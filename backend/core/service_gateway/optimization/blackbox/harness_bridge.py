@@ -278,6 +278,24 @@ def contained_path(root: Path, relative_path: str) -> Path:
     return target
 
 
+def workspace_files(proposer: dict[str, Any]) -> list[str]:
+    """List the files :func:`run_session` writes into the agent's workspace.
+
+    Args:
+        proposer: Serialized harness launch.
+
+    Returns:
+        Workspace-relative paths; empty for Claude Code, which writes none.
+    """
+    if not proposer or proposer.get("harness") == "claude_code":
+        return []
+    paths = [str(path) for path in (proposer.get("files") or {})]
+    instructions = proposer.get("instructions_file")
+    if instructions and instructions != "CLAUDE.md":
+        paths.append(str(instructions))
+    return paths
+
+
 def cost_usd(usage: Usage, price: dict[str, float] | None) -> float:
     """Price a usage record with the per-token rates the parent supplied.
 

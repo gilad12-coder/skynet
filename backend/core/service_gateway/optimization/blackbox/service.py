@@ -107,7 +107,7 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[str, dict[str, Any]], None]
 
-_REPO_ENGINE_REASON = "A repository is optimized by AutoResearch or GEPA."
+_REPO_ENGINE_REASON = "Auto mode does not optimize a repository; pick one engine."
 
 # Progress events per run are capped near this many so a 100k-run budget
 # does not flood the job log.

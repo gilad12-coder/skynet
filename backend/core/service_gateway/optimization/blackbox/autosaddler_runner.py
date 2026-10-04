@@ -28,12 +28,13 @@ import signal
 import subprocess
 import sys
 import tarfile
+import tempfile
 import threading
 import time
 import traceback
 import uuid
 from collections.abc import Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:
@@ -43,6 +44,7 @@ try:
     from autosaddler.v2.core.engine import AutoSaddlerEngine
     from autosaddler.v2.core.run_state import RunState
     from autosaddler.v2.harness.component_map import ComponentMapHarnessSpace
+    from autosaddler.v2.harness.git import GitHarnessSpace, GitVerificationVerdict
     from autosaddler.v2.prompting import assets as as_assets
     from autosaddler.v2.prompting.history import build_history_bundle
     from autosaddler.v2.prompting.models import SessionSpec
@@ -53,21 +55,23 @@ try:
     from autosaddler.v2.storage.local import LocalRunStore
 except ImportError:  # Upstream needs Python 3.12; parent-side tests still import the helpers.
     as_domain = as_policies = as_ports = as_assets = None
-    AutoSaddlerEngine = RunState = ComponentMapHarnessSpace = None
+    AutoSaddlerEngine = RunState = ComponentMapHarnessSpace = GitHarnessSpace = GitVerificationVerdict = None
     build_history_bundle = SessionSpec = ClaudeAgentProvider = ClaudeProviderConfig = LocalRunStore = None
     SessionUsage = BaseAgentProvider = TransportOutcome = WorkspaceRenderer = None
 
 try:
-    from . import harness_bridge
-except ImportError:  # In the sandbox this file runs as a script beside the bridge.
-    _bridge_spec = importlib.util.spec_from_file_location(
-        "harness_bridge", Path(__file__).with_name("harness_bridge.py")
-    )
-    assert _bridge_spec is not None
-    assert _bridge_spec.loader is not None
-    harness_bridge = importlib.util.module_from_spec(_bridge_spec)
-    sys.modules["harness_bridge"] = harness_bridge
-    _bridge_spec.loader.exec_module(harness_bridge)
+    from . import harness_bridge, repo_tree
+except ImportError:  # In the sandbox this file runs as a script beside its sibling modules.
+    _sibling_modules = {}
+    for _sibling in ("harness_bridge", "repo_tree"):
+        _spec = importlib.util.spec_from_file_location(_sibling, Path(__file__).with_name(f"{_sibling}.py"))
+        assert _spec is not None
+        assert _spec.loader is not None
+        _sibling_modules[_sibling] = importlib.util.module_from_spec(_spec)
+        sys.modules[_sibling] = _sibling_modules[_sibling]
+        _spec.loader.exec_module(_sibling_modules[_sibling])
+    harness_bridge = _sibling_modules["harness_bridge"]
+    repo_tree = _sibling_modules["repo_tree"]
 
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
@@ -93,6 +97,9 @@ _HARNESS_CAPABILITY_TOOLS = dict.fromkeys(
 )
 _HARNESS_SKILL_DIRECTORY = ".agents/skills"
 _MIN_CASES = 2
+_GIT_IDENTITY = ("-c", "user.name=skynet", "-c", "user.email=skynet@localhost", "-c", "commit.gpgsign=false")
+# Repository runs read their prompts and skills from this plugin subfolder.
+_REPO_ASSETS = "repo/"
 
 
 class EvaluationStopped(BaseException):
@@ -278,6 +285,130 @@ def build_cases(split: str, examples: Sequence[Any]) -> tuple[Any, ...]:
     )
 
 
+def _git_output(cwd: Path, *arguments: str, env: Mapping[str, str] | None = None) -> str:
+    """Run git in a checkout and return its output as UTF-8 text.
+
+    Args:
+        cwd: Checkout or worktree to run in.
+        *arguments: Arguments after ``git``.
+        env: Process environment, when it differs from this process's.
+
+    Returns:
+        Standard output.
+
+    Raises:
+        RuntimeError: When git fails.
+        UnicodeDecodeError: When the output is not UTF-8.
+    """
+    result = subprocess.run(
+        ["git", "--literal-pathspecs", *_GIT_IDENTITY, *arguments],
+        cwd=cwd,
+        env=None if env is None else dict(env),
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace") or result.stdout.decode("utf-8", "replace")
+        raise RuntimeError(f"git {arguments[0]} failed: {detail.strip()[-2000:]}")
+    return result.stdout.decode("utf-8")
+
+
+def workspace_patch(workspace: Path, base: str, changed_paths: Sequence[Any]) -> str:
+    """Diff a mutation workspace against the starting commit without touching its index.
+
+    Args:
+        workspace: Upstream mutation worktree, checked out at the parent version.
+        base: Starting commit of the run.
+        changed_paths: Paths the agent changed relative to the parent.
+
+    Returns:
+        The patch the parent would score for this version.
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        # Upstream stages and commits the changed paths itself after verification,
+        # so the worktree's own index must stay untouched; a private one stages them here.
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
+        _git_output(workspace, "read-tree", "HEAD", env=env)
+        if changed_paths:
+            _git_output(workspace, "add", "--all", "--", *(str(path) for path in changed_paths), env=env)
+        return _git_output(workspace, "diff", "--cached", "--binary", "--no-color", "--no-ext-diff", base, env=env)
+
+
+def repo_verifier(base: str, editable_paths: Sequence[str], readonly_paths: Sequence[str]) -> Any:
+    """Build the upstream verifier that refuses versions the trusted scorer would refuse.
+
+    Args:
+        base: Starting commit of the run.
+        editable_paths: Paths a version may change.
+        readonly_paths: Submodules and Git LFS files that stay as fetched.
+
+    Returns:
+        A ``GitVerifier`` for upstream's ``GitHarnessSpace``.
+    """
+
+    def verify(context: Any) -> Any:
+        """Check one finished mutation before upstream commits it.
+
+        Args:
+            context: Upstream verification context.
+
+        Returns:
+            Upstream verdict; a rejection becomes a rejected iteration, never a score.
+        """
+        try:
+            patch = workspace_patch(context.workspace, base, context.changed_paths)
+        except UnicodeDecodeError:
+            return GitVerificationVerdict(False, "utf8", "A changed text file is not UTF-8.", ())
+        problems = repo_tree.patch_violations(patch, editable_paths, readonly_paths)
+        if len(patch.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:
+            problems.append("The change is larger than a version may be.")
+        if problems:
+            return GitVerificationVerdict(False, "repository-rules", "; ".join(problems), ())
+        return GitVerificationVerdict(True, "repository-rules", "The change stays inside the editable paths.", ())
+
+    return verify
+
+
+def repo_space(repo: Mapping[str, Any], seed_patch: Any, run_dir: Path, proposer: dict[str, Any]) -> tuple[Any, str]:
+    """Unpack the shipped repository and open upstream's Git candidate space on it.
+
+    Args:
+        repo: Parent payload's ``repo`` entry: tree chunks and path rules.
+        seed_patch: Starting version as a patch against the fetched commit, or empty.
+        run_dir: Upstream run directory.
+        proposer: Serialized harness launch, whose workspace files never join a version.
+
+    Returns:
+        The Git harness space and the fetched commit every version is diffed against.
+    """
+    checkout = repo_tree.unpack_tree((Path(chunk) for chunk in repo["chunks"]), Path("repo-checkout").resolve())
+    base = _git_output(checkout, "rev-parse", repo_tree.BASE_REF).strip()
+    # Non-Claude harnesses read skills rendered into the mutation worktree, a
+    # folder upstream does not treat as its own; left unexcluded, they would
+    # count as the agent's change. Every worktree shares this exclude file.
+    with (checkout / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write(f"\n/{_HARNESS_SKILL_DIRECTORY}/\n")
+    repo_tree.exclude_paths(checkout, harness_bridge.workspace_files(proposer))
+    start = base
+    if isinstance(seed_patch, str) and seed_patch.strip():
+        repo_tree.apply_patch(checkout, seed_patch)
+        _git_output(checkout, "add", "--all")
+        _git_output(checkout, "commit", "--quiet", "--no-verify", "-m", "seed")
+        start = _git_output(checkout, "rev-parse", "HEAD").strip()
+    editable = [str(path) for path in repo["editable_paths"]]
+    readonly = [str(path) for path in repo["readonly_paths"]]
+    space = GitHarnessSpace(
+        source_repo=checkout,
+        base_revision=start,
+        store_root=run_dir / "candidates",
+        worktree_root=run_dir / "worktrees",
+        writable_paths=[PurePosixPath(path) for path in editable],
+        forbidden_paths=[PurePosixPath(path) for path in readonly],
+        verifier=repo_verifier(base, editable, readonly),
+    )
+    return space, base
+
+
 class SkynetEvaluator:
     """Score upstream candidates through the parent scorer, case by case."""
 
@@ -291,20 +422,24 @@ class SkynetEvaluator:
         stop_at_score: float | None,
         fingerprint: str,
         development_case_ids: Sequence[str] = (),
+        repo_base: str | None = None,
     ) -> None:
         """Bind the evaluator to the parent transport and run layout.
 
         Args:
             mailbox: Parent evaluation transport.
-            harness_space: Upstream component-map space holding candidate text.
+            harness_space: Upstream space holding candidate text or repository versions.
             store_run_dir: Upstream run directory used for relative artifact references.
             max_concurrency: Parallel scorer requests the parent admits.
             stop_at_score: Development aggregate that ends the search early.
             fingerprint: Stable identity of the scorer for upstream observations.
             development_case_ids: Development cases in split order, which names them by position.
+            repo_base: Starting commit of a repository run, whose versions go to the parent as patches against it.
         """
         self.mailbox = mailbox
         self.harness_space = harness_space
+        self.repo_base = repo_base
+        self.patches: dict[str, str] = {}
         self.store_run_dir = store_run_dir
         self.stop_at_score = stop_at_score
         self.fingerprint = fingerprint
@@ -315,6 +450,29 @@ class SkynetEvaluator:
         self.versions: dict[str, int] = {}
         self.case_ids = {case_id: str(index) for index, case_id in enumerate(development_case_ids)}
         self._semaphore = asyncio.Semaphore(max(1, max_concurrency))
+
+    def value_of(self, candidate: Any) -> str | dict[str, str]:
+        """Return the candidate in the shape the parent scorer takes.
+
+        Args:
+            candidate: Upstream candidate reference.
+
+        Returns:
+            The text or named parts, or for a repository version its patch against the starting commit.
+        """
+        if self.repo_base is None:
+            return candidate_value(self.components_of(candidate))
+        if candidate.candidate_id not in self.patches:
+            materialized = self.harness_space.materialize(candidate, "inspect")
+            try:
+                # The parent rebuilds every version from this patch alone, exactly
+                # as it does for every other engine's repository versions.
+                self.patches[candidate.candidate_id] = _git_output(
+                    materialized.root, "diff", "--binary", "--no-color", "--no-ext-diff", self.repo_base, "HEAD"
+                )
+            finally:
+                materialized.release()
+        return self.patches[candidate.candidate_id]
 
     def components_of(self, candidate: Any) -> dict[str, str]:
         """Read and remember a candidate's component text.
@@ -348,7 +506,7 @@ class SkynetEvaluator:
         Raises:
             TargetReached: When a development aggregate meets the stop target.
         """
-        value = candidate_value(self.components_of(candidate))
+        value = self.value_of(candidate)
         context.artifact_dir.mkdir(parents=True, exist_ok=True)
         if context.purpose == "development":
             self.versions.setdefault(candidate.candidate_id, len(self.versions))
@@ -605,6 +763,31 @@ def _evolve_schema(candidate_ids: Sequence[str], source_options: Mapping[str, Se
     }
 
 
+def _repo_diagnosis_schema() -> dict[str, Any]:
+    """Describe the diagnosis output for a repository run, whose change is the edited workspace itself.
+
+    Returns:
+        JSON schema for diagnose-patch session output.
+    """
+    return {
+        "type": "object",
+        "required": ["schema_version", "intent", "diagnosis", "expected_effect", "changed_paths"],
+        "properties": {
+            "schema_version": {"const": _DIAGNOSIS_SCHEMA},
+            "intent": {"type": "string", "minLength": 1},
+            "diagnosis": {"type": "string", "minLength": 1},
+            "expected_effect": {"type": "string", "minLength": 1},
+            "changed_paths": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+                "uniqueItems": True,
+                "minItems": 1,
+            },
+        },
+        "additionalProperties": False,
+    }
+
+
 def _reflection_schema() -> dict[str, Any]:
     """Describe the lesson output upstream records after each iteration.
 
@@ -714,12 +897,13 @@ def _plugin_asset(relative_path: str, asset_id: str) -> Any:
     )
 
 
-def resolved_assets(kind: str, skill_paths: Mapping[str, str | None]) -> Any:
+def resolved_assets(kind: str, skill_paths: Mapping[str, str | None], prefix: str = "") -> Any:
     """Compose upstream methodology with the Skynet plugin for one session kind.
 
     Args:
         kind: Upstream session kind.
         skill_paths: Skill names mapped to optional plugin skill documents.
+        prefix: Plugin subfolder holding this run's prompts, empty for text candidates.
 
     Returns:
         Resolved system context, task prompt and skills with provenance.
@@ -734,11 +918,11 @@ def resolved_assets(kind: str, skill_paths: Mapping[str, str | None]) -> Any:
         as_assets.PromptComposition(
             system_assets=(
                 _shared_asset("methodology/system/optimizer-invariants.md", "methodology.system.invariants"),
-                _plugin_asset("SYSTEM.md", f"{_PLUGIN_NAME}.system"),
+                _plugin_asset(f"{prefix}SYSTEM.md", f"{_PLUGIN_NAME}.system"),
             ),
             task_assets=(
                 _shared_asset(f"methodology/prompts/{method}-method.md", f"methodology.prompt.{kind}"),
-                _plugin_asset(f"prompts/{kind}.md", f"{_PLUGIN_NAME}.prompt.{kind}"),
+                _plugin_asset(f"{prefix}prompts/{kind}.md", f"{_PLUGIN_NAME}.prompt.{kind}"),
             ),
             skill_assets={
                 name: (
@@ -747,7 +931,7 @@ def resolved_assets(kind: str, skill_paths: Mapping[str, str | None]) -> Any:
                         if name in shared_skills
                         else ()
                     ),
-                    *((_plugin_asset(path, f"{_PLUGIN_NAME}.skill.{name}"),) if path is not None else ()),
+                    *((_plugin_asset(f"{prefix}{path}", f"{_PLUGIN_NAME}.skill.{name}"),) if path is not None else ()),
                 )
                 for name, path in skill_paths.items()
             },
@@ -764,8 +948,11 @@ _DIAGNOSE_SKILLS: dict[str, str | None] = {
 _ANALYSIS_SKILLS: dict[str, str | None] = {"history-analysis": None}
 
 
-def composition_record() -> Any:
+def composition_record(prefix: str = "") -> Any:
     """Record every prompt composition the Skynet plugin can produce.
+
+    Args:
+        prefix: Plugin subfolder holding this run's prompts, empty for text candidates.
 
     Returns:
         Upstream composition entity for the run store.
@@ -773,9 +960,9 @@ def composition_record() -> Any:
     return as_assets.prompt_composition_record(
         plugin_name=_PLUGIN_NAME,
         compositions={
-            "evolve": resolved_assets("evolve", _ANALYSIS_SKILLS),
-            "diagnose_patch": resolved_assets("diagnose_patch", _DIAGNOSE_SKILLS),
-            "reflect": resolved_assets("reflect", _ANALYSIS_SKILLS),
+            "evolve": resolved_assets("evolve", _ANALYSIS_SKILLS, prefix),
+            "diagnose_patch": resolved_assets("diagnose_patch", _DIAGNOSE_SKILLS, prefix),
+            "reflect": resolved_assets("reflect", _ANALYSIS_SKILLS, prefix),
         },
     )
 
@@ -784,20 +971,29 @@ class SkynetPromptPack:
     """Render upstream sessions with the Skynet objective and candidate schema."""
 
     def __init__(
-        self, *, store: Any, component_names: Sequence[str], objective: str | None, background: str | None
+        self,
+        *,
+        store: Any,
+        component_names: Sequence[str],
+        objective: str | None,
+        background: str | None,
+        readonly_paths: Sequence[str] | None = None,
     ) -> None:
         """Bind the prompt pack to the run store and task framing.
 
         Args:
             store: Upstream run store used for history bundles and evidence.
-            component_names: Frozen candidate component schema.
+            component_names: Frozen candidate component schema, or a repository's editable paths.
             objective: User objective text.
             background: User background notes.
+            readonly_paths: Paths that stay as fetched; set only for a repository run.
         """
         self.store = store
         self.component_names = tuple(component_names)
         self.objective = objective
         self.background = background
+        self.readonly_paths = None if readonly_paths is None else tuple(readonly_paths)
+        self.prefix = "" if readonly_paths is None else _REPO_ASSETS
 
     def session(self, kind: str, context: Mapping[str, Any]) -> Any:
         """Build the session specification for one upstream session kind.
@@ -817,13 +1013,16 @@ class SkynetPromptPack:
             "objective": self.objective,
             "background": self.background,
             "mutation_scope": list(self.component_names),
+            **({} if self.readonly_paths is None else {"readonly_paths": list(self.readonly_paths)}),
         }
         workspace_files = {_SESSION_CONTEXT_PATH: as_domain.canonical_json(rendered) + "\n"}
         workspace_files.update(build_history_bundle(self.store, context).workspace_files)
         mutation_label = None
         if kind == "diagnose_patch":
             workspace_files[_TRAINING_EVIDENCE_PATH] = self._evidence(context.get("evidence"))
-            schema = _diagnosis_schema(self.component_names)
+            schema = (
+                _diagnosis_schema(self.component_names) if self.readonly_paths is None else _repo_diagnosis_schema()
+            )
             skill_paths = _DIAGNOSE_SKILLS
             mutation_label = "candidate-patch"
         elif kind == "evolve":
@@ -837,7 +1036,7 @@ class SkynetPromptPack:
             skill_paths = _ANALYSIS_SKILLS
         else:
             raise ValueError(f"Unknown Skynet session kind: {kind}")
-        resolved = resolved_assets(kind, skill_paths)
+        resolved = resolved_assets(kind, skill_paths, self.prefix)
         workspace_files[_PROMPT_ASSETS_PATH] = (
             as_domain.canonical_json(
                 {
@@ -1125,8 +1324,8 @@ def _incumbent(store: Any, evaluator: SkynetEvaluator, seed: Any) -> dict[str, A
         state = RunState.replay(store.events())
         if state.accepted_candidate_ids:
             candidate = state.candidates[state.accepted_candidate_ids[-1]]
-            return {"best_candidate": candidate_value(evaluator.components_of(candidate)), "best_score": None}
-    return {"best_candidate": candidate_value(evaluator.components_of(seed)), "best_score": None}
+            return {"best_candidate": evaluator.value_of(candidate), "best_score": None}
+    return {"best_candidate": evaluator.value_of(seed), "best_score": None}
 
 
 def execute(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1150,17 +1349,28 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("The pinned upstream autosaddler package is not importable in this runtime.")
     model = str(payload["model"])
     timeout = float(payload["timeout_seconds"])
-    components = baseline_components(task.get("seed_candidate"))
+    repo = payload.get("repo")
+    proposer = payload.get("proposer") or {"harness": "claude_code"}
     train_examples, development_examples = split_cases(task.get("train_set"), task.get("val_set"))
     train_cases = build_cases("train", train_examples)
     development_cases = build_cases("development", development_examples)
     run_dir = Path("autosaddler-run").resolve()
     store = LocalRunStore(run_dir=run_dir, run_id=f"skynet-{payload['nonce'][:12]}")
-    harness_space = ComponentMapHarnessSpace(
-        baseline=components,
-        store_root=run_dir / "candidates",
-        materialization_root=run_dir / "materialized",
-    )
+    if repo is None:
+        components = baseline_components(task.get("seed_candidate"))
+        harness_space: Any = ComponentMapHarnessSpace(
+            baseline=components,
+            store_root=run_dir / "candidates",
+            materialization_root=run_dir / "materialized",
+        )
+        repo_base = None
+        component_names = tuple(components)
+        readonly_paths = None
+    else:
+        harness_space, repo_base = repo_space(repo, task.get("seed_candidate"), run_dir, proposer)
+        component_names = tuple(str(path) for path in repo["editable_paths"])
+        readonly_paths = tuple(str(path) for path in repo["readonly_paths"])
+    prefix = "" if repo is None else _REPO_ASSETS
     mailbox = EvaluatorMailbox(payload["nonce"], timeout)
     evaluator = SkynetEvaluator(
         mailbox=mailbox,
@@ -1170,6 +1380,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         stop_at_score=payload.get("stop_at_score"),
         fingerprint=as_domain.sha256_digest(as_domain.canonical_json({"evaluator": "skynet-parent-scorer"})),
         development_case_ids=[case.case_id for case in development_cases],
+        repo_base=repo_base,
     )
     scenario = as_ports.ScenarioComponents(
         name=_PLUGIN_NAME,
@@ -1179,25 +1390,25 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         evidence_builder=SkynetEvidenceBuilder(store, {case.case_id: case for case in train_cases}),
         prompt_pack=SkynetPromptPack(
             store=store,
-            component_names=tuple(components),
+            component_names=component_names,
             objective=task.get("objective"),
             background=task.get("background"),
+            readonly_paths=readonly_paths,
         ),
         train_cases=train_cases,
         development_cases=development_cases,
         required_capabilities=_CAPABILITIES,
         resolved_entities={
             **as_assets.prompt_source_entities(plugin_root=_PLUGIN_ROOT, plugin_name=_PLUGIN_NAME),
-            "resolved/prompts/compositions.json": composition_record(),
+            "resolved/prompts/compositions.json": composition_record(prefix),
             "resolved/scenario_runtime.json": {
                 "schema_version": "skynet-autosaddler-scenario/v1",
-                "components": list(components),
+                "components": list(component_names),
                 "train_case_ids": [case.case_id for case in train_cases],
                 "development_case_ids": [case.case_id for case in development_cases],
             },
         },
     )
-    proposer = payload.get("proposer") or {"harness": "claude_code"}
     if proposer.get("harness") == "claude_code":
         harness_bridge.use_direct_anthropic(os.environ)
         inner = ClaudeAgentProvider(
@@ -1249,9 +1460,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             selected = store.read_json("result.json")
             document.update(
                 {
-                    "best_candidate": candidate_value(
-                        evaluator.components_of(_candidate(store, result.selected_candidate_id))
-                    ),
+                    "best_candidate": evaluator.value_of(_candidate(store, result.selected_candidate_id)),
                     "best_score": result.development_score,
                     "total_evals": mailbox.total_evals,
                     "metadata": {

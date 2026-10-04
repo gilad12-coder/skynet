@@ -517,7 +517,7 @@ def _engine_knobs(engine_id: str, proposer: dict[str, Any]) -> dict[str, Any]:
     """
     if engine_id == "meta_harness":
         names = ("max_candidates_per_iter", "effort", "max_thinking_tokens")
-    elif engine_id == "gepa_repo":
+    elif engine_id in ("gepa_repo", "best_of_n_repo"):
         names = ("effort", "max_thinking_tokens")
     else:
         names = ("ralph", "max_no_eval_seconds", "effort", "max_thinking_tokens")
@@ -552,7 +552,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Result envelope, or a failure envelope retaining available usage.
     """
-    if payload.get("engine_id") not in ("meta_harness", "autoresearch", "gepa_repo"):
+    if payload.get("engine_id") not in native_engines.ENGINES:
         raise ValueError("Unsupported native optimizer.")
     if payload.get("task", {}).get("test_set") is not None:
         raise ValueError("Held-out examples must not enter the native optimizer.")
@@ -562,9 +562,8 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     config_values: dict[str, Any] = {"model": payload["model"], **_engine_knobs(payload["engine_id"], proposer)}
     repo = payload.get("repo")
     if repo is not None:
-        if payload["engine_id"] not in ("autoresearch", "gepa_repo"):
-            raise ValueError("Only AutoResearch and GEPA optimize a repository.")
         checkout = repo_tree.unpack_tree((Path(chunk) for chunk in repo["chunks"]), Path("repo-checkout").resolve())
+        repo_tree.exclude_paths(checkout, harness_bridge.workspace_files(proposer))
         config_values["repo"] = {
             "checkout": str(checkout),
             "base": repo_tree.BASE_REF,

@@ -68,13 +68,14 @@ _INSTALL_ALLOWANCE = 600.0
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _UUID = re.compile(r"^[0-9a-f]{32}$")
-NATIVE_ENGINES = frozenset({"meta_harness", "autoresearch", "autosaddler", "gepa_repo"})
-# ``gepa_repo`` exists only for repositories; AutoResearch takes either kind of task.
-REPO_NATIVE_ENGINES = frozenset({"autoresearch", "gepa_repo"})
+NATIVE_ENGINES = frozenset({"meta_harness", "autoresearch", "autosaddler", "gepa_repo", "best_of_n_repo"})
+# ``gepa_repo`` and ``best_of_n_repo`` exist only for repositories; the others take either kind of task.
+REPO_ONLY_NATIVE_ENGINES = frozenset({"gepa_repo", "best_of_n_repo"})
 _UPSTREAMS = {
     "meta_harness": (META_HARNESS_SOURCE, META_HARNESS_REVISION),
     "autoresearch": (AUTORESEARCH_SOURCE, AUTORESEARCH_VERSION),
     "gepa_repo": (GEPA_PACKAGE_SOURCE, GEPA_REVISION),
+    "best_of_n_repo": (GEPA_PACKAGE_SOURCE, GEPA_REVISION),
     "autosaddler": (AUTOSADDLER_SOURCE, AUTOSADDLER_REVISION),
 }
 _AUTOSADDLER_RUNNER_FILE = "autosaddler_runner.py"
@@ -228,7 +229,11 @@ def _runner_files(engine_id: str) -> dict[str, str]:
         return files
     runner = Path(native_runner.__file__).with_name(_AUTOSADDLER_RUNNER_FILE)
     plugin_root = runner.with_name(_AUTOSADDLER_PLUGIN_DIR)
-    files = {**bridge, _AUTOSADDLER_RUNNER_FILE: runner.read_text(encoding="utf-8")}
+    files = {
+        **bridge,
+        _AUTOSADDLER_RUNNER_FILE: runner.read_text(encoding="utf-8"),
+        _REPO_TREE_FILE: Path(repo_tree.__file__).read_text(encoding="utf-8"),
+    }
     for asset in sorted([*plugin_root.rglob("*.md"), plugin_root / "LICENSE"]):
         files[f"{_AUTOSADDLER_PLUGIN_DIR}/{asset.relative_to(plugin_root).as_posix()}"] = asset.read_text(
             encoding="utf-8"
@@ -686,11 +691,9 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     autosaddler = engine_id == "autosaddler"
     if not autosaddler and not task.str_mode:
         raise ServiceError("Native agent engines require a single text candidate.")
-    if options.repo is not None and engine_id not in REPO_NATIVE_ENGINES:
-        raise ServiceError("Only AutoResearch and GEPA drive a coding agent through a repository checkout.")
-    if options.repo is None and engine_id == "gepa_repo":
-        raise ServiceError("GEPA's agent proposer needs a repository checkout.")
-    if autosaddler and task.seed_candidate is None:
+    if options.repo is None and engine_id in REPO_ONLY_NATIVE_ENGINES:
+        raise ServiceError("This agent proposer needs a repository checkout.")
+    if autosaddler and options.repo is None and task.seed_candidate is None:
         raise ServiceError("AutoSaddler requires a seed candidate to patch.")
     if autosaddler and len(task.train_set or []) + len(task.val_set or []) < 2:
         raise ServiceError("AutoSaddler needs at least two visible examples to diagnose and confirm patches.")

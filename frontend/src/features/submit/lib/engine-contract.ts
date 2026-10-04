@@ -7,11 +7,14 @@ import type {
 } from "@/shared/types/api";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 
+/** Whether the run's proposer is a coding agent; every engine drives one through a repository. */
 export function usesNativeProposer(
   mode: BlackboxStrategy["mode"],
   engine: BlackboxEngineId | null,
+  repo = false,
 ): boolean {
   return (
+    repo ||
     mode !== "single" ||
     engine === "meta_harness" ||
     engine === "autoresearch" ||
@@ -90,6 +93,7 @@ export function engineSelectionIssue(input: {
   engine: BlackboxEngineId | null;
   hasParts: boolean;
   trainingCaseCount: number | null;
+  repo?: boolean;
 }): EngineIssue | null {
   const { catalog, mode, engine, hasParts } = input;
   if (!catalog) return { key: "submit.blackbox.engines.checking" };
@@ -121,7 +125,7 @@ export function engineSelectionIssue(input: {
         : { key: "submit.blackbox.run_disabled.no_engines" };
     }
   }
-  if (usesNativeProposer(mode, engine)) {
+  if (usesNativeProposer(mode, engine, input.repo)) {
     const selectedRuntime = catalog.proposer_runtimes?.find((item) => item.id === "vercel");
     if (!selectedRuntime?.available) {
       return selectedRuntime?.unavailable_reason?.trim()

@@ -1318,12 +1318,13 @@ def test_proposer_accepts_any_offered_harness_and_rejects_unlaunchable_ones() ->
         _payload(proposer={"max_thinking_tokens": 10})
 
 
-def test_engine_catalog_for_a_repository_offers_only_autoresearch_and_gepa() -> None:
-    """A repository run can pick AutoResearch or GEPA, never Auto or another engine."""
+def test_engine_catalog_for_a_repository_offers_every_engine_but_not_auto() -> None:
+    """A repository run can pick any single engine the deployment offers, never Auto."""
     catalog = service_mod.engine_catalog("repo")
 
     available = {entry.id for entry in catalog.engines if entry.available}
-    assert available <= {"autoresearch", "gepa"}
+    text_available = {entry.id for entry in service_mod.engine_catalog("text").engines if entry.available}
+    assert available == text_available
     assert "gepa" in available
     assert catalog.auto_available is False
     assert catalog.auto_unavailable_reason

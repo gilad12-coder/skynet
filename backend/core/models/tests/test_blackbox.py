@@ -198,17 +198,17 @@ def test_repo_run_starts_from_the_empty_patch() -> None:
     assert request.target.repo.editable_paths == ["src"]
 
 
-@pytest.mark.parametrize("engine", ["autosaddler", "best_of_n", "meta_harness"])
-def test_repo_run_rejects_engines_that_cannot_edit_a_checkout(engine: str) -> None:
-    """Only AutoResearch and GEPA can drive a repository run."""
+def test_repo_run_rejects_auto_mode() -> None:
+    """Auto mode never takes a repository; a repository run picks one engine."""
     with pytest.raises(ValidationError, match="repository target"):
-        BlackboxRunRequest.model_validate(_repo_request(strategy={"mode": "single", "engine": engine}))
+        BlackboxRunRequest.model_validate(_repo_request(strategy={"mode": "auto"}))
 
 
-def test_repo_run_accepts_gepa() -> None:
-    """GEPA is the second repository engine."""
-    request = BlackboxRunRequest.model_validate(_repo_request(strategy={"mode": "single", "engine": "gepa"}))
-    assert request.strategy.engine == "gepa"
+@pytest.mark.parametrize("engine", ["gepa", "best_of_n", "meta_harness", "autosaddler"])
+def test_repo_run_accepts_every_checkout_editing_engine(engine: str) -> None:
+    """Every single engine drives a coding agent through the checkout."""
+    request = BlackboxRunRequest.model_validate(_repo_request(strategy={"mode": "single", "engine": engine}))
+    assert request.strategy.engine == engine
 
 
 def test_repo_run_rejects_a_multi_part_seed() -> None:
