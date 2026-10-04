@@ -43,7 +43,7 @@ from webauthn.helpers.structs import (
 )
 
 from ...config import settings
-from ...storage.models import UserModel, WebAuthnChallengeModel, WebAuthnCredentialModel
+from ...storage.models import UserIdentityModel, UserModel, WebAuthnChallengeModel, WebAuthnCredentialModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..email_sender import email_configured, send_email
 from ..errors import DomainError
@@ -143,9 +143,7 @@ def _client_challenge(credential: dict[str, Any]) -> str:
     return challenge
 
 
-def _consume_challenge(
-    session: Session, credential: dict[str, Any], purpose: str
-) -> tuple[bytes, str | None]:
+def _consume_challenge(session: Session, credential: dict[str, Any], purpose: str) -> tuple[bytes, str | None]:
     """Look up, validate, and burn the server-issued challenge for a ceremony.
 
     The row is deleted (and committed) before signature verification runs, so
@@ -226,12 +224,22 @@ class PasskeyInfo(BaseModel):
 
 
 # The signed-in user's full security posture, driving the settings tab.
+# A Google or GitHub account that signs in to the caller's account.
+class LinkedIdentity(BaseModel):
+    provider: str = Field(description="Provider id, such as 'google' or 'github'.")
+    email: str = Field(description="The provider account's email when it was linked.")
+    linked_at: str = Field(description="ISO-8601 time the link was made.")
+
+
 class SecurityStatus(BaseModel):
     has_password: bool = Field(description="Whether a local email/password account exists (2FA applies only to those).")
     totp_enabled: bool = Field(description="Whether an authenticator app is enrolled.")
     email_2fa_enabled: bool = Field(description="Whether emailed sign-in codes are enabled.")
     email_2fa_available: bool = Field(description="Whether this deployment can deliver email at all.")
     passkeys: list[PasskeyInfo] = Field(description="Registered passkeys, oldest first.")
+    identities: list[LinkedIdentity] = Field(
+        default_factory=list, description="Linked Google and GitHub accounts, oldest first."
+    )
 
 
 # Fresh TOTP enrollment material for the QR step.
@@ -330,12 +338,23 @@ def create_account_security_router(*, job_store) -> APIRouter:
                 .where(WebAuthnCredentialModel.user_email == email)
                 .order_by(WebAuthnCredentialModel.created_at)
             ).all()
+            identities = session.scalars(
+                select(UserIdentityModel)
+                .where(UserIdentityModel.username == email)
+                .order_by(UserIdentityModel.created_at)
+            ).all()
             return SecurityStatus(
                 has_password=_has_password(row),
                 totp_enabled=bool(row is not None and row.totp_secret),
                 email_2fa_enabled=bool(row is not None and row.email_2fa_enabled),
                 email_2fa_available=email_configured(),
                 passkeys=[_passkey_info(p) for p in passkeys],
+                identities=[
+                    LinkedIdentity(
+                        provider=str(i.provider), email=str(i.provider_email), linked_at=i.created_at.isoformat()
+                    )
+                    for i in identities
+                ],
             )
 
     @router.post(
@@ -422,9 +441,7 @@ def create_account_security_router(*, job_store) -> APIRouter:
             secret = row.totp_secret
             if not secret:
                 raise DomainError("accounts.totp_setup_required", status=422)
-            if not verify_totp(str(secret), body.code) and not consume_recovery_code(
-                row, body.code
-            ):
+            if not verify_totp(str(secret), body.code) and not consume_recovery_code(row, body.code):
                 raise DomainError("accounts.invalid_second_factor", status=401)
             row.totp_secret = None
             row.totp_pending_secret = None
@@ -477,9 +494,7 @@ def create_account_security_router(*, job_store) -> APIRouter:
         email = _normalise_email(user.username)
         with Session(job_store.engine) as session:
             existing = session.scalars(
-                select(WebAuthnCredentialModel).where(
-                    WebAuthnCredentialModel.user_email == email
-                )
+                select(WebAuthnCredentialModel).where(WebAuthnCredentialModel.user_email == email)
             ).all()
             options = generate_registration_options(
                 rp_id=_rp_id(),
@@ -491,8 +506,7 @@ def create_account_security_router(*, job_store) -> APIRouter:
                     user_verification=UserVerificationRequirement.PREFERRED,
                 ),
                 exclude_credentials=[
-                    PublicKeyCredentialDescriptor(id=base64url_to_bytes(str(c.credential_id)))
-                    for c in existing
+                    PublicKeyCredentialDescriptor(id=base64url_to_bytes(str(c.credential_id))) for c in existing
                 ],
             )
             _store_challenge(session, options.challenge, "register", email)
@@ -505,9 +519,7 @@ def create_account_security_router(*, job_store) -> APIRouter:
         status_code=201,
         summary="Finish passkey registration (verify + store)",
     )
-    def passkey_register_verify(
-        body: PasskeyRegisterRequest, user: AuthenticatedUserDep
-    ) -> PasskeyInfo:
+    def passkey_register_verify(body: PasskeyRegisterRequest, user: AuthenticatedUserDep) -> PasskeyInfo:
         """Verify the browser's attestation and store the new passkey.
 
         Args:
@@ -608,6 +620,47 @@ def create_account_security_router(*, job_store) -> APIRouter:
             if row is None or str(row.user_email) != email:
                 raise DomainError("webauthn.not_found", status=404)
             session.delete(row)
+            session.commit()
+        return OkResponse()
+
+    @router.delete(
+        "/auth/security/identities/{provider}",
+        response_model=OkResponse,
+        summary="Unlink one of the caller's Google or GitHub accounts",
+    )
+    def identity_delete(provider: str, user: AuthenticatedUserDep) -> OkResponse:
+        """Stop a provider account from signing in to the caller's account.
+
+        Refused when it is the account's last way in, so nobody locks
+        themselves out by unlinking.
+
+        Args:
+            provider: Provider id from the linked-accounts list.
+            user: The bearer-authenticated caller.
+
+        Returns:
+            Acknowledgement.
+
+        Raises:
+            DomainError: 404 when no such link belongs to the caller; 409 when
+                no password, passkey or other linked account would remain.
+        """
+        email = _normalise_email(user.username)
+        with Session(job_store.engine) as session:
+            links = session.scalars(select(UserIdentityModel).where(UserIdentityModel.username == email)).all()
+            doomed = [link for link in links if str(link.provider) == provider]
+            if not doomed:
+                raise DomainError("accounts.identity_not_found", status=404)
+            has_passkey = (
+                session.scalars(
+                    select(WebAuthnCredentialModel.credential_id).where(WebAuthnCredentialModel.user_email == email)
+                ).first()
+                is not None
+            )
+            if len(doomed) == len(links) and not _has_password(session.get(UserModel, email)) and not has_passkey:
+                raise DomainError("accounts.last_sign_in_method", status=409)
+            for link in doomed:
+                session.delete(link)
             session.commit()
         return OkResponse()
 

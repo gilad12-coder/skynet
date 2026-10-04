@@ -6,7 +6,7 @@ import test from "node:test";
 // API routes that must stay behind login. Every other ``src/app/api`` route is
 // hit by logged-out visitors and must be excluded from the proxy matcher, or
 // its POSTs bounce to /login and the flow silently never completes.
-const GATED_API = new Set<string>([]);
+const GATED_API = new Set<string>(["account-link"]);
 
 test("every API route is either excluded from the auth matcher or explicitly gated", () => {
   const source = fs.readFileSync(path.join(process.cwd(), "src", "proxy.ts"), "utf8");

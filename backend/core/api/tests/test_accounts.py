@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from ...config import settings
-from ...storage.models import UserModel
+from ...storage.models import UserIdentityModel, UserModel
 from ..errors import DomainError
 from ..password_policy import validate_password
 from ..passwords import hash_password, verify_password
@@ -75,6 +75,7 @@ def accounts_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(settings, "smtp_host", None)
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     UserModel.__table__.create(engine)
+    UserIdentityModel.__table__.create(engine)
     store = _Store(engine)
     app = FastAPI()
     app.state.job_store = store

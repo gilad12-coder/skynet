@@ -21,10 +21,11 @@ from typing import Annotated, TypeGuard
 
 from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from ...config import settings
-from ...storage.models import UserModel
+from ...storage.models import UserIdentityModel, UserModel
 from ..email_sender import email_configured, send_email
 from ..email_verification import (
     issue_verification_code,
@@ -81,6 +82,20 @@ class OAuthProvisionRequest(BaseModel):
             "under one of them is reused when none exists under ``email``."
         ),
     )
+    provider: str = Field(default="", max_length=32, description="Provider id, such as 'google' or 'github'.")
+    provider_account_id: str = Field(
+        default="",
+        max_length=255,
+        description="The provider's stable account id; a linked one decides the account before any email does.",
+    )
+
+
+# Links a provider account to the signed-in account from Settings.
+class OAuthLinkRequest(BaseModel):
+    username: str = Field(description="The signed-in account the provider account joins.")
+    provider: str = Field(min_length=1, max_length=32, description="Provider id, such as 'google' or 'github'.")
+    provider_account_id: str = Field(min_length=1, max_length=255, description="The provider's stable account id.")
+    provider_email: str = Field(default="", max_length=255, description="The provider account's email, for display.")
 
 
 # The resolved account the frontend turns into a session — never carries a secret.
@@ -151,6 +166,25 @@ def _existing_account(session: Session, emails: list[str]) -> UserModel | None:
         if row is not None:
             return row
     return None
+
+
+def _linked_account(session: Session, provider: str, provider_account_id: str) -> UserModel | None:
+    """Return the account a provider account was linked to, if any.
+
+    Args:
+        session: Open database session.
+        provider: Provider id.
+        provider_account_id: The provider's stable account id.
+
+    Returns:
+        The linked account row, or None when the provider account is unlinked.
+    """
+    if not provider or not provider_account_id:
+        return None
+    identity = session.get(UserIdentityModel, (provider, provider_account_id))
+    if identity is None:
+        return None
+    return session.get(UserModel, str(identity.username))
 
 
 def _coerce_choice(value: str, allowed: frozenset[str]) -> str | None:
@@ -440,10 +474,13 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
             raise DomainError("accounts.invalid_email", status=422)
         now = datetime.now(UTC)
         with Session(job_store.engine) as session:
-            row = session.get(UserModel, email)
+            row = _linked_account(session, body.provider, body.provider_account_id)
+            linked = row is not None
+            if row is None:
+                row = session.get(UserModel, email)
             if row is None:
                 row = _existing_account(session, body.other_emails)
-            if row is not None and not bool(row.email_verified):
+            if row is not None and not linked and not bool(row.email_verified):
                 # The password was set by whoever registered the address without
                 # ever proving it; the provider just proved it, so that password
                 # must not keep a way into the owner's account.
@@ -461,12 +498,78 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
                     email_verified=True,
                 )
                 session.add(row)
+            if not linked and body.provider and body.provider_account_id:
+                session.merge(
+                    UserIdentityModel(
+                        provider=body.provider,
+                        provider_account_id=body.provider_account_id,
+                        username=str(row.email),
+                        provider_email=email,
+                        created_at=now,
+                    )
+                )
             first_login = row.last_login_at is None
             row.last_login_at = now
             email = str(row.email)
             name = str(row.name)
             session.commit()
         return AccountInfo(email=email, name=name, role=_role_for(email), first_login=first_login)
+
+    @router.post(
+        "/auth/oauth/link",
+        response_model=AccountInfo,
+        summary="Link a provider account to a signed-in account",
+    )
+    def link_oauth(
+        body: OAuthLinkRequest,
+        x_internal_auth: Annotated[str | None, Header()] = None,
+    ) -> AccountInfo:
+        """Make a Google or GitHub account sign in to an existing account.
+
+        The frontend calls this after the user, already signed in, finishes
+        the provider's consent screen from Settings. Linking goes by the
+        provider's account id, so the provider's emails never have to match.
+        Each account keeps one link per provider; a new one replaces the old.
+
+        Args:
+            body: The signed-in account and the provider account joining it.
+            x_internal_auth: Shared-secret header proving the caller is the
+                trusted frontend.
+
+        Returns:
+            The signed-in account, which the session keeps.
+
+        Raises:
+            DomainError: 403 on a bad internal secret; 404 when the account
+                does not exist; 409 when the provider account already signs in
+                to a different account.
+        """
+        _require_internal_auth(x_internal_auth)
+        username = _normalise_email(body.username)
+        with Session(job_store.engine) as session:
+            row = session.get(UserModel, username)
+            if row is None:
+                raise DomainError("accounts.not_found", status=404)
+            existing = session.get(UserIdentityModel, (body.provider, body.provider_account_id))
+            if existing is not None and str(existing.username) != username:
+                raise DomainError("accounts.identity_in_use", status=409)
+            if existing is None:
+                session.execute(
+                    delete(UserIdentityModel).where(
+                        UserIdentityModel.username == username, UserIdentityModel.provider == body.provider
+                    )
+                )
+                session.add(
+                    UserIdentityModel(
+                        provider=body.provider,
+                        provider_account_id=body.provider_account_id,
+                        username=username,
+                        provider_email=_normalise_email(body.provider_email),
+                        created_at=datetime.now(UTC),
+                    )
+                )
+            session.commit()
+            return AccountInfo(email=username, name=str(row.name), role=_role_for(username))
 
     @router.post(
         "/auth/password-reset/request",

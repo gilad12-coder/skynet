@@ -124,6 +124,25 @@ class UserModel(Base):
     recovery_codes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class UserIdentityModel(Base):
+    """A Google or GitHub account that signs in to one Skynet account.
+
+    Keyed by the provider's stable account id rather than its email, so a
+    provider account linked from Settings keeps reaching the same Skynet
+    account even when none of its emails match it.
+    """
+
+    __tablename__ = "user_identities"
+
+    provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    provider_account_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    provider_email: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
 class MonthlyActiveUserModel(Base):
     """One identity admitted to use the application during a UTC month."""
 

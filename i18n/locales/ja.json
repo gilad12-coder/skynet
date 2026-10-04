@@ -65,6 +65,11 @@
     "winningCandidate": "最良候補"
   },
   "messages": {
+    "accounts.identity_in_use": "このアカウントはすでに別の Skynet アカウントにサインインしています。",
+    "accounts.identity_not_found": "このアカウントは連携されていません。",
+    "accounts.last_sign_in_method": "これが唯一のサインイン方法です。先にパスワードかパスキーを追加してください。",
+    "accounts.link_failed": "アカウントを連携できませんでした。もう一度お試しください。",
+    "accounts.not_found": "このアカウントは存在しません。",
     "blackbox.repo_target_unavailable": "リポジトリの最適化はまだ利用できません。",
     "secrets.invalid_name": "「{name}」はシークレット名として使えません。英字、数字、アンダースコアを使い、英字またはアンダースコアで始めてください。",
     "secrets.invalid_value": "シークレットの値は {limit} バイト以下にしてください。",

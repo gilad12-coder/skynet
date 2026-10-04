@@ -65,6 +65,11 @@
     "winningCandidate": "المرشّح الفائز"
   },
   "messages": {
+    "accounts.identity_in_use": "هذا الحساب يسجّل الدخول بالفعل إلى حساب Skynet آخر.",
+    "accounts.identity_not_found": "هذا الحساب غير مرتبط.",
+    "accounts.last_sign_in_method": "هذه طريقتك الوحيدة لتسجيل الدخول. أضف كلمة مرور أو مفتاح مرور أولاً.",
+    "accounts.link_failed": "تعذّر ربط هذا الحساب. حاول مرة أخرى.",
+    "accounts.not_found": "هذا الحساب غير موجود.",
     "blackbox.repo_target_unavailable": "تحسين مستودع غير متاح بعد.",
     "secrets.invalid_name": "لا يمكن استخدام \"{name}\" اسمًا لسر. استخدم الأحرف والأرقام والشرطات السفلية، وابدأ بحرف أو شرطة سفلية.",
     "secrets.invalid_value": "يحتاج السر إلى قيمة لا تتجاوز {limit} بايت.",
