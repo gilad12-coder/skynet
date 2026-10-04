@@ -93,13 +93,7 @@ import {
   type CostBracket,
   type ProjectedModelRole,
 } from "../lib/cost-bracket";
-import {
-  isMeaningfulAnythingDraft,
-  stripModelSecrets,
-  type AnythingDraftData,
-} from "../lib/draft-record";
 import { fileNewRun } from "../lib/file-new-run";
-import { useWizardDrafts } from "./use-wizard-drafts";
 import { useExecutionBudget } from "./use-execution-budget";
 import { prepareModelConfig } from "./use-submit-wizard";
 import {
@@ -256,7 +250,11 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: string | null = null) {
+export function useBlackboxWizard(
+  initialRecipe: BlackboxRecipe,
+  folderId: string | null = null,
+  touring = false,
+) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();
@@ -279,7 +277,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
   const [isPrivate, setIsPrivate] = useState(true);
   const [economyMode, setEconomyMode] = useState(false);
 
-  // Execution intent comes from the entry point, draft or clone, never from
+  // Execution intent comes from the entry point or a clone, never from
   // syntax detection: code-shaped text may be a config or a prompt example.
   const [recipe, setRecipeState] = useState<BlackboxRecipe>(initialRecipe);
   const isRepo = recipe === "repo";
@@ -454,17 +452,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
     availableCents,
   } = useExecutionBudget();
 
-  const drafts = useWizardDrafts();
-  const draftsRef = useRef(drafts);
-  useEffect(() => {
-    draftsRef.current = drafts;
-  }, [drafts]);
-  // Taken once at mount: the saved draft this instance hydrates from, or null
-  // when the form starts blank. Publishing waits until that hydration has
-  // landed so the first snapshot written is the restored one, not the empty
-  // initial state.
-  const [draftSnapshot] = useState(() => drafts.takeSnapshot("anything"));
-  const hydratedRef = useRef(false);
   const submittedRef = useRef(false);
 
   // Shared wizard-state bridge (see use-submit-wizard): the panel agent's
@@ -627,79 +614,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
         if (lastStagedCasesRef.current === parsedCases) lastStagedCasesRef.current = null;
       });
   }, [parsedCases, casesName]);
-  // The draft's stage is applied one render after its fields, so the
-  // prerequisite walk (below validateStep) checks the restored state rather
+  // A clone's stage is applied one render after its fields, so the
+  // prerequisite walk (below validateStep) checks the cloned state rather
   // than the empty initial one.
   const [pendingRestore, setPendingRestore] = useState<{
     stage: WizardStageId;
     furthest: WizardStageId;
   } | null>(null);
-  useEffect(() => {
-    const d = draftSnapshot;
-    if (!d) {
-      hydratedRef.current = true;
-      return;
-    }
-    setPendingRestore({ stage: d.stage, furthest: d.furthestStage });
-    setJobName(d.jobName);
-    setJobNameTouched(d.jobName.trim() !== "" && d.jobName !== suggestedRunName(d.objective));
-    setJobDescription(d.jobDescription);
-    setIsPrivate(d.isPrivate);
-    setEconomyMode(d.economyMode ?? false);
-    setRecipeState(wizardRecipe(d.recipe));
-    setRepoName(d.repo?.repository ?? "");
-    setRepoBranch(d.repo?.branch ?? "");
-    setRepoPaths(d.repo?.editablePaths ?? ".");
-    setRepoSetup(d.repo?.setupCommand ?? "");
-    setRepoSecrets(
-      (d.repo?.secrets ?? []).map((row) => ({
-        name: row.name,
-        value: "",
-        savedSecretId: row.savedSecretId,
-      })),
-    );
-    setCodeAssistMode(d.codeAssistMode);
-    const singlePart = d.seedMode === "parts" && d.seedParts.length === 1 ? d.seedParts[0] : null;
-    setSeedMode(singlePart ? "text" : d.seedMode);
-    setSeedText(singlePart ? singlePart.value : d.seedText);
-    setSeedParts(singlePart ? [] : d.seedParts);
-    setSeedManuallyEdited(
-      d.seedManuallyEdited ||
-        !!d.seedText.trim() ||
-        d.seedParts.some((part) => !!part.value.trim()),
-    );
-    setScorerManuallyEdited(d.scorerManuallyEdited || !!d.metricCode.trim());
-    setObjective(d.objective);
-    setBackground(d.background);
-    setParsedCases(d.parsedCases);
-    setCasesName(d.casesName);
-    splitModeRef.current = d.splitMode;
-    setSplitModeState(d.splitMode);
-    setSplit(d.split);
-    setShuffle(d.shuffle);
-    setSeed(d.seed);
-    setScorerKind(d.scorerKind);
-    setMetricCode(d.metricCode);
-    setScorerUrl(d.scorerUrl);
-    setScorerInstall(d.scorerInstall);
-    setScorerPackages(d.scorerPackages ?? "");
-    setScorerDependencyLock(d.scorerDependencyLock ?? null);
-    setScorerModel(d.scorerModel);
-    setScorerModelMode(d.scorerModelMode);
-    // Drafts saved with the retired plateau relay open as Auto.
-    setStrategyMode(d.strategyMode === "single" ? "single" : "auto");
-    setEngine(d.engine);
-    // Drafts saved with a now-unavailable harness open on the default one.
-    setProposer(
-      d.proposer && UNAVAILABLE_HARNESSES.includes(d.proposer.harness)
-        ? DEFAULT_PROPOSER
-        : { ...DEFAULT_PROPOSER, ...d.proposer },
-    );
-    setMaxScorerRuns(d.maxScorerRuns);
-    setMaxIterations(d.maxIterations);
-    setStopAtScore(d.stopAtScore);
-    setReflectionModel(d.reflectionModel);
-  }, [draftSnapshot]);
 
   // Auto picks engines itself, so only a hand-picked engine shapes the
   // recommended split.
@@ -756,14 +677,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
   // optimizer all come from the payload.
   const cloneRan = useRef(false);
   const [cloned, setCloned] = useState(false);
-  const [cloneReady, setCloneReady] = useState(false);
-  const cloneCompared = useRef(false);
   const [issue, setIssue] = useState<WizardIssue | null>(null);
   useEffect(() => {
     const cloneId = searchParams.get("clone");
-    // A restored draft owns the form; the clone URL it was continued past must
-    // not hydrate over it.
-    if (!cloneId || cloneRan.current || draftSnapshot) return;
+    if (!cloneId || cloneRan.current) return;
     cloneRan.current = true;
     Promise.all([getOptimizationPayload(cloneId), getJob(cloneId).catch(() => null)])
       .then(([{ optimization_type, payload }, jobData]) => {
@@ -891,10 +808,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
         // answered. The restore walk still stops at a stage that no longer
         // validates, so a stale clone lands where it needs repair.
         if (source) setPendingRestore({ stage: "review", furthest: "review" });
-        setCloneReady(true);
       })
       .catch(() => {
-        draftsRef.current.compareClone("anything", null);
         toast.error(msg("submit.clone.failed"));
       });
   }, [searchParams]);
@@ -1289,21 +1204,14 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
     [recipe, objective, background, scorerUsesModel, resolvedScorerModel],
   );
 
-  // Restored or cloned authored artifacts must survive the first render before hydration.
+  // The guided tour drives the wizard with demo data, so no paid assistant starts.
   const interviewPossible =
     !isRepo &&
-    !drafts.offerPending &&
-    !drafts.suspended &&
+    !touring &&
     codeAssistMode === "auto" &&
     !cloned &&
     !seedManuallyEdited &&
-    !scorerManuallyEdited &&
-    !(
-      draftSnapshot &&
-      (draftSnapshot.seedText.trim() ||
-        draftSnapshot.metricCode.trim() ||
-        draftSnapshot.seedParts.some((part) => part.value.trim()))
-    );
+    !scorerManuallyEdited;
   // The interview opens on the Goal stage, the wizard's first — drafting the
   // seed is its job, so it never waits for a typed objective. The seed pass
   // runs when it resolves, so the user leaves the stage with a drafted
@@ -1371,7 +1279,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
     runSignatureValidation: noSeedValidation,
     runMetricValidation: noSeedValidation,
     // A repository has no text seed to draft, and its scorer is written by hand.
-    seedEnabled: !isRepo && !drafts.offerPending && interview.resolved,
+    seedEnabled: !isRepo && interview.resolved,
     interviewBrief: interview.confirmedBrief,
     blackbox: authoringContext,
     model: interview.model,
@@ -1527,14 +1435,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
     return found == null;
   };
 
-  // Walk the restored stage's prerequisites against the restored state: a
-  // saved stage whose earlier stages no longer validate opens on the first
-  // failing one instead. Publishing starts here, after the restored fields
-  // have landed.
+  // Walk the cloned stage's prerequisites against the cloned state: a stage
+  // whose earlier stages no longer validate opens on the first failing one
+  // instead.
   useEffect(() => {
     if (!pendingRestore) return;
     setPendingRestore(null);
-    hydratedRef.current = true;
     const target = WIZARD_STAGE[pendingRestore.stage];
     let reachable = 0;
     while (reachable < target && validateStep(reachable)) reachable += 1;
@@ -1688,7 +1594,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
   // Next would have. One that finished while they were gone is its own page.
   const resumedRef = useRef(false);
   useEffect(() => {
-    if (resumedRef.current || !hydratedRef.current || pendingRestore) return;
+    if (resumedRef.current || pendingRestore) return;
     resumedRef.current = true;
     const progress = preflight.progress.state;
     if (!progress || progress.identity !== preflight.identity) return;
@@ -1764,10 +1670,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
         scorer: scorerKind,
         has_cases: parsedCases != null,
       });
-      // The accepted job consumed the draft: nothing is re-parked while the
-      // splash plays out.
       submittedRef.current = true;
-      draftsRef.current.consumed();
       await fileNewRun(result.optimization_id, folderId);
       const jobUrl = `/optimizations/${result.optimization_id}`;
       setSubmitPhase("splash");
@@ -1788,91 +1691,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
     }
   };
 
-  // The draft never carries credentials: a restored BYOK model comes back
-  // without its key and shows as missing credentials.
-  const safeScorerModel = useMemo(() => stripModelSecrets(scorerModel), [scorerModel]);
-  const safeReflectionModel = useMemo(() => stripModelSecrets(reflectionModel), [reflectionModel]);
-  // Every commit hands the saver the serializable snapshot; it debounces and
-  // dedupes. Evidence, dry-run results and the remote secret stay out on
-  // purpose so a continued draft re-runs its checks.
-  useEffect(() => {
-    if (!hydratedRef.current || submittedRef.current) return;
-    const snapshot: AnythingDraftData = {
-      stage: stageAt(step),
-      furthestStage: stageAt(furthestReachedStep),
-      jobName,
-      jobDescription,
-      isPrivate,
-      economyMode,
-      recipe,
-      codeAssistMode,
-      seedMode,
-      seedText,
-      seedParts,
-      seedManuallyEdited,
-      scorerManuallyEdited,
-      objective,
-      background,
-      targetKind: isRepo ? "repo" : "text",
-      // Typed secret values never reach the draft; a restored row asks for its value again.
-      repo: isRepo
-        ? {
-            repository: repoName,
-            branch: repoBranch,
-            editablePaths: repoPaths,
-            setupCommand: repoSetup,
-            secrets: repoSecrets.map((row) => ({
-              name: row.name,
-              savedSecretId: row.savedSecretId,
-            })),
-          }
-        : undefined,
-      parsedCases,
-      casesName,
-      split,
-      shuffle,
-      seed,
-      splitMode,
-      scorerKind,
-      metricCode,
-      scorerUrl,
-      scorerInstall,
-      scorerPackages,
-      scorerDependencyLock,
-      scorerModel: safeScorerModel,
-      scorerModelMode,
-      strategyMode,
-      engine,
-      proposerRuntime,
-      proposer,
-      maxScorerRuns,
-      maxIterations,
-      stopAtScore,
-      reflectionModel: safeReflectionModel,
-      maxCostCents,
-      setupSpent,
-    };
-    if (cloneReady && !pendingRestore && !cloneCompared.current) {
-      cloneCompared.current = true;
-      draftsRef.current.compareClone("anything", snapshot);
-    }
-    draftsRef.current.publish("anything", snapshot, isMeaningfulAnythingDraft(snapshot));
-  });
-  // Stage boundaries are the one place the debounce is skipped: a refresh right
-  // after Next lands on the stage the user just reached.
-  useEffect(() => {
-    if (hydratedRef.current) draftsRef.current.flush();
-  }, [step]);
   useEffect(
     () => () => {
-      if (submittedRef.current) {
-        // A submit leaves on purpose: reset the shared agent state; the draft
-        // was already consumed when the job was accepted.
-        wizardCtxRef.current?.reset();
-        return;
-      }
-      // Leaving mid-setup keeps the draft: write whatever the debounce still holds.
-      draftsRef.current.flush();
+      // A submit leaves on purpose: reset the shared agent state.
+      if (submittedRef.current) wizardCtxRef.current?.reset();
     },
     [],
   );

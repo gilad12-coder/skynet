@@ -138,8 +138,8 @@ export const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 /**
  * Window event fired synchronously right before a locale switch reloads the
- * page, so in-memory state that should survive the switch (e.g. the submit
- * wizard draft) can stash itself for the hop.
+ * page, so in-memory state can settle itself first (e.g. a running interview
+ * marks itself to restart in the new language).
  */
 export const LOCALE_RELOAD_EVENT = "skynet:locale-will-reload";
 

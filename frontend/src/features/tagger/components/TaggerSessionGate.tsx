@@ -1,8 +1,8 @@
 "use client";
 
 import { LoadingState } from "@/shared/ui/loading-state";
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { XCircle } from "@/shared/ui/icons";
 
@@ -14,8 +14,10 @@ import {
   type TaggerSessionDetail,
 } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
+import { clearRecentSession } from "@/shared/lib/recent-session";
 import { PageContainer } from "@/shared/layout/page-container";
 import { TaggerBackLink } from "./TaggerBackLink";
+import { discardUnstartedSession } from "../hooks/use-tagger";
 import { TaggerView } from "./TaggerView";
 import {
   clearTaggerInterviewLocaleReset,
@@ -24,6 +26,7 @@ import {
 
 type GateState =
   | { mode: "loading" }
+  | { mode: "unstarted"; session: TaggerSessionDetail }
   | { mode: "ready"; session: TaggerSessionDetail }
   | { mode: "notfound" };
 
@@ -64,14 +67,22 @@ async function resetInterviewAfterLocaleReload(
 /**
  * Resolves ``/tagger/[id]``: fetches the caller's saved session and hands its
  * full state to {@link TaggerView} to resume annotating, or shows a not-found
- * state when the id is unknown or owned by someone else. Mirrors
+ * state when the id is unknown or owned by someone else. A session that never
+ * got past its setup interview is not reopened: it is discarded and the user
+ * starts fresh, unless this very tab just created it or reloaded it for a
+ * language switch. Mirrors
  * ``OptimizationDetailGate`` — the bearer is attached before the probe because
  * effects run child-before-parent and the root token bridge may not have synced.
  */
 export function TaggerSessionGate() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { data: session, status } = useSession();
   const [state, setState] = useState<GateState>({ mode: "loading" });
+  // StrictMode's dev-only effect re-run consumes the one-shot handoff on the
+  // first pass and refetches on the second; the ref remembers this tab was
+  // handed the session, so the refetch is not mistaken for a return visit.
+  const handedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -80,6 +91,7 @@ export function TaggerSessionGate() {
     // reload or a return from elsewhere finds none and fetches from the server.
     const handed = takeTaggerSession(id);
     if (handed) {
+      handedIdRef.current = id;
       void resetInterviewAfterLocaleReload(handed).then((sessionDetail) => {
         if (!cancelled) setState({ mode: "ready", session: sessionDetail });
       });
@@ -90,9 +102,18 @@ export function TaggerSessionGate() {
     setState({ mode: "loading" });
     if (session?.backendAccessToken) setApiAuthToken(session.backendAccessToken);
     getTaggerSession(id)
-      .then(resetInterviewAfterLocaleReload)
-      .then((detail) => {
-        if (!cancelled) setState({ mode: "ready", session: detail });
+      .then(async (detail) => {
+        if (
+          detail.phase === "interview" &&
+          handedIdRef.current !== detail.id &&
+          !hasTaggerInterviewLocaleReset(detail.id)
+        ) {
+          return { mode: "unstarted", session: detail } as const;
+        }
+        return { mode: "ready", session: await resetInterviewAfterLocaleReload(detail) } as const;
+      })
+      .then((next) => {
+        if (!cancelled) setState(next);
       })
       .catch(() => {
         if (!cancelled) setState({ mode: "notfound" });
@@ -102,7 +123,14 @@ export function TaggerSessionGate() {
     };
   }, [id, status, session?.backendAccessToken]);
 
-  if (state.mode === "loading") {
+  useEffect(() => {
+    if (state.mode !== "unstarted") return;
+    if (state.session.role === "owner") discardUnstartedSession(state.session.id);
+    clearRecentSession("tagger");
+    router.replace("/tagger");
+  }, [state, router]);
+
+  if (state.mode === "loading" || state.mode === "unstarted") {
     return (
       <PageContainer full>
         <LoadingState fullPage />

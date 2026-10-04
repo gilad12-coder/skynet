@@ -9,14 +9,16 @@ ownership guard that a caller cannot touch another user's session.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from ...storage.models import Base
+from ...storage.models import Base, TaggingSessionModel
 from ...storage.remote import RemoteDBJobStore
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -231,3 +233,31 @@ def test_list_orders_pinned_first() -> None:
     items = client.get("/tagging-sessions").json()["items"]
     assert next(i["id"] for i in items) == first
     assert {i["id"] for i in items} == {first, second}
+
+
+def test_list_leaves_out_sessions_still_in_the_interview() -> None:
+    """An unstarted (interview) session is neither listed nor counted."""
+    client, _ = _client(_ALICE)
+    started = _create(client)
+    resp = client.post("/tagging-sessions", json={**_SESSION_BODY, "phase": "interview"})
+    assert resp.status_code == 201, resp.text
+    body = client.get("/tagging-sessions").json()
+    assert body["total"] == 1
+    assert [item["id"] for item in body["items"]] == [started]
+
+
+def test_create_deletes_only_stale_unstarted_sessions() -> None:
+    """Creating a session purges the caller's idle interview rows, nothing else."""
+    client, store = _client(_ALICE)
+    stale = client.post("/tagging-sessions", json={**_SESSION_BODY, "phase": "interview"}).json()["id"]
+    live = client.post("/tagging-sessions", json={**_SESSION_BODY, "phase": "interview"}).json()["id"]
+    started = _create(client)
+    with Session(store.engine) as session:
+        row = session.get(TaggingSessionModel, stale)
+        assert row is not None
+        row.updated_at = datetime.now(UTC) - timedelta(hours=2)
+        session.commit()
+    _create(client)
+    assert client.get(f"/tagging-sessions/{stale}").status_code == 404
+    assert client.get(f"/tagging-sessions/{live}").status_code == 200
+    assert client.get(f"/tagging-sessions/{started}").status_code == 200

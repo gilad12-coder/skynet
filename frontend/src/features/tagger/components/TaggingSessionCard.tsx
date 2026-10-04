@@ -49,7 +49,6 @@ const MODE_LABEL_KEYS: Record<string, MessageKey> = {
 
 /** Human status for a session card, derived from phase and progress. */
 function sessionStatus(session: TaggerSessionSummary): string {
-  if (session.phase === "interview") return msg("tagger.session.status.setup");
   if (session.phase === "calibration" || session.phase === "review") {
     return msg("tagger.session.status.review");
   }
