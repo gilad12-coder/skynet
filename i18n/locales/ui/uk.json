@@ -1,4 +1,9 @@
 {
+  "submit.blackbox.agent.reading_repo": "Читає репозиторій…",
+  "submit.blackbox.agent.tool.brief": "Оновив мету й контекст",
+  "submit.blackbox.agent.tool.list_folder": "Відкрив {path}",
+  "submit.blackbox.agent.tool.read_file": "Прочитав {path}",
+  "submit.blackbox.agent.writing_brief": "Оновлює мету…",
   "settings.security.connected.description": "Входьте з цими акаунтами, навіть якщо їхня пошта відрізняється від вашої.",
   "settings.security.connected.github": "GitHub",
   "settings.security.connected.google": "Google",
@@ -480,7 +485,7 @@
   "optimization.blackbox.stats.runtime": "Час виконання",
   "optimization.blackbox.stats.scorer_runs": "Запуски оцінювача",
   "optimization.progress.blackbox": "Запуски оцінювача",
-  "submit.blackbox.agent.empty_hint": "Опишіть свою мету, і агент підготує початкову точку та оцінювач на Python. Ви можете прийняти їх як є або попросити змінити.",
+  "submit.blackbox.agent.empty_hint": "Розкажіть агентові, що ви хочете покращити. Він ставитиме запитання, доки не зрозуміє мету й те, як оцінювати кожну версію, і сам заповнить поля.",
   "submit.blackbox.agent.fix_scorer": "Оцінювач видав помилку. Виправ її.",
   "submit.blackbox.interview.reading": "Готуємо перше запитання…",
   "submit.blackbox.interview.brief.description": "Виведено з ваших відповідей. Редагуйте будь-що — початкову точку та оцінювач буде підготовлено за цими директивами.",

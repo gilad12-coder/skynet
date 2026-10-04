@@ -1,4 +1,9 @@
 {
+  "submit.blackbox.agent.reading_repo": "Читает репозиторий…",
+  "submit.blackbox.agent.tool.brief": "Обновил цель и контекст",
+  "submit.blackbox.agent.tool.list_folder": "Открыл {path}",
+  "submit.blackbox.agent.tool.read_file": "Прочитал {path}",
+  "submit.blackbox.agent.writing_brief": "Обновляет цель…",
   "settings.security.connected.description": "Входите с этими аккаунтами, даже если их почта отличается от вашей.",
   "settings.security.connected.github": "GitHub",
   "settings.security.connected.google": "Google",
@@ -480,7 +485,7 @@
   "optimization.blackbox.stats.runtime": "Время выполнения",
   "optimization.blackbox.stats.scorer_runs": "Запуски оценщика",
   "optimization.progress.blackbox": "Запуски оценщика",
-  "submit.blackbox.agent.empty_hint": "Опишите свою цель, и агент составит отправную точку и оценщик на Python. Вы можете принять их как есть или запросить изменения.",
+  "submit.blackbox.agent.empty_hint": "Расскажите агенту, что вы хотите улучшить. Он будет задавать вопросы, пока не поймёт цель и то, как оценивать каждую версию, и сам заполнит поля.",
   "submit.blackbox.agent.fix_scorer": "Оценщик выдал ошибку. Исправь её.",
   "submit.blackbox.interview.reading": "Готовим первый вопрос…",
   "submit.blackbox.interview.brief.description": "Составлено на основе ваших ответов. Можно редактировать что угодно — отправная точка и оценщик будут составлены согласно этим указаниям.",

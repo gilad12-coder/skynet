@@ -1,4 +1,9 @@
 {
+  "submit.blackbox.agent.reading_repo": "リポジトリを読んでいます…",
+  "submit.blackbox.agent.tool.brief": "目的と背景を更新しました",
+  "submit.blackbox.agent.tool.list_folder": "{path} を開きました",
+  "submit.blackbox.agent.tool.read_file": "{path} を読みました",
+  "submit.blackbox.agent.writing_brief": "目的を更新しています…",
   "settings.security.connected.description": "メールアドレスがあなたのものと異なっていても、これらのアカウントでサインインできます。",
   "settings.security.connected.github": "GitHub",
   "settings.security.connected.google": "Google",
@@ -480,7 +485,7 @@
   "optimization.blackbox.stats.runtime": "実行時間",
   "optimization.blackbox.stats.scorer_runs": "スコアラー実行",
   "optimization.progress.blackbox": "スコアラー実行",
-  "submit.blackbox.agent.empty_hint": "目的を記述すると、エージェントが開始点と Python スコアラーの下書きを作成します。そのまま採用することも、変更を依頼することもできます。",
+  "submit.blackbox.agent.empty_hint": "改善したいことをエージェントに伝えてください。目的と各バージョンの評価方法を理解するまで質問し、項目を自動で入力します。",
   "submit.blackbox.agent.fix_scorer": "スコアラーでエラーが発生しました。修正してください。",
   "submit.blackbox.interview.reading": "最初の質問を準備しています…",
   "submit.blackbox.interview.brief.description": "あなたの回答から抽出されました。自由に編集できます — 開始点とスコアラーはこれらの指示に従って下書きされます。",

@@ -1,4 +1,9 @@
 {
+  "submit.blackbox.agent.reading_repo": "正在讀取儲存庫…",
+  "submit.blackbox.agent.tool.brief": "更新咗目標同背景",
+  "submit.blackbox.agent.tool.list_folder": "開咗 {path}",
+  "submit.blackbox.agent.tool.read_file": "讀咗 {path}",
+  "submit.blackbox.agent.writing_brief": "正在更新目標…",
   "settings.security.connected.description": "即使呢啲帳戶嘅電郵同你嘅唔同，都可以用佢哋登入。",
   "settings.security.connected.github": "GitHub",
   "settings.security.connected.google": "Google",
@@ -480,7 +485,7 @@
   "optimization.blackbox.stats.runtime": "執行時間",
   "optimization.blackbox.stats.scorer_runs": "評分器執行次數",
   "optimization.progress.blackbox": "評分器執行次數",
-  "submit.blackbox.agent.empty_hint": "描述你嘅目標，Agent 就會草擬一個起點同一個 Python 評分器。你可以直接採用，亦可以要求修改。",
+  "submit.blackbox.agent.empty_hint": "話俾代理知你想改善乜嘢。佢會一路問問題，直到明白目標同點樣評估每個版本，然後幫你填好欄位。",
   "submit.blackbox.agent.fix_scorer": "評分器出現錯誤，請修正。",
   "submit.blackbox.interview.reading": "準備緊第一條問題…",
   "submit.blackbox.interview.brief.description": "根據你嘅回答整理而成。你可以修改任何內容 — 起點同評分器會跟隨呢啲指引嚟草擬。",

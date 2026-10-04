@@ -308,13 +308,27 @@ def repository_tree(secret: ConnectorSecret, full_name: str, branch: str) -> dic
         ``{"entries": [{"path", "type": "file" | "dir"}], "truncated": bool}``;
         ``truncated`` is GitHub's flag for a tree too large to list whole.
     """
+    return tree_entries(secret.access_token, full_name, branch)
+
+
+def tree_entries(token: str, full_name: str, branch: str) -> dict[str, Any]:
+    """List every file and folder of a repository at a branch with a bare token.
+
+    Args:
+        token: Bearer token with read access to the repository.
+        full_name: The repository as ``owner/name``.
+        branch: Branch name; empty for the default branch.
+
+    Returns:
+        ``{"entries": [{"path", "type": "file" | "dir"}], "truncated": bool}``.
+    """
     owner, name = _split_repo(full_name)
     # A branch name may hold slashes; encoded, it stays one path segment.
     ref = quote(branch.strip(), safe="") or "HEAD"
     body = get_json(
         f"{_repo_url(owner, name)}/git/trees/{ref}",
         provider=PROVIDER,
-        headers=_headers(secret.access_token),
+        headers=_headers(token),
         params={"recursive": "1"},
     )
     if not isinstance(body, dict):
@@ -326,6 +340,32 @@ def repository_tree(secret: ConnectorSecret, full_name: str, branch: str) -> dic
         if isinstance(item, dict) and item.get("type") in kinds and isinstance(item.get("path"), str)
     ]
     return {"entries": entries, "truncated": bool(body.get("truncated"))}
+
+
+def read_text_file(token: str, full_name: str, branch: str, path: str, max_bytes: int) -> tuple[str, bool]:
+    """Read one file of a repository at a branch as text, up to a byte cap.
+
+    Args:
+        token: Bearer token with read access to the repository.
+        full_name: The repository as ``owner/name``.
+        branch: Branch name; empty for the default branch.
+        path: File path inside the repository.
+        max_bytes: Stop reading after this many bytes.
+
+    Returns:
+        ``(text, truncated)``; undecodable bytes are replaced.
+    """
+    owner, name = _split_repo(full_name)
+    params = {"ref": branch.strip()} if branch.strip() else None
+    headers = {**_headers(token, accept="application/vnd.github.raw+json"), **range_header(max_bytes)}
+    content, truncated = download(
+        _contents_url(owner, name, path.strip("/")),
+        provider=PROVIDER,
+        headers=headers,
+        max_bytes=max_bytes,
+        params=params,
+    )
+    return content.decode("utf-8", errors="replace"), truncated
 
 
 def _contents_url(owner: str, repo: str, path: str) -> str:

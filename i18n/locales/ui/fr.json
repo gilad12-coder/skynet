@@ -1,4 +1,9 @@
 {
+  "submit.blackbox.agent.reading_repo": "Lecture du dépôt…",
+  "submit.blackbox.agent.tool.brief": "A mis à jour l’objectif et le contexte",
+  "submit.blackbox.agent.tool.list_folder": "A ouvert {path}",
+  "submit.blackbox.agent.tool.read_file": "A lu {path}",
+  "submit.blackbox.agent.writing_brief": "Mise à jour de l’objectif…",
   "settings.security.connected.description": "Connectez-vous avec ces comptes même si leur e-mail diffère du vôtre.",
   "settings.security.connected.github": "GitHub",
   "settings.security.connected.google": "Google",
@@ -480,7 +485,7 @@
   "optimization.blackbox.stats.runtime": "Durée d'exécution",
   "optimization.blackbox.stats.scorer_runs": "Exécutions de l'évaluateur",
   "optimization.progress.blackbox": "Exécutions de l'évaluateur",
-  "submit.blackbox.agent.empty_hint": "Décrivez votre objectif et l'agent rédigera un point de départ et un évaluateur Python. Vous pouvez les accepter tels quels ou demander des modifications.",
+  "submit.blackbox.agent.empty_hint": "Dites à l’agent ce que vous voulez améliorer. Il pose des questions jusqu’à comprendre l’objectif et la façon de juger chaque version, puis remplit les champs pour vous.",
   "submit.blackbox.agent.fix_scorer": "L'évaluateur a rencontré une erreur. Corrige-le.",
   "submit.blackbox.interview.reading": "Préparation de la première question…",
   "submit.blackbox.interview.brief.description": "Distillé à partir de vos réponses. Modifiez ce que vous voulez — le point de départ et l'évaluateur seront rédigés selon ces directives.",

@@ -94,10 +94,7 @@ import {
 import { fileNewRun } from "../lib/file-new-run";
 import { useExecutionBudget } from "./use-execution-budget";
 import { prepareModelConfig } from "./use-submit-wizard";
-import {
-  useModelCatalog,
-  useRecentModelConfigs,
-} from "./use-submit-wizard-data";
+import { useModelCatalog, useRecentModelConfigs } from "./use-submit-wizard-data";
 
 export type SeedMode = "text" | "parts" | "none";
 // The wizard offers three kinds of starting point: text, a program, or a
@@ -1139,16 +1136,35 @@ export function useBlackboxWizard(
   );
 
   const authoringContext = useMemo<BlackboxAuthoringContext>(
-    // The writing assistant has no repository mode: a repository run's scorer
-    // is written by hand, so it reads as plain text here.
+    // A repository has no text seed to draft, so it reads as "anything"; the
+    // agent gets the repository itself to read before it asks.
     () => ({
       recipe: recipe === "repo" ? "anything" : recipe,
       objective,
       background,
       target_kind: "text",
       scorer_has_model: scorerUsesModel && (resolvedScorerModel?.name.trim().length ?? 0) > 0,
+      focus: stageAt(step) === "evaluation" ? "scorer" : "goal",
+      ...(isRepo && repoName.trim()
+        ? {
+            repository: repoName.trim(),
+            branch: repoBranch.trim(),
+            editable_paths: parseEditablePaths(repoPaths),
+          }
+        : {}),
     }),
-    [recipe, objective, background, scorerUsesModel, resolvedScorerModel],
+    [
+      recipe,
+      objective,
+      background,
+      scorerUsesModel,
+      resolvedScorerModel,
+      step,
+      isRepo,
+      repoName,
+      repoBranch,
+      repoPaths,
+    ],
   );
 
   // The guided tour drives the wizard with demo data, so no paid assistant starts.
@@ -1204,6 +1220,12 @@ export function useBlackboxWizard(
     setSeedMode("text");
   }, []);
   const noSeedValidation = useCallback(async () => null, []);
+  // The agent writes the brief from the conversation; what it sends is the
+  // field's full new text, so it replaces what was there.
+  const agentSetBrief = useCallback((fields: { objective?: string; background?: string }) => {
+    if (fields.objective !== undefined) setObjective(fields.objective);
+    if (fields.background !== undefined) setBackground(fields.background);
+  }, []);
   const agent = useCodeAgent({
     codeAssistMode,
     setCodeAssistMode,
@@ -1229,6 +1251,7 @@ export function useBlackboxWizard(
     seedEnabled: !isRepo && interview.resolved,
     interviewBrief: interview.confirmedBrief,
     blackbox: authoringContext,
+    onBrief: agentSetBrief,
     model: interview.model,
     reasoningEffort: interview.reasoningEffort,
   });
@@ -1276,14 +1299,7 @@ export function useBlackboxWizard(
       repo: isRepo,
     });
     return issue ? msg(issue.key, issue.params) : null;
-  }, [
-    engineCatalog,
-    engineCatalogFailed,
-    strategyMode,
-    engine,
-    seedMode,
-    isRepo,
-  ]);
+  }, [engineCatalog, engineCatalogFailed, strategyMode, engine, seedMode, isRepo]);
   const optimizationFamily = optimizationModelFamily(strategyMode, engine);
 
   /** The first problem holding a stage back, or null when it validates. */

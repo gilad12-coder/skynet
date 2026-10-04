@@ -1,4 +1,9 @@
 {
+  "submit.blackbox.agent.reading_repo": "Liest das Repository…",
+  "submit.blackbox.agent.tool.brief": "Ziel und Hintergrund aktualisiert",
+  "submit.blackbox.agent.tool.list_folder": "{path} geöffnet",
+  "submit.blackbox.agent.tool.read_file": "{path} gelesen",
+  "submit.blackbox.agent.writing_brief": "Aktualisiert das Ziel…",
   "settings.security.connected.description": "Melde dich mit diesen Konten an, auch wenn ihre E-Mail von deiner abweicht.",
   "settings.security.connected.github": "GitHub",
   "settings.security.connected.google": "Google",
@@ -480,7 +485,7 @@
   "optimization.blackbox.stats.runtime": "Laufzeit",
   "optimization.blackbox.stats.scorer_runs": "Scorer-Durchläufe",
   "optimization.progress.blackbox": "Scorer-Durchläufe",
-  "submit.blackbox.agent.empty_hint": "Beschreiben Sie Ihr Ziel, und der Agent entwirft einen Startpunkt und einen Python-Scorer. Sie können beides unverändert übernehmen oder Änderungen anfordern.",
+  "submit.blackbox.agent.empty_hint": "Sag dem Agenten, was du verbessern willst. Er stellt Fragen, bis er das Ziel versteht und weiß, wie jede Version bewertet wird, und füllt die Felder selbst aus.",
   "submit.blackbox.agent.fix_scorer": "Der Scorer ist auf einen Fehler gestoßen. Beheben Sie ihn.",
   "submit.blackbox.interview.reading": "Die erste Frage wird vorbereitet…",
   "submit.blackbox.interview.brief.description": "Aus deinen Antworten destilliert. Bearbeite alles — Startpunkt und Scorer werden gemäß diesen Vorgaben entworfen.",

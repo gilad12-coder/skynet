@@ -56,8 +56,10 @@ from ..language_models import (
 )
 from ..react_compat import native_tool_calling_active
 from ..safe_exec import validate_metric_code, validate_signature_code
+from .answer_options import normalize_options
 from .constants import REASONING_FIELD
 from .parse_salvage import strip_adapter_debris
+from .repo_browser import RepoBrowser
 
 logger = logging.getLogger(__name__)
 
@@ -830,8 +832,9 @@ class CodeAssistant(dspy.Signature):
     REMOVE, FIX, or REWRITE code in that artifact.
 
     For EVERYTHING ELSE — questions, explanations, "how does X work",
-    confirmations, clarifications, opinions, critique, small talk — call
-    ``finish`` immediately and answer in ``reply``. Never edit code just
+    confirmations, clarifications, opinions, critique, small talk — answer
+    in ``reply`` (after any ``set_brief``, reads or ``ask_user`` the turn
+    needs). Never edit code just
     to "satisfy" a question.
 
     If the user says "don't change the code" (or any variant), you MUST
@@ -1115,19 +1118,57 @@ class BlackboxAssistant(dspy.Signature):
 
     ## Your tools
 
+    * ``ask_user(question, options_json)`` — shows the user ONE question
+      with clickable answers. Call ``finish`` right after it.
+    * ``set_brief(objective, background)`` — writes what you learned into
+      the job's Objective and Background fields.
     * ``edit_seed(reason, new_text)`` — REWRITES the starting point.
     * ``edit_scorer(reason, new_code)`` — REWRITES the scorer.
+    * ``list_repo_folder(path)`` / ``read_repo_file(path)`` — open the
+      repository in ``repo``; only when ``repo`` is not empty.
     * ``finish`` — end the turn and answer in ``reply``.
 
-    ## Rule 1: Default to ``finish``. Editing is the exception.
+    ## Rule 0: You are the user's interviewer. Pull out what they know.
+
+    The optimization is only as good as what the user tells you, so keep
+    a back-and-forth going until you understand: what a better version
+    achieves, what must never change, how a version should be judged
+    (what counts as right, what is partly right, what is a failure, which
+    numbers or limits matter), the edge cases, and what has already been
+    tried. Ask ONE short, concrete question per turn, grounded in what you
+    already know, never one the context answers. Ask through ``ask_user``
+    whenever the question has a small set of likely answers: 2-4 options,
+    each a concrete, self-contained answer with a one-line description
+    (never "other" or "something else"; the user can always type), then
+    ``finish`` with ``reply`` holding the same question. An open question
+    goes straight into ``reply``. When ``objective`` is empty, your first
+    question is what they want to optimize and what a better version
+    achieves. Keep asking while answers add something; stop when the user
+    wants to move on or you have what you need, and say so in ``reply``.
+
+    ``focus`` says which step the user is on. On 'goal', you work on the
+    objective and background: after each answer that changes them, call
+    ``set_brief`` with the full updated text of whichever field changed
+    (an empty argument leaves that field as it is), written in the user's
+    terms. On 'scorer', you work on how versions are judged and on the
+    scorer itself.
+
+    When ``repo`` is set, the job optimizes that repository. Read before
+    you ask: open the README, the manifest, the entry point, the tests and
+    the editable files with ``read_repo_file`` (``list_repo_folder`` for a
+    collapsed folder), then ask about what the code does not tell you, and
+    name the files you read. Read only what you need; each read costs time.
+
+    ## Rule 1: Edit only on request. Never edit just to answer.
 
     Call ``edit_seed`` or ``edit_scorer`` ONLY when the user's latest
     message is a direct instruction to CHANGE, MODIFY, REPLACE, ADD,
     REMOVE, FIX, or REWRITE that artifact.
 
     For EVERYTHING ELSE — questions, explanations, "how does X work",
-    confirmations, clarifications, opinions, critique, small talk — call
-    ``finish`` immediately and answer in ``reply``. Never edit just to
+    confirmations, clarifications, opinions, critique, small talk — answer
+    in ``reply`` (after any ``set_brief``, reads or ``ask_user`` the turn
+    needs). Never edit just to
     "satisfy" a question. If the user says "don't change anything" (or
     any variant), you MUST call ``finish`` and answer in ``reply`` only.
 
@@ -1166,10 +1207,14 @@ class BlackboxAssistant(dspy.Signature):
     confirmations.
     """
 
-    objective: str = dspy.InputField(desc="What a better version achieves, in the user's words.")
+    objective: str = dspy.InputField(desc="What a better version achieves, in the user's words; empty until known.")
     background: str = dspy.InputField(desc="Free-form context from the user; may be empty.")
     recipe: str = dspy.InputField(desc="'prompt' | 'code' | 'anything' — what the starting point is.")
     target_kind: str = dspy.InputField(desc="'text' or 'agent' (a coding agent's instructions file).")
+    focus: str = dspy.InputField(desc="'goal' (objective and background) or 'scorer' — the step the user is on.")
+    repo: str = dspy.InputField(
+        desc="The repository the job optimizes and its compact tree; empty when the job is not a repository.",
+    )
     case_columns: list[str] = dspy.InputField(desc="Column names of the case file; empty when the job has no cases.")
     sample_cases: str = dspy.InputField(desc="JSON array of up to 5 representative cases.")
     scorer_contract: str = dspy.InputField(desc="The exact contract any new scorer must satisfy.")
@@ -2383,6 +2428,7 @@ class _BlackboxEditSession:
         self._slots = {"seed": seed_text, "scorer": scorer_code}
         self._successful_edits = {"seed": 0, "scorer": 0}
         self._emit = emit
+        self._asked = False
 
     @property
     def seed_text(self) -> str:
@@ -2462,6 +2508,54 @@ class _BlackboxEditSession:
             f"{label[0].upper()}{label[1:]} replaced. Do NOT edit the {label} again this turn — "
             "call finish and summarize the change in reply."
         )
+
+    def ask_user(self, question: str, options_json: str) -> str:
+        """Show the user one question with clickable answers.
+
+        Call it for a question with a small set of likely answers, then call
+        ``finish`` with ``reply`` holding the same question. One question per
+        turn.
+
+        Args:
+            question: The question, in the reply language.
+            options_json: JSON array of 2-4 ``{"label": <answer, <= 6 words>,
+                "description": <what picking it means>}`` objects.
+
+        Returns:
+            An observation string the ReAct agent reads back.
+        """
+        if self._asked:
+            return "A question is already shown this turn. Call finish now."
+        try:
+            raw = json.loads(options_json) if options_json and options_json.strip() else []
+        except (json.JSONDecodeError, TypeError):
+            raw = []
+        options = normalize_options(raw)
+        self._asked = True
+        self._emit({"event": "ask", "data": {"question": question.strip(), "options": options}})
+        return "The question and its answers are shown. Call finish now with the same question in reply."
+
+    def set_brief(self, objective: str, background: str) -> str:
+        """Write what the user told you into the job's Objective and Background fields.
+
+        Pass the FULL new text of each field you change, in the user's terms;
+        an empty string leaves that field as it is.
+
+        Args:
+            objective: What a better version achieves, or ``""``.
+            background: Context, constraints and examples, or ``""``.
+
+        Returns:
+            An observation string the ReAct agent reads back.
+        """
+        fields = {k: v.strip() for k, v in (("objective", objective), ("background", background)) if v and v.strip()}
+        if not fields:
+            return "Nothing to write: both fields were empty."
+        call_id = uuid.uuid4().hex[:8]
+        self._emit({"event": "tool_start", "data": {"id": call_id, "tool": "set_brief", "reason": ""}})
+        self._emit({"event": "brief", "data": fields})
+        self._emit({"event": "tool_end", "data": {"id": call_id, "tool": "set_brief", "status": "ok"}})
+        return f"Updated: {', '.join(fields)}."
 
     def edit_seed(self, reason: str, new_text: str) -> str:
         """Replace the starting point in the editor.
@@ -3481,6 +3575,7 @@ async def _run_blackbox_agent(
     initial_scorer: str,
     reply_language: str,
     queue: asyncio.Queue[dict | None],
+    repo_browser: RepoBrowser | None = None,
 ) -> dict[str, str]:
     """Run a ReAct agent with ``edit_seed`` + ``edit_scorer`` tools.
 
@@ -3504,6 +3599,8 @@ async def _run_blackbox_agent(
         initial_scorer: Original scorer before any edits this conversation.
         reply_language: Language name for the reply and tool rationales.
         queue: SSE event queue receiving lifecycle and token events.
+        repo_browser: The repository a repository job optimizes, opened by
+            the browsing tools; ``None`` otherwise.
 
     Returns:
         Mapping with keys ``signature_code`` (the starting point),
@@ -3514,14 +3611,20 @@ async def _run_blackbox_agent(
     emit: Callable[[dict], None] = partial(_emit_to_code_queue, loop, queue)
     session = _BlackboxEditSession(seed_text=prior_seed, scorer_code=prior_scorer, emit=emit)
 
-    # Same iteration budget as ``_run_agent``: both artifacts edited with one
-    # validator-driven retry each, plus the submit carrying the reply.
-    react = dspy.ReActV2(BlackboxAssistant, tools=[session.edit_seed, session.edit_scorer], max_iters=5)
+    tools: list[Callable[..., str]] = [session.ask_user, session.set_brief, session.edit_seed, session.edit_scorer]
+    if repo_browser is not None:
+        repo_browser.bind(emit)
+        tools += [repo_browser.list_repo_folder, repo_browser.read_repo_file]
+    # Both artifacts edited with one validator-driven retry each, a brief and
+    # a question, plus a handful of repository reads before the reply.
+    react = dspy.ReActV2(BlackboxAssistant, tools=tools, max_iters=14 if repo_browser is not None else 8)
     reply_stream = ReactReplyStream(react, "reply", lm)
     program = dspy.streamify(react, stream_listeners=reply_stream.listeners(), async_streaming=True)
 
     inputs = {
         **_blackbox_inputs(blackbox, case_columns, sample_cases_json),
+        "focus": "scorer" if blackbox.get("focus") == "scorer" else "goal",
+        "repo": repo_browser.summary() if repo_browser is not None else "",
         "current_seed": prior_seed,
         "current_scorer": prior_scorer,
         "current_scorer_validation": prior_scorer_validation or "",
@@ -3580,6 +3683,7 @@ async def _run_code_agent_orchestration(
     initial_workflow: dict | None,
     reply_language: str,
     blackbox: dict[str, Any] | None,
+    repo_browser: RepoBrowser | None = None,
 ) -> None:
     """Run the seed or chat path and push the terminal envelope into ``queue``.
 
@@ -3616,6 +3720,8 @@ async def _run_code_agent_orchestration(
             the case columns / sample cases and the ``prior_*`` /
             ``initial_*`` signature and metric slots hold the starting
             point and the scorer.
+        repo_browser: The repository a black-box repository job optimizes;
+            ``None`` otherwise (chat path only).
     """
     try:
         if blackbox is not None and is_seed:
@@ -3643,6 +3749,7 @@ async def _run_code_agent_orchestration(
                 initial_scorer=initial_metric,
                 reply_language=reply_language,
                 queue=queue,
+                repo_browser=repo_browser,
             )
         elif is_seed and prior_workflow is not None:
             results = await _run_workflow_seed(
@@ -3731,6 +3838,7 @@ async def run_code_agent(
     reasoning_effort: str | None = None,
     usage_sink: list | None = None,
     blackbox: dict[str, Any] | None = None,
+    repo_browser: RepoBrowser | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream code-agent events to the UI.
 
@@ -3801,7 +3909,9 @@ async def run_code_agent(
             can meter the turn's token usage on any exit path.
         blackbox: The black-box wizard's authoring context (``recipe``,
             ``objective``, ``background``, ``target_kind``,
-            ``scorer_has_model``); ``None`` runs the DSPy paths.
+            ``scorer_has_model``, ``focus``); ``None`` runs the DSPy paths.
+        repo_browser: The repository a black-box repository job optimizes,
+            opened by the chat agent's browsing tools; ``None`` otherwise.
 
     Yields:
         SSE event dicts of shape ``{"event": str, "data": dict}``.
@@ -3842,6 +3952,7 @@ async def run_code_agent(
             initial_workflow=initial_workflow,
             reply_language=_reply_language(locale),
             blackbox=blackbox,
+            repo_browser=repo_browser,
         )
     )
     try:

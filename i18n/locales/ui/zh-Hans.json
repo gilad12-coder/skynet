@@ -1,4 +1,9 @@
 {
+  "submit.blackbox.agent.reading_repo": "正在读取仓库…",
+  "submit.blackbox.agent.tool.brief": "已更新目标和背景",
+  "submit.blackbox.agent.tool.list_folder": "已打开 {path}",
+  "submit.blackbox.agent.tool.read_file": "已读取 {path}",
+  "submit.blackbox.agent.writing_brief": "正在更新目标…",
   "settings.security.connected.description": "即使这些账号的邮箱与你的不同，也可以用它们登录。",
   "settings.security.connected.github": "GitHub",
   "settings.security.connected.google": "Google",
@@ -480,7 +485,7 @@
   "optimization.blackbox.stats.runtime": "运行时长",
   "optimization.blackbox.stats.scorer_runs": "评分器运行次数",
   "optimization.progress.blackbox": "评分器运行次数",
-  "submit.blackbox.agent.empty_hint": "描述你的目标，智能体将草拟一个起点和一个 Python 评分器。你可以直接采用，也可以要求修改。",
+  "submit.blackbox.agent.empty_hint": "告诉代理你想改进什么。它会一直提问，直到理解目标以及如何评判每个版本，然后替你填写各个字段。",
   "submit.blackbox.agent.fix_scorer": "评分器出现错误。请修复它。",
   "submit.blackbox.interview.reading": "正在准备第一个问题…",
   "submit.blackbox.interview.brief.description": "从你的回答中提炼。可任意编辑——起点和评分器将按照这些指令草拟。",

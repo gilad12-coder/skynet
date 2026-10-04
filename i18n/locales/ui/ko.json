@@ -1,4 +1,9 @@
 {
+  "submit.blackbox.agent.reading_repo": "저장소를 읽는 중…",
+  "submit.blackbox.agent.tool.brief": "목표와 배경을 업데이트함",
+  "submit.blackbox.agent.tool.list_folder": "{path} 열림",
+  "submit.blackbox.agent.tool.read_file": "{path} 읽음",
+  "submit.blackbox.agent.writing_brief": "목표를 업데이트하는 중…",
   "settings.security.connected.description": "이메일이 내 이메일과 달라도 이 계정으로 로그인할 수 있습니다.",
   "settings.security.connected.github": "GitHub",
   "settings.security.connected.google": "Google",
@@ -480,7 +485,7 @@
   "optimization.blackbox.stats.runtime": "실행 시간",
   "optimization.blackbox.stats.scorer_runs": "채점기 실행",
   "optimization.progress.blackbox": "채점기 실행",
-  "submit.blackbox.agent.empty_hint": "목표를 설명하면 에이전트가 시작점과 Python 채점기 초안을 작성합니다. 그대로 수락하거나 변경을 요청할 수 있습니다.",
+  "submit.blackbox.agent.empty_hint": "개선하고 싶은 것을 에이전트에게 알려 주세요. 목표와 각 버전을 평가하는 방법을 이해할 때까지 질문하고, 항목을 직접 채워 줍니다.",
   "submit.blackbox.agent.fix_scorer": "채점기에서 오류가 발생했습니다. 수정해 주세요.",
   "submit.blackbox.interview.reading": "첫 번째 질문을 준비하는 중…",
   "submit.blackbox.interview.brief.description": "답변에서 추출되었습니다. 무엇이든 편집할 수 있으며, 시작점과 채점기는 이 지시에 따라 작성됩니다.",

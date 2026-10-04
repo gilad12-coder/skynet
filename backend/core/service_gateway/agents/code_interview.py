@@ -26,6 +26,7 @@ import dspy
 from ...api.model_catalog import agent_model_id
 from ...config import settings
 from ..language_models import served_model_from
+from .answer_options import normalize_options
 from .code import ReasoningStreamListener, _build_agent_lm, _reply_language
 from .constants import REASONING_FIELD
 from .parse_salvage import salvage_prediction
@@ -97,9 +98,9 @@ class CodeInterviewTurnSig(dspy.Signature):
     done: str = dspy.OutputField(desc="'true' when the interview is finished, else 'false'.")
     options_json: str = dspy.OutputField(
         desc=(
-            'JSON array of 0-4 answer options for a closed question, each '
+            "JSON array of 0-4 answer options for a closed question, each "
             '{"label": <short pickable answer, <= 6 words>, "description": '
-            '<one-line note on what picking it means>}; [] for an open question.'
+            "<one-line note on what picking it means>}; [] for an open question."
         )
     )
     brief_json: str = dspy.OutputField(desc="JSON array of authoring-directive strings; [] until done.")
@@ -170,9 +171,9 @@ class BlackboxInterviewTurnSig(dspy.Signature):
     done: str = dspy.OutputField(desc="'true' when the interview is finished, else 'false'.")
     options_json: str = dspy.OutputField(
         desc=(
-            'JSON array of 0-4 answer options for a closed question, each '
+            "JSON array of 0-4 answer options for a closed question, each "
             '{"label": <short pickable answer, <= 6 words>, "description": '
-            '<one-line note on what picking it means>}; [] for an open question.'
+            "<one-line note on what picking it means>}; [] for an open question."
         )
     )
     brief_json: str = dspy.OutputField(desc="JSON array of authoring-directive strings; [] until done.")
@@ -183,32 +184,6 @@ class BlackboxInterviewTurnSig(dspy.Signature):
             "was empty; '' otherwise."
         ),
     )
-
-
-def normalize_options(raw: Any) -> list[dict[str, str]]:
-    """Coerce a model options field into ``[{label, description}]``.
-
-    Tolerant of the model emitting either the structured shape or a bare list
-    of answer strings; drops entries without a label and caps the list at four.
-
-    Args:
-        raw: The parsed ``options_json`` value (any JSON type).
-
-    Returns:
-        Up to four ``{"label", "description"}`` dicts with non-empty labels.
-    """
-    if not isinstance(raw, list):
-        return []
-    options: list[dict[str, str]] = []
-    for item in raw:
-        if isinstance(item, dict):
-            label = str(item.get("label", "")).strip()
-            description = str(item.get("description", "")).strip()
-        else:
-            label, description = str(item).strip(), ""
-        if label:
-            options.append({"label": label, "description": description})
-    return options[:4]
 
 
 def _parse_json(text: str, fallback: Any) -> Any:
@@ -396,13 +371,9 @@ async def _drive_interview_turn(
                     async for chunk in program(**inputs):
                         if isinstance(chunk, dspy.streaming.StreamResponse):
                             if chunk.signature_field_name == REASONING_FIELD:
-                                await queue.put(
-                                    {"event": "reasoning_patch", "data": {"chunk": chunk.chunk}}
-                                )
+                                await queue.put({"event": "reasoning_patch", "data": {"chunk": chunk.chunk}})
                             elif chunk.signature_field_name == "message":
-                                await queue.put(
-                                    {"event": "message_patch", "data": {"chunk": chunk.chunk}}
-                                )
+                                await queue.put({"event": "message_patch", "data": {"chunk": chunk.chunk}})
                                 if chunk.is_last_chunk:
                                     await queue.put({"event": "message_end", "data": {}})
                             elif chunk.signature_field_name == "done":
@@ -492,18 +463,14 @@ async def interview_turn_stream(
         inputs = _blackbox_interview_inputs(blackbox, dataset_columns, sample_rows, job_model, turns, locale)
     else:
         predict = dspy.Predict(CodeInterviewTurnSig)
-        inputs = _interview_inputs(
-            dataset_columns, column_roles, column_kinds, sample_rows, job_model, turns, locale
-        )
+        inputs = _interview_inputs(dataset_columns, column_roles, column_kinds, sample_rows, job_model, turns, locale)
 
     # Drive the streamify loop in its own task and relay its events off a queue:
     # yielding directly from inside the loop finalizes the dspy.context token and
     # streamify's anyio task group in the SSE consumer's task, corrupting both.
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
     task = asyncio.create_task(
-        _drive_interview_turn(
-            predict=predict, lm=lm, inputs=inputs, asked=asked, model=model, queue=queue
-        )
+        _drive_interview_turn(predict=predict, lm=lm, inputs=inputs, asked=asked, model=model, queue=queue)
     )
     try:
         while True:

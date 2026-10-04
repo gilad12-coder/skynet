@@ -1,7 +1,15 @@
 "use client";
 
 import * as React from "react";
-import { Robot, Ruler, FileCode, ChatCenteredDots, ShareNetwork } from "@/shared/ui/icons";
+import {
+  Robot,
+  Ruler,
+  FileCode,
+  ChatCenteredDots,
+  ShareNetwork,
+  FolderOpen,
+  Target,
+} from "@/shared/ui/icons";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
@@ -12,6 +20,7 @@ import {
   ChatTranscript,
   Composer,
   ComposerModelMenu,
+  QuestionChoices,
 } from "@/shared/ui/agent";
 import { ActivityBreadcrumb } from "@/shared/ui/agent/activity-breadcrumb";
 import type { AgentToolCall as SharedAgentToolCall } from "@/shared/ui/agent";
@@ -131,6 +140,15 @@ export function CodeAgentPanel({
                     blackbox={blackbox}
                   />
                 </div>
+              )}
+
+              {!isEditingAny && !streaming && !disabled && agent.question && (
+                <QuestionChoices
+                  options={agent.question.options}
+                  onSelect={agent.send}
+                  hint={msg("submit.code.interview.choices_hint")}
+                  ariaLabel={msg("submit.code.interview.choices_label")}
+                />
               )}
 
               {agent.error && agent.status === "error" && (
@@ -263,17 +281,32 @@ function ToolCallCard({ call, isRetry = false }: { call: SharedAgentToolCall; is
   const codeCall = call as AgentToolCall;
   const isSignature = codeCall.tool === "edit_signature" || codeCall.tool === "edit_seed";
   const isMetric = codeCall.tool === "edit_metric" || codeCall.tool === "edit_scorer";
-  const Icon = isSignature ? FileCode : isMetric ? Ruler : ShareNetwork;
+  const isRepoRead = codeCall.tool === "read_repo_file" || codeCall.tool === "list_repo_folder";
+  const Icon = isSignature
+    ? FileCode
+    : isMetric
+      ? Ruler
+      : isRepoRead
+        ? FolderOpen
+        : codeCall.tool === "set_brief"
+          ? Target
+          : ShareNetwork;
   const title =
-    codeCall.tool === "edit_seed"
-      ? msg("submit.blackbox.agent.tool.seed")
-      : codeCall.tool === "edit_scorer"
-        ? msg("submit.blackbox.agent.tool.scorer")
-        : isSignature
-          ? msg("submit.code.agent.tool.signature.title")
-          : isMetric
-            ? msg("submit.code.agent.tool.metric.title")
-            : msg(`workflow.agent.tool.${codeCall.tool}` as Parameters<typeof msg>[0]);
+    codeCall.tool === "read_repo_file"
+      ? formatMsg("submit.blackbox.agent.tool.read_file", { path: codeCall.reason })
+      : codeCall.tool === "list_repo_folder"
+        ? formatMsg("submit.blackbox.agent.tool.list_folder", { path: codeCall.reason })
+        : codeCall.tool === "set_brief"
+          ? msg("submit.blackbox.agent.tool.brief")
+          : codeCall.tool === "edit_seed"
+            ? msg("submit.blackbox.agent.tool.seed")
+            : codeCall.tool === "edit_scorer"
+              ? msg("submit.blackbox.agent.tool.scorer")
+              : isSignature
+                ? msg("submit.code.agent.tool.signature.title")
+                : isMetric
+                  ? msg("submit.code.agent.tool.metric.title")
+                  : msg(`workflow.agent.tool.${codeCall.tool}` as Parameters<typeof msg>[0]);
 
   const diff = React.useMemo<DiffLine[]>(() => {
     if (!codeCall.newCode) return [];
