@@ -93,8 +93,7 @@ def purchase_fee_cents(cents: int) -> int:
 
 # One-time allowance a new account gets. 0 = no free balance: every cent
 # spent was paid for, so the platform never subsidizes tokens or compute.
-# Accounts whose grant was seeded while this was non-zero keep their remaining
-# grant (the seed logic only fills a NULL column, never tops up).
+# Grants seeded while this was non-zero were cleared by migration c4f1a7d9e2b5.
 FREE_GRANT_CENTS = 0
 
 # Prefix on the placeholder ``stripe_customer_id`` of a billing row created by a
