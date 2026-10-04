@@ -496,3 +496,38 @@ def test_cost_ceiling_is_the_total_or_what_the_account_can_fund(gateway: ModelGa
     finally:
         other.close()
     assert ceiling == int(uncapped.available_cents) > uncapped.total_cents
+
+
+def test_bound_evaluator_answers_only_its_capability(gateway: ModelGateway) -> None:
+    """A parent-owned evaluator serves the guest's scoring requests behind its own token."""
+    received: list[Any] = []
+
+    class _Evaluator:
+        """Echo the candidate back as its score."""
+
+        def dispatch(self, body: Any) -> ModelHTTPResult:
+            """Record the request and score it.
+
+            Args:
+                body: The guest's request.
+
+            Returns:
+                A fixed score.
+            """
+            received.append(body)
+            return ModelHTTPResult(200, "application/json", b'{"score": 0.5}')
+
+    route = gateway.bind_evaluator(_Evaluator())
+    with pytest.raises(ValueError, match="already owns an evaluator"):
+        gateway.bind_evaluator(_Evaluator())
+    body = {"candidate": "diff", "case": None}
+    reply = httpx.post(
+        f"{route['url']}/_evaluator", headers={"Authorization": f"Bearer {route['token']}"}, json=body, trust_env=False
+    )
+    assert reply.json() == {"score": 0.5}
+    assert received == [body]
+    refused = httpx.post(
+        f"{route['url']}/_evaluator", headers={"Authorization": "Bearer wrong"}, json=body, trust_env=False
+    )
+    assert refused.status_code == 401
+    assert len(received) == 1

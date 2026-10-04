@@ -93,3 +93,53 @@ def test_only_repository_targets_are_staged() -> None:
     assert repo_staging.is_repo_payload(_payload(None))
     assert not repo_staging.is_repo_payload({"target": {"kind": "agent"}})
     assert not repo_staging.is_repo_payload({})
+
+
+class _Gateway:
+    """Record the evaluator a repository run binds."""
+
+    def __init__(self) -> None:
+        """Start with no evaluator."""
+        self.evaluator: Any = None
+
+    def bind_evaluator(self, evaluator: Any) -> dict[str, str]:
+        """Keep the evaluator and hand back a fake route.
+
+        Args:
+            evaluator: The parent's repository scorer.
+
+        Returns:
+            A fake route.
+        """
+        self.evaluator = evaluator
+        return {"url": "http://127.0.0.1:1/v1", "token": "evaluator-token"}
+
+
+def test_binding_hands_the_guest_a_route_and_closes_the_box(tmp_path: Path) -> None:
+    """The guest receives only the evaluator route; the parent owns the scorer and closes it."""
+    archive = tmp_path / "tree.tgz"
+    archive.write_bytes(b"tree")
+    staged = repo_staging.StagedRepository(
+        snapshot=RepoSnapshot(commit="a" * 40, archive=archive, readonly_paths=(), size_bytes=4),
+        secrets={"API_KEY": "secret-value"},
+        workdir=tmp_path,
+    )
+    payload = {
+        **_payload("a" * 40),
+        "scorer": {"kind": "python", "metric_code": "def score(p):\n    return 1\n", "timeout_seconds": 60},
+        "_budget_gateway_descriptor": {
+            "url": "http://127.0.0.1:1/v1",
+            "control_token": "control-token",
+            "image": "img",
+            "lifetime_seconds": 600,
+        },
+    }
+    gateway = _Gateway()
+
+    repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1")
+
+    assert payload["_skynet_evaluator_route"] == {"url": "http://127.0.0.1:1/v1", "token": "evaluator-token"}
+    assert staged.scorers == [gateway.evaluator]
+    assert "secret-value" not in repr(payload)
+    staged.close_scorers()
+    assert staged.scorers == []
