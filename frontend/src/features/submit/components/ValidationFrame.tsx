@@ -1,7 +1,6 @@
 "use client";
 
 import { ProgressBar } from "@/shared/ui/progress-bar";
-import { Badge } from "@/shared/ui/primitives/badge";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
@@ -9,7 +8,6 @@ import {
   Check,
   CircleNotch,
   Clock,
-  Hourglass,
   ListChecks,
   Warning,
 } from "@/shared/ui/icons";
@@ -101,8 +99,8 @@ const SUCCESS_LINGER_MS = 1200;
 // A step that has run this long gets a word of reassurance.
 const SLOW_AFTER_MS = 30_000;
 
-// Rough per-step budgets, used only to fill the progress bar and to read out
-// how much time is likely left. The evaluator step dominates a real run.
+// Rough per-step budgets, used only to fill the progress bar. The evaluator
+// step dominates a real run.
 const PHASE_ESTIMATE_MS: Record<ValidationPhase, number> = {
   budget: 4_000,
   dependencies: 20_000,
@@ -111,10 +109,6 @@ const PHASE_ESTIMATE_MS: Record<ValidationPhase, number> = {
   models: 15_000,
   usage: 20_000,
 };
-
-// Below this much time left the finish is close enough that a countdown only
-// flickers, so the estimate steps aside.
-const ETA_HIDE_BELOW_MS = 8_000;
 
 // A running bar never quite fills — the last stretch belongs to the result.
 const RUNNING_BAR_CAP = 0.92;
@@ -290,14 +284,6 @@ export function ValidationFrame({
         ? "bg-foreground/70"
         : "bg-[var(--warning)]";
 
-  // The estimate only earns a spot on a real wait: while running, off the
-  // usage poll (which shows its own countdown), and with room left to name.
-  const showEta = running && activeKey !== "usage" && remainingMs >= ETA_HIDE_BELOW_MS;
-  const etaLabel =
-    remainingMs >= 60_000
-      ? msg("submit.validation.progress.eta", { minutes: Math.ceil(remainingMs / 60_000) })
-      : msg("submit.validation.progress.eta_soon");
-
   const title = running
     ? msg("submit.validation.progress.title")
     : success
@@ -345,25 +331,7 @@ export function ValidationFrame({
           )}
         </div>
         <div className="min-w-0 flex-1 space-y-1.5">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.75rem]">{title}</h2>
-            <AnimatePresence initial={false}>
-              {showEta && (
-                <Badge key="eta" asChild variant="secondary" size="sm">
-                  <motion.span
-                    dir="auto"
-                    initial={reduce ? false : { opacity: 0, y: -3 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
-                    transition={{ duration: 0.25, ease: "easeOut" }}
-                  >
-                    <Hourglass aria-hidden="true" />
-                    {etaLabel}
-                  </motion.span>
-                </Badge>
-              )}
-            </AnimatePresence>
-          </div>
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.75rem]">{title}</h2>
           <p
             className="max-w-prose text-[15px] leading-relaxed text-muted-foreground"
             aria-live="polite"

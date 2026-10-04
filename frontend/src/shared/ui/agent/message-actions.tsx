@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { outputTokensPerSecond } from "./turn-stats";
 import type { TurnStats } from "./types";
 
 interface MessageActionsProps {
@@ -101,11 +102,8 @@ export function MessageActions({
       value: count.format(stats.outputTokens),
     });
   }
-  // Generation time excludes the wait for the first token, so the rate
-  // reflects how fast the model wrote rather than how long it queued.
-  const generationMs = stats?.durationMs != null ? stats.durationMs - (stats.ttftMs ?? 0) : null;
-  if (stats?.outputTokens && generationMs && generationMs > 0) {
-    const perSecond = stats.outputTokens / (generationMs / 1000);
+  const perSecond = outputTokensPerSecond(stats);
+  if (perSecond != null) {
     rows.push({
       label: msg("shared.agent.info.speed"),
       value: formatMsg("shared.agent.info.tokens_per_second", {
