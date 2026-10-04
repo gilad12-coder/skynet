@@ -225,6 +225,9 @@ def test_repo_secret_needs_exactly_one_source() -> None:
     with pytest.raises(ValidationError):
         BlackboxRepoSecret(name="TOKEN", value="v", saved_secret_id="abc")
     assert BlackboxRepoSecret(name="TOKEN", saved_secret_id="abc").value is None
+    assert BlackboxRepoSecret(name="TOKEN", credential_ref="ref", credential_revision=1).value is None
+    with pytest.raises(ValidationError):
+        BlackboxRepoSecret(name="TOKEN", value="v", credential_ref="ref", credential_revision=1)
 
 
 def test_repo_secret_names_are_unique() -> None:

@@ -18,6 +18,7 @@ from ..billing.signals import BudgetReached
 from ..exceptions import InfrastructureInterruptionError
 from ..i18n import CATALOG_PATH
 from ..service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
+from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY, archive_chunks
 from ..service_gateway.optimization.blackbox.sandbox import CommandResult, SandboxSpec
 from .checkpoint_compat import runtime_identity, source_files
 from .constants import EVENT_ERROR, EVENT_RESULT, EVENT_TERMINAL
@@ -143,6 +144,14 @@ def run_vercel_dspy(payload: dict[str, Any], artifact_id: str, event_queue: Any,
                 operation_key=f"dspy:{artifact_id}",
             )
         )
+        session_root = f".skynet-dspy-{nonce}"
+        snapshot = guest_payload.pop(REPO_SNAPSHOT_KEY, None)
+        if isinstance(snapshot, dict):
+            chunks = []
+            for index, chunk in enumerate(archive_chunks(Path(snapshot["archive"]))):
+                chunks.append(f"{session_root}/repo/tree.{index:04d}.b64")
+                session.write_files({chunks[-1]: chunk})
+            guest_payload[REPO_SNAPSHOT_KEY] = {**snapshot, "archive": None, "chunks": chunks}
         document = {
             "payload": guest_payload,
             "artifact_id": artifact_id,
@@ -151,7 +160,6 @@ def run_vercel_dspy(payload: dict[str, Any], artifact_id: str, event_queue: Any,
             "export_checkpoints": checkpoint_root is not None,
             "runtime_identity": runtime_identity(),
         }
-        session_root = f".skynet-dspy-{nonce}"
         request_path = f"{session_root}/request.json"
         archive_path = f"{session_root}/source.tgz.b64"
         source_root = f"{session_root}/source"

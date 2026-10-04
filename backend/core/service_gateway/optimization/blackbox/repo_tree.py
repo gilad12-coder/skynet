@@ -1,0 +1,286 @@
+"""Ship a repository tree into a sandbox and check the versions written against it.
+
+A repository version is a ``git diff --binary`` against the run's starting
+tree. Stdlib only: the native runner ships this module into its sandbox so
+the agent's workspace and the trusted scorer apply the same rules.
+"""
+
+from __future__ import annotations
+
+import base64
+import re
+import subprocess
+import tarfile
+from collections.abc import Iterable, Iterator, Sequence
+from pathlib import Path
+
+# Payload key naming the packed tree. The parent sets it to a file on its own
+# disk; the sandbox supervisor uploads that file and rewrites the key into
+# guest chunk paths. Secrets never ride in a payload, only their names do.
+REPO_SNAPSHOT_KEY = "_repo_snapshot"
+# Uploads are text and capped at 16 MiB per request: 9 MiB of bytes is 12 MiB of base64.
+ARCHIVE_CHUNK_BYTES = 9 * 1024 * 1024
+_GIT_IDENTITY = ["-c", "user.name=skynet", "-c", "user.email=skynet@localhost", "-c", "commit.gpgsign=false"]
+
+# A version travels as one sandbox file, and uploads cap each file at 16 MiB.
+MAX_PATCH_BYTES = 8 * 1024 * 1024
+
+_GITLINK_MODE = "160000"
+_MODE_LINE = re.compile(r"^(?:new file mode|deleted file mode|old mode|new mode) (\d{6})$")
+_INDEX_MODE = re.compile(r"^index [0-9a-f]+\.\.[0-9a-f]+ (\d{6})$")
+_PATH_PREFIXES = ("rename from ", "rename to ", "copy from ", "copy to ")
+
+
+def _unquote(token: str) -> str:
+    """Decode a C-quoted git path, octal escapes included.
+
+    Args:
+        token: Path as git printed it, with or without surrounding quotes.
+
+    Returns:
+        The path's text.
+    """
+    if not (len(token) >= 2 and token.startswith('"') and token.endswith('"')):
+        return token
+    raw = token[1:-1].encode("latin-1", "backslashreplace")
+    return raw.decode("unicode_escape").encode("latin-1").decode("utf-8", "replace")
+
+
+def _split_quoted(rest: str) -> list[str]:
+    """Split the two quoted or bare tokens of a ``diff --git`` header.
+
+    Args:
+        rest: The header after ``diff --git ``.
+
+    Returns:
+        The tokens, quotes still attached.
+    """
+    tokens: list[str] = []
+    index = 0
+    while index < len(rest):
+        if rest[index] == " ":
+            index += 1
+            continue
+        if rest[index] == '"':
+            end = index + 1
+            while end < len(rest) and rest[end] != '"':
+                end += 2 if rest[end] == "\\" else 1
+            tokens.append(rest[index : end + 1])
+            index = end + 1
+        else:
+            end = rest.find(" ", index)
+            end = len(rest) if end == -1 else end
+            tokens.append(rest[index:end])
+            index = end
+    return tokens
+
+
+def _header_paths(rest: str) -> list[str]:
+    """Read the paths of one ``diff --git a/X b/Y`` header.
+
+    An unquoted header is ambiguous when names hold spaces, but git prints the
+    same path twice unless the file was renamed, and a rename also writes
+    ``rename from``/``rename to`` lines, so the equal halves split is enough.
+
+    Args:
+        rest: The header after ``diff --git ``.
+
+    Returns:
+        The paths without their ``a/``/``b/`` prefixes; empty when unreadable.
+    """
+    if rest.startswith('"') or rest.endswith('"'):
+        tokens = [_unquote(token) for token in _split_quoted(rest)]
+        return [token[2:] for token in tokens if token[:2] in ("a/", "b/")]
+    half = (len(rest) - len("a/ b/")) // 2
+    first, separator, second = rest[2 : 2 + half], rest[2 + half : 5 + half], rest[5 + half :]
+    if rest.startswith("a/") and separator == " b/" and first == second:
+        return [first]
+    return []
+
+
+def patch_paths(patch: str) -> list[str]:
+    """List every repository path a patch creates, changes, renames, or deletes.
+
+    Args:
+        patch: ``git diff`` output.
+
+    Returns:
+        The distinct paths in first-seen order.
+    """
+    found: list[str] = []
+    # Hunk bodies can hold lines that look like headers ("--- a/x" is a
+    # removed "-- a/x"), so only the lines before a file's first hunk count.
+    in_header = False
+    for line in patch.splitlines():
+        if line.startswith("diff --git "):
+            in_header = True
+            found.extend(_header_paths(line[len("diff --git ") :]))
+        elif not in_header:
+            continue
+        elif line.startswith(("@@", "GIT binary patch")):
+            in_header = False
+        elif line.startswith(("--- a/", "+++ b/")):
+            found.append(line[6:].split("\t", 1)[0])
+        elif line.startswith(('--- "a/', '+++ "b/')):
+            found.append(_unquote(line[4:].split("\t", 1)[0])[2:])
+        else:
+            found.extend(_unquote(line[len(prefix) :]) for prefix in _PATH_PREFIXES if line.startswith(prefix))
+    return list(dict.fromkeys(found))
+
+
+def _inside(path: str, roots: Iterable[str]) -> bool:
+    """Report whether ``path`` is one of ``roots`` or lies below one.
+
+    Args:
+        path: Repository-relative path.
+        roots: Repository-relative files or folders; ``.`` is the whole tree.
+
+    Returns:
+        Whether a root covers the path.
+    """
+    return any(root == "." or path == root or path.startswith(root.rstrip("/") + "/") for root in roots)
+
+
+def patch_violations(patch: str, editable_paths: Iterable[str], readonly_paths: Iterable[str] = ()) -> list[str]:
+    """Explain every way a patch breaks the run's editing rules.
+
+    Args:
+        patch: ``git diff`` output for one version.
+        editable_paths: Files and folders the agent may change.
+        readonly_paths: Submodules and Git LFS files, which stay as fetched.
+
+    Returns:
+        One readable reason per broken rule; empty when the patch is allowed.
+    """
+    if len(patch.encode("utf-8")) > MAX_PATCH_BYTES:
+        return [f"The change is larger than the {MAX_PATCH_BYTES // (1024 * 1024)} MiB limit."]
+    editable, readonly = list(editable_paths), list(readonly_paths)
+    problems: list[str] = []
+    in_header = False
+    for line in patch.splitlines():
+        if line.startswith("diff --git "):
+            in_header = True
+        elif line.startswith(("@@", "GIT binary patch")):
+            in_header = False
+        mode = (_MODE_LINE.match(line) or _INDEX_MODE.match(line)) if in_header else None
+        if mode and mode.group(1) == _GITLINK_MODE:
+            problems.append("Submodules are read-only; the change adds, moves, or updates one.")
+            break
+    for path in patch_paths(patch):
+        parts = path.split("/")
+        if path.startswith("/") or any(part in ("", ".", "..") for part in parts) or ".git" in parts:
+            problems.append(f"'{path}' is not a path inside the repository.")
+        elif _inside(path, readonly):
+            problems.append(f"'{path}' is a submodule or Git LFS file, which are read-only.")
+        elif not _inside(path, editable):
+            problems.append(f"'{path}' is outside the editable paths.")
+    return problems
+
+
+def archive_chunks(archive: Path) -> Iterator[str]:
+    """Stream a packed tree as base64 text pieces for text-only sandbox uploads.
+
+    Args:
+        archive: Packed tree.
+
+    Yields:
+        Base64 text of consecutive slices; concatenated and decoded they
+        rebuild the archive.
+    """
+    with archive.open("rb") as stream:
+        while block := stream.read(ARCHIVE_CHUNK_BYTES):
+            yield base64.b64encode(block).decode("ascii")
+
+
+def _git(arguments: Sequence[str], cwd: Path) -> str:
+    """Run git in a checkout and return its output.
+
+    Args:
+        arguments: Arguments after ``git``.
+        cwd: Checkout root.
+
+    Returns:
+        Standard output.
+
+    Raises:
+        RuntimeError: When git fails.
+    """
+    result = subprocess.run(["git", *_GIT_IDENTITY, *arguments], cwd=cwd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"git {arguments[0]} failed: {(result.stderr or result.stdout).strip()[-2000:]}")
+    return result.stdout
+
+
+def unpack_tree(chunks: Iterable[str | Path], destination: Path) -> Path:
+    """Rebuild a shipped tree and commit it, so ``version_patch`` can diff against it.
+
+    Args:
+        chunks: Base64 chunk files in order.
+        destination: Empty or missing folder the tree goes in.
+
+    Returns:
+        The destination.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    archive = destination.parent / f".{destination.name}.tgz"
+    with archive.open("wb") as packed:
+        for chunk in chunks:
+            packed.write(base64.b64decode(Path(chunk).read_text(encoding="ascii")))
+    with tarfile.open(archive) as tree:
+        tree.extractall(destination, filter="data")
+    archive.unlink()
+    _git(["init", "--quiet"], destination)
+    _git(["add", "--all", "--force"], destination)
+    _git(["commit", "--quiet", "--allow-empty", "--no-verify", "-m", "base"], destination)
+    return destination
+
+
+def version_patch(checkout: Path) -> str:
+    """Return everything changed in a checkout since ``unpack_tree`` as one patch.
+
+    Files the repository ignores are left out, so caches and build output an
+    agent leaves behind never bloat a version. Scoring rebuilds each version
+    from its patch alone, so nothing left out can affect a score.
+
+    Args:
+        checkout: Folder made by :func:`unpack_tree`, possibly edited since.
+
+    Returns:
+        ``git diff --binary`` output; empty when nothing changed.
+    """
+    _git(["add", "--all"], checkout)
+    return _git(["diff", "--cached", "--binary", "--no-color", "--no-ext-diff", "HEAD"], checkout)
+
+
+def reset_tree(checkout: Path) -> None:
+    """Throw away every change in a checkout made by :func:`unpack_tree`.
+
+    Args:
+        checkout: Folder to restore to the shipped tree.
+    """
+    _git(["reset", "--quiet", "--hard", "HEAD"], checkout)
+    _git(["clean", "--quiet", "-fdx"], checkout)
+
+
+def apply_patch(checkout: Path, patch: str) -> None:
+    """Apply a version to a clean checkout.
+
+    Args:
+        checkout: Folder made by :func:`unpack_tree`, reset to its base.
+        patch: ``git diff --binary`` output.
+
+    Raises:
+        RuntimeError: When the patch does not apply.
+    """
+    if not patch.strip():
+        return
+    result = subprocess.run(
+        ["git", "apply", "--binary", "--whitespace=nowarn", "-"],
+        cwd=checkout,
+        input=patch,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"The change does not apply cleanly: {(result.stderr or result.stdout).strip()[-2000:]}")

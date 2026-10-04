@@ -72,7 +72,7 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
             sed -i "s|http[s]\?://deb.debian.org|$DEBIAN_MIRROR|g; s|http[s]\?://security.debian.org|$DEBIAN_MIRROR|g" {} \; ; \
     fi \
     && apt-get update \
-    && apt-get install -y --no-install-recommends build-essential ca-certificates curl unzip git \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates curl unzip git git-lfs \
         libosmesa6 libgl1 libglu1-mesa \
     && rm -rf /var/lib/apt/lists/*
 

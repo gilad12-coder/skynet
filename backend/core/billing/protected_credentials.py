@@ -49,6 +49,8 @@ _MCP_PURPOSE = "mcp_auth_header"
 _MCP_URL_PURPOSE = "mcp_endpoint_url"
 _SCORER_PURPOSE = "remote_evaluator_secret"
 _SCORER_URL_PURPOSE = "remote_evaluator_endpoint_url"
+REPO_SECRET_REF_FIELD = "credential_ref"
+REPO_SECRET_REVISION_FIELD = "credential_revision"
 
 
 @dataclass(frozen=True)
@@ -259,6 +261,120 @@ def _scorer_audience(scorer: dict[str, Any]) -> str:
     return json_fingerprint({"kind": "remote", "url": public_endpoint(str(scorer.get("url") or ""))})
 
 
+def _repo_secret_slot(repository: str, name: str) -> tuple[str, str]:
+    """Name the vault purpose and audience of one repository secret.
+
+    The purpose column is short and unique per budget, so it carries a digest
+    of the secret's name rather than the name itself.
+
+    Args:
+        repository: ``owner/name`` the secret is used with.
+        name: Environment variable name.
+
+    Returns:
+        The purpose and the audience hash.
+    """
+    return f"repo_secret:{json_fingerprint(name)[:20]}", json_fingerprint({"kind": "repo", "repository": repository})
+
+
+def _repo_secrets(payload: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    """Find the secret entries of a repository target.
+
+    Args:
+        payload: Black-box run payload.
+
+    Returns:
+        The repository name and its mutable secret mappings; empty when the
+        payload has no repository target.
+    """
+    target = payload.get("target")
+    repo = target.get("repo") if isinstance(target, dict) else None
+    if not isinstance(repo, dict) or not isinstance(repo.get("secrets"), list):
+        return "", []
+    return str(repo.get("repository") or ""), [entry for entry in repo["secrets"] if isinstance(entry, dict)]
+
+
+def _protect_repo_secrets(
+    payload: dict[str, Any],
+    *,
+    username: str,
+    binding_id: str,
+    vault: ProtectedCredentialVault,
+) -> None:
+    """Vault inline repository secret values, leaving opaque references behind.
+
+    Args:
+        payload: Black-box run payload to mutate.
+        username: Authenticated owner.
+        binding_id: Execution budget binding setup and run together.
+        vault: Encrypted execution credential store.
+
+    Raises:
+        ValueError: When a secret value is not text, or an entry without a
+            value has no current reference to reuse.
+    """
+    repository, entries = _repo_secrets(payload)
+    for entry in entries:
+        raw = entry.pop("value", None)
+        entry.pop(REPO_SECRET_REF_FIELD, None)
+        entry.pop(REPO_SECRET_REVISION_FIELD, None)
+        if entry.get("saved_secret_id") is not None:
+            continue
+        if raw is not None and not isinstance(raw, str):
+            raise ValueError("A repository secret value must be text.")
+        purpose, audience = _repo_secret_slot(repository, str(entry.get("name") or ""))
+        reference = (
+            vault.store_secret(username, binding_id, audience, purpose, raw)
+            if raw is not None
+            else vault.current_reference(username, binding_id, audience, purpose)
+        )
+        if reference is None:
+            raise ValueError(f"Enter the value of the secret '{entry.get('name')}' again.")
+        entry[REPO_SECRET_REF_FIELD] = reference.id
+        entry[REPO_SECRET_REVISION_FIELD] = reference.revision
+
+
+def resolve_repo_secrets(
+    payload: dict[str, Any],
+    *,
+    username: str,
+    binding_id: str,
+    vault: ProtectedCredentialVault,
+    saved: Any,
+) -> dict[str, str]:
+    """Decrypt a repository target's secrets for the scorer's sandbox only.
+
+    Args:
+        payload: Stored black-box run payload carrying references.
+        username: Persisted execution owner.
+        binding_id: Execution budget attached to the run.
+        vault: Encrypted execution credential store.
+        saved: Account secret store resolving ``saved_secret_id`` entries.
+
+    Returns:
+        Environment variable name to value; empty without a repository target.
+
+    Raises:
+        ValueError: When a reference is incomplete or no longer current.
+    """
+    repository, entries = _repo_secrets(payload)
+    values: dict[str, str] = {}
+    for entry in entries:
+        name = str(entry.get("name") or "")
+        if entry.get("saved_secret_id") is not None:
+            values[name] = saved.resolve(username, str(entry["saved_secret_id"]))
+            continue
+        identity = entry.get(REPO_SECRET_REF_FIELD)
+        revision = entry.get(REPO_SECRET_REVISION_FIELD)
+        if identity is None or revision is None:
+            raise ValueError(f"The secret '{name}' has no saved value; enter it again.")
+        purpose, audience = _repo_secret_slot(repository, name)
+        values[name] = vault.resolve_secret(
+            username, binding_id, audience, purpose, ProtectedCredentialRef(str(identity), int(revision))
+        )
+    return values
+
+
 def _scrubbable_model_configs(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Collect every model configuration whose arbitrary extras cross a trust boundary.
 
@@ -466,6 +582,7 @@ def protect_execution_credentials(
             if reference is not None:
                 scorer[SCORER_CREDENTIAL_REF_FIELD] = reference.id
                 scorer[SCORER_CREDENTIAL_REVISION_FIELD] = reference.revision
+    _protect_repo_secrets(result, username=username, binding_id=binding_id, vault=vault)
     return result
 
 
@@ -593,7 +710,11 @@ def scrub_execution_credentials(payload: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Deep copy whose external services require credential re-entry.
     """
-    return _scrub_payload_model_credentials(_scrub_execution_value(payload))
+    result = _scrub_payload_model_credentials(_scrub_execution_value(payload))
+    for entry in _repo_secrets(result)[1]:
+        for field in ("value", REPO_SECRET_REF_FIELD, REPO_SECRET_REVISION_FIELD):
+            entry.pop(field, None)
+    return result
 
 
 def has_exposed_execution_credentials(payload: dict[str, Any], *, allow_parent_model_routes: bool = False) -> bool:

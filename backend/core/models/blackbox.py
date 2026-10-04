@@ -117,12 +117,15 @@ REPO_COMMIT_PATTERN = r"^[0-9a-f]{40}$"
 # One environment variable a repository needs to build or score. ``value`` is
 # entered for this run only; ``saved_secret_id`` points at a secret saved on
 # the account. Exactly one is set. Values never reach the job payload: the
-# trusted parent vaults them at submission and injects them only into the
-# sandbox, never into an agent's prompt or logs.
+# trusted parent vaults them at submission, leaving the opaque
+# ``credential_ref``/``credential_revision`` pair in their place, and injects
+# them only into the scorer's sandbox, never into an agent's prompt or logs.
 class BlackboxRepoSecret(BaseModel):
     name: str = Field(pattern=REPO_SECRET_NAME_PATTERN)
     value: str | None = Field(default=None, max_length=16_384)
     saved_secret_id: str | None = Field(default=None, min_length=1, max_length=64)
+    credential_ref: str | None = Field(default=None, min_length=1, max_length=64)
+    credential_revision: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _ensure_one_source(self) -> BlackboxRepoSecret:
@@ -134,7 +137,8 @@ class BlackboxRepoSecret(BaseModel):
         Raises:
             ValueError: When both or neither source is given.
         """
-        if (self.value is None) == (self.saved_secret_id is None):
+        sources = [self.value is not None, self.saved_secret_id is not None, self.credential_ref is not None]
+        if sum(sources) != 1:
             raise ValueError(f"Secret '{self.name}' needs either a value or a saved secret, not both.")
         return self
 
