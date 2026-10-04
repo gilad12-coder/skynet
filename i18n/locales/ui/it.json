@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "Nomi degli strumenti separati da virgola della sorgente strumenti dell'esecuzione. Se vuoto, il nodo viene eseguito senza strumenti.",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "L'approvazione non è andata a buon fine — riprova",
+  "agent.kickoff.oversized_data": "I dati che hai aggiunto sono troppo grandi per essere esaminati. Cosa vuoi fare?",
+  "agent.kickoff.oversized_repo": "{name} è un repository grande, quindi non sono riuscito a esaminarlo. Cosa vuoi fare?",
   "agent.composer.attach": "Allega un dataset",
   "agent.composer.mic_unavailable": "Microfono non disponibile",
   "agent.composer.record": "Detta",

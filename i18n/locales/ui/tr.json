@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "Çalıştırmanın araç kaynağından virgülle ayrılmış araç adları. Boş bırakılırsa düğüm araçsız çalışır.",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "Onay geçmedi — tekrar deneyin",
+  "agent.kickoff.oversized_data": "Eklediğiniz veriler taramam için çok büyük. Ne yapmak istersiniz?",
+  "agent.kickoff.oversized_repo": "{name} büyük bir depo, bu yüzden tarayamadım. Ne yapmak istersiniz?",
   "agent.composer.attach": "Veri kümesi ekle",
   "agent.composer.mic_unavailable": "Mikrofon kullanılamıyor",
   "agent.composer.record": "Dikte et",

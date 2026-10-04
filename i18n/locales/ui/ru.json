@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "Разделенный запятыми список названий инструментов из источника запуска. Если поле пустое, узел выполняется без инструментов.",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "Подтверждение не прошло — попробуйте снова",
+  "agent.kickoff.oversized_data": "Добавленные данные слишком велики, чтобы их просмотреть. Что вы хотите сделать?",
+  "agent.kickoff.oversized_repo": "{name} — большой репозиторий, поэтому я не смог его просмотреть. Что вы хотите сделать?",
   "agent.composer.attach": "Прикрепить набор данных",
   "agent.composer.mic_unavailable": "Микрофон недоступен",
   "agent.composer.record": "Диктовка",

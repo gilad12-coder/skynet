@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "Noms des outils séparés par des virgules provenant de la source d'outils de l'exécution. Si ce champ est vide, le nœud s'exécute sans outils.",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "L'approbation n'a pas abouti — réessayez",
+  "agent.kickoff.oversized_data": "Les données ajoutées sont trop volumineuses pour que je les parcoure. Que voulez-vous faire ?",
+  "agent.kickoff.oversized_repo": "{name} est un dépôt volumineux, je n'ai donc pas pu le parcourir. Que voulez-vous faire ?",
   "agent.composer.attach": "Joindre un jeu de données",
   "agent.composer.mic_unavailable": "Microphone indisponible",
   "agent.composer.record": "Dicter",

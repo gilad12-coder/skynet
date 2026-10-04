@@ -21,6 +21,7 @@ from ...connectors import github
 from ...connectors.github_repo import RepoFetchError, github_token
 from ...service_gateway.agents.code import run_code_agent
 from ...service_gateway.agents.code_interview import interview_turn_stream
+from ...service_gateway.agents.kickoff import fits_kickoff_budget, measured_bytes, oversized_kickoff
 from ...service_gateway.agents.repo_browser import KICKOFF_MESSAGE, RepoBrowser
 from ..agent_turns import AgentTurnRegistry
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -77,9 +78,7 @@ class BlackboxAuthoringContext(BaseModel):
     )
 
 
-def open_repo_browser(
-    engine: Any, username: str, blackbox: BlackboxAuthoringContext | None, *, key_files: bool = False
-) -> RepoBrowser | None:
+def open_repo_browser(engine: Any, username: str, blackbox: BlackboxAuthoringContext | None) -> RepoBrowser | None:
     """Open the repository a black-box job optimizes, for the agent's browsing tools.
 
     A repository the caller cannot read (GitHub not connected, a missing
@@ -90,8 +89,6 @@ def open_repo_browser(
         engine: SQLAlchemy engine holding the connector vault.
         username: The caller, whose GitHub connection is used.
         blackbox: The request's black-box context, when any.
-        key_files: Also read the root README and manifest into the summary,
-            for the agent's opening look at the repository.
 
     Returns:
         The browser, or ``None`` when there is no repository or it cannot be read.
@@ -104,7 +101,7 @@ def open_repo_browser(
     except (RepoFetchError, DomainError) as exc:
         logger.info("Agent cannot open %s: %s", blackbox.repository, exc)
         return None
-    browser = RepoBrowser(
+    return RepoBrowser(
         token=token,
         repository=blackbox.repository,
         branch=blackbox.branch,
@@ -112,9 +109,6 @@ def open_repo_browser(
         entries=tree["entries"],
         truncated=tree["truncated"],
     )
-    if key_files:
-        browser.preload_key_files()
-    return browser
 
 
 def gate_interactive_turn(job_store: Any, username: str, blackbox: BlackboxAuthoringContext | None) -> Any:
@@ -493,6 +487,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
           "model", "served_model"}`` (workflow mode carries ``workflow`` +
           ``workflow_valid`` instead of ``signature_code``)
         * ``error`` — ``{"error": "<message>"}``
+        * ``kickoff_oversized`` — ``{"subject": "repo", "name"}`` (a kickoff
+          whose repository is over the opening budget: the whole turn, with
+          no model call; the client shows its fixed opening)
 
         The turn runs server-side independent of this connection: the stream
         opens with ``turn_started`` (``{"turn_id"}``), every event carries an
@@ -507,16 +504,21 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         Returns:
             A :class:`StreamingResponse` of Server-Sent Events.
         """
-        billed_store = await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, req.blackbox)
-        model = route_menu_model(req.model)
-        usage_sink: list = []
         kickoff = req.kickoff and req.blackbox is not None
         user_message = KICKOFF_MESSAGE if kickoff else req.user_message
         repo_browser = (
-            await asyncio.to_thread(open_repo_browser, engine, current_user.username, req.blackbox, key_files=kickoff)
+            await asyncio.to_thread(open_repo_browser, engine, current_user.username, req.blackbox)
             if user_message.strip()
             else None
         )
+        # Decided before the gate: the fixed opening is neither billed nor capped.
+        if kickoff and repo_browser is not None and not repo_browser.opening_fits():
+            return await _turn_response(oversized_kickoff("repo", repo_browser.repository), current_user.username)
+        billed_store = await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, req.blackbox)
+        if kickoff and repo_browser is not None:
+            await asyncio.to_thread(repo_browser.preload_key_files)
+        model = route_menu_model(req.model)
+        usage_sink: list = []
         source = run_code_agent(
             dataset_columns=req.dataset_columns,
             column_roles=req.column_roles,
@@ -572,6 +574,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
           ``objective`` is the objective a black-box interview captured over
           a blank field, else "")
         * ``error`` — ``{"error": "<message>"}``
+        * ``kickoff_oversized`` — ``{"subject": "data", "name": ""}`` (an
+          opening turn whose sample is over the opening budget: the whole
+          turn, with no model call; the client shows its fixed opening)
 
         Framed as a resumable turn exactly like ``ai-generate-code``.
 
@@ -583,6 +588,10 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         Returns:
             A :class:`StreamingResponse` of Server-Sent Events.
         """
+        if not req.turns and not fits_kickoff_budget(
+            measured_bytes(req.dataset_columns, req.sample_rows[:5], req.blackbox.model_dump() if req.blackbox else "")
+        ):
+            return await _turn_response(oversized_kickoff("data"), current_user.username)
         billed_store = await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, req.blackbox)
         model = route_menu_model(req.model)
         usage_sink: list = []

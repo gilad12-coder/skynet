@@ -1,5 +1,7 @@
 {
   "agent.approval.confirm_failed": "אישור הפעולה לא נקלט — נסו שוב",
+  "agent.kickoff.oversized_data": "הנתונים שהעליתם גדולים מדי, אז לא סרקתי אותם. מה תרצו לעשות?",
+  "agent.kickoff.oversized_repo": "המאגר {name} גדול מדי, אז לא סרקתי אותו. מה תרצו לעשות?",
   "agent.composer.attach": "צירוף דאטאסט",
   "agent.composer.mic_unavailable": "אין גישה למיקרופון",
   "agent.composer.record": "הכתבה קולית",

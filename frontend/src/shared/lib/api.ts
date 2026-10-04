@@ -32,6 +32,7 @@ import type {
   WorkflowDryRunResponse,
   WorkflowSpec,
 } from "@/shared/types/api";
+import { kickoffOpening } from "@/shared/lib/agent-kickoff";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import type { TurnStats } from "@/shared/ui/agent/types";
 import { parseTurnStats } from "@/shared/ui/agent/turn-stats";
@@ -3171,7 +3172,18 @@ export async function streamCodeAgent(
   handlers: CodeAgentHandlers,
 ): Promise<void> {
   const processEvent = ({ event, data }: ServerSentEvent) => {
-    if (event === "signature_patch") {
+    const opening = kickoffOpening(event, data);
+    if (opening !== null) {
+      // Only a chat-mode kickoff gets it, so the empty code never lands.
+      handlers.onDone({
+        signature_code: "",
+        metric_code: "",
+        assistant_message: opening,
+        model: null,
+        served_model: null,
+        stats: null,
+      });
+    } else if (event === "signature_patch") {
       handlers.onSignaturePatch(String(data.chunk ?? ""));
     } else if (event === "metric_patch") {
       handlers.onMetricPatch(String(data.chunk ?? ""));
@@ -3376,6 +3388,20 @@ export async function streamCodeInterviewTurn(
     },
     signal: handlers.signal,
     onEvent: ({ event, data }) => {
+      const opening = kickoffOpening(event, data);
+      if (opening !== null) {
+        finished = true;
+        handlers.onDone({
+          message: opening,
+          options: [],
+          brief: [],
+          objective: "",
+          done: false,
+          model: null,
+          served_model: null,
+        });
+        return;
+      }
       switch (event) {
         case "reasoning_patch":
           handlers.onReasoningPatch?.(String(data.chunk ?? ""));

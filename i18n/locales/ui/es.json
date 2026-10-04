@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "Nombres de herramientas separados por comas de la fuente de herramientas de la ejecución. Si está vacío, el nodo se ejecuta sin herramientas.",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "La aprobación no se registró — inténtalo de nuevo",
+  "agent.kickoff.oversized_data": "Los datos que agregaste son demasiado grandes para revisarlos. ¿Qué quieres hacer?",
+  "agent.kickoff.oversized_repo": "{name} es un repositorio grande, así que no pude revisarlo. ¿Qué quieres hacer?",
   "agent.composer.attach": "Adjuntar un conjunto de datos",
   "agent.composer.mic_unavailable": "Micrófono no disponible",
   "agent.composer.record": "Dictar",

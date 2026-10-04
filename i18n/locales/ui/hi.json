@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "रन के टूल सोर्स से कॉमा द्वारा अलग किए गए टूल के नाम। खाली होने का अर्थ है कि नोड बिना टूल्स के चलता है।",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "अनुमोदन पूरा नहीं हुआ — फिर से कोशिश करें",
+  "agent.kickoff.oversized_data": "आपके जोड़े गए डेटा को स्कैन करना मेरे लिए बहुत बड़ा है। आप क्या करना चाहेंगे?",
+  "agent.kickoff.oversized_repo": "{name} एक बड़ी रिपॉज़िटरी है, इसलिए मैं इसे स्कैन नहीं कर सका। आप क्या करना चाहेंगे?",
   "agent.composer.attach": "डेटासेट संलग्न करें",
   "agent.composer.mic_unavailable": "माइक्रोफ़ोन उपलब्ध नहीं",
   "agent.composer.record": "बोलकर लिखवाएँ",

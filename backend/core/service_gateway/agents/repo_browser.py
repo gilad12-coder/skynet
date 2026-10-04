@@ -15,6 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ...connectors import github
+from .kickoff import fits_kickoff_budget, measured_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +249,35 @@ class RepoBrowser:
             lines += ["", f"--- {path} (already read for you) ---", text]
         return "\n".join(lines)
 
+    def _key_file_paths(self) -> list[str]:
+        """Pick the root README and build manifest an opening look reads.
+
+        Returns:
+            Up to two root paths, README first; the first name match of each wins.
+        """
+        roots = {path.lower(): path for path in self._files if "/" not in path}
+        picks = (
+            next((roots[name] for name in names if name in roots), None) for names in (README_NAMES, MANIFEST_NAMES)
+        )
+        return [path for path in picks if path is not None]
+
+    def opening_fits(self) -> bool:
+        """Tell whether the repository is small enough for the agent's opening look.
+
+        Measured from the tree alone, before anything is read: every path of
+        the full file list plus the README's and manifest's whole sizes. A
+        tree GitHub cut short is too large by definition.
+
+        Returns:
+            ``True`` when the opening may load the repository.
+        """
+        if self._truncated:
+            return False
+        sizes = {str(e.get("path")): e.get("size") for e in self._entries}
+        key_bytes = sum(size for path in self._key_file_paths() if isinstance(size := sizes.get(path), int))
+        listing = "\n".join(str(e.get("path")) for e in self._entries)
+        return fits_kickoff_budget(measured_bytes(listing) + key_bytes)
+
     def preload_key_files(self) -> None:
         """Read the root README and build manifest into the summary, for an opening look.
 
@@ -255,11 +285,7 @@ class RepoBrowser:
         ``KEY_FILE_BYTES``, never the rest of the repository. A file that
         cannot be read is skipped.
         """
-        roots = {path.lower(): path for path in self._files if "/" not in path}
-        for names in (README_NAMES, MANIFEST_NAMES):
-            path = next((roots[name] for name in names if name in roots), None)
-            if path is None:
-                continue
+        for path in self._key_file_paths():
             try:
                 text, truncated = github.read_text_file(self._token, self.repository, self.branch, path, KEY_FILE_BYTES)
             except Exception as exc:  # an unreadable file leaves the opening look without it

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useAgentKickoff } from "@/shared/hooks/use-agent-kickoff";
 import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
 import { msg } from "@/shared/lib/messages";
 
@@ -234,12 +235,14 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
     [parsedDataset, busy, columnRoles, columnKinds, jobModel, model, reasoningEffort, blackbox],
   );
 
-  // Fire the opening question exactly once per eligible interview.
-  React.useEffect(() => {
-    if (localeReloadingRef.current || !enabled || resolved || done || busy || error) return;
-    if (turns.length > 0) return;
-    runTurn([]);
-  }, [enabled, resolved, done, busy, error, turns, runTurn]);
+  // Fire the opening question exactly once per eligible interview; a reset
+  // re-arms it. An input over the server's budget opens with its fixed message.
+  const { rearm: rearmOpening } = useAgentKickoff(
+    enabled && (parsedDataset || blackbox) && !resolved && !done && turns.length === 0
+      ? "opening"
+      : null,
+    React.useCallback(() => runTurn([]), [runTurn]),
+  );
 
   const send = React.useCallback(
     (content: string) => runTurn([...turns, { role: "user", content }]),
@@ -285,6 +288,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
   const reset = React.useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    rearmOpening();
     setTurns([]);
     setBusy(false);
     setStreamText("");
@@ -297,7 +301,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
     setResolved(false);
     setConfirmedBrief([]);
     setObjective("");
-  }, []);
+  }, [rearmOpening]);
 
   const messages: AgentMessage[] = React.useMemo(() => {
     const mapped: AgentMessage[] = turns.map((t) => ({

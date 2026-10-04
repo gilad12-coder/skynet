@@ -661,6 +661,8 @@
   "tooltip.blackbox.versions.best": "搜尋期間分數最高嘅版本——即係今次運行嘅結果",
   "tooltip.blackbox.versions.section": "運行評過分嘅每個唔同版本，按出現次序排列 — 逐個睇或者喺軌道揀一個",
   "agent.approval.confirm_failed": "審批未能完成 — 請再試一次",
+  "agent.kickoff.oversized_data": "你加入嘅資料太大，我冇辦法掃描。你想做咩？",
+  "agent.kickoff.oversized_repo": "{name} 係個大型儲存庫，所以我冇辦法掃描。你想做咩？",
   "agent.composer.attach": "附加資料集",
   "agent.composer.mic_unavailable": "無法使用咪高峰",
   "agent.composer.record": "語音輸入",

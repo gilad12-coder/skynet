@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "실행 도구 소스의 도구 이름을 쉼표로 구분하여 입력하세요. 비워 두면 노드가 도구 없이 실행됩니다.",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "승인이 처리되지 않았습니다 — 다시 시도하세요",
+  "agent.kickoff.oversized_data": "추가한 데이터가 너무 커서 살펴보지 못했습니다. 무엇을 하고 싶으신가요?",
+  "agent.kickoff.oversized_repo": "{name}은(는) 큰 저장소라서 살펴보지 못했습니다. 무엇을 하고 싶으신가요?",
   "agent.composer.attach": "데이터셋 첨부",
   "agent.composer.mic_unavailable": "마이크를 사용할 수 없음",
   "agent.composer.record": "음성 받아쓰기",

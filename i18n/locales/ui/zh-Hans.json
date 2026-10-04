@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "来自运行工具源的工具名称（用逗号分隔）。留空表示该节点在不使用工具的情况下运行。",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "审批未生效——请重试",
+  "agent.kickoff.oversized_data": "你添加的数据太大，我无法扫描。你想做什么？",
+  "agent.kickoff.oversized_repo": "{name} 是一个大型仓库，所以我无法扫描它。你想做什么？",
   "agent.composer.attach": "附加数据集",
   "agent.composer.mic_unavailable": "麦克风不可用",
   "agent.composer.record": "语音输入",

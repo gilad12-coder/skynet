@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useAgentKickoff } from "@/shared/hooks/use-agent-kickoff";
 import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
 import { toast } from "react-toastify";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -271,7 +272,6 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   const [limitReached, setLimitReached] = React.useState(false);
   // The current run is an opening (no user message to retry from).
   const [openingRun, setOpeningRun] = React.useState(false);
-  const [kickedKey, setKickedKey] = React.useState<string | null>(null);
   const [question, setQuestion] = React.useState<AgentQuestion | null>(null);
   const [signatureVersions, setSignatureVersions] = React.useState<ArtifactVersion[]>([]);
   const [metricVersions, setMetricVersions] = React.useState<ArtifactVersion[]>([]);
@@ -302,6 +302,23 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     ((msg: string, hist: AgentMessage[], kickoff?: boolean) => void) | null
   >(null);
   const messagesRef = React.useRef<AgentMessage[]>([]);
+
+  // A picked repository opens the conversation once per repository/branch;
+  // picking another one starts over about it, and so does a new chat.
+  // Clearing the pick keeps the chat, and picking the same one again does
+  // not repeat the opening.
+  const kickoffKey =
+    kickoffEnabled && codeAssistMode === "auto" && blackbox?.repository
+      ? `${blackbox.repository}@${blackbox.branch ?? ""}`
+      : null;
+  const { pending: kickoffPending, rearm: rearmKickoff } = useAgentKickoff(
+    kickoffKey,
+    React.useCallback(() => {
+      autoFixAttemptsRef.current = 0;
+      runAgentRef.current?.("", [], true);
+    }, []),
+    KICKOFF_SETTLE_MS,
+  );
   const flashClearRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Latest values for the stream callbacks — kept in a ref so closures
@@ -985,7 +1002,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     setQuestion(null);
     setStatus("idle");
     setOpeningRun(false);
-    setKickedKey(null);
+    rearmKickoff();
     setLimitReached(false);
     setMode("seed");
     setStatusLabel("");
@@ -1008,7 +1025,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     setSignatureManuallyEdited(false);
     setMetricManuallyEdited(false);
     setSessionKey((k) => k + 1);
-  }, [setSignatureManuallyEdited, setMetricManuallyEdited]);
+  }, [setSignatureManuallyEdited, setMetricManuallyEdited, rearmKickoff]);
 
   // Swapping the dataset invalidates the entire conversation: messages,
   // version history, and any in-flight stream all refer to schemas that no
@@ -1066,24 +1083,6 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     sessionKey,
   ]);
 
-  // A picked repository opens the conversation once per repository/branch;
-  // picking another one starts over about it, and so does a new chat.
-  // Clearing the pick keeps the chat, and picking the same one again does
-  // not repeat the opening.
-  const kickoffKey =
-    kickoffEnabled && codeAssistMode === "auto" && blackbox?.repository
-      ? `${blackbox.repository}@${blackbox.branch ?? ""}`
-      : null;
-  React.useEffect(() => {
-    if (!kickoffKey || kickedKey === kickoffKey) return;
-    const timer = setTimeout(() => {
-      setKickedKey(kickoffKey);
-      autoFixAttemptsRef.current = 0;
-      runAgentRef.current?.("", [], true);
-    }, KICKOFF_SETTLE_MS);
-    return () => clearTimeout(timer);
-  }, [kickoffKey, kickedKey]);
-
   const firstMessage = messages[0];
   const awaitingFirstWords =
     openingRun &&
@@ -1092,7 +1091,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     !firstMessage?.content &&
     !firstMessage?.toolCalls?.length;
   const openingRepo =
-    (kickoffKey !== null && kickedKey !== kickoffKey) || awaitingFirstWords
+    kickoffPending || awaitingFirstWords
       ? (blackbox?.repository ?? null)
       : null;
 

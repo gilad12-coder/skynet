@@ -1,5 +1,7 @@
 {
   "agent.approval.confirm_failed": "The approval didn't go through — try again",
+  "agent.kickoff.oversized_data": "The data you added is too large for me to scan. What would you like to do?",
+  "agent.kickoff.oversized_repo": "{name} is a large repository, so I couldn't scan it. What would you like to do?",
   "agent.composer.attach": "Attach a dataset",
   "agent.composer.mic_unavailable": "Microphone unavailable",
   "agent.composer.record": "Dictate",

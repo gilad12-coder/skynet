@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "実行のツールソースからカンマ区切りのツール名を指定します。空の場合はツールなしでノードが実行されます。",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "承認が反映されませんでした — もう一度お試しください",
+  "agent.kickoff.oversized_data": "追加されたデータが大きすぎてスキャンできませんでした。何をしたいですか?",
+  "agent.kickoff.oversized_repo": "{name} は大きなリポジトリのため、スキャンできませんでした。何をしたいですか?",
   "agent.composer.attach": "データセットを添付",
   "agent.composer.mic_unavailable": "マイクを利用できません",
   "agent.composer.record": "音声入力",

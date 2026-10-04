@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "Розділені комами назви інструментів із джерела інструментів запуску. Якщо поле порожнє, вузол виконується без інструментів.",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "Підтвердження не пройшло — спробуйте ще раз",
+  "agent.kickoff.oversized_data": "Додані дані завеликі, щоб їх переглянути. Що ви хочете зробити?",
+  "agent.kickoff.oversized_repo": "{name} — великий репозиторій, тому я не зміг його переглянути. Що ви хочете зробити?",
   "agent.composer.attach": "Прикріпити набір даних",
   "agent.composer.mic_unavailable": "Мікрофон недоступний",
   "agent.composer.record": "Диктувати",

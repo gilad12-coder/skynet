@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "أسماء الأدوات مفصولة بفواصل من مصدر أدوات التشغيل. تركه فارغًا يعني أن العقدة ستعمل بدون أدوات.",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "لم تُسجَّل الموافقة — حاول مرة أخرى",
+  "agent.kickoff.oversized_data": "البيانات التي أضفتها كبيرة جدًا بحيث لا يمكنني فحصها. ماذا تريد أن تفعل؟",
+  "agent.kickoff.oversized_repo": "المستودع {name} كبير، لذا لم أتمكن من فحصه. ماذا تريد أن تفعل؟",
   "agent.composer.attach": "إرفاق مجموعة بيانات",
   "agent.composer.mic_unavailable": "الميكروفون غير متاح",
   "agent.composer.record": "إملاء صوتي",

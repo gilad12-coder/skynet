@@ -1147,6 +1147,8 @@
   "workflow.inspector.flex_tools_hint": "Nomes de ferramentas separados por vírgulas da fonte de ferramentas da execução. Se estiver vazio, o nó é executado sem ferramentas.",
   "workflow.inspector.flex_tools_placeholder": "search, fetch",
   "agent.approval.confirm_failed": "A aprovação não foi registada — tente novamente",
+  "agent.kickoff.oversized_data": "Os dados adicionados são grandes demais para eu analisar. O que você quer fazer?",
+  "agent.kickoff.oversized_repo": "{name} é um repositório grande, por isso não consegui analisá-lo. O que você quer fazer?",
   "agent.composer.attach": "Anexar um conjunto de dados",
   "agent.composer.mic_unavailable": "Microfone indisponível",
   "agent.composer.record": "Ditar",
