@@ -23,13 +23,10 @@ from core.service_gateway.optimization.blackbox.sandbox import (
 )
 from core.worker.interaction import run_interaction
 from core.worker.preflight import run_dspy_preflight
+from core.worker.sandbox_protocol import SANDBOX_PROTOCOL
 from core.worker.subprocess_runner import run_service_in_subprocess
 
 EVENT_PREFIX = "SKYNET_JOB_EVENT "
-# The request and event shapes the worker and its sandbox exchange. The image
-# carries the optimizer itself, so this is the only contract the two share; bump
-# it whenever either shape changes incompatibly.
-SANDBOX_PROTOCOL = 1
 INCOMPATIBLE_IMAGE_MESSAGE = "The sandbox image speaks an older protocol than this worker; rebuild the sandbox image."
 _CHECKPOINT_PATH = re.compile(r"(?:(?:pair_\d+|gepa)/)?gepa_state\.bin\Z")
 
