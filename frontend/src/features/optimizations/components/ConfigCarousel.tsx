@@ -84,9 +84,9 @@ function ExpandTextButton({
         </Button>
       </TooltipButton>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="w-[min(40rem,92vw)] max-w-[min(40rem,92vw)] sm:max-w-[min(40rem,92vw)]">
+        <DialogContent className="flex w-[min(40rem,92vw)] max-w-[min(40rem,92vw)] flex-col overflow-hidden sm:max-w-[min(40rem,92vw)]">
           <DialogTitleRow title={label} />
-          <div className="max-h-[70vh] overflow-y-auto rounded-xl border border-border/45 bg-[#F8F4EE] p-4">
+          <div className="max-h-[70dvh] min-h-0 overflow-y-auto overscroll-contain rounded-xl border border-border/45 bg-[#F8F4EE] p-4">
             <p
               className={cn("whitespace-pre-wrap break-words text-sm", mono && "font-mono")}
               dir={mono ? "ltr" : "auto"}

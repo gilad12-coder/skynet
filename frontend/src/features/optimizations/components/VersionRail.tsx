@@ -165,7 +165,10 @@ export function VersionRail({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72 overflow-hidden p-0">
-            <div className="max-h-72 overflow-y-auto py-1" dir="ltr">
+            <div
+              className="max-h-[min(18rem,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto py-1"
+              dir="ltr"
+            >
               {newestFirst.map((i) => (
                 <VersionRow
                   key={versions[i]?.number ?? i}

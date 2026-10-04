@@ -13,6 +13,7 @@ const panelClass = cn(
   "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
   "rounded-xl border border-border/60 bg-background/95 py-1.5 backdrop-blur-xl shadow-lg",
   "outline-none",
+  "max-h-(--radix-context-menu-content-available-height) max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain",
 );
 
 const rowClass = cn(

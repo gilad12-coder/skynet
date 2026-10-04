@@ -17,6 +17,8 @@ const panelClass = cn(
   "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
   "rounded-xl border border-border/60 bg-background/95 py-1.5 backdrop-blur-xl shadow-lg",
   "outline-none",
+  // Long menus scroll inside the space Radix measured instead of running off-screen.
+  "max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto overscroll-contain",
 );
 
 const rowClass = cn(
@@ -49,7 +51,7 @@ function DropdownMenuContent({
         sideOffset={sideOffset}
         align={align}
         collisionPadding={collisionPadding}
-        className={cn(panelClass, className)}
+        className={cn(panelClass, "max-w-[calc(100vw-1rem)]", className)}
         style={{ zIndex: 50 }}
         {...props}
       />

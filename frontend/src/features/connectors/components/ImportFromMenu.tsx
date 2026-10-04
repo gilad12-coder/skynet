@@ -78,7 +78,7 @@ export function ImportFromMenu({
             <CaretDown className="size-3 opacity-60" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="max-h-[70vh] min-w-[15rem] overflow-y-auto">
+        <DropdownMenuContent align="end" className="min-w-[15rem]">
           {PROVIDER_GROUPS.map((group, index) => (
             <React.Fragment key={group.category}>
               {index > 0 && <DropdownMenuSeparator />}
