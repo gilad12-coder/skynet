@@ -11,7 +11,6 @@ import {
   type CodeAgentToolName,
 } from "@/shared/lib/api";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
-import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
 import { TERMS } from "@/shared/lib/terms";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
@@ -126,37 +125,6 @@ interface ArtifactVersion {
   ts: number;
 }
 
-// A locale switch reloads the page (see LocaleProvider), which would drop the
-// conversation. Consumers that pass `reloadPersistKey` get their transcript
-// stashed in sessionStorage for that single hop and restored (then cleared) on
-// the next mount — the same pattern as the submit wizard's draft stash.
-interface AgentReloadStash {
-  messages: AgentMessage[];
-  mode: AgentMode;
-  signatureVersions: ArtifactVersion[];
-  metricVersions: ArtifactVersion[];
-  signatureVersionIndex: number;
-  metricVersionIndex: number;
-  reasoning: string;
-  reasoningStartedAt: number | null;
-  reasoningEndedAt: number | null;
-}
-
-function reloadStashKey(persistKey: string): string {
-  return `skynet.code-agent.reload-stash:${persistKey}`;
-}
-
-function readAgentReloadStash(persistKey: string): AgentReloadStash | null {
-  try {
-    const raw = window.sessionStorage.getItem(reloadStashKey(persistKey));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as AgentReloadStash;
-    return Array.isArray(parsed?.messages) && parsed.messages.length > 0 ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 export interface CodeAgentState {
   status: AgentStatus;
   mode: AgentMode;
@@ -222,9 +190,6 @@ export interface UseCodeAgentArgs {
   // Directives confirmed at the end of the Signature & Metric interview;
   // the seed authors honor them. Empty when the interview was skipped.
   interviewBrief?: string[];
-  // When set, the conversation survives the locale-switch reload under this
-  // stash key. Leave unset for surfaces that shouldn't persist.
-  reloadPersistKey?: string;
   /** Black-box authoring context; when set the agent drafts the starting
    *  point + Python scorer and no dataset is required. */
   blackbox?: BlackboxAuthoringContext | null;
@@ -263,58 +228,31 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     applyAgentWorkflow,
     seedEnabled = true,
     interviewBrief,
-    reloadPersistKey,
     model,
     reasoningEffort,
     blackbox = null,
   } = args;
-
-  // Read the reload stash once at mount, before the initializers below
-  // consume it. Reading is idempotent — the stash is only cleared in the
-  // mount effect further down — so StrictMode's double-invoked initializer
-  // can't read-then-lose it.
-  const [restored] = React.useState<AgentReloadStash | null>(() =>
-    reloadPersistKey && typeof window !== "undefined"
-      ? readAgentReloadStash(reloadPersistKey)
-      : null,
-  );
 
   const [status, setStatus] = React.useState<AgentStatus>("idle");
   // The run notifies from the hook, so it still does after its panel has left the screen.
   useCompletionNotification(status === "streaming", () =>
     msg(status === "error" ? "notify.code.failed" : "notify.code.done"),
   );
-  const [mode, setMode] = React.useState<AgentMode>(restored?.mode ?? "seed");
+  const [mode, setMode] = React.useState<AgentMode>("seed");
   const [statusLabel, setStatusLabel] = React.useState("");
-  const [signatureStatus, setSignatureStatus] = React.useState<ArtifactStatus>(
-    restored && restored.signatureVersions.length > 0 ? "done" : "idle",
-  );
-  const [metricStatus, setMetricStatus] = React.useState<ArtifactStatus>(
-    restored && restored.metricVersions.length > 0 ? "done" : "idle",
-  );
-  const [messages, setMessages] = React.useState<AgentMessage[]>(restored?.messages ?? []);
+  const [signatureStatus, setSignatureStatus] = React.useState<ArtifactStatus>("idle");
+  const [metricStatus, setMetricStatus] = React.useState<ArtifactStatus>("idle");
+  const [messages, setMessages] = React.useState<AgentMessage[]>([]);
   const [error, setError] = React.useState<string | null>(null);
-  const [signatureVersions, setSignatureVersions] = React.useState<ArtifactVersion[]>(
-    restored?.signatureVersions ?? [],
-  );
-  const [metricVersions, setMetricVersions] = React.useState<ArtifactVersion[]>(
-    restored?.metricVersions ?? [],
-  );
-  const [signatureVersionIndex, setSignatureVersionIndex] = React.useState(
-    restored?.signatureVersionIndex ?? -1,
-  );
-  const [metricVersionIndex, setMetricVersionIndex] = React.useState(
-    restored?.metricVersionIndex ?? -1,
-  );
+  const [signatureVersions, setSignatureVersions] = React.useState<ArtifactVersion[]>([]);
+  const [metricVersions, setMetricVersions] = React.useState<ArtifactVersion[]>([]);
+  const [signatureVersionIndex, setSignatureVersionIndex] = React.useState(-1);
+  const [metricVersionIndex, setMetricVersionIndex] = React.useState(-1);
   const [signatureFlashLines, setSignatureFlashLines] = React.useState<number[]>([]);
   const [metricFlashLines, setMetricFlashLines] = React.useState<number[]>([]);
-  const [reasoning, setReasoning] = React.useState(restored?.reasoning ?? "");
-  const [reasoningStartedAt, setReasoningStartedAt] = React.useState<number | null>(
-    restored?.reasoningStartedAt ?? null,
-  );
-  const [reasoningEndedAt, setReasoningEndedAt] = React.useState<number | null>(
-    restored?.reasoningEndedAt ?? null,
-  );
+  const [reasoning, setReasoning] = React.useState("");
+  const [reasoningStartedAt, setReasoningStartedAt] = React.useState<number | null>(null);
+  const [reasoningEndedAt, setReasoningEndedAt] = React.useState<number | null>(null);
 
   const abortRef = React.useRef<AbortController | null>(null);
   const sigBufRef = React.useRef("");
@@ -325,9 +263,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   // Latches once per run: the timer stops the moment the model moves from
   // reasoning to producing artifacts, even if a parallel stream reasons on.
   const reasoningEndedRef = React.useRef(false);
-  // A restored transcript already contains the seed exchange — never re-seed
-  // over it after the locale-switch reload.
-  const autoRanRef = React.useRef(restored != null);
+  const autoRanRef = React.useRef(false);
   const [sessionKey, setSessionKey] = React.useState(0);
   const pendingValidationsRef = React.useRef<
     Array<{ kind: "signature" | "metric"; promise: Promise<unknown> }>
@@ -376,41 +312,6 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   React.useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
-
-  // Mirror the stashable transcript every render so the locale-reload
-  // listener parks the freshest state, then stash it when the reload event
-  // fires. The mount-time removeItem is the "restored, now consume it" half
-  // of the handshake with readAgentReloadStash above.
-  const reloadSnapshotRef = React.useRef<AgentReloadStash | null>(null);
-  React.useEffect(() => {
-    reloadSnapshotRef.current = {
-      messages,
-      mode,
-      signatureVersions,
-      metricVersions,
-      signatureVersionIndex,
-      metricVersionIndex,
-      reasoning,
-      reasoningStartedAt,
-      reasoningEndedAt,
-    };
-  });
-  React.useEffect(() => {
-    if (!reloadPersistKey) return;
-    window.sessionStorage.removeItem(reloadStashKey(reloadPersistKey));
-    const stash = () => {
-      const snap = reloadSnapshotRef.current;
-      if (!snap || snap.messages.length === 0) return;
-      try {
-        window.sessionStorage.setItem(reloadStashKey(reloadPersistKey), JSON.stringify(snap));
-      } catch {
-        // Best-effort — a blown quota loses the transcript, exactly as the
-        // reload did before this stash existed.
-      }
-    };
-    window.addEventListener(LOCALE_RELOAD_EVENT, stash);
-    return () => window.removeEventListener(LOCALE_RELOAD_EVENT, stash);
-  }, [reloadPersistKey]);
 
   const hasRequiredContext = React.useMemo(() => {
     if (blackbox) return blackbox.objective.trim().length > 0;
@@ -1058,14 +959,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
 
   // Re-arm when the user changes their DSPy module (predict ↔ chain_of_thought
   // ↔ react, …). The manual-edit gate still protects user-authored edits;
-  // fresh seed output just flips to the new module's expected shape. After a
-  // locale-reload restore, module-name churn is hydration rather than a user
-  // switch — re-arming then would seed over the restored transcript, and real
-  // switches reset the conversation via the wizard's chooseModule() anyway.
+  // fresh seed output just flips to the new module's expected shape.
   React.useEffect(() => {
-    if (restored != null) return;
     autoRanRef.current = false;
-  }, [moduleName, restored]);
+  }, [moduleName]);
 
   // Kick off the seed run as soon as the user has a dataset + I/O roles.
   // This hook lives at the wizard level, so the seed fires even when the

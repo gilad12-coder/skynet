@@ -13,7 +13,6 @@ import { createExecutionBudget, getExecutionBudget, updateExecutionBudget } from
 import { msg } from "@/shared/lib/messages";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import { ExecutionBudgetSession } from "../lib/execution-budget-session";
-import { useWizardDrafts } from "./use-wizard-drafts";
 
 const BudgetContext = createContext<{ session: ExecutionBudgetSession; revision: number } | null>(
   null,
@@ -21,17 +20,21 @@ const BudgetContext = createContext<{ session: ExecutionBudgetSession; revision:
 
 /** One server budget follows the user across both wizard workflows. */
 export function ExecutionBudgetProvider({ children }: { children: ReactNode }) {
-  const drafts = useWizardDrafts();
   const [revision, changed] = useReducer((revision: number) => revision + 1, 0);
   const [session] = useState(
     () =>
-      new ExecutionBudgetSession(drafts.takeExecution(), {
-        persist: drafts.saveExecution,
-        create: createExecutionBudget,
-        get: getExecutionBudget,
-        update: updateExecutionBudget,
-        changed,
-      }),
+      // A setup lives only as long as its wizard, so the budget identity is
+      // kept in memory and never written anywhere.
+      new ExecutionBudgetSession(
+        {},
+        {
+          persist: async () => {},
+          create: createExecutionBudget,
+          get: getExecutionBudget,
+          update: updateExecutionBudget,
+          changed,
+        },
+      ),
   );
   const effectGeneration = useRef(0);
   useEffect(() => {

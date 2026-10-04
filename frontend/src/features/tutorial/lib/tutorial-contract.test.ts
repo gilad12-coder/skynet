@@ -114,7 +114,7 @@ test("the quick-start guide keeps demo code deterministic and cost-free", () => 
   assert.match(wizard, /setMetricManuallyEdited\(true\)/);
 });
 
-test("the optimize-anything guide never spends money or saves a draft", () => {
+test("the optimize-anything guide never spends money", () => {
   const steps = readFileSync(STEPS_PATH, "utf8");
   const demoData = readFileSync(DEMO_DATA_PATH, "utf8");
   const detailView = readFileSync(DETAIL_VIEW_PATH, "utf8");
@@ -124,7 +124,7 @@ test("the optimize-anything guide never spends money or saves a draft", () => {
   assert.match(scorer, /def score\(candidate, case=None\):/);
   assert.doesNotMatch(scorer, /\bllm\b/);
   assert.match(steps, /callTutorialHook\("setBlackboxDemo"/);
-  assert.match(blackboxWizard, /!drafts\.suspended &&/);
+  assert.match(blackboxWizard, /!touring &&/);
   assert.match(detailView, /setJob\(buildBlackboxDemoJob\(\)\)/);
 });
 

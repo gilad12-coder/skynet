@@ -75,13 +75,7 @@ import {
   type CostBracket,
   type ProjectedModelRole,
 } from "../lib/cost-bracket";
-import {
-  isMeaningfulProgramDraft,
-  stripModelSecrets,
-  type WizardDraftData,
-} from "../lib/draft-record";
 import { fileNewRun } from "../lib/file-new-run";
-import { useWizardDrafts } from "./use-wizard-drafts";
 import { useExecutionBudget } from "./use-execution-budget";
 import { useWizardPreflight } from "./use-wizard-preflight";
 import { formatBudgetUsd, usePricingTerms } from "@/features/billing";
@@ -177,7 +171,7 @@ export function useSubmitWizard(folderId: string | null = null) {
   // module is committed — `moduleName` is only the carousel's starting slide
   // until then, never an implicit choice. While the picker is open
   // (moduleChosen=false) the editors and the agent's seed pass wait. Flows
-  // that carry a decided module (draft, clone, shared state) set it chosen.
+  // that carry a decided module (clone, shared state) set it chosen.
   const [moduleChosen, setModuleChosen] = useState(false);
   const [optimizerName, setOptimizerName] = useState("gepa");
 
@@ -217,7 +211,7 @@ export function useSubmitWizard(folderId: string | null = null) {
   // Workflow graph spec — the canvas's single source of truth. `null` until
   // the user first picks the workflow module (the starter graph is seeded
   // from the dataset's column roles at that moment). `workflowRevision`
-  // bumps only on external replacements (init, draft restore, clone) so the
+  // bumps only on external replacements (init, clone) so the
   // canvas can remount without looping on its own edits.
   const [workflowSpec, setWorkflowSpec] = useState<WorkflowSpec | null>(null);
   const [workflowRevision, setWorkflowRevision] = useState(0);
@@ -225,7 +219,7 @@ export function useSubmitWizard(folderId: string | null = null) {
   useEffect(() => {
     workflowSpecRef.current = workflowSpec;
   }, [workflowSpec]);
-  // True until the user (or a restored draft/clone) touches the graph; a
+  // True until the user (or a clone) touches the graph; a
   // pristine starter graph re-seeds when the dataset's column roles change,
   // an edited one is never clobbered.
   const workflowPristineRef = useRef(true);
@@ -488,8 +482,6 @@ export function useSubmitWizard(folderId: string | null = null) {
   const validationCacheRef = useRef(new Map<string, Promise<ValidateCodeResponse>>());
 
   const [cloneLoading, setCloneLoading] = useState(false);
-  const [cloneReady, setCloneReady] = useState(false);
-  const cloneCompared = useRef(false);
   const [issue, setIssue] = useState<WizardIssue | null>(null);
   const cloneRan = useRef(false);
 
@@ -565,182 +557,18 @@ export function useSubmitWizard(folderId: string | null = null) {
   }, [wizardCtx]);
   const submittedRef = useRef(false);
 
-  const drafts = useWizardDrafts();
-  const draftsRef = useRef(drafts);
-  useEffect(() => {
-    draftsRef.current = drafts;
-  }, [drafts]);
-  // Taken once at mount: the saved draft this instance hydrates from, or null
-  // when the form starts blank. Publishing waits until that hydration has
-  // landed so the first snapshot written is the restored one, not the empty
-  // initial state.
-  const [draftSnapshot] = useState(() => drafts.takeSnapshot("program"));
-  const hydratedRef = useRef(false);
-  // The draft never carries credentials: a restored BYOK model comes back
-  // without its key and shows as missing credentials.
-  const safeReactConfig = useMemo(() => ({ ...reactConfig, mcpAuthHeader: "" }), [reactConfig]);
-  const safeModelConfig = useMemo(() => stripModelSecrets(modelConfig), [modelConfig]);
-  const safeSecondModelConfig = useMemo(
-    () => (secondModelConfig ? stripModelSecrets(secondModelConfig) : null),
-    [secondModelConfig],
-  );
-  const safeGenerationModels = useMemo(
-    () => generationModels.map(stripModelSecrets),
-    [generationModels],
-  );
-  const safeReflectionModels = useMemo(
-    () => reflectionModels.map(stripModelSecrets),
-    [reflectionModels],
-  );
-
-  // Mirror the full serializable wizard snapshot into a ref every commit and
-  // hand it to the draft saver, which debounces and dedupes the writes.
-  const draftRef = useRef<WizardDraftData | null>(null);
-  useEffect(() => {
-    draftRef.current = {
-      stage: stageAt(step),
-      furthestStage: stageAt(furthestReachedStep),
-      summaryTab,
-      summaryCodeTab,
-      jobType,
-      isPrivate,
-      jobName,
-      jobDescription,
-      moduleName,
-      moduleChosen,
-      optimizerName,
-      executionRuntime,
-      codeAssistMode,
-      splitMode,
-      reactConfig: safeReactConfig,
-      workflowSpec,
-      signatureCode,
-      metricCode,
-      signatureManuallyEdited,
-      metricManuallyEdited,
-      parsedDataset,
-      datasetFileName,
-      columnRoles,
-      columnKinds,
-      modelConfig: safeModelConfig,
-      secondModelConfig: safeSecondModelConfig,
-      generationModels: safeGenerationModels,
-      reflectionModels: safeReflectionModels,
-      split,
-      seed,
-      autoLevel,
-      reflectionMinibatchSize,
-      maxFullEvals,
-      maxMetricCalls,
-      useMerge,
-      targetScore,
-      pxnParents,
-      pxnProposals,
-      shuffle,
-      economyMode,
-      maxCostCents,
-    };
-    // A submit that has left is not re-parked while its splash plays out.
-    if (hydratedRef.current && !submittedRef.current) {
-      const d = draftRef.current;
-      draftsRef.current.publish("program", d, isMeaningfulProgramDraft(d));
-    }
-  });
-  // Stage boundaries are the one place the debounce is skipped: a refresh right
-  // after Next lands on the stage the user just reached.
-  useEffect(() => {
-    if (hydratedRef.current) draftsRef.current.flush();
-  }, [step]);
-
-  // Hydrate once from the draft this instance was handed (Continue, a locale
-  // reload) so the user lands on the same step with inputs intact. A blank
-  // start leaves a clone/share URL to populate the form itself.
-  const restoredRef = useRef(false);
-  const restoreWalkedRef = useRef(false);
-  // The draft's stage is applied one render after its fields, so the
-  // prerequisite walk (below validateStep) checks the restored state rather
+  // A clone's stage is applied one render after its fields, so the
+  // prerequisite walk (below validateStep) checks the cloned state rather
   // than the empty initial one.
   const [pendingRestore, setPendingRestore] = useState<{
     stage: WizardStageId;
     furthest: WizardStageId;
   } | null>(null);
-  useEffect(() => {
-    if (!cloneReady || pendingRestore || cloneCompared.current || !draftRef.current) return;
-    cloneCompared.current = true;
-    draftsRef.current.compareClone("program", draftRef.current);
-  }, [cloneReady, pendingRestore]);
-  useEffect(() => {
-    if (restoredRef.current) return;
-    restoredRef.current = true;
-    const d = draftSnapshot;
-    if (!d) {
-      hydratedRef.current = true;
-      return;
-    }
-    setPendingRestore({ stage: d.stage, furthest: d.furthestStage });
-    setSummaryTab(d.summaryTab);
-    setSummaryCodeTab(d.summaryCodeTab);
-    setOptimizationType(d.jobType);
-    setIsPrivate(d.isPrivate);
-    setJobName(d.jobName);
-    setJobNameTouched(
-      d.jobName.trim() !== "" &&
-        d.jobName !== suggestedDspyRunName(d.signatureCode, d.datasetFileName),
-    );
-    setJobDescription(d.jobDescription);
-    setModuleName(d.moduleName);
-    setModuleChosen(d.moduleChosen);
-    setOptimizerName(d.optimizerName);
-    setCodeAssistMode(d.codeAssistMode ?? readPref("wizardCodeAssist"));
-    splitModeRef.current = d.splitMode ?? readPref("wizardSplitMode");
-    setSplitModeState(d.splitMode ?? readPref("wizardSplitMode"));
-    setReactConfig({ ...d.reactConfig, mcpAuthHeader: "" });
-    if (d.workflowSpec) {
-      replaceWorkflowSpec(d.workflowSpec);
-      workflowPristineRef.current = false;
-      setWorkflowTouched(true);
-    }
-    setSignatureCode(d.signatureCode);
-    setMetricCode(d.metricCode);
-    setSignatureManuallyEdited(d.signatureManuallyEdited || !!d.signatureCode.trim());
-    setMetricManuallyEdited(d.metricManuallyEdited || !!d.metricCode.trim());
-    setSignatureValidation(null);
-    setMetricValidation(null);
-    setDatasetValidation(null);
-    validationCacheRef.current.clear();
-    setParsedDataset(d.parsedDataset);
-    setDatasetFileName(d.datasetFileName);
-    setColumnRoles(d.columnRoles);
-    setColumnKinds(d.columnKinds);
-    setModelConfig(d.modelConfig);
-    setSecondModelConfig(d.secondModelConfig);
-    setGenerationModels(d.generationModels);
-    setReflectionModels(d.reflectionModels);
-    setSplit(d.split);
-    setSeed(d.seed);
-    setAutoLevel(d.autoLevel);
-    setReflectionMinibatchSize(d.reflectionMinibatchSize);
-    setMaxFullEvals(d.maxFullEvals);
-    setMaxMetricCalls(d.maxMetricCalls ?? "");
-    setUseMerge(d.useMerge);
-    setTargetScore(d.targetScore?.trim() ? d.targetScore : DEFAULT_TARGET_SCORE);
-    setPxnParents(d.pxnParents ?? DEFAULT_PXN);
-    setPxnProposals(d.pxnProposals ?? DEFAULT_PXN);
-    setShuffle(d.shuffle);
-    setEconomyMode(d.economyMode ?? false);
-    hydratedRef.current = true;
-  }, []);
 
   useEffect(
     () => () => {
-      if (submittedRef.current) {
-        // A submit leaves on purpose: reset the shared agent state; the draft
-        // was already consumed when the job was accepted.
-        wizardCtxRef.current?.reset();
-        return;
-      }
-      // Leaving mid-setup keeps the draft: write whatever the debounce still holds.
-      draftsRef.current.flush();
+      // A submit leaves on purpose: reset the shared agent state.
+      if (submittedRef.current) wizardCtxRef.current?.reset();
     },
     [],
   );
@@ -1424,9 +1252,7 @@ export function useSubmitWizard(folderId: string | null = null) {
 
   useEffect(() => {
     const cloneId = searchParams.get("clone");
-    // A restored draft owns the form; the clone URL it was continued past must
-    // not hydrate over it.
-    if (!cloneId || cloneRan.current || draftSnapshot) return;
+    if (!cloneId || cloneRan.current) return;
     cloneRan.current = true;
     const pairParam = searchParams.get("pair");
     const clonePairIndex = pairParam == null ? null : Number(pairParam);
@@ -1598,7 +1424,6 @@ export function useSubmitWizard(folderId: string | null = null) {
       if (fromProgram) {
         setPendingRestore({ stage: "review", furthest: "review" });
       }
-      setCloneReady(true);
     };
 
     // Share / public clone: hydrate from the scrubbed composite — token-gated for
@@ -1637,7 +1462,6 @@ export function useSubmitWizard(folderId: string | null = null) {
 
     source
       .catch(() => {
-        draftsRef.current.compareClone("program", null);
         toast.error(msg("submit.clone.failed"));
       })
       .finally(() => setCloneLoading(false));
@@ -1968,14 +1792,12 @@ export function useSubmitWizard(folderId: string | null = null) {
 
   const maxReachableStep = furthestReachedStep;
 
-  // A restored draft reopens where the user left off only while every earlier
-  // stage still passes. The first stage that no longer validates opens instead
+  // A clone reopens on its stage only while every earlier stage still passes. The first stage that no longer validates opens instead
   // and also caps the unlocked range, because the stepper lets the user jump
   // forward to any unlocked stage without re-validating.
   useEffect(() => {
     if (!pendingRestore) return;
     setPendingRestore(null);
-    restoreWalkedRef.current = true;
     const target = WIZARD_STAGE[pendingRestore.stage];
     const furthest = Math.max(target, WIZARD_STAGE[pendingRestore.furthest]);
     let open = target;
@@ -2146,8 +1968,7 @@ export function useSubmitWizard(folderId: string | null = null) {
   // Next would have. One that finished while they were gone is its own page.
   const resumedRef = useRef(false);
   useEffect(() => {
-    if (resumedRef.current || !hydratedRef.current || pendingRestore) return;
-    if (draftSnapshot && !restoreWalkedRef.current) return;
+    if (resumedRef.current || pendingRestore) return;
     resumedRef.current = true;
     const progress = preflight.progress.state;
     if (!progress || progress.identity !== preflight.identity) return;
@@ -2386,7 +2207,6 @@ export function useSubmitWizard(folderId: string | null = null) {
       // Mark the submit so the unmount cleanup clears the shared wizard state
       // once navigation tears this form down.
       submittedRef.current = true;
-      draftsRef.current.consumed();
       await fileNewRun(result.optimization_id, folderId);
       const jobUrl = `/optimizations/${result.optimization_id}`;
       setSubmitPhase("splash");
@@ -2479,7 +2299,6 @@ export function useSubmitWizard(folderId: string | null = null) {
   // never fires before the dataset exists. Pre-existing code work (clone
   // pre-fill, manual edits, a touched canvas) rules the interview out.
   const interviewPossible =
-    !drafts.offerPending &&
     codeAssistMode === "auto" &&
     !signatureManuallyEdited &&
     !metricManuallyEdited &&
@@ -2533,14 +2352,8 @@ export function useSubmitWizard(folderId: string | null = null) {
     // picks another one — and while an interview could still happen. When
     // the interview is ruled out (manual mode, pre-existing code work) its
     // resolution never gates anything.
-    seedEnabled:
-      !drafts.offerPending &&
-      !moduleSelectionRequired &&
-      (!interviewPossible || interview.resolved),
+    seedEnabled: !moduleSelectionRequired && (!interviewPossible || interview.resolved),
     interviewBrief: interview.confirmedBrief,
-    // The conversation rides through the locale-switch reload alongside the
-    // wizard draft (see use-wizard-drafts.tsx).
-    reloadPersistKey: "submit-code-agent",
     model: interview.model,
     reasoningEffort: interview.reasoningEffort,
   });

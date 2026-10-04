@@ -16,7 +16,7 @@ Hidden from the public Scalar reference — wizard-internal flow.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, cast
 from uuid import uuid4
 
@@ -47,6 +47,11 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 MAX_LIST = 200
 DEFAULT_LIST = 100
 MAX_NAME = 200
+# A session still in its setup interview has not started labeling, so it is
+# never offered back to the user. The client deletes one it leaves; this is the
+# backstop for a tab closed mid-interview.
+UNSTARTED_PHASE = "interview"
+UNSTARTED_TTL = timedelta(hours=1)
 
 
 class TaggingSessionSummary(BaseModel):
@@ -244,7 +249,10 @@ def create_tagging_session_router(*, job_store) -> APIRouter:
         limit: int = Query(default=DEFAULT_LIST, ge=1, le=MAX_LIST),
         offset: int = Query(default=0, ge=0),
     ) -> TaggingSessionListResponse:
-        """Return the caller's sessions, pinned first then newest activity.
+        """Return the caller's started sessions, pinned first then newest activity.
+
+        Sessions still in the setup interview are left out: they have not
+        started labeling and are not something to come back to.
 
         The heavy JSON columns (``data``/``annotations``/``assist``) are not
         selected so the sidebar list stays cheap as sessions accumulate;
@@ -263,7 +271,8 @@ def create_tagging_session_router(*, job_store) -> APIRouter:
         """
         with Session(job_store.engine) as session:
             owned = session.query(TaggingSessionModel).filter(
-                TaggingSessionModel.username == user.username
+                TaggingSessionModel.username == user.username,
+                TaggingSessionModel.phase != UNSTARTED_PHASE,
             )
             total = owned.with_entities(func.count(TaggingSessionModel.id)).scalar() or 0
             rows = (
@@ -317,7 +326,10 @@ def create_tagging_session_router(*, job_store) -> APIRouter:
             if shared_ids and offset == 0:
                 shared_rows = (
                     session.query(TaggingSessionModel)
-                    .filter(TaggingSessionModel.id.in_(shared_ids))
+                    .filter(
+                        TaggingSessionModel.id.in_(shared_ids),
+                        TaggingSessionModel.phase != UNSTARTED_PHASE,
+                    )
                     .with_entities(
                         TaggingSessionModel.id,
                         TaggingSessionModel.name,
@@ -365,6 +377,9 @@ def create_tagging_session_router(*, job_store) -> APIRouter:
     ) -> TaggingSessionDetail:
         """Persist a new tagger session owned by the caller.
 
+        The caller's unstarted sessions idle past ``UNSTARTED_TTL`` are deleted
+        first; a live interview in another tab keeps saving, so it survives.
+
         Args:
             req: The full session payload captured when annotating begins.
             user: Authenticated caller; recorded as the session owner.
@@ -391,6 +406,11 @@ def create_tagging_session_router(*, job_store) -> APIRouter:
             updated_at=now,
         )
         with Session(job_store.engine) as session:
+            session.query(TaggingSessionModel).filter(
+                TaggingSessionModel.username == user.username,
+                TaggingSessionModel.phase == UNSTARTED_PHASE,
+                TaggingSessionModel.updated_at < now - UNSTARTED_TTL,
+            ).delete(synchronize_session=False)
             session.add(row)
             session.commit()
             session.refresh(row)

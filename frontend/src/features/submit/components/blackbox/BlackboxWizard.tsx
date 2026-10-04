@@ -49,12 +49,15 @@ export function BlackboxWizard({
   header,
   initialRecipe,
   folderId = null,
+  touring = false,
 }: {
   header?: ReactNode;
   initialRecipe: BlackboxRecipe;
   folderId?: string | null;
+  /** The guided tour drives the wizard with demo data: no paid assistant starts. */
+  touring?: boolean;
 }) {
-  const w = useBlackboxWizard(initialRecipe, folderId);
+  const w = useBlackboxWizard(initialRecipe, folderId, touring);
   const wallet = useBalance();
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
