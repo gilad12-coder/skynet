@@ -21,6 +21,7 @@ from ....exceptions import ServiceError
 from ..budget_stop import BudgetReached
 from ..trajectory import capture_proposal_prompts, trajectory_watch
 from .feedback import STR_CANDIDATE_KEY, emit_scorer_feedback
+from .native_runtime import run_native_engine
 from .protocol import BudgetExhaustedError, Candidate, EngineContext, EvalServer, Result, Task
 from .upstream import GEPA_SOURCE
 
@@ -60,6 +61,10 @@ class GepaEngine:
         """
         if server.remaining <= 0:
             return Result(best_candidate=task.seed_candidate or "", best_score=None, total_evals=0)
+        if ctx.native_options is not None and ctx.native_options.repo is not None:
+            # A repository version is a patch: a coding agent writes it inside the
+            # native runtime's checkout, where GEPA runs with that agent as its proposer.
+            return run_native_engine("gepa_repo", task, server, ctx)
         run_dir = str(Path(ctx.run_dir) / self.name)
         Path(run_dir).mkdir(parents=True, exist_ok=True)
         stop_callbacks: list[Any] = []

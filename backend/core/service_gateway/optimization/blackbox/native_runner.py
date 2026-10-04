@@ -32,7 +32,7 @@ try:
     from . import harness_bridge, native_engines, repo_tree
 except ImportError:  # In the sandbox this file runs as a script beside its sibling modules.
     _sibling_modules = {}
-    for _sibling in ("harness_bridge", "native_engines", "repo_tree"):
+    for _sibling in ("harness_bridge", "repo_tree", "native_engines"):
         _spec = importlib.util.spec_from_file_location(_sibling, Path(__file__).with_name(f"{_sibling}.py"))
         assert _spec is not None
         assert _spec.loader is not None
@@ -517,6 +517,8 @@ def _engine_knobs(engine_id: str, proposer: dict[str, Any]) -> dict[str, Any]:
     """
     if engine_id == "meta_harness":
         names = ("max_candidates_per_iter", "effort", "max_thinking_tokens")
+    elif engine_id == "gepa_repo":
+        names = ("effort", "max_thinking_tokens")
     else:
         names = ("ralph", "max_no_eval_seconds", "effort", "max_thinking_tokens")
     return {name: proposer[name] for name in names if proposer.get(name) is not None}
@@ -550,7 +552,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Result envelope, or a failure envelope retaining available usage.
     """
-    if payload.get("engine_id") not in ("meta_harness", "autoresearch"):
+    if payload.get("engine_id") not in ("meta_harness", "autoresearch", "gepa_repo"):
         raise ValueError("Unsupported native optimizer.")
     if payload.get("task", {}).get("test_set") is not None:
         raise ValueError("Held-out examples must not enter the native optimizer.")
@@ -560,8 +562,8 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     config_values: dict[str, Any] = {"model": payload["model"], **_engine_knobs(payload["engine_id"], proposer)}
     repo = payload.get("repo")
     if repo is not None:
-        if payload["engine_id"] != "autoresearch":
-            raise ValueError("Only AutoResearch optimizes a repository.")
+        if payload["engine_id"] not in ("autoresearch", "gepa_repo"):
+            raise ValueError("Only AutoResearch and GEPA optimize a repository.")
         checkout = repo_tree.unpack_tree((Path(chunk) for chunk in repo["chunks"]), Path("repo-checkout").resolve())
         config_values["repo"] = {
             "checkout": str(checkout),

@@ -16,11 +16,11 @@ from ....models.common import SplitFractions
 from ..data import split_examples
 from .agent_eval import READINESS_LIFETIME_SECONDS, case_lifetime_seconds
 from .harness import GatewayConfig
-from .native_runtime import NATIVE_ENGINES, NativeOptions, check_native_runtime
+from .native_runtime import NativeOptions, check_native_runtime
 from .sandbox import SandboxRuntime, sandbox_runtime_context
 from .sandbox_scorer import SandboxPythonScorer, scorer_gateway
 from .scorer import build_scorer
-from .service import _agent_scorer, validate_blackbox_payload
+from .service import _agent_scorer, uses_native_runtime, validate_blackbox_payload
 
 # What a scorer box needs around the evaluator's own timeout: booting and the install.
 _SCORER_BOX_OVERHEAD_SECONDS = 60.0
@@ -220,7 +220,7 @@ def verify_anything_in_sandbox(
                 public = {key: value for key, value in payload.items() if not key.startswith("_")}
                 typed = BlackboxRunRequest.model_validate(public)
                 validate_blackbox_payload(typed, verify_scorer=False)
-                native = typed.strategy.mode != "single" or typed.strategy.engine in NATIVE_ENGINES
+                native = uses_native_runtime(typed)
                 if native:
                     route = typed.reflection_model_settings.extra[ROUTE_KEY]
                     readiness = check_native_runtime(

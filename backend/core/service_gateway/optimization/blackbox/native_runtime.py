@@ -48,9 +48,11 @@ from .upstream import (
     AUTORESEARCH_VERSION,
     AUTOSADDLER_REVISION,
     AUTOSADDLER_SOURCE,
+    GEPA_REVISION,
     META_HARNESS_REVISION,
     META_HARNESS_SOURCE,
 )
+from .upstream import GEPA_SOURCE as GEPA_PACKAGE_SOURCE
 
 GEPA_SOURCE = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
 CLAUDE_VERSION = "2.1.259"
@@ -66,10 +68,13 @@ _INSTALL_ALLOWANCE = 600.0
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _UUID = re.compile(r"^[0-9a-f]{32}$")
-NATIVE_ENGINES = frozenset({"meta_harness", "autoresearch", "autosaddler"})
+NATIVE_ENGINES = frozenset({"meta_harness", "autoresearch", "autosaddler", "gepa_repo"})
+# ``gepa_repo`` exists only for repositories; AutoResearch takes either kind of task.
+REPO_NATIVE_ENGINES = frozenset({"autoresearch", "gepa_repo"})
 _UPSTREAMS = {
     "meta_harness": (META_HARNESS_SOURCE, META_HARNESS_REVISION),
     "autoresearch": (AUTORESEARCH_SOURCE, AUTORESEARCH_VERSION),
+    "gepa_repo": (GEPA_PACKAGE_SOURCE, GEPA_REVISION),
     "autosaddler": (AUTOSADDLER_SOURCE, AUTOSADDLER_REVISION),
 }
 _AUTOSADDLER_RUNNER_FILE = "autosaddler_runner.py"
@@ -681,8 +686,10 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     autosaddler = engine_id == "autosaddler"
     if not autosaddler and not task.str_mode:
         raise ServiceError("Native agent engines require a single text candidate.")
-    if options.repo is not None and engine_id != "autoresearch":
-        raise ServiceError("Only AutoResearch drives a coding agent through a repository checkout.")
+    if options.repo is not None and engine_id not in REPO_NATIVE_ENGINES:
+        raise ServiceError("Only AutoResearch and GEPA drive a coding agent through a repository checkout.")
+    if options.repo is None and engine_id == "gepa_repo":
+        raise ServiceError("GEPA's agent proposer needs a repository checkout.")
     if autosaddler and task.seed_candidate is None:
         raise ServiceError("AutoSaddler requires a seed candidate to patch.")
     if autosaddler and len(task.train_set or []) + len(task.val_set or []) < 2:
