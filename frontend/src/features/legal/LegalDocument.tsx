@@ -9,7 +9,6 @@ import Link from "next/link";
 import type { Icon } from "@phosphor-icons/react";
 import {
   ArrowLeft,
-  ArrowRight,
   CalendarBlank,
   CheckCircle,
   Clock,
@@ -33,7 +32,6 @@ import type { LegalBlock, LegalDocument as LegalDoc } from "./types";
 import styles from "./legal-document.module.css";
 
 const CHROME = {
-  legal: "Legal",
   homeAria: "Skynet home",
   contents: "On this page",
   contentsAria: "Document sections",
@@ -44,7 +42,6 @@ const CHROME = {
   sections: "sections",
   current: "Current document",
   backToApp: "Return to Skynet",
-  relatedDocument: "Related document",
   questions: "Questions about this document?",
   contactPrompt: "Contact us and we will help clarify how this document applies to Skynet.",
   termsEyebrow: "Service agreement",
@@ -121,16 +118,8 @@ function Block({ block }: { block: LegalBlock }) {
   return <p className="text-base leading-7 text-foreground/75">{block.text}</p>;
 }
 
-/** Render a complete legal document with navigation, metadata, and cross-links. */
-export function LegalDocument({
-  document,
-  kind,
-  related,
-}: {
-  document: LegalDoc;
-  kind: LegalDocumentKind;
-  related: { label: string; href: string };
-}) {
+/** Render a complete legal document with navigation and metadata. */
+export function LegalDocument({ document, kind }: { document: LegalDoc; kind: LegalDocumentKind }) {
   const { title, intro, sections } = document;
   const isPrivacy = kind === "privacy";
   const DocumentIcon = isPrivacy ? ShieldCheck : Scroll;
@@ -145,6 +134,13 @@ export function LegalDocument({
     >
       <header className="sticky top-0 z-20 border-b border-border/60 bg-[#FAF8F5]/95 backdrop-blur-md print:static print:bg-white">
         <div className="mx-auto flex min-h-16 w-full max-w-[96rem] items-center justify-between gap-4 px-4 sm:px-8 lg:px-12 xl:px-16">
+          <Button asChild variant="outline" size="sm" className="min-h-[44px] lg:min-h-0">
+            <Link href="/" aria-label={CHROME.backToApp}>
+              <ArrowLeft className="size-4" aria-hidden="true" />
+              <span className="hidden sm:inline">{CHROME.backToApp}</span>
+            </Link>
+          </Button>
+
           <Link
             href="/"
             aria-label={CHROME.homeAria}
@@ -157,16 +153,7 @@ export function LegalDocument({
               autoMorphDuration={10000}
               morphSpeed={250}
             />
-            <span aria-hidden="true" className="h-4 w-px bg-border/70" />
-            <span className="text-sm font-medium text-muted-foreground">{CHROME.legal}</span>
           </Link>
-
-          <Button asChild variant="outline" size="sm" className="min-h-[44px] lg:min-h-0">
-            <Link href="/" aria-label={CHROME.backToApp}>
-              <ArrowLeft className="size-4" aria-hidden="true" />
-              <span className="hidden sm:inline">{CHROME.backToApp}</span>
-            </Link>
-          </Button>
         </div>
       </header>
 
@@ -326,7 +313,7 @@ export function LegalDocument({
           </div>
         </div>
 
-        <footer className="grid overflow-hidden rounded-[2rem] border border-border/70 bg-[#FAF8F5] md:grid-cols-2 print:rounded-none">
+        <footer className="grid overflow-hidden rounded-[2rem] border border-border/70 bg-[#FAF8F5] print:rounded-none">
           <div className="flex flex-col justify-between gap-8 p-6 sm:p-8 lg:p-10">
             <div>
               <span className="grid size-11 place-items-center rounded-xl bg-[#EDE7DD] text-[#5C4535]">
@@ -349,34 +336,6 @@ export function LegalDocument({
                 <Envelope className="size-4" aria-hidden="true" />
                 <span className="truncate">{contactEmail}</span>
               </a>
-            </Button>
-          </div>
-
-          <div className="flex flex-col justify-between gap-8 border-t border-border/70 bg-[#F0EBE4] p-6 sm:p-8 md:border-l md:border-t-0 lg:p-10">
-            <div>
-              <span className="grid size-11 place-items-center rounded-xl border border-border/70 bg-[#FAF8F5] text-[#5C4535]">
-                <FileText className="size-5" aria-hidden="true" />
-              </span>
-              <p className="mt-6 text-xs font-bold uppercase tracking-[0.15em] text-[#8C7A6B]">
-                {CHROME.relatedDocument}
-              </p>
-              <h2 className="mt-2 text-2xl font-bold tracking-tight text-foreground">
-                {related.label}
-              </h2>
-            </div>
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              className="group min-h-[44px] w-fit lg:min-h-0"
-            >
-              <Link href={related.href}>
-                {related.label}
-                <ArrowRight
-                  className="size-4 transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transition-none"
-                  aria-hidden="true"
-                />
-              </Link>
             </Button>
           </div>
         </footer>

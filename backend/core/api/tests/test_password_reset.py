@@ -165,15 +165,16 @@ def test_request_then_confirm_resets_password(
     )
 
 
-def test_request_unknown_email_is_ok_and_silent(
+def test_request_unknown_email_is_404_and_silent(
     reset_client: tuple[TestClient, list[dict[str, str]]],
 ) -> None:
-    """An unknown address gets the same 200 but no email is sent."""
+    """An unknown address is refused with ``accounts.not_found`` and no email is sent."""
     client, sent = reset_client
     res = client.post(
         "/auth/password-reset/request", json={"email": "ghost@example.com"}, headers=_AUTH_HEADER
     )
-    assert res.status_code == 200
+    assert res.status_code == 404
+    assert res.json()["detail"] == t_en("accounts.not_found")
     assert sent == []
 
 
