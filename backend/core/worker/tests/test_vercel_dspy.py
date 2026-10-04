@@ -32,7 +32,10 @@ class FakeSession:
         self.files.update(files)
 
     def run(self, command: str, **kwargs: Any) -> CommandResult:
-        """Emit fragmented checkpoint and successful optimizer frames."""
+        """Answer the protocol probe, then emit fragmented checkpoint and optimizer frames."""
+        if command == vercel_dspy.PROTOCOL_PROBE:
+            assert not self.files
+            return CommandResult(0, stdout=f"{SANDBOX_PROTOCOL}\n")
         [request_path] = [path for path in self.files if path.endswith("/request.json")]
         assert list(self.files) == [request_path]
         assert command.startswith("PYTHONPATH=/app python3 -m core.worker.isolated_runner")
@@ -144,7 +147,9 @@ class CrashingSession(FakeSession):
         self.stderr = stderr
 
     def run(self, command: str, **kwargs: Any) -> CommandResult:
-        """Stream only stderr and exit 1 without framing any event."""
+        """Pass the protocol probe, then stream only stderr and exit 1 without framing any event."""
+        if command == vercel_dspy.PROTOCOL_PROBE:
+            return CommandResult(0, stdout=f"{SANDBOX_PROTOCOL}\n")
         kwargs["on_output"]("stderr", self.stderr)
         return CommandResult(1, stderr=self.stderr)
 
@@ -198,6 +203,71 @@ def test_guest_crash_names_its_cause(
     assert event["error"] == expected
     assert event["failure_kind"] == kind
     assert "Traceback (most recent call last):" in caplog.text
+    assert events.empty()
+
+
+class ProbedSession(FakeSession):
+    """Answer the protocol probe the way a given image would and record every command."""
+
+    def __init__(self, probe: CommandResult) -> None:
+        """Keep the image's probe answer."""
+        super().__init__()
+        self.probe = probe
+        self.commands: list[str] = []
+
+    def run(self, command: str, **kwargs: Any) -> CommandResult:
+        """Return the probe answer; any later command means the request was sent."""
+        self.commands.append(command)
+        return self.probe
+
+
+@pytest.mark.parametrize(
+    ("probe", "expected"),
+    [
+        (
+            CommandResult(
+                1,
+                stderr="Traceback (most recent call last):\n"
+                '  File "<string>", line 1, in <module>\n'
+                "ModuleNotFoundError: No module named 'core.worker.sandbox_protocol'\n",
+            ),
+            vercel_dspy.OUTDATED_IMAGE_MESSAGE,
+        ),
+        (
+            CommandResult(0, stdout=f"{SANDBOX_PROTOCOL + 1}\n"),
+            f"The sandbox image speaks protocol {SANDBOX_PROTOCOL + 1}, but this worker speaks {SANDBOX_PROTOCOL};"
+            " rebuild and re-pin the sandbox image.",
+        ),
+    ],
+)
+def test_incompatible_image_is_refused_before_the_request_is_sent(
+    probe: CommandResult, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Name the stale image instead of letting its older models reject the request."""
+    session = ProbedSession(probe)
+    monkeypatch.setattr(vercel_dspy, "RemoteSandboxRuntime", lambda *_args: SimpleNamespace(open=lambda _spec: session))
+    events: queue.Queue = queue.Queue()
+    vercel_dspy.run_vercel_dspy(
+        {
+            "_preflight": {"scope": "evaluation"},
+            "_budget_gateway_descriptor": {
+                "url": "http://127.0.0.1:9876",
+                "control_token": "control",
+                "image": "backend@sha256:" + "a" * 64,
+                "lifetime_seconds": 600,
+            },
+        },
+        "setup",
+        events,
+        "spawn",
+    )
+    assert session.commands == [vercel_dspy.PROTOCOL_PROBE]
+    assert session.files == {}
+    assert session.closed
+    event = events.get_nowait()
+    assert event["type"] == "error"
+    assert event["error"] == expected
+    assert event["failure_kind"] == DETERMINISTIC_FAILURE
     assert events.empty()
 
 
