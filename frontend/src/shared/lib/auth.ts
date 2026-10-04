@@ -156,25 +156,56 @@ async function verifyBackendPasskey(assertion: string): Promise<BackendAccount |
 /**
  * Mirror a provider-authenticated (Google/GitHub/SSO) identity into the
  * backend's users table via the internal /auth/oauth/provision, so it gets the
- * same first-sign-in signal as a local account. Resolves to whether this was
- * the identity's first sign-in; false on any failure, which never blocks the
- * sign-in itself — the provider has already authenticated the user.
+ * same first-sign-in signal as a local account. The provider's other verified
+ * emails ride along so an account registered under one of them is reused
+ * instead of forking a second identity. Resolves to the account the backend
+ * chose, or null on any failure, which never blocks the sign-in itself — the
+ * provider has already authenticated the user.
  */
 async function provisionBackendAccount(user: {
   email?: string | null;
   name?: string | null;
-}): Promise<boolean> {
-  if (!backendAuthSecret || !user.email) return false;
+  otherEmails?: string[];
+}): Promise<BackendAccount | null> {
+  if (!backendAuthSecret || !user.email) return null;
   try {
     const res = await fetch(`${backendBaseUrl}/auth/oauth/provision`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Internal-Auth": backendAuthSecret },
-      body: JSON.stringify({ email: user.email, name: user.name ?? "" }),
+      body: JSON.stringify({
+        email: user.email,
+        name: user.name ?? "",
+        other_emails: user.otherEmails ?? [],
+      }),
     });
-    if (!res.ok) return false;
-    return ((await res.json()) as BackendAccount).first_login === true;
+    if (!res.ok) return null;
+    return (await res.json()) as BackendAccount;
   } catch {
-    return false;
+    return null;
+  }
+}
+
+type GitHubEmail = { email: string; primary: boolean; verified: boolean };
+
+/**
+ * List the verified emails on a GitHub account, primary first. GitHub lets a
+ * user add any address without confirming it, so only verified ones may name
+ * a Skynet identity.
+ */
+async function githubVerifiedEmails(accessToken: string | undefined): Promise<string[]> {
+  if (!accessToken) return [];
+  try {
+    const res = await fetch("https://api.github.com/user/emails", {
+      headers: { Authorization: `Bearer ${accessToken}`, "User-Agent": "skynet" },
+    });
+    if (!res.ok) return [];
+    const emails = (await res.json()) as GitHubEmail[];
+    return emails
+      .filter((e) => e.verified)
+      .sort((a, b) => Number(b.primary) - Number(a.primary))
+      .map((e) => e.email.toLowerCase());
+  } catch {
+    return [];
   }
 }
 
@@ -411,6 +442,20 @@ export const { handlers, auth } = NextAuth({
     authorized({ auth: session }) {
       return !!session?.user;
     },
+    // Identity is the email, so a provider email nobody proved must never name
+    // an account: it would let anyone who types a victim's address at the
+    // provider sign in as them.
+    async signIn({ user, account, profile }) {
+      if (account?.provider === "google") return profile?.email_verified === true;
+      if (account?.provider === "github") {
+        const verified = await githubVerifiedEmails(account.access_token ?? undefined);
+        if (!verified.length) return false;
+        const asserted = user.email?.toLowerCase();
+        user.email = asserted && verified.includes(asserted) ? asserted : verified[0];
+        user.otherEmails = verified.filter((e) => e !== user.email);
+      }
+      return true;
+    },
     async jwt({ token, user, account }) {
       if (user) {
         token.name = user.name ?? token.name;
@@ -425,10 +470,17 @@ export const { handlers, auth } = NextAuth({
         // whether this is the account's first sign-in. Every other provider
         // authenticates at the IdP, so its identity is mirrored to the backend
         // here to get the same signal.
-        token.firstLogin =
-          account && account.type !== "credentials"
-            ? await provisionBackendAccount(user)
-            : user.firstLogin === true;
+        if (account && account.type !== "credentials") {
+          const linked = await provisionBackendAccount(user);
+          // The backend may pick an account under another verified email.
+          if (linked) {
+            token.email = linked.email;
+            token.name = linked.name || token.name;
+          }
+          token.firstLogin = linked?.first_login === true;
+        } else {
+          token.firstLogin = user.firstLogin === true;
+        }
       }
       return token;
     },
