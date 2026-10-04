@@ -28,11 +28,11 @@ class _SampleStream:
         """Bind the stream to the cases upstream scores samples on.
 
         Args:
-            task: Optimization inputs; upstream uses the train set, else the val set.
+            task: Optimization inputs; each sample is scored on every case.
             server: Run accounting, for the scorer runs spent per sample.
             ctx: The job's progress sink.
         """
-        cases = task.train_set or task.val_set or []
+        cases = task.cases
         self._case_ids = {id(example): str(index) for index, example in enumerate(cases)}
         self._per_sample = max(1, len(cases))
         self._server = server

@@ -21,7 +21,6 @@ from core.constants import (
     PROGRESS_LANE_STARTED,
     PROGRESS_OPTIMIZED,
     PROGRESS_OPTIMIZER,
-    PROGRESS_SPLITS_READY,
     TQDM_N_KEY,
     TQDM_TOTAL_KEY,
 )
@@ -56,6 +55,39 @@ from .mocks import (
 )
 
 _CASES = [{"target": "aeiou", "i": i} for i in range(10)]
+
+
+class _RecordingScorer:
+    """Wrap a job scorer and record every ``(candidate, case)`` it is asked to score."""
+
+    def __init__(self, inner: Any) -> None:
+        """Wrap ``inner``.
+
+        Args:
+            inner: The real job scorer.
+        """
+        self.inner = inner
+        self.usage = inner.usage
+        self.calls: list[tuple[Candidate, Any]] = []
+        self._lock = threading.Lock()
+
+    def __call__(self, candidate: Candidate, case: Any = None) -> tuple[float, dict[str, Any]]:
+        """Record the call and score it with the wrapped scorer.
+
+        Args:
+            candidate: The version to score.
+            case: The case, if any.
+
+        Returns:
+            The wrapped scorer's result.
+        """
+        with self._lock:
+            self.calls.append((candidate, case))
+        return self.inner(candidate, case)
+
+    def close(self) -> None:
+        """Close the wrapped scorer."""
+        self.inner.close()
 
 
 def _payload(**overrides: Any) -> BlackboxRunRequest:
@@ -129,7 +161,7 @@ def fake_native_proposers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, En
         invocations.append((engine, ctx))
         candidate = "aeioua" if engine == "autoresearch" else "aeiouaa"
         scores = []
-        for example in task.train_set or task.val_set or [None]:
+        for example in task.cases or [None]:
             if server.remaining <= 0:
                 break
             score, _ = server.evaluate(candidate, example)
@@ -147,8 +179,8 @@ def fake_native_proposers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, En
     return invocations
 
 
-def test_run_scores_baseline_and_optimized_on_the_holdout(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
-    """A single best_of_n run improves the seed and reports the split, lanes, usage and reflection timing."""
+def test_run_scores_baseline_and_best_in_a_separate_final_run(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
+    """A single best_of_n run improves the seed and reports the final run, lanes, usage and reflection timing."""
     sink: list[tuple[str, dict[str, Any]]] = []
 
     response = run_blackbox_optimization(
@@ -161,11 +193,12 @@ def test_run_scores_baseline_and_optimized_on_the_holdout(fake_lm: FakeReflectio
     assert response.optimizer_name == BLACKBOX_ENGINE_BEST_OF_N
     assert response.engine_used == BLACKBOX_ENGINE_BEST_OF_N
     assert response.strategy_mode == "single"
-    assert response.split_counts.train + response.split_counts.val + response.split_counts.test == 10
+    assert response.case_count == 10
+    assert response.final_scorer_runs == 20
     assert response.seed_candidate == "hello world"
     assert response.best_candidate == "aeiou"
-    assert response.baseline_test_metric == pytest.approx(3 / 11)
-    assert response.optimized_test_metric == 1.0
+    assert response.baseline_score == pytest.approx(3 / 11)
+    assert response.best_score == 1.0
     assert response.metric_improvement == pytest.approx(1 - 3 / 11)
     assert response.regression_guard_applied is False
     assert response.total_scorer_runs <= 12
@@ -193,10 +226,7 @@ def test_run_scores_baseline_and_optimized_on_the_holdout(fake_lm: FakeReflectio
     assert response.details["n_parse_failures"] == 0
 
     events = [event for event, _ in sink]
-    assert events[0] == PROGRESS_SPLITS_READY
-    assert events[1] == PROGRESS_BASELINE
-    assert events[-2] == PROGRESS_EVALUATION_STARTED
-    assert events[-1] == PROGRESS_OPTIMIZED
+    assert events[-3:] == [PROGRESS_EVALUATION_STARTED, PROGRESS_BASELINE, PROGRESS_OPTIMIZED]
     assert PROGRESS_LANE_STARTED in events
     assert PROGRESS_LANE_COMPLETED in events
     assert PROGRESS_LANE_HANDOFF not in events
@@ -244,7 +274,7 @@ def test_auto_run_hands_off_between_engines(
     assert all(ctx.native_options.runtime == "vercel" for _, ctx in fake_native_proposers)
     assert all(ctx.native_options.max_token_cost > 0 for _, ctx in fake_native_proposers)
     assert response.total_scorer_runs <= 24
-    assert response.optimized_test_metric >= response.baseline_test_metric
+    assert response.best_score >= response.baseline_score
     handoffs = [m for e, m in sink if e == PROGRESS_LANE_HANDOFF]
     assert len(handoffs) == 1
     assert handoffs[0]["to_engine"] == "gepa"
@@ -253,7 +283,7 @@ def test_auto_run_hands_off_between_engines(
 def test_regression_guard_restores_the_seed(
     fake_lm: FakeReflectionLM, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A winner that scores below the starting point on the held-out cases is discarded."""
+    """A winner that scores below the starting point in the final run is discarded."""
     monkeypatch.setattr(
         service_mod,
         "run_strategy",
@@ -267,7 +297,7 @@ def test_regression_guard_restores_the_seed(
 
     assert response.regression_guard_applied is True
     assert response.best_candidate == "hello world"
-    assert response.optimized_test_metric == response.baseline_test_metric
+    assert response.best_score == response.baseline_score
     assert response.metric_improvement == 0.0
     assert response.engine_used == BLACKBOX_ENGINE_BEST_OF_N
 
@@ -281,11 +311,14 @@ def test_seedless_run_without_cases_scores_the_version_alone(fake_lm: FakeReflec
     )
 
     assert response.seed_candidate is None
-    assert response.baseline_test_metric is None
+    assert response.baseline_score is None
     assert response.metric_improvement is None
-    assert response.split_counts.model_dump() == {"train": 0, "val": 0, "test": 0}
+    assert response.case_count == 0
+    assert response.case_results == []
+    assert response.final_scorer_runs == 1
+    assert response.best_feedback == "5 vowel(s)"
     assert response.best_candidate == "aeiou"
-    assert response.optimized_test_metric == 1.0
+    assert response.best_score == 1.0
 
 
 def test_run_fails_when_the_scorer_rejects_the_starting_point(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
@@ -341,7 +374,7 @@ def test_dry_run_scores_python_scorer_in_the_sandbox() -> None:
 
     assert response.ok is True
     assert response.score == 1.0
-    assert response.side_info == {"vowels": 5}
+    assert response.side_info == {"feedback": "5 vowel(s)", "vowels": 5}
     assert response.error is None
     assert response.elapsed_ms >= 0
 
@@ -526,8 +559,8 @@ def test_agent_target_runs_every_scorer_call_in_its_own_sandbox(
 
     # The default fake answers ``done`` (two vowels of four) for every run, so
     # the scorer that reads the answer file scores every version at 0.5.
-    assert response.baseline_test_metric == pytest.approx(0.5)
-    assert response.optimized_test_metric == pytest.approx(0.5)
+    assert response.baseline_score == pytest.approx(0.5)
+    assert response.best_score == pytest.approx(0.5)
     assert response.regression_guard_applied is False
 
     target_meta = response.optimization_metadata["target"]
@@ -537,9 +570,7 @@ def test_agent_target_runs_every_scorer_call_in_its_own_sandbox(
     assert target_meta["concurrency"] == 2
 
 
-_JUDGE_SCORER_CODE = (
-    "def score(candidate, case=None):\n    return float(llm(candidate, case['target'])), {'judge': 'fake'}\n"
-)
+_JUDGE_SCORER_CODE = "def score(candidate, case=None):\n    return float(llm(candidate, case['target'])), {'feedback': 'judged', 'judge': 'fake'}\n"
 
 
 @pytest.mark.parametrize(
@@ -577,103 +608,31 @@ def test_unavailable_native_recipe_fails_before_building_a_scorer(
 
 
 @pytest.mark.parametrize(
-    ("strategy", "requires_train"),
+    "strategy",
     [
-        ({"mode": "auto"}, True),
-        ({"mode": "single", "engine": "meta_harness"}, True),
-        ({"mode": "single", "engine": "gepa"}, False),
-        ({"mode": "single", "engine": "autoresearch"}, False),
-        ({"mode": "single", "engine": "autosaddler"}, False),
+        {"mode": "auto"},
+        {"mode": "single", "engine": "gepa"},
+        {"mode": "single", "engine": "best_of_n"},
+        {"mode": "single", "engine": "autoresearch"},
+        {"mode": "single", "engine": "meta_harness"},
+        {"mode": "single", "engine": "autosaddler"},
     ],
 )
-def test_empty_training_split_rejected_only_for_meta_harness_recipes(
-    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str], requires_train: bool
+@pytest.mark.parametrize("cases", [None, _CASES[:1], _CASES])
+def test_every_engine_accepts_zero_one_or_many_cases(
+    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str], cases: list[dict[str, Any]] | None
 ) -> None:
-    """Protect Meta-Harness from dropping validation-only data without relocating any cases.
+    """No engine asks for a minimum number of cases any more.
 
     Args:
         monkeypatch: Pytest fixture for deterministic runtime capabilities.
-        strategy: Upstream recipe being validated.
-        requires_train: Whether the recipe includes Meta-Harness.
+        strategy: The engine or recipe being validated.
+        cases: No cases, one case, or many.
     """
     monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
     monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
-    payload = _payload(
-        strategy=strategy,
-        max_cost_cents=100,
-        split_fractions={"train": 0.0, "val": 0.8, "test": 0.2},
-    )
-    before = payload.model_dump()
 
-    def unexpected_scorer(*args: Any, **kwargs: Any) -> None:
-        """Fail if an invalid training split reaches scorer construction.
-
-        Args:
-            *args: Unexpected scorer arguments.
-            **kwargs: Unexpected scorer options.
-        """
-        pytest.fail("Invalid training split reached scorer construction")
-
-    monkeypatch.setattr(service_mod, "build_scorer", unexpected_scorer)
-    if requires_train:
-        with pytest.raises(ServiceError, match="at least one training case"):
-            run_blackbox_optimization(payload, artifact_id="empty-training")
-    else:
-        validate_blackbox_payload(payload)
-
-    assert payload.model_dump() == before
-
-
-@pytest.mark.parametrize(
-    ("cases", "accepted"),
-    [
-        (_CASES[:1], False),
-        (_CASES[:2], True),
-    ],
-)
-def test_autosaddler_needs_two_visible_cases(
-    monkeypatch: pytest.MonkeyPatch, cases: list[dict[str, Any]], accepted: bool
-) -> None:
-    """Reject a single AutoSaddler run that cannot both diagnose and confirm a patch.
-
-    Args:
-        monkeypatch: Pytest fixture for deterministic runtime capabilities.
-        cases: Uploaded cases before the split.
-        accepted: Whether the payload should pass validation.
-    """
-    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
-    monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
-    payload = _payload(
-        strategy={"mode": "single", "engine": "autosaddler"},
-        max_cost_cents=100,
-        cases=cases,
-        split_fractions={"train": 1.0, "val": 0.0, "test": 0.0},
-    )
-    if accepted:
-        validate_blackbox_payload(payload)
-    else:
-        with pytest.raises(ServiceError, match="at least two"):
-            validate_blackbox_payload(payload)
-
-
-def test_smallest_training_share_keeps_one_case_for_meta_harness(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give a training share too small to round to a case one case, so Meta-Harness accepts it.
-
-    Args:
-        monkeypatch: Pytest fixture for deterministic runtime capabilities.
-    """
-    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
-    monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
-    payload = _payload(
-        strategy={"mode": "single", "engine": "meta_harness"},
-        max_cost_cents=100,
-        split_fractions={"train": 0.01, "val": 0.8, "test": 0.19},
-    )
-    before = payload.model_dump()
-
-    validate_blackbox_payload(payload)
-
-    assert payload.model_dump() == before
+    validate_blackbox_payload(_payload(strategy=strategy, max_cost_cents=100, cases=cases))
 
 
 def test_combined_usage_preserves_distinct_native_model_keys() -> None:
@@ -766,10 +725,10 @@ def test_scorer_llm_usage_is_billed_with_the_run(
     assert chosen == ["fake/judge"]
     chats = [request["body"]["messages"] for request in judge.requests]
     assert chats
-    assert chats[0] == [{"role": "system", "content": "hello world"}, {"role": "user", "content": "aeiou"}]
+    assert [{"role": "system", "content": "hello world"}, {"role": "user", "content": "aeiou"}] in chats
     assert all(chat[0]["role"] == "system" and chat[1] == {"role": "user", "content": "aeiou"} for chat in chats)
     assert all(r["authorization"] == "Bearer k" and r["body"]["model"] == "judge" for r in judge.requests)
-    assert response.baseline_test_metric == 0.5
+    assert response.baseline_score == 0.5
     calls = len(judge.requests)
     usage = {u.model: (u.input_tokens, u.output_tokens) for u in response.usage_by_model}
     assert usage["fake/judge"] == (3 * calls, calls)
@@ -868,13 +827,13 @@ def test_run_persists_every_version_it_scored(fake_lm: FakeReflectionLM, tmp_pat
 
     assert response.versions
     assert response.seed_candidate == "hello world"
-    assert response.baseline_test_metric == pytest.approx(3 / 11)
+    assert response.baseline_score == pytest.approx(3 / 11)
     assert response.versions[0].candidate == "aeiou"
     assert [version.first_run for version in response.versions] == sorted(
         version.first_run for version in response.versions
     )
     assert all(version.evals >= 1 and version.score is not None for version in response.versions)
-    assert response.versions[0].side_info == {"vowels": 5}
+    assert response.versions[0].side_info == {"feedback": "5 vowel(s)", "vowels": 5}
     assert max(response.versions, key=lambda version: version.score or 0.0).candidate == "aeiou"
 
 
@@ -947,13 +906,13 @@ def test_service_hands_the_progress_sink_to_the_engine_context(
 
 
 @pytest.mark.parametrize("concurrency", [1, 2])
-def test_score_holdout_logs_a_debug_heartbeat_per_case(caplog: pytest.LogCaptureFixture, concurrency: int) -> None:
-    """Held-out passes log one DEBUG line per case for the verbose log view, whichever pool serves them."""
+def test_final_run_logs_a_debug_heartbeat_per_case(caplog: pytest.LogCaptureFixture, concurrency: int) -> None:
+    """Final runs log one DEBUG line per case for the verbose log view, whichever pool serves them."""
     cases = [{"n": 1}, {"n": 2}]
 
     with caplog.at_level(logging.DEBUG, logger="core.service_gateway.optimization.blackbox.service"):
-        mean = service_mod._score_holdout(
-            lambda candidate, case: (case["n"] / 4, {}),
+        run = service_mod._final_run(
+            lambda candidate, case: (case["n"] / 4, {"feedback": f"case {case['n']}"}),
             "v",
             cases,
             label="optimized version",
@@ -961,16 +920,19 @@ def test_score_holdout_logs_a_debug_heartbeat_per_case(caplog: pytest.LogCapture
             concurrency=concurrency,
         )
 
-    assert mean == pytest.approx(0.375)
+    assert run.score == pytest.approx(0.375)
+    assert run.cases == [(0.25, "case 1"), (0.5, "case 2")]
+    assert run.feedback is None
+    assert run.runs == 2
     heartbeats = sorted(r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG)
     assert heartbeats == [
-        "optimized version holdout eval 1/2 score=0.250",
-        "optimized version holdout eval 2/2 score=0.500",
+        "optimized version final run 1/2 score=0.250",
+        "optimized version final run 2/2 score=0.500",
     ]
 
 
-def test_score_holdout_stops_scheduling_cases_once_one_fails() -> None:
-    """A failing case fails the pass at once and the cases still queued are never scored."""
+def test_final_run_stops_scheduling_cases_once_one_fails() -> None:
+    """A failing case fails the run at once and the cases still queued are never scored."""
     started: list[int] = []
     lock = threading.Lock()
 
@@ -986,23 +948,50 @@ def test_score_holdout_stops_scheduling_cases_once_one_fails() -> None:
 
     cases = [{"n": n} for n in range(1, 7)]
     with pytest.raises(ServiceError, match="scorer failed on the optimized version: ValueError: boom"):
-        service_mod._score_holdout(scorer, "v", cases, label="optimized version", phase=PHASE_FINAL, concurrency=2)
+        service_mod._final_run(scorer, "v", cases, label="optimized version", phase=PHASE_FINAL, concurrency=2)
 
     assert set(started) <= {1, 2, 3}
 
 
-def test_score_holdout_logs_the_score_in_single_task_mode(caplog: pytest.LogCaptureFixture) -> None:
-    """Without cases the held-out pass still says what it scores and what it scored."""
-    with caplog.at_level(logging.INFO, logger="core.service_gateway.optimization.blackbox.service"):
-        score = service_mod._score_holdout(
-            lambda candidate, case: (0.8, {}), "v", None, label="starting point", phase=PHASE_BASELINE
-        )
+def test_final_run_without_cases_scores_the_version_once() -> None:
+    """Without cases the final run scores the version once and keeps its feedback and named scores."""
+    seen: list[Any] = []
 
-    assert score == 0.8
-    assert [r.getMessage() for r in caplog.records if r.levelno == logging.INFO] == [
-        "scoring the starting point",
-        "starting point scored 0.800 in 0s",
-    ]
+    def scorer(candidate: Candidate, case: Any) -> tuple[float, dict[str, Any]]:
+        """Score once, reporting two named scores."""
+        seen.append(case)
+        return 0.8, {
+            "feedback": "mostly right",
+            "scores": {
+                "accuracy": {"score": 0.9, "feedback": "one slip"},
+                "tone": {"score": 0.7, "feedback": "a bit stiff"},
+            },
+        }
+
+    run = service_mod._final_run(scorer, "v", [], label="starting point", phase=PHASE_BASELINE)
+
+    assert seen == [None]
+    assert (run.score, run.feedback, run.cases, run.runs) == (0.8, "mostly right", [], 1)
+    assert {name: (entry.score, entry.feedback) for name, entry in run.named.items()} == {
+        "accuracy": (0.9, "one slip"),
+        "tone": (0.7, "a bit stiff"),
+    }
+
+
+def test_final_run_averages_named_scores_over_cases() -> None:
+    """Each named score is the mean over the cases, and its feedback says what each case found."""
+
+    def scorer(candidate: Candidate, case: Any) -> tuple[float, dict[str, Any]]:
+        """Score each case with one named score."""
+        return case["n"] / 2, {
+            "feedback": "ok",
+            "scores": {"accuracy": {"score": case["n"] / 2, "feedback": f"case {case['n']} acc"}},
+        }
+
+    run = service_mod._final_run(scorer, "v", [{"n": 1}, {"n": 2}], label="optimized version", phase=PHASE_FINAL)
+
+    assert run.named["accuracy"].score == pytest.approx(0.75)
+    assert run.named["accuracy"].feedback == "Case 1: case 1 acc\nCase 2: case 2 acc"
 
 
 def test_version_history_shows_the_validation_score_and_keeps_the_running_mean() -> None:
@@ -1063,69 +1052,61 @@ def test_run_versions_show_the_tree_score_as_their_headline(fake_lm: FakeReflect
         assert version.evals >= 1
 
 
-def test_holdout_passes_share_measurements_with_the_eval_server(caplog: pytest.LogCaptureFixture) -> None:
-    """The baseline pass feeds the engine's look at the seed; the final pass reuses the engine's scores."""
-    calls: list[tuple[Candidate, Any]] = []
+def test_final_run_rescores_both_versions_outside_the_budget(
+    fake_lm: FakeReflectionLM, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The winner is picked from the run's scores, then both versions are scored afresh on every case.
 
-    def scorer(candidate: Candidate, case: Any) -> tuple[float, dict[str, Any]]:
-        """Score by case number, remembering every call.
+    Args:
+        fake_lm: Metered model fake used by upstream Best-of-N.
+        tmp_path: Per-test artifact directory.
+        monkeypatch: Pytest fixture wrapping the job's scorer.
+    """
+    real_build = service_mod.build_scorer
+    recorders: list[_RecordingScorer] = []
 
-        Args:
-            candidate: The version.
-            case: The case.
+    def build(*args: Any, **kwargs: Any) -> _RecordingScorer:
+        """Wrap the real sandboxed scorer so every call is recorded."""
+        recorders.append(_RecordingScorer(real_build(*args, **kwargs)))
+        return recorders[-1]
 
-        Returns:
-            A score that depends on the case only.
-        """
-        calls.append((candidate, case))
-        return case["n"] / 4, {"case": case["n"]}
+    monkeypatch.setattr(service_mod, "build_scorer", build)
 
-    cases = [{"n": 1}, {"n": 2}]
-    server = EvalServer(scorer, max_evals=10)
+    response = run_blackbox_optimization(_payload(), artifact_id="job-final", gepa_log_dir_path=str(tmp_path))
 
-    baseline = service_mod._score_holdout(
-        scorer, "seed", cases, label="starting point", phase=PHASE_BASELINE, server=server
-    )
-    assert baseline == pytest.approx(0.375)
-    assert len(calls) == 2
-    assert server.evaluate("seed", cases[0]) == (0.25, {"case": 1})
-    assert server.evaluate("seed", cases[1]) == (0.5, {"case": 2})
-    assert (server.used, len(calls)) == (0, 2)
-
-    server.evaluate("best", cases[0])
-    server.evaluate("best", cases[1])
-    assert (server.used, len(calls)) == (2, 4)
-    with caplog.at_level(logging.INFO, logger="core.service_gateway.optimization.blackbox.service"):
-        optimized = service_mod._score_holdout(
-            scorer, "best", cases, label="optimized version", phase=PHASE_FINAL, server=server
-        )
-
-    assert optimized == pytest.approx(0.375)
-    assert len(calls) == 4
-    assert any("(2 reused from the run)" in r.getMessage() for r in caplog.records)
+    calls = recorders[0].calls
+    assert response.total_scorer_runs <= 12
+    assert response.final_scorer_runs == 2 * len(_CASES)
+    assert len(calls) == response.total_scorer_runs + response.final_scorer_runs
+    final_calls = calls[-response.final_scorer_runs :]
+    assert sorted(candidate for candidate, _ in final_calls) == ["aeiou"] * len(_CASES) + ["hello world"] * len(_CASES)
+    assert response.baseline_score == pytest.approx(3 / 11)
+    assert response.best_score == 1.0
+    assert response.case_count == len(_CASES)
+    assert [(row.baseline_score, row.best_score) for row in response.case_results] == [
+        (pytest.approx(3 / 11), 1.0)
+    ] * len(_CASES)
+    assert response.case_results[0].best_feedback == "5 vowel(s)"
 
 
-def test_run_without_a_test_split_measures_each_pair_once(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
-    """Reuse a completed candidate's training scores while charging partial subsequent proposals.
+def test_one_case_run_scores_and_reports_that_case(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
+    """A single case is enough: no split can leave an engine or the final run empty-handed.
 
     Args:
         fake_lm: Metered model fake used by upstream Best-of-N.
         tmp_path: Per-test artifact directory.
     """
     response = run_blackbox_optimization(
-        _payload(split_fractions={"train": 1.0, "val": 0.0, "test": 0.0}),
-        artifact_id="job-1",
+        _payload(cases=_CASES[:1], budget={"max_scorer_runs": 4}),
+        artifact_id="job-one-case",
         gepa_log_dir_path=str(tmp_path),
     )
 
-    assert (response.split_counts.train, response.split_counts.val, response.split_counts.test) == (10, 0, 0)
-    assert response.baseline_test_metric == pytest.approx(3 / 11)
-    assert response.versions[0].mean_score == 1.0
-    assert response.versions[0].evals == 10
-    assert response.best_candidate == "aeiou"
-    assert response.optimized_test_metric == response.details["optimizer_best_score"] == 1.0
-    assert response.total_scorer_runs == 12
-    assert response.versions[1].evals == 2
+    assert response.case_count == 1
+    assert response.final_scorer_runs == 2
+    assert response.baseline_score == pytest.approx(3 / 11)
+    assert response.best_score == 1.0
+    assert len(response.case_results) == 1
 
 
 @pytest.mark.parametrize("evaluated", [False, True])
@@ -1138,12 +1119,11 @@ def test_budget_stop_preserves_only_evaluated_incumbent_and_skips_final_test(fak
         monkeypatch: Dependency replacement fixture.
         evaluated: Whether upstream has published a completed aggregate selection.
     """
-    holdouts = []
+    final_runs = []
 
-    def holdout(*args, **kwargs):
-        """Record which holdout passes were actually requested."""
-        holdouts.append(kwargs["phase"])
-        return 0.3
+    def final_run(*args, **kwargs):
+        """Record which final runs were actually requested."""
+        final_runs.append(kwargs["phase"])
 
     def strategy(*args, **kwargs):
         """Stop after the upstream incumbent publication boundary."""
@@ -1158,30 +1138,28 @@ def test_budget_stop_preserves_only_evaluated_incumbent_and_skips_final_test(fak
             stop.evidence["selection_scope"] = "validation"
         raise stop
 
-    monkeypatch.setattr(service_mod, "_score_holdout", holdout)
+    monkeypatch.setattr(service_mod, "_final_run", final_run)
     monkeypatch.setattr(service_mod, "run_strategy", strategy)
     with pytest.raises(BudgetReached) as caught:
         run_blackbox_optimization(_payload(), artifact_id="budget-fixture", gepa_log_dir_path=str(tmp_path))
-    assert holdouts == [PHASE_BASELINE]
+    assert final_runs == []
     if evaluated:
         response = caught.value.result
         assert response.best_candidate == "tested candidate"
-        assert response.optimized_test_metric is None
+        assert response.best_score is None
         assert response.details["optimizer_best_score"] == 0.7
         assert caught.value.evidence["candidate_origin"] == "optimized"
     else:
         response = caught.value.result
         assert response.best_candidate == "hello world"
-        assert response.baseline_test_metric == 0.3
-        assert response.optimized_test_metric is None
-        assert response.details["optimizer_best_score"] == 0.3
+        assert response.baseline_score is None
+        assert response.best_score is None
         assert caught.value.evidence["candidate_origin"] == "seed"
-        assert caught.value.evidence["selection_scope"] == "heldout"
     assert caught.value.evidence["final_evaluation_completed"] is False
 
 
-def test_budget_stop_before_completed_baseline_has_no_result(fake_lm, tmp_path, monkeypatch):
-    """Leave result absent when the baseline holdout did not finish.
+def test_budget_stop_during_the_final_run_keeps_the_winner_unscored(fake_lm, tmp_path, monkeypatch):
+    """A budget stop in the final run still reports the winner, without final scores.
 
     Args:
         fake_lm: Deterministic reflection model.
@@ -1189,15 +1167,17 @@ def test_budget_stop_before_completed_baseline_has_no_result(fake_lm, tmp_path, 
         monkeypatch: Dependency replacement fixture.
     """
 
-    def holdout(*_args, **_kwargs):
-        """Stop before returning any complete baseline score."""
+    def final_run(*_args, **_kwargs):
+        """Stop before returning any final score."""
         raise BudgetReached()
 
-    monkeypatch.setattr(service_mod, "_score_holdout", holdout)
+    monkeypatch.setattr(service_mod, "_final_run", final_run)
     with pytest.raises(BudgetReached) as caught:
         run_blackbox_optimization(_payload(), artifact_id="budget-fixture", gepa_log_dir_path=str(tmp_path))
 
-    assert caught.value.result is None
+    assert caught.value.result.best_candidate == "aeiou"
+    assert caught.value.result.baseline_score is None
+    assert caught.value.result.best_score is None
 
 
 @pytest.mark.parametrize(

@@ -169,7 +169,9 @@ export function BlackboxConfigCard({
   const reflectionCard = toModelCard(payload.reflection_model_config);
   const taskCard = toModelCard(payload.task_model_config);
   const scorerModelCard = toModelCard(scorer.model);
-  const split = (payload.split_fractions ?? job.split_fractions ?? null) as {
+  // Only runs submitted before cases stopped being split carry a split or a
+  // shuffle flag; newer runs score every case.
+  const split = (payload.split_fractions ?? null) as {
     train: number;
     val: number;
     test: number;
@@ -178,7 +180,6 @@ export function BlackboxConfigCard({
   const objective = typeof payload.objective === "string" ? payload.objective : "";
   const background = typeof payload.background === "string" ? payload.background : "";
   const engine = job.blackbox_result?.engine_used ?? strategy.engine;
-  const splitCounts = job.blackbox_result?.split_counts ?? null;
   const timeout =
     typeof scorer.timeout_seconds === "number"
       ? formatMsg("optimization.blackbox.config.scorer_timeout", {
@@ -487,8 +488,7 @@ export function BlackboxConfigCard({
     });
   }
 
-  const shuffleVal =
-    payload.shuffle != null ? Boolean(payload.shuffle) : job.shuffle != null ? job.shuffle : null;
+  const shuffleVal = payload.shuffle != null ? Boolean(payload.shuffle) : null;
   const seedVal = (payload.seed ?? job.seed) as number | null | undefined;
   const dataRows: ConfigRow[] = [];
   if (shuffleVal != null) {
@@ -707,22 +707,6 @@ export function BlackboxConfigCard({
                     }
                     icon={<Database />}
                   />
-                  {splitCounts && (splitCounts.train ?? 0) > 0 && (
-                    <SlideHeroCard
-                      index={1}
-                      label={
-                        <HelpTip text={tip("blackbox.config.split_counts")}>
-                          {msg("optimization.blackbox.config.split_counts")}
-                        </HelpTip>
-                      }
-                      value={formatMsg("optimization.blackbox.config.split_counts_value", {
-                        train: splitCounts.train ?? 0,
-                        val: splitCounts.val ?? 0,
-                        test: splitCounts.test ?? 0,
-                      })}
-                      icon={<Shuffle />}
-                    />
-                  )}
                 </div>
                 {split &&
                   (holdout ? (

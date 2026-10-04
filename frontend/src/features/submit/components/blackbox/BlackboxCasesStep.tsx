@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Books, UploadSimple } from "@/shared/ui/icons";
+import { Books, CaretDown, Trash, UploadSimple } from "@/shared/ui/icons";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Button } from "@/shared/ui/primitives/button";
 import { Separator } from "@/shared/ui/primitives/separator";
@@ -13,7 +13,7 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { DATASET_UPLOAD_ACCEPT } from "@/shared/lib/parse-dataset";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
-import { StepCard } from "./shared";
+import { StepCard, cnGrid } from "./shared";
 
 export function BlackboxCasesStep({
   w,
@@ -35,78 +35,125 @@ export function BlackboxCasesStep({
     handlePickFromLibrary,
     libraryOpen,
     setLibraryOpen,
+    clearCases,
   } = w;
+  // Cases are optional: the section opens on demand, and stays open while
+  // there are cases in it (a clone, an upload, or the agent staging rows).
+  const [requested, setRequested] = useState(false);
+  const open = requested || Boolean(parsedCases);
 
   return (
     <StepCard
       title={msg("submit.blackbox.cases.title")}
       tip={msg("submit.blackbox.cases.none_hint")}
       description={msg("submit.blackbox.cases.desc")}
-    >
-      <DatasetPreviewLayout
-        data={parsedCases}
-        filename={casesName}
-        expanded={previewExpanded}
-        onExpandedChange={onPreviewExpandedChange}
-        open={previewOpen}
-        onOpenChange={onPreviewOpenChange}
-      >
-        <label
-          className={cn(
-            "group relative block cursor-pointer rounded-xl focus-within:ring-2 focus-within:ring-ring border-2 border-dashed text-center transition-colors duration-200",
-            parsedCases
-              ? "border-primary/40 bg-primary/5 p-4"
-              : "p-6 hover:border-primary/50 hover:bg-muted/30 sm:p-10",
+      trailing={
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" size="sm">
+            {msg("submit.blackbox.cases.optional")}
+          </Badge>
+          {parsedCases ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5"
+              onClick={clearCases}
+            >
+              <Trash className="size-3.5" aria-hidden="true" />
+              {msg("submit.blackbox.cases.remove")}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              aria-expanded={open}
+              aria-controls="bb-cases-body"
+              onClick={() => setRequested((current) => !current)}
+            >
+              {msg("submit.blackbox.cases.add")}
+              <CaretDown
+                className={cn("size-3.5 transition-transform", open && "rotate-180")}
+                aria-hidden="true"
+              />
+            </Button>
           )}
-        >
-          <UploadSimple className="mx-auto mb-3 h-10 w-10 text-muted-foreground transition-colors duration-300 group-hover:text-primary/70" />
-          <p
-            className="max-w-full truncate px-4 text-sm font-medium"
-            title={casesName || undefined}
-          >
-            {casesName || msg("submit.blackbox.cases.upload")}
-          </p>
-          {parsedCases && (
-            <Badge variant="secondary" size="sm" className="mt-2">
-              {formatMsg("submit.blackbox.cases.loaded", {
-                rows: parsedCases.rowCount,
-                cols: parsedCases.columns.length,
-              })}
-            </Badge>
-          )}
-          {parsedCases && (
-            <span className="mt-3 block text-sm underline underline-offset-4">
-              {msg("auto.features.agent.panel.components.datasetuploadcard.replace")}
-            </span>
-          )}
-          <input
-            type="file"
-            accept={DATASET_UPLOAD_ACCEPT}
-            className="sr-only"
-            onChange={handleFileUpload}
-          />
-        </label>
-
-        <div className="flex items-center gap-3">
-          <Separator className="flex-1" />
-          <span className="text-xs text-muted-foreground">{msg("submit.dataset.library_or")}</span>
-          <Separator className="flex-1" />
         </div>
+      }
+    >
+      <div id="bb-cases-body" className={cnGrid(open)} inert={open ? undefined : true}>
+        <div className="min-h-0 space-y-5 overflow-hidden">
+          <p className="text-sm text-muted-foreground">{msg("submit.blackbox.cases.how")}</p>
+          <DatasetPreviewLayout
+            data={parsedCases}
+            filename={casesName}
+            expanded={previewExpanded}
+            onExpandedChange={onPreviewExpandedChange}
+            open={previewOpen}
+            onOpenChange={onPreviewOpenChange}
+          >
+            <label
+              className={cn(
+                "group relative block cursor-pointer rounded-xl focus-within:ring-2 focus-within:ring-ring border-2 border-dashed text-center transition-colors duration-200",
+                parsedCases
+                  ? "border-primary/40 bg-primary/5 p-4"
+                  : "p-6 hover:border-primary/50 hover:bg-muted/30 sm:p-10",
+              )}
+            >
+              <UploadSimple className="mx-auto mb-3 h-10 w-10 text-muted-foreground transition-colors duration-300 group-hover:text-primary/70" />
+              <p
+                className="max-w-full truncate px-4 text-sm font-medium"
+                title={casesName || undefined}
+              >
+                {casesName || msg("submit.blackbox.cases.upload")}
+              </p>
+              {parsedCases && (
+                <Badge variant="secondary" size="sm" className="mt-2">
+                  {formatMsg("submit.blackbox.cases.loaded", {
+                    rows: parsedCases.rowCount,
+                    cols: parsedCases.columns.length,
+                  })}
+                </Badge>
+              )}
+              {parsedCases && (
+                <span className="mt-3 block text-sm underline underline-offset-4">
+                  {msg("auto.features.agent.panel.components.datasetuploadcard.replace")}
+                </span>
+              )}
+              <input
+                type="file"
+                accept={DATASET_UPLOAD_ACCEPT}
+                className="sr-only"
+                onChange={handleFileUpload}
+              />
+            </label>
 
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setLibraryOpen(true)}
-          className="min-h-[44px] w-full justify-center gap-2 lg:min-h-0"
-        >
-          <Books className="size-4" />
-          {msg("submit.dataset.library_pick")}
-        </Button>
-        <ImportFromMenu
-          onImported={handlePickFromLibrary}
-          className="min-h-[44px] w-full justify-center gap-2 lg:min-h-0"
-        />
-      </DatasetPreviewLayout>
+            <div className="flex items-center gap-3">
+              <Separator className="flex-1" />
+              <span className="text-xs text-muted-foreground">
+                {msg("submit.dataset.library_or")}
+              </span>
+              <Separator className="flex-1" />
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setLibraryOpen(true)}
+              className="min-h-[44px] w-full justify-center gap-2 lg:min-h-0"
+            >
+              <Books className="size-4" />
+              {msg("submit.dataset.library_pick")}
+            </Button>
+            <ImportFromMenu
+              onImported={handlePickFromLibrary}
+              className="min-h-[44px] w-full justify-center gap-2 lg:min-h-0"
+            />
+          </DatasetPreviewLayout>
+        </div>
+      </div>
       <DatasetPickerDialog
         open={libraryOpen}
         onOpenChange={setLibraryOpen}

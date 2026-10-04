@@ -566,21 +566,6 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     readingTimeSec: 12,
   },
   {
-    id: "bb-budget",
-    title: msg("tutorial.step.bb_budget.title"),
-    description: msg("tutorial.step.bb_budget.body"),
-    target: "[data-tutorial='wizard-stage-evaluation']",
-    placement: "left",
-    beforeShow: async () => {
-      await ensureSubmit("anything");
-      injectBlackboxDemo();
-      showWizardSubstep("evaluation", "totalBudgetInput");
-      await waitForElement("[data-tutorial='wizard-stage-evaluation']");
-    },
-    tracks: ANYTHING_ONLY,
-    readingTimeSec: 9,
-  },
-  {
     id: "bb-scorer",
     title: msg("tutorial.step.bb_scorer.title"),
     description: msg("tutorial.step.bb_scorer.body"),
@@ -594,6 +579,21 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     },
     tracks: ANYTHING_ONLY,
     readingTimeSec: 15,
+  },
+  {
+    id: "bb-budget",
+    title: msg("tutorial.step.bb_budget.title"),
+    description: msg("tutorial.step.bb_budget.body"),
+    target: "[data-tutorial='wizard-stage-evaluation']",
+    placement: "left",
+    beforeShow: async () => {
+      await ensureSubmit("anything");
+      injectBlackboxDemo();
+      showWizardSubstep("evaluation", "totalBudgetInput");
+      await waitForElement("[data-tutorial='wizard-stage-evaluation']");
+    },
+    tracks: ANYTHING_ONLY,
+    readingTimeSec: 9,
   },
   {
     id: "bb-engines",

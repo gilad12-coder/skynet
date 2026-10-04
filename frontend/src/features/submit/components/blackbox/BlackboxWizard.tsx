@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
 import { ValidationFrame, ValidationGate, ValidationPlan } from "../ValidationFrame";
@@ -22,7 +22,6 @@ import { SubmitNav } from "../SubmitNav";
 import { ModelConfigModal } from "../ModelConfigModal";
 import { TotalBudgetCard } from "../TotalBudgetCard";
 import { WizardSubsteps } from "../WizardSubsteps";
-import { SplitSection } from "../steps/SplitSection";
 import { BlackboxBasicsStep } from "./BlackboxBasicsStep";
 import { BlackboxStartStep } from "./BlackboxStartStep";
 import { BlackboxCasesStep } from "./BlackboxCasesStep";
@@ -30,18 +29,20 @@ import { BlackboxScorerStep } from "./BlackboxScorerStep";
 import { BlackboxOptimizerStep } from "./BlackboxOptimizerStep";
 import { BlackboxSummaryStep } from "./BlackboxSummaryStep";
 
-type EvaluationStep = "cases" | "scorer" | "split" | "budget";
+type EvaluationStep = "scorer" | "cases" | "budget";
+// The scorer is the one thing a run needs; cases are optional and the budget
+// comes last because both of the others move the estimate.
+const EVALUATION_STEPS: readonly EvaluationStep[] = ["scorer", "cases", "budget"];
 const GOAL_STEPS = ["goal"] as const;
 const OPTIMIZATION_STEPS = ["strategy", "model", "check"] as const;
 const REVIEW_STEPS = ["basics", "summary"] as const;
 
 /** The evaluation substep that holds a field, so a problem opens where it is fixed. */
-function evaluationStepFor(field: string | undefined, hasCases: boolean): EvaluationStep | null {
+function evaluationStepFor(field: string | undefined): EvaluationStep | null {
   if (!field) return null;
   if (field === "totalBudgetInput") return "budget";
-  if (field === "bb-cases" || field === "wizard-stage-evaluation") return "cases";
-  if (field.startsWith("bb-scor")) return "scorer";
-  if (field === "bb-split") return hasCases ? "split" : "cases";
+  if (field === "bb-cases") return "cases";
+  if (field.startsWith("bb-scor") || field === "wizard-stage-evaluation") return "scorer";
   return null;
 }
 
@@ -68,25 +69,20 @@ export function BlackboxWizard({
   const [reviewPart, setReviewPart] = useState(0);
   const activeReviewPart = Math.min(reviewPart, REVIEW_STEPS.length - 1);
 
-  // The split only exists once there are cases to divide.
-  const hasCases = Boolean(w.parsedCases?.rowCount);
-  const evaluationSteps = useMemo<readonly EvaluationStep[]>(
-    () => (hasCases ? ["budget", "cases", "scorer", "split"] : ["budget", "cases", "scorer"]),
-    [hasCases],
-  );
+  const evaluationSteps = EVALUATION_STEPS;
   const activeEvaluationPart = Math.min(evaluationPart, evaluationSteps.length - 1);
-  const activeEvaluationStep: EvaluationStep = evaluationSteps[activeEvaluationPart] ?? "cases";
+  const activeEvaluationStep: EvaluationStep = evaluationSteps[activeEvaluationPart] ?? "scorer";
 
   const routeSubstep = useCallback(
     (stage: WizardStageId, field?: string) => {
       if (stage === "evaluation") {
-        const key = evaluationStepFor(field, hasCases);
+        const key = evaluationStepFor(field);
         if (key) setEvaluationPart(Math.max(0, evaluationSteps.indexOf(key)));
       }
       if (stage === "optimization")
         setOptimizationPart(field === "bb-optimization-model" || field === "bb-max-runs" ? 1 : 0);
     },
-    [evaluationSteps, hasCases],
+    [evaluationSteps],
   );
   useEffect(() => registerTutorialHook("showWizardSubstep", routeSubstep), [routeSubstep]);
   // A reported problem opens the substep that holds its field and lands focus there.
@@ -140,20 +136,11 @@ export function BlackboxWizard({
         />
       </div>
     ),
-    // Cases and the optimization model both move the estimate and come later.
+    // The optimization model moves the estimate and is chosen later.
     budget: (
-      <TotalBudgetCard
-        w={w}
-        mode={w.tokenSource}
-        preliminary={!hasCases || !w.reflectionModel.name.trim()}
-      />
+      <TotalBudgetCard w={w} mode={w.tokenSource} preliminary={!w.reflectionModel.name.trim()} />
     ),
     scorer: <BlackboxScorerStep w={w} />,
-    split: (
-      <div id="bb-split" tabIndex={-1} className="outline-none">
-        <SplitSection w={w} totalRows={w.parsedCases?.rowCount ?? 0} />
-      </div>
-    ),
   };
   const optimizationPanels: readonly ReactNode[] = [
     <BlackboxOptimizerStep key="strategy" w={w} part="strategy" />,

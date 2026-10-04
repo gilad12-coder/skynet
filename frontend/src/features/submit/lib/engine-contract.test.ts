@@ -60,7 +60,6 @@ const selection = {
   mode: "auto" as const,
   engine: null,
   hasParts: false,
-  trainingCaseCount: null,
 };
 
 test("iteration limits apply only to a single Meta-Harness run", () => {
@@ -165,27 +164,16 @@ test("parts follow each single engine's capabilities", () => {
   );
 });
 
-test("Meta-Harness recipes require training cases without moving validation data", () => {
-  for (const mode of ["auto", "single"] as const) {
-    assert.equal(
-      engineSelectionIssue({ ...selection, mode, engine: "meta_harness", trainingCaseCount: 0 })
-        ?.key,
-      "submit.blackbox.validation.training_cases",
-    );
-    assert.equal(
-      engineSelectionIssue({ ...selection, mode, engine: "meta_harness", trainingCaseCount: 1 }),
-      null,
-    );
-    assert.equal(
-      engineSelectionIssue({ ...selection, mode, engine: "meta_harness", trainingCaseCount: null }),
-      null,
-    );
-  }
-  for (const engine of ["gepa", "autoresearch"] as const) {
-    assert.equal(
-      engineSelectionIssue({ ...selection, mode: "single", engine, trainingCaseCount: 0 }),
-      null,
-    );
+test("every engine and Auto run without cases", () => {
+  assert.equal(engineSelectionIssue({ ...selection, mode: "auto", engine: null }), null);
+  for (const engine of [
+    "gepa",
+    "best_of_n",
+    "autoresearch",
+    "meta_harness",
+    "autosaddler",
+  ] as const) {
+    assert.equal(engineSelectionIssue({ ...selection, mode: "single", engine }), null);
   }
 });
 

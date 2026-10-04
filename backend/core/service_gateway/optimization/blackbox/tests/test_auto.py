@@ -242,6 +242,98 @@ def test_auto_continuation_stops_after_cumulative_spend(tmp_path: Path, monkeypa
         )
     assert stopped.value.result.best_candidate == "seed:meta_harness"
     assert stopped.value.result.best_score == -1.0
-    assert stopped.value.evidence["selection_scope"] == "training"
+    assert stopped.value.evidence["selection_scope"] == "validation"
     assert spent[0] == budget
     assert sorted(starts) == sorted(AUTO_ENGINES)
+
+
+@pytest.mark.parametrize("cases", [[], [{"i": 0}], [{"i": 0}, {"i": 1}, {"i": 2}]])
+def test_auto_runs_with_zero_one_or_many_cases(tmp_path: Path, fixture_engines: None, cases: list[Any]) -> None:
+    """Auto needs no cases: every lane and the continuation run with or without them.
+
+    Args:
+        tmp_path: Artifact directory.
+        fixture_engines: Deterministic fixture.
+        cases: The run's cases.
+    """
+    server = EvalServer(score, max_evals=2 * (len(AUTO_ENGINES) + 1))
+
+    result, lanes = auto.run_strategy(
+        BlackboxStrategy(), Task("seed", cases=cases), server, make_ctx(str(tmp_path)), caps=CAPS
+    )
+
+    assert result.best_candidate == "seed:meta_harness:gepa"
+    assert all(lane.status != "failed" for lane in lanes)
+
+
+def test_a_failed_auto_lane_does_not_sink_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """One engine crashing is recorded on its lane while the others' work still wins.
+
+    Args:
+        tmp_path: Artifact directory.
+        monkeypatch: Patch fixture.
+    """
+
+    class CrashingEngine(FixtureEngine):
+        """Crash the way a broken engine does, before scoring anything."""
+
+        def run(self, task: Any, server: Any, ctx: EngineContext | None = None) -> Any:
+            """Raise an engine-internal error.
+
+            Args:
+                task: Scheduler-selected task.
+                server: Scoring allowance.
+                ctx: Run accounting context.
+
+            Raises:
+                RuntimeError: Always.
+            """
+            raise RuntimeError("engine crashed")
+
+    monkeypatch.setattr(
+        auto, "get_engine", lambda name, caps: CrashingEngine(name) if name == "autoresearch" else FixtureEngine(name)
+    )
+    server = EvalServer(score, max_evals=2 * (len(AUTO_ENGINES) + 1))
+
+    result, lanes = auto.run_strategy(BlackboxStrategy(), Task("seed"), server, make_ctx(str(tmp_path)), caps=CAPS)
+
+    assert result.best_candidate == "seed:meta_harness:gepa"
+    [failed] = [lane for lane in lanes if lane.status == "failed"]
+    assert failed.engine == "autoresearch"
+    assert "engine crashed" in (failed.error or "")
+
+
+def test_auto_fails_when_every_lane_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With nothing to continue from, the run reports every lane's error.
+
+    Args:
+        tmp_path: Artifact directory.
+        monkeypatch: Patch fixture.
+    """
+
+    class CrashingEngine(FixtureEngine):
+        """Crash before scoring anything."""
+
+        def run(self, task: Any, server: Any, ctx: EngineContext | None = None) -> Any:
+            """Raise an engine-internal error.
+
+            Args:
+                task: Scheduler-selected task.
+                server: Scoring allowance.
+                ctx: Run accounting context.
+
+            Raises:
+                RuntimeError: Always.
+            """
+            raise RuntimeError("engine crashed")
+
+    monkeypatch.setattr(auto, "get_engine", lambda name, caps: CrashingEngine(name))
+
+    with pytest.raises(ServiceError, match="Every Auto exploration lane failed"):
+        auto.run_strategy(
+            BlackboxStrategy(),
+            Task("seed"),
+            EvalServer(score, max_evals=2 * (len(AUTO_ENGINES) + 1)),
+            make_ctx(str(tmp_path)),
+            caps=CAPS,
+        )

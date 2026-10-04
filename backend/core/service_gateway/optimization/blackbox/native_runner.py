@@ -1,7 +1,7 @@
 """Execute pinned upstream agent engines with a filesystem evaluator mailbox.
 
 This standalone module is copied into the selected runtime. It deliberately
-imports no Skynet application code and never receives held-out test examples.
+imports no Skynet application code; the parent owns the scorer and its cases.
 """
 
 from __future__ import annotations
@@ -134,7 +134,7 @@ class ProgressEvalServer(EvalServer):
         """Bind the upstream evaluator and its additive progress transport.
 
         Args:
-            task: Upstream task without held-out examples.
+            task: Upstream task carrying the job's cases, if any.
             mailbox: Parent evaluation and progress connection.
             config: Native engine evaluation budget and concurrency.
             output_dir: Persisted upstream evaluation artifacts.

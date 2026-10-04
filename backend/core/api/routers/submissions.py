@@ -1298,8 +1298,6 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                 PAYLOAD_OVERVIEW_MODEL_SETTINGS: strip_api_key(payload.reflection_model_settings.model_dump()),
                 PAYLOAD_OVERVIEW_REFLECTION_MODEL: reflection_model,
                 PAYLOAD_OVERVIEW_DATASET_ROWS: len(payload.cases or []),
-                PAYLOAD_OVERVIEW_SPLIT_FRACTIONS: payload.split_fractions.model_dump(),
-                PAYLOAD_OVERVIEW_SHUFFLE: payload.shuffle,
                 PAYLOAD_OVERVIEW_SEED: payload.seed,
                 PAYLOAD_OVERVIEW_TOKEN_SOURCE: payload.token_source,
                 PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL: _token_sources_by_model,

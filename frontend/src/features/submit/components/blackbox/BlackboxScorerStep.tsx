@@ -16,6 +16,11 @@ import { ModelRoleRow } from "./ModelRoleRow";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 import { formatElapsedMs, formatScore } from "@/shared/lib/formatters";
+import {
+  isMissingFeedbackError,
+  sideInfoFeedback,
+  sideInfoNamedScores,
+} from "@/shared/lib/blackbox-scores";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
@@ -64,7 +69,15 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
   } = w;
 
   const result = dryRun.status === "done" ? dryRun.result : null;
-  const sideEntries = result?.ok ? Object.entries(result.side_info) : [];
+  const feedback = result?.ok ? sideInfoFeedback(result.side_info) : null;
+  const namedScores = Object.entries(result?.ok ? sideInfoNamedScores(result.side_info) : {});
+  // Feedback and named scores get their own rows; the rest is the scorer's free-form side info.
+  const sideEntries = result?.ok
+    ? Object.entries(result.side_info).filter(([key]) => key !== "feedback" && key !== "scores")
+    : [];
+  const missingFeedback =
+    isMissingFeedbackError(result && !result.ok ? result.error : null) ||
+    isMissingFeedbackError(scorerValidation?.errors?.[0]);
   const sideImages = sideEntries.filter(isDataImage);
   const sideText = Object.fromEntries(sideEntries.filter((entry) => !isDataImage(entry)));
 
@@ -291,6 +304,51 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               })}
             </p>
           )}
+          {feedback && (
+            <div className="space-y-1">
+              <p className="text-[0.625rem] font-medium uppercase tracking-wide text-[#8C7A6B]">
+                {msg("submit.blackbox.scorer.result_feedback")}
+              </p>
+              <p className="whitespace-pre-wrap break-words text-xs text-foreground/90" dir="auto">
+                {feedback}
+              </p>
+            </div>
+          )}
+          {namedScores.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[0.625rem] font-medium uppercase tracking-wide text-[#8C7A6B]">
+                {msg("submit.blackbox.scorer.result_named")}
+              </p>
+              <ul className="space-y-1.5">
+                {namedScores.map(([name, named]) => (
+                  <li
+                    key={name}
+                    className="rounded-md border border-border/40 bg-background/70 px-2.5 py-1.5"
+                  >
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="truncate font-mono text-xs" dir="ltr">
+                        {name}
+                      </span>
+                      <span
+                        className="font-mono text-xs font-semibold tabular-nums text-[#3D2E22]"
+                        dir="ltr"
+                      >
+                        {formatScore(named.score)}
+                      </span>
+                    </div>
+                    {named.feedback && (
+                      <p
+                        className="mt-0.5 whitespace-pre-wrap break-words text-[0.6875rem] text-muted-foreground"
+                        dir="auto"
+                      >
+                        {named.feedback}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {sideImages.length > 0 && (
             <div className="flex flex-wrap gap-2" dir="ltr">
               {sideImages.map(([key, url]) => (
@@ -316,7 +374,13 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
           )}
         </div>
       )}
-      {result && !result.ok && scorerKind === "remote" && (
+      {missingFeedback && (
+        <InlineErrorRow
+          title={msg("submit.blackbox.scorer.feedback_missing")}
+          message={msg("submit.blackbox.scorer.feedback_shape")}
+        />
+      )}
+      {result && !result.ok && scorerKind === "remote" && !missingFeedback && (
         <InlineErrorRow
           title={result.error ? msg("submit.blackbox.scorer.result_error") : undefined}
           message={result.error || msg("submit.blackbox.scorer.result_error")}

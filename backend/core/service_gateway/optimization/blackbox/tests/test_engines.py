@@ -122,8 +122,7 @@ def test_best_of_n_matches_direct_upstream_sampling(tmp_path: Path) -> None:
         seed_candidate="never score this seed",
         objective="more vowels",
         background="Keep the task unchanged",
-        train_set=[{"id": "train-a"}, {"id": "train-b"}],
-        val_set=[{"id": "validation"}],
+        cases=[{"id": "train-a"}, {"id": "train-b"}],
     )
 
     def direct_score(candidate: Any, example: Any = None) -> tuple[float, dict[str, Any]]:
@@ -157,8 +156,7 @@ def test_best_of_n_matches_direct_upstream_sampling(tmp_path: Path) -> None:
         seed_candidate=task.seed_candidate,
         objective=task.objective,
         background=task.background,
-        train_set=task.train_set,
-        val_set=task.val_set,
+        train_set=task.cases,
     )
     upstream = UpstreamEvalServer(upstream_task, direct_score, BudgetTracker(max_evals=6))
     with FakeGateway(reply=lambda body: direct_model(body["messages"])) as gateway:
@@ -205,7 +203,7 @@ def test_best_of_n_keeps_completed_incumbent_when_next_candidate_is_partial(tmp_
         return (0.4 if candidate == "completed" else 1.0), {}
 
     server = EvalServer(score, max_evals=3)
-    task = Task(seed_candidate="seed", val_set=[{"id": "a"}, {"id": "b"}])
+    task = Task(seed_candidate="seed", cases=[{"id": "a"}, {"id": "b"}])
     result = BestOfNEngine().run(task, server, EngineContext(reflection_lm=model, run_dir=str(tmp_path)))
 
     assert server.best_candidate == "incomplete"
@@ -220,7 +218,7 @@ def test_best_of_n_streams_each_completed_sample_as_a_root(tmp_path: Path) -> No
     model = _SequenceModel(["aeiou", "xyz", "cut short"])
     sink: list[tuple[str, dict[str, Any]]] = []
     server = EvalServer(vowel_scorer, max_evals=5)
-    task = Task(seed_candidate="seed", train_set=[{"id": "a"}, {"id": "b"}])
+    task = Task(seed_candidate="seed", cases=[{"id": "a"}, {"id": "b"}])
     ctx = EngineContext(
         reflection_lm=model,
         run_dir=str(tmp_path),
@@ -245,7 +243,7 @@ def test_best_of_n_does_not_invent_a_seed_score(tmp_path: Path, seed: str | None
     """Preserve unscored seeds and reject seedless runs without a completed candidate."""
     model = _SequenceModel(["proposed"])
     server = EvalServer(vowel_scorer, max_evals=budget)
-    task = Task(seed_candidate=seed, val_set=[{"id": "a"}, {"id": "b"}])
+    task = Task(seed_candidate=seed, cases=[{"id": "a"}, {"id": "b"}])
     context = EngineContext(reflection_lm=model, run_dir=str(tmp_path))
     if seed is None:
         with pytest.raises(ServiceError, match="stopped before producing a fully evaluated candidate"):
@@ -348,7 +346,7 @@ def test_gepa_engine_routes_evaluations_and_unwraps_text_results(
 
     monkeypatch.setattr(gepa_mod, "optimize_anything", fake_optimize)
     server = EvalServer(vowel_scorer, max_evals=7)
-    task = Task(seed_candidate="seed", objective="vowels", background="bg", train_set=[{"i": 0}], val_set=[{"i": 1}])
+    task = Task(seed_candidate="seed", objective="vowels", background="bg", cases=[{"i": 0}, {"i": 1}])
 
     result = GepaEngine().run(task, server, make_ctx(str(tmp_path), seed=3, stop_at_score=0.95))
 
@@ -367,7 +365,7 @@ def test_gepa_engine_routes_evaluations_and_unwraps_text_results(
     assert seen["seed_candidate"] == "seed"
     assert seen["objective"] == "vowels"
     assert seen["background"] == "bg"
-    assert seen["valset"] == [{"i": 1}]
+    assert seen["dataset"] == seen["valset"] == [{"i": 0}, {"i": 1}]
     config = seen["config"]
     assert config.engine.max_metric_calls == 7
     assert config.engine.seed == 3
@@ -401,7 +399,7 @@ def test_gepa_engine_binds_recovery_seed_boundary_to_upstream_config(
     monkeypatch.setattr(gepa_mod, "optimize_anything", fake_optimize)
     context = make_ctx(str(tmp_path), recovery_seed_boundary=boundary)
 
-    GepaEngine().run(Task(seed_candidate="seed", train_set=[{"i": 0}]), EvalServer(vowel_scorer, max_evals=2), context)
+    GepaEngine().run(Task(seed_candidate="seed", cases=[{"i": 0}]), EvalServer(vowel_scorer, max_evals=2), context)
 
     config = captured["config"]
     assert config.callbacks == [boundary]
@@ -460,9 +458,7 @@ def test_gepa_engine_recovers_checkpointed_state_after_budget_exhaustion(
 def test_gepa_engine_real_run_improves_the_seed(tmp_path: Path) -> None:
     """The real ``optimize_anything`` loop runs against the eval server and stays within budget."""
     server = EvalServer(vowel_scorer, max_evals=12)
-    task = Task(
-        seed_candidate="hello world", objective="more vowels", train_set=[{"i": 0}, {"i": 1}], val_set=[{"i": 2}]
-    )
+    task = Task(seed_candidate="hello world", objective="more vowels", cases=[{"i": 0}, {"i": 1}, {"i": 2}])
 
     result = GepaEngine().run(task, server, make_ctx(str(tmp_path)))
 
@@ -545,7 +541,7 @@ def test_gepa_engine_streams_scorer_feedback(monkeypatch, tmp_path) -> None:
     ctx = make_ctx(str(tmp_path), progress_callback=lambda event, metrics: sink.append((event, metrics)))
     cases = [{"q": 1}, {"q": 2}]
 
-    GepaEngine().run(Task(seed_candidate="seed", train_set=cases), EvalServer(vowel_scorer, max_evals=5), ctx)
+    GepaEngine().run(Task(seed_candidate="seed", cases=cases), EvalServer(vowel_scorer, max_evals=5), ctx)
 
     assert [m for e, m in sink if e == PROGRESS_MINIBATCH] == [
         {
@@ -558,3 +554,73 @@ def test_gepa_engine_streams_scorer_feedback(monkeypatch, tmp_path) -> None:
             "images_dropped": 0,
         }
     ]
+
+
+def _named_scorer(candidate: Any, case: Any = None) -> tuple[float, dict[str, Any]]:
+    """Score with feedback and two named scores, each with its own feedback.
+
+    Args:
+        candidate: Proposed text.
+        case: Ignored.
+
+    Returns:
+        The vowel density, its feedback and the named scores.
+    """
+    score, _ = vowel_scorer(candidate, case)
+    return score, {
+        "feedback": "needs more vowels",
+        "scores": {
+            "vowels": {"score": score, "feedback": "too few vowels"},
+            "length": {"score": 0.5, "feedback": "a bit short"},
+        },
+    }
+
+
+@pytest.mark.parametrize("cases", [[], [{"i": 0}], [{"i": 0}, {"i": 1}, {"i": 2}]])
+def test_gepa_engine_runs_with_zero_one_or_many_cases_and_shapes_named_scores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cases: list[dict[str, int]]
+) -> None:
+    """Cases go in as both dataset and valset; none means single-instance mode; named scores reach GEPA.
+
+    GEPA's objective frontier reads ``side_info["scores"]`` as numbers, so the
+    named scores arrive as plain numbers with their feedback beside them for
+    the reflection prompt.
+
+    Args:
+        tmp_path: Workspace.
+        monkeypatch: Replaces upstream ``optimize_anything``.
+        cases: The run's cases.
+    """
+    seen: dict[str, Any] = {}
+    returned: list[tuple[float, dict[str, Any]]] = []
+
+    def fake_optimize(**kwargs: Any) -> Any:
+        """Score one version through the evaluator on each case, or once without cases."""
+        seen.update(kwargs)
+        returned.extend(kwargs["evaluator"]("aaa", example) for example in kwargs.get("dataset") or [None])
+        gepa_result = MagicMock()
+        gepa_result.best_candidate = {"current_candidate": "aaa"}
+        gepa_result.best_idx = 0
+        gepa_result.val_aggregate_scores = [1.0]
+        gepa_result.candidates = [{"current_candidate": "aaa"}]
+        gepa_result.parents = [[None]]
+        gepa_result.discovery_eval_counts = [1]
+        gepa_result.total_metric_calls = len(returned)
+        return gepa_result
+
+    monkeypatch.setattr(gepa_mod, "optimize_anything", fake_optimize)
+    server = EvalServer(_named_scorer, max_evals=5)
+
+    result = GepaEngine().run(Task(seed_candidate="seed", cases=cases), server, make_ctx(str(tmp_path)))
+
+    assert result.best_candidate == "aaa"
+    assert server.used == max(1, len(cases))
+    if cases:
+        assert seen["dataset"] == seen["valset"] == cases
+    else:
+        assert "dataset" not in seen
+        assert "valset" not in seen
+    score, side_info = returned[0]
+    assert side_info["scores"] == {"vowels": score, "length": 0.5}
+    assert side_info["Feedback per score"] == {"vowels": "too few vowels", "length": "a bit short"}
+    assert side_info["feedback"] == "needs more vowels"

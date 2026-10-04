@@ -140,3 +140,23 @@ class GridSearchResponse(BaseModel):
     # Per-model usage summed across all pairs — the basis the worker charges the
     # whole grid from (each pair priced on its own gen/refl models).
     usage_by_model: list[ModelTokenUsage] = Field(default_factory=list)
+
+
+def result_scores(result: dict[str, Any]) -> tuple[Any, Any]:
+    """Read a stored result's baseline and optimized scores, whatever job wrote it.
+
+    DSPy runs store held-out test metrics; black-box runs store the scores of
+    their final run under ``baseline_score`` / ``best_score``.
+
+    Args:
+        result: A stored ``result`` mapping (or a grid search's ``best_pair``).
+
+    Returns:
+        The raw ``(baseline, optimized)`` values, each ``None`` when absent.
+    """
+    baseline = result.get("baseline_test_metric")
+    optimized = result.get("optimized_test_metric")
+    return (
+        result.get("baseline_score") if baseline is None else baseline,
+        result.get("best_score") if optimized is None else optimized,
+    )

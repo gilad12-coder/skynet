@@ -20,8 +20,6 @@ import type {
   ScorerDependencyLock,
   ModelConfig,
   ScorerDryRunResponse,
-  SplitFractions,
-  SplitPlan,
   ValidateCodeResponse,
 } from "@/shared/types/api";
 import {
@@ -39,7 +37,7 @@ import {
 } from "@/shared/lib/api";
 import { useWizardStateOptional } from "@/features/agent-panel";
 import { registerTutorialHook } from "@/features/tutorial";
-import { readPref, useUserPrefs } from "@/features/settings";
+import { readPref } from "@/features/settings";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
 import { BLACKBOX_HARNESSES, UNAVAILABLE_HARNESSES } from "@/shared/lib/blackbox-harness";
@@ -50,10 +48,10 @@ import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import type { ValidationResult } from "@/shared/ui/code-editor";
 
-import { defaultSplit, emptyModelConfig, type ColumnRole } from "../constants";
+import { emptyModelConfig } from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { suggestedRunName } from "../lib/budget";
-import { splitExampleCounts } from "../lib/split-example-counts";
+import { blackboxEstimatedScorerRuns } from "../lib/blackbox-estimate";
 import { detectLanguage, looksLikeCode, type SeedLanguage } from "../lib/seed-format";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import type { WizardIssue } from "../lib/wizard-issue";
@@ -97,7 +95,6 @@ import { fileNewRun } from "../lib/file-new-run";
 import { useExecutionBudget } from "./use-execution-budget";
 import { prepareModelConfig } from "./use-submit-wizard";
 import {
-  useDatasetProfiling,
   useModelCatalog,
   useRecentModelConfigs,
 } from "./use-submit-wizard-data";
@@ -163,15 +160,42 @@ export type DryRunState =
   | { status: "running" }
   | { status: "done"; result: ScorerDryRunResponse };
 
-// The backend looks for a `score` (or `metric`) entrypoint and accepts either a
-// bare number or `{"score": ..., ...side_info}` (see blackbox/scorer.py).
+// The backend looks for a `score` (or `metric`) entrypoint and needs feedback
+// with every score: `{"score", "feedback", "scores": {name: {"score",
+// "feedback"}}}` or a `(score, "feedback")` tuple (see blackbox/scorer.py).
+// The engines read that feedback to decide what to change next, so every
+// template returns it, and splits the score into named parts when it measures
+// more than one thing.
 const SCORER_TEMPLATE = `from skynet import llm, Image  # llm(prompt, input=None, images=None) asks the scorer model
+
+TARGET_WORDS = 150
 
 
 def score(candidate, case=None):
-    """Return a number — higher is better. \`case\` is one row of your cases (or None)."""
+    """Score one candidate. \`case\` is one row of your cases, or None without cases.
+
+    Return the overall score (higher is better), feedback that says what to
+    change, and one named score with its own feedback per thing you measure.
+    """
     text = candidate if isinstance(candidate, str) else "\\n".join(candidate.values())
-    return float(len(text.split()))
+    words = len(text.split())
+    length = max(0.0, 1.0 - abs(words - TARGET_WORDS) / TARGET_WORDS)
+    paragraphs = [p for p in text.split("\\n\\n") if p.strip()]
+    structure = min(1.0, len(paragraphs) / 3)
+    return {
+        "score": (length + structure) / 2,
+        "feedback": f"{words} words in {len(paragraphs)} paragraphs.",
+        "scores": {
+            "length": {
+                "score": length,
+                "feedback": f"{words} words; aim for about {TARGET_WORDS}.",
+            },
+            "structure": {
+                "score": structure,
+                "feedback": f"{len(paragraphs)} paragraphs; three or more read best.",
+            },
+        },
+    }
 `;
 
 const RUN_CODE_SCORER_TEMPLATE = `import os
@@ -181,7 +205,11 @@ import tempfile
 
 
 def score(candidate, case=None):
-    """Run the candidate as a python program; the last number it prints is the score."""
+    """Run the candidate as a python program; the last number it prints is the score.
+
+    The feedback carries what went wrong (or the output), so the next version
+    can fix it.
+    """
     TIMEOUT_SECONDS = 30
     source = candidate if isinstance(candidate, str) else "\\n".join(candidate.values())
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as handle:
@@ -189,15 +217,15 @@ def score(candidate, case=None):
     try:
         run = subprocess.run([sys.executable, handle.name], capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
-        return 0.0, {"error": f"timed out after {TIMEOUT_SECONDS}s"}
+        return 0.0, f"The program timed out after {TIMEOUT_SECONDS}s."
     finally:
         os.unlink(handle.name)
     if run.returncode != 0:
-        return 0.0, {"error": run.stderr.strip()[-2000:]}
+        return 0.0, "The program crashed:\\n" + run.stderr.strip()[-2000:]
     numbers = [token for token in run.stdout.split() if _is_number(token)]
     if not numbers:
-        return 0.0, {"error": "the program printed no number", "stdout": run.stdout[-2000:]}
-    return float(numbers[-1]), {"stdout": run.stdout[-2000:]}
+        return 0.0, "The program printed no number. Output:\\n" + run.stdout[-2000:]
+    return float(numbers[-1]), "The program ran. Output:\\n" + run.stdout[-2000:]
 
 
 def _is_number(token):
@@ -210,11 +238,16 @@ def _is_number(token):
 
 // A repository version is a checkout on disk: the scorer gets its path and
 // runs whatever proves it better, here the repository's own test suite.
-const REPO_SCORER_TEMPLATE = `import subprocess
+const REPO_SCORER_TEMPLATE = `import re
+import subprocess
 
 
 def score(repo_path, case=None):
-    """Return a number, higher is better. \`repo_path\` is a checkout of one version."""
+    """Score one checkout. \`repo_path\` is a checkout of one version.
+
+    Returns the share of tests that pass (higher is better) and the failing
+    output as feedback, so the next version knows what to fix.
+    """
     TIMEOUT_SECONDS = 600
     try:
         run = subprocess.run(
@@ -225,8 +258,13 @@ def score(repo_path, case=None):
             timeout=TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
-        return 0.0, {"error": f"tests timed out after {TIMEOUT_SECONDS}s"}
-    return (1.0 if run.returncode == 0 else 0.0), {"output": run.stdout[-2000:]}
+        return 0.0, f"The tests timed out after {TIMEOUT_SECONDS}s."
+    passed = sum(int(n) for n in re.findall(r"(\\d+) passed", run.stdout))
+    failed = sum(int(n) for n in re.findall(r"(\\d+) (?:failed|error)", run.stdout))
+    total = passed + failed
+    if total == 0:
+        return 0.0, "No tests ran. Output:\\n" + (run.stdout + run.stderr)[-2000:]
+    return passed / total, f"{passed} of {total} tests pass.\\n" + run.stdout[-2000:]
 `;
 
 // A program's natural yardstick is running it, so the code recipe opens on
@@ -300,61 +338,8 @@ export function useBlackboxWizard(
   const [background, setBackground] = useState("");
   const [parsedCases, setParsedCases] = useState<ParsedDataset | null>(null);
   const [casesName, setCasesName] = useState("");
-  const [split, setSplit] = useState<SplitFractions>(defaultSplit);
-  const [shuffle, setShuffle] = useState(true);
   const [seed, setSeed] = useState<number | undefined>(undefined);
   const [libraryOpen, setLibraryOpen] = useState(false);
-
-  // Same split UX as the standard wizard: the server recommends a plan from
-  // the cases, auto mode follows it and manual mode keeps the user's numbers.
-  // The ref lets the profiling effect read the mode without re-running.
-  const [splitPlan, setSplitPlan] = useState<SplitPlan | null>(null);
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [splitMode, setSplitModeState] = useState<"auto" | "manual">(() =>
-    readPref("wizardSplitMode"),
-  );
-  const splitModeRef = useRef<"auto" | "manual">(readPref("wizardSplitMode"));
-  const { prefs } = useUserPrefs();
-
-  // Skip the first run: UserPrefsProvider boots with DEFAULT_PREFS and only
-  // hydrates from localStorage in an effect, so the first `prefs.*` value
-  // would clobber what readPref() read synchronously above.
-  const splitModeFirstRunRef = useRef(true);
-  useEffect(() => {
-    if (splitModeFirstRunRef.current) {
-      splitModeFirstRunRef.current = false;
-      return;
-    }
-    splitModeRef.current = prefs.wizardSplitMode;
-    setSplitModeState(prefs.wizardSplitMode);
-  }, [prefs.wizardSplitMode]);
-
-  // Every case column feeds the black box, so the whole row is the profiler's
-  // duplicate key — there are no output columns to map.
-  const caseColumnRoles = useMemo<Record<string, ColumnRole>>(
-    () =>
-      Object.fromEntries((parsedCases?.columns ?? []).map((column) => [column, "input"] as const)),
-    [parsedCases],
-  );
-  const setSplitMode = useCallback(
-    (mode: "auto" | "manual") => {
-      splitModeRef.current = mode;
-      setSplitModeState(mode);
-      if (mode === "auto" && splitPlan) {
-        setSplit(splitPlan.fractions);
-        setShuffle(splitPlan.shuffle);
-        setSeed(splitPlan.seed);
-      }
-    },
-    [splitPlan],
-  );
-  const updateSplit = (field: keyof SplitFractions, value: string) => {
-    if (splitModeRef.current === "auto") return;
-    const num = parseFloat(value);
-    if (isNaN(num) || num < 0 || num > 1) return;
-    setSplit((prev) => ({ ...prev, [field]: num }));
-  };
-  const splitSum = +(split.train + split.val + split.test).toFixed(4);
 
   const [scorerKind, setScorerKind] = useState<"python" | "remote">("python");
   const [metricCode, setMetricCode] = useState(scorerTemplateFor(initialRecipe));
@@ -480,18 +465,8 @@ export function useBlackboxWizard(
         setJobDescription(shared.job_description);
       } else if (key === "is_private" && typeof shared.is_private === "boolean") {
         setIsPrivate(shared.is_private);
-      } else if (key === "split_fractions" && shared.split_fractions) {
-        setSplit(shared.split_fractions);
-      } else if (
-        key === "split_mode" &&
-        (shared.split_mode === "auto" || shared.split_mode === "manual")
-      ) {
-        splitModeRef.current = shared.split_mode;
-        setSplitModeState(shared.split_mode);
       } else if (key === "seed" && typeof shared.seed === "number") {
         setSeed(shared.seed);
-      } else if (key === "shuffle" && typeof shared.shuffle === "boolean") {
-        setShuffle(shared.shuffle);
       } else if (key === "blackbox_objective" && typeof shared.blackbox_objective === "string") {
         setObjective(shared.blackbox_objective);
       } else if (key === "blackbox_seed" && typeof shared.blackbox_seed === "string") {
@@ -545,13 +520,7 @@ export function useBlackboxWizard(
       wizardCtx.setField("job_description", jobDescription, "user");
     }
     if (s.is_private !== isPrivate) wizardCtx.setField("is_private", isPrivate, "user");
-    if (s.split_mode !== splitMode) wizardCtx.setField("split_mode", splitMode, "user");
     if (s.seed !== seed) wizardCtx.setField("seed", seed, "user");
-    if (s.shuffle !== shuffle) wizardCtx.setField("shuffle", shuffle, "user");
-    const sf = s.split_fractions;
-    if (!sf || sf.train !== split.train || sf.val !== split.val || sf.test !== split.test) {
-      wizardCtx.setField("split_fractions", split, "user");
-    }
     // The agent reads which workflow is on screen from job_type, and the task
     // itself from the blackbox_* fields; an empty or non-shareable value (a
     // multi-part seed, a remote scorer) is dropped rather than sent blank.
@@ -572,10 +541,7 @@ export function useBlackboxWizard(
     jobName,
     jobDescription,
     isPrivate,
-    splitMode,
     seed,
-    shuffle,
-    split,
     objective,
     seedMode,
     seedText,
@@ -618,20 +584,6 @@ export function useBlackboxWizard(
     stage: WizardStageId;
     furthest: WizardStageId;
   } | null>(null);
-
-  // Auto picks engines itself, so only a hand-picked engine shapes the
-  // recommended split.
-  useDatasetProfiling({
-    parsedDataset: parsedCases,
-    columnRoles: caseColumnRoles,
-    splitModeRef,
-    setSplitPlan,
-    setProfileLoading,
-    setSplit,
-    setShuffle,
-    setSeed,
-    engine: strategyMode === "single" ? engine : null,
-  });
 
   useEffect(() => {
     let cancelled = false;
@@ -741,14 +693,6 @@ export function useBlackboxWizard(
           setParsedCases(rows);
           setCasesName(String(basics.name || cloneId));
         }
-        // The cloned split stays on hand for manual selection, but the mode
-        // starts where every new optimization does: on the saved preference,
-        // so the recommendation applies unless the user prefers manual.
-        if (basics.split) setSplit({ ...defaultSplit, ...basics.split });
-        const cloneDefaultMode = readPref("wizardSplitMode");
-        splitModeRef.current = cloneDefaultMode;
-        setSplitModeState(cloneDefaultMode);
-        if (basics.shuffle != null) setShuffle(basics.shuffle);
         if (basics.seed != null) setSeed(basics.seed);
 
         if (source) {
@@ -930,8 +874,16 @@ export function useBlackboxWizard(
     return projectCostBracket({
       autoLevel: "",
       maxFullEvals: "",
-      maxMetricCalls: String(maxScorerRuns),
-      datasetRows: Math.max(1, parsedCases?.rowCount ?? 0),
+      // The final run scores the starting version and the winner afresh,
+      // outside the search budget, so the estimate counts it on top.
+      maxMetricCalls: String(
+        blackboxEstimatedScorerRuns(
+          maxScorerRuns,
+          parsedCases?.rowCount ?? 0,
+          isRepo || seedCandidate != null,
+        ),
+      ),
+      datasetRows: parsedCases?.rowCount ?? 0,
       modelRoles,
       runtime: runtimeCostProjection(selectedRuntime?.cost, scorerKind === "python" ? 4 : 3),
       pricing,
@@ -948,6 +900,8 @@ export function useBlackboxWizard(
     maxScorerRuns,
     scorerKind,
     parsedCases?.rowCount,
+    isRepo,
+    seedCandidate,
     pricing,
     economyMode,
     nativeProposer,
@@ -991,8 +945,6 @@ export function useBlackboxWizard(
       seed_candidate: seedCandidate ?? undefined,
       scorer: buildScorer(overrideCode),
       cases: parsedCases?.rows,
-      split_fractions: split,
-      shuffle,
       seed,
       budget: {
         max_scorer_runs: maxScorerRuns,
@@ -1281,23 +1233,11 @@ export function useBlackboxWizard(
     reasoningEffort: interview.reasoningEffort,
   });
 
-  // A fresh set of cases deserves a fresh recommendation: the mode returns to
-  // the user's saved preference so the profiling effect applies the new plan
-  // when they prefer the recommendation, and stays out of the way when they
-  // prefer manual.
-  const resetSplitModeForNewCases = () => {
-    const mode = readPref("wizardSplitMode");
-    splitModeRef.current = mode;
-    setSplitModeState(mode);
-    setSplitPlan(null);
-  };
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
       const cases = await parseDatasetFile(file);
-      resetSplitModeForNewCases();
       setParsedCases(cases);
       setCasesName(file.name);
     } catch {
@@ -1309,7 +1249,6 @@ export function useBlackboxWizard(
     setLibraryOpen(false);
     try {
       const res = await getDatasetRows(dataset.id);
-      resetSplitModeForNewCases();
       setParsedCases({
         columns: res.columns.length > 0 ? res.columns : Object.keys(res.rows[0] ?? {}),
         rows: res.rows,
@@ -1327,9 +1266,6 @@ export function useBlackboxWizard(
   };
 
   const selectedEngine = engineCatalog?.engines.find((e) => e.id === engine) ?? null;
-  const trainingCaseCount = parsedCases?.rows.length
-    ? splitExampleCounts(parsedCases.rows.length, split).train
-    : null;
   const runDisabledReason = useMemo<string | null>(() => {
     if (engineCatalogFailed) return msg("submit.blackbox.engines.check_failed");
     const issue = engineSelectionIssue({
@@ -1337,7 +1273,6 @@ export function useBlackboxWizard(
       mode: strategyMode,
       engine,
       hasParts: seedMode === "parts",
-      trainingCaseCount,
       repo: isRepo,
     });
     return issue ? msg(issue.key, issue.params) : null;
@@ -1347,7 +1282,6 @@ export function useBlackboxWizard(
     strategyMode,
     engine,
     seedMode,
-    trainingCaseCount,
     isRepo,
   ]);
   const optimizationFamily = optimizationModelFamily(strategyMode, engine);
@@ -1394,13 +1328,9 @@ export function useBlackboxWizard(
           return fail("submit.blackbox.validation.scorer_model_required", "bb-scoring-model");
         if (scorerKind === "remote" && !/^https?:\/\/\S+$/.test(scorerUrl.trim()))
           return fail("submit.blackbox.validation.scorer_url_required", "bb-scorer-url");
-        if (parsedCases && Math.abs(split.train + split.val + split.test - 1) > 0.001)
-          return fail("submit.blackbox.validation.split_sum", "bb-split");
         return null;
       }
       case WIZARD_STAGE.optimization: {
-        if (trainingCaseCount === 0 && (strategyMode !== "single" || engine === "meta_harness"))
-          return fail("submit.blackbox.validation.training_cases", "bb-cases");
         // Availability is not a validation failure: an unavailable engine is a
         // configuration state that holds Run back with its reason.
         if (strategyMode === "single") {
@@ -1768,16 +1698,6 @@ export function useBlackboxWizard(
     clearCases,
     libraryOpen,
     setLibraryOpen,
-    split,
-    setSplit,
-    updateSplit,
-    splitSum,
-    splitMode,
-    setSplitMode,
-    splitPlan,
-    profileLoading,
-    shuffle,
-    setShuffle,
     scorerKind,
     setScorerKind,
     metricCode,

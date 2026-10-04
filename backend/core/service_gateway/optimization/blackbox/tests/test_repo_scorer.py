@@ -12,7 +12,7 @@ from core.exceptions import ServiceError
 from core.models.blackbox import BlackboxRunRequest
 from core.models.tests.test_blackbox import _repo_request
 
-from ..repo_scorer import RepoScoreError, RepoScorer, per_case_scores
+from ..repo_scorer import RepoScoreError, RepoScorer, fold_case_scores
 from ..repo_workspace import RepoWorkspace
 from ..sandbox import LocalSubprocessRuntime, SandboxSpec
 from ..service import run_blackbox_optimization
@@ -26,10 +26,14 @@ def score(repo_path, case=None):
     built = open(os.path.join(repo_path, "built.txt")).read()
     return {
         "score": value / 10,
+        "feedback": "value read",
         "secret": os.environ["API_KEY"],
         "built": built,
         "case": case,
-        "cases": {"small": value / 20, "large": value / 5},
+        "cases": {
+            "small": {"score": value / 20, "feedback": "small ok"},
+            "large": {"score": value / 5, "feedback": "large ok"},
+        },
     }
 """
 
@@ -71,7 +75,11 @@ def test_scores_the_baseline_and_a_version(scored: tuple[RepoScorer, Path, Path]
     improved = scorer.score(_patch(root / "v1", archive, {"src/app.py": "x = 7\n"}), {"id": 3})
     assert improved["score"] == pytest.approx(0.7)
     assert improved["case"] == {"id": 3}
-    assert improved["cases"] == {"small": pytest.approx(0.35), "large": pytest.approx(1.4)}
+    assert "cases" not in improved
+    assert improved["scores"] == {
+        "small": {"score": pytest.approx(0.35), "feedback": "small ok"},
+        "large": {"score": pytest.approx(1.4), "feedback": "large ok"},
+    }
 
 
 def test_secrets_reach_the_scorer_but_are_redacted(scored: tuple[RepoScorer, Path, Path]) -> None:
@@ -126,20 +134,26 @@ def test_dispatch_answers_the_guest(scored: tuple[RepoScorer, Path, Path]) -> No
 @pytest.mark.parametrize(
     ("side_info", "expected"),
     [
-        ({}, None),
-        ({"cases": {"a": 1, "b": 0.5}}, {"a": 1.0, "b": 0.5}),
+        ({"feedback": "f"}, {"feedback": "f"}),
+        (
+            {"feedback": "f", "cases": {"a": {"score": 1, "feedback": "x"}, "b": (0.5, "y")}},
+            {"feedback": "f", "scores": {"a": {"score": 1.0, "feedback": "x"}, "b": {"score": 0.5, "feedback": "y"}}},
+        ),
     ],
 )
-def test_per_case_scores(side_info: dict, expected: dict | None) -> None:
-    """Per-case scores are optional and read as floats."""
-    assert per_case_scores(side_info) == expected
+def test_fold_case_scores(side_info: dict, expected: dict) -> None:
+    """Per-case scores are optional and become named scores, each with its feedback."""
+    assert fold_case_scores(side_info) == expected
 
 
-@pytest.mark.parametrize("cases", [[1, 2], {"a": "high"}, {"a": float("nan")}, {"a": True}])
-def test_per_case_scores_reject_bad_shapes(cases: object) -> None:
-    """Per-case scores must map names to finite numbers."""
+@pytest.mark.parametrize(
+    "cases",
+    [[1, 2], {"a": "high"}, {"a": {"score": float("nan"), "feedback": "x"}}, {"a": True}, {"a": 1.0}],
+)
+def test_fold_case_scores_reject_bad_shapes(cases: object) -> None:
+    """Per-case scores must map names to a finite score with its own feedback."""
     with pytest.raises(RepoScoreError):
-        per_case_scores({"cases": cases})
+        fold_case_scores({"cases": cases})
 
 
 @pytest.mark.parametrize("engine", ["autoresearch", "gepa"])

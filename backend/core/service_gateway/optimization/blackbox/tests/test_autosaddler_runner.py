@@ -414,3 +414,24 @@ def test_runner_evolves_repository_versions_scored_by_the_parent(tmp_path: Path)
     assert result["best_score"] == 1.0
     assert result["metadata"]["iterations"] == 2
     assert (tmp_path / "sessions.log").read_text().split().count("diagnose_patch") == 2
+
+
+@pytest.mark.parametrize(
+    ("cases", "expected"),
+    [(None, [None]), ([], [None]), ([{"q": 1}], [{"q": 1}]), ([{"q": 1}, {"q": 2}], [{"q": 1}, {"q": 2}])],
+)
+def test_visible_examples_need_no_cases(cases: list[Any] | None, expected: list[Any]) -> None:
+    """Zero cases score the candidate once; one or many are diagnosed and confirmed on the same examples.
+
+    Args:
+        cases: The run's cases, if any.
+        expected: The examples both upstream splits score.
+    """
+    assert autosaddler_runner.visible_examples(cases) == expected
+
+
+def test_a_blank_seed_is_a_valid_starting_component() -> None:
+    """A run without a starting point starts AutoSaddler from an empty text instead of crashing."""
+    assert autosaddler_runner.baseline_components("") == {autosaddler_runner._SINGLE_COMPONENT: ""}
+    with pytest.raises(ValueError, match="seed candidate"):
+        autosaddler_runner.baseline_components(None)

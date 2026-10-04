@@ -28,6 +28,19 @@ def test_feedback_string_leads_and_other_keys_follow() -> None:
     assert text == 'tight\nscore_parts: {"a": 1}\nframes: ["note"]'
 
 
+def test_named_scores_render_one_line_each_with_their_feedback() -> None:
+    """Every named score reaches the reflection text as ``name: score — feedback`` after the overall feedback."""
+    side_info = {
+        "feedback": "overall",
+        "scores": {"accuracy": {"score": 0.5, "feedback": "half wrong"}, "tone": {"score": 1, "feedback": "warm"}},
+    }
+
+    assert scorer_feedback_text(side_info) == "overall\naccuracy: 0.5 — half wrong\ntone: 1 — warm"
+    shaped = feedback.gepa_side_info(side_info)
+    assert shaped["scores"] == {"accuracy": 0.5, "tone": 1.0}
+    assert shaped[feedback.SCORE_FEEDBACK_KEY] == {"accuracy": "half wrong", "tone": "warm"}
+
+
 def test_images_and_empty_values_are_dropped() -> None:
     """Inline renders, ``None`` and empty containers never reach the feedback text."""
     side_info = {"render": PNG, "frames": [PNG, PNG], "feedback": "ok", "missing": None, "extra": {}}

@@ -239,8 +239,8 @@ def _version_score(result: dict[str, Any], candidate: str) -> float | None:
 def improved_patch(result: dict[str, Any]) -> str | None:
     """Return the best version when it beat the starting code, else ``None``.
 
-    Held-out scores decide when the run has them; a run without a hold-out
-    split compares the versions' own scores instead.
+    The final run's fresh scores decide; a run stopped before its final run
+    compares the versions' own scores instead.
 
     Args:
         result: Finished black-box result.
@@ -251,7 +251,7 @@ def improved_patch(result: dict[str, Any]) -> str | None:
     best = result.get("best_candidate")
     if not isinstance(best, str) or not best.strip() or result.get("regression_guard_applied"):
         return None
-    baseline, optimized = result.get("baseline_test_metric"), result.get("optimized_test_metric")
+    baseline, optimized = result.get("baseline_score"), result.get("best_score")
     if baseline is None or optimized is None:
         baseline, optimized = _version_score(result, result.get("seed_candidate") or ""), _version_score(result, best)
     if baseline is None or optimized is None:
@@ -270,7 +270,7 @@ def _description(result: dict[str, Any], patch: str, run_url: str) -> str:
     Returns:
         Markdown body.
     """
-    baseline, optimized = result.get("baseline_test_metric"), result.get("optimized_test_metric")
+    baseline, optimized = result.get("baseline_score"), result.get("best_score")
     if baseline is None or optimized is None:
         baseline, optimized = _version_score(result, result.get("seed_candidate") or ""), _version_score(result, patch)
     files = sorted(set(patch_paths(patch)))

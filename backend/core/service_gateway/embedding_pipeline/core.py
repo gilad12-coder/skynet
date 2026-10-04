@@ -46,6 +46,7 @@ from ...constants import (
     PAYLOAD_OVERVIEW_USERNAME,
     TOKEN_SOURCE_MANAGED,
 )
+from ...models.results import result_scores
 from ...storage.models import JobEmbeddingModel
 from .embeddings import get_embedder
 from .summarizer import summarize_blackbox_task, summarize_task
@@ -121,10 +122,11 @@ def _extract_scores(job: dict[str, Any]) -> tuple[float | None, float | None]:
             baseline = best.get("baseline_test_metric", baseline)
             optimized = best.get("optimized_test_metric", optimized)
     else:
+        stored_baseline, stored_optimized = result_scores(result)
         if baseline is None:
-            baseline = result.get("baseline_test_metric")
+            baseline = stored_baseline
         if optimized is None:
-            optimized = result.get("optimized_test_metric")
+            optimized = stored_optimized
     try:
         baseline_f = float(baseline) if baseline is not None else None
     except (TypeError, ValueError):

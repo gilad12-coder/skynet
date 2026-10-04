@@ -967,9 +967,9 @@ class CodeAssistant(dspy.Signature):
 _SCORER_CONTRACT = """The scorer is one python function, def score(candidate, case=None):
 - candidate (str) is the version under optimization: the full text of the starting point as the optimizer rewrote it.
 - case is one row of the case file as a dict keyed by the case columns; None when the job has no cases (still return a score).
-- Return a float, higher is better, 0.0 to 1.0 by convention, or a (score, side_info) tuple where side_info is a dict with a short "feedback" string. The optimizer reads that feedback to learn WHY a version scored low, so name the expected value or the failed check whenever you can.
+- Always return {"score": float, "feedback": str}: score higher is better, 0.0 to 1.0 by convention; feedback says WHY the version scored that, naming the expected value or the failed check. Feedback is required: a scorer that returns a bare number is rejected, because the optimizer learns from the feedback. When you measure several things, also return "scores": {"<name>": {"score": float, "feedback": str}, ...}, one entry per thing measured, each with its own feedback; the top-level score is then their (weighted) combination. A (score, "feedback") tuple is accepted too.
 - Standard library only (re, json, math, difflib, statistics, subprocess, tempfile, ...): no third-party imports and no network of your own. The scorer runs in a throwaway sandbox, so temp files and subprocesses are fine.
-- Never raise: catch failures and return 0.0 with the error in feedback.
+- Never raise: catch failures and return {"score": 0.0, "feedback": "<the error>"}.
 - Read case columns by their exact names; never invent columns."""
 
 _SCORER_AGENT_CONTRACT = """The target is an AGENT: candidate is the instructions file a coding agent runs with, and the agent has ALREADY run on the case when the scorer is called, so case is the run record, not the raw case. case["case"] is the original case dict; case["output"] is the agent's answer (the answer file, else its final message; None when it produced nothing); case["exit_code"], case["timed_out"], case["error"] and case["transcript"] describe the run. Score case["output"] against case["case"]; never try to run the agent yourself."""
@@ -1061,7 +1061,8 @@ class GenerateBlackboxScorer(dspy.Signature):
     measurably better version looks like, then implement it under
     ``scorer_contract`` — that contract is exact; follow it literally.
     Prefer graded scores over pass/fail so the optimizer sees progress,
-    and always explain the score in ``feedback``. Use the case columns by
+    and always explain the score in ``feedback``; when several things are
+    measured, return each as a named score with its own feedback. Use the case columns by
     their exact names from ``case_columns``. Honor every directive in
     ``authoring_brief``. Output ONLY the python code: no markdown fences,
     no commentary.
@@ -1150,7 +1151,8 @@ class BlackboxAssistant(dspy.Signature):
     ## Rule 3: A new scorer must satisfy ``scorer_contract`` literally.
 
     Keep ``def score(candidate, case=None)``, read case columns by their
-    exact names, return a float or ``(score, {"feedback": ...})``, and
+    exact names, return ``{"score": ..., "feedback": ...}`` (plus named
+    ``scores``, each with its own feedback, when several things are measured), and
     call ``llm`` only when the contract says it exists. When
     ``current_scorer_validation`` reports an error and the user asks for a
     fix, fix exactly that error.
@@ -2507,8 +2509,8 @@ class _BlackboxEditSession:
         ``reason`` must be prose in the reply language — the
         ``reply_language`` input (≤10 words). ``new_code`` must be the
         COMPLETE python source and satisfy ``scorer_contract``:
-        ``def score(candidate, case=None)`` returning a float or
-        ``(score, {"feedback": ...})``.
+        ``def score(candidate, case=None)`` returning
+        ``{"score": ..., "feedback": ...}``, optionally with named ``scores``.
 
         Args:
             reason: Short rationale for the edit, in the reply language.

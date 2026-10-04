@@ -54,6 +54,7 @@ from ...models import (
     RunResponse,
     WorkflowSpec,
 )
+from ...models.results import result_scores
 from ...models.serve import WorkflowNodeTrace
 from ...registry import ResolverError, resolve_module_factory
 from ...service_gateway.language_models import usage_by_model_from_history
@@ -964,8 +965,7 @@ def build_summary(job_data: dict) -> OptimizationSummaryResponse:
             completed_pairs = result_data.get("completed_pairs")
             failed_pairs = result_data.get("failed_pairs")
         else:
-            baseline = result_data.get("baseline_test_metric")
-            optimized = result_data.get("optimized_test_metric")
+            baseline, optimized = result_scores(result_data)
 
     # For grid search, pull live counters from latest_metrics if result not yet available
     if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH:

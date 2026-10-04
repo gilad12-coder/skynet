@@ -150,76 +150,6 @@ test("removing either of two parts retains the surviving content as whole text",
   }
 });
 
-function splitState(mode = "manual") {
-  const state = {
-    split: { train: 0.8, val: 0.1, test: 0.1 },
-    shuffle: false,
-    seed: 123,
-    mode,
-  };
-  const bindings = {
-    splitModeRef: { current: mode },
-    splitPlan: { fractions: { train: 0.6, val: 0.2, test: 0.2 }, shuffle: true, seed: 42 },
-    setSplitModeState: (next: string) => {
-      state.mode = next;
-    },
-    setSplit: (
-      next: typeof state.split | ((previous: typeof state.split) => typeof state.split),
-    ) => {
-      state.split = typeof next === "function" ? next(state.split) : next;
-    },
-    setShuffle: (next: boolean) => {
-      state.shuffle = next;
-    },
-    setSeed: (next: number) => {
-      state.seed = next;
-    },
-  };
-  return {
-    state,
-    bindings: {
-      ...bindings,
-      setSplitMode: evaluate(variable(wizard, "setSplitMode"), bindings),
-      updateSplit: evaluate(variable(wizard, "updateSplit"), bindings),
-    },
-  };
-}
-
-const splitCard = source("../components/SplitRecommendationCard.tsx");
-
-// The card's own toggle hands the chosen mode to the wizard: Manual selection
-// keeps whatever fractions are set, Use recommendation restores the plan.
-function chooseMode(bindings: ReturnType<typeof splitState>["bindings"], mode: "auto" | "manual") {
-  const toggle = find(
-    splitCard,
-    (node) =>
-      ts.isJsxAttribute(node) &&
-      node.name.getText() === "onChange" &&
-      ts.isJsxSelfClosingElement(node.parent.parent) &&
-      node.parent.parent.tagName.getText() === "Segmented",
-  ) as ts.JsxAttribute;
-  assert.ok(toggle.initializer && ts.isJsxExpression(toggle.initializer));
-  evaluate(toggle.initializer.expression!, { onChange: bindings.setSplitMode })(mode);
-}
-
-for (const mode of ["manual", "auto"]) {
-  test(`Manual selection from ${mode} keeps the current values`, () => {
-    const { state, bindings } = splitState(mode);
-    const before = structuredClone(state);
-    chooseMode(bindings, "manual");
-    assert.deepEqual(state, { ...before, mode: "manual" });
-  });
-}
-
-test("Use recommendation restores the planned fractions, shuffle and seed", () => {
-  const { state, bindings } = splitState();
-  chooseMode(bindings, "auto");
-  assert.equal(state.mode, "auto");
-  assert.deepEqual(state.split, bindings.splitPlan.fractions);
-  assert.equal(state.shuffle, true);
-  assert.equal(state.seed, 42);
-});
-
 test("the manual fields and their example counts only render under Manual selection", () => {
   const gate = find(
     splitSection,
@@ -233,24 +163,6 @@ test("the manual fields and their example counts only render under Manual select
     assert.ok(gate.right.getText().includes(`examples(counts.${field})`));
   }
 });
-
-for (const field of ["train", "val", "test"] as const) {
-  test(`editing ${field} applies the value and stays manual`, () => {
-    const { state, bindings } = splitState();
-    const input = find(
-      splitSection,
-      (node) =>
-        ts.isJsxSelfClosingElement(node) &&
-        node.tagName.getText() === "NumberInput" &&
-        node.getText().includes(`id="split-${field}"`),
-    );
-    evaluate(handler(input, "onChange"), bindings)(0.25);
-    assert.equal(state.mode, "manual");
-    assert.equal(state.split[field], 0.25);
-    assert.equal(state.shuffle, false);
-    assert.equal(state.seed, 123);
-  });
-}
 
 for (const path of ["../hooks/use-submit-wizard.ts"]) {
   const hook = source(path);
@@ -583,7 +495,7 @@ test("Anything lets a problem's own stage be reached, and holds every other move
   const onStage = evaluate(variable(wizard, "leaveStage"), {
     WIZARD_STAGE,
     blackboxIssueStage,
-    currentIssue: () => ({ stage: "evaluation", fieldId: "bb-split", message: "fix split" }),
+    currentIssue: () => ({ stage: "evaluation", fieldId: "bb-scorer-code", message: "fix the scorer" }),
     reportIssue: () => {},
   });
   assert.equal(onStage(WIZARD_STAGE.goal), false);
@@ -845,20 +757,15 @@ test("inherited evaluator picker opens the effective model instead of stale expl
 
 const blackboxView = source("../components/blackbox/BlackboxWizard.tsx");
 
-test("Evaluation ends on the split, which exists only when there are cases", () => {
-  for (const hasCases of [false, true]) {
-    const steps = evaluate(variable(blackboxView, "evaluationSteps"), { hasCases })();
-    assert.deepEqual(
-      Array.from(steps),
-      hasCases ? ["budget", "cases", "scorer", "split"] : ["budget", "cases", "scorer"],
-    );
-  }
+test("Evaluation is scorer, then the optional cases, then the budget, with no split", () => {
+  const steps = evaluate(variable(blackboxView, "EVALUATION_STEPS"), {});
+  assert.deepEqual(Array.from(steps), ["scorer", "cases", "budget"]);
 });
 
 test("Continue walks the Evaluation substeps and moves on from the last one without a check", async () => {
-  let part = 2;
+  let part = 1;
   let advanced = 0;
-  const steps = ["budget", "cases", "scorer", "split"];
+  const steps = ["scorer", "cases", "budget"];
   const next = () =>
     evaluate(variable(blackboxView, "handleEvaluationNext"), {
       activeEvaluationStep: steps[part],
@@ -876,10 +783,10 @@ test("Continue walks the Evaluation substeps and moves on from the last one with
       },
     })();
   await next();
-  assert.equal(steps[part], "split");
+  assert.equal(steps[part], "budget");
   assert.equal(advanced, 0);
   await next();
-  assert.equal(steps[part], "split");
+  assert.equal(steps[part], "budget");
   assert.equal(advanced, 1);
 });
 

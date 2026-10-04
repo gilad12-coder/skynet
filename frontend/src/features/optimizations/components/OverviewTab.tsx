@@ -16,6 +16,7 @@ import {
 } from "@/shared/ui/primitives/table";
 import { FadeIn, StaggerContainer, StaggerItem, TiltCard } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { blackboxBaselineScore, blackboxBestScore } from "@/shared/lib/blackbox-scores";
 import type {
   BlackboxStrategy,
   LMActivity,
@@ -37,6 +38,7 @@ import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import type { ScorePoint } from "../lib/extract-scores";
 import { InfoCard } from "./ui-primitives";
+import { BlackboxFinalScores } from "./BlackboxFinalScores";
 import { PipelineStages, computeStageTimestamps } from "./PipelineStages";
 import { MetaHarnessPanel, TrajectoryPanel, climbEngineOf } from "@/features/trajectory";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -206,9 +208,9 @@ function OverviewTabImpl({
   const bbResult = isBlackbox ? job.blackbox_result : null;
   const numberFormat = new Intl.NumberFormat(getActiveIntlLocale());
   const baseline =
-    runResult?.baseline_test_metric ?? bbResult?.baseline_test_metric ?? baselineFromEvents;
+    runResult?.baseline_test_metric ?? blackboxBaselineScore(bbResult) ?? baselineFromEvents;
   const optimized =
-    runResult?.optimized_test_metric ?? bbResult?.optimized_test_metric ?? optimizedFromEvents;
+    runResult?.optimized_test_metric ?? blackboxBestScore(bbResult) ?? optimizedFromEvents;
   const improvement =
     runResult?.metric_improvement ??
     bbResult?.metric_improvement ??
@@ -515,6 +517,8 @@ function OverviewTabImpl({
           </StaggerContainer>
         </div>
       )}
+
+      {renderRunBlocks && bbResult && <BlackboxFinalScores result={bbResult} />}
 
       {renderRunBlocks && loggedMetricNames.length > 0 && (
         <FadeIn delay={0.1}>

@@ -1,8 +1,8 @@
 """Sandbox-side runner that drives the pinned upstream AutoSaddler v2 engine.
 
 This file is copied verbatim into an isolated sandbox next to the Skynet
-plugin assets. It imports no Skynet application code and never receives
-held-out test examples. Everything Skynet contributes is expressed through
+plugin assets. It imports no Skynet application code; the parent owns the
+scorer and its cases. Everything Skynet contributes is expressed through
 the upstream ports: a scenario whose evaluator scores candidates through the
 parent-owned budget over the same filesystem mailbox the other native engines
 use, an evidence builder that surfaces the scorer's per-case feedback, and a
@@ -96,7 +96,6 @@ _HARNESS_CAPABILITY_TOOLS = dict.fromkeys(
     ("read_workspace", "edit_workspace", "run_commands", "load_skills", "network"), ()
 )
 _HARNESS_SKILL_DIRECTORY = ".agents/skills"
-_MIN_CASES = 2
 _GIT_IDENTITY = ("-c", "user.name=skynet", "-c", "user.email=skynet@localhost", "-c", "commit.gpgsign=false")
 # Repository runs read their prompts and skills from this plugin subfolder.
 _REPO_ASSETS = "repo/"
@@ -207,46 +206,30 @@ def baseline_components(seed: Any) -> dict[str, str]:
         Component mapping upstream can mutate.
 
     Raises:
-        ValueError: When the seed is missing or has an empty component.
+        ValueError: When the seed is neither text nor named parts.
     """
     if isinstance(seed, str):
-        components = {_SINGLE_COMPONENT: seed}
-    elif isinstance(seed, dict) and seed:
-        components = {str(name): str(text) for name, text in seed.items()}
-    else:
-        raise ValueError("AutoSaddler requires a seed candidate: a version text or named parts.")
-    if any(not text.strip() for text in components.values()):
-        raise ValueError("AutoSaddler cannot start from an empty candidate component.")
-    return components
+        return {_SINGLE_COMPONENT: seed}
+    if isinstance(seed, dict) and seed:
+        return {str(name): str(text) for name, text in seed.items()}
+    raise ValueError("AutoSaddler requires a seed candidate: a version text or named parts.")
 
 
-def split_cases(train_set: Sequence[Any] | None, val_set: Sequence[Any] | None) -> tuple[list[Any], list[Any]]:
-    """Assign visible examples to the disjoint train and development splits upstream requires.
+def visible_examples(cases: Sequence[Any] | None) -> list[Any]:
+    """Return the examples both upstream splits score, one ``None`` when there are no cases.
+
+    Upstream diagnoses on a training split and confirms each patch on a
+    development split. Skynet confirms a patch by re-running the same scorer,
+    so both splits hold the same examples; without cases the scorer runs once
+    per candidate with ``case=None``.
 
     Args:
-        train_set: Skynet training examples, if any.
-        val_set: Skynet validation examples, if any.
+        cases: The run's cases, if any.
 
     Returns:
-        Training examples that drive diagnosis and development examples that gate acceptance.
-
-    Raises:
-        ValueError: When fewer than two examples are visible.
+        The examples to score, never empty.
     """
-    train = list(train_set or [])
-    development = list(val_set or [])
-    if train and development:
-        return train, development
-    examples = train or development
-    if len(examples) < _MIN_CASES:
-        raise ValueError(
-            "AutoSaddler needs at least two visible examples: it diagnoses failures on training "
-            "cases and confirms every patch on held-out development cases."
-        )
-    # Without a validation split, hold out a quarter so acceptance is never
-    # judged on the cases a patch was diagnosed against.
-    held_out = max(1, len(examples) // 4)
-    return examples[:-held_out], examples[-held_out:]
+    return list(cases or []) or [None]
 
 
 def _case_id(split: str, index: int, example: Any) -> str:
@@ -1351,9 +1334,9 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     timeout = float(payload["timeout_seconds"])
     repo = payload.get("repo")
     proposer = payload.get("proposer") or {"harness": "claude_code"}
-    train_examples, development_examples = split_cases(task.get("train_set"), task.get("val_set"))
-    train_cases = build_cases("train", train_examples)
-    development_cases = build_cases("development", development_examples)
+    examples = visible_examples(task.get("train_set"))
+    train_cases = build_cases("train", examples)
+    development_cases = build_cases("development", examples)
     run_dir = Path("autosaddler-run").resolve()
     store = LocalRunStore(run_dir=run_dir, run_id=f"skynet-{payload['nonce'][:12]}")
     if repo is None:

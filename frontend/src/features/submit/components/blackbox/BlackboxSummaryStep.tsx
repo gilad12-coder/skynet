@@ -12,7 +12,6 @@ import {
   Target,
   FileText,
   Columns,
-  Shuffle,
   Database,
   Cpu,
   Gauge,
@@ -230,8 +229,6 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
     objective,
     background,
     parsedCases,
-    split,
-    shuffle,
     scorerKind,
     metricCode,
     scorerUrl,
@@ -278,8 +275,6 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
         : formatMsg("submit.blackbox.review.start_parts", {
             n: seedParts.filter((p) => p.value.trim()).length,
           });
-
-  const hasHoldout = split.val > 0 || split.test > 0;
 
   const tabs: Array<{ id: string; label: string; icon: ReactNode }> = [
     {
@@ -432,36 +427,14 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                         })
                       : msg("submit.blackbox.review.cases_none")}
                   </Row>
-                  {parsedCases && (
-                    <div className="space-y-3">
-                      <HelpTip text={tip("submit.blackbox.review_cases")}>
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Columns className="size-3.5" />
-                          {hasHoldout
-                            ? formatMsg("submit.blackbox.review.cases_split", {
-                                train: Math.round(split.train * 100),
-                                val: Math.round(split.val * 100),
-                                test: Math.round(split.test * 100),
-                              })
-                            : msg("submit.blackbox.review.cases_all")}
-                        </span>
-                      </HelpTip>
-                      <div className="flex h-3 overflow-hidden rounded-full">
-                        <div className="bg-[#3D2E22]" style={{ width: `${split.train * 100}%` }} />
-                        <div className="bg-[#C8A882]" style={{ width: `${split.val * 100}%` }} />
-                        <div className="bg-[#8C7A6B]" style={{ width: `${split.test * 100}%` }} />
-                      </div>
-                    </div>
-                  )}
-                  <Row
-                    icon={<Shuffle className="size-3.5" />}
-                    label={msg("submit.blackbox.review.cases_shuffled")}
-                    tipText={tip("data.shuffle_explanation")}
-                  >
-                    {shuffle
-                      ? msg("auto.features.submit.components.steps.summarystep.literal.9")
-                      : msg("auto.features.submit.components.steps.summarystep.literal.10")}
-                  </Row>
+                  <HelpTip text={tip("submit.blackbox.review_cases")}>
+                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Columns className="size-3.5" />
+                      {parsedCases
+                        ? msg("submit.blackbox.review.cases_each")
+                        : msg("submit.blackbox.review.cases_once")}
+                    </span>
+                  </HelpTip>
                 </div>
               )}
 
