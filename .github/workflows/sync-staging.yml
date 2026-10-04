@@ -1,0 +1,40 @@
+# Keeps staging a superset of production. Whenever main moves (a release from
+# staging, or a hotfix merged straight to main), main is merged into staging so
+# the next release never undoes a production fix. A red run means the merge
+# conflicted: merge main into staging by hand and push.
+name: sync staging
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: sync-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  merge-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: staging
+          fetch-depth: 0
+      - name: Merge main into staging
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "Staging already contains main"
+            exit 0
+          fi
+          if ! git merge --no-edit origin/main -m "chore: merge main into staging"; then
+            echo "::error::main does not merge cleanly into staging. Merge it by hand: git checkout staging && git merge origin/main"
+            exit 1
+          fi
+          git push origin HEAD:staging
