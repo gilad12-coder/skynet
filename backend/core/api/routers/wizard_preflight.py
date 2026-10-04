@@ -20,7 +20,6 @@ from ..auth import AuthenticatedUser, get_authenticated_user
 from ..preflight_execution import WizardPreflightRequest, WizardPreflightResponse, run_preflight
 from ..preflight_progress import progress_observer
 from ..rate_limit import enforce_submission_rate
-from ._helpers import refuse_repo_target
 from .submissions import _expand_catalog_grid_payload, _materialize_library_dataset, _materialize_staged_dataset
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
@@ -41,9 +40,6 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
         Returns:
             Scoped checks, reusable evidence identity, and authoritative setup spend.
         """
-        if request.workflow == "anything":
-            target = request.payload.get("target")
-            refuse_repo_target(target.get("kind") if isinstance(target, dict) else None)
         enforce_submission_rate(user.username)
         payload = copy.deepcopy(request.payload)
         payload["username"] = user.username

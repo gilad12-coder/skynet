@@ -941,7 +941,10 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const cloneRecipe =
     job?.optimization_type !== "blackbox"
       ? "program"
-      : payloadRecipe === "prompt" || payloadRecipe === "code" || payloadRecipe === "anything"
+      : payloadRecipe === "prompt" ||
+          payloadRecipe === "code" ||
+          payloadRecipe === "anything" ||
+          payloadRecipe === "repo"
         ? payloadRecipe
         : "anything";
   const cloneQuery = `&recipe=${cloneRecipe}`;
@@ -1625,7 +1628,11 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
             {showBestVersionTab && job.blackbox_result && (
               <TabsContent value="best" className="mt-4" data-tutorial="best-version">
-                <BestVersionTab result={job.blackbox_result} jobName={job.name} />
+                <BestVersionTab
+                  result={job.blackbox_result}
+                  jobName={job.name}
+                  repository={payloadRecipe === "repo"}
+                />
               </TabsContent>
             )}
 

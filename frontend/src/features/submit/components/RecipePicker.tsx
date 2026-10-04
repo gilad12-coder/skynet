@@ -2,14 +2,16 @@
 
 import type { ComponentType } from "react";
 
-import { Cube, Repeat, RocketLaunch } from "@/shared/ui/icons";
+import { Cube, GitBranch, Repeat, RocketLaunch } from "@/shared/ui/icons";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { Carousel } from "@/features/agent-panel";
 
 import { wizardRecipe, type BlackboxRecipe } from "../hooks/use-blackbox-wizard";
 import { BannerFrame, GArrow, GBar, GBox, GWire, PickerSlide } from "./steps/PickerSlide";
 
-export type Recipe = "program" | "anything";
+// "repo" opens the black-box wizard with a GitHub repository as its starting
+// point; its drafts are saved under the black-box slot like any other kind.
+export type Recipe = "program" | "anything" | "repo";
 
 /**
  * What a `?recipe=` deep link or clone link names, or null when absent or
@@ -22,6 +24,7 @@ export function parseRecipeLink(
   value: string | null,
 ): { recipe: Recipe; kind: BlackboxRecipe } | null {
   if (value === "program") return { recipe: "program", kind: "anything" };
+  if (value === "repo") return { recipe: "repo", kind: "repo" };
   if (value === "prompt" || value === "code" || value === "anything") {
     return { recipe: "anything", kind: wizardRecipe(value) };
   }
@@ -36,6 +39,7 @@ const RECIPES: Array<{
   Banner: ComponentType;
 }> = [
   { id: "anything", Icon: Cube, Banner: AnythingBanner },
+  { id: "repo", Icon: GitBranch, Banner: RepoBanner },
   { id: "program", Icon: RocketLaunch, Banner: ProgramBanner },
 ];
 
@@ -188,6 +192,49 @@ function AnythingBanner() {
       <GBox x={198} y={29} w={26} h={22} />
       <GBar x={204} y={36} w={14} />
       <GBar x={204} y={42} w={9} />
+    </BannerFrame>
+  );
+}
+
+function RepoBanner() {
+  return (
+    <BannerFrame>
+      {/* A branch forks off the repository's line, gets scored, and the best
+          version comes back as a pull request. */}
+      <GWire d="M18 56 H222" />
+      <GWire d="M70 56 V30 H120" />
+      <GArrow x={124} y={30} dir="right" />
+      <GWire d="M168 30 H190 V48" />
+      <GArrow x={190} y={50} dir="down" />
+      <GBox x={124} y={18} w={44} h={24} accent />
+      <GBar x={134} y={28} w={24} />
+      <circle
+        cx={70}
+        cy={56}
+        r={5}
+        fill="#FAF8F5"
+        stroke="#3D2E22"
+        strokeOpacity={0.4}
+        strokeWidth={1.25}
+      />
+      <circle
+        cx={190}
+        cy={56}
+        r={5}
+        fill="#FAF8F5"
+        stroke="#3D2E22"
+        strokeOpacity={0.4}
+        strokeWidth={1.25}
+      />
+      <circle
+        cx={34}
+        cy={56}
+        r={4}
+        fill="#FAF8F5"
+        stroke="#3D2E22"
+        strokeOpacity={0.4}
+        strokeWidth={1.25}
+      />
     </BannerFrame>
   );
 }

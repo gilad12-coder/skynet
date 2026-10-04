@@ -100,6 +100,7 @@ import { GitBranch as GitBranchBase } from "@phosphor-icons/react/dist/ssr/GitBr
 import { GitDiff as GitDiffBase } from "@phosphor-icons/react/dist/ssr/GitDiff";
 import { GitMerge as GitMergeBase } from "@phosphor-icons/react/dist/ssr/GitMerge";
 import { GithubLogo as GithubLogoBase } from "@phosphor-icons/react/dist/ssr/GithubLogo";
+import { GitPullRequest as GitPullRequestBase } from "@phosphor-icons/react/dist/ssr/GitPullRequest";
 import { Globe as GlobeBase } from "@phosphor-icons/react/dist/ssr/Globe";
 import { GraduationCap as GraduationCapBase } from "@phosphor-icons/react/dist/ssr/GraduationCap";
 import { GridFour as GridFourBase } from "@phosphor-icons/react/dist/ssr/GridFour";
@@ -267,6 +268,7 @@ export const GitBranch = /* @__PURE__ */ bold(GitBranchBase);
 export const GitDiff = /* @__PURE__ */ bold(GitDiffBase);
 export const GitMerge = /* @__PURE__ */ bold(GitMergeBase);
 export const GithubLogo = /* @__PURE__ */ bold(GithubLogoBase);
+export const GitPullRequest = /* @__PURE__ */ bold(GitPullRequestBase);
 export const Globe = /* @__PURE__ */ bold(GlobeBase);
 export const GraduationCap = /* @__PURE__ */ bold(GraduationCapBase);
 export const GridFour = /* @__PURE__ */ bold(GridFourBase);
