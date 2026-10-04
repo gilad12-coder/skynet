@@ -87,7 +87,15 @@ export interface AnythingDraftData {
   scorerManuallyEdited: boolean;
   objective: string;
   background: string;
-  targetKind: "text" | "agent";
+  targetKind: "text" | "agent" | "repo";
+  // Set on a repository run. Secret rows keep only their name and saved reference.
+  repo?: {
+    repository: string;
+    branch: string;
+    editablePaths: string;
+    setupCommand: string;
+    secrets: Array<{ name: string; savedSecretId: string | null }>;
+  };
   parsedCases: ParsedDataset | null;
   casesName: string;
   split: SplitFractions;
@@ -209,6 +217,7 @@ export function isMeaningfulAnythingDraft(d: AnythingDraftData): boolean {
   return (
     d.stage !== "goal" ||
     d.objective.trim() !== "" ||
+    (d.repo?.repository.trim() ?? "") !== "" ||
     d.background.trim() !== "" ||
     d.seedText.trim() !== "" ||
     d.seedParts.some((p) => p.key.trim() !== "" || p.value.trim() !== "") ||

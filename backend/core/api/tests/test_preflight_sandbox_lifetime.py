@@ -50,6 +50,7 @@ def _run(monkeypatch: pytest.MonkeyPatch, request: WizardPreflightRequest) -> tu
         SimpleNamespace(id="budget", generation=1),
         {"id": "setup"},
         attempt=1,
+        engine=object(),
     )
     assert status == "succeeded"
     return status, bound

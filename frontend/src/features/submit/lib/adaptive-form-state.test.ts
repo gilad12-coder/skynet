@@ -463,6 +463,7 @@ for (const codeAssistMode of ["manual", "auto"]) {
       evaluate(variable(wizard, "stageIssue"), {
         WIZARD_STAGE,
         stageAt,
+        isRepo: false,
         seedMode: "text",
         codeAssistMode,
         objective,
@@ -474,6 +475,57 @@ for (const codeAssistMode of ["manual", "auto"]) {
     if (codeAssistMode === "manual") assert.equal(validate("", "Existing prompt"), null);
   });
 }
+
+test("a repository goal needs a name, editable paths, sound secrets and an objective", () => {
+  const validate = (fields: {
+    repoName?: string;
+    repoPaths?: string;
+    repoSecrets?: Array<{ name: string; value: string; savedSecretId: string | null }>;
+    objective?: string;
+  }) =>
+    evaluate(variable(wizard, "stageIssue"), {
+      WIZARD_STAGE,
+      stageAt,
+      isRepo: true,
+      REPO_NAME_PATTERN: /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/,
+      REPO_SECRET_NAME_PATTERN: /^[A-Za-z_][A-Za-z0-9_]{0,127}$/,
+      parseEditablePaths: (value: string) =>
+        value
+          .split(/[\n,]/)
+          .map((path) => path.trim())
+          .filter(Boolean),
+      editablePathIssue: (path: string) =>
+        path.startsWith("/") ? "submit.blackbox.repo.validation.path_absolute" : null,
+      repoName: "acme/widgets",
+      repoPaths: ".",
+      repoSecrets: [],
+      objective: "Make the tests pass",
+      ...fields,
+      msg: (key: string) => key,
+    })(WIZARD_STAGE.goal);
+  assert.equal(validate({}), null);
+  assert.equal(validate({ repoName: "widgets" })?.fieldId, "bb-repo-name");
+  assert.equal(validate({ repoPaths: " " })?.fieldId, "bb-repo-paths");
+  assert.equal(validate({ repoPaths: "/etc" })?.fieldId, "bb-repo-paths");
+  assert.equal(
+    validate({ repoSecrets: [{ name: "API_KEY", value: "", savedSecretId: null }] })?.message,
+    "submit.blackbox.repo.validation.secret_value",
+  );
+  assert.equal(
+    validate({ repoSecrets: [{ name: "API_KEY", value: "", savedSecretId: "s1" }] }),
+    null,
+  );
+  assert.equal(
+    validate({
+      repoSecrets: [
+        { name: "A", value: "x", savedSecretId: null },
+        { name: "A", value: "y", savedSecretId: null },
+      ],
+    })?.message,
+    "submit.blackbox.repo.validation.secret_duplicate",
+  );
+  assert.equal(validate({ objective: "" })?.fieldId, "bb-objective");
+});
 
 test("typing into a restored no-seed draft makes the starting point active", () => {
   let seedMode = "none";

@@ -27,6 +27,7 @@ from ..models.common import SplitFractions
 from ..service_gateway.optimization.blackbox.preflight import preflight_lifetime_seconds
 from ..service_gateway.optimization.data import split_examples
 from ..storage.preflights import PreflightStore
+from ..worker.repo_staging import StagedRepository, bind_repo_scorer, is_repo_payload, stage_repository
 from ..worker.vercel_dspy import run_vercel_dspy
 from .model_billing import normalize_model_token_sources
 from .preflight_progress import report_preflight_phase
@@ -252,7 +253,11 @@ def _verify_anything(gateway: ModelGateway, payload: dict[str, Any], *, scope: s
     if scope == "execution" and optimizer_ready:
         public = {key: value for key, value in payload.items() if not key.startswith("_")}
         typed = BlackboxRunRequest.model_validate(public)
-        native = typed.strategy.mode != "single" or typed.strategy.engine in {"meta_harness", "autoresearch"}
+        native = (
+            typed.strategy.mode != "single"
+            or typed.strategy.engine in {"meta_harness", "autoresearch"}
+            or typed.target.kind == "repo"
+        )
         optimizer_index = next(index for index, check in enumerate(result["checks"]) if check.get("key") == "optimizer")
         result["checks"][optimizer_index:optimizer_index] = _verify_model_routes(gateway, native=native)
     return result
@@ -347,7 +352,13 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
             )
             parent_request = request.model_copy(update={"payload": parent_payload})
             status, result = _perform_preflight(
-                parent_request, user, budgets, snapshot, claim.document, attempt=claim.attempt
+                parent_request,
+                user,
+                budgets,
+                snapshot,
+                claim.document,
+                attempt=claim.attempt,
+                engine=job_store.engine,
             )
             snapshot = budgets.get(request.execution_budget_id, user.username)
             if snapshot.pending_operations:
@@ -370,6 +381,7 @@ def _perform_preflight(
     document: dict[str, Any],
     *,
     attempt: int,
+    engine: Any,
 ) -> tuple[str, dict[str, Any]]:
     """Execute the owned attempt and finalize its transports before publishing evidence.
 
@@ -380,12 +392,14 @@ def _perform_preflight(
         snapshot: Generation read after the execution claim.
         document: Durable identity of this setup attempt.
         attempt: Number of this physical run of the setup row.
+        engine: Database holding the GitHub connection and saved secrets.
 
     Returns:
         Actual readiness outcome and preserved results, including pending usage.
     """
     payload = request.payload
     gateway: ModelGateway | None = None
+    staged: StagedRepository | None = None
     status = "failed"
     result: dict[str, Any] = {}
     try:
@@ -454,6 +468,15 @@ def _perform_preflight(
         # or released hold from an earlier run would block a new dispatch under
         # the same key, so every run of the row carries its own number.
         identity = f"{document['id']}-{attempt}"
+        if request.workflow == "anything" and is_repo_payload(protected):
+            report_preflight_phase("sandbox")
+            protected, staged = stage_repository(
+                protected,
+                username=user.username,
+                binding_id=request.execution_budget_id,
+                engine=engine,
+            )
+            bind_repo_scorer(protected, staged, gateway, owner_id=f"preflight-{identity}")
         result = (
             _verify_anything(gateway, protected, scope=request.scope, identity=identity)
             if request.workflow == "anything"
@@ -481,6 +504,9 @@ def _perform_preflight(
     except Exception as error:
         result = {"checks": [_check("setup", "failed", str(error))]}
     finally:
+        if staged is not None:
+            staged.close_scorers()
+            staged.cleanup()
         if gateway is not None:
             report_preflight_phase("usage")
             try:

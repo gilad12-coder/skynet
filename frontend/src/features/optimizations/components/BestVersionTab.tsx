@@ -5,7 +5,15 @@ import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import dynamic from "next/dynamic";
 import { useMemo, useState, type KeyboardEvent } from "react";
 import { motion } from "framer-motion";
-import { Code, Cube, DownloadSimple, Eye, GitDiff } from "@/shared/ui/icons";
+import {
+  ArrowSquareOut,
+  Code,
+  Cube,
+  DownloadSimple,
+  Eye,
+  GitDiff,
+  GitPullRequest,
+} from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import {
   Select,
@@ -321,9 +329,12 @@ function insidePopup(target: EventTarget | null): boolean {
 export function BestVersionTab({
   result,
   jobName,
+  repository = false,
 }: {
   result: BlackboxRunResult;
   jobName?: string | null;
+  /** Each version is a patch against the pinned commit, not a text artifact. */
+  repository?: boolean;
 }) {
   const versions = useMemo(() => buildVersions(result), [result]);
   const [index, setIndex] = useState(() => defaultVersionIndex(versions));
@@ -338,11 +349,14 @@ export function BestVersionTab({
     current && hasVisual(current, kind) ? "preview" : "code",
   );
   if (!current) return null;
-  const canDiff = versions.length > 1;
+  // A repository version is already a diff against the starting commit;
+  // diffing two patches against each other reads as noise.
+  const canDiff = versions.length > 1 && !repository;
+  const pullRequest = repository ? readPullRequest(result.details) : null;
   const activeView: View = view === "diff" && !canDiff ? "code" : view;
   const title = msg("optimization.blackbox.versions.title");
   const slug = (jobName ?? "candidate").replace(/[^\w.-]+/g, "_");
-  const fileName = `${slug}-v${current.number}.${RENDER_KIND_EXTENSION[kind]}`;
+  const fileName = `${slug}-v${current.number}.${repository ? "patch" : RENDER_KIND_EXTENSION[kind]}`;
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     // An inner pager that already took the arrow (the preview carousel, an
@@ -389,6 +403,12 @@ export function BestVersionTab({
         <div className="space-y-3 p-3 sm:p-4">
           {result.regression_guard_applied && (
             <InlineWarningRow message={msg("optimization.blackbox.best.regression_guard")} />
+          )}
+          {pullRequest && <PullRequestRow pullRequest={pullRequest} />}
+          {repository && current.text === "" && (
+            <p className="text-xs text-muted-foreground">
+              {msg("optimization.blackbox.repo.unchanged")}
+            </p>
           )}
           {!result.versions?.length && versions.length > 1 && (
             <p className="text-xs text-muted-foreground">
@@ -441,5 +461,44 @@ export function BestVersionTab({
         )}
       </section>
     </FadeIn>
+  );
+}
+
+type PullRequestDetail = { url: string; number: number; branch: string } | { error: string };
+
+/** The draft pull request the worker opened, or why it couldn't, from the run's details. */
+function readPullRequest(details: Record<string, unknown>): PullRequestDetail | null {
+  const raw = details?.pull_request as Record<string, unknown> | undefined;
+  if (!raw) return null;
+  if (typeof raw.url === "string" && typeof raw.number === "number") {
+    return { url: raw.url, number: raw.number, branch: String(raw.branch ?? "") };
+  }
+  return typeof raw.error === "string" ? { error: raw.error } : null;
+}
+
+function PullRequestRow({ pullRequest }: { pullRequest: PullRequestDetail }) {
+  if ("error" in pullRequest) {
+    return (
+      <InlineWarningRow
+        message={formatMsg("optimization.blackbox.repo.pr_failed", { p1: pullRequest.error })}
+      />
+    );
+  }
+  return (
+    <a
+      href={pullRequest.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex min-h-11 items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm transition-colors hover:border-[#C8A882]"
+    >
+      <GitPullRequest className="size-4 shrink-0 text-primary" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">
+        {formatMsg("optimization.blackbox.repo.pr_open", { p1: pullRequest.number })}
+        {pullRequest.branch && (
+          <span className="ms-2 font-mono text-xs text-muted-foreground">{pullRequest.branch}</span>
+        )}
+      </span>
+      <ArrowSquareOut className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    </a>
   );
 }

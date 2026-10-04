@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any
 
 import pytest
@@ -1900,10 +1901,34 @@ def test_submit_blackbox_run_returns_201_and_persists_overview(monkeypatch: pyte
 
 
 @pytest.mark.usefixtures("_skip_scorer_sandbox")
-def test_submit_blackbox_run_refuses_repository_targets_for_now(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A repository target is refused before anything, inline secrets included, is stored."""
+def test_submit_blackbox_run_accepts_repository_targets_without_storing_secret_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repository run is queued and its inline secret values never reach the stored payload."""
+    monkeypatch.setattr(_sub_mod.settings, "byok_vault_key", SecretStr(Fernet.generate_key().decode("utf-8")))
     store = _FakeJobStore()
     client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    staged: list[dict] = []
+    closed: list[str] = []
+
+    class _Staged:
+        """Stand in for the fetched tree without touching GitHub."""
+
+        def close_scorers(self) -> None:
+            """Record that the scoring boxes were stopped."""
+            closed.append("scorers")
+
+        def cleanup(self) -> None:
+            """Record that the tree was removed."""
+            closed.append("tree")
+
+    def stage(payload: dict, **kwargs: object) -> tuple[dict, _Staged]:
+        """Record what the setup check stages and hand the payload back."""
+        staged.append(payload)
+        return payload, _Staged()
+
+    monkeypatch.setattr(preflight_execution, "stage_repository", stage)
+    monkeypatch.setattr(preflight_execution, "bind_repo_scorer", lambda *args, **kwargs: None)
     payload = {
         **_blackbox_payload(),
         "strategy": {"mode": "single", "engine": "autoresearch"},
@@ -1919,9 +1944,11 @@ def test_submit_blackbox_run_refuses_repository_targets_for_now(monkeypatch: pyt
 
     resp = client.post("/blackbox/run", json=payload)
 
-    assert resp.status_code == 422
-    assert resp.json()["code"] == "blackbox.repo_target_unavailable"
-    assert store._jobs == {}
+    assert resp.status_code == 201, resp.text
+    assert "plaintext" not in json.dumps(store._jobs, default=str)
+    assert len(staged) == 1
+    assert "plaintext" not in json.dumps(staged[0], default=str)
+    assert closed == ["scorers", "tree"]
 
 
 @pytest.mark.usefixtures("_skip_scorer_sandbox")

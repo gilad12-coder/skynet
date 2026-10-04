@@ -610,8 +610,26 @@ export interface BlackboxBudget {
   stop_at_score?: number | null;
 }
 
+/** One environment variable the repository scorer receives: typed in, or saved on the account. */
+export interface BlackboxRepoSecret {
+  name: string;
+  value?: string | null;
+  saved_secret_id?: string | null;
+}
+
+/** A GitHub repository optimized as a whole; each version is a patch against `commit`. */
+export interface BlackboxRepoSource {
+  provider?: "github";
+  repository: string;
+  branch?: string | null;
+  commit?: string | null;
+  editable_paths: string[];
+  secrets?: BlackboxRepoSecret[];
+}
+
 export interface BlackboxTarget {
-  kind: "text" | "agent";
+  kind: "text" | "agent" | "repo";
+  repo?: BlackboxRepoSource | null;
   harness?: BlackboxHarness;
   model?: string | null;
   timeout_seconds?: number;
@@ -652,7 +670,7 @@ export interface BlackboxRunRequest {
   objective?: string | null;
   background?: string | null;
   // Wizard recipe that authored the run; cloning preselects the picker with it.
-  recipe?: "prompt" | "code" | "anything" | null;
+  recipe?: "prompt" | "code" | "anything" | "repo" | null;
   seed_candidate?: BlackboxCandidate | null;
   scorer: BlackboxScorer;
   cases?: Array<Record<string, unknown>> | null;
@@ -775,7 +793,7 @@ export interface BlackboxEngineInfo {
 }
 
 export interface BlackboxEngineCatalogResponse {
-  target_kind: "text" | "agent";
+  target_kind: "text" | "agent" | "repo";
   sandbox_available: boolean;
   sandbox_reason?: string | null;
   engines: BlackboxEngineInfo[];

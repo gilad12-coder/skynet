@@ -505,7 +505,7 @@ export function updateExecutionBudget(
   });
 }
 
-export function getBlackboxEngines(target: "text" | "agent") {
+export function getBlackboxEngines(target: "text" | "agent" | "repo") {
   return request<BlackboxEngineCatalogResponse>(
     `/blackbox/engines?target=${encodeURIComponent(target)}`,
   );
@@ -1120,6 +1120,39 @@ export interface HubPreview {
 /** List the caller's connectors (one entry per supported provider). */
 export function getConnectors() {
   return request<ConnectorListResponse>("/connectors");
+}
+
+/** A secret saved on the account; its value never comes back from the server. */
+export interface SavedSecret {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listSavedSecrets() {
+  return request<{ secrets: SavedSecret[] }>("/secrets");
+}
+
+/** Save a secret under `name`, replacing the value of one already saved under it. */
+export function saveSecret(name: string, value: string) {
+  return request<SavedSecret>("/secrets", {
+    method: "PUT",
+    body: JSON.stringify({ name, value }),
+  });
+}
+
+/** Forget one saved secret. The route returns 204. */
+export async function deleteSavedSecret(id: string): Promise<void> {
+  const res = await fetchWithAuthRetry(`${apiBase()}/secrets/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      parseErrorMessage(text) ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status }),
+    );
+  }
 }
 
 /**

@@ -13,6 +13,7 @@ import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
+import { BlackboxRepoFields } from "./BlackboxRepoFields";
 import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
 import { Disclosure } from "../Disclosure";
 import { Field, TEXTAREA_CLASS } from "./shared";
@@ -258,7 +259,8 @@ export function BlackboxStartStep({
       title={msg("submit.blackbox.start.title")}
       description={msg("submit.blackbox.start.desc")}
     >
-      {seedFields}
+      {/* A repository run starts from the pinned commit, so it has no text to seed. */}
+      {recipe === "repo" ? <BlackboxRepoFields w={w} /> : seedFields}
       <ExpandableTextarea
         id="bb-objective"
         label={msg("submit.blackbox.start.objective_label")}

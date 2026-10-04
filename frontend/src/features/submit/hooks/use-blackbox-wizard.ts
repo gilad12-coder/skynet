@@ -16,6 +16,7 @@ import type {
   BlackboxProposer,
   BlackboxRunRequest,
   BlackboxScorer,
+  BlackboxTarget,
   ScorerDependencyLock,
   ModelConfig,
   ScorerDryRunResponse,
@@ -108,9 +109,10 @@ import {
 } from "./use-submit-wizard-data";
 
 export type SeedMode = "text" | "parts" | "none";
-// The wizard offers two kinds of starting point. Runs saved before the
-// prompt kind folded into text still carry "prompt"; they land on text.
-export type BlackboxRecipe = "code" | "anything";
+// The wizard offers three kinds of starting point: text, a program, or a
+// GitHub repository. Runs saved before the prompt kind folded into text still
+// carry "prompt"; they land on text.
+export type BlackboxRecipe = "code" | "anything" | "repo";
 
 interface SeedGuess {
   code: boolean;
@@ -120,7 +122,41 @@ const NO_GUESS: SeedGuess = { code: false, language: null };
 
 /** Maps a stored or linked recipe onto the kinds the wizard offers. */
 export function wizardRecipe(value: string | null | undefined): BlackboxRecipe {
-  return value === "code" ? "code" : "anything";
+  return value === "code" || value === "repo" ? value : "anything";
+}
+
+/** One environment variable a repository scorer reads: typed here, or saved on the account. */
+export interface RepoSecretRow {
+  name: string;
+  value: string;
+  savedSecretId: string | null;
+}
+
+export const REPO_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
+export const REPO_SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+// Repository runs are searched by one of these; the rest edit text only.
+const REPO_ENGINES: readonly BlackboxEngineId[] = ["autoresearch", "gepa"];
+
+/** The editable paths as typed, one per line or comma, with "." meaning the whole repository. */
+export function parseEditablePaths(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map((path) =>
+      path
+        .trim()
+        .replace(/^\.\/(?=.)/, "")
+        .replace(/\/+$/, ""),
+    )
+    .filter(Boolean);
+}
+
+/** Why an editable path would be refused, or null when it is fine. */
+function editablePathIssue(path: string): MessageKey | null {
+  if (path.startsWith("/")) return "submit.blackbox.repo.validation.path_absolute";
+  const parts = path.split("/");
+  if (parts.includes("..") || parts.includes(".git"))
+    return "submit.blackbox.repo.validation.path_outside";
+  return null;
 }
 
 // Black-box cases carry no column roles; the agent reads them as raw samples.
@@ -180,9 +216,31 @@ def _is_number(token):
     return True
 `;
 
+// A repository version is a checkout on disk: the scorer gets its path and
+// runs whatever proves it better, here the repository's own test suite.
+const REPO_SCORER_TEMPLATE = `import subprocess
+
+
+def score(repo_path, case=None):
+    """Return a number, higher is better. \`repo_path\` is a checkout of one version."""
+    TIMEOUT_SECONDS = 600
+    try:
+        run = subprocess.run(
+            ["python3", "-m", "pytest", "-q"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return 0.0, {"error": f"tests timed out after {TIMEOUT_SECONDS}s"}
+    return (1.0 if run.returncode == 0 else 0.0), {"output": run.stdout[-2000:]}
+`;
+
 // A program's natural yardstick is running it, so the code recipe opens on
 // the run-program scorer instead of the generic word-count template.
 function scorerTemplateFor(recipe: BlackboxRecipe): string {
+  if (recipe === "repo") return REPO_SCORER_TEMPLATE;
   return recipe === "code" ? RUN_CODE_SCORER_TEMPLATE : SCORER_TEMPLATE;
 }
 
@@ -224,6 +282,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
   // Execution intent comes from the entry point, draft or clone, never from
   // syntax detection: code-shaped text may be a config or a prompt example.
   const [recipe, setRecipeState] = useState<BlackboxRecipe>(initialRecipe);
+  const isRepo = recipe === "repo";
+  const [repoName, setRepoName] = useState("");
+  const [repoBranch, setRepoBranch] = useState("");
+  const [repoPaths, setRepoPaths] = useState(".");
+  const [repoSetup, setRepoSetup] = useState("");
+  const [repoSecrets, setRepoSecrets] = useState<RepoSecretRow[]>([]);
 
   const [codeAssistMode, setCodeAssistMode] = useState<"auto" | "manual">(() =>
     readPref("wizardCodeAssist"),
@@ -582,7 +646,18 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
     setJobDescription(d.jobDescription);
     setIsPrivate(d.isPrivate);
     setEconomyMode(d.economyMode ?? false);
-    setRecipeState(d.recipe);
+    setRecipeState(wizardRecipe(d.recipe));
+    setRepoName(d.repo?.repository ?? "");
+    setRepoBranch(d.repo?.branch ?? "");
+    setRepoPaths(d.repo?.editablePaths ?? ".");
+    setRepoSetup(d.repo?.setupCommand ?? "");
+    setRepoSecrets(
+      (d.repo?.secrets ?? []).map((row) => ({
+        name: row.name,
+        value: "",
+        savedSecretId: row.savedSecretId,
+      })),
+    );
     setCodeAssistMode(d.codeAssistMode);
     const singlePart = d.seedMode === "parts" && d.seedParts.length === 1 ? d.seedParts[0] : null;
     setSeedMode(singlePart ? "text" : d.seedMode);
@@ -642,7 +717,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
 
   useEffect(() => {
     let cancelled = false;
-    getBlackboxEngines("text")
+    setEngineCatalogResult(null);
+    getBlackboxEngines(isRepo ? "repo" : "text")
       .then((res) => {
         if (!cancelled) setEngineCatalogResult({ data: res });
       })
@@ -652,7 +728,27 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isRepo]);
+
+  // A repository is searched by one hand-picked engine: Auto mixes text-only
+  // engines, so the strategy settles on AutoResearch unless GEPA was chosen.
+  useEffect(() => {
+    if (!isRepo) return;
+    setStrategyMode("single");
+    setEngine((current) => (current && REPO_ENGINES.includes(current) ? current : "autoresearch"));
+    setScorerKind("python");
+  }, [isRepo, strategyMode, engine]);
+
+  /** Switch between optimizing text and a repository, keeping a hand-written scorer. */
+  const setRecipe = useCallback(
+    (next: BlackboxRecipe) => {
+      if (next === recipe) return;
+      setRecipeState(next);
+      if (!scorerManuallyEdited) setMetricCode(scorerTemplateFor(next));
+      if (recipe === "repo") setStrategyMode("auto");
+    },
+    [recipe, scorerManuallyEdited],
+  );
 
   // A `?clone=` link hydrates the wizard from the source run's stored payload
   // (server-scrubbed: no model api_key, no remote-scorer secret). The clone
@@ -692,6 +788,22 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
         if (source) {
           setEconomyMode(source.economy_mode === true);
           if (source.recipe) setRecipeState(wizardRecipe(source.recipe));
+          const repo = source.target?.kind === "repo" ? source.target.repo : null;
+          if (repo) {
+            setRecipeState("repo");
+            setRepoName(repo.repository);
+            setRepoBranch(repo.branch ?? "");
+            setRepoPaths(repo.editable_paths.join("\n"));
+            setRepoSetup(source.target?.setup_command ?? "");
+            // Typed values are scrubbed from the stored run; saved ones keep their reference.
+            setRepoSecrets(
+              (repo.secrets ?? []).map((row) => ({
+                name: row.name,
+                value: "",
+                savedSecretId: row.saved_secret_id ?? null,
+              })),
+            );
+          }
           if (source.objective) setObjective(source.objective);
           if (source.background) setBackground(source.background);
 
@@ -810,11 +922,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
   const seedIsCode = recipe === "code" || seedGuess.code;
 
   const seedCandidate = useMemo<BlackboxCandidate | null>(() => {
+    if (isRepo) return null;
     if (seedMode === "none") return null;
     if (seedMode === "text") return seedText.trim() ? seedText : null;
     const parts = namedSeedParts(seedParts).filter((p) => p.key.trim() && p.value.trim());
     return parts.length ? Object.fromEntries(parts.map((p) => [p.key.trim(), p.value])) : null;
-  }, [seedMode, seedText, seedParts]);
+  }, [isRepo, seedMode, seedText, seedParts]);
 
   // The seed candidate runs inside the scorer box, so its imports belong in the
   // dependency lock — but the signed lock binds only to the scorer source, so
@@ -937,6 +1050,24 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
     [costBracket, tokenSource],
   );
 
+  const repoTarget = (): BlackboxTarget => ({
+    kind: "repo",
+    setup_command: repoSetup.trim() || null,
+    repo: {
+      provider: "github",
+      repository: repoName.trim(),
+      branch: repoBranch.trim() || null,
+      editable_paths: parseEditablePaths(repoPaths),
+      secrets: repoSecrets
+        .filter((row) => row.name.trim())
+        .map((row) =>
+          row.savedSecretId
+            ? { name: row.name.trim(), saved_secret_id: row.savedSecretId }
+            : { name: row.name.trim(), value: row.value },
+        ),
+    },
+  });
+
   const buildSubmissionPayload = (overrideCode?: string): BlackboxRunRequest => {
     const reflection = prepareModelConfig(effectiveReflectionModel);
     const estimate = chargeableBracket(costBracket, tokenSource);
@@ -961,7 +1092,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
       strategy: strategyMode === "single" ? { mode: "single", engine } : { mode: "auto" },
       proposer_runtime: proposerRuntime,
       proposer: nativeProposer ? submittedProposer(proposer, strategyMode, engine) : undefined,
-      target: { kind: "text" },
+      target: isRepo ? repoTarget() : { kind: "text" },
       reflection_model_config: reflection,
       token_source: tokenSource,
       is_private: isPrivate,
@@ -1146,8 +1277,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
   );
 
   const authoringContext = useMemo<BlackboxAuthoringContext>(
+    // The writing assistant has no repository mode: a repository run's scorer
+    // is written by hand, so it reads as plain text here.
     () => ({
-      recipe,
+      recipe: recipe === "repo" ? "anything" : recipe,
       objective,
       background,
       target_kind: "text",
@@ -1158,6 +1291,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
 
   // Restored or cloned authored artifacts must survive the first render before hydration.
   const interviewPossible =
+    !isRepo &&
     !drafts.offerPending &&
     !drafts.suspended &&
     codeAssistMode === "auto" &&
@@ -1236,7 +1370,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
     metricValidation: scorerValidation,
     runSignatureValidation: noSeedValidation,
     runMetricValidation: noSeedValidation,
-    seedEnabled: !drafts.offerPending && interview.resolved,
+    // A repository has no text seed to draft, and its scorer is written by hand.
+    seedEnabled: !isRepo && !drafts.offerPending && interview.resolved,
     interviewBrief: interview.confirmedBrief,
     blackbox: authoringContext,
     model: interview.model,
@@ -1314,6 +1449,26 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
     });
     switch (s) {
       case WIZARD_STAGE.goal: {
+        if (isRepo) {
+          if (!REPO_NAME_PATTERN.test(repoName.trim()))
+            return fail("submit.blackbox.repo.validation.repository", "bb-repo-name");
+          const paths = parseEditablePaths(repoPaths);
+          if (!paths.length) return fail("submit.blackbox.repo.validation.paths", "bb-repo-paths");
+          const pathIssue = paths.map(editablePathIssue).find(Boolean);
+          if (pathIssue) return fail(pathIssue, "bb-repo-paths");
+          const named = repoSecrets.filter(
+            (row) => row.name.trim() || row.value || row.savedSecretId,
+          );
+          if (named.some((row) => !REPO_SECRET_NAME_PATTERN.test(row.name.trim())))
+            return fail("submit.blackbox.repo.validation.secret_name", "bb-repo-secrets");
+          if (new Set(named.map((row) => row.name.trim())).size !== named.length)
+            return fail("submit.blackbox.repo.validation.secret_duplicate", "bb-repo-secrets");
+          if (named.some((row) => !row.savedSecretId && !row.value))
+            return fail("submit.blackbox.repo.validation.secret_value", "bb-repo-secrets");
+          if (!objective.trim())
+            return fail("submit.blackbox.validation.objective_required", "bb-objective");
+          return null;
+        }
         const partsIssue = seedMode === "parts" ? seedPartsIssue(namedSeedParts(seedParts)) : null;
         if (partsIssue) return fail(`submit.parts.${partsIssue}`, "bb-seed");
         // In auto mode the agent drafts the text seed from the objective, so
@@ -1610,7 +1765,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
       track(TelemetryEvent.BlackboxSubmitted, {
         strategy: strategyMode,
         engine: engine ?? "auto",
-        target: "text",
+        target: isRepo ? "repo" : "text",
         scorer: scorerKind,
         has_cases: parsedCases != null,
       });
@@ -1663,7 +1818,20 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
       scorerManuallyEdited,
       objective,
       background,
-      targetKind: "text",
+      targetKind: isRepo ? "repo" : "text",
+      // Typed secret values never reach the draft; a restored row asks for its value again.
+      repo: isRepo
+        ? {
+            repository: repoName,
+            branch: repoBranch,
+            editablePaths: repoPaths,
+            setupCommand: repoSetup,
+            secrets: repoSecrets.map((row) => ({
+              name: row.name,
+              savedSecretId: row.savedSecretId,
+            })),
+          }
+        : undefined,
       parsedCases,
       casesName,
       split,
@@ -1716,6 +1884,18 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
 
   return {
     recipe,
+    setRecipe,
+    isRepo,
+    repoName,
+    setRepoName,
+    repoBranch,
+    setRepoBranch,
+    repoPaths,
+    setRepoPaths,
+    repoSetup,
+    setRepoSetup,
+    repoSecrets,
+    setRepoSecrets,
     step,
     direction,
     maxReachableStep: furthestReachedStep,

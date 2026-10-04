@@ -57,6 +57,7 @@ from ....constants import (
 from ....exceptions import ServiceError
 from ....models.blackbox import (
     BLACKBOX_HARNESS_CLAUDE_CODE,
+    BLACKBOX_REPO_ENGINES,
     BLACKBOX_STRATEGY_AUTO,
     BLACKBOX_TARGET_AGENT,
     BLACKBOX_TARGET_REPO,
@@ -106,6 +107,8 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[str, dict[str, Any]], None]
 
+_REPO_ENGINE_REASON = "A repository is optimized by AutoResearch or GEPA."
+
 # Progress events per run are capped near this many so a 100k-run budget
 # does not flood the job log.
 _PROGRESS_EVENTS = 100
@@ -135,7 +138,7 @@ def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
     """List every engine with its availability for a job whose target is ``target_kind``.
 
     Args:
-        target_kind: ``text`` or ``agent`` — the target the wizard is building.
+        target_kind: ``text``, ``agent`` or ``repo`` — the target the wizard is building.
     Returns:
         The catalog in registry order, each entry carrying the user-facing
         reason it cannot run here, when it cannot.
@@ -166,8 +169,16 @@ def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
                 id=spec.id,
                 label=spec.label,
                 description=spec.description,
-                available=spec.available_for(caps),
-                unavailable_reason=spec.unavailable_reason_for(caps),
+                available=spec.available_for(caps)
+                and (target_kind != BLACKBOX_TARGET_REPO or spec.id in BLACKBOX_REPO_ENGINES),
+                unavailable_reason=(
+                    spec.unavailable_reason_for(caps)
+                    or (
+                        _REPO_ENGINE_REASON
+                        if target_kind == BLACKBOX_TARGET_REPO and spec.id not in BLACKBOX_REPO_ENGINES
+                        else None
+                    )
+                ),
                 requires_agent_target=spec.requires_agent_target,
                 supports_parts=spec.supports_parts,
                 checkpoint_recovery_supported=spec.checkpoint_recovery_supported,
@@ -180,8 +191,8 @@ def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
             for spec in ENGINES.values()
         ],
         auto_engines=list(AUTO_ENGINES),
-        auto_available=auto_reason is None,
-        auto_unavailable_reason=auto_reason,
+        auto_available=auto_reason is None and target_kind != BLACKBOX_TARGET_REPO,
+        auto_unavailable_reason=auto_reason or (_REPO_ENGINE_REASON if target_kind == BLACKBOX_TARGET_REPO else None),
         auto_checkpoint_recovery_supported=False,
         auto_checkpoint_recovery_reason="The Auto recipe cannot restore its multi-engine search from one checkpoint.",
         claude_code_proposer_available=settings.claude_code_byok_egress,

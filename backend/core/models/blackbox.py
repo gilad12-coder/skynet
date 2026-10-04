@@ -310,9 +310,9 @@ class BlackboxRunRequest(BaseModel):
     username: str | None = None
     objective: str | None = None
     background: str | None = None
-    # Which wizard recipe authored the run ("prompt" / "code" / "anything").
+    # Which wizard recipe authored the run ("prompt" / "code" / "anything" / "repo").
     # Engines ignore it; cloning reads it back to preselect the recipe picker.
-    recipe: Literal["prompt", "code", "anything"] | None = None
+    recipe: Literal["prompt", "code", "anything", "repo"] | None = None
     seed_candidate: BlackboxCandidate | None = None
     scorer: BlackboxScorer
     cases: list[dict[str, Any]] | None = Field(default=None, max_length=200_000)

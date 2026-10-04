@@ -33,6 +33,7 @@ const cantoneseEnglishAllowlist = new Set([
   "auto.features.tutorial.components.concepts.guide.literal.344",
   "auto.features.tutorial.components.concepts.guide.literal.41",
   "settings.admin.storage.username_placeholder",
+  "submit.blackbox.repo.paths_placeholder",
 ]);
 const intentionallyEmptyTranslations = new Set(["uk:auto.app.optimizations.id.page.7"]);
 
