@@ -125,6 +125,7 @@ def bind_protected_sandbox(
     owner_id: str,
     lifetime_seconds: int | None = None,
     anthropic_api_key: str | None = None,
+    parent_hosts: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Keep provider credentials, fixed resource profiles, and metering in the parent.
 
@@ -136,6 +137,8 @@ def bind_protected_sandbox(
         lifetime_seconds: Optional shorter ceiling for one bounded interaction.
         anthropic_api_key: The owner's Anthropic key when Claude Code proposes;
             the network edge adds it to the box's Anthropic requests.
+        parent_hosts: Package registries the parent's own repository scoring
+            box may reach during setup; empty when the run opens no such box.
 
     Returns:
         Non-secret deployment identity usable in setup evidence.
@@ -177,4 +180,6 @@ def bind_protected_sandbox(
         lifetime_seconds=lifetime,
         allowed_hosts=(ANTHROPIC_HOST,) if anthropic_api_key is not None else (),
     )
+    if parent_hosts:
+        gateway.fund_parent_sandbox(parent_hosts)
     return {"image": image, "lifetime_seconds": lifetime}

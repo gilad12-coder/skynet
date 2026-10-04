@@ -437,6 +437,21 @@ class VercelSandboxSession:
             return None
         return self._session.fs.read_text(path, cwd=self._cwd)
 
+    def disable_network(self) -> None:
+        """Switch the running box to deny-all networking and confirm Vercel applied it.
+
+        Raises:
+            ServiceError: When Vercel does not report the box as deny-all afterwards.
+        """
+        updated = self._session.update_network_policy(NetworkPolicy.deny_all())
+        policy = getattr(updated, "network_policy", None)
+        mode = getattr(policy, "mode", None)
+        # Vercel may echo an empty custom allowlist instead of the deny-all
+        # mode; both admit no host, and anything else fails closed.
+        if not (mode == "deny-all" or (mode == "custom" and not getattr(policy, "allow", None))):
+            raise ServiceError("Vercel did not confirm that the scoring box's network is off.")
+        self._session = updated
+
     def close(self) -> None:
         """Stop exactly one session, destroy its sandbox, and settle final usage.
 

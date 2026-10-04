@@ -12,6 +12,9 @@ from .operation_pricing import OperationQuote, json_fingerprint
 from .vercel_usage import SANDBOX_NETWORK_BYTES_CAP, quote_vercel_sandbox
 
 RECOVERY_ADMISSION_VERSION = 1
+# Descriptor key naming the hosts a parent-owned repository scoring box may
+# reach; when present, that box is funded alongside the outer sandbox.
+PARENT_HOSTS_KEY = "parent_allowed_hosts"
 _VOLATILE_PRICE_FIELDS = frozenset({"retrieved_at", "version"})
 
 
@@ -115,40 +118,85 @@ def _validate_model_bound(bound: Any) -> Mapping[str, Any]:
     return bound
 
 
+def _request_bound(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Price one sandbox request into recovery evidence.
+
+    Args:
+        request: Final immutable Vercel create parameters.
+
+    Returns:
+        The request, its fingerprint, maximum cents and price evidence.
+    """
+    quote = quote_vercel_sandbox(request)
+    return {
+        "request": copy.deepcopy(dict(request)),
+        "request_fingerprint": quote.request_fingerprint,
+        "max_cents": str(quote.maximum.total),
+        "max_wallet_cents": str(quote.maximum.wallet),
+        "price_snapshot": copy.deepcopy(dict(quote.price_snapshot)),
+    }
+
+
+def _runtime_document(request: Mapping[str, Any], parent_request: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Combine the outer sandbox and an optional parent scoring box into one runtime bound.
+
+    Args:
+        request: The outer sandbox's create parameters.
+        parent_request: The parent box's create parameters, if the run opens one.
+
+    Returns:
+        Runtime evidence whose maxima cover every box it names.
+    """
+    document = {"kind": "vercel", **_request_bound(request)}
+    if parent_request is not None:
+        parent = _request_bound(parent_request)
+        document["parent_box"] = parent
+        document["max_cents"] = str(_amount(document["max_cents"]) + _amount(parent["max_cents"]))
+        document["max_wallet_cents"] = str(_amount(document["max_wallet_cents"]) + _amount(parent["max_wallet_cents"]))
+    return document
+
+
+def _box_request(image: Any, lifetime_seconds: Any, hosts: Any) -> dict[str, Any]:
+    """Build one sandbox's create parameters as the runtime sends them.
+
+    Args:
+        image: Immutable image digest.
+        lifetime_seconds: Funded lifetime.
+        hosts: Hosts the box may reach; empty for deny-all.
+
+    Returns:
+        The request :func:`quote_vercel_sandbox` prices.
+    """
+    return {
+        "image": image,
+        "lifetime_ms": math.ceil(float(lifetime_seconds or 0) * 1000),
+        "vcpus": 2,
+        "network_disabled": not hosts,
+        **({"allowed_hosts": list(hosts), "network_bytes_cap": SANDBOX_NETWORK_BYTES_CAP} if hosts else {}),
+        "ports": [],
+        "persistent": False,
+    }
+
+
 def runtime_bound(kind: str, descriptor: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Build the exact outer sandbox resource ceiling for a later restore.
+    """Build the exact sandbox resource ceiling for a later restore.
 
     Args:
         kind: Managed execution runtime.
-        descriptor: Parent-owned Vercel image and lifetime profile.
+        descriptor: Parent-owned Vercel image and lifetime profile, plus the
+            hosts of a parent scoring box when the run opens one.
 
     Returns:
         Runtime identity, enforced resources, price evidence, and maximum cents.
     """
     if kind != "vercel" or not isinstance(descriptor, Mapping):
         raise RecoveryAdmissionError("Recovery requires a recognized bounded sandbox runtime.")
-    request = {
-        "image": descriptor.get("image"),
-        "lifetime_ms": math.ceil(float(descriptor.get("lifetime_seconds", 0)) * 1000),
-        "vcpus": 2,
-        "network_disabled": not descriptor.get("allowed_hosts"),
-        **(
-            {"allowed_hosts": list(descriptor["allowed_hosts"]), "network_bytes_cap": SANDBOX_NETWORK_BYTES_CAP}
-            if descriptor.get("allowed_hosts")
-            else {}
-        ),
-        "ports": [],
-        "persistent": False,
-    }
-    quote = quote_vercel_sandbox(request)
-    return {
-        "kind": "vercel",
-        "request": request,
-        "request_fingerprint": quote.request_fingerprint,
-        "max_cents": str(quote.maximum.total),
-        "max_wallet_cents": str(quote.maximum.wallet),
-        "price_snapshot": copy.deepcopy(dict(quote.price_snapshot)),
-    }
+    image, lifetime = descriptor.get("image"), descriptor.get("lifetime_seconds", 0)
+    parent_hosts = descriptor.get(PARENT_HOSTS_KEY)
+    return _runtime_document(
+        _box_request(image, lifetime, descriptor.get("allowed_hosts")),
+        _box_request(image, lifetime, parent_hosts) if parent_hosts else None,
+    )
 
 
 def build_recovery_plan(
@@ -244,18 +292,13 @@ def validate_recovery_plan(plan: Any, manifest: Mapping[str, Any]) -> dict[str, 
         raise RecoveryAdmissionError("Recovery admission has no bounded outer sandbox runtime.")
     try:
         request = runtime.get("request")
-        if not isinstance(request, Mapping):
+        parent = runtime.get("parent_box")
+        if not isinstance(request, Mapping) or (parent is not None and not isinstance(parent, Mapping)):
             raise RecoveryAdmissionError("Recovery admission has no bounded Vercel request.")
-        quote = quote_vercel_sandbox(request)
-        verified_runtime = {
-            "kind": "vercel",
-            "request": copy.deepcopy(dict(request)),
-            "request_fingerprint": quote.request_fingerprint,
-            "max_cents": str(quote.maximum.total),
-            "max_wallet_cents": str(quote.maximum.wallet),
-            "price_snapshot": copy.deepcopy(dict(quote.price_snapshot)),
-        }
-        validate_recovery_runtime({"runtime": runtime}, verified_runtime)
+        parent_request = parent.get("request") if parent is not None else None
+        if parent is not None and not isinstance(parent_request, Mapping):
+            raise RecoveryAdmissionError("Recovery admission has no bounded Vercel request.")
+        validate_recovery_runtime({"runtime": runtime}, _runtime_document(request, parent_request))
     except (TypeError, ValueError) as error:
         if isinstance(error, RecoveryAdmissionError):
             raise

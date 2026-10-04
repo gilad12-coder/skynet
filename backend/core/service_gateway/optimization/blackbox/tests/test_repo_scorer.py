@@ -48,7 +48,7 @@ def scored(tmp_path: Path) -> Iterator[tuple[RepoScorer, Path, Path]]:
     scorer = RepoScorer(
         RepoWorkspace(
             runtime=LocalSubprocessRuntime(),
-            spec=SandboxSpec(lifetime_seconds=120),
+            spec=SandboxSpec(lifetime_seconds=120, network_disabled=True),
             archive=archive,
             editable_paths=["src"],
             readonly_paths=[],
@@ -93,7 +93,7 @@ def test_a_failing_scorer_is_reported(tmp_path: Path) -> None:
     scorer = RepoScorer(
         RepoWorkspace(
             runtime=LocalSubprocessRuntime(),
-            spec=SandboxSpec(lifetime_seconds=60),
+            spec=SandboxSpec(lifetime_seconds=60, network_disabled=True),
             archive=archive,
             editable_paths=["src"],
             readonly_paths=[],

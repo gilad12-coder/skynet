@@ -672,3 +672,58 @@ def test_command_result_ok() -> None:
     """``ok`` is exit code zero."""
     assert CommandResult(exit_code=0).ok is True
     assert CommandResult(exit_code=1).ok is False
+
+
+class _PolicyBox(_FakeBox):
+    """Fake box whose session echoes a configured network policy after an update."""
+
+    def __init__(self, echoed: Any) -> None:
+        """Choose the policy Vercel reports back.
+
+        Args:
+            echoed: The policy the update returns, or an exception to raise.
+        """
+        super().__init__()
+        self._echoed = echoed
+        self.requested: list[Any] = []
+        self.network_policy: Any = None
+
+    def update_network_policy(self, policy: Any) -> _PolicyBox:
+        """Record the request and report the configured outcome."""
+        self.requested.append(policy)
+        if isinstance(self._echoed, Exception):
+            raise self._echoed
+        self.network_policy = self._echoed
+        return self
+
+
+@_needs_sdk
+@pytest.mark.parametrize(
+    "echoed",
+    [
+        sandbox_mod.NetworkPolicy.deny_all() if _SDK_PRESENT else None,
+        sandbox_mod.NetworkPolicy.custom(allow={}) if _SDK_PRESENT else None,
+    ],
+)
+def test_disable_network_accepts_only_a_confirmed_deny_all(echoed: Any) -> None:
+    """Ask Vercel for deny-all and accept either form it reports with no host allowed."""
+    box = _PolicyBox(echoed)
+    VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context()).disable_network()
+    assert box.requested[0].mode == "deny-all"
+
+
+@_needs_sdk
+@pytest.mark.parametrize(
+    "echoed",
+    [
+        None,
+        sandbox_mod.NetworkPolicy.allow_all() if _SDK_PRESENT else None,
+        sandbox_mod.NetworkPolicy.custom(allow={"pypi.org": ()}) if _SDK_PRESENT else None,
+        ServiceError("policy update failed"),
+    ],
+)
+def test_disable_network_fails_closed_without_confirmation(echoed: Any) -> None:
+    """Raise when Vercel refuses the switch or reports any host still reachable."""
+    session = VercelSandboxSession(_PolicyBox(echoed), _FakeApiSession(), contextvars.copy_context())
+    with pytest.raises(ServiceError):
+        session.disable_network()

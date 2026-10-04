@@ -28,9 +28,11 @@ from core.billing.protected_credentials import (
     protect_execution_credentials,
     resolve_execution_credentials,
 )
-from core.billing.recovery_admission import model_call_bound
+from core.billing.recovery_admission import PARENT_HOSTS_KEY, model_call_bound
 from core.billing.runtime import BudgetRuntime
+from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, settings
+from core.exceptions import ServiceError
 from core.service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
 from core.service_gateway.optimization.blackbox.sandbox import CommandResult, LocalSubprocessRuntime, SandboxSpec
 from core.service_gateway.optimization.blackbox.sandbox_broker import SandboxBroker
@@ -531,3 +533,28 @@ def test_bound_evaluator_answers_only_its_capability(gateway: ModelGateway) -> N
     )
     assert refused.status_code == 401
     assert len(received) == 1
+
+
+def test_parent_registry_box_is_funded_but_unreachable_from_the_guest_route(gateway: ModelGateway) -> None:
+    """Fund the parent's box in recovery, keep its hosts out of the guest's descriptor, and refuse them remotely."""
+    gateway.bind_sandbox(
+        SandboxBroker(LocalSubprocessRuntime(), image=IMAGE, max_lifetime_seconds=20),
+        image=IMAGE,
+        lifetime_seconds=20,
+    )
+    with pytest.raises(ValueError, match="Fund"):
+        gateway.parent_sandbox_runtime()
+    gateway.fund_parent_sandbox(PACKAGE_REGISTRY_HOSTS)
+    protected = gateway.protect_payload({"model_config": {"name": "fixture/text"}}, managed_key="upstream-secret")
+    descriptor = protected["_budget_gateway_descriptor"]
+
+    assert PARENT_HOSTS_KEY not in descriptor
+    assert "pypi.org" not in json.dumps(descriptor)
+    remote = RemoteSandboxRuntime(descriptor["url"], descriptor["control_token"])
+    with pytest.raises(ServiceError, match="network access"):
+        remote.open(SandboxSpec(lifetime_seconds=20, image=IMAGE, allowed_hosts=("pypi.org",)))
+    runtime = gateway.checkpoint_recovery_plan(
+        {"checkpoint_sha256": "c", "configuration_sha256": "c", "source_sha256": "s"}, runtime="vercel"
+    )["runtime"]
+    assert runtime["parent_box"]["request"]["allowed_hosts"] == list(PACKAGE_REGISTRY_HOSTS)
+    gateway.parent_sandbox_runtime()

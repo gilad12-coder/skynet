@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from ..billing.protected_credentials import ProtectedCredentialVault, resolve_repo_secrets
+from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..connectors.github_publish import RepoPublishError, open_pull_request, push_version
 from ..connectors.github_repo import RepoFetchError, RepoSnapshot, fetch_snapshot, github_token, resolve_commit
 from ..connectors.saved_secrets import SavedSecretStore
-from ..service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
 from ..service_gateway.optimization.blackbox.repo_scorer import RepoScorer
 from ..service_gateway.optimization.blackbox.repo_setup import infer_setup_command
 from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY, patch_paths, patch_violations
@@ -176,9 +176,12 @@ def infer_repo_setup(payload: dict[str, Any], staged: StagedRepository, gateway:
 def bind_repo_scorer(payload: dict[str, Any], staged: StagedRepository, gateway: Any, *, owner_id: str) -> None:
     """Score the run's versions in a parent-owned box and hand the guest only its route.
 
-    The box is opened through the gateway's own metered sandbox control, so
-    it is billed and cleaned up like the guest's, but the guest never holds
-    its control token, its secrets or its filesystem.
+    The box is opened in-process through the gateway's parent-only runtime,
+    never over the guest's control route, so it is billed and cleaned up like
+    the guest's boxes while the guest never holds its secrets, its filesystem
+    or a way to open a box with package-registry access. When the target has
+    a setup command the box opens reaching only package registries, runs
+    setup once, and goes offline before any version is laid out.
 
     Args:
         payload: Protected payload, updated in place with the evaluator route.
@@ -189,13 +192,15 @@ def bind_repo_scorer(payload: dict[str, Any], staged: StagedRepository, gateway:
     descriptor = payload["_budget_gateway_descriptor"]
     target = payload["target"]
     scorer_spec = payload["scorer"]
+    hosts = PACKAGE_REGISTRY_HOSTS if (target.get("setup_command") or "").strip() else ()
     scorer = RepoScorer(
         RepoWorkspace(
-            runtime=RemoteSandboxRuntime(descriptor["url"], descriptor["control_token"]),
+            runtime=gateway.parent_sandbox_runtime(),
             spec=SandboxSpec(
                 lifetime_seconds=descriptor["lifetime_seconds"],
                 image=descriptor["image"],
-                network_disabled=True,
+                network_disabled=not hosts,
+                allowed_hosts=hosts,
                 operation_key=f"repo-scorer:{owner_id}",
             ),
             archive=staged.snapshot.archive,
@@ -208,6 +213,9 @@ def bind_repo_scorer(payload: dict[str, Any], staged: StagedRepository, gateway:
         timeout_seconds=float(scorer_spec["timeout_seconds"]),
     )
     staged.scorers.append(scorer)
+    # Setup and the network cutoff finish here, in the parent, before the
+    # guest that writes versions exists; either failing fails the run.
+    scorer.prepare()
     payload["_skynet_evaluator_route"] = gateway.bind_evaluator(scorer)
 
 

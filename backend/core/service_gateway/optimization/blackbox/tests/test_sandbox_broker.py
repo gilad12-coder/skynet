@@ -11,6 +11,7 @@ import pytest
 
 from core.billing.runtime import UsagePendingError
 from core.billing.signals import BudgetReached
+from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.exceptions import InfrastructureInterruptionError, ServiceError
 
 from ..remote_sandbox import RemoteSandboxRuntime, RemoteSandboxSession
@@ -120,6 +121,54 @@ def test_broker_opens_anthropic_only_with_the_owner_key_added_at_the_edge() -> N
     broker.handle("open", {**_open_payload(), "request_id": "offline"})
     assert runtime.specs[1].network_disabled is True
     assert runtime.specs[1].inject_headers == {}
+
+
+def test_the_guest_route_never_reaches_a_package_registry() -> None:
+    """However the guest asks, its boxes stay Anthropic-only or offline, even while the parent's box is online."""
+    runtime = FakeRuntime()
+    broker = SandboxBroker(runtime, image=IMAGE, max_lifetime_seconds=120, anthropic_api_key="sk-ant-secret")
+    parent = broker.parent_runtime(PACKAGE_REGISTRY_HOSTS).open(
+        SandboxSpec(lifetime_seconds=60, allowed_hosts=PACKAGE_REGISTRY_HOSTS, operation_key="repo-scorer:job")
+    )
+    for hosts in (["pypi.org"], list(PACKAGE_REGISTRY_HOSTS), ["api.anthropic.com", "registry.npmjs.org"]):
+        with pytest.raises(ServiceError, match="network access"):
+            broker.handle("open", _open_payload(allowed_hosts=hosts))
+    for action in ("parent_runtime", "_open_parent", "open_parent"):
+        with pytest.raises(ServiceError):
+            broker.handle(action, _open_payload(allowed_hosts=["pypi.org"]))
+    assert len(runtime.specs) == 1
+    assert runtime.specs[0].allowed_hosts == PACKAGE_REGISTRY_HOSTS
+    assert runtime.specs[0].inject_headers == {}
+    assert runtime.specs[0].env == {}
+    with pytest.raises(ServiceError):
+        broker.handle("run", {"sandbox_id": "0", "command": "true"})
+    broker.close()
+    assert runtime.sessions[0].close_calls == 1
+    parent.close()
+
+
+def test_the_parent_box_reaches_only_funded_registries_and_carries_no_credentials() -> None:
+    """Refuse non-registry hosts, hosts beyond the funded list, and credentials on the parent's box."""
+    broker = SandboxBroker(FakeRuntime(), image=IMAGE, max_lifetime_seconds=120)
+    with pytest.raises(ServiceError, match="package registries"):
+        broker.parent_runtime(("api.anthropic.com",))
+    with pytest.raises(ServiceError, match="package registries"):
+        broker.parent_runtime(("pypi.org", "evil.example"))
+    narrow = broker.parent_runtime(("pypi.org",))
+    with pytest.raises(ServiceError, match="not funded"):
+        narrow.open(SandboxSpec(lifetime_seconds=60, allowed_hosts=("registry.npmjs.org",), operation_key="k"))
+    with pytest.raises(ServiceError, match="credentials"):
+        narrow.open(SandboxSpec(lifetime_seconds=60, allowed_hosts=("pypi.org",), env={"A": "b"}, operation_key="k"))
+    with pytest.raises(ServiceError, match="duration"):
+        narrow.open(SandboxSpec(lifetime_seconds=600, allowed_hosts=("pypi.org",), operation_key="k"))
+
+
+def test_a_parent_box_without_a_network_switch_fails_closed() -> None:
+    """A provider session that cannot change its policy cannot be taken offline, so the switch refuses."""
+    parent = SandboxBroker(FakeRuntime(), image=IMAGE, max_lifetime_seconds=120).parent_runtime(("pypi.org",))
+    session = parent.open(SandboxSpec(lifetime_seconds=60, allowed_hosts=("pypi.org",), operation_key="k"))
+    with pytest.raises(ServiceError, match="cannot switch"):
+        session.disable_network()
 
 
 def test_broker_rejects_host_paths_and_closes_every_session_after_failure() -> None:

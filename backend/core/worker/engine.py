@@ -48,6 +48,7 @@ from ..billing.protected_credentials import (
 from ..billing.protected_execution import bind_protected_sandbox, claude_code_anthropic_key
 from ..billing.recovery_admission import validate_recovery_plan
 from ..billing.runtime import BudgetRuntime, UsagePendingError
+from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..config import settings
 from ..constants import (
     OPTIMIZATION_TYPE_BLACKBOX,
@@ -1002,6 +1003,11 @@ class BackgroundWorker:
                             if optimization_type == OPTIMIZATION_TYPE_BLACKBOX
                             and claude_code_proposes(blackbox_payload)
                             else None
+                        ),
+                        parent_hosts=(
+                            PACKAGE_REGISTRY_HOSTS
+                            if optimization_type == OPTIMIZATION_TYPE_BLACKBOX and is_repo_payload(payload_dict)
+                            else ()
                         ),
                     )
                     budget_gateway.validate_recovery_runtime(execution_runtime)

@@ -12,8 +12,12 @@ import pytest
 
 from core.billing.model_dispatch import ModelHTTPResult
 from core.billing.protected_credentials import has_exposed_execution_credentials
+from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.connectors.github_publish import PublishedChange, RepoPublishError
 from core.connectors.github_repo import RepoSnapshot
+from core.exceptions import ServiceError
+from core.service_gateway.optimization.blackbox.repo_workspace import _PROBE_OK, NetworkCutoffError
+from core.service_gateway.optimization.blackbox.sandbox import CommandResult, SandboxSpec
 from core.worker import repo_staging
 
 
@@ -100,12 +104,74 @@ def test_only_repository_targets_are_staged() -> None:
     assert not repo_staging.is_repo_payload({})
 
 
-class _Gateway:
-    """Record the evaluator a repository run binds."""
+class _Box:
+    """Answer every command, tracking the network state a real box would have."""
 
-    def __init__(self) -> None:
-        """Start with no evaluator."""
+    def __init__(self, spec: SandboxSpec, cutoff_works: bool) -> None:
+        """Open over ``spec``.
+
+        Args:
+            spec: The box's requested network profile.
+            cutoff_works: Whether switching the network off succeeds.
+        """
+        self.spec = spec
+        self.online = not spec.network_disabled
+        self._cutoff_works = cutoff_works
+        self.commands: list[tuple[str, bool]] = []
+        self.closed = False
+
+    def write_files(self, files: dict[str, str]) -> None:
+        """Accept files."""
+
+    def read_file(self, path: str) -> str | None:
+        """Hold no files."""
+        return None
+
+    def run(self, command: str, **options: Any) -> CommandResult:
+        """Record the command, answering the reachability check as the box would."""
+        self.commands.append((command, self.online))
+        if "/dev/tcp/" in command:
+            return CommandResult(exit_code=1) if self.online else CommandResult(exit_code=0, stdout=_PROBE_OK)
+        return CommandResult(exit_code=0)
+
+    def disable_network(self) -> None:
+        """Switch the network off, or fail like a provider that refused."""
+        if not self._cutoff_works:
+            raise ServiceError("policy update refused")
+        self.online = False
+
+    def close(self) -> None:
+        """Record shutdown."""
+        self.closed = True
+
+
+class _Gateway:
+    """Record the evaluator a repository run binds and the parent box it opens."""
+
+    def __init__(self, *, cutoff_works: bool = True) -> None:
+        """Start with no evaluator or box.
+
+        Args:
+            cutoff_works: Whether the parent box's network switch succeeds.
+        """
         self.evaluator: Any = None
+        self.boxes: list[_Box] = []
+        self._cutoff_works = cutoff_works
+
+    def parent_sandbox_runtime(self) -> Any:
+        """Return a runtime that opens recording boxes."""
+        gateway = self
+
+        class _Runtime:
+            """Open one recording box per call."""
+
+            def open(self, spec: SandboxSpec) -> _Box:
+                """Open a recording box over ``spec``."""
+                box = _Box(spec, gateway._cutoff_works)
+                gateway.boxes.append(box)
+                return box
+
+        return _Runtime()
 
     def bind_evaluator(self, evaluator: Any) -> dict[str, str]:
         """Keep the evaluator and hand back a fake route.
@@ -116,12 +182,21 @@ class _Gateway:
         Returns:
             A fake route.
         """
+        assert all(not box.online for box in self.boxes)
         self.evaluator = evaluator
         return {"url": "http://127.0.0.1:1/v1", "token": "evaluator-token"}
 
 
-def test_binding_hands_the_guest_a_route_and_closes_the_box(tmp_path: Path) -> None:
-    """The guest receives only the evaluator route; the parent owns the scorer and closes it."""
+def _binding(tmp_path: Path, setup: str | None) -> tuple[dict[str, Any], repo_staging.StagedRepository]:
+    """Build a staged repository and the payload that binds its scorer.
+
+    Args:
+        tmp_path: Scratch folder.
+        setup: The target's setup command.
+
+    Returns:
+        The payload and the staged tree.
+    """
     archive = tmp_path / "tree.tgz"
     archive.write_bytes(b"tree")
     staged = repo_staging.StagedRepository(
@@ -139,6 +214,13 @@ def test_binding_hands_the_guest_a_route_and_closes_the_box(tmp_path: Path) -> N
             "lifetime_seconds": 600,
         },
     }
+    payload["target"]["setup_command"] = setup
+    return payload, staged
+
+
+def test_binding_hands_the_guest_a_route_and_closes_the_box(tmp_path: Path) -> None:
+    """The guest receives only the evaluator route; the parent owns the scorer and closes it."""
+    payload, staged = _binding(tmp_path, None)
     gateway = _Gateway()
 
     repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1")
@@ -146,8 +228,44 @@ def test_binding_hands_the_guest_a_route_and_closes_the_box(tmp_path: Path) -> N
     assert payload["_skynet_evaluator_route"] == {"url": "http://127.0.0.1:1/v1", "token": "evaluator-token"}
     assert staged.scorers == [gateway.evaluator]
     assert "secret-value" not in repr(payload)
+    box = gateway.boxes[0]
+    assert box.spec.network_disabled is True
+    assert box.spec.allowed_hosts == ()
+    assert not any(online for _, online in box.commands)
     staged.close_scorers()
     assert staged.scorers == []
+    assert box.closed
+
+
+def test_setup_runs_online_in_the_parent_before_the_guest_gets_a_route(tmp_path: Path) -> None:
+    """A setup command opens the box to package registries only, and it is offline before binding finishes."""
+    payload, staged = _binding(tmp_path, "pip install -r requirements.txt")
+    gateway = _Gateway()
+
+    repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1")
+
+    box = gateway.boxes[0]
+    assert box.spec.allowed_hosts == PACKAGE_REGISTRY_HOSTS
+    assert box.spec.network_disabled is False
+    assert box.spec.env == {}
+    assert box.online is False
+    setup = [online for command, online in box.commands if "pip install" in command]
+    assert setup == [True]
+    staged.close_scorers()
+
+
+def test_a_failed_network_cutoff_aborts_the_run(tmp_path: Path) -> None:
+    """When the box cannot be taken offline, binding fails, the guest gets no route and the box is closed."""
+    payload, staged = _binding(tmp_path, "npm ci")
+    gateway = _Gateway(cutoff_works=False)
+
+    with pytest.raises(NetworkCutoffError):
+        repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1")
+
+    assert "_skynet_evaluator_route" not in payload
+    assert gateway.evaluator is None
+    assert gateway.boxes[0].closed
+    staged.close_scorers()
 
 
 _EDIT = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"

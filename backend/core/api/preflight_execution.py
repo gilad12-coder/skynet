@@ -20,6 +20,7 @@ from ..billing.protected_credentials import (
 )
 from ..billing.protected_execution import bind_protected_sandbox, protected_vercel_unavailable_reason
 from ..billing.runtime import BudgetRuntime, UsagePendingError
+from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..config import settings
 from ..constants import OPTIMIZATION_TYPE_BLACKBOX, TOKEN_SOURCE_MANAGED
 from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
@@ -464,6 +465,9 @@ def _perform_preflight(
             workflow=request.workflow,
             owner_id=document["id"],
             lifetime_seconds=lifetime_seconds,
+            parent_hosts=(
+                PACKAGE_REGISTRY_HOSTS if request.workflow == "anything" and is_repo_payload(payload) else ()
+            ),
         )
         protected = gateway.protect_payload(
             payload,
