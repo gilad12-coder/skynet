@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "Немає очікуваного підтвердження для вказаного call_id.",
     "agent.status.tool_end": "Інструмент завершив роботу.",
     "agent.status.tool_start": "Агент викликає інструмент…",
+    "agent.turn.not_found": "Хід агента не знайдено або термін його дії минув.",
     "analytics.other_bucket": "Інше",
     "auth.invalid_token": "Токен автентифікації недійсний або термін його дії минув.",
     "auth.missing_token": "Потрібен токен автентифікації.",

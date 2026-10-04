@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "दिए गए call_id के लिए कोई लंबित अनुमोदन नहीं है।",
     "agent.status.tool_end": "टूल समाप्त हुआ।",
     "agent.status.tool_start": "एजेंट टूल आमंत्रित कर रहा है…",
+    "agent.turn.not_found": "एजेंट का टर्न नहीं मिला या उसकी समय-सीमा समाप्त हो गई।",
     "analytics.other_bucket": "अन्य",
     "auth.invalid_token": "प्रमाणीकरण टोकन अमान्य या समाप्त हो चुका है।",
     "auth.missing_token": "प्रमाणीकरण टोकन आवश्यक है।",

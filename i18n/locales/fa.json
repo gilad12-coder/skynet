@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "هیچ تأییدیه‌ی در انتظاری برای call_id داده‌شده وجود ندارد.",
     "agent.status.tool_end": "ابزار به پایان رسید.",
     "agent.status.tool_start": "عامل در حال فراخوانی ابزار…",
+    "agent.turn.not_found": "نوبت عامل پیدا نشد یا منقضی شده است.",
     "analytics.other_bucket": "سایر",
     "auth.invalid_token": "توکن احراز هویت نامعتبر یا منقضی شده است.",
     "auth.missing_token": "توکن احراز هویت الزامی است.",

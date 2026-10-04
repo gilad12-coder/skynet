@@ -40,6 +40,7 @@ import { reportHandledError } from "@/shared/lib/report-error";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { readServerSentEvents, type ServerSentEvent } from "@/shared/lib/sse";
+import { streamResumableTurn } from "@/shared/lib/resumable-turn";
 
 // Resolve the runtime API base lazily on every call. Capturing it once at
 // module load races the injected `window.__SKYNET_ENV__` script: the framework
@@ -3144,26 +3145,6 @@ export async function streamCodeAgent(
   req: CodeAgentRequest,
   handlers: CodeAgentHandlers,
 ): Promise<void> {
-  let res: Response;
-  try {
-    res = await fetchWithAuthRetry(`${apiBase()}/optimizations/ai-generate-code`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify(req),
-      signal: handlers.signal,
-    });
-  } catch (err) {
-    if ((err as Error)?.name === "AbortError") return;
-    handlers.onError(msg("auto.shared.lib.api.literal.11"));
-    return;
-  }
-  if (!res.ok || !res.body) {
-    const text = await res.text().catch(() => "");
-    handlers.onError(
-      parseErrorMessage(text) ?? formatMsg("auto.shared.lib.api.template.5", { p1: res.status }),
-    );
-    return;
-  }
   const processEvent = ({ event, data }: ServerSentEvent) => {
     if (event === "signature_patch") {
       handlers.onSignaturePatch(String(data.chunk ?? ""));
@@ -3231,12 +3212,33 @@ export async function streamCodeAgent(
       handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.12")));
     }
   };
-  try {
-    await readServerSentEvents(res.body, processEvent);
-  } catch (err) {
-    if ((err as Error)?.name !== "AbortError") {
-      handlers.onError(err instanceof Error ? err.message : msg("auto.shared.lib.api.literal.10"));
-    }
+  // The turn outlives any one connection (the edge cuts requests at 15 min);
+  // streamResumableTurn reconnects and replays from the last event id.
+  const result = await streamResumableTurn({
+    fetch: fetchWithAuthRetry,
+    read: readServerSentEvents,
+    apiBase: apiBase(),
+    startPath: "/optimizations/ai-generate-code",
+    startInit: {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(req),
+    },
+    onEvent: processEvent,
+    signal: handlers.signal,
+  });
+  if (result.status !== "failed") return;
+  if (result.response) {
+    const res = result.response;
+    const text = await res.text().catch(() => "");
+    handlers.onError(
+      parseErrorMessage(text) ?? formatMsg("auto.shared.lib.api.template.5", { p1: res.status }),
+    );
+  } else if (!result.started) {
+    handlers.onError(msg("auto.shared.lib.api.literal.11"));
+  } else {
+    const err = result.error;
+    handlers.onError(err instanceof Error ? err.message : msg("auto.shared.lib.api.literal.10"));
   }
 }
 
@@ -3320,26 +3322,19 @@ export async function streamCodeInterviewTurn(
   req: CodeInterviewRequest,
   handlers: CodeInterviewHandlers,
 ): Promise<void> {
-  let res: Response;
-  try {
-    res = await fetchWithAuthRetry(`${apiBase()}/optimizations/code-interview`, {
+  let finished = false;
+  const result = await streamResumableTurn({
+    fetch: fetchWithAuthRetry,
+    read: readServerSentEvents,
+    apiBase: apiBase(),
+    startPath: "/optimizations/code-interview",
+    startInit: {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(req),
-      signal: handlers.signal,
-    });
-  } catch (err) {
-    if ((err as Error)?.name === "AbortError") return;
-    handlers.onError(msg("submit.code.interview.error"));
-    return;
-  }
-  if (!res.ok || !res.body) {
-    handlers.onError(msg("submit.code.interview.error"));
-    return;
-  }
-  let finished = false;
-  try {
-    await readServerSentEvents(res.body, ({ event, data }) => {
+    },
+    signal: handlers.signal,
+    onEvent: ({ event, data }) => {
       switch (event) {
         case "reasoning_patch":
           handlers.onReasoningPatch?.(String(data.chunk ?? ""));
@@ -3374,12 +3369,9 @@ export async function streamCodeInterviewTurn(
           handlers.onError(msg("submit.code.interview.error"));
           break;
       }
-    });
-  } catch (err) {
-    if ((err as Error)?.name === "AbortError") return;
-    if (!finished) handlers.onError(msg("submit.code.interview.error"));
-    return;
-  }
+    },
+  });
+  if (result.status === "aborted") return;
   if (!finished) handlers.onError(msg("submit.code.interview.error"));
 }
 

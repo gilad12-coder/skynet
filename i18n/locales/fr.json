@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "Aucune approbation en attente pour le call_id indiqué.",
     "agent.status.tool_end": "Outil terminé.",
     "agent.status.tool_start": "L'agent appelle l'outil…",
+    "agent.turn.not_found": "Tour de l'agent introuvable ou expiré.",
     "analytics.other_bucket": "Autre",
     "auth.invalid_token": "Le jeton d'authentification est invalide ou expiré.",
     "auth.missing_token": "Un jeton d'authentification est requis.",

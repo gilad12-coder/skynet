@@ -95,6 +95,7 @@
     "agent.approval.unknown_call_id": "No pending approval for the given call_id.",
     "agent.status.tool_end": "Tool finished.",
     "agent.status.tool_start": "Agent invoking tool…",
+    "agent.turn.not_found": "Agent turn not found or expired.",
     "analytics.other_bucket": "Other",
     "auth.invalid_token": "Authentication token is invalid or expired.",
     "auth.missing_token": "Authentication token is required.",

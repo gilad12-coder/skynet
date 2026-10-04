@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "Keine ausstehende Genehmigung für die angegebene call_id.",
     "agent.status.tool_end": "Werkzeug abgeschlossen.",
     "agent.status.tool_start": "Agent ruft Werkzeug auf…",
+    "agent.turn.not_found": "Agentendurchlauf nicht gefunden oder abgelaufen.",
     "analytics.other_bucket": "Sonstige",
     "auth.invalid_token": "Das Authentifizierungstoken ist ungültig oder abgelaufen.",
     "auth.missing_token": "Ein Authentifizierungstoken ist erforderlich.",

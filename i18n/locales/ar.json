@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "لا توجد موافقة معلّقة لمعرّف الاستدعاء call_id المحدّد.",
     "agent.status.tool_end": "انتهت الأداة.",
     "agent.status.tool_start": "الوكيل يستدعي الأداة…",
+    "agent.turn.not_found": "لم يتم العثور على جولة الوكيل أو انتهت صلاحيتها.",
     "analytics.other_bucket": "أخرى",
     "auth.invalid_token": "رمز المصادقة غير صالح أو منتهي الصلاحية.",
     "auth.missing_token": "رمز المصادقة مطلوب.",
