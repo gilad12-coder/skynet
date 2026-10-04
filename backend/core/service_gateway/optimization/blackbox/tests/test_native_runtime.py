@@ -28,7 +28,7 @@ from core.models.blackbox import BlackboxProposer, BlackboxTarget
 from core.service_gateway.language_models import total_tokens_from_history, usage_by_model_from_history
 from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededError
 
-from .. import harness_bridge, native_runner, native_runtime
+from .. import harness_bridge, native_runner, native_runtime, repo_tree
 from ..harness import GatewayConfig, build_launch, launch_payload
 from ..native_runtime import NativeOptions, _bootstrap_command, check_native_runtime, run_native_engine
 from ..protocol import EvalServer, ScorerAbortError, Task
@@ -370,6 +370,109 @@ def test_protected_managed_runtime_does_not_nest_upstream_jail(tmp_path: Path, m
     assert session.closed
 
 
+def test_repository_tree_and_rules_reach_the_autoresearch_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Upload the packed tree chunk by chunk, with the rules the agent's eval.sh checks."""
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    chunks = [tmp_path / "tree.0000.b64", tmp_path / "tree.0001.b64"]
+    for index, chunk in enumerate(chunks):
+        chunk.write_text(f"chunk{index}")
+    session = FakeSession()
+    session.candidate = ""
+    ctx = _context(tmp_path, FakeRuntime(session))
+    repo = {"chunks": [str(chunk) for chunk in chunks], "editable_paths": ["src"], "readonly_paths": ["vendor/lib"]}
+    ctx.native_options = replace(ctx.native_options, repo=repo)
+    run_native_engine("autoresearch", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+
+    assert (session.files["repo-tree/tree.0000.b64"], session.files["repo-tree/tree.0001.b64"]) == ("chunk0", "chunk1")
+    assert json.loads(session.files["native_input.json"])["repo"] == {
+        "chunks": ["repo-tree/tree.0000.b64", "repo-tree/tree.0001.b64"],
+        "editable_paths": ["src"],
+        "readonly_paths": ["vendor/lib"],
+    }
+    assert session.files["repo_tree.py"] == Path(repo_tree.__file__).read_text()
+
+
+def test_only_autoresearch_takes_a_repository(tmp_path: Path) -> None:
+    """Meta-Harness edits one text file, so a repository run never reaches it."""
+    ctx = _context(tmp_path, FakeRuntime(FakeSession()))
+    ctx.native_options = replace(ctx.native_options, repo={"chunks": [], "editable_paths": ["."], "readonly_paths": []})
+    with pytest.raises(ServiceError, match="Only AutoResearch"):
+        run_native_engine("meta_harness", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+
+
+def test_real_native_runner_unpacks_the_repository_for_autoresearch(tmp_path: Path) -> None:
+    """The runner rebuilds the checkout, and the agent's eval.sh sends its diff to the parent."""
+    source = tmp_path / "source"
+    (source / "src").mkdir(parents=True)
+    (source / "src" / "a.py").write_text("a = 1\n")
+    archive = tmp_path / "tree.tgz"
+    subprocess.run(["tar", "-czf", str(archive), "-C", str(source), "."], check=True)
+    (tmp_path / "repo-tree").mkdir()
+    chunk_names = []
+    for index, chunk in enumerate(repo_tree.archive_chunks(archive)):
+        chunk_names.append(f"repo-tree/tree.{index:04d}.b64")
+        (tmp_path / chunk_names[-1]).write_text(chunk)
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    fake_cli = binary / "claude"
+    fake_cli.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, subprocess, sys\n"
+        "args=sys.argv[1:]; session=args[args.index('--session-id')+1]\n"
+        "pathlib.Path('repo/src/a.py').write_text('a = 2\\n')\n"
+        "done=subprocess.run(['./eval.sh'],capture_output=True,text=True)\n"
+        "assert done.returncode==0, done.stdout+done.stderr\n"
+        "print(json.dumps({'total_cost_usd':0.01,'session_id':session,"
+        "'modelUsage':{'claude-test':{'inputTokens':7,'outputTokens':3}}}))\n"
+    )
+    fake_cli.chmod(0o755)
+    (tmp_path / "rpc").mkdir()
+    payload = {
+        "nonce": "testnonce",
+        "engine_id": "autoresearch",
+        "model": "claude-test",
+        "sandbox": False,
+        "max_token_cost": 0.05,
+        "max_evals": 4,
+        "max_concurrency": 1,
+        "timeout_seconds": 20,
+        "task": {"name": "test", "seed_candidate": ""},
+        "proposer": {"harness": "claude_code", "ralph": False},
+        "repo": {"chunks": chunk_names, "editable_paths": ["src"], "readonly_paths": []},
+    }
+    (tmp_path / "input.json").write_text(json.dumps(payload))
+    env = {"PATH": f"{binary}{os.pathsep}/usr/bin:/bin", "HOME": str(tmp_path), "PYTHONUNBUFFERED": "1"}
+    process = subprocess.Popen(
+        [sys.executable, native_runner.__file__, "input.json"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    candidates = []
+    try:
+        for line in process.stdout:
+            if line.startswith("SKYNET_NATIVE_RPC testnonce "):
+                request = json.loads(line.split(" ", 2)[2])
+                candidates.append(request["candidate"])
+                response = {"score": 0.9, "info": {}}
+                (tmp_path / "rpc" / f"{request['id']}.json").write_text(json.dumps(response))
+        stderr = process.stderr.read()
+        assert process.wait(timeout=25) == 0, stderr
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    assert len(candidates) == 1
+    assert repo_tree.patch_paths(candidates[0]) == ["src/a.py"]
+    assert "+a = 2" in candidates[0]
+    result = json.loads((tmp_path / "native_result.json").read_text())
+    assert (result["best_candidate"], result["best_score"]) == (candidates[0], 0.9)
+
+
 def test_parent_scorer_abort_survives_child_transport(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The original parent failure propagates after available usage is retained and teardown runs."""
     monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
@@ -666,6 +769,7 @@ def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
         "native_runner.py",
         "native_engines.py",
         "harness_bridge.py",
+        "repo_tree.py",
         "upstream_prompts/meta_harness/SKILL.md",
         "upstream_prompts/meta_harness/LICENSE",
         "upstream_prompts/meta_harness/NOTICE.md",

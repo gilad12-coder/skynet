@@ -26,6 +26,7 @@ from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.language_models import activate_job_lm_budget, activate_job_usage_registry, job_usage_snapshot
 from ..service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
+from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY
 from ..service_gateway.optimization.blackbox.sandbox import sandbox_runtime_context
 from ..service_gateway.optimization.blackbox.service import run_blackbox_optimization
 from ..service_gateway.optimization.budget_stop import BudgetReached
@@ -233,6 +234,7 @@ def run_service_in_subprocess(
         completed_pairs = payload_dict.pop("_completed_pairs", None)
         target_route = payload_dict.pop("_skynet_target_route", None)
         evaluator_route = payload_dict.pop("_skynet_evaluator_route", None)
+        repo_snapshot = payload_dict.pop(REPO_SNAPSHOT_KEY, None)
         budget_gateway_descriptor = payload_dict.pop("_budget_gateway_descriptor", None)
         if budget_gateway_descriptor is not None:
             runtime_scope.enter_context(
@@ -269,6 +271,7 @@ def run_service_in_subprocess(
                 agent_run_sink=partial(_emit_agent_run_event, event_queue),
                 target_route=target_route,
                 evaluator_route=evaluator_route,
+                repo_snapshot=repo_snapshot,
             )
         else:
             run_payload = RunRequest.model_validate(payload_dict)

@@ -97,6 +97,63 @@ if [ "$HTTP_CODE" = "429" ]; then echo "{marker}" >&2; exit 1; fi
 if [ "$HTTP_CODE" != "200" ]; then echo "evaluator returned HTTP $HTTP_CODE" >&2; exit 1; fi
 """
 
+# Repository mode: the candidate is the diff between the lab's ``repo/`` checkout
+# and the commit it started from. The rules file and the shared ``repo_tree``
+# module reject a diff the trusted scorer would refuse anyway, without spending
+# budget; the scorer still enforces the same rules on its own. Example ids are
+# probes, as in text mode.
+REPO_EVAL_SCRIPT = """\
+#!/usr/bin/env bash
+# Usage: ./eval.sh [example_id ...]
+set -euo pipefail
+cd "$(dirname "$0")"
+PATCH_FILE=$(mktemp)
+trap 'rm -f "$PATCH_FILE"' EXIT
+git -C repo add --all
+git -C repo diff --cached --binary --no-color --no-ext-diff {base} > "$PATCH_FILE"
+SERVER_URL="{server_url}"
+PYTHON="{python}"
+BODY=$(PATCH_FILE="$PATCH_FILE" PYTHONPATH="{tools}" "$PYTHON" -c 'import json, os, sys
+import repo_tree
+try:
+    patch = open(os.environ["PATCH_FILE"], encoding="utf-8").read()
+except UnicodeDecodeError:
+    sys.exit("Not evaluated: a changed text file is not UTF-8.")
+rules = json.load(open(".repo-rules.json", encoding="utf-8"))
+problems = repo_tree.patch_violations(patch, rules["editable_paths"], rules["readonly_paths"])
+if problems:
+    sys.exit("Not evaluated:\\n" + "\\n".join(problems))
+body = {{"candidate": patch}}
+if sys.argv[1:]:
+    body["example_ids"] = sys.argv[1:]
+print(json.dumps(body))' "$@")
+RESPONSE=$(curl -s -w "\\n%{{http_code}}" -X POST "$SERVER_URL/{route}" \\
+    -H "Content-Type: application/json" --data-binary @- <<< "$BODY")
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+echo "$BODY"
+if [ "$HTTP_CODE" = "429" ]; then echo "{marker}" >&2; exit 1; fi
+if [ "$HTTP_CODE" != "200" ]; then echo "evaluator returned HTTP $HTTP_CODE" >&2; exit 1; fi
+"""
+
+CHECKOUT_SCRIPT = """\
+#!/usr/bin/env bash
+# Usage: ./checkout.sh <id>   (an archive id such as c003, or "base" for the starting commit)
+set -euo pipefail
+cd "$(dirname "$0")"
+VERSION="${{1:?usage: ./checkout.sh <id|base>}}"
+case "$VERSION" in *[!A-Za-z0-9]*) echo "unknown version: $VERSION" >&2; exit 2;; esac
+if [ "$VERSION" != "base" ] && [ ! -f "archive/$VERSION.patch" ]; then
+    echo "unknown version: $VERSION" >&2; exit 2
+fi
+git -C repo reset --quiet --hard {base}
+git -C repo clean --quiet -fd
+if [ "$VERSION" != "base" ] && [ -s "archive/$VERSION.patch" ]; then
+    git -C repo apply --binary --whitespace=nowarn "$PWD/archive/$VERSION.patch"
+fi
+echo "repo/ is now $VERSION"
+"""
+
 
 def load_asset(relative: str) -> str:
     """Read a vendored upstream prompt and verify it is the pinned revision's text.
@@ -486,6 +543,10 @@ class AutoResearchEngine:
         self.effort = engine_config.pop("effort", None)
         thinking = engine_config.pop("max_thinking_tokens", None)
         self.max_thinking_tokens = None if thinking is None else int(thinking)
+        # ``checkout``, ``base``, ``editable_paths``, ``readonly_paths`` and
+        # ``tools`` (the folder holding ``repo_tree.py``) for a repository run.
+        self.repo: dict[str, Any] | None = engine_config.pop("repo", None)
+        self.suffix = ".patch" if self.repo else ".txt"
         self.max_token_cost = config.max_token_cost
         self.stop_at_score = config.stop_at_score
         self.run_dir = Path(config.run_dir or "autoresearch-run").resolve()
@@ -564,7 +625,7 @@ class AutoResearchEngine:
         """
         target = Path(output_dir) / self.name
         target.mkdir(parents=True, exist_ok=True)
-        (target / "best_candidate.txt").write_text(result.best_candidate, encoding="utf-8")
+        (target / f"best_candidate{self.suffix}").write_text(result.best_candidate, encoding="utf-8")
         (target / "metadata.json").write_text(json.dumps(result.metadata, indent=2, default=str), encoding="utf-8")
         notebook = self.work_dir / "notebook.md"
         if notebook.is_file():
@@ -624,7 +685,7 @@ class AutoResearchEngine:
                 return
             cid = f"c{len(self._ids) + 1:03d}"
             self._ids[observation.candidate] = cid
-            (self.work_dir / "archive" / f"{cid}.txt").write_text(observation.candidate, encoding="utf-8")
+            (self.work_dir / "archive" / f"{cid}{self.suffix}").write_text(observation.candidate, encoding="utf-8")
             with (self.work_dir / "archive" / "index.tsv").open("a", encoding="utf-8") as index:
                 index.write(f"{cid}\t{_mean(observation.scores):.6f}\t{observation.round}\n")
 
@@ -710,25 +771,129 @@ class AutoResearchEngine:
         """
         if self.work_dir.exists():
             shutil.rmtree(self.work_dir)
-        for sub in ("archive", "frontier", "work"):
+        for sub in ("archive", "frontier") if self.repo else ("archive", "frontier", "work"):
             (self.work_dir / sub).mkdir(parents=True)
         route = "evaluate_examples" if self.example_ids else "evaluate"
-        (self.work_dir / "TASK.md").write_text(task_brief(task, self.example_ids), encoding="utf-8")
-        (self.work_dir / "work" / "seed.txt").write_text(seed_as_text(task.seed_candidate), encoding="utf-8")
-        eval_script = self.work_dir / "eval.sh"
-        eval_script.write_text(
-            EVAL_SCRIPT.format(
+        brief = task_brief(task, self.example_ids)
+        if self.repo:
+            brief += self._repo_rules()
+            (self.work_dir / "repo").symlink_to(Path(self.repo["checkout"]), target_is_directory=True)
+            rules = {"editable_paths": self.repo["editable_paths"], "readonly_paths": self.repo["readonly_paths"]}
+            (self.work_dir / ".repo-rules.json").write_text(json.dumps(rules), encoding="utf-8")
+            script = REPO_EVAL_SCRIPT.format(
+                server_url=server.url,
+                route=route,
+                marker=BUDGET_EXHAUSTED_MARKER,
+                python=sys.executable,
+                tools=self.repo["tools"],
+                base=self.repo["base"],
+            )
+            checkout_script = self.work_dir / "checkout.sh"
+            checkout_script.write_text(CHECKOUT_SCRIPT.format(base=self.repo["base"]), encoding="utf-8")
+            checkout_script.chmod(0o755)
+        else:
+            (self.work_dir / "work" / "seed.txt").write_text(seed_as_text(task.seed_candidate), encoding="utf-8")
+            script = EVAL_SCRIPT.format(
                 server_url=server.url, route=route, marker=BUDGET_EXHAUSTED_MARKER, python=sys.executable
-            ),
-            encoding="utf-8",
-        )
+            )
+        (self.work_dir / "TASK.md").write_text(brief, encoding="utf-8")
+        eval_script = self.work_dir / "eval.sh"
+        eval_script.write_text(script, encoding="utf-8")
         eval_script.chmod(0o755)
-        (self.work_dir / "BRIEF.md").write_text(self._brief(), encoding="utf-8")
+        (self.work_dir / "BRIEF.md").write_text(self._repo_brief() if self.repo else self._brief(), encoding="utf-8")
         (self.work_dir / "notebook.md").write_text(
             "# Research notebook\n\nOne section per round: hypotheses, experiments, outcomes, conclusions.\n",
             encoding="utf-8",
         )
         (self.work_dir / "archive" / "index.tsv").write_text("id\tscore\tround\n", encoding="utf-8")
+
+    def _repo_rules(self) -> str:
+        """Describe which parts of the repository a version may change.
+
+        Returns:
+            Markdown appended to ``TASK.md``.
+        """
+        repo = self.repo or {}
+        editable = ", ".join("the whole repository" if p == "." else f"`{p}`" for p in repo["editable_paths"])
+        lines = ["", "## Repository", "", f"You may change: {editable}. Everything else is read-only context."]
+        if repo["readonly_paths"]:
+            lines += ["", "Submodules and Git LFS files stay as fetched:"]
+            lines += [f"- `{path}`" for path in repo["readonly_paths"]]
+        return "\n".join(lines) + "\n"
+
+    def _repo_brief(self) -> str:
+        """Write the standing research method for a repository run.
+
+        Returns:
+            The ``BRIEF.md`` text.
+        """
+        probe = (
+            "- `./eval.sh <example_id> [<example_id> ...]` is a **probe**: it scores `repo/` on just those examples "
+            "and costs one unit per example. Probes check whether a change moves the examples it targets; they "
+            "never enter the leaderboard.\n"
+            if self.example_ids
+            else ""
+        )
+        full = (
+            "one unit per visible example (see `TASK.md`)"
+            if self.example_ids
+            else "one unit, since the evaluator scores the repository as a whole"
+        )
+        return (
+            "# Research brief\n\n"
+            "You are running one round of a multi-round research effort to improve a code repository against a "
+            "fixed evaluator. `TASK.md` says what the change is for, how it is judged and which paths you may "
+            "edit. Higher scores are better.\n\n"
+            "## Files\n\n"
+            "- `repo/` is a git checkout of the repository. Edit it in place: its files are the version you are "
+            "working on. Only the editable paths in `TASK.md` may change.\n"
+            "- `TASK.md`, `BRIEF.md`, `STATE.md`, `eval.sh`, `checkout.sh`, `frontier/` and `archive/` are "
+            "maintained by the engine. Read them; never edit them.\n"
+            "- `STATE.md` is rewritten before every round: the leaderboard, the Pareto frontier of versions that "
+            "win on different examples, the failure dossier, this round's **directive** and your evaluation "
+            "allowance.\n"
+            "- Versions are patches against the starting commit. `frontier/<id>.patch` holds the current frontier; "
+            "`archive/<id>.patch` holds every version that ever received a full evaluation, with scores in "
+            "`archive/index.tsv`.\n"
+            "- `./checkout.sh <id>` resets `repo/` to that version, and `./checkout.sh base` to the starting "
+            "commit. It throws away unsaved work in `repo/`.\n"
+            "- `notebook.md` is yours and is the only memory that survives between rounds. Later rounds, "
+            "possibly a different session of you, depend on it.\n\n"
+            "## Evaluating\n\n"
+            f"- `./eval.sh` is a **full evaluation** of `repo/` as it stands: it costs {full} and is the only way "
+            "a version enters the leaderboard.\n"
+            f"{probe}"
+            "- The evaluator scores the difference between `repo/` and the starting commit. Files the repository "
+            "ignores are left out, and commits you make do not matter, only the files. It applies that difference "
+            "to a fresh checkout, runs the repository's setup and then the scorer, which you cannot run here. "
+            "This sandbox is offline, so local builds and tests may lack dependencies.\n"
+            "- A change outside the editable paths is refused before it is scored and costs nothing.\n"
+            f"- If `eval.sh` prints `{BUDGET_EXHAUSTED_MARKER}`, the budget is spent: write up the notebook and end "
+            "the session.\n"
+            "- Never score the same state twice; every call spends budget.\n\n"
+            "## Method for a round\n\n"
+            "1. **Orient.** Read `STATE.md`, then `notebook.md`. Do not rerun a hypothesis the notebook already "
+            "refuted unless you have a new reason, and say what the reason is.\n"
+            "2. **Diagnose.** Study the failure dossier and the evaluator feedback, and read the code it points "
+            "to. Name concrete failure modes, each tied to the examples that show it.\n"
+            "3. **Hypothesize.** Under a `## Round N` heading in `notebook.md`, write two to four falsifiable "
+            "hypotheses. For each: the change, why it should help, and which examples it should move.\n"
+            "4. **Experiment.** Test one hypothesis per version: `./checkout.sh` a frontier version, make one "
+            "focused change in `repo/`, and evaluate it. Write the hypothesis down before you evaluate, and the "
+            "result right after.\n"
+            "5. **Conclude.** Mark each hypothesis confirmed, refuted or inconclusive, with the evidence. Record "
+            "what you learned about the code, not just the number.\n"
+            "6. **Consolidate.** Stack the confirmed changes into one version of `repo/` and give it a full "
+            "evaluation before the round's allowance runs out.\n\n"
+            "## Standards\n\n"
+            "- Follow the round's directive in `STATE.md`; it is chosen from the evidence of earlier rounds.\n"
+            "- Keep the repository working. Held-out test cases exist, so a change that only helps because it "
+            "special-cases a visible example, or weakens the checks that judge it, is not an improvement.\n"
+            "- Between two versions with the same score, the smaller diff is better. A change that deletes code "
+            "and keeps the score is a win.\n"
+            "- There is no human to ask. End the session once the allowance is spent or the directive is done; "
+            "the engine starts the next round with fresh evidence.\n"
+        )
 
     def _brief(self) -> str:
         """Write the standing research method every round follows.
@@ -808,7 +973,7 @@ class AutoResearchEngine:
         for stale_file in frontier_dir.iterdir():
             stale_file.unlink()
         for candidate in front:
-            (frontier_dir / f"{self._ids[candidate]}.txt").write_text(candidate, encoding="utf-8")
+            (frontier_dir / f"{self._ids[candidate]}{self.suffix}").write_text(candidate, encoding="utf-8")
         quota = self._round_quota(server)
         remaining = server.budget.remaining
         lines = [f"# Round {self.round}", "", "## Directive", "", self._directive_text(directive, table, front), ""]
@@ -850,7 +1015,13 @@ class AutoResearchEngine:
         Returns:
             Markdown for the directive section.
         """
-        leader = self._ids[front[0]] if front else "the seed"
+        leader = self._ids[front[0]] if front else ("the starting commit" if self.repo else "the seed")
+        if directive == "survey" and self.repo:
+            return (
+                "**Survey.** First give the untouched checkout a full evaluation (`./checkout.sh base`, then "
+                "`./eval.sh`) to anchor the baseline. Then map the failure modes across examples and test your most "
+                "promising hypotheses."
+            )
         if directive == "survey":
             return (
                 "**Survey.** First give `work/seed.txt` a full evaluation as-is to anchor the baseline. Then map the "
@@ -870,10 +1041,13 @@ class AutoResearchEngine:
                     "of it cause those wins and graft them into the leader without losing the leader's own wins."
                 )
         if directive == "pivot":
+            angle = (
+                "take a different approach in the code" if self.repo else "rewrite the candidate from a different angle"
+            )
             return (
                 f"**Pivot.** {_PIVOT_AFTER} rounds in a row did not beat `{leader}`: small edits have stalled. Make a "
-                "structural change: rewrite the candidate from a different angle, or start from a frontier member "
-                "other than the leader. Keep what the notebook confirmed and drop what it refuted."
+                f"structural change: {angle}, or start from a frontier member other than the leader. Keep what the "
+                "notebook confirmed and drop what it refuted."
             )
         return (
             f"**Explore.** The last round did not beat `{leader}`. Aim new hypotheses at the hard examples in the "
@@ -1015,6 +1189,7 @@ class AutoResearchEngine:
                 "frontier": [{"id": self._ids[c], "score": round(_mean(table[c]), 6)} for c in pareto_front(table)],
                 "work_dir": str(self.work_dir),
                 "seed_len": len(seed_as_text(task.seed_candidate)),
+                **({"repository": True} if self.repo else {}),
             },
         )
 

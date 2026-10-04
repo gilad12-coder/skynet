@@ -130,6 +130,7 @@ def test_extend_installs_only_what_a_later_candidate_adds(tmp_path: Path, monkey
         base: [wheels["base-1.0"][1], wheels["base-2.0"][1]],
         extra: [wheels["extra-1.0"][1]],
     }
+
     def request(route: dict[str, str], body: dict[str, Any]) -> dict[str, Any]:
         """Emulate the scoped parent registry protocol.
 

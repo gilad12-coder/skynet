@@ -29,10 +29,10 @@ from gepa.oa.eval_server import EvalServer
 from gepa.oa.task import Task
 
 try:
-    from . import harness_bridge, native_engines
+    from . import harness_bridge, native_engines, repo_tree
 except ImportError:  # In the sandbox this file runs as a script beside its sibling modules.
     _sibling_modules = {}
-    for _sibling in ("harness_bridge", "native_engines"):
+    for _sibling in ("harness_bridge", "native_engines", "repo_tree"):
         _spec = importlib.util.spec_from_file_location(_sibling, Path(__file__).with_name(f"{_sibling}.py"))
         assert _spec is not None
         assert _spec.loader is not None
@@ -41,6 +41,7 @@ except ImportError:  # In the sandbox this file runs as a script beside its sibl
         _spec.loader.exec_module(_sibling_modules[_sibling])
     harness_bridge = _sibling_modules["harness_bridge"]
     native_engines = _sibling_modules["native_engines"]
+    repo_tree = _sibling_modules["repo_tree"]
 
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
@@ -557,6 +558,18 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     proposer = payload.get("proposer") or {}
     _install_proposer(proposer)
     config_values: dict[str, Any] = {"model": payload["model"], **_engine_knobs(payload["engine_id"], proposer)}
+    repo = payload.get("repo")
+    if repo is not None:
+        if payload["engine_id"] != "autoresearch":
+            raise ValueError("Only AutoResearch optimizes a repository.")
+        checkout = repo_tree.unpack_tree((Path(chunk) for chunk in repo["chunks"]), Path("repo-checkout").resolve())
+        config_values["repo"] = {
+            "checkout": str(checkout),
+            "base": repo_tree.BASE_REF,
+            "editable_paths": list(repo["editable_paths"]),
+            "readonly_paths": list(repo["readonly_paths"]),
+            "tools": str(Path(__file__).resolve().parent),
+        }
     if payload["engine_id"] == "meta_harness" and payload.get("max_iterations") is not None:
         config_values["max_iterations"] = payload["max_iterations"]
     output_dir = Path("upstream-artifacts").resolve()
