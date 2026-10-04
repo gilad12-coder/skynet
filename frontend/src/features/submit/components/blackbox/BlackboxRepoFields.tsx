@@ -39,9 +39,9 @@ const TYPED = "__typed__";
 
 /**
  * The Goal stage of a repository run: which GitHub repository, which of its
- * paths the agent may edit, how a checkout is prepared, and the secrets the
- * scorer reads. The GitHub link itself lives in Settings; this offers it
- * when it is missing.
+ * paths the agent may edit, and the secrets the scorer reads. The setup
+ * command is inferred from the repository by the server. The GitHub link
+ * itself lives in Settings; this offers it when it is missing.
  */
 export function BlackboxRepoFields({ w }: { w: BlackboxWizardContext }) {
   const {
@@ -51,8 +51,6 @@ export function BlackboxRepoFields({ w }: { w: BlackboxWizardContext }) {
     setRepoBranch,
     repoPaths,
     setRepoPaths,
-    repoSetup,
-    setRepoSetup,
     repoSecrets,
     setRepoSecrets,
   } = w;
@@ -186,22 +184,6 @@ export function BlackboxRepoFields({ w }: { w: BlackboxWizardContext }) {
           </Field>
         </>
       )}
-
-      <Field
-        label={msg("submit.blackbox.repo.setup_label")}
-        htmlFor="bb-repo-setup"
-        hint={msg("submit.blackbox.repo.setup_hint")}
-      >
-        <Input
-          id="bb-repo-setup"
-          value={repoSetup}
-          onChange={(e) => setRepoSetup(e.target.value)}
-          placeholder="pip install -e ."
-          autoComplete="off"
-          spellCheck={false}
-          className={`${TOUCH_FIELD} font-mono`}
-        />
-      </Field>
 
       <Field
         label={msg("submit.blackbox.repo.secrets_label")}

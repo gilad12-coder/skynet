@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "Değer",
   "submit.blackbox.repo.secrets_hint": "Kurulum ve puanlama için ortam değişkenleri. Ajan bunları asla görmez.",
   "submit.blackbox.repo.secrets_label": "Gizli anahtarlar",
-  "submit.blackbox.repo.setup_hint": "Puanlanmadan önce her sürümde çalışır. İsteğe bağlı.",
-  "submit.blackbox.repo.setup_label": "Kurulum komutu",
   "submit.blackbox.repo.validation.path_absolute": "Yollar depo köküne göre göreli olmalıdır.",
   "submit.blackbox.repo.validation.path_outside": "Yollar deponun dışına çıkamaz veya .git içini gösteremez.",
   "submit.blackbox.repo.validation.paths": "En az bir düzenlenebilir yol ekleyin.",

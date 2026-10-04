@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "مقدار",
   "submit.blackbox.repo.secrets_hint": "متغیرهای محیطی برای راه‌اندازی و امتیازدهی. عامل هرگز آن‌ها را نمی‌بیند.",
   "submit.blackbox.repo.secrets_label": "رمزها",
-  "submit.blackbox.repo.setup_hint": "پیش از امتیازدهی روی هر نسخه اجرا می‌شود. اختیاری.",
-  "submit.blackbox.repo.setup_label": "دستور راه‌اندازی",
   "submit.blackbox.repo.validation.path_absolute": "مسیرها باید نسبت به ریشه مخزن باشند.",
   "submit.blackbox.repo.validation.path_outside": "مسیرها نمی‌توانند از مخزن خارج شوند یا به داخل .git اشاره کنند.",
   "submit.blackbox.repo.validation.paths": "دست‌کم یک مسیر قابل ویرایش اضافه کنید.",

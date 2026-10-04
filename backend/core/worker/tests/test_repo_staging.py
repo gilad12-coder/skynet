@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import io
+import json
+import tarfile
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from core.billing.model_dispatch import ModelHTTPResult
 from core.billing.protected_credentials import has_exposed_execution_credentials
 from core.connectors.github_publish import PublishedChange, RepoPublishError
 from core.connectors.github_repo import RepoSnapshot
@@ -292,3 +296,99 @@ def test_no_improvement_publishes_nothing(tmp_path: Path) -> None:
 
     assert _publish(result, _staged(tmp_path)) is None
     assert result["details"] == {}
+
+
+class _ModelGateway:
+    """Answer the setup question through a fake optimization route."""
+
+    def __init__(self, status: int = 200, answer: str = "make setup") -> None:
+        """Fix the provider's reply.
+
+        Args:
+            status: HTTP status the route answers with.
+            answer: The model's reply text.
+        """
+        self.status = status
+        self.answer = answer
+        self.calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    def model_routes(self) -> list[dict[str, str]]:
+        """List a task route and an optimization route."""
+        return [
+            {"url": "u", "token": "task-token", "model": "task/model", "role": "task"},
+            {"url": "u", "token": "opt-token", "model": "opt/model", "role": "optimization"},
+        ]
+
+    def dispatch_guest(self, token: str, path: str, body: dict[str, Any], headers: dict[str, str]) -> Any:
+        """Record the call and reply like OpenRouter.
+
+        Args:
+            token: Route token.
+            path: Protocol path.
+            body: Chat request.
+            headers: Protocol headers.
+
+        Returns:
+            A model response.
+        """
+        self.calls.append((token, path, body))
+        reply = {"choices": [{"message": {"content": self.answer}}]}
+        return ModelHTTPResult(self.status, "application/json", json.dumps(reply).encode())
+
+
+def _repo_tree(tmp_path: Path) -> repo_staging.StagedRepository:
+    """Stage a small Python tree with a uv lockfile.
+
+    Args:
+        tmp_path: Scratch folder.
+
+    Returns:
+        The staged tree.
+    """
+    archive = tmp_path / "tree.tgz"
+    with tarfile.open(archive, "w:gz") as packed:
+        for name in ("pyproject.toml", "uv.lock"):
+            info = tarfile.TarInfo(name)
+            info.size = 1
+            packed.addfile(info, io.BytesIO(b"x"))
+    return repo_staging.StagedRepository(
+        snapshot=RepoSnapshot(commit="a" * 40, archive=archive, readonly_paths=(), size_bytes=1),
+        secrets={},
+        workdir=tmp_path,
+    )
+
+
+def test_inference_asks_the_optimization_model_and_writes_the_target(tmp_path: Path) -> None:
+    """With no setup command, the run's optimization model names one and the target keeps it."""
+    payload = _payload("a" * 40)
+    gateway = _ModelGateway()
+
+    inferred = repo_staging.infer_repo_setup(payload, _repo_tree(tmp_path), gateway)
+
+    assert inferred == "make setup"
+    assert payload["target"]["setup_command"] == "make setup"
+    assert [(token, path, body["model"]) for token, path, body in gateway.calls] == [
+        ("opt-token", "/v1/chat/completions", "opt/model")
+    ]
+
+
+def test_an_explicit_setup_command_is_kept(tmp_path: Path) -> None:
+    """An API client's own command is honored and nothing is asked."""
+    payload = _payload("a" * 40)
+    payload["target"]["setup_command"] = "./bootstrap.sh"
+    gateway = _ModelGateway()
+
+    assert repo_staging.infer_repo_setup(payload, _repo_tree(tmp_path), gateway) is None
+    assert payload["target"]["setup_command"] == "./bootstrap.sh"
+    assert gateway.calls == []
+
+
+@pytest.mark.parametrize(("economy", "status"), [(True, 200), (False, 402)])
+def test_inference_falls_back_to_the_lockfile(economy: bool, status: int, tmp_path: Path) -> None:
+    """An economy run never waits on a batch, and a refused call falls back to the manifests."""
+    payload = {**_payload("a" * 40), "economy_mode": economy}
+    gateway = _ModelGateway(status=status)
+
+    assert repo_staging.infer_repo_setup(payload, _repo_tree(tmp_path), gateway) == "uv sync --frozen"
+    assert payload["target"]["setup_command"] == "uv sync --frozen"
+    assert len(gateway.calls) == (0 if economy else 1)

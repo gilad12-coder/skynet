@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "मान",
   "submit.blackbox.repo.secrets_hint": "सेटअप और स्कोरिंग के लिए एनवायरनमेंट वेरिएबल। एजेंट इन्हें कभी नहीं देखता।",
   "submit.blackbox.repo.secrets_label": "सीक्रेट",
-  "submit.blackbox.repo.setup_hint": "स्कोर किए जाने से पहले हर वर्ज़न पर चलता है। वैकल्पिक।",
-  "submit.blackbox.repo.setup_label": "सेटअप कमांड",
   "submit.blackbox.repo.validation.path_absolute": "पाथ रिपॉज़िटरी रूट के सापेक्ष होने चाहिए।",
   "submit.blackbox.repo.validation.path_outside": "पाथ रिपॉज़िटरी से बाहर नहीं जा सकते या .git के अंदर इंगित नहीं कर सकते।",
   "submit.blackbox.repo.validation.paths": "कम से कम एक संपादन योग्य पाथ जोड़ें।",

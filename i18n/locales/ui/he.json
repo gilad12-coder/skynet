@@ -4065,8 +4065,6 @@
   "submit.blackbox.repo.secret_value": "ערך",
   "submit.blackbox.repo.secrets_hint": "משתני סביבה להכנה ולניקוד. הסוכן אף פעם לא רואה אותם.",
   "submit.blackbox.repo.secrets_label": "סודות",
-  "submit.blackbox.repo.setup_hint": "רצה על כל גרסה לפני הניקוד. לא חובה.",
-  "submit.blackbox.repo.setup_label": "פקודת הכנה",
   "submit.blackbox.repo.validation.path_absolute": "הנתיבים צריכים להיות יחסיים לשורש המאגר.",
   "submit.blackbox.repo.validation.path_outside": "נתיבים לא יכולים לצאת מהמאגר או להצביע לתוך .git.",
   "submit.blackbox.repo.validation.paths": "הוסיפו לפחות נתיב אחד לעריכה.",

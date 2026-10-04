@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "Valor",
   "submit.blackbox.repo.secrets_hint": "Variables de entorno para la configuración y la puntuación. El agente nunca las ve.",
   "submit.blackbox.repo.secrets_label": "Secretos",
-  "submit.blackbox.repo.setup_hint": "Se ejecuta en cada versión antes de puntuarla. Opcional.",
-  "submit.blackbox.repo.setup_label": "Comando de configuración",
   "submit.blackbox.repo.validation.path_absolute": "Las rutas deben ser relativas a la raíz del repositorio.",
   "submit.blackbox.repo.validation.path_outside": "Las rutas no pueden salir del repositorio ni apuntar dentro de .git.",
   "submit.blackbox.repo.validation.paths": "Añade al menos una ruta editable.",

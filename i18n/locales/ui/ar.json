@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "القيمة",
   "submit.blackbox.repo.secrets_hint": "متغيرات بيئة للإعداد والتقييم. لا يراها الوكيل أبدًا.",
   "submit.blackbox.repo.secrets_label": "الأسرار",
-  "submit.blackbox.repo.setup_hint": "يُنفَّذ على كل نسخة قبل تقييمها. اختياري.",
-  "submit.blackbox.repo.setup_label": "أمر الإعداد",
   "submit.blackbox.repo.validation.path_absolute": "يجب أن تكون المسارات نسبية إلى جذر المستودع.",
   "submit.blackbox.repo.validation.path_outside": "لا يمكن للمسارات الخروج من المستودع أو الإشارة إلى داخل .git.",
   "submit.blackbox.repo.validation.paths": "أضف مسارًا واحدًا قابلًا للتعديل على الأقل.",

@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "Wert",
   "submit.blackbox.repo.secrets_hint": "Umgebungsvariablen für Setup und Bewertung. Der Agent sieht sie nie.",
   "submit.blackbox.repo.secrets_label": "Secrets",
-  "submit.blackbox.repo.setup_hint": "Läuft für jede Version, bevor sie bewertet wird. Optional.",
-  "submit.blackbox.repo.setup_label": "Setup-Befehl",
   "submit.blackbox.repo.validation.path_absolute": "Pfade müssen relativ zum Stammverzeichnis des Repositorys sein.",
   "submit.blackbox.repo.validation.path_outside": "Pfade dürfen das Repository nicht verlassen oder in .git zeigen.",
   "submit.blackbox.repo.validation.paths": "Füge mindestens einen bearbeitbaren Pfad hinzu.",
