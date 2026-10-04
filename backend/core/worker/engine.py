@@ -106,7 +106,7 @@ from .constants import (
     EVENT_TERMINAL,
 )
 from .memory_guard import memory_usage_fraction
-from .repo_staging import StagedRepository, is_repo_payload, stage_repository
+from .repo_staging import StagedRepository, bind_repo_scorer, is_repo_payload, stage_repository
 from .subprocess_runner import run_service_in_subprocess, set_fork_service
 from .tagging_job import TaggingAutotagPayload, run_autotag_job
 from .vercel_dspy import run_vercel_dspy
@@ -1030,6 +1030,7 @@ class BackgroundWorker:
                             binding_id=job_data["execution_budget_id"],
                             engine=byok_engine,
                         )
+                        bind_repo_scorer(payload_dict, staged_repository, budget_gateway, owner_id=optimization_id)
                         self._touch_activity(worker_id)
                 if has_exposed_execution_credentials(
                     payload_dict,
@@ -1332,6 +1333,9 @@ class BackgroundWorker:
                         self._stop_blackbox_sandboxes(optimization_id)
                 raise
             finally:
+                # The scoring box is closed through the gateway, so it goes first.
+                if staged_repository is not None:
+                    staged_repository.close_scorers()
                 if budget_gateway is not None:
                     execution_budget_snapshot, settlement_error = self._close_budget_gateway(
                         optimization_id, budget_gateway, execution_generation

@@ -99,7 +99,13 @@ class RemoteScorer:
     usage = None
 
     def __init__(
-        self, url: str, *, secret: str | None, timeout_seconds: float, protected_route: dict[str, str] | None = None
+        self,
+        url: str,
+        *,
+        secret: str | None,
+        timeout_seconds: float,
+        protected_route: dict[str, str] | None = None,
+        label: str = "remote scorer",
     ) -> None:
         """Create a remote scorer.
 
@@ -108,12 +114,15 @@ class RemoteScorer:
             secret: Shared secret sent as a bearer token, if any.
             timeout_seconds: Per-request timeout.
             protected_route: Parent-issued capability for a protected evaluator endpoint.
+            label: Names the scorer in failure messages.
         """
         self._url = url
         self._secret = secret
         self._timeout_seconds = timeout_seconds
         self._relay = (
-            RemoteEvaluatorClient(protected_route, timeout_seconds=timeout_seconds) if protected_route else None
+            RemoteEvaluatorClient(protected_route, timeout_seconds=timeout_seconds, label=label)
+            if protected_route
+            else None
         )
 
     def __call__(self, candidate: Candidate, case: Any = None) -> tuple[float, SideInfo]:

@@ -58,6 +58,7 @@ from ....models.blackbox import (
     BLACKBOX_HARNESS_CLAUDE_CODE,
     BLACKBOX_STRATEGY_AUTO,
     BLACKBOX_TARGET_AGENT,
+    BLACKBOX_TARGET_REPO,
     BlackboxCandidateNode,
     BlackboxEngineCatalogResponse,
     BlackboxEngineInfo,
@@ -93,6 +94,7 @@ from .harness import GatewayConfig
 from .native_runtime import NATIVE_ENGINES, NativeOptions, native_runtime_unavailable_reason
 from .protocol import Candidate, EngineContext, EvalServer, Result, ScorerFn, Task, candidate_key
 from .registry import ENGINES, EngineCapabilities, get_engine
+from .repo_scorer import REPO_SCORER_URL, SETUP_ALLOWANCE_SECONDS
 from .runner import side_info_json_default
 from .sandbox import current_sandbox_runtime, sandbox_runtime_from_settings
 from .sandbox_scorer import probe_scorer
@@ -676,7 +678,18 @@ def run_blackbox_optimization(
     protected = payload.execution_budget_id is not None or ROUTE_KEY in payload.reflection_model_settings.extra
     if payload.scorer.kind == "remote" and protected and not evaluator_route:
         raise ServiceError("Protected remote evaluation requires its parent-issued capability.")
-    base_scorer = build_scorer(payload.scorer, job_id=artifact_id, protected_route=evaluator_route)
+    if payload.target.kind == BLACKBOX_TARGET_REPO:
+        if not evaluator_route:
+            raise ServiceError("A repository run is scored only by its trusted parent.")
+        base_scorer: JobScorer = RemoteScorer(
+            REPO_SCORER_URL,
+            secret=None,
+            timeout_seconds=payload.scorer.timeout_seconds + SETUP_ALLOWANCE_SECONDS,
+            protected_route=evaluator_route,
+            label="repository scorer",
+        )
+    else:
+        base_scorer = build_scorer(payload.scorer, job_id=artifact_id, protected_route=evaluator_route)
     try:
         return _run_job(
             payload,
