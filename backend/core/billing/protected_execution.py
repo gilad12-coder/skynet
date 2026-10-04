@@ -126,6 +126,7 @@ def bind_protected_sandbox(
     lifetime_seconds: int | None = None,
     anthropic_api_key: str | None = None,
     parent_hosts: tuple[str, ...] = (),
+    image: str | None = None,
 ) -> dict[str, Any]:
     """Keep provider credentials, fixed resource profiles, and metering in the parent.
 
@@ -139,6 +140,8 @@ def bind_protected_sandbox(
             the network edge adds it to the box's Anthropic requests.
         parent_hosts: Package registries the parent's own repository scoring
             box may reach during setup; empty when the run opens no such box.
+        image: The immutable image the run is pinned to; the deployment's
+            current image when None.
 
     Returns:
         Non-secret deployment identity usable in setup evidence.
@@ -149,7 +152,10 @@ def bind_protected_sandbox(
     reason = protected_vercel_unavailable_reason(settings, workflow)
     if reason:
         raise UnpricedOperationError(reason)
-    image = protected_image(settings, workflow)
+    if image is None:
+        image = protected_image(settings, workflow)
+    elif not _IMMUTABLE_IMAGE.fullmatch(image):
+        raise UnpricedOperationError("The run's pinned sandbox image is not an immutable reference.")
     assert image is not None
     assert settings.vercel_token is not None
     configured_lifetime = settings.vercel_sandbox_max_lifetime_seconds

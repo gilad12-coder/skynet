@@ -37,6 +37,7 @@ def test_anything_guest_binds_contained_runtime_around_optimizer(
                 "payload": {"_optimization_type": OPTIMIZATION_TYPE_BLACKBOX},
                 "artifact_id": "anything-g1",
                 "nonce": "fixture",
+                "protocol": isolated_runner.SANDBOX_PROTOCOL,
             }
         )
     )
@@ -106,6 +107,7 @@ def test_anything_guest_binds_contained_runtime_around_preflight(
                 },
                 "artifact_id": "preflight-inside",
                 "nonce": "fixture",
+                "protocol": isolated_runner.SANDBOX_PROTOCOL,
             }
         )
     )

@@ -77,12 +77,15 @@ from .usage import (
 )
 
 
-def _current_recovery_runtime(payload: dict[str, Any], optimization_type: str | None) -> dict[str, Any]:
+def _current_recovery_runtime(
+    payload: dict[str, Any], optimization_type: str | None, sandbox_image: str | None = None
+) -> dict[str, Any]:
     """Build the current bounded outer-runtime evidence for recovery admission.
 
     Args:
         payload: Persisted request used to recognize legacy Anything jobs.
         optimization_type: Stored dispatch family for legacy/default selection.
+        sandbox_image: The image the run is pinned to, which a resume reuses.
 
     Returns:
         Fresh Vercel resource and price evidence.
@@ -90,7 +93,9 @@ def _current_recovery_runtime(payload: dict[str, Any], optimization_type: str | 
     try:
         is_blackbox = optimization_type == "blackbox" or "strategy" in payload
         workflow = "anything" if is_blackbox else "dspy"
-        image = settings.vercel_sandbox_image if workflow == "anything" else settings.dspy_sandbox_image
+        image = sandbox_image or (
+            settings.vercel_sandbox_image if workflow == "anything" else settings.dspy_sandbox_image
+        )
         target = payload.get("target")
         # A repository run also opens the parent's scoring box, which reaches
         # package registries during setup, so its restore funds that box too.
@@ -662,6 +667,7 @@ class RemoteDBJobStore:
                 "terminal_evidence": job.terminal_evidence,
                 "recovery": job.recovery,
                 "code_version": job.code_version,
+                "sandbox_image": job.sandbox_image,
                 "stored_bytes": job.stored_bytes or 0,
                 "accumulated_runtime_seconds": job.accumulated_runtime_seconds or 0.0,
                 "parent_optimization_id": job.parent_optimization_id,
@@ -1542,11 +1548,19 @@ class RemoteDBJobStore:
             if job.get("execution_budget_id") is None:
                 return False
             checkpoints = self._checkpoints.list_for_optimization(optimization_id)
-            if not checkpoints or job.get("code_version") != self._current_code_version:
+            if not checkpoints:
+                return False
+            # A run pinned to a sandbox image resumes on any worker version: its
+            # optimizer, code included, lives in that image, not in the worker.
+            if job.get("sandbox_image") is None and job.get("code_version") != self._current_code_version:
                 return False
             for checkpoint in checkpoints:
                 validate_checkpoint(
-                    checkpoint.data, checkpoint.manifest, job.get("payload") or {}, job.get("code_version")
+                    checkpoint.data,
+                    checkpoint.manifest,
+                    job.get("payload") or {},
+                    job.get("code_version"),
+                    sandbox_image=job.get("sandbox_image"),
                 )
             return True
         except (KeyError, CheckpointCompatibilityError):
@@ -1628,8 +1642,14 @@ class RemoteDBJobStore:
             ):
                 raise CheckpointCompatibilityError("The selected pair has no compatible checkpoint.")
             for checkpoint in checkpoints:
-                validate_checkpoint(checkpoint.data, checkpoint.manifest, job.payload or {}, job.code_version)
-            if job.code_version != self._current_code_version:
+                validate_checkpoint(
+                    checkpoint.data,
+                    checkpoint.manifest,
+                    job.payload or {},
+                    job.code_version,
+                    sandbox_image=job.sandbox_image,
+                )
+            if job.sandbox_image is None and job.code_version != self._current_code_version:
                 raise CheckpointCompatibilityError("No compatible worker version is available for this checkpoint.")
             if job.execution_budget_id is None:
                 raise CheckpointCompatibilityError(
@@ -1653,7 +1673,7 @@ class RemoteDBJobStore:
                     recovery_plan = validate_recovery_plan(manifest.get("recovery_admission"), manifest)
                     validate_recovery_runtime(
                         recovery_plan,
-                        _current_recovery_runtime(job.payload or {}, job.optimization_type),
+                        _current_recovery_runtime(job.payload or {}, job.optimization_type, job.sandbox_image),
                     )
                 except RecoveryAdmissionError as error:
                     raise CheckpointCompatibilityError(str(error)) from error
@@ -1793,6 +1813,10 @@ class RemoteDBJobStore:
             current = int(job.attempts or 0)
             next_attempt = current + 1 if bump_attempts else current
             job.attempts = next_attempt  # type: ignore[assignment]
+            if job.sandbox_image is not None:
+                # Workers claim only their own version's jobs; the pinned image
+                # carries the optimizer, so the current workers can supervise it.
+                job.code_version = self._current_code_version  # type: ignore[assignment]
             job.status = "pending"  # type: ignore[assignment]
             job.claimed_by = None  # type: ignore[assignment]
             job.claimed_at = None  # type: ignore[assignment]
@@ -1812,6 +1836,36 @@ class RemoteDBJobStore:
             job.message = "Resuming" if bump_attempts else "Re-running grid pair"  # type: ignore[assignment]
             session.commit()
             return next_attempt
+        finally:
+            session.close()
+
+    def pin_sandbox_image(self, optimization_id: str, image: str) -> str:
+        """Record the image a protected run executes in, keeping any earlier pin.
+
+        Args:
+            optimization_id: The run about to open its sandbox.
+            image: The deployment's current image, used only when none is pinned.
+
+        Returns:
+            The image every sandbox of this run must boot from.
+
+        Raises:
+            KeyError: When the job row does not exist.
+        """
+        session = self._get_session()
+        try:
+            job = (
+                session.query(JobModel)
+                .filter(JobModel.optimization_id == optimization_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if job is None:
+                raise KeyError(optimization_id)
+            if job.sandbox_image is None:
+                job.sandbox_image = image  # type: ignore[assignment]
+                session.commit()
+            return str(job.sandbox_image)
         finally:
             session.close()
 
@@ -1861,6 +1915,7 @@ class RemoteDBJobStore:
             job.latest_metrics = {}  # type: ignore[assignment]
             job.result = None  # type: ignore[assignment]
             job.attempts = 0  # type: ignore[assignment]
+            job.sandbox_image = None  # type: ignore[assignment]
             job.claimed_by = None  # type: ignore[assignment]
             job.claimed_at = None  # type: ignore[assignment]
             job.lease_expires_at = None  # type: ignore[assignment]
