@@ -1905,6 +1905,7 @@ def test_submit_blackbox_run_accepts_repository_targets_without_storing_secret_v
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A repository run is queued and its inline secret values never reach the stored payload."""
+    monkeypatch.setattr(_sub_mod.settings, "byok_vault_key", SecretStr(Fernet.generate_key().decode("utf-8")))
     store = _FakeJobStore()
     client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
     staged: list[dict] = []
