@@ -130,6 +130,7 @@
     "webauthn.invalid_credential": "Не удалось проверить этот ключ доступа.",
     "webauthn.not_found": "Ключ доступа не найден.",
     "billing.insufficient_funds": "Ваш баланс пуст. Пополните его, чтобы начать запуск.",
+    "wizard_agent.daily_limit_reached": "Вы использовали {limit} бесплатных ходов агента на сегодня. Агент снова будет доступен завтра.",
     "billing.openrouter_oauth_failed": "Вход через OpenRouter не завершён. Попробуйте ещё раз.",
     "billing.openrouter_oauth_state_invalid": "Ссылка для входа через OpenRouter недействительна или устарела. Начните заново.",
     "billing.openrouter_unreachable": "Не удалось связаться с OpenRouter. Попробуйте ещё раз чуть позже.",

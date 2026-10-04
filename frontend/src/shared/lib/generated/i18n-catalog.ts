@@ -280,6 +280,7 @@ export const I18N_MESSAGES = {
   "wizard.split_fractions_not_number": "ערכי split_fractions חייבים להיות מספרים: {error}",
   "wizard.split_fractions_not_object": "split_fractions חייב להיות אובייקט עם המפתחות train/val/test.",
   "wizard.split_fractions_sum": "split_fractions חייב להסתכם ל-1.0, התקבל {total}",
+  "wizard_agent.daily_limit_reached": "ניצלת את {limit} התורות החינמיות של הסוכן להיום. הסוכן יהיה זמין שוב מחר.",
   "workflow.validation_failed": "אימות תהליך העבודה נכשל: {error}",
 } as const;
 
@@ -569,6 +570,7 @@ const i18n_ar: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "يجب أن تكون قيم split_fractions أعدادًا: {error}",
   "wizard.split_fractions_not_object": "يجب أن يكون split_fractions كائنًا يحوي المفاتيح train/val/test.",
   "wizard.split_fractions_sum": "يجب أن يكون مجموع split_fractions مساويًا 1.0، وكان {total}",
+  "wizard_agent.daily_limit_reached": "لقد استخدمت أدوار الوكيل المجانية البالغة {limit} لهذا اليوم. سيكون الوكيل متاحًا مجددًا غدًا.",
   "workflow.validation_failed": "فشل التحقق من سير العمل: {error}",
 };
 
@@ -852,6 +854,7 @@ const i18n_de: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "split_fractions-Werte müssen Zahlen sein: {error}",
   "wizard.split_fractions_not_object": "split_fractions muss ein Objekt mit den Schlüsseln train/val/test sein.",
   "wizard.split_fractions_sum": "split_fractions müssen sich zu 1.0 summieren, ergab {total}",
+  "wizard_agent.daily_limit_reached": "Sie haben die {limit} kostenlosen Agenten-Runden für heute aufgebraucht. Der Agent ist morgen wieder verfügbar.",
   "workflow.validation_failed": "Workflow-Validierung fehlgeschlagen: {error}",
 };
 
@@ -1135,6 +1138,7 @@ export const I18N_MESSAGES_EN: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "split_fractions values must be numbers: {error}",
   "wizard.split_fractions_not_object": "split_fractions must be an object with train/val/test keys.",
   "wizard.split_fractions_sum": "split_fractions must sum to 1.0, got {total}",
+  "wizard_agent.daily_limit_reached": "You've used today's {limit} free agent turns. The agent is available again tomorrow.",
   "workflow.validation_failed": "Workflow validation failed: {error}",
 };
 
@@ -1494,6 +1498,7 @@ const i18n_es: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "Los valores de split_fractions deben ser números: {error}",
   "wizard.split_fractions_not_object": "split_fractions debe ser un objeto con claves train/val/test.",
   "wizard.split_fractions_sum": "split_fractions debe sumar 1.0, pero se obtuvo {total}",
+  "wizard_agent.daily_limit_reached": "Has usado los {limit} turnos gratuitos del agente de hoy. El agente vuelve a estar disponible mañana.",
   "workflow.validation_failed": "La validación del flujo de trabajo falló: {error}",
 };
 
@@ -1777,6 +1782,7 @@ const i18n_fa: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "مقادیر split_fractions باید عدد باشند: {error}",
   "wizard.split_fractions_not_object": "split_fractions باید شیئی با کلیدهای train/val/test باشد.",
   "wizard.split_fractions_sum": "split_fractions باید جمعاً برابر 1.0 شود، {total} دریافت شد.",
+  "wizard_agent.daily_limit_reached": "{limit} نوبت رایگان امروز دستیار را استفاده کرده‌اید. دستیار فردا دوباره در دسترس است.",
   "workflow.validation_failed": "اعتبارسنجی گردش کار ناموفق بود: {error}",
 };
 
@@ -2060,6 +2066,7 @@ const i18n_fr: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "Les valeurs de split_fractions doivent être des nombres : {error}",
   "wizard.split_fractions_not_object": "split_fractions doit être un objet avec les clés train/val/test.",
   "wizard.split_fractions_sum": "split_fractions doit totaliser 1.0, obtenu {total}",
+  "wizard_agent.daily_limit_reached": "Vous avez utilisé les {limit} tours gratuits de l'agent pour aujourd'hui. L'agent sera de nouveau disponible demain.",
   "workflow.validation_failed": "La validation du flux de travail a échoué : {error}",
 };
 
@@ -2357,6 +2364,7 @@ const i18n_hi: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "split_fractions मान संख्याएँ होनी चाहिए: {error}",
   "wizard.split_fractions_not_object": "split_fractions एक ऑब्जेक्ट होना चाहिए जिसमें train/val/test कुंजियाँ हों।",
   "wizard.split_fractions_sum": "split_fractions का योग 1.0 होना चाहिए, मिला {total}",
+  "wizard_agent.daily_limit_reached": "आपने आज के {limit} मुफ़्त एजेंट टर्न इस्तेमाल कर लिए हैं। एजेंट कल फिर उपलब्ध होगा।",
   "workflow.validation_failed": "वर्कफ़्लो सत्यापन विफल रहा: {error}",
 };
 
@@ -2640,6 +2648,7 @@ const i18n_it: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "I valori di split_fractions devono essere numeri: {error}",
   "wizard.split_fractions_not_object": "split_fractions deve essere un oggetto con chiavi train/val/test.",
   "wizard.split_fractions_sum": "split_fractions deve sommare a 1.0, ottenuto {total}",
+  "wizard_agent.daily_limit_reached": "Hai usato i {limit} turni gratuiti dell'agente di oggi. L'agente sarà di nuovo disponibile domani.",
   "workflow.validation_failed": "Convalida del flusso di lavoro non riuscita: {error}",
 };
 
@@ -2923,6 +2932,7 @@ const i18n_ja: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "split_fractions の値は数値である必要があります: {error}",
   "wizard.split_fractions_not_object": "split_fractions は train／val／test のキーを持つオブジェクトである必要があります。",
   "wizard.split_fractions_sum": "split_fractions の合計は 1.0 である必要がありますが、{total} でした。",
+  "wizard_agent.daily_limit_reached": "本日の無料エージェントターン（{limit} 回）を使い切りました。エージェントは明日また利用できます。",
   "workflow.validation_failed": "ワークフローの検証に失敗しました: {error}",
 };
 
@@ -3206,6 +3216,7 @@ const i18n_ko: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "split_fractions 값은 숫자여야 합니다: {error}",
   "wizard.split_fractions_not_object": "split_fractions는 train/val/test 키를 가진 객체여야 합니다.",
   "wizard.split_fractions_sum": "split_fractions의 합은 1.0이어야 하는데 {total}입니다.",
+  "wizard_agent.daily_limit_reached": "오늘의 무료 에이전트 턴 {limit}회를 모두 사용했습니다. 에이전트는 내일 다시 사용할 수 있습니다.",
   "workflow.validation_failed": "워크플로 검증에 실패했습니다: {error}",
 };
 
@@ -3489,6 +3500,7 @@ const i18n_pt: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "Os valores de split_fractions devem ser números: {error}",
   "wizard.split_fractions_not_object": "split_fractions deve ser um objeto com as chaves train/val/test.",
   "wizard.split_fractions_sum": "split_fractions deve somar 1.0, obteve-se {total}",
+  "wizard_agent.daily_limit_reached": "Usou os {limit} turnos gratuitos do agente de hoje. O agente fica disponível novamente amanhã.",
   "workflow.validation_failed": "Falha na validação do fluxo de trabalho: {error}",
 };
 
@@ -3791,6 +3803,7 @@ const i18n_ru: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "Значения split_fractions должны быть числами: {error}",
   "wizard.split_fractions_not_object": "split_fractions должен быть объектом с ключами train/val/test.",
   "wizard.split_fractions_sum": "Сумма split_fractions должна быть равна 1.0, получено {total}",
+  "wizard_agent.daily_limit_reached": "Вы использовали {limit} бесплатных ходов агента на сегодня. Агент снова будет доступен завтра.",
   "workflow.validation_failed": "Проверка рабочего процесса не пройдена: {error}",
 };
 
@@ -4074,6 +4087,7 @@ const i18n_tr: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "split_fractions değerleri sayı olmalıdır: {error}",
   "wizard.split_fractions_not_object": "split_fractions, train/val/test anahtarları olan bir nesne olmalıdır.",
   "wizard.split_fractions_sum": "split_fractions toplamı 1.0 olmalıdır, {total} alındı.",
+  "wizard_agent.daily_limit_reached": "Bugünkü {limit} ücretsiz ajan turunu kullandınız. Ajan yarın yeniden kullanılabilir.",
   "workflow.validation_failed": "İş akışı doğrulaması başarısız oldu: {error}",
 };
 
@@ -4357,6 +4371,7 @@ const i18n_uk: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "Значення split_fractions мають бути числами: {error}",
   "wizard.split_fractions_not_object": "split_fractions має бути об'єктом із ключами train/val/test.",
   "wizard.split_fractions_sum": "split_fractions мають у сумі давати 1.0, отримано {total}",
+  "wizard_agent.daily_limit_reached": "Ви використали {limit} безкоштовних ходів агента на сьогодні. Агент знову буде доступний завтра.",
   "workflow.validation_failed": "Перевірка робочого процесу не пройдена: {error}",
 };
 
@@ -4640,6 +4655,7 @@ const i18n_yue: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "split_fractions 嘅數值必須係數字：{error}",
   "wizard.split_fractions_not_object": "split_fractions 必須係包含 train/val/test 鍵值（keys）嘅物件。",
   "wizard.split_fractions_sum": "split_fractions 嘅總和必須為 1.0，目前為 {total}",
+  "wizard_agent.daily_limit_reached": "你今日已經用晒 {limit} 次免費代理回合。代理聽日會再開放。",
   "workflow.validation_failed": "工作流程驗證失敗：{error}",
 };
 
@@ -4923,6 +4939,7 @@ const i18n_zh_Hans: Partial<Record<I18nMessageKey, string>> = {
   "wizard.split_fractions_not_number": "split_fractions 的取值必须是数字：{error}",
   "wizard.split_fractions_not_object": "split_fractions 必须是一个包含 train/val/test 键的对象。",
   "wizard.split_fractions_sum": "split_fractions 之和必须为 1.0，实际得到 {total}。",
+  "wizard_agent.daily_limit_reached": "您已用完今天的 {limit} 次免费智能体回合。智能体明天将再次可用。",
   "workflow.validation_failed": "工作流验证失败：{error}",
 };
 
@@ -5190,6 +5207,7 @@ export const I18N_KEY = {
   WIZARD_SPLIT_FRACTIONS_NOT_NUMBER: "wizard.split_fractions_not_number",
   WIZARD_SPLIT_FRACTIONS_NOT_OBJECT: "wizard.split_fractions_not_object",
   WIZARD_SPLIT_FRACTIONS_SUM: "wizard.split_fractions_sum",
+  WIZARD_AGENT_DAILY_LIMIT_REACHED: "wizard_agent.daily_limit_reached",
   WORKFLOW_VALIDATION_FAILED: "workflow.validation_failed",
 } as const;
 

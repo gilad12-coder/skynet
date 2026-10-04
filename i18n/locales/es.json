@@ -130,6 +130,7 @@
     "webauthn.invalid_credential": "No se pudo verificar esta clave de acceso.",
     "webauthn.not_found": "Clave de acceso no encontrada.",
     "billing.insufficient_funds": "Tu saldo está vacío. Añade fondos para iniciar una ejecución.",
+    "wizard_agent.daily_limit_reached": "Has usado los {limit} turnos gratuitos del agente de hoy. El agente vuelve a estar disponible mañana.",
     "billing.openrouter_oauth_failed": "El inicio de sesión en OpenRouter no se completó. Inténtalo de nuevo.",
     "billing.openrouter_oauth_state_invalid": "El enlace de inicio de sesión de OpenRouter no es válido o ha caducado. Empieza de nuevo.",
     "billing.openrouter_unreachable": "No se pudo contactar con OpenRouter. Inténtalo de nuevo en un momento.",

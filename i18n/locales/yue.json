@@ -135,6 +135,7 @@
     "auth.missing_token": "需要提供身份驗證權杖。",
     "auth.not_configured": "後端尚未設定身份驗證。",
     "billing.insufficient_funds": "你嘅結餘不足。請先增值先可以開始執行。",
+    "wizard_agent.daily_limit_reached": "你今日已經用晒 {limit} 次免費代理回合。代理聽日會再開放。",
     "billing.openrouter_oauth_failed": "OpenRouter 登入未完成。請再試一次。",
     "billing.openrouter_oauth_state_invalid": "OpenRouter 登入連結無效或者已經過期。請重新開始。",
     "billing.openrouter_unreachable": "連唔到 OpenRouter。請等一陣再試。",

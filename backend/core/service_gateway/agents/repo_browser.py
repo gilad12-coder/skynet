@@ -25,6 +25,36 @@ FOLDER_DEPTH = 2
 FILE_BYTES = 40_000
 FILE_LINES = 400
 READS_PER_TURN = 10
+KEY_FILE_BYTES = 6_000
+
+# What an opening look at a repository reads: what the project says it is,
+# and what it is built with. Root level only; the first match of each wins.
+README_NAMES = ("readme.md", "readme.rst", "readme.txt", "readme")
+MANIFEST_NAMES = (
+    "package.json",
+    "pyproject.toml",
+    "setup.py",
+    "requirements.txt",
+    "cargo.toml",
+    "go.mod",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "gemfile",
+    "composer.json",
+    "mix.exs",
+)
+
+# The hidden turn the wizard sends when the user picks a repository. It never
+# shows in the chat; only the agent's reply does.
+KICKOFF_MESSAGE = (
+    "(Automatic start, not typed by the user: they just picked this repository.) "
+    "Its tree, README and manifest are in repo. Do not read other files this turn. "
+    "Open with one or two sentences in the shape 'I looked at <repository>. It looks like "
+    "<what the project is and does>.', then ask what they want to improve in it through "
+    "ask_user, with 2-4 options grounded in this repository (its features, tests, "
+    "performance or prompts), and finish. When repo is empty, ask what they want to optimize."
+)
 
 # Generated or vendored folders say nothing about the project and would eat
 # the tree's line budget; they stay as one collapsed line.
@@ -188,6 +218,7 @@ class RepoBrowser:
         self._files = {str(e.get("path")) for e in entries if e.get("type") == "file"}
         self._emit: Callable[[dict], None] = lambda _event: None
         self._reads = 0
+        self._key_files: list[tuple[str, str]] = []
 
     def bind(self, emit: Callable[[dict], None]) -> None:
         """Route tool events to this turn's stream and reset the per-turn read count.
@@ -213,7 +244,28 @@ class RepoBrowser:
         ]
         if self._truncated:
             lines.append("GitHub cut the tree short, so some files are missing above.")
+        for path, text in self._key_files:
+            lines += ["", f"--- {path} (already read for you) ---", text]
         return "\n".join(lines)
+
+    def preload_key_files(self) -> None:
+        """Read the root README and build manifest into the summary, for an opening look.
+
+        A light read by design: two root files at most, each capped at
+        ``KEY_FILE_BYTES``, never the rest of the repository. A file that
+        cannot be read is skipped.
+        """
+        roots = {path.lower(): path for path in self._files if "/" not in path}
+        for names in (README_NAMES, MANIFEST_NAMES):
+            path = next((roots[name] for name in names if name in roots), None)
+            if path is None:
+                continue
+            try:
+                text, truncated = github.read_text_file(self._token, self.repository, self.branch, path, KEY_FILE_BYTES)
+            except Exception as exc:  # an unreadable file leaves the opening look without it
+                logger.info("Key file %s unreadable in %s: %s", path, self.repository, exc)
+                continue
+            self._key_files.append((path, text + ("\n... (file cut here)" if truncated else "")))
 
     def _tool(self, tool: str, reason: str, run: Callable[[], str]) -> str:
         """Run one browsing call between ``tool_start`` and ``tool_end`` events.

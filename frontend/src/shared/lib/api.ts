@@ -3071,6 +3071,9 @@ export interface CodeAgentRequest {
   // Explicit reasoning-effort level for the chosen model; absent keeps its default.
   reasoning_effort?: string;
   blackbox?: BlackboxAuthoringContext;
+  // Black-box only: the agent opens the conversation itself; the server
+  // supplies the hidden opening message in place of `user_message`.
+  kickoff?: boolean;
 }
 
 export type CodeAgentToolName =
@@ -3157,7 +3160,8 @@ export interface CodeAgentHandlers {
     metricValid?: boolean;
     validationError?: string | null;
   }) => void;
-  onError: (message: string) => void;
+  /** `code` is the server's error code when the request was refused (e.g. a quota). */
+  onError: (message: string, code?: string) => void;
   signal?: AbortSignal;
 }
 
@@ -3266,8 +3270,10 @@ export async function streamCodeAgent(
   if (result.response) {
     const res = result.response;
     const text = await res.text().catch(() => "");
+    const parsed = parseError(text);
     handlers.onError(
-      parseErrorMessage(text) ?? formatMsg("auto.shared.lib.api.template.5", { p1: res.status }),
+      parsed.message ?? formatMsg("auto.shared.lib.api.template.5", { p1: res.status }),
+      parsed.code,
     );
   } else if (!result.started) {
     handlers.onError(msg("auto.shared.lib.api.literal.11"));

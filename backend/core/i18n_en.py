@@ -45,6 +45,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "auth.missing_token": "Authentication token is required.",
     "auth.not_configured": "Backend authentication is not configured.",
     "billing.insufficient_funds": "Your balance is empty. Add funds to start a run.",
+    "wizard_agent.daily_limit_reached": "You've used today's {limit} free agent turns. The agent is available again tomorrow.",
     "billing.byok_not_configured": "The BYOK key vault is not configured on this deployment, so provider keys can't be saved.",
     "billing.byok_unknown_provider": "Unknown provider '{provider}'.",
     "billing.byok_empty_secret": "A provider key can't be empty.",

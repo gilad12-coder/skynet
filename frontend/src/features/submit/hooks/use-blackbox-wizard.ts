@@ -1252,6 +1252,8 @@ export function useBlackboxWizard(
     interviewBrief: interview.confirmedBrief,
     blackbox: authoringContext,
     onBrief: agentSetBrief,
+    // The guided tour's demo repository must not start the agent.
+    kickoffEnabled: isRepo && !touring,
     model: interview.model,
     reasoningEffort: interview.reasoningEffort,
   });

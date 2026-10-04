@@ -130,6 +130,7 @@
     "webauthn.invalid_credential": "Impossibile verificare questa passkey.",
     "webauthn.not_found": "Passkey non trovata.",
     "billing.insufficient_funds": "Il tuo saldo è esaurito. Aggiungi fondi per avviare un'esecuzione.",
+    "wizard_agent.daily_limit_reached": "Hai usato i {limit} turni gratuiti dell'agente di oggi. L'agente sarà di nuovo disponibile domani.",
     "billing.openrouter_oauth_failed": "L'accesso a OpenRouter non è stato completato. Riprova.",
     "billing.openrouter_oauth_state_invalid": "Il link di accesso a OpenRouter non è valido o è scaduto. Ricomincia.",
     "billing.openrouter_unreachable": "Impossibile raggiungere OpenRouter. Riprova tra un momento.",

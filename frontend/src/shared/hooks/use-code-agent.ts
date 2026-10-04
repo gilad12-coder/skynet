@@ -138,6 +138,11 @@ export interface CodeAgentState {
   metricStatus: ArtifactStatus;
   messages: AgentMessage[];
   error: string | null;
+  /** The black-box wizard agent's daily turn cap is used up. */
+  limitReached: boolean;
+  /** The repository the agent is reading to open the conversation by
+   *  itself, until its first words arrive; `null` otherwise. */
+  openingRepo: string | null;
   canSend: boolean;
   /** The question the agent's last reply asked, with clickable answers. */
   question: AgentQuestion | null;
@@ -207,7 +212,15 @@ export interface UseCodeAgentArgs {
   // conversation's chosen model so code authoring follows the composer.
   model?: string | null;
   reasoningEffort?: string | null;
+  /** Black-box repository: once per picked repository/branch the agent
+   *  reads it and opens the conversation without the user typing. */
+  kickoffEnabled?: boolean;
 }
+
+const DAILY_LIMIT_CODE = "wizard_agent.daily_limit_reached";
+// Picking a repository resets its branch and the branch picker may then fill
+// one in; waiting for the selection to settle starts one opening, not two.
+const KICKOFF_SETTLE_MS = 600;
 
 export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   const {
@@ -241,6 +254,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     reasoningEffort,
     blackbox = null,
     onBrief,
+    kickoffEnabled = false,
   } = args;
 
   const [status, setStatus] = React.useState<AgentStatus>("idle");
@@ -254,6 +268,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   const [metricStatus, setMetricStatus] = React.useState<ArtifactStatus>("idle");
   const [messages, setMessages] = React.useState<AgentMessage[]>([]);
   const [error, setError] = React.useState<string | null>(null);
+  const [limitReached, setLimitReached] = React.useState(false);
+  // The current run is an opening (no user message to retry from).
+  const [openingRun, setOpeningRun] = React.useState(false);
+  const [kickedKey, setKickedKey] = React.useState<string | null>(null);
   const [question, setQuestion] = React.useState<AgentQuestion | null>(null);
   const [signatureVersions, setSignatureVersions] = React.useState<ArtifactVersion[]>([]);
   const [metricVersions, setMetricVersions] = React.useState<ArtifactVersion[]>([]);
@@ -280,7 +298,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     Array<{ kind: "signature" | "metric"; promise: Promise<unknown> }>
   >([]);
   const autoFixAttemptsRef = React.useRef(0);
-  const runAgentRef = React.useRef<((msg: string, hist: AgentMessage[]) => void) | null>(null);
+  const runAgentRef = React.useRef<
+    ((msg: string, hist: AgentMessage[], kickoff?: boolean) => void) | null
+  >(null);
   const messagesRef = React.useRef<AgentMessage[]>([]);
   const flashClearRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -410,8 +430,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   );
 
   const runAgent = React.useCallback(
-    (userMessage: string, history: AgentMessage[]) => {
-      if (!(userMessage.length > 0 ? canChat : hasRequiredContext)) return;
+    (userMessage: string, history: AgentMessage[], kickoff = false) => {
+      const isChat = userMessage.length > 0 || kickoff;
+      if (!(isChat ? canChat : hasRequiredContext)) return;
 
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -426,11 +447,14 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       pendingValidationsRef.current = [];
       setQuestion(null);
 
-      const isChat = userMessage.length > 0;
       setMode(isChat ? "chat" : "seed");
       setStatus("streaming");
+      setOpeningRun(kickoff);
+      setLimitReached(false);
       setStatusLabel(
-        isChat
+        kickoff
+          ? formatMsg("submit.blackbox.agent.opening_title", { repo: blackbox?.repository ?? "" })
+          : isChat
           ? msg("auto.features.submit.hooks.use.code.agent.literal.1")
           : blackbox
             ? msg("submit.blackbox.agent.reading")
@@ -445,7 +469,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       setReasoningEndedAt(null);
       setError(null);
 
-      if (isChat) {
+      if (kickoff) {
+        // The opening message is the server's and stays hidden: the chat
+        // starts with the agent's reply, about this repository only.
+        setMessages([{ role: "assistant", content: "", toolCalls: [] }]);
+      } else if (isChat) {
         setMessages((m) => [
           ...m,
           { role: "user", content: userMessage },
@@ -525,6 +553,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           ...(model ? { model } : {}),
           ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
           ...(blackbox ? { blackbox } : {}),
+          ...(kickoff ? { kickoff: true } : {}),
         },
         {
           signal: controller.signal,
@@ -811,8 +840,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               runAgentRef.current?.(fixMessage, messagesRef.current);
             });
           },
-          onError: (message) => {
+          onError: (message, code) => {
             if (controller.signal.aborted) return;
+            setLimitReached(code === DAILY_LIMIT_CODE);
             setStatus("error");
             setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.8"));
             setSignatureStatus("idle");
@@ -883,14 +913,17 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
 
   const retry = React.useCallback(() => {
     const lastUserIndex = [...messages].reverse().findIndex((m) => m.role === "user");
-    if (lastUserIndex === -1) return;
+    if (lastUserIndex === -1) {
+      if (openingRun) runAgent("", [], true);
+      return;
+    }
     const index = messages.length - 1 - lastUserIndex;
     const lastUser = messages[index];
     const truncated = messages.slice(0, index);
     setMessages(truncated);
     autoFixAttemptsRef.current = 0;
     runAgent(lastUser?.content ?? "", truncated);
-  }, [messages, runAgent]);
+  }, [messages, runAgent, openingRun]);
 
   const goToSignatureVersion = React.useCallback(
     (index: number) => {
@@ -951,6 +984,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     setMessages([]);
     setQuestion(null);
     setStatus("idle");
+    setOpeningRun(false);
+    setKickedKey(null);
+    setLimitReached(false);
     setMode("seed");
     setStatusLabel("");
     setSignatureStatus("idle");
@@ -1030,6 +1066,36 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     sessionKey,
   ]);
 
+  // A picked repository opens the conversation once per repository/branch;
+  // picking another one starts over about it, and so does a new chat.
+  // Clearing the pick keeps the chat, and picking the same one again does
+  // not repeat the opening.
+  const kickoffKey =
+    kickoffEnabled && codeAssistMode === "auto" && blackbox?.repository
+      ? `${blackbox.repository}@${blackbox.branch ?? ""}`
+      : null;
+  React.useEffect(() => {
+    if (!kickoffKey || kickedKey === kickoffKey) return;
+    const timer = setTimeout(() => {
+      setKickedKey(kickoffKey);
+      autoFixAttemptsRef.current = 0;
+      runAgentRef.current?.("", [], true);
+    }, KICKOFF_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [kickoffKey, kickedKey]);
+
+  const firstMessage = messages[0];
+  const awaitingFirstWords =
+    openingRun &&
+    status === "streaming" &&
+    messages.length === 1 &&
+    !firstMessage?.content &&
+    !firstMessage?.toolCalls?.length;
+  const openingRepo =
+    (kickoffKey !== null && kickedKey !== kickoffKey) || awaitingFirstWords
+      ? (blackbox?.repository ?? null)
+      : null;
+
   // If the user switches to manual mid-stream, abort and reset.
   React.useEffect(() => {
     if (codeAssistMode === "auto") return;
@@ -1045,6 +1111,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     metricStatus,
     messages,
     error,
+    limitReached,
+    openingRepo,
     canSend: canChat && status !== "streaming",
     question,
     signatureVersions,
