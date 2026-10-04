@@ -73,6 +73,14 @@ class LoginRequest(BaseModel):
 class OAuthProvisionRequest(BaseModel):
     email: str = Field(description="Provider-asserted email; also the cross-app identity.")
     name: str = Field(default="", description="Display name from the provider profile.")
+    other_emails: list[str] = Field(
+        default_factory=list,
+        max_length=50,
+        description=(
+            "Other provider-verified emails on the same identity; an existing account "
+            "under one of them is reused when none exists under ``email``."
+        ),
+    )
 
 
 # The resolved account the frontend turns into a session — never carries a secret.
@@ -80,9 +88,7 @@ class AccountInfo(BaseModel):
     email: str = Field(description="Lowercased account email, which is the identity.")
     name: str = Field(description="Display name.")
     role: str = Field(description="Authorization role: 'admin' or 'user'.")
-    first_login: bool = Field(
-        default=False, description="Whether this sign-in is the account's first."
-    )
+    first_login: bool = Field(default=False, description="Whether this sign-in is the account's first.")
 
 
 # Simple acknowledgement for state-changing auth calls. Lives here (not in the
@@ -125,6 +131,26 @@ def _normalise_email(raw: str) -> str:
         The normalized email.
     """
     return raw.strip().lower()
+
+
+def _existing_account(session: Session, emails: list[str]) -> UserModel | None:
+    """Return the first account registered under one of the given emails.
+
+    Args:
+        session: Open database session.
+        emails: Provider-verified emails, in the provider's order.
+
+    Returns:
+        The matching account row, or None when no email has one.
+    """
+    for raw in emails:
+        candidate = _normalise_email(raw)
+        if not _EMAIL_RE.match(candidate):
+            continue
+        row = session.get(UserModel, candidate)
+        if row is not None:
+            return row
+    return None
 
 
 def _coerce_choice(value: str, allowed: frozenset[str]) -> str | None:
@@ -391,10 +417,13 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         first sign-in creates a row with no password, so ``/auth/login`` can
         never sign in to it, and later sign-ins only stamp ``last_login_at``. A
         local account with the same email is reused untouched, so one person
-        stays one identity however they sign in.
+        stays one identity however they sign in. When no account exists under
+        the email, an account under one of the provider's other verified emails
+        is reused instead. An existing account whose email was never confirmed
+        loses its password, since the provider is the first proof of ownership.
 
         Args:
-            body: Provider-asserted email and display name.
+            body: Provider-asserted email, display name, and other verified emails.
             x_internal_auth: Shared-secret header proving the caller is the
                 trusted frontend.
 
@@ -413,6 +442,14 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         with Session(job_store.engine) as session:
             row = session.get(UserModel, email)
             if row is None:
+                row = _existing_account(session, body.other_emails)
+            if row is not None and not bool(row.email_verified):
+                # The password was set by whoever registered the address without
+                # ever proving it; the provider just proved it, so that password
+                # must not keep a way into the owner's account.
+                row.password_hash = ""
+                row.email_verified = True
+            if row is None:
                 # The provider already vouched for the email, and an empty hash
                 # never verifies, so the row is verified yet unreachable through
                 # the password path until the user sets a password.
@@ -426,6 +463,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
                 session.add(row)
             first_login = row.last_login_at is None
             row.last_login_at = now
+            email = str(row.email)
             name = str(row.name)
             session.commit()
         return AccountInfo(email=email, name=name, role=_role_for(email), first_login=first_login)
@@ -554,11 +592,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         enforce_account_rate(email, "verify")
         with Session(job_store.engine) as session:
             row = session.get(UserModel, email)
-            nothing_to_send = (
-                row is None
-                or bool(row.email_verified)
-                or verification_code_on_cooldown(session, email)
-            )
+            nothing_to_send = row is None or bool(row.email_verified) or verification_code_on_cooldown(session, email)
             if nothing_to_send:
                 return OkResponse()
             code = issue_verification_code(session, email)
