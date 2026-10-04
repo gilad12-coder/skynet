@@ -106,7 +106,13 @@ from .constants import (
     EVENT_TERMINAL,
 )
 from .memory_guard import memory_usage_fraction
-from .repo_staging import StagedRepository, bind_repo_scorer, is_repo_payload, stage_repository
+from .repo_staging import (
+    StagedRepository,
+    bind_repo_scorer,
+    is_repo_payload,
+    publish_improvement,
+    stage_repository,
+)
 from .subprocess_runner import run_service_in_subprocess, set_fork_service
 from .tagging_job import TaggingAutotagPayload, run_autotag_job
 from .vercel_dspy import run_vercel_dspy
@@ -1204,6 +1210,18 @@ class BackgroundWorker:
                         )
                         if first_error:
                             final_message = f"{final_message}: {first_error}"
+
+                if staged_repository is not None and isinstance(result_dict, dict):
+                    self._touch_activity(worker_id)
+                    publish_improvement(
+                        result_dict,
+                        payload_dict,
+                        staged_repository,
+                        username=execution_payload.username,
+                        engine=byok_engine,
+                        optimization_id=optimization_id,
+                        app_url=settings.app_public_url,
+                    )
 
                 # A pair child durably records its PairResult (and the grid
                 # envelope) onto the PARENT before its own terminal write, so

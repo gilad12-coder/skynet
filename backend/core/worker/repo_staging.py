@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import logging
 import shutil
 import tempfile
 from dataclasses import dataclass, field
@@ -11,13 +12,18 @@ from pathlib import Path
 from typing import Any
 
 from ..billing.protected_credentials import ProtectedCredentialVault, resolve_repo_secrets
-from ..connectors.github_repo import RepoSnapshot, fetch_snapshot, github_token, resolve_commit
+from ..connectors.github_publish import RepoPublishError, open_pull_request, push_version
+from ..connectors.github_repo import RepoFetchError, RepoSnapshot, fetch_snapshot, github_token, resolve_commit
 from ..connectors.saved_secrets import SavedSecretStore
 from ..service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
 from ..service_gateway.optimization.blackbox.repo_scorer import RepoScorer
-from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY
+from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY, patch_paths, patch_violations
 from ..service_gateway.optimization.blackbox.repo_workspace import RepoWorkspace
 from ..service_gateway.optimization.blackbox.sandbox import SandboxSpec
+
+logger = logging.getLogger(__name__)
+
+PULL_REQUEST_DETAIL = "pull_request"
 
 
 @dataclass(frozen=True)
@@ -137,3 +143,138 @@ def bind_repo_scorer(payload: dict[str, Any], staged: StagedRepository, gateway:
     )
     staged.scorers.append(scorer)
     payload["_skynet_evaluator_route"] = gateway.bind_evaluator(scorer)
+
+
+def _version_score(result: dict[str, Any], candidate: str) -> float | None:
+    """Return the score the run ranked one version by.
+
+    Args:
+        result: Finished black-box result.
+        candidate: The version's patch.
+
+    Returns:
+        Its recorded score, or ``None`` when the run never scored it.
+    """
+    for version in result.get("versions") or []:
+        if isinstance(version, dict) and version.get("candidate") == candidate:
+            score = version.get("score")
+            return float(score) if isinstance(score, int | float) else None
+    return None
+
+
+def improved_patch(result: dict[str, Any]) -> str | None:
+    """Return the best version when it beat the starting code, else ``None``.
+
+    Held-out scores decide when the run has them; a run without a hold-out
+    split compares the versions' own scores instead.
+
+    Args:
+        result: Finished black-box result.
+
+    Returns:
+        The best version's patch, or ``None`` when it is empty or no better.
+    """
+    best = result.get("best_candidate")
+    if not isinstance(best, str) or not best.strip() or result.get("regression_guard_applied"):
+        return None
+    baseline, optimized = result.get("baseline_test_metric"), result.get("optimized_test_metric")
+    if baseline is None or optimized is None:
+        baseline, optimized = _version_score(result, result.get("seed_candidate") or ""), _version_score(result, best)
+    if baseline is None or optimized is None:
+        return None
+    return best if optimized > baseline else None
+
+
+def _description(result: dict[str, Any], patch: str, run_url: str) -> str:
+    """Write the pull request description.
+
+    Args:
+        result: Finished black-box result.
+        patch: The published version.
+        run_url: Link to the run in the web app.
+
+    Returns:
+        Markdown body.
+    """
+    baseline, optimized = result.get("baseline_test_metric"), result.get("optimized_test_metric")
+    if baseline is None or optimized is None:
+        baseline, optimized = _version_score(result, result.get("seed_candidate") or ""), _version_score(result, patch)
+    files = sorted(set(patch_paths(patch)))
+    listed = "\n".join(f"- `{path}`" for path in files[:50])
+    more = f"\n- and {len(files) - 50} more" if len(files) > 50 else ""
+    return (
+        f"Skynet found this version while optimizing the repository with {result.get('engine_used', 'an agent')}.\n\n"
+        f"Score went from {baseline:.4g} to {optimized:.4g}.\n\n"
+        f"Changed files:\n{listed}{more}\n\n"
+        f"Review the run: {run_url}\n"
+    )
+
+
+def publish_improvement(
+    result: dict[str, Any],
+    payload: dict[str, Any],
+    staged: StagedRepository,
+    *,
+    username: str,
+    engine: Any,
+    optimization_id: str,
+    app_url: str,
+) -> dict[str, Any] | None:
+    """Open a draft pull request with the run's best version when it beat the start.
+
+    Never raises: the run already finished, so a failure is recorded on the
+    result for its owner to read instead.
+
+    Args:
+        result: Finished black-box result, updated in place.
+        payload: The staged payload, which pins the commit.
+        staged: The fetched tree, whose read-only paths still apply.
+        username: Owner of the run and of the GitHub connection.
+        engine: SQLAlchemy engine holding the connector vault.
+        optimization_id: The run, named in the branch.
+        app_url: Public origin of the web app.
+
+    Returns:
+        What was recorded under ``details.pull_request``, or ``None`` when the
+        run did not improve.
+    """
+    patch = improved_patch(result)
+    if patch is None:
+        return None
+    repo = payload["target"]["repo"]
+    outcome: dict[str, Any]
+    # The patch came back from the guest, so the editing rules are checked
+    # again before anything reaches the user's repository.
+    problems = patch_violations(patch, repo["editable_paths"], staged.snapshot.readonly_paths)
+    if problems:
+        outcome = {"error": f"The best version breaks the editing rules: {problems[0]}"}
+    else:
+        branch = f"skynet/optimize-{optimization_id[:12]}"
+        run_url = f"{app_url.rstrip('/')}/optimizations/{optimization_id}"
+        try:
+            token = github_token(engine, username)
+            push_version(
+                repo["repository"],
+                repo["commit"],
+                patch,
+                branch,
+                f"Apply the best version from Skynet run {optimization_id[:12]}",
+                token,
+            )
+            change = open_pull_request(
+                token,
+                repo["repository"],
+                head=branch,
+                base_branch=repo.get("branch"),
+                title=f"Skynet: optimized version from run {optimization_id[:12]}",
+                body=_description(result, patch, run_url),
+            )
+            outcome = {"url": change.url, "number": change.number, "branch": change.branch, "draft": change.draft}
+        except (RepoFetchError, RepoPublishError) as error:
+            outcome = {"error": str(error)}
+        except Exception:  # isolation boundary: a finished run must keep its result
+            logger.exception("Publishing the best version of %s failed", optimization_id)
+            outcome = {"error": "The pull request could not be opened."}
+    details = result.setdefault("details", {})
+    details[PULL_REQUEST_DETAIL] = outcome
+    return outcome
