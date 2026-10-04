@@ -1,0 +1,185 @@
+"""Score repository versions in the trusted parent's box, where the run's secrets live.
+
+The guest that hosts the coding agent never sees the secrets or this box: it
+posts each version through the parent's evaluator capability, and the parent
+rebuilds the checkout, runs the setup command, then calls the user's
+``score(repo_path)`` (or ``score(repo_path, case)``) on it.
+
+A scorer may return per-case scores under ``cases``, a mapping of case name to
+score. The run's score stays the top-level number; the cases are feedback that
+GEPA reflects on.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import shlex
+import threading
+from collections.abc import Mapping
+from typing import Any
+
+from ....billing.model_dispatch import ModelHTTPResult
+from . import runner
+from .repo_workspace import REPO_DIR, RepoWorkspace, redact
+from .sandbox import SandboxSession
+from .sandbox_scorer import RUNNER_SOURCE
+
+CASES_KEY = "cases"
+# The guest names no real endpoint: its requests reach only the parent relay.
+REPO_SCORER_URL = "https://scoped-evaluator.invalid/score"
+RUNNER_PATH = f"{REPO_DIR}/skynet_runner.py"
+CALLS_DIR = f"{REPO_DIR}/calls"
+# The guest waits for setup and the scorer together, so its relay gets both allowances.
+SETUP_ALLOWANCE_SECONDS = 1_800.0
+
+
+class RepoScoreError(Exception):
+    """A version could not be scored; the message is safe to show the agent."""
+
+
+def per_case_scores(side_info: Mapping[str, Any]) -> dict[str, float] | None:
+    """Read and check the per-case scores a repository scorer returned.
+
+    Args:
+        side_info: Everything the scorer returned besides its score.
+
+    Returns:
+        Case name to score, or ``None`` when the scorer returned no cases.
+
+    Raises:
+        RepoScoreError: When ``cases`` is not a mapping of names to finite numbers.
+    """
+    cases = side_info.get(CASES_KEY)
+    if cases is None:
+        return None
+    if not isinstance(cases, dict) or not all(
+        isinstance(name, str)
+        and isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        for name, value in cases.items()
+    ):
+        raise RepoScoreError(f"'{CASES_KEY}' must map each case name to a number.")
+    return {name: float(value) for name, value in cases.items()}
+
+
+class RepoScorer:
+    """Score one repository version at a time in the parent's workspace box."""
+
+    def __init__(self, workspace: RepoWorkspace, code: str, *, timeout_seconds: float) -> None:
+        """Bind the user's scorer code to a repository workspace.
+
+        Args:
+            workspace: Parent-owned box holding the pristine tree.
+            code: Scorer source defining ``score(repo_path)`` or ``score(repo_path, case)``.
+            timeout_seconds: Longest one scorer call may run, setup excluded.
+        """
+        self._workspace = workspace
+        self._code = code
+        self._timeout_seconds = timeout_seconds
+        self._root: str | None = None
+        self._calls = 0
+        self._lock = threading.Lock()
+
+    def score(self, patch: str, case: Any = None) -> dict[str, Any]:
+        """Check out one version, set it up and score it.
+
+        Args:
+            patch: The version as a git patch against the starting commit.
+            case: The case to score it on, when the run has cases.
+
+        Returns:
+            ``{"score": ..., **side_info}``, secrets redacted.
+
+        Raises:
+            RepoScoreError: When the version breaks the path rules, does not
+                apply or set up, or the scorer fails or returns no score.
+        """
+        secrets = list(self._workspace.secrets.values())
+        # Checkout and scoring share one lock: the next version's checkout
+        # replaces the tree this one is scored on.
+        with self._lock:
+            checkout = self._workspace.checkout(patch)
+            if checkout.path is None:
+                detail = " ".join(checkout.problems)
+                if checkout.setup_log:
+                    detail += f"\n{checkout.setup_log}"
+                raise RepoScoreError(detail)
+            session = self._workspace.session()
+            root = self._box_root(session)
+            self._calls += 1
+            call_dir = f"{root}/{CALLS_DIR}/{self._calls:06d}"
+            session.write_files(
+                {
+                    f"{CALLS_DIR}/{self._calls:06d}/{runner.INPUT_FILE}": json.dumps(
+                        {"code": self._code, "candidate": f"{root}/{checkout.path}", "case": case, "gateway": None}
+                    )
+                }
+            )
+            result = session.run(
+                f"cd {shlex.quote(checkout.path)} && python3 {shlex.quote(f'{root}/{RUNNER_PATH}')}"
+                f" {shlex.quote(call_dir)}",
+                env=self._workspace.secrets or None,
+                timeout_seconds=self._timeout_seconds,
+            )
+            if result.timed_out:
+                raise RepoScoreError(f"The scorer exceeded its {self._timeout_seconds:g}s timeout.")
+            text = session.read_file(f"{CALLS_DIR}/{self._calls:06d}/{runner.OUTPUT_FILE}")
+        if text is None:
+            output = redact((result.stderr or result.stdout)[-2_000:], secrets)
+            raise RepoScoreError(f"The scorer did not finish (exit {result.exit_code}): {output}")
+        output = json.loads(redact(text, secrets))
+        if output.get("error") or output.get("score") is None:
+            raise RepoScoreError(str(output.get("error") or "The scorer returned no score."))
+        side_info = dict(output.get("side_info") or {})
+        per_case_scores(side_info)
+        return {**side_info, "score": float(output["score"])}
+
+    def dispatch(self, body: Mapping[str, Any]) -> ModelHTTPResult:
+        """Answer one guest scoring request through the evaluator capability.
+
+        Args:
+            body: ``{"candidate": <patch>, "case": ...}`` from the guest.
+
+        Returns:
+            200 with the score and side information, or 422 with why the
+            version could not be scored, as text.
+
+        Raises:
+            ValueError: When the body is not a patch and an optional case.
+        """
+        candidate = body.get("candidate")
+        if set(body).difference({"candidate", "case"}) or not isinstance(candidate, str):
+            raise ValueError("A repository version must be sent as a patch and an optional case.")
+        try:
+            document = self.score(candidate, body.get("case"))
+        except RepoScoreError as error:
+            # Plain text: the guest's relay client quotes the body in its error.
+            return ModelHTTPResult(422, "text/plain; charset=utf-8", str(error).encode())
+        return ModelHTTPResult(200, "application/json", json.dumps(document).encode())
+
+    def _box_root(self, session: SandboxSession) -> str:
+        """Return the box's working directory, installing the runner on first use.
+
+        Args:
+            session: The workspace's open box.
+
+        Returns:
+            The absolute directory relative paths in the box resolve against.
+
+        Raises:
+            RepoScoreError: When the box cannot report its directory.
+        """
+        if self._root is None:
+            located = session.run("pwd", timeout_seconds=30)
+            root = located.stdout.strip()
+            if not located.ok or not root.startswith("/"):
+                raise RepoScoreError("The scoring box could not report its working directory.")
+            session.write_files({RUNNER_PATH: RUNNER_SOURCE})
+            self._root = root
+        return self._root
+
+    def close(self) -> None:
+        """Destroy the workspace box."""
+        self._workspace.close()

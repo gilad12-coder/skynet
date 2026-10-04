@@ -110,6 +110,14 @@ def _model_attempt_key(headers: Mapping[str, str]) -> str | None:
     return f"model-attempt:{identity}"
 
 
+class EvaluatorEndpoint(Protocol):
+    """Answer guest scoring requests without importing optimizer code."""
+
+    def dispatch(self, body: Mapping[str, Any]) -> ModelHTTPResult:
+        """Score one candidate the guest posted."""
+        ...
+
+
 class SandboxControl(Protocol):
     """Describe the parent-owned sandbox boundary without importing optimizer code."""
 
@@ -175,7 +183,7 @@ class ModelGateway:
         self._routes: dict[str, OpenRouterDispatcher] = {}
         self._sandbox: SandboxControl | None = None
         self._tools: McpToolsBroker | None = None
-        self._evaluator: RemoteEvaluatorBroker | None = None
+        self._evaluator: EvaluatorEndpoint | None = None
         self._packages: PackageBroker | None = None
         self._package_token = secrets.token_urlsafe(32)
         self._evaluator_token = secrets.token_urlsafe(32)
@@ -562,6 +570,23 @@ class ModelGateway:
             {"url": self.url, "token": token, "model": route.model, "role": route.role}
             for token, route in self._routes.items()
         ]
+
+    def bind_evaluator(self, evaluator: EvaluatorEndpoint) -> dict[str, str]:
+        """Serve the guest's scoring requests from a parent-owned evaluator.
+
+        Args:
+            evaluator: Scores each candidate the guest posts, in the parent.
+
+        Returns:
+            The opaque route the guest posts its candidates to.
+
+        Raises:
+            ValueError: When the gateway already owns an evaluator endpoint.
+        """
+        if self._evaluator is not None:
+            raise ValueError("This gateway already owns an evaluator endpoint.")
+        self._evaluator = evaluator
+        return {"url": self.url, "token": self._evaluator_token}
 
     def bind_sandbox(
         self, broker: SandboxControl, *, image: str, lifetime_seconds: float, allowed_hosts: tuple[str, ...] = ()

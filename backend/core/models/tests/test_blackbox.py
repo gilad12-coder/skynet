@@ -253,3 +253,11 @@ def test_repository_must_be_owner_slash_name(repository: str) -> None:
     """Only the ``owner/name`` form is accepted."""
     with pytest.raises(ValidationError):
         BlackboxRepoSource(repository=repository, editable_paths=["src"])
+
+
+def test_repo_run_needs_a_python_scorer() -> None:
+    """A remote endpoint never sees the checkout, so a repository run is scored by Python code."""
+    with pytest.raises(ValidationError, match="scored by Python code"):
+        BlackboxRunRequest.model_validate(
+            _repo_request(scorer={"kind": "remote", "url": "https://scorer.example.com/score"})
+        )

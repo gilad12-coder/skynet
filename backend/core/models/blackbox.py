@@ -425,12 +425,14 @@ class BlackboxRunRequest(BaseModel):
         so the seed is the empty patch; a supplied seed must be a patch.
 
         Raises:
-            ValueError: When the seed is multi-part, or the run is not a single
-                AutoResearch or GEPA run.
+            ValueError: When the seed is multi-part, the scorer is not Python
+                code, or the run is not a single AutoResearch or GEPA run.
         """
         multi_part = isinstance(self.seed_candidate, dict)
         if multi_part:
             raise ValueError("A repository run starts from its commit; a multi-part starting point does not apply.")
+        if self.scorer.kind != "python":
+            raise ValueError("A repository run is scored by Python code that receives the checkout's path.")
         self.seed_candidate = self.seed_candidate or ""
         if self.strategy.mode != "single" or self.strategy.engine not in BLACKBOX_REPO_ENGINES:
             raise ValueError(f"A repository target runs a single {' or '.join(sorted(BLACKBOX_REPO_ENGINES))} engine.")
