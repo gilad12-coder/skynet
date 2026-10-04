@@ -268,6 +268,12 @@
     "connectors.invalid_ref": "That location isn't valid. Pick a file from the list.",
     "connectors.picker_unavailable": "Choosing files from Google isn't set up on this deployment.",
     "connectors.picker_needs_oauth": "Choosing files needs a {provider} account linked with Google sign-in.",
-    "connectors.unknown_provider": "Unknown connector: {provider}."
+    "connectors.unknown_provider": "Unknown connector: {provider}.",
+    "secrets.invalid_name": "\"{name}\" can't be a secret name. Use letters, digits and underscores, starting with a letter or underscore.",
+    "secrets.invalid_value": "A secret needs a value of at most {limit} bytes.",
+    "secrets.limit_reached": "You can save up to {limit} secrets. Delete one to add another.",
+    "secrets.not_found": "That secret doesn't exist, or it isn't yours.",
+    "secrets.undecryptable": "This secret can no longer be read. Save it again.",
+    "blackbox.repo_target_unavailable": "Optimizing a repository isn't available yet."
   }
 }

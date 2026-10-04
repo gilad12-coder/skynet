@@ -65,6 +65,12 @@
     "winningCandidate": "candidato vincente"
   },
   "messages": {
+    "blackbox.repo_target_unavailable": "L'ottimizzazione di un repository non è ancora disponibile.",
+    "secrets.invalid_name": "\"{name}\" non può essere il nome di un segreto. Usa lettere, cifre e trattini bassi, iniziando con una lettera o un trattino basso.",
+    "secrets.invalid_value": "Un segreto richiede un valore di al massimo {limit} byte.",
+    "secrets.limit_reached": "Puoi salvare fino a {limit} segreti. Eliminane uno per aggiungerne un altro.",
+    "secrets.not_found": "Questo segreto non esiste oppure non è tuo.",
+    "secrets.undecryptable": "Questo segreto non può più essere letto. Salvalo di nuovo.",
     "connectors.query_failed": "{provider} non è riuscito a eseguire la query: {reason}",
     "connectors.expired": "La tua sessione {provider} è scaduta. Accedi di nuovo dalle Impostazioni.",
     "connectors.file_unsupported": "Impossibile leggere questo file come tabella. Formati supportati: CSV, TSV, JSON, JSONL e Parquet.",

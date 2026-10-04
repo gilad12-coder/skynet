@@ -65,6 +65,12 @@
     "winningCandidate": "المرشّح الفائز"
   },
   "messages": {
+    "blackbox.repo_target_unavailable": "تحسين مستودع غير متاح بعد.",
+    "secrets.invalid_name": "لا يمكن استخدام \"{name}\" اسمًا لسر. استخدم الأحرف والأرقام والشرطات السفلية، وابدأ بحرف أو شرطة سفلية.",
+    "secrets.invalid_value": "يحتاج السر إلى قيمة لا تتجاوز {limit} بايت.",
+    "secrets.limit_reached": "يمكنك حفظ ما يصل إلى {limit} سرًا. احذف واحدًا لإضافة آخر.",
+    "secrets.not_found": "هذا السر غير موجود، أو ليس لك.",
+    "secrets.undecryptable": "لم يعد بالإمكان قراءة هذا السر. احفظه مرة أخرى.",
     "connectors.query_failed": "تعذّر على {provider} تنفيذ الاستعلام: {reason}",
     "connectors.expired": "انتهت صلاحية جلسة {provider} الخاصة بك. أعد الاتصال من الإعدادات.",
     "connectors.file_unsupported": "تعذّرت قراءة هذا الملف كجدول بيانات. الصيغ المدعومة: CSV وTSV وJSON وJSONL وParquet.",

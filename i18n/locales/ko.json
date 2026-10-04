@@ -65,6 +65,12 @@
     "winningCandidate": "최우수 후보"
   },
   "messages": {
+    "blackbox.repo_target_unavailable": "저장소 최적화는 아직 사용할 수 없습니다.",
+    "secrets.invalid_name": "\"{name}\"은(는) 시크릿 이름으로 쓸 수 없습니다. 문자, 숫자, 밑줄을 사용하고 문자나 밑줄로 시작하세요.",
+    "secrets.invalid_value": "시크릿 값은 최대 {limit}바이트여야 합니다.",
+    "secrets.limit_reached": "시크릿은 최대 {limit}개까지 저장할 수 있습니다. 새로 추가하려면 하나를 삭제하세요.",
+    "secrets.not_found": "이 시크릿이 없거나 본인 것이 아닙니다.",
+    "secrets.undecryptable": "이 시크릿을 더 이상 읽을 수 없습니다. 다시 저장하세요.",
     "connectors.query_failed": "{provider}에서 쿼리를 실행하지 못했습니다: {reason}",
     "connectors.expired": "{provider} 세션이 만료되었습니다. 설정에서 다시 연결해 주세요.",
     "connectors.file_unsupported": "이 파일은 표 형식으로 읽을 수 없습니다. 지원 형식: CSV, TSV, JSON, JSONL, Parquet.",

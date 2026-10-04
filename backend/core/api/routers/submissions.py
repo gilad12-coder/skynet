@@ -120,6 +120,7 @@ from ._helpers import (
     compute_task_fingerprint,
     enforce_job_quota,
     enforce_storage_quota,
+    refuse_repo_target,
     stable_seed,
     strip_api_key,
 )
@@ -1194,6 +1195,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             DomainError: 400 (unknown engine / scorer code does not load),
                 402 (no balance), 409 (quota), 422 (malformed).
         """
+        refuse_repo_target(payload.target.kind)
         payload.username = current_user.username
         # Resolved before the replay key is derived so a by-reference submit
         # and its inline twin hash to the same request. The staged rows are

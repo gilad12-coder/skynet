@@ -1757,3 +1757,21 @@ def load_pair_program(
         _program_cache[cache_key] = _materialize_program(artifact, overview)
 
     return _program_cache[cache_key], pair, overview
+
+
+def refuse_repo_target(target_kind: object) -> None:
+    """Refuse repository targets until their runner ships.
+
+    The request model already accepts ``target.kind == "repo"`` so the wizard
+    and engine work can land in steps, but no engine can execute one yet, and
+    inline secret values must not be persisted before the submission path
+    vaults them.
+
+    Args:
+        target_kind: The submitted ``target.kind``.
+
+    Raises:
+        DomainError: 422 for a repository target.
+    """
+    if target_kind == "repo":
+        raise DomainError("blackbox.repo_target_unavailable", status=422)
