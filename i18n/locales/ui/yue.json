@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "評分器執行次數",
   "submit.blackbox.agent.empty_hint": "描述你嘅目標，Agent 就會草擬一個起點同一個 Python 評分器。你可以直接採用，亦可以要求修改。",
   "submit.blackbox.agent.fix_scorer": "評分器出現錯誤，請修正。",
-  "submit.blackbox.agent.objective_required": "喺「起點」步驟加入目標，就可以啟動 Agent。",
   "submit.blackbox.interview.reading": "準備緊第一條問題…",
   "submit.blackbox.interview.brief.description": "根據你嘅回答整理而成。你可以修改任何內容 — 起點同評分器會跟隨呢啲指引嚟草擬。",
   "submit.blackbox.interview.brief.confirm": "草擬起點同評分器",

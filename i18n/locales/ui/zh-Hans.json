@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "评分器运行次数",
   "submit.blackbox.agent.empty_hint": "描述你的目标，智能体将草拟一个起点和一个 Python 评分器。你可以直接采用，也可以要求修改。",
   "submit.blackbox.agent.fix_scorer": "评分器出现错误。请修复它。",
-  "submit.blackbox.agent.objective_required": "在“起点”步骤中添加目标以启用智能体。",
   "submit.blackbox.interview.reading": "正在准备第一个问题…",
   "submit.blackbox.interview.brief.description": "从你的回答中提炼。可任意编辑——起点和评分器将按照这些指令草拟。",
   "submit.blackbox.interview.brief.confirm": "草拟起点与评分器",

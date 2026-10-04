@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "スコアラー実行",
   "submit.blackbox.agent.empty_hint": "目的を記述すると、エージェントが開始点と Python スコアラーの下書きを作成します。そのまま採用することも、変更を依頼することもできます。",
   "submit.blackbox.agent.fix_scorer": "スコアラーでエラーが発生しました。修正してください。",
-  "submit.blackbox.agent.objective_required": "エージェントを有効にするには、「開始点」ステップで目的を追加してください。",
   "submit.blackbox.interview.reading": "最初の質問を準備しています…",
   "submit.blackbox.interview.brief.description": "あなたの回答から抽出されました。自由に編集できます — 開始点とスコアラーはこれらの指示に従って下書きされます。",
   "submit.blackbox.interview.brief.confirm": "開始点とスコアラーの下書きを作成",

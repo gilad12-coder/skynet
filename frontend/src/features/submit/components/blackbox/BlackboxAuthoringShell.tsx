@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { msg } from "@/shared/lib/messages";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { AuthoringShell } from "../steps/AuthoringShell";
@@ -10,8 +9,7 @@ import { CodeInterviewPanel } from "../steps/CodeInterviewPanel";
 
 // The Starting point and Scorer steps share one authoring surface: the
 // agent (or its opening interview) on the start side, the step's own
-// fields on the end side. The agent needs an objective to work from, so an
-// empty one disables it with a reason.
+// fields on the end side.
 export function BlackboxAuthoringShell({
   w,
   start,
@@ -25,10 +23,7 @@ export function BlackboxAuthoringShell({
   description?: string;
   children: ReactNode;
 }) {
-  const { codeAssistMode, setCodeAssistMode, objective, agent, interview, interviewEligible } = w;
-  const disabledReason = objective.trim()
-    ? undefined
-    : msg("submit.blackbox.agent.objective_required");
+  const { codeAssistMode, setCodeAssistMode, agent, interview, interviewEligible } = w;
   // The interview owns the agent-panel slot until it resolves — but never
   // over an existing conversation.
   const interviewActive =
@@ -42,7 +37,6 @@ export function BlackboxAuthoringShell({
     <AuthoringShell
       value={codeAssistMode}
       onChange={setCodeAssistMode}
-      disabledReason={disabledReason}
       start={start}
       title={title}
       description={description}
@@ -56,8 +50,6 @@ export function BlackboxAuthoringShell({
             onModelChange={interview.setModel}
             reasoningEffort={interview.reasoningEffort}
             onReasoningEffortChange={interview.setReasoningEffort}
-            disabled={!!disabledReason}
-            disabledReason={disabledReason}
             blackbox
             className="absolute inset-0"
           />

@@ -3458,7 +3458,6 @@
   "submit.blackbox.agent.tool.seed": "Starting point",
   "submit.blackbox.agent.tool.scorer": "Scorer",
   "submit.blackbox.agent.empty_hint": "Describe your objective and the agent will draft a starting point and a Python scorer. You can accept them as is, or request changes.",
-  "submit.blackbox.agent.objective_required": "Add an objective on the Starting point step to turn the agent on.",
   "submit.blackbox.interview.reading": "Getting the first question ready…",
   "submit.blackbox.interview.brief.description": "Distilled from your answers. Edit anything — the starting point and the scorer will be drafted to follow these directives.",
   "submit.blackbox.interview.brief.confirm": "Draft the starting point & scorer",

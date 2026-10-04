@@ -2566,7 +2566,6 @@
   "submit.basics.privacy.public_desc": "מופיע ב{term.exploreTitle}",
   "submit.blackbox.agent.empty_hint": "תארו את המטרה והסוכן ינסח נקודת התחלה ומדד ב-Python. אפשר לאשר כפי שהם, או לבקש שינויים.",
   "submit.blackbox.agent.fix_scorer": "אירעה שגיאה במדד. תקנו אותה.",
-  "submit.blackbox.agent.objective_required": "הוסיפו מטרה בשלב נקודת ההתחלה כדי להפעיל את הסוכן.",
   "submit.blackbox.interview.reading": "מכין את השאלה הראשונה…",
   "submit.blackbox.interview.brief.description": "זוקק מהתשובות שלכם. אפשר לערוך הכול — נקודת ההתחלה והמדד ינוסחו לפי ההנחיות האלה.",
   "submit.blackbox.interview.brief.confirm": "ניסוח נקודת ההתחלה והמדד",

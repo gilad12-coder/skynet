@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "Execuções do pontuador",
   "submit.blackbox.agent.empty_hint": "Descreva o seu objetivo e o agente esboça um ponto de partida e um pontuador em Python. Pode aceitá-los como estão ou pedir alterações.",
   "submit.blackbox.agent.fix_scorer": "O pontuador deu um erro. Corrija-o.",
-  "submit.blackbox.agent.objective_required": "Adicione um objetivo no passo Ponto de partida para ativar o agente.",
   "submit.blackbox.interview.reading": "A preparar a primeira pergunta…",
   "submit.blackbox.interview.brief.description": "Destilado das suas respostas. Edite o que quiser — o ponto de partida e o pontuador serão esboçados para seguir estas diretivas.",
   "submit.blackbox.interview.brief.confirm": "Esboçar o ponto de partida e o pontuador",

@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "Esecuzioni dello scorer",
   "submit.blackbox.agent.empty_hint": "Descrivi il tuo obiettivo e l'agente redigerà un punto di partenza e uno scorer in Python. Puoi accettarli così come sono oppure richiedere modifiche.",
   "submit.blackbox.agent.fix_scorer": "Lo scorer ha generato un errore. Correggilo.",
-  "submit.blackbox.agent.objective_required": "Aggiungi un obiettivo nel passaggio Punto di partenza per attivare l'agente.",
   "submit.blackbox.interview.reading": "Preparazione della prima domanda…",
   "submit.blackbox.interview.brief.description": "Distillato dalle tue risposte. Puoi modificare tutto — il punto di partenza e lo scorer verranno redatti seguendo queste direttive.",
   "submit.blackbox.interview.brief.confirm": "Redigi il punto di partenza e lo scorer",
