@@ -257,14 +257,14 @@ export function HuggingFaceImportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          "gap-0 overflow-y-auto p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
+          "flex flex-col gap-0 overflow-hidden p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
           // Same footprint as the dataset detail dialog so the two read as one family.
           previewExpanded
-            ? "max-h-[85vh] w-[96vw] max-w-[96vw] sm:max-w-[96vw]"
-            : "max-h-[85vh] w-[min(72rem,94vw)] max-w-[min(72rem,94vw)] sm:max-w-[min(72rem,94vw)]",
+            ? "max-h-[85dvh] w-[96vw] max-w-[96vw] sm:max-w-[96vw]"
+            : "max-h-[85dvh] w-[min(72rem,94vw)] max-w-[min(72rem,94vw)] sm:max-w-[min(72rem,94vw)]",
         )}
       >
-        <DialogHeader className="px-5 pt-5">
+        <DialogHeader className="shrink-0 px-5 pt-5">
           <div className="flex items-center gap-2.5">
             <HuggingFace.Avatar size={28} />
             <div className="min-w-0">
@@ -277,7 +277,7 @@ export function HuggingFaceImportDialog({
         </DialogHeader>
 
         {repoId === null ? (
-          <div className="px-5 pb-5 pt-4">
+          <div className="flex min-h-0 flex-1 flex-col px-5 pb-5 pt-4">
             <SearchInput
               dir="ltr"
               autoFocus
@@ -291,7 +291,7 @@ export function HuggingFaceImportDialog({
               busy={searching}
             />
 
-            <div className="mt-3 max-h-[min(36rem,60vh)] overflow-y-auto">
+            <div className="mt-3 max-h-[min(36rem,60vh)] min-h-0 overflow-y-auto">
               {searchFailed ? (
                 <p className="px-1 py-6 text-center text-sm text-muted-foreground">
                   {msg("hf_import.search_error")}
@@ -363,134 +363,142 @@ export function HuggingFaceImportDialog({
             </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-4 px-5 pb-5 pt-4">
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setRepoId(null)}
-                aria-label={msg("hf_import.back")}
-                className="shrink-0"
-              >
-                <ArrowLeft className="size-4 rtl:rotate-180" />
-              </Button>
-              <span
-                dir="ltr"
-                className="min-w-0 flex-1 truncate text-start text-sm font-medium text-foreground"
-              >
-                {repoId}
-              </span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    asChild
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={msg("hf_import.view_on_hub")}
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                  >
-                    <a
-                      href={`https://huggingface.co/datasets/${repoId}`}
-                      target="_blank"
-                      rel="noreferrer noopener"
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-4 pt-4">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setRepoId(null)}
+                  aria-label={msg("hf_import.back")}
+                  className="shrink-0"
+                >
+                  <ArrowLeft className="size-4 rtl:rotate-180" />
+                </Button>
+                <span
+                  dir="ltr"
+                  className="min-w-0 flex-1 truncate text-start text-sm font-medium text-foreground"
+                >
+                  {repoId}
+                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      asChild
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={msg("hf_import.view_on_hub")}
+                      className="shrink-0 text-muted-foreground hover:text-foreground"
                     >
-                      <ArrowUpRight className="size-4" />
-                    </a>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{msg("hf_import.view_on_hub")}</TooltipContent>
-              </Tooltip>
-            </div>
+                      <a
+                        href={`https://huggingface.co/datasets/${repoId}`}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                      >
+                        <ArrowUpRight className="size-4" />
+                      </a>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{msg("hf_import.view_on_hub")}</TooltipContent>
+                </Tooltip>
+              </div>
 
-            {splitsLoading ? (
-              <LoadingState />
-            ) : (
-              <>
-                <div className="grid gap-3">
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="hf-split" className="text-xs">
-                      {msg("hf_import.split_label")}
-                    </Label>
-                    <Select value={splitKey} onValueChange={setSplitKey}>
-                      <SelectTrigger id="hf-split" dir="ltr" className={cn(TOUCH_FIELD, "w-full")}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {splits.map((s) => (
-                          <SelectItem
-                            key={`${s.config}\u0000${s.split}`}
-                            value={`${s.config}\u0000${s.split}`}
-                          >
-                            <span dir="ltr" className="flex items-center gap-2">
-                              {formatMsg("hf_import.split_option", {
-                                config: s.config,
-                                split: s.split,
-                              })}
-                              {s.num_rows != null && (
-                                <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
-                                  {formatMsg("hf_import.rows_total", {
-                                    count: s.num_rows.toLocaleString(),
-                                  })}
-                                </span>
-                              )}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              {splitsLoading ? (
+                <LoadingState />
+              ) : (
+                <>
+                  <div className="grid gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="hf-split" className="text-xs">
+                        {msg("hf_import.split_label")}
+                      </Label>
+                      <Select value={splitKey} onValueChange={setSplitKey}>
+                        <SelectTrigger
+                          id="hf-split"
+                          dir="ltr"
+                          className={cn(TOUCH_FIELD, "w-full")}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {splits.map((s) => (
+                            <SelectItem
+                              key={`${s.config}\u0000${s.split}`}
+                              value={`${s.config}\u0000${s.split}`}
+                            >
+                              <span dir="ltr" className="flex items-center gap-2">
+                                {formatMsg("hf_import.split_option", {
+                                  config: s.config,
+                                  split: s.split,
+                                })}
+                                {s.num_rows != null && (
+                                  <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
+                                    {formatMsg("hf_import.rows_total", {
+                                      count: s.num_rows.toLocaleString(),
+                                    })}
+                                  </span>
+                                )}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="hf-name" className="text-xs">
+                        {msg("hf_import.name_label")}
+                      </Label>
+                      <Input
+                        id="hf-name"
+                        dir="ltr"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className={TOUCH_FIELD}
+                      />
+                    </div>
                   </div>
+
                   <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="hf-name" className="text-xs">
-                      {msg("hf_import.name_label")}
-                    </Label>
-                    <Input
-                      id="hf-name"
-                      dir="ltr"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className={TOUCH_FIELD}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                        {previewRows?.rows.length ? msg("datasets.detail.row_reader.hint") : null}
+                      </span>
+                      {rowTotal != null && (
+                        <span className="shrink-0 whitespace-nowrap text-[0.6875rem] text-muted-foreground tabular-nums">
+                          {formatMsg("hf_import.rows_total", { count: rowTotal.toLocaleString() })}
+                        </span>
+                      )}
+                    </div>
+                    <DatasetPreviewPanel
+                      rows={previewRows}
+                      emptyTitle={msg("hf_import.preview_empty")}
+                      expanded={previewExpanded}
+                      onExpandedChange={setPreviewExpanded}
+                      className="h-80"
+                      expandedClassName="h-80"
                     />
                   </div>
-                </div>
+                </>
+              )}
+            </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate text-xs font-medium text-foreground">
-                      {previewRows?.rows.length ? msg("datasets.detail.row_reader.hint") : null}
-                    </span>
-                    {rowTotal != null && (
-                      <span className="shrink-0 whitespace-nowrap text-[0.6875rem] text-muted-foreground tabular-nums">
-                        {formatMsg("hf_import.rows_total", { count: rowTotal.toLocaleString() })}
-                      </span>
-                    )}
-                  </div>
-                  <DatasetPreviewPanel
-                    rows={previewRows}
-                    emptyTitle={msg("hf_import.preview_empty")}
-                    expanded={previewExpanded}
-                    onExpandedChange={setPreviewExpanded}
-                    className="h-80"
-                    expandedClassName="h-80"
-                  />
-                </div>
-
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => onOpenChange(false)}>
-                    {msg("hf_import.cancel")}
-                  </Button>
-                  <Button onClick={handleImport} disabled={!selectedSplit || importing}>
-                    {importing ? (
-                      <CircleNotch
-                        className="animate-spin motion-reduce:animate-none"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <DownloadSimple className="size-4" />
-                    )}
-                    {importing ? msg("hf_import.importing") : msg("hf_import.import")}
-                  </Button>
-                </DialogFooter>
-              </>
+            {!splitsLoading && (
+              <DialogFooter className="shrink-0 px-5 pb-5">
+                <Button variant="outline" onClick={() => onOpenChange(false)}>
+                  {msg("hf_import.cancel")}
+                </Button>
+                <Button onClick={handleImport} disabled={!selectedSplit || importing}>
+                  {importing ? (
+                    <CircleNotch
+                      className="animate-spin motion-reduce:animate-none"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <DownloadSimple className="size-4" />
+                  )}
+                  {importing ? msg("hf_import.importing") : msg("hf_import.import")}
+                </Button>
+              </DialogFooter>
             )}
           </div>
         )}

@@ -12,6 +12,7 @@ import {
 import { createExecutionBudget, getExecutionBudget, updateExecutionBudget } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
+import { MIN_BUDGET_CENTS } from "@/shared/lib/budget-input";
 import { ExecutionBudgetSession } from "../lib/execution-budget-session";
 
 const BudgetContext = createContext<{ session: ExecutionBudgetSession; revision: number } | null>(
@@ -25,8 +26,10 @@ export function ExecutionBudgetProvider({ children }: { children: ReactNode }) {
     () =>
       // A setup lives only as long as its wizard, so the budget identity is
       // kept in memory and never written anywhere.
+      // A new run's limit starts at the smallest accepted amount; a clone
+      // overwrites it with its own limit.
       new ExecutionBudgetSession(
-        {},
+        { budgetTotalCents: MIN_BUDGET_CENTS },
         {
           persist: async () => {},
           create: createExecutionBudget,

@@ -14,6 +14,8 @@
  */
 
 const CENTS_PER_DOLLAR = 100;
+/** The smallest limit the field and the server accept: one cent. */
+export const MIN_BUDGET_CENTS = 1;
 
 export type BudgetInputResult =
   | { kind: "empty" }
@@ -95,7 +97,7 @@ export function parseBudgetInput(text: string, locale: string): BudgetInputResul
   const dollars = Number(whole);
   const fractionCents = fraction ? Number(fraction.padEnd(2, "0")) : 0;
   const value = dollars * CENTS_PER_DOLLAR + fractionCents;
-  if (negative || value < 1) return { kind: "below_one" };
+  if (negative || value < MIN_BUDGET_CENTS) return { kind: "below_one" };
   if (!Number.isSafeInteger(value)) return { kind: "invalid" };
   return { kind: "value", value };
 }

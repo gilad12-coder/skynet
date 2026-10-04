@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
@@ -151,6 +151,14 @@ export function TotalBudgetCard({
   };
   const atFloor = parsed.kind === "value" && parsed.value <= 1;
   const minimum = minimumTotalCents == null ? null : Math.ceil(minimumTotalCents);
+  // A minimum the server reports later fills an empty field once, and never
+  // replaces an amount already there.
+  const minimumApplied = useRef(false);
+  useEffect(() => {
+    if (minimum == null || maxCostCents != null || minimumApplied.current) return;
+    minimumApplied.current = true;
+    setMaxCostCents(minimum);
+  }, [minimum, maxCostCents, setMaxCostCents]);
   const minimumMessage =
     minimum == null
       ? null
