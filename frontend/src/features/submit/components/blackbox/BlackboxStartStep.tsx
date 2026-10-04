@@ -4,8 +4,9 @@ import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Plus, Trash } from "@/shared/ui/icons";
+import { GithubLogo, Plus, TextT, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
+import { Segmented } from "@/shared/ui/segmented";
 import { msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 
@@ -28,6 +29,7 @@ export function BlackboxStartStep({
 }) {
   const {
     recipe,
+    setRecipe,
     seedIsCode,
     seedLanguage,
     codeAssistMode,
@@ -259,8 +261,37 @@ export function BlackboxStartStep({
       title={msg("submit.blackbox.start.title")}
       description={msg("submit.blackbox.start.desc")}
     >
+      <Segmented
+        label={msg("submit.blackbox.repo.kind_label")}
+        value={recipe === "repo" ? "repo" : "text"}
+        onChange={(next) => {
+          // Text covers the code kind too; only crossing to or from a repository switches.
+          if ((next === "repo") !== (recipe === "repo"))
+            setRecipe(next === "repo" ? "repo" : "anything");
+        }}
+        controls="bb-start-kind"
+        options={[
+          {
+            value: "text",
+            label: msg("submit.blackbox.repo.kind_text"),
+            desc: msg("submit.blackbox.repo.kind_text_desc"),
+            icon: <TextT className="size-3.5" aria-hidden="true" />,
+          },
+          {
+            value: "repo",
+            label: msg("submit.blackbox.repo.kind_repo"),
+            desc: msg("submit.blackbox.repo.kind_repo_desc"),
+            icon: <GithubLogo className="size-3.5" aria-hidden="true" />,
+          },
+        ]}
+      />
       {/* A repository run starts from the pinned commit, so it has no text to seed. */}
-      {recipe === "repo" ? <BlackboxRepoFields w={w} /> : seedFields}
+      <div
+        id="bb-start-kind"
+        className={recipe === "repo" ? "flex flex-col" : "flex min-h-0 flex-1 flex-col"}
+      >
+        {recipe === "repo" ? <BlackboxRepoFields w={w} /> : seedFields}
+      </div>
       <ExpandableTextarea
         id="bb-objective"
         label={msg("submit.blackbox.start.objective_label")}

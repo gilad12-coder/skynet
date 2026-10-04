@@ -17,7 +17,7 @@ storage quota apply exactly as they do to an upload.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -25,9 +25,9 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from ...config import settings
+from ...connectors import github, registry
 from ...connectors import huggingface as hf
 from ...connectors import oauth as generic_oauth
-from ...connectors import registry
 from ...connectors.pruning import browse_importable
 from ...connectors.transport import label
 from ...connectors.vault import ConnectorSecret, ConnectorVault
@@ -172,6 +172,44 @@ class RefImportRequest(BaseModel):
 
     ref: str = Field(min_length=1, max_length=2048)
     name: str | None = Field(default=None, max_length=255)
+
+
+class GithubRepository(BaseModel):
+    """One repository the GitHub picker offers."""
+
+    full_name: str
+    private: bool = False
+    description: str | None = None
+    language: str | None = None
+    default_branch: str | None = None
+    pushed_at: str | None = None
+
+
+class GithubRepositoriesResponse(BaseModel):
+    """Envelope for ``GET /connectors/github/repos``."""
+
+    repositories: list[GithubRepository]
+
+
+class GithubBranchesResponse(BaseModel):
+    """A repository's branch names and its default branch."""
+
+    default_branch: str | None = None
+    branches: list[str]
+
+
+class GithubTreeEntry(BaseModel):
+    """One file or folder of a repository tree."""
+
+    path: str
+    type: Literal["file", "dir"]
+
+
+class GithubTreeResponse(BaseModel):
+    """Every file and folder of a repository at one branch."""
+
+    entries: list[GithubTreeEntry]
+    truncated: bool = Field(default=False, description="GitHub listed only part of a very large tree.")
 
 
 def create_connectors_router(*, job_store) -> APIRouter:
@@ -534,6 +572,71 @@ def create_connectors_router(*, job_store) -> APIRouter:
                 account_label=secret.account_label,
             )
         return secret
+
+    @router.get(
+        "/connectors/github/repos",
+        response_model=GithubRepositoriesResponse,
+        summary="List the caller's GitHub repositories for the repository picker",
+    )
+    def list_github_repositories(
+        user: Annotated[AuthenticatedUser, Depends(get_authenticated_user)],
+        search: str = Query(default="", max_length=200),
+    ) -> GithubRepositoriesResponse:
+        """List repositories the linked account can see, most recently pushed first.
+
+        Args:
+            user: Authenticated caller.
+            search: Optional ``owner/name`` filter; a full ``owner/name`` also
+                offers that public repository when the account lacks it.
+
+        Returns:
+            The repositories with their visibility, description, language,
+            default branch and last push.
+        """
+        repos = github.list_repositories(_secret(user.username, github.PROVIDER), search)
+        return GithubRepositoriesResponse(repositories=[GithubRepository(**r) for r in repos])
+
+    @router.get(
+        "/connectors/github/branches",
+        response_model=GithubBranchesResponse,
+        summary="List a GitHub repository's branches",
+    )
+    def list_github_branches(
+        user: Annotated[AuthenticatedUser, Depends(get_authenticated_user)],
+        repo: str = Query(min_length=3, max_length=201),
+    ) -> GithubBranchesResponse:
+        """List a repository's branch names with its default branch.
+
+        Args:
+            user: Authenticated caller.
+            repo: The repository as ``owner/name``.
+
+        Returns:
+            The default branch and up to 300 branch names.
+        """
+        return GithubBranchesResponse(**github.list_branches(_secret(user.username, github.PROVIDER), repo))
+
+    @router.get(
+        "/connectors/github/tree",
+        response_model=GithubTreeResponse,
+        summary="List every file and folder of a GitHub repository at a branch",
+    )
+    def github_repository_tree(
+        user: Annotated[AuthenticatedUser, Depends(get_authenticated_user)],
+        repo: str = Query(min_length=3, max_length=201),
+        branch: str = Query(default="", max_length=255),
+    ) -> GithubTreeResponse:
+        """List a repository's whole tree, for choosing the paths an agent may edit.
+
+        Args:
+            user: Authenticated caller.
+            repo: The repository as ``owner/name``.
+            branch: Branch name; empty for the default branch.
+
+        Returns:
+            Every file and folder path, and whether GitHub truncated the tree.
+        """
+        return GithubTreeResponse(**github.repository_tree(_secret(user.username, github.PROVIDER), repo, branch))
 
     @router.put(
         "/connectors/{provider}/credentials",

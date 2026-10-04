@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "react-toastify";
 
-import { FloppyDisk, GithubLogo, Plus, Trash } from "@/shared/ui/icons";
+import { FloppyDisk, GitBranch, GithubLogo, Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import {
@@ -14,10 +14,9 @@ import {
   SelectValue,
 } from "@/shared/ui/primitives/select";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
-import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
 import { useConnectors } from "@/features/connectors";
 import {
-  browseConnector,
+  listGithubBranches,
   listSavedSecrets,
   saveSecret,
   startConnectorOAuth,
@@ -26,11 +25,14 @@ import {
 import { msg } from "@/shared/lib/messages";
 
 import {
+  REPO_NAME_PATTERN,
   REPO_SECRET_NAME_PATTERN,
   type BlackboxWizardContext,
   type RepoSecretRow,
 } from "../../hooks/use-blackbox-wizard";
-import { Field, TEXTAREA_CLASS } from "./shared";
+import { RepoPathTree } from "./RepoPathTree";
+import { RepoPicker } from "./RepoPicker";
+import { Field } from "./shared";
 
 // The select's value for a row whose secret is typed into this run only.
 const TYPED = "__typed__";
@@ -57,25 +59,10 @@ export function BlackboxRepoFields({ w }: { w: BlackboxWizardContext }) {
   const { byProvider, loading } = useConnectors();
   const github = byProvider("github");
   const linked = github?.connected === true && github.status !== "invalid";
-  const [repos, setRepos] = useState<string[]>([]);
   const [saved, setSaved] = useState<SavedSecret[]>([]);
   const [connecting, setConnecting] = useState(false);
   const [savingRow, setSavingRow] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!linked) return;
-    let cancelled = false;
-    browseConnector("github", "", "")
-      .then((res) => {
-        if (!cancelled) setRepos(res.entries.filter((e) => e.kind === "folder").map((e) => e.ref));
-      })
-      .catch(() => {
-        // Typing owner/name still works without the list.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [linked]);
+  const repoChosen = linked && REPO_NAME_PATTERN.test(repoName.trim());
 
   useEffect(() => {
     let cancelled = false;
@@ -158,65 +145,47 @@ export function BlackboxRepoFields({ w }: { w: BlackboxWizardContext }) {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <Field
-          label={msg("submit.blackbox.repo.repository_label")}
-          htmlFor="bb-repo-name"
-          hint={msg("submit.blackbox.repo.repository_hint")}
-        >
-          <Input
-            id="bb-repo-name"
+      {linked && (
+        <Field label={msg("submit.blackbox.repo.repository_label")}>
+          <RepoPicker
             value={repoName}
-            onChange={(e) => setRepoName(e.target.value)}
-            placeholder="owner/repository"
-            list="bb-repo-options"
-            autoComplete="off"
-            spellCheck={false}
-            className={`${TOUCH_FIELD} font-mono`}
-          />
-          <datalist id="bb-repo-options">
-            {repos.map((ref) => (
-              <option key={ref} value={ref} />
-            ))}
-          </datalist>
-        </Field>
-        <Field
-          label={msg("submit.blackbox.repo.branch_label")}
-          htmlFor="bb-repo-branch"
-          hint={msg("submit.blackbox.repo.branch_hint")}
-        >
-          <Input
-            id="bb-repo-branch"
-            value={repoBranch}
-            onChange={(e) => setRepoBranch(e.target.value)}
-            placeholder={msg("submit.blackbox.repo.branch_placeholder")}
-            autoComplete="off"
-            spellCheck={false}
-            className={`${TOUCH_FIELD} font-mono`}
+            onPick={(repo) => {
+              if (repo.full_name === repoName.trim()) return;
+              setRepoName(repo.full_name);
+              // Another repository's branch and paths mean nothing here.
+              setRepoBranch("");
+              setRepoPaths(".");
+            }}
           />
         </Field>
-      </div>
+      )}
 
-      <ExpandableTextarea
-        id="bb-repo-paths"
-        label={msg("submit.blackbox.repo.paths_label")}
-        value={repoPaths}
-        onChange={setRepoPaths}
-        placeholder={msg("submit.blackbox.repo.paths_placeholder")}
-        rows={3}
-        className={`${TEXTAREA_CLASS} font-mono text-sm`}
-      >
-        {({ textarea, trigger }) => (
+      {repoChosen && (
+        <>
+          <Field
+            label={msg("submit.blackbox.repo.branch_label")}
+            htmlFor="bb-repo-branch"
+            hint={msg("submit.blackbox.repo.branch_tip")}
+          >
+            <BranchSelect
+              repo={repoName.trim()}
+              branch={repoBranch}
+              onBranchChange={setRepoBranch}
+            />
+          </Field>
           <Field
             label={msg("submit.blackbox.repo.paths_label")}
-            htmlFor="bb-repo-paths"
-            hint={msg("submit.blackbox.repo.paths_hint")}
-            trailing={trigger}
+            hint={msg("submit.blackbox.repo.paths_tip")}
           >
-            {textarea}
+            <RepoPathTree
+              repo={repoName.trim()}
+              branch={repoBranch.trim()}
+              paths={repoPaths}
+              onPathsChange={setRepoPaths}
+            />
           </Field>
-        )}
-      </ExpandableTextarea>
+        </>
+      )}
 
       <Field
         label={msg("submit.blackbox.repo.setup_label")}
@@ -331,5 +300,87 @@ export function BlackboxRepoFields({ w }: { w: BlackboxWizardContext }) {
         </div>
       </Field>
     </div>
+  );
+}
+
+/**
+ * The repository's branches as a select, opening on the default branch. An
+ * empty value is the default branch, as the run reads it; when the list
+ * cannot load, the branch is typed instead.
+ */
+function BranchSelect({
+  repo,
+  branch,
+  onBranchChange,
+}: {
+  repo: string;
+  branch: string;
+  onBranchChange: (branch: string) => void;
+}) {
+  const [data, setData] = useState<{ default_branch: string | null; branches: string[] } | null>(
+    null,
+  );
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setData(null);
+    setFailed(false);
+    listGithubBranches(repo)
+      .then((res) => {
+        if (!cancelled) setData(res);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repo]);
+
+  if (failed) {
+    return (
+      <Input
+        id="bb-repo-branch"
+        value={branch}
+        onChange={(e) => onBranchChange(e.target.value)}
+        placeholder={msg("submit.blackbox.repo.branch_default")}
+        autoComplete="off"
+        spellCheck={false}
+        className={`${TOUCH_FIELD} font-mono`}
+      />
+    );
+  }
+
+  const fallback = data?.default_branch ?? "";
+  const value = branch.trim() || fallback;
+  const options = data ? data.branches : [];
+  // A branch restored from a draft stays choosable even past the list's cap.
+  const names = value && !options.includes(value) ? [value, ...options] : options;
+  return (
+    <Select
+      value={value}
+      onValueChange={(next) => onBranchChange(next === fallback ? "" : next)}
+      disabled={!data}
+    >
+      <SelectTrigger id="bb-repo-branch" className={`${TOUCH_FIELD} w-full font-mono`}>
+        <span className="flex min-w-0 items-center gap-2">
+          <GitBranch className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <SelectValue placeholder={msg("submit.blackbox.repo.branch_loading")} />
+        </span>
+      </SelectTrigger>
+      <SelectContent>
+        {names.map((name) => (
+          <SelectItem key={name} value={name} className="font-mono">
+            {name}
+            {name === fallback && (
+              <span className="ms-2 font-sans text-xs text-muted-foreground">
+                {msg("submit.blackbox.repo.branch_default")}
+              </span>
+            )}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
