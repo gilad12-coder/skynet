@@ -369,6 +369,99 @@ def test_autoresearch_edits_a_repository_checkout_and_scores_its_patch(tmp_path:
     assert (output / "autoresearch" / "best_candidate.patch").read_text() == result.best_candidate
 
 
+def _repo_config(tmp_path: Path, checkout: Path, **knobs: Any) -> OptimizeAnythingConfig:
+    """Build a ``gepa_repo`` config over ``checkout`` whose editable path is ``src``.
+
+    Args:
+        tmp_path: Scratch folder holding the run directory.
+        checkout: Checkout made by ``_repo_checkout``.
+        **knobs: Extra engine knobs.
+
+    Returns:
+        The config.
+    """
+    config = _config(
+        "gepa_repo",
+        repo={
+            "checkout": str(checkout),
+            "base": repo_tree.BASE_REF,
+            "editable_paths": ["src"],
+            "readonly_paths": ["vendor/lib"],
+            "tools": str(Path(repo_tree.__file__).parent),
+        },
+        **knobs,
+    )
+    config.run_dir = str(tmp_path / "run")
+    config.max_token_cost = 1.0
+    return config
+
+
+def test_gepa_drives_an_agent_proposer_over_repository_versions(tmp_path: Path, fake_home: Path) -> None:
+    """GEPA picks the parent and cases; the agent edits a checkout of it and the diff becomes the next version."""
+    task = Task(
+        name="repo",
+        seed_candidate="",
+        objective="make it better",
+        train_set=[{"id": "a"}, {"id": "b"}],
+    )
+    seen: list[str] = []
+
+    def evaluate(candidate: str, example: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+        """Score a patch that writes ``better`` into ``src/app.py`` highly."""
+        seen.append(candidate)
+        if "+better" in candidate:
+            return 1.0, {"feedback": f"case {example['id']} passes"}
+        return 0.25, {"feedback": f"case {example['id']} needs better code"}
+
+    dataset = EvalServer(task, evaluate, BudgetTracker(max_evals=12))
+    dataset.start()
+    try:
+        _install_fake(
+            fake_home,
+            "prompt = args[-1]\n"
+            "assert 'needs better code' in prompt, prompt\n"
+            "assert '`src`' in prompt and 'vendor/lib' in prompt and 'make it better' in prompt, prompt\n"
+            "assert pathlib.Path('src/app.py').read_text() == 'x = 1\\n'\n"
+            "pathlib.Path('src/app.py').write_text('better\\n')\n",
+        )
+        checkout = _repo_checkout(tmp_path, {"src/app.py": "x = 1\n", "README.md": "hi\n"})
+        engine = native_engines.GepaRepoEngine(_repo_config(tmp_path, checkout, effort="low"))
+        result = engine.run(task, dataset)
+    finally:
+        dataset.stop()
+    assert seen[0] == ""
+    assert result.best_score == 1.0
+    assert repo_tree.patch_paths(result.best_candidate) == ["src/app.py"]
+    assert result.metadata["proposals"] >= 1
+    assert result.metadata["proposer_cost_usd"] == pytest.approx(0.01 * result.metadata["proposals"])
+    assert all("--effort" in argv and "low" in argv for argv in _invocations(fake_home))
+    assert (checkout / "src" / "app.py").read_text() == "x = 1\n"
+    output = tmp_path / "out"
+    engine.process_result(result, output)
+    assert (output / "gepa_repo" / "best_candidate.patch").read_text() == result.best_candidate
+
+
+def test_agent_proposer_keeps_the_parent_when_its_diff_is_too_large(
+    tmp_path: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A diff too large to ship as one sandbox file never becomes a version."""
+    _install_fake(fake_home, "pathlib.Path('src/app.py').write_text('y' * 4096)\n")
+    checkout = _repo_checkout(tmp_path, {"src/app.py": "x = 1\n"})
+    engine = native_engines.GepaRepoEngine(_repo_config(tmp_path, checkout))
+    monkeypatch.setattr(repo_tree, "MAX_PATCH_BYTES", 1024)
+    proposed = engine.proposer({"current_candidate": ""}, {"current_candidate": []}, ["current_candidate"])
+    assert proposed == {"current_candidate": ""}
+    assert engine.proposer.total_cost == pytest.approx(0.01)
+    assert "No per-case feedback was recorded." in _invocations(fake_home)[0][-1]
+    assert (checkout / "src" / "app.py").read_text() == "x = 1\n"
+
+
+def test_gepa_repo_engine_needs_a_checkout() -> None:
+    """The agent-proposer GEPA engine has nothing to edit without a repository."""
+    with pytest.raises(ValueError, match="repository checkout"):
+        native_engines.GepaRepoEngine(_config("gepa_repo"))
+
+
 def test_single_candidate_tasks_use_the_whole_candidate_route(tmp_path: Path, fake_home: Path) -> None:
     """Without a dataset the evaluator scores the candidate as a whole and the server's best is the answer."""
     task = Task(name="single", seed_candidate="seed")

@@ -28,10 +28,10 @@ from core.models.blackbox import BlackboxProposer, BlackboxTarget
 from core.service_gateway.language_models import total_tokens_from_history, usage_by_model_from_history
 from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededError
 
-from .. import harness_bridge, native_runner, native_runtime, repo_tree
+from .. import gepa_engine, harness_bridge, native_runner, native_runtime, repo_tree
 from ..harness import GatewayConfig, build_launch, launch_payload
 from ..native_runtime import NativeOptions, _bootstrap_command, check_native_runtime, run_native_engine
-from ..protocol import EvalServer, ScorerAbortError, Task
+from ..protocol import EvalServer, Result, ScorerAbortError, Task
 from ..sandbox import CommandResult, SandboxSpec
 
 
@@ -394,16 +394,58 @@ def test_repository_tree_and_rules_reach_the_autoresearch_sandbox(
     assert session.files["repo_tree.py"] == Path(repo_tree.__file__).read_text()
 
 
-def test_only_autoresearch_takes_a_repository(tmp_path: Path) -> None:
+def test_only_autoresearch_and_gepa_take_a_repository(tmp_path: Path) -> None:
     """Meta-Harness edits one text file, so a repository run never reaches it."""
     ctx = _context(tmp_path, FakeRuntime(FakeSession()))
     ctx.native_options = replace(ctx.native_options, repo={"chunks": [], "editable_paths": ["."], "readonly_paths": []})
-    with pytest.raises(ServiceError, match="Only AutoResearch"):
+    with pytest.raises(ServiceError, match="Only AutoResearch and GEPA"):
         run_native_engine("meta_harness", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
 
 
-def test_real_native_runner_unpacks_the_repository_for_autoresearch(tmp_path: Path) -> None:
-    """The runner rebuilds the checkout, and the agent's eval.sh sends its diff to the parent."""
+def test_gepa_hands_a_repository_run_to_the_native_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """GEPA on a repository runs in the native sandbox, with the coding agent as its proposer."""
+    calls: list[str] = []
+
+    def fake_native(engine_id: str, *_: object) -> Result:
+        """Record which native engine GEPA asked for."""
+        calls.append(engine_id)
+        return Result(best_candidate="", best_score=1.0, total_evals=1)
+
+    monkeypatch.setattr(gepa_engine, "run_native_engine", fake_native)
+    ctx = _context(tmp_path, FakeRuntime(FakeSession()))
+    ctx.native_options = replace(ctx.native_options, repo={"chunks": [], "editable_paths": ["."], "readonly_paths": []})
+    result = gepa_engine.GepaEngine().run(Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+    assert calls == ["gepa_repo"]
+    assert result.best_score == 1.0
+
+
+def test_gepa_agent_proposer_needs_a_repository(tmp_path: Path) -> None:
+    """Text runs keep GEPA's reflection model; the agent proposer exists only for checkouts."""
+    ctx = _context(tmp_path, FakeRuntime(FakeSession()))
+    with pytest.raises(ServiceError, match="needs a repository checkout"):
+        run_native_engine("gepa_repo", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+
+
+_AUTORESEARCH_AGENT = (
+    "pathlib.Path('repo/src/a.py').write_text('a = 2\\n')\n"
+    "done=subprocess.run(['./eval.sh'],capture_output=True,text=True)\n"
+    "assert done.returncode==0, done.stdout+done.stderr\n"
+)
+# GEPA's agent works inside the checkout itself and never scores its own edit.
+_GEPA_AGENT = "pathlib.Path('src/a.py').write_text('a = 2\\n')\n"
+
+
+@pytest.mark.parametrize(
+    ("engine_id", "agent", "starts"),
+    [("autoresearch", _AUTORESEARCH_AGENT, []), ("gepa_repo", _GEPA_AGENT, [[]])],
+)
+def test_real_native_runner_unpacks_the_repository_for_its_engine(
+    tmp_path: Path, engine_id: str, agent: str, starts: list[list[str]]
+) -> None:
+    """The runner rebuilds the checkout, and the agent's edit reaches the parent as a diff.
+
+    GEPA scores the unedited commit first; AutoResearch scores only what its agent submits.
+    """
     source = tmp_path / "source"
     (source / "src").mkdir(parents=True)
     (source / "src" / "a.py").write_text("a = 1\n")
@@ -421,17 +463,15 @@ def test_real_native_runner_unpacks_the_repository_for_autoresearch(tmp_path: Pa
         f"#!{sys.executable}\n"
         "import json, pathlib, subprocess, sys\n"
         "args=sys.argv[1:]; session=args[args.index('--session-id')+1]\n"
-        "pathlib.Path('repo/src/a.py').write_text('a = 2\\n')\n"
-        "done=subprocess.run(['./eval.sh'],capture_output=True,text=True)\n"
-        "assert done.returncode==0, done.stdout+done.stderr\n"
-        "print(json.dumps({'total_cost_usd':0.01,'session_id':session,"
+        + agent
+        + "print(json.dumps({'total_cost_usd':0.01,'session_id':session,"
         "'modelUsage':{'claude-test':{'inputTokens':7,'outputTokens':3}}}))\n"
     )
     fake_cli.chmod(0o755)
     (tmp_path / "rpc").mkdir()
     payload = {
         "nonce": "testnonce",
-        "engine_id": "autoresearch",
+        "engine_id": engine_id,
         "model": "claude-test",
         "sandbox": False,
         "max_token_cost": 0.05,
@@ -458,7 +498,7 @@ def test_real_native_runner_unpacks_the_repository_for_autoresearch(tmp_path: Pa
             if line.startswith("SKYNET_NATIVE_RPC testnonce "):
                 request = json.loads(line.split(" ", 2)[2])
                 candidates.append(request["candidate"])
-                response = {"score": 0.9, "info": {}}
+                response = {"score": 0.9 if "+a = 2" in request["candidate"] else 0.5, "info": {}}
                 (tmp_path / "rpc" / f"{request['id']}.json").write_text(json.dumps(response))
         stderr = process.stderr.read()
         assert process.wait(timeout=25) == 0, stderr
@@ -466,11 +506,13 @@ def test_real_native_runner_unpacks_the_repository_for_autoresearch(tmp_path: Pa
         if process.poll() is None:
             process.kill()
             process.wait()
-    assert len(candidates) == 1
-    assert repo_tree.patch_paths(candidates[0]) == ["src/a.py"]
-    assert "+a = 2" in candidates[0]
+    scored = [repo_tree.patch_paths(candidate) for candidate in candidates]
+    assert scored[: len(starts)] == starts
+    assert ["src/a.py"] in scored
     result = json.loads((tmp_path / "native_result.json").read_text())
-    assert (result["best_candidate"], result["best_score"]) == (candidates[0], 0.9)
+    assert repo_tree.patch_paths(result["best_candidate"]) == ["src/a.py"]
+    assert "+a = 2" in result["best_candidate"]
+    assert result["best_score"] == 0.9
 
 
 def test_parent_scorer_abort_survives_child_transport(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -37,11 +37,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gepa.gepa_launcher import EngineConfig, GEPAConfig, ReflectionConfig, optimize_anything
 from gepa.oa.budget import BudgetExhausted
 from gepa.oa.config import OptimizeAnythingConfig
 from gepa.oa.engine import Result
 from gepa.oa.eval_server import EvalServer
 from gepa.oa.task import Task, seed_as_text
+from gepa.utils.stop_condition import ScoreThresholdStopper
+
+try:
+    from . import repo_tree
+except ImportError:  # In the sandbox the runner loads ``repo_tree`` as a top-level sibling first.
+    import repo_tree
 
 META_HARNESS_REVISION = "0cbc31e97c9e6d24232d1dc754827c02e1ec415c"
 AUTORESEARCH_VERSION = "1"
@@ -1683,7 +1690,279 @@ class MetaHarnessEngine:
         )
 
 
-ENGINES: dict[str, type] = {AutoResearchEngine.name: AutoResearchEngine, MetaHarnessEngine.name: MetaHarnessEngine}
+class BestValsetVersion:
+    """GEPA callback that keeps the best version scored on every validation case.
+
+    When the evaluation budget runs out mid-round, ``optimize_anything`` raises
+    instead of returning its state, and plain per-case calls never reach the
+    server's aggregate log, so this is the only record of what GEPA had found.
+    """
+
+    def __init__(self) -> None:
+        """Start with nothing recorded."""
+        self.best: tuple[str, float] | None = None
+
+    def on_valset_evaluated(self, event: dict[str, Any]) -> None:
+        """Keep ``event``'s version when it covers the whole validation set and beats the best so far.
+
+        Args:
+            event: GEPA's ``ValsetEvaluatedEvent``.
+        """
+        if event["num_examples_evaluated"] < event["total_valset_size"]:
+            return
+        score = float(event["average_score"])
+        if self.best is None or score > self.best[1]:
+            self.best = (next(iter(event["candidate"].values()), ""), score)
+
+
+class GepaRepoEngine:
+    """GEPA's reflective search over repository versions, with a coding agent as its proposer.
+
+    GEPA keeps the Pareto front and picks which version to improve and on which
+    cases. Each proposal is one agent session in a checkout of that version,
+    briefed with the cases' scores and scorer feedback; the new version is the
+    checkout's diff against the starting commit.
+    """
+
+    name = "gepa_repo"
+
+    def __init__(self, config: OptimizeAnythingConfig) -> None:
+        """Pop the engine knobs from the shared config.
+
+        Args:
+            config: Cross-engine run configuration; ``engine_config`` must hold ``repo``.
+
+        Raises:
+            ValueError: When no repository checkout was configured.
+        """
+        engine_config = dict(config.engine_config)
+        self.repo: dict[str, Any] | None = engine_config.pop("repo", None)
+        if self.repo is None:
+            raise ValueError("GEPA's agent proposer needs a repository checkout.")
+        self.proposer = AgentProposer(
+            model=str(engine_config.pop("model")),
+            checkout=Path(self.repo["checkout"]),
+            editable_paths=list(self.repo["editable_paths"]),
+            readonly_paths=list(self.repo["readonly_paths"]),
+            log_dir=Path(config.run_dir or "gepa-repo-run").resolve() / "sessions",
+            effort=engine_config.pop("effort", None),
+            max_thinking_tokens=engine_config.pop("max_thinking_tokens", None),
+            max_token_cost=config.max_token_cost,
+        )
+        self.max_token_cost = config.max_token_cost
+        self.stop_at_score = config.stop_at_score
+        self.run_dir = Path(config.run_dir or "gepa-repo-run").resolve()
+
+    def run(self, task: Task, server: EvalServer) -> Result:
+        """Run GEPA until its evaluation or proposer budget runs out.
+
+        Args:
+            task: Task whose seed is the starting patch (empty for the commit as fetched).
+            server: Evaluation server that scores each version through the parent.
+
+        Returns:
+            GEPA's validation-best version, or the best fully scored version
+            when the budget stopped GEPA mid-round.
+
+        Raises:
+            RuntimeError: When nothing was scored at all.
+        """
+        self.proposer.objective = task.objective
+        self.proposer.background = task.background
+        gepa_dir = self.run_dir / "gepa"
+        gepa_dir.mkdir(parents=True, exist_ok=True)
+        tracker = BestValsetVersion()
+        config = GEPAConfig(
+            engine=EngineConfig(
+                run_dir=str(gepa_dir),
+                max_metric_calls=server.budget.remaining,
+                max_reflection_cost=self.max_token_cost,
+                # Every version is applied to the one shared checkout.
+                parallel=False,
+                display_progress_bar=False,
+            ),
+            reflection=ReflectionConfig(reflection_lm=None, custom_candidate_proposer=self.proposer),
+            stop_callbacks=[ScoreThresholdStopper(self.stop_at_score)] if self.stop_at_score is not None else None,
+            callbacks=[tracker],
+        )
+        kwargs: dict[str, Any] = {
+            "seed_candidate": seed_as_text(task.seed_candidate) if task.seed_candidate is not None else "",
+            "evaluator": server.evaluate,
+            "config": config,
+        }
+        if task.train_set:
+            kwargs["dataset"] = task.train_set
+        if task.val_set:
+            kwargs["valset"] = task.val_set
+        if task.objective:
+            kwargs["objective"] = task.objective
+        if task.background:
+            kwargs["background"] = task.background
+        try:
+            gepa_result = optimize_anything(**kwargs)
+        except BudgetExhausted:
+            gepa_result = None
+        metadata: dict[str, Any] = {
+            "proposals": self.proposer.proposals,
+            "proposer_cost_usd": self.proposer.total_cost,
+            "session_ids": list(self.proposer.session_ids),
+        }
+        if gepa_result is not None:
+            best: Any = gepa_result.best_candidate
+            if isinstance(best, dict):
+                best = next(iter(best.values()), "")
+            metadata["candidates"] = len(gepa_result.candidates)
+            return Result(
+                best_candidate=best,
+                best_score=float(gepa_result.val_aggregate_scores[gepa_result.best_idx]),
+                total_evals=server.budget.used,
+                metadata=metadata,
+            )
+        fallback = tracker.best or best_aggregate_candidate(server)
+        if fallback is None:
+            raise RuntimeError("GEPA stopped before any repository version was fully scored.")
+        return Result(
+            best_candidate=fallback[0], best_score=fallback[1], total_evals=server.budget.used, metadata=metadata
+        )
+
+    def process_result(self, result: Result, output_dir: str | Path) -> None:
+        """Write the best patch and run metadata beside the evaluator artifacts.
+
+        Args:
+            result: Result returned by ``run``.
+            output_dir: Evaluator output directory.
+        """
+        target = Path(output_dir) / self.name
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "best_candidate.patch").write_text(result.best_candidate, encoding="utf-8")
+        (target / "metadata.json").write_text(json.dumps(result.metadata, indent=2, default=str), encoding="utf-8")
+
+
+class AgentProposer:
+    """GEPA ``custom_candidate_proposer`` that writes each new version with a coding agent.
+
+    GEPA's reflection-cost stopper reads ``total_cost`` off this object, so the
+    agent sessions' reported spend caps the run exactly as a reflection model's would.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        checkout: Path,
+        editable_paths: list[str],
+        readonly_paths: list[str],
+        log_dir: Path,
+        effort: str | None,
+        max_thinking_tokens: int | None,
+        max_token_cost: float | None,
+    ) -> None:
+        """Record where the agent works and what it may spend.
+
+        Args:
+            model: Model identifier for the ``claude`` command.
+            checkout: Git checkout the agent edits, made by ``repo_tree.unpack_tree``.
+            editable_paths: Repository paths a version may change.
+            readonly_paths: Submodule and Git LFS paths that stay as fetched.
+            log_dir: Where each session's output lands.
+            effort: ``--effort`` value, or ``None``.
+            max_thinking_tokens: Fixed thinking budget, or ``None`` for adaptive.
+            max_token_cost: Proposer spend cap in dollars, or ``None``.
+        """
+        self.model = model
+        self.checkout = checkout
+        self.editable_paths = editable_paths
+        self.readonly_paths = readonly_paths
+        self.log_dir = log_dir
+        self.effort = effort
+        self.max_thinking_tokens = None if max_thinking_tokens is None else int(max_thinking_tokens)
+        self.max_token_cost = max_token_cost
+        self.objective = ""
+        self.background = ""
+        self.total_cost = 0.0
+        self.proposals = 0
+        self.session_ids: list[str] = []
+
+    def __call__(
+        self,
+        candidate: dict[str, str],
+        reflective_dataset: dict[str, list[dict[str, Any]]],
+        components_to_update: list[str],
+    ) -> dict[str, str]:
+        """Check out ``candidate``, let the agent improve it, and return the new patch.
+
+        Args:
+            candidate: The parent version, keyed by GEPA's single text component.
+            reflective_dataset: Per-component records of the cases GEPA reflects on.
+            components_to_update: The component GEPA asks to change.
+
+        Returns:
+            The new version under the same component key; the parent itself when
+            the agent's diff is too large to ship.
+        """
+        key = components_to_update[0] if components_to_update else next(iter(candidate))
+        parent = candidate[key]
+        repo_tree.reset_tree(self.checkout)
+        repo_tree.apply_patch(self.checkout, parent)
+        self.proposals += 1
+        outcome = run_proposer(
+            self.prompt(reflective_dataset.get(key) or []),
+            work_dir=self.checkout,
+            log_dir=self.log_dir,
+            name=f"proposal{self.proposals}",
+            model=self.model,
+            session_id=str(uuid.uuid4()),
+            effort=self.effort,
+            max_thinking_tokens=self.max_thinking_tokens,
+            max_budget_usd=_remaining_cost(self.max_token_cost, self.total_cost),
+        )
+        self.total_cost += outcome.cost_usd
+        self.session_ids.append(outcome.session_id)
+        patch = repo_tree.version_patch(self.checkout)
+        repo_tree.reset_tree(self.checkout)
+        if len(patch.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:
+            return {key: parent}
+        return {key: patch}
+
+    def prompt(self, records: list[dict[str, Any]]) -> str:
+        """Brief one proposal session: the goal, the rules and how this version scored.
+
+        Args:
+            records: GEPA's reflective records for the cases this proposal targets.
+
+        Returns:
+            The session prompt.
+        """
+        editable = ", ".join("the whole repository" if p == "." else f"`{p}`" for p in self.editable_paths)
+        lines = [
+            "You are improving a code repository. The current directory is a checkout of the version to improve.",
+            "",
+            f"Goal: {self.objective or 'raise the score the evaluator gives this repository.'}",
+        ]
+        if self.background:
+            lines += ["", "Background:", self.background]
+        lines += ["", f"You may change: {editable}. Leave everything else as it is."]
+        if self.readonly_paths:
+            lines.append("Submodules and Git LFS files stay as fetched: " + ", ".join(self.readonly_paths) + ".")
+        lines += ["", "How this version scored on the cases to improve:"]
+        for index, record in enumerate(records[:_DOSSIER_EXAMPLES], start=1):
+            lines.append(f"{index}. " + _feedback_text(record))
+        if not records:
+            lines.append("No per-case feedback was recorded.")
+        lines += [
+            "",
+            "Make one focused change that should raise the score, and leave it in the working tree. You cannot run "
+            "the evaluator: Skynet scores whatever you leave in this checkout once you finish. Do not commit, and "
+            "reply with one short paragraph describing the change.",
+        ]
+        return "\n".join(lines)
+
+
+ENGINES: dict[str, type] = {
+    AutoResearchEngine.name: AutoResearchEngine,
+    MetaHarnessEngine.name: MetaHarnessEngine,
+    GepaRepoEngine.name: GepaRepoEngine,
+}
 
 
 def check_assets() -> dict[str, str]:

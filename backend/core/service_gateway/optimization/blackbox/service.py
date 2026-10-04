@@ -194,6 +194,22 @@ CLAUDE_CODE_UNAVAILABLE = "Claude Code is temporarily unavailable. Choose anothe
 CLAUDE_CODE_MODEL_UNSUPPORTED = "Claude Code runs only Anthropic Claude models. Choose an anthropic/claude-* model."
 
 
+def uses_native_runtime(payload: BlackboxRunRequest) -> bool:
+    """Report whether a job runs a coding-agent proposer in the native runtime.
+
+    Args:
+        payload: The submitted or stored job.
+
+    Returns:
+        True for auto mode, a native engine, or any repository run.
+    """
+    return (
+        payload.strategy.mode != "single"
+        or payload.strategy.engine in NATIVE_ENGINES
+        or payload.target.kind == BLACKBOX_TARGET_REPO
+    )
+
+
 def claude_code_proposes(payload: BlackboxRunRequest) -> bool:
     """Report whether a job would launch Claude Code as its native proposer.
 
@@ -203,8 +219,7 @@ def claude_code_proposes(payload: BlackboxRunRequest) -> bool:
     Returns:
         True when a native engine runs with the Claude Code harness.
     """
-    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in NATIVE_ENGINES
-    return needs_native and payload.proposer.harness == BLACKBOX_HARNESS_CLAUDE_CODE
+    return uses_native_runtime(payload) and payload.proposer.harness == BLACKBOX_HARNESS_CLAUDE_CODE
 
 
 def claude_code_in_use(payload: BlackboxRunRequest) -> bool:
@@ -288,7 +303,7 @@ def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: boo
     else:
         for name in AUTO_ENGINES:
             get_engine(name, caps)
-    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in NATIVE_ENGINES
+    needs_native = uses_native_runtime(payload)
     if needs_native:
         model = payload.reflection_model_settings
         if (
@@ -686,8 +701,6 @@ def run_blackbox_optimization(
             raise ServiceError("A repository run is scored only by its trusted parent.")
         if not repo_snapshot or not repo_snapshot.get("chunks"):
             raise ServiceError("A repository run needs the repository its parent fetched.")
-        if payload.strategy.engine != "autoresearch":
-            raise ServiceError("This deployment optimizes repositories with AutoResearch only.")
         base_scorer: JobScorer = RemoteScorer(
             REPO_SCORER_URL,
             secret=None,
@@ -838,7 +851,7 @@ def _run_job(
             PLATFORM_FEE_FRACTION if payload.reflection_model_settings.token_source == "byok" else usage_markup()
         )
         token_budget = payload.max_cost_cents * CENT_USD_VALUE / cost_multiplier
-    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in NATIVE_ENGINES
+    needs_native = uses_native_runtime(payload)
     native_options = None
     if needs_native:
         budget_route = payload.reflection_model_settings.extra.get(ROUTE_KEY)
