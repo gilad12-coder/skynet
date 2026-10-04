@@ -1,4 +1,9 @@
 {
+  "submit.blackbox.agent.reading_repo": "در حال خواندن مخزن…",
+  "submit.blackbox.agent.tool.brief": "هدف و پیش‌زمینه را به‌روز کرد",
+  "submit.blackbox.agent.tool.list_folder": "{path} را باز کرد",
+  "submit.blackbox.agent.tool.read_file": "{path} را خواند",
+  "submit.blackbox.agent.writing_brief": "در حال به‌روزرسانی هدف…",
   "settings.security.connected.description": "با این حساب‌ها وارد شوید، حتی اگر ایمیل آن‌ها با ایمیل شما فرق داشته باشد.",
   "settings.security.connected.github": "GitHub",
   "settings.security.connected.google": "Google",
@@ -480,7 +485,7 @@
   "optimization.blackbox.stats.runtime": "زمان اجرا",
   "optimization.blackbox.stats.scorer_runs": "اجراهای امتیازدهنده",
   "optimization.progress.blackbox": "اجراهای امتیازدهنده",
-  "submit.blackbox.agent.empty_hint": "هدف خود را شرح دهید تا عامل یک نقطه‌ی شروع و یک امتیازدهنده‌ی Python پیش‌نویس کند. می‌توانید آن‌ها را همان‌طور که هستند بپذیرید یا تغییراتی بخواهید.",
+  "submit.blackbox.agent.empty_hint": "به عامل بگویید چه چیزی را می‌خواهید بهتر کنید. تا وقتی هدف و نحوهٔ داوری هر نسخه را بفهمد سؤال می‌پرسد و فیلدها را خودش پر می‌کند.",
   "submit.blackbox.agent.fix_scorer": "امتیازدهنده به خطا خورد. آن را برطرف کن.",
   "submit.blackbox.interview.reading": "در حال آماده‌سازی پرسش اول…",
   "submit.blackbox.interview.brief.description": "برگرفته از پاسخ‌های شما. هر چیزی را می‌توانید ویرایش کنید — نقطه‌ی شروع و امتیازدهنده بر اساس این دستورالعمل‌ها پیش‌نویس خواهند شد.",

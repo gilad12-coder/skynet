@@ -1,4 +1,9 @@
 {
+  "submit.blackbox.agent.reading_repo": "يقرأ المستودع…",
+  "submit.blackbox.agent.tool.brief": "حدّث الهدف والخلفية",
+  "submit.blackbox.agent.tool.list_folder": "فتح {path}",
+  "submit.blackbox.agent.tool.read_file": "قرأ {path}",
+  "submit.blackbox.agent.writing_brief": "يحدّث الهدف…",
   "settings.security.connected.description": "سجّل الدخول بهذه الحسابات حتى عندما يختلف بريدها الإلكتروني عن بريدك.",
   "settings.security.connected.github": "GitHub",
   "settings.security.connected.google": "Google",
@@ -480,7 +485,7 @@
   "optimization.blackbox.stats.runtime": "مدّة التشغيل",
   "optimization.blackbox.stats.scorer_runs": "عمليات تشغيل المُقيِّم",
   "optimization.progress.blackbox": "عمليات تشغيل المُقيِّم",
-  "submit.blackbox.agent.empty_hint": "صِف هدفك وسيصوغ الوكيل نقطة بداية ومُقيِّمًا بلغة Python. يمكنك قبولهما كما هما أو طلب تعديلات.",
+  "submit.blackbox.agent.empty_hint": "أخبر الوكيل بما تريد تحسينه. سيطرح أسئلة حتى يفهم الهدف وكيف يُقيَّم كل إصدار، ثم يملأ الحقول بنفسه.",
   "submit.blackbox.agent.fix_scorer": "واجه المُقيِّم خطأً. أصلِحه.",
   "submit.blackbox.interview.reading": "جارٍ تجهيز السؤال الأول…",
   "submit.blackbox.interview.brief.description": "مُستخلَص من إجاباتك. عدّل ما تشاء — ستُصاغ نقطة البداية والمُقيِّم وفق هذه التوجيهات.",

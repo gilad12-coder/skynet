@@ -7,6 +7,7 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 
 import {
   streamCodeAgent,
+  type AgentQuestion,
   type BlackboxAuthoringContext,
   type CodeAgentToolName,
 } from "@/shared/lib/api";
@@ -30,6 +31,10 @@ function isSeedTool(tool: AgentToolName): boolean {
 
 function isScorerTool(tool: AgentToolName): boolean {
   return tool === "edit_metric" || tool === "edit_scorer";
+}
+
+function isRepoTool(tool: AgentToolName): boolean {
+  return tool === "list_repo_folder" || tool === "read_repo_file";
 }
 
 export interface AgentToolCall {
@@ -134,6 +139,8 @@ export interface CodeAgentState {
   messages: AgentMessage[];
   error: string | null;
   canSend: boolean;
+  /** The question the agent's last reply asked, with clickable answers. */
+  question: AgentQuestion | null;
   signatureVersions: ArtifactVersion[];
   metricVersions: ArtifactVersion[];
   signatureVersionIndex: number;
@@ -193,6 +200,8 @@ export interface UseCodeAgentArgs {
   /** Black-box authoring context; when set the agent drafts the starting
    *  point + Python scorer and no dataset is required. */
   blackbox?: BlackboxAuthoringContext | null;
+  /** Black-box chat: lands objective / background text the agent wrote. */
+  onBrief?: (fields: { objective?: string; background?: string }) => void;
   // Catalog model id + effort the code author runs on (the composer's model
   // menu). Absent/`null` routes automatically. The agent panel forwards the
   // conversation's chosen model so code authoring follows the composer.
@@ -231,6 +240,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     model,
     reasoningEffort,
     blackbox = null,
+    onBrief,
   } = args;
 
   const [status, setStatus] = React.useState<AgentStatus>("idle");
@@ -244,6 +254,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   const [metricStatus, setMetricStatus] = React.useState<ArtifactStatus>("idle");
   const [messages, setMessages] = React.useState<AgentMessage[]>([]);
   const [error, setError] = React.useState<string | null>(null);
+  const [question, setQuestion] = React.useState<AgentQuestion | null>(null);
   const [signatureVersions, setSignatureVersions] = React.useState<ArtifactVersion[]>([]);
   const [metricVersions, setMetricVersions] = React.useState<ArtifactVersion[]>([]);
   const [signatureVersionIndex, setSignatureVersionIndex] = React.useState(-1);
@@ -313,6 +324,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     messagesRef.current = messages;
   }, [messages]);
 
+  const onBriefRef = React.useRef(onBrief);
+  React.useEffect(() => {
+    onBriefRef.current = onBrief;
+  }, [onBrief]);
+
   const hasRequiredContext = React.useMemo(() => {
     if (blackbox) return blackbox.objective.trim().length > 0;
     if (!parsedDataset || parsedDataset.rowCount === 0) return false;
@@ -320,6 +336,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     const hasOutput = Object.values(columnRoles).some((r) => r === "output");
     return hasInput && hasOutput;
   }, [parsedDataset, columnRoles, blackbox]);
+  // A black-box chat needs nothing up front: with no objective yet, the agent
+  // asks for it. Only the seed draft waits for one.
+  const canChat = blackbox ? true : hasRequiredContext;
 
   const appendReply = React.useCallback((chunk: string) => {
     setMessages((prev) => {
@@ -392,7 +411,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
 
   const runAgent = React.useCallback(
     (userMessage: string, history: AgentMessage[]) => {
-      if (!hasRequiredContext) return;
+      if (!(userMessage.length > 0 ? canChat : hasRequiredContext)) return;
 
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -405,6 +424,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       reasoningSectionsRef.current = { order: [], bufs: {} };
       reasoningEndedRef.current = false;
       pendingValidationsRef.current = [];
+      setQuestion(null);
 
       const isChat = userMessage.length > 0;
       setMode(isChat ? "chat" : "seed");
@@ -550,22 +570,34 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             replyBufRef.current += chunk;
             appendReply(chunk);
           },
+          onAsk: (ask) => {
+            if (controller.signal.aborted) return;
+            setQuestion(ask.options.length > 0 ? ask : null);
+          },
+          onBrief: (fields) => {
+            if (controller.signal.aborted) return;
+            onBriefRef.current?.(fields);
+          },
           onToolStart: (ev) => {
             markReasoningDone();
             setStatusLabel(
-              isSeedTool(ev.tool)
-                ? msg(
-                    blackbox
-                      ? "submit.blackbox.agent.writing_seed"
-                      : "auto.features.submit.hooks.use.code.agent.literal.5",
-                  )
-                : isScorerTool(ev.tool)
-                  ? msg(
-                      blackbox
-                        ? "submit.blackbox.agent.writing_scorer"
-                        : "auto.features.submit.hooks.use.code.agent.literal.6",
-                    )
-                  : msg("workflow.agent.editing_graph"),
+              isRepoTool(ev.tool)
+                ? msg("submit.blackbox.agent.reading_repo")
+                : ev.tool === "set_brief"
+                  ? msg("submit.blackbox.agent.writing_brief")
+                  : isSeedTool(ev.tool)
+                    ? msg(
+                        blackbox
+                          ? "submit.blackbox.agent.writing_seed"
+                          : "auto.features.submit.hooks.use.code.agent.literal.5",
+                      )
+                    : isScorerTool(ev.tool)
+                      ? msg(
+                          blackbox
+                            ? "submit.blackbox.agent.writing_scorer"
+                            : "auto.features.submit.hooks.use.code.agent.literal.6",
+                        )
+                      : msg("workflow.agent.editing_graph"),
             );
             if (isSeedTool(ev.tool)) setSignatureStatus("writing");
             else if (isScorerTool(ev.tool)) setMetricStatus("writing");
@@ -802,6 +834,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     [
       parsedDataset,
       hasRequiredContext,
+      canChat,
       columnRoles,
       columnKinds,
       isWorkflow,
@@ -916,6 +949,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       flashClearRef.current = null;
     }
     setMessages([]);
+    setQuestion(null);
     setStatus("idle");
     setMode("seed");
     setStatusLabel("");
@@ -1011,7 +1045,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     metricStatus,
     messages,
     error,
-    canSend: hasRequiredContext && status !== "streaming",
+    canSend: canChat && status !== "streaming",
+    question,
     signatureVersions,
     metricVersions,
     signatureVersionIndex,

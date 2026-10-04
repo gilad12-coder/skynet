@@ -1,4 +1,9 @@
 {
+  "submit.blackbox.agent.reading_repo": "रिपॉज़िटरी पढ़ रहा है…",
+  "submit.blackbox.agent.tool.brief": "लक्ष्य और पृष्ठभूमि अपडेट की",
+  "submit.blackbox.agent.tool.list_folder": "{path} खोला",
+  "submit.blackbox.agent.tool.read_file": "{path} पढ़ा",
+  "submit.blackbox.agent.writing_brief": "लक्ष्य अपडेट कर रहा है…",
   "settings.security.connected.description": "इन खातों से साइन इन करें, भले ही उनका ईमेल आपके ईमेल से अलग हो।",
   "settings.security.connected.github": "GitHub",
   "settings.security.connected.google": "Google",
@@ -480,7 +485,7 @@
   "optimization.blackbox.stats.runtime": "रनटाइम",
   "optimization.blackbox.stats.scorer_runs": "स्कोरर रन",
   "optimization.progress.blackbox": "स्कोरर रन",
-  "submit.blackbox.agent.empty_hint": "अपना उद्देश्य बताएँ और एजेंट एक प्रारंभिक बिंदु और एक Python स्कोरर तैयार करेगा। आप उन्हें वैसे ही स्वीकार कर सकते हैं, या बदलाव का अनुरोध कर सकते हैं।",
+  "submit.blackbox.agent.empty_hint": "एजेंट को बताइए कि आप क्या बेहतर करना चाहते हैं। वह तब तक सवाल पूछेगा जब तक लक्ष्य और हर संस्करण को परखने का तरीका न समझ ले, और फ़ील्ड ख़ुद भर देगा।",
   "submit.blackbox.agent.fix_scorer": "स्कोरर में एक त्रुटि आई। इसे ठीक करें।",
   "submit.blackbox.interview.reading": "पहला सवाल तैयार किया जा रहा है…",
   "submit.blackbox.interview.brief.description": "आपके उत्तरों से तैयार किया गया। कुछ भी संपादित करें — प्रारंभिक बिंदु और स्कोरर इन निर्देशों का पालन करते हुए तैयार किए जाएँगे।",

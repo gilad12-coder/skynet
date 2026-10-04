@@ -11,14 +11,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field, model_validator
 from starlette.responses import StreamingResponse
 
+from ...connectors import github
+from ...connectors.github_repo import RepoFetchError, github_token
 from ...service_gateway.agents.code import run_code_agent
 from ...service_gateway.agents.code_interview import interview_turn_stream
+from ...service_gateway.agents.repo_browser import RepoBrowser
 from ..agent_turns import AgentTurnRegistry
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -57,6 +60,52 @@ class BlackboxAuthoringContext(BaseModel):
     scorer_has_model: bool = Field(
         default=False,
         description="Whether the scorer step has a model, so scorer code may call the injected llm() helper.",
+    )
+    focus: Literal["goal", "scorer"] = Field(
+        default="goal",
+        description="The wizard step the user is on: 'goal' (objective and background) or 'scorer'.",
+    )
+    repository: str = Field(
+        default="",
+        description="The GitHub repository a repository job optimizes, as owner/name; blank otherwise.",
+    )
+    branch: str = Field(default="", description="The repository's branch; blank for the default branch.")
+    editable_paths: list[str] = Field(
+        default_factory=list,
+        description="Paths inside the repository the optimizer may change.",
+    )
+
+
+def open_repo_browser(engine: Any, username: str, blackbox: BlackboxAuthoringContext | None) -> RepoBrowser | None:
+    """Open the repository a black-box job optimizes, for the agent's browsing tools.
+
+    A repository the caller cannot read (GitHub not connected, a missing
+    branch, a provider error) leaves the agent without the tools rather than
+    failing the turn: it can still interview the user.
+
+    Args:
+        engine: SQLAlchemy engine holding the connector vault.
+        username: The caller, whose GitHub connection is used.
+        blackbox: The request's black-box context, when any.
+
+    Returns:
+        The browser, or ``None`` when there is no repository or it cannot be read.
+    """
+    if blackbox is None or not blackbox.repository.strip() or engine is None:
+        return None
+    try:
+        token = github_token(engine, username)
+        tree = github.tree_entries(token, blackbox.repository, blackbox.branch)
+    except (RepoFetchError, DomainError) as exc:
+        logger.info("Agent cannot open %s: %s", blackbox.repository, exc)
+        return None
+    return RepoBrowser(
+        token=token,
+        repository=blackbox.repository,
+        branch=blackbox.branch,
+        editable_paths=blackbox.editable_paths,
+        entries=tree["entries"],
+        truncated=tree["truncated"],
     )
 
 
@@ -418,6 +467,11 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
         model = route_menu_model(req.model)
         usage_sink: list = []
+        repo_browser = (
+            await asyncio.to_thread(open_repo_browser, engine, current_user.username, req.blackbox)
+            if req.user_message.strip()
+            else None
+        )
         source = run_code_agent(
             dataset_columns=req.dataset_columns,
             column_roles=req.column_roles,
@@ -439,6 +493,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             reasoning_effort=effective_reasoning_effort(model, req.reasoning_effort),
             usage_sink=usage_sink,
             blackbox=req.blackbox.model_dump() if req.blackbox else None,
+            repo_browser=repo_browser,
         )
         metered = stream_with_llm_metering(
             source,

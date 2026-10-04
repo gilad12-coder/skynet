@@ -105,7 +105,16 @@ def test_interview_without_model_runs_catalog_default(monkeypatch) -> None:
     monkeypatch.setattr(
         model_router,
         "get_catalog_cached",
-        lambda: SimpleNamespace(models=[SimpleNamespace(value="openrouter/anthropic/claude-sonnet-5", is_default=True, reasoning_efforts=None, reasoning_default_enabled=None)]),
+        lambda: SimpleNamespace(
+            models=[
+                SimpleNamespace(
+                    value="openrouter/anthropic/claude-sonnet-5",
+                    is_default=True,
+                    reasoning_efforts=None,
+                    reasoning_default_enabled=None,
+                )
+            ]
+        ),
     )
     client = _client()
     assert client.post("/optimizations/code-interview", json=_INTERVIEW_BODY).status_code == 200
@@ -126,9 +135,7 @@ def test_interview_rejects_unknown_model(monkeypatch) -> None:
         "get_catalog_cached",
         lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test", is_default=False)]),
     )
-    resp = _client().post(
-        "/optimizations/code-interview", json={**_INTERVIEW_BODY, "model": "openai/not-a-model"}
-    )
+    resp = _client().post("/optimizations/code-interview", json={**_INTERVIEW_BODY, "model": "openai/not-a-model"})
     assert resp.status_code == 422
     assert resp.json()["code"] == "models.unknown_model"
 
@@ -239,7 +246,16 @@ def test_seed_endpoint_without_model_runs_catalog_default(monkeypatch) -> None:
     monkeypatch.setattr(
         model_router,
         "get_catalog_cached",
-        lambda: SimpleNamespace(models=[SimpleNamespace(value="openrouter/anthropic/claude-sonnet-5", is_default=True, reasoning_efforts=None, reasoning_default_enabled=None)]),
+        lambda: SimpleNamespace(
+            models=[
+                SimpleNamespace(
+                    value="openrouter/anthropic/claude-sonnet-5",
+                    is_default=True,
+                    reasoning_efforts=None,
+                    reasoning_default_enabled=None,
+                )
+            ]
+        ),
     )
     client = _client()
     assert client.post("/optimizations/ai-generate-code", json=_SEED_BODY).status_code == 200
@@ -260,9 +276,7 @@ def test_seed_endpoint_rejects_unknown_model(monkeypatch) -> None:
         "get_catalog_cached",
         lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test", is_default=False)]),
     )
-    resp = _client().post(
-        "/optimizations/ai-generate-code", json={**_SEED_BODY, "model": "openai/not-a-model"}
-    )
+    resp = _client().post("/optimizations/ai-generate-code", json={**_SEED_BODY, "model": "openai/not-a-model"})
     assert resp.status_code == 422
     assert resp.json()["code"] == "models.unknown_model"
 
@@ -298,7 +312,14 @@ def test_interview_forwards_blackbox_context_without_columns(monkeypatch) -> Non
     )
     assert resp.status_code == 200
     assert seen["dataset_columns"] == []
-    assert seen["blackbox"] == {**_BLACKBOX_CONTEXT, "background": ""}
+    assert seen["blackbox"] == {
+        **_BLACKBOX_CONTEXT,
+        "background": "",
+        "repository": "",
+        "branch": "",
+        "editable_paths": [],
+        "focus": "goal",
+    }
 
 
 def test_interview_without_columns_or_blackbox_is_rejected() -> None:
@@ -324,7 +345,14 @@ def test_seed_endpoint_forwards_blackbox_context(monkeypatch) -> None:
     )
     assert resp.status_code == 200
     assert seen["dataset_columns"] == []
-    assert seen["blackbox"] == {**_BLACKBOX_CONTEXT, "background": ""}
+    assert seen["blackbox"] == {
+        **_BLACKBOX_CONTEXT,
+        "background": "",
+        "repository": "",
+        "branch": "",
+        "editable_paths": [],
+        "focus": "goal",
+    }
 
 
 def test_seed_endpoint_without_columns_or_blackbox_is_rejected() -> None:

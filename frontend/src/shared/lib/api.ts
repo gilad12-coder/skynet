@@ -3031,6 +3031,12 @@ export interface BlackboxAuthoringContext {
   target_kind?: "text" | "agent";
   // True when a model is attached in the Scorer step, so the scorer may call llm().
   scorer_has_model?: boolean;
+  // The wizard step the user is on; steers what the agent asks about.
+  focus?: "goal" | "scorer";
+  // A repository job's GitHub repository, read by the agent's browsing tools.
+  repository?: string;
+  branch?: string;
+  editable_paths?: string[];
 }
 
 export interface CodeAgentRequest {
@@ -3072,6 +3078,9 @@ export type CodeAgentToolName =
   | "edit_metric"
   | "edit_seed"
   | "edit_scorer"
+  | "set_brief"
+  | "list_repo_folder"
+  | "read_repo_file"
   | "add_node"
   | "update_node"
   | "remove_node"
@@ -3083,6 +3092,9 @@ const CODE_AGENT_TOOLS = new Set<CodeAgentToolName>([
   "edit_metric",
   "edit_seed",
   "edit_scorer",
+  "set_brief",
+  "list_repo_folder",
+  "read_repo_file",
   "add_node",
   "update_node",
   "remove_node",
@@ -3102,6 +3114,11 @@ interface CodeAgentToolEnd {
   status: string;
 }
 
+export interface AgentQuestion {
+  question: string;
+  options: Array<{ label: string; description: string }>;
+}
+
 export interface CodeAgentHandlers {
   onSignaturePatch: (chunk: string) => void;
   onMetricPatch: (chunk: string) => void;
@@ -3116,6 +3133,10 @@ export interface CodeAgentHandlers {
   onWorkflowReplace?: (workflow: WorkflowSpec, changedNodeId: string | null) => void;
   onToolStart?: (ev: CodeAgentToolStart) => void;
   onToolEnd?: (ev: CodeAgentToolEnd) => void;
+  // Black-box chat: a question the agent asks with clickable answers.
+  onAsk?: (ask: AgentQuestion) => void;
+  // Black-box chat: objective / background text the agent wrote from the conversation.
+  onBrief?: (fields: { objective?: string; background?: string }) => void;
   onDone: (result: {
     signature_code: string;
     metric_code: string;
@@ -3186,6 +3207,20 @@ export async function streamCodeAgent(
           status: String(data.status ?? "ok"),
         });
       }
+    } else if (event === "ask") {
+      const options = Array.isArray(data.options) ? data.options : [];
+      handlers.onAsk?.({
+        question: String(data.question ?? ""),
+        options: options
+          .filter((o): o is Record<string, unknown> => !!o && typeof o === "object")
+          .map((o) => ({ label: String(o.label ?? ""), description: String(o.description ?? "") }))
+          .filter((o) => o.label.trim().length > 0),
+      });
+    } else if (event === "brief") {
+      handlers.onBrief?.({
+        ...(typeof data.objective === "string" ? { objective: data.objective } : {}),
+        ...(typeof data.background === "string" ? { background: data.background } : {}),
+      });
     } else if (event === "done") {
       const rawModel = data.model;
       const rawServedModel = data.served_model;
