@@ -19,13 +19,19 @@ from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY,
 from ..service_gateway.optimization.blackbox.sandbox import CommandResult, SandboxSpec
 from .constants import EVENT_ERROR, EVENT_RESULT, EVENT_TERMINAL
 from .failure_events import failure_event
-from .isolated_runner import EVENT_PREFIX, SANDBOX_PROTOCOL
+from .isolated_runner import EVENT_PREFIX
+from .sandbox_protocol import SANDBOX_PROTOCOL
 
 logger = logging.getLogger(__name__)
 
 CHECKPOINT_EVENT = "checkpoint_file"
 _CHECKPOINT_PATH = re.compile(r"(?:(?:pair_\d+|gepa)/)?gepa_state\.bin\Z")
 BROKEN_IMAGE_MESSAGE = "The sandbox image cannot start its optimizer; rebuild the sandbox image."
+OUTDATED_IMAGE_MESSAGE = "The sandbox image is older than this version of Skynet; rebuild and re-pin the sandbox image."
+PROTOCOL_PROBE = (
+    'PYTHONPATH=/app python3 -c "from core.worker.sandbox_protocol import SANDBOX_PROTOCOL; print(SANDBOX_PROTOCOL)"'
+)
+_PROBE_TIMEOUT_SECONDS = 120.0
 _MISSING_CORE_MODULE = re.compile(r"(?:ModuleNotFoundError|ImportError): .*\bcore\.")
 _DIAGNOSTIC_LINES = 40
 
@@ -78,6 +84,36 @@ def _guest_failure(result: CommandResult) -> Exception:
     )
 
 
+def _require_image_protocol(session: Any, lifetime: float) -> None:
+    """Refuse an image whose optimizer cannot read this worker's request.
+
+    The image validates the request with its own copy of the backend models,
+    so an image that predates a request field rejects it with a bare
+    validation error. Images built before the protocol existed never check
+    it, so the worker reads the image's protocol itself before sending
+    anything.
+
+    Args:
+        session: The freshly opened sandbox session.
+        lifetime: The sandbox lifetime, bounding the probe.
+
+    Raises:
+        RuntimeError: When the image lacks the protocol or speaks another one.
+    """
+    result = session.run(PROTOCOL_PROBE, timeout_seconds=min(lifetime, _PROBE_TIMEOUT_SECONDS))
+    if result.ok:
+        found = result.stdout.strip()
+        if found == str(SANDBOX_PROTOCOL):
+            return
+        raise RuntimeError(
+            f"The sandbox image speaks protocol {found}, but this worker speaks {SANDBOX_PROTOCOL};"
+            " rebuild and re-pin the sandbox image."
+        )
+    if "core.worker.sandbox_protocol" in result.stderr:
+        raise RuntimeError(OUTDATED_IMAGE_MESSAGE)
+    raise _guest_failure(result)
+
+
 def run_vercel_dspy(payload: dict[str, Any], artifact_id: str, event_queue: Any, _start_method: str) -> None:
     """Execute the full optimizer in the pinned backend image without provider credentials.
 
@@ -114,6 +150,7 @@ def run_vercel_dspy(payload: dict[str, Any], artifact_id: str, event_queue: Any,
                 operation_key=f"dspy:{artifact_id}",
             )
         )
+        _require_image_protocol(session, lifetime)
         session_root = f".skynet-dspy-{nonce}"
         snapshot = guest_payload.pop(REPO_SNAPSHOT_KEY, None)
         if isinstance(snapshot, dict):

@@ -2,11 +2,10 @@
 
 import { LoadingState } from "@/shared/ui/loading-state";
 import * as React from "react";
-import { Plus, ArrowCounterClockwise, Trash } from "@/shared/ui/icons";
+import { ArrowCounterClockwise } from "@/shared/ui/icons";
 
 import { Button } from "@/shared/ui/primitives/button";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
-import { TooltipButton } from "@/shared/ui/tooltip-button";
 import {
   AgentThread,
   ChatTranscript,
@@ -15,10 +14,10 @@ import {
   QuestionChoices,
   QuestionChoicesSkeleton,
 } from "@/shared/ui/agent";
-import { msg } from "@/shared/lib/messages";
+import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import type { CodeInterviewState } from "@/shared/hooks/use-code-interview";
-import { Textarea } from "@/shared/ui/primitives/textarea";
+import { RuleList } from "@/shared/ui/rule-list";
 
 interface Props {
   interview: CodeInterviewState;
@@ -176,9 +175,6 @@ function BriefCard({ interview, copy }: { interview: CodeInterviewState; copy: I
   const [directives, setDirectives] = React.useState<string[]>(interview.brief);
   React.useEffect(() => setDirectives(interview.brief), [interview.brief]);
 
-  const update = (idx: number, value: string) =>
-    setDirectives((prev) => prev.map((d, i) => (i === idx ? value : d)));
-  const remove = (idx: number) => setDirectives((prev) => prev.filter((_, i) => i !== idx));
   const cleaned = directives.map((d) => d.trim()).filter(Boolean);
 
   return (
@@ -189,44 +185,16 @@ function BriefCard({ interview, copy }: { interview: CodeInterviewState; copy: I
         </h4>
         <p className="mt-0.5 text-xs text-muted-foreground">{msg(copy.briefDescription)}</p>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
-        {directives.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            {msg("submit.code.interview.brief.empty")}
-          </p>
-        )}
-        {directives.map((directive, idx) => (
-          <div key={idx} className="flex items-start gap-2">
-            <span className="mt-2.5 size-1.5 shrink-0 rounded-full bg-primary/50" />
-            <Textarea
-              value={directive}
-              onChange={(e) => update(idx, e.target.value)}
-              rows={2}
-              className="flex-1 leading-relaxed"
-              dir="auto"
-            />
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => remove(idx)}
-              aria-label={msg("submit.code.interview.brief.remove")}
-              className="mt-1.5"
-            >
-              <Trash className="size-3.5 text-muted-foreground" />
-            </Button>
-          </div>
-        ))}
-        <TooltipButton tooltip={msg("submit.code.interview.brief.add")} side="top">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setDirectives((prev) => [...prev, ""])}
-            aria-label={msg("submit.code.interview.brief.add")}
-            className="mt-1 w-full"
-          >
-            <Plus className="size-3.5" aria-hidden="true" />
-          </Button>
-        </TooltipButton>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2">
+        <RuleList
+          rules={directives}
+          onChange={setDirectives}
+          itemLabel={(number) => formatMsg("submit.code.interview.brief.item_label", { number })}
+          removeLabel={msg("submit.code.interview.brief.remove")}
+          addLabel={msg("submit.code.interview.brief.add")}
+          placeholder={msg("submit.code.interview.brief.placeholder")}
+          emptyLabel={msg("submit.code.interview.brief.empty")}
+        />
       </div>
       <div className="border-t border-border/40 p-4 shrink-0">
         <Button onClick={() => interview.confirm(cleaned)} className="w-full">

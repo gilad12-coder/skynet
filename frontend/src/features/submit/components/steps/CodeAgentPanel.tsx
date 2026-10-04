@@ -37,6 +37,8 @@ interface Props {
   className?: string;
   /** Black-box wizard: the agent drafts a starting point + scorer, not DSPy code. */
   blackbox?: boolean;
+  /** Black-box repository job with no repository picked yet: picking one starts the agent. */
+  awaitingRepo?: boolean;
   model: string | null;
   onModelChange: (model: string | null) => void;
   reasoningEffort: string | null;
@@ -49,6 +51,7 @@ export function CodeAgentPanel({
   disabledReason,
   className,
   blackbox,
+  awaitingRepo,
   model,
   onModelChange,
   reasoningEffort,
@@ -113,9 +116,18 @@ export function CodeAgentPanel({
       )}
       <AgentThread
         scrollDeps={[agent.messages, agent.status]}
-        isEmpty={agent.messages.length === 0 && !streaming}
+        isEmpty={
+          agent.openingRepo !== null ||
+          (agent.messages.length === 0 && !streaming && agent.status !== "error")
+        }
         emptyState={
-          <EmptyState disabled={disabled} disabledReason={disabledReason} blackbox={blackbox} />
+          <EmptyState
+            disabled={disabled}
+            disabledReason={disabledReason}
+            blackbox={blackbox}
+            awaitingRepo={awaitingRepo}
+            openingRepo={agent.openingRepo}
+          />
         }
       >
         <ChatTranscript
@@ -151,7 +163,10 @@ export function CodeAgentPanel({
                 />
               )}
 
-              {agent.error && agent.status === "error" && (
+              {agent.error && agent.status === "error" && agent.limitReached && (
+                <ChatErrorBanner message={agent.error} />
+              )}
+              {agent.error && agent.status === "error" && !agent.limitReached && (
                 <ChatErrorBanner
                   message={agent.error}
                   retryLabel={msg("auto.features.submit.components.steps.codeagentpanel.2")}
@@ -181,9 +196,11 @@ export function CodeAgentPanel({
           disabled
             ? disabledReason ||
               msg("auto.features.submit.components.steps.codeagentpanel.literal.4")
-            : msg("auto.features.submit.components.steps.codeagentpanel.literal.1")
+            : agent.limitReached
+              ? msg("submit.blackbox.agent.limit_placeholder")
+              : msg("auto.features.submit.components.steps.codeagentpanel.literal.1")
         }
-        disabled={disabled}
+        disabled={disabled || agent.limitReached}
         streaming={streaming}
         modelMenu={
           <ComposerModelMenu
@@ -386,11 +403,26 @@ function EmptyState({
   disabled,
   disabledReason,
   blackbox,
+  awaitingRepo,
+  openingRepo,
 }: {
   disabled?: boolean;
   disabledReason?: string;
   blackbox?: boolean;
+  awaitingRepo?: boolean;
+  openingRepo?: string | null;
 }) {
+  if (openingRepo && !disabled) {
+    return (
+      <SharedEmptyState
+        icon={FolderOpen}
+        iconWrap="tile"
+        variant="compact"
+        title={formatMsg("submit.blackbox.agent.opening_title", { repo: openingRepo })}
+        description={msg("submit.blackbox.agent.opening_hint")}
+      />
+    );
+  }
   return (
     <SharedEmptyState
       icon={Robot}
@@ -405,7 +437,11 @@ function EmptyState({
         disabled
           ? disabledReason || msg("auto.features.submit.components.steps.codeagentpanel.literal.16")
           : blackbox
-            ? msg("submit.blackbox.agent.empty_hint")
+            ? msg(
+                awaitingRepo
+                  ? "submit.blackbox.agent.empty_hint_repo"
+                  : "submit.blackbox.agent.empty_hint",
+              )
             : formatMsg("auto.features.submit.components.steps.codeagentpanel.template.2", {
                 p1: TERMS.dataset,
                 p2: TERMS.signature,

@@ -130,6 +130,7 @@
     "webauthn.invalid_credential": "इस पासकी को सत्यापित नहीं किया जा सका।",
     "webauthn.not_found": "पासकी नहीं मिली।",
     "billing.insufficient_funds": "आपका बैलेंस खाली है। रन शुरू करने के लिए बैलेंस जोड़ें।",
+    "wizard_agent.daily_limit_reached": "आपने आज के {limit} मुफ़्त एजेंट टर्न इस्तेमाल कर लिए हैं। एजेंट कल फिर उपलब्ध होगा।",
     "billing.openrouter_oauth_failed": "OpenRouter में साइन-इन पूरा नहीं हुआ। फिर से कोशिश करें।",
     "billing.openrouter_oauth_state_invalid": "OpenRouter साइन-इन लिंक अमान्य है या उसकी समय-सीमा समाप्त हो गई है। फिर से शुरू करें।",
     "billing.openrouter_unreachable": "OpenRouter तक नहीं पहुँचा जा सका। थोड़ी देर में फिर से कोशिश करें।",

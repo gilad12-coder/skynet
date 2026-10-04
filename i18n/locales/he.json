@@ -159,6 +159,7 @@
     "webauthn.not_found": "מפתח הגישה לא נמצא.",
     "submit.no_models_available": "אין {term.modelPlural} זמינים בקטלוג — הגדר/הגדירי קודם API key של ספק.",
     "billing.insufficient_funds": "היתרה שלך ריקה. יש להוסיף כסף כדי להריץ.",
+    "wizard_agent.daily_limit_reached": "ניצלת את {limit} התורות החינמיות של הסוכן להיום. הסוכן יהיה זמין שוב מחר.",
     "billing.openrouter_oauth_failed": "ההתחברות ל-OpenRouter לא הושלמה. נסו שוב.",
     "billing.openrouter_oauth_state_invalid": "קישור ההתחברות ל-OpenRouter לא תקין או שפג תוקפו. התחילו מחדש.",
     "billing.openrouter_unreachable": "לא הצלחנו להגיע ל-OpenRouter. נסו שוב בעוד רגע.",

@@ -1087,6 +1087,15 @@ class Settings(BaseSettings):
             "kill-switch (per-user balance gate still applies)."
         ),
     )
+    wizard_agent_daily_turns: int = Field(
+        default=50,
+        ge=0,
+        description=(
+            "Turns of the black-box wizard agent (its interview and chat) one account may start per "
+            "UTC day. The wizard agent is free, so this cap replaces the credit charge. 0 disables "
+            "the cap."
+        ),
+    )
     interactive_min_balance_cents: int = Field(
         validation_alias=AliasChoices("INTERACTIVE_MIN_BALANCE_CENTS", "INTERACTIVE_MIN_BALANCE_CREDITS"),
         default=5,

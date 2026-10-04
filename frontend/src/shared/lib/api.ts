@@ -32,6 +32,7 @@ import type {
   WorkflowDryRunResponse,
   WorkflowSpec,
 } from "@/shared/types/api";
+import { kickoffOpening } from "@/shared/lib/agent-kickoff";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import type { TurnStats } from "@/shared/ui/agent/types";
 import { parseTurnStats } from "@/shared/ui/agent/turn-stats";
@@ -3071,6 +3072,9 @@ export interface CodeAgentRequest {
   // Explicit reasoning-effort level for the chosen model; absent keeps its default.
   reasoning_effort?: string;
   blackbox?: BlackboxAuthoringContext;
+  // Black-box only: the agent opens the conversation itself; the server
+  // supplies the hidden opening message in place of `user_message`.
+  kickoff?: boolean;
 }
 
 export type CodeAgentToolName =
@@ -3157,7 +3161,8 @@ export interface CodeAgentHandlers {
     metricValid?: boolean;
     validationError?: string | null;
   }) => void;
-  onError: (message: string) => void;
+  /** `code` is the server's error code when the request was refused (e.g. a quota). */
+  onError: (message: string, code?: string) => void;
   signal?: AbortSignal;
 }
 
@@ -3167,7 +3172,18 @@ export async function streamCodeAgent(
   handlers: CodeAgentHandlers,
 ): Promise<void> {
   const processEvent = ({ event, data }: ServerSentEvent) => {
-    if (event === "signature_patch") {
+    const opening = kickoffOpening(event, data);
+    if (opening !== null) {
+      // Only a chat-mode kickoff gets it, so the empty code never lands.
+      handlers.onDone({
+        signature_code: "",
+        metric_code: "",
+        assistant_message: opening,
+        model: null,
+        served_model: null,
+        stats: null,
+      });
+    } else if (event === "signature_patch") {
       handlers.onSignaturePatch(String(data.chunk ?? ""));
     } else if (event === "metric_patch") {
       handlers.onMetricPatch(String(data.chunk ?? ""));
@@ -3266,8 +3282,10 @@ export async function streamCodeAgent(
   if (result.response) {
     const res = result.response;
     const text = await res.text().catch(() => "");
+    const parsed = parseError(text);
     handlers.onError(
-      parseErrorMessage(text) ?? formatMsg("auto.shared.lib.api.template.5", { p1: res.status }),
+      parsed.message ?? formatMsg("auto.shared.lib.api.template.5", { p1: res.status }),
+      parsed.code,
     );
   } else if (!result.started) {
     handlers.onError(msg("auto.shared.lib.api.literal.11"));
@@ -3370,6 +3388,20 @@ export async function streamCodeInterviewTurn(
     },
     signal: handlers.signal,
     onEvent: ({ event, data }) => {
+      const opening = kickoffOpening(event, data);
+      if (opening !== null) {
+        finished = true;
+        handlers.onDone({
+          message: opening,
+          options: [],
+          brief: [],
+          objective: "",
+          done: false,
+          model: null,
+          served_model: null,
+        });
+        return;
+      }
       switch (event) {
         case "reasoning_patch":
           handlers.onReasoningPatch?.(String(data.chunk ?? ""));

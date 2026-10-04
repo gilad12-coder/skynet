@@ -54,22 +54,7 @@ import {
   interviewComposerModel,
 } from "../lib/assist";
 import type { AnnotationMode, AssistState, Category, TaggerConfig } from "../lib/types";
-import { Textarea } from "@/shared/ui/primitives/textarea";
-
-/**
- * Focus a just-appended field without the native focus jump: ``focus()``
- * yanks the nearest scroll container to the element instantly, which reads
- * as the list "jumping" at the add button. Focus is taken without scrolling,
- * then the reveal happens as its own smooth glide (instant under
- * reduced-motion).
- */
-function focusAppendedField(el: HTMLElement): void {
-  el.focus({ preventScroll: true });
-  el.scrollIntoView({
-    block: "nearest",
-    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-  });
-}
+import { focusAppendedField, RULE_MARKER_CLASS, RuleList } from "@/shared/ui/rule-list";
 
 /** The confirmed task contract handed back from the labeling-guide card. */
 interface TaskContract {
@@ -342,9 +327,7 @@ function ContractPendingIndicator() {
       <div aria-hidden className="flex flex-col gap-2">
         {(["w-3/4", "w-4/5", "w-2/3"] as const).map((width, index) => (
           <div key={width} className="flex items-center gap-2.5">
-            <span className="w-4 select-none text-end font-mono text-xs tabular-nums text-muted-foreground/50">
-              {index + 1}
-            </span>
+            <span className={RULE_MARKER_CLASS}>{index + 1}</span>
             <Skeleton height={12} containerClassName={cn("leading-none", width)} />
           </div>
         ))}
@@ -440,7 +423,7 @@ function RubricCard({
   const question = config.question ?? "";
   const [categories, setCategories] = useState<Category[]>(config.categories ?? []);
   // Which just-appended field should grab focus once it mounts.
-  const focusAppended = useRef<"category" | "rule" | null>(null);
+  const focusAppended = useRef<"category" | null>(null);
   // The guide is an editable draft, like the code interview's brief; a
   // re-run interview replaces it.
   const [rules, setRules] = useState<string[]>(assist.rubric);
@@ -491,13 +474,6 @@ function RubricCard({
   };
   const cleanedCategories = categories.filter((c) => c.label.trim());
 
-  const updateRule = (idx: number, value: string) =>
-    setRules((prev) => prev.map((r, i) => (i === idx ? value : r)));
-  const removeRule = (idx: number) => setRules((prev) => prev.filter((_, i) => i !== idx));
-  const addRule = () => {
-    focusAppended.current = "rule";
-    setRules((prev) => [...prev, ""]);
-  };
 
   const taskValid = mode !== "multiclass" || cleanedCategories.length >= 2;
 
@@ -739,52 +715,15 @@ function RubricCard({
                 <CardTitle className="text-lg">{msg("tagger.assist.rubric.guide_title")}</CardTitle>
                 <CardDescription>{msg("tagger.assist.rubric.guide_hint")}</CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-2.5">
-                {rules.map((rule, idx) => (
-                  <div key={idx} className="flex items-start gap-2.5">
-                    <span className="w-4 shrink-0 select-none pt-2.5 text-end font-mono text-xs tabular-nums text-muted-foreground/60">
-                      {idx + 1}
-                    </span>
-                    <Textarea
-                      ref={
-                        idx === rules.length - 1
-                          ? (el: HTMLTextAreaElement | null) => {
-                              if (el && focusAppended.current === "rule") {
-                                focusAppended.current = null;
-                                focusAppendedField(el);
-                              }
-                            }
-                          : undefined
-                      }
-                      value={rule}
-                      onChange={(e) => updateRule(idx, e.target.value)}
-                      rows={2}
-                      aria-label={formatMsg("tagger.assist.rubric.rule_label", {
-                        number: idx + 1,
-                      })}
-                      className="flex-1 text-sm leading-relaxed"
-                      dir="auto"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => removeRule(idx)}
-                      aria-label={msg("tagger.assist.rubric.rule_remove")}
-                      className="mt-1.5"
-                    >
-                      <Trash className="size-3.5 text-muted-foreground" />
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={addRule}
-                  className="gap-1.5 self-start text-muted-foreground"
-                >
-                  <Plus className="size-3.5" />
-                  {msg("tagger.assist.rubric.rule_add")}
-                </Button>
+              <CardContent>
+                <RuleList
+                  rules={rules}
+                  onChange={setRules}
+                  itemLabel={(number) => formatMsg("tagger.assist.rubric.rule_label", { number })}
+                  removeLabel={msg("tagger.assist.rubric.rule_remove")}
+                  addLabel={msg("tagger.assist.rubric.rule_add")}
+                  placeholder={msg("tagger.assist.rubric.rule_placeholder")}
+                />
               </CardContent>
             </Card>
           )}
