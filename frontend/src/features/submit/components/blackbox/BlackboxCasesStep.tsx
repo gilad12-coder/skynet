@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Books, CaretDown, Trash, UploadSimple } from "@/shared/ui/icons";
+import { Books, UploadSimple } from "@/shared/ui/icons";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Button } from "@/shared/ui/primitives/button";
+import { Label } from "@/shared/ui/primitives/label";
 import { Separator } from "@/shared/ui/primitives/separator";
+import { Switch } from "@/shared/ui/primitives/switch";
 import { DatasetPreviewLayout } from "../DatasetPreviewLayout";
 import { DatasetPickerDialog } from "@/features/datasets";
 import { ImportFromMenu } from "@/features/connectors";
@@ -37,7 +39,7 @@ export function BlackboxCasesStep({
     setLibraryOpen,
     clearCases,
   } = w;
-  // Cases are optional: the section opens on demand, and stays open while
+  // Cases are opt-in: the switch opens the section, and it stays on while
   // there are cases in it (a clone, an upload, or the agent staging rows).
   const [requested, setRequested] = useState(false);
   const open = requested || Boolean(parsedCases);
@@ -49,37 +51,19 @@ export function BlackboxCasesStep({
       description={msg("submit.blackbox.cases.desc")}
       trailing={
         <div className="flex items-center gap-2">
-          <Badge variant="secondary" size="sm">
-            {msg("submit.blackbox.cases.optional")}
-          </Badge>
-          {parsedCases ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="gap-1.5"
-              onClick={clearCases}
-            >
-              <Trash className="size-3.5" aria-hidden="true" />
-              {msg("submit.blackbox.cases.remove")}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              aria-expanded={open}
-              aria-controls="bb-cases-body"
-              onClick={() => setRequested((current) => !current)}
-            >
-              {msg("submit.blackbox.cases.add")}
-              <CaretDown
-                className={cn("size-3.5 transition-transform", open && "rotate-180")}
-                aria-hidden="true"
-              />
-            </Button>
-          )}
+          <Label htmlFor="bb-cases-toggle" className="cursor-pointer">
+            {msg("submit.blackbox.cases.add")}
+          </Label>
+          <Switch
+            id="bb-cases-toggle"
+            checked={open}
+            aria-controls="bb-cases-body"
+            onCheckedChange={(checked) => {
+              // Turning cases off means the run has none, so drop any loaded.
+              if (!checked) clearCases();
+              setRequested(checked);
+            }}
+          />
         </div>
       }
     >

@@ -254,22 +254,6 @@ export function BlackboxOptimizerStep({
                   />
                 </Field>
               )}
-              {knobs.ralph && (
-                // A toggle reads as a row, not a column: it takes the full
-                // width with its label at the start and the switch at the end.
-                <div className="flex min-h-[44px] items-center justify-between gap-3 rounded-lg border border-border/50 bg-background/60 px-3 py-2 sm:col-span-2">
-                  <Label htmlFor="bb-proposer-ralph" className="cursor-pointer">
-                    <HelpTip text={tip("submit.blackbox.proposer_ralph")}>
-                      {msg("submit.blackbox.proposer.ralph")}
-                    </HelpTip>
-                  </Label>
-                  <Switch
-                    id="bb-proposer-ralph"
-                    checked={proposer.ralph ?? true}
-                    onCheckedChange={(checked) => updateProposer({ ralph: checked })}
-                  />
-                </div>
-              )}
             </div>
           )}
 
