@@ -208,6 +208,7 @@
     "agent.approval.unknown_call_id": "אין אישור ממתין ל-call_id שצוין.",
     "agent.status.tool_start": "הסוכן מפעיל כלי…",
     "agent.status.tool_end": "הכלי סיים לפעול.",
+    "agent.turn.not_found": "סבב הסוכן לא נמצא או שפג תוקפו.",
     "wizard.column_roles_not_object": "column_roles חייב להיות אובייקט.",
     "wizard.invalid_role_values": "ערכי תפקיד לא תקינים (חייבים להיות אחד מ-{allowed}): {bad}",
     "wizard.field_must_be_list": "{field} חייב להיות רשימה.",

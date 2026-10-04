@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "Verilen call_id için bekleyen bir onay yok.",
     "agent.status.tool_end": "Araç tamamlandı.",
     "agent.status.tool_start": "Aracı, aracı çağırıyor…",
+    "agent.turn.not_found": "Aracı turu bulunamadı veya süresi doldu.",
     "analytics.other_bucket": "Diğer",
     "auth.invalid_token": "Kimlik doğrulama belirteci geçersiz veya süresi dolmuş.",
     "auth.missing_token": "Kimlik doğrulama belirteci gereklidir.",

@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "Nessuna approvazione in sospeso per il call_id indicato.",
     "agent.status.tool_end": "Strumento terminato.",
     "agent.status.tool_start": "L'agente sta invocando lo strumento…",
+    "agent.turn.not_found": "Turno dell'agente non trovato o scaduto.",
     "analytics.other_bucket": "Altro",
     "auth.invalid_token": "Il token di autenticazione non è valido o è scaduto.",
     "auth.missing_token": "Il token di autenticazione è obbligatorio.",

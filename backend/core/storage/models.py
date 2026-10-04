@@ -79,6 +79,51 @@ class AgentApprovalModel(Base):
     )
 
 
+class AgentTurnModel(Base):
+    """One resumable wizard-agent turn, shared across backend replicas.
+
+    The turn runs as a server-side task on the replica that started it, while
+    the browser's stream connection is capped by the hosting edge and may
+    reconnect to any replica. This row carries what those other replicas need:
+    the owner (resume/cancel authorization), the run status, a cancel request
+    for the owning replica to act on, the owner's liveness heartbeat, and the
+    last time any reader was attached. Rows (and their events) are purged an
+    hour after their last heartbeat.
+    """
+
+    __tablename__ = "agent_turns"
+
+    turn_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC), index=True
+    )
+    last_read_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class AgentTurnEventModel(Base):
+    """One SSE event of an :class:`AgentTurnModel`, in emission order.
+
+    ``seq`` is the turn's monotonic event number (the SSE ``id``); a
+    reconnecting stream replays every row after the last ``seq`` it saw.
+    ``data`` is the event payload as JSON text, exactly as it was streamed.
+    """
+
+    __tablename__ = "agent_turn_events"
+
+    turn_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    data: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class UserModel(Base):
     """A Skynet account row, keyed by the cross-app identity.
 

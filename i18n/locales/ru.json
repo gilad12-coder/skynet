@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "Нет ожидающего подтверждения для указанного call_id.",
     "agent.status.tool_end": "Инструмент завершил работу.",
     "agent.status.tool_start": "Агент вызывает инструмент…",
+    "agent.turn.not_found": "Ход агента не найден или истёк.",
     "analytics.other_bucket": "Прочее",
     "auth.invalid_token": "Токен аутентификации недействителен или просрочен.",
     "auth.missing_token": "Требуется токен аутентификации.",

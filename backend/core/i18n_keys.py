@@ -42,6 +42,7 @@ class I18nKey(StrEnum):
     AGENT_APPROVAL_UNKNOWN_CALL_ID = 'agent.approval.unknown_call_id'
     AGENT_STATUS_TOOL_END = 'agent.status.tool_end'
     AGENT_STATUS_TOOL_START = 'agent.status.tool_start'
+    AGENT_TURN_NOT_FOUND = 'agent.turn.not_found'
     ANALYTICS_OTHER_BUCKET = 'analytics.other_bucket'
     AUTH_INVALID_TOKEN = 'auth.invalid_token'
     AUTH_MISSING_TOKEN = 'auth.missing_token'

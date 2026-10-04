@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "No hay ninguna aprobación pendiente para el call_id indicado.",
     "agent.status.tool_end": "Herramienta finalizada.",
     "agent.status.tool_start": "El agente está invocando la herramienta…",
+    "agent.turn.not_found": "No se encontró el turno del agente o ha caducado.",
     "analytics.other_bucket": "Otros",
     "auth.invalid_token": "El token de autenticación no es válido o ha caducado.",
     "auth.missing_token": "Se requiere un token de autenticación.",

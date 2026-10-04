@@ -305,8 +305,12 @@ async def sse_from_events(
     otherwise leaves the connection idle long enough for an intermediary
     (ingress/LB idle timeout) to silently drop it mid-turn.
 
+    A mapping that also carries an ``id`` gets an ``id: <id>`` line, which a
+    resumable stream's client echoes back to resume after that event.
+
     Args:
-        source: Async iterable yielding ``{"event": str, "data": dict}`` mappings.
+        source: Async iterable yielding ``{"event": str, "data": dict}``
+            mappings, optionally with an ``id``.
 
     Yields:
         SSE-formatted strings ready for ``StreamingResponse``.
@@ -329,7 +333,9 @@ async def sse_from_events(
             next_event = None
             name = event["event"]
             payload = json.dumps(event["data"], ensure_ascii=False, default=str)
-            yield f"event: {name}\ndata: {payload}\n\n"
+            event_id = event.get("id")
+            prefix = f"id: {event_id}\n" if event_id is not None else ""
+            yield f"{prefix}event: {name}\ndata: {payload}\n\n"
     finally:
         if next_event is not None:
             next_event.cancel()

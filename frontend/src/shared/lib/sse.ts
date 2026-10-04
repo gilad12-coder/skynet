@@ -1,6 +1,8 @@
 export interface ServerSentEvent {
   event: string;
   data: Record<string, unknown>;
+  /** The SSE `id:` field, when the server numbered the event. */
+  id?: string;
 }
 
 function normalizeStreamChunk(chunk: string): string {
@@ -9,14 +11,17 @@ function normalizeStreamChunk(chunk: string): string {
 
 function parseServerSentEvent(raw: string): ServerSentEvent | null {
   let event = "message";
+  let id: string | undefined;
   const dataLines: string[] = [];
   for (const line of normalizeStreamChunk(raw).split("\n")) {
     if (line.startsWith("event:")) event = line.slice(6).trim();
     else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+    else if (line.startsWith("id:")) id = line.slice(3).trim();
   }
   if (dataLines.length === 0) return null;
   try {
-    return { event, data: JSON.parse(dataLines.join("\n")) as Record<string, unknown> };
+    const data = JSON.parse(dataLines.join("\n")) as Record<string, unknown>;
+    return id === undefined ? { event, data } : { event, data, id };
   } catch {
     return null;
   }

@@ -13,12 +13,13 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field, model_validator
 from starlette.responses import StreamingResponse
 
 from ...service_gateway.agents.code import run_code_agent
 from ...service_gateway.agents.code_interview import interview_turn_stream
+from ..agent_turns import AgentTurnRegistry
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort
@@ -310,8 +311,39 @@ class RequestCodeAuthoringResponse(BaseModel):
     goal: str
 
 
+class CancelAgentTurnResponse(BaseModel):
+    """Envelope for ``POST /optimizations/agent-turns/{turn_id}/cancel``."""
+
+    cancelled: bool
+
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+def _parse_last_event_id(value: str | None) -> int:
+    """Read a resumable stream's ``Last-Event-ID`` header as a sequence number.
+
+    Args:
+        value: Raw header value, if the client sent one.
+
+    Returns:
+        The sequence number, or 0 when absent or not a non-negative integer.
+    """
+    if value is None or not value.strip().isdigit():
+        return 0
+    return int(value.strip())
+
+
 def create_code_agent_router(*, job_store=None) -> APIRouter:
-    """Mount the ``POST /optimizations/ai-generate-code`` SSE endpoint.
+    """Mount the wizard's code-agent and interview SSE endpoints.
+
+    Both streaming routes run their turn through the resumable
+    :mod:`~core.api.agent_turns` registry, alongside the resume and cancel
+    endpoints that serve it.
 
     Args:
         job_store: Optional job-store whose engine backs the balance gate and
@@ -322,6 +354,26 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         A configured :class:`APIRouter` with the code-agent endpoints attached.
     """
     router = APIRouter()
+    turns = AgentTurnRegistry()
+    engine = getattr(job_store, "engine", None) if job_store is not None else None
+    if engine is not None:
+        turns.bind_engine(engine)
+
+    async def _turn_response(source: AsyncIterator[dict], username: str) -> StreamingResponse:
+        """Start ``source`` as a resumable turn and stream its first response window.
+
+        Args:
+            source: The turn's metered event stream.
+            username: Owner of the turn.
+
+        Returns:
+            A :class:`StreamingResponse` of Server-Sent Events whose first
+            event is ``turn_started``.
+        """
+        turn_id = await turns.start(source, owner=username)
+        return StreamingResponse(
+            sse_from_events(turns.stream(turn_id)), media_type="text/event-stream", headers=_SSE_HEADERS
+        )
 
     @router.post(
         "/optimizations/ai-generate-code",
@@ -349,6 +401,12 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
           "model", "served_model"}`` (workflow mode carries ``workflow`` +
           ``workflow_valid`` instead of ``signature_code``)
         * ``error`` — ``{"error": "<message>"}``
+
+        The turn runs server-side independent of this connection: the stream
+        opens with ``turn_started`` (``{"turn_id"}``), every event carries an
+        SSE ``id``, and it closes with ``turn_end``. A response that ends
+        without ``turn_end`` is resumed through
+        ``GET /optimizations/agent-turns/{turn_id}/stream``.
 
         Args:
             req: Request body controlling code-agent inputs and chat history.
@@ -389,15 +447,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             description="Code authoring",
             usage_sink=usage_sink,
         )
-        return StreamingResponse(
-            sse_from_events(metered),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+        return await _turn_response(metered, current_user.username)
 
     @router.post(
         "/optimizations/code-interview",
@@ -422,6 +472,8 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
           ``objective`` is the objective a black-box interview captured over
           a blank field, else "")
         * ``error`` — ``{"error": "<message>"}``
+
+        Framed as a resumable turn exactly like ``ai-generate-code``.
 
         Args:
             req: Dataset (or black-box) context, the client-owned transcript,
@@ -463,15 +515,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             description="Code interview",
             usage_sink=usage_sink,
         )
-        return StreamingResponse(
-            sse_from_events(metered),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+        return await _turn_response(metered, current_user.username)
 
     @router.post(
         "/optimizations/edit-code",
@@ -572,5 +616,63 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             back so the card can display it.
         """
         return RequestCodeAuthoringResponse(awaiting_code=True, goal=req.goal.strip())
+
+    @router.get(
+        "/optimizations/agent-turns/{turn_id}/stream",
+        summary="Resume a wizard agent turn's event stream",
+    )
+    async def resume_agent_turn(
+        turn_id: str,
+        current_user: AuthenticatedUserDep,
+        after: Annotated[int | None, Query(ge=0, description="Last event id already received.")] = None,
+        last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
+    ) -> StreamingResponse:
+        """Replay a turn's events after the client's last one, then tail it.
+
+        The hosting edge cuts any request at 15 minutes, so each response
+        ends after a window and the client reconnects here until it receives
+        ``turn_end``. Works from any replica: events of a turn owned by
+        another replica are read from the shared store.
+
+        Args:
+            turn_id: Turn returned by the ``turn_started`` event.
+            current_user: The authenticated caller; must own the turn.
+            after: Last event id the client holds; wins over the header.
+            last_event_id: Standard SSE resume header, used when ``after`` is absent.
+
+        Returns:
+            A :class:`StreamingResponse` of Server-Sent Events.
+
+        Raises:
+            DomainError: 404 when the turn is unknown, expired or not the caller's.
+        """
+        await turns.authorize(turn_id, current_user.username)
+        after_seq = after if after is not None else _parse_last_event_id(last_event_id)
+        return StreamingResponse(
+            sse_from_events(turns.stream(turn_id, after_seq=after_seq)),
+            media_type="text/event-stream",
+            headers=_SSE_HEADERS,
+        )
+
+    @router.post(
+        "/optimizations/agent-turns/{turn_id}/cancel",
+        response_model=CancelAgentTurnResponse,
+        summary="Stop a running wizard agent turn",
+    )
+    async def cancel_agent_turn(turn_id: str, current_user: AuthenticatedUserDep) -> CancelAgentTurnResponse:
+        """Stop a turn the caller started (the wizard's explicit Stop).
+
+        Idempotent: stopping a finished, unknown or foreign turn is a no-op
+        reported as ``cancelled: false``.
+
+        Args:
+            turn_id: Turn to stop.
+            current_user: The authenticated caller; must own the turn.
+
+        Returns:
+            A :class:`CancelAgentTurnResponse`; ``cancelled`` is true when a
+            running turn was stopped or flagged for its owning replica.
+        """
+        return CancelAgentTurnResponse(cancelled=await turns.cancel(turn_id, current_user.username))
 
     return router

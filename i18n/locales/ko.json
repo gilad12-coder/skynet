@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "지정된 call_id에 대해 대기 중인 승인이 없습니다.",
     "agent.status.tool_end": "도구 실행이 완료되었습니다.",
     "agent.status.tool_start": "에이전트가 도구를 호출하는 중…",
+    "agent.turn.not_found": "에이전트 턴을 찾을 수 없거나 만료되었습니다.",
     "analytics.other_bucket": "기타",
     "auth.invalid_token": "인증 토큰이 유효하지 않거나 만료되었습니다.",
     "auth.missing_token": "인증 토큰이 필요합니다.",

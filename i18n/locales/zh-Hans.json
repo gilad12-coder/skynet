@@ -146,6 +146,7 @@
     "agent.approval.unknown_call_id": "没有与该 call_id 对应的待审批项。",
     "agent.status.tool_end": "工具已完成。",
     "agent.status.tool_start": "智能体正在调用工具…",
+    "agent.turn.not_found": "未找到智能体回合，或已过期。",
     "analytics.other_bucket": "其他",
     "auth.invalid_token": "身份验证令牌无效或已过期。",
     "auth.missing_token": "需要提供身份验证令牌。",
