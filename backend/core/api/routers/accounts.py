@@ -582,22 +582,23 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
     ) -> OkResponse:
         """Email a reset code to an account that has forgotten its password.
 
-        Returns the same acknowledgement whether or not the address has an
-        account, so this route can't be used to enumerate registered emails. A
-        per-account cooldown bounds how often a code is sent, keeping it from
-        being a mail-bomb oracle since no password is required here.
+        An unknown address is refused, so the sign-in card can say so instead
+        of asking for a code that will never arrive. A per-account cooldown
+        bounds how often a code is sent, keeping it from being a mail-bomb
+        oracle since no password is required here.
 
         Args:
             body: The account email to send a code to.
             x_internal_auth: Shared-secret header proving the trusted frontend.
 
         Returns:
-            Acknowledgement (identical for known and unknown emails).
+            Acknowledgement that a code was sent, or is still on its way.
 
         Raises:
             DomainError: 403 on a bad internal secret; 422 when the deployment
                 has no SMTP relay (a global, account-independent condition);
-                502 when the relay rejects the send.
+                404 ``accounts.not_found`` when no account uses the email; 502
+                when the relay rejects the send.
         """
         _require_internal_auth(x_internal_auth)
         if not email_configured():
@@ -605,7 +606,9 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         email = _normalise_email(body.email)
         enforce_account_rate(email, "pwreset")
         with Session(job_store.engine) as session:
-            if session.get(UserModel, email) is None or reset_code_on_cooldown(session, email):
+            if session.get(UserModel, email) is None:
+                raise DomainError("accounts.not_found", status=404)
+            if reset_code_on_cooldown(session, email):
                 return OkResponse()
             code = issue_reset_code(session, email)
             session.commit()

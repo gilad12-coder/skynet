@@ -1,6 +1,5 @@
 "use client";
 
-import { EmptyState } from "@/shared/ui/empty-state";
 import * as React from "react";
 import { toast } from "react-toastify";
 import {
@@ -327,9 +326,7 @@ export function SecurityTab() {
         </TooltipButton>
       </SettingsRow>
 
-      {status.passkeys.length === 0 ? (
-        <EmptyState variant="list" title={msg("settings.security.passkeys.empty")} />
-      ) : (
+      {status.passkeys.length > 0 && (
         <ul className="flex flex-col gap-2.5 ps-7">
           {status.passkeys.map((passkey) => (
             <li

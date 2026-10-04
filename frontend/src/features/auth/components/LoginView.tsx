@@ -279,10 +279,9 @@ export function LoginView() {
   }
 
   /**
-   * Ask the backend to email a reset code. The response is deliberately identical
-   * for known and unknown addresses, so a success only advances the card to the
-   * code step; it never reveals whether the email has an account. Doubles as the
-   * "resend" action on the code step.
+   * Ask the backend to email a reset code. An unknown address comes back as an
+   * error, so the card stays on the email step instead of asking for a code that
+   * will never arrive. Doubles as the "resend" action on the code step.
    */
   async function requestResetCode(): Promise<void> {
     const cleanEmail = resetEmail.trim().toLowerCase();
