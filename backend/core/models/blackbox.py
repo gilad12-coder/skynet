@@ -203,7 +203,9 @@ class BlackboxRepoSource(BaseModel):
 # can be metered independently; ``model`` remains for stored-client compatibility.
 # ``repo``: every version is a patch against ``repo.commit``. The scorer runs
 # on a checkout with the patch applied, after ``setup_command``; the coding
-# agent that writes versions is the request's ``proposer``.
+# agent that writes versions is the request's ``proposer``. The wizard never
+# sends a ``setup_command`` for a repository: the parent infers one from the
+# fetched tree while staging it and stores it back on the run.
 class BlackboxTarget(BaseModel):
     kind: Literal["text", "agent", "repo"] = BLACKBOX_TARGET_TEXT
     harness: str = BLACKBOX_HARNESS_PI

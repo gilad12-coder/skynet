@@ -8,6 +8,7 @@ import pytest
 
 from core.billing.operation_pricing import OperationCharge, OperationQuote, json_fingerprint
 from core.billing.recovery_admission import (
+    PARENT_HOSTS_KEY,
     RecoveryAdmissionError,
     build_recovery_plan,
     model_call_bound,
@@ -15,6 +16,7 @@ from core.billing.recovery_admission import (
     validate_recovery_plan,
     validate_recovery_runtime,
 )
+from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS, SANDBOX_NETWORK_BYTES_CAP
 
 
 def _manifest() -> dict[str, str]:
@@ -128,3 +130,39 @@ def test_recovery_funds_the_network_allowance_of_a_run_that_reaches_anthropic() 
     assert networked["request"]["network_disabled"] is False
     assert networked["request"]["allowed_hosts"] == ["api.anthropic.com"]
     assert Decimal(networked["max_cents"]) > Decimal(offline["max_cents"])
+
+
+def test_recovery_funds_the_parent_scoring_box_and_its_registry_hosts() -> None:
+    """Add the parent's registry-reaching box to the bound, and refuse a restore whose box list changed."""
+    manifest = _manifest()
+    offline = _runtime()
+    with_parent = runtime_bound(
+        "vercel",
+        {"image": "fixture@sha256:" + "a" * 64, "lifetime_seconds": 60, PARENT_HOSTS_KEY: list(PACKAGE_REGISTRY_HOSTS)},
+    )
+    parent = with_parent["parent_box"]
+    assert parent["request"]["allowed_hosts"] == list(PACKAGE_REGISTRY_HOSTS)
+    assert parent["request"]["network_bytes_cap"] == SANDBOX_NETWORK_BYTES_CAP
+    assert with_parent["request"] == offline["request"]
+    assert Decimal(with_parent["max_cents"]) == Decimal(offline["max_cents"]) + Decimal(parent["max_cents"])
+    assert Decimal(parent["max_cents"]) > Decimal(offline["max_cents"])
+
+    plan = build_recovery_plan(
+        manifest,
+        runtime=with_parent,
+        seed_bounds=[_bound()],
+        execution_bound={"model_calls": [_bound()], "max_cents": "2", "max_wallet_cents": "2"},
+        seed_marker_seen=True,
+    )
+    validated = validate_recovery_plan(plan, manifest)
+    assert Decimal(validated["max_cents"]) == Decimal(4) + Decimal(with_parent["max_cents"])
+    validate_recovery_runtime(validated, with_parent)
+    with pytest.raises(RecoveryAdmissionError, match="differs"):
+        validate_recovery_runtime(validated, offline)
+
+    understated = dict(plan)
+    understated["runtime"] = {**with_parent, "max_cents": offline["max_cents"]}
+    understated.pop("fingerprint")
+    understated["fingerprint"] = json_fingerprint(understated)
+    with pytest.raises(RecoveryAdmissionError):
+        validate_recovery_plan(understated, manifest)

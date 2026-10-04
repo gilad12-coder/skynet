@@ -37,6 +37,31 @@ _BYTES_PER_GB = Decimal(1_000_000_000)
 # Vercel cannot cap a box's transfer, so this is the most a networked box is
 # funded for; a box that moves more stays pending for manual reconciliation.
 SANDBOX_NETWORK_BYTES_CAP = 2_000_000_000
+# The only hosts a repository's setup may reach, and only from the parent's
+# scorer box before any version runs in it. Beyond the named registries:
+# index.crates.io is cargo's default sparse index, sum.golang.org is the
+# checksum database ``go`` verifies modules against, registry.yarnpkg.com is
+# where Yarn 1 lockfiles point, and codeload/objects/release-assets serve the
+# tarballs a ``git+https`` dependency or a GitHub release download redirects to.
+PACKAGE_REGISTRY_HOSTS = tuple(
+    sorted(
+        {
+            "codeload.github.com",
+            "crates.io",
+            "files.pythonhosted.org",
+            "github.com",
+            "index.crates.io",
+            "objects.githubusercontent.com",
+            "proxy.golang.org",
+            "pypi.org",
+            "registry.npmjs.org",
+            "registry.yarnpkg.com",
+            "release-assets.githubusercontent.com",
+            "static.crates.io",
+            "sum.golang.org",
+        }
+    )
+)
 _MS_PER_HOUR = Decimal(3_600_000)
 _IMMUTABLE_IMAGE = re.compile(r".+@sha256:[0-9a-f]{64}\Z")
 _SESSION_FIELDS = (

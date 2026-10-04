@@ -4065,8 +4065,6 @@
   "submit.blackbox.repo.secret_value": "Value",
   "submit.blackbox.repo.secrets_hint": "Environment variables for setup and scoring. The agent never sees them.",
   "submit.blackbox.repo.secrets_label": "Secrets",
-  "submit.blackbox.repo.setup_hint": "Runs on every version before it's scored. Optional.",
-  "submit.blackbox.repo.setup_label": "Setup command",
   "submit.blackbox.repo.validation.path_absolute": "Paths must be relative to the repository root.",
   "submit.blackbox.repo.validation.path_outside": "Paths can't leave the repository or point into .git.",
   "submit.blackbox.repo.validation.paths": "Add at least one editable path.",

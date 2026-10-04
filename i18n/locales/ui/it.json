@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "Valore",
   "submit.blackbox.repo.secrets_hint": "Variabili d'ambiente per la configurazione e la valutazione. L'agente non le vede mai.",
   "submit.blackbox.repo.secrets_label": "Secret",
-  "submit.blackbox.repo.setup_hint": "Viene eseguito su ogni versione prima della valutazione. Facoltativo.",
-  "submit.blackbox.repo.setup_label": "Comando di configurazione",
   "submit.blackbox.repo.validation.path_absolute": "I percorsi devono essere relativi alla radice del repository.",
   "submit.blackbox.repo.validation.path_outside": "I percorsi non possono uscire dal repository né puntare dentro .git.",
   "submit.blackbox.repo.validation.paths": "Aggiungi almeno un percorso modificabile.",

@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "Значение",
   "submit.blackbox.repo.secrets_hint": "Переменные окружения для настройки и оценки. Агент их никогда не видит.",
   "submit.blackbox.repo.secrets_label": "Секреты",
-  "submit.blackbox.repo.setup_hint": "Выполняется для каждой версии перед оценкой. Необязательно.",
-  "submit.blackbox.repo.setup_label": "Команда настройки",
   "submit.blackbox.repo.validation.path_absolute": "Пути должны быть относительными к корню репозитория.",
   "submit.blackbox.repo.validation.path_outside": "Пути не могут выходить за пределы репозитория или указывать в .git.",
   "submit.blackbox.repo.validation.paths": "Добавьте хотя бы один редактируемый путь.",

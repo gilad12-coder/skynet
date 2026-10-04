@@ -48,6 +48,7 @@ from ..billing.protected_credentials import (
 from ..billing.protected_execution import bind_protected_sandbox, claude_code_anthropic_key
 from ..billing.recovery_admission import validate_recovery_plan
 from ..billing.runtime import BudgetRuntime, UsagePendingError
+from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..config import settings
 from ..constants import (
     OPTIMIZATION_TYPE_BLACKBOX,
@@ -109,6 +110,7 @@ from .memory_guard import memory_usage_fraction
 from .repo_staging import (
     StagedRepository,
     bind_repo_scorer,
+    infer_repo_setup,
     is_repo_payload,
     publish_improvement,
     stage_repository,
@@ -1002,6 +1004,11 @@ class BackgroundWorker:
                             and claude_code_proposes(blackbox_payload)
                             else None
                         ),
+                        parent_hosts=(
+                            PACKAGE_REGISTRY_HOSTS
+                            if optimization_type == OPTIMIZATION_TYPE_BLACKBOX and is_repo_payload(payload_dict)
+                            else ()
+                        ),
                     )
                     budget_gateway.validate_recovery_runtime(execution_runtime)
                     checkpoint_tracker.update(
@@ -1036,6 +1043,9 @@ class BackgroundWorker:
                             binding_id=job_data["execution_budget_id"],
                             engine=byok_engine,
                         )
+                        inferred_setup = infer_repo_setup(payload_dict, staged_repository, budget_gateway)
+                        if inferred_setup is not None:
+                            self._record_setup_command(optimization_id, inferred_setup)
                         bind_repo_scorer(payload_dict, staged_repository, budget_gateway, owner_id=optimization_id)
                         self._touch_activity(worker_id)
                 if has_exposed_execution_credentials(
@@ -1657,6 +1667,21 @@ class BackgroundWorker:
             ``True`` while ``start`` has been called and ``stop`` has not.
         """
         return self._running
+
+    def _record_setup_command(self, optimization_id: str, command: str) -> None:
+        """Store an inferred repository setup command on the run's own payload.
+
+        The run's configuration page then shows what was inferred, and a
+        resumed run reuses it instead of asking again.
+
+        Args:
+            optimization_id: The repository run.
+            command: The inferred setup command.
+        """
+        stored = self._job_store.get_job(optimization_id).get("payload")
+        if isinstance(stored, dict) and isinstance(stored.get("target"), dict):
+            stored["target"]["setup_command"] = command
+            self._job_store.update_job(optimization_id, payload=stored)
 
     def _touch_activity(self, worker_id: int) -> None:
         """Record liveness and renew the lease on this worker's current job.

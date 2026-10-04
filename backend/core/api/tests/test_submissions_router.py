@@ -1929,6 +1929,7 @@ def test_submit_blackbox_run_accepts_repository_targets_without_storing_secret_v
 
     monkeypatch.setattr(preflight_execution, "stage_repository", stage)
     monkeypatch.setattr(preflight_execution, "bind_repo_scorer", lambda *args, **kwargs: None)
+    monkeypatch.setattr(preflight_execution, "infer_repo_setup", lambda *args, **kwargs: None)
     payload = {
         **_blackbox_payload(),
         "strategy": {"mode": "single", "engine": "autoresearch"},

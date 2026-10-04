@@ -20,6 +20,7 @@ from ..billing.protected_credentials import (
 )
 from ..billing.protected_execution import bind_protected_sandbox, protected_vercel_unavailable_reason
 from ..billing.runtime import BudgetRuntime, UsagePendingError
+from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..config import settings
 from ..constants import OPTIMIZATION_TYPE_BLACKBOX, TOKEN_SOURCE_MANAGED
 from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
@@ -27,7 +28,13 @@ from ..models.common import SplitFractions
 from ..service_gateway.optimization.blackbox.preflight import preflight_lifetime_seconds
 from ..service_gateway.optimization.data import split_examples
 from ..storage.preflights import PreflightStore
-from ..worker.repo_staging import StagedRepository, bind_repo_scorer, is_repo_payload, stage_repository
+from ..worker.repo_staging import (
+    StagedRepository,
+    bind_repo_scorer,
+    infer_repo_setup,
+    is_repo_payload,
+    stage_repository,
+)
 from ..worker.vercel_dspy import run_vercel_dspy
 from .model_billing import normalize_model_token_sources
 from .preflight_progress import report_preflight_phase
@@ -458,6 +465,9 @@ def _perform_preflight(
             workflow=request.workflow,
             owner_id=document["id"],
             lifetime_seconds=lifetime_seconds,
+            parent_hosts=(
+                PACKAGE_REGISTRY_HOSTS if request.workflow == "anything" and is_repo_payload(payload) else ()
+            ),
         )
         protected = gateway.protect_payload(
             payload,
@@ -476,6 +486,7 @@ def _perform_preflight(
                 binding_id=request.execution_budget_id,
                 engine=engine,
             )
+            infer_repo_setup(protected, staged, gateway)
             bind_repo_scorer(protected, staged, gateway, owner_id=f"preflight-{identity}")
         result = (
             _verify_anything(gateway, protected, scope=request.scope, identity=identity)

@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "値",
   "submit.blackbox.repo.secrets_hint": "セットアップとスコアリングで使う環境変数です。エージェントからは参照できません。",
   "submit.blackbox.repo.secrets_label": "シークレット",
-  "submit.blackbox.repo.setup_hint": "各バージョンのスコアリング前に実行されます。任意。",
-  "submit.blackbox.repo.setup_label": "セットアップコマンド",
   "submit.blackbox.repo.validation.path_absolute": "パスはリポジトリのルートからの相対パスで指定してください。",
   "submit.blackbox.repo.validation.path_outside": "パスはリポジトリの外や .git の中を指すことはできません。",
   "submit.blackbox.repo.validation.paths": "編集可能なパスを 1 つ以上追加してください。",

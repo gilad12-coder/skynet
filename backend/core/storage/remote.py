@@ -21,12 +21,14 @@ from sqlalchemy.orm import Session, aliased, defer, sessionmaker
 from ..billing.budgets import BudgetInFlightError, BudgetInsufficientError
 from ..billing.plans import has_pro_entitlement
 from ..billing.recovery_admission import (
+    PARENT_HOSTS_KEY,
     RecoveryAdmissionError,
     headroom_price_snapshot,
     runtime_bound,
     validate_recovery_plan,
     validate_recovery_runtime,
 )
+from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, settings
 from ..constants import (
     OPTIMIZATION_TYPE_TAGGING,
@@ -89,6 +91,10 @@ def _current_recovery_runtime(payload: dict[str, Any], optimization_type: str | 
         is_blackbox = optimization_type == "blackbox" or "strategy" in payload
         workflow = "anything" if is_blackbox else "dspy"
         image = settings.vercel_sandbox_image if workflow == "anything" else settings.dspy_sandbox_image
+        target = payload.get("target")
+        # A repository run also opens the parent's scoring box, which reaches
+        # package registries during setup, so its restore funds that box too.
+        repo_run = is_blackbox and isinstance(target, dict) and target.get("kind") == "repo"
         return runtime_bound(
             "vercel",
             {
@@ -96,6 +102,7 @@ def _current_recovery_runtime(payload: dict[str, Any], optimization_type: str | 
                 "lifetime_seconds": min(
                     settings.vercel_sandbox_max_lifetime_seconds, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
                 ),
+                **({PARENT_HOSTS_KEY: list(PACKAGE_REGISTRY_HOSTS)} if repo_run else {}),
             },
         )
     except (TypeError, ValueError) as error:

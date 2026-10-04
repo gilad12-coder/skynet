@@ -40,6 +40,7 @@ from .protected_credentials import (
     SCORER_URL_REVISION_FIELD,
 )
 from .recovery_admission import (
+    PARENT_HOSTS_KEY,
     build_recovery_plan,
     model_call_bound,
     quote_fits_bound,
@@ -127,6 +128,10 @@ class SandboxControl(Protocol):
 
     def run(self, payload: Mapping[str, Any], on_output: Any = None) -> Any:
         """Execute an owned guest command and return its terminal result."""
+        ...
+
+    def parent_runtime(self, allowed_hosts: tuple[str, ...]) -> Any:
+        """Return a runtime for the parent's own boxes, never reachable by the guest."""
         ...
 
     def close(self) -> None:
@@ -611,6 +616,33 @@ class ModelGateway:
             **({"allowed_hosts": sorted(allowed_hosts)} if allowed_hosts else {}),
         }
 
+    def fund_parent_sandbox(self, allowed_hosts: tuple[str, ...]) -> None:
+        """Count one more parent-owned box reaching ``allowed_hosts`` in this run's recovery bound.
+
+        Args:
+            allowed_hosts: Hosts the parent's box may reach before it goes offline.
+
+        Raises:
+            ValueError: When no sandbox broker is bound yet.
+        """
+        if self._descriptor is None:
+            raise ValueError("This gateway has no sandbox broker to open a parent box with.")
+        self._descriptor[PARENT_HOSTS_KEY] = sorted(set(allowed_hosts))
+
+    def parent_sandbox_runtime(self) -> Any:
+        """Return the runtime the parent opens its own scoring box with.
+
+        Returns:
+            A runtime limited to the hosts :meth:`fund_parent_sandbox` recorded.
+
+        Raises:
+            ValueError: When the parent box was never funded.
+        """
+        hosts = (self._descriptor or {}).get(PARENT_HOSTS_KEY)
+        if self._sandbox is None or hosts is None:
+            raise ValueError("Fund the parent's box before opening it.")
+        return self._sandbox.parent_runtime(tuple(hosts))
+
     def dispatch_guest(
         self, token: str, path: str, body: Mapping[str, Any], headers: Mapping[str, str]
     ) -> ModelHTTPResult:
@@ -738,7 +770,9 @@ class ModelGateway:
             source["mcp_url"] = "https://scoped-tools.invalid/mcp"
             result["_skynet_tools_route"] = {"url": self.url, "token": self._tool_token}
         if self._descriptor is not None:
-            result["_budget_gateway_descriptor"] = dict(self._descriptor)
+            result["_budget_gateway_descriptor"] = {
+                key: value for key, value in self._descriptor.items() if key != PARENT_HOSTS_KEY
+            }
         target = result.get("target")
         target_config = result.get("task_model_config") if isinstance(target, dict) else None
         target_route: dict[str, str] | None = None

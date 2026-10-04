@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "值",
   "submit.blackbox.repo.secrets_hint": "用嚟做設定同評分嘅環境變數。代理永遠睇唔到。",
   "submit.blackbox.repo.secrets_label": "密鑰",
-  "submit.blackbox.repo.setup_hint": "每個版本評分之前都會運行。可選。",
-  "submit.blackbox.repo.setup_label": "設定指令",
   "submit.blackbox.repo.validation.path_absolute": "路徑必須係相對於倉庫根目錄。",
   "submit.blackbox.repo.validation.path_outside": "路徑唔可以離開倉庫，亦唔可以指向 .git 入面。",
   "submit.blackbox.repo.validation.paths": "請至少加一個可編輯路徑。",

@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "Значення",
   "submit.blackbox.repo.secrets_hint": "Змінні середовища для налаштування та оцінювання. Агент ніколи їх не бачить.",
   "submit.blackbox.repo.secrets_label": "Секрети",
-  "submit.blackbox.repo.setup_hint": "Виконується для кожної версії перед оцінюванням. Необов’язково.",
-  "submit.blackbox.repo.setup_label": "Команда налаштування",
   "submit.blackbox.repo.validation.path_absolute": "Шляхи мають бути відносними до кореня репозиторію.",
   "submit.blackbox.repo.validation.path_outside": "Шляхи не можуть виходити за межі репозиторію або вказувати в .git.",
   "submit.blackbox.repo.validation.paths": "Додайте принаймні один шлях для редагування.",

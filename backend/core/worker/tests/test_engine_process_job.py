@@ -891,3 +891,16 @@ def test_process_job_does_not_bill_platform_infrastructure_interruption(
     )
     assert store._jobs["opt-bill-infra"]["status"] == "pending"
     debit.assert_not_called()
+
+
+def test_an_inferred_setup_command_is_stored_on_the_run(worker: BackgroundWorker, store: FakeJobStore) -> None:
+    """The run's own payload keeps the inferred command, so its config page shows it."""
+    store.seed_job("opt-repo", payload={"target": {"kind": "repo", "repo": {"repository": "acme/app"}}})
+
+    worker._record_setup_command("opt-repo", "uv sync --frozen")
+
+    assert store._jobs["opt-repo"]["payload"]["target"] == {
+        "kind": "repo",
+        "repo": {"repository": "acme/app"},
+        "setup_command": "uv sync --frozen",
+    }

@@ -284,7 +284,6 @@ export function useBlackboxWizard(
   const [repoName, setRepoName] = useState("");
   const [repoBranch, setRepoBranch] = useState("");
   const [repoPaths, setRepoPaths] = useState(".");
-  const [repoSetup, setRepoSetup] = useState("");
   const [repoSecrets, setRepoSecrets] = useState<RepoSecretRow[]>([]);
 
   const [codeAssistMode, setCodeAssistMode] = useState<"auto" | "manual">(() =>
@@ -711,7 +710,6 @@ export function useBlackboxWizard(
             setRepoName(repo.repository);
             setRepoBranch(repo.branch ?? "");
             setRepoPaths(repo.editable_paths.join("\n"));
-            setRepoSetup(source.target?.setup_command ?? "");
             // Typed values are scrubbed from the stored run; saved ones keep their reference.
             setRepoSecrets(
               (repo.secrets ?? []).map((row) => ({
@@ -967,7 +965,6 @@ export function useBlackboxWizard(
 
   const repoTarget = (): BlackboxTarget => ({
     kind: "repo",
-    setup_command: repoSetup.trim() || null,
     repo: {
       provider: "github",
       repository: repoName.trim(),
@@ -1709,8 +1706,6 @@ export function useBlackboxWizard(
     setRepoBranch,
     repoPaths,
     setRepoPaths,
-    repoSetup,
-    setRepoSetup,
     repoSecrets,
     setRepoSecrets,
     step,

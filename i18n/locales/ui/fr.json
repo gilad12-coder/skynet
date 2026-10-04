@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "Valeur",
   "submit.blackbox.repo.secrets_hint": "Variables d'environnement pour l'installation et l'évaluation. L'agent ne les voit jamais.",
   "submit.blackbox.repo.secrets_label": "Secrets",
-  "submit.blackbox.repo.setup_hint": "S'exécute sur chaque version avant son évaluation. Facultatif.",
-  "submit.blackbox.repo.setup_label": "Commande d'installation",
   "submit.blackbox.repo.validation.path_absolute": "Les chemins doivent être relatifs à la racine du dépôt.",
   "submit.blackbox.repo.validation.path_outside": "Les chemins ne peuvent pas sortir du dépôt ni pointer dans .git.",
   "submit.blackbox.repo.validation.paths": "Ajoutez au moins un chemin modifiable.",

@@ -2,7 +2,7 @@
 
 The guest that hosts the coding agent never sees the secrets or this box: it
 posts each version through the parent's evaluator capability, and the parent
-rebuilds the checkout, runs the setup command, then calls the user's
+lays it out on a copy of the already set-up tree, then calls the user's
 ``score(repo_path)`` (or ``score(repo_path, case)``) on it.
 
 A scorer may return per-case scores under ``cases``, a mapping of case name to
@@ -30,7 +30,9 @@ CASES_KEY = "cases"
 REPO_SCORER_URL = "https://scoped-evaluator.invalid/score"
 RUNNER_PATH = f"{REPO_DIR}/skynet_runner.py"
 CALLS_DIR = f"{REPO_DIR}/calls"
-# The guest waits for setup and the scorer together, so its relay gets both allowances.
+# The guest waits for the version's checkout and the scorer together; copying a
+# prepared tree with its installed dependencies can take a while, so its relay
+# gets an allowance on top of the scorer's own timeout.
 SETUP_ALLOWANCE_SECONDS = 1_800.0
 
 
@@ -83,7 +85,7 @@ class RepoScorer:
         self._lock = threading.Lock()
 
     def score(self, patch: str, case: Any = None) -> dict[str, Any]:
-        """Check out one version, set it up and score it.
+        """Check out one version and score it.
 
         Args:
             patch: The version as a git patch against the starting commit.
@@ -93,8 +95,8 @@ class RepoScorer:
             ``{"score": ..., **side_info}``, secrets redacted.
 
         Raises:
-            RepoScoreError: When the version breaks the path rules, does not
-                apply or set up, or the scorer fails or returns no score.
+            RepoScoreError: When the version breaks the path rules or does not
+                apply, or the scorer fails or returns no score.
         """
         secrets = list(self._workspace.secrets.values())
         # Checkout and scoring share one lock: the next version's checkout
@@ -102,10 +104,7 @@ class RepoScorer:
         with self._lock:
             checkout = self._workspace.checkout(patch)
             if checkout.path is None:
-                detail = " ".join(checkout.problems)
-                if checkout.setup_log:
-                    detail += f"\n{checkout.setup_log}"
-                raise RepoScoreError(detail)
+                raise RepoScoreError(" ".join(checkout.problems))
             session = self._workspace.session()
             root = self._box_root(session)
             self._calls += 1
@@ -135,6 +134,16 @@ class RepoScorer:
         side_info = dict(output.get("side_info") or {})
         per_case_scores(side_info)
         return {**side_info, "score": float(output["score"])}
+
+    def prepare(self) -> None:
+        """Set the repository up and take its box offline before any version is sent.
+
+        Raises:
+            RepoSetupError: When the repository cannot be unpacked or set up.
+            NetworkCutoffError: When the box's network cannot be switched off and confirmed.
+        """
+        with self._lock:
+            self._workspace.session()
 
     def dispatch(self, body: Mapping[str, Any]) -> ModelHTTPResult:
         """Answer one guest scoring request through the evaluator capability.

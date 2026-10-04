@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "值",
   "submit.blackbox.repo.secrets_hint": "用于安装配置和评分的环境变量。智能体永远看不到它们。",
   "submit.blackbox.repo.secrets_label": "密钥",
-  "submit.blackbox.repo.setup_hint": "在每个版本评分前运行。可选。",
-  "submit.blackbox.repo.setup_label": "安装配置命令",
   "submit.blackbox.repo.validation.path_absolute": "路径必须相对于仓库根目录。",
   "submit.blackbox.repo.validation.path_outside": "路径不能超出仓库范围，也不能指向 .git 内部。",
   "submit.blackbox.repo.validation.paths": "请至少添加一个可编辑路径。",

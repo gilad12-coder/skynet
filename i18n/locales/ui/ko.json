@@ -53,8 +53,6 @@
   "submit.blackbox.repo.secret_value": "값",
   "submit.blackbox.repo.secrets_hint": "설정과 채점에 사용되는 환경 변수입니다. 에이전트는 이 값을 볼 수 없습니다.",
   "submit.blackbox.repo.secrets_label": "시크릿",
-  "submit.blackbox.repo.setup_hint": "채점 전에 모든 버전에서 실행됩니다. 선택 사항입니다.",
-  "submit.blackbox.repo.setup_label": "설정 명령",
   "submit.blackbox.repo.validation.path_absolute": "경로는 리포지토리 루트 기준의 상대 경로여야 합니다.",
   "submit.blackbox.repo.validation.path_outside": "경로는 리포지토리 밖이나 .git 내부를 가리킬 수 없습니다.",
   "submit.blackbox.repo.validation.paths": "편집 가능한 경로를 하나 이상 추가하세요.",
