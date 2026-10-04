@@ -320,7 +320,8 @@ def tree_entries(token: str, full_name: str, branch: str) -> dict[str, Any]:
         branch: Branch name; empty for the default branch.
 
     Returns:
-        ``{"entries": [{"path", "type": "file" | "dir"}], "truncated": bool}``.
+        ``{"entries": [{"path", "type": "file" | "dir", "size"?}], "truncated": bool}``;
+        ``size`` is a file's byte count, when GitHub reports it.
     """
     owner, name = _split_repo(full_name)
     # A branch name may hold slashes; encoded, it stays one path segment.
@@ -335,7 +336,11 @@ def tree_entries(token: str, full_name: str, branch: str) -> dict[str, Any]:
         raise DomainError("connectors.provider_error", status=502, provider=label(PROVIDER), status_code=200)
     kinds = {"blob": "file", "tree": "dir"}
     entries = [
-        {"path": item["path"], "type": kinds[item.get("type")]}
+        {
+            "path": item["path"],
+            "type": kinds[item.get("type")],
+            **({"size": item["size"]} if isinstance(item.get("size"), int) else {}),
+        }
         for item in body.get("tree") or []
         if isinstance(item, dict) and item.get("type") in kinds and isinstance(item.get("path"), str)
     ]

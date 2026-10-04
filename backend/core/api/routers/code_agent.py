@@ -21,12 +21,14 @@ from ...connectors import github
 from ...connectors.github_repo import RepoFetchError, github_token
 from ...service_gateway.agents.code import run_code_agent
 from ...service_gateway.agents.code_interview import interview_turn_stream
-from ...service_gateway.agents.repo_browser import RepoBrowser
+from ...service_gateway.agents.kickoff import fits_kickoff_budget, measured_bytes, oversized_kickoff
+from ...service_gateway.agents.repo_browser import KICKOFF_MESSAGE, RepoBrowser
 from ..agent_turns import AgentTurnRegistry
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort
 from ..model_router import effective_reasoning_effort, route_menu_model
+from ..wizard_agent_quota import consume_wizard_agent_turn
 from ._helpers import enforce_llm_balance, sse_from_events, stream_with_llm_metering
 
 logger = logging.getLogger(__name__)
@@ -107,6 +109,32 @@ def open_repo_browser(engine: Any, username: str, blackbox: BlackboxAuthoringCon
         entries=tree["entries"],
         truncated=tree["truncated"],
     )
+
+
+def gate_interactive_turn(job_store: Any, username: str, blackbox: BlackboxAuthoringContext | None) -> Any:
+    """Admit a wizard turn and pick the store its usage is billed to.
+
+    The black-box wizard agent is free: its turns count against the daily
+    cap instead of the balance and are never charged. Every other turn keeps
+    the balance gate and the charge.
+
+    Args:
+        job_store: Job-store whose engine backs billing and the usage cap.
+        username: Account starting the turn.
+        blackbox: The request's black-box context, when any.
+
+    Returns:
+        The store to meter the turn against; ``None`` streams it unbilled.
+
+    Raises:
+        DomainError: 429 at the wizard agent's daily cap; 402 when a billed
+            turn's account is below the minimum balance.
+    """
+    if blackbox is not None:
+        consume_wizard_agent_turn(getattr(job_store, "engine", None), username)
+        return None
+    enforce_llm_balance(job_store, username)
+    return job_store
 
 
 def _require_columns_or_blackbox(dataset_columns: list[str], blackbox: BlackboxAuthoringContext | None) -> None:
@@ -226,6 +254,15 @@ class CodeAgentRequest(BaseModel):
             "scorer (``prior_metric`` slot) with ``edit_seed`` / "
             "``edit_scorer``; ``dataset_columns`` then holds the case "
             "columns and may be empty."
+        ),
+    )
+    kickoff: bool = Field(
+        default=False,
+        description=(
+            "Black-box only: the agent starts the conversation by itself. The "
+            "server supplies the (hidden) opening message in place of "
+            "``user_message`` and reads the repository's README and manifest "
+            "for the agent."
         ),
     )
 
@@ -450,6 +487,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
           "model", "served_model"}`` (workflow mode carries ``workflow`` +
           ``workflow_valid`` instead of ``signature_code``)
         * ``error`` — ``{"error": "<message>"}``
+        * ``kickoff_oversized`` — ``{"subject": "repo", "name"}`` (a kickoff
+          whose repository is over the opening budget: the whole turn, with
+          no model call; the client shows its fixed opening)
 
         The turn runs server-side independent of this connection: the stream
         opens with ``turn_started`` (``{"turn_id"}``), every event carries an
@@ -464,20 +504,27 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         Returns:
             A :class:`StreamingResponse` of Server-Sent Events.
         """
-        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
-        model = route_menu_model(req.model)
-        usage_sink: list = []
+        kickoff = req.kickoff and req.blackbox is not None
+        user_message = KICKOFF_MESSAGE if kickoff else req.user_message
         repo_browser = (
             await asyncio.to_thread(open_repo_browser, engine, current_user.username, req.blackbox)
-            if req.user_message.strip()
+            if user_message.strip()
             else None
         )
+        # Decided before the gate: the fixed opening is neither billed nor capped.
+        if kickoff and repo_browser is not None and not repo_browser.opening_fits():
+            return await _turn_response(oversized_kickoff("repo", repo_browser.repository), current_user.username)
+        billed_store = await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, req.blackbox)
+        if kickoff and repo_browser is not None:
+            await asyncio.to_thread(repo_browser.preload_key_files)
+        model = route_menu_model(req.model)
+        usage_sink: list = []
         source = run_code_agent(
             dataset_columns=req.dataset_columns,
             column_roles=req.column_roles,
             column_kinds=req.column_kinds,
             sample_rows=req.sample_rows,
-            user_message=req.user_message,
+            user_message=user_message,
             chat_history=[t.model_dump() for t in req.chat_history],
             prior_signature=req.prior_signature,
             prior_metric=req.prior_metric,
@@ -497,7 +544,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         )
         metered = stream_with_llm_metering(
             source,
-            job_store=job_store,
+            job_store=billed_store,
             username=current_user.username,
             description="Code authoring",
             usage_sink=usage_sink,
@@ -527,6 +574,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
           ``objective`` is the objective a black-box interview captured over
           a blank field, else "")
         * ``error`` — ``{"error": "<message>"}``
+        * ``kickoff_oversized`` — ``{"subject": "data", "name": ""}`` (an
+          opening turn whose sample is over the opening budget: the whole
+          turn, with no model call; the client shows its fixed opening)
 
         Framed as a resumable turn exactly like ``ai-generate-code``.
 
@@ -538,7 +588,11 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         Returns:
             A :class:`StreamingResponse` of Server-Sent Events.
         """
-        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
+        if not req.turns and not fits_kickoff_budget(
+            measured_bytes(req.dataset_columns, req.sample_rows[:5], req.blackbox.model_dump() if req.blackbox else "")
+        ):
+            return await _turn_response(oversized_kickoff("data"), current_user.username)
+        billed_store = await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, req.blackbox)
         model = route_menu_model(req.model)
         usage_sink: list = []
 
@@ -565,7 +619,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
 
         metered = stream_with_llm_metering(
             source(),
-            job_store=job_store,
+            job_store=billed_store,
             username=current_user.username,
             description="Code interview",
             usage_sink=usage_sink,

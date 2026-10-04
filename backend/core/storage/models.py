@@ -200,6 +200,20 @@ class MonthlyActiveUserModel(Base):
     )
 
 
+class WizardAgentUsageModel(Base):
+    """How many black-box wizard agent turns an identity started on one UTC day.
+
+    The wizard agent is free to use, so instead of a credit charge each turn
+    counts against a daily cap (``settings.wizard_agent_daily_turns``).
+    """
+
+    __tablename__ = "wizard_agent_usage"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    turns: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class NotificationPreferenceModel(Base):
     """Per-identity preferences for optional product notification emails.
 

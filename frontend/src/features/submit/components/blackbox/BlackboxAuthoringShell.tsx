@@ -51,6 +51,7 @@ export function BlackboxAuthoringShell({
             reasoningEffort={interview.reasoningEffort}
             onReasoningEffortChange={interview.setReasoningEffort}
             blackbox
+            awaitingRepo={w.isRepo && !w.repoName.trim()}
             className="absolute inset-0"
           />
         )

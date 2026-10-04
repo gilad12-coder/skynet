@@ -17,6 +17,7 @@ import {
   type TaggerSessionDetail,
   type InterviewOption,
 } from "@/shared/lib/api";
+import { useAgentKickoff } from "@/shared/hooks/use-agent-kickoff";
 import { msg } from "@/shared/lib/messages";
 import {
   clearRecentSession,
@@ -794,14 +795,16 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
     interviewAbortRef.current?.abort();
   }, []);
 
-  // Fire the opening interview question once the session exists server-side.
-  useEffect(() => {
-    if (phase !== "interview" || !sessionId) return;
-    const state = assistRef.current;
-    if (!state || state.interview.turns.length > 0 || state.interview.done) return;
-    if (interviewBusy) return;
-    void sendInterviewMessage(null);
-  }, [phase, sessionId]);
+  // Fire the opening interview question once per session, once it exists
+  // server-side. A dataset over the server's budget opens with its fixed message.
+  useAgentKickoff(
+    phase === "interview" && sessionId ? sessionId : null,
+    useCallback(() => {
+      const state = assistRef.current;
+      if (!state || state.interview.turns.length > 0 || state.interview.done) return;
+      void sendInterviewMessage(null);
+    }, [sendInterviewMessage]),
+  );
 
   /**
    * Confirm the task contract (answer style, artifacts, rubric) and leave the

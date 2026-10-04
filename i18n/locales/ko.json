@@ -130,6 +130,7 @@
     "webauthn.invalid_credential": "이 패스키를 확인할 수 없습니다.",
     "webauthn.not_found": "패스키를 찾을 수 없습니다.",
     "billing.insufficient_funds": "잔액이 비어 있습니다. 실행을 시작하려면 충전하세요.",
+    "wizard_agent.daily_limit_reached": "오늘의 무료 에이전트 턴 {limit}회를 모두 사용했습니다. 에이전트는 내일 다시 사용할 수 있습니다.",
     "billing.openrouter_oauth_failed": "OpenRouter 로그인이 완료되지 않았습니다. 다시 시도하세요.",
     "billing.openrouter_oauth_state_invalid": "OpenRouter 로그인 링크가 잘못되었거나 만료되었습니다. 처음부터 다시 시작하세요.",
     "billing.openrouter_unreachable": "OpenRouter에 연결할 수 없습니다. 잠시 후 다시 시도하세요.",

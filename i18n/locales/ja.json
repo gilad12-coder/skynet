@@ -130,6 +130,7 @@
     "webauthn.invalid_credential": "このパスキーを検証できませんでした。",
     "webauthn.not_found": "パスキーが見つかりません。",
     "billing.insufficient_funds": "残高が空です。実行を開始するには入金してください。",
+    "wizard_agent.daily_limit_reached": "本日の無料エージェントターン（{limit} 回）を使い切りました。エージェントは明日また利用できます。",
     "billing.openrouter_oauth_failed": "OpenRouter へのサインインが完了しませんでした。もう一度お試しください。",
     "billing.openrouter_oauth_state_invalid": "OpenRouter のサインインリンクが無効か、期限切れです。最初からやり直してください。",
     "billing.openrouter_unreachable": "OpenRouter に接続できませんでした。しばらくしてからもう一度お試しください。",

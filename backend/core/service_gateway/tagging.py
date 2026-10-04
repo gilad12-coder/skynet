@@ -32,6 +32,7 @@ from ..models import ModelConfig
 from .agents.code import ReasoningStreamListener, _reply_language
 from .agents.code_interview import INTERVIEW_TURN_ATTEMPTS, normalize_options
 from .agents.constants import REASONING_FIELD
+from .agents.kickoff import measured_bytes
 from .agents.parse_salvage import salvage_prediction, strip_adapter_debris
 from .language_models import (
     apply_model_reasoning_config,
@@ -482,6 +483,36 @@ def task_description(config: dict[str, Any]) -> str:
     )
 
 
+def _sample_rows(data: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pick the rows the interview sees, spread evenly across the dataset.
+
+    Args:
+        data: The full row payload.
+
+    Returns:
+        At most ``SAMPLE_ROWS`` rows.
+    """
+    step = max(1, len(data) // SAMPLE_ROWS)
+    return data[::step][:SAMPLE_ROWS]
+
+
+def opening_sample_bytes(config: dict[str, Any], columns: list[str], data: list[dict[str, Any]]) -> int:
+    """Measure the dataset the interview's opening turn reads, before any cut.
+
+    Args:
+        config: The session's ``TaggerConfig`` payload.
+        columns: All dataset column names.
+        data: The full row payload.
+
+    Returns:
+        The byte size of the columns and the sampled rows' whole text; 0 for
+        a synthetic session that has no rows yet.
+    """
+    if config.get("_synthetic_pending"):
+        return 0
+    return measured_bytes(columns, [str(row.get("text") or "") for row in _sample_rows(data)])
+
+
 def summarize_dataset(config: dict[str, Any], columns: list[str], data: list[dict[str, Any]]) -> str:
     """Summarize the dataset for the interview and rubric prompts.
 
@@ -506,8 +537,7 @@ def summarize_dataset(config: dict[str, Any], columns: list[str], data: list[dic
             ensure_ascii=False,
         )
     input_cols = [str(c) for c in config.get("inputColumns") or []]
-    step = max(1, len(data) // SAMPLE_ROWS)
-    sample = [_row_text(row) for row in data[::step][:SAMPLE_ROWS]]
+    sample = [_row_text(row) for row in _sample_rows(data)]
     # Columns the user left unselected are invisible at labeling time (the row
     # text is built from the input columns only), so they are surfaced as
     # explicitly excluded rather than as available material for the task.

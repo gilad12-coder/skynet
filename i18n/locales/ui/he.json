@@ -1,5 +1,7 @@
 {
   "agent.approval.confirm_failed": "אישור הפעולה לא נקלט — נסו שוב",
+  "agent.kickoff.oversized_data": "הנתונים שהעליתם גדולים מדי, אז לא סרקתי אותם. מה תרצו לעשות?",
+  "agent.kickoff.oversized_repo": "המאגר {name} גדול מדי, אז לא סרקתי אותו. מה תרצו לעשות?",
   "agent.composer.attach": "צירוף דאטאסט",
   "agent.composer.mic_unavailable": "אין גישה למיקרופון",
   "agent.composer.record": "הכתבה קולית",
@@ -2565,6 +2567,10 @@
   "submit.basics.privacy.public": "ציבורי",
   "submit.basics.privacy.public_desc": "מופיע ב{term.exploreTitle}",
   "submit.blackbox.agent.empty_hint": "ספרו לסוכן מה תרצו לשפר. הוא ישאל שאלות עד שיבין את המטרה ואיך לשפוט כל גרסה, וימלא את השדות בעצמו.",
+  "submit.blackbox.agent.opening_title": "קורא את {repo}…",
+  "submit.blackbox.agent.opening_hint": "הסוכן עובר על ה-README ועל קבצי הפרויקט. הוא יספר מה מצא וישאל מה תרצו לשפר.",
+  "submit.blackbox.agent.empty_hint_repo": "בחרו מאגר והסוכן יקרא אותו ויפתח את השיחה. אפשר גם לכתוב לו קודם.",
+  "submit.blackbox.agent.limit_placeholder": "התורות החינמיות של הסוכן להיום נוצלו",
   "submit.blackbox.agent.fix_scorer": "אירעה שגיאה במדד. תקנו אותה.",
   "submit.blackbox.interview.reading": "מכין את השאלה הראשונה…",
   "submit.blackbox.interview.brief.description": "זוקק מהתשובות שלכם. אפשר לערוך הכול — נקודת ההתחלה והמדד ינוסחו לפי ההנחיות האלה.",
