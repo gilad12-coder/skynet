@@ -78,7 +78,7 @@ ALLOWED_ORIGINS=http://localhost:3000          # comma-separated CORS origins
 WORKER_CONCURRENCY=4                           # parallel background jobs
 
 # ── Billing (optional — omit to disable charging entirely) ──
-# STRIPE_SECRET_KEY=...                        # see docs/stripe-setup.md
+# STRIPE_SECRET_KEY=...
 ```
 
 See `backend/.env.example` for the full annotated list (agents' models, tagger assist models, notifications, air-gap gateways, and more).
@@ -112,7 +112,7 @@ The job detail page includes a built-in inference playground and a program expor
 - **Anywhere with Postgres** — the backend migrates its own schema at boot and the worker fleet scales horizontally via DB-lease job claims (no external queue).
 - **Kubernetes** — Helm chart in `deploy/helm`.
 - **Docker** — `cd backend && docker compose up --build` starts API + Postgres.
-- **Billing** — optional; follow `docs/stripe-setup.md` to enable balance top-ups and metered usage.
+- **Billing** — optional; set the Stripe keys in `backend/.env.example` to enable balance top-ups and metered usage.
 
 ## Extensibility
 
