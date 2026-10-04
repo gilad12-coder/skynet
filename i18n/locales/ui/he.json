@@ -3946,7 +3946,7 @@
   "tutorial.step.tagger_task.body": "בוחרים איך עונים על כל שורה: שאלת כן/לא, אחת מהקטגוריות שלך, או תשובה כתובה.",
   "tutorial.step.sidebar_nav.title": "התמצאות באפליקציה",
   "tutorial.step.sidebar_nav.body": "בסרגל הצד עוברים בין הדפים. לחיצה על ‎⌘K או Ctrl+K מכל מקום קופצת לכל דף או הגדרה.",
-  "billing.plans.topup.fee_note": "המחיר כולל עמלת פלטפורמה של {p1}, זהה לכל אמצעי תשלום.",
+  "billing.plans.topup.fee_note": "המחיר כולל עמלת פלטפורמה של {p1}.",
   "billing.plans.topup.custom_range": "יש להזין סכום בין {p1} ל-{p2}.",
   "submit.economy.label": "חצי מחיר, איטי יותר",
   "submit.economy.hint": "קריאות מודל מנוהלות עוברות בתור אצוות אצל הספק בחצי מחיר. כל סבב יכול לקחת בין דקות לשעות.",

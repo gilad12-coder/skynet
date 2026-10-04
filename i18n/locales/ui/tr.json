@@ -3984,7 +3984,7 @@
   "tutorial.step.tagger_task.body": "Her satırın nasıl yanıtlanacağını seçin: evet/hayır sorusu, kategorilerinizden biri ya da yazılı bir yanıt.",
   "tutorial.step.sidebar_nav.title": "Uygulamada gezinme",
   "tutorial.step.sidebar_nav.body": "Sayfalar arasında geçmek için kenar çubuğunu kullanın. Herhangi bir sayfaya veya ayara atlamak için her yerde ⌘K ya da Ctrl+K'ye basın.",
-  "billing.plans.topup.fee_note": "Fiyata {p1} platform ücreti dahildir; her ödeme yönteminde aynıdır.",
+  "billing.plans.topup.fee_note": "Fiyata {p1} platform ücreti dahildir.",
   "billing.plans.topup.custom_range": "{p1} ile {p2} arasında bir tutar girin.",
   "submit.economy.label": "Yarı fiyat, daha yavaş",
   "submit.economy.hint": "Yönetilen model çağrıları sağlayıcının toplu iş kuyruğundan yarı fiyatına geçer. Her tur dakikalardan saatlere kadar sürebilir.",
