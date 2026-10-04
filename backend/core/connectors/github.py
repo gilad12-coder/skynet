@@ -9,6 +9,7 @@ API; CSV, TSV, JSON, JSONL and Parquet files are importable.
 from __future__ import annotations
 
 import hashlib
+import re
 import threading
 import time
 from typing import Any
@@ -20,7 +21,7 @@ from .base import Credential, Entry, import_file, preview_file, range_header
 from .oauth import OAuthApp
 from .oauth import oauth_available as _oauth_available
 from .tabular import check_size, is_supported
-from .transport import download, get_json
+from .transport import download, get_json, label
 from .vault import ConnectorSecret
 
 PROVIDER = "github"
@@ -28,6 +29,9 @@ API_URL = "https://api.github.com"
 SCOPES = "repo read:user"
 REPO_LIMIT = 100
 TREE_TTL_SECONDS = 300.0
+BRANCH_PAGE_SIZE = 100
+BRANCH_LIMIT = 300
+REPO_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
 
 _trees: dict[tuple[str, str, str], tuple[float, list[str] | None]] = {}
 _tree_locks: dict[tuple[str, str, str], threading.Lock] = {}
@@ -162,6 +166,166 @@ def _list_repos(token: str, search: str) -> list[Entry]:
     if needle.count("/") == 1 and all(needle.split("/")) and not any(e.ref.lower() == needle for e in entries):
         entries.insert(0, Entry(ref=search.strip(), name=search.strip(), kind="folder"))
     return entries
+
+
+def _repo_url(owner: str, repo: str) -> str:
+    """Build the API URL of one repository.
+
+    Args:
+        owner: Repository owner.
+        repo: Repository name.
+
+    Returns:
+        The URL.
+    """
+    return f"{API_URL}/repos/{quote(owner, safe='')}/{quote(repo, safe='')}"
+
+
+def _split_repo(full_name: str) -> tuple[str, str]:
+    """Split ``"owner/name"`` into its parts.
+
+    Args:
+        full_name: The repository as ``owner/name``.
+
+    Returns:
+        ``(owner, name)``.
+
+    Raises:
+        DomainError: 400 when the value is not shaped like ``owner/name``.
+    """
+    value = full_name.strip()
+    if not REPO_NAME.match(value):
+        raise DomainError("connectors.invalid_ref", status=400)
+    owner, name = value.split("/")
+    return owner, name
+
+
+def _repo_summary(repo: dict[str, Any]) -> dict[str, Any]:
+    """Keep the fields the repository picker shows.
+
+    Args:
+        repo: A repository object from the GitHub API.
+
+    Returns:
+        ``full_name``, ``private``, ``description``, ``language``,
+        ``default_branch`` and ``pushed_at``.
+    """
+    return {
+        "full_name": repo["full_name"],
+        "private": bool(repo.get("private")),
+        "description": repo.get("description") if isinstance(repo.get("description"), str) else None,
+        "language": repo.get("language") if isinstance(repo.get("language"), str) else None,
+        "default_branch": repo.get("default_branch") if isinstance(repo.get("default_branch"), str) else None,
+        "pushed_at": repo.get("pushed_at") if isinstance(repo.get("pushed_at"), str) else None,
+    }
+
+
+def list_repositories(secret: ConnectorSecret, search: str) -> list[dict[str, Any]]:
+    """List the account's repositories with the details the picker shows, most recently pushed first.
+
+    A ``search`` shaped like ``owner/name`` that the account's list lacks is
+    looked up directly, so a public repository outside the account can be
+    picked; it is left out when GitHub does not know it.
+
+    Args:
+        secret: The stored connector.
+        search: Case-insensitive substring filter on ``owner/name``.
+
+    Returns:
+        Repository summaries, see :func:`_repo_summary`.
+    """
+    token = secret.access_token
+    body = get_json(
+        f"{API_URL}/user/repos",
+        provider=PROVIDER,
+        headers=_headers(token),
+        params={"per_page": REPO_LIMIT, "sort": "pushed", "affiliation": "owner,collaborator,organization_member"},
+    )
+    needle = search.strip().lower()
+    repos = [
+        _repo_summary(repo)
+        for repo in body or []
+        if isinstance(repo, dict) and isinstance(repo.get("full_name"), str) and needle in repo["full_name"].lower()
+    ]
+    if REPO_NAME.match(needle) and not any(r["full_name"].lower() == needle for r in repos):
+        owner, name = search.strip().split("/")
+        try:
+            found = get_json(_repo_url(owner, name), provider=PROVIDER, headers=_headers(token))
+        except DomainError as exc:
+            if exc.code != "connectors.not_found":
+                raise
+            found = None
+        if isinstance(found, dict) and isinstance(found.get("full_name"), str):
+            repos.insert(0, _repo_summary(found))
+    return repos
+
+
+def list_branches(secret: ConnectorSecret, full_name: str) -> dict[str, Any]:
+    """List a repository's branch names with its default branch.
+
+    Args:
+        secret: The stored connector.
+        full_name: The repository as ``owner/name``.
+
+    Returns:
+        ``{"default_branch": str | None, "branches": [name, ...]}``: up to
+        :data:`BRANCH_LIMIT` names, plus the default branch when the cap cut it.
+    """
+    owner, name = _split_repo(full_name)
+    headers = _headers(secret.access_token)
+    meta = get_json(_repo_url(owner, name), provider=PROVIDER, headers=headers)
+    default = meta.get("default_branch") if isinstance(meta, dict) else None
+    default = default if isinstance(default, str) else None
+    branches: list[str] = []
+    page = 1
+    while len(branches) < BRANCH_LIMIT:
+        body = get_json(
+            f"{_repo_url(owner, name)}/branches",
+            provider=PROVIDER,
+            headers=headers,
+            params={"per_page": BRANCH_PAGE_SIZE, "page": page},
+        )
+        batch = [b["name"] for b in body or [] if isinstance(b, dict) and isinstance(b.get("name"), str)]
+        branches.extend(batch)
+        if len(batch) < BRANCH_PAGE_SIZE:
+            break
+        page += 1
+    branches = branches[:BRANCH_LIMIT]
+    if default and default not in branches:
+        branches.insert(0, default)
+    return {"default_branch": default, "branches": branches}
+
+
+def repository_tree(secret: ConnectorSecret, full_name: str, branch: str) -> dict[str, Any]:
+    """List every file and folder of a repository at a branch in one call.
+
+    Args:
+        secret: The stored connector.
+        full_name: The repository as ``owner/name``.
+        branch: Branch name; empty for the default branch.
+
+    Returns:
+        ``{"entries": [{"path", "type": "file" | "dir"}], "truncated": bool}``;
+        ``truncated`` is GitHub's flag for a tree too large to list whole.
+    """
+    owner, name = _split_repo(full_name)
+    # A branch name may hold slashes; encoded, it stays one path segment.
+    ref = quote(branch.strip(), safe="") or "HEAD"
+    body = get_json(
+        f"{_repo_url(owner, name)}/git/trees/{ref}",
+        provider=PROVIDER,
+        headers=_headers(secret.access_token),
+        params={"recursive": "1"},
+    )
+    if not isinstance(body, dict):
+        raise DomainError("connectors.provider_error", status=502, provider=label(PROVIDER), status_code=200)
+    kinds = {"blob": "file", "tree": "dir"}
+    entries = [
+        {"path": item["path"], "type": kinds[item.get("type")]}
+        for item in body.get("tree") or []
+        if isinstance(item, dict) and item.get("type") in kinds and isinstance(item.get("path"), str)
+    ]
+    return {"entries": entries, "truncated": bool(body.get("truncated"))}
 
 
 def _contents_url(owner: str, repo: str, path: str) -> str:

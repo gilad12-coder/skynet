@@ -1292,6 +1292,47 @@ export function browseConnector(provider: ConnectorProvider, location: string, s
   );
 }
 
+/** One repository the linked GitHub account can see, as the repository picker shows it. */
+export interface GithubRepository {
+  full_name: string;
+  private: boolean;
+  description: string | null;
+  language: string | null;
+  default_branch: string | null;
+  pushed_at: string | null;
+}
+
+/** One file or folder of a repository tree. */
+export interface GithubTreeEntry {
+  path: string;
+  type: "file" | "dir";
+}
+
+/**
+ * The linked account's repositories, most recently pushed first. A ``search``
+ * written as ``owner/name`` also offers that public repository by itself.
+ */
+export function listGithubRepositories(search: string) {
+  const params = new URLSearchParams({ search });
+  return request<{ repositories: GithubRepository[] }>(`/connectors/github/repos?${params}`);
+}
+
+/** A repository's branch names and its default branch. */
+export function listGithubBranches(repo: string) {
+  const params = new URLSearchParams({ repo });
+  return request<{ default_branch: string | null; branches: string[] }>(
+    `/connectors/github/branches?${params}`,
+  );
+}
+
+/** Every file and folder of a repository at ``branch`` (empty for the default branch). */
+export function getGithubTree(repo: string, branch: string) {
+  const params = new URLSearchParams({ repo, branch });
+  return request<{ entries: GithubTreeEntry[]; truncated: boolean }>(
+    `/connectors/github/tree?${params}`,
+  );
+}
+
 /** A short-lived token, API key and app id for opening the Google Picker as the caller. */
 export function getConnectorPicker(provider: ConnectorProvider) {
   return request<{ access_token: string; developer_key: string; app_id: string }>(

@@ -143,9 +143,7 @@ export function SubmitEntry() {
     if (offerPending && !comparingClone) return;
     const jobType = wizardState.state.job_type;
     if (!jobType) return;
-    // A repository setup is a black-box run too; the agent never leaves it.
-    const wanted: Recipe =
-      jobType === "blackbox" ? (recipe === "repo" ? "repo" : "anything") : "program";
+    const wanted: Recipe = jobType === "blackbox" ? "anything" : "program";
     if (recipe === wanted && !picking) return;
     dropRecipeScopedState(wanted, wizardState.agentPulseKeys);
     setRecipe(wanted);
@@ -206,13 +204,11 @@ export function SubmitEntry() {
             }}
             className={shown === "wizard" && !comparingClone ? undefined : "hidden"}
           >
-            {recipe === "anything" || recipe === "repo" ? (
+            {recipe === "anything" ? (
               <BlackboxWizard
-                // The repository kind is read at mount, so switching between it
-                // and Anything gives the wizard a fresh instance.
-                key={`${accountId}:${wizardKey}:${recipe === "repo" ? "repo" : "blackbox"}`}
+                key={`${accountId}:${wizardKey}`}
                 header={chip}
-                initialRecipe={recipe === "repo" ? "repo" : (link?.kind ?? "anything")}
+                initialRecipe={link?.kind ?? "anything"}
                 folderId={folderId}
               />
             ) : (
