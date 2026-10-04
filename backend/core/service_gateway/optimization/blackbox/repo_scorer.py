@@ -5,9 +5,11 @@ posts each version through the parent's evaluator capability, and the parent
 lays it out on a copy of the already set-up tree, then calls the user's
 ``score(repo_path)`` (or ``score(repo_path, case)``) on it.
 
-A scorer may return per-case scores under ``cases``, a mapping of case name to
-score. The run's score stays the top-level number; the cases are feedback that
-GEPA reflects on.
+A scorer returns a score with its feedback, like any scorer, and may return
+per-case results under ``cases``, a mapping of case name to
+``{"score", "feedback"}``. The run's score stays the top-level number; each
+case becomes a named score that every engine reflects on and keeps on its
+Pareto front.
 """
 
 from __future__ import annotations
@@ -40,30 +42,34 @@ class RepoScoreError(Exception):
     """A version could not be scored; the message is safe to show the agent."""
 
 
-def per_case_scores(side_info: Mapping[str, Any]) -> dict[str, float] | None:
-    """Read and check the per-case scores a repository scorer returned.
+def fold_case_scores(side_info: Mapping[str, Any]) -> dict[str, Any]:
+    """Turn the per-case scores a repository scorer returned into named scores.
+
+    Each case becomes a named score, so every engine reflects on it and
+    treats it as its own objective, exactly like ``scores``.
 
     Args:
         side_info: Everything the scorer returned besides its score.
 
     Returns:
-        Case name to score, or ``None`` when the scorer returned no cases.
+        The side info with ``cases`` folded into ``scores``.
 
     Raises:
-        RepoScoreError: When ``cases`` is not a mapping of names to finite numbers.
+        RepoScoreError: When ``cases`` is not a mapping of names to a finite
+            score with its feedback.
     """
-    cases = side_info.get(CASES_KEY)
+    folded = dict(side_info)
+    cases = folded.pop(CASES_KEY, None)
     if cases is None:
-        return None
-    if not isinstance(cases, dict) or not all(
-        isinstance(name, str)
-        and isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        for name, value in cases.items()
-    ):
-        raise RepoScoreError(f"'{CASES_KEY}' must map each case name to a number.")
-    return {name: float(value) for name, value in cases.items()}
+        return folded
+    try:
+        named = runner.named_scores(cases)
+    except runner.ScorerError as exc:
+        raise RepoScoreError(f"'{CASES_KEY}' must map each case name to a score and feedback. {exc}") from exc
+    if not all(math.isfinite(entry["score"]) for entry in named.values()):
+        raise RepoScoreError(f"'{CASES_KEY}' must map each case name to a finite score.")
+    folded["scores"] = {**named, **(folded.get("scores") or {})}
+    return folded
 
 
 class RepoScorer:
@@ -131,8 +137,7 @@ class RepoScorer:
         output = json.loads(redact(text, secrets))
         if output.get("error") or output.get("score") is None:
             raise RepoScoreError(str(output.get("error") or "The scorer returned no score."))
-        side_info = dict(output.get("side_info") or {})
-        per_case_scores(side_info)
+        side_info = fold_case_scores(output.get("side_info") or {})
         return {**side_info, "score": float(output["score"])}
 
     def prepare(self) -> None:

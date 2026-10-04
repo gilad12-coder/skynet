@@ -12,8 +12,6 @@ from ....config import settings
 from ....exceptions import ServiceError
 from ....models import BlackboxRunRequest
 from ....models.blackbox import BlackboxScorer, BlackboxTarget
-from ....models.common import SplitFractions
-from ..data import split_examples
 from .agent_eval import READINESS_LIFETIME_SECONDS, case_lifetime_seconds
 from .harness import GatewayConfig
 from .native_runtime import NativeOptions, check_native_runtime
@@ -65,27 +63,16 @@ def _check(key: str, status: str, message: str | None = None, field: str | None 
 
 
 def _sample(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Choose one visible training or validation case.
+    """Choose the case the dry run scores.
 
     Args:
-        payload: Canonical scorer inputs and split configuration.
+        payload: Canonical scorer inputs.
 
     Returns:
-        One non-held-out case, or None for a task without cases.
+        The first case, or None for a task without cases.
     """
     cases = payload.get("cases") or []
-    if not cases:
-        return None
-    splits = split_examples(
-        cases,
-        SplitFractions.model_validate(payload.get("split_fractions") or {}),
-        shuffle=payload.get("shuffle", True),
-        seed=payload.get("seed") or 0,
-    )
-    eligible = splits.train or splits.val
-    if not eligible:
-        raise ValueError("Setup needs at least one training or validation case; held-out data is never used.")
-    return eligible[0]
+    return cases[0] if cases else None
 
 
 def _needs_model(code: str) -> bool:

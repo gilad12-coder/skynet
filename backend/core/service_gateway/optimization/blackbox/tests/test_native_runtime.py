@@ -332,7 +332,7 @@ def test_native_transport_preserves_engine_choice_and_scores_once(
     progress: list[dict[str, Any]] = []
     ctx.progress_callback = lambda event, metrics: progress.append(metrics)
     result = run_native_engine(
-        "meta_harness", Task("seed", train_set=[{"id": "case"}]), EvalServer(score, max_evals=3), ctx
+        "meta_harness", Task("seed", cases=[{"id": "case"}]), EvalServer(score, max_evals=3), ctx
     )
 
     assert calls == [("better", {"id": "case"})]
@@ -363,7 +363,7 @@ def test_protected_managed_runtime_does_not_nest_upstream_jail(tmp_path: Path, m
     runtime.injects_headers = False
     run_native_engine(
         "meta_harness",
-        Task("seed", train_set=[{"id": "case"}]),
+        Task("seed", cases=[{"id": "case"}]),
         EvalServer(lambda *_: (0.75, {}), max_evals=3),
         _context(tmp_path, runtime),
     )
@@ -385,7 +385,7 @@ def test_repository_tree_and_rules_reach_every_repository_engine(
     ctx = _context(tmp_path, FakeRuntime(session))
     repo = {"chunks": [str(chunk) for chunk in chunks], "editable_paths": ["src"], "readonly_paths": ["vendor/lib"]}
     ctx.native_options = replace(ctx.native_options, repo=repo)
-    task = Task("", train_set=[{"id": "a"}, {"id": "b"}])
+    task = Task("", cases=[{"id": "a"}, {"id": "b"}])
     run_native_engine(engine_id, task, EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
 
     assert ctx.native_options.sandbox_runtime.spec.allowed_hosts == ()
@@ -868,7 +868,7 @@ def test_autosaddler_transport_scores_named_parts_without_the_gepa_archive(
         calls.append((candidate, example))
         return 0.75, {}
 
-    task = Task({"system": "seed", "user": "ask"}, train_set=[{"id": "a"}], val_set=[{"id": "b"}])
+    task = Task({"system": "seed", "user": "ask"}, cases=[{"id": "a"}, {"id": "b"}])
     result = run_native_engine("autosaddler", task, EvalServer(score, max_evals=3), _context(tmp_path, runtime))
 
     assert calls == [({"system": "better", "user": "ask"}, {"id": "case"})]
@@ -893,28 +893,39 @@ def test_autosaddler_transport_rejects_a_candidate_of_the_wrong_shape(
     session = FakeSession()
     runtime = FakeRuntime(session)
     scorer = MagicMock(return_value=(0.5, {}))
-    task = Task({"system": "seed", "user": "ask"}, train_set=[{"id": "a"}], val_set=[{"id": "b"}])
+    task = Task({"system": "seed", "user": "ask"}, cases=[{"id": "a"}, {"id": "b"}])
     with pytest.raises(ServiceError, match="invalid candidate shape"):
         run_native_engine("autosaddler", task, EvalServer(scorer, max_evals=3), _context(tmp_path, runtime))
     scorer.assert_not_called()
 
 
 @pytest.mark.parametrize(
-    ("task", "message"),
-    [
-        (Task(None, train_set=[{"id": "a"}, {"id": "b"}]), "requires a seed candidate"),
-        (Task("seed", train_set=[{"id": "a"}]), "at least two visible examples"),
-        (Task("seed"), "at least two visible examples"),
-    ],
+    "task",
+    [Task(None), Task("seed"), Task("seed", cases=[{"id": "a"}]), Task("seed", cases=[{"id": "a"}, {"id": "b"}])],
 )
-def test_autosaddler_transport_needs_a_seed_and_two_visible_examples(tmp_path: Path, task: Task, message: str) -> None:
-    """Fail before launching a sandbox when upstream has nothing to patch or confirm against."""
-    runtime = FakeRuntime(FakeSession())
-    with pytest.raises(ServiceError, match=message):
-        run_native_engine(
-            "autosaddler", task, EvalServer(lambda *_: (0.5, {}), max_evals=3), _context(tmp_path, runtime)
-        )
-    assert runtime.spec is None
+def test_autosaddler_transport_runs_with_zero_one_or_many_cases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, task: Task
+) -> None:
+    """AutoSaddler needs no cases and no seed: a blank run patches an empty text, cases go in once.
+
+    Args:
+        tmp_path: Workspace.
+        monkeypatch: Skips packing the GEPA archive.
+        task: The run's starting point and cases.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", MagicMock(side_effect=AssertionError("unused")))
+    session = FakeSession()
+    runtime = FakeRuntime(session)
+
+    result = run_native_engine(
+        "autosaddler", task, EvalServer(lambda *_: (0.5, {}), max_evals=3), _context(tmp_path, runtime)
+    )
+
+    assert result.best_candidate == "better"
+    sent = json.loads(session.files["native_input.json"])["task"]
+    assert sent["seed_candidate"] == (task.seed_candidate or "")
+    assert sent["train_set"] == (task.cases or None)
+    assert "val_set" not in sent
 
 
 @pytest.mark.parametrize("engine_id", ["autoresearch", "meta_harness"])
@@ -1069,7 +1080,7 @@ def test_direct_claude_code_box_reaches_only_anthropic_and_flags_the_guest(
         budget_route={"url": "http://127.0.0.1:9000/v1", "token": "scoped"},
     )
     run_native_engine(
-        "meta_harness", Task("seed", train_set=[{"id": "case"}]), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx
+        "meta_harness", Task("seed", cases=[{"id": "case"}]), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx
     )
     assert runtime.spec.allowed_hosts == ("api.anthropic.com",)
     assert session.calls[1][1]["env"][harness_bridge.DIRECT_ANTHROPIC_ENV] == "1"

@@ -1383,8 +1383,10 @@ export const DEMO_BLACKBOX_SCORER_CODE = `RUBRIC = ["support agent", "restating"
 def score(candidate, case=None):
     """Share of the support-reply rubric the prompt covers. Higher is better."""
     text = candidate if isinstance(candidate, str) else "\\n".join(candidate.values())
-    covered = [rule for rule in RUBRIC if rule in text.lower()]
-    return len(covered) / len(RUBRIC), {"covered": covered}
+    missing = [rule for rule in RUBRIC if rule not in text.lower()]
+    covered = len(RUBRIC) - len(missing)
+    feedback = "Covers every rule." if not missing else "Missing: " + ", ".join(missing) + "."
+    return covered / len(RUBRIC), feedback
 `;
 
 export function buildBlackboxDemoPayload(): OptimizationPayloadResponse {
@@ -1424,10 +1426,16 @@ export function buildBlackboxDemoJob(): OptimizationStatusResponse {
     optimizer_name: "GEPA",
     strategy_mode: "single",
     engine_used: "gepa",
-    split_counts: {},
-    baseline_test_metric: seed?.score ?? null,
-    optimized_test_metric: best?.score ?? null,
+    baseline_score: seed?.score ?? null,
+    best_score: best?.score ?? null,
     metric_improvement: seed && best ? best.score - seed.score : null,
+    baseline_feedback: "Missing: restating, numbered steps, account access, steps fail, 120 words.",
+    best_feedback: "Covers every rule.",
+    baseline_named_scores: {},
+    best_named_scores: {},
+    case_results: [],
+    case_count: 0,
+    final_scorer_runs: 2,
     seed_candidate: DEMO_BLACKBOX_SEED_TEXT,
     best_candidate: best?.text ?? "",
     regression_guard_applied: false,
@@ -1446,7 +1454,7 @@ export function buildBlackboxDemoJob(): OptimizationStatusResponse {
       mean_score: version.score,
       evals: 6,
       first_run: version.firstRun,
-      side_info: {},
+      side_info: { feedback: version.score === 1 ? "Covers every rule." : "Some rules missing." },
     })),
     total_scorer_runs: scorerRuns,
     runtime_seconds: runtimeSeconds,
@@ -1471,8 +1479,8 @@ export function buildBlackboxDemoJob(): OptimizationStatusResponse {
     elapsed: fmtElapsed(runtimeSeconds),
     optimizer_name: "GEPA",
     model_name: "openai/gpt-4o-mini",
-    baseline_test_metric: result.baseline_test_metric,
-    optimized_test_metric: result.optimized_test_metric,
+    baseline_test_metric: result.baseline_score,
+    optimized_test_metric: result.best_score,
     metric_improvement: result.metric_improvement,
     progress_events: progress,
     logs: [],

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from gepa.oa.budget import BudgetExhausted
 
 from ..cost_ceiling import CostCeilingExceededError
+from .runner import FEEDBACK_REQUIRED
 
 if TYPE_CHECKING:
     from .native_runtime import NativeOptions
@@ -57,36 +58,25 @@ def candidate_key(candidate: Candidate) -> str:
     return candidate
 
 
-def example_key(example: Any) -> str:
-    """Return a stable identity string for a case.
-
-    Args:
-        example: A case mapping, or ``None`` in single-task mode.
-
-    Returns:
-        The sorted-key JSON form of the case (``"null"`` without one).
-    """
-    return json.dumps(example, sort_keys=True, default=str)
-
-
 @dataclass
 class Task:
     """What an engine optimizes: the starting point, the goal and the cases.
 
-    ``test_set`` is intentionally absent — the held-out split never enters
-    the optimization loop; the service scores it before and after.
+    The cases are not split: every engine scores a version on all of them
+    (each case is also a Pareto axis), and with none it scores the version
+    on its own. The service's final run re-scores the starting point and the
+    winner afresh on the same cases.
     """
 
     seed_candidate: Candidate | None
     objective: str | None = None
     background: str | None = None
-    train_set: list[Any] = field(default_factory=list)
-    val_set: list[Any] = field(default_factory=list)
+    cases: list[Any] = field(default_factory=list)
 
     @property
     def has_dataset(self) -> bool:
         """Return True when the task carries cases (multi-task mode)."""
-        return bool(self.train_set or self.val_set)
+        return bool(self.cases)
 
     @property
     def str_mode(self) -> bool:
@@ -201,12 +191,6 @@ class EvalServer:
         self._on_eval = on_eval
         self.used = 0
         self._records: dict[str, CandidateRecord] = {}
-        # Root only: the latest score per (version, case) an engine paid for,
-        # so the final held-out pass can reuse it instead of re-measuring, and
-        # scores handed in by :meth:`prime` for the engine's first look at a
-        # pair — each consumed once.
-        self._scores: dict[tuple[str, str], float] = {}
-        self._primed: dict[tuple[str, str], tuple[float, SideInfo]] = {}
         # Locks are only ever taken child → parent, so lanes cannot deadlock.
         self._lock = threading.Lock()
 
@@ -251,77 +235,22 @@ class EvalServer:
             BudgetExhaustedError: When no scorer calls remain.
         """
         root = self._root
-        key = (candidate_key(candidate), example_key(example))
-        primed = root._take_primed(key)
-        if primed is None:
-            self._reserve()
-            score, side_info = root._score(candidate, example)
-            # Per-call heartbeat at DEBUG so it surfaces only in the Logs tab's
-            # verbose view — the black-box counterpart of the DSPy per-example eval
-            # heartbeat, so every run type gets the same normal=aggregates /
-            # verbose=per-call split. Counted against the run-wide budget.
-            logger.debug("scorer eval %d/%d score=%.3f", root.used, root.max_evals, score)
-        else:
-            score, side_info = primed
-        with root._lock:
-            root._scores[key] = score
+        self._reserve()
+        score, side_info = root._score(candidate, example)
+        # Per-call heartbeat at DEBUG so it surfaces only in the Logs tab's
+        # verbose view — the black-box counterpart of the DSPy per-example eval
+        # heartbeat, so every run type gets the same normal=aggregates /
+        # verbose=per-call split. Counted against the run-wide budget.
+        logger.debug("scorer eval %d/%d score=%.3f", root.used, root.max_evals, score)
         server: EvalServer | None = self
         while server is not None:
             with server._lock:
                 server._record(candidate, score, side_info)
             server = server._parent
-        # A primed score cost no scorer run, so it does not tick the progress listener.
-        if primed is None and root._on_eval is not None:
+        if root._on_eval is not None:
             with root._lock:
                 root._on_eval(root, score)
         return score, side_info
-
-    def prime(self, candidate: Candidate, example: Any, score: float, side_info: SideInfo) -> None:
-        """Hand in a score measured outside the budget for one (version, case) pair.
-
-        The engine's first :meth:`evaluate` of that pair returns it without a
-        scorer run; any later evaluation of the pair is measured afresh.
-
-        Args:
-            candidate: The version that was scored.
-            example: The case it was scored on (``None`` in single-task mode).
-            score: The measured score.
-            side_info: The scorer's side information for that measurement.
-        """
-        root = self._root
-        with root._lock:
-            root._primed[(candidate_key(candidate), example_key(example))] = (score, side_info)
-
-    def recorded(self, candidate: Candidate, example: Any = None) -> float | None:
-        """Return the score already measured for ``(candidate, example)``, if any.
-
-        Args:
-            candidate: The version to look up.
-            example: The case, or ``None`` in single-task mode.
-
-        Returns:
-            The latest score an engine paid for on that pair, else a primed
-            score not yet consumed, else ``None``.
-        """
-        root = self._root
-        key = (candidate_key(candidate), example_key(example))
-        with root._lock:
-            score = root._scores.get(key)
-            if score is None and key in root._primed:
-                score = root._primed[key][0]
-        return score
-
-    def _take_primed(self, key: tuple[str, str]) -> tuple[float, SideInfo] | None:
-        """Pop and return the primed score for ``key``, if one is waiting.
-
-        Args:
-            key: The ``(candidate_key, example_key)`` pair.
-
-        Returns:
-            The primed ``(score, side_info)``, or ``None``.
-        """
-        with self._lock:
-            return self._primed.pop(key, None)
 
     def _reserve(self) -> None:
         """Claim one scorer call here and in every ancestor, or claim nothing.
@@ -352,13 +281,17 @@ class EvalServer:
             The score and side information, or ``(0.0, {"error": ...})``.
 
         Raises:
-            ScorerAbortError: When the scorer asks to stop the run.
+            ScorerAbortError: When the scorer asks to stop the run, or returns no feedback.
         """
         try:
             return self._scorer(candidate, example)
         except (ScorerAbortError, BudgetExhaustedError, BudgetExhausted, CostCeilingExceededError):
             raise
         except Exception as exc:
+            # A scorer without feedback lacks it on every version, so flooring
+            # would spend the whole budget teaching the proposer nothing.
+            if FEEDBACK_REQUIRED in str(exc):
+                raise ScorerAbortError(str(exc)) from exc
             logger.warning("scorer raised on a candidate: %s", exc)
             return 0.0, {"error": f"{type(exc).__name__}: {exc}"}
 

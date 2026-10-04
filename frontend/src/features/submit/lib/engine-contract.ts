@@ -92,13 +92,10 @@ export function engineSelectionIssue(input: {
   mode: BlackboxStrategy["mode"];
   engine: BlackboxEngineId | null;
   hasParts: boolean;
-  trainingCaseCount: number | null;
   repo?: boolean;
 }): EngineIssue | null {
   const { catalog, mode, engine, hasParts } = input;
   if (!catalog) return { key: "submit.blackbox.engines.checking" };
-  if (input.trainingCaseCount === 0 && (mode !== "single" || engine === "meta_harness"))
-    return { key: "submit.blackbox.validation.training_cases" };
   if (mode === "single") {
     const selected = catalog.engines.find((candidate) => candidate.id === engine);
     if (!selected) return { key: "submit.blackbox.validation.engine_required" };

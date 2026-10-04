@@ -74,6 +74,8 @@ _FEEDBACK_CHARS = 600
 _PIVOT_AFTER = 2
 _STOP_AFTER = 4
 _PLANNED_ROUNDS = 6
+# A named score's Pareto column is keyed apart from example ids.
+NAMED_PREFIX = "score:"
 # Once a round spends its allowance the agent still gets time to write up the notebook.
 _WRITE_UP_GRACE_SECONDS = 90
 
@@ -503,15 +505,25 @@ def task_brief(task: Task, example_ids: list[str]) -> str:
     lines += ["## Evaluation", ""]
     if example_ids:
         lines += [
-            f"The evaluator scores a candidate on {_plural(len(example_ids), 'visible example')} and reports the "
+            f"The evaluator scores a candidate on {_plural(len(example_ids), 'example')} and reports the "
             "average score (higher is better) together with per-example scores and feedback.",
             "",
             "Example ids: " + ", ".join(f"`{eid}`" for eid in example_ids),
             "",
-            "Held-out test cases exist and are never exposed; do not overfit the visible ones.",
+            "The final result is measured afresh on these examples; a change that only helps by special-casing "
+            "one of them is not an improvement.",
         ]
     else:
-        lines += ["The evaluator scores the candidate as a whole and reports a single score (higher is better)."]
+        lines += [
+            "The evaluator scores the candidate as a whole and reports a score (higher is better) with feedback "
+            "explaining it."
+        ]
+    lines += [
+        "",
+        "The evaluator may also report named scores, each with its own feedback. Each named score is a column "
+        f"(`{NAMED_PREFIX}<name>`) of the per-example scores and an axis of the Pareto front, so a candidate that "
+        "wins on one of them is worth keeping even when its average is lower.",
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -520,6 +532,9 @@ class Observation:
     """One evaluator call the research agent made, as the server answered it."""
 
     candidate: str
+    # The candidate's score, the mean over the examples it was scored on.
+    score: float
+    # Pareto columns: per-example scores, then named scores as ``score:<name>``.
     scores: dict[str, float]
     feedback: dict[str, str]
     full: bool
@@ -544,22 +559,93 @@ def _feedback_text(info: Any) -> str:
     return text if len(text) <= _FEEDBACK_CHARS else text[:_FEEDBACK_CHARS] + " …"
 
 
-def pareto_front(table: dict[str, dict[str, float]]) -> list[str]:
-    """Return the candidates no other candidate beats on every example.
+def named_score_columns(infos: list[Any]) -> tuple[dict[str, float], dict[str, str]]:
+    """Average a scorer's named scores over the examples into Pareto columns.
 
     Args:
-        table: Per-example scores of each fully evaluated candidate.
+        infos: The scorer's side info for each example scored (one item without examples).
 
     Returns:
-        The non-dominated candidates, highest mean first.
+        ``(scores, feedback)`` keyed ``score:<name>``: each name's mean score,
+        and its feedback from every example joined into one note.
+    """
+    collected: dict[str, list[tuple[float, str]]] = {}
+    for info in infos:
+        raw = info.get("scores") if isinstance(info, dict) else None
+        if not isinstance(raw, dict):
+            continue
+        for name, entry in raw.items():
+            value = entry.get("score") if isinstance(entry, dict) else entry
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                continue
+            note = str(entry.get("feedback") or "") if isinstance(entry, dict) else ""
+            collected.setdefault(f"{NAMED_PREFIX}{name}", []).append((float(value), note))
+    scores = {column: sum(value for value, _ in entries) / len(entries) for column, entries in collected.items()}
+    feedback = {
+        column: _feedback_text({"feedback": " | ".join(note for _, note in entries if note)})
+        for column, entries in collected.items()
+    }
+    return scores, feedback
+
+
+def gepa_named_scores(side_info: Any) -> Any:
+    """Shape side info for GEPA: numeric named scores for its frontier, their feedback beside them.
+
+    Args:
+        side_info: What the scorer returned next to the score.
+
+    Returns:
+        A copy whose ``scores`` maps each name to its number, with each named
+        score's feedback under ``Feedback per score``; anything else unchanged.
+    """
+    raw = side_info.get("scores") if isinstance(side_info, dict) else None
+    if not isinstance(raw, dict) or not any(isinstance(entry, dict) for entry in raw.values()):
+        return side_info
+    numbers = {name: entry.get("score") if isinstance(entry, dict) else entry for name, entry in raw.items()}
+    notes = {name: entry.get("feedback") for name, entry in raw.items() if isinstance(entry, dict)}
+    return {**side_info, "scores": numbers, "Feedback per score": {k: v for k, v in notes.items() if v}}
+
+
+def record_text(record: Any) -> str:
+    """Render one GEPA reflective record: the feedback, then each named score with its own feedback.
+
+    Args:
+        record: A record from GEPA's reflective dataset.
+
+    Returns:
+        A short readable note.
+    """
+    if not isinstance(record, dict):
+        return _feedback_text(record)
+    numbers = record.get("Scores (Higher is Better)")
+    notes = record.get("Feedback per score")
+    lines = [_feedback_text({"feedback": record["feedback"]}) if isinstance(record.get("feedback"), str) else ""]
+    if isinstance(numbers, dict):
+        notes = notes if isinstance(notes, dict) else {}
+        for name, value in numbers.items():
+            note = notes.get(name)
+            lines.append(f"   - {name}: {value}" + (f" — {_feedback_text({'feedback': note})}" if note else ""))
+    text = "\n".join(line for line in lines if line)
+    return text or _feedback_text(record)
+
+
+def pareto_front(table: dict[str, dict[str, float]], ranking: dict[str, float]) -> list[str]:
+    """Return the candidates no other candidate beats on every column.
+
+    Args:
+        table: Per-example and named-score columns of each fully evaluated candidate.
+        ranking: Each candidate's overall score, to order the front.
+
+    Returns:
+        The non-dominated candidates, highest overall score first.
     """
 
     def dominates(a: dict[str, float], b: dict[str, float]) -> bool:
         """Tell whether ``a`` is at least as good as ``b`` everywhere and better somewhere."""
-        return all(a[k] >= b[k] for k in b) and any(a[k] > b[k] for k in b)
+        return all(a.get(k, 0.0) >= b[k] for k in b) and any(a.get(k, 0.0) > b[k] for k in b)
 
     front = [c for c, row in table.items() if not any(dominates(other, row) for d, other in table.items() if d != c)]
-    return sorted(front, key=lambda c: -_mean(table[c]))
+    return sorted(front, key=lambda c: -ranking.get(c, _mean(table[c])))
 
 
 def _mean(row: dict[str, float]) -> float:
@@ -731,7 +817,12 @@ class AutoResearchEngine:
                 feedback = {str(k): _feedback_text(v) for k, v in (info.get("infos") or {}).items()}
                 for eid, error in (info.get("errors") or {}).items():
                     feedback[str(eid)] = _feedback_text(f"error: {error}")
-                self._observe(Observation(candidate, scores, feedback, set(scores) == visible, self.round))
+                full = set(scores) == visible
+                mean = _mean(scores)
+                named, named_feedback = named_score_columns(list((info.get("infos") or {}).values()))
+                scores.update(named)
+                feedback.update(named_feedback)
+                self._observe(Observation(candidate, mean, scores, feedback, full, self.round))
                 return score, info
 
             server.evaluate_examples = evaluate_examples  # type: ignore[method-assign]
@@ -741,9 +832,12 @@ class AutoResearchEngine:
         def evaluate(candidate: str, example: Any = None, **kwargs: Any) -> Any:
             """Score through the server, then log the whole-candidate answer."""
             score, info = original_single(candidate, example, **kwargs)
-            self._observe(
-                Observation(candidate, {"_single": float(score)}, {"_single": _feedback_text(info)}, True, self.round)
-            )
+            named, named_feedback = named_score_columns([info])
+            # Without examples the named scores are the Pareto axes; the score
+            # alone is one when the scorer names none.
+            columns = named or {"_single": float(score)}
+            feedback = {"_single": _feedback_text(info), **named_feedback}
+            self._observe(Observation(candidate, float(score), columns, feedback, True, self.round))
             return score, info
 
         server.evaluate = evaluate  # type: ignore[method-assign]
@@ -763,10 +857,10 @@ class AutoResearchEngine:
             self._ids[observation.candidate] = cid
             (self.work_dir / "archive" / f"{cid}{self.suffix}").write_text(observation.candidate, encoding="utf-8")
             with (self.work_dir / "archive" / "index.tsv").open("a", encoding="utf-8") as index:
-                index.write(f"{cid}\t{_mean(observation.scores):.6f}\t{observation.round}\n")
+                index.write(f"{cid}\t{observation.score:.6f}\t{observation.round}\n")
 
     def _table(self) -> dict[str, dict[str, float]]:
-        """Per-example scores of every fully evaluated candidate, latest answer winning.
+        """Per-example and named-score columns of every fully evaluated candidate, latest answer winning.
 
         Returns:
             Rows keyed by candidate text.
@@ -774,14 +868,36 @@ class AutoResearchEngine:
         with self._lock:
             return {o.candidate: o.scores for o in self.observations if o.full}
 
+    def _ranking(self) -> dict[str, float]:
+        """Overall score of every fully evaluated candidate, latest answer winning.
+
+        Returns:
+            Scores keyed by candidate text.
+        """
+        with self._lock:
+            return {o.candidate: o.score for o in self.observations if o.full}
+
+    def _columns(self, table: dict[str, dict[str, float]]) -> list[str]:
+        """List the Pareto columns worth showing: examples, then named scores.
+
+        Args:
+            table: Per-example and named-score columns of fully evaluated candidates.
+
+        Returns:
+            Column ids in first-seen order, without the single-score placeholder.
+        """
+        columns = list(self.example_ids)
+        for row in table.values():
+            columns += [column for column in row if column not in columns and column != "_single"]
+        return columns
+
     def _leader_score(self) -> float | None:
-        """Return the best mean score among fully evaluated candidates.
+        """Return the best overall score among fully evaluated candidates.
 
         Returns:
             The score, or ``None`` before any full evaluation.
         """
-        table = self._table()
-        return max((_mean(row) for row in table.values()), default=None)
+        return max(self._ranking().values(), default=None)
 
     def _directive(self, stale: int, improved: bool) -> str:
         """Pick this round's research directive from the evidence so far.
@@ -809,7 +925,7 @@ class AutoResearchEngine:
             frontier member wins anywhere the leader loses.
         """
         table = self._table()
-        front = pareto_front(table)
+        front = pareto_front(table, self._ranking())
         if len(front) < 2:
             return None
         leader = table[front[0]]
@@ -949,8 +1065,8 @@ class AutoResearchEngine:
             "evaluation before the round's allowance runs out.\n\n"
             "## Standards\n\n"
             "- Follow the round's directive in `STATE.md`; it is chosen from the evidence of earlier rounds.\n"
-            "- Keep the repository working. Held-out test cases exist, so a change that only helps because it "
-            "special-cases a visible example, or weakens the checks that judge it, is not an improvement.\n"
+            "- Keep the repository working. The final result is measured afresh, so a change that only helps "
+            "because it special-cases an example, or weakens the checks that judge it, is not an improvement.\n"
             "- Between two versions with the same score, the smaller diff is better. A change that deletes code "
             "and keeps the score is a win.\n"
             "- There is no human to ask. End the session once the allowance is spent or the directive is done; "
@@ -1014,7 +1130,7 @@ class AutoResearchEngine:
             "before the round's allowance runs out.\n\n"
             "## Standards\n\n"
             "- Follow the round's directive in `STATE.md`; it is chosen from the evidence of earlier rounds.\n"
-            "- Keep every candidate valid for `TASK.md`. Held-out test cases exist, so a change that only helps "
+            "- Keep every candidate valid for `TASK.md`. The final result is measured afresh, so a change that only helps "
             "because it names or special-cases a visible example is not an improvement.\n"
             "- Between two candidates with the same score, the shorter and simpler one is better. A change that "
             "deletes text and keeps the score is a win.\n"
@@ -1030,7 +1146,8 @@ class AutoResearchEngine:
             directive: This round's directive.
         """
         table = self._table()
-        front = pareto_front(table)[:_FRONTIER_SIZE]
+        ranking = self._ranking()
+        front = pareto_front(table, ranking)[:_FRONTIER_SIZE]
         frontier_dir = self.work_dir / "frontier"
         for stale_file in frontier_dir.iterdir():
             stale_file.unlink()
@@ -1050,18 +1167,19 @@ class AutoResearchEngine:
             lines.append(f"- Your own model spend left for the run: ${left:.2f}.")
         lines += ["", "## Leaderboard", ""]
         if table:
-            ranked = sorted(table, key=lambda c: -_mean(table[c]))[:_LEADERBOARD_SIZE]
+            ranked = sorted(table, key=lambda c: -ranking[c])[:_LEADERBOARD_SIZE]
             lines += ["| id | score | on frontier |", "| --- | --- | --- |"]
-            lines += [f"| {self._ids[c]} | {_mean(table[c]):.4f} | {'yes' if c in front else ''} |" for c in ranked]
+            lines += [f"| {self._ids[c]} | {ranking[c]:.4f} | {'yes' if c in front else ''} |" for c in ranked]
         else:
             lines.append("Nothing has been fully evaluated yet.")
-        if table and self.example_ids:
-            lines += ["", "## Per-example scores on the frontier", ""]
-            lines += ["| example | " + " | ".join(self._ids[c] for c in front) + " |"]
+        columns = self._columns(table)
+        if table and columns:
+            lines += ["", "## Per-example and named scores on the frontier", ""]
+            lines += ["| column | " + " | ".join(self._ids[c] for c in front) + " |"]
             lines += ["| --- " * (len(front) + 1) + "|"]
-            for eid in self.example_ids:
-                cells = " | ".join(f"{table[c].get(eid, 0.0):.3f}" for c in front)
-                lines.append(f"| `{eid}` | {cells} |")
+            for column in columns:
+                cells = " | ".join(f"{table[c].get(column, 0.0):.3f}" for c in front)
+                lines.append(f"| `{column}` | {cells} |")
         lines += ["", "## Failure dossier", ""]
         lines += self._dossier(table, front)
         (self.work_dir / "STATE.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1131,17 +1249,22 @@ class AutoResearchEngine:
         leader = front[0]
         with self._lock:
             feedback = next((o.feedback for o in reversed(self.observations) if o.full and o.candidate == leader), {})
+        columns = self._columns(table)
+        lines: list[str] = []
         if not self.example_ids:
             note = feedback.get("_single") or "(no feedback)"
-            return [f"Leader `{self._ids[leader]}` feedback:", "", "```", note, "```"]
-        best_anywhere = {eid: max(row.get(eid, 0.0) for row in table.values()) for eid in self.example_ids}
-        hard = sorted(self.example_ids, key=lambda eid: best_anywhere[eid])[:_DOSSIER_EXAMPLES]
-        weakest = sorted(self.example_ids, key=lambda eid: table[leader].get(eid, 0.0))[:_DOSSIER_EXAMPLES]
-        lines = [
-            "Hardest examples (best score any candidate reached): "
-            + ", ".join(f"`{eid}` {best_anywhere[eid]:.3f}" for eid in hard),
+            lines += [f"Leader `{self._ids[leader]}` feedback:", "", "```", note, "```"]
+            if not columns:
+                return lines
+            lines.append("")
+        best_anywhere = {column: max(row.get(column, 0.0) for row in table.values()) for column in columns}
+        hard = sorted(columns, key=lambda column: best_anywhere[column])[:_DOSSIER_EXAMPLES]
+        weakest = sorted(columns, key=lambda column: table[leader].get(column, 0.0))[:_DOSSIER_EXAMPLES]
+        lines += [
+            "Hardest examples and named scores (best score any candidate reached): "
+            + ", ".join(f"`{column}` {best_anywhere[column]:.3f}" for column in hard),
             "",
-            f"Leader `{self._ids[leader]}` on its weakest examples:",
+            f"Leader `{self._ids[leader]}` where it is weakest:",
             "",
         ]
         for eid in weakest:
@@ -1235,6 +1358,7 @@ class AutoResearchEngine:
             raise RuntimeError("The research agent finished without scoring any candidate through eval.sh.")
         candidate, score = best
         table = self._table()
+        ranking = self._ranking()
         return Result(
             best_candidate=candidate,
             best_score=score,
@@ -1248,7 +1372,7 @@ class AutoResearchEngine:
                 "session_ids": list(self.session_ids),
                 "proposer_cost_usd": round(self.cost_usd, 6),
                 "candidates_evaluated": len(table),
-                "frontier": [{"id": self._ids[c], "score": round(_mean(table[c]), 6)} for c in pareto_front(table)],
+                "frontier": [{"id": self._ids[c], "score": round(ranking[c], 6)} for c in pareto_front(table, ranking)],
                 "work_dir": str(self.work_dir),
                 "seed_len": len(seed_as_text(task.seed_candidate)),
                 **({"repository": True} if self.repo else {}),
@@ -1542,8 +1666,10 @@ class MetaHarnessEngine:
                 + "## Directory Structure\n\n"
                 "- Val results: `results/<candidate>/val.json` (`avg_val` plus per-example `scores` and evaluator "
                 "`infos`)\n"
-                "- Frontier: `frontier_val.json` (`_pareto` ranks candidates by average score)\n"
-                "- Test results are held out and never exposed during evolution",
+                "- Frontier: `frontier_val.json` (`_pareto` ranks candidates by average score; every other key "
+                "is an example or a named score `score:<name>` with the candidate that leads it)\n"
+                "- Named scores: `results/<candidate>/val.json` `named_scores` maps each to its score and "
+                "feedback; a candidate that leads one is worth building on",
             ),
             (
                 '{"iteration": 1, "system": "example_system", "avg_val": 45.0, "axis": "exploitation", '
@@ -1740,8 +1866,19 @@ class MetaHarnessEngine:
         avg, info = server.evaluate_examples(candidate, example_ids=ids)
         avg = float(avg)
         server.log_progress(avg, candidate=candidate)
-        record = {"system": name, "avg_val": avg, "scores": info.get("scores", {}), "infos": info.get("infos", {})}
-        self.results[name] = {"avg_val": avg, "scores": dict(record["scores"]), "candidate": candidate}
+        infos = info.get("infos", {})
+        named, named_feedback = named_score_columns(list(infos.values()) if isinstance(infos, dict) else [info])
+        record = {
+            "system": name,
+            "avg_val": avg,
+            "scores": info.get("scores", {}),
+            "infos": infos,
+            "named_scores": {
+                column.removeprefix(NAMED_PREFIX): {"score": value, "feedback": named_feedback[column]}
+                for column, value in named.items()
+            },
+        }
+        self.results[name] = {"avg_val": avg, "scores": {**record["scores"], **named}, "candidate": candidate}
         target = self.logs_dir / "results" / name
         target.mkdir(parents=True, exist_ok=True)
         (target / "val.json").write_text(json.dumps(record, indent=2, default=str), encoding="utf-8")
@@ -1753,7 +1890,10 @@ class MetaHarnessEngine:
         frontier: dict[str, Any] = {
             "_pareto": [{"system": name, "val_accuracy": entry["avg_val"]} for name, entry in ranked]
         }
-        for eid in self.example_ids or ["_single"]:
+        named = [
+            column for entry in self.results.values() for column in entry["scores"] if column.startswith(NAMED_PREFIX)
+        ]
+        for eid in [*(self.example_ids or ["_single"]), *dict.fromkeys(named)]:
             leader = max(
                 ((name, entry["scores"].get(eid)) for name, entry in ranked if entry["scores"].get(eid) is not None),
                 key=lambda item: item[1],
@@ -1905,15 +2045,21 @@ class GepaRepoEngine:
             stop_callbacks=[ScoreThresholdStopper(self.stop_at_score)] if self.stop_at_score is not None else None,
             callbacks=[tracker],
         )
+
+        def evaluate(candidate: Any, example: Any = None) -> tuple[float, Any]:
+            """Score through the server, named scores reshaped for GEPA's objective frontier."""
+            score, info = server.evaluate(candidate, example)
+            return score, gepa_named_scores(info)
+
         kwargs: dict[str, Any] = {
             "seed_candidate": seed_as_text(task.seed_candidate) if task.seed_candidate is not None else "",
-            "evaluator": server.evaluate,
+            "evaluator": evaluate,
             "config": config,
         }
+        # Every case both drives reflection and ranks versions.
         if task.train_set:
             kwargs["dataset"] = task.train_set
-        if task.val_set:
-            kwargs["valset"] = task.val_set
+            kwargs["valset"] = task.train_set
         if task.objective:
             kwargs["objective"] = task.objective
         if task.background:
@@ -2064,11 +2210,11 @@ class AgentProposer:
         lines += ["", f"You may change: {editable}. Leave everything else as it is."]
         if self.readonly_paths:
             lines.append("Submodules and Git LFS files stay as fetched: " + ", ".join(self.readonly_paths) + ".")
-        lines += ["", "How this version scored on the cases to improve:"]
+        lines += ["", "How this version scored, with the scorer's feedback and each named score's own feedback:"]
         for index, record in enumerate(records[:_DOSSIER_EXAMPLES], start=1):
-            lines.append(f"{index}. " + _feedback_text(record))
+            lines.append(f"{index}. " + record_text(record))
         if not records:
-            lines.append("No per-case feedback was recorded.")
+            lines.append("No feedback was recorded.")
         lines += [
             "",
             "Make one focused change that should raise the score, and leave it in the working tree. You cannot run "

@@ -22,8 +22,7 @@ export function preflightDestination(
         stage: "evaluation",
         fieldId: /model/.test(key) ? "bb-scoring-model" : "bb-scorer-code",
       };
-    if (/case|split|dataset/.test(key))
-      return { stage: "evaluation", fieldId: "wizard-stage-evaluation" };
+    if (/case|dataset/.test(key)) return { stage: "evaluation", fieldId: "bb-cases" };
     if (/task|target/.test(key))
       return { stage: "optimization", fieldId: "wizard-stage-optimization" };
   } else {

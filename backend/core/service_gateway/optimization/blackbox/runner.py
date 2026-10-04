@@ -275,36 +275,97 @@ def side_info_json_default(value: Any) -> str:
     return str(value)
 
 
-def normalize_score(raw: Any) -> tuple[float, SideInfo]:
-    """Coerce a scorer's return value into ``(score, side_info)``.
+FEEDBACK_REQUIRED = (
+    'The scorer must return feedback: return {"score": <number>, "feedback": "<why it scored that>"}, '
+    'optionally with "scores": {"<name>": {"score": <number>, "feedback": "<why>"}} for each thing you '
+    'measure, or a (score, "feedback") pair. The optimizer learns from the feedback, so say what was wrong '
+    "or missing."
+)
 
-    Accepted shapes: a number; ``(number, side_info)``; a mapping with a
-    ``score`` key (remaining keys become side info); an object with a
-    numeric ``score`` attribute.
+
+def _feedback(value: Any, where: str) -> str:
+    """Return a non-empty feedback string or explain what is missing.
+
+    Args:
+        value: The feedback the scorer gave.
+        where: Names the score the feedback belongs to, for the error.
+
+    Returns:
+        The feedback text.
+
+    Raises:
+        ScorerError: When the feedback is absent, not text, or blank.
+    """
+    if isinstance(value, str) and value.strip():
+        return value
+    raise ScorerError(f"{FEEDBACK_REQUIRED} ({where} has no feedback.)")
+
+
+def named_scores(raw: Any) -> dict[str, dict[str, Any]]:
+    """Validate the optional named scores into ``{name: {"score", "feedback"}}``.
+
+    Args:
+        raw: The scorer's ``scores`` value.
+
+    Returns:
+        Each named score with its float score and feedback.
+
+    Raises:
+        ScorerError: When ``scores`` is not a mapping, or a named score lacks a number or feedback.
+    """
+    if not isinstance(raw, dict):
+        raise ScorerError(f'{FEEDBACK_REQUIRED} ("scores" must map each name to a score and feedback.)')
+    named: dict[str, dict[str, Any]] = {}
+    for name, entry in raw.items():
+        if isinstance(entry, (tuple, list)) and len(entry) == 2:
+            entry = {"score": entry[0], "feedback": entry[1]}
+        value = entry.get("score") if isinstance(entry, dict) else None
+        if not isinstance(value, _NUMBER_TYPES):
+            raise ScorerError(f"{FEEDBACK_REQUIRED} (The named score {name!r} has no numeric score.)")
+        named[str(name)] = {
+            "score": float(value),
+            "feedback": _feedback(entry.get("feedback"), f"The named score {name!r}"),
+        }
+    return named
+
+
+def normalize_score(raw: Any) -> tuple[float, SideInfo]:
+    """Coerce a scorer's return value into ``(score, side_info)``, feedback included.
+
+    Accepted shapes: a mapping ``{"score", "feedback", "scores"?, ...}``
+    (other keys stay in the side info); a ``(score, feedback)`` pair whose
+    second item is the feedback text or a mapping holding it; an object
+    with numeric ``score`` and text ``feedback`` attributes. Every score
+    carries feedback, the top-level one and each named score, because the
+    engines' proposers learn from it.
 
     Args:
         raw: Whatever the scorer returned.
 
     Returns:
-        The float score and a side-info mapping (empty when none was given).
+        The float score and side info with ``feedback`` and, when given,
+        ``scores`` as ``{name: {"score": float, "feedback": str}}``.
 
     Raises:
-        ScorerError: When the value has none of the accepted shapes.
+        ScorerError: When the value has none of the accepted shapes or lacks feedback.
     """
-    if isinstance(raw, _NUMBER_TYPES):
-        return float(raw), {}
     if isinstance(raw, (tuple, list)) and len(raw) == 2 and isinstance(raw[0], _NUMBER_TYPES):
-        side = raw[1]
-        return float(raw[0]), dict(side) if isinstance(side, dict) else {"feedback": side}
-    if isinstance(raw, dict) and isinstance(raw.get("score"), _NUMBER_TYPES):
-        return float(raw["score"]), {key: value for key, value in raw.items() if key != "score"}
-    score_attr = getattr(raw, "score", None)
-    if isinstance(score_attr, _NUMBER_TYPES):
-        return float(score_attr), {}
-    raise ScorerError(
-        "scorer must return a number, a (number, side_info) pair, or a mapping with a 'score' key; "
-        f"got {type(raw).__name__}."
-    )
+        score, side = raw
+        side_info = dict(side) if isinstance(side, dict) else {"feedback": side}
+    elif isinstance(raw, dict) and isinstance(raw.get("score"), _NUMBER_TYPES):
+        score = raw["score"]
+        side_info = {key: value for key, value in raw.items() if key != "score"}
+    elif isinstance(getattr(raw, "score", None), _NUMBER_TYPES):
+        score = raw.score
+        side_info = {"feedback": getattr(raw, "feedback", None)}
+    elif isinstance(raw, _NUMBER_TYPES):
+        raise ScorerError(f"{FEEDBACK_REQUIRED} (It returned a bare number.)")
+    else:
+        raise ScorerError(f"{FEEDBACK_REQUIRED} (It returned {type(raw).__name__}.)")
+    side_info["feedback"] = _feedback(side_info.get("feedback"), "The score")
+    if "scores" in side_info:
+        side_info["scores"] = named_scores(side_info["scores"])
+    return float(score), side_info
 
 
 def helper_module(helpers: dict[str, Any]) -> types.ModuleType:

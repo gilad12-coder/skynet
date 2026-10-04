@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-from .common import ModelConfig, SplitCounts, SplitFractions
+from .common import ModelConfig
 from .results import LMActivity, ModelTokenUsage
 from .scorer_dependencies import ScorerDependencyLock
 
@@ -107,7 +107,8 @@ class BlackboxScorer(BaseModel):
 
 
 # Hard stops for a run. ``max_scorer_runs`` caps optimizer-driven scorer
-# calls (the baseline/final test-set evaluations are outside the cap);
+# calls (the final run that re-scores the starting point and the winner is
+# outside the cap);
 # ``max_iterations`` caps proposer rounds for the engines that iterate
 # (Meta-Harness, AutoSaddler); ``stop_at_score`` ends the run early once a version
 # reaches it.
@@ -329,8 +330,6 @@ class BlackboxRunRequest(BaseModel):
     # By-reference twin of ``cases`` for agent callers: a dataset already staged
     # server-side, so the rows never travel through the model's tool arguments.
     staged_dataset_id: str | None = Field(default=None, min_length=1, max_length=64)
-    split_fractions: SplitFractions = Field(default_factory=SplitFractions)
-    shuffle: bool = True
     seed: int | None = None
     budget: BlackboxBudget = Field(default_factory=BlackboxBudget)
     strategy: BlackboxStrategy = Field(default_factory=BlackboxStrategy)
@@ -390,8 +389,7 @@ class BlackboxRunRequest(BaseModel):
 
         Raises:
             ValueError: When the seed is blank or an empty dict; when a multi-part seed is paired with
-                an engine that only takes text; or when an agent target has
-                no cases to run the agent on; or when an iteration cap is
+                an engine that only takes text; or when an iteration cap is
                 supplied outside a single Meta-Harness run.
         """
         seed = self.seed_candidate
@@ -412,8 +410,6 @@ class BlackboxRunRequest(BaseModel):
                 )
         elif not seed.strip():
             raise ValueError("The starting point cannot be blank.")
-        if self.target.kind == BLACKBOX_TARGET_AGENT and not self.cases:
-            raise ValueError("An agent target needs at least one case: the tasks the agent is run on.")
         if self.target.kind == BLACKBOX_TARGET_AGENT and self.task_model_settings is not None:
             task_model = self.task_model_settings.normalized_identifier()
             if not task_model:
@@ -510,17 +506,39 @@ class BlackboxCandidateNode(BaseModel):
     discovery_evals: int = 0
 
 
-# Result persisted for a finished black-box job. ``baseline_test_metric`` /
-# ``optimized_test_metric`` keep the DSPy result names so the summary and
-# billing paths read them unchanged.
+# One named score a scorer returned, with the feedback that explains it.
+class BlackboxNamedScore(BaseModel):
+    score: float
+    feedback: str = ""
+
+
+# The final run's fresh scores of the starting point and the winner on one case.
+class BlackboxCaseResult(BaseModel):
+    index: int
+    baseline_score: float | None = None
+    best_score: float | None = None
+    baseline_feedback: str | None = None
+    best_feedback: str | None = None
+
+
+# Result persisted for a finished black-box job. The winner is chosen from the
+# optimization run's scores; ``baseline_score`` / ``best_score`` come from a
+# separate final run that scores the starting point and the winner afresh (on
+# every case, or once each without cases). Named scores are means over cases.
 class BlackboxRunResponse(BaseModel):
     optimizer_name: str
     strategy_mode: Literal["auto", "single"]
     engine_used: str
-    split_counts: SplitCounts
-    baseline_test_metric: float | None = None
-    optimized_test_metric: float | None = None
+    baseline_score: float | None = None
+    best_score: float | None = None
     metric_improvement: float | None = None
+    baseline_feedback: str | None = None
+    best_feedback: str | None = None
+    baseline_named_scores: dict[str, BlackboxNamedScore] = Field(default_factory=dict)
+    best_named_scores: dict[str, BlackboxNamedScore] = Field(default_factory=dict)
+    case_results: list[BlackboxCaseResult] = Field(default_factory=list)
+    case_count: int = 0
+    final_scorer_runs: int = 0
     seed_candidate: BlackboxCandidate | None = None
     best_candidate: BlackboxCandidate
     regression_guard_applied: bool = False
@@ -539,6 +557,28 @@ class BlackboxRunResponse(BaseModel):
     lm_activity: LMActivity | None = None
     optimization_metadata: dict[str, Any] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)
+
+    # Results stored before the final run existed carry the DSPy names for
+    # their held-out scores; read them as the baseline and best scores.
+    @model_validator(mode="before")
+    @classmethod
+    def _fold_held_out_scores(cls, data: Any) -> Any:
+        """Map a stored result's held-out test metrics onto the final-run scores.
+
+        Args:
+            data: The raw result mapping.
+
+        Returns:
+            The mapping with ``baseline_score`` / ``best_score`` filled from the
+            legacy fields when only those exist.
+        """
+        legacy = {"baseline_test_metric", "optimized_test_metric", "split_counts"}
+        if not isinstance(data, dict) or not legacy & data.keys():
+            return data
+        folded = {key: value for key, value in data.items() if key not in legacy}
+        folded.setdefault("baseline_score", data.get("baseline_test_metric"))
+        folded.setdefault("best_score", data.get("optimized_test_metric"))
+        return folded
 
     # Results stored by the retired plateau relay strategy stay readable:
     # they open as Auto runs whose hand-off lanes ended by completing.

@@ -276,6 +276,8 @@ def _result_summary_columns() -> tuple[Any, ...]:
         best_pair["runtime_seconds"].as_string(),
         best_pair["generation_model"].as_string(),
         best_pair["reflection_model"].as_string(),
+        result["baseline_score"].as_string(),
+        result["best_score"].as_string(),
     )
 
 
@@ -306,6 +308,8 @@ def _assemble_result_summary(values: Any) -> dict[str, Any] | None:
         bp_runtime,
         bp_generation,
         bp_reflection,
+        r_baseline_score,
+        r_best_score,
     ) = values
     if result_null:
         return None
@@ -315,6 +319,8 @@ def _assemble_result_summary(values: Any) -> dict[str, Any] | None:
         ("runtime_seconds", _json_float(r_runtime)),
         ("completed_pairs", _json_int(r_completed)),
         ("failed_pairs", _json_int(r_failed)),
+        ("baseline_score", _json_float(r_baseline_score)),
+        ("best_score", _json_float(r_best_score)),
     )
     result: dict[str, Any] = {key: value for key, value in result_pairs if value is not None}
     best_pair_pairs = (

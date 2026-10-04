@@ -1872,9 +1872,12 @@ Capabilities worth knowing about:
        from the user, never invent either, and write them with
        ``update_wizard_state``.
     2. The scorer is Python source defining
-       ``score(candidate, case=None)`` that returns a float (higher
-       is better) or a ``(score, side_info)`` tuple; ``case`` is one
-       row of the evaluation cases, when there are any. This is the
+       ``score(candidate, case=None)`` that returns
+       ``{"score": float, "feedback": str}`` (higher is better; the
+       feedback says why, and is required), plus
+       ``"scores": {name: {"score", "feedback"}}`` when it measures
+       several things; ``case`` is one row of the evaluation cases,
+       when there are any (cases are optional). This is the
        ONE place you write code yourself. Put it in
        ``blackbox_scorer_code`` via ``update_wizard_state`` so the
        user can read it.

@@ -72,7 +72,7 @@ from ..constants import (
 from ..exceptions import INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
 from ..i18n import CANCELLATION_REASON, PAUSE_REASON
 from ..models import BlackboxRunRequest, GridSearchRequest, GridSearchResponse, PairResult, RunRequest, SplitCounts
-from ..models.results import TerminalOutcome
+from ..models.results import TerminalOutcome, result_scores
 from ..notifications import notify_job_completed
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
@@ -1302,8 +1302,9 @@ class BackgroundWorker:
                         self._maybe_finalize_grid(pair_parent_id)
                         return
                     _username = overview.get(PAYLOAD_OVERVIEW_USERNAME, "")
-                    _baseline = result_dict.get("baseline_test_metric") if isinstance(result_dict, dict) else None
-                    _optimized = result_dict.get("optimized_test_metric") if isinstance(result_dict, dict) else None
+                    _baseline, _optimized = (
+                        result_scores(result_dict) if isinstance(result_dict, dict) else (None, None)
+                    )
                     claimed = self._job_store.claim_completion_notification(optimization_id)
                     if claimed:
                         notify_job_completed(

@@ -39,7 +39,7 @@ _GATEWAY = ScorerGateway(
     url="http://gw.example/v1", model="judge", api_key="k", billing_model="fake/judge", timeout_seconds=9.0
 )
 _OK = {"score": 0.5, "side_info": {}, "error": None, "usage": []}
-_LLM_SCORER = "def score(candidate, case=None):\n    return float(llm(candidate, case['input']))\n"
+_LLM_SCORER = "def score(candidate, case=None):\n    return float(llm(candidate, case['input'])), 'judged'\n"
 
 
 class _RunnerSession(FakeSandboxSession):
@@ -543,14 +543,17 @@ def test_probe_scorer_runs_the_real_runner_through_the_local_runtime() -> None:
     """End to end on the host: the vowel scorer scores a seed and returns its side info."""
     probe = probe_scorer(scorer_code=VOWEL_SCORER_CODE, candidate="aeiou", runtime=LocalSubprocessRuntime())
 
-    assert probe == ScorerProbeResult(score=1.0, side_info={"vowels": 5}, error=None, usage_by_model={})
+    assert probe == ScorerProbeResult(
+        score=1.0, side_info={"feedback": "5 vowel(s)", "vowels": 5}, error=None, usage_by_model={}
+    )
 
 
 @pytest.mark.parametrize(
     ("code", "error"),
     [
         ("def score(c, case=None): raise ValueError('bad candidate')", "ValueError: bad candidate"),
-        ("def score(c, case=None): return 'nope'", "scorer must return"),
+        ("def score(c, case=None): return 'nope'", "must return feedback"),
+        ("def score(c, case=None): return 1.0", "must return feedback"),
         ("def !!!", "scorer code has a syntax error"),
         (_LLM_SCORER, "no model was chosen in the Scorer step"),
     ],
@@ -572,7 +575,7 @@ def test_probe_scorer_carries_large_side_info_and_images_back_from_the_box() -> 
     """Multi-megabyte side info, image objects and odd types all survive the file round trip."""
     code = (
         "def score(candidate, case=None):\n"
-        "    return 0.5, {'blob': 'x' * 3_000_000, 'render': Image(base64_data='aGk=', media_type='image/png'), 'odd': {1, 2}}\n"
+        "    return 0.5, {'feedback': 'f', 'blob': 'x' * 3_000_000, 'render': Image(base64_data='aGk=', media_type='image/png'), 'odd': {1, 2}}\n"
     )
 
     probe = probe_scorer(scorer_code=code, candidate="x", runtime=LocalSubprocessRuntime())
@@ -610,7 +613,9 @@ def test_probe_scorer_calls_the_gateway_from_inside_the_box_and_bills_the_tokens
         finally:
             scorer.close()
 
-    assert probe == ScorerProbeResult(score=0.75, side_info={}, error=None, usage_by_model={"fake/judge": (5, 2)})
+    assert probe == ScorerProbeResult(
+        score=0.75, side_info={"feedback": "judged"}, error=None, usage_by_model={"fake/judge": (5, 2)}
+    )
     [request] = judge.requests
     assert request["authorization"] == "Bearer secret-key"
     assert request["body"]["model"] == "judge"

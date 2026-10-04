@@ -137,8 +137,8 @@ ENGINES: dict[str, EngineSpec] = {
         id=BLACKBOX_ENGINE_AUTOSADDLER,
         label="AutoSaddler",
         description=(
-            "A coding agent diagnoses training failures and patches the version; "
-            "only patches confirmed on held-out development cases are kept."
+            "A coding agent diagnoses the scorer's feedback and patches the version; "
+            "only patches a fresh scorer run confirms are kept."
         ),
         factory=AutoSaddlerEngine,
         requires_proposer=True,

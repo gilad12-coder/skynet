@@ -33,22 +33,22 @@ AUTO_ENGINES = ("gepa", "autoresearch", "meta_harness", "autosaddler")
 
 
 def upstream_task(task: Task, name: str) -> UpstreamTask:
-    """Translate task data while keeping held-out examples outside the optimizer.
+    """Translate a Skynet task into the upstream task shape.
 
     Args:
-        task: Skynet's optimization-only task.
+        task: Skynet's optimization task.
         name: Artifact grouping name.
 
     Returns:
-        The equivalent upstream task, with no test set.
+        The equivalent upstream task; its cases go in as the train set alone
+        because upstream merges train and val into one pool.
     """
     return UpstreamTask(
         name=name,
         seed_candidate=task.seed_candidate,
         objective=task.objective or "",
         background=task.background or "",
-        train_set=task.train_set or None,
-        val_set=task.val_set or None,
+        train_set=task.cases or None,
     )
 
 

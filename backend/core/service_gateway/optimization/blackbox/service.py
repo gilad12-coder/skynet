@@ -1,9 +1,10 @@
 """Job entry points for black-box optimization.
 
 ``run_blackbox_optimization`` is what the worker subprocess calls for a
-``blackbox`` job: split the cases, score the starting point on the held-out
-split, run the strategy through a budgeted eval server, score the winner
-on the same split, and apply the regression guard. On an agent target the
+``blackbox`` job: run the strategy through a budgeted eval server that scores
+every version on every case (or once, without cases), pick the winner from
+those scores, then score the starting point and the winner afresh in a
+separate final run and apply the regression guard. On an agent target the
 scorer is wrapped so every scorer run launches the harness in a private
 workspace inside the run's managed sandbox. ``validate_blackbox_payload`` and ``dry_run_scorer`` back the
 submissions router.
@@ -17,7 +18,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -41,14 +42,10 @@ from ....config import settings
 from ....constants import (
     DETAIL_BASELINE,
     DETAIL_OPTIMIZED,
-    DETAIL_TEST,
-    DETAIL_TRAIN,
-    DETAIL_VAL,
     PROGRESS_BASELINE,
     PROGRESS_EVALUATION_STARTED,
     PROGRESS_OPTIMIZED,
     PROGRESS_OPTIMIZER,
-    PROGRESS_SPLITS_READY,
     TQDM_DESC_KEY,
     TQDM_N_KEY,
     TQDM_PERCENT_KEY,
@@ -62,9 +59,11 @@ from ....models.blackbox import (
     BLACKBOX_TARGET_AGENT,
     BLACKBOX_TARGET_REPO,
     BlackboxCandidateNode,
+    BlackboxCaseResult,
     BlackboxEngineCatalogResponse,
     BlackboxEngineInfo,
     BlackboxLaneResult,
+    BlackboxNamedScore,
     BlackboxProposerRuntimeInfo,
     BlackboxRunRequest,
     BlackboxRunResponse,
@@ -73,7 +72,6 @@ from ....models.blackbox import (
     ScorerDryRunRequest,
     ScorerDryRunResponse,
 )
-from ....models.common import SplitCounts
 from ....models.results import LMActivity, LMStageStats, ModelTokenUsage
 from ...language_models import (
     GepaRecoverySeedBoundary,
@@ -86,12 +84,12 @@ from ...language_models import (
 from ...safe_exec import validate_scorer_code
 from ..budget_stop import BudgetReached
 from ..cost_ceiling import CostCeilingCallback
-from ..data import split_examples
 from ..timing import STAGE_TRAINING
+from ..trajectory import MINIBATCH_FEEDBACK_CHAR_CAP
 from .agent_eval import SandboxAgentScorer, agent_target_unavailable_reason, gateway_from_settings
 from .agent_runs import PHASE_BASELINE, PHASE_FINAL, AgentRunRecorder, AgentRunSink, run_scope
 from .auto import LaneOutcome, run_strategy
-from .feedback import without_images
+from .feedback import FEEDBACK_KEY, named_scores, without_images
 from .harness import GatewayConfig
 from .native_runtime import NATIVE_ENGINES, NativeOptions, native_runtime_unavailable_reason
 from .protocol import Candidate, EngineContext, EvalServer, Result, ScorerFn, Task, candidate_key
@@ -332,24 +330,6 @@ def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: boo
         # state one here.
         if payload.max_cost_cents is None and payload.execution_budget_id is None:
             raise ServiceError("Set a total spending budget before starting an upstream agent proposer.")
-        includes_meta_harness = payload.strategy.mode != "single" or payload.strategy.engine == "meta_harness"
-        if includes_meta_harness and payload.cases:
-            splits = split_examples(
-                list(payload.cases), payload.split_fractions, shuffle=payload.shuffle, seed=payload.seed
-            )
-            if not splits.train:
-                raise ServiceError("Meta-Harness and compositions containing it require at least one training case.")
-        if payload.strategy.mode == "single" and payload.strategy.engine == "autosaddler":
-            visible = 0
-            if payload.cases:
-                splits = split_examples(
-                    list(payload.cases), payload.split_fractions, shuffle=payload.shuffle, seed=payload.seed
-                )
-                visible = len(splits.train) + len(splits.val)
-            if visible < 2:
-                raise ServiceError(
-                    "AutoSaddler needs at least two training or validation cases to diagnose and confirm patches."
-                )
     if payload.strategy.mode == "auto" and payload.budget.max_scorer_runs < len(AUTO_ENGINES) + 1:
         raise ServiceError(f"Auto needs at least {len(AUTO_ENGINES) + 1} scorer runs.")
     if verify_scorer and payload.scorer.kind == "python":
@@ -397,110 +377,147 @@ def _agent_scorer(
     return SandboxAgentScorer(scorer, runtime=runtime, target=target, gateway=gateway, job_id=job_id, recorder=recorder)
 
 
-def _score_holdout(
+@dataclass
+class FinalRun:
+    """One version's fresh scores from the final run, outside the optimization budget."""
+
+    score: float
+    feedback: str | None
+    named: dict[str, BlackboxNamedScore]
+    # Per case ``(score, feedback)``; empty when the run has no cases.
+    cases: list[tuple[float, str]] = field(default_factory=list)
+    runs: int = 0
+
+
+def _mean_named_scores(side_infos: list[dict[str, Any]]) -> dict[str, BlackboxNamedScore]:
+    """Average each named score over the cases, keeping what each case said about it.
+
+    Args:
+        side_infos: The scorer's side info on each case, in case order.
+
+    Returns:
+        Each name's mean score; its feedback verbatim with one case, else one
+        ``Case n: ...`` line per case, capped like any feedback text.
+    """
+    collected: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for position, side_info in enumerate(side_infos, start=1):
+        for name, entry in named_scores(side_info).items():
+            collected.setdefault(name, []).append((position, entry))
+    merged: dict[str, BlackboxNamedScore] = {}
+    for name, entries in collected.items():
+        if len(side_infos) == 1:
+            feedback = entries[0][1]["feedback"]
+        else:
+            feedback = "\n".join(f"Case {position}: {entry['feedback']}" for position, entry in entries)
+        merged[name] = BlackboxNamedScore(
+            score=sum(entry["score"] for _, entry in entries) / len(entries),
+            feedback=feedback[:MINIBATCH_FEEDBACK_CHAR_CAP],
+        )
+    return merged
+
+
+def _final_run(
     scorer: ScorerFn,
     candidate: Candidate,
-    holdout: list[Any] | None,
+    cases: list[Any],
     *,
     label: str,
     phase: str,
     concurrency: int = 1,
-    server: EvalServer | None = None,
-) -> float | None:
-    """Score ``candidate`` on the held-out cases, outside the optimization budget.
+) -> FinalRun:
+    """Score ``candidate`` afresh on every case, or once without cases, outside the budget.
+
+    The optimization run picks the winner; this separate run measures the
+    starting point and the winner the same way so their scores compare
+    like for like, just as GEPA reports its final candidate.
 
     Args:
         scorer: The run's scorer.
         candidate: The version to score.
-        holdout: Held-out cases, or ``None`` in single-task mode.
-        label: What the candidate is, for the error message.
+        cases: The run's cases; empty to score the version on its own.
+        label: What the candidate is, for logs and the error message.
         phase: Which pass this is, for the agent run records: ``PHASE_BASELINE`` or ``PHASE_FINAL``.
         concurrency: How many cases to score at once (agent targets run one
             sandbox per case, so this is the number of sandboxes in flight).
-        server: The run's eval server, when the held-out cases overlap the
-            engine's own. A pair it already measured is reused rather than
-            scored again, and a pair scored here is handed to it so the
-            engine's first look at that pair costs no budget.
 
     Returns:
-        The mean held-out score, or ``None`` when there are no held-out cases.
+        The mean score, the feedback and named scores, and each case's result.
 
     Raises:
-        ServiceError: When the scorer fails on the candidate.
+        ServiceError: When the scorer fails on the candidate, including when
+            it returns no feedback.
     """
+    targets: list[Any] = cases or [None]
 
-    def score_one(case: Any, position: int = 0) -> tuple[float, bool]:
-        """Score ``candidate`` on one case, or reuse the engine's measurement.
-
-        Args:
-            case: The held-out case, or ``None`` in single-task mode.
-            position: The case's 0-based position, naming it in the agent run records.
-
-        Returns:
-            The score and whether it was reused from the eval server.
-        """
-        known = None if server is None else server.recorded(candidate, case)
-        if known is not None:
-            return known, True
-        with run_scope(phase, str(position)):
-            score, side_info = scorer(candidate, case)
-        if server is not None:
-            server.prime(candidate, case, score, side_info)
-        return score, False
-
-    # Per-case heartbeats at DEBUG so they surface only in the Logs tab's
-    # verbose view: these passes sit outside the eval server, so its own
-    # heartbeat never fires for them. Normal mode keeps the single aggregate
-    # metric; verbose adds the live per-case progress, as for DSPy test evals.
-    def score_case(numbered: tuple[int, Any]) -> tuple[float, bool]:
-        """Score ``candidate`` on one held-out case and log the result.
+    def score_case(numbered: tuple[int, Any]) -> tuple[float, dict[str, Any]]:
+        """Score ``candidate`` on one case and log the result.
 
         Args:
             numbered: The case's 1-based position and the case itself.
 
         Returns:
-            The score for that case and whether it was reused.
+            The score and side information for that case.
         """
         position, case = numbered
-        score, reused = score_one(case, position - 1)
-        origin = " (reused)" if reused else ""
-        logger.debug("%s holdout eval %d/%d score=%.3f%s", label, position, len(holdout or ()), score, origin)
-        return score, reused
+        with run_scope(phase, str(position - 1)):
+            score, side_info = scorer(candidate, case)
+        # Per-case heartbeats at DEBUG surface only in the Logs tab's verbose view.
+        logger.debug("%s final run %d/%d score=%.3f", label, position, len(targets), score)
+        return score, side_info
 
     started = time.perf_counter()
     try:
-        if holdout is None:
-            logger.info("scoring the %s", label)
-            score, _ = score_one(None)
-            logger.info("%s scored %.3f in %.0fs", label, score, time.perf_counter() - started)
-            return score
-        if not holdout:
-            return None
-        workers = max(1, min(concurrency, len(holdout)))
-        logger.info("scoring the %s on %d held-out case(s), %d at a time", label, len(holdout), workers)
+        workers = max(1, min(concurrency, len(targets)))
+        logger.info("final run: scoring the %s on %d case(s), %d at a time", label, len(cases), workers)
         if workers == 1:
-            scored = [score_case(numbered) for numbered in enumerate(holdout, start=1)]
+            scored = [score_case(numbered) for numbered in enumerate(targets, start=1)]
         else:
-            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="holdout") as pool:
-                scored = list(pool.map(score_case, enumerate(holdout, start=1)))
-        scores = [score for score, _ in scored]
-        reused = sum(1 for _, was_reused in scored if was_reused)
-        mean = sum(scores) / len(scores)
-        logger.info(
-            "%s scored %.3f over %d case(s) (%d reused from the run) in %.0fs",
-            label,
-            mean,
-            len(scores),
-            reused,
-            time.perf_counter() - started,
-        )
-        return mean
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="final-run") as pool:
+                scored = list(pool.map(score_case, enumerate(targets, start=1)))
     except (BudgetError, UsagePendingError, UnpricedOperationError):
         raise
     except ServiceError as exc:
         raise ServiceError(f"scorer failed on the {label}: {exc}") from exc
     except Exception as exc:
         raise ServiceError(f"scorer failed on the {label}: {type(exc).__name__}: {exc}") from exc
+    side_infos = [side_info for _, side_info in scored]
+    feedbacks = [str(side_info.get(FEEDBACK_KEY) or "") for side_info in side_infos]
+    mean = sum(score for score, _ in scored) / len(scored)
+    logger.info("%s scored %.3f over %d run(s) in %.0fs", label, mean, len(scored), time.perf_counter() - started)
+    return FinalRun(
+        score=mean,
+        feedback=None if cases else feedbacks[0],
+        named=_mean_named_scores(side_infos),
+        cases=[(score, feedback) for (score, _), feedback in zip(scored, feedbacks, strict=True)] if cases else [],
+        runs=len(scored),
+    )
+
+
+def _case_results(baseline: FinalRun | None, best: FinalRun | None) -> list[BlackboxCaseResult]:
+    """Pair the final run's per-case scores of the starting point and the winner.
+
+    Args:
+        baseline: The starting point's final run, if it had one.
+        best: The winner's final run, if it had one.
+
+    Returns:
+        One row per case; empty when the run has no cases.
+    """
+    count = max(len(baseline.cases) if baseline else 0, len(best.cases) if best else 0)
+    rows = []
+    for index in range(count):
+        before = baseline.cases[index] if baseline and index < len(baseline.cases) else None
+        after = best.cases[index] if best and index < len(best.cases) else None
+        rows.append(
+            BlackboxCaseResult(
+                index=index,
+                baseline_score=before[0] if before else None,
+                best_score=after[0] if after else None,
+                baseline_feedback=before[1] if before else None,
+                best_feedback=after[1] if after else None,
+            )
+        )
+    return rows
 
 
 # Side info persisted with the version history is capped so a run whose scorer
@@ -692,7 +709,7 @@ def run_blackbox_optimization(
         repo_snapshot: A repository run's packed tree, as uploaded into this box.
 
     Returns:
-        The best version with baseline vs optimized held-out scores.
+        The best version with the final run's baseline and optimized scores.
 
     Raises:
         ServiceError: When the scorer cannot be built, the job has an agent
@@ -799,7 +816,7 @@ def _run_job(
         repo_snapshot: A repository run's packed tree, as uploaded into this box.
 
     Returns:
-        The best version with baseline vs optimized held-out scores.
+        The best version with the final run's baseline and optimized scores.
     """
     scorer: ScorerFn = base_scorer
     target = payload.target
@@ -815,44 +832,9 @@ def _run_job(
         )
     concurrency = target.concurrency if caps.agent_target else 1
     cases = list(payload.cases or [])
-    splits = split_examples(cases, payload.split_fractions, shuffle=payload.shuffle, seed=payload.seed)
-    split_counts = SplitCounts(train=len(splits.train), val=len(splits.val), test=len(splits.test))
-    if cases:
-        logger.info(
-            "%d case(s) split into %d train / %d val / %d test",
-            len(cases),
-            split_counts.train,
-            split_counts.val,
-            split_counts.test,
-        )
-    if progress_callback is not None:
-        progress_callback(
-            PROGRESS_SPLITS_READY,
-            {DETAIL_TRAIN: split_counts.train, DETAIL_VAL: split_counts.val, DETAIL_TEST: split_counts.test},
-        )
-    # Without cases the scorer judges the version on its own; with cases the
-    # held-out split is the yardstick, falling back to val/train for tiny sets.
-    # Those fallbacks are the engine's own cases, so the held-out passes share
-    # measurements with the eval server: the baseline feeds the engine's first
-    # look at the seed, and the final pass reuses the engine's scores of the
-    # winner instead of measuring the same pairs a second time.
-    holdout: list[Any] | None = (splits.test or splits.val or splits.train) if cases else None
+    logger.info("every version is scored on %s", f"each of {len(cases)} case(s)" if cases else "its own (no cases)")
     server = EvalServer(scorer, max_evals=payload.budget.max_scorer_runs, on_eval=_progress_listener(progress_callback))
-
     seed_candidate = payload.seed_candidate
-    baseline = None
-    if seed_candidate is not None:
-        baseline = _score_holdout(
-            scorer,
-            seed_candidate,
-            holdout,
-            label="starting point",
-            phase=PHASE_BASELINE,
-            concurrency=concurrency,
-            server=server,
-        )
-        if progress_callback is not None:
-            progress_callback(PROGRESS_BASELINE, {DETAIL_BASELINE: baseline})
 
     lm = build_language_model(payload.reflection_model_settings, disable_cache=True)
     reflection_lm, reflection_durations_ms = _reflection_caller(lm)
@@ -902,8 +884,7 @@ def _run_job(
         seed_candidate=seed_candidate,
         objective=payload.objective,
         background=payload.background,
-        train_set=list(splits.train),
-        val_set=list(splits.val),
+        cases=cases,
     )
     ctx = EngineContext(
         reflection_lm=reflection_lm,
@@ -961,18 +942,15 @@ def _run_job(
         stop = exc
         result = exc.result
         lanes = exc.evidence.pop("_lanes", [])
-        if result is None and seed_candidate is not None and baseline is not None:
+        if result is None and seed_candidate is not None:
+            seed_score = server.mean_score(seed_candidate)
             result = Result(
                 best_candidate=seed_candidate,
-                best_score=baseline,
+                best_score=seed_score,
                 total_evals=server.used,
-                metadata={"selection_source": "completed_baseline"},
+                metadata={"selection_source": "seed"},
             )
-            exc.evidence.update(
-                selection_scope="heldout",
-                selection_score=baseline,
-                candidate_origin="seed",
-            )
+            exc.evidence.update(selection_scope="validation", selection_score=seed_score, candidate_origin="seed")
         elif result is None:
             raise
 
@@ -980,24 +958,34 @@ def _run_job(
     logger.info("optimization finished after %d scorer run(s): best score %s", server.used, server.best_score)
     if progress_callback is not None:
         progress_callback(PROGRESS_EVALUATION_STARTED, {})
-    optimized = None
+    baseline_run: FinalRun | None = None
+    best_run: FinalRun | None = None
     if stop is None:
         try:
-            optimized = _score_holdout(
-                scorer,
-                best_candidate,
-                holdout,
-                label="optimized version",
-                phase=PHASE_FINAL,
-                concurrency=concurrency,
-                server=server,
+            if seed_candidate is not None:
+                baseline_run = _final_run(
+                    scorer, seed_candidate, cases, label="starting point", phase=PHASE_BASELINE, concurrency=concurrency
+                )
+                if progress_callback is not None:
+                    progress_callback(PROGRESS_BASELINE, {DETAIL_BASELINE: baseline_run.score})
+            best_run = (
+                baseline_run
+                if baseline_run is not None and best_candidate == seed_candidate
+                else _final_run(
+                    scorer, best_candidate, cases, label="optimized version", phase=PHASE_FINAL, concurrency=concurrency
+                )
             )
         except BudgetReached as exc:
             stop = exc
+    final_scorer_runs = (baseline_run.runs if baseline_run else 0) + (
+        best_run.runs if best_run is not None and best_run is not baseline_run else 0
+    )
     regression_guard_applied = False
-    if seed_candidate is not None and baseline is not None and optimized is not None and optimized < baseline:
+    if baseline_run is not None and best_run is not None and best_run.score < baseline_run.score:
         logger.info("the optimized version scored below the starting point; keeping the starting point")
-        best_candidate, optimized, regression_guard_applied = seed_candidate, baseline, True
+        best_candidate, best_run, regression_guard_applied = seed_candidate, baseline_run, True
+    baseline = baseline_run.score if baseline_run else None
+    optimized = best_run.score if best_run else None
     if progress_callback is not None:
         progress_callback(PROGRESS_OPTIMIZED, {DETAIL_OPTIMIZED: optimized})
 
@@ -1012,10 +1000,16 @@ def _run_job(
         optimizer_name=payload.strategy.engine or payload.strategy.mode,
         strategy_mode=payload.strategy.mode,
         engine_used=engine_used,
-        split_counts=split_counts,
-        baseline_test_metric=baseline,
-        optimized_test_metric=optimized,
+        baseline_score=baseline,
+        best_score=optimized,
         metric_improvement=None if baseline is None or optimized is None else optimized - baseline,
+        baseline_feedback=baseline_run.feedback if baseline_run else None,
+        best_feedback=best_run.feedback if best_run else None,
+        baseline_named_scores=baseline_run.named if baseline_run else {},
+        best_named_scores=best_run.named if best_run else {},
+        case_results=_case_results(baseline_run, best_run),
+        case_count=len(cases),
+        final_scorer_runs=final_scorer_runs,
         seed_candidate=seed_candidate,
         best_candidate=best_candidate,
         regression_guard_applied=regression_guard_applied,

@@ -224,11 +224,11 @@ def test_autoresearch_directives_follow_the_evidence(tmp_path: Path) -> None:
     (tmp_path / "archive").mkdir()
     engine.round = 1
     assert engine._directive(0, False) == "survey"
-    specialist = native_engines.Observation("x", {"a": 1.0, "b": 0.0}, {}, True, 1)
-    generalist = native_engines.Observation("y", {"a": 0.5, "b": 0.75}, {}, True, 1)
+    specialist = native_engines.Observation("x", 0.5, {"a": 1.0, "b": 0.0}, {}, True, 1)
+    generalist = native_engines.Observation("y", 0.625, {"a": 0.5, "b": 0.75}, {}, True, 1)
     for observation in (specialist, generalist):
         engine._observe(observation)
-    assert native_engines.pareto_front(engine._table()) == ["y", "x"]
+    assert native_engines.pareto_front(engine._table(), engine._ranking()) == ["y", "x"]
     assert engine._partner() == ("x", ["a"])
     engine.round, engine.directives = 2, ["survey"]
     assert engine._directive(0, True) == "combine"
@@ -564,7 +564,7 @@ def test_agent_proposer_keeps_the_parent_when_its_diff_is_too_large(
     proposed = engine.proposer({"current_candidate": ""}, {"current_candidate": []}, ["current_candidate"])
     assert proposed == {"current_candidate": ""}
     assert engine.proposer.total_cost == pytest.approx(0.01)
-    assert "No per-case feedback was recorded." in _invocations(fake_home)[0][-1]
+    assert "No feedback was recorded." in _invocations(fake_home)[0][-1]
     assert (checkout / "src" / "app.py").read_text() == "x = 1\n"
 
 
@@ -605,6 +605,83 @@ def test_single_candidate_tasks_use_the_whole_candidate_route(tmp_path: Path, fa
         single.stop()
 
 
+def _named_single_scorer(candidate: str, example: Any = None) -> tuple[float, dict[str, Any]]:
+    """Score a whole candidate with two named scores that pull in different directions.
+
+    Args:
+        candidate: Candidate text.
+        example: Ignored; the task has no cases.
+
+    Returns:
+        The mean of the named scores, overall feedback, and each named score with its feedback.
+    """
+    length = min(1.0, len(candidate) / 20)
+    brevity = 1.0 - length
+    return (length + brevity) / 2, {
+        "feedback": "overall verdict",
+        "scores": {
+            "length": {"score": length, "feedback": f"length note {len(candidate)}"},
+            "brevity": {"score": brevity, "feedback": "brevity note"},
+        },
+    }
+
+
+def test_autoresearch_shows_named_scores_and_their_feedback_without_cases(tmp_path: Path, fake_home: Path) -> None:
+    """Without cases, named scores are the leaderboard's columns and the dossier quotes each one's feedback."""
+    task = Task(name="single", seed_candidate="seed")
+    single = EvalServer(task, _named_single_scorer, BudgetTracker(max_evals=4))
+    single.start()
+    try:
+        _install_fake(
+            fake_home,
+            "state = pathlib.Path('STATE.md').read_text()\n"
+            "if count > 1:\n"
+            "    assert '`score:length`' in state and '`score:brevity`' in state, state\n"
+            "    assert 'overall verdict' in state and 'brevity note' in state, state\n"
+            "pathlib.Path('work/c.txt').write_text('x' * (count * 5))\n"
+            "run = subprocess.run(['./eval.sh', 'work/c.txt'], capture_output=True, text=True)\n"
+            "assert run.returncode == 0, run.stderr\n",
+        )
+        config = _config("autoresearch")
+        config.run_dir = str(tmp_path / "run")
+        engine = native_engines.AutoResearchEngine(config)
+        result = engine.run(task, single)
+        assert result.metadata["rounds"] >= 2
+        table = engine._table()
+        assert all({"score:length", "score:brevity"} <= set(row) for row in table.values())
+    finally:
+        single.stop()
+
+
+def test_meta_harness_records_named_scores_without_cases(tmp_path: Path, fake_home: Path) -> None:
+    """Meta-Harness writes each named score and its feedback to ``val.json`` and leads the frontier per name."""
+    task = Task(name="single", seed_candidate="seed")
+    single = EvalServer(task, _named_single_scorer, BudgetTracker(max_evals=4))
+    single.start()
+    try:
+        _install_fake(
+            fake_home,
+            "pathlib.Path('agents/long.txt').write_text('a much longer candidate')\n"
+            "pathlib.Path('logs/run/pending_eval.json').write_text(json.dumps({'candidates': ["
+            "{'name': 'long', 'file': 'agents/long.txt'}]}))\n",
+        )
+        config = _config("meta_harness", max_iterations=1, max_candidates_per_iter=1)
+        config.run_dir = str(tmp_path / "run")
+        engine = native_engines.MetaHarnessEngine(config)
+        engine.run(task, single)
+        logs = engine.logs_dir
+        record = json.loads((logs / "results" / "seed" / "val.json").read_text())
+        assert record["named_scores"] == {
+            "length": {"score": 0.2, "feedback": "length note 4"},
+            "brevity": {"score": 0.8, "feedback": "brevity note"},
+        }
+        frontier = json.loads((logs / "frontier_val.json").read_text())
+        assert frontier["score:length"]["system"] == "long"
+        assert frontier["score:brevity"]["system"] == "seed"
+    finally:
+        single.stop()
+
+
 @pytest.mark.parametrize(("direct", "expected"), [(True, "sk-ant-skynet-edge-injected"), (False, None)])
 def test_only_a_direct_claude_code_run_keeps_its_anthropic_key(
     fake_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, direct: bool, expected: str | None
@@ -623,3 +700,51 @@ def test_only_a_direct_claude_code_run_keeps_its_anthropic_key(
         "go", work_dir=tmp_path, log_dir=tmp_path / "logs", name="iter0", model="claude-test", session_id="s1"
     )
     assert json.loads((fake_home / "key.json").read_text()) == expected
+
+
+def test_named_scores_become_pareto_columns_without_cases() -> None:
+    """Without cases, named scores are the per-example table's columns, so the front and combine still work."""
+    named_a = {"scores": {"accuracy": {"score": 1.0, "feedback": "all right"}, "style": (0.0, "terse")}}
+    named_b = {"scores": {"accuracy": {"score": 0.5, "feedback": "half"}, "style": {"score": 1.0, "feedback": "nice"}}}
+
+    columns_a, notes_a = native_engines.named_score_columns([named_a])
+    columns_b, _ = native_engines.named_score_columns([named_b])
+
+    assert columns_a == {"score:accuracy": 1.0}
+    assert notes_a == {"score:accuracy": "all right"}
+    assert columns_b == {"score:accuracy": 0.5, "score:style": 1.0}
+    table = {"a": columns_a | {"score:style": 0.0}, "b": columns_b}
+    assert native_engines.pareto_front(table, {"a": 0.5, "b": 0.75}) == ["b", "a"]
+
+
+def test_named_scores_average_over_cases_with_their_feedback() -> None:
+    """With cases, each named score's column is its mean, and every case's note is kept."""
+    infos = [
+        {"scores": {"accuracy": {"score": 1.0, "feedback": "case one fine"}}},
+        {"scores": {"accuracy": {"score": 0.0, "feedback": "case two wrong"}}},
+    ]
+
+    columns, notes = native_engines.named_score_columns(infos)
+
+    assert columns == {"score:accuracy": 0.5}
+    assert "case one fine" in notes["score:accuracy"]
+    assert "case two wrong" in notes["score:accuracy"]
+
+
+def test_repo_gepa_reflection_shows_each_named_score_with_its_feedback() -> None:
+    """GEPA gets numeric named scores for its frontier; the repo proposer still reads each one's feedback."""
+    shaped = native_engines.gepa_named_scores(
+        {"feedback": "overall ok", "scores": {"tests": {"score": 0.5, "feedback": "two failing"}}}
+    )
+    assert shaped["scores"] == {"tests": 0.5}
+    record = {
+        "feedback": shaped["feedback"],
+        "Scores (Higher is Better)": shaped["scores"],
+        "Feedback per score": shaped["Feedback per score"],
+    }
+
+    text = native_engines.record_text(record)
+
+    assert "overall ok" in text
+    assert "tests: 0.5" in text
+    assert "two failing" in text

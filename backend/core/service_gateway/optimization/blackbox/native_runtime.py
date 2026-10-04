@@ -14,7 +14,7 @@ import tarfile
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from importlib.metadata import distribution
 from pathlib import Path
 from typing import Any, Literal
@@ -694,9 +694,8 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     if options.repo is None and engine_id in REPO_ONLY_NATIVE_ENGINES:
         raise ServiceError("This agent proposer needs a repository checkout.")
     if autosaddler and options.repo is None and task.seed_candidate is None:
-        raise ServiceError("AutoSaddler requires a seed candidate to patch.")
-    if autosaddler and len(task.train_set or []) + len(task.val_set or []) < 2:
-        raise ServiceError("AutoSaddler needs at least two visible examples to diagnose and confirm patches.")
+        # A blank run patches an empty starting text rather than refusing.
+        task = replace(task, seed_candidate="")
     if server.remaining <= 0:
         raise BudgetExhaustedError("The native optimizer evaluation budget is exhausted.")
     if not math.isfinite(options.max_token_cost) or options.max_token_cost <= 0:
@@ -781,8 +780,9 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 "seed_candidate": task.seed_candidate,
                 "objective": task.objective or "",
                 "background": task.background or "",
-                "train_set": task.train_set or None,
-                "val_set": task.val_set or None,
+                # The guest builds an upstream task, whose train and val sets
+                # form one pool; the cases go in once, as its train set.
+                "train_set": task.cases or None,
             },
         }
         if options.repo is not None:

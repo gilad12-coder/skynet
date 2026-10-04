@@ -38,6 +38,7 @@ import { CandidatePreview } from "./CandidatePreview";
 import { VersionRail } from "./VersionRail";
 import { formatBlackboxScore } from "@/shared/lib";
 import { countChanges, diffRows } from "../lib/blackbox-diff";
+import { VersionFeedback } from "./BlackboxFinalScores";
 import {
   buildVersions,
   defaultVersionIndex,
@@ -427,6 +428,7 @@ export function BestVersionTab({
             {activeView === "code" && <CodeView version={current} kind={kind} />}
             {activeView === "diff" && <ChangesView versions={versions} index={at} />}
           </div>
+          <VersionFeedback sideInfo={current.sideInfo} />
         </div>
 
         <footer className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border/50 bg-muted/20 px-2 py-1.5">

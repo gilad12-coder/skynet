@@ -674,8 +674,6 @@ export interface BlackboxRunRequest {
   seed_candidate?: BlackboxCandidate | null;
   scorer: BlackboxScorer;
   cases?: Array<Record<string, unknown>> | null;
-  split_fractions?: SplitFractions;
-  shuffle?: boolean;
   seed?: number | null;
   budget: BlackboxBudget;
   strategy: BlackboxStrategy;
@@ -753,14 +751,45 @@ interface BlackboxCandidateNode {
   discovery_evals: number;
 }
 
+/** One named score a scorer returned, with its own feedback. */
+export interface BlackboxNamedScore {
+  score: number;
+  feedback: string;
+}
+
+/** One case of the final run: the starting version and the winner, scored afresh. */
+export interface BlackboxCaseResult {
+  index: number;
+  baseline_score?: number | null;
+  best_score?: number | null;
+  baseline_feedback?: string | null;
+  best_feedback?: string | null;
+}
+
 export interface BlackboxRunResult {
   optimizer_name: string;
   strategy_mode: "auto" | "single";
   engine_used: BlackboxEngineId;
-  split_counts: Record<string, number>;
+  /** Fresh final-run score of the starting version. */
+  baseline_score?: number | null;
+  /** Fresh final-run score of the winner. */
+  best_score?: number | null;
+  metric_improvement?: number | null;
+  /** The final run's top-level feedback; null when there are cases (see `case_results`). */
+  baseline_feedback?: string | null;
+  best_feedback?: string | null;
+  /** Named scores from the final run, averaged over cases; absent on older runs. */
+  baseline_named_scores?: Record<string, BlackboxNamedScore>;
+  best_named_scores?: Record<string, BlackboxNamedScore>;
+  /** One row per case of the final run; empty without cases. */
+  case_results?: BlackboxCaseResult[];
+  case_count?: number;
+  /** Fresh scorer runs spent on the final run, outside `max_scorer_runs`. */
+  final_scorer_runs?: number;
+  /** Runs recorded before the final run existed. */
+  split_counts?: Record<string, number>;
   baseline_test_metric?: number | null;
   optimized_test_metric?: number | null;
-  metric_improvement?: number | null;
   seed_candidate?: BlackboxCandidate | null;
   best_candidate: BlackboxCandidate;
   regression_guard_applied: boolean;
