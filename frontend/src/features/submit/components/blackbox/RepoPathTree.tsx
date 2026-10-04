@@ -9,7 +9,6 @@ import {
   Folder,
   FolderOpen,
   GitBranch,
-  X,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Skeleton } from "@/shared/ui/skeleton";
@@ -147,36 +146,7 @@ export function RepoPathTree({
 
   return (
     <div className="flex flex-col gap-3">
-      {selected.length > 0 ? (
-        <ul
-          className="flex flex-wrap gap-1.5"
-          aria-label={msg("submit.blackbox.repo.paths_chosen")}
-        >
-          {selected.map((path) => {
-            const label = path === WHOLE_REPOSITORY ? msg("submit.blackbox.repo.whole") : path;
-            return (
-              <li key={path}>
-                <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/70 bg-muted/50 py-0.5 ps-2.5 pe-0.5 text-xs">
-                  <span
-                    className={cn("min-w-0 truncate", path !== WHOLE_REPOSITORY && "font-mono")}
-                    dir={path === WHOLE_REPOSITORY ? undefined : "ltr"}
-                  >
-                    {label}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={msg("submit.blackbox.repo.path_remove", { path: label })}
-                    onClick={() => write(selected.filter((p) => p !== path))}
-                    className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
-                  >
-                    <X className="size-3" aria-hidden="true" />
-                  </button>
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
+      {selected.length === 0 && (
         <p className="text-xs text-muted-foreground">{msg("submit.blackbox.repo.paths_none")}</p>
       )}
 
