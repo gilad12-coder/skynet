@@ -65,6 +65,11 @@
     "winningCandidate": "विजेता उम्मीदवार"
   },
   "messages": {
+    "accounts.identity_in_use": "यह खाता पहले से किसी दूसरे Skynet खाते में साइन इन करता है।",
+    "accounts.identity_not_found": "यह खाता जुड़ा हुआ नहीं है।",
+    "accounts.last_sign_in_method": "साइन इन करने का यही आपका एकमात्र तरीका है। पहले पासवर्ड या पासकी जोड़ें।",
+    "accounts.link_failed": "यह खाता नहीं जुड़ सका। फिर से कोशिश करें।",
+    "accounts.not_found": "यह खाता मौजूद नहीं है।",
     "blackbox.repo_target_unavailable": "रिपॉज़िटरी को ऑप्टिमाइज़ करना अभी उपलब्ध नहीं है।",
     "secrets.invalid_name": "\"{name}\" सीक्रेट का नाम नहीं हो सकता। अक्षर, अंक और अंडरस्कोर इस्तेमाल करें, और किसी अक्षर या अंडरस्कोर से शुरू करें।",
     "secrets.invalid_value": "सीक्रेट का मान अधिकतम {limit} बाइट का होना चाहिए।",

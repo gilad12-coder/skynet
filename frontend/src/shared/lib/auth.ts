@@ -4,6 +4,8 @@ import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import GitHub from "next-auth/providers/github";
 import { createHmac, randomUUID } from "crypto";
+import { cookies } from "next/headers";
+import { ACCOUNT_LINK_COOKIE, decodeAccountLink } from "./account-link";
 
 /**
  * Authentication configuration.
@@ -158,15 +160,16 @@ async function verifyBackendPasskey(assertion: string): Promise<BackendAccount |
  * backend's users table via the internal /auth/oauth/provision, so it gets the
  * same first-sign-in signal as a local account. The provider's other verified
  * emails ride along so an account registered under one of them is reused
- * instead of forking a second identity. Resolves to the account the backend
- * chose, or null on any failure, which never blocks the sign-in itself — the
- * provider has already authenticated the user.
+ * instead of forking a second identity, and the provider's stable account id
+ * lets an account linked from Settings win over any email. Resolves to the
+ * account the backend chose, or null on any failure, which never blocks the
+ * sign-in itself — the provider has already authenticated the user.
  */
-async function provisionBackendAccount(user: {
-  email?: string | null;
-  name?: string | null;
-  otherEmails?: string[];
-}): Promise<BackendAccount | null> {
+async function provisionBackendAccount(
+  user: { email?: string | null; name?: string | null; otherEmails?: string[] },
+  provider: string,
+  providerAccountId: string,
+): Promise<BackendAccount | null> {
   if (!backendAuthSecret || !user.email) return null;
   try {
     const res = await fetch(`${backendBaseUrl}/auth/oauth/provision`, {
@@ -176,6 +179,8 @@ async function provisionBackendAccount(user: {
         email: user.email,
         name: user.name ?? "",
         other_emails: user.otherEmails ?? [],
+        provider,
+        provider_account_id: providerAccountId,
       }),
     });
     if (!res.ok) return null;
@@ -183,6 +188,49 @@ async function provisionBackendAccount(user: {
   } catch {
     return null;
   }
+}
+
+/**
+ * Link a provider account to the signed-in ``username`` through the backend's
+ * internal /auth/oauth/link. Resolves to null on success, else the i18n code
+ * to show back in Settings.
+ */
+async function linkBackendIdentity(
+  username: string,
+  provider: string,
+  providerAccountId: string,
+  providerEmail: string,
+): Promise<string | null> {
+  if (!backendAuthSecret) return "accounts.link_failed";
+  try {
+    const res = await fetch(`${backendBaseUrl}/auth/oauth/link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Internal-Auth": backendAuthSecret },
+      body: JSON.stringify({
+        username,
+        provider,
+        provider_account_id: providerAccountId,
+        provider_email: providerEmail,
+      }),
+    });
+    if (res.ok) return null;
+    const body = (await res.json().catch(() => ({}))) as { code?: unknown };
+    return typeof body.code === "string" ? body.code : "accounts.link_failed";
+  } catch {
+    return "accounts.link_failed";
+  }
+}
+
+/**
+ * Consume the Settings link cookie for ``provider``, returning the signed-in
+ * account it names, or null when this sign-in is not a link.
+ */
+async function pendingAccountLink(provider: string): Promise<string | null> {
+  const jar = await cookies();
+  const value = jar.get(ACCOUNT_LINK_COOKIE)?.value;
+  if (!value) return null;
+  jar.delete(ACCOUNT_LINK_COOKIE);
+  return decodeAccountLink(value, provider);
 }
 
 type GitHubEmail = { email: string; primary: boolean; verified: boolean };
@@ -446,6 +494,23 @@ export const { handlers, auth } = NextAuth({
     // an account: it would let anyone who types a victim's address at the
     // provider sign in as them.
     async signIn({ user, account, profile }) {
+      // Linking from Settings goes by the provider's account id, so the
+      // provider's emails don't have to match or even be verified.
+      if (account && (account.provider === "google" || account.provider === "github")) {
+        const linkTo = await pendingAccountLink(account.provider);
+        if (linkTo) {
+          const error = await linkBackendIdentity(
+            linkTo,
+            account.provider,
+            account.providerAccountId,
+            user.email ?? "",
+          );
+          if (error) return `/?settings=security&link_error=${encodeURIComponent(error)}`;
+          user.email = linkTo;
+          user.otherEmails = [];
+          return true;
+        }
+      }
       if (account?.provider === "google") return profile?.email_verified === true;
       if (account?.provider === "github") {
         const verified = await githubVerifiedEmails(account.access_token ?? undefined);
@@ -471,7 +536,11 @@ export const { handlers, auth } = NextAuth({
         // authenticates at the IdP, so its identity is mirrored to the backend
         // here to get the same signal.
         if (account && account.type !== "credentials") {
-          const linked = await provisionBackendAccount(user);
+          const linked = await provisionBackendAccount(
+            user,
+            account.provider,
+            account.providerAccountId,
+          );
           // The backend may pick an account under another verified email.
           if (linked) {
             token.email = linked.email;

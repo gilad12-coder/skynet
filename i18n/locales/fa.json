@@ -65,6 +65,11 @@
     "winningCandidate": "نامزد برنده"
   },
   "messages": {
+    "accounts.identity_in_use": "این حساب از قبل به حساب Skynet دیگری وارد می‌شود.",
+    "accounts.identity_not_found": "این حساب متصل نیست.",
+    "accounts.last_sign_in_method": "این تنها راه ورود شماست. ابتدا یک رمز عبور یا کلید عبور اضافه کنید.",
+    "accounts.link_failed": "اتصال این حساب ممکن نشد. دوباره تلاش کنید.",
+    "accounts.not_found": "این حساب وجود ندارد.",
     "blackbox.repo_target_unavailable": "بهینه‌سازی یک مخزن هنوز در دسترس نیست.",
     "secrets.invalid_name": "\"{name}\" نمی‌تواند نام یک راز باشد. از حروف، ارقام و زیرخط استفاده کنید و با یک حرف یا زیرخط شروع کنید.",
     "secrets.invalid_value": "یک راز به مقداری حداکثر {limit} بایت نیاز دارد.",

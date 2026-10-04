@@ -65,6 +65,11 @@
     "winningCandidate": "kazanan aday"
   },
   "messages": {
+    "accounts.identity_in_use": "Bu hesap zaten başka bir Skynet hesabında oturum açıyor.",
+    "accounts.identity_not_found": "Bu hesap bağlı değil.",
+    "accounts.last_sign_in_method": "Bu, oturum açmanın tek yolu. Önce bir parola veya geçiş anahtarı ekleyin.",
+    "accounts.link_failed": "Hesap bağlanamadı. Tekrar deneyin.",
+    "accounts.not_found": "Bu hesap mevcut değil.",
     "blackbox.repo_target_unavailable": "Bir depoyu optimize etmek henüz kullanılamıyor.",
     "secrets.invalid_name": "\"{name}\" bir gizli anahtar adı olamaz. Harf, rakam ve alt çizgi kullanın; bir harf veya alt çizgiyle başlayın.",
     "secrets.invalid_value": "Bir gizli anahtarın değeri en fazla {limit} bayt olmalıdır.",

@@ -61,6 +61,7 @@ from ..storage.models import (
     TaggingSessionShareLinkModel,
     TelemetryEventModel,
     TwoFactorEmailCodeModel,
+    UserIdentityModel,
     UserModel,
     UserQuotaAuditModel,
     UserQuotaOverrideModel,
@@ -414,6 +415,7 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(AgentConversationModel).where(AgentConversationModel.username == username))
 
     _run_delete(delete(ApiTokenModel).where(ApiTokenModel.username == username))
+    _run_delete(delete(UserIdentityModel).where(UserIdentityModel.username == username))
     _run_delete(delete(TwoFactorEmailCodeModel).where(TwoFactorEmailCodeModel.email == username))
     _run_delete(delete(WebAuthnCredentialModel).where(WebAuthnCredentialModel.user_email == username))
     _run_delete(delete(WebAuthnChallengeModel).where(WebAuthnChallengeModel.user_email == username))

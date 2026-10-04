@@ -631,6 +631,14 @@ export interface SecurityStatus {
   email_2fa_enabled: boolean;
   email_2fa_available: boolean;
   passkeys: PasskeyInfo[];
+  identities: LinkedIdentity[];
+}
+
+/** A Google or GitHub account that signs in to the caller's account. */
+export interface LinkedIdentity {
+  provider: string;
+  email: string;
+  linked_at: string;
 }
 
 export interface TotpSetup {
@@ -696,6 +704,13 @@ export function renamePasskey(credentialId: string, nickname: string) {
 /** Remove one of the caller's passkeys. */
 export function deletePasskey(credentialId: string) {
   return request<{ ok: boolean }>(`/auth/security/passkeys/${encodeURIComponent(credentialId)}`, {
+    method: "DELETE",
+  });
+}
+
+/** Stop a linked Google or GitHub account from signing in to the caller's account. */
+export function unlinkIdentity(provider: string) {
+  return request<{ ok: boolean }>(`/auth/security/identities/${encodeURIComponent(provider)}`, {
     method: "DELETE",
   });
 }

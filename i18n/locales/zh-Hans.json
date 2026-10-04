@@ -65,6 +65,11 @@
     "winningCandidate": "胜出候选项"
   },
   "messages": {
+    "accounts.identity_in_use": "该账号已用于登录另一个 Skynet 账号。",
+    "accounts.identity_not_found": "该账号未关联。",
+    "accounts.last_sign_in_method": "这是你唯一的登录方式。请先添加密码或通行密钥。",
+    "accounts.link_failed": "无法关联该账号，请重试。",
+    "accounts.not_found": "该账号不存在。",
     "blackbox.repo_target_unavailable": "暂不支持优化代码仓库。",
     "secrets.invalid_name": "“{name}”不能用作密钥名称。请使用字母、数字和下划线，并以字母或下划线开头。",
     "secrets.invalid_value": "密钥的值最多 {limit} 字节。",

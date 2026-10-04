@@ -27,6 +27,7 @@ from webauthn.helpers import bytes_to_base64url
 from ...config import settings
 from ...storage.models import (
     TwoFactorEmailCodeModel,
+    UserIdentityModel,
     UserModel,
     WebAuthnChallengeModel,
     WebAuthnCredentialModel,
@@ -81,6 +82,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         WebAuthnCredentialModel,
         WebAuthnChallengeModel,
         TwoFactorEmailCodeModel,
+        UserIdentityModel,
     ):
         model.__table__.create(engine)
     store = _Store(engine)
@@ -153,6 +155,7 @@ def test_security_status_defaults(client: TestClient) -> None:
         "email_2fa_enabled": False,
         "email_2fa_available": False,
         "passkeys": [],
+        "identities": [],
     }
 
 
@@ -389,3 +392,120 @@ def test_internal_routes_reject_bad_secret(client: TestClient) -> None:
         ).status_code
         == 403
     )
+
+
+def _act_as(client: TestClient, email: str) -> None:
+    """Make the settings-facing routes act on another identity.
+
+    Args:
+        client: The fixture client.
+        email: The identity the bearer dependency resolves to.
+    """
+    client.app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(
+        username=email, role="user", groups=()
+    )
+
+
+def _link(client: TestClient, username: str, account_id: str = "gh-1", email: str = "gh@work.edu"):
+    """POST the internal link call for a GitHub account.
+
+    Args:
+        client: The fixture client.
+        username: The signed-in account the GitHub account joins.
+        account_id: GitHub's stable account id.
+        email: The GitHub account's email.
+
+    Returns:
+        The raw response.
+    """
+    return client.post(
+        "/auth/oauth/link",
+        json={
+            "username": username,
+            "provider": "github",
+            "provider_account_id": account_id,
+            "provider_email": email,
+        },
+        headers=_AUTH_HEADER,
+    )
+
+
+def test_linked_provider_account_signs_in_to_its_account(client: TestClient) -> None:
+    """A linked GitHub account reaches its account even when no email matches."""
+    linked = _link(client, _EMAIL)
+    assert linked.status_code == 200
+    assert linked.json()["email"] == _EMAIL
+    signed_in = client.post(
+        "/auth/oauth/provision",
+        json={"email": "gh@work.edu", "provider": "github", "provider_account_id": "gh-1"},
+        headers=_AUTH_HEADER,
+    )
+    assert signed_in.status_code == 200
+    assert signed_in.json()["email"] == _EMAIL
+    with Session(client.app.state.job_store.engine) as session:
+        assert session.get(UserModel, "gh@work.edu") is None
+    identities = client.get("/auth/security").json()["identities"]
+    assert [(i["provider"], i["email"]) for i in identities] == [("github", "gh@work.edu")]
+
+
+def test_link_refuses_a_provider_account_another_account_uses(client: TestClient) -> None:
+    """One GitHub account can't sign in to two Skynet accounts."""
+    client.post(
+        "/auth/oauth/provision",
+        json={"email": "other@example.com", "provider": "github", "provider_account_id": "gh-1"},
+        headers=_AUTH_HEADER,
+    )
+    refused = _link(client, _EMAIL)
+    assert refused.status_code == 409
+    assert refused.json()["code"] == "accounts.identity_in_use"
+
+
+def test_link_replaces_the_previous_account_for_that_provider(client: TestClient) -> None:
+    """Linking a second GitHub account swaps out the first."""
+    _link(client, _EMAIL, "gh-1", "one@work.edu")
+    _link(client, _EMAIL, "gh-2", "two@work.edu")
+    identities = client.get("/auth/security").json()["identities"]
+    assert [i["email"] for i in identities] == ["two@work.edu"]
+
+
+def test_provision_remembers_the_provider_account(client: TestClient) -> None:
+    """A provider account that signed in once keeps its account after its email changes."""
+    client.post(
+        "/auth/oauth/provision",
+        json={"email": "sam@gmail.com", "provider": "google", "provider_account_id": "g-9"},
+        headers=_AUTH_HEADER,
+    )
+    renamed = client.post(
+        "/auth/oauth/provision",
+        json={"email": "sam@newmail.com", "provider": "google", "provider_account_id": "g-9"},
+        headers=_AUTH_HEADER,
+    )
+    assert renamed.json()["email"] == "sam@gmail.com"
+
+
+def test_unlink_keeps_at_least_one_way_to_sign_in(client: TestClient) -> None:
+    """A provider-only account can't unlink its last provider, but a password account can."""
+    client.post(
+        "/auth/oauth/provision",
+        json={"email": "solo@gmail.com", "provider": "google", "provider_account_id": "g-1"},
+        headers=_AUTH_HEADER,
+    )
+    _act_as(client, "solo@gmail.com")
+    refused = client.delete("/auth/security/identities/google")
+    assert refused.status_code == 409
+    assert refused.json()["code"] == "accounts.last_sign_in_method"
+
+    _act_as(client, _EMAIL)
+    _link(client, _EMAIL)
+    assert client.delete("/auth/security/identities/github").status_code == 200
+    assert client.get("/auth/security").json()["identities"] == []
+    missing = client.delete("/auth/security/identities/github")
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "accounts.identity_not_found"
+
+
+def test_link_requires_an_existing_account(client: TestClient) -> None:
+    """Linking to an account that doesn't exist is a 404."""
+    missing = _link(client, "ghost@example.com")
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "accounts.not_found"

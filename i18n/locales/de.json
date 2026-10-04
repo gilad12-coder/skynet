@@ -65,6 +65,11 @@
     "winningCandidate": "Gewinnerkandidat"
   },
   "messages": {
+    "accounts.identity_in_use": "Dieses Konto meldet sich bereits bei einem anderen Skynet-Konto an.",
+    "accounts.identity_not_found": "Dieses Konto ist nicht verknüpft.",
+    "accounts.last_sign_in_method": "Das ist deine einzige Anmeldemethode. Füge zuerst ein Passwort oder einen Passkey hinzu.",
+    "accounts.link_failed": "Das Konto konnte nicht verknüpft werden. Versuch es noch einmal.",
+    "accounts.not_found": "Dieses Konto existiert nicht.",
     "blackbox.repo_target_unavailable": "Das Optimieren eines Repositorys ist noch nicht verfügbar.",
     "secrets.invalid_name": "\"{name}\" kann kein Secret-Name sein. Verwende Buchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstaben oder Unterstrich.",
     "secrets.invalid_value": "Ein Secret braucht einen Wert von höchstens {limit} Bytes.",
