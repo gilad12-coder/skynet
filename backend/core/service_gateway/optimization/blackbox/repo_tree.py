@@ -22,6 +22,9 @@ REPO_SNAPSHOT_KEY = "_repo_snapshot"
 ARCHIVE_CHUNK_BYTES = 9 * 1024 * 1024
 _GIT_IDENTITY = ["-c", "user.name=skynet", "-c", "user.email=skynet@localhost", "-c", "commit.gpgsign=false"]
 
+# The shipped tree's commit. Versions diff against this ref rather than HEAD,
+# so an agent that commits in its checkout cannot hide those edits.
+BASE_REF = "refs/skynet/base"
 # A version travels as one sandbox file, and uploads cap each file at 16 MiB.
 MAX_PATCH_BYTES = 8 * 1024 * 1024
 
@@ -232,6 +235,7 @@ def unpack_tree(chunks: Iterable[str | Path], destination: Path) -> Path:
     _git(["init", "--quiet"], destination)
     _git(["add", "--all", "--force"], destination)
     _git(["commit", "--quiet", "--allow-empty", "--no-verify", "-m", "base"], destination)
+    _git(["update-ref", BASE_REF, "HEAD"], destination)
     return destination
 
 
@@ -249,7 +253,7 @@ def version_patch(checkout: Path) -> str:
         ``git diff --binary`` output; empty when nothing changed.
     """
     _git(["add", "--all"], checkout)
-    return _git(["diff", "--cached", "--binary", "--no-color", "--no-ext-diff", "HEAD"], checkout)
+    return _git(["diff", "--cached", "--binary", "--no-color", "--no-ext-diff", BASE_REF], checkout)
 
 
 def reset_tree(checkout: Path) -> None:
@@ -258,7 +262,7 @@ def reset_tree(checkout: Path) -> None:
     Args:
         checkout: Folder to restore to the shipped tree.
     """
-    _git(["reset", "--quiet", "--hard", "HEAD"], checkout)
+    _git(["reset", "--quiet", "--hard", BASE_REF], checkout)
     _git(["clean", "--quiet", "-fdx"], checkout)
 
 

@@ -27,7 +27,7 @@ from ....config import Settings, settings
 from ....exceptions import ServiceError
 from ....models.blackbox import BLACKBOX_HARNESS_CLAUDE_CODE, BlackboxProposer, BlackboxTarget
 from ..budget_stop import BudgetReached
-from . import harness_bridge, native_runner
+from . import harness_bridge, native_runner, repo_tree
 from .agent_eval import gateway_from_settings
 from .feedback import emit_candidate, emit_case_scored
 from .harness import GatewayConfig, build_launch, launch_payload, pinned_harness_check
@@ -75,6 +75,8 @@ _UPSTREAMS = {
 _AUTOSADDLER_RUNNER_FILE = "autosaddler_runner.py"
 _BRIDGE_FILE = "harness_bridge.py"
 _ENGINES_FILE = "native_engines.py"
+_REPO_TREE_FILE = "repo_tree.py"
+_REPO_CHUNK_DIR = "repo-tree"
 _PROMPTS_DIR = "upstream_prompts"
 _AUTOSADDLER_PLUGIN_DIR = "autosaddler_plugin"
 # Upstream AutoSaddler v2 declares Python 3.12+ (its usage dataclasses rely on
@@ -133,6 +135,9 @@ class NativeOptions:
     # Claude Code talks to Anthropic on the run owner's key, added at the network
     # edge by the parent, instead of through the model gateway.
     direct_anthropic: bool = False
+    # A repository run's packed tree: ``chunks`` (files on this machine),
+    # ``editable_paths`` and ``readonly_paths``.
+    repo: dict[str, Any] | None = None
     usage_by_model: dict[str, dict[str, int]] = field(default_factory=dict)
     usage_lock: Any = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -210,6 +215,7 @@ def _runner_files(engine_id: str) -> dict[str, str]:
             **bridge,
             _RUNNER_FILE: Path(native_runner.__file__).read_text(encoding="utf-8"),
             _ENGINES_FILE: engines.read_text(encoding="utf-8"),
+            _REPO_TREE_FILE: Path(repo_tree.__file__).read_text(encoding="utf-8"),
         }
         prompts_root = engines.with_name(_PROMPTS_DIR)
         for asset in sorted(path for path in prompts_root.rglob("*") if path.is_file()):
@@ -675,6 +681,8 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     autosaddler = engine_id == "autosaddler"
     if not autosaddler and not task.str_mode:
         raise ServiceError("Native agent engines require a single text candidate.")
+    if options.repo is not None and engine_id != "autoresearch":
+        raise ServiceError("Only AutoResearch drives a coding agent through a repository checkout.")
     if autosaddler and task.seed_candidate is None:
         raise ServiceError("AutoSaddler requires a seed candidate to patch.")
     if autosaddler and len(task.train_set or []) + len(task.val_set or []) < 2:
@@ -767,6 +775,17 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 "val_set": task.val_set or None,
             },
         }
+        if options.repo is not None:
+            chunks = []
+            # One upload per chunk: each is close to the per-request size cap.
+            for index, chunk in enumerate(options.repo["chunks"]):
+                chunks.append(f"{_REPO_CHUNK_DIR}/tree.{index:04d}.b64")
+                session.write_files({chunks[-1]: Path(chunk).read_text(encoding="ascii")})
+            payload["repo"] = {
+                "chunks": chunks,
+                "editable_paths": list(options.repo["editable_paths"]),
+                "readonly_paths": list(options.repo["readonly_paths"]),
+            }
         session.write_files(
             {
                 **_runner_files(engine_id),

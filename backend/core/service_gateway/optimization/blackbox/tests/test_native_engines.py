@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -16,7 +17,7 @@ from gepa.oa.config import OptimizeAnythingConfig
 from gepa.oa.eval_server import EvalServer
 from gepa.oa.task import Task
 
-from core.service_gateway.optimization.blackbox import native_engines
+from core.service_gateway.optimization.blackbox import native_engines, repo_tree
 
 FAKE_HEADER = (
     f"#!{sys.executable}\n"
@@ -279,6 +280,93 @@ def test_autoresearch_without_any_evaluation_fails_instead_of_guessing(
     with pytest.raises(RuntimeError, match="without scoring any candidate"):
         native_engines.AutoResearchEngine(config).run(server.task, server)
     assert "evaluate_examples" not in vars(server)
+
+
+def _repo_checkout(tmp_path: Path, files: dict[str, str]) -> Path:
+    """Pack ``files`` and unpack them the way the native runner builds its checkout.
+
+    Args:
+        tmp_path: Scratch folder.
+        files: Relative path to text.
+
+    Returns:
+        The checkout.
+    """
+    source = tmp_path / "source"
+    for name, text in files.items():
+        (source / name).parent.mkdir(parents=True, exist_ok=True)
+        (source / name).write_text(text)
+    archive = tmp_path / "tree.tgz"
+    subprocess.run(["tar", "-czf", str(archive), "-C", str(source), "."], check=True)
+    chunks = []
+    for index, chunk in enumerate(repo_tree.archive_chunks(archive)):
+        chunks.append(tmp_path / f"tree.{index}.b64")
+        chunks[-1].write_text(chunk)
+    return repo_tree.unpack_tree(chunks, tmp_path / "repo-checkout")
+
+
+def test_autoresearch_edits_a_repository_checkout_and_scores_its_patch(tmp_path: Path, fake_home: Path) -> None:
+    """The agent edits ``repo/`` in place; eval.sh sends the diff, and refuses edits outside the editable paths."""
+    task = Task(name="repo", seed_candidate="", objective="make it better")
+    seen: list[str] = []
+
+    def evaluate(candidate: str, example: dict[str, Any] | None = None) -> tuple[float, dict[str, Any]]:
+        """Score a patch that adds the word ``better`` highly."""
+        seen.append(candidate)
+        return (1.0 if "+better" in candidate else 0.5), {"feedback": "ok"}
+
+    single = EvalServer(task, evaluate, BudgetTracker(max_evals=5))
+    single.start()
+    try:
+        _install_fake(
+            fake_home,
+            "def run(*argv):\n"
+            "    return subprocess.run(list(argv), capture_output=True, text=True)\n"
+            "if count == 1:\n"
+            "    assert 'Survey' in pathlib.Path('STATE.md').read_text()\n"
+            "    assert '`src`' in pathlib.Path('TASK.md').read_text()\n"
+            "    assert run('./eval.sh').returncode == 0\n"
+            "    pathlib.Path('repo/src/app.py').write_text('better\\n')\n"
+            "    subprocess.run(['git', '-c', 'user.name=a', '-c', 'user.email=a@a', 'commit', '-qam', 'x'],\n"
+            "                   cwd='repo', check=True)\n"
+            "    done = run('./eval.sh')\n"
+            "    assert done.returncode == 0 and json.loads(done.stdout)['score'] == 1.0, done.stderr\n"
+            "    pathlib.Path('repo/README.md').write_text('changed\\n')\n"
+            "    refused = run('./eval.sh')\n"
+            "    assert refused.returncode != 0 and 'README.md' in refused.stderr, refused.stderr\n"
+            "    assert run('./checkout.sh', 'base').returncode == 0\n"
+            "    assert pathlib.Path('repo/README.md').read_text() == 'hi\\n'\n"
+            "    assert pathlib.Path('repo/src/app.py').read_text() == 'x = 1\\n'\n"
+            "    assert run('./checkout.sh', 'c002').returncode == 0\n"
+            "    assert pathlib.Path('repo/src/app.py').read_text() == 'better\\n'\n"
+            "    assert run('./checkout.sh', '../x').returncode == 2\n",
+        )
+        checkout = _repo_checkout(tmp_path, {"src/app.py": "x = 1\n", "README.md": "hi\n"})
+        config = _config(
+            "autoresearch",
+            ralph=False,
+            repo={
+                "checkout": str(checkout),
+                "base": repo_tree.BASE_REF,
+                "editable_paths": ["src"],
+                "readonly_paths": [],
+                "tools": str(Path(repo_tree.__file__).parent),
+            },
+        )
+        config.run_dir = str(tmp_path / "run")
+        engine = native_engines.AutoResearchEngine(config)
+        result = engine.run(task, single)
+    finally:
+        single.stop()
+    assert len(seen) == 2
+    assert seen[0] == ""
+    assert result.best_score == 1.0
+    assert repo_tree.patch_paths(result.best_candidate) == ["src/app.py"]
+    assert (engine.work_dir / "archive" / "c002.patch").read_text() == result.best_candidate
+    assert "checkout.sh" in (engine.work_dir / "BRIEF.md").read_text()
+    output = tmp_path / "out"
+    engine.process_result(result, output)
+    assert (output / "autoresearch" / "best_candidate.patch").read_text() == result.best_candidate
 
 
 def test_single_candidate_tasks_use_the_whole_candidate_route(tmp_path: Path, fake_home: Path) -> None:

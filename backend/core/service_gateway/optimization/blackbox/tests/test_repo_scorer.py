@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
+
+from core.exceptions import ServiceError
+from core.models.blackbox import BlackboxRunRequest
+from core.models.tests.test_blackbox import _repo_request
 
 from ..repo_scorer import RepoScoreError, RepoScorer, per_case_scores
 from ..repo_workspace import RepoWorkspace
 from ..sandbox import LocalSubprocessRuntime, SandboxSpec
+from ..service import run_blackbox_optimization
 from .test_repo_workspace import _archive, _patch
 
 SCORER = """
@@ -135,3 +141,20 @@ def test_per_case_scores_reject_bad_shapes(cases: object) -> None:
     """Per-case scores must map names to finite numbers."""
     with pytest.raises(RepoScoreError):
         per_case_scores({"cases": cases})
+
+
+@pytest.mark.parametrize(
+    ("overrides", "snapshot", "message"),
+    [
+        ({}, None, "repository its parent fetched"),
+        ({"strategy": {"mode": "single", "engine": "gepa"}}, {"chunks": ["tree.0000.b64"]}, "AutoResearch only"),
+    ],
+)
+def test_a_repository_run_needs_its_tree_and_autoresearch(
+    overrides: dict[str, Any], snapshot: dict[str, Any] | None, message: str
+) -> None:
+    """Refuse a repository run the guest cannot carry out before any scoring starts."""
+    payload = BlackboxRunRequest.model_validate(_repo_request(max_cost_cents=100, **overrides))
+    route = {"url": "http://127.0.0.1:1/v1/_evaluator", "token": "t"}
+    with pytest.raises(ServiceError, match=message):
+        run_blackbox_optimization(payload, artifact_id="job", evaluator_route=route, repo_snapshot=snapshot)

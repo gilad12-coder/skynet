@@ -456,6 +456,7 @@ def test_run_service_in_subprocess_blackbox_progress_is_forwarded() -> None:
         agent_run_sink=None,
         target_route=None,
         evaluator_route=None,
+        repo_snapshot=None,
     ):
         """Stand-in for ``run_blackbox_optimization`` that emits one lane event and one run row."""
         assert evaluator_route == relay

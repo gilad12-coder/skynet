@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
+from pathlib import Path
 from typing import Any
 
 import dspy
@@ -650,6 +651,7 @@ def run_blackbox_optimization(
     agent_run_sink: AgentRunSink | None = None,
     target_route: dict[str, str] | None = None,
     evaluator_route: dict[str, str] | None = None,
+    repo_snapshot: dict[str, Any] | None = None,
 ) -> BlackboxRunResponse:
     """Run one black-box job end to end.
 
@@ -661,6 +663,7 @@ def run_blackbox_optimization(
         agent_run_sink: Receives each sandboxed agent run's record and live transcript, if any.
         target_route: Opaque parent route for the optimized task model.
         evaluator_route: Opaque parent route for the selected external evaluator.
+        repo_snapshot: A repository run's packed tree, as uploaded into this box.
 
     Returns:
         The best version with baseline vs optimized held-out scores.
@@ -681,6 +684,10 @@ def run_blackbox_optimization(
     if payload.target.kind == BLACKBOX_TARGET_REPO:
         if not evaluator_route:
             raise ServiceError("A repository run is scored only by its trusted parent.")
+        if not repo_snapshot or not repo_snapshot.get("chunks"):
+            raise ServiceError("A repository run needs the repository its parent fetched.")
+        if payload.strategy.engine != "autoresearch":
+            raise ServiceError("This deployment optimizes repositories with AutoResearch only.")
         base_scorer: JobScorer = RemoteScorer(
             REPO_SCORER_URL,
             secret=None,
@@ -700,6 +707,7 @@ def run_blackbox_optimization(
             gepa_log_dir_path=gepa_log_dir_path,
             agent_run_sink=agent_run_sink,
             target_route=target_route,
+            repo_snapshot=repo_snapshot,
         )
     except BudgetReached as exc:
         exc.evidence.setdefault("candidate_origin", None)
@@ -751,6 +759,7 @@ def _run_job(
     gepa_log_dir_path: str | None,
     agent_run_sink: AgentRunSink | None,
     target_route: dict[str, str] | None = None,
+    repo_snapshot: dict[str, Any] | None = None,
 ) -> BlackboxRunResponse:
     """Run the job over an already-built scorer; see :func:`run_blackbox_optimization`.
 
@@ -763,6 +772,7 @@ def _run_job(
         gepa_log_dir_path: Workspace for engine state; a temp dir when unset.
         agent_run_sink: Receives each sandboxed agent run's record and live transcript, if any.
         target_route: Opaque parent route for the optimized task model.
+        repo_snapshot: A repository run's packed tree, as uploaded into this box.
 
     Returns:
         The best version with baseline vs optimized held-out scores.
@@ -853,6 +863,15 @@ def _run_job(
             budget_route=budget_route,
             max_token_cost=token_budget,
             proposer=payload.proposer,
+            repo=(
+                {
+                    "chunks": [str(Path(chunk).resolve()) for chunk in repo_snapshot["chunks"]],
+                    "editable_paths": list(target.repo.editable_paths),
+                    "readonly_paths": list(repo_snapshot.get("readonly_paths") or ()),
+                }
+                if target.repo is not None and repo_snapshot is not None
+                else None
+            ),
         )
 
     task = Task(

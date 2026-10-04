@@ -79,6 +79,17 @@ def test_a_version_round_trips_through_a_patch(tmp_path: Path) -> None:
     assert patch_violations(patch, ["src"]) == []
 
 
+def test_commits_in_the_checkout_stay_in_the_version(tmp_path: Path) -> None:
+    """Diff against the shipped commit, so committing an edit cannot hide it."""
+    checkout = _unpacked(tmp_path, {"src/a.py": "a\n"})
+    (checkout / "src/a.py").write_text("b\n")
+    subprocess.run([*_GIT, "commit", "--quiet", "-am", "agent"], cwd=checkout, check=True)
+
+    assert patch_paths(version_patch(checkout)) == ["src/a.py"]
+    reset_tree(checkout)
+    assert (checkout / "src/a.py").read_text() == "a\n"
+
+
 def test_ignored_files_are_left_out_of_a_version(tmp_path: Path) -> None:
     """Keep caches and build output the repository ignores out of the patch."""
     checkout = _unpacked(tmp_path, {".gitignore": "*.log\n", "src/a.py": "a\n"})
