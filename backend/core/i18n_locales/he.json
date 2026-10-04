@@ -268,7 +268,13 @@
     "connectors.invalid_ref": "המיקום הזה אינו תקין. בחרו קובץ מהרשימה.",
     "connectors.picker_unavailable": "בחירת קבצים מ-Google לא מוגדרת בפריסה הזו.",
     "connectors.picker_needs_oauth": "בחירת קבצים דורשת חשבון {provider} שחובר דרך התחברות עם Google.",
-    "connectors.unknown_provider": "מחבר לא מוכר: {provider}."
+    "connectors.unknown_provider": "מחבר לא מוכר: {provider}.",
+    "secrets.invalid_name": "\"{name}\" לא יכול לשמש כשם סוד. השתמשו באותיות, ספרות וקווים תחתונים, והתחילו באות או בקו תחתון.",
+    "secrets.invalid_value": "לסוד צריך להיות ערך של עד {limit} בתים.",
+    "secrets.limit_reached": "אפשר לשמור עד {limit} סודות. מחקו סוד אחד כדי להוסיף חדש.",
+    "secrets.not_found": "הסוד הזה לא קיים, או שהוא לא שלכם.",
+    "secrets.undecryptable": "אי אפשר לקרוא את הסוד הזה יותר. שמרו אותו שוב.",
+    "blackbox.repo_target_unavailable": "עדיין אי אפשר לבצע אופטימיזציה למאגר קוד."
   },
   "backend": {
     "constants": {

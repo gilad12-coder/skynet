@@ -29,6 +29,7 @@ BLACKBOX_ENGINE_AUTOSADDLER = "autosaddler"
 BLACKBOX_STRATEGY_AUTO = "auto"
 BLACKBOX_TARGET_TEXT = "text"
 BLACKBOX_TARGET_AGENT = "agent"
+BLACKBOX_TARGET_REPO = "repo"
 BLACKBOX_HARNESS_PI = "pi"
 BLACKBOX_HARNESS_CODEX = "codex"
 BLACKBOX_HARNESS_CLAUDE_CODE = "claude_code"
@@ -45,6 +46,9 @@ BLACKBOX_HARNESSES = (
 )
 # Engines that accept a multi-part (named files) starting point.
 BLACKBOX_MULTI_PART_ENGINES = frozenset({BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_AUTOSADDLER})
+# Engines that can optimize a repository: both drive a coding agent that edits
+# a real checkout. GEPA only searches there; the agent writes every version.
+BLACKBOX_REPO_ENGINES = frozenset({BLACKBOX_ENGINE_AUTORESEARCH, BLACKBOX_ENGINE_GEPA})
 # Single-mode engines that honor an explicit iteration cap.
 BLACKBOX_ITERATION_LIMIT_ENGINES = frozenset({BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER})
 # Stands in for ``module_name`` in the job overview and notifications, where
@@ -105,6 +109,83 @@ class BlackboxBudget(BaseModel):
     stop_at_score: float | None = None
 
 
+REPO_SECRET_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+REPO_NAME_PATTERN = r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+REPO_COMMIT_PATTERN = r"^[0-9a-f]{40}$"
+
+
+# One environment variable a repository needs to build or score. ``value`` is
+# entered for this run only; ``saved_secret_id`` points at a secret saved on
+# the account. Exactly one is set. Values never reach the job payload: the
+# trusted parent vaults them at submission and injects them only into the
+# sandbox, never into an agent's prompt or logs.
+class BlackboxRepoSecret(BaseModel):
+    name: str = Field(pattern=REPO_SECRET_NAME_PATTERN)
+    value: str | None = Field(default=None, max_length=16_384)
+    saved_secret_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def _ensure_one_source(self) -> BlackboxRepoSecret:
+        """Require exactly one of an inline value or a saved secret.
+
+        Returns:
+            The validated secret instance.
+
+        Raises:
+            ValueError: When both or neither source is given.
+        """
+        if (self.value is None) == (self.saved_secret_id is None):
+            raise ValueError(f"Secret '{self.name}' needs either a value or a saved secret, not both.")
+        return self
+
+
+# The repository a ``repo`` target optimizes. ``commit`` pins the starting
+# point; the server resolves it from ``branch`` when omitted, so every version
+# is a patch against one fixed tree. ``editable_paths`` are the files and
+# folders (relative, ``/``-separated) an agent may change; the rest of the
+# repository is read-only context; ``.`` makes the whole repository editable.
+# Submodules and Git LFS files are fetched
+# read-only.
+class BlackboxRepoSource(BaseModel):
+    provider: Literal["github"] = "github"
+    repository: str = Field(pattern=REPO_NAME_PATTERN)
+    branch: str | None = Field(default=None, min_length=1, max_length=255)
+    commit: str | None = Field(default=None, pattern=REPO_COMMIT_PATTERN)
+    editable_paths: list[str] = Field(min_length=1, max_length=200)
+    secrets: list[BlackboxRepoSecret] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def _ensure_clean_paths(self) -> BlackboxRepoSource:
+        """Normalize editable paths and reject ones that escape the repository.
+
+        Returns:
+            The validated source with ``/``-joined, slash-trimmed paths.
+
+        Raises:
+            ValueError: When a path is absolute, empty, or walks out with ``..``,
+                or when two secrets share a name.
+        """
+        cleaned: list[str] = []
+        for raw in self.editable_paths:
+            path = raw.strip().replace("\\", "/")
+            if path in (".", "./"):
+                cleaned.append(".")
+                continue
+            if path.startswith("/") or not path.strip("/"):
+                raise ValueError(f"Editable path '{raw}' must be relative and stay inside the repository.")
+            path = path.strip("/")
+            if any(part in ("", ".", "..") for part in path.split("/")):
+                raise ValueError(f"Editable path '{raw}' must be relative and stay inside the repository.")
+            if path == ".git" or path.startswith(".git/"):
+                raise ValueError("The .git folder cannot be editable.")
+            cleaned.append(path)
+        self.editable_paths = list(dict.fromkeys(cleaned))
+        names = [secret.name for secret in self.secrets]
+        if len(names) != len(set(names)):
+            raise ValueError("Each secret name can only be used once.")
+        return self
+
+
 # What the versions under optimization drive. ``text``: the scorer reads a
 # version directly. ``agent``: every scorer run launches a coding harness in a
 # private workspace inside the run's managed sandbox, with the version as the
@@ -116,8 +197,11 @@ class BlackboxBudget(BaseModel):
 # ``reflection_model_config`` on the request. Clients also send the full
 # target role as ``task_model_config`` on the request so its credential source
 # can be metered independently; ``model`` remains for stored-client compatibility.
+# ``repo``: every version is a patch against ``repo.commit``. The scorer runs
+# on a checkout with the patch applied, after ``setup_command``; the coding
+# agent that writes versions is the request's ``proposer``.
 class BlackboxTarget(BaseModel):
-    kind: Literal["text", "agent"] = BLACKBOX_TARGET_TEXT
+    kind: Literal["text", "agent", "repo"] = BLACKBOX_TARGET_TEXT
     harness: str = BLACKBOX_HARNESS_PI
     model: str | None = None
     timeout_seconds: float = Field(default=600.0, gt=0, le=2_700)
@@ -125,18 +209,22 @@ class BlackboxTarget(BaseModel):
     setup_command: str | None = None
     install_command: str | None = None
     run_command: str | None = None
+    repo: BlackboxRepoSource | None = None
 
     @model_validator(mode="after")
     def _ensure_agent_fields(self) -> BlackboxTarget:
-        """Require what an agent target needs to launch.
+        """Require what an agent or repository target needs to launch.
 
         Returns:
             The validated target instance.
 
         Raises:
             ValueError: When an agent target names no model or an unknown
-                harness, or a custom harness has no run command.
+                harness, a custom harness has no run command, or the
+                repository and target kind disagree.
         """
+        if (self.kind == BLACKBOX_TARGET_REPO) != (self.repo is not None):
+            raise ValueError("A repository target needs a repo, and only a repository target takes one.")
         if self.kind != BLACKBOX_TARGET_AGENT:
             return self
         if not (self.model or "").strip():
@@ -294,7 +382,9 @@ class BlackboxRunRequest(BaseModel):
                 supplied outside a single Meta-Harness run.
         """
         seed = self.seed_candidate
-        if seed is None:
+        if self.target.kind == BLACKBOX_TARGET_REPO:
+            self._ensure_repo_run()
+        elif seed is None:
             if not (self.objective or "").strip():
                 raise ValueError("Without a starting point, an objective is required.")
         elif isinstance(seed, dict):
@@ -323,6 +413,23 @@ class BlackboxRunRequest(BaseModel):
         ):
             raise ValueError("An iteration limit is only supported by single Meta-Harness or AutoSaddler runs.")
         return self
+
+    def _ensure_repo_run(self) -> None:
+        """Check the rules a repository target adds to a run.
+
+        The starting point of a repository run is the pinned commit itself,
+        so the seed is the empty patch; a supplied seed must be a patch.
+
+        Raises:
+            ValueError: When the seed is multi-part, or the run is not a single
+                AutoResearch or GEPA run.
+        """
+        multi_part = isinstance(self.seed_candidate, dict)
+        if multi_part:
+            raise ValueError("A repository run starts from its commit; a multi-part starting point does not apply.")
+        self.seed_candidate = self.seed_candidate or ""
+        if self.strategy.mode != "single" or self.strategy.engine not in BLACKBOX_REPO_ENGINES:
+            raise ValueError(f"A repository target runs a single {' or '.join(sorted(BLACKBOX_REPO_ENGINES))} engine.")
 
 
 # ``POST /blackbox/scorer/dry-run``: score one version on one case before
@@ -502,7 +609,7 @@ class BlackboxProposerRuntimeInfo(BaseModel):
 
 
 class BlackboxEngineCatalogResponse(BaseModel):
-    target_kind: Literal["text", "agent"]
+    target_kind: Literal["text", "agent", "repo"]
     sandbox_available: bool
     sandbox_reason: str | None = None
     engines: list[BlackboxEngineInfo] = Field(default_factory=list)

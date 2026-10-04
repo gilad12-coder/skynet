@@ -65,6 +65,12 @@
     "winningCandidate": "胜出候选项"
   },
   "messages": {
+    "blackbox.repo_target_unavailable": "暂不支持优化代码仓库。",
+    "secrets.invalid_name": "“{name}”不能用作密钥名称。请使用字母、数字和下划线，并以字母或下划线开头。",
+    "secrets.invalid_value": "密钥的值最多 {limit} 字节。",
+    "secrets.limit_reached": "最多可保存 {limit} 个密钥。删除一个后才能添加新的。",
+    "secrets.not_found": "该密钥不存在，或不属于你。",
+    "secrets.undecryptable": "该密钥已无法读取，请重新保存。",
     "connectors.query_failed": "{provider} 无法执行查询：{reason}",
     "connectors.expired": "您的 {provider} 登录已过期，请前往「设置」重新连接。",
     "connectors.file_unsupported": "该文件无法作为表格读取。支持的格式：CSV、TSV、JSON、JSONL 和 Parquet。",

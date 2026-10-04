@@ -65,6 +65,12 @@
     "winningCandidate": "نامزد برنده"
   },
   "messages": {
+    "blackbox.repo_target_unavailable": "بهینه‌سازی یک مخزن هنوز در دسترس نیست.",
+    "secrets.invalid_name": "\"{name}\" نمی‌تواند نام یک راز باشد. از حروف، ارقام و زیرخط استفاده کنید و با یک حرف یا زیرخط شروع کنید.",
+    "secrets.invalid_value": "یک راز به مقداری حداکثر {limit} بایت نیاز دارد.",
+    "secrets.limit_reached": "می‌توانید حداکثر {limit} راز ذخیره کنید. برای افزودن راز جدید، یکی را حذف کنید.",
+    "secrets.not_found": "این راز وجود ندارد یا متعلق به شما نیست.",
+    "secrets.undecryptable": "این راز دیگر قابل خواندن نیست. دوباره ذخیره‌اش کنید.",
     "connectors.query_failed": "{provider} نتوانست کوئری را اجرا کند: {reason}",
     "connectors.expired": "نشست {provider} شما منقضی شده است. دوباره از بخش تنظیمات متصل شوید.",
     "connectors.file_unsupported": "این فایل را نمی‌توان به‌صورت جدول خواند. فرمت‌های پشتیبانی‌شده: CSV، TSV، JSON، JSONL و Parquet.",

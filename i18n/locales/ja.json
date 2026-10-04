@@ -65,6 +65,12 @@
     "winningCandidate": "最良候補"
   },
   "messages": {
+    "blackbox.repo_target_unavailable": "リポジトリの最適化はまだ利用できません。",
+    "secrets.invalid_name": "「{name}」はシークレット名として使えません。英字、数字、アンダースコアを使い、英字またはアンダースコアで始めてください。",
+    "secrets.invalid_value": "シークレットの値は {limit} バイト以下にしてください。",
+    "secrets.limit_reached": "保存できるシークレットは最大 {limit} 個です。追加するには1つ削除してください。",
+    "secrets.not_found": "このシークレットは存在しないか、あなたのものではありません。",
+    "secrets.undecryptable": "このシークレットは読み取れなくなりました。もう一度保存してください。",
     "connectors.query_failed": "{provider} はクエリを実行できませんでした: {reason}",
     "connectors.expired": "{provider}のセッションが切れました。設定画面から再度接続してください。",
     "connectors.file_unsupported": "このファイルは表形式として読み込めません。対応形式:CSV、TSV、JSON、JSONL、Parquet。",

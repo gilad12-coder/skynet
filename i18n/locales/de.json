@@ -65,6 +65,12 @@
     "winningCandidate": "Gewinnerkandidat"
   },
   "messages": {
+    "blackbox.repo_target_unavailable": "Das Optimieren eines Repositorys ist noch nicht verfügbar.",
+    "secrets.invalid_name": "\"{name}\" kann kein Secret-Name sein. Verwende Buchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstaben oder Unterstrich.",
+    "secrets.invalid_value": "Ein Secret braucht einen Wert von höchstens {limit} Bytes.",
+    "secrets.limit_reached": "Du kannst bis zu {limit} Secrets speichern. Lösche eines, um ein weiteres hinzuzufügen.",
+    "secrets.not_found": "Dieses Secret existiert nicht oder gehört nicht dir.",
+    "secrets.undecryptable": "Dieses Secret kann nicht mehr gelesen werden. Speichere es erneut.",
     "connectors.query_failed": "{provider} konnte die Abfrage nicht ausführen: {reason}",
     "connectors.expired": "Ihre {provider}-Sitzung ist abgelaufen. Verbinden Sie sich erneut über die Einstellungen.",
     "connectors.file_unsupported": "Diese Datei kann nicht als Tabelle gelesen werden. Unterstützte Formate: CSV, TSV, JSON, JSONL und Parquet.",

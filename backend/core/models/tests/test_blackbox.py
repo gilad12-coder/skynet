@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from core.models.blackbox import BlackboxRunRequest
+from core.models.blackbox import BlackboxRepoSecret, BlackboxRepoSource, BlackboxRunRequest, BlackboxTarget
 
 
 def _payload(**overrides: Any) -> dict[str, Any]:
@@ -152,3 +152,101 @@ def test_iteration_limit_requires_single_meta_harness(strategy: dict[str, str], 
 
     payload["budget"]["max_iterations"] = None
     assert BlackboxRunRequest.model_validate(payload).budget.max_iterations is None
+
+
+def _repo_request(**overrides: object) -> dict:
+    """Build a valid repository run payload, with ``overrides`` applied.
+
+    Args:
+        **overrides: Top-level request fields to replace.
+
+    Returns:
+        The request payload.
+    """
+    payload = {
+        "recipe": "anything",
+        "scorer": {"kind": "python", "metric_code": "def score(repo_path):\n    return 1.0\n"},
+        "reflection_model_config": {"name": "gpt-4o"},
+        "budget": {"max_evals": 10},
+        "strategy": {"mode": "single", "engine": "autoresearch"},
+        "target": {
+            "kind": "repo",
+            "repo": {"repository": "octo/hello", "branch": "main", "editable_paths": ["src/"]},
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_repo_run_starts_from_the_empty_patch() -> None:
+    """A repository run needs no seed or objective; its seed is the empty patch."""
+    request = BlackboxRunRequest.model_validate(_repo_request())
+    assert request.seed_candidate == ""
+    assert request.target.repo is not None
+    assert request.target.repo.editable_paths == ["src"]
+
+
+@pytest.mark.parametrize("engine", ["autosaddler", "best_of_n", "meta_harness"])
+def test_repo_run_rejects_engines_that_cannot_edit_a_checkout(engine: str) -> None:
+    """Only AutoResearch and GEPA can drive a repository run."""
+    with pytest.raises(ValidationError, match="repository target"):
+        BlackboxRunRequest.model_validate(_repo_request(strategy={"mode": "single", "engine": engine}))
+
+
+def test_repo_run_accepts_gepa() -> None:
+    """GEPA is the second repository engine."""
+    request = BlackboxRunRequest.model_validate(_repo_request(strategy={"mode": "single", "engine": "gepa"}))
+    assert request.strategy.engine == "gepa"
+
+
+def test_repo_run_rejects_a_multi_part_seed() -> None:
+    """The starting point of a repository run is its commit, never named parts."""
+    with pytest.raises(ValidationError, match="multi-part"):
+        BlackboxRunRequest.model_validate(_repo_request(seed_candidate={"a": "b"}))
+
+
+@pytest.mark.parametrize("path", ["/etc", "../up", "src/../../x", ".git", ".git/hooks", "", "a//b"])
+def test_editable_paths_must_stay_inside_the_repository(path: str) -> None:
+    """Absolute paths, parent walks, empty segments and .git are refused."""
+    with pytest.raises(ValidationError):
+        BlackboxRepoSource(repository="octo/hello", editable_paths=[path])
+
+
+def test_editable_paths_are_normalized_and_deduplicated() -> None:
+    """Backslashes and trailing slashes normalize; duplicates collapse; ``.`` means everything."""
+    source = BlackboxRepoSource(repository="octo/hello", editable_paths=["src\\lib/", "src/lib", "./"])
+    assert source.editable_paths == ["src/lib", "."]
+
+
+def test_repo_secret_needs_exactly_one_source() -> None:
+    """A secret is either typed for this run or picked from the account."""
+    with pytest.raises(ValidationError):
+        BlackboxRepoSecret(name="TOKEN")
+    with pytest.raises(ValidationError):
+        BlackboxRepoSecret(name="TOKEN", value="v", saved_secret_id="abc")
+    assert BlackboxRepoSecret(name="TOKEN", saved_secret_id="abc").value is None
+
+
+def test_repo_secret_names_are_unique() -> None:
+    """Two secrets cannot set the same environment variable."""
+    with pytest.raises(ValidationError, match="once"):
+        BlackboxRepoSource(
+            repository="octo/hello",
+            editable_paths=["src"],
+            secrets=[{"name": "T", "value": "a"}, {"name": "T", "value": "b"}],
+        )
+
+
+def test_repo_field_only_on_repository_targets() -> None:
+    """A repo kind needs a repo, and other kinds cannot carry one."""
+    with pytest.raises(ValidationError):
+        BlackboxTarget(kind="repo")
+    with pytest.raises(ValidationError):
+        BlackboxTarget(kind="text", repo={"repository": "octo/hello", "editable_paths": ["src"]})
+
+
+@pytest.mark.parametrize("repository", ["octo", "octo/hello/extra", "octo/hel lo", "https://github.com/octo/hello"])
+def test_repository_must_be_owner_slash_name(repository: str) -> None:
+    """Only the ``owner/name`` form is accepted."""
+    with pytest.raises(ValidationError):
+        BlackboxRepoSource(repository=repository, editable_paths=["src"])

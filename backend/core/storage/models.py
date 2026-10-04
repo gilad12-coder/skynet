@@ -589,6 +589,31 @@ class UserConnectorModel(Base):
     __table_args__ = (UniqueConstraint("username", "provider", name="uq_user_connectors_username_provider"),)
 
 
+class UserSecretModel(Base):
+    """One named secret a user saved on their account for reuse across runs.
+
+    Repository runs read these as environment variables inside the sandbox
+    (build tokens, test credentials). Only Fernet ciphertext under the vault
+    key is persisted; ``name`` is the environment variable name and is unique
+    per user.
+    """
+
+    __tablename__ = "user_secrets"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid4().hex)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    secret_ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    __table_args__ = (UniqueConstraint("username", "name", name="uq_user_secrets_username_name"),)
+
+
 class ProtectedCredentialModel(Base):
     """One execution-scoped secret encrypted for use by a trusted parent relay.
 

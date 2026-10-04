@@ -65,6 +65,12 @@
     "winningCandidate": "candidato vencedor"
   },
   "messages": {
+    "blackbox.repo_target_unavailable": "Ainda não é possível otimizar um repositório.",
+    "secrets.invalid_name": "\"{name}\" não pode ser o nome de um segredo. Use letras, dígitos e sublinhados, começando com uma letra ou sublinhado.",
+    "secrets.invalid_value": "Um segredo precisa de um valor com no máximo {limit} bytes.",
+    "secrets.limit_reached": "Você pode salvar até {limit} segredos. Exclua um para adicionar outro.",
+    "secrets.not_found": "Esse segredo não existe ou não é seu.",
+    "secrets.undecryptable": "Este segredo não pode mais ser lido. Salve-o novamente.",
     "connectors.query_failed": "{provider} não conseguiu executar a consulta: {reason}",
     "connectors.expired": "A sua sessão do {provider} expirou. Ligue-se novamente em Definições.",
     "connectors.file_unsupported": "Não é possível ler este ficheiro como uma tabela. Formatos suportados: CSV, TSV, JSON, JSONL e Parquet.",

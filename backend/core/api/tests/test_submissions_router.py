@@ -1900,6 +1900,31 @@ def test_submit_blackbox_run_returns_201_and_persists_overview(monkeypatch: pyte
 
 
 @pytest.mark.usefixtures("_skip_scorer_sandbox")
+def test_submit_blackbox_run_refuses_repository_targets_for_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A repository target is refused before anything, inline secrets included, is stored."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    payload = {
+        **_blackbox_payload(),
+        "strategy": {"mode": "single", "engine": "autoresearch"},
+        "target": {
+            "kind": "repo",
+            "repo": {
+                "repository": "octo/hello",
+                "editable_paths": ["src"],
+                "secrets": [{"name": "TOKEN", "value": "plaintext"}],
+            },
+        },
+    }
+
+    resp = client.post("/blackbox/run", json=payload)
+
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "blackbox.repo_target_unavailable"
+    assert store._jobs == {}
+
+
+@pytest.mark.usefixtures("_skip_scorer_sandbox")
 def test_submit_blackbox_run_single_engine_is_the_optimizer_name(monkeypatch: pytest.MonkeyPatch) -> None:
     """In ``single`` mode the chosen engine is recorded as the run's optimizer."""
     store = _FakeJobStore()

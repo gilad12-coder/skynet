@@ -65,6 +65,12 @@
     "winningCandidate": "kazanan aday"
   },
   "messages": {
+    "blackbox.repo_target_unavailable": "Bir depoyu optimize etmek henüz kullanılamıyor.",
+    "secrets.invalid_name": "\"{name}\" bir gizli anahtar adı olamaz. Harf, rakam ve alt çizgi kullanın; bir harf veya alt çizgiyle başlayın.",
+    "secrets.invalid_value": "Bir gizli anahtarın değeri en fazla {limit} bayt olmalıdır.",
+    "secrets.limit_reached": "En fazla {limit} gizli anahtar kaydedebilirsiniz. Yenisini eklemek için birini silin.",
+    "secrets.not_found": "Bu gizli anahtar yok ya da size ait değil.",
+    "secrets.undecryptable": "Bu gizli anahtar artık okunamıyor. Yeniden kaydedin.",
     "connectors.query_failed": "{provider} sorguyu çalıştıramadı: {reason}",
     "connectors.expired": "{provider} oturumunuzun süresi doldu. Ayarlar'dan tekrar bağlanın.",
     "connectors.file_unsupported": "Bu dosya tablo olarak okunamıyor. Desteklenen biçimler: CSV, TSV, JSON, JSONL ve Parquet.",

@@ -65,6 +65,12 @@
     "winningCandidate": "переможний кандидат"
   },
   "messages": {
+    "blackbox.repo_target_unavailable": "Оптимізація репозиторію поки що недоступна.",
+    "secrets.invalid_name": "«{name}» не може бути назвою секрету. Використовуйте літери, цифри й підкреслення, починаючи з літери або підкреслення.",
+    "secrets.invalid_value": "Значення секрету має займати щонайбільше {limit} байтів.",
+    "secrets.limit_reached": "Можна зберегти щонайбільше {limit} секретів. Видаліть один, щоб додати новий.",
+    "secrets.not_found": "Цього секрету не існує, або він не ваш.",
+    "secrets.undecryptable": "Цей секрет більше не читається. Збережіть його знову.",
     "connectors.query_failed": "{provider} не вдалося виконати запит: {reason}",
     "connectors.expired": "Сеанс {provider} завершився. Підключіться знову в налаштуваннях.",
     "connectors.file_unsupported": "Цей файл не вдається прочитати як таблицю. Підтримувані формати: CSV, TSV, JSON, JSONL і Parquet.",
