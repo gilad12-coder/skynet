@@ -809,7 +809,7 @@ function CanvasInner({
       ref={rootRef}
       className={cn(
         fullscreen
-          ? "fixed inset-0 z-50 flex h-screen w-screen flex-col bg-background"
+          ? "fixed inset-0 z-50 flex h-dvh w-screen flex-col bg-background"
           : "relative flex flex-col",
         className,
       )}

@@ -62,16 +62,16 @@ function SheetContent({
           side === "left" &&
             "w-3/4 border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-[min(24rem,92vw)]",
           side === "top" &&
-            "h-auto border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
+            "h-auto max-h-[90dvh] overflow-y-auto border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
           side === "bottom" &&
-            "h-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+            "h-auto max-h-[90dvh] overflow-y-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
           className,
         )}
         style={{
           zIndex: 50,
           position: "fixed",
-          ...(side === "right" && { top: 0, bottom: 0, right: 0, height: "100%" }),
-          ...(side === "left" && { top: 0, bottom: 0, left: 0, height: "100%" }),
+          ...(side === "right" && { top: 0, bottom: 0, right: 0, height: "100dvh" }),
+          ...(side === "left" && { top: 0, bottom: 0, left: 0, height: "100dvh" }),
           ...(side === "top" && { top: 0, left: 0, right: 0 }),
           ...(side === "bottom" && { bottom: 0, left: 0, right: 0 }),
           ...style,

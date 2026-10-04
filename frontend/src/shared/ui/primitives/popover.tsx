@@ -17,6 +17,7 @@ function PopoverContent({
   className,
   sideOffset = 6,
   align = "center",
+  collisionPadding = 8,
   children,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content>) {
@@ -26,8 +27,12 @@ function PopoverContent({
         data-slot="popover-content"
         sideOffset={sideOffset}
         align={align}
+        collisionPadding={collisionPadding}
         className={cn(
           "origin-(--radix-popover-content-transform-origin)",
+          // Never taller or wider than the space Radix measured beside the
+          // trigger; content that outgrows it scrolls inside the panel.
+          "max-h-(--radix-popover-content-available-height) max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain",
           // Unfold from the trigger origin (200ms expo-out) instead of the
           // default ~150ms snap, with a crisper 140ms ease-in dismiss. The
           // arbitrary animation-* props set duration/easing on the enter/exit

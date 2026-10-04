@@ -268,13 +268,13 @@ export function ModelPicker({
         align="start"
         sideOffset={4}
         role="listbox"
-        className="w-(--radix-popover-trigger-width) overflow-hidden p-0"
+        className="flex w-(--radix-popover-trigger-width) flex-col overflow-hidden p-0"
         onOpenAutoFocus={(e) => {
           e.preventDefault();
           inputRef.current?.focus();
         }}
       >
-        <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-3 py-2">
           <MagnifyingGlass className="size-4 shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
@@ -289,7 +289,7 @@ export function ModelPicker({
           <div
             role="group"
             aria-label={msg("submit.modelpicker.purpose.aria")}
-            className="flex flex-wrap gap-1 border-b border-border/50 px-3 py-2"
+            className="flex shrink-0 flex-wrap gap-1 border-b border-border/50 px-3 py-2"
           >
             {purposeOptions.map((p) => (
               <button
@@ -311,7 +311,7 @@ export function ModelPicker({
           </div>
         )}
 
-        <div className="max-h-60 overflow-y-auto py-1">
+        <div className="max-h-60 min-h-0 flex-1 overflow-y-auto py-1">
           {filtered.length === 0 && (
             <div className="px-3 py-8 text-center text-xs text-muted-foreground">
               {msg("auto.features.submit.components.modelpicker.3")}

@@ -537,7 +537,7 @@ export function TrajectoryTree({
       ref={containerRef}
       className={
         isMaximized
-          ? "fixed inset-0 z-50 w-screen h-screen overflow-hidden border-0"
+          ? "fixed inset-0 z-50 w-screen h-dvh overflow-hidden border-0"
           : "relative w-full overflow-hidden rounded-xl border border-[#DDD4C8]/60"
       }
       style={

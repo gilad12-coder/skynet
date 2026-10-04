@@ -257,7 +257,7 @@ export function ShareDialog({
           {/* Flex column so the people list is the only scroller — invite stays
               pinned at the top and access/link controls pinned at the bottom no
               matter how many members are granted. */}
-          <div className="flex max-h-[85vh] flex-col">
+          <div className="flex max-h-[85dvh] flex-col">
             <DialogHeader className="shrink-0 border-b border-border/40 px-4 pb-4 pt-6 sm:px-6">
               <DialogTitle>{msg("share.dialog_title")}</DialogTitle>
             </DialogHeader>

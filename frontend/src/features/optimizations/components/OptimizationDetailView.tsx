@@ -1431,7 +1431,10 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             <div className="text-sm font-medium text-[#B04030] mb-1">
               {msg("auto.features.optimizations.components.pairdetailview.3")}
             </div>
-            <pre className="text-xs font-mono text-[#B04030]/80 whitespace-pre-wrap" dir="ltr">
+            <pre
+              className="text-xs font-mono text-[#B04030]/80 whitespace-pre-wrap break-words"
+              dir="ltr"
+            >
               {activePair.error}
             </pre>
           </div>

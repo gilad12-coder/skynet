@@ -162,108 +162,110 @@ export function DryRunDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !running && onOpenChange(o)}>
-      <DialogContent className="max-h-[calc(100dvh-1rem)] max-w-lg overflow-y-auto px-4 py-5 sm:max-h-[85vh] sm:p-6">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[calc(100dvh-1rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:max-h-[85dvh]">
+        <DialogHeader className="shrink-0 px-4 pt-5 pb-4 sm:px-6 sm:pt-6">
           <DialogTitle>{msg("workflow.dryrun.title")}</DialogTitle>
           <DialogDescription>
             {msg(useSetupSample ? "workflow.dryrun.setup_sample" : "workflow.dryrun.description")}
           </DialogDescription>
         </DialogHeader>
-        {modelName && onPickModel && (
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/40 px-3 py-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <ProviderLogo slug={modelProviderSlug(modelName)} size={16} />
-              <span
-                className="truncate font-mono text-xs text-foreground"
-                dir="ltr"
-                title={modelName}
-              >
-                {modelDisplayName(modelName)}
-              </span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 shrink-0 px-2 text-xs text-muted-foreground hover:text-foreground"
-              disabled={running}
-              onClick={onPickModel}
-            >
-              {msg("workflow.dryrun.change_model")}
-            </Button>
-          </div>
-        )}
-        {!useSetupSample && (
-          <div className="max-h-80 space-y-3 overflow-y-auto py-1">
-            {inputFields.map((field) => (
-              <div key={field} className="space-y-1.5">
-                <Label className="font-mono text-xs" dir="ltr">
-                  {field}
-                </Label>
-                <Textarea
-                  dir="auto"
-                  rows={2}
-                  value={values[field] ?? ""}
-                  disabled={running}
-                  onChange={(e) => setValues((v) => ({ ...v, [field]: e.target.value }))}
-                  className="resize-y"
-                />
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4 sm:px-6">
+          {modelName && onPickModel && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/40 px-3 py-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <ProviderLogo slug={modelProviderSlug(modelName)} size={16} />
+                <span
+                  className="truncate font-mono text-xs text-foreground"
+                  dir="ltr"
+                  title={modelName}
+                >
+                  {modelDisplayName(modelName)}
+                </span>
               </div>
-            ))}
-          </div>
-        )}
-        {started && (
-          <div className="space-y-2 border-t border-border/60 pt-3">
-            <div
-              className={cn(
-                "flex items-center gap-1.5 text-[0.6875rem] font-medium",
-                running && "text-muted-foreground",
-                !running && result && !result.error && "text-[#5A7247]",
-                !running && result?.error && "text-[#A3512B]",
-              )}
-              role="status"
-            >
-              {running && (
-                <>
-                  <CircleNotch className="size-3 shrink-0 animate-spin" />
-                  {msg("workflow.dryrun.running")}
-                </>
-              )}
-              {!running && result && !result.error && (
-                <>
-                  <CheckCircle className="size-3 shrink-0" />
-                  {msg("workflow.dryrun.succeeded")}
-                </>
-              )}
-              {!running && result?.error && (
-                <>
-                  <Warning className="size-3 shrink-0" />
-                  {msg("workflow.dryrun.failed")}
-                </>
-              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 shrink-0 px-2 text-xs text-muted-foreground hover:text-foreground"
+                disabled={running}
+                onClick={onPickModel}
+              >
+                {msg("workflow.dryrun.change_model")}
+              </Button>
             </div>
-            <div className="max-h-72 space-y-3 overflow-y-auto">
-              {visibleAnswerFields.map((field) => (
-                <AnswerFieldBox
-                  key={field}
-                  field={field}
-                  text={answerFor(field)}
-                  streaming={running && activeField === field}
-                />
+          )}
+          {!useSetupSample && (
+            <div className="max-h-80 space-y-3 overflow-y-auto py-1">
+              {inputFields.map((field) => (
+                <div key={field} className="space-y-1.5">
+                  <Label className="font-mono text-xs" dir="ltr">
+                    {field}
+                  </Label>
+                  <Textarea
+                    dir="auto"
+                    rows={2}
+                    value={values[field] ?? ""}
+                    disabled={running}
+                    onChange={(e) => setValues((v) => ({ ...v, [field]: e.target.value }))}
+                    className="resize-y"
+                  />
+                </div>
               ))}
             </div>
-            {result?.error && (
-              <p className="break-words text-xs text-destructive" dir="ltr">
-                {result.error}
-              </p>
-            )}
-          </div>
-        )}
-        {error && (
-          <p className="break-words text-xs text-destructive" dir="ltr">
-            {error}
-          </p>
-        )}
-        <DialogFooter>
+          )}
+          {started && (
+            <div className="space-y-2 border-t border-border/60 pt-3">
+              <div
+                className={cn(
+                  "flex items-center gap-1.5 text-[0.6875rem] font-medium",
+                  running && "text-muted-foreground",
+                  !running && result && !result.error && "text-[#5A7247]",
+                  !running && result?.error && "text-[#A3512B]",
+                )}
+                role="status"
+              >
+                {running && (
+                  <>
+                    <CircleNotch className="size-3 shrink-0 animate-spin" />
+                    {msg("workflow.dryrun.running")}
+                  </>
+                )}
+                {!running && result && !result.error && (
+                  <>
+                    <CheckCircle className="size-3 shrink-0" />
+                    {msg("workflow.dryrun.succeeded")}
+                  </>
+                )}
+                {!running && result?.error && (
+                  <>
+                    <Warning className="size-3 shrink-0" />
+                    {msg("workflow.dryrun.failed")}
+                  </>
+                )}
+              </div>
+              <div className="max-h-72 space-y-3 overflow-y-auto">
+                {visibleAnswerFields.map((field) => (
+                  <AnswerFieldBox
+                    key={field}
+                    field={field}
+                    text={answerFor(field)}
+                    streaming={running && activeField === field}
+                  />
+                ))}
+              </div>
+              {result?.error && (
+                <p className="break-words text-xs text-destructive" dir="ltr">
+                  {result.error}
+                </p>
+              )}
+            </div>
+          )}
+          {error && (
+            <p className="break-words text-xs text-destructive" dir="ltr">
+              {error}
+            </p>
+          )}
+        </div>
+        <DialogFooter className="shrink-0 px-4 pt-4 pb-5 sm:px-6 sm:pb-6">
           <Button
             variant="outline"
             onClick={() => {

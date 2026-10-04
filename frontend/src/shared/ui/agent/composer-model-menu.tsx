@@ -200,7 +200,7 @@ export function ComposerModelMenu({
             <CaretRight className="size-3.5 shrink-0 text-muted-foreground rtl:rotate-180" />
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-72 overflow-hidden p-0">
-            <div className="max-h-72 overflow-y-auto py-1">
+            <div className="max-h-[min(18rem,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto py-1">
               {currentExtra && (
                 <MenuItem
                   selected

@@ -158,9 +158,13 @@ export function ModelConfigModal({
   // catalog knows it, else medium, else the middle of the ladder. A model
   // with no ladder takes any level as "on", and medium is OpenRouter's own.
   const defaultEffort = (model: string, ladder: readonly string[]) => {
-    const providerDefault = detectionModels?.find((m) => m.value === model)?.default_reasoning_effort;
+    const providerDefault = detectionModels?.find(
+      (m) => m.value === model,
+    )?.default_reasoning_effort;
     if (providerDefault && ladder.includes(providerDefault)) return providerDefault;
-    return ladder.includes("medium") ? "medium" : (ladder[Math.floor(ladder.length / 2)] ?? "medium");
+    return ladder.includes("medium")
+      ? "medium"
+      : (ladder[Math.floor(ladder.length / 2)] ?? "medium");
   };
   const thinkingInfo = (model: string) => {
     const hit = detectionModels?.find((m) => m.value === model);
@@ -219,10 +223,10 @@ export function ModelConfigModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[85vh] sm:max-w-2xl">
-        <DialogTitleRow title={roleLabel} className="px-4 pt-6 sm:px-6" />
+      <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[85dvh] sm:max-w-2xl">
+        <DialogTitleRow title={roleLabel} className="shrink-0 px-4 pt-6 sm:px-6" />
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
           {visibleRecent.length > 0 && (
             <div className="space-y-1.5">
               <Label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
@@ -356,7 +360,9 @@ export function ModelConfigModal({
                   // new model accepts: "off" becomes the default when the new
                   // model can't turn off (or is off anyway), and a level
                   // outside its ladder moves to its default level.
-                  const ladder = effortsFor(next, detectionModels).filter((level) => level !== "none");
+                  const ladder = effortsFor(next, detectionModels).filter(
+                    (level) => level !== "none",
+                  );
                   const { mandatory, defaultOn } = thinkingInfo(next);
                   let effort = (p.extra?.reasoning_effort as string | undefined) ?? null;
                   if (!modelSupportsThinking(next, detectionModels)) effort = null;
@@ -469,7 +475,7 @@ export function ModelConfigModal({
           )}
         </div>
 
-        <DialogFooter className="border-t border-border/40 px-4 pb-4 pt-4 sm:px-6 sm:pb-6">
+        <DialogFooter className="shrink-0 border-t border-border/40 px-4 pb-4 pt-4 sm:px-6 sm:pb-6">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {msg("auto.features.submit.components.modelconfigmodal.10")}
           </Button>
