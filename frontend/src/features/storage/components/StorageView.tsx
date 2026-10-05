@@ -2,7 +2,7 @@
 
 import { ProgressBar, StorageUsageBar } from "@/shared/ui/progress-bar";
 import * as React from "react";
-import { CaretLeft, CaretRight, HardDrive } from "@/shared/ui/icons";
+import { CaretLeft, CaretRight, HardDrive, WarningCircle } from "@/shared/ui/icons";
 import { getStorageUsage, type StorageUsageResponse } from "@/shared/lib/api";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { formatStorageSize } from "@/shared/lib/formatters";
@@ -91,6 +91,12 @@ export function StorageView() {
           </span>
         </div>
         <StorageUsageBar value={usagePct} over={quota > 0 && used > quota} className="mt-3" />
+        {quota > 0 && used >= quota && (
+          <p role="alert" className="mt-3 flex items-start gap-1.5 text-sm text-destructive">
+            <WarningCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            {msg("storage.quota.full_warning")}
+          </p>
+        )}
         <p className="mt-2 text-xs tabular-nums text-muted-foreground">
           {formatMsg("storage.page.percent", {
             percent: used > 0 ? Math.max(1, Math.round(usagePct)) : 0,

@@ -4094,5 +4094,22 @@
   "optimization.blackbox.final.case_col": "Case",
   "optimization.blackbox.versions.feedback": "Scorer feedback",
   "tooltip.blackbox.final.named_scores": "Each named score the scorer returned, measured afresh on the starting version and the best version after the search, with the scorer's feedback",
-  "tooltip.blackbox.final.cases": "The starting version and the best version, scored afresh on each case after the search"
+  "tooltip.blackbox.final.cases": "The starting version and the best version, scored afresh on each case after the search",
+  "optimizations.logs.live": "Live",
+  "optimizations.logs.reconnecting": "Reconnecting",
+  "optimizations.logs.new_lines": "{count} new lines",
+  "optimizations.logs.jump_latest": "Jump to latest",
+  "optimizations.logs.col.source": "Source",
+  "optimizations.logs.col.candidate": "Candidate",
+  "optimizations.logs.col.case": "Case",
+  "optimizations.logs.source.host": "Host",
+  "optimizations.logs.source.engine": "Engine",
+  "optimizations.logs.source.proposer": "Proposer",
+  "optimizations.logs.source.scorer": "Scorer",
+  "optimizations.logs.source.sandbox": "Sandbox",
+  "optimizations.logs.fields.show": "Show event details",
+  "optimizations.logs.fields.hide": "Hide event details",
+  "optimizations.logs.quota_full_toast": "Your storage is full, so this run's log stopped saving. The run keeps going. Free up space to save new log lines.",
+  "storage.quota.full_warning": "Storage is full. Run logs stop saving until you free up space.",
+  "tutorial.concepts.scorer_log": "To see what your scorer is doing while a run is going, call from skynet import log, then log(\"judge.retry\", attempt=2, reason=\"rate limited\"). Each event shows in the run's Logs tab the moment it happens, tagged with the candidate and case being scored. Pass message= for the line to show and level= for DEBUG, INFO, WARNING or ERROR. Fields can be any size. Plain print output stays hidden."
 }
