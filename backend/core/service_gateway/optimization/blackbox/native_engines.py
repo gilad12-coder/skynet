@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -938,6 +939,10 @@ class AutoResearchEngine:
         def evaluate(candidate: str, example: Any = None, **kwargs: Any) -> Any:
             """Score through the server, then log the whole-candidate answer."""
             score, info = original_single(candidate, example, **kwargs)
+            # Upstream checkpoints only dataset sweeps; without one the run
+            # view would never see a version, so each answer is its checkpoint.
+            if math.isfinite(float(score)):
+                server.log_progress(float(score), candidate=candidate)
             named, named_feedback = named_score_columns([info])
             # Without examples the named scores are the Pareto axes; the score
             # alone is one when the scorer names none.

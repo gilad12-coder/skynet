@@ -270,6 +270,32 @@ def test_autoresearch_single_round_when_multi_round_is_off(tmp_path: Path, fake_
     assert (result.best_candidate, result.metadata["rounds"], result.total_evals) == ("seed", 1, 2)
 
 
+def test_autoresearch_checkpoints_every_single_task_answer(tmp_path: Path) -> None:
+    """Without cases each scored version becomes a checkpoint, so the run view can chart it."""
+    task = Task(name="single", seed_candidate="seed", objective="be better")
+    single = EvalServer(
+        task, lambda candidate, example=None: (len(candidate) / 10, {"feedback": "ok"}), BudgetTracker(max_evals=5)
+    )
+    config = _config("autoresearch")
+    config.run_dir = str(tmp_path / "run")
+    engine = native_engines.AutoResearchEngine(config)
+    engine.example_ids = []
+    single.start()
+    try:
+        engine._layout(task, single)
+        restore = engine._record(single)
+        single.evaluate("seed")
+        single.evaluate("better")
+        restore()
+    finally:
+        single.stop()
+    ids = single._candidate_registry
+    assert [(e["candidate_id"], e["val_score"]) for e in single.progress_log] == [
+        (ids["seed"], 0.4),
+        (ids["better"], 0.6),
+    ]
+
+
 def test_autoresearch_without_any_evaluation_fails_instead_of_guessing(
     tmp_path: Path, fake_home: Path, server: EvalServer
 ) -> None:

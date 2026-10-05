@@ -39,7 +39,6 @@ import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import type { ScorePoint } from "../lib/extract-scores";
 import { InfoCard } from "./ui-primitives";
-import { BlackboxFinalScores } from "./BlackboxFinalScores";
 import { PipelineStages, computeStageTimestamps } from "./PipelineStages";
 import { MetaHarnessPanel, TrajectoryPanel, climbEngineOf } from "@/features/trajectory";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -503,8 +502,6 @@ function OverviewTabImpl({
           </StaggerContainer>
         </div>
       )}
-
-      {renderRunBlocks && bbResult && <BlackboxFinalScores result={bbResult} />}
 
       {renderRunBlocks && loggedMetricNames.length > 0 && (
         <FadeIn delay={0.1}>
