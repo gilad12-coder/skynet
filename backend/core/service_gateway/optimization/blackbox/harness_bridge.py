@@ -422,6 +422,7 @@ def run_session(
             [shell, "-c", proposer["run_command"].replace(KEY_TOKEN, api_key)],
             cwd=workspace,
             env=env,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=stderr,
             text=True,
@@ -502,6 +503,54 @@ def record_transcript(session_id: str, workspace: Path, model: str, usage: Usage
         handle.write(json.dumps(entry) + "\n")
 
 
+def _event_error(event: dict[str, Any]) -> str | None:
+    """Return the message of a harness event that reports an error, if it is one.
+
+    Args:
+        event: One parsed JSON event from the harness stdout.
+
+    Returns:
+        The error message, or ``None`` for ordinary events.
+    """
+    kind = str(event.get("type", "")).lower()
+    if "error" not in kind and "fail" not in kind and not event.get("is_error"):
+        return None
+    error = event.get("error")
+    message = (
+        event.get("message") or (error.get("message") if isinstance(error, dict) else error) or event.get("result")
+    )
+    return str(message or json.dumps(event))[:500]
+
+
+def failure_detail(outcome: SessionOutcome, limit: int = 2000) -> str:
+    """Summarize why a harness session failed, from both of its output streams.
+
+    JSON harnesses such as Codex report the real error as an event on stdout and
+    only a banner on stderr, so stderr alone would hide the cause.
+
+    Args:
+        outcome: Parsed session outcome.
+        limit: Maximum length of the summary.
+
+    Returns:
+        The stderr tail followed by any error events or plain lines from stdout.
+    """
+    parts = []
+    stderr = outcome.stderr.strip()
+    if stderr:
+        parts.append(stderr[-limit:])
+    errors: list[str] = []
+    for event in _json_lines(outcome.stdout):
+        message = _event_error(event)
+        if message and (not errors or errors[-1] != message):
+            errors.append(message)
+    plain = [line for line in outcome.stdout.splitlines() if line.strip() and not line.lstrip().startswith("{")]
+    stdout_lines = errors[-10:] or plain[-20:]
+    if stdout_lines:
+        parts.append("stdout: " + "\n".join(stdout_lines))
+    return "\n".join(parts)[-limit:]
+
+
 def result_document(session_id: str, model: str, outcome: SessionOutcome) -> dict[str, Any]:
     """Shape a session outcome like ``claude --print --output-format json``.
 
@@ -516,7 +565,7 @@ def result_document(session_id: str, model: str, outcome: SessionOutcome) -> dic
     is_error = outcome.returncode != 0 or outcome.timed_out or outcome.text is None
     input_tokens = outcome.usage.get("input_tokens", 0)
     output_tokens = outcome.usage.get("output_tokens", 0)
-    detail = (outcome.stderr or outcome.stdout).strip()[-2000:]
+    detail = failure_detail(outcome)
     return {
         "type": "result",
         "subtype": "success" if not is_error else "error_during_execution",
