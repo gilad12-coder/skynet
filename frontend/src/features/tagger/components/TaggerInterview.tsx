@@ -36,6 +36,7 @@ import {
   QuestionChoices,
   QuestionChoicesSkeleton,
 } from "@/shared/ui/agent";
+import { useSteerQueue } from "@/shared/ui/agent/use-steer-queue";
 import type { AgentMessage, AgentThinking } from "@/shared/ui/agent";
 import type { InterviewOption } from "@/shared/lib/api";
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
@@ -168,6 +169,14 @@ export function TaggerInterview({
     onSend(content);
   };
 
+  // Answers typed while the interviewer is replying wait for it to finish.
+  const { midTurn } = useSteerQueue({
+    busy,
+    send: (text) => {
+      if (!done) onSend(text);
+    },
+  });
+
   return (
     // Height subtracts page padding plus the ~2.5rem back-to-sessions bar
     // rendered above, so the thread stays viewport-locked without page scroll.
@@ -256,6 +265,7 @@ export function TaggerInterview({
             onStop={onStop}
             disabled={!busy && messages.length === 0}
             streaming={busy}
+            midTurn={midTurn}
             placeholder={msg("tagger.assist.interview.placeholder")}
             modelMenu={
               <ComposerModelMenu

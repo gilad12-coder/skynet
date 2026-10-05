@@ -14,6 +14,7 @@ import {
   QuestionChoices,
   QuestionChoicesSkeleton,
 } from "@/shared/ui/agent";
+import { useSteerQueue } from "@/shared/ui/agent/use-steer-queue";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import type { CodeInterviewState } from "@/shared/hooks/use-code-interview";
@@ -57,6 +58,14 @@ export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
     setDraft("");
     interview.send(content);
   };
+
+  // Answers typed while the interviewer is replying wait for it to finish.
+  const { midTurn } = useSteerQueue({
+    busy: interview.busy,
+    send: (text) => {
+      if (!interview.done) interview.send(text);
+    },
+  });
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}>
@@ -139,6 +148,7 @@ export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
             onStop={interview.stop}
             disabled={!interview.busy && interview.messages.length === 0}
             streaming={interview.busy}
+            midTurn={midTurn}
             placeholder={msg("submit.code.interview.placeholder")}
             modelMenu={
               <ComposerModelMenu

@@ -11,6 +11,8 @@ import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { cn } from "@/shared/lib/utils";
 
 import { autoResizeTextarea } from "./auto-resize";
+import { PendingMessages } from "./pending-messages";
+import { appendToDraft, midTurnKeyAction, type MidTurnQueue } from "./steer-queue";
 import { formatRecSeconds, useDictation } from "./use-dictation";
 
 interface ComposerProps {
@@ -32,6 +34,10 @@ interface ComposerProps {
    *  into a single row. */
   layout?: "stacked" | "inline";
   className?: string;
+  /** Opts the chat into mid-turn input: typing and dictating stay open while
+   *  a turn streams, Enter steers (or queues) and Tab queues. Without it the
+   *  composer locks while streaming. */
+  midTurn?: MidTurnQueue;
 }
 
 /**
@@ -57,6 +63,7 @@ export function Composer({
   leadingControls,
   layout = "stacked",
   className,
+  midTurn,
 }: ComposerProps) {
   const inline = layout === "inline";
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
@@ -87,16 +94,73 @@ export function Composer({
   // A recording in flight keeps its controls even if the pref flips off in
   // the settings modal mid-take.
   const showMic = prefs.dictationEnabled || dictating;
+  // Without a mid-turn handler a streaming turn locks the input as before.
+  const locked = Boolean(streaming && !midTurn);
+  const hasDraft = value.trim().length > 0;
+
+  const resetHeight = () => {
+    if (textareaRef.current) textareaRef.current.style.height = inline ? "36px" : "42px";
+  };
+
+  const refocus = () =>
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        autoResizeTextarea(el);
+      }
+    });
+
+  const sendMidTurn = (mode: "steer" | "queue") => {
+    if (!midTurn || disabled || dictating || !hasDraft) return;
+    if (mode === "steer") midTurn.steer(value);
+    else midTurn.queue(value);
+    onChange("");
+    resetHeight();
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (disabled || streaming || dictating || !value.trim()) return;
+    if (streaming) {
+      sendMidTurn(midTurn?.canSteer ? "steer" : "queue");
+      return;
+    }
+    if (disabled || dictating || !hasDraft) return;
     onSubmit();
-    if (textareaRef.current) textareaRef.current.style.height = inline ? "36px" : "42px";
+    resetHeight();
+  };
+
+  const editPending = (id: string) => {
+    const text = midTurn?.edit(id);
+    if (text == null) return;
+    onChange(appendToDraft(value, text));
+    refocus();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (midTurn && !disabled) {
+      const action = midTurnKeyAction(e, {
+        streaming: Boolean(streaming),
+        draft: value,
+        canSteer: midTurn.canSteer,
+        queuedCount: midTurn.queued.length,
+      });
+      if (action === "recall") {
+        const text = midTurn.recallLast();
+        if (text !== null) {
+          e.preventDefault();
+          onChange(text);
+          refocus();
+        }
+        return;
+      }
+      if (action) {
+        e.preventDefault();
+        sendMidTurn(action);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
@@ -108,6 +172,16 @@ export function Composer({
       onSubmit={handleSubmit}
       className={cn("border-t border-border/40 px-3 py-3 shrink-0", className)}
     >
+      {midTurn && (
+        <PendingMessages
+          queued={midTurn.queued}
+          steering={midTurn.steering}
+          canPromote={midTurn.canSteer}
+          onPromote={midTurn.promote}
+          onEdit={editPending}
+          onRemove={midTurn.remove}
+        />
+      )}
       <div
         className={cn(
           "rounded-2xl border border-[#DDD4C8] bg-muted/20 transition-colors",
@@ -124,7 +198,7 @@ export function Composer({
               autoResizeTextarea(e.target);
             }}
             onKeyDown={handleKeyDown}
-            disabled={disabled || streaming}
+            disabled={disabled || locked}
             rows={1}
             placeholder={placeholder}
             className={cn(
@@ -218,7 +292,7 @@ export function Composer({
                     size="icon"
                     variant="ghost"
                     onClick={() => void dictation.start()}
-                    disabled={disabled || streaming || dictation.state.kind === "busy"}
+                    disabled={disabled || locked || dictation.state.kind === "busy"}
                     className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
                     aria-label={msg("agent.composer.record")}
                   >
@@ -226,24 +300,12 @@ export function Composer({
                   </Button>
                 </TooltipButton>
               ))}
-            {streaming && onStop ? (
-              <TooltipButton tooltip={stopAriaLabel} side="top">
-                <Button
-                  type="button"
-                  size="icon"
-                  onClick={onStop}
-                  className="shrink-0 rounded-full"
-                  aria-label={stopAriaLabel}
-                >
-                  <Square className="size-3 fill-current" />
-                </Button>
-              </TooltipButton>
-            ) : (
+            {(!streaming || !onStop || (midTurn && hasDraft)) && (
               <Button
                 type="submit"
                 size="icon"
                 className="shrink-0 rounded-full"
-                disabled={disabled || dictating || !value.trim()}
+                disabled={disabled || dictating || !hasDraft}
                 aria-label={sendAriaLabel}
               >
                 <svg viewBox="0 0 24 24" fill="none" className="size-4">
@@ -257,9 +319,27 @@ export function Composer({
                 </svg>
               </Button>
             )}
+            {streaming && onStop && (
+              <TooltipButton tooltip={stopAriaLabel} side="top">
+                <Button
+                  type="button"
+                  size="icon"
+                  onClick={onStop}
+                  className="shrink-0 rounded-full"
+                  aria-label={stopAriaLabel}
+                >
+                  <Square className="size-3 fill-current" />
+                </Button>
+              </TooltipButton>
+            )}
           </div>
         </div>
       </div>
+      {midTurn && streaming && hasDraft && (
+        <p className="mt-1 px-1 text-[11px] text-muted-foreground" aria-live="polite">
+          {msg(midTurn.canSteer ? "agent.composer.hint_steer" : "agent.composer.hint_queue")}
+        </p>
+      )}
     </form>
   );
 }

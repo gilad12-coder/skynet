@@ -3061,6 +3061,9 @@ export interface CodeAgentRequest {
   // Black-box only: the agent opens the conversation itself; the server
   // supplies the hidden opening message in place of `user_message`.
   kickoff?: boolean;
+  // Client-generated id of this turn; messages posted to /agent-steer with
+  // it are delivered into the running turn.
+  steer_key?: string;
 }
 
 export type CodeAgentToolName =
@@ -3127,6 +3130,8 @@ export interface CodeAgentHandlers {
   onAsk?: (ask: AgentQuestion) => void;
   // Black-box chat: objective / background text the agent wrote from the conversation.
   onBrief?: (fields: { objective?: string; background?: string }) => void;
+  // The agent read these steered messages at a step boundary; `text` joins them.
+  onSteerApplied?: (ev: { ids: string[]; text: string }) => void;
   onDone: (result: {
     signature_code: string;
     metric_code: string;
@@ -3223,6 +3228,8 @@ export async function streamCodeAgent(
         ...(typeof data.objective === "string" ? { objective: data.objective } : {}),
         ...(typeof data.background === "string" ? { background: data.background } : {}),
       });
+    } else if (event === "steer_applied") {
+      handlers.onSteerApplied?.(parseSteerApplied(data));
     } else if (event === "done") {
       const rawModel = data.model;
       const rawServedModel = data.served_model;
@@ -3279,6 +3286,33 @@ export async function streamCodeAgent(
     const err = result.error;
     handlers.onError(err instanceof Error ? err.message : msg("auto.shared.lib.api.literal.10"));
   }
+}
+
+/** Deliver a message into the running turn opened with `steerKey`; resolves
+ *  the message's id, which a later `steer_applied` event or withdraw names. */
+export async function postAgentSteer(steerKey: string, text: string): Promise<string> {
+  const res = await request<{ id: string }>("/optimizations/agent-steer", {
+    method: "POST",
+    body: JSON.stringify({ steer_key: steerKey, text }),
+  });
+  return String(res.id);
+}
+
+/** Read a `steer_applied` event's payload. */
+export function parseSteerApplied(data: Record<string, unknown>): { ids: string[]; text: string } {
+  return {
+    ids: Array.isArray(data.ids) ? data.ids.map(String) : [],
+    text: String(data.text ?? ""),
+  };
+}
+
+/** Take back every message the turn opened with `steerKey` never read. */
+export async function withdrawAgentSteers(steerKey: string): Promise<string[]> {
+  const res = await request<{ ids: string[] }>("/optimizations/agent-steer/withdraw", {
+    method: "POST",
+    body: JSON.stringify({ steer_key: steerKey }),
+  });
+  return Array.isArray(res.ids) ? res.ids.map(String) : [];
 }
 
 export interface CodeInterviewRequest {

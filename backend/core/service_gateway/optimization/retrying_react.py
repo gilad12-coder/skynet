@@ -34,6 +34,7 @@ import logging
 import dspy
 from dspy.utils.exceptions import AdapterParseError
 
+from ..agents.steering import deliver_steering
 from ..stable_roster_adapter import StableRosterChatAdapter
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,7 @@ class RetryingPredict(dspy.Predict):
             AdapterParseError: When every attempt fails to parse.
             ValueError: When every attempt raises a value error from the adapter.
         """
+        deliver_steering(self, kwargs)
         if dspy.settings.adapter is None:
             with dspy.context(adapter=_STABLE_ROSTER_ADAPTER):
                 return self._forward_with_retries(**kwargs)

@@ -1,0 +1,57 @@
+"use client";
+
+import * as React from "react";
+
+import { postAgentSteer, withdrawAgentSteers } from "@/shared/lib/api";
+
+import { midTurnOf, SteerQueue, type MidTurnQueue, type SteerChannel } from "./steer-queue";
+
+export interface UseSteerQueueArgs {
+  /** A turn is running in this chat. */
+  busy: boolean;
+  /** Start a new turn with `text`; called for each queued follow-up in turn. */
+  send: (text: string) => void;
+}
+
+export interface SteerQueueHandle {
+  /** The store, for the chat's turn machinery (`openTurn`, `applied`). */
+  store: SteerQueue;
+  /** The surface the composer renders and drives. */
+  midTurn: MidTurnQueue;
+}
+
+/** A fresh per-turn key for the backend's steer mailbox. */
+export function newSteerKey(): string {
+  return crypto.randomUUID();
+}
+
+/** The backend steer mailbox of the turn started with `steerKey`. */
+export function agentSteerChannel(steerKey: string): SteerChannel {
+  return {
+    post: (text) => postAgentSteer(steerKey, text),
+    withdraw: () => withdrawAgentSteers(steerKey),
+  };
+}
+
+/**
+ * One chat's mid-turn input: queued follow-ups (sent one at a time once the
+ * chat is idle) and, for a chat whose turns call `store.openTurn`, steers
+ * delivered into the running turn. A chat that never opens a steerable turn
+ * gets a plain queue.
+ *
+ * `busy` is applied after the render commits, so a queued follow-up is sent
+ * against the finished turn's committed history.
+ */
+export function useSteerQueue({ busy, send }: UseSteerQueueArgs): SteerQueueHandle {
+  const [store] = React.useState(() => new SteerQueue(send));
+  // Before the busy effect below, so a follow-up runs through the latest send.
+  React.useEffect(() => {
+    store.setSend(send);
+  }, [store, send]);
+  React.useEffect(() => {
+    store.setBusy(busy);
+  }, [store, busy]);
+  const snapshot = React.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  const midTurn = React.useMemo(() => midTurnOf(() => store, snapshot), [store, snapshot]);
+  return { store, midTurn };
+}

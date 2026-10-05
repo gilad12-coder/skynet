@@ -67,6 +67,7 @@ from .code import ReactReplyStream, _agent_error_payload, _format_agent_error, _
 from .conduct import with_conduct
 from .constants import REASONING_FIELD
 from .conversation_react import AppendOnlyChatAdapter, ConversationReAct, history_from_turns
+from .steering import SteerInbox, attach_steering, get_steer_store
 
 logger = logging.getLogger(__name__)
 
@@ -2087,6 +2088,7 @@ async def _drive_generalist_agent(
     reply_language: str,
     auth_header: str | None = None,
     approval_owner: str | None = None,
+    steer_key: str | None = None,
 ) -> str:
     """Open the MCP session, run the ReAct loop, and return the final assistant message.
 
@@ -2112,6 +2114,8 @@ async def _drive_generalist_agent(
             user that opened the SSE stream.
         approval_owner: Username pending approvals are bound to, so only the
             stream's own caller can resolve them.
+        steer_key: Client-chosen key the user's mid-turn messages are posted
+            under; ``None`` leaves the turn unsteerable.
 
     Returns:
         The full assistant reply text after the loop completes.
@@ -2158,6 +2162,17 @@ async def _drive_generalist_agent(
             }
         )
         react = ConversationReAct(GeneralistSig, tools=dspy_tools, max_iters=12)
+        if steer_key and approval_owner:
+            attach_steering(
+                react,
+                SteerInbox(
+                    owner=approval_owner,
+                    steer_key=steer_key,
+                    input_field="user_message",
+                    emit=emit,
+                    store=get_steer_store(),
+                ),
+            )
         # ``ReactReplyStream`` picks its listener from the adapter active while
         # it is built, and the loop only installs its native-tool-call adapter
         # inside ``forward``; without this it would decode the text protocol.
@@ -2211,6 +2226,7 @@ async def run_generalist_agent(
     locale: str | None = None,
     usage_sink: list | None = None,
     approval_owner: str | None = None,
+    steer_key: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream generalist-agent events for one user turn.
 
@@ -2251,6 +2267,8 @@ async def run_generalist_agent(
             client disconnect where the ``done`` event never fires.
         approval_owner: Username of the authenticated caller. Pending
             approvals are keyed to it so another account cannot resolve them.
+        steer_key: Client-chosen key for messages the user sends while this
+            turn runs; they reach the loop at its next step.
 
     Yields:
         SSE event dicts of shape ``{"event": str, "data": dict}``.
@@ -2297,6 +2315,7 @@ async def run_generalist_agent(
             reply_language=_reply_language(locale),
             auth_header=auth_header,
             approval_owner=approval_owner,
+            steer_key=steer_key,
         )
     )
     try:

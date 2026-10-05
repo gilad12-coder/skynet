@@ -79,6 +79,29 @@ class AgentApprovalModel(Base):
     )
 
 
+class AgentSteerMessageModel(Base):
+    """A message the user sent into an agent turn that was still running.
+
+    The steer POST and the streaming turn can land on different replicas, so
+    the message waits here under the turn's client-chosen ``steer_key``. The
+    running loop takes it at its next step; once the turn ends, the client
+    withdraws whatever the loop never read. Taking sets ``taken_at``, so a
+    message is either read by the agent or withdrawn, never both.
+    """
+
+    __tablename__ = "agent_steer_messages"
+    __table_args__ = (Index("ix_agent_steer_messages_key", "steer_key", "owner"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid4().hex)
+    steer_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    owner: Mapped[str] = mapped_column(String(255), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    taken_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AgentTurnModel(Base):
     """One resumable wizard-agent turn, shared across backend replicas.
 

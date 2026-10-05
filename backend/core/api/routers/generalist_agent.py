@@ -36,6 +36,12 @@ from ...service_gateway.agents.generalist import (
     get_approval_registry,
     run_generalist_agent,
 )
+from ...service_gateway.agents.steering import (
+    STEER_APPLIED_EVENT,
+    STEER_KEY_MAX_CHARS,
+    STEER_TEXT_MAX_CHARS,
+    get_steer_store,
+)
 from ...service_gateway.embedding_pipeline import queue_conversation_embed
 from ...storage.models import AgentConversationModel, AgentMessageModel
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -155,6 +161,15 @@ class GeneralistAgentRequest(BaseModel):
         default=None,
         description=("Explicit reasoning-effort level for the chosen model; absent keeps the model's default."),
     )
+    steer_key: str | None = Field(
+        default=None,
+        max_length=STEER_KEY_MAX_CHARS,
+        description=(
+            "Client-chosen key for this turn. Messages posted to "
+            "``/optimizations/agent-steer`` under it while the turn runs reach "
+            "the agent at its next step, announced by a ``steer_applied`` event."
+        ),
+    )
 
 
 class ConfirmApprovalRequest(BaseModel):
@@ -168,6 +183,31 @@ class ConfirmApprovalResponse(BaseModel):
     """Ack for an approval confirm call."""
 
     resolved: bool
+
+
+class SteerMessageRequest(BaseModel):
+    """A message for an agent turn that is still running."""
+
+    steer_key: str = Field(..., min_length=1, max_length=STEER_KEY_MAX_CHARS, description="The running turn's key.")
+    text: str = Field(..., min_length=1, max_length=STEER_TEXT_MAX_CHARS, description="The message text.")
+
+
+class SteerMessageResponse(BaseModel):
+    """Ack for a steer message."""
+
+    id: str
+
+
+class SteerWithdrawRequest(BaseModel):
+    """Take back the messages a finished turn never read."""
+
+    steer_key: str = Field(..., min_length=1, max_length=STEER_KEY_MAX_CHARS, description="The turn's key.")
+
+
+class SteerWithdrawResponse(BaseModel):
+    """Messages returned to the client, oldest first."""
+
+    ids: list[str]
 
 
 def _derive_title(user_message: str) -> str:
@@ -457,6 +497,14 @@ async def _wrap_with_persistence(
                     tool_schema_hashes = {str(k): str(v) for k, v in raw_hashes.items()}
                 # Internal envelope — never forward to the frontend.
                 continue
+            elif name == STEER_APPLIED_EVENT:
+                # The steered message is a user turn of this conversation; it
+                # goes in now so it sits before the reply written on ``done``.
+                if conversation_id and job_store is not None and isinstance(data.get("text"), str):
+                    try:
+                        await asyncio.to_thread(_persist_user_turn, job_store, conversation_id, data["text"])
+                    except Exception:
+                        logger.exception("Failed to persist a steered user message")
             elif name == "tool_start":
                 tid = str(data.get("id", ""))
                 if tid:
@@ -543,6 +591,7 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
     engine = getattr(job_store, "engine", None) if job_store is not None else None
     if engine is not None:
         get_approval_registry().bind_engine(engine)
+        get_steer_store().bind_engine(engine)
 
     @router.post(
         "/optimizations/generalist-agent",
@@ -620,6 +669,7 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
             locale=req.locale,
             model_config=model_config,
             usage_sink=usage_sink,
+            steer_key=req.steer_key,
         )
         metered = stream_with_llm_metering(
             source,
@@ -674,5 +724,47 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
         if not resolved:
             raise DomainError("agent.approval.unknown_call_id", status=404)
         return ConfirmApprovalResponse(resolved=True)
+
+    @router.post(
+        "/optimizations/agent-steer",
+        response_model=SteerMessageResponse,
+        summary="Send a message into a running agent turn",
+    )
+    def post_steer(req: SteerMessageRequest, current_user: AuthenticatedUserDep) -> SteerMessageResponse:
+        """Store a message for the caller's turn running under ``steer_key``.
+
+        The turn reads it at its next step and announces that with a
+        ``steer_applied`` event. Works for the generalist agent and the code,
+        black-box and workflow assistants.
+
+        Args:
+            req: The turn's key and the message.
+            current_user: The authenticated caller; only their own turns read it.
+
+        Returns:
+            The stored message's id.
+        """
+        return SteerMessageResponse(id=get_steer_store().post(current_user.username, req.steer_key, req.text))
+
+    @router.post(
+        "/optimizations/agent-steer/withdraw",
+        response_model=SteerWithdrawResponse,
+        summary="Take back steer messages a turn never read",
+    )
+    def withdraw_steer(req: SteerWithdrawRequest, current_user: AuthenticatedUserDep) -> SteerWithdrawResponse:
+        """Take back every message the turn under ``steer_key`` has not read.
+
+        Called when the turn ends; each message goes either to the turn or
+        back here, never both.
+
+        Args:
+            req: The turn's key.
+            current_user: The authenticated caller.
+
+        Returns:
+            The ids of the messages returned, oldest first.
+        """
+        taken = get_steer_store().take(current_user.username, req.steer_key)
+        return SteerWithdrawResponse(ids=[message_id for message_id, _ in taken])
 
     return router

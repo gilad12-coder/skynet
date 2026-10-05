@@ -889,6 +889,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
                 onStop={agent.stop}
                 placeholder={msg("auto.features.agent.panel.components.generalistpanel.literal.5")}
                 streaming={activeBusy}
+                midTurn={agent.midTurn}
                 disabled={codeAuthoringActive}
                 modelMenu={
                   <ComposerModelMenu

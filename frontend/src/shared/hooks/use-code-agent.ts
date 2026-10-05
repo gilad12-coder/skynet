@@ -17,6 +17,8 @@ import { TERMS } from "@/shared/lib/terms";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
 import type { TurnStats } from "@/shared/ui/agent/types";
+import type { MidTurnQueue } from "@/shared/ui/agent/steer-queue";
+import { agentSteerChannel, newSteerKey, useSteerQueue } from "@/shared/ui/agent/use-steer-queue";
 
 type AgentStatus = "idle" | "streaming" | "done" | "error";
 type AgentMode = "seed" | "chat";
@@ -159,6 +161,8 @@ export interface CodeAgentState {
   goToSignatureVersion: (index: number) => void;
   goToMetricVersion: (index: number) => void;
   send: (message: string) => void;
+  /** Messages sent while a turn runs: steered into it or queued after it. */
+  midTurn: MidTurnQueue;
   editAndResend: (messageIndex: number, content: string) => void;
   retry: () => void;
   fallbackToManual: () => void;
@@ -302,6 +306,13 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     ((msg: string, hist: AgentMessage[], kickoff?: boolean) => void) | null
   >(null);
   const messagesRef = React.useRef<AgentMessage[]>([]);
+  // `send` is declared after `runAgent`, which needs the queue's store.
+  const sendLatestRef = React.useRef<(text: string) => void>(() => {});
+  const sendQueued = React.useCallback((text: string) => sendLatestRef.current(text), []);
+  const { store: steerStore, midTurn } = useSteerQueue({
+    busy: status === "streaming",
+    send: sendQueued,
+  });
 
   // A picked repository opens the conversation once per repository/branch;
   // picking another one starts over about it, and so does a new chat.
@@ -543,6 +554,13 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
         }
       };
 
+      // Chat turns take messages the user sends while they run.
+      const steerKey = isChat ? newSteerKey() : null;
+      if (steerKey) steerStore.openTurn(agentSteerChannel(steerKey));
+      // Reply text streamed before the latest applied steer, which the
+      // finished turn's whole-reply `assistant_message` would repeat.
+      let replyBeforeSteer: string | null = null;
+
       void streamCodeAgent(
         {
           dataset_columns: parsedDataset?.columns ?? [],
@@ -571,9 +589,30 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
           ...(blackbox ? { blackbox } : {}),
           ...(kickoff ? { kickoff: true } : {}),
+          ...(steerKey ? { steer_key: steerKey } : {}),
         },
         {
           signal: controller.signal,
+          onSteerApplied: ({ ids, text }) => {
+            if (controller.signal.aborted) return;
+            steerStore.applied(ids);
+            if (!text.trim()) return;
+            replyBeforeSteer = replyBufRef.current;
+            // The reply so far stays as its own bubble; the rest of the turn
+            // streams into a new one after the user's message.
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              const kept =
+                last && last.role === "assistant" && !last.content && !last.toolCalls?.length
+                  ? prev.slice(0, -1)
+                  : prev;
+              return [
+                ...kept,
+                { role: "user", content: text },
+                { role: "assistant", content: "", toolCalls: [] },
+              ];
+            });
+          },
           onReasoningPatch: (chunk, source) => {
             if (reasoningBufRef.current === "") {
               setReasoningStartedAt(Date.now());
@@ -798,7 +837,15 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
                 : blackbox
                   ? msg("submit.blackbox.agent.seed_done")
                   : "I wrote a Signature and Metric based on your data.";
-              const finalContent = result.assistant_message || last.content || fallback;
+              let replyTail = result.assistant_message;
+              if (replyBeforeSteer !== null) {
+                replyTail = replyTail.startsWith(replyBeforeSteer)
+                  ? replyTail.slice(replyBeforeSteer.length).trimStart()
+                  : last.content;
+                // Nothing came after the steer: no hollow bubble.
+                if (!replyTail && !last.content && !last.toolCalls?.length) return prev.slice(0, -1);
+              }
+              const finalContent = replyTail || last.content || fallback;
               const next = prev.slice();
               next[next.length - 1] = {
                 ...last,
@@ -917,6 +964,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       pushToolCall,
       finishToolCall,
       attachCodeToLatestRunningToolCall,
+      steerStore,
     ],
   );
 
@@ -933,6 +981,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     },
     [runAgent, messages],
   );
+  React.useEffect(() => {
+    sendLatestRef.current = send;
+  }, [send]);
 
   const editAndResend = React.useCallback(
     (messageIndex: number, content: string) => {
@@ -1012,6 +1063,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     pendingValidationsRef.current = [];
     autoFixAttemptsRef.current = 0;
     autoRanRef.current = false;
+    steerStore.clear();
     if (flashClearRef.current) {
       clearTimeout(flashClearRef.current);
       flashClearRef.current = null;
@@ -1043,7 +1095,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     setSignatureManuallyEdited(false);
     setMetricManuallyEdited(false);
     setSessionKey((k) => k + 1);
-  }, [setSignatureManuallyEdited, setMetricManuallyEdited, rearmKickoff]);
+  }, [setSignatureManuallyEdited, setMetricManuallyEdited, rearmKickoff, steerStore]);
 
   // Swapping the dataset invalidates the entire conversation: messages,
   // version history, and any in-flight stream all refer to schemas that no
@@ -1144,6 +1196,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     goToSignatureVersion,
     goToMetricVersion,
     send,
+    midTurn,
     editAndResend,
     retry,
     fallbackToManual,
