@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
 from pydantic import ValidationError
 
+from ....billing.budgets import BudgetService
 from ....billing.protected_credentials import scrub_execution_credentials
 from ....constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
@@ -119,6 +121,31 @@ async def stream_dashboard_snapshots(
         await asyncio.sleep(DASHBOARD_POLL_SECONDS)
 
 
+def execution_budget_view(job_store: Any, job_data: dict[str, Any]) -> dict[str, Any] | None:
+    """Build the caller-safe execution budget snapshot for one job.
+
+    Reads the live budget when the job has one and the store is database
+    backed, and falls back to the copy frozen into the terminal evidence.
+
+    Args:
+        job_store: Job store, whose ``engine`` backs the budget service.
+        job_data: Job fields holding ``execution_budget_id``, ``username``
+            and ``terminal_evidence``.
+
+    Returns:
+        The budget fields without the owner and account balance, or ``None``
+        when the job has no budget.
+    """
+    execution_budget = (job_data.get("terminal_evidence") or {}).get("execution_budget")
+    if job_data.get("execution_budget_id") is not None and getattr(job_store, "engine", None) is not None:
+        execution_budget = asdict(
+            BudgetService(engine=job_store.engine).get(job_data["execution_budget_id"], job_data["username"])
+        )
+        execution_budget.pop("username", None)
+        execution_budget.pop("account_available_cents", None)
+    return execution_budget
+
+
 async def stream_job_updates(job_store, optimization_id: str) -> AsyncIterator[dict[str, Any]]:
     """Yield live status updates for a single optimization.
 
@@ -148,9 +175,10 @@ async def stream_job_updates(job_store, optimization_id: str) -> AsyncIterator[d
             return
 
         status = raw.get("status", "pending")
-        log_count, progress_count = await asyncio.gather(
+        log_count, progress_count, execution_budget = await asyncio.gather(
             loop.run_in_executor(None, job_store.get_log_count, optimization_id),
             loop.run_in_executor(None, job_store.get_progress_count, optimization_id),
+            loop.run_in_executor(None, execution_budget_view, job_store, raw),
         )
         yield {
             "event": "message",
@@ -163,6 +191,7 @@ async def stream_job_updates(job_store, optimization_id: str) -> AsyncIterator[d
                 "terminal_evidence": raw.get("terminal_evidence"),
                 "stop_reason": raw.get("stop_reason"),
                 "result_availability": raw.get("result_availability"),
+                "execution_budget": execution_budget,
                 "log_count": log_count,
                 "progress_count": progress_count,
             },
