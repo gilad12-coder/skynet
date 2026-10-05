@@ -17,8 +17,6 @@ import {
   isBudgetPause,
   isBudgetStop,
   recoveryDisplayState,
-  recoveryEpisode,
-  type RecoveryDisplayState,
 } from "../lib/run-lifecycle";
 import { Label } from "@/shared/ui/primitives/label";
 
@@ -69,101 +67,38 @@ export function RunLifecycleNotice({
   const projection = budgetPause ? (job.terminal_evidence?.budget_projection ?? null) : null;
   const recovery = job.recovery;
   const recoveryState = recoveryDisplayState(recovery);
-  const episode = recoveryEpisode(job);
   const previous = useRef<{
     runId: string;
     budgetStop: boolean;
     budgetPause: boolean;
-    episode: string | null;
-    recoveryState?: RecoveryDisplayState;
   } | null>(null);
-  const liveToast = useRef<string | null>(null);
   const resultCopy = msg(RESULT_COPY[budgetResultKind(job)]);
   const [requestedLimit, setRequestedLimit] = useState<number | null>(null);
   const [raising, setRaising] = useState(false);
   const limitInputId = useId();
 
+  // Recovery has no toast: the inline notice below already shows it, and a
+  // spinner toast on every interruption was noise.
   useEffect(() => {
     const before = previous.current;
     const sameRun = before?.runId === job.optimization_id;
-    const toastId = episode ? `run-recovery:${episode}` : null;
-    if (budgetStop) {
-      if (liveToast.current) {
-        toast.update(liveToast.current, {
-          render: `${stopTitle}. ${resultCopy}`,
-          type: "info",
-          isLoading: false,
-          autoClose: 6000,
-        });
-        liveToast.current = null;
-      } else if (sameRun && !before.budgetStop) {
-        toast.info(`${stopTitle}. ${resultCopy}`, {
-          toastId: `run-budget:${job.optimization_id}`,
-        });
-      }
-    } else if (budgetPause) {
-      if (liveToast.current) {
-        toast.dismiss(liveToast.current);
-        liveToast.current = null;
-      }
-      if (sameRun && !before.budgetPause) {
-        toast.info(msg("optimization.budget_projected.title"), {
-          toastId: `run-budget-pause:${job.optimization_id}`,
-        });
-      }
-    } else if (recovery && toastId) {
-      const changed =
-        !sameRun || before?.episode !== episode || before?.recoveryState !== recoveryState;
-      const [titleKey, bodyKey] = RECOVERY_COPY[recoveryState];
-      const text = `${msg(titleKey)}. ${msg(bodyKey)}`;
-      if (changed && recoveryState === "recovering") {
-        if (liveToast.current && liveToast.current !== toastId) toast.dismiss(liveToast.current);
-        toast.loading(text, { toastId });
-        liveToast.current = toastId;
-      } else if (changed && liveToast.current === toastId) {
-        toast.update(toastId, {
-          render: text,
-          type: recoveryState === "recovered" ? "success" : "info",
-          isLoading: false,
-          autoClose: 6000,
-        });
-        liveToast.current = null;
-      }
-    } else if (liveToast.current) {
-      toast.dismiss(liveToast.current);
-      liveToast.current = null;
+    if (budgetStop && sameRun && !before.budgetStop) {
+      toast.info(`${stopTitle}. ${resultCopy}`, {
+        toastId: `run-budget:${job.optimization_id}`,
+      });
+    } else if (budgetPause && sameRun && !before.budgetPause) {
+      toast.info(msg("optimization.budget_projected.title"), {
+        toastId: `run-budget-pause:${job.optimization_id}`,
+      });
     }
-    previous.current = {
-      runId: job.optimization_id,
-      budgetStop,
-      budgetPause,
-      episode,
-      recoveryState: recovery ? recoveryState : undefined,
-    };
-  }, [
-    job.optimization_id,
-    budgetStop,
-    budgetPause,
-    episode,
-    recovery,
-    recoveryState,
-    resultCopy,
-    stopTitle,
-  ]);
+    previous.current = { runId: job.optimization_id, budgetStop, budgetPause };
+  }, [job.optimization_id, budgetStop, budgetPause, resultCopy, stopTitle]);
 
-  useEffect(
-    () => () => {
-      if (liveToast.current) toast.dismiss(liveToast.current);
-    },
-    [],
-  );
-
-  // The plain budget recap now lives in its own tab; only actionable lifecycle
-  // states (stop, pause, recovery) keep an inline notice, with their recap.
+  // The budget breakdown lives in the Budget tab; only actionable lifecycle
+  // states (stop, pause, recovery) keep an inline notice.
   if (!budgetStop && !budgetPause && !recovery) return null;
-  // An unavailable recovery attempt has nothing to act on, so its notice — and
-  // the budget recap that rode with it — is dropped; live runs and budget
-  // stops/pauses still surface on their own.
+  // An unavailable recovery attempt has nothing to act on, so its notice is
+  // dropped; live runs and budget stops/pauses still surface on their own.
   if (!budgetStop && !budgetPause && recovery && recoveryState === "unavailable") return null;
   const [titleKey, bodyKey] = recovery ? RECOVERY_COPY[recoveryState] : RECOVERY_COPY.unavailable;
   const budgetHalt = budgetStop || budgetPause;
@@ -300,36 +235,6 @@ export function RunLifecycleNotice({
           )}
         </div>
       </div>
-      {budget && (
-        <div className="space-y-2 border-t border-border/40 pt-3">
-          <dl className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-5">
-            {(
-              [
-                [
-                  "submit.budget.label",
-                  budget.uncapped
-                    ? msg("submit.budget.uncapped_short")
-                    : String(budget.total_cents),
-                ],
-                ["submit.budget.setup_spent", budget.setup_spent_cents],
-                ["submit.budget.run_spent", budget.run_spent_cents],
-                ["submit.budget.reserved", budget.reserved_cents],
-                ["submit.budget.available", budget.available_cents],
-              ] as const
-            ).map(([key, value]) => (
-              <div key={key} className="min-w-0 space-y-1">
-                <dt className="text-muted-foreground">{msg(key)}</dt>
-                <dd className="break-all font-medium tabular-nums" dir="auto">
-                  {key === "submit.budget.label" && budget.uncapped ? value : amount(value)}
-                </dd>
-              </div>
-            ))}
-          </dl>
-          {(settling || (budget.blocked_reason && !budgetHalt)) && (
-            <p className="text-xs text-muted-foreground">{msg("budget.pending")}</p>
-          )}
-        </div>
-      )}
       {canContinue && budget && (
         <form
           className="flex flex-wrap items-end gap-3 border-t border-border/40 pt-3"

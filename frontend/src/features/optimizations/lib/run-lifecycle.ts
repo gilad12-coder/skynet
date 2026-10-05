@@ -27,11 +27,3 @@ export function budgetResultKind(
   if (job.result_availability !== "evaluated") return "none";
   return job.terminal_evidence?.candidate_origin === "seed" ? "seed" : "evaluated";
 }
-
-/** Heartbeats within one recovery attempt share one notification. */
-export function recoveryEpisode(
-  job: Pick<OptimizationSummaryResponse, "optimization_id" | "recovery">,
-): string | null {
-  if (!job.recovery) return null;
-  return `${job.optimization_id}:${job.recovery.execution_generation ?? 0}:${job.recovery.checkpoint_revision ?? ""}`;
-}
