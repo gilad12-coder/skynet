@@ -205,3 +205,55 @@ def test_direct_anthropic_points_claude_at_the_edge_with_only_a_placeholder(
         "ANTHROPIC_API_KEY": "sk-ant-skynet-edge-injected",
         "NODE_EXTRA_CA_CERTS": str(ca),
     }
+
+
+def test_failed_result_names_the_error_event_codex_writes_to_stdout() -> None:
+    """Keep Codex's stdout error events next to its stderr banner, which says nothing on its own."""
+    stdout = "\n".join(
+        [
+            json.dumps({"type": "thread.started", "thread_id": "t1"}),
+            json.dumps({"type": "turn.started"}),
+            json.dumps({"type": "error", "message": "unexpected status 401 Unauthorized"}),
+            json.dumps({"type": "turn.failed", "error": {"message": "stream disconnected before completion"}}),
+        ]
+    )
+    outcome = SessionOutcome(
+        text=None,
+        stdout=stdout,
+        stderr="Reading additional input from stdin...\n",
+        returncode=1,
+        usage={},
+        cost_usd=None,
+        duration_seconds=2.0,
+    )
+    document = result_document("sid", "m1", outcome)
+    assert document["is_error"] is True
+    assert "Reading additional input from stdin..." in document["result"]
+    assert "unexpected status 401 Unauthorized" in document["result"]
+    assert "stream disconnected before completion" in document["result"]
+    assert "thread.started" not in document["result"]
+
+
+def test_failed_result_falls_back_to_plain_stdout_lines() -> None:
+    """Report the tail of non-JSON stdout when the harness wrote no error events."""
+    outcome = SessionOutcome(
+        text=None,
+        stdout="booting\nfatal: config missing\n",
+        stderr="",
+        returncode=2,
+        usage={},
+        cost_usd=None,
+        duration_seconds=0.1,
+    )
+    assert harness_bridge.failure_detail(outcome) == "stdout: booting\nfatal: config missing"
+
+
+def test_harness_gets_an_empty_stdin(tmp_path: Path) -> None:
+    """Give the harness a closed stdin so a CLI that reads it never waits on the bridge's own input."""
+    proposer = {**_PLAIN, "run_command": 'if read -r line; then echo "got:$line"; else echo eof; fi'}
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+    outcome = run_session(
+        proposer, workspace=workspace, prompt="x", model="m1", session_dir=tmp_path / "s", timeout_seconds=10
+    )
+    assert outcome.stdout.strip() == "eof"

@@ -1123,7 +1123,7 @@ class HarnessTransport:
             error_type="HarnessExit" if failed else None,
             usage_incomplete=not outcome.usage,
         )
-        detail = (outcome.stderr or outcome.stdout).strip()[-2000:]
+        detail = harness_bridge.failure_detail(outcome)
         raw = outcome.text if outcome.text is not None else f"Harness exited with {outcome.returncode}: {detail}"
         return TransportOutcome(raw_response=raw, usage=(usage,))
 
