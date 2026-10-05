@@ -31,6 +31,7 @@ from ..constants import TOKEN_SOURCE_BYOK, TOKEN_SOURCE_MANAGED
 from ..models import ModelConfig
 from .agents.code import ReasoningStreamListener, _reply_language
 from .agents.code_interview import INTERVIEW_TURN_ATTEMPTS, normalize_options
+from .agents.conduct import with_conduct
 from .agents.constants import REASONING_FIELD
 from .agents.kickoff import measured_bytes
 from .agents.parse_salvage import salvage_prediction, strip_adapter_debris
@@ -161,7 +162,7 @@ def _build_assist_lm(
 
 
 class InterviewTurnSig(dspy.Signature):
-    """Interview the dataset owner to distill a labeling rubric.
+    __doc__ = with_conduct("""Interview the dataset owner to distill a labeling rubric.
 
     You are a labeling copilot preparing to tag the user's dataset for them.
     The user chose which columns each row's text is built from; the dataset
@@ -194,7 +195,7 @@ class InterviewTurnSig(dspy.Signature):
     is "I'll type it below"; when only escape hatches would fill the list,
     offer fewer options or ask an open question instead. Write ``message``,
     the options and the rubric in ``reply_language``.
-    """
+    """)
 
     task_description: str = dspy.InputField(desc="What is being labeled and the allowed labels.")
     dataset_summary: str = dspy.InputField(

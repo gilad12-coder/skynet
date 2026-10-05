@@ -28,6 +28,7 @@ from ...config import settings
 from ..language_models import served_model_from
 from .answer_options import normalize_options
 from .code import ReasoningStreamListener, _build_agent_lm, _reply_language
+from .conduct import with_conduct
 from .constants import REASONING_FIELD
 from .parse_salvage import salvage_prediction
 
@@ -40,7 +41,7 @@ INTERVIEW_TURN_ATTEMPTS = 2
 
 
 class CodeInterviewTurnSig(dspy.Signature):
-    """Interview the dataset owner to distill a Signature & Metric brief.
+    __doc__ = with_conduct("""Interview the dataset owner to distill a Signature & Metric brief.
 
     You are an authoring copilot about to write a DSPy Signature (the
     input → output contract whose docstring and field descriptions become
@@ -70,7 +71,7 @@ class CodeInterviewTurnSig(dspy.Signature):
     fewer options or ask an open question instead. Write ``message``, the
     options and the brief in ``reply_language``, keeping the product terms
     ``Signature`` and ``Metric`` in English.
-    """
+    """)
 
     dataset_columns: list[str] = dspy.InputField(desc="Every column name in the dataset.")
     column_roles: str = dspy.InputField(
@@ -107,7 +108,7 @@ class CodeInterviewTurnSig(dspy.Signature):
 
 
 class BlackboxInterviewTurnSig(dspy.Signature):
-    """Interview the owner of a black-box optimization job to distill an authoring brief.
+    __doc__ = with_conduct("""Interview the owner of a black-box optimization job to distill an authoring brief.
 
     You are an authoring copilot about to write the starting point and the
     scorer for the user's optimization job. The starting point is what the
@@ -147,7 +148,7 @@ class BlackboxInterviewTurnSig(dspy.Signature):
     hatches would fill the list, offer fewer options or ask an open
     question instead. Write ``message``, the options and the brief in
     ``reply_language``.
-    """
+    """)
 
     objective: str = dspy.InputField(desc="What a better version achieves, in the user's words.")
     background: str = dspy.InputField(desc="Free-form context from the user; may be empty.")
