@@ -11,7 +11,9 @@ export function blackboxBestScore(result: BlackboxRunResult | null | undefined):
 }
 
 /** Feedback text of a side-info mapping, when the scorer gave one. */
-export function sideInfoFeedback(sideInfo: Record<string, unknown> | null | undefined): string | null {
+export function sideInfoFeedback(
+  sideInfo: Record<string, unknown> | null | undefined,
+): string | null {
   const feedback = sideInfo?.feedback;
   return typeof feedback === "string" && feedback.trim() ? feedback : null;
 }
@@ -40,21 +42,6 @@ export function sideInfoNamedScores(
     }
   }
   return named;
-}
-
-/** One named score with the starting version's and the winner's figures side by side. */
-export interface NamedScoreRow {
-  name: string;
-  baseline: BlackboxNamedScore | null;
-  best: BlackboxNamedScore | null;
-}
-
-/** Pair the final run's named scores by name, the winner's order first. */
-export function namedScoreRows(result: BlackboxRunResult | null | undefined): NamedScoreRow[] {
-  const baseline = result?.baseline_named_scores ?? {};
-  const best = result?.best_named_scores ?? {};
-  const names = Array.from(new Set([...Object.keys(best), ...Object.keys(baseline)]));
-  return names.map((name) => ({ name, baseline: baseline[name] ?? null, best: best[name] ?? null }));
 }
 
 /** Whether a scorer error is the backend's refusal of a result without feedback. */
