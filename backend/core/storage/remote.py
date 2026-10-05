@@ -31,6 +31,7 @@ from ..billing.recovery_admission import (
 from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, settings
 from ..constants import (
+    OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_TAGGING,
     PAYLOAD_OVERVIEW_DATASET_ROWS,
     PAYLOAD_OVERVIEW_MODEL_NAME,
@@ -1633,10 +1634,18 @@ class RemoteDBJobStore:
             if automatic and job.stop_reason == "budget_reached":
                 return None
             checkpoints = self._checkpoints.list_for_optimization(optimization_id)
-            if not checkpoints:
-                raise CheckpointCompatibilityError(
-                    "No completed compatible checkpoint is available; automatic fresh restart is disabled."
-                )
+            # An interruption before the first checkpoint (a redeploy minutes into
+            # a run) leaves nothing to resume, so the run starts over under the
+            # same cumulative budget, which caps what both legs spend together.
+            fresh_restart = (
+                automatic
+                and not checkpoints
+                and pair_index_to_resume is None
+                and job.optimization_type != OPTIMIZATION_TYPE_GRID_SEARCH
+                and job.parent_optimization_id is None
+            )
+            if not checkpoints and not fresh_restart:
+                raise CheckpointCompatibilityError("No completed compatible checkpoint is available.")
             if pair_index_to_resume is not None and not any(
                 checkpoint.pair_index == pair_index_to_resume for checkpoint in checkpoints
             ):
@@ -1649,7 +1658,7 @@ class RemoteDBJobStore:
                     job.code_version,
                     sandbox_image=job.sandbox_image,
                 )
-            if job.sandbox_image is None and job.code_version != self._current_code_version:
+            if not fresh_restart and job.sandbox_image is None and job.code_version != self._current_code_version:
                 raise CheckpointCompatibilityError("No compatible worker version is available for this checkpoint.")
             if job.execution_budget_id is None:
                 raise CheckpointCompatibilityError(
@@ -1661,7 +1670,8 @@ class RemoteDBJobStore:
             recovery_plan = None
             checkpoint_revision = None
             headroom_operation_id = None
-            if automatic:
+            manifest: dict[str, Any] = {}
+            if automatic and not fresh_restart:
                 if len(checkpoints) != 1:
                     raise CheckpointCompatibilityError(
                         "Automatic recovery requires one independently bounded GEPA checkpoint per job."
@@ -1798,10 +1808,10 @@ class RemoteDBJobStore:
             job.stop_reason = None
             job.recovery = {
                 "state": "recovering",
-                "phase": "resuming",
+                "phase": "restarting" if fresh_restart else "resuming",
                 "attempt": int(job.attempts or 0) + int(bump_attempts),
-                "checkpoint_iteration": max(cp.iteration for cp in checkpoints),
-                "seed_reevaluation_required": True,
+                "checkpoint_iteration": max((cp.iteration for cp in checkpoints), default=None),
+                "seed_reevaluation_required": not fresh_restart,
                 "execution_generation": int(job.execution_generation or 0),
                 "checkpoint_revision": checkpoint_revision,
                 "headroom_operation_id": headroom_operation_id,
@@ -1813,9 +1823,10 @@ class RemoteDBJobStore:
             current = int(job.attempts or 0)
             next_attempt = current + 1 if bump_attempts else current
             job.attempts = next_attempt  # type: ignore[assignment]
-            if job.sandbox_image is not None:
-                # Workers claim only their own version's jobs; the pinned image
-                # carries the optimizer, so the current workers can supervise it.
+            if job.sandbox_image is not None or fresh_restart:
+                # Workers claim only their own version's jobs; a pinned image carries
+                # the optimizer and a fresh restart has no state from the old version,
+                # so the current workers can run either.
                 job.code_version = self._current_code_version  # type: ignore[assignment]
             job.status = "pending"  # type: ignore[assignment]
             job.claimed_by = None  # type: ignore[assignment]
@@ -1833,7 +1844,7 @@ class RemoteDBJobStore:
                 ) + max(0.0, (leg_end - leg_start).total_seconds())
             job.completed_at = None  # type: ignore[assignment]
             job.started_at = None  # type: ignore[assignment]
-            job.message = "Resuming" if bump_attempts else "Re-running grid pair"  # type: ignore[assignment]
+            job.message = "Restarting" if fresh_restart else "Resuming" if bump_attempts else "Re-running grid pair"  # type: ignore[assignment]
             session.commit()
             return next_attempt
         finally:
