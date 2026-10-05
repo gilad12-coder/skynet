@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Coins } from "@/shared/ui/icons";
+import { Coins, Stack } from "@/shared/ui/icons";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
@@ -307,16 +307,19 @@ export function UsageTab({
         <Summary job={job} usage={usage} running={running} splitCost={splitCost} />
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3 overflow-x-auto no-scrollbar">
-            <Segmented
-              size="sm"
-              label={msg("usage_tab.group.label")}
-              value={activeGrouping}
-              onChange={(next) => {
-                setGrouping(next);
-                writeGrouping(next);
-              }}
-              options={offered.map((g) => ({ value: g, label: msg(GROUPING_LABEL_KEYS[g]) }))}
-            />
+            <div className="inline-flex items-center gap-1.5">
+              <Stack className="size-3 text-foreground/35" aria-hidden="true" />
+              <Segmented
+                size="sm"
+                label={msg("usage_tab.group.label")}
+                value={activeGrouping}
+                onChange={(next) => {
+                  setGrouping(next);
+                  writeGrouping(next);
+                }}
+                options={offered.map((g) => ({ value: g, label: msg(GROUPING_LABEL_KEYS[g]) }))}
+              />
+            </div>
             {running && <LiveMarker status="live" />}
           </div>
           <ExportTableMenu

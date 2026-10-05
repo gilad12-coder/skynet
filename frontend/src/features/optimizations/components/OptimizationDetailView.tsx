@@ -1262,6 +1262,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 {!isPairContext && (
                   <RunCostChip
                     details={job.result?.details ?? job.blackbox_result?.details}
+                    budget={job.execution_budget ?? job.terminal_evidence?.execution_budget}
+                    running={isActive}
                     onOpen={showUsageTab ? () => setDetailTab("usage") : undefined}
                   />
                 )}
