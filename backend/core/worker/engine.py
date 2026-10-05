@@ -22,6 +22,7 @@ import tempfile
 import threading
 import time
 import traceback
+from collections.abc import Iterator
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -944,18 +945,17 @@ class BackgroundWorker:
                     if optimization_type == OPTIMIZATION_TYPE_BLACKBOX and payload_dict.get("max_cost_cents") is None:
                         payload_dict["max_cost_cents"] = budget_gateway.cost_ceiling_cents()
                     if optimization_type == OPTIMIZATION_TYPE_BLACKBOX and is_repo_payload(payload_dict):
-                        self._touch_activity(worker_id)
-                        payload_dict, staged_repository = stage_repository(
-                            payload_dict,
-                            username=execution_payload.username,
-                            binding_id=job_data["execution_budget_id"],
-                            engine=byok_engine,
-                        )
-                        inferred_setup = infer_repo_setup(payload_dict, staged_repository, budget_gateway)
-                        if inferred_setup is not None:
-                            self._record_setup_command(optimization_id, inferred_setup)
-                        bind_repo_scorer(payload_dict, staged_repository, budget_gateway, owner_id=optimization_id)
-                        self._touch_activity(worker_id)
+                        with self._renewing_lease(worker_id):
+                            payload_dict, staged_repository = stage_repository(
+                                payload_dict,
+                                username=execution_payload.username,
+                                binding_id=job_data["execution_budget_id"],
+                                engine=byok_engine,
+                            )
+                            inferred_setup = infer_repo_setup(payload_dict, staged_repository, budget_gateway)
+                            if inferred_setup is not None:
+                                self._record_setup_command(optimization_id, inferred_setup)
+                            bind_repo_scorer(payload_dict, staged_repository, budget_gateway, owner_id=optimization_id)
                 if has_exposed_execution_credentials(
                     payload_dict,
                     allow_parent_model_routes=budget_gateway is not None,
@@ -1130,16 +1130,16 @@ class BackgroundWorker:
                             final_message = f"{final_message}: {first_error}"
 
                 if staged_repository is not None and isinstance(result_dict, dict):
-                    self._touch_activity(worker_id)
-                    publish_improvement(
-                        result_dict,
-                        payload_dict,
-                        staged_repository,
-                        username=execution_payload.username,
-                        engine=byok_engine,
-                        optimization_id=optimization_id,
-                        app_url=settings.app_public_url,
-                    )
+                    with self._renewing_lease(worker_id):
+                        publish_improvement(
+                            result_dict,
+                            payload_dict,
+                            staged_repository,
+                            username=execution_payload.username,
+                            engine=byok_engine,
+                            optimization_id=optimization_id,
+                            app_url=settings.app_public_url,
+                        )
 
                 # A pair child durably records its PairResult (and the grid
                 # envelope) onto the PARENT before its own terminal write, so
@@ -1571,6 +1571,37 @@ class BackgroundWorker:
         if isinstance(stored, dict) and isinstance(stored.get("target"), dict):
             stored["target"]["setup_command"] = command
             self._job_store.update_job(optimization_id, payload=stored)
+
+    @contextlib.contextmanager
+    def _renewing_lease(self, worker_id: int) -> Iterator[None]:
+        """Keep this worker's lease alive through a blocking step in the job thread.
+
+        Repository staging and pull-request publishing run synchronously and can
+        outlast the lease window; without renewal the orphan sweeper fails a run
+        whose worker is still busy with it.
+
+        Args:
+            worker_id: Index of the worker thread that owns the current job.
+
+        Yields:
+            Nothing; the lease is renewed until the block exits.
+        """
+        done = threading.Event()
+
+        def _renew() -> None:
+            """Renew the lease every third of its window until the block exits."""
+            while not done.wait(self._lease_seconds / 3):
+                self._touch_activity(worker_id)
+
+        renewer = threading.Thread(target=_renew, name=f"lease-renew-{worker_id}", daemon=True)
+        self._touch_activity(worker_id)
+        renewer.start()
+        try:
+            yield
+        finally:
+            done.set()
+            renewer.join()
+            self._touch_activity(worker_id)
 
     def _touch_activity(self, worker_id: int) -> None:
         """Record liveness and renew the lease on this worker's current job.

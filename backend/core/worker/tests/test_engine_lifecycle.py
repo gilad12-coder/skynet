@@ -722,3 +722,20 @@ def test_stop_blackbox_sandboxes_swallows_a_failed_sweep(
 
     assert runtime.swept == ["opt-1"]
     assert store.append_log_calls == []
+
+
+def test_renewing_lease_touches_activity_while_a_blocking_step_runs(
+    worker: BackgroundWorker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A step that outlasts the lease window keeps renewing the lease until it exits."""
+    touches: list[int] = []
+    monkeypatch.setattr(worker, "_lease_seconds", 0.06)
+    monkeypatch.setattr(worker, "_touch_activity", touches.append)
+
+    with worker._renewing_lease(1):
+        threading.Event().wait(0.2)
+        renewed_during_step = len(touches)
+
+    assert renewed_during_step >= 3
+    assert len(touches) == renewed_during_step + 1
+    assert set(touches) == {1}
