@@ -385,11 +385,13 @@ def collect_usage(paths: list[Path], model: str) -> dict[str, dict[str, int]]:
         model: Configured model, used when a native record omits its model id.
 
     Returns:
-        Per-model usage from final CLI summaries or deduplicated message ids.
+        Per-model usage from final CLI summaries or deduplicated message ids,
+        with ``calls`` counting one model request per distinct assistant message.
     """
     totals: dict[str, dict[str, int]] = {}
     complete_sessions: set[str] = set()
     summaries: dict[str, dict[str, Any]] = {}
+    summary_turns: dict[str, int] = {}
     messages: dict[tuple[str, str], dict[str, Any]] = {}
     for root in paths:
         if not root.exists():
@@ -404,6 +406,7 @@ def collect_usage(paths: list[Path], model: str) -> dict[str, dict[str, int]]:
             if isinstance(document, dict) and isinstance(document.get("modelUsage"), dict):
                 session = str(document.get("session_id") or path.name)
                 summaries[session] = document["modelUsage"]
+                summary_turns[session] = _number(document.get("num_turns"))
         for path in root.rglob("*.jsonl"):
             if path.is_symlink():
                 continue
@@ -432,8 +435,18 @@ def collect_usage(paths: list[Path], model: str) -> dict[str, dict[str, int]]:
             if isinstance(counts, dict):
                 _add_usage(totals, str(native_model), counts, camel=True)
     for (session, _message_id), message in messages.items():
+        message_model = str(message.get("model") or model)
         if session not in complete_sessions:
-            _add_usage(totals, str(message.get("model") or model), message["usage"], camel=False)
+            _add_usage(totals, message_model, message["usage"], camel=False)
+        current = totals.setdefault(message_model, {**dict.fromkeys(_TOKEN_NAMES, 0), "total_tokens": 0})
+        current["calls"] = current.get("calls", 0) + 1
+    sessions_with_messages = {session for session, _message_id in messages}
+    # A summary without its transcript still reports how many turns it took.
+    for session in complete_sessions - sessions_with_messages:
+        first_model = next((str(name) for name, counts in summaries[session].items() if isinstance(counts, dict)), None)
+        if first_model is not None and summary_turns.get(session):
+            current = totals[first_model]
+            current["calls"] = current.get("calls", 0) + summary_turns[session]
     return totals
 
 
