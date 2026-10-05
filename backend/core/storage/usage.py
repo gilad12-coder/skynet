@@ -126,6 +126,18 @@ def _byte_size(column: object, dialect_name: str):
     return func.coalesce(length_fn(as_text), 0)
 
 
+def _log_entry_bytes(dialect_name: str):
+    """Return a SQL expression for one run-log row's footprint: its message plus event fields.
+
+    Args:
+        dialect_name: ``engine.dialect.name``, see :func:`_byte_size`.
+
+    Returns:
+        A SQLAlchemy expression yielding the row's byte count.
+    """
+    return _byte_size(LogEntryModel.message, dialect_name) + _byte_size(LogEntryModel.fields, dialect_name)
+
+
 def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
     """Sum every byte the user owns across the database into one budget figure.
 
@@ -159,7 +171,7 @@ def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
             select(func.coalesce(func.sum(DatasetModel.byte_size), 0)).where(DatasetModel.owner_username == normalized)
         )
         logs = scalar(
-            select(func.coalesce(func.sum(_byte_size(LogEntryModel.message, dialect)), 0)).where(
+            select(func.coalesce(func.sum(_log_entry_bytes(dialect)), 0)).where(
                 LogEntryModel.optimization_id.in_(user_job_ids)
             )
         )
@@ -371,7 +383,7 @@ def compute_user_storage_category_items(
     with Session(engine) as session:
         if category == "optimizations":
             logs_bytes = (
-                select(func.coalesce(func.sum(_byte_size(LogEntryModel.message, dialect)), 0))
+                select(func.coalesce(func.sum(_log_entry_bytes(dialect)), 0))
                 .where(LogEntryModel.optimization_id == JobModel.optimization_id)
                 .scalar_subquery()
             )
