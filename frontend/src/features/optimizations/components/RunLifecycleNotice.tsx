@@ -16,7 +16,6 @@ import {
   budgetResultKind,
   isBudgetPause,
   isBudgetStop,
-  recoveryDisplayState,
 } from "../lib/run-lifecycle";
 import { Label } from "@/shared/ui/primitives/label";
 
@@ -24,15 +23,6 @@ const RESULT_COPY = {
   evaluated: "optimization.budget_reached.saved",
   seed: "optimization.budget_reached.seed_saved",
   none: "optimization.budget_reached.no_result",
-} as const;
-
-const RECOVERY_COPY = {
-  recovering: ["optimization.recovery.running_title", "optimization.recovery.running_body"],
-  recovered: ["optimization.recovery.recovered_title", "optimization.recovery.recovered_body"],
-  unavailable: [
-    "optimization.recovery.unavailable_title",
-    "optimization.recovery.unavailable_body",
-  ],
 } as const;
 
 // A projection pause suggests the measured projection plus a margin so one
@@ -49,7 +39,7 @@ interface RunLifecycleNoticeProps {
   onBudgetChanged?: () => void;
 }
 
-/** Keep durable stop/recovery evidence visible after its transition toast closes. */
+/** Keep durable budget stop/pause evidence visible after its transition toast closes. */
 export function RunLifecycleNotice({
   job,
   canEdit = false,
@@ -65,8 +55,6 @@ export function RunLifecycleNotice({
     accountEmpty ? "optimization.account_empty.title" : "optimization.budget_reached.title",
   );
   const projection = budgetPause ? (job.terminal_evidence?.budget_projection ?? null) : null;
-  const recovery = job.recovery;
-  const recoveryState = recoveryDisplayState(recovery);
   const previous = useRef<{
     runId: string;
     budgetStop: boolean;
@@ -77,8 +65,6 @@ export function RunLifecycleNotice({
   const [raising, setRaising] = useState(false);
   const limitInputId = useId();
 
-  // Recovery has no toast: the inline notice below already shows it, and a
-  // spinner toast on every interruption was noise.
   useEffect(() => {
     const before = previous.current;
     const sameRun = before?.runId === job.optimization_id;
@@ -94,15 +80,9 @@ export function RunLifecycleNotice({
     previous.current = { runId: job.optimization_id, budgetStop, budgetPause };
   }, [job.optimization_id, budgetStop, budgetPause, resultCopy, stopTitle]);
 
-  // The budget breakdown lives in the Budget tab; only actionable lifecycle
-  // states (stop, pause, recovery) keep an inline notice.
-  if (!budgetStop && !budgetPause && !recovery) return null;
-  // An unavailable recovery attempt has nothing to act on, so its notice is
-  // dropped; live runs and budget stops/pauses still surface on their own.
-  if (!budgetStop && !budgetPause && recovery && recoveryState === "unavailable") return null;
-  const [titleKey, bodyKey] = recovery ? RECOVERY_COPY[recoveryState] : RECOVERY_COPY.unavailable;
-  const budgetHalt = budgetStop || budgetPause;
-  const recovering = !budgetHalt && recoveryState === "recovering";
+  // The budget breakdown lives in the Budget tab, and recovery runs without a
+  // notice; only a budget stop or pause needs one, to raise the limit.
+  if (!budgetStop && !budgetPause) return null;
   const evidence = job.terminal_evidence;
   const scope = evidence?.selection_scope;
   const scopeLabel =
@@ -143,7 +123,7 @@ export function RunLifecycleNotice({
   const requested = Math.max(minimumLimit, requestedLimit ?? suggestedLimit);
   const settling = (budget?.pending_operations ?? 0) > 0;
   const canContinue =
-    budgetHalt && canEdit && job.resumable === true && budget != null && !budget.uncapped;
+    canEdit && job.resumable === true && budget != null && !budget.uncapped;
 
   const handleRaise = async () => {
     if (!budget || raising) return;
@@ -168,41 +148,24 @@ export function RunLifecycleNotice({
       role="status"
     >
       <div className="flex items-start gap-2">
-        {recovering ? (
-          <CircleNotch
-            className="mt-0.5 size-4 shrink-0 animate-spin motion-reduce:animate-none"
-            aria-hidden="true"
-          />
-        ) : (
-          <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        )}
+        <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
         <div className="min-w-0 space-y-1">
           <p className="text-sm font-semibold">
-            {budgetStop
-              ? stopTitle
-              : budgetPause
-                ? msg("optimization.budget_projected.title")
-                : recovery
-                  ? msg(titleKey)
-                  : msg("submit.budget.label")}
+            {budgetStop ? stopTitle : msg("optimization.budget_projected.title")}
           </p>
-          {(budgetHalt || recovery) && (
-            <p className="text-sm text-muted-foreground" dir="auto">
-              {budgetStop
-                ? resultCopy
-                : budgetPause
-                  ? projection
-                    ? formatMsg("optimization.budget_projected.body", {
-                        done: projection.done_calls,
-                        planned: projection.planned_calls,
-                        spent: amount(projection.spent_cents),
-                        projected: amount(projection.projected_cents),
-                        limit: amount(projection.limit_cents),
-                      })
-                    : msg("optimization.budget_reached.raise_hint")
-                  : msg(bodyKey)}
-            </p>
-          )}
+          <p className="text-sm text-muted-foreground" dir="auto">
+            {budgetStop
+              ? resultCopy
+              : projection
+                ? formatMsg("optimization.budget_projected.body", {
+                    done: projection.done_calls,
+                    planned: projection.planned_calls,
+                    spent: amount(projection.spent_cents),
+                    projected: amount(projection.projected_cents),
+                    limit: amount(projection.limit_cents),
+                  })
+                : msg("optimization.budget_reached.raise_hint")}
+          </p>
           {budgetStop && job.result_availability === "evaluated" && scope && scoreLabel && (
             <p className="text-xs text-muted-foreground" dir="auto">
               {formatMsg("optimization.budget_reached.selection_score", {
@@ -226,11 +189,6 @@ export function RunLifecycleNotice({
           {budgetStop && canContinue && (
             <p className="text-xs text-muted-foreground">
               {msg("optimization.budget_reached.raise_hint")}
-            </p>
-          )}
-          {!budgetHalt && recovery?.reason && (
-            <p className="break-words text-xs text-muted-foreground" dir="auto">
-              {recovery.reason}
             </p>
           )}
         </div>
