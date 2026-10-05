@@ -1378,7 +1378,8 @@ table {
 
 /* Gliding columns. A table whose cells opt in with ``collapse`` becomes a
    size container; as it narrows, those columns drop out and their values
-   glide into the row's primary cell through ``TableInline``. Tables with no
+   glide into the row's primary cell through ``TableInline``. The motion
+   itself is a FLIP animation in ``table-glide.ts``. Tables with no
    opted-in cell are never made containers, so shrink-to-fit parents keep
    sizing them by content. */
 [data-slot="table-container"]:has([data-collapse]) {
@@ -1409,22 +1410,6 @@ table {
   }
   [data-slot="table-inline"][data-at="sm"] {
     display: inline-flex;
-  }
-}
-@media (prefers-reduced-motion: no-preference) {
-  [data-slot="table-inline"],
-  [data-collapse] {
-    transition:
-      opacity 220ms cubic-bezier(0.25, 1, 0.5, 1),
-      translate 220ms cubic-bezier(0.25, 1, 0.5, 1),
-      display 220ms allow-discrete;
-  }
-  @starting-style {
-    [data-slot="table-inline"],
-    [data-collapse] {
-      opacity: 0;
-      translate: 0 0.25rem;
-    }
   }
 }
 [data-slot="table-group"][data-state="open"] > tr:not([data-slot="table-group-header"]) {
