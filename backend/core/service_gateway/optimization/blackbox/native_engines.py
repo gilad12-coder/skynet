@@ -63,6 +63,8 @@ BUDGET_EXHAUSTED_MARKER = "BUDGET_EXHAUSTED"
 META_HARNESS_TOOLS = "Read,Glob,Grep,Agent,Write,Edit,Bash"
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,80}$")
 _SESSION_POLL_SECONDS = 0.2
+# The CLI stderr tail carried into a failed run's error and its run log.
+_FAILURE_TAIL_CHARS = 2000
 
 # AutoResearch tuning: frontier and dossier sizes keep STATE.md readable; the
 # stale-round thresholds decide when to change tack and when to stop paying for
@@ -322,6 +324,10 @@ def best_aggregate_candidate(server: EvalServer) -> tuple[str, float] | None:
     return best
 
 
+class ProposerFailedError(RuntimeError):
+    """The proposer CLI failed on its own, so the run cannot continue."""
+
+
 @dataclass
 class ProposerOutcome:
     """One ``claude --print`` invocation's parsed result."""
@@ -332,6 +338,28 @@ class ProposerOutcome:
     text: str
     budget_exhausted: bool
     killed: bool
+    returncode: int | None = None
+    stderr_tail: str = ""
+
+    def raise_if_failed(self, name: str) -> None:
+        """Fail the run when the CLI errored without the engine stopping it or the budget running out.
+
+        Before this, an errored session was treated as a session that found
+        nothing, so a CLI that could not start ended the run as a success built
+        from the seed alone.
+
+        Args:
+            name: Session label used in the message, such as ``round1``.
+
+        Raises:
+            ProposerFailedError: When the session failed on its own.
+        """
+        if not self.is_error or self.killed or self.budget_exhausted:
+            return
+        detail = self.stderr_tail.strip() or self.text.strip() or "no output"
+        raise ProposerFailedError(
+            f"The proposer CLI session {name} failed (exit {self.returncode}): {detail[-_FAILURE_TAIL_CHARS:]}"
+        )
 
 
 def run_proposer(
@@ -425,7 +453,17 @@ def run_proposer(
         text=str(document.get("result") or ""),
         budget_exhausted=BUDGET_EXHAUSTED_MARKER in stdout or BUDGET_EXHAUSTED_MARKER in stderr,
         killed=killed,
+        returncode=process.returncode,
+        stderr_tail=stderr[-_FAILURE_TAIL_CHARS:],
     )
+    if outcome.is_error:
+        # The runner's stderr reaches the job's run log; the CLI's own files die with the sandbox.
+        print(
+            f"[{name}] proposer CLI exited {process.returncode}"
+            f"{' after being stopped' if killed else ''}: {(stderr.strip() or outcome.text.strip())[-_FAILURE_TAIL_CHARS:]}",
+            file=sys.stderr,
+            flush=True,
+        )
     (log_dir / f"{name}_meta.json").write_text(
         json.dumps(
             {
@@ -734,6 +772,7 @@ class AutoResearchEngine:
 
         Raises:
             RuntimeError: When the agent finished without scoring any candidate.
+            ProposerFailedError: When a round's CLI session failed on its own.
         """
         self.example_ids = visible_example_ids(server)
         self._layout(task, server)
@@ -754,6 +793,7 @@ class AutoResearchEngine:
                 outcome = self._session(server, directive, max_budget_usd=remaining)
                 self.cost_usd += outcome.cost_usd
                 self.session_ids.append(outcome.session_id)
+                outcome.raise_if_failed(f"round{self.round}")
                 after = self._leader_score()
                 improved = after is not None and (before is None or after > before)
                 stale = 0 if improved else stale + 1
@@ -1724,6 +1764,9 @@ class MetaHarnessEngine:
             server: Evaluation server that benchmarks candidates.
             iteration: One-based iteration number.
             remaining_cost: Proposer spend still allowed, or ``None``.
+
+        Raises:
+            ProposerFailedError: When the iteration's CLI session failed on its own.
         """
         best = self._best()
         print(
@@ -1748,6 +1791,7 @@ class MetaHarnessEngine:
         propose_seconds = time.monotonic() - started
         self.cost_usd += outcome.cost_usd
         self.session_ids.append(outcome.session_id)
+        outcome.raise_if_failed(f"iter{iteration}")
         candidates = self._read_pending(pending)
         if not candidates:
             print(f"[iter {iteration}] no candidates produced", flush=True)
@@ -2026,6 +2070,7 @@ class GepaRepoEngine:
 
         Raises:
             RuntimeError: When nothing was scored at all.
+            ProposerFailedError: When the proposer CLI failed on its own.
         """
         self.proposer.objective = task.objective
         self.proposer.background = task.background
@@ -2042,7 +2087,10 @@ class GepaRepoEngine:
                 display_progress_bar=False,
             ),
             reflection=ReflectionConfig(reflection_lm=None, custom_candidate_proposer=self.proposer),
-            stop_callbacks=[ScoreThresholdStopper(self.stop_at_score)] if self.stop_at_score is not None else None,
+            stop_callbacks=[
+                lambda _state: self.proposer.failure is not None,
+                *([ScoreThresholdStopper(self.stop_at_score)] if self.stop_at_score is not None else []),
+            ],
             callbacks=[tracker],
         )
 
@@ -2068,6 +2116,8 @@ class GepaRepoEngine:
             gepa_result = optimize_anything(**kwargs)
         except BudgetExhausted:
             gepa_result = None
+        if self.proposer.failure is not None:
+            raise self.proposer.failure
         metadata: dict[str, Any] = {
             "proposals": self.proposer.proposals,
             "proposer_cost_usd": self.proposer.total_cost,
@@ -2148,6 +2198,7 @@ class AgentProposer:
         self.total_cost = 0.0
         self.proposals = 0
         self.session_ids: list[str] = []
+        self.failure: ProposerFailedError | None = None
 
     def __call__(
         self,
@@ -2165,7 +2216,13 @@ class AgentProposer:
         Returns:
             The new version under the same component key; the parent itself when
             the agent's diff is too large to ship.
+
+        Raises:
+            ProposerFailedError: When this or an earlier CLI session failed on its own.
         """
+        # GEPA can ask again within the same iteration before its stop check runs.
+        if self.failure is not None:
+            raise self.failure
         key = components_to_update[0] if components_to_update else next(iter(candidate))
         parent = candidate[key]
         repo_tree.reset_tree(self.checkout)
@@ -2184,6 +2241,13 @@ class AgentProposer:
         )
         self.total_cost += outcome.cost_usd
         self.session_ids.append(outcome.session_id)
+        try:
+            outcome.raise_if_failed(f"proposal{self.proposals}")
+        except ProposerFailedError as error:
+            # GEPA logs a proposer exception and keeps iterating, so the engine
+            # reads this back to stop the run and fail it.
+            self.failure = error
+            raise
         patch = repo_tree.version_patch(self.checkout)
         repo_tree.reset_tree(self.checkout)
         if len(patch.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:

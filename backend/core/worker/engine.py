@@ -104,6 +104,7 @@ from .constants import (
     EVENT_RESULT,
     EVENT_TERMINAL,
 )
+from .log_handler import route_sandbox_logs
 from .memory_guard import memory_usage_fraction
 from .repo_staging import (
     StagedRepository,
@@ -612,7 +613,8 @@ class BackgroundWorker:
                     self._thread_current_job[worker_id] = optimization_id
                 self._touch_activity(worker_id)
                 try:
-                    self._process_job(optimization_id, worker_id)
+                    with route_sandbox_logs(optimization_id, self._job_store):
+                        self._process_job(optimization_id, worker_id)
                 except Exception:  # isolation boundary: one bad job must not kill the worker thread
                     logger.exception("Worker %d failed processing job %s", worker_id, optimization_id)
                 finally:

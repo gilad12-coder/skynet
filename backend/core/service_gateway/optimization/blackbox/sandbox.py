@@ -40,6 +40,7 @@ from ....billing.signals import BudgetReached
 from ....billing.vercel_usage import SANDBOX_NETWORK_BYTES_CAP, VercelUsageReservation
 from ....config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, Settings
 from ....exceptions import ServiceError
+from .sandbox_log import logged_command
 
 # The SDK is a declared dependency, but an air-gap build vendored from an
 # older requirements file must degrade to "agent targets unavailable", not
@@ -293,6 +294,8 @@ class VercelSandboxSession:
         usage: VercelUsageReservation | None = None,
         *,
         lifetime_ms: int | None = None,
+        env: Mapping[str, str] | None = None,
+        owner: str | None = None,
     ) -> None:
         """Wrap an open sandbox.
 
@@ -303,7 +306,11 @@ class VercelSandboxSession:
             usage: Optional pre-dispatch reservation and trusted provider usage collector.
             lifetime_ms: The most the box may live once every slice is funded;
                 only a protected box opened for a shorter first slice passes it.
+            env: The box's environment, kept so its values are redacted from logged output.
+            owner: Job the box belongs to, which its logged output is routed to.
         """
+        self._env = dict(env or {})
+        self.log_owner = owner
         self._box = box
         # The named-sandbox handle silently resumes stopped VMs. An exact session
         # cannot create another billable lifetime behind the admission boundary.
@@ -372,6 +379,7 @@ class VercelSandboxSession:
                 self._session.fs.mkdir(parent, cwd=self._cwd, recursive=True)
             self._session.fs.write_text(path, text, cwd=self._cwd)
 
+    @logged_command
     def run(
         self,
         command: str,
@@ -718,7 +726,13 @@ class VercelSandboxRuntime:
             if usage is not None:
                 usage.confirm_created(box.current_session)
             return VercelSandboxSession(
-                box, api_session, context, usage, lifetime_ms=lifetime_ms if usage is not None else None
+                box,
+                api_session,
+                context,
+                usage,
+                lifetime_ms=lifetime_ms if usage is not None else None,
+                env=spec.env,
+                owner=spec.tags.get(JOB_TAG),
             )
         except BaseException as error:
             if box is not None:
@@ -800,6 +814,7 @@ class LocalSubprocessSession:
         """
         self._dir = Path(tempfile.mkdtemp(prefix="skynet-sandbox-")).resolve()
         self._protected_relay = protected_relay
+        self.log_owner = spec.tags.get(JOB_TAG)
         (self._dir / "tmp").mkdir()
         # Not .resolve(): in a venv that follows the symlink to the base
         # interpreter, putting a python3 without the venv's packages on PATH.
@@ -848,6 +863,7 @@ class LocalSubprocessSession:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
 
+    @logged_command
     def run(
         self,
         command: str,

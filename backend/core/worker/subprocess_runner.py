@@ -28,6 +28,7 @@ from ..service_gateway.language_models import activate_job_lm_budget, activate_j
 from ..service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
 from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY
 from ..service_gateway.optimization.blackbox.sandbox import sandbox_runtime_context
+from ..service_gateway.optimization.blackbox.sandbox_log import stream_logger as sandbox_stream_logger
 from ..service_gateway.optimization.blackbox.service import run_blackbox_optimization
 from ..service_gateway.optimization.budget_stop import BudgetReached
 from ..service_gateway.optimization.llm_error import (
@@ -211,6 +212,7 @@ def run_service_in_subprocess(
     forwarded_loggers = (
         logging.getLogger("dspy"),
         logging.getLogger("core.service_gateway.optimization"),
+        sandbox_stream_logger,
     )
     saved_levels = [lg.level for lg in forwarded_loggers]
     for lg in forwarded_loggers:

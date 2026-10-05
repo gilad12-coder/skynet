@@ -235,7 +235,7 @@ def _owner_can_fund_summary(engine: Any, owner: str | None) -> bool:
     if engine is None or not owner:
         return False
     try:
-        return StripeBillingService(engine).spendable_cents(owner) > 0
+        return StripeBillingService(engine=engine).spendable_cents(owner) > 0
     except Exception as exc:
         logger.warning("Summary balance check failed for %s: %s", owner, exc)
         return False
