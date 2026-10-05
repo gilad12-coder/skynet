@@ -4,7 +4,7 @@ import { ProgressBar } from "@/shared/ui/progress-bar";
 import { PingDot } from "@/shared/ui/ping-dot";
 import { memo, useMemo, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { ChatText, Coins, Gauge, Hourglass, Timer, TrendUp } from "@/shared/ui/icons";
+import { ChatText, Gauge, Hourglass, Timer, TrendUp } from "@/shared/ui/icons";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import {
   Table,
@@ -43,7 +43,6 @@ import { BlackboxFinalScores } from "./BlackboxFinalScores";
 import { PipelineStages, computeStageTimestamps } from "./PipelineStages";
 import { MetaHarnessPanel, TrajectoryPanel, climbEngineOf } from "@/features/trajectory";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { buildBlackboxTrajectoryContext } from "../lib/blackbox-trajectory";
 import { describeBlackboxArtifact } from "../lib/blackbox-artifact";
 
@@ -210,7 +209,6 @@ function OverviewTabImpl({
   // Black-box runs persist their scores on `blackbox_result` (raw scorer
   // values, not percentages) — `job.result` stays null for them.
   const bbResult = isBlackbox ? job.blackbox_result : null;
-  const numberFormat = new Intl.NumberFormat(getActiveIntlLocale());
   const baseline =
     runResult?.baseline_test_metric ?? blackboxBaselineScore(bbResult) ?? baselineFromEvents;
   const optimized =
@@ -398,7 +396,7 @@ function OverviewTabImpl({
 
       {bbResult && (
         <FadeIn delay={0.1}>
-          <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2.5">
             <InfoCard
               label={
                 <HelpTip text={tip("blackbox.stats.scorer_runs")}>
@@ -417,26 +415,6 @@ function OverviewTabImpl({
               value={formatDuration(bbResult.runtime_seconds)}
               icon={<Timer className="size-3.5" />}
             />
-            <InfoCard
-              label={
-                <HelpTip text={tip("blackbox.stats.lm_calls")}>
-                  {msg("optimization.blackbox.stats.lm_calls")}
-                </HelpTip>
-              }
-              value={String(bbResult.num_lm_calls)}
-              icon={<ChatText className="size-3.5" />}
-            />
-            {bbResult.total_tokens != null && (
-              <InfoCard
-                label={
-                  <HelpTip text={tip("blackbox.stats.tokens")}>
-                    {msg("optimization.blackbox.stats.tokens")}
-                  </HelpTip>
-                }
-                value={numberFormat.format(bbResult.total_tokens)}
-                icon={<Coins className="size-3.5" />}
-              />
-            )}
           </div>
         </FadeIn>
       )}
