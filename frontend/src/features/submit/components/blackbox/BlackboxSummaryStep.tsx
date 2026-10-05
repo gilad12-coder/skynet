@@ -73,24 +73,26 @@ function Row({
 }
 
 const COLLAPSED_NOTE_LINES = 4;
-// text-sm line-height (1.25rem) x four lines; the exact value is measured below.
-const DEFAULT_COLLAPSED_NOTE_HEIGHT = 80;
+// text-sm line-height (1.25rem); the exact value is measured below.
+const DEFAULT_NOTE_LINE_HEIGHT = 20;
 
 // The clamp height must be measured before paint so the note renders already
 // collapsed with no full-height flash; useLayoutEffect warns during SSR, so
 // fall back to useEffect off the client.
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-/** A long-form field: a label above its wrapped text, expandable when it overflows four lines. */
+/** A long-form field: a label above its wrapped text, expandable when it overflows `collapsedLines`. */
 function Note({
   icon,
   label,
   tipText,
+  collapsedLines = COLLAPSED_NOTE_LINES,
   children,
 }: {
   icon: ReactNode;
   label: ReactNode;
   tipText: string;
+  collapsedLines?: number;
   children: ReactNode;
 }) {
   const bodyRef = useRef<HTMLParagraphElement>(null);
@@ -99,7 +101,7 @@ function Note({
   const [interacted, setInteracted] = useState(false);
   // Start collapsed so long text never flashes full before measurement lands.
   const [overflows, setOverflows] = useState(true);
-  const [collapsedHeight, setCollapsedHeight] = useState(DEFAULT_COLLAPSED_NOTE_HEIGHT);
+  const [collapsedHeight, setCollapsedHeight] = useState(DEFAULT_NOTE_LINE_HEIGHT * collapsedLines);
   const [fullHeight, setFullHeight] = useState<number>();
 
   // Measure both heights in pixels (and keep them fresh on reflow) so the
@@ -112,8 +114,8 @@ function Note({
     const measure = () => {
       const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
       const collapsed = Number.isFinite(lineHeight)
-        ? lineHeight * COLLAPSED_NOTE_LINES
-        : DEFAULT_COLLAPSED_NOTE_HEIGHT;
+        ? lineHeight * collapsedLines
+        : DEFAULT_NOTE_LINE_HEIGHT * collapsedLines;
       setCollapsedHeight(collapsed);
       setFullHeight(el.scrollHeight);
       setOverflows(el.scrollHeight > collapsed + 1);
@@ -123,7 +125,7 @@ function Note({
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [children]);
+  }, [children, collapsedLines]);
 
   const clamped = overflows && !expanded;
 
@@ -397,6 +399,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       icon={<FileText className="size-3.5" />}
                       label={msg("submit.blackbox.start.objective_label")}
                       tipText={tip("submit.blackbox.objective")}
+                      collapsedLines={2}
                     >
                       {objective}
                     </Note>
