@@ -5,6 +5,7 @@ Provides RemoteDBJobStore for persisting job state to a PostgreSQL database.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections import defaultdict
@@ -35,6 +36,7 @@ from ..worker.checkpoint_compat import CheckpointCompatibilityError, validate_ch
 from .agent_run_store import PostgresAgentRunStore
 from .base import JobRecord, LogEntryRecord, ProgressEventRecord
 from .checkpoint_store import GepaCheckpoint, PostgresCheckpointBlobStore, PostgresGridPairResultStore
+from .log_quota import LogQuotaGate
 from .migrate import stamp_if_unadopted, upgrade_if_adopted
 from .models import (
     EMBEDDING_DIM,
@@ -395,6 +397,9 @@ class RemoteDBJobStore:
         self._code_version = settings.code_version
         self._progress_event_counters: defaultdict[str, int] = defaultdict(int)
         self._progress_counter_lock = threading.Lock()
+        self._log_quota = LogQuotaGate(
+            lambda username: self.compute_user_storage(username).total, self.get_effective_user_storage_quota
+        )
         # Force every connection's session timezone to UTC so TZ-aware writes
         # into TIMESTAMPTZ columns round-trip without offset rotation, and any
         # naive value that slipped into legacy rows is interpreted as UTC.
@@ -2816,7 +2821,9 @@ class RemoteDBJobStore:
 
         Takes the keys :meth:`append_log` takes as keyword arguments, with
         ``logger`` in place of ``logger_name``. Text bound for a fixed-width
-        column is cut to fit and ends with ``...``.
+        column is cut to fit and ends with ``...``. Once the owner's storage
+        is full the run stores one notice and drops every later entry, see
+        :mod:`core.storage.log_quota`.
 
         Args:
             optimization_id: ID of the job emitting the logs.
@@ -2830,9 +2837,16 @@ class RemoteDBJobStore:
             # An existence probe, not a critical section: appends are independent
             # inserts, so a per-job row lock would only serialize writers and
             # starve the connection pool under concurrent log bursts.
-            exists = session.query(JobModel.optimization_id).filter(JobModel.optimization_id == optimization_id).first()
-            if exists is None:
+            owner = session.query(JobModel.username).filter(JobModel.optimization_id == optimization_id).first()
+            if owner is None:
                 logger.warning("Discarding %d log entries for missing job %s", len(entries), optimization_id)
+                return
+            if owner.username:
+                # Fail open: a usage lookup that errors must not lose the run's
+                # log, and logging the failure here would re-enter this method.
+                with contextlib.suppress(Exception):
+                    entries = self._log_quota.admit(optimization_id, owner.username, entries)
+            if not entries:
                 return
             session.add_all(
                 LogEntryModel(
