@@ -1304,12 +1304,6 @@ export interface GithubRepository {
   pushed_at: string | null;
 }
 
-/** One file or folder of a repository tree. */
-export interface GithubTreeEntry {
-  path: string;
-  type: "file" | "dir";
-}
-
 /**
  * The linked account's repositories, most recently pushed first. A ``search``
  * written as ``owner/name`` also offers that public repository by itself.
@@ -1324,14 +1318,6 @@ export function listGithubBranches(repo: string) {
   const params = new URLSearchParams({ repo });
   return request<{ default_branch: string | null; branches: string[] }>(
     `/connectors/github/branches?${params}`,
-  );
-}
-
-/** Every file and folder of a repository at ``branch`` (empty for the default branch). */
-export function getGithubTree(repo: string, branch: string) {
-  const params = new URLSearchParams({ repo, branch });
-  return request<{ entries: GithubTreeEntry[]; truncated: boolean }>(
-    `/connectors/github/tree?${params}`,
   );
 }
 

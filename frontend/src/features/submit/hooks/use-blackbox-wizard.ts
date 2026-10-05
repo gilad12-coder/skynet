@@ -123,27 +123,8 @@ export interface RepoSecretRow {
 export const REPO_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 export const REPO_SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 
-/** The editable paths as typed, one per line or comma, with "." meaning the whole repository. */
-export function parseEditablePaths(value: string): string[] {
-  return value
-    .split(/[\n,]/)
-    .map((path) =>
-      path
-        .trim()
-        .replace(/^\.\/(?=.)/, "")
-        .replace(/\/+$/, ""),
-    )
-    .filter(Boolean);
-}
-
-/** Why an editable path would be refused, or null when it is fine. */
-function editablePathIssue(path: string): MessageKey | null {
-  if (path.startsWith("/")) return "submit.blackbox.repo.validation.path_absolute";
-  const parts = path.split("/");
-  if (parts.includes("..") || parts.includes(".git"))
-    return "submit.blackbox.repo.validation.path_outside";
-  return null;
-}
+// A repository run always lets the agent edit the whole repository.
+const WHOLE_REPOSITORY = ["."];
 
 // Black-box cases carry no column roles; the agent reads them as raw samples.
 const NO_ROLES: Record<string, string> = {};
@@ -316,7 +297,6 @@ export function useBlackboxWizard(
   const isRepo = recipe === "repo";
   const [repoName, setRepoName] = useState("");
   const [repoBranch, setRepoBranch] = useState("");
-  const [repoPaths, setRepoPaths] = useState(".");
   const [repoSecrets, setRepoSecrets] = useState<RepoSecretRow[]>([]);
 
   const [codeAssistMode, setCodeAssistMode] = useState<"auto" | "manual">(() =>
@@ -656,7 +636,6 @@ export function useBlackboxWizard(
             setRecipeState("repo");
             setRepoName(repo.repository);
             setRepoBranch(repo.branch ?? "");
-            setRepoPaths(repo.editable_paths.join("\n"));
             // Typed values are scrubbed from the stored run; saved ones keep their reference.
             setRepoSecrets(
               (repo.secrets ?? []).map((row) => ({
@@ -918,7 +897,7 @@ export function useBlackboxWizard(
       provider: "github",
       repository: repoName.trim(),
       branch: repoBranch.trim() || null,
-      editable_paths: parseEditablePaths(repoPaths),
+      editable_paths: WHOLE_REPOSITORY,
       secrets: repoSecrets
         .filter((row) => row.name.trim())
         .map((row) =>
@@ -1149,7 +1128,7 @@ export function useBlackboxWizard(
         ? {
             repository: repoName.trim(),
             branch: repoBranch.trim(),
-            editable_paths: parseEditablePaths(repoPaths),
+            editable_paths: WHOLE_REPOSITORY,
           }
         : {}),
     }),
@@ -1163,7 +1142,6 @@ export function useBlackboxWizard(
       isRepo,
       repoName,
       repoBranch,
-      repoPaths,
     ],
   );
 
@@ -1316,10 +1294,6 @@ export function useBlackboxWizard(
         if (isRepo) {
           if (!REPO_NAME_PATTERN.test(repoName.trim()))
             return fail("submit.blackbox.repo.validation.repository", "bb-repo-name");
-          const paths = parseEditablePaths(repoPaths);
-          if (!paths.length) return fail("submit.blackbox.repo.validation.paths", "bb-repo-paths");
-          const pathIssue = paths.map(editablePathIssue).find(Boolean);
-          if (pathIssue) return fail(pathIssue, "bb-repo-paths");
           const named = repoSecrets.filter(
             (row) => row.name.trim() || row.value || row.savedSecretId,
           );
@@ -1659,8 +1633,6 @@ export function useBlackboxWizard(
     setRepoName,
     repoBranch,
     setRepoBranch,
-    repoPaths,
-    setRepoPaths,
     repoSecrets,
     setRepoSecrets,
     step,
