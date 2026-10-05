@@ -8,7 +8,14 @@ import { Gauge, Scroll } from "@/shared/ui/icons";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { Badge } from "@/shared/ui/primitives/badge";
-import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/shared/ui/primitives/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableInline,
+  TableRow,
+} from "@/shared/ui/primitives/table";
 import {
   ColumnHeader,
   useColumnFilters,
@@ -24,6 +31,10 @@ import { formatLogTimestamp, logTimeBucket } from "@/shared/lib";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 type Verbosity = "quiet" | "normal" | "verbose";
+
+function levelBadgeVariant(level: string): "destructive" | "outline" | "secondary" {
+  return level === "ERROR" ? "destructive" : level === "WARNING" ? "outline" : "secondary";
+}
 
 // "verbose" carries no preset — it clears the level filter so every captured
 // level (incl. DEBUG) shows. Quiet/Normal map to explicit level sets that drive
@@ -244,20 +255,26 @@ export function LogsTab({
         <Card>
           <CardContent className="p-0">
             <div className="max-h-[600px] overflow-auto">
-              <Table className="w-full min-w-[720px] table-fixed">
+              <Table className="w-full table-fixed">
                 <colgroup>
                   {showPairCol && (
-                    <col style={{ width: logResize.widths["pair_index"] ?? "12%" }} />
+                    <col
+                      data-collapse="lg"
+                      style={{ width: logResize.widths["pair_index"] ?? "12%" }}
+                    />
                   )}
                   <col
+                    data-collapse="md"
                     style={{
                       width: logResize.widths["timestamp"] ?? (showPairCol ? "13%" : "15%"),
                     }}
                   />
                   <col
+                    data-collapse="sm"
                     style={{ width: logResize.widths["level"] ?? (showPairCol ? "10%" : "12%") }}
                   />
                   <col
+                    data-collapse="lg"
                     style={{ width: logResize.widths["logger"] ?? (showPairCol ? "14%" : "17%") }}
                   />
                   <col />
@@ -279,6 +296,7 @@ export function LogsTab({
                         setOpenFilter={logFilters.setOpenFilter}
                         width={logResize.widths["pair_index"]}
                         onResize={logResize.setColumnWidth}
+                        collapse="lg"
                       />
                     )}
                     <ColumnHeader
@@ -295,6 +313,7 @@ export function LogsTab({
                       setOpenFilter={logFilters.setOpenFilter}
                       width={logResize.widths["timestamp"]}
                       onResize={logResize.setColumnWidth}
+                      collapse="md"
                     />
                     <ColumnHeader
                       label={msg("auto.features.optimizations.components.logstab.literal.4")}
@@ -310,6 +329,7 @@ export function LogsTab({
                       setOpenFilter={logFilters.setOpenFilter}
                       width={logResize.widths["level"]}
                       onResize={logResize.setColumnWidth}
+                      collapse="sm"
                     />
                     <ColumnHeader
                       label={msg("auto.features.optimizations.components.logstab.literal.5")}
@@ -325,6 +345,7 @@ export function LogsTab({
                       setOpenFilter={logFilters.setOpenFilter}
                       width={logResize.widths["logger"]}
                       onResize={logResize.setColumnWidth}
+                      collapse="lg"
                     />
                     <ColumnHeader
                       label={msg("auto.features.optimizations.components.logstab.literal.6")}
@@ -345,7 +366,12 @@ export function LogsTab({
                       onClick={(e) => {
                         const td = (e.target as HTMLElement).closest("td");
                         if (!td) return;
-                        const text = td.textContent?.trim();
+                        // The message cell also holds folded copies of the
+                        // collapsible columns (present in textContent even
+                        // while hidden), so copy just the message there.
+                        const text = (
+                          td.querySelector("[data-log-message]") ?? td
+                        ).textContent?.trim();
                         if (text) {
                           void navigator.clipboard.writeText(text);
                           notifyCopied();
@@ -354,6 +380,7 @@ export function LogsTab({
                     >
                       {showPairCol && (
                         <TableCell
+                          collapse="lg"
                           className="text-xs font-mono truncate overflow-hidden"
                           style={
                             logResize.widths["pair_index"]
@@ -378,6 +405,7 @@ export function LogsTab({
                         </TableCell>
                       )}
                       <TableCell
+                        collapse="md"
                         className="text-xs font-mono text-muted-foreground truncate overflow-hidden"
                         style={
                           logResize.widths["timestamp"]
@@ -392,6 +420,7 @@ export function LogsTab({
                         {formatLogTimestamp(log.timestamp)}
                       </TableCell>
                       <TableCell
+                        collapse="sm"
                         className="truncate overflow-hidden"
                         style={
                           logResize.widths["level"]
@@ -403,19 +432,14 @@ export function LogsTab({
                         }
                       >
                         <Badge
-                          variant={
-                            log.level === "ERROR"
-                              ? "destructive"
-                              : log.level === "WARNING"
-                                ? "outline"
-                                : "secondary"
-                          }
+                          variant={levelBadgeVariant(log.level)}
                           className="text-[0.625rem] font-mono"
                         >
                           {log.level}
                         </Badge>
                       </TableCell>
                       <TableCell
+                        collapse="lg"
                         className="text-xs font-mono text-muted-foreground truncate overflow-hidden"
                         style={
                           logResize.widths["logger"]
@@ -441,7 +465,38 @@ export function LogsTab({
                         }
                         title={clipText(log.message)}
                       >
-                        {log.message}
+                        <div className="flex flex-wrap items-center gap-x-2">
+                          {showPairCol && log.pair_index != null && (
+                            <TableInline at="lg" className="mb-1">
+                              <Badge variant="secondary" size="sm" className="font-mono">
+                                {pairNames?.[log.pair_index] ??
+                                  formatMsg(
+                                    "auto.features.optimizations.components.logstab.template.3",
+                                    { p1: log.pair_index + 1 },
+                                  )}
+                              </Badge>
+                            </TableInline>
+                          )}
+                          <TableInline at="md" className="mb-1" dir="ltr">
+                            {formatLogTimestamp(log.timestamp)}
+                          </TableInline>
+                          <TableInline at="sm" className="mb-1">
+                            <Badge
+                              variant={levelBadgeVariant(log.level)}
+                              className="text-[0.625rem] font-mono"
+                            >
+                              {log.level}
+                            </Badge>
+                          </TableInline>
+                          <TableInline
+                            at="lg"
+                            className="mb-1 min-w-0 shrink truncate"
+                            title={log.logger}
+                          >
+                            {log.logger}
+                          </TableInline>
+                        </div>
+                        <span data-log-message>{log.message}</span>
                       </TableCell>
                     </TableRow>
                   ))}

@@ -6,7 +6,14 @@ import { useTableSort } from "@/shared/hooks/use-table-sort";
 import { WarningCircle } from "@/shared/ui/icons";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
 import { Badge } from "@/shared/ui/primitives/badge";
-import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/shared/ui/primitives/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableInline,
+  TableRow,
+} from "@/shared/ui/primitives/table";
 import {
   ColumnHeader,
   ResetColumnsButton,
@@ -257,6 +264,7 @@ export function TaggerResultsTable({
                         onSort={toggleSort}
                         width={colResize.widths["confidence"] ?? 110}
                         onResize={colResize.setColumnWidth}
+                        collapse="md"
                       />
                       <ColumnHeader
                         label={msg("tagger.results.col.source")}
@@ -272,6 +280,7 @@ export function TaggerResultsTable({
                         setOpenFilter={colFilters.setOpenFilter}
                         width={colResize.widths["source"] ?? 130}
                         onResize={colResize.setColumnWidth}
+                        collapse="lg"
                       />
                     </>
                   )}
@@ -303,6 +312,16 @@ export function TaggerResultsTable({
                           <span className="truncate" dir="auto">
                             {clipText(row.text)}
                           </span>
+                          {assisted && row.confidence !== null && (
+                            <TableInline at="md">{`${Math.round(row.confidence * 100)}%`}</TableInline>
+                          )}
+                          {assisted && provKey && (
+                            <TableInline at="lg">
+                              <Badge variant="secondary" size="sm">
+                                {msg(provKey)}
+                              </Badge>
+                            </TableInline>
+                          )}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -312,10 +331,10 @@ export function TaggerResultsTable({
                       </TableCell>
                       {assisted && (
                         <>
-                          <TableCell className="tabular-nums text-muted-foreground">
+                          <TableCell collapse="md" className="tabular-nums text-muted-foreground">
                             {row.confidence !== null ? `${Math.round(row.confidence * 100)}%` : ""}
                           </TableCell>
-                          <TableCell>
+                          <TableCell collapse="lg">
                             {provKey && (
                               <Badge variant="secondary" size="sm">
                                 {msg(provKey)}

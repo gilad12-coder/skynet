@@ -4,7 +4,15 @@ import { ProgressBar } from "@/shared/ui/progress-bar";
 import { useMemo } from "react";
 import { useTableSort } from "@/shared/hooks/use-table-sort";
 import type { ReactNode } from "react";
-import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/shared/ui/primitives/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableInline,
+  TableRow,
+} from "@/shared/ui/primitives/table";
+import type { TableCollapse } from "@/shared/ui/primitives/table";
 import {
   ColumnHeader,
   ResetColumnsButton,
@@ -25,7 +33,7 @@ import type { OptimizerRow } from "../lib/transform-chart-data";
 // Same density overrides as the optimizations table (JobsTab) so the two
 // dashboards read as one table family.
 const TABLE_CLASS =
-  "table-stack no-copy-underline [&_thead_th]:ps-1 [&_thead_th]:pe-2 [&_thead_th]:py-2 [&_thead_th]:text-[0.6875rem] [&_thead_th_button]:px-1 [&_thead_svg]:size-2.5 [&_tbody_td]:px-1.5";
+  "no-copy-underline [&_thead_th]:ps-1 [&_thead_th]:pe-2 [&_thead_th]:py-2 [&_thead_th]:text-[0.6875rem] [&_thead_th_button]:px-1 [&_thead_svg]:size-2.5 [&_tbody_td]:px-1.5";
 const ROW_CLASS =
   "group cursor-pointer border-border/30 transition-colors duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:bg-muted/50";
 
@@ -53,7 +61,6 @@ function compare(a: unknown, b: unknown): number {
   if (typeof a === "number" && typeof b === "number") return a - b;
   return String(a).localeCompare(String(b));
 }
-
 
 function sortRows<T>(rows: T[], key: keyof T, dir: SortDir): T[] {
   const sign = dir === "asc" ? 1 : -1;
@@ -84,12 +91,10 @@ function Toolbar({
   );
 }
 
-function TableFrame({ minWidth, children }: { minWidth: string; children: ReactNode }) {
+function TableFrame({ children }: { children: ReactNode }) {
   return (
     <div className="overflow-x-auto rounded-2xl border border-border/40 bg-card/60">
-      <Table style={{ minWidth }} className={TABLE_CLASS}>
-        {children}
-      </Table>
+      <Table className={TABLE_CLASS}>{children}</Table>
     </div>
   );
 }
@@ -146,7 +151,12 @@ export function OptimizerTable({
     return sortRows(kept, sortKey, sortDir);
   }, [rows, filters, sortKey, sortDir]);
 
-  const header = (label: string, key: OptimizerKey, filterable = false) => (
+  const header = (
+    label: string,
+    key: OptimizerKey,
+    filterable = false,
+    collapse?: TableCollapse,
+  ) => (
     <ColumnHeader
       label={label}
       sortKey={key}
@@ -161,6 +171,7 @@ export function OptimizerTable({
       setOpenFilter={setOpenFilter}
       width={resize.widths[key] ?? OPTIMIZER_WIDTHS[key]}
       onResize={resize.setColumnWidth}
+      collapse={collapse}
     />
   );
 
@@ -199,15 +210,15 @@ export function OptimizerTable({
           filename: "optimizers",
         })}
       />
-      <TableFrame minWidth="560px">
+      <TableFrame>
         <TableHeader>
           <TableRow>
             {header(labels.name, "name", true)}
             {header(labels.count, "count")}
-            {header(labels.share, "share")}
-            {header(labels.successRate, "successRate")}
+            {header(labels.share, "share", false, "lg")}
+            {header(labels.successRate, "successRate", false, "sm")}
             {header(labels.avgImprovement, "avgImprovement")}
-            {header(labels.avgRuntimeMinutes, "avgRuntimeMinutes")}
+            {header(labels.avgRuntimeMinutes, "avgRuntimeMinutes", false, "md")}
           </TableRow>
         </TableHeader>
         <TableBody className="transition-opacity duration-200">
@@ -227,12 +238,24 @@ export function OptimizerTable({
               }}
             >
               <TableCell className="px-2 font-medium" data-label={labels.name}>
-                <span dir="ltr">{row.name}</span>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate" dir="ltr">
+                    {row.name}
+                  </span>
+                  <TableInline at="sm" dir="ltr" title={labels.successRate}>
+                    {Math.round(row.successRate)}%
+                  </TableInline>
+                  <TableInline at="md" dir="ltr">
+                    {row.avgRuntimeMinutes == null
+                      ? "—"
+                      : formatElapsed(row.avgRuntimeMinutes * 60)}
+                  </TableInline>
+                </div>
               </TableCell>
               <TableCell className="px-2 tabular-nums font-semibold" data-label={labels.count}>
                 {row.count}
               </TableCell>
-              <TableCell className="px-2" data-label={labels.share}>
+              <TableCell className="px-2" data-label={labels.share} collapse="lg">
                 <div className="flex items-center gap-2" dir="ltr">
                   <ProgressBar value={row.share} color="var(--color-chart-2)" className="w-16" />
                   <span className="text-[0.6875rem] tabular-nums text-muted-foreground">
@@ -240,7 +263,11 @@ export function OptimizerTable({
                   </span>
                 </div>
               </TableCell>
-              <TableCell className="px-2 tabular-nums" data-label={labels.successRate}>
+              <TableCell
+                className="px-2 tabular-nums"
+                data-label={labels.successRate}
+                collapse="sm"
+              >
                 {Math.round(row.successRate)}%
               </TableCell>
               <TableCell
@@ -254,6 +281,7 @@ export function OptimizerTable({
                 className="px-2 tabular-nums"
                 data-label={labels.avgRuntimeMinutes}
                 dir="ltr"
+                collapse="md"
               >
                 {row.avgRuntimeMinutes == null ? "—" : formatElapsed(row.avgRuntimeMinutes * 60)}
               </TableCell>
@@ -343,7 +371,12 @@ export function Leaderboard({
     return sortRows(kept, sortKey, sortDir);
   }, [rows, filters, sortKey, sortDir]);
 
-  const header = (label: string, key: LeaderKey, filterCol?: "optimizer_name" | "model_name") => (
+  const header = (
+    label: string,
+    key: LeaderKey,
+    filterCol?: "optimizer_name" | "model_name",
+    collapse?: TableCollapse,
+  ) => (
     <ColumnHeader
       label={label}
       sortKey={key}
@@ -358,6 +391,7 @@ export function Leaderboard({
       setOpenFilter={setOpenFilter}
       width={resize.widths[key] ?? LEADER_WIDTHS[key]}
       onResize={resize.setColumnWidth}
+      collapse={collapse}
     />
   );
 
@@ -401,16 +435,16 @@ export function Leaderboard({
           filename: "leaderboard",
         })}
       />
-      <TableFrame minWidth="640px">
+      <TableFrame>
         <TableHeader>
           <TableRow>
             {header(labels.rank, "rank")}
             {header(labels.name, "name")}
-            {header(labels.optimizer_name, "optimizer_name", "optimizer_name")}
-            {header(labels.model_name, "model_name", "model_name")}
+            {header(labels.optimizer_name, "optimizer_name", "optimizer_name", "sm")}
+            {header(labels.model_name, "model_name", "model_name", "md")}
             {header(labels.improvement, "improvement")}
-            {header(labels.elapsed_seconds, "elapsed_seconds")}
-            {header(labels.created_at, "created_at")}
+            {header(labels.elapsed_seconds, "elapsed_seconds", undefined, "lg")}
+            {header(labels.created_at, "created_at", undefined, "lg")}
           </TableRow>
         </TableHeader>
         <TableBody className="transition-opacity duration-200">
@@ -437,13 +471,46 @@ export function Leaderboard({
                 {row.rank}
               </TableCell>
               <TableCell
-                className="max-w-[16rem] truncate px-2 font-medium"
+                className="max-w-[16rem] px-2 font-medium @max-[44rem]/table:max-w-none"
                 title={row.name || undefined}
                 data-label={labels.name}
               >
-                {row.name || <span dir="ltr">{row.optimization_id.slice(0, 8)}…</span>}
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate">
+                    {row.name || <span dir="ltr">{row.optimization_id.slice(0, 8)}…</span>}
+                  </span>
+                  {row.optimizer_name && (
+                    <TableInline at="sm" dir="ltr">
+                      {row.optimizer_name}
+                    </TableInline>
+                  )}
+                  {row.model_name && (
+                    <TableInline at="md" dir="ltr" className="font-mono">
+                      {modelDisplayName(row.model_name)}
+                    </TableInline>
+                  )}
+                  {row.elapsed_seconds != null && (
+                    <TableInline at="lg" dir="ltr">
+                      {formatElapsed(row.elapsed_seconds)}
+                    </TableInline>
+                  )}
+                  {row.created_at && (
+                    <TableInline at="lg">
+                      {new Date(row.created_at).toLocaleDateString(locale, {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </TableInline>
+                  )}
+                </div>
               </TableCell>
-              <TableCell className="px-2" data-label={labels.optimizer_name} dir="ltr">
+              <TableCell
+                className="px-2"
+                data-label={labels.optimizer_name}
+                dir="ltr"
+                collapse="sm"
+              >
                 {row.optimizer_name || "—"}
               </TableCell>
               <TableCell
@@ -451,6 +518,7 @@ export function Leaderboard({
                 dir="ltr"
                 title={row.model_name || undefined}
                 data-label={labels.model_name}
+                collapse="md"
               >
                 {row.model_name ? modelDisplayName(row.model_name) : "—"}
               </TableCell>
@@ -465,12 +533,14 @@ export function Leaderboard({
                 className="px-2 tabular-nums"
                 dir="ltr"
                 data-label={labels.elapsed_seconds}
+                collapse="lg"
               >
                 {row.elapsed_seconds == null ? "—" : formatElapsed(row.elapsed_seconds)}
               </TableCell>
               <TableCell
                 className="whitespace-nowrap px-2 tabular-nums"
                 data-label={labels.created_at}
+                collapse="lg"
               >
                 {row.created_at
                   ? new Date(row.created_at).toLocaleDateString(locale, {

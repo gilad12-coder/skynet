@@ -9,6 +9,15 @@ import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { tip } from "@/shared/lib/tooltips";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableInline,
+  TableRow,
+} from "@/shared/ui/primitives/table";
 import { mergeModelUsage } from "../lib/model-usage";
 import type {
   BlackboxRunResult,
@@ -444,6 +453,33 @@ function LMActivityMatrix({
   );
 }
 
+/** The input / output token columns folded into the row's name cell on narrow tables. */
+function TokenSplit({
+  input,
+  output,
+  inputLabel,
+  outputLabel,
+}: {
+  input: number;
+  output: number;
+  inputLabel: string;
+  outputLabel: string;
+}) {
+  return (
+    <TableInline at="sm" className="font-sans font-normal">
+      {inputLabel}
+      <span dir="ltr" className="font-mono">
+        {formatCalls(input)}
+      </span>
+      <span aria-hidden="true">·</span>
+      {outputLabel}
+      <span dir="ltr" className="font-mono">
+        {formatCalls(output)}
+      </span>
+    </TableInline>
+  );
+}
+
 /**
  * Black-box variant of the activity tab: the shared per-stage timing matrix
  * for the reflection model (older runs predate the recording and skip it),
@@ -472,7 +508,7 @@ export function BlackboxLMActivityTab({ result }: { result: BlackboxRunResult })
   const outputLabel = msg("optimization.blackbox.stats.output_col");
   const tokensLabel = msg("usage.col.tokens");
   const headCls =
-    "px-3 py-2 text-end text-[0.75rem] font-semibold text-muted-foreground whitespace-nowrap";
+    "h-auto px-3 py-2 text-end text-[0.75rem] font-semibold text-muted-foreground whitespace-nowrap";
   const cellCls = "px-3 py-2.5 text-end align-middle";
 
   return (
@@ -522,105 +558,119 @@ export function BlackboxLMActivityTab({ result }: { result: BlackboxRunResult })
               title={msg("auto.features.optimizations.components.lmactivitytab.no_data")}
             />
           ) : (
-            <div className="overflow-x-auto -mx-2 px-2">
-              <table className="guide-table w-full text-sm">
-                <thead>
-                  <tr className="bg-muted/40">
-                    <th
-                      scope="col"
-                      className="px-3 py-2 text-start text-[0.75rem] font-semibold text-muted-foreground whitespace-nowrap"
-                    >
+            <div className="-mx-2 px-2">
+              <Table className="guide-table w-full text-sm">
+                <TableHeader className="static bg-transparent backdrop-blur-none [&_tr]:border-b-0">
+                  <TableRow className="border-b-0 bg-muted/40">
+                    <TableHead className="h-auto px-3 py-2 text-start text-[0.75rem] font-semibold text-muted-foreground whitespace-nowrap">
                       {modelLabel}
-                    </th>
-                    <th scope="col" className={headCls}>
+                    </TableHead>
+                    <TableHead collapse="sm" className={headCls}>
                       <HelpTip text={tip("blackbox.tokens.input")}>{inputLabel}</HelpTip>
-                    </th>
-                    <th scope="col" className={headCls}>
+                    </TableHead>
+                    <TableHead collapse="sm" className={headCls}>
                       <HelpTip text={tip("blackbox.tokens.output")}>{outputLabel}</HelpTip>
-                    </th>
-                    <th scope="col" className={headCls}>
+                    </TableHead>
+                    <TableHead className={headCls}>
                       <HelpTip text={tip("blackbox.tokens.total")}>{tokensLabel}</HelpTip>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {rows.map((u) => (
-                    <tr
+                    <TableRow
                       key={u.model}
-                      className="border-t border-border/60 transition-colors duration-150 hover:bg-muted/50"
+                      className="border-b-0 border-t border-border/60 transition-colors duration-150 hover:bg-muted/50"
                     >
                       <th
                         scope="row"
-                        dir="ltr"
                         title={u.model}
-                        className="px-3 py-2.5 text-start font-mono text-sm font-medium text-foreground whitespace-nowrap"
+                        className="w-full max-w-0 px-3 py-2.5 text-start font-mono text-sm font-medium text-foreground whitespace-nowrap"
                       >
-                        {u.model}
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span dir="ltr" className="truncate">
+                            {u.model}
+                          </span>
+                          <TokenSplit
+                            input={u.input_tokens}
+                            output={u.output_tokens}
+                            inputLabel={inputLabel}
+                            outputLabel={outputLabel}
+                          />
+                        </div>
                       </th>
-                      <td className={cellCls}>
+                      <TableCell collapse="sm" className={cellCls}>
                         <span
                           className="font-mono tabular-nums text-sm text-muted-foreground"
                           dir="ltr"
                         >
                           {formatCalls(u.input_tokens)}
                         </span>
-                      </td>
-                      <td className={cellCls}>
+                      </TableCell>
+                      <TableCell collapse="sm" className={cellCls}>
                         <span
                           className="font-mono tabular-nums text-sm text-muted-foreground"
                           dir="ltr"
                         >
                           {formatCalls(u.output_tokens)}
                         </span>
-                      </td>
-                      <td className={cellCls}>
+                      </TableCell>
+                      <TableCell className={cellCls}>
                         <span
                           className="font-mono tabular-nums text-sm font-normal text-foreground"
                           dir="ltr"
                         >
                           {formatCalls(u.input_tokens + u.output_tokens)}
                         </span>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
                   {rows.length > 1 && (
-                    <tr className="border-t border-border bg-muted/20">
+                    <TableRow className="border-b-0 border-t border-border bg-muted/20">
                       <th
                         scope="row"
                         className="px-3 py-3 text-start text-sm font-bold text-foreground whitespace-nowrap"
                       >
-                        <HelpTip text={tip("blackbox.tokens.total_row")}>
-                          {msg("auto.features.optimizations.components.lmactivitytab.row_total")}
-                        </HelpTip>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <HelpTip text={tip("blackbox.tokens.total_row")}>
+                            {msg("auto.features.optimizations.components.lmactivitytab.row_total")}
+                          </HelpTip>
+                          <TokenSplit
+                            input={totals.input}
+                            output={totals.output}
+                            inputLabel={inputLabel}
+                            outputLabel={outputLabel}
+                          />
+                        </div>
                       </th>
-                      <td className={cellCls}>
+                      <TableCell collapse="sm" className={cellCls}>
                         <span
                           className="font-mono tabular-nums text-sm font-semibold text-foreground"
                           dir="ltr"
                         >
                           {formatCalls(totals.input)}
                         </span>
-                      </td>
-                      <td className={cellCls}>
+                      </TableCell>
+                      <TableCell collapse="sm" className={cellCls}>
                         <span
                           className="font-mono tabular-nums text-sm font-semibold text-foreground"
                           dir="ltr"
                         >
                           {formatCalls(totals.output)}
                         </span>
-                      </td>
-                      <td className={cellCls}>
+                      </TableCell>
+                      <TableCell className={cellCls}>
                         <span
                           className="font-mono tabular-nums text-sm font-semibold text-foreground"
                           dir="ltr"
                         >
                           {formatCalls(totals.input + totals.output)}
                         </span>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   )}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
         </div>

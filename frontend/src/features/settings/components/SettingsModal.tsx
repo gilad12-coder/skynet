@@ -37,12 +37,7 @@ import {
   Info,
   X,
 } from "@/shared/ui/icons";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/primitives/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/shared/ui/primitives/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/primitives/tabs";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import {
@@ -66,6 +61,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableInline,
   TableRow,
 } from "@/shared/ui/primitives/table";
 import {
@@ -838,7 +834,7 @@ function AdminTab() {
 
           <div className="flex-1 overflow-auto">
             <div className="table-scroll">
-              <Table style={{ minWidth: "560px" }}>
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <ColumnHeader
@@ -873,6 +869,7 @@ function AdminTab() {
                       onSort={toggleSort}
                       width={colResize.widths["used_bytes"]}
                       onResize={colResize.setColumnWidth}
+                      collapse="sm"
                     />
                     <ColumnHeader
                       label={msg("settings.admin.storage.updated_by")}
@@ -888,6 +885,7 @@ function AdminTab() {
                       setOpenFilter={colFilters.setOpenFilter}
                       width={colResize.widths["updated_by"]}
                       onResize={colResize.setColumnWidth}
+                      collapse="sm"
                     />
                     <TableHead className="w-12" />
                   </TableRow>
@@ -916,10 +914,16 @@ function AdminTab() {
                         <span className="text-[0.6875rem] text-muted-foreground">MB</span>
                       </span>
                     </TableCell>
-                    <TableCell className="text-center text-xs text-muted-foreground/70">
+                    <TableCell
+                      collapse="sm"
+                      className="text-center text-xs text-muted-foreground/70"
+                    >
                       —
                     </TableCell>
-                    <TableCell className="text-center text-xs text-muted-foreground/70">
+                    <TableCell
+                      collapse="sm"
+                      className="text-center text-xs text-muted-foreground/70"
+                    >
                       —
                     </TableCell>
                     <TableCell className="w-12 text-center">
@@ -961,11 +965,27 @@ function AdminTab() {
                         className="transition-colors duration-150 hover:bg-muted/50"
                       >
                         <TableCell
-                          className="max-w-[200px] truncate text-center font-semibold text-xs text-foreground"
+                          className="max-w-[200px] text-center font-semibold text-xs text-foreground"
                           dir="ltr"
                           title={item.username}
                         >
-                          {item.username}
+                          <div className="flex min-w-0 items-center justify-center gap-2">
+                            <span className="truncate">{item.username}</span>
+                            <TableInline
+                              at="sm"
+                              className={cn(
+                                "font-mono font-normal",
+                                item.effective_bytes > 0 &&
+                                  item.used_bytes > item.effective_bytes &&
+                                  "text-destructive",
+                              )}
+                            >
+                              {formatStorageSize(item.used_bytes)}
+                            </TableInline>
+                            <TableInline at="sm" className="font-normal">
+                              {item.updated_by || msg("settings.admin.storage.default")}
+                            </TableInline>
+                          </div>
                         </TableCell>
                         <TableCell className="text-center">
                           <EditableBudgetCell
@@ -974,10 +994,11 @@ function AdminTab() {
                             disabled={busy}
                           />
                         </TableCell>
-                        <TableCell className="text-center">
+                        <TableCell collapse="sm" className="text-center">
                           <UsageMeter used={item.used_bytes} budget={item.effective_bytes} />
                         </TableCell>
                         <TableCell
+                          collapse="sm"
                           className="max-w-[180px] truncate text-center text-xs text-muted-foreground"
                           dir="ltr"
                           title={item.updated_by || msg("settings.admin.storage.default")}
@@ -1328,10 +1349,7 @@ export function SettingsModal() {
     setActiveTab(tab);
     track(TelemetryEvent.SettingsTabChanged, { tab });
   }, []);
-  const tabs = React.useMemo(
-    () => visibleSettingsTabs(isAdmin),
-    [isAdmin],
-  );
+  const tabs = React.useMemo(() => visibleSettingsTabs(isAdmin), [isAdmin]);
   React.useEffect(() => {
     if (!tabs.includes(activeTab)) setActiveTab(isPhone ? "account" : "wizard");
   }, [activeTab, tabs, isPhone]);
