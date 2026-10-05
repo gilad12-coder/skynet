@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -85,6 +86,18 @@ def test_responses_counts_images_inside_tool_output() -> None:
         {"prompt": {"id": "server-prompt"}},
         {"context_management": [{"type": "compaction"}]},
         {"tools": [{"type": "web_search_preview"}]},
+        {"tools": [{"type": "namespace", "name": "ns", "tools": [{"type": "web_search_preview"}]}]},
+        {"input": [{"type": "additional_tools", "role": "developer", "tools": [{"type": "web_search_preview"}]}]},
+        {
+            "input": [
+                {
+                    "type": "additional_tools",
+                    "role": "developer",
+                    "tools": [{"type": "namespace", "name": "ns", "tools": [{"type": "file_search"}]}],
+                }
+            ]
+        },
+        {"input": [{"type": "additional_tools", "role": "developer", "tools": "opaque"}]},
         {"input": [{"type": "item_reference", "id": "hidden"}]},
         {"input": [{"role": "user", "content": [{"type": "input_file", "file_id": "opaque"}]}]},
         {"input": [{"type": "function_call_output", "call_id": "call", "output": [{"type": "input_audio"}]}]},
@@ -97,6 +110,37 @@ def test_responses_rejects_unbounded_categories(extra: dict) -> None:
         price_responses_request(
             {"model": "fixture/text", "input": "text", **extra}, _CATALOG, ChargePolicy("managed_model")
         )
+
+
+def test_responses_prices_codex_additional_tools_as_prompt_text() -> None:
+    """Accept the tool-schema history item Codex sends under the full-context input bound."""
+    tools = [
+        {
+            "type": "namespace",
+            "name": "functions",
+            "description": "",
+            "tools": [
+                {"type": "custom", "name": "exec", "description": "Run code."},
+                {"type": "function", "name": "wait", "strict": False, "parameters": {"type": "object"}},
+            ],
+        }
+    ]
+    history = [
+        {"role": "user", "content": [{"type": "input_text", "text": "question"}]},
+        {"type": "function_call", "call_id": "call", "name": "wait", "arguments": "{}"},
+        {"type": "function_call_output", "call_id": "call", "output": "ok"},
+    ]
+    policy = ChargePolicy("managed_model")
+    bare = price_responses_request({"model": "fixture/text", "input": history}, _CATALOG, policy)
+    request = {
+        "model": "fixture/text",
+        "input": [{"type": "additional_tools", "id": "at_1", "role": "developer", "tools": tools}, *history],
+    }
+    priced = price_responses_request(request, _CATALOG, policy)
+    assert priced.body["input"] == request["input"]
+    assert Decimal(priced.quote.price_snapshot["maximum_provider_usd"]) == Decimal(
+        bare.quote.price_snapshot["maximum_provider_usd"]
+    )
 
 
 def test_responses_missing_output_endpoint_maximum_is_not_guessed() -> None:
