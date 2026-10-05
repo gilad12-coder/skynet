@@ -2427,7 +2427,7 @@
   "shared.agent.seconds_short": "s",
   "shared.agent.send": "שלח/שלחי",
   "shared.agent.turn_failed": "התשובה לא הושלמה.",
-  "shared.agent.turn_failed_retry": "נסה/נסי שוב",
+  "shared.agent.turn_failed_retry": "ניסיון חוזר",
   "shared.agent.thinking": "חושב",
   "shared.agent.thought_seconds": "חשב במשך {seconds} שניות",
   "shared.code_editor.collapse": "כווץ/י",

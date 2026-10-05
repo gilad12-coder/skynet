@@ -1151,7 +1151,7 @@
   "agent.composer.hint_queue": "Enter للإضافة إلى قائمة الانتظار",
   "agent.pending.list_label": "رسائل معلّقة",
   "agent.pending.steering": "سيقرأها الوكيل في خطوته التالية",
-  "agent.pending.steer": "توجيه إلى الدور الحالي",
+  "agent.pending.steer": "إرسال إلى الجولة الحالية",
   "agent.pending.edit": "تعديل",
   "agent.pending.remove": "إزالة",
   "agent.model_menu.auto": "تلقائي",
