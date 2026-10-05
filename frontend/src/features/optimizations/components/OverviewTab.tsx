@@ -12,6 +12,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableInline,
   TableRow,
 } from "@/shared/ui/primitives/table";
 import { FadeIn, StaggerContainer, StaggerItem, TiltCard } from "@/shared/ui/motion";
@@ -546,7 +547,10 @@ function OverviewTabImpl({
                   <TableHead className="h-auto w-full px-0 pb-1.5 text-[0.6875rem] font-medium text-muted-foreground/70">
                     {msg("optimization.logged_metrics.metric_col")}
                   </TableHead>
-                  <TableHead className="h-auto px-0 pb-1.5 ps-4 text-end text-[0.6875rem] font-medium text-muted-foreground/70">
+                  <TableHead
+                    collapse="sm"
+                    className="h-auto px-0 pb-1.5 ps-4 text-end text-[0.6875rem] font-medium text-muted-foreground/70"
+                  >
                     <HelpTip text={tip("score.baseline")}>
                       {msg("optimization.logged_metrics.baseline_col")}
                     </HelpTip>
@@ -581,11 +585,22 @@ function OverviewTabImpl({
                         scope="row"
                         dir="auto"
                         title={name}
-                        className="w-full max-w-0 truncate py-2 pe-3 text-start font-mono text-xs font-normal text-foreground"
+                        className="w-full max-w-0 py-2 pe-3 text-start font-mono text-xs font-normal text-foreground"
                       >
-                        {name}
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate">{name}</span>
+                          <TableInline at="sm" className="font-sans">
+                            {msg("optimization.logged_metrics.baseline_col")}
+                            <span dir="ltr" className="font-mono">
+                              {formatLoggedValue(baselineValue, loggedDecimals)}
+                            </span>
+                          </TableInline>
+                        </div>
                       </th>
-                      <TableCell className="px-0 py-2 ps-4 text-end font-mono text-xs tabular-nums text-muted-foreground">
+                      <TableCell
+                        collapse="sm"
+                        className="px-0 py-2 ps-4 text-end font-mono text-xs tabular-nums text-muted-foreground"
+                      >
                         <span dir="ltr">{formatLoggedValue(baselineValue, loggedDecimals)}</span>
                       </TableCell>
                       <TableCell className="px-0 py-2 ps-4 text-end font-mono text-xs font-semibold tabular-nums text-primary">
