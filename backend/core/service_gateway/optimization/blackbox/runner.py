@@ -50,6 +50,10 @@ LLM_HELPER_NAME = "llm"
 ENV_API_KEY = "SKYNET_API_KEY"
 ENV_BUDGET_RELAY_URL = "SKYNET_BUDGET_RELAY_URL"
 IMAGE_HELPER_NAME = "Image"
+LOG_HELPER_NAME = "log"
+# Frames one ``log()`` event on stderr; the host turns each into a run-log line.
+EVENT_PREFIX = "SKYNET_SCORER_EVENT "
+_EVENT_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 # The module scorer code imports those helpers from: ``from skynet import llm, Image``.
 HELPER_MODULE_NAME = "skynet"
 # Where Vercel's egress proxy leaves its CA when a network policy rewrites headers.
@@ -275,6 +279,58 @@ def side_info_json_default(value: Any) -> str:
     return str(value)
 
 
+def _json_plain(value: Any) -> Any:
+    """Make a value strict-JSON safe: non-finite numbers become their text.
+
+    Args:
+        value: Parsed JSON.
+
+    Returns:
+        The same structure with every NaN and infinity as a string.
+    """
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return str(value)
+    if isinstance(value, list):
+        return [_json_plain(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _json_plain(item) for key, item in value.items()}
+    return value
+
+
+def log(event: str, message: Any = None, *, level: str = "INFO", **fields: Any) -> None:
+    """Send one named event to the run's log the moment it happens.
+
+    Scorer code calls it as ``from skynet import log`` then
+    ``log("judge.retry", attempt=2, reason="rate limited")``. The host shows
+    it live, tagged with the candidate and case being scored.
+
+    Args:
+        event: Event name, such as ``judge.retry``.
+        message: The line shown in the log; the event name when unset.
+        level: ``DEBUG``, ``INFO``, ``WARNING`` or ``ERROR``.
+        **fields: Details shown with the event; values that are not JSON become text.
+
+    Raises:
+        ValueError: When ``event`` is empty or ``level`` is not one of the four.
+    """
+    if not isinstance(event, str) or not event.strip():
+        raise ValueError("log() needs a non-empty event name, such as log('judge.retry').")
+    name = str(level).upper()
+    if name not in _EVENT_LEVELS:
+        raise ValueError(f"log() level must be one of {', '.join(_EVENT_LEVELS)}, not {level!r}.")
+    line = {
+        "level": name,
+        "logger": "scorer",
+        "message": event if message is None else str(message),
+        "event": event,
+        "fields": _json_plain(json.loads(json.dumps(fields, default=side_info_json_default))) if fields else None,
+    }
+    # The real stderr: a scorer that redirects sys.stderr must not swallow its own events.
+    stream = sys.__stderr__ or sys.stderr
+    stream.write(EVENT_PREFIX + json.dumps(line, allow_nan=False) + "\n")
+    stream.flush()
+
+
 FEEDBACK_REQUIRED = (
     'The scorer must return feedback: return {"score": <number>, "feedback": "<why it scored that>"}, '
     'optionally with "scores": {"<name>": {"score": <number>, "feedback": "<why>"}} for each thing you '
@@ -378,7 +434,8 @@ def helper_module(helpers: dict[str, Any]) -> types.ModuleType:
         A module exposing every helper as an attribute.
     """
     module = types.ModuleType(
-        HELPER_MODULE_NAME, "Helpers for scorer code: llm(prompt, input=None, images=None) and Image(...)."
+        HELPER_MODULE_NAME,
+        "Helpers for scorer code: llm(prompt, input=None, images=None), Image(...) and log(event, **fields).",
     )
     module.__dict__.update(helpers)
     return module
@@ -652,7 +709,11 @@ def run_call(payload: dict[str, Any]) -> dict[str, Any]:
             timeout_seconds=float(gateway.get("timeout_seconds") or 120.0),
             protected=bool(gateway.get("protected")),
         )
-    helpers = {LLM_HELPER_NAME: llm if llm is not None else missing_llm, IMAGE_HELPER_NAME: Image}
+    helpers = {
+        LLM_HELPER_NAME: llm if llm is not None else missing_llm,
+        IMAGE_HELPER_NAME: Image,
+        LOG_HELPER_NAME: log,
+    }
     result: dict[str, Any] = {"score": None, "side_info": {}, "error": None, "usage": []}
     try:
         fn = load_scorer_from_code(str(payload.get("code") or ""), helpers=helpers)

@@ -633,7 +633,10 @@ class _EvaluatorMailbox:
                         raise ServiceError("Native evaluator request carries an invalid candidate shape.")
                     if self.check_budget is not None:
                         self.check_budget()
-                    score, info = self.server.evaluate(candidate, request.get("example"))
+                    with sandbox_log.event_scope(
+                        candidate=_label(request.get("candidate_id")), case=_label(request.get("case"))
+                    ):
+                        score, info = self.server.evaluate(candidate, request.get("example"))
                     if self.check_budget is not None:
                         self.check_budget()
                     response = {"score": score, "info": info}
@@ -648,6 +651,20 @@ class _EvaluatorMailbox:
                 self.error = self.error or exc
                 self._responses[request_id] = json.dumps({"error": "The parent evaluator returned invalid feedback."})
         self.session.write_files({f"rpc/{request_id}.json": self._responses[request_id]})
+
+
+def _label(value: Any) -> str | None:
+    """Read a child-sent candidate or case label as short text.
+
+    Args:
+        value: The label as the child sent it.
+
+    Returns:
+        A number or text label, or ``None`` for anything else.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        return None
+    return run_log.fit(str(value), run_log.CANDIDATE_CHARS)
 
 
 def _finite(value: Any) -> bool:

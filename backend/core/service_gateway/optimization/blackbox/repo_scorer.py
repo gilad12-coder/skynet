@@ -22,7 +22,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ....billing.model_dispatch import ModelHTTPResult
-from . import runner
+from . import runner, sandbox_log
 from .repo_workspace import REPO_DIR, RepoWorkspace, redact
 from .sandbox import SandboxSession
 from .sandbox_scorer import RUNNER_SOURCE
@@ -122,12 +122,15 @@ class RepoScorer:
                     )
                 }
             )
-            result = session.run(
-                f"cd {shlex.quote(checkout.path)} && python3 {shlex.quote(f'{root}/{RUNNER_PATH}')}"
-                f" {shlex.quote(call_dir)}",
-                env=self._workspace.secrets or None,
-                timeout_seconds=self._timeout_seconds,
-            )
+            # A sink makes the session stream stderr live, which is where log() events travel.
+            with sandbox_log.event_scope(source="scorer"):
+                result = session.run(
+                    f"cd {shlex.quote(checkout.path)} && python3 {shlex.quote(f'{root}/{RUNNER_PATH}')}"
+                    f" {shlex.quote(call_dir)}",
+                    env=self._workspace.secrets or None,
+                    timeout_seconds=self._timeout_seconds,
+                    on_output=sandbox_log.ignore_output,
+                )
             if result.timed_out:
                 raise RepoScoreError(f"The scorer exceeded its {self._timeout_seconds:g}s timeout.")
             text = session.read_file(f"{CALLS_DIR}/{self._calls:06d}/{runner.OUTPUT_FILE}")

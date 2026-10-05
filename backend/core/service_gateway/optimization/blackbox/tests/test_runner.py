@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from ..runner import (
     accepts_case,
     image_content_part,
     load_scorer_from_code,
+    log,
     normalize_score,
     run_call,
     scorer_messages,
@@ -458,3 +460,37 @@ def test_main_wants_exactly_one_argument(capsys: pytest.CaptureFixture[str]) -> 
     assert runner.main([]) == 2
     assert runner.main(["a", "b"]) == 2
     assert "usage:" in capsys.readouterr().err
+
+
+def test_log_writes_one_framed_event_to_the_real_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fields of any type travel as strict JSON; a redirected sys.stderr does not swallow it."""
+    real, redirected = io.StringIO(), io.StringIO()
+    monkeypatch.setattr(sys, "__stderr__", real)
+    monkeypatch.setattr(sys, "stderr", redirected)
+    log("judge.retry", "retrying", level="warning", attempt=2, ratio=float("nan"), path=Path("/x"))
+    assert redirected.getvalue() == ""
+    line = real.getvalue()
+    assert line.startswith(runner.EVENT_PREFIX)
+    assert line.endswith("\n")
+    assert json.loads(line[len(runner.EVENT_PREFIX) :]) == {
+        "level": "WARNING",
+        "logger": "scorer",
+        "message": "retrying",
+        "event": "judge.retry",
+        "fields": {"attempt": 2, "ratio": "nan", "path": "/x"},
+    }
+
+
+@pytest.mark.parametrize(("event", "level"), [("", "INFO"), ("  ", "INFO"), ("ok", "CRITICAL"), ("ok", "loud")])
+def test_log_rejects_a_missing_name_or_an_unknown_level(event: str, level: str) -> None:
+    """A scorer learns about a bad call at once, not from a silent log."""
+    with pytest.raises(ValueError):
+        log(event, level=level)
+
+
+def test_scorer_code_imports_log_from_skynet() -> None:
+    """``from skynet import log`` works in the box and in validation alike."""
+    fn = load_scorer_from_code(
+        "from skynet import log\ndef score(c, case=None):\n    return 1.0, 'ok'\n", helpers={"log": log}
+    )
+    assert fn("x") == (1.0, "ok")

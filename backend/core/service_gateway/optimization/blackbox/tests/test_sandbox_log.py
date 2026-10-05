@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterator
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 import pytest
 
 from core.service_gateway.optimization.blackbox import sandbox_log
+from core.service_gateway.optimization.blackbox.runner import EVENT_PREFIX
 from core.service_gateway.optimization.blackbox.sandbox import (
     JOB_TAG,
     CommandResult,
@@ -175,6 +177,39 @@ def test_forward_ignores_anything_but_a_record(captured: _Capture) -> None:
     """A JSON value that is not an object is not a record."""
     sandbox_log.forward(["not", "a", "record"], owner="job-1", scrub=sandbox_log.Scrubber(()))
     assert captured.records == []
+
+
+def _event_line(**fields: Any) -> str:
+    """Frame one scorer event the way ``skynet.log`` writes it."""
+    return EVENT_PREFIX + json.dumps({"level": "INFO", "logger": "scorer", "message": "m", **fields}) + "\n"
+
+
+def test_scorer_events_in_a_scope_are_pinned_to_its_source_candidate_and_case(captured: _Capture) -> None:
+    """A scorer cannot claim another source, candidate or case, nor pass for the host."""
+    forged = _event_line(event="judge.retry", source="host", candidate="99", case="99", level="CRITICAL")
+    with sandbox_log.event_scope(candidate="3", case="1"), sandbox_log.event_scope(source="scorer"):
+        _FakeSession(forged).run("cmd", on_output=sandbox_log.ignore_output)
+    [record] = captured.records
+    assert record.name == "sandbox.scorer"
+    assert record.levelno == logging.INFO
+    assert record.run_log == {"source": "scorer", "event": "judge.retry", "fields": None, "candidate": "3", "case": "1"}
+
+
+def test_event_lines_outside_a_scope_stay_plain_output(captured: _Capture) -> None:
+    """Only commands the host scoped may send events; elsewhere the line is ordinary stderr."""
+    _FakeSession(_event_line(event="judge.retry")).run("cmd", on_output=sandbox_log.ignore_output)
+    [record] = captured.records
+    assert record.levelno == logging.DEBUG
+    assert record.run_log["source"] == "sandbox"
+    assert record.run_log["event"] is None
+
+
+def test_an_unreadable_event_line_is_kept_as_plain_output(captured: _Capture) -> None:
+    """A torn event line is logged, not lost and not fatal."""
+    with sandbox_log.event_scope(source="scorer"):
+        _FakeSession(EVENT_PREFIX + "{not json\n").run("cmd", on_output=sandbox_log.ignore_output)
+    [record] = captured.records
+    assert record.getMessage() == "[sandbox] {not json"
 
 
 def test_a_command_that_raises_logs_what_it_wrote_first(captured: _Capture) -> None:

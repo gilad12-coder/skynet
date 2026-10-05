@@ -37,7 +37,7 @@ from ....config import Settings, settings
 from ....exceptions import ServiceError
 from ....models.common import ModelConfig
 from ...language_models import usage_by_model_from_history
-from . import package_setup, runner
+from . import package_setup, runner, sandbox_log
 from .agent_eval import gateway_from_settings
 from .harness import ENV_API_KEY
 from .heartbeat import heartbeat
@@ -473,18 +473,21 @@ class SandboxPythonScorer:
         session.write_files(
             {f"{call_dir}/{runner.INPUT_FILE}": json.dumps(payload, default=runner.side_info_json_default)}
         )
-        result = session.run(
-            f"python3 {RUNNER_FILE} {shlex.quote(call_dir)}",
-            env={
-                **({ENV_API_KEY: self._env_key} if self._env_key else {}),
-                **({"PYTHONPATH": ".skynet-dependencies/site"} if self._dependency_lock is not None else {}),
-                # The protected image has no display or GPU; PyOpenGL-based renderers
-                # (pyrender and friends) would otherwise try to open an X display.
-                **({"PYOPENGL_PLATFORM": "osmesa"} if self._protected else {}),
-            }
-            or None,
-            timeout_seconds=self._timeout_seconds,
-        )
+        # A sink makes the session stream stderr live, which is where log() events travel.
+        with sandbox_log.event_scope(source="scorer"):
+            result = session.run(
+                f"python3 {RUNNER_FILE} {shlex.quote(call_dir)}",
+                env={
+                    **({ENV_API_KEY: self._env_key} if self._env_key else {}),
+                    **({"PYTHONPATH": ".skynet-dependencies/site"} if self._dependency_lock is not None else {}),
+                    # The protected image has no display or GPU; PyOpenGL-based renderers
+                    # (pyrender and friends) would otherwise try to open an X display.
+                    **({"PYOPENGL_PLATFORM": "osmesa"} if self._protected else {}),
+                }
+                or None,
+                timeout_seconds=self._timeout_seconds,
+                on_output=sandbox_log.ignore_output,
+            )
         logger.debug(
             "scorer call %d finished in %.1fs (exit %s)", self._calls, time.perf_counter() - started, result.exit_code
         )
