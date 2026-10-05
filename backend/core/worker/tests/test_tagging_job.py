@@ -42,7 +42,6 @@ class _MemStore(RemoteDBJobStore):
         self._session_factory = sessionmaker(bind=self._engine)
         self._code_version = "test"
         self._max_progress_events = 100
-        self._max_log_entries = 100
         self._progress_counter_lock = threading.Lock()
 
 

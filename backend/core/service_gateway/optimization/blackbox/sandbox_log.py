@@ -8,8 +8,9 @@ logs a WARNING with its last lines on :data:`logger`. Each record carries the
 sandbox's job as ``sandbox_owner``; the worker routes records by it into that
 job's run log, and the optimization subprocess forwards them as log events.
 
-Sandbox output is untrusted, so it is bounded, stripped of terminal control
-sequences, and scrubbed of every secret the command was given.
+Sandbox output is untrusted, so it is stripped of terminal control sequences
+and scrubbed of every secret the command was given. :func:`forward` relays a
+structured record a sandbox sent, attributed and capped by the host.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from collections import deque
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from .... import run_log
+
 logger = logging.getLogger(__name__)
 # Streamed lines reach only the run-log handlers attached here, never the
 # process's own console, which would otherwise carry every sandbox's stderr.
@@ -29,13 +32,103 @@ stream_logger = logging.getLogger(f"{__name__}.stream")
 stream_logger.propagate = False
 stream_logger.setLevel(logging.DEBUG)
 
-_STREAMED_LINES = 200
-_LINE_CHARS = 1000
 _TAIL_LINES = 40
 _LABEL_CHARS = 120
 # Shorter values (ports, flags, "1") are not secrets, and scrubbing them would mangle ordinary text.
 _SECRET_MIN_CHARS = 8
 _CONTROL = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]|[\x00-\x08\x0b-\x1f\x7f]")
+# The highest level a sandbox may claim: CRITICAL is reserved for the host.
+_FORWARDED_LEVELS = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING, "ERROR": logging.ERROR}
+
+
+class Scrubber:
+    """Make untrusted sandbox text safe to log."""
+
+    def __init__(self, secrets: Iterable[str]) -> None:
+        """Remember the values to redact.
+
+        Args:
+            secrets: Values the sandbox can see; each is replaced before logging.
+        """
+        self._secrets = sorted({value for value in secrets if len(value) >= _SECRET_MIN_CHARS}, key=len, reverse=True)
+
+    def text(self, line: str) -> str:
+        """Redact secrets and drop terminal control sequences from one line.
+
+        Args:
+            line: Raw output text.
+
+        Returns:
+            The text as it may be logged.
+        """
+        for secret in self._secrets:
+            line = line.replace(secret, "[redacted]")
+        return _CONTROL.sub("", line)
+
+    def value(self, value: Any) -> Any:
+        """Redact secrets from every string inside a JSON value.
+
+        Args:
+            value: Parsed JSON.
+
+        Returns:
+            The same structure with each string scrubbed.
+        """
+        if isinstance(value, str):
+            return self.text(value)
+        if isinstance(value, list):
+            return [self.value(item) for item in value]
+        if isinstance(value, dict):
+            return {self.text(str(key)): self.value(item) for key, item in value.items()}
+        return value
+
+
+def forward(data: Any, *, owner: str | None, scrub: Scrubber, source: str = "engine") -> None:
+    """Relay one structured record a sandbox sent into its job's run log.
+
+    The host, not the sandbox, decides what the record may be: its logger is
+    always under ``sandbox.``, its source one of the sandbox sources, and its
+    level at most ERROR, so sandbox code can never pass for Skynet's own lines.
+
+    Args:
+        data: The decoded record; anything but a mapping is ignored.
+        owner: Job the sandbox belongs to.
+        scrub: Redacts the sandbox's secrets.
+        source: Source used when the record names none it may use.
+    """
+    if not isinstance(data, dict):
+        return
+    claimed = run_log.normalize(scrub.value(data))
+    if claimed["source"] not in run_log.SANDBOX_SOURCES:
+        claimed["source"] = source
+    level = _FORWARDED_LEVELS.get(str(data.get("level", "")).upper(), logging.INFO)
+    name = scrub.text(str(data.get("logger") or "sandbox")).strip() or "sandbox"
+    record = stream_logger.makeRecord(
+        f"sandbox.{name}",
+        level,
+        __file__,
+        0,
+        "%s",
+        (scrub.text(str(data.get("message", ""))),),
+        None,
+        extra=run_log.event_extra(**claimed, sandbox_owner=owner),
+    )
+    stream_logger.handle(record)
+
+
+def stream_line(line: str, *, owner: str | None, scrub: Scrubber, label: str = "sandbox") -> None:
+    """Log one plain line a sandbox printed, at DEBUG.
+
+    Args:
+        line: Raw line without its newline.
+        owner: Job the sandbox belongs to.
+        scrub: Redacts the sandbox's secrets.
+        label: Prefix that says where the line came from.
+    """
+    if line.strip():
+        stream_logger.debug(
+            "[%s] %s", label, scrub.text(line), extra=run_log.event_extra(source="sandbox", sandbox_owner=owner)
+        )
 
 
 class SandboxOutputLog:
@@ -49,45 +142,25 @@ class SandboxOutputLog:
             secrets: Values the command can see; each is replaced before logging.
             owner: Job the sandbox belongs to, set on every record as ``sandbox_owner``.
         """
-        self._extra = {"sandbox_owner": owner}
-        self._secrets = sorted({value for value in secrets if len(value) >= _SECRET_MIN_CHARS}, key=len, reverse=True)
+        self._owner = owner
+        self._extra = run_log.event_extra(source="sandbox", sandbox_owner=owner)
+        self.scrub = Scrubber(secrets)
         first = command.strip().splitlines()[0] if command.strip() else ""
-        self.label = self._clean(first[:_LABEL_CHARS] + ("…" if len(first) > _LABEL_CHARS else ""))
+        self.label = self.scrub.text(first[:_LABEL_CHARS] + ("…" if len(first) > _LABEL_CHARS else ""))
         self._pending = ""
-        self._streamed = 0
-        self._suppressed = 0
         self._tail: deque[str] = deque(maxlen=_TAIL_LINES)
         self._lock = threading.Lock()
 
-    def _clean(self, line: str) -> str:
-        """Redact secrets, drop control sequences and cap the length of one line.
-
-        Args:
-            line: Raw output line.
-
-        Returns:
-            The line as it may be logged.
-        """
-        for secret in self._secrets:
-            line = line.replace(secret, "[redacted]")
-        line = _CONTROL.sub("", line)
-        return line if len(line) <= _LINE_CHARS else line[:_LINE_CHARS] + "…"
-
     def _line(self, line: str) -> None:
-        """Stream one complete stderr line, within the per-command cap.
+        """Stream one complete stderr line.
 
         Args:
             line: Raw stderr line without its newline.
         """
         if not line.strip():
             return
-        clean = self._clean(line)
-        self._tail.append(clean)
-        if self._streamed < _STREAMED_LINES:
-            self._streamed += 1
-            stream_logger.debug("[sandbox] %s", clean, extra=self._extra)
-        else:
-            self._suppressed += 1
+        self._tail.append(self.scrub.text(line))
+        stream_line(line, owner=self._owner, scrub=self.scrub)
 
     def feed(self, text: str) -> None:
         """Take a stderr chunk, which may hold partial lines.
@@ -162,9 +235,8 @@ class SandboxOutputLog:
             headline: What happened to which command.
         """
         lines = list(self._tail)
-        note = f" ({self._suppressed} earlier lines not streamed)" if self._suppressed else ""
         body = "\n".join(lines) if lines else "(no stderr)"
-        logger.log(level, "[sandbox] command %s%s\n%s", headline, note, body, extra=self._extra)
+        logger.log(level, "[sandbox] command %s\n%s", headline, body, extra=self._extra)
 
 
 def logged_command(run: Callable[..., Any]) -> Callable[..., Any]:

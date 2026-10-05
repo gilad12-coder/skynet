@@ -18,6 +18,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, defer, sessionmaker
 
+from .. import run_log
 from ..billing.plans import has_pro_entitlement
 from ..config import settings
 from ..constants import (
@@ -91,17 +92,39 @@ logger = logging.getLogger(__name__)
 
 MAX_PROGRESS_EVENTS = 5000
 ORPHANED_RUN_MESSAGE = "The run stopped because its worker went away. Resume, retry or clone it to continue."
-MAX_LOG_ENTRIES = 5000
 PROGRESS_TRIM_SAMPLE_RATE = 100
-# Same sampled-retention idea as progress events: counting rows on every log
-# line doubles the round trips of the worker's hottest write path, and the cap
-# is a soft limit — drifting a batch above it between trims is harmless.
-LOG_TRIM_SAMPLE_RATE = 100
 _IMMUTABLE_JOB_COLUMNS = frozenset({"optimization_id", "notified_at", "idempotency_key"})
 # The JSON columns whose serialized size dominates a job's storage footprint and
 # therefore make up ``jobs.stored_bytes``. ``latest_metrics`` / ``message`` are
 # tiny and intentionally excluded to keep the recompute read narrow.
 _STORED_BYTES_JSON_COLUMNS = ("payload", "result", "payload_overview")
+
+
+def _log_record(log: LogEntryModel) -> LogEntryRecord:
+    """Shape one ``job_logs`` row as the record the API and the live stream serve.
+
+    Args:
+        log: The stored row.
+
+    Returns:
+        The row's fields, with a pre-structured row's missing source read as ``host``.
+    """
+    return cast(
+        LogEntryRecord,
+        {
+            "id": log.id,
+            "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+            "level": log.level,
+            "logger": log.logger,
+            "message": log.message,
+            "pair_index": log.pair_index,
+            "source": log.source or "host",
+            "event": log.event,
+            "fields": log.fields,
+            "candidate": log.candidate,
+            "case": log.case_id,
+        },
+    )
 
 
 def _build_connect_args(db_url: str) -> dict[str, Any]:
@@ -369,7 +392,6 @@ class RemoteDBJobStore:
         # available, else explore search uses ILIKE substring matching.
         self.bm25_search_enabled = False
         self._max_progress_events = settings.progress_events_per_job_cap
-        self._max_log_entries = settings.log_entries_per_job_cap
         self._code_version = settings.code_version
         self._progress_event_counters: defaultdict[str, int] = defaultdict(int)
         self._progress_counter_lock = threading.Lock()
@@ -434,11 +456,6 @@ class RemoteDBJobStore:
     def _progress_events_cap(self) -> int:
         """Return the per-job progress-event retention cap."""
         return getattr(self, "_max_progress_events", MAX_PROGRESS_EVENTS)
-
-    @property
-    def _log_entries_cap(self) -> int:
-        """Return the per-job log-entry retention cap."""
-        return getattr(self, "_max_log_entries", MAX_LOG_ENTRIES)
 
     @property
     def _current_code_version(self) -> str:
@@ -2751,15 +2768,17 @@ class RemoteDBJobStore:
         message: str,
         timestamp: datetime | None = None,
         pair_index: int | None = None,
+        source: str | None = None,
+        event: str | None = None,
+        fields: dict[str, Any] | None = None,
+        candidate: str | None = None,
+        case: str | None = None,
     ) -> None:
         """Append a log entry for a job.
 
-        Silently discards the entry if the job no longer exists (a
-        late log from a cleaned-up run is not an error). Retention is
-        enforced by a sampled trim (mirroring progress events): every
-        ``LOG_TRIM_SAMPLE_RATE`` appends the oldest excess rows are deleted
-        in one batch, instead of paying a ``COUNT(*)`` on every line of the
-        worker's hottest write path.
+        Silently discards the entry if the job no longer exists (a late log
+        from a cleaned-up run is not an error). A run's log is never trimmed:
+        its rows count against the owner's storage budget instead.
 
         Args:
             optimization_id: ID of the job emitting the log.
@@ -2768,72 +2787,69 @@ class RemoteDBJobStore:
             message: Log line content.
             timestamp: Optional override for the entry timestamp; defaults to ``now``.
             pair_index: Optional grid-pair index when emitted from a sweep.
+            source: Where the line came from, see :data:`core.run_log.SOURCES`.
+            event: Typed event name, if the line is an event.
+            fields: The event's JSON payload.
+            candidate: Candidate the line belongs to.
+            case: Case the line belongs to.
         """
-        ts = timestamp or datetime.now(UTC)
+        self.append_logs(
+            optimization_id,
+            [
+                {
+                    "level": level,
+                    "logger": logger_name,
+                    "message": message,
+                    "timestamp": timestamp,
+                    "pair_index": pair_index,
+                    "source": source,
+                    "event": event,
+                    "fields": fields,
+                    "candidate": candidate,
+                    "case": case,
+                }
+            ],
+        )
+
+    def append_logs(self, optimization_id: str, entries: list[dict[str, Any]]) -> None:
+        """Append several log entries for a job in one transaction.
+
+        Takes the keys :meth:`append_log` takes as keyword arguments, with
+        ``logger`` in place of ``logger_name``. Text bound for a fixed-width
+        column is cut to fit and ends with ``...``.
+
+        Args:
+            optimization_id: ID of the job emitting the logs.
+            entries: The entries, oldest first.
+        """
+        if not entries:
+            return
+        now = datetime.now(UTC)
         session = self._get_session()
         try:
             # An existence probe, not a critical section: appends are independent
-            # inserts, so the per-job row lock only serialized writers and starved
-            # the connection pool under concurrent log bursts. The sampled trim
-            # below tolerates a transient over-count without correctness loss.
+            # inserts, so a per-job row lock would only serialize writers and
+            # starve the connection pool under concurrent log bursts.
             exists = session.query(JobModel.optimization_id).filter(JobModel.optimization_id == optimization_id).first()
             if exists is None:
-                logger.warning("Discarding log entry for missing job %s", optimization_id)
+                logger.warning("Discarding %d log entries for missing job %s", len(entries), optimization_id)
                 return
-
-            entry = LogEntryModel(
-                optimization_id=optimization_id,
-                timestamp=ts,
-                level=level,
-                logger=logger_name,
-                message=message,
-                pair_index=pair_index,
-            )
-            session.add(entry)
-
-            session.commit()
-        finally:
-            session.close()
-        if self._should_trim_logs(optimization_id):
-            self._trim_logs(optimization_id)
-
-    def _should_trim_logs(self, optimization_id: str) -> bool:
-        """Return whether this append should trigger a sampled retention trim.
-
-        Args:
-            optimization_id: ID of the job whose in-memory append counter is advanced.
-
-        Returns:
-            ``True`` every ``LOG_TRIM_SAMPLE_RATE`` appends for a job.
-        """
-        if not hasattr(self, "_log_append_counters"):
-            self._log_append_counters = defaultdict(int)
-            self._log_counter_lock = threading.Lock()
-        with self._log_counter_lock:
-            self._log_append_counters[optimization_id] += 1
-            return self._log_append_counters[optimization_id] % LOG_TRIM_SAMPLE_RATE == 0
-
-    def _trim_logs(self, optimization_id: str) -> None:
-        """Delete the oldest excess log entries for a job in one batch.
-
-        Args:
-            optimization_id: ID of the job whose retained log rows should be
-                brought back down to the configured cap.
-        """
-        session = self._get_session()
-        try:
-            log_count = session.query(LogEntryModel).filter(LogEntryModel.optimization_id == optimization_id).count()
-            excess = log_count - self._log_entries_cap
-            if excess <= 0:
-                return
-            old_ids = (
-                session.query(LogEntryModel.id)
-                .filter(LogEntryModel.optimization_id == optimization_id)
-                .order_by(LogEntryModel.timestamp.asc(), LogEntryModel.id.asc())
-                .limit(excess)
-            )
-            session.query(LogEntryModel).filter(LogEntryModel.id.in_(old_ids.scalar_subquery())).delete(
-                synchronize_session=False
+            session.add_all(
+                LogEntryModel(
+                    optimization_id=optimization_id,
+                    timestamp=entry.get("timestamp") or now,
+                    level=run_log.fit(str(entry.get("level") or "INFO"), run_log.LEVEL_CHARS),
+                    logger=run_log.fit(str(entry.get("logger") or ""), run_log.LOGGER_CHARS),
+                    # Postgres TEXT rejects NUL, which sandbox output can carry.
+                    message=str(entry.get("message") or "").replace("\x00", ""),
+                    pair_index=entry.get("pair_index"),
+                    source=run_log.fit(entry.get("source"), run_log.SOURCE_CHARS),
+                    event=run_log.fit(entry.get("event"), run_log.EVENT_CHARS),
+                    fields=entry.get("fields"),
+                    candidate=run_log.fit(entry.get("candidate"), run_log.CANDIDATE_CHARS),
+                    case_id=run_log.fit(entry.get("case"), run_log.CASE_CHARS),
+                )
+                for entry in entries
             )
             session.commit()
         finally:
@@ -2846,6 +2862,7 @@ class RemoteDBJobStore:
         limit: int | None = None,
         offset: int = 0,
         level: str | None = None,
+        after_id: int | None = None,
     ) -> list[LogEntryRecord]:
         """Retrieve log entries for a job, ordered ascending.
 
@@ -2854,6 +2871,8 @@ class RemoteDBJobStore:
             limit: Maximum number of entries to return; ``None`` means no cap.
             offset: Number of entries to skip.
             level: When set, restricts results to the given level.
+            after_id: When set, returns only entries written after the entry with this id,
+                in write order, which is what a live reader resumes from.
 
         Returns:
             Matching log entries in chronological order.
@@ -2863,25 +2882,15 @@ class RemoteDBJobStore:
             q = session.query(LogEntryModel).filter(LogEntryModel.optimization_id == optimization_id)
             if level:
                 q = q.filter(LogEntryModel.level == level)
-            q = q.order_by(LogEntryModel.timestamp.asc())
+            if after_id is not None:
+                q = q.filter(LogEntryModel.id > after_id).order_by(LogEntryModel.id.asc())
+            else:
+                q = q.order_by(LogEntryModel.timestamp.asc(), LogEntryModel.id.asc())
             if offset:
                 q = q.offset(offset)
             if limit is not None:
                 q = q.limit(limit)
-            logs = q.all()
-            return [
-                cast(
-                    LogEntryRecord,
-                    {
-                        "timestamp": log.timestamp.isoformat() if log.timestamp else None,
-                        "level": log.level,
-                        "logger": log.logger,
-                        "message": log.message,
-                        "pair_index": log.pair_index,
-                    },
-                )
-                for log in logs
-            ]
+            return [_log_record(log) for log in q.all()]
         finally:
             session.close()
 

@@ -52,11 +52,17 @@ class ProgressEventRecord(TypedDict):
 class LogEntryRecord(TypedDict):
     """Dict representation of a log entry."""
 
+    id: int
     timestamp: str | None
     level: str
     logger: str
     message: str
     pair_index: int | None
+    source: str
+    event: str | None
+    fields: dict[str, Any] | None
+    candidate: str | None
+    case: str | None
 
 
 @runtime_checkable
@@ -224,6 +230,11 @@ class JobStore(Protocol):
         message: str,
         timestamp: datetime | None = None,
         pair_index: int | None = None,
+        source: str | None = None,
+        event: str | None = None,
+        fields: dict[str, Any] | None = None,
+        candidate: str | None = None,
+        case: str | None = None,
     ) -> None:
         """Append a log entry to a job's log history.
 
@@ -237,6 +248,21 @@ class JobStore(Protocol):
             message: Log line content.
             timestamp: Optional override for the entry timestamp.
             pair_index: Optional grid-pair index when emitted from a sweep.
+            source: Where the line came from, see :data:`core.run_log.SOURCES`.
+            event: Typed event name, if the line is an event.
+            fields: The event's JSON payload.
+            candidate: Candidate the line belongs to.
+            case: Case the line belongs to.
+        """
+        ...
+
+    def append_logs(self, optimization_id: str, entries: list[dict[str, Any]]) -> None:
+        """Append several log entries for a job in one write.
+
+        Args:
+            optimization_id: ID of the job emitting the logs.
+            entries: Entries carrying :meth:`append_log`'s keyword arguments,
+                with ``logger`` in place of ``logger_name``, oldest first.
         """
         ...
 
@@ -247,6 +273,7 @@ class JobStore(Protocol):
         limit: int | None = None,
         offset: int = 0,
         level: str | None = None,
+        after_id: int | None = None,
     ) -> list[LogEntryRecord]:
         """Retrieve log entries for a job with optional level filter and pagination.
 
@@ -255,6 +282,7 @@ class JobStore(Protocol):
             limit: Maximum number of entries to return; ``None`` means no cap.
             offset: Number of entries to skip from the start.
             level: When set, restricts results to the given level.
+            after_id: When set, only entries written after the entry with this id, in write order.
 
         Returns:
             Matching log entries in chronological order.

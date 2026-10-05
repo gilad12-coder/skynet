@@ -103,7 +103,7 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 _RESPONSE_SCHEMA_VERSION = "v6"
 
 
-def _delta_offset(raw: str | None, count: int, cap: int) -> int:
+def _delta_offset(raw: str | None, count: int, cap: int | None) -> int:
     """Resolve a client stream cursor to a safe slice offset.
 
     Position cursors are exact only while a stream is append-only, which holds
@@ -116,7 +116,7 @@ def _delta_offset(raw: str | None, count: int, cap: int) -> int:
     Args:
         raw: The raw ``since_*`` query-param value, or ``None`` when absent.
         count: Current number of rows in the stream.
-        cap: Per-job retention cap for the stream.
+        cap: Per-job retention cap for the stream; ``None`` for a stream that never evicts.
 
     Returns:
         The parsed cursor when it is a valid position into an append-only
@@ -134,7 +134,7 @@ def _delta_offset(raw: str | None, count: int, cap: int) -> int:
         # A non-integer cursor is a client bug, not an eviction edge — reject it
         # loudly instead of silently re-sending the whole stream every tick.
         raise HTTPException(status_code=422, detail="optimization.invalid_cursor") from exc
-    if since <= 0 or since > count or count >= cap:
+    if since <= 0 or since > count or (cap is not None and count >= cap):
         return 0
     return since
 
@@ -260,7 +260,7 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
         progress_offset = _delta_offset(
             request.query_params.get("since_progress"), progress_count, settings.progress_events_per_job_cap
         )
-        logs_offset = _delta_offset(request.query_params.get("since_log"), log_count, settings.log_entries_per_job_cap)
+        logs_offset = _delta_offset(request.query_params.get("since_log"), log_count, None)
         progress_events = job_store.get_progress_events(optimization_id, since=progress_offset)
         logs = job_store.get_logs(optimization_id, offset=logs_offset)
 

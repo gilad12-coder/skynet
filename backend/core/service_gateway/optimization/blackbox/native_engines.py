@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -55,6 +56,48 @@ AUTORESEARCH_VERSION = "1"
 PROMPTS_DIR = Path(__file__).with_name("upstream_prompts")
 # harness_bridge.DIRECT_ANTHROPIC_ENV; this module loads in the sandbox without its siblings.
 _DIRECT_ANTHROPIC_ENV = "SKYNET_CLAUDE_DIRECT"
+# Mirrors core.run_log.RECORD_ATTR: this module runs in the sandbox without Skynet's code.
+RUN_LOG_ATTR = "run_log"
+run_log = logging.getLogger("skynet.engine")
+
+
+def log_event(
+    event: str,
+    message: str,
+    *,
+    level: int = logging.INFO,
+    source: str = "engine",
+    candidate: Any = None,
+    case: Any = None,
+    **fields: Any,
+) -> None:
+    """Log one typed run event, which the runner streams to the job's run log.
+
+    Args:
+        event: Event name, such as ``proposer.done``.
+        message: Human-readable line.
+        level: Logging level.
+        source: ``engine`` or ``proposer``.
+        candidate: Candidate the event belongs to.
+        case: Case the event belongs to.
+        **fields: JSON-serializable event payload.
+    """
+    run_log.log(
+        level,
+        "%s",
+        message,
+        extra={
+            RUN_LOG_ATTR: {
+                "source": source,
+                "event": event,
+                "fields": fields or None,
+                "candidate": None if candidate is None else str(candidate),
+                "case": None if case is None else str(case),
+            }
+        },
+    )
+
+
 ASSET_CHECKSUMS = {
     "meta_harness/SKILL.md": "fce9a51d2e95d8a2d59c60b91106adc0309232a8d6b2fe0fa0785395dcb78d1c",
 }
@@ -425,6 +468,15 @@ def run_proposer(
     log_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     killed = False
+    log_event(
+        "proposer.start",
+        f"Proposer session {name} started" + (" (resumed)" if resume else ""),
+        source="proposer",
+        session=name,
+        model=model,
+        resume=resume,
+        max_budget_usd=max_budget_usd,
+    )
     with (
         (log_dir / f"{name}_stdout.json").open("w", encoding="utf-8") as stdout_file,
         (log_dir / f"{name}_stderr.txt").open("w", encoding="utf-8") as stderr_file,
@@ -455,6 +507,20 @@ def run_proposer(
         killed=killed,
         returncode=process.returncode,
         stderr_tail=stderr[-_FAILURE_TAIL_CHARS:],
+    )
+    duration = round(time.monotonic() - started, 1)
+    log_event(
+        "proposer.done",
+        f"Proposer session {name} {'failed' if outcome.is_error else 'finished'} in {duration}s, "
+        f"spent {outcome.cost_usd:.4f} dollars",
+        level=logging.WARNING if outcome.is_error and not killed else logging.INFO,
+        source="proposer",
+        session=name,
+        duration_s=duration,
+        cost_usd=outcome.cost_usd,
+        returncode=process.returncode,
+        killed=killed,
+        budget_exhausted=outcome.budget_exhausted,
     )
     if outcome.is_error:
         # The runner's stderr reaches the job's run log; the CLI's own files die with the sandbox.
@@ -1769,8 +1835,13 @@ class MetaHarnessEngine:
             ProposerFailedError: When the iteration's CLI session failed on its own.
         """
         best = self._best()
-        print(
-            f"[iter {iteration}] frontier: {best[1]:.4f}" if best else f"[iter {iteration}] frontier: none", flush=True
+        log_event(
+            "iteration.start",
+            f"Iteration {iteration} started, frontier {best[1]:.4f}"
+            if best
+            else f"Iteration {iteration} started, no frontier yet",
+            iteration=iteration,
+            frontier=best[1] if best else None,
         )
         pending = self.logs_dir / "pending_eval.json"
         pending.unlink(missing_ok=True)
@@ -1794,7 +1865,9 @@ class MetaHarnessEngine:
         outcome.raise_if_failed(f"iter{iteration}")
         candidates = self._read_pending(pending)
         if not candidates:
-            print(f"[iter {iteration}] no candidates produced", flush=True)
+            log_event(
+                "iteration.end", f"Iteration {iteration} produced no candidates", iteration=iteration, candidates=0
+            )
             return
         previous_best = best[1] if best else None
         rows: list[dict[str, Any]] = []
@@ -1835,10 +1908,17 @@ class MetaHarnessEngine:
                 handle.write(json.dumps(row) + "\n")
         self._write_frontier()
         new_best = self._best()
-        if new_best and (previous_best is None or new_best[1] > previous_best):
-            print(f"[iter {iteration}] NEW BEST: {new_best[1]:.4f}", flush=True)
-        else:
-            print(f"[iter {iteration}] no improvement", flush=True)
+        improved = bool(new_best and (previous_best is None or new_best[1] > previous_best))
+        log_event(
+            "iteration.end",
+            f"Iteration {iteration} new best {new_best[1]:.4f}"
+            if improved and new_best
+            else f"Iteration {iteration} brought no improvement",
+            iteration=iteration,
+            candidates=len(rows),
+            improved=improved,
+            best=new_best[1] if new_best else None,
+        )
 
     def _read_pending(self, pending: Path) -> list[dict[str, Any]]:
         """Read the proposer's ``pending_eval.json`` candidate list.

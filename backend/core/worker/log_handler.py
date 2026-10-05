@@ -15,6 +15,7 @@ from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from typing import Any
 
+from .. import run_log
 from ..service_gateway.optimization.blackbox import sandbox_log
 from ..storage import JobStore
 
@@ -98,6 +99,7 @@ class JobLogHandler(logging.Handler):
                 message=message,
                 timestamp=timestamp,
                 pair_index=get_current_pair_index(),
+                **run_log.entry_fields(record),
             )
             for event_name, metrics in _extract_progress_from_log(message):
                 self._jobs.record_progress(
@@ -147,6 +149,7 @@ class SandboxLogRouter(logging.Handler):
                 message=record.getMessage(),
                 timestamp=datetime.fromtimestamp(record.created, tz=UTC),
                 pair_index=None,
+                **run_log.entry_fields(record),
             )
         except Exception:
             self.handleError(record)
