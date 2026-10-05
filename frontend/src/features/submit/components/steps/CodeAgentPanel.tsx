@@ -21,6 +21,7 @@ import {
   Composer,
   ComposerModelMenu,
   QuestionChoices,
+  TurnFailedBlock,
 } from "@/shared/ui/agent";
 import { ActivityBreadcrumb } from "@/shared/ui/agent/activity-breadcrumb";
 import type { AgentToolCall as SharedAgentToolCall } from "@/shared/ui/agent";
@@ -166,16 +167,17 @@ export function CodeAgentPanel({
               {agent.error && agent.status === "error" && agent.limitReached && (
                 <ChatErrorBanner message={agent.error} />
               )}
-              {agent.error && agent.status === "error" && !agent.limitReached && (
-                <ChatErrorBanner
-                  message={agent.error}
-                  retryLabel={msg("auto.features.submit.components.steps.codeagentpanel.2")}
+              {agent.status === "error" && !agent.limitReached && (
+                <TurnFailedBlock
+                  message={msg("shared.agent.turn_failed")}
+                  detail={agent.error}
+                  retryLabel={msg("shared.agent.turn_failed_retry")}
                   onRetry={agent.retry}
                   action={
                     <button
                       type="button"
                       onClick={agent.fallbackToManual}
-                      className="-ms-2 min-h-[44px] cursor-pointer rounded px-2 py-0.5 text-[0.6875rem] text-[#7A1E13] transition-colors hover:bg-[#9B2C1F]/10 lg:min-h-0"
+                      className="-ms-2 min-h-[44px] cursor-pointer rounded px-2 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:min-h-0"
                     >
                       {msg("auto.features.submit.components.steps.codeagentpanel.3")}
                     </button>

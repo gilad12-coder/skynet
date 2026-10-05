@@ -7,4 +7,5 @@ export { ComposerModelMenu } from "./composer-model-menu";
 export { MessageActions } from "./message-actions";
 export { QuestionChoices, QuestionChoicesSkeleton } from "./question-choices";
 export { parseTurnStats } from "./turn-stats";
+export { TurnFailedBlock } from "./turn-failed-block";
 export type { AgentMessage, AgentThinking, AgentToolCall, TurnStats } from "./types";

@@ -56,12 +56,48 @@ from ..language_models import (
 )
 from ..react_compat import native_tool_calling_active
 from ..safe_exec import validate_metric_code, validate_signature_code
+from .acting_react import ActingReActV2
 from .answer_options import normalize_options
 from .constants import REASONING_FIELD
 from .parse_salvage import strip_adapter_debris
 from .repo_browser import RepoBrowser
 
 logger = logging.getLogger(__name__)
+
+# ReActV2 termination reasons that mean the agent actually answered.
+_ANSWERED_TERMINATIONS = frozenset({"submit", "forced_submit"})
+
+
+class AgentStoppedError(RuntimeError):
+    """The agent loop ended without calling ``submit`` and without a reply."""
+
+
+def _require_answer(prediction: dspy.Prediction | None, reply_text: str) -> None:
+    """Fail a turn that ended without the agent ever answering.
+
+    A reasoning model that spends its whole output budget thinking returns no
+    tool call; ReActV2 then breaks out of the loop and its forced ``submit``
+    can come back empty too. Reporting that as a finished turn shows the user
+    a bare "Done." while nothing they asked for happened.
+
+    Args:
+        prediction: The loop's final prediction; ``None`` when none arrived.
+        reply_text: The reply streamed or carried by the final prediction.
+
+    Raises:
+        AgentStoppedError: When the reply is empty and the loop did not end
+            on a ``submit`` call.
+    """
+    if reply_text.strip():
+        return
+    reason = getattr(prediction, "termination_reason", None) if prediction is not None else "no_prediction"
+    if reason in _ANSWERED_TERMINATIONS:
+        return
+    logger.warning("code agent stopped without answering: termination_reason=%s", reason)
+    raise AgentStoppedError(
+        "The model stopped before it answered, usually because it ran out of room while thinking. "
+        "Check the editor, then send your message again or pick a different model."
+    )
 
 
 def _format_agent_error(exc: BaseException) -> str:
@@ -84,6 +120,8 @@ def _format_agent_error(exc: BaseException) -> str:
     name = type(leaf).__name__
     if not text:
         return name or "code agent failed"
+    if isinstance(leaf, AgentStoppedError):
+        return text
     if "Cannot connect to host" in text or "nodename nor servname" in text:
         return "Can't reach the model provider. Check your network and try again."
     return f"{name}: {text}" if name not in text else text
@@ -1844,8 +1882,10 @@ def _build_agent_lm(
         # budget, and on real datasets the seed's reasoning alone can run
         # thousands of tokens; keep enough headroom that code is never cut
         # off mid-artifact (a truncation costs a repair LLM call plus two
-        # more multi-second subprocess validations).
-        max_tokens=16000,
+        # more multi-second subprocess validations). A chat step that rewrites
+        # a whole scorer often drafts it in its reasoning first and then emits
+        # it again as the tool argument, which overran 16000.
+        max_tokens=32000,
         extra=extra,
     )
     config = apply_reasoning_effort(config, reasoning_effort)
@@ -3075,7 +3115,7 @@ async def _run_agent(
     # the submit that carries the reply — max_iters=5 covers that without
     # room to run away (the per-artifact success guards reject any further
     # edits).
-    react = dspy.ReActV2(
+    react = ActingReActV2(
         CodeAssistant,
         tools=[session.edit_signature, session.edit_metric],
         max_iters=5,
@@ -3106,6 +3146,7 @@ async def _run_agent(
     }
 
     reply_text = ""
+    prediction: dspy.Prediction | None = None
     with dspy.context(lm=lm):
         async for chunk in program(**inputs):
             if isinstance(chunk, dspy.streaming.StreamResponse):
@@ -3122,9 +3163,11 @@ async def _run_agent(
                         reply_text += delta
                         await queue.put({"event": "message_patch", "data": {"chunk": delta}})
             elif isinstance(chunk, dspy.Prediction):
+                prediction = chunk
                 final = getattr(chunk, "reply", "") or ""
                 if final and final != reply_text:
                     reply_text = final
+    _require_answer(prediction, reply_text)
 
     return {
         "signature_code": session.signature_code,
@@ -3341,7 +3384,7 @@ async def _run_workflow_agent(
     # A graph restructure is several ops (disconnect + add + reconnects),
     # each its own ReAct iteration; 8 covers a two-step insert with a
     # validation retry without room to run away.
-    react = dspy.ReActV2(
+    react = ActingReActV2(
         WorkflowAssistant,
         tools=[
             session.add_node,
@@ -3374,6 +3417,7 @@ async def _run_workflow_agent(
     }
 
     reply_text = ""
+    prediction: dspy.Prediction | None = None
     with dspy.context(lm=lm):
         async for chunk in program(**inputs):
             if isinstance(chunk, dspy.streaming.StreamResponse):
@@ -3390,9 +3434,11 @@ async def _run_workflow_agent(
                         reply_text += delta
                         await queue.put({"event": "message_patch", "data": {"chunk": delta}})
             elif isinstance(chunk, dspy.Prediction):
+                prediction = chunk
                 final = getattr(chunk, "reply", "") or ""
                 if final and final != reply_text:
                     reply_text = final
+    _require_answer(prediction, reply_text)
 
     final_error = await asyncio.to_thread(_validate_workflow_dict, session.workflow)
     return {
@@ -3617,7 +3663,7 @@ async def _run_blackbox_agent(
         tools += [repo_browser.list_repo_folder, repo_browser.read_repo_file]
     # Both artifacts edited with one validator-driven retry each, a brief and
     # a question, plus a handful of repository reads before the reply.
-    react = dspy.ReActV2(BlackboxAssistant, tools=tools, max_iters=14 if repo_browser is not None else 8)
+    react = ActingReActV2(BlackboxAssistant, tools=tools, max_iters=14 if repo_browser is not None else 8)
     reply_stream = ReactReplyStream(react, "reply", lm)
     program = dspy.streamify(react, stream_listeners=reply_stream.listeners(), async_streaming=True)
 
@@ -3636,6 +3682,7 @@ async def _run_blackbox_agent(
     }
 
     reply_text = ""
+    prediction: dspy.Prediction | None = None
     with dspy.context(lm=lm):
         async for chunk in program(**inputs):
             if isinstance(chunk, dspy.streaming.StreamResponse):
@@ -3649,9 +3696,11 @@ async def _run_blackbox_agent(
                         reply_text += delta
                         await queue.put({"event": "message_patch", "data": {"chunk": delta}})
             elif isinstance(chunk, dspy.Prediction):
+                prediction = chunk
                 final = getattr(chunk, "reply", "") or ""
                 if final and final != reply_text:
                     reply_text = final
+    _require_answer(prediction, reply_text)
 
     return {
         "signature_code": session.seed_text,
