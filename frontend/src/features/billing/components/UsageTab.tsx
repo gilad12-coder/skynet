@@ -25,8 +25,6 @@ import { formatCents, formatCentsUsd, formatResetDate, type UsageEntry } from ".
 type PresetRange = "7d" | "30d" | "90d" | "all";
 /** The selected window: a preset, or a user-picked `custom` from/to range. */
 type RangeKey = PresetRange | "custom";
-/** Time bucket for the spend-over-time chart. */
-type GroupBy = "day" | "week";
 
 const RANGE_DAYS: Record<PresetRange, number | null> = { "7d": 7, "30d": 30, "90d": 90, all: null };
 
@@ -36,11 +34,6 @@ const RANGE_LABEL: Record<RangeKey, MessageKey> = {
   "90d": "usage.range.90d",
   all: "usage.range.all",
   custom: "usage.range.custom",
-};
-
-const GROUP_LABEL: Record<GroupBy, MessageKey> = {
-  day: "usage.group.day",
-  week: "usage.group.week",
 };
 
 // Warm monochrome ramp (matches --chart-1..5): billed spend anchors to the
@@ -156,24 +149,11 @@ function formatDay(iso: string, locale: string): string {
   );
 }
 
-/** Monday-anchored ISO week key (`YYYY-MM-DD`) for a calendar day. */
-function weekKey(iso: string): string {
-  const date = new Date(`${iso}T00:00:00Z`);
-  const offset = (date.getUTCDay() + 6) % 7;
-  date.setUTCDate(date.getUTCDate() - offset);
-  return date.toISOString().slice(0, 10);
-}
-
-/** Re-bucket the per-day series to the chosen granularity, ascending by time. */
-function bucketDays(
-  byDay: BillingUsageResponse["by_day"],
-  mode: GroupBy,
-  locale: string,
-): Bucket[] {
+/** Sum the per-day series into chart buckets, ascending by day. */
+function bucketDays(byDay: BillingUsageResponse["by_day"], locale: string): Bucket[] {
   const map = new Map<string, number>();
   for (const day of byDay) {
-    const key = mode === "week" ? weekKey(day.date) : day.date;
-    map.set(key, (map.get(key) ?? 0) + day.billed_cents);
+    map.set(day.date, (map.get(day.date) ?? 0) + day.billed_cents);
   }
   return [...map.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -439,7 +419,6 @@ export function UsageTab() {
   const [range, setRange] = React.useState<RangeKey>("30d");
   const [customFrom, setCustomFrom] = React.useState<string | null>(null);
   const [customTo, setCustomTo] = React.useState<string | null>(null);
-  const [groupBy, setGroupBy] = React.useState<GroupBy>("day");
   const [data, setData] = React.useState<BillingUsageResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const reqId = React.useRef(0);
@@ -481,8 +460,8 @@ export function UsageTab() {
   }, [load]);
 
   const buckets = React.useMemo(
-    () => bucketDays(data?.by_day ?? [], groupBy, locale),
-    [data?.by_day, groupBy, locale],
+    () => bucketDays(data?.by_day ?? [], locale),
+    [data?.by_day, locale],
   );
 
   const entries = data?.entries ?? [];
@@ -490,10 +469,6 @@ export function UsageTab() {
   const rangeOptions = (Object.keys(RANGE_DAYS) as RangeKey[]).map((value) => ({
     value,
     label: msg(RANGE_LABEL[value]),
-  }));
-  const groupOptions = (Object.keys(GROUP_LABEL) as GroupBy[]).map((value) => ({
-    value,
-    label: msg(GROUP_LABEL[value]),
   }));
 
   const toolbar = (
@@ -509,13 +484,6 @@ export function UsageTab() {
           />
         </div>
         <div className="flex items-center gap-2">
-          <Segmented
-            options={groupOptions}
-            value={groupBy}
-            onChange={setGroupBy}
-            size="sm"
-            label={msg("usage.group.label")}
-          />
           <ExportTableMenu
             iconOnly
             disabled={entries.length === 0}
