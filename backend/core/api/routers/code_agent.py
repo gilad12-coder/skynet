@@ -23,6 +23,7 @@ from ...service_gateway.agents.code import run_code_agent
 from ...service_gateway.agents.code_interview import interview_turn_stream
 from ...service_gateway.agents.kickoff import fits_kickoff_budget, measured_bytes, oversized_kickoff
 from ...service_gateway.agents.repo_browser import KICKOFF_MESSAGE, RepoBrowser
+from ...service_gateway.agents.steering import STEER_KEY_MAX_CHARS, get_steer_store
 from ..agent_turns import AgentTurnRegistry
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -256,6 +257,15 @@ class CodeAgentRequest(BaseModel):
             "columns and may be empty."
         ),
     )
+    steer_key: str | None = Field(
+        default=None,
+        max_length=STEER_KEY_MAX_CHARS,
+        description=(
+            "Client-chosen key for this turn. Messages posted to "
+            "``/optimizations/agent-steer`` under it while the turn runs reach "
+            "the agent at its next step, announced by a ``steer_applied`` event."
+        ),
+    )
     kickoff: bool = Field(
         default=False,
         description=(
@@ -444,6 +454,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
     engine = getattr(job_store, "engine", None) if job_store is not None else None
     if engine is not None:
         turns.bind_engine(engine)
+        get_steer_store().bind_engine(engine)
 
     async def _turn_response(source: AsyncIterator[dict], username: str) -> StreamingResponse:
         """Start ``source`` as a resumable turn and stream its first response window.
@@ -541,6 +552,8 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             usage_sink=usage_sink,
             blackbox=req.blackbox.model_dump() if req.blackbox else None,
             repo_browser=repo_browser,
+            steer_owner=current_user.username,
+            steer_key=req.steer_key,
         )
         metered = stream_with_llm_metering(
             source,

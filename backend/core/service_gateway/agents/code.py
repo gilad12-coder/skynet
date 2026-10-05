@@ -62,6 +62,7 @@ from .conduct import with_conduct
 from .constants import REASONING_FIELD
 from .parse_salvage import strip_adapter_debris
 from .repo_browser import RepoBrowser
+from .steering import SteerInbox, attach_steering, get_steer_store
 
 logger = logging.getLogger(__name__)
 
@@ -3067,6 +3068,7 @@ async def _run_agent(
     initial_metric: str,
     reply_language: str,
     queue: asyncio.Queue[dict | None],
+    steering: SteerInbox | None = None,
 ) -> dict[str, str]:
     """Run a ReAct agent with ``edit_signature`` + ``edit_metric`` tools.
 
@@ -3097,6 +3099,8 @@ async def _run_agent(
         initial_metric: Original metric source before any edits this conversation.
         reply_language: Language name for the reply and tool rationales.
         queue: SSE event queue receiving lifecycle and token events.
+        steering: The turn's inbox for messages the user sends while it
+            runs; ``None`` leaves the turn unsteerable.
 
     Returns:
         Mapping with keys ``signature_code``, ``metric_code``, and
@@ -3121,6 +3125,7 @@ async def _run_agent(
         tools=[session.edit_signature, session.edit_metric],
         max_iters=5,
     )
+    attach_steering(react, steering)
     # The user's ``reply`` rides a ``submit`` tool call; ``ReactReplyStream``
     # wires the listeners and decodes it into reply deltas.
     reply_stream = ReactReplyStream(react, "reply", lm)
@@ -3351,6 +3356,7 @@ async def _run_workflow_agent(
     initial_workflow: dict | None,
     reply_language: str,
     queue: asyncio.Queue[dict | None],
+    steering: SteerInbox | None = None,
 ) -> dict[str, Any]:
     """Run a ReAct agent with graph tools over the canvas workflow.
 
@@ -3371,6 +3377,8 @@ async def _run_workflow_agent(
         initial_workflow: Original graph before any edits this conversation.
         reply_language: Language name for the reply and tool rationales.
         queue: SSE event queue receiving lifecycle and token events.
+        steering: The turn's inbox for messages the user sends while it
+            runs; ``None`` leaves the turn unsteerable.
 
     Returns:
         Mapping with keys ``workflow`` (dict), ``metric_code``, and
@@ -3397,6 +3405,7 @@ async def _run_workflow_agent(
         ],
         max_iters=8,
     )
+    attach_steering(react, steering)
     reply_stream = ReactReplyStream(react, "reply", lm)
     program = dspy.streamify(
         react,
@@ -3623,6 +3632,7 @@ async def _run_blackbox_agent(
     reply_language: str,
     queue: asyncio.Queue[dict | None],
     repo_browser: RepoBrowser | None = None,
+    steering: SteerInbox | None = None,
 ) -> dict[str, str]:
     """Run a ReAct agent with ``edit_seed`` + ``edit_scorer`` tools.
 
@@ -3648,6 +3658,8 @@ async def _run_blackbox_agent(
         queue: SSE event queue receiving lifecycle and token events.
         repo_browser: The repository a repository job optimizes, opened by
             the browsing tools; ``None`` otherwise.
+        steering: The turn's inbox for messages the user sends while it
+            runs; ``None`` leaves the turn unsteerable.
 
     Returns:
         Mapping with keys ``signature_code`` (the starting point),
@@ -3665,6 +3677,7 @@ async def _run_blackbox_agent(
     # Both artifacts edited with one validator-driven retry each, a brief and
     # a question, plus a handful of repository reads before the reply.
     react = ActingReActV2(BlackboxAssistant, tools=tools, max_iters=14 if repo_browser is not None else 8)
+    attach_steering(react, steering)
     reply_stream = ReactReplyStream(react, "reply", lm)
     program = dspy.streamify(react, stream_listeners=reply_stream.listeners(), async_streaming=True)
 
@@ -3734,6 +3747,7 @@ async def _run_code_agent_orchestration(
     reply_language: str,
     blackbox: dict[str, Any] | None,
     repo_browser: RepoBrowser | None = None,
+    steering: SteerInbox | None = None,
 ) -> None:
     """Run the seed or chat path and push the terminal envelope into ``queue``.
 
@@ -3772,6 +3786,8 @@ async def _run_code_agent_orchestration(
             point and the scorer.
         repo_browser: The repository a black-box repository job optimizes;
             ``None`` otherwise (chat path only).
+        steering: The turn's inbox for messages the user sends while it
+            runs; ``None`` leaves the turn unsteerable.
     """
     try:
         if blackbox is not None and is_seed:
@@ -3800,6 +3816,7 @@ async def _run_code_agent_orchestration(
                 reply_language=reply_language,
                 queue=queue,
                 repo_browser=repo_browser,
+                steering=steering,
             )
         elif is_seed and prior_workflow is not None:
             results = await _run_workflow_seed(
@@ -3825,6 +3842,7 @@ async def _run_code_agent_orchestration(
                 initial_workflow=initial_workflow,
                 reply_language=reply_language,
                 queue=queue,
+                steering=steering,
             )
         elif is_seed:
             results = await _run_seed(
@@ -3854,6 +3872,7 @@ async def _run_code_agent_orchestration(
                 initial_metric=initial_metric,
                 reply_language=reply_language,
                 queue=queue,
+                steering=steering,
             )
         payload = dict(results)
         payload.setdefault("model", model_name)
@@ -3889,6 +3908,8 @@ async def run_code_agent(
     usage_sink: list | None = None,
     blackbox: dict[str, Any] | None = None,
     repo_browser: RepoBrowser | None = None,
+    steer_owner: str | None = None,
+    steer_key: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream code-agent events to the UI.
 
@@ -3962,6 +3983,9 @@ async def run_code_agent(
             ``scorer_has_model``, ``focus``); ``None`` runs the DSPy paths.
         repo_browser: The repository a black-box repository job optimizes,
             opened by the chat agent's browsing tools; ``None`` otherwise.
+        steer_owner: Username whose mid-turn messages this turn reads.
+        steer_key: Client-chosen key those messages are posted under; with
+            ``steer_owner`` it makes a chat turn steerable.
 
     Yields:
         SSE event dicts of shape ``{"event": str, "data": dict}``.
@@ -3978,6 +4002,17 @@ async def run_code_agent(
     is_seed = not user_message.strip()
 
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
+    steering = (
+        SteerInbox(
+            owner=steer_owner,
+            steer_key=steer_key,
+            input_field="user_message",
+            emit=partial(_emit_to_code_queue, asyncio.get_running_loop(), queue),
+            store=get_steer_store(),
+        )
+        if steer_owner and steer_key and not is_seed
+        else None
+    )
 
     task = asyncio.create_task(
         _run_code_agent_orchestration(
@@ -4003,6 +4038,7 @@ async def run_code_agent(
             reply_language=_reply_language(locale),
             blackbox=blackbox,
             repo_browser=repo_browser,
+            steering=steering,
         )
     )
     try:

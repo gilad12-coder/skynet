@@ -20,6 +20,7 @@ import dspy
 from dspy.utils.exceptions import AdapterParseError
 
 from ..react_compat import native_tool_calling_active
+from .steering import deliver_steering
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class _ActingPredict(dspy.Predict):
             AdapterParseError: When the retry also fails to parse.
             ValueError: When the retry raises a value error from the adapter.
         """
+        deliver_steering(self, kwargs)
         config = dict(kwargs.get("config") or {})
         if "tool_choice" in config:
             return super().forward(**kwargs)
