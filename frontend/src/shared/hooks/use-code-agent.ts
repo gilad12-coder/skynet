@@ -715,6 +715,24 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             // the auto-fix step still matters — abort can land while the
             // validations above are awaited.
             if (controller.signal.aborted) return;
+            // A chat turn that ends without a word is a failed turn, not a
+            // finished one: the chat offers a retry instead of a bare "Done.".
+            if (isChat && !result.assistant_message.trim() && !replyBufRef.current.trim()) {
+              setStatus("error");
+              setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.8"));
+              setSignatureStatus("idle");
+              setMetricStatus("idle");
+              setError(null);
+              if (reasoningBufRef.current) setReasoningEndedAt(Date.now());
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last && last.role === "assistant" && !last.toolCalls?.length) {
+                  return prev.slice(0, -1);
+                }
+                return prev;
+              });
+              return;
+            }
             if (!isChat && isWorkflow) {
               // Workflow seed: the graph landed via workflow_replace (or
               // rides the done payload after a repair); only the metric
@@ -776,7 +794,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               const last = prev[prev.length - 1];
               if (!last || last.role !== "assistant") return prev;
               const fallback = isChat
-                ? "Done."
+                ? ""
                 : blackbox
                   ? msg("submit.blackbox.agent.seed_done")
                   : "I wrote a Signature and Metric based on your data.";
