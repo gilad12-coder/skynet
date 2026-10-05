@@ -637,7 +637,6 @@ class BudgetService:
         max_wallet_cents: Decimal | str | int | float | None = None,
         attempt: int = 0,
         role: str | None = None,
-        headroom_operation_id: str | None = None,
         session: Session | None = None,
     ) -> OperationSnapshot:
         """Admit one physical attempt under its verified scope and wallet bounds.
@@ -655,7 +654,6 @@ class BudgetService:
             max_wallet_cents: Maximum Skynet wallet charge; defaults to the scope bound.
             attempt: Physical retry number; a new billable retry needs a new attempt.
             role: Optional task, judge, proposer or runtime attribution.
-            headroom_operation_id: Recovery hold transferred atomically into this physical operation.
             session: Optional caller transaction for atomic lifecycle publication.
 
         Returns:
@@ -721,40 +719,27 @@ class BudgetService:
             )
             if unresolved is not None:
                 raise BudgetUnreconciledError("Previous-generation paid work must be reconciled before recovery.")
-            headroom = None
-            if headroom_operation_id is not None:
-                headroom = session.get(ExecutionOperationModel, headroom_operation_id, with_for_update=True)
-                if (
-                    headroom is None
-                    or headroom.budget_id != budget.id
-                    or headroom.generation != generation
-                    or headroom.cost_kind != "recovery_headroom"
-                ):
-                    raise BudgetConflictError("The recovery headroom does not belong to this execution generation.")
-                if headroom.state != "reserved" or scope > headroom.max_units or charge > headroom.max_wallet_units:
-                    raise BudgetInsufficientError("Recovery work exceeded its pre-authorized operation bounds.")
-            else:
-                if not budget.uncapped:
-                    remaining = budget.total_cents * CENT_SCALE - budget.settled_units
-                    if scope > remaining:
-                        raise BudgetInsufficientError(
-                            f"The next operation needs up to {ceil_cents(scope)} cents, but only "
-                            f"{max(remaining, 0) // CENT_SCALE} of the {budget.total_cents}-cent limit remain."
-                        )
-                    if scope > remaining - budget.reserved_units:
-                        raise BudgetInFlightError("Covered work must settle before this operation can fit.")
-                held = account_committed_cents(session, username)
-                wallet_balance = int(wallet.balance_cents) + int(wallet.grant_remaining or 0)
-                hold_delta = (
-                    ceil_cents(budget.wallet_settled_units + budget.wallet_reserved_units + charge)
-                    - budget.billed_cents
-                    - budget_wallet_hold(budget)
-                )
-                if hold_delta > wallet_balance - held:
-                    after_release = ceil_cents(budget.wallet_settled_units + charge) - budget.billed_cents
-                    if after_release <= wallet_balance:
-                        raise BudgetInFlightError("Other covered work currently holds the required wallet funds.")
-                    raise BudgetInsufficientError("The account cannot fund the next operation.")
+            if not budget.uncapped:
+                remaining = budget.total_cents * CENT_SCALE - budget.settled_units
+                if scope > remaining:
+                    raise BudgetInsufficientError(
+                        f"The next operation needs up to {ceil_cents(scope)} cents, but only "
+                        f"{max(remaining, 0) // CENT_SCALE} of the {budget.total_cents}-cent limit remain."
+                    )
+                if scope > remaining - budget.reserved_units:
+                    raise BudgetInFlightError("Covered work must settle before this operation can fit.")
+            held = account_committed_cents(session, username)
+            wallet_balance = int(wallet.balance_cents) + int(wallet.grant_remaining or 0)
+            hold_delta = (
+                ceil_cents(budget.wallet_settled_units + budget.wallet_reserved_units + charge)
+                - budget.billed_cents
+                - budget_wallet_hold(budget)
+            )
+            if hold_delta > wallet_balance - held:
+                after_release = ceil_cents(budget.wallet_settled_units + charge) - budget.billed_cents
+                if after_release <= wallet_balance:
+                    raise BudgetInFlightError("Other covered work currently holds the required wallet funds.")
+                raise BudgetInsufficientError("The account cannot fund the next operation.")
             now = datetime.now(UTC)
             operation = ExecutionOperationModel(
                 id=str(uuid4()),
@@ -774,15 +759,8 @@ class BudgetService:
                 updated_at=now,
             )
             session.add(operation)
-            if headroom is None:
-                budget.reserved_units += scope
-                budget.wallet_reserved_units += charge
-            else:
-                headroom.max_units -= scope
-                headroom.max_wallet_units -= charge
-                headroom.updated_at = now
-                if headroom.max_units == 0 and headroom.max_wallet_units == 0:
-                    headroom.state = "released"
+            budget.reserved_units += scope
+            budget.wallet_reserved_units += charge
             budget.updated_at = now
             return self._operation_snapshot(session, operation, budget, wallet)
 
@@ -978,46 +956,6 @@ class BudgetService:
             budget.wallet_reserved_units -= operation.max_wallet_units
             operation.state = "released"
             operation.updated_at = budget.updated_at = now
-            return self._operation_snapshot(session, operation, budget, wallet)
-
-    def trim_recovery_headroom(
-        self,
-        operation_id: str,
-        username: str,
-        *,
-        max_cents: Decimal | str | int | float,
-        max_wallet_cents: Decimal | str | int | float,
-    ) -> OperationSnapshot:
-        """Release unused seed coverage while retaining one proved execution operation.
-
-        Args:
-            operation_id: Recovery hold already transferred into replayed physical work.
-            username: Authenticated account owner.
-            max_cents: Remaining combined scope coverage to retain.
-            max_wallet_cents: Remaining wallet coverage to retain.
-
-        Returns:
-            Updated recovery hold and authoritative budget totals.
-        """
-        scope = cent_units(max_cents)
-        charge = cent_units(max_wallet_cents)
-        with self._transaction() as session:
-            wallet, budget, operation = self._operation(session, operation_id, username)
-            if operation.cost_kind != "recovery_headroom" or operation.state not in {"reserved", "released"}:
-                raise BudgetConflictError("Only active recovery headroom can be trimmed.")
-            if operation.state == "released":
-                if scope or charge:
-                    raise BudgetInsufficientError("Recovery consumed its execution headroom before activation.")
-                return self._operation_snapshot(session, operation, budget, wallet)
-            if scope > operation.max_units or charge > operation.max_wallet_units:
-                raise BudgetInsufficientError("Recovery consumed more than its proved seed-evaluation allowance.")
-            budget.reserved_units -= operation.max_units - scope
-            budget.wallet_reserved_units -= operation.max_wallet_units - charge
-            operation.max_units = scope
-            operation.max_wallet_units = charge
-            operation.updated_at = budget.updated_at = datetime.now(UTC)
-            if scope == 0 and charge == 0:
-                operation.state = "released"
             return self._operation_snapshot(session, operation, budget, wallet)
 
     def fence_generation(

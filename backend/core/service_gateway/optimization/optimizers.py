@@ -26,7 +26,7 @@ from ...constants import (
 )
 from ...exceptions import ServiceError
 from ...models import ModelConfig
-from ..language_models import GepaRecoverySeedBoundary, build_language_model
+from ..language_models import build_language_model
 from .data import DatasetSplits
 from .logged_scores import LoggedScoreRecorder, reset_logged_metrics
 
@@ -494,7 +494,6 @@ def instantiate_optimizer(
     log_dir: str | None = None,
     target_score: float | None = None,
     stop_state: dict[str, Any] | None = None,
-    recovery_seed_model: object | None = None,
 ) -> Any:
     """Instantiate an optimizer, injecting language models and metrics as needed.
 
@@ -537,8 +536,6 @@ def instantiate_optimizer(
         stop_state: Optional mutable mapping that receives the stateful target
             stopper under ``target_score_stopper`` so callers can report
             whether the target actually triggered.
-        recovery_seed_model: Protected task model used to publish GEPA's exact
-            seed-evaluation boundary to the trusted parent.
 
     Returns:
         An instantiated optimizer ready for ``compile``.
@@ -593,28 +590,6 @@ def instantiate_optimizer(
             kwargs["gepa_kwargs"] = gepa_kwargs
             if stop_state is not None:
                 stop_state["target_score_stopper"] = target_stopper
-    if optimizer_key == OPTIMIZER_NAME_GEPA and recovery_seed_model is not None:
-        boundary = GepaRecoverySeedBoundary(recovery_seed_model)
-        gepa_kwargs = _gepa_kwargs_copy(kwargs)
-        existing_observers = gepa_kwargs.get("callbacks")
-        if existing_observers is None:
-            observers: list[Any] = []
-        elif isinstance(existing_observers, list | tuple):
-            observers = list(existing_observers)
-        else:
-            raise ServiceError("GEPA callbacks must be a list or tuple.")
-        existing_stoppers = gepa_kwargs.get("stop_callbacks")
-        if existing_stoppers is None:
-            stoppers: list[Any] = []
-        elif isinstance(existing_stoppers, list | tuple):
-            stoppers = list(existing_stoppers)
-        else:
-            stoppers = [existing_stoppers]
-        if any(not callable(stopper) for stopper in stoppers):
-            raise ServiceError("GEPA stop_callbacks must contain callable stopping conditions.")
-        gepa_kwargs["callbacks"] = [boundary, *observers]
-        gepa_kwargs["stop_callbacks"] = [boundary, *stoppers]
-        kwargs["gepa_kwargs"] = gepa_kwargs
     # GEPA proposal sampling: p distinct parents x n mutations per reflective
     # iteration (PxNSampling), batched so proposals run in parallel and the
     # optimizer generalizes better than the classic one-parent-one-mutation

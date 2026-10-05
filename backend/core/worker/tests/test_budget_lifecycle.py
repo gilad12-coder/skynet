@@ -102,7 +102,6 @@ def test_manifest_retains_upstream_counters_and_requires_exact_evidence(tmp_path
     manifest = checkpoint_manifest(data, payload, "fixture-v1")
     assert manifest["iteration"] == 4
     assert manifest["metric_calls"] == 23
-    assert manifest["seed_reevaluation_required"] is True
     validate_checkpoint(data, manifest, payload, "fixture-v1")
     recovered = completed_gepa_result(str(tmp_path), seed=11)
     assert recovered.total_metric_calls == 23

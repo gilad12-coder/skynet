@@ -487,7 +487,6 @@ def _run_grid_pair(
                 log_dir=trajectory_log_dir,
                 target_score=ctx.payload.target_score,
                 stop_state=stop_state,
-                recovery_seed_model=language_model,
             )
             if ctx.splits.test:
                 with track_stage(STAGE_BASELINE, *timing_callbacks):
@@ -908,7 +907,6 @@ class DspyService:
                 log_dir=trajectory_log_dir,
                 target_score=payload.target_score,
                 stop_state=stop_state,
-                recovery_seed_model=language_model,
             )
             with dspy.context(lm=language_model, callbacks=callbacks):
                 baseline_test_metric = None
@@ -1237,7 +1235,6 @@ class DspyService:
                     run_dir=trajectory_log_dir,
                     progress_callback=progress_callback,
                     timing_callbacks=(gen_timing,),
-                    recovery_seed_model=student_lm,
                 )
             except BudgetReached as exc:
                 if not isinstance(exc.result, dict) or "program_state" not in exc.result:

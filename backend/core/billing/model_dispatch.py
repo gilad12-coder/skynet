@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any
@@ -283,7 +283,6 @@ class OpenRouterDispatcher:
         role: str,
         policy: ChargePolicy,
         client: httpx.Client,
-        quote_observer: Callable[[str, str, OperationQuote, str, int], bool] | None = None,
         batch: BatchCollector | None = None,
         data_policy: DataPolicy | None = None,
     ) -> None:
@@ -296,8 +295,6 @@ class OpenRouterDispatcher:
             role: Task, judge, or optimization attribution.
             policy: The approved model charge and external-cost scope.
             client: Non-retrying HTTP client with an enforced request timeout.
-            quote_observer: Optional parent-side recovery bound recorder and
-                atomic headroom claimant.
             batch: Economy-mode collector; managed chat calls then wait for an
                 OpenRouter batch at half price instead of answering directly.
             data_policy: The owner's provider privacy setting, forced onto every
@@ -309,7 +306,6 @@ class OpenRouterDispatcher:
         self.role = role
         self.policy = policy
         self._client = client
-        self._quote_observer = quote_observer
         self._attempt_quotes: dict[tuple[str, str, int], tuple[str, PricedRequest]] = {}
         self._refusal: tuple[bytes, float] | None = None
         self._batch = batch
@@ -371,15 +367,6 @@ class OpenRouterDispatcher:
             if attempt_key is not None:
                 self._attempt_quotes[attempt_key] = (request_identity, priced)
         physical_key = operation_key or str(uuid4())
-        recovery_headroom = False
-        if self._quote_observer is not None:
-            recovery_headroom = self._quote_observer(
-                self.role,
-                self.model,
-                priced.quote,
-                physical_key,
-                attempt,
-            )
         headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
         headers.update(
             {
@@ -494,7 +481,6 @@ class OpenRouterDispatcher:
             cost_kind="model",
             role=self.role,
             attempt=attempt,
-            recovery_headroom=recovery_headroom,
         )
 
     def stop_batch(self) -> None:
