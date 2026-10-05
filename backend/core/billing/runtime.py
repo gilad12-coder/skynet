@@ -183,6 +183,53 @@ class BudgetRuntime:
                 self.service.stop_admission(self.budget_id, self.username, reason="budget_reached")
                 raise self.stop.trip(str(error)) from error
 
+    def extend(
+        self,
+        operation_id: str,
+        quote: OperationQuote,
+        *,
+        evidence_key: str,
+        evidence: Mapping[str, Any],
+        deadline: float,
+    ) -> OperationSnapshot:
+        """Grow a running sandbox's coverage, waiting for in-flight work until ``deadline``.
+
+        Args:
+            operation_id: Dispatched sandbox attempt.
+            quote: The sandbox's bound over its extended lifetime.
+            evidence_key: Immutable identity of this extension.
+            evidence: Audit record of the extended bound.
+            deadline: ``time.monotonic()`` instant after which waiting stops.
+
+        Returns:
+            The operation with its grown coverage.
+
+        Raises:
+            UsagePendingError: When covered work did not settle before ``deadline``.
+            BudgetReached: When the budget cannot pay for the extension.
+        """
+        while True:
+            self.stop.check()
+            try:
+                return self.service.extend_coverage(
+                    operation_id,
+                    self.username,
+                    evidence_key=evidence_key,
+                    max_cents=quote.maximum.total,
+                    max_wallet_cents=quote.maximum.wallet,
+                    evidence=evidence,
+                )
+            except BudgetInFlightError as error:
+                if time.monotonic() >= deadline:
+                    raise UsagePendingError("Covered work has not settled; the sandbox was not extended.") from error
+                with self._changed:
+                    self._changed.wait(timeout=min(1.0, max(0.0, deadline - time.monotonic())))
+            except BudgetInsufficientError as error:
+                if self.phase == "setup":
+                    raise
+                self.service.stop_admission(self.budget_id, self.username, reason="budget_reached")
+                raise self.stop.trip(str(error)) from error
+
     def execute(
         self,
         quote: OperationQuote,

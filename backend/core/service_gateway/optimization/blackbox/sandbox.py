@@ -28,6 +28,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -35,6 +36,7 @@ import httpx
 
 from ....billing.operation_pricing import json_fingerprint
 from ....billing.runtime import BudgetRuntime
+from ....billing.signals import BudgetReached
 from ....billing.vercel_usage import SANDBOX_NETWORK_BYTES_CAP, VercelUsageReservation
 from ....config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, Settings
 from ....exceptions import ServiceError
@@ -57,6 +59,15 @@ logger = logging.getLogger(__name__)
 _TIMEOUT_EXIT_CODES = frozenset({124, 137})
 # Slack past the in-sandbox timeout before the service kills the wrapper as well.
 KILL_GRACE_SECONDS = 15.0
+# A protected box is funded and kept alive one slice at a time, so a run holds
+# coverage for the slice ahead rather than for the box's whole lifetime. A
+# whole number of minutes, matching Vercel's memory billing increment.
+COVERAGE_SLICE_SECONDS = 600
+# The next slice is funded and the box extended this long before the current one ends.
+_RENEWAL_LEAD_SECONDS = 180.0
+# Waiting for in-flight work to free room for the next slice stops this long before the box would end.
+_RENEWAL_MARGIN_SECONDS = 30.0
+_RENEWAL_JOIN_SECONDS = 30.0
 # Detached processes are watched with short status polls; the delay doubles from
 # the floor to the cap so quick commands return fast and long runs poll gently.
 _POLL_FLOOR_SECONDS = 1.0
@@ -275,7 +286,13 @@ class VercelSandboxSession:
     """Session over one Vercel sandbox, bound to the SDK session that created it."""
 
     def __init__(
-        self, box: Any, api_session: Any, context: contextvars.Context, usage: VercelUsageReservation | None = None
+        self,
+        box: Any,
+        api_session: Any,
+        context: contextvars.Context,
+        usage: VercelUsageReservation | None = None,
+        *,
+        lifetime_ms: int | None = None,
     ) -> None:
         """Wrap an open sandbox.
 
@@ -284,6 +301,8 @@ class VercelSandboxSession:
             api_session: The entered ``vercel.api.session`` context that owns it.
             context: The ``contextvars`` context ``api_session`` was entered in.
             usage: Optional pre-dispatch reservation and trusted provider usage collector.
+            lifetime_ms: The most the box may live once every slice is funded;
+                only a protected box opened for a shorter first slice passes it.
         """
         self._box = box
         # The named-sandbox handle silently resumes stopped VMs. An exact session
@@ -296,6 +315,50 @@ class VercelSandboxSession:
         self._cwd = box.cwd
         self._usage = usage
         self._closed = False
+        self._started = time.monotonic()
+        self._ceiling_ms = lifetime_ms
+        self._stopping = threading.Event()
+        self._renewer: threading.Thread | None = None
+        if usage is not None and lifetime_ms is not None and lifetime_ms > usage.lifetime_ms:
+            self._renewer = threading.Thread(target=self._renew, name=f"renew-{box.name}", daemon=True)
+            self._renewer.start()
+
+    def _renew(self) -> None:
+        """Fund and extend the box one slice at a time until it closes or reaches its ceiling.
+
+        Runs only in the trusted parent: nothing in the box can ask for more
+        time. Each slice is admitted by the ledger before Vercel is asked to
+        extend, so Vercel's own timer never runs past funded coverage. When
+        the budget cannot pay for the next slice, the box is left to end when
+        its funded time runs out.
+        """
+        usage = self._usage
+        assert usage is not None
+        assert self._ceiling_ms is not None
+        while usage.lifetime_ms < self._ceiling_ms:
+            ends = self._started + usage.lifetime_ms / 1000
+            if self._stopping.wait(max(0.0, ends - _RENEWAL_LEAD_SECONDS - time.monotonic())):
+                return
+            funded = usage.lifetime_ms
+            target = min(funded + COVERAGE_SLICE_SECONDS * 1000, self._ceiling_ms)
+            try:
+                usage.extend(target, deadline=ends - _RENEWAL_MARGIN_SECONDS)
+            except (Exception, BudgetReached) as exc:
+                logger.warning("sandbox %s not extended past %ss: %s", self._box.name, funded // 1000, exc)
+                return
+            if self._stopping.is_set():
+                return
+            try:
+                updated = self._session.extend_execution_time_limit(timedelta(milliseconds=target - funded))
+                usage.confirm_extended(updated)
+            except Exception:
+                # The coverage is already held, so an unconfirmed extension
+                # leaves the box over-funded, never under. A limit beyond the
+                # funded lifetime ends the box at once instead.
+                logger.exception("sandbox %s extension unconfirmed; ending it", self._box.name)
+                with contextlib.suppress(Exception):
+                    self._session.stop()
+                return
 
     def write_files(self, files: Mapping[str, str]) -> None:
         """Write text files at paths relative to the working directory, creating parents.
@@ -462,6 +525,9 @@ class VercelSandboxSession:
         if self._closed:
             return
         self._closed = True
+        self._stopping.set()
+        if self._renewer is not None:
+            self._renewer.join(timeout=_RENEWAL_JOIN_SECONDS)
         try:
             if self._usage is None:
                 try:
@@ -569,7 +635,10 @@ class VercelSandboxRuntime:
         image = spec.image or self._image
         name = spec.name
         usage = None
+        lifetime_ms = math.ceil(spec.lifetime_seconds * 1000)
+        first_ms = lifetime_ms
         if self._budget is not None:
+            first_ms = min(lifetime_ms, COVERAGE_SLICE_SECONDS * 1000)
             if not spec.operation_key:
                 raise ServiceError("A protected sandbox requires a stable operation identity.")
             name = (
@@ -582,7 +651,7 @@ class VercelSandboxRuntime:
                 {
                     "name": name,
                     "image": image,
-                    "lifetime_ms": math.ceil(spec.lifetime_seconds * 1000),
+                    "lifetime_ms": first_ms,
                     "vcpus": spec.vcpus,
                     "network_disabled": spec.network_disabled,
                     **(
@@ -632,7 +701,7 @@ class VercelSandboxRuntime:
                 vercel_sync.create_sandbox,
                 name=name,
                 image=image,
-                execution_time_limit=spec.lifetime_seconds,
+                execution_time_limit=first_ms / 1000,
                 resources=vercel_sync.SandboxResources(vcpus=spec.vcpus, memory=spec.vcpus * 2048),
                 persistent=False,
                 ports=[],
@@ -646,10 +715,11 @@ class VercelSandboxRuntime:
                 ),
                 tags={**SANDBOX_TAG, **spec.tags},
             )
-            session = VercelSandboxSession(box, api_session, context, usage)
             if usage is not None:
                 usage.confirm_created(box.current_session)
-            return session
+            return VercelSandboxSession(
+                box, api_session, context, usage, lifetime_ms=lifetime_ms if usage is not None else None
+            )
         except BaseException as error:
             if box is not None:
                 with contextlib.suppress(Exception):

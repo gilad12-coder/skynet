@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterator
 from decimal import Decimal
 from pathlib import Path
@@ -14,6 +15,7 @@ from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session
 from vercel.sandbox import SandboxApiError
 
+from core.billing.budget_amounts import cent_units
 from core.billing.budgets import BudgetInsufficientError, BudgetService
 from core.billing.operation_pricing import UnpricedOperationError
 from core.billing.runtime import BudgetRuntime, UsagePendingError
@@ -206,6 +208,7 @@ def _mock_provider(
     fail_create: bool = False,
     reject_create: bool = False,
     network_policy: dict[str, Any] | None = None,
+    overshoot_ms: int = 0,
 ) -> list[httpx.Request]:
     """Install a real Python SDK transport with deterministic Vercel API responses.
 
@@ -216,6 +219,7 @@ def _mock_provider(
         fail_create: Simulate a network failure after creation may have been accepted.
         reject_create: Answer the first create call with the 400 Vercel returns for a lifetime above its ceiling.
         network_policy: The create body's expected network policy, deny-all when omitted.
+        overshoot_ms: Extra lifetime Vercel reports beyond each requested extension.
 
     Returns:
         Captured provider requests for replay and lifecycle assertions.
@@ -223,6 +227,7 @@ def _mock_provider(
     requests: list[httpx.Request] = []
     sandbox = {"name": "sandbox-one", "currentSessionId": "session-one", "persistent": False}
     final = {**RECEIPT, **(receipt or {})}
+    limit = {"timeout": 0}
 
     def provider(request: httpx.Request) -> httpx.Response:
         """Require durable coverage before returning realistic provider metadata."""
@@ -230,6 +235,7 @@ def _mock_provider(
         if request.method == "POST" and request.url.path.endswith("/v3/sandboxes"):
             assert runtime.service.get(runtime.budget_id, "alice").reserved_cents > 0
             body = json.loads(request.content)
+            limit["timeout"] = body["timeout"]
             assert body["persistent"] is False
             assert body["ports"] == []
             assert body["networkPolicy"] == (network_policy or {"mode": "deny-all"})
@@ -250,8 +256,23 @@ def _mock_provider(
                 if key not in {"stoppedAt", "activeCpuDurationMs", "networkTransfer"}
             }
             active["status"] = "running"
+            active["timeout"] = limit["timeout"]
             return httpx.Response(
                 200, json={"sandbox": {**sandbox, "status": "running"}, "session": active, "routes": []}
+            )
+        if request.method == "POST" and request.url.path.endswith("/session-one/extend-timeout"):
+            limit["timeout"] += json.loads(request.content)["duration"] + overshoot_ms
+            funded = quote_vercel_sandbox({**CREATE, "lifetime_ms": limit["timeout"] - overshoot_ms})
+            with Session(runtime.service._engine) as session:
+                operation = session.scalar(select(ExecutionOperationModel))
+                assert operation.max_units >= cent_units(funded.maximum.total)
+            active = {key: value for key, value in RECEIPT.items() if key not in {"stoppedAt", "activeCpuDurationMs"}}
+            return httpx.Response(
+                200,
+                json={
+                    "sandbox": {**sandbox, "status": "running"},
+                    "session": {**active, "status": "running", "timeout": limit["timeout"]},
+                },
             )
         if request.method == "POST" and request.url.path.endswith("/session-one/stop"):
             return httpx.Response(200, json={"sandbox": {**sandbox, "status": "stopped"}, "session": final})
@@ -407,3 +428,79 @@ def test_insufficient_sandbox_coverage_never_calls_provider(database: Engine, mo
     assert requests == []
     with Session(database) as session:
         assert session.scalar(select(ExecutionOperationModel)) is None
+
+
+_SHORT = {"stoppedAt": 2_900, "activeCpuDurationMs": 500, "timeout": 1_000}
+
+
+def _slices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shrink coverage slices to one second so renewals run within a test."""
+    monkeypatch.setattr(sandbox_module, "COVERAGE_SLICE_SECONDS", 1)
+    monkeypatch.setattr(sandbox_module, "_RENEWAL_LEAD_SECONDS", 0.9)
+    monkeypatch.setattr(sandbox_module, "_RENEWAL_MARGIN_SECONDS", 0.0)
+
+
+def _extensions(requests: list[httpx.Request]) -> list[int]:
+    """Return the durations of the extensions Vercel was asked for."""
+    return [json.loads(r.content)["duration"] for r in requests if r.url.path.endswith("/extend-timeout")]
+
+
+def _wait_for(condition: Any) -> None:
+    """Poll until ``condition()`` holds or two seconds pass."""
+    for _ in range(200):
+        if condition():
+            return
+        time.sleep(0.01)
+
+
+def test_protected_box_is_funded_one_slice_at_a_time_up_to_its_lifetime(
+    database: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Open for the first slice, fund each next slice before Vercel extends, and stop at the ceiling."""
+    _slices(monkeypatch)
+    runtime = _runtime(database)
+    requests = _mock_provider(monkeypatch, runtime, receipt={**_SHORT, "stoppedAt": 4_500, "timeout": 3_000})
+    sandbox = _sandbox_runtime(runtime).open(_spec(lifetime_seconds=3))
+    assert json.loads(requests[0].content)["timeout"] == 1_000
+    first = runtime.service.get(runtime.budget_id, "alice").reserved_cents
+    _wait_for(lambda: len(_extensions(requests)) == 2)
+    time.sleep(0.2)
+    assert _extensions(requests) == [1_000, 1_000]
+    assert runtime.service.get(runtime.budget_id, "alice").reserved_cents > first
+    sandbox.close()
+    snapshot = runtime.service.get(runtime.budget_id, "alice")
+    assert snapshot.reserved_cents == 0
+    assert snapshot.pending_operations == 0
+
+
+def test_unfundable_slice_is_never_requested_from_vercel(database: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Leave the box to end on its funded time when the budget cannot pay for the next slice."""
+    _slices(monkeypatch)
+    runtime = _runtime(database)
+    requests = _mock_provider(monkeypatch, runtime, receipt=_SHORT)
+    attempts: list[str] = []
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        """Refuse every extension as the ledger does when funds run out."""
+        attempts.append(kwargs["evidence_key"])
+        raise BudgetInsufficientError("no room")
+
+    monkeypatch.setattr(runtime.service, "extend_coverage", refuse)
+    sandbox = _sandbox_runtime(runtime).open(_spec(lifetime_seconds=3))
+    _wait_for(lambda: attempts)
+    time.sleep(0.2)
+    assert attempts == ["vercel-extend:2000"]
+    assert _extensions(requests) == []
+    sandbox.close()
+
+
+def test_extension_past_funded_time_ends_the_box(database: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop the box at once when Vercel reports a limit beyond the coverage the ledger holds."""
+    _slices(monkeypatch)
+    runtime = _runtime(database)
+    requests = _mock_provider(monkeypatch, runtime, receipt=_SHORT, overshoot_ms=60_000)
+    sandbox = _sandbox_runtime(runtime).open(_spec(lifetime_seconds=3))
+    _wait_for(lambda: any(r.url.path.endswith("/session-one/stop") for r in requests))
+    assert _extensions(requests) == [1_000]
+    assert any(r.url.path.endswith("/session-one/stop") for r in requests)
+    sandbox.close()

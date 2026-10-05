@@ -714,3 +714,46 @@ def test_recovered_generation_can_repeat_a_logical_operation(engine: Engine) -> 
     assert retried.id == second.id
     assert generation_operation_key("k" * 128, 3).endswith("#g3")
     assert len(generation_operation_key("k" * 128, 3)) <= 128
+
+
+def test_sandbox_coverage_grows_only_through_admission(engine: Engine) -> None:
+    """Admit each extra slice like new work, record it once, and keep settlement capped at the grown bound."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 30, idempotency_key="slices")
+    box = _reserve(service, budget.id, "box", cost_kind="sandbox", max_cents=10)
+    model = _reserve(service, budget.id, "model", max_cents=5)
+    with pytest.raises(BudgetConflictError, match="running sandbox"):
+        service.extend_coverage(
+            box.id, "alice", evidence_key="early", max_cents=12, max_wallet_cents=12, evidence={"lifetime_ms": 2}
+        )
+    service.mark_dispatched(box.id, "alice", "session-one")
+    service.mark_dispatched(model.id, "alice", "request-one")
+    with pytest.raises(BudgetConflictError, match="running sandbox"):
+        service.extend_coverage(
+            model.id, "alice", evidence_key="model", max_cents=12, max_wallet_cents=12, evidence={"lifetime_ms": 2}
+        )
+    with pytest.raises(BudgetConflictError, match="grow"):
+        service.extend_coverage(
+            box.id, "alice", evidence_key="shrink", max_cents=10, max_wallet_cents=10, evidence={"lifetime_ms": 2}
+        )
+    with pytest.raises(BudgetInFlightError):
+        service.extend_coverage(
+            box.id, "alice", evidence_key="wait", max_cents=26, max_wallet_cents=26, evidence={"lifetime_ms": 2}
+        )
+    with pytest.raises(BudgetInsufficientError):
+        service.extend_coverage(
+            box.id, "alice", evidence_key="over", max_cents=41, max_wallet_cents=41, evidence={"lifetime_ms": 3}
+        )
+    for _ in range(2):
+        service.extend_coverage(
+            box.id, "alice", evidence_key="slice-2", max_cents=20, max_wallet_cents=20, evidence={"lifetime_ms": 2}
+        )
+        assert service.get(budget.id, "alice").reserved_cents == 25
+    with pytest.raises(BudgetConflictError, match="different bound"):
+        service.extend_coverage(
+            box.id, "alice", evidence_key="slice-2", max_cents=22, max_wallet_cents=22, evidence={"lifetime_ms": 2}
+        )
+    with pytest.raises(BudgetBoundExceededError):
+        service.settle(box.id, "alice", evidence_key="stop-over", actual_cents=21, actual_wallet_cents=21, evidence={})
+    service.settle(box.id, "alice", evidence_key="stop", actual_cents=18, actual_wallet_cents=18, evidence={})
+    assert service.get(budget.id, "alice").reserved_cents == 5

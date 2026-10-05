@@ -365,6 +365,7 @@ class VercelUsageReservation:
             operation_key: Stable logical identity for creation replay protection.
         """
         self.runtime = runtime
+        self.request = dict(request)
         self.vcpus = request["vcpus"]
         self.lifetime_ms = request["lifetime_ms"]
         self.quote = quote_vercel_sandbox(request)
@@ -385,7 +386,7 @@ class VercelUsageReservation:
         """
         path = response.request.url.path
         is_create = path == "/api/v3/sandboxes" and response.request.method == "POST"
-        is_session = re.fullmatch(r"/api/v2/sandboxes/sessions/[^/]+(?:/stop)?", path) is not None
+        is_session = re.fullmatch(r"/api/v2/sandboxes/sessions/[^/]+(?:/stop|/extend-timeout)?", path) is not None
         if response.request.url.host != "vercel.com" or not response.is_success or not (is_create or is_session):
             return
         try:
@@ -427,6 +428,50 @@ class VercelUsageReservation:
             or math.ceil(timeout.total_seconds() * 1000) > self.lifetime_ms
         ):
             raise UsagePendingError("Vercel did not confirm the admitted CPU, memory, region, and lifetime limits.")
+
+    def extend(self, lifetime_ms: int, *, deadline: float) -> None:
+        """Fund the session up to ``lifetime_ms`` before Vercel is asked to keep it alive that long.
+
+        The coverage grows to the quote for the whole extended lifetime, so
+        the slices add up to exactly what one up-front quote would hold.
+
+        Args:
+            lifetime_ms: The session's total lifetime once extended.
+            deadline: ``time.monotonic()`` instant after which waiting for in-flight work stops.
+
+        Raises:
+            UnpricedOperationError: When the extended lifetime cannot be bounded.
+            UsagePendingError: When covered work did not settle before ``deadline``.
+            BudgetReached: When the budget cannot pay for the extension.
+        """
+        if lifetime_ms <= self.lifetime_ms:
+            raise ValueError("An extension must lengthen the funded lifetime.")
+        quote = quote_vercel_sandbox({**self.request, "lifetime_ms": lifetime_ms})
+        self.runtime.extend(
+            self.operation.id,
+            quote,
+            evidence_key=f"vercel-extend:{lifetime_ms}",
+            evidence={"provider": "vercel", "lifetime_ms": lifetime_ms, "request": quote.request_fingerprint},
+            deadline=deadline,
+        )
+        self.lifetime_ms = lifetime_ms
+
+    def confirm_extended(self, session: Any) -> None:
+        """Verify Vercel kept the session within its funded lifetime.
+
+        Args:
+            session: The session handle Vercel returned from the extension.
+
+        Raises:
+            UsagePendingError: When the returned limit is missing or exceeds the funded lifetime.
+        """
+        timeout = session.execution_time_limit
+        if (
+            session.id != self.session_id
+            or timeout is None
+            or math.ceil(timeout.total_seconds() * 1000) > self.lifetime_ms
+        ):
+            raise UsagePendingError("Vercel extended the session beyond its funded lifetime.")
 
     def pending(self) -> None:
         """Retain covered funding when creation, shutdown, or billing evidence is uncertain."""
