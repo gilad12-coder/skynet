@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * Visual pipeline timeline — renders the run's planned stages (validating →
- * splitting → baseline → optimizing [→ refining] → evaluating, see
+ * Visual pipeline timeline — renders the run's planned stages (validating → [splitting →
+ * baseline →] optimizing [→ refining] → evaluating, see
  * `planPipelineStages`) as a connected row of nodes. Each finished stage
  * shows how far into the run it was reached (like chapter markers on a
  * video) plus the wall-clock time.
