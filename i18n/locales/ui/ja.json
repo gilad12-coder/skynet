@@ -4161,5 +4161,7 @@
   "tooltip.usage_tab.charged": "Skynetがウォレットに請求した額。自分のキーを使う場合はプラットフォーム手数料です。",
   "tooltip.usage_tab.provider": "これらの呼び出しについて、プロバイダーがあなた自身のキーに請求する額。概算であり、請求はプロバイダーが行います。",
   "tooltip.usage_tab.not_priced": "このモデルには価格が登録されていないため、呼び出しとトークンはカウントされますが、コストは表示できません。",
-  "tooltip.usage_tab.unattributed": "ロールのタグが付いていないモデル呼び出し。合計には含まれます。"
+  "tooltip.usage_tab.unattributed": "ロールのタグが付いていないモデル呼び出し。合計には含まれます。",
+  "usage_tab.role.rounding": "1セント単位への切り上げ",
+  "tooltip.usage_tab.role.rounding": "ウォレットへの請求は1セント単位で、実行全体に対して一度だけ切り上げられます。この行はその差額です。"
 }

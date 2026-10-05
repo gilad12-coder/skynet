@@ -4161,5 +4161,7 @@
   "tooltip.usage_tab.charged": "Was Skynet deinem Wallet belastet hat. Bei eigenen Schlüsseln ist das die Plattformgebühr.",
   "tooltip.usage_tab.provider": "Was dein Anbieter deinem eigenen Schlüssel für diese Aufrufe berechnet. Es ist eine Schätzung, und dein Anbieter rechnet sie ab.",
   "tooltip.usage_tab.not_priced": "Für dieses Modell ist kein Preis hinterlegt. Seine Aufrufe und Tokens zählen, aber seine Kosten können nicht angezeigt werden.",
-  "tooltip.usage_tab.unattributed": "Modellaufrufe ohne Rollen-Tag. Sie zählen trotzdem zur Gesamtsumme."
+  "tooltip.usage_tab.unattributed": "Modellaufrufe ohne Rollen-Tag. Sie zählen trotzdem zur Gesamtsumme.",
+  "usage_tab.role.rounding": "Rundung auf ganze Cent",
+  "tooltip.usage_tab.role.rounding": "Deine Wallet wird in ganzen Cent belastet, einmal für den gesamten Lauf aufgerundet. Diese Zeile ist die Differenz."
 }

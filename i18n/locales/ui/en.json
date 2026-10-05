@@ -4161,5 +4161,7 @@
   "tooltip.usage_tab.charged": "What Skynet charged your wallet. For your own keys, that's the platform fee.",
   "tooltip.usage_tab.provider": "What your provider charges your own key for these calls. It's an estimate, and your provider bills it.",
   "tooltip.usage_tab.not_priced": "This model has no price on record, so its calls and tokens count but its cost can't be shown.",
-  "tooltip.usage_tab.unattributed": "Model calls that weren't tagged with one. They still count in the total."
+  "tooltip.usage_tab.unattributed": "Model calls that weren't tagged with one. They still count in the total.",
+  "usage_tab.role.rounding": "Rounding to whole cents",
+  "tooltip.usage_tab.role.rounding": "Your wallet is charged in whole cents, rounded up once for the whole run. This row is that difference."
 }

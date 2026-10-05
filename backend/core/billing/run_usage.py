@@ -17,8 +17,8 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from ..storage.models import ExecutionOperationModel, ExecutionUsageEvidenceModel
-from .budget_amounts import cents_from_units
+from ..storage.models import ExecutionBudgetModel, ExecutionOperationModel, ExecutionUsageEvidenceModel
+from .budget_amounts import CENT_SCALE, cents_from_units
 from .pricing import CENT_USD_VALUE, ModelUsage, usage_cost_usd
 
 ROLE_TASK = "task"
@@ -28,6 +28,7 @@ ROLE_SCORER = "scorer"
 ROLE_SANDBOX = "sandbox"
 ROLE_SETUP = "setup"
 ROLE_OTHER = "other"
+ROLE_ROUNDING = "rounding"
 
 BILLING_SKYNET = "skynet"
 BILLING_BYOK = "byok"
@@ -250,6 +251,55 @@ def load_records(engine: Engine, budget_id: str) -> list[OperationRecord]:
             )
             for operation in operations
         ]
+
+
+def billed_cents(engine: Engine, budget_id: str) -> int | None:
+    """Read how many whole cents a budget has billed to the wallet.
+
+    Args:
+        engine: Database engine holding the billing tables.
+        budget_id: The run's execution budget.
+
+    Returns:
+        The billed cents, or ``None`` when the budget does not exist.
+    """
+    with Session(engine) as session:
+        return session.execute(
+            select(ExecutionBudgetModel.billed_cents).where(ExecutionBudgetModel.id == budget_id)
+        ).scalar_one_or_none()
+
+
+def with_rounding(rows: list[UsageRow], billed: int | None) -> list[UsageRow]:
+    """Add a row for the wallet rounding its fractional charges up to whole cents.
+
+    The wallet bills the ceiling of the run's running total, so the operations
+    sum to slightly less than the charge. The extra row keeps every grouping
+    adding up to exactly what the wallet charged.
+
+    Args:
+        rows: The run's usage rows.
+        billed: Whole cents the budget billed, or ``None`` when unknown.
+
+    Returns:
+        ``rows``, plus a rounding row when the charge exceeds their sum.
+    """
+    if billed is None:
+        return rows
+    gap = billed * CENT_SCALE - sum(row.charged_units for row in rows)
+    if gap <= 0:
+        return rows
+    return [
+        *rows,
+        UsageRow(
+            role=ROLE_ROUNDING,
+            model=None,
+            stage=None,
+            pair=None,
+            candidate=None,
+            billing=BILLING_SKYNET,
+            charged_units=gap,
+        ),
+    ]
 
 
 def serialize(rows: Iterable[UsageRow]) -> list[dict[str, Any]]:

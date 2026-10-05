@@ -47,6 +47,14 @@ describe("groupUsage", () => {
     }
   });
 
+  it("keeps the rounding row out of model groupings and in the total", () => {
+    const rounded = [...rows, row({ role: "rounding", model: null, charged_cents: 0.5 })];
+    const groups = groupUsage(rounded, "model");
+    assert.ok(groups.find((g) => g.key === "rounding")?.nonModel);
+    assert.equal(usageTotal(rounded).chargedCents, 19);
+    assert.deepEqual(availableGroupings([row({ role: "rounding", model: null })]), ["role"]);
+  });
+
   it("puts model spend without a tag under unattributed, after attributed groups", () => {
     const groups = groupUsage(rows, "candidate");
     assert.deepEqual(

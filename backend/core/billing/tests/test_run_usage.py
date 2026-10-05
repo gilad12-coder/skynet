@@ -19,14 +19,17 @@ from core.billing.run_usage import (
     BILLING_SKYNET,
     ROLE_PROPOSER,
     ROLE_REFLECTION,
+    ROLE_ROUNDING,
     ROLE_SANDBOX,
     ROLE_SCORER,
     ROLE_SETUP,
     ROLE_TASK,
     OperationRecord,
     aggregate,
+    billed_cents,
     load_records,
     serialize,
+    with_rounding,
 )
 from core.storage.models import Base, ExecutionBudgetModel, ExecutionOperationModel, ExecutionUsageEvidenceModel
 
@@ -144,6 +147,23 @@ def test_direct_proposer_usage_is_a_row_with_an_estimate_and_no_charge() -> None
     assert aggregate([], proposer=True, direct_usage=[usage], pair="0") == []
 
 
+def test_rounding_row_brings_the_rows_up_to_the_billed_charge() -> None:
+    """Add the gap to whole billed cents as its own row, so the rows equal the charge."""
+    rows = aggregate(
+        [_op(cents="0.4", evidence=_call()), _op(role="runtime", cost_kind="sandbox", cents="0.3")], proposer=False
+    )
+    rounded = with_rounding(rows, 1)
+    assert rounded[-1].role == ROLE_ROUNDING
+    assert sum(row.charged_units for row in rounded) == cent_units(1)
+    assert with_rounding(rows, None) == rows
+
+
+def test_no_rounding_row_when_rows_already_match() -> None:
+    """Leave whole-cent rows alone."""
+    rows = aggregate([_op(cents="2", evidence=_call())], proposer=False)
+    assert with_rounding(rows, 2) == rows
+
+
 def test_serialize_renders_cents() -> None:
     """Render units as cents for JSON."""
     (document,) = serialize(aggregate([_op(cents="1.23456789", evidence=_call())], proposer=False))
@@ -217,6 +237,8 @@ def test_load_records_merges_evidence_per_operation(engine: Engine) -> None:
             )
         session.commit()
     (record,) = load_records(engine, "b1")
+    assert billed_cents(engine, "b1") == 0
+    assert billed_cents(engine, "missing") is None
     assert record.policy == _MANAGED
     assert record.wallet_units == cent_units(2)
     assert record.evidence["tags"] == {"stage": "training"}

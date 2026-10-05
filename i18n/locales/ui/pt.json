@@ -4161,5 +4161,7 @@
   "tooltip.usage_tab.charged": "O que a Skynet cobrou à sua carteira. Com as suas próprias chaves, é a taxa da plataforma.",
   "tooltip.usage_tab.provider": "O que o seu fornecedor cobra à sua própria chave por estas chamadas. É uma estimativa, e é o seu fornecedor que a fatura.",
   "tooltip.usage_tab.not_priced": "Este modelo não tem preço registado, por isso as chamadas e os tokens contam, mas o custo não pode ser mostrado.",
-  "tooltip.usage_tab.unattributed": "Chamadas ao modelo que não foram marcadas com uma função. Continuam a contar para o total."
+  "tooltip.usage_tab.unattributed": "Chamadas ao modelo que não foram marcadas com uma função. Continuam a contar para o total.",
+  "usage_tab.role.rounding": "Arredondamento ao cêntimo",
+  "tooltip.usage_tab.role.rounding": "A carteira é cobrada em cêntimos inteiros, arredondados para cima uma única vez para toda a execução. Esta linha é a diferença."
 }

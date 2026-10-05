@@ -4161,5 +4161,7 @@
   "tooltip.usage_tab.charged": "Skynet 从你的钱包扣除的金额。使用自有密钥时，这是平台费用。",
   "tooltip.usage_tab.provider": "提供商就这些调用向你自有密钥收取的费用。这是估算值，由提供商计费。",
   "tooltip.usage_tab.not_priced": "此模型没有价格记录，因此其调用和令牌会计入，但无法显示费用。",
-  "tooltip.usage_tab.unattributed": "未标记角色的模型调用，仍计入合计。"
+  "tooltip.usage_tab.unattributed": "未标记角色的模型调用，仍计入合计。",
+  "usage_tab.role.rounding": "向上取整到整美分",
+  "tooltip.usage_tab.role.rounding": "钱包按整美分扣费，整个运行只向上取整一次。这一行就是差额。"
 }

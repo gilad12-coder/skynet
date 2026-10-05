@@ -4161,5 +4161,7 @@
   "tooltip.usage_tab.charged": "Skynet'in cüzdanınızdan tahsil ettiği tutar. Kendi anahtarlarınızda bu, platform ücretidir.",
   "tooltip.usage_tab.provider": "Sağlayıcınızın bu çağrılar için kendi anahtarınızdan aldığı ücret. Bu bir tahmindir ve faturayı sağlayıcınız keser.",
   "tooltip.usage_tab.not_priced": "Bu modelin kayıtlı bir fiyatı yok; çağrıları ve token'ları sayılır ama maliyeti gösterilemez.",
-  "tooltip.usage_tab.unattributed": "Bir rolle etiketlenmemiş model çağrıları. Yine de toplama dahil edilir."
+  "tooltip.usage_tab.unattributed": "Bir rolle etiketlenmemiş model çağrıları. Yine de toplama dahil edilir.",
+  "usage_tab.role.rounding": "Tam sente yuvarlama",
+  "tooltip.usage_tab.role.rounding": "Cüzdanınızdan tam sent olarak ücret alınır ve tüm çalıştırma için bir kez yukarı yuvarlanır. Bu satır aradaki farktır."
 }
