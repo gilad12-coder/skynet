@@ -30,7 +30,16 @@ from core.models.blackbox import BlackboxProposer, BlackboxTarget
 from core.service_gateway.language_models import total_tokens_from_history, usage_by_model_from_history
 from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededError
 
-from .. import autosaddler_runner, best_of_n, gepa_engine, harness_bridge, native_runner, native_runtime, repo_tree
+from .. import (
+    autosaddler_runner,
+    best_of_n,
+    gepa_engine,
+    harness_bridge,
+    native_runner,
+    native_runtime,
+    repo_tree,
+    sandbox_log,
+)
 from ..harness import GatewayConfig, build_launch, launch_payload
 from ..native_runtime import NativeOptions, _bootstrap_command, check_native_runtime, run_native_engine
 from ..protocol import EvalServer, Result, ScorerAbortError, Task
@@ -1124,6 +1133,7 @@ class _RecordingMailbox:
     def __init__(self) -> None:
         """Start with no recorded progress."""
         self.lines: list[dict[str, Any]] = []
+        self.labels = threading.local()
 
     def evaluate(self, candidate: Any, example: Any = None) -> tuple[float, dict[str, Any]]:
         """Score a text by its vowel density, ignoring the case.
@@ -1203,3 +1213,44 @@ def test_mailbox_relays_case_scores_and_per_case_versions() -> None:
     assert candidate["parent_id"] is None
     assert candidate["score"] == 0.75
     assert candidate["per_example"] == [{"id": "0", "score": 1.0}, {"id": "1", "score": 0.5}]
+
+
+def test_each_evaluation_runs_in_a_scope_of_the_candidate_and_case_the_child_names() -> None:
+    """Scorer events logged while scoring a request carry its candidate and case labels."""
+    seen: list[dict[str, Any] | None] = []
+
+    def evaluator(candidate: str, example: Any = None) -> tuple[float, dict[str, Any]]:
+        """Record the event scope the scorer would run in."""
+        seen.append(sandbox_log._scope.get())
+        return 1.0, {}
+
+    mailbox = native_runtime._EvaluatorMailbox(FakeSession(), EvalServer(evaluator, max_evals=3), "nonce")
+    request = {"candidate": "seed", "example": {"q": 1}, "candidate_id": 4, "case": "2"}
+    mailbox.on_output(
+        "stdout",
+        f"SKYNET_NATIVE_RPC nonce {json.dumps({**request, 'id': '0' * 32})}\n"
+        f"SKYNET_NATIVE_RPC nonce {json.dumps({**request, 'id': '1' * 32, 'candidate_id': True, 'case': [1]})}\n",
+    )
+    assert mailbox.error is None
+    assert seen == [{"candidate": "4", "case": "2"}, {}]
+
+
+def test_the_child_names_the_candidate_and_case_of_each_request(tmp_path: Path) -> None:
+    """Each evaluation is labelled with the registered candidate id and the case's position."""
+    labels: list[tuple[Any, Any]] = []
+    mailbox = _RecordingMailbox()
+
+    def evaluate(candidate: str, example: Any = None, **kwargs: Any) -> tuple[float, dict[str, Any]]:
+        """Record the labels the request would carry."""
+        labels.append((mailbox.labels.candidate_id, mailbox.labels.case))
+        return 1.0, {}
+
+    mailbox.evaluate = evaluate  # type: ignore[method-assign]
+    task = UpstreamTask("seed", train_set=[{"id": "a"}, {"id": "b"}])
+    server = native_runner.ProgressEvalServer(
+        task, mailbox, OptimizeAnythingConfig(max_evals=8, max_concurrency=1), tmp_path
+    )
+    server._register_candidate("seed")
+    server.evaluate("seed", list(server._examples.values())[1])
+    server.evaluate("unregistered", None)
+    assert labels == [(0, "1"), (None, None)]

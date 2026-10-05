@@ -76,6 +76,9 @@ class EvaluatorMailbox:
         self.timeout_seconds = timeout_seconds
         self.error: EvaluationStopped | None = None
         self.stopped = threading.Event()
+        # Candidate and case of the evaluation this thread is making, so the
+        # parent can tag what the scorer logs while scoring it.
+        self.labels = threading.local()
         self._write_lock = threading.Lock()
 
     def evaluate(self, candidate: str, example: Any = None, **kwargs: Any) -> tuple[float, dict[str, Any]]:
@@ -96,7 +99,13 @@ class EvaluatorMailbox:
         if self.stopped.is_set():
             raise EvaluationStopped("The parent evaluator has stopped this run.")
         request_id = uuid.uuid4().hex
-        request = {"id": request_id, "candidate": candidate, "example": example}
+        request = {
+            "id": request_id,
+            "candidate": candidate,
+            "example": example,
+            "candidate_id": getattr(self.labels, "candidate_id", None),
+            "case": getattr(self.labels, "case", None),
+        }
         self.emit(_RPC_PREFIX, request)
         response_path = Path("rpc") / f"{request_id}.json"
         deadline = time.monotonic() + self.timeout_seconds
@@ -271,6 +280,9 @@ class ProgressEvalServer(EvalServer):
         Returns:
             The unchanged upstream score and side information.
         """
+        with self._lock:
+            self.mailbox.labels.candidate_id = self._candidate_registry.get(_candidate_key(candidate))
+        self.mailbox.labels.case = None if example is None else self._case_ids.get(id(example))
         score, info = super().evaluate(candidate, example, **kwargs)
         with self._sweep_lock:
             sweep = self._sweeps.get(_candidate_key(candidate))

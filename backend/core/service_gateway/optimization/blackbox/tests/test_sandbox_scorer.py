@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ from core.exceptions import ServiceError
 from core.models.common import ModelConfig
 from core.service_gateway.language_models import lm_call_count, total_tokens_from_history, usage_by_model_from_history
 
+from .. import sandbox_log
 from .. import sandbox_scorer as sandbox_scorer_mod
 from ..harness import GatewayConfig
 from ..sandbox import CommandResult, LocalSubprocessRuntime, OutputSink
@@ -730,3 +732,35 @@ def test_sandbox_scorer_reports_an_uninstallable_candidate_package_as_feedback()
     assert [request["action"] for request in box.requests] == ["install", "extend"]
     assert box.commands[-1] == f"python3 {RUNNER_FILE} {CALLS_DIR}/000001"
     assert box.closed is False
+
+
+def test_scorer_log_events_reach_the_run_log_tagged_with_their_candidate_and_case() -> None:
+    """End to end through the real runner: ``log()`` streams out, prints stay hidden."""
+    code = (
+        "from skynet import log\n"
+        "def score(candidate, case=None):\n"
+        "    log('judge.retry', 'retrying the judge', level='warning', attempt=2)\n"
+        "    print('hidden from the log')\n"
+        "    return 1.0, 'ok'\n"
+    )
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler(logging.DEBUG)
+    handler.emit = records.append  # type: ignore[method-assign]
+    sandbox_log.stream_logger.addHandler(handler)
+    try:
+        with sandbox_log.event_scope(candidate="3", case="1"):
+            probe = probe_scorer(scorer_code=code, candidate="x", runtime=LocalSubprocessRuntime())
+    finally:
+        sandbox_log.stream_logger.removeHandler(handler)
+    assert probe.score == 1.0
+    [event] = [record for record in records if record.run_log["event"]]
+    assert event.levelno == logging.WARNING
+    assert event.getMessage() == "retrying the judge"
+    assert event.run_log == {
+        "source": "scorer",
+        "event": "judge.retry",
+        "fields": {"attempt": 2},
+        "candidate": "3",
+        "case": "1",
+    }
+    assert not any("hidden from the log" in record.getMessage() for record in records)

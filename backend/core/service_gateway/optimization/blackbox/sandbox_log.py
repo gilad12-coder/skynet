@@ -10,20 +10,26 @@ job's run log, and the optimization subprocess forwards them as log events.
 
 Sandbox output is untrusted, so it is stripped of terminal control sequences
 and scrubbed of every secret the command was given. :func:`forward` relays a
-structured record a sandbox sent, attributed and capped by the host.
+structured record a sandbox sent, attributed and capped by the host. Inside an
+:func:`event_scope`, the ``log()`` events a scorer writes to stderr are relayed
+the same way, pinned to the scope's source, candidate and case.
 """
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import functools
+import json
 import logging
 import re
 import threading
 from collections import deque
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
 
 from .... import run_log
+from .runner import EVENT_PREFIX
 
 logger = logging.getLogger(__name__)
 # Streamed lines reach only the run-log handlers attached here, never the
@@ -39,6 +45,44 @@ _SECRET_MIN_CHARS = 8
 _CONTROL = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]|[\x00-\x08\x0b-\x1f\x7f]")
 # The highest level a sandbox may claim: CRITICAL is reserved for the host.
 _FORWARDED_LEVELS = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING, "ERROR": logging.ERROR}
+
+
+# What the host knows about the command running now: the source its events
+# come from and the candidate and case it serves. Unset, stderr is plain output.
+_scope: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("sandbox_event_scope", default=None)
+
+
+@contextlib.contextmanager
+def event_scope(**tags: Any) -> Iterator[None]:
+    """Relay the events commands write to stderr while the scope is open.
+
+    Scopes nest: an inner one keeps the outer's tags and overrides those it sets.
+
+    Args:
+        **tags: ``source``, ``candidate`` and ``case`` to pin on every event; ``None`` keeps the outer value.
+
+    Yields:
+        Nothing; the scope ends when the block does.
+    """
+    merged = {**(_scope.get() or {}), **{key: value for key, value in tags.items() if value is not None}}
+    token = _scope.set(merged)
+    try:
+        yield
+    finally:
+        _scope.reset(token)
+
+
+def ignore_output(stream: str, text: str) -> None:
+    """Accept streamed output that :func:`logged_command` already records.
+
+    Passing it as ``on_output`` makes a session stream a command's stderr live,
+    instead of logging it once the command ends.
+
+    Args:
+        stream: ``stdout`` or ``stderr``.
+        text: The chunk.
+    """
+    del stream, text
 
 
 class Scrubber:
@@ -83,7 +127,14 @@ class Scrubber:
         return value
 
 
-def forward(data: Any, *, owner: str | None, scrub: Scrubber, source: str = "engine") -> None:
+def forward(
+    data: Any,
+    *,
+    owner: str | None,
+    scrub: Scrubber,
+    source: str = "engine",
+    pinned: Mapping[str, Any] | None = None,
+) -> None:
     """Relay one structured record a sandbox sent into its job's run log.
 
     The host, not the sandbox, decides what the record may be: its logger is
@@ -95,10 +146,12 @@ def forward(data: Any, *, owner: str | None, scrub: Scrubber, source: str = "eng
         owner: Job the sandbox belongs to.
         scrub: Redacts the sandbox's secrets.
         source: Source used when the record names none it may use.
+        pinned: Fields the host knows and the record may not change, such as
+            a scorer event's source, candidate and case.
     """
     if not isinstance(data, dict):
         return
-    claimed = run_log.normalize(scrub.value(data))
+    claimed = run_log.normalize({**scrub.value(data), **(pinned or {})})
     if claimed["source"] not in run_log.SANDBOX_SOURCES:
         claimed["source"] = source
     level = _FORWARDED_LEVELS.get(str(data.get("level", "")).upper(), logging.INFO)
@@ -143,6 +196,7 @@ class SandboxOutputLog:
             owner: Job the sandbox belongs to, set on every record as ``sandbox_owner``.
         """
         self._owner = owner
+        self._scope = _scope.get()
         self._extra = run_log.event_extra(source="sandbox", sandbox_owner=owner)
         self.scrub = Scrubber(secrets)
         first = command.strip().splitlines()[0] if command.strip() else ""
@@ -159,8 +213,30 @@ class SandboxOutputLog:
         """
         if not line.strip():
             return
+        if self._scope is not None and line.startswith(EVENT_PREFIX):
+            self._event(line[len(EVENT_PREFIX) :])
+            return
         self._tail.append(self.scrub.text(line))
         stream_line(line, owner=self._owner, scrub=self.scrub)
+
+    def _event(self, body: str) -> None:
+        """Relay one ``log()`` event, pinned to the scope it was written in.
+
+        Args:
+            body: The JSON after the event prefix; unreadable JSON is logged as plain output.
+        """
+        try:
+            data = json.loads(body)
+        except ValueError:
+            stream_line(body, owner=self._owner, scrub=self.scrub)
+            return
+        scope = self._scope or {}
+        pinned = {
+            "source": scope.get("source", "sandbox"),
+            "candidate": scope.get("candidate"),
+            "case": scope.get("case"),
+        }
+        forward(data, owner=self._owner, scrub=self.scrub, pinned=pinned)
 
     def feed(self, text: str) -> None:
         """Take a stderr chunk, which may hold partial lines.

@@ -35,7 +35,7 @@ from typing import Any
 import dspy
 
 from ..exceptions import ServiceError
-from .optimization.blackbox.runner import IMAGE_HELPER_NAME, LLM_HELPER_NAME, Image, missing_llm
+from .optimization.blackbox.runner import IMAGE_HELPER_NAME, LLM_HELPER_NAME, LOG_HELPER_NAME, Image, log, missing_llm
 from .optimization.blackbox.scorer import load_scorer_from_code
 from .optimization.data import (
     extract_signature_fields,
@@ -597,7 +597,9 @@ def _scorer_worker(scorer_code: str, queue: Any) -> None:
         queue: Multiprocessing queue used to return a result dict.
     """
     try:
-        load_scorer_from_code(scorer_code, helpers={LLM_HELPER_NAME: missing_llm, IMAGE_HELPER_NAME: Image})
+        load_scorer_from_code(
+            scorer_code, helpers={LLM_HELPER_NAME: missing_llm, IMAGE_HELPER_NAME: Image, LOG_HELPER_NAME: log}
+        )
         queue.put({"ok": True})
     except BaseException as exc:  # user code is arbitrary — any failure is reported, not raised
         queue.put(_error_payload(exc))
