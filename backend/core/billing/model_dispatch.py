@@ -21,6 +21,7 @@ from .openrouter_quotes import PricedRequest, fetch_endpoint_prices, price_text_
 from .operation_pricing import ChargePolicy, OperationQuote, UnpricedOperationError, exact_nonnegative, json_fingerprint
 from .responses_adapter import price_responses_request, responses_failure, responses_receipt
 from .runtime import BudgetRuntime, PaidResult
+from .usage_tags import header_tags
 
 MODEL_ATTEMPT_HEADER = "x-skynet-model-attempt-id"
 
@@ -367,6 +368,8 @@ class OpenRouterDispatcher:
             if attempt_key is not None:
                 self._attempt_quotes[attempt_key] = (request_identity, priced)
         physical_key = operation_key or str(uuid4())
+        tags = header_tags(protocol_headers)
+        started = time.monotonic()
         headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
         headers.update(
             {
@@ -426,7 +429,10 @@ class OpenRouterDispatcher:
                 "status": status,
                 "usage": usage,
                 "interrupted": interrupted,
+                "latency_ms": round((time.monotonic() - started) * 1000),
             }
+            if tags:
+                evidence["tags"] = tags
             if failure is not None:
                 evidence["failure"] = failure
             amount = None

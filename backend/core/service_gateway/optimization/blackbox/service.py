@@ -804,6 +804,28 @@ def _native_call_count(native: NativeOptions | None) -> int:
         return sum(counts.get("calls", 0) for counts in native.usage_by_model.values())
 
 
+def _direct_proposer_usage(payload: BlackboxRunRequest, native: NativeOptions | None) -> list[dict[str, Any]]:
+    """List the proposer usage that reached the owner's provider without passing Skynet's gateway.
+
+    Claude Code proposes on the owner's own Anthropic key, so its calls have no
+    billing record; this keeps them countable in the run's usage breakdown.
+
+    Args:
+        payload: The job, which decides whether Claude Code proposed.
+        native: Shared native usage collector, if the recipe uses one.
+
+    Returns:
+        One row per model with calls and token counts, empty when every call was billed.
+    """
+    if native is None or not claude_code_proposes(payload):
+        return []
+    with native.usage_lock:
+        return [
+            {"model": model, **{name: value for name, value in counts.items() if isinstance(value, int)}}
+            for model, counts in sorted(native.usage_by_model.items())
+        ]
+
+
 def _run_job(
     payload: BlackboxRunRequest,
     base_scorer: JobScorer,
@@ -1047,6 +1069,7 @@ def _run_job(
             "target": target.model_dump(),
             "proposer_runtime": payload.proposer_runtime,
             "upstream_revision": GEPA_REVISION,
+            "direct_proposer_usage": _direct_proposer_usage(payload, native_options),
         },
         details={"optimizer_best_score": result.best_score, **result.metadata},
     )

@@ -29,6 +29,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
 
 from .... import run_log
+from ....billing.usage_tags import usage_scope
 from .runner import EVENT_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ _scope: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("
 def event_scope(**tags: Any) -> Iterator[None]:
     """Relay the events commands write to stderr while the scope is open.
 
+    The candidate and case also tag the model calls made inside the scope.
     Scopes nest: an inner one keeps the outer's tags and overrides those it sets.
 
     Args:
@@ -67,7 +69,8 @@ def event_scope(**tags: Any) -> Iterator[None]:
     merged = {**(_scope.get() or {}), **{key: value for key, value in tags.items() if value is not None}}
     token = _scope.set(merged)
     try:
-        yield
+        with usage_scope(candidate=tags.get("candidate"), case=tags.get("case")):
+            yield
     finally:
         _scope.reset(token)
 

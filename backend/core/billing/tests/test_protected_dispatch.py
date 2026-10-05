@@ -25,7 +25,7 @@ from core.billing.openrouter_quotes import price_text_request
 from core.billing.operation_pricing import ChargePolicy, UnpricedOperationError
 from core.billing.runtime import BudgetRuntime, OperationCompletedError, ProviderFailedError, UsagePendingError
 from core.config import settings
-from core.storage.models import Base, BillingCustomerModel, ExecutionOperationModel
+from core.storage.models import Base, BillingCustomerModel, ExecutionOperationModel, ExecutionUsageEvidenceModel
 
 CATALOG = {
     "id": "fixture/text",
@@ -503,3 +503,36 @@ def test_dispatch_sends_and_reserves_the_marked_body(database: Engine) -> None:
         result = dispatcher.dispatch("/chat/completions", request)
     assert result.status == 200
     assert sent[0]["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_dispatch_records_usage_tags_and_latency_without_forwarding_them(database: Engine) -> None:
+    """Keep a call's attribution tags in its evidence and out of the provider request."""
+    runtime = _runtime(database)
+    sent: list[httpx.Request] = []
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        """Answer with measured usage and remember what reached the provider."""
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": CATALOG})
+        sent.append(request)
+        return httpx.Response(200, json={"id": "gen-tags", "usage": {"cost": "0.001"}, "choices": []})
+
+    with httpx.Client(transport=httpx.MockTransport(provider)) as client:
+        dispatcher = OpenRouterDispatcher(
+            runtime,
+            api_key="private",
+            model="fixture/text",
+            role="task",
+            policy=ChargePolicy("managed_model"),
+            client=client,
+        )
+        dispatcher.dispatch(
+            "/chat/completions",
+            REQUEST,
+            protocol_headers={"x-skynet-usage-tags": '{"stage":"training","candidate":"3","role":"judge"}'},
+        )
+    assert "x-skynet-usage-tags" not in sent[0].headers
+    with Session(database) as session:
+        evidence = session.scalars(select(ExecutionUsageEvidenceModel)).one().evidence
+    assert evidence["tags"] == {"stage": "training", "candidate": "3"}
+    assert isinstance(evidence["latency_ms"], int)

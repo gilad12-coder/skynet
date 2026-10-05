@@ -41,6 +41,7 @@ from .protected_credentials import (
 from .remote_evaluator import RemoteEvaluatorBroker, RemoteEvaluatorTransportError
 from .runtime import BudgetRuntime, ProviderFailedError, UsagePendingError
 from .signals import BudgetReached
+from .usage_tags import USAGE_TAGS_HEADER
 
 ROUTE_KEY = "_skynet_budget_route"
 # Descriptor key naming the hosts a parent-owned repository scoring box may
@@ -287,7 +288,7 @@ class ModelGateway:
                             protocol_headers={
                                 name: value
                                 for name, value in self.headers.items()
-                                if name.lower() in {"anthropic-version", "anthropic-beta"}
+                                if name.lower() in {"anthropic-version", "anthropic-beta", USAGE_TAGS_HEADER}
                             },
                         )
                     )
