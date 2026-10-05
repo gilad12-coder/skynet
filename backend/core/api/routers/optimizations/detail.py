@@ -19,7 +19,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import random
-from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
@@ -30,7 +29,6 @@ from pydantic import AliasChoices, BaseModel, Field, ValidationError
 
 from ....billing import ProviderKeyVault, resolve_byok_model_config
 from ....billing.budget_amounts import MAX_CENTS
-from ....billing.budgets import BudgetService
 from ....config import settings
 from ....constants import (
     OPTIMIZATION_TYPE_BLACKBOX,
@@ -91,7 +89,7 @@ from .._helpers import (
     stable_seed,
 )
 from ..constants import TERMINAL_STATUSES
-from ._local import remap_test_indices
+from ._local import execution_budget_view, remap_test_indices
 from ._program_export import build_program_export_zip
 
 logger = logging.getLogger(__name__)
@@ -311,13 +309,7 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
         )
 
         logger.debug("Returning status for optimization_id=%s state=%s", optimization_id, status)
-        execution_budget = (job_data.get("terminal_evidence") or {}).get("execution_budget")
-        if job_data.get("execution_budget_id") is not None and getattr(job_store, "engine", None) is not None:
-            execution_budget = asdict(
-                BudgetService(engine=job_store.engine).get(job_data["execution_budget_id"], job_data["username"])
-            )
-            execution_budget.pop("username", None)
-            execution_budget.pop("account_available_cents", None)
+        execution_budget = execution_budget_view(job_store, job_data)
         response_data = OptimizationStatusResponse(
             optimization_id=optimization_id,
             status=status,

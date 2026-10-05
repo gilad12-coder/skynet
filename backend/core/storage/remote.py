@@ -984,7 +984,7 @@ class RemoteDBJobStore:
     def get_job_status_fields(self, optimization_id: str) -> JobRecord:
         """Retrieve only the live-polling fields for a job.
 
-        Selects ``status`` / ``message`` / ``latest_metrics`` directly so the
+        Selects the status columns plus the budget id and owner directly so the
         per-job SSE loop can poll every few seconds without re-reading the
         ``payload`` JSONB that :meth:`get_job` materializes.
 
@@ -1009,6 +1009,8 @@ class RemoteDBJobStore:
                     JobModel.terminal_evidence,
                     JobModel.stop_reason,
                     JobModel.result_availability,
+                    JobModel.execution_budget_id,
+                    JobModel.username,
                 )
                 .filter(JobModel.optimization_id == optimization_id)
                 .first()
@@ -1025,6 +1027,8 @@ class RemoteDBJobStore:
                     "terminal_evidence": row[4],
                     "stop_reason": row[5],
                     "result_availability": row[6],
+                    "execution_budget_id": row[7],
+                    "username": row[8],
                 },
             )
         finally:
