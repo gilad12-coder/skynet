@@ -98,7 +98,7 @@ import { extractCandidates, scopeToLatestLane } from "@/features/trajectory";
 import { isReactModuleName } from "../lib/is-react-module";
 import { reconstructGridResult } from "../lib/reconstruct-grid";
 import { DataTab } from "./DataTab";
-import { LogsTab, type LogFocus } from "./LogsTab";
+import { LogsTab } from "./LogsTab";
 import { DeleteJobDialog } from "./DeleteJobDialog";
 import { ShareDialog } from "./ShareDialog";
 import { StatusBadge } from "@/shared/ui/status-badge";
@@ -277,7 +277,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const requestedTab = searchParams.get("tab") ?? "overview";
   const initialTab = RENAMED_TABS[requestedTab] ?? requestedTab;
   const [detailTab, setDetailTab] = useState(initialTab);
-  const [logFocus, setLogFocus] = useState<LogFocus | null>(null);
   // Phones get the view-first subset: Overview, Usage (chat), Artifact, Logs,
   // Usage and cost. Data/Code/LM activity/Config are desk work; a deep link to one of
   // those tabs lands on Overview instead of an empty pane.
@@ -1703,7 +1702,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 <LogsTab
                   logs={isPairContext ? pairFilteredLogs : (jobLogs ?? [])}
                   liveStatus={logStreamStatus}
-                  focus={logFocus}
                 />
               </TabsContent>
             )}
@@ -1713,10 +1711,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 <UsageTab
                   job={job}
                   pairIndex={isPairContext ? activePair.pair_index : null}
-                  onOpenLogs={(focus) => {
-                    setLogFocus(focus);
-                    setDetailTab("logs");
-                  }}
                 />
               </TabsContent>
             )}

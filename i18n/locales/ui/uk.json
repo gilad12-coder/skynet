@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "Виклики моделі",
   "usage_tab.summary.tokens": "Токени",
   "usage_tab.budget_stopped": "Цей запуск зупинено лімітом бюджету.",
-  "usage_tab.open_logs": "Показати в журналах",
   "usage_tab.load_error": "Не вдалося завантажити використання. Спробуйте ще раз за мить.",
   "tooltip.usage_tab.role.task": "Виклики моделі, на якій працює ваша програма, поки її вимірюють і оптимізують.",
   "tooltip.usage_tab.role.reflection": "Виклики моделі, яка читає результати й пише кращі інструкції.",

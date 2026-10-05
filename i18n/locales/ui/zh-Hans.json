@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "模型调用",
   "usage_tab.summary.tokens": "令牌",
   "usage_tab.budget_stopped": "预算上限已停止此次运行。",
-  "usage_tab.open_logs": "在日志中查看",
   "usage_tab.load_error": "无法加载用量，请稍后重试。",
   "tooltip.usage_tab.role.task": "在程序被评估和优化期间，对程序所用模型的调用。",
   "tooltip.usage_tab.role.reflection": "对读取结果并撰写更好指令的模型的调用。",

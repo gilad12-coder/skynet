@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "Modellaufrufe",
   "usage_tab.summary.tokens": "Tokens",
   "usage_tab.budget_stopped": "Das Budgetlimit hat diesen Lauf gestoppt.",
-  "usage_tab.open_logs": "In den Logs anzeigen",
   "usage_tab.load_error": "Nutzung konnte nicht geladen werden. Versuche es gleich noch einmal.",
   "tooltip.usage_tab.role.task": "Aufrufe an das Modell, auf dem dein Programm läuft, während es gemessen und optimiert wird.",
   "tooltip.usage_tab.role.reflection": "Aufrufe an das Modell, das Ergebnisse liest und bessere Anweisungen schreibt.",

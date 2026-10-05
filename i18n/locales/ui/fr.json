@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "Appels de modèle",
   "usage_tab.summary.tokens": "Jetons",
   "usage_tab.budget_stopped": "La limite de budget a arrêté cette exécution.",
-  "usage_tab.open_logs": "Afficher dans les journaux",
   "usage_tab.load_error": "Impossible de charger l'utilisation. Réessayez dans un instant.",
   "tooltip.usage_tab.role.task": "Appels au modèle sur lequel tourne votre programme, pendant qu'il est mesuré et optimisé.",
   "tooltip.usage_tab.role.reflection": "Appels au modèle qui lit les résultats et rédige de meilleures instructions.",

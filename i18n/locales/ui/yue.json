@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "模型呼叫",
   "usage_tab.summary.tokens": "Token 數",
   "usage_tab.budget_stopped": "預算上限停咗呢次運行。",
-  "usage_tab.open_logs": "喺記錄度睇",
   "usage_tab.load_error": "載入唔到用量，請等陣再試。",
   "tooltip.usage_tab.role.task": "程序被量度同優化期間，對程序所用模型嘅呼叫。",
   "tooltip.usage_tab.role.reflection": "對讀取結果、寫出更好指示嘅模型嘅呼叫。",

@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "استدعاءات النماذج",
   "usage_tab.summary.tokens": "الرموز",
   "usage_tab.budget_stopped": "أوقف حدّ الميزانية هذا التشغيل.",
-  "usage_tab.open_logs": "عرضها في السجلّات",
   "usage_tab.load_error": "تعذّر تحميل الاستخدام. حاول مجددًا بعد قليل.",
   "tooltip.usage_tab.role.task": "استدعاءات النموذج الذي يعمل عليه برنامجك، أثناء قياسه وتحسينه.",
   "tooltip.usage_tab.role.reflection": "استدعاءات النموذج الذي يقرأ النتائج ويكتب تعليمات أفضل.",

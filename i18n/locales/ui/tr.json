@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "Model çağrıları",
   "usage_tab.summary.tokens": "Token",
   "usage_tab.budget_stopped": "Bütçe limiti bu çalıştırmayı durdurdu.",
-  "usage_tab.open_logs": "Bunları günlüklerde göster",
   "usage_tab.load_error": "Kullanım yüklenemedi. Birazdan tekrar deneyin.",
   "tooltip.usage_tab.role.task": "Programınızın çalıştığı modele yapılan çağrılar; program ölçülüp optimize edilirken.",
   "tooltip.usage_tab.role.reflection": "Sonuçları okuyup daha iyi talimatlar yazan modele yapılan çağrılar.",

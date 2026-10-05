@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "קריאות מודל",
   "usage_tab.summary.tokens": "טוקנים",
   "usage_tab.budget_stopped": "מגבלת התקציב עצרה את ההרצה.",
-  "usage_tab.open_logs": "הצגה ביומן",
   "usage_tab.load_error": "לא הצלחנו לטעון את השימוש. נסו שוב בעוד רגע.",
   "tooltip.usage_tab.role.task": "קריאות למודל שהתוכנית שלך רצה עליו, בזמן המדידה והאופטימיזציה.",
   "tooltip.usage_tab.role.reflection": "קריאות למודל שקורא את התוצאות וכותב הוראות טובות יותר.",

@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "فراخوانی‌های مدل",
   "usage_tab.summary.tokens": "توکن‌ها",
   "usage_tab.budget_stopped": "سقف بودجه این اجرا را متوقف کرد.",
-  "usage_tab.open_logs": "نمایش در لاگ‌ها",
   "usage_tab.load_error": "بارگیری مصرف ممکن نشد. کمی بعد دوباره تلاش کنید.",
   "tooltip.usage_tab.role.task": "فراخوانی‌های مدلی که برنامهٔ شما روی آن اجرا می‌شود، در حین سنجش و بهینه‌سازی.",
   "tooltip.usage_tab.role.reflection": "فراخوانی‌های مدلی که نتایج را می‌خواند و دستورالعمل‌های بهتری می‌نویسد.",

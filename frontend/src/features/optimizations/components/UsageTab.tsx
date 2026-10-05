@@ -7,6 +7,7 @@ import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { Segmented } from "@/shared/ui/segmented";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
+import { Card, CardContent } from "@/shared/ui/primitives/card";
 import {
   Table,
   TableBody,
@@ -29,14 +30,13 @@ import {
   availableGroupings,
   groupUsage,
   hasProviderSpend,
-  logSourceForRole,
   UNATTRIBUTED,
   usageTotal,
   type RunUsage,
   type UsageGroup,
   type UsageGrouping,
 } from "../lib/run-usage";
-import { LiveMarker, type LogFocus } from "./LogsTab";
+import { LiveMarker } from "./LogsTab";
 
 const GROUPING_STORAGE_KEY = "skynet.usage.grouping";
 /** Refresh interval while the run is going. */
@@ -112,16 +112,6 @@ function groupLabel(group: UsageGroup, grouping: UsageGrouping): string {
   return group.key;
 }
 
-function groupFocus(group: UsageGroup, grouping: UsageGrouping): LogFocus | null {
-  if (group.key === UNATTRIBUTED) return null;
-  if (grouping === "candidate" && !group.nonModel) return { column: "candidate", value: group.key };
-  if (grouping === "role" || group.nonModel) {
-    const source = logSourceForRole(group.key);
-    return source ? { column: "source", value: source } : null;
-  }
-  return null;
-}
-
 function formatCount(n: number): string {
   return n.toLocaleString(getActiveIntlLocale());
 }
@@ -184,12 +174,16 @@ function Summary({
   const budget = job.execution_budget ?? job.terminal_evidence?.execution_budget;
   const total = usageTotal(usage.rows);
   const budgetHit = isBudgetStop(job) || isBudgetPause(job);
-  const spentLabel = running ? msg("usage_tab.summary.spent_so_far") : msg("usage_tab.summary.spent");
+  const spentLabel = running
+    ? msg("usage_tab.summary.spent_so_far")
+    : msg("usage_tab.summary.spent");
   const items: Array<[string, string, string?]> = [];
   if (budget) {
     items.push([
       msg("usage_tab.summary.limit"),
-      budget.uncapped ? msg("submit.budget.uncapped_short") : formatBudgetUsd(String(budget.total_cents), locale),
+      budget.uncapped
+        ? msg("submit.budget.uncapped_short")
+        : formatBudgetUsd(String(budget.total_cents), locale),
     ]);
   }
   items.push([spentLabel, formatCentsUsd(total.chargedCents, locale)]);
@@ -202,10 +196,16 @@ function Summary({
   }
   if (budget) {
     items.push([msg("usage_tab.summary.reserved"), formatBudgetUsd(budget.reserved_cents, locale)]);
-    items.push([msg("usage_tab.summary.available"), formatBudgetUsd(budget.available_cents, locale)]);
+    items.push([
+      msg("usage_tab.summary.available"),
+      formatBudgetUsd(budget.available_cents, locale),
+    ]);
   }
   items.push([msg("usage_tab.summary.calls"), formatCount(total.calls)]);
-  items.push([msg("usage_tab.summary.tokens"), formatCount(total.inputTokens + total.outputTokens)]);
+  items.push([
+    msg("usage_tab.summary.tokens"),
+    formatCount(total.inputTokens + total.outputTokens),
+  ]);
   return (
     <dl
       className={cn(
@@ -239,11 +239,9 @@ function Summary({
 export function UsageTab({
   job,
   pairIndex,
-  onOpenLogs,
 }: {
   job: OptimizationStatusResponse;
   pairIndex: number | null;
-  onOpenLogs: (focus: LogFocus) => void;
 }) {
   const { usage, error } = useRunUsage(job, pairIndex);
   const [grouping, setGrouping] = useState<UsageGrouping>("role");
@@ -260,9 +258,7 @@ export function UsageTab({
   const firstNonModel = groups.findIndex((g) => g.nonModel);
 
   if (!usage) {
-    return error ? (
-      <EmptyState icon={Coins} title={msg("usage_tab.load_error")} />
-    ) : null;
+    return error ? <EmptyState icon={Coins} title={msg("usage_tab.load_error")} /> : null;
   }
 
   const cost = (g: UsageGroup) =>
@@ -272,8 +268,9 @@ export function UsageTab({
       formatCentsUsd(g.chargedCents, locale)
     );
   const provider = (g: UsageGroup) =>
-    g.providerCents == null ? msg("common.empty") : formatCentsUsd(g.providerCents, locale);
-  const activity = (g: UsageGroup, value: string) => (g.nonModel ? msg("common.empty") : value);
+    g.providerCents == null ? empty : formatCentsUsd(g.providerCents, locale);
+  const empty = <span className="text-muted-foreground/50">{msg("common.empty")}</span>;
+  const activity = (g: UsageGroup, value: string) => (g.nonModel ? empty : value);
   const costLabel = splitCost ? msg("usage_tab.charged") : msg("usage_tab.col.cost");
 
   return (
@@ -328,131 +325,131 @@ export function UsageTab({
             description={msg("usage_tab.empty_body")}
           />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{msg(GROUPING_LABEL_KEYS[activeGrouping])}</TableHead>
-                <TableHead className="text-end">
-                  {splitCost ? <HelpTip text={tip("usage_tab.charged")}>{costLabel}</HelpTip> : costLabel}
-                </TableHead>
-                {splitCost && (
-                  <TableHead className="text-end" collapse="sm">
-                    <HelpTip text={tip("usage_tab.provider")}>{msg("usage_tab.provider")}</HelpTip>
-                  </TableHead>
-                )}
-                <TableHead className="text-end">{msg("usage_tab.col.calls")}</TableHead>
-                <TableHead className="text-end" collapse="md">
-                  {msg("usage_tab.col.input")}
-                </TableHead>
-                <TableHead className="text-end" collapse="md">
-                  {msg("usage_tab.col.output")}
-                </TableHead>
-                <TableHead className="text-end" collapse="lg">
-                  {msg("usage_tab.col.latency")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {groups.map((g, i) => {
-                const focus = groupFocus(g, activeGrouping);
-                const label = groupLabel(g, activeGrouping);
-                const roleTipKey =
-                  activeGrouping === "role" || g.nonModel ? ROLE_TIP_KEYS[g.key] : undefined;
-                const roleTip = roleTipKey
-                  ? tip(roleTipKey)
-                  : g.key === UNATTRIBUTED
-                      ? tip("usage_tab.unattributed")
-                      : null;
-                return (
-                  <TableRow
-                    key={`${g.nonModel ? "n" : "m"}:${g.key}`}
-                    className={cn(i === firstNonModel && i > 0 && "border-t-2 border-border/60")}
-                  >
-                    <TableCell className="max-w-[18rem] font-medium">
-                      {i === firstNonModel && activeGrouping === "model" && (
-                        <span className="block text-xs font-normal text-muted-foreground">
-                          {msg("usage_tab.not_model")}
+          <Card className="overflow-hidden py-0">
+            <CardContent className="p-0">
+              <Table className="no-copy-underline">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="ps-4">
+                      {msg(GROUPING_LABEL_KEYS[activeGrouping])}
+                    </TableHead>
+                    <TableHead className="text-end">
+                      {splitCost ? (
+                        <HelpTip text={tip("usage_tab.charged")}>{costLabel}</HelpTip>
+                      ) : (
+                        costLabel
+                      )}
+                    </TableHead>
+                    {splitCost && (
+                      <TableHead className="text-end" collapse="sm">
+                        <HelpTip text={tip("usage_tab.provider")}>
+                          {msg("usage_tab.provider")}
+                        </HelpTip>
+                      </TableHead>
+                    )}
+                    <TableHead className="text-end">{msg("usage_tab.col.calls")}</TableHead>
+                    <TableHead className="text-end" collapse="md">
+                      {msg("usage_tab.col.input")}
+                    </TableHead>
+                    <TableHead className="text-end" collapse="md">
+                      {msg("usage_tab.col.output")}
+                    </TableHead>
+                    <TableHead className="pe-4 text-end" collapse="lg">
+                      {msg("usage_tab.col.latency")}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {groups.map((g, i) => {
+                    const label = groupLabel(g, activeGrouping);
+                    const roleTipKey =
+                      activeGrouping === "role" || g.nonModel ? ROLE_TIP_KEYS[g.key] : undefined;
+                    const roleTip = roleTipKey
+                      ? tip(roleTipKey)
+                      : g.key === UNATTRIBUTED
+                        ? tip("usage_tab.unattributed")
+                        : null;
+                    return (
+                      <TableRow
+                        key={`${g.nonModel ? "n" : "m"}:${g.key}`}
+                        className={cn(i === firstNonModel && i > 0 && "border-t border-border")}
+                      >
+                        <TableCell className="max-w-[18rem] ps-4">
+                          {i === firstNonModel && activeGrouping === "model" && (
+                            <span className="mb-0.5 block text-[0.6875rem] text-muted-foreground">
+                              {msg("usage_tab.not_model")}
+                            </span>
+                          )}
+                          <span
+                            className={cn(
+                              "block truncate",
+                              activeGrouping === "model" && !g.nonModel && "font-mono text-xs",
+                            )}
+                            dir="auto"
+                          >
+                            {roleTip ? <HelpTip text={roleTip}>{label}</HelpTip> : label}
+                          </span>
+                          <TableInline at="md">
+                            {activity(g, formatCount(g.inputTokens + g.outputTokens))}
+                          </TableInline>
+                        </TableCell>
+                        <TableCell className="text-end font-medium tabular-nums" dir="ltr">
+                          {cost(g)}
+                        </TableCell>
+                        {splitCost && (
+                          <TableCell className="text-end tabular-nums" dir="ltr" collapse="sm">
+                            {provider(g)}
+                          </TableCell>
+                        )}
+                        <TableCell className="text-end tabular-nums">
+                          {activity(g, formatCount(g.calls))}
+                        </TableCell>
+                        <TableCell className="text-end tabular-nums" collapse="md">
+                          {activity(g, formatCount(g.inputTokens))}
+                        </TableCell>
+                        <TableCell className="text-end tabular-nums" collapse="md">
+                          {activity(g, formatCount(g.outputTokens))}
+                        </TableCell>
+                        <TableCell className="pe-4 text-end tabular-nums" collapse="lg">
+                          {activity(g, formatLatency(g.avgLatencyMs))}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  <TableRow className="border-t border-border bg-muted/30 font-semibold hover:bg-muted/30">
+                    <TableCell className="ps-4">
+                      {msg("usage_tab.total")}
+                      {running && (
+                        <span className="ms-1.5 text-xs font-normal text-muted-foreground">
+                          {msg("usage_tab.so_far")}
                         </span>
                       )}
-                      <span
-                        className={cn(
-                          "block truncate",
-                          activeGrouping === "model" && !g.nonModel && "font-mono text-xs",
-                        )}
-                        dir="auto"
-                      >
-                        {focus ? (
-                          <button
-                            type="button"
-                            onClick={() => onOpenLogs(focus)}
-                            title={msg("usage_tab.open_logs")}
-                            className="underline decoration-border underline-offset-4 transition-colors hover:decoration-foreground"
-                          >
-                            {label}
-                          </button>
-                        ) : roleTip ? (
-                          <HelpTip text={roleTip}>{label}</HelpTip>
-                        ) : (
-                          label
-                        )}
-                      </span>
-                      <TableInline at="md">
-                        {activity(g, formatCount(g.inputTokens + g.outputTokens))}
-                      </TableInline>
                     </TableCell>
                     <TableCell className="text-end tabular-nums" dir="ltr">
-                      {cost(g)}
+                      {formatCentsUsd(total.chargedCents, locale)}
                     </TableCell>
                     {splitCost && (
                       <TableCell className="text-end tabular-nums" dir="ltr" collapse="sm">
-                        {provider(g)}
+                        {provider(total)}
                       </TableCell>
                     )}
                     <TableCell className="text-end tabular-nums">
-                      {activity(g, formatCount(g.calls))}
+                      {formatCount(total.calls)}
                     </TableCell>
                     <TableCell className="text-end tabular-nums" collapse="md">
-                      {activity(g, formatCount(g.inputTokens))}
+                      {formatCount(total.inputTokens)}
                     </TableCell>
                     <TableCell className="text-end tabular-nums" collapse="md">
-                      {activity(g, formatCount(g.outputTokens))}
+                      {formatCount(total.outputTokens)}
                     </TableCell>
-                    <TableCell className="text-end tabular-nums" collapse="lg">
-                      {activity(g, formatLatency(g.avgLatencyMs))}
+                    <TableCell className="pe-4 text-end tabular-nums" collapse="lg">
+                      {formatLatency(total.avgLatencyMs)}
                     </TableCell>
                   </TableRow>
-                );
-              })}
-              <TableRow className="border-t-2 border-border/60 font-semibold">
-                <TableCell>
-                  {msg("usage_tab.total")}
-                  {running && (
-                    <span className="ms-1.5 text-xs font-normal text-muted-foreground">
-                      {msg("usage_tab.so_far")}
-                    </span>
-                  )}
-                </TableCell>
-                <TableCell className="text-end tabular-nums" dir="ltr">
-                  {formatCentsUsd(total.chargedCents, locale)}
-                </TableCell>
-                {splitCost && (
-                  <TableCell className="text-end tabular-nums" dir="ltr" collapse="sm">
-                    {provider(total)}
-                  </TableCell>
-                )}
-                <TableCell className="text-end tabular-nums">{formatCount(total.calls)}</TableCell>
-                <TableCell className="text-end tabular-nums" collapse="md">
-                  {formatCount(total.inputTokens)}
-                </TableCell>
-                <TableCell className="text-end tabular-nums" collapse="md">
-                  {formatCount(total.outputTokens)}
-                </TableCell>
-                <TableCell className="text-end tabular-nums" collapse="lg">
-                  {formatLatency(total.avgLatencyMs)}
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         )}
         {usage.settling && !running && (
           <p className="text-xs text-muted-foreground">{msg("usage_tab.settling")}</p>

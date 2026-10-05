@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "Chamadas ao modelo",
   "usage_tab.summary.tokens": "Tokens",
   "usage_tab.budget_stopped": "O limite de orçamento parou esta execução.",
-  "usage_tab.open_logs": "Mostrar nos registos",
   "usage_tab.load_error": "Não foi possível carregar a utilização. Tente novamente daqui a pouco.",
   "tooltip.usage_tab.role.task": "Chamadas ao modelo em que o seu programa é executado, enquanto é medido e otimizado.",
   "tooltip.usage_tab.role.reflection": "Chamadas ao modelo que lê os resultados e escreve instruções melhores.",
