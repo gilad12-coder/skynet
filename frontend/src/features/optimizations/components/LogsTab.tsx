@@ -33,6 +33,12 @@ import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 type Verbosity = "quiet" | "normal" | "verbose";
 
+/** A filter another tab opens the logs with, e.g. one candidate's lines. */
+export interface LogFocus {
+  column: "source" | "candidate";
+  value: string;
+}
+
 const SOURCE_LABEL_KEYS: Record<string, string> = {
   host: "optimizations.logs.source.host",
   engine: "optimizations.logs.source.engine",
@@ -49,7 +55,7 @@ function sourceLabel(source: string): string {
 /** Rows newer than this many pixels from the newest edge count as "scrolled away". */
 const FOLLOW_SLACK_PX = 24;
 
-function LiveMarker({ status }: { status: RunLogStreamStatus }) {
+export function LiveMarker({ status }: { status: RunLogStreamStatus }) {
   if (status !== "live" && status !== "reconnecting") return null;
   const live = status === "live";
   return (
@@ -124,10 +130,12 @@ export function LogsTab({
   logs,
   pairNames,
   liveStatus = "idle",
+  focus = null,
 }: {
   logs: OptimizationLogEntry[];
   pairNames?: Record<number, string>;
   liveStatus?: RunLogStreamStatus;
+  focus?: LogFocus | null;
 }) {
   const showPairCol = !!pairNames && Object.keys(pairNames).length > 0;
   const showSourceCol = useMemo(() => logs.some((l) => !!l.source), [logs]);
@@ -150,6 +158,10 @@ export function LogsTab({
   // the operator opts into "verbose". Seeding here (vs. an effect) keeps the
   // first paint already filtered, and resets to Normal on every mount.
   const logFilters = useColumnFilters({ level: new Set(VERBOSITY_LEVELS.normal) });
+  const { setColumnFilter } = logFilters;
+  useEffect(() => {
+    if (focus) setColumnFilter(focus.column, new Set([focus.value]));
+  }, [focus, setColumnFilter]);
   const logResize = useColumnResize();
   const activeVerbosity = useMemo(
     () => verbosityFromLevelFilter(logFilters.filters.level),
