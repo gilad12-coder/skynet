@@ -74,7 +74,6 @@ from ....models.blackbox import (
 )
 from ....models.results import LMActivity, LMStageStats, ModelTokenUsage
 from ...language_models import (
-    GepaRecoverySeedBoundary,
     build_language_model,
     canonical_model_id,
     lm_call_count,
@@ -888,11 +887,6 @@ def _run_job(
     )
     ctx = EngineContext(
         reflection_lm=reflection_lm,
-        recovery_seed_boundary=(
-            GepaRecoverySeedBoundary(lm)
-            if payload.strategy.mode == "single" and payload.strategy.engine == "gepa"
-            else None
-        ),
         native_options=native_options,
         proposer_token_budget_usd=token_budget,
         run_dir=gepa_log_dir_path or tempfile.mkdtemp(prefix=f"skynet-blackbox-{artifact_id}-"),

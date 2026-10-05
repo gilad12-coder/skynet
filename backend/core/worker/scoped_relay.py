@@ -26,7 +26,6 @@ def model_forwarder(payload: dict[str, Any]) -> Any:
             "/v1/chat/completions",
             "/v1/responses",
             "/v1/_budget/state",
-            "/v1/_budget/recovery-seed-complete",
         }
     )
 

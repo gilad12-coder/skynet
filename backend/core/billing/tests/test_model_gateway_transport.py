@@ -20,15 +20,14 @@ from core.api.preflight_execution import _verify_model_routes
 from core.billing import model_gateway as gateway_module
 from core.billing.budgets import BudgetService
 from core.billing.model_dispatch import ModelHTTPResult
-from core.billing.model_gateway import ROUTE_KEY, ModelGateway
+from core.billing.model_gateway import PARENT_HOSTS_KEY, ROUTE_KEY, ModelGateway
 from core.billing.model_mailbox import ModelMailbox
-from core.billing.operation_pricing import ChargePolicy, OperationCharge, OperationQuote
+from core.billing.operation_pricing import ChargePolicy
 from core.billing.protected_credentials import (
     ProtectedCredentialVault,
     protect_execution_credentials,
     resolve_execution_credentials,
 )
-from core.billing.recovery_admission import PARENT_HOSTS_KEY, model_call_bound
 from core.billing.runtime import BudgetRuntime
 from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, settings
@@ -113,66 +112,6 @@ def test_control_capability_is_separate_from_model_capability(gateway: ModelGate
     )
     assert response.status_code == 401
     assert "upstream-secret" not in response.text
-
-
-def test_recovery_attempt_claims_are_idempotent_and_single_consumer(gateway: ModelGateway) -> None:
-    """Bind seed quotas and execution headroom to stable physical attempt ids."""
-    quote = OperationQuote(
-        request_fingerprint="bounded-request",
-        maximum=OperationCharge(total=Decimal(2), wallet=Decimal(2)),
-        price_snapshot={"version": "fixture-v1", "provider": "fixture"},
-    )
-    bound = model_call_bound("task", "fixture/text", quote)
-    gateway._recovery_plan = {
-        "seed_reevaluation": {"model_calls": [bound]},
-        "execution_headroom": {"model_calls": [bound]},
-    }
-
-    assert gateway._observe_model_quote("task", "fixture/text", quote, "seed", 0) is True
-    assert gateway._observe_model_quote("task", "fixture/text", quote, "seed", 0) is True
-    with pytest.raises(ValueError, match="exceeded"):
-        gateway._observe_model_quote("task", "fixture/text", quote, "extra-seed", 0)
-
-    gateway.finish_recovery_seed()
-    assert gateway._observe_model_quote("task", "fixture/text", quote, "first-execution", 0) is True
-    assert gateway._observe_model_quote("task", "fixture/text", quote, "first-execution", 0) is True
-    assert gateway._observe_model_quote("task", "fixture/text", quote, "later-execution", 0) is False
-
-
-def test_checkpoint_plan_uses_observed_seed_count_and_next_operation_bound(gateway: ModelGateway) -> None:
-    """Publish only actual bounded replay work with one enforced execution operation."""
-    seed_quote = OperationQuote(
-        request_fingerprint="seed-request",
-        maximum=OperationCharge(total=Decimal(2), wallet=Decimal(2)),
-        price_snapshot={"version": "seed-v1", "provider": "fixture"},
-    )
-    execution_quote = OperationQuote(
-        request_fingerprint="execution-request",
-        maximum=OperationCharge(total=Decimal(3), wallet=Decimal(3)),
-        price_snapshot={"version": "execution-v1", "provider": "fixture"},
-    )
-    manifest = {
-        "checkpoint_sha256": "checkpoint",
-        "configuration_sha256": "configuration",
-        "source_sha256": "source",
-    }
-
-    gateway._observe_model_quote("task", "fixture/text", seed_quote, "seed-a", 0)
-    gateway._observe_model_quote("task", "fixture/text", seed_quote, "seed-b", 0)
-    gateway.finish_recovery_seed()
-    gateway._observe_model_quote("optimization", "fixture/text", execution_quote, "execution", 0)
-
-    gateway.bind_sandbox(
-        SandboxBroker(LocalSubprocessRuntime(), image=IMAGE, max_lifetime_seconds=60),
-        image=IMAGE,
-        lifetime_seconds=60,
-    )
-    plan = gateway.checkpoint_recovery_plan(manifest, runtime="vercel")
-
-    assert plan["eligible"] is True
-    assert plan["seed_reevaluation"]["model_calls"][0]["count"] == 2
-    assert plan["execution_headroom"]["max_cents"] == "3"
-    assert Decimal(plan["max_cents"]) == Decimal(7) + Decimal(plan["runtime"]["max_cents"])
 
 
 def test_guest_controls_and_dataset_routes_cannot_replace_parent_authority(gateway: ModelGateway) -> None:
@@ -362,9 +301,6 @@ def test_remote_runtime_streams_and_metered_mailbox_scrubs_protocol(gateway: Mod
     session = runtime.open(SandboxSpec(lifetime_seconds=20, image=IMAGE, network_disabled=True))
     source = (
         "import json, os, urllib.request\n"
-        "marker=urllib.request.Request(os.environ['OPENAI_BASE_URL']+'/_budget/recovery-seed-complete', data=b'{}', "
-        "headers={'Content-Type':'application/json','Authorization':'Bearer '+os.environ['ROLE_TOKEN']})\n"
-        "with urllib.request.urlopen(marker) as response: assert json.load(response)['ok'] is True\n"
         "body=json.dumps({'model':'fixture/text','max_tokens':16,'messages':[{'role':'user','content':'private prompt'}]}).encode()\n"
         "req=urllib.request.Request(os.environ['OPENAI_BASE_URL']+'/chat/completions', data=body, "
         "headers={'Content-Type':'application/json','Authorization':'Bearer '+os.environ['ROLE_TOKEN']})\n"
@@ -385,7 +321,6 @@ def test_remote_runtime_streams_and_metered_mailbox_scrubs_protocol(gateway: Mod
     assert result.stdout.strip() == "OK"
     assert "private prompt" not in result.stdout
     assert "SKYNET_MODEL_" not in "".join(output)
-    assert gateway._seed_marker_count == 1
     assert gateway.runtime.service.get(gateway.runtime.budget_id, "alice").setup_spent_cents == Decimal("0.1")
     assert "upstream-secret" not in json.dumps(protected)
 
@@ -536,7 +471,7 @@ def test_bound_evaluator_answers_only_its_capability(gateway: ModelGateway) -> N
 
 
 def test_parent_registry_box_is_funded_but_unreachable_from_the_guest_route(gateway: ModelGateway) -> None:
-    """Fund the parent's box in recovery, keep its hosts out of the guest's descriptor, and refuse them remotely."""
+    """Fund the parent's box, keep its hosts out of the guest's descriptor, and refuse them remotely."""
     gateway.bind_sandbox(
         SandboxBroker(LocalSubprocessRuntime(), image=IMAGE, max_lifetime_seconds=20),
         image=IMAGE,
@@ -553,8 +488,4 @@ def test_parent_registry_box_is_funded_but_unreachable_from_the_guest_route(gate
     remote = RemoteSandboxRuntime(descriptor["url"], descriptor["control_token"])
     with pytest.raises(ServiceError, match="network access"):
         remote.open(SandboxSpec(lifetime_seconds=20, image=IMAGE, allowed_hosts=("pypi.org",)))
-    runtime = gateway.checkpoint_recovery_plan(
-        {"checkpoint_sha256": "c", "configuration_sha256": "c", "source_sha256": "s"}, runtime="vercel"
-    )["runtime"]
-    assert runtime["parent_box"]["request"]["allowed_hosts"] == list(PACKAGE_REGISTRY_HOSTS)
     gateway.parent_sandbox_runtime()

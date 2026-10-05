@@ -292,7 +292,6 @@ def checkpoint_manifest(
         **(_worker_runtime(code_version) if sandbox_image is None else {"sandbox_image": sandbox_image}),
         "iteration": int(state.get("i", 0)),
         "metric_calls": int(state.get("total_num_evals", 0)),
-        "seed_reevaluation_required": True,
     }
 
 

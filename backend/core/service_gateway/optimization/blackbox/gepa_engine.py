@@ -68,8 +68,6 @@ class GepaEngine:
         run_dir = str(Path(ctx.run_dir) / self.name)
         Path(run_dir).mkdir(parents=True, exist_ok=True)
         stop_callbacks: list[Any] = []
-        if ctx.recovery_seed_boundary is not None:
-            stop_callbacks.append(ctx.recovery_seed_boundary)
         if ctx.stop_at_score is not None:
             stop_callbacks.append(ScoreThresholdStopper(ctx.stop_at_score))
         config = GEPAConfig(
@@ -87,7 +85,6 @@ class GepaEngine:
             reflection=ReflectionConfig(reflection_lm=_LaneReflection(ctx.reflection_lm, ctx.check_budget)),
             tracking=TrackingConfig(logger=_JobLogger()),
             stop_callbacks=stop_callbacks or None,
-            callbacks=[ctx.recovery_seed_boundary] if ctx.recovery_seed_boundary is not None else None,
         )
 
         # GEPA hands the dataset rows back by identity and keys each candidate's

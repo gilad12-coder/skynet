@@ -68,7 +68,6 @@ class _PreviewRuntime(BudgetRuntime):
         cost_kind: str,
         role: str | None = None,
         attempt: int = 0,
-        recovery_headroom: bool | None = None,
     ) -> OperationSnapshot:
         """Reserve normally while binding opaque operation keys to this preview's receipts.
 
@@ -78,7 +77,6 @@ class _PreviewRuntime(BudgetRuntime):
             cost_kind: Model or sandbox attribution.
             role: Optional model role.
             attempt: Physical retry counter supplied by the transport.
-            recovery_headroom: Whether this request may consume recovery coverage.
 
         Returns:
             The real ledger reservation, with recovered owners kept distinct.
@@ -89,7 +87,6 @@ class _PreviewRuntime(BudgetRuntime):
             cost_kind=cost_kind,
             role=role,
             attempt=attempt,
-            recovery_headroom=recovery_headroom,
         )
 
 

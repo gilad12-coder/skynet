@@ -51,12 +51,14 @@ External evaluator and MCP service fees are outside Skynet Total. Their relay st
 
 ## Recovery contract
 
-| Path | Supported recovery |
+An interrupted run is never restarted automatically: a worker shutdown, a lost lease, or a dropped sandbox leaves the run failed with `stop_reason=interrupted`. The owner chooses what happens next: Resume, Retry, or Clone.
+
+| Path | Manual Resume |
 | --- | --- |
 | DSPy GEPA, including independent GEPA grid pairs | Exact compatible persisted GEPA state |
 | Anything, single GEPA engine | Exact compatible persisted GEPA state |
-| Meta-Harness, AutoResearch, Auto/omni, other optimizers | No automatic checkpoint recovery contract |
+| Meta-Harness, AutoResearch, Auto/omni, other optimizers | Not supported; Retry or Clone instead |
 
-Recovery requires state schema 7 at the pinned GEPA revision, matching checkpoint bytes, task/configuration/data, backend source/version, dependency versions, and Python patch version. It retains the same job and cumulative funded budget, fences the previous execution generation, and waits for unresolved prior usage. Upstream resumed seed reevaluation is a real metered operation. Missing or incompatible evidence never triggers a fresh run automatically.
+Resume requires state schema 7 at the pinned GEPA revision, matching checkpoint bytes, task/configuration/data, and the run's pinned sandbox image. It retains the same job and cumulative funded budget, fences the previous execution generation, and waits for unresolved prior usage before admitting new work. The resumed run's seed reevaluation is ordinary metered work under that budget.
 
-Budget-reached stops and user cancellation do not resume automatically. Manual continuation requires compatible state, remaining authorized headroom, and admission reopened explicitly. A fresh restart returns to configuration for fresh authorization. A stopped run retains only an upstream-selected evaluated incumbent, with explicit final-evaluation evidence; no-result stops remain distinct from failures and from evaluated results.
+Budget-reached stops and user cancellation are never resumed without the owner. A fresh restart returns to configuration for fresh authorization. A stopped run retains only an upstream-selected evaluated incumbent, with explicit final-evaluation evidence; no-result stops remain distinct from failures and from evaluated results.

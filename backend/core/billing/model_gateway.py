@@ -10,7 +10,6 @@ import secrets
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
-from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -39,19 +38,14 @@ from .protected_credentials import (
     SCORER_URL_REF_FIELD,
     SCORER_URL_REVISION_FIELD,
 )
-from .recovery_admission import (
-    PARENT_HOSTS_KEY,
-    build_recovery_plan,
-    model_call_bound,
-    quote_fits_bound,
-    runtime_bound,
-    validate_recovery_runtime,
-)
 from .remote_evaluator import RemoteEvaluatorBroker, RemoteEvaluatorTransportError
 from .runtime import BudgetRuntime, UsagePendingError
 from .signals import BudgetReached
 
 ROUTE_KEY = "_skynet_budget_route"
+# Descriptor key naming the hosts a parent-owned repository scoring box may
+# reach; when present, that box is funded alongside the outer sandbox.
+PARENT_HOSTS_KEY = "parent_allowed_hosts"
 _MAX_REQUEST_BYTES = 32 * 1024 * 1024
 _MODEL_ATTEMPT_ID = re.compile(r"[0-9a-f]{32}\Z")
 _TRANSIENT_SANDBOX_ERROR_TYPES = frozenset(
@@ -174,14 +168,12 @@ class ModelGateway:
         runtime: BudgetRuntime,
         *,
         timeout: float = 600,
-        recovery_plan: Mapping[str, Any] | None = None,
     ) -> None:
         """Start a loopback-only service for one setup or run authority.
 
         Args:
             runtime: Owner-bound, generation-fenced spending context.
             timeout: Physical provider request timeout, excluding hidden retries.
-            recovery_plan: Checkpoint-bound replay caps already covered by one ledger hold.
         """
         self.runtime = runtime
         self._client = httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False)
@@ -195,16 +187,6 @@ class ModelGateway:
         self._tool_token = secrets.token_urlsafe(32)
         self._control_token = secrets.token_urlsafe(32)
         self._descriptor: dict[str, Any] | None = None
-        self._recovery_lock = threading.Lock()
-        self._recovery_plan = copy.deepcopy(dict(recovery_plan)) if recovery_plan is not None else None
-        self._seed_marker_count = 0
-        self._seed_complete = False
-        self._seed_bounds: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
-        self._execution_bounds: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
-        self._recovery_seed_used: dict[int, int] = {}
-        self._recovery_seed_claims: dict[tuple[str, int], int] = {}
-        self._recovery_execution_claim: tuple[str, int] | None = None
-        self._recovery_ineligible_reason: str | None = None
         # Set once the job's event queue exists, so an economy batch's polling
         # keeps the stall watchdog from mistaking a long wait for a hang.
         self.heartbeat: Callable[[], None] | None = None
@@ -280,18 +262,6 @@ class ModelGateway:
                 )
                 if route is None and not is_tools and not is_evaluator and not is_packages:
                     self._error(401, "unauthorized", "Unknown scoped model route.")
-                    return
-                if self.path == "/v1/_budget/recovery-seed-complete":
-                    try:
-                        length = int(self.headers.get("Content-Length", "0"))
-                        if not 0 <= length <= 1024:
-                            raise ValueError("Recovery marker exceeds the supported size.")
-                        if length and json.loads(self.rfile.read(length)) != {}:
-                            raise ValueError("Recovery marker body must be empty.")
-                        gateway.finish_recovery_seed()
-                        self._reply(ModelHTTPResult(200, "application/json", b'{"ok":true}'))
-                    except (ValueError, TypeError) as error:
-                        self._error(422, "invalid_recovery_marker", str(error))
                     return
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
@@ -395,134 +365,6 @@ class ModelGateway:
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="budget-model-gateway")
         self._thread.start()
 
-    @staticmethod
-    def _bound_key(bound: Mapping[str, Any]) -> tuple[str, str, str, str, str]:
-        """Return the prompt-free identity of one repeatable model request ceiling."""
-        return (
-            str(bound.get("role")),
-            str(bound.get("model")),
-            str(bound.get("price_binding")),
-            str(bound.get("max_cents")),
-            str(bound.get("max_wallet_cents")),
-        )
-
-    def _observe_model_quote(
-        self,
-        role: str,
-        model: str,
-        quote: Any,
-        operation_key: str,
-        attempt: int,
-    ) -> bool:
-        """Record initial seed bounds or enforce the persisted replay call quota.
-
-        Args:
-            role: Fixed model-route role.
-            model: Exact provider model slug.
-            quote: Fresh verified quote for the fully resolved physical request.
-            operation_key: Stable identity of the physical model attempt.
-            attempt: Retry number within that operation identity.
-
-        Returns:
-            Whether this exact attempt owns recovery headroom in the ledger.
-        """
-        observed = model_call_bound(role, model, quote)
-        claim = (operation_key, attempt)
-        with self._recovery_lock:
-            if self._recovery_plan is None:
-                target = self._execution_bounds if self._seed_complete else self._seed_bounds
-                key = self._bound_key(observed)
-                current = target.get(key)
-                if current is None:
-                    target[key] = observed
-                elif not self._seed_complete:
-                    current["count"] = int(current["count"]) + 1
-                return False
-            if not self._seed_complete:
-                bounds = self._recovery_plan.get("seed_reevaluation", {}).get("model_calls", [])
-                claimed_index = self._recovery_seed_claims.get(claim)
-                if claimed_index is not None:
-                    if not quote_fits_bound(bounds[claimed_index], role, model, quote):
-                        raise ValueError("A recovered seed attempt identity changed its bounded request.")
-                    return True
-                for index, bound in enumerate(bounds):
-                    used = self._recovery_seed_used.get(index, 0)
-                    if used < int(bound.get("count", 0)) and quote_fits_bound(bound, role, model, quote):
-                        self._recovery_seed_used[index] = used + 1
-                        self._recovery_seed_claims[claim] = index
-                        key = self._bound_key(observed)
-                        current = self._seed_bounds.get(key)
-                        if current is None:
-                            self._seed_bounds[key] = observed
-                        else:
-                            current["count"] = int(current["count"]) + 1
-                        return True
-                raise ValueError("Recovered seed evaluation exceeded its persisted model-call or price bound.")
-            if self._recovery_execution_claim is None:
-                bounds = self._recovery_plan.get("execution_headroom", {}).get("model_calls", [])
-                if not any(quote_fits_bound(bound, role, model, quote) for bound in bounds):
-                    raise ValueError("The resumed operation differs from its persisted execution headroom bound.")
-                self._recovery_execution_claim = claim
-            elif self._recovery_execution_claim == claim:
-                return True
-            self._execution_bounds.setdefault(self._bound_key(observed), observed)
-            return self._recovery_execution_claim == claim
-
-    def finish_recovery_seed(self) -> None:
-        """Close the mandatory seed-evaluation phase and activate one execution bound."""
-        with self._recovery_lock:
-            self._seed_marker_count += 1
-            if self._seed_marker_count > 1 and self._recovery_plan is None:
-                self._recovery_ineligible_reason = (
-                    "Multiple independent seed evaluators share this process; recover them as separate GEPA pairs."
-                )
-            self._seed_complete = True
-            if self._recovery_plan is not None:
-                self.runtime.finish_recovery_seed()
-
-    def checkpoint_recovery_plan(self, manifest: Mapping[str, Any], *, runtime: str) -> dict[str, Any]:
-        """Build a checkpoint-bound plan from observed calls and enforced sandbox limits.
-
-        Args:
-            manifest: Compatibility evidence for the exact state bytes being published.
-            runtime: Selected managed outer sandbox.
-
-        Returns:
-            Eligible or precisely ineligible recovery admission evidence.
-        """
-        with self._recovery_lock:
-            seed_bounds = [copy.deepcopy(value) for value in self._seed_bounds.values()]
-            execution_bounds = [copy.deepcopy(value) for value in self._execution_bounds.values()]
-            marker_seen = self._seed_marker_count == 1
-            reason = self._recovery_ineligible_reason
-        execution = None
-        if execution_bounds:
-            execution = {
-                "model_calls": execution_bounds,
-                "max_cents": str(max(Decimal(item["max_cents"]) for item in execution_bounds)),
-                "max_wallet_cents": str(max(Decimal(item["max_wallet_cents"]) for item in execution_bounds)),
-            }
-        return build_recovery_plan(
-            manifest,
-            runtime=runtime_bound(runtime, self._descriptor),
-            seed_bounds=seed_bounds,
-            execution_bound=execution,
-            seed_marker_seen=marker_seen,
-            ineligible_reason=reason,
-        )
-
-    def validate_recovery_runtime(self, runtime: str) -> None:
-        """Verify the selected current sandbox against the checkpoint's covered profile.
-
-        Args:
-            runtime: Selected managed execution runtime.
-
-        Raises:
-            RecoveryAdmissionError: When current resources or prices differ from the plan.
-        """
-        if self._recovery_plan is not None:
-            validate_recovery_runtime(self._recovery_plan, runtime_bound(runtime, self._descriptor))
-
     @property
     def url(self) -> str:
         """Return the loopback endpoint passed to the authorized optimizer child."""
@@ -554,7 +396,6 @@ class ModelGateway:
             role=role,
             policy=policy,
             client=self._client,
-            quote_observer=self._observe_model_quote,
             data_policy=data_policy,
             batch=(
                 BatchCollector(api_key=api_key, model=model, client=self._client, heartbeat=self._beat)
@@ -670,11 +511,6 @@ class ModelGateway:
             if path != "/v1/_packages":
                 raise ValueError("The package capability can only fetch its registered artifacts.")
             return self._packages.dispatch(body)
-        if path == "/v1/_budget/recovery-seed-complete":
-            if body:
-                raise ValueError("Recovery marker body must be empty.")
-            self.finish_recovery_seed()
-            return ModelHTTPResult(200, "application/json", b'{"ok":true}')
         if is_evaluator:
             if path != "/v1/_evaluator":
                 raise ValueError("The evaluator capability cannot dispatch models, tools, or sandbox commands.")
@@ -896,7 +732,6 @@ class ModelGateway:
             if self._sandbox is not None:
                 self._sandbox.close()
         finally:
-            self.runtime.release_recovery_headroom()
             self._client.close()
             self._routes.clear()
             self._tools = None

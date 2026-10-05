@@ -69,7 +69,6 @@ class _InteractionRuntime(BudgetRuntime):
         cost_kind: str,
         role: str | None = None,
         attempt: int = 0,
-        recovery_headroom: bool | None = None,
     ) -> OperationSnapshot:
         """Reserve one physical operation under the interaction namespace.
 
@@ -79,7 +78,6 @@ class _InteractionRuntime(BudgetRuntime):
             cost_kind: Model or sandbox attribution.
             role: Optional model role.
             attempt: Physical retry counter.
-            recovery_headroom: Unused recovery compatibility argument.
 
         Returns:
             Authoritative operation reservation.
@@ -90,7 +88,6 @@ class _InteractionRuntime(BudgetRuntime):
             cost_kind=cost_kind,
             role=role,
             attempt=attempt,
-            recovery_headroom=recovery_headroom,
         )
 
 
