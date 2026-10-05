@@ -52,6 +52,7 @@ import {
   serveProgramStream,
   servePairProgramStream,
   serveSharedOptimization,
+  STORAGE_CHANGED_EVENT,
 } from "@/shared/lib/api";
 import type {
   LMActivity,
@@ -83,8 +84,15 @@ import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { ACTIVE_STATUSES, TERMINAL_STATUSES } from "@/shared/constants/job-status";
+import { useLiteMode } from "@/features/settings";
+import { useRunLogStream } from "../hooks/use-run-log-stream";
+import { QUOTA_FULL_EVENT, maxLogId, mergeLiveLogs, pruneLiveLogs } from "../lib/run-log-merge";
 import { registerTutorialHook } from "@/features/tutorial";
-import type { OptimizationStatusResponse, OptimizationPayloadResponse } from "@/shared/types/api";
+import type {
+  OptimizationLogEntry,
+  OptimizationStatusResponse,
+  OptimizationPayloadResponse,
+} from "@/shared/types/api";
 import type { SharedOptimizationData } from "@/shared/lib/api";
 import { extractScoresFromLogs } from "../lib/extract-scores";
 import { extractBlackboxScorePoints } from "../lib/blackbox";
@@ -424,7 +432,39 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   // Hoisted so the memos below depend on a plain local — the React Compiler lint
   // can't equate an inferred `job.logs` path with a `job?.logs` dependency
   // literal, which would skip optimizing the whole component.
-  const jobLogs = job?.logs;
+  const fetchedLogs = job?.logs;
+  // Rows the live log stream delivered since the last fetch. Kept apart from
+  // job.logs because fetchJob's delta cursor counts the fetched rows only.
+  const [liveLogs, setLiveLogs] = useState<OptimizationLogEntry[]>([]);
+  const fetchedLogsRef = useRef(fetchedLogs);
+  useEffect(() => {
+    fetchedLogsRef.current = fetchedLogs;
+    if (fetchedLogs) setLiveLogs((cur) => pruneLiveLogs(fetchedLogs, cur));
+  }, [fetchedLogs]);
+  const lite = useLiteMode();
+  const hasJob = !!job;
+  const jobRunning = !!job && !TERMINAL_STATUSES.has(job.status);
+  const quotaToastShownRef = useRef(false);
+  const logStreamStatus = useRunLogStream(
+    !skipNetwork && authReady && !lite && hasJob && jobRunning
+      ? `${getRuntimeEnv().apiUrl}/optimizations/${encodeURIComponent(id)}/logs/stream`
+      : "",
+    () => maxLogId(fetchedLogsRef.current),
+    (entries) => {
+      setLiveLogs((cur) => [...cur, ...entries]);
+      if (!quotaToastShownRef.current && entries.some((e) => e.event === QUOTA_FULL_EVENT)) {
+        quotaToastShownRef.current = true;
+        toast.warning(msg("optimizations.logs.quota_full_toast"), {
+          toastId: "run-log-quota-full",
+        });
+        window.dispatchEvent(new Event(STORAGE_CHANGED_EVENT));
+      }
+    },
+  );
+  const jobLogs = useMemo(
+    () => (fetchedLogs ? mergeLiveLogs(fetchedLogs, liveLogs) : undefined),
+    [fetchedLogs, liveLogs],
+  );
 
   const pairScorePoints = useMemo(() => {
     if (activePairIndex === null || !jobLogs) return [];
@@ -1668,7 +1708,10 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
             {showLogsTab && (
               <TabsContent value="logs">
-                <LogsTab logs={isPairContext ? pairFilteredLogs : (job.logs ?? [])} />
+                <LogsTab
+                  logs={isPairContext ? pairFilteredLogs : (jobLogs ?? [])}
+                  liveStatus={logStreamStatus}
+                />
               </TabsContent>
             )}
 

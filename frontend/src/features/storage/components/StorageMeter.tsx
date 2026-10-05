@@ -3,7 +3,7 @@
 import { StorageUsageBar } from "@/shared/ui/progress-bar";
 import * as React from "react";
 import Link from "next/link";
-import { HardDrive } from "@/shared/ui/icons";
+import { HardDrive, WarningCircle } from "@/shared/ui/icons";
 import {
   getStorageUsage,
   STORAGE_CHANGED_EVENT,
@@ -56,10 +56,13 @@ export function StorageMeter({ collapsed = false }: { collapsed?: boolean }) {
   if (!usage || usage.quota_bytes <= 0) return null;
 
   const usagePct = Math.min(100, (usage.used_bytes / usage.quota_bytes) * 100);
-  const usageLabel = formatMsg("storage.quota.usage", {
+  // Full, not over: run logs stop saving the moment usage reaches the quota.
+  const full = usage.used_bytes >= usage.quota_bytes;
+  const usageText = formatMsg("storage.quota.usage", {
     used: formatStorageSize(usage.used_bytes),
     total: formatStorageSize(usage.quota_bytes),
   });
+  const usageLabel = full ? `${usageText}. ${msg("storage.quota.full_warning")}` : usageText;
 
   if (collapsed) {
     const tooltipSide = getActiveDir() === "rtl" ? "left" : "right";
@@ -71,7 +74,11 @@ export function StorageMeter({ collapsed = false }: { collapsed?: boolean }) {
             aria-label={usageLabel}
             className="flex min-h-[44px] min-w-[44px] items-center justify-center px-2 py-2.5 transition-colors duration-150 hover:bg-sidebar-accent/40 lg:min-h-0 lg:min-w-0"
           >
-            <HardDrive className="size-4 text-muted-foreground" />
+            {full ? (
+              <WarningCircle className="size-4 text-destructive" />
+            ) : (
+              <HardDrive className="size-4 text-muted-foreground" />
+            )}
           </Link>
         </TooltipTrigger>
         <TooltipContent side={tooltipSide}>{usageLabel}</TooltipContent>
@@ -86,9 +93,15 @@ export function StorageMeter({ collapsed = false }: { collapsed?: boolean }) {
       className="block min-h-[44px] px-3 pt-3 pb-1 transition-colors duration-150 hover:bg-sidebar-accent/40 lg:min-h-0"
     >
       <StorageUsageBar value={usagePct} over={usage.used_bytes > usage.quota_bytes} />
-      <p className="mt-1.5 text-start text-[0.6875rem] text-muted-foreground tabular-nums">
-        {usageLabel}
+      <p className="mt-1.5 flex items-center gap-1 text-start text-[0.6875rem] text-muted-foreground tabular-nums">
+        {full && <WarningCircle className="size-3 shrink-0 text-destructive" aria-hidden="true" />}
+        {usageText}
       </p>
+      {full && (
+        <p className="mt-0.5 text-start text-[0.6875rem] text-destructive">
+          {msg("storage.quota.full_warning")}
+        </p>
+      )}
     </Link>
   );
 }

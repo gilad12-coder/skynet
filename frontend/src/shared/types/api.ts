@@ -376,12 +376,23 @@ export interface PaginatedJobsResponse {
   offset: number;
 }
 
+/** Where a run-log line came from; sandbox sources are attributed by the host. */
+export type LogSource = "host" | "engine" | "proposer" | "scorer" | "sandbox";
+
 export interface OptimizationLogEntry {
+  /** Row id: the live stream's resume cursor. Absent on demo data. */
+  id?: number | null;
   timestamp: string;
   level: LogLevel | (string & {});
   logger: string;
   message: string;
   pair_index?: number | null;
+  source?: LogSource | (string & {});
+  /** Typed event name, such as `candidate.scored`, or a scorer's own name. */
+  event?: string | null;
+  fields?: Record<string, unknown> | null;
+  candidate?: string | null;
+  case?: string | null;
 }
 
 export interface ProgressEvent {

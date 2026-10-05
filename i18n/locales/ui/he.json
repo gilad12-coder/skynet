@@ -4094,5 +4094,22 @@
   "optimization.blackbox.final.case_col": "מקרה",
   "optimization.blackbox.versions.feedback": "משוב המדד",
   "tooltip.blackbox.final.named_scores": "כל ציון בעל שם שהמדד החזיר, שנמדד מחדש על גרסת ההתחלה ועל הגרסה הטובה ביותר אחרי החיפוש, עם המשוב של המדד",
-  "tooltip.blackbox.final.cases": "גרסת ההתחלה והגרסה הטובה ביותר, שקיבלו ציון מחדש על כל מקרה אחרי החיפוש"
+  "tooltip.blackbox.final.cases": "גרסת ההתחלה והגרסה הטובה ביותר, שקיבלו ציון מחדש על כל מקרה אחרי החיפוש",
+  "optimizations.logs.live": "חי",
+  "optimizations.logs.reconnecting": "מתחבר מחדש",
+  "optimizations.logs.new_lines": "{count} שורות חדשות",
+  "optimizations.logs.jump_latest": "מעבר לאחרונות",
+  "optimizations.logs.col.source": "מקור",
+  "optimizations.logs.col.candidate": "מועמד",
+  "optimizations.logs.col.case": "מקרה",
+  "optimizations.logs.source.host": "שרת",
+  "optimizations.logs.source.engine": "מנוע",
+  "optimizations.logs.source.proposer": "מציע",
+  "optimizations.logs.source.scorer": "מדד",
+  "optimizations.logs.source.sandbox": "סביבת הריצה",
+  "optimizations.logs.fields.show": "הצגת פרטי האירוע",
+  "optimizations.logs.fields.hide": "הסתרת פרטי האירוע",
+  "optimizations.logs.quota_full_toast": "האחסון שלכם מלא, ולכן היומן של ההרצה הזו הפסיק להישמר. ההרצה ממשיכה. פנו מקום כדי לשמור שורות יומן חדשות.",
+  "storage.quota.full_warning": "האחסון מלא. יומני הרצות לא יישמרו עד שתפנו מקום.",
+  "tutorial.concepts.scorer_log": "כדי לראות מה המדד שלכם עושה בזמן שהרצה פועלת, קראו ל-from skynet import log ואחר כך ל-log(\"judge.retry\", attempt=2, reason=\"rate limited\"). כל אירוע מופיע בלשונית היומנים של ההרצה ברגע שהוא קורה, מתויג במועמד ובמקרה שנמדדים. העבירו message= לשורה שתוצג ו-level= לרמה DEBUG, INFO, WARNING או ERROR. השדות יכולים להיות בכל גודל. פלט print רגיל נשאר מוסתר."
 }

@@ -206,7 +206,7 @@ const INSUFFICIENT_FUNDS_CODE = I18N_KEY.BILLING_INSUFFICIENT_FUNDS;
 /** Browser event the central error path fires when a submit hits the balance gate. */
 export const INSUFFICIENT_FUNDS_EVENT = "billing-insufficient-credits";
 
-/** Browser event fired after a storage-freeing delete so the meter re-reads usage. */
+/** Browser event fired when storage usage changes, such as a delete or a full quota, so the meter re-reads usage. */
 export const STORAGE_CHANGED_EVENT = "storage-changed";
 
 /**

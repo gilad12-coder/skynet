@@ -784,6 +784,7 @@ function SectionScorers() {
         height="200px"
       />
       <p>{msg("auto.features.tutorial.components.concepts.guide.literal.409")}</p>
+      <p>{msg("tutorial.concepts.scorer_log")}</p>
 
       <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.411")}</SubHeading>
       <p>{msg("auto.features.tutorial.components.concepts.guide.literal.412")}</p>
