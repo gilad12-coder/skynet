@@ -494,6 +494,9 @@ class _EvaluatorMailbox:
         # Replaced once the run's environment is known, so its secrets are redacted.
         self.scrub = sandbox_log.Scrubber(())
         self._buffer = ""
+        self._plain = sandbox_log.LineGroups(
+            lambda text: sandbox_log.stream_line(text, owner=self.owner, scrub=self.scrub, label="stdout")
+        )
         self._responses: dict[str, str] = {}
         self._lock = threading.Lock()
 
@@ -516,8 +519,10 @@ class _EvaluatorMailbox:
                     f"{_LOG_PREFIX}{self.nonce} ",
                 )
                 if not line.startswith(framed):
-                    sandbox_log.stream_line(line, owner=self.owner, scrub=self.scrub, label="stdout")
+                    if line.strip():
+                        self._plain.add(line)
                     continue
+                self._plain.flush()
                 if line.startswith(_LOG_PREFIX):
                     self._log(line.split(" ", 2)[2])
                     continue
@@ -530,6 +535,7 @@ class _EvaluatorMailbox:
                     # LocalSubprocessRuntime delivers output on a reader thread;
                     # raising there would abandon the child waiting for its reply.
                     self.error = self.error or exc
+            self._plain.flush()
 
     def _log(self, body: str) -> None:
         """Relay one structured record from the child into the run log.

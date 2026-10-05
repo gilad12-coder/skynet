@@ -264,3 +264,48 @@ def test_the_worker_persists_only_its_own_jobs_sandbox_records() -> None:
     _FakeSession("after\n", exit_code=1).run("cmd")
     assert [(job, level) for job, level, _ in store.logs] == [("job-1", "DEBUG"), ("job-1", "WARNING")]
     assert store.logs[1][2].endswith("mine")
+
+
+def _groups(lines: list[str]) -> list[str]:
+    """Return the messages ``lines`` group into."""
+    out: list[str] = []
+    groups = sandbox_log.LineGroups(out.append)
+    for line in lines:
+        groups.add(line)
+    groups.flush()
+    return out
+
+
+def test_node_error_object_is_one_message() -> None:
+    """A printed Node error, its fields and its closing brace form one message."""
+    lines = [
+        "[notion] Unable to auto-discover data source TypeError: fetch failed",
+        "    at async t.request (chunk.js:1:19874)",
+        "  [cause]: Error: getaddrinfo EAI_AGAIN api.notion.com",
+        "    errno: -3001,",
+        "  }",
+        "}",
+        "next line",
+    ]
+    assert _groups(lines) == ["\n".join(lines[:6]), "next line"]
+
+
+def test_python_traceback_takes_its_exception_line() -> None:
+    """A traceback ends with its unindented exception line, not before it."""
+    lines = ["Traceback (most recent call last):", '  File "x.py", line 1', "ValueError: bad", "after"]
+    assert _groups(lines) == ["\n".join(lines[:3]), "after"]
+
+
+def test_plain_lines_stay_separate() -> None:
+    """Unrelated unindented lines are each their own message."""
+    assert _groups(["one", "two"]) == ["one", "two"]
+
+
+def test_streamed_error_is_one_row(captured: _Capture) -> None:
+    """A multi-line stderr chunk is logged as one DEBUG row."""
+    log = sandbox_log.SandboxOutputLog("npm run build", ())
+    log.feed("Error: boom\n    at a (b.js:1)\n    at c (d.js:2)\ndone\n")
+    assert captured.messages(logging.DEBUG) == [
+        "[sandbox] Error: boom\n    at a (b.js:1)\n    at c (d.js:2)",
+        "[sandbox] done",
+    ]
