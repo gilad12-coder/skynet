@@ -7,7 +7,7 @@ import threading
 from decimal import Decimal
 
 import httpx
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from core.billing.model_batch import BatchCollector, allocate_cost
@@ -15,7 +15,7 @@ from core.billing.model_dispatch import OpenRouterDispatcher
 from core.billing.operation_pricing import ChargePolicy
 from core.billing.tests.test_protected_dispatch import CATALOG, REQUEST, _runtime
 from core.config import settings
-from core.storage.models import Base, BillingCustomerModel
+from core.storage.models import Base, BillingCustomerModel, ExecutionUsageEvidenceModel
 
 RATES = (Decimal("0.000001"), Decimal("0.000004"))
 
@@ -285,6 +285,10 @@ def test_economy_dispatch_settles_the_batch_share(tmp_path, monkeypatch) -> None
         result = dispatcher.dispatch("/chat/completions", REQUEST)
     assert result.status == 200
     assert not direct
+    with Session(engine) as session:
+        evidence = session.scalars(select(ExecutionUsageEvidenceModel)).one().evidence
+    assert evidence["batched"] is True
+    assert "latency_ms" not in evidence
     snapshot = runtime.service.get(runtime.budget_id, "alice")
     assert snapshot.setup_spent_cents == Decimal("0.2")
     assert snapshot.reserved_cents == 0

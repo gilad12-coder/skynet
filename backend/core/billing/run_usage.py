@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from ..storage.models import ExecutionBudgetModel, ExecutionOperationModel, ExecutionUsageEvidenceModel
 from .budget_amounts import CENT_SCALE, cents_from_units
 from .pricing import CENT_USD_VALUE, ModelUsage, usage_cost_usd
+from .usage_tags import CALLER_PROPOSER, CALLER_REFLECTION
 
 ROLE_TASK = "task"
 ROLE_REFLECTION = "reflection"
@@ -78,7 +79,8 @@ def _role(record: OperationRecord, *, proposer: bool) -> str:
 
     Args:
         record: The operation.
-        proposer: Whether the run's optimization model is a proposer agent rather than DSPy reflection.
+        proposer: Whether the run's optimization model is a proposer agent rather than DSPy reflection;
+            a ``caller`` tag on the call overrides it, since auto mode runs both on one route.
 
     Returns:
         One of the ``ROLE_*`` names.
@@ -87,6 +89,10 @@ def _role(record: OperationRecord, *, proposer: bool) -> str:
         return ROLE_SETUP
     if record.cost_kind == "sandbox":
         return ROLE_SANDBOX
+    tags = record.evidence.get("tags")
+    caller = tags.get("caller") if isinstance(tags, Mapping) else None
+    if caller in (CALLER_PROPOSER, CALLER_REFLECTION):
+        proposer = caller == CALLER_PROPOSER
     return {
         "task": ROLE_TASK,
         "optimization": ROLE_PROPOSER if proposer else ROLE_REFLECTION,

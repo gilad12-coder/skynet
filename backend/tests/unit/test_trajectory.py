@@ -43,6 +43,7 @@ from core.service_gateway.optimization.trajectory import (
     _load_state,
     _normalize_prediction,
     capture_proposal_prompts,
+    current_proposal_iteration,
     emit_valset_event,
     extract_candidates_from_state,
     extract_rejected_from_trace,
@@ -385,9 +386,7 @@ class TestSerializeValsetRows:
     def test_ids_match_gepa_subscore_keys(self) -> None:
         """Ids are sequential integer strings starting at ``"0"`` so the frontend
         can join them against per-example score keys."""
-        rows = serialize_valset_rows(
-            [dspy.Example(q="a", a="x").with_inputs("q") for _ in range(3)]
-        )
+        rows = serialize_valset_rows([dspy.Example(q="a", a="x").with_inputs("q") for _ in range(3)])
         assert [r["id"] for r in rows] == ["0", "1", "2"]
 
     def test_plain_dict_fallback_uses_dict_as_inputs(self) -> None:
@@ -439,9 +438,7 @@ class TestEmitValsetEvent:
         )
         assert len(events) == 1
         assert events[0][0] == PROGRESS_VALSET
-        assert events[0][1] == {
-            "rows": [{"id": "0", "inputs": {"q": "a"}, "outputs": {"a": "x"}}]
-        }
+        assert events[0][1] == {"rows": [{"id": "0", "inputs": {"q": "a"}, "outputs": {"a": "x"}}]}
 
     def test_noop_when_callback_missing(self) -> None:
         """Non-streaming code paths pass ``None`` and must get no exception."""
@@ -455,6 +452,7 @@ class TestEmitValsetEvent:
 
     def test_callback_exception_is_swallowed(self) -> None:
         """A raising callback must not abort the optimization."""
+
         def raising(event: str, metrics: dict) -> None:
             """Progress callback that always raises to exercise the swallow path."""
             raise RuntimeError("downstream broke")
@@ -574,6 +572,7 @@ class TestMinibatchRecorder:
     def test_callback_exception_does_not_break_metric_call(self) -> None:
         """A raising progress callback never aborts the optimizer's metric call."""
         ex = dspy.Example(q="a").with_inputs("q")
+
         def raising(event: str, metrics: dict) -> None:
             """Progress callback that always raises to test that the metric still returns."""
             raise RuntimeError("downstream broke")
@@ -669,6 +668,7 @@ class TestMaybeWrapMinibatchRecorder:
 
     def test_returns_raw_metric_when_callback_missing(self) -> None:
         """Without a progress callback there's nowhere to send events, so skip wrapping."""
+
         def metric(*_, **__):
             """Constant stub metric; its value is irrelevant to this test."""
             return 0.0
@@ -715,9 +715,7 @@ class TestCaptureProposalPrompts:
             def __init__(self) -> None:
                 """Seed candidate and trace fields the wrapped propose call reads."""
                 self.program_candidates = [{"qa": "Answer the question."}]
-                self.full_program_trace: list[dict] = [
-                    {"i": 0, "selected_program_candidate": 0}
-                ]
+                self.full_program_trace: list[dict] = [{"i": 0, "selected_program_candidate": 0}]
 
         captured_state = _FakeState()
         proposed_text = {"qa": "Answer in detail."}
@@ -762,9 +760,7 @@ class TestCaptureProposalPrompts:
                 """Seed iteration counter plus the candidate and trace lists."""
                 self.i = 11
                 self.program_candidates = [{"qa": "p"}]
-                self.full_program_trace: list[dict] = [
-                    {"i": 11, "selected_program_candidate": 0}
-                ]
+                self.full_program_trace: list[dict] = [{"i": 11, "selected_program_candidate": 0}]
 
         seen: dict[str, int | None] = {"value": -1}
 
@@ -783,6 +779,35 @@ class TestCaptureProposalPrompts:
 
         assert seen["value"] == 11
         assert _current_proposal_iteration.get() is None
+
+    def test_iteration_reaches_dspy_worker_threads(self) -> None:
+        """Calls DSPy's parallel evaluator makes inside propose see the iteration too."""
+
+        class _FakeState:
+            """Stand-in for GEPAState with an iteration and no trace."""
+
+            i = 4
+            program_candidates: list[dict] = []
+            full_program_trace: list[dict] = []
+
+        seen: list[int | None] = []
+
+        def fake_original(self: object, state: object) -> CandidateProposal | None:
+            """Read the iteration from worker threads, as a parent-minibatch evaluation would."""
+            executor = dspy.utils.parallelizer.ParallelExecutor(num_threads=2, disable_progress_bar=True)
+            seen.extend(executor.execute(lambda _: current_proposal_iteration(), [1, 2]))
+            return None
+
+        original = ReflectiveMutationProposer.propose
+        ReflectiveMutationProposer.propose = fake_original  # type: ignore[method-assign]
+        try:
+            with capture_proposal_prompts("gepa"):
+                ReflectiveMutationProposer.propose(None, _FakeState())  # type: ignore[arg-type]
+        finally:
+            ReflectiveMutationProposer.propose = original  # type: ignore[method-assign]
+
+        assert seen == [4, 4]
+        assert current_proposal_iteration() is None
 
 
 class TestNormalizePrediction:

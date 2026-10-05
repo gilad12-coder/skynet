@@ -429,8 +429,12 @@ class OpenRouterDispatcher:
                 "status": status,
                 "usage": usage,
                 "interrupted": interrupted,
-                "latency_ms": round((time.monotonic() - started) * 1000),
             }
+            # A batched answer's wait is mostly the batch window and polling, not the model.
+            if batched:
+                evidence["batched"] = True
+            else:
+                evidence["latency_ms"] = round((time.monotonic() - started) * 1000)
             if tags:
                 evidence["tags"] = tags
             if failure is not None:
