@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "モデル呼び出し",
   "usage_tab.summary.tokens": "トークン",
   "usage_tab.budget_stopped": "予算の上限によりこの実行は停止しました。",
-  "usage_tab.open_logs": "ログで表示",
   "usage_tab.load_error": "使用量を読み込めませんでした。しばらくしてからもう一度お試しください。",
   "tooltip.usage_tab.role.task": "計測・最適化中に、プログラムが動作するモデルへの呼び出し。",
   "tooltip.usage_tab.role.reflection": "結果を読み取り、より良い指示を書くモデルへの呼び出し。",

@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "모델 호출",
   "usage_tab.summary.tokens": "토큰",
   "usage_tab.budget_stopped": "예산 한도로 이 실행이 중지되었습니다.",
-  "usage_tab.open_logs": "로그에서 보기",
   "usage_tab.load_error": "사용량을 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
   "tooltip.usage_tab.role.task": "프로그램이 측정 및 최적화되는 동안, 프로그램이 실행되는 모델에 대한 호출입니다.",
   "tooltip.usage_tab.role.reflection": "결과를 읽고 더 나은 지침을 작성하는 모델에 대한 호출입니다.",

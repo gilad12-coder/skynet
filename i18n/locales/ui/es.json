@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "Llamadas al modelo",
   "usage_tab.summary.tokens": "Tokens",
   "usage_tab.budget_stopped": "El límite de presupuesto detuvo esta ejecución.",
-  "usage_tab.open_logs": "Ver en los registros",
   "usage_tab.load_error": "No se pudo cargar el uso. Inténtalo de nuevo en un momento.",
   "tooltip.usage_tab.role.task": "Llamadas al modelo en el que se ejecuta tu programa, mientras se mide y optimiza.",
   "tooltip.usage_tab.role.reflection": "Llamadas al modelo que lee los resultados y escribe mejores instrucciones.",

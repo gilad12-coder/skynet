@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "Chiamate al modello",
   "usage_tab.summary.tokens": "Token",
   "usage_tab.budget_stopped": "Il limite di budget ha interrotto questa esecuzione.",
-  "usage_tab.open_logs": "Mostra nei log",
   "usage_tab.load_error": "Impossibile caricare l'utilizzo. Riprova tra un momento.",
   "tooltip.usage_tab.role.task": "Chiamate al modello su cui gira il tuo programma, mentre viene misurato e ottimizzato.",
   "tooltip.usage_tab.role.reflection": "Chiamate al modello che legge i risultati e scrive istruzioni migliori.",

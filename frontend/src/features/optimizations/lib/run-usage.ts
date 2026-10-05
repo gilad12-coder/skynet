@@ -128,8 +128,3 @@ export function availableGroupings(rows: readonly RunUsageRow[]): UsageGrouping[
 export function hasProviderSpend(rows: readonly RunUsageRow[]): boolean {
   return rows.some((r) => r.provider_cents != null);
 }
-
-/** Log source a role's lines carry, for jumping from a usage row to its log lines. */
-export function logSourceForRole(role: string): string | null {
-  return role === "proposer" || role === "scorer" || role === "sandbox" ? role : null;
-}

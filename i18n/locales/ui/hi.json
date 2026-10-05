@@ -4149,7 +4149,6 @@
   "usage_tab.summary.calls": "मॉडल कॉल",
   "usage_tab.summary.tokens": "टोकन",
   "usage_tab.budget_stopped": "बजट सीमा ने यह रन रोक दिया।",
-  "usage_tab.open_logs": "इन्हें लॉग में दिखाएँ",
   "usage_tab.load_error": "उपयोग लोड नहीं हो सका। थोड़ी देर में फिर से कोशिश करें।",
   "tooltip.usage_tab.role.task": "उस मॉडल को कॉल जिस पर आपका प्रोग्राम चलता है, जब उसे मापा और ऑप्टिमाइज़ किया जा रहा हो।",
   "tooltip.usage_tab.role.reflection": "उस मॉडल को कॉल जो परिणाम पढ़कर बेहतर निर्देश लिखता है।",
