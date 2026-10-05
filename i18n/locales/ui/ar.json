@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "لا يوجد سعر مسجّل لهذا النموذج، لذا تُحتسب استدعاءاته ورموزه لكن لا يمكن عرض تكلفته.",
   "tooltip.usage_tab.unattributed": "استدعاءات نماذج لم تُوسَم بدور. ومع ذلك تُحتسب ضمن الإجمالي.",
   "usage_tab.role.rounding": "التقريب إلى سنتات كاملة",
-  "tooltip.usage_tab.role.rounding": "تُخصم من محفظتك سنتات كاملة، مع التقريب للأعلى مرة واحدة للتشغيل كله. هذا الصف هو الفرق."
+  "tooltip.usage_tab.role.rounding": "تُخصم من محفظتك سنتات كاملة، مع التقريب للأعلى مرة واحدة للتشغيل كله. هذا الصف هو الفرق.",
+  "tooltip.usage_tab.summary.limit": "أقصى مبلغ يُسمح لهذا التشغيل بإنفاقه. يتوقف عند الوصول إليه.",
+  "tooltip.usage_tab.summary.spent": "ما خصمه التشغيل من محفظتك، بما في ذلك الإعداد.",
+  "tooltip.usage_tab.summary.reserved": "مبلغ محجوز لاستدعاءات ما زالت قيد التنفيذ. ما لا تستخدمه يعود إليك.",
+  "tooltip.usage_tab.summary.available": "ما تبقى من الميزانية بعد المُنفَق والمحجوز.",
+  "tooltip.usage_tab.summary.calls": "كل استدعاءات النماذج التي أجراها التشغيل، في جميع الأدوار.",
+  "tooltip.usage_tab.summary.tokens": "رموز الإدخال والإخراج عبر كل استدعاءات النماذج.",
+  "tooltip.usage_tab.col.cost": "ما خصمته هذه الاستدعاءات من محفظتك.",
+  "tooltip.usage_tab.col.calls": "عدد استدعاءات النماذج في هذا الصف.",
+  "tooltip.usage_tab.col.input": "الرموز المرسلة إلى النموذج: التعليمات والأمثلة والسياق.",
+  "tooltip.usage_tab.col.output": "الرموز التي كتبها النموذج في ردّه.",
+  "tooltip.usage_tab.col.latency": "متوسط الوقت الذي استغرقه الاستدعاء للرد.",
+  "tooltip.usage_tab.group.role": "كل صف هو مهمة واحدة أداها نموذج في التشغيل.",
+  "tooltip.usage_tab.group.model": "كل صف هو نموذج واحد، أيًّا كان الدور الذي أداه.",
+  "tooltip.usage_tab.group.stage": "كل صف هو مرحلة واحدة من التشغيل.",
+  "tooltip.usage_tab.group.candidate": "كل صف هو مرشّح واحد جرّبه المُحسِّن.",
+  "tooltip.usage_tab.total": "مجموع كل الصفوف. يطابق ما خصمه التشغيل."
 }

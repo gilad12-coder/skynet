@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "此模型没有价格记录，因此其调用和令牌会计入，但无法显示费用。",
   "tooltip.usage_tab.unattributed": "未标记角色的模型调用，仍计入合计。",
   "usage_tab.role.rounding": "向上取整到整美分",
-  "tooltip.usage_tab.role.rounding": "钱包按整美分扣费，整个运行只向上取整一次。这一行就是差额。"
+  "tooltip.usage_tab.role.rounding": "钱包按整美分扣费，整个运行只向上取整一次。这一行就是差额。",
+  "tooltip.usage_tab.summary.limit": "本次运行最多可花费的金额，达到后即停止。",
+  "tooltip.usage_tab.summary.spent": "本次运行从你的钱包扣除的金额，包括准备工作。",
+  "tooltip.usage_tab.summary.reserved": "为仍在进行的调用预留的金额，未用完的部分会退回。",
+  "tooltip.usage_tab.summary.available": "预算减去已花费和已预留后剩下的金额。",
+  "tooltip.usage_tab.summary.calls": "本次运行在所有角色中发起的全部模型调用。",
+  "tooltip.usage_tab.summary.tokens": "所有模型调用的输入和输出令牌。",
+  "tooltip.usage_tab.col.cost": "这些调用从你的钱包扣除的金额。",
+  "tooltip.usage_tab.col.calls": "这一行发起了多少次模型调用。",
+  "tooltip.usage_tab.col.input": "发送给模型的令牌：提示词、示例和上下文。",
+  "tooltip.usage_tab.col.output": "模型返回的令牌。",
+  "tooltip.usage_tab.col.latency": "一次调用平均多久得到响应。",
+  "tooltip.usage_tab.group.role": "每一行是模型在本次运行中承担的一项工作。",
+  "tooltip.usage_tab.group.model": "每一行是一个模型，不论它承担什么角色。",
+  "tooltip.usage_tab.group.stage": "每一行是本次运行的一个阶段。",
+  "tooltip.usage_tab.group.candidate": "每一行是优化器尝试过的一个候选。",
+  "tooltip.usage_tab.total": "所有行的合计，与本次运行扣除的金额一致。"
 }

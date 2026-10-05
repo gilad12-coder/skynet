@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "Bu modelin kayıtlı bir fiyatı yok; çağrıları ve token'ları sayılır ama maliyeti gösterilemez.",
   "tooltip.usage_tab.unattributed": "Bir rolle etiketlenmemiş model çağrıları. Yine de toplama dahil edilir.",
   "usage_tab.role.rounding": "Tam sente yuvarlama",
-  "tooltip.usage_tab.role.rounding": "Cüzdanınızdan tam sent olarak ücret alınır ve tüm çalıştırma için bir kez yukarı yuvarlanır. Bu satır aradaki farktır."
+  "tooltip.usage_tab.role.rounding": "Cüzdanınızdan tam sent olarak ücret alınır ve tüm çalıştırma için bir kez yukarı yuvarlanır. Bu satır aradaki farktır.",
+  "tooltip.usage_tab.summary.limit": "Bu çalıştırmanın harcayabileceği en yüksek tutar. Bu tutara ulaşınca durur.",
+  "tooltip.usage_tab.summary.spent": "Çalıştırmanın kurulum dahil cüzdanınızdan tahsil ettiği tutar.",
+  "tooltip.usage_tab.summary.reserved": "Hâlâ süren çağrılar için ayrılan para. Kullanılmayan kısım geri döner.",
+  "tooltip.usage_tab.summary.available": "Harcanan ve ayrılan tutarlardan sonra bütçeden kalan.",
+  "tooltip.usage_tab.summary.calls": "Çalıştırmanın her roldeki tüm model çağrıları.",
+  "tooltip.usage_tab.summary.tokens": "Tüm model çağrılarındaki girdi ve çıktı token'ları.",
+  "tooltip.usage_tab.col.cost": "Bu çağrıların cüzdanınızdan tahsil ettiği tutar.",
+  "tooltip.usage_tab.col.calls": "Bu satırın yaptığı model çağrısı sayısı.",
+  "tooltip.usage_tab.col.input": "Modele gönderilen token'lar: istemler, örnekler ve bağlam.",
+  "tooltip.usage_tab.col.output": "Modelin yanıt olarak yazdığı token'lar.",
+  "tooltip.usage_tab.col.latency": "Bir çağrının yanıt vermesinin ortalama ne kadar sürdüğü.",
+  "tooltip.usage_tab.group.role": "Her satır, çalıştırmada bir modelin yaptığı bir iştir.",
+  "tooltip.usage_tab.group.model": "Her satır bir modeldir; hangi rolde olduğu fark etmez.",
+  "tooltip.usage_tab.group.stage": "Her satır çalıştırmanın bir aşamasıdır.",
+  "tooltip.usage_tab.group.candidate": "Her satır, optimize edicinin denediği bir adaydır.",
+  "tooltip.usage_tab.total": "Tüm satırların toplamı. Çalıştırmanın tahsil ettiği tutarla aynıdır."
 }

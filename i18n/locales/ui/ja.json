@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "このモデルには価格が登録されていないため、呼び出しとトークンはカウントされますが、コストは表示できません。",
   "tooltip.usage_tab.unattributed": "ロールのタグが付いていないモデル呼び出し。合計には含まれます。",
   "usage_tab.role.rounding": "1セント単位への切り上げ",
-  "tooltip.usage_tab.role.rounding": "ウォレットへの請求は1セント単位で、実行全体に対して一度だけ切り上げられます。この行はその差額です。"
+  "tooltip.usage_tab.role.rounding": "ウォレットへの請求は1セント単位で、実行全体に対して一度だけ切り上げられます。この行はその差額です。",
+  "tooltip.usage_tab.summary.limit": "この実行で使える上限額。ここに達すると停止します。",
+  "tooltip.usage_tab.summary.spent": "この実行がウォレットに請求した額。セットアップを含みます。",
+  "tooltip.usage_tab.summary.reserved": "実行中の呼び出しのために確保している金額。使われなかった分は戻ります。",
+  "tooltip.usage_tab.summary.available": "予算から支出額と予約額を引いた残り。",
+  "tooltip.usage_tab.summary.calls": "この実行のすべてのロールでのモデル呼び出し。",
+  "tooltip.usage_tab.summary.tokens": "すべてのモデル呼び出しの入力トークンと出力トークン。",
+  "tooltip.usage_tab.col.cost": "これらの呼び出しがウォレットに請求した額。",
+  "tooltip.usage_tab.col.calls": "この行のモデル呼び出しの回数。",
+  "tooltip.usage_tab.col.input": "モデルに送ったトークン。プロンプト、例、コンテキストを含みます。",
+  "tooltip.usage_tab.col.output": "モデルが返したトークン。",
+  "tooltip.usage_tab.col.latency": "呼び出しが応答するまでの平均時間。",
+  "tooltip.usage_tab.group.role": "各行は、この実行でモデルが担った1つの役割です。",
+  "tooltip.usage_tab.group.model": "各行は1つのモデルです。ロールは問いません。",
+  "tooltip.usage_tab.group.stage": "各行は実行の1つのステージです。",
+  "tooltip.usage_tab.group.candidate": "各行はオプティマイザーが試した1つの候補です。",
+  "tooltip.usage_tab.total": "すべての行の合計。この実行の請求額と一致します。"
 }

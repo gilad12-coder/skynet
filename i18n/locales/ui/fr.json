@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "Ce modèle n'a aucun prix enregistré : ses appels et jetons sont comptés, mais son coût ne peut pas être affiché.",
   "tooltip.usage_tab.unattributed": "Appels de modèle qui n'ont pas été étiquetés avec un rôle. Ils comptent quand même dans le total.",
   "usage_tab.role.rounding": "Arrondi au centime entier",
-  "tooltip.usage_tab.role.rounding": "Votre portefeuille est débité en centimes entiers, arrondis au supérieur une seule fois pour toute l'exécution. Cette ligne correspond à la différence."
+  "tooltip.usage_tab.role.rounding": "Votre portefeuille est débité en centimes entiers, arrondis au supérieur une seule fois pour toute l'exécution. Cette ligne correspond à la différence.",
+  "tooltip.usage_tab.summary.limit": "Le montant maximal que cette exécution peut dépenser. Elle s'arrête dès qu'elle l'atteint.",
+  "tooltip.usage_tab.summary.spent": "Ce que l'exécution a débité de votre portefeuille, configuration comprise.",
+  "tooltip.usage_tab.summary.reserved": "Montant bloqué pour les appels encore en cours. Ce qu'ils n'utilisent pas vous est rendu.",
+  "tooltip.usage_tab.summary.available": "Ce qui reste du budget une fois déduits le dépensé et le réservé.",
+  "tooltip.usage_tab.summary.calls": "Tous les appels de modèle de l'exécution, tous rôles confondus.",
+  "tooltip.usage_tab.summary.tokens": "Jetons d'entrée et de sortie sur l'ensemble des appels de modèle.",
+  "tooltip.usage_tab.col.cost": "Ce que ces appels ont débité de votre portefeuille.",
+  "tooltip.usage_tab.col.calls": "Le nombre d'appels de modèle de cette ligne.",
+  "tooltip.usage_tab.col.input": "Jetons envoyés au modèle : prompts, exemples et contexte.",
+  "tooltip.usage_tab.col.output": "Jetons que le modèle a renvoyés.",
+  "tooltip.usage_tab.col.latency": "Le temps de réponse moyen d'un appel.",
+  "tooltip.usage_tab.group.role": "Chaque ligne correspond à une tâche effectuée par un modèle pendant l'exécution.",
+  "tooltip.usage_tab.group.model": "Chaque ligne correspond à un modèle, quel que soit son rôle.",
+  "tooltip.usage_tab.group.stage": "Chaque ligne correspond à une étape de l'exécution.",
+  "tooltip.usage_tab.group.candidate": "Chaque ligne correspond à un candidat essayé par l'optimiseur.",
+  "tooltip.usage_tab.total": "La somme de toutes les lignes. Elle correspond à ce que l'exécution a débité."
 }

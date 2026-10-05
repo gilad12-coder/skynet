@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "呢個模型冇價格記錄，所以佢嘅呼叫同 token 會計入，但顯示唔到費用。",
   "tooltip.usage_tab.unattributed": "冇標記角色嘅模型呼叫，仍然計入合計。",
   "usage_tab.role.rounding": "進位到整數仙",
-  "tooltip.usage_tab.role.rounding": "你嘅錢包以整數仙收費，成個運行只會向上進位一次。呢一行就係差額。"
+  "tooltip.usage_tab.role.rounding": "你嘅錢包以整數仙收費，成個運行只會向上進位一次。呢一行就係差額。",
+  "tooltip.usage_tab.summary.limit": "今次運行最多可以使幾多錢，去到就會停。",
+  "tooltip.usage_tab.summary.spent": "今次運行喺你錢包扣咗幾多，包埋設定。",
+  "tooltip.usage_tab.summary.reserved": "為仲做緊嘅呼叫預留嘅錢，用唔晒嘅會退返。",
+  "tooltip.usage_tab.summary.available": "預算減去已用同已預留之後剩返幾多。",
+  "tooltip.usage_tab.summary.calls": "今次運行喺所有角色入面做嘅全部模型呼叫。",
+  "tooltip.usage_tab.summary.tokens": "所有模型呼叫嘅輸入同輸出 token。",
+  "tooltip.usage_tab.col.cost": "呢啲呼叫喺你錢包扣咗幾多。",
+  "tooltip.usage_tab.col.calls": "呢一行做咗幾多次模型呼叫。",
+  "tooltip.usage_tab.col.input": "送俾模型嘅 token：提示、例子同上下文。",
+  "tooltip.usage_tab.col.output": "模型回覆寫出嚟嘅 token。",
+  "tooltip.usage_tab.col.latency": "一次呼叫平均要幾耐先有回應。",
+  "tooltip.usage_tab.group.role": "每一行係模型喺今次運行做嘅一項工作。",
+  "tooltip.usage_tab.group.model": "每一行係一個模型，唔理佢做咩角色。",
+  "tooltip.usage_tab.group.stage": "每一行係今次運行嘅一個階段。",
+  "tooltip.usage_tab.group.candidate": "每一行係優化器試過嘅一個候選。",
+  "tooltip.usage_tab.total": "所有行加埋，同今次運行扣嘅錢一樣。"
 }

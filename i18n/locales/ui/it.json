@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "Questo modello non ha un prezzo registrato: chiamate e token vengono conteggiati, ma il costo non può essere mostrato.",
   "tooltip.usage_tab.unattributed": "Chiamate al modello senza un ruolo assegnato. Rientrano comunque nel totale.",
   "usage_tab.role.rounding": "Arrotondamento al centesimo intero",
-  "tooltip.usage_tab.role.rounding": "Il portafoglio viene addebitato in centesimi interi, arrotondando per eccesso una sola volta per l'intera esecuzione. Questa riga è la differenza."
+  "tooltip.usage_tab.role.rounding": "Il portafoglio viene addebitato in centesimi interi, arrotondando per eccesso una sola volta per l'intera esecuzione. Questa riga è la differenza.",
+  "tooltip.usage_tab.summary.limit": "Il massimo che questa esecuzione può spendere. Si ferma quando lo raggiunge.",
+  "tooltip.usage_tab.summary.spent": "Quanto l'esecuzione ha addebitato al tuo portafoglio, configurazione inclusa.",
+  "tooltip.usage_tab.summary.reserved": "Denaro trattenuto per le chiamate ancora in corso. Quello che non usano ti viene restituito.",
+  "tooltip.usage_tab.summary.available": "Quanto resta del budget dopo lo speso e il riservato.",
+  "tooltip.usage_tab.summary.calls": "Tutte le chiamate al modello dell'esecuzione, in ogni ruolo.",
+  "tooltip.usage_tab.summary.tokens": "Token di input e output di tutte le chiamate al modello.",
+  "tooltip.usage_tab.col.cost": "Quanto queste chiamate hanno addebitato al tuo portafoglio.",
+  "tooltip.usage_tab.col.calls": "Quante chiamate al modello ha fatto questa riga.",
+  "tooltip.usage_tab.col.input": "Token inviati al modello: prompt, esempi e contesto.",
+  "tooltip.usage_tab.col.output": "Token che il modello ha scritto in risposta.",
+  "tooltip.usage_tab.col.latency": "Quanto ha impiegato in media una chiamata a rispondere.",
+  "tooltip.usage_tab.group.role": "Ogni riga è un compito svolto da un modello nell'esecuzione.",
+  "tooltip.usage_tab.group.model": "Ogni riga è un modello, qualunque ruolo abbia avuto.",
+  "tooltip.usage_tab.group.stage": "Ogni riga è una fase dell'esecuzione.",
+  "tooltip.usage_tab.group.candidate": "Ogni riga è un candidato provato dall'ottimizzatore.",
+  "tooltip.usage_tab.total": "La somma di tutte le righe. Corrisponde a quanto ha addebitato l'esecuzione."
 }
