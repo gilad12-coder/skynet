@@ -748,3 +748,68 @@ def test_repo_gepa_reflection_shows_each_named_score_with_its_feedback() -> None
     assert "overall ok" in text
     assert "tests: 0.5" in text
     assert "two failing" in text
+
+
+_FAILING_CLI = "sys.stderr.write('Error: Invalid API key\\n')\nsys.exit(1)\n"
+
+
+def test_autoresearch_fails_when_its_cli_fails_instead_of_returning_the_seed(
+    tmp_path: Path, fake_home: Path, server: EvalServer, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A CLI that cannot start fails the run with its own stderr, not a success built from the seed."""
+    _install_fake(fake_home, _FAILING_CLI)
+    config = _config("autoresearch")
+    config.run_dir = str(tmp_path / "run")
+    with pytest.raises(native_engines.ProposerFailedError, match=r"round1 failed \(exit 1\): Error: Invalid API key"):
+        native_engines.AutoResearchEngine(config).run(server.task, server)
+    assert "proposer CLI exited 1: Error: Invalid API key" in capsys.readouterr().err
+
+
+def test_meta_harness_fails_when_its_cli_fails(tmp_path: Path, fake_home: Path, server: EvalServer) -> None:
+    """Meta-Harness stops at the first failed CLI session instead of iterating on nothing."""
+    _install_fake(fake_home, _FAILING_CLI)
+    config = _config("meta_harness")
+    config.run_dir = str(tmp_path / "run")
+    with pytest.raises(native_engines.ProposerFailedError, match="iter1 failed"):
+        native_engines.MetaHarnessEngine(config).run(server.task, server)
+    assert len(_invocations(fake_home)) == 1
+
+
+def test_gepa_repo_fails_when_its_cli_fails_even_though_gepa_swallows_proposer_errors(
+    tmp_path: Path, fake_home: Path
+) -> None:
+    """GEPA keeps iterating past a proposer exception, so the engine stops it and re-raises."""
+    server = _repo_task_server([], max_evals=12)
+    try:
+        _install_fake(fake_home, _FAILING_CLI)
+        checkout = _repo_checkout(tmp_path, {"src/app.py": "x = 1\n"})
+        with pytest.raises(native_engines.ProposerFailedError, match="Invalid API key"):
+            native_engines.GepaRepoEngine(_repo_config(tmp_path, checkout)).run(server.task, server)
+    finally:
+        server.stop()
+    assert len(_invocations(fake_home)) == 1
+
+
+def test_best_of_n_repo_fails_when_its_cli_fails(tmp_path: Path, fake_home: Path) -> None:
+    """Best-of-N does not score an untouched checkout as a sample when the agent never ran."""
+    seen: list[str] = []
+    server = _repo_task_server(seen, max_evals=5)
+    try:
+        _install_fake(fake_home, _FAILING_CLI)
+        config = _repo_config(tmp_path, _repo_checkout(tmp_path, {"src/app.py": "x = 1\n"}))
+        config.engine = "best_of_n_repo"
+        with pytest.raises(native_engines.ProposerFailedError):
+            native_engines.BestOfNRepoEngine(config).run(server.task, server)
+    finally:
+        server.stop()
+    assert seen == []
+
+
+def test_a_budget_stop_is_not_a_cli_failure() -> None:
+    """Sessions the engine stopped or that ran out of budget end the run normally."""
+    for outcome in (
+        native_engines.ProposerOutcome("s", 0.0, True, "", budget_exhausted=True, killed=False, returncode=1),
+        native_engines.ProposerOutcome("s", 0.0, True, "", budget_exhausted=False, killed=True, returncode=-15),
+        native_engines.ProposerOutcome("s", 0.0, False, "done", budget_exhausted=False, killed=False, returncode=0),
+    ):
+        outcome.raise_if_failed("round1")
