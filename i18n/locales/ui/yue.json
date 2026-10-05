@@ -4161,5 +4161,7 @@
   "tooltip.usage_tab.charged": "Skynet 喺你錢包扣咗幾多。用你自己嘅密鑰嘅話，就係平台費。",
   "tooltip.usage_tab.provider": "你嘅供應商就呢啲呼叫向你自己嘅密鑰收幾多。呢個係估算，由你嘅供應商收費。",
   "tooltip.usage_tab.not_priced": "呢個模型冇價格記錄，所以佢嘅呼叫同 token 會計入，但顯示唔到費用。",
-  "tooltip.usage_tab.unattributed": "冇標記角色嘅模型呼叫，仍然計入合計。"
+  "tooltip.usage_tab.unattributed": "冇標記角色嘅模型呼叫，仍然計入合計。",
+  "usage_tab.role.rounding": "進位到整數仙",
+  "tooltip.usage_tab.role.rounding": "你嘅錢包以整數仙收費，成個運行只會向上進位一次。呢一行就係差額。"
 }

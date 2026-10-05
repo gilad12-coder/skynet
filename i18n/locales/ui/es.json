@@ -4161,5 +4161,7 @@
   "tooltip.usage_tab.charged": "Lo que Skynet cobró a tu monedero. Con tus propias claves, es la tarifa de la plataforma.",
   "tooltip.usage_tab.provider": "Lo que tu proveedor cobra a tu propia clave por estas llamadas. Es una estimación y te lo factura tu proveedor.",
   "tooltip.usage_tab.not_priced": "Este modelo no tiene precio registrado, así que sus llamadas y tokens cuentan, pero no se puede mostrar su coste.",
-  "tooltip.usage_tab.unattributed": "Llamadas al modelo sin etiqueta de rol. Aun así cuentan en el total."
+  "tooltip.usage_tab.unattributed": "Llamadas al modelo sin etiqueta de rol. Aun así cuentan en el total.",
+  "usage_tab.role.rounding": "Redondeo a céntimos enteros",
+  "tooltip.usage_tab.role.rounding": "Al monedero se le cobra en céntimos enteros, redondeando al alza una vez por toda la ejecución. Esta fila es la diferencia."
 }

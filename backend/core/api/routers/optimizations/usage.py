@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 
-from ....billing.run_usage import aggregate, load_records, serialize
+from ....billing.run_usage import aggregate, billed_cents, load_records, serialize, with_rounding
 from ....constants import OPTIMIZATION_TYPE_BLACKBOX, PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE
 from ...auth import AuthenticatedUser, get_authenticated_user
 from ...converters import parse_overview
@@ -41,9 +41,14 @@ def run_usage(job_store: Any, job_data: dict[str, Any], pair_index: int | None) 
         direct_usage=direct if isinstance(direct, list) else (),
         pair=None if pair_index is None else str(pair_index),
     )
+    finished = job_data.get("status") in TERMINAL_STATUSES
+    settling = finished and any(row.pending_calls for row in rows)
+    # Rounding is per budget, so a single grid pair's view can't carry it.
+    if finished and not settling and pair_index is None and records:
+        rows = with_rounding(rows, billed_cents(engine, budget_id))
     return {
         "rows": serialize(rows),
-        "settling": job_data.get("status") in TERMINAL_STATUSES and any(row.pending_calls for row in rows),
+        "settling": settling,
         "proposer": blackbox,
     }
 

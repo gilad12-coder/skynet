@@ -4161,5 +4161,7 @@
   "tooltip.usage_tab.charged": "Ce que Skynet a débité de votre portefeuille. Avec vos propres clés, ce sont les frais de plateforme.",
   "tooltip.usage_tab.provider": "Ce que votre fournisseur facture à votre propre clé pour ces appels. C'est une estimation, et c'est votre fournisseur qui le facture.",
   "tooltip.usage_tab.not_priced": "Ce modèle n'a aucun prix enregistré : ses appels et jetons sont comptés, mais son coût ne peut pas être affiché.",
-  "tooltip.usage_tab.unattributed": "Appels de modèle qui n'ont pas été étiquetés avec un rôle. Ils comptent quand même dans le total."
+  "tooltip.usage_tab.unattributed": "Appels de modèle qui n'ont pas été étiquetés avec un rôle. Ils comptent quand même dans le total.",
+  "usage_tab.role.rounding": "Arrondi au centime entier",
+  "tooltip.usage_tab.role.rounding": "Votre portefeuille est débité en centimes entiers, arrondis au supérieur une seule fois pour toute l'exécution. Cette ligne correspond à la différence."
 }

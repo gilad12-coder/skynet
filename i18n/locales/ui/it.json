@@ -4161,5 +4161,7 @@
   "tooltip.usage_tab.charged": "Quanto Skynet ha addebitato al tuo portafoglio. Con le tue chiavi, è la commissione della piattaforma.",
   "tooltip.usage_tab.provider": "Quanto il tuo provider addebita alla tua chiave per queste chiamate. È una stima, e la fattura il tuo provider.",
   "tooltip.usage_tab.not_priced": "Questo modello non ha un prezzo registrato: chiamate e token vengono conteggiati, ma il costo non può essere mostrato.",
-  "tooltip.usage_tab.unattributed": "Chiamate al modello senza un ruolo assegnato. Rientrano comunque nel totale."
+  "tooltip.usage_tab.unattributed": "Chiamate al modello senza un ruolo assegnato. Rientrano comunque nel totale.",
+  "usage_tab.role.rounding": "Arrotondamento al centesimo intero",
+  "tooltip.usage_tab.role.rounding": "Il portafoglio viene addebitato in centesimi interi, arrotondando per eccesso una sola volta per l'intera esecuzione. Questa riga è la differenza."
 }

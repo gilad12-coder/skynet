@@ -7,6 +7,7 @@ export type UsageRole =
   | "scorer"
   | "sandbox"
   | "setup"
+  | "rounding"
   | "other";
 
 /** How a row was paid: through Skynet, through the owner's key with a fee, or straight to the provider. */

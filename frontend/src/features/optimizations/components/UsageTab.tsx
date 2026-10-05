@@ -59,6 +59,7 @@ const ROLE_LABEL_KEYS: Record<string, Parameters<typeof msg>[0]> = {
   sandbox: "usage_tab.role.sandbox",
   setup: "usage_tab.role.setup",
   other: "usage_tab.role.other",
+  rounding: "usage_tab.role.rounding",
 };
 
 const ROLE_TIP_KEYS: Record<string, TooltipKey> = {
@@ -69,6 +70,7 @@ const ROLE_TIP_KEYS: Record<string, TooltipKey> = {
   sandbox: "usage_tab.role.sandbox",
   setup: "usage_tab.role.setup",
   other: "usage_tab.role.other",
+  rounding: "usage_tab.role.rounding",
 };
 
 const STAGE_LABEL_KEYS: Record<string, Parameters<typeof msg>[0]> = {

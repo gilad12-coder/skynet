@@ -9,14 +9,14 @@ export type UsageGrouping = "role" | "model" | "stage" | "candidate";
 export const USAGE_GROUPINGS: readonly UsageGrouping[] = ["role", "model", "stage", "candidate"];
 
 /** Roles that are not model calls; they keep their own row under every grouping. */
-const NON_MODEL_ROLES: ReadonlySet<string> = new Set(["sandbox", "setup"]);
+const NON_MODEL_ROLES: ReadonlySet<string> = new Set(["sandbox", "setup", "rounding"]);
 
 export const UNATTRIBUTED = "__unattributed__";
 
 export interface UsageGroup {
   /** Grouping value, a non-model role, or {@link UNATTRIBUTED}. */
   key: string;
-  /** True for sandbox compute and setup rows, which carry no model activity. */
+  /** True for sandbox compute, setup and rounding rows, which carry no model activity. */
   nonModel: boolean;
   chargedCents: number;
   /** Provider charge behind owner-key rows; null when no row in the group has one. */
