@@ -4,21 +4,18 @@ from __future__ import annotations
 
 import pickle
 import queue
-from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from gepa.core.state import GEPAState, ValsetEvaluation
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from core.billing.runtime import UsagePendingError
 from core.billing.signals import BudgetReached, BudgetStopLatch
 from core.constants import PROGRESS_CANDIDATE
 from core.service_gateway.optimization.incumbent import completed_gepa_result
-from core.storage.models import ExecutionOperationModel
+from core.storage.remote import ORPHANED_RUN_MESSAGE
 from core.storage.tests.test_remote_jobstore import SQLiteJobStore, _fund_checkpoint
 from core.worker.checkpoint_compat import (
     CheckpointCompatibilityError,
@@ -144,8 +141,8 @@ def test_checkpoint_incumbent_accepts_only_finite_completed_candidate_events() -
     assert checkpoint_incumbent({"evaluated_incumbent": {**incumbent, "candidate": {"predict": 3}}}) is None
 
 
-def test_unfunded_orphan_without_checkpoint_does_not_fresh_restart() -> None:
-    """Fail an interrupted run with no checkpoint when no cumulative budget bounds a restart."""
+def test_orphaned_run_stays_failed() -> None:
+    """Fail an interrupted run and leave any restart to the user."""
     store = SQLiteJobStore()
     store.create_job("no-checkpoint")
     store.update_job("no-checkpoint", payload={"optimizer_name": "GEPA"})
@@ -154,7 +151,8 @@ def test_unfunded_orphan_without_checkpoint_does_not_fresh_restart() -> None:
     job = store.get_job("no-checkpoint")
     assert job["status"] == "failed"
     assert job["stop_reason"] == "interrupted"
-    assert "execution budget" in job["message"]
+    assert job["message"] == ORPHANED_RUN_MESSAGE
+    assert job["recovery"] is None
 
 
 def test_late_generation_cannot_publish_or_override_cancelled_job() -> None:
@@ -189,7 +187,7 @@ def test_checkpoint_and_pair_publication_reject_obsolete_generation() -> None:
     assert store.get_grid_pair_results("checkpoint-fence")[0] == {"score": 0.5}
 
 
-def test_recovery_waits_for_dispatched_usage_then_retains_cumulative_budget(
+def test_resume_waits_for_dispatched_usage_then_retains_cumulative_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Fence old work, wait for its usage, and resume the same funded checkpoint.
@@ -199,7 +197,7 @@ def test_recovery_waits_for_dispatched_usage_then_retains_cumulative_budget(
     """
     store = SQLiteJobStore()
     store.create_job("recovery-pending")
-    store.update_job("recovery-pending", status="running")
+    store.update_job("recovery-pending", status="failed")
     budgets = _fund_checkpoint(store, "recovery-pending", monkeypatch)
     budget_id = store.get_job("recovery-pending")["execution_budget_id"]
     operation = budgets.reserve(
@@ -214,10 +212,7 @@ def test_recovery_waits_for_dispatched_usage_then_retains_cumulative_budget(
         max_cents=3,
     )
     budgets.mark_dispatched(operation.id, "resume-owner", "fixture-request")
-    assert (
-        store.requeue_for_resume("recovery-pending", automatic=True, expected_generation=0, budget_service=budgets)
-        is None
-    )
+    assert store.requeue_for_resume("recovery-pending", expected_generation=0, budget_service=budgets) is None
     waiting = store.get_job("recovery-pending")
     assert waiting["recovery"]["state"] == "recovering"
     assert waiting["recovery"]["phase"] == "waiting_for_usage"
@@ -229,132 +224,13 @@ def test_recovery_waits_for_dispatched_usage_then_retains_cumulative_budget(
         actual_cents=2,
         evidence={"usage": "authoritative-fixture"},
     )
-    assert (
-        store.requeue_for_resume("recovery-pending", automatic=True, expected_generation=1, budget_service=budgets) == 1
-    )
+    assert store.requeue_for_resume("recovery-pending", expected_generation=1, budget_service=budgets) == 1
     resumed = store.get_job("recovery-pending")
     assert resumed["execution_budget_id"] == budget_id
     assert resumed["execution_budget_generation"] == 1
     assert resumed["execution_generation"] == 2
-    assert resumed["recovery"]["checkpoint_iteration"] == 3
-    assert resumed["recovery"]["seed_reevaluation_required"] is True
+    assert resumed["recovery"] is None
     assert budgets.get(budget_id, "resume-owner").run_spent_cents == 2
-
-
-def test_recovery_admission_stops_when_exact_plan_exceeds_remaining_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep cumulative spend and stop instead of granting recovery a fresh allowance.
-
-    Args:
-        monkeypatch: Fixture binding the checkpoint's immutable runtime profile.
-    """
-    store = SQLiteJobStore()
-    store.create_job("recovery-insufficient")
-    store.update_job("recovery-insufficient", status="running")
-    budgets = _fund_checkpoint(store, "recovery-insufficient", monkeypatch)
-    checkpoint = store.get_gepa_checkpoint("recovery-insufficient")
-    manifest = dict(checkpoint.manifest or {})
-    manifest["evaluated_incumbent"] = {
-        "candidate_id": "1",
-        "candidate_origin": "optimized",
-        "candidate": {"predict": "best completed instructions"},
-        "selection_score": 0.75,
-        "selection_scope": "validation",
-        "evaluated_examples": 1,
-        "discovered_at_evals": 12,
-        "iteration": 3,
-    }
-    store.save_gepa_checkpoint(
-        "recovery-insufficient",
-        checkpoint.data,
-        checkpoint.iteration,
-        manifest=manifest,
-    )
-    budget_id = store.get_job("recovery-insufficient")["execution_budget_id"]
-    operation = budgets.reserve(
-        budget_id,
-        "resume-owner",
-        operation_key="prior-work",
-        generation=0,
-        phase="run",
-        cost_kind="model",
-        request_fingerprint="prior-work",
-        price_snapshot={"version": "fixture"},
-        max_cents=19,
-    )
-    budgets.mark_dispatched(operation.id, "resume-owner")
-    budgets.settle(
-        operation.id,
-        "resume-owner",
-        evidence_key="prior-usage",
-        actual_cents=19,
-        evidence={"provider": "fixture"},
-    )
-
-    assert (
-        store.requeue_for_resume(
-            "recovery-insufficient",
-            automatic=True,
-            expected_generation=0,
-            budget_service=budgets,
-        )
-        is None
-    )
-    job = store.get_job("recovery-insufficient")
-    budget = budgets.get(budget_id, "resume-owner")
-    assert job["status"] == "stopped"
-    assert job["stop_reason"] == "budget_reached"
-    assert job["result_availability"] == "evaluated"
-    assert job["terminal_evidence"]["selection_score"] == 0.75
-    assert job["terminal_evidence"]["incumbent"]["candidate"] == {"predict": "best completed instructions"}
-    assert job["execution_budget_id"] == budget_id
-    assert budget.total_cents == 20
-    assert budget.run_spent_cents == 19
-    assert budget.reserved_cents == 0
-    assert budget.blocked_reason == "budget_reached"
-
-
-def test_duplicate_recovery_delivery_keeps_one_headroom_hold(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Deduplicate a repeated coordinator delivery without reserving recovery twice.
-
-    Args:
-        monkeypatch: Fixture binding the checkpoint's immutable runtime profile.
-    """
-    store = SQLiteJobStore()
-    store.create_job("recovery-duplicate")
-    store.update_job("recovery-duplicate", status="running")
-    budgets = _fund_checkpoint(store, "recovery-duplicate", monkeypatch)
-    budget_id = store.get_job("recovery-duplicate")["execution_budget_id"]
-    checkpoint = store.get_gepa_checkpoint("recovery-duplicate")
-    expected_headroom = Decimal(str(checkpoint.manifest["recovery_admission"]["max_cents"]))
-
-    assert (
-        store.requeue_for_resume(
-            "recovery-duplicate",
-            automatic=True,
-            expected_generation=0,
-            budget_service=budgets,
-        )
-        == 1
-    )
-    first = store.get_job("recovery-duplicate")
-    assert budgets.get(budget_id, "resume-owner").reserved_cents == expected_headroom
-    assert (
-        store.requeue_for_resume(
-            "recovery-duplicate",
-            automatic=True,
-            expected_generation=0,
-            budget_service=budgets,
-        )
-        is None
-    )
-    second = store.get_job("recovery-duplicate")
-    assert second["execution_generation"] == first["execution_generation"]
-    assert second["recovery"]["headroom_operation_id"] == first["recovery"]["headroom_operation_id"]
-    assert budgets.get(budget_id, "resume-owner").reserved_cents == expected_headroom
 
 
 def test_pause_keeps_admission_closed_until_explicit_compatible_resume(
@@ -371,7 +247,7 @@ def test_pause_keeps_admission_closed_until_explicit_compatible_resume(
     budgets = _fund_checkpoint(store, "paused", monkeypatch)
     budget_id = store.get_job("paused")["execution_budget_id"]
     budgets.stop_admission(budget_id, "resume-owner", reason="user_paused")
-    assert store.recover_orphaned_jobs(budget_service=budgets) == 0
+    assert store.recover_orphaned_jobs() == 0
     assert budgets.get(budget_id, "resume-owner").state == "closed"
     assert store.requeue_for_resume("paused", bump_attempts=False, expected_generation=0, budget_service=budgets) == 0
     assert budgets.get(budget_id, "resume-owner").state == "attached"
@@ -386,7 +262,7 @@ def test_recovery_fence_rolls_back_with_job_when_publication_fails(monkeypatch: 
     """
     store = SQLiteJobStore()
     store.create_job("recovery-rollback")
-    store.update_job("recovery-rollback", status="running")
+    store.update_job("recovery-rollback", status="failed")
     budgets = _fund_checkpoint(store, "recovery-rollback", monkeypatch)
     budget_id = store.get_job("recovery-rollback")["execution_budget_id"]
     reservation = budgets.reserve(
@@ -409,7 +285,7 @@ def test_recovery_fence_rolls_back_with_job_when_publication_fails(monkeypatch: 
 
     monkeypatch.setattr(budgets, "fence_generation", fail_after_fence)
     with pytest.raises(RuntimeError, match="simulated publication failure"):
-        store.requeue_for_resume("recovery-rollback", automatic=True, budget_service=budgets)
+        store.requeue_for_resume("recovery-rollback", budget_service=budgets)
     job = store.get_job("recovery-rollback")
     budget = budgets.get(budget_id, "resume-owner")
     assert job["execution_generation"] == 0
@@ -417,37 +293,6 @@ def test_recovery_fence_rolls_back_with_job_when_publication_fails(monkeypatch: 
     assert job["recovery"] is None
     assert budgets.get_operation(reservation.id, "resume-owner").state == "reserved"
     assert budget.reserved_cents == 3
-
-
-def test_recovery_headroom_rolls_back_with_failed_requeue_publication(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Avoid retaining a recovery hold when its pending lifecycle update is not published.
-
-    Args:
-        monkeypatch: Fixture binding the runtime profile and injected failure.
-    """
-    store = SQLiteJobStore()
-    store.create_job("recovery-headroom-rollback")
-    store.update_job("recovery-headroom-rollback", status="running")
-    budgets = _fund_checkpoint(store, "recovery-headroom-rollback", monkeypatch)
-    budget_id = store.get_job("recovery-headroom-rollback")["execution_budget_id"]
-    reserve = budgets.reserve
-
-    def fail_after_headroom(*args, **kwargs):
-        """Raise after the aggregate hold is staged in the caller transaction."""
-        assert kwargs.get("session") is not None
-        reserve(*args, **kwargs)
-        raise RuntimeError("simulated requeue publication failure")
-
-    monkeypatch.setattr(budgets, "reserve", fail_after_headroom)
-    with pytest.raises(RuntimeError, match="simulated requeue publication failure"):
-        store.requeue_for_resume("recovery-headroom-rollback", automatic=True, budget_service=budgets)
-
-    assert budgets.get(budget_id, "resume-owner").reserved_cents == 0
-    with Session(store.engine) as session:
-        holds = session.scalars(
-            select(ExecutionOperationModel).where(ExecutionOperationModel.cost_kind == "recovery_headroom")
-        ).all()
-    assert holds == []
 
 
 def test_checkpoint_metadata_inspection_never_executes_pickle_payload(tmp_path: Path) -> None:

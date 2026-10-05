@@ -368,7 +368,7 @@ def advisory_lock(engine: Any, key: int) -> Iterator[bool]:
 
 
 class OrphanRecoverySweeper:
-    """Periodically re-queue jobs whose worker lease expired.
+    """Periodically fail jobs whose worker lease expired.
 
     The startup-only sweep in :func:`backend.core.api.app.lifespan` only fires
     once. If a worker dies mid-job after the fleet has booted, the lease ticks
@@ -420,8 +420,7 @@ class OrphanRecoverySweeper:
         engine = getattr(self._job_store, "engine", None)
         if engine is None or engine.dialect.name != "postgresql":
             try:
-                kwargs = {"budget_service": BudgetService(engine=engine)} if engine is not None else {}
-                recovered = int(self._job_store.recover_orphaned_jobs(**kwargs))
+                recovered = int(self._job_store.recover_orphaned_jobs())
                 self._reconcile_sandbox_usage(engine)
                 return recovered
             except Exception:
@@ -435,7 +434,7 @@ class OrphanRecoverySweeper:
                 ).scalar()
                 if not acquired:
                     return 0
-                recovered = int(self._job_store.recover_orphaned_jobs(budget_service=BudgetService(engine=engine)))
+                recovered = int(self._job_store.recover_orphaned_jobs())
                 self._reconcile_sandbox_usage(engine)
                 return recovered
         except Exception:

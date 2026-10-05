@@ -584,8 +584,8 @@ def register_lifecycle_routes(
 
         # A manual pause/resume or a continuation past the spending limit is
         # user-driven, not failure recovery: it neither consumes an attempt nor is
-        # bounded by the cap. Only failed/cancelled resumes share
-        # ``job_max_attempts`` with automatic pod-failure recovery.
+        # bounded by the cap. Only failed/cancelled resumes count against
+        # ``job_max_attempts``.
         is_paused = status == OptimizationStatus.paused or budget_stop
         if not is_paused:
             attempts = int(job_data.get("attempts") or 0)
@@ -612,7 +612,7 @@ def register_lifecycle_routes(
             raise DomainError(
                 "optimization.resume_not_resumable",
                 status=409,
-                detail="Recovery is waiting for usage settlement or the run changed state.",
+                detail="In-flight usage is still settling or the run changed state.",
             )
         logger.info("Resumed optimization %s in place (attempt %s)", optimization_id, new_attempt)
         return JobCancelResponse(optimization_id=optimization_id, status=OptimizationStatus.pending.value)
@@ -721,7 +721,7 @@ def register_lifecycle_routes(
                 raise DomainError(
                     "optimization.pair_not_resumable",
                     status=409,
-                    detail="Recovery is waiting for usage settlement or the run changed state.",
+                    detail="In-flight usage is still settling or the run changed state.",
                 )
             return JobCancelResponse(optimization_id=optimization_id, status=OptimizationStatus.pending.value)
 

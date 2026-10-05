@@ -18,20 +18,9 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, defer, sessionmaker
 
-from ..billing.budgets import BudgetInFlightError, BudgetInsufficientError
 from ..billing.plans import has_pro_entitlement
-from ..billing.recovery_admission import (
-    PARENT_HOSTS_KEY,
-    RecoveryAdmissionError,
-    headroom_price_snapshot,
-    runtime_bound,
-    validate_recovery_plan,
-    validate_recovery_runtime,
-)
-from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
-from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, settings
+from ..config import settings
 from ..constants import (
-    OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_TAGGING,
     PAYLOAD_OVERVIEW_DATASET_ROWS,
     PAYLOAD_OVERVIEW_MODEL_NAME,
@@ -41,7 +30,7 @@ from ..constants import (
     STRUCTURAL_PROGRESS_EVENTS,
     TQDM_KEY_PREFIX,
 )
-from ..worker.checkpoint_compat import CheckpointCompatibilityError, checkpoint_incumbent, validate_checkpoint
+from ..worker.checkpoint_compat import CheckpointCompatibilityError, validate_checkpoint
 from .agent_run_store import PostgresAgentRunStore
 from .base import JobRecord, LogEntryRecord, ProgressEventRecord
 from .checkpoint_store import GepaCheckpoint, PostgresCheckpointBlobStore, PostgresGridPairResultStore
@@ -78,86 +67,30 @@ from .usage import (
 )
 
 
-def _current_recovery_runtime(
-    payload: dict[str, Any], optimization_type: str | None, sandbox_image: str | None = None
-) -> dict[str, Any]:
-    """Build the current bounded outer-runtime evidence for recovery admission.
-
-    Args:
-        payload: Persisted request used to recognize legacy Anything jobs.
-        optimization_type: Stored dispatch family for legacy/default selection.
-        sandbox_image: The image the run is pinned to, which a resume reuses.
-
-    Returns:
-        Fresh Vercel resource and price evidence.
-    """
-    try:
-        is_blackbox = optimization_type == "blackbox" or "strategy" in payload
-        workflow = "anything" if is_blackbox else "dspy"
-        image = sandbox_image or (
-            settings.vercel_sandbox_image if workflow == "anything" else settings.dspy_sandbox_image
-        )
-        target = payload.get("target")
-        # A repository run also opens the parent's scoring box, which reaches
-        # package registries during setup, so its restore funds that box too.
-        repo_run = is_blackbox and isinstance(target, dict) and target.get("kind") == "repo"
-        return runtime_bound(
-            "vercel",
-            {
-                "image": image,
-                "lifetime_seconds": min(
-                    settings.vercel_sandbox_max_lifetime_seconds, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
-                ),
-                **({PARENT_HOSTS_KEY: list(PACKAGE_REGISTRY_HOSTS)} if repo_run else {}),
-            },
-        )
-    except (TypeError, ValueError) as error:
-        if isinstance(error, RecoveryAdmissionError):
-            raise
-        raise RecoveryAdmissionError(
-            "The current sandbox runtime cannot provide a bounded recovery profile."
-        ) from error
-
-
-def _mark_recovery_budget_stop(job: JobModel, manifest: dict[str, Any], checkpoint_revision: Any) -> None:
-    """Preserve safe evaluated checkpoint evidence when recovery cannot be funded.
+def _mark_resume_budget_stop(job: JobModel) -> None:
+    """Stop a resume that the remaining authorized budget cannot fund.
 
     Args:
         job: Locked run row to terminate.
-        manifest: Verified checkpoint manifest from the interrupted execution.
-        checkpoint_revision: Checkpoint digest shown in recovery evidence.
     """
-    message = "The remaining authorized budget cannot cover checkpoint recovery."
-    incumbent = checkpoint_incumbent(manifest)
-    evidence: dict[str, Any] = {
+    job.status = "stopped"
+    job.stop_reason = "budget_reached"
+    job.result_availability = "none"
+    job.terminal_evidence = {
+        **(job.terminal_evidence or {}),
         "candidate_origin": None,
         "final_evaluation_completed": False,
         "final_evaluation_reason": "budget_reached",
     }
-    if incumbent is not None:
-        evidence.update(
-            candidate_origin=incumbent["candidate_origin"],
-            selection_scope=incumbent["selection_scope"],
-            selection_score=incumbent["selection_score"],
-            incumbent=incumbent,
-        )
-    job.status = "stopped"
-    job.stop_reason = "budget_reached"
-    job.result_availability = "evaluated" if incumbent is not None else "none"
-    job.terminal_evidence = {**(job.terminal_evidence or {}), **evidence}
     job.completed_at = datetime.now(UTC)
-    job.message = message
-    job.recovery = {
-        "state": "unavailable",
-        "phase": "admission",
-        "reason": message,
-        "checkpoint_revision": checkpoint_revision,
-    }
+    job.message = "The remaining authorized budget cannot cover resuming this run."
+    job.recovery = None
 
 
 logger = logging.getLogger(__name__)
 
 MAX_PROGRESS_EVENTS = 5000
+ORPHANED_RUN_MESSAGE = "The run stopped because its worker went away. Resume, retry or clone it to continue."
 MAX_LOG_ENTRIES = 5000
 PROGRESS_TRIM_SAMPLE_RATE = 100
 # Same sampled-retention idea as progress events: counting rows on every log
@@ -1587,7 +1520,6 @@ class RemoteDBJobStore:
         optimization_id: str,
         *,
         bump_attempts: bool = True,
-        automatic: bool = False,
         expected_generation: int | None = None,
         budget_service: Any = None,
         pair_index_to_resume: int | None = None,
@@ -1595,12 +1527,10 @@ class RemoteDBJobStore:
         """Re-queue a terminal job in place so a worker resumes it from its checkpoint.
 
         Flips the existing row back to ``pending`` — same id, payload, seed and
-        budget — and clears the prior claim/lease, mirroring
-        :meth:`recover_orphaned_jobs`. A whole-job resume increments ``attempts``
-        so it shares the ``job_max_attempts`` cap with pod-failure recovery; a
-        targeted per-pair grid re-run passes ``bump_attempts=False`` so retrying
-        individual pairs is not bounded by that cap. The caller owns the
-        resumability preconditions.
+        budget — and clears the prior claim/lease. A whole-job resume increments
+        ``attempts`` against the ``job_max_attempts`` cap; a targeted per-pair grid
+        re-run passes ``bump_attempts=False`` so retrying individual pairs is not
+        bounded by that cap. The caller owns the resumability preconditions.
 
         The finished leg's wall-clock duration is folded into
         ``accumulated_runtime_seconds`` before ``started_at``/``completed_at`` are
@@ -1610,7 +1540,6 @@ class RemoteDBJobStore:
         Args:
             optimization_id: The job to resume.
             bump_attempts: Whether to count this re-queue against the attempt cap.
-            automatic: Whether interruption recovery, rather than an explicit user action, requested resume.
             expected_generation: Fenced publication generation observed by the caller.
             budget_service: Authoritative funding and dispatch fence for a protected job.
             pair_index_to_resume: Explicit pair whose stored result is cleared atomically for recovery.
@@ -1628,27 +1557,12 @@ class RemoteDBJobStore:
             )
             if job is None:
                 return None
-            expected_statuses = (
-                {"running", "validating"} if automatic else {"failed", "cancelled", "paused", "success", "stopped"}
-            )
-            if job.status not in expected_statuses or (
+            if job.status not in {"failed", "cancelled", "paused", "success", "stopped"} or (
                 expected_generation is not None and job.execution_generation != expected_generation
             ):
                 return None
-            if automatic and job.stop_reason == "budget_reached":
-                return None
             checkpoints = self._checkpoints.list_for_optimization(optimization_id)
-            # An interruption before the first checkpoint (a redeploy minutes into
-            # a run) leaves nothing to resume, so the run starts over under the
-            # same cumulative budget, which caps what both legs spend together.
-            fresh_restart = (
-                automatic
-                and not checkpoints
-                and pair_index_to_resume is None
-                and job.optimization_type != OPTIMIZATION_TYPE_GRID_SEARCH
-                and job.parent_optimization_id is None
-            )
-            if not checkpoints and not fresh_restart:
+            if not checkpoints:
                 raise CheckpointCompatibilityError("No completed compatible checkpoint is available.")
             if pair_index_to_resume is not None and not any(
                 checkpoint.pair_index == pair_index_to_resume for checkpoint in checkpoints
@@ -1662,7 +1576,7 @@ class RemoteDBJobStore:
                     job.code_version,
                     sandbox_image=job.sandbox_image,
                 )
-            if not fresh_restart and job.sandbox_image is None and job.code_version != self._current_code_version:
+            if job.sandbox_image is None and job.code_version != self._current_code_version:
                 raise CheckpointCompatibilityError("No compatible worker version is available for this checkpoint.")
             if job.execution_budget_id is None:
                 raise CheckpointCompatibilityError(
@@ -1670,27 +1584,7 @@ class RemoteDBJobStore:
                 )
             current_attempt = int(job.attempts or 0)
             if bump_attempts and current_attempt + 1 >= settings.job_max_attempts:
-                raise CheckpointCompatibilityError("This run has reached its automatic recovery attempt limit.")
-            recovery_plan = None
-            checkpoint_revision = None
-            headroom_operation_id = None
-            manifest: dict[str, Any] = {}
-            if automatic and not fresh_restart:
-                if len(checkpoints) != 1:
-                    raise CheckpointCompatibilityError(
-                        "Automatic recovery requires one independently bounded GEPA checkpoint per job."
-                    )
-                checkpoint = checkpoints[0]
-                manifest = checkpoint.manifest or {}
-                checkpoint_revision = manifest.get("checkpoint_sha256")
-                try:
-                    recovery_plan = validate_recovery_plan(manifest.get("recovery_admission"), manifest)
-                    validate_recovery_runtime(
-                        recovery_plan,
-                        _current_recovery_runtime(job.payload or {}, job.optimization_type, job.sandbox_image),
-                    )
-                except RecoveryAdmissionError as error:
-                    raise CheckpointCompatibilityError(str(error)) from error
+                raise CheckpointCompatibilityError("This run has reached its resume attempt limit.")
             if job.execution_budget_id is not None:
                 if budget_service is None:
                     raise CheckpointCompatibilityError("Recovery requires the authoritative budget service.")
@@ -1712,9 +1606,8 @@ class RemoteDBJobStore:
                     job.recovery = {
                         "state": "recovering",
                         "phase": "waiting_for_usage",
-                        "reason": "Reconciling interrupted requests before recovery.",
+                        "reason": "Reconciling interrupted requests before resuming.",
                         "execution_generation": int(job.execution_generation or 0) + 1,
-                        "checkpoint_revision": checkpoint_revision,
                     }
                     fenced_generation = job.execution_generation
                     previous_status = job.status
@@ -1735,7 +1628,7 @@ class RemoteDBJobStore:
                 budget = budget_service.get(job.execution_budget_id, job.username)
                 if budget.pending_operations or budget.reserved_cents:
                     return None
-                if not automatic and budget.state == "closed" and budget.available_cents > 0:
+                if budget.state == "closed" and budget.available_cents > 0:
                     budget = budget_service.resume_admission(
                         job.execution_budget_id, job.username, expected_generation=job.execution_budget_generation
                     )
@@ -1746,49 +1639,9 @@ class RemoteDBJobStore:
                             job.username,
                             reason="budget_reached",
                         )
-                    _mark_recovery_budget_stop(job, manifest, checkpoint_revision)
+                    _mark_resume_budget_stop(job)
                     session.commit()
                     return None
-                if automatic and recovery_plan is not None:
-                    try:
-                        headroom = budget_service.reserve(
-                            job.execution_budget_id,
-                            job.username,
-                            operation_key=(
-                                f"recovery:{optimization_id}:{recovery_plan['checkpoint_sha256']}:"
-                                f"g{job.execution_budget_generation}"
-                            ),
-                            generation=job.execution_budget_generation,
-                            phase="run",
-                            cost_kind="recovery_headroom",
-                            request_fingerprint=recovery_plan["fingerprint"],
-                            price_snapshot=headroom_price_snapshot(recovery_plan),
-                            max_cents=recovery_plan["max_cents"],
-                            max_wallet_cents=recovery_plan["max_wallet_cents"],
-                            role="recovery",
-                            session=session,
-                        )
-                        headroom_operation_id = headroom.id
-                    except BudgetInFlightError:
-                        job.recovery = {
-                            **(job.recovery or {}),
-                            "state": "recovering",
-                            "phase": "waiting_for_usage",
-                            "reason": "Waiting for covered account work to settle before recovery.",
-                            "checkpoint_revision": checkpoint_revision,
-                        }
-                        session.commit()
-                        return None
-                    except BudgetInsufficientError:
-                        budget_service.stop_admission(
-                            job.execution_budget_id,
-                            job.username,
-                            reason="budget_reached",
-                            session=session,
-                        )
-                        _mark_recovery_budget_stop(job, manifest, checkpoint_revision)
-                        session.commit()
-                        return None
             if pair_index_to_resume is not None:
                 result = job.result if isinstance(job.result, dict) else {}
                 for pair in result.get("pair_results", []):
@@ -1810,27 +1663,13 @@ class RemoteDBJobStore:
                     session.delete(selected)
             job.execution_generation = int(job.execution_generation or 0) + 1
             job.stop_reason = None
-            job.recovery = {
-                "state": "recovering",
-                "phase": "restarting" if fresh_restart else "resuming",
-                "attempt": int(job.attempts or 0) + int(bump_attempts),
-                "checkpoint_iteration": max((cp.iteration for cp in checkpoints), default=None),
-                "seed_reevaluation_required": not fresh_restart,
-                "execution_generation": int(job.execution_generation or 0),
-                "checkpoint_revision": checkpoint_revision,
-                "headroom_operation_id": headroom_operation_id,
-                "execution_max_cents": recovery_plan.get("execution_max_cents") if recovery_plan else None,
-                "execution_max_wallet_cents": (
-                    recovery_plan.get("execution_max_wallet_cents") if recovery_plan else None
-                ),
-            }
+            job.recovery = None
             current = int(job.attempts or 0)
             next_attempt = current + 1 if bump_attempts else current
             job.attempts = next_attempt  # type: ignore[assignment]
-            if job.sandbox_image is not None or fresh_restart:
+            if job.sandbox_image is not None:
                 # Workers claim only their own version's jobs; a pinned image carries
-                # the optimizer and a fresh restart has no state from the old version,
-                # so the current workers can run either.
+                # the optimizer, so the current workers can run it.
                 job.code_version = self._current_code_version  # type: ignore[assignment]
             job.status = "pending"  # type: ignore[assignment]
             job.claimed_by = None  # type: ignore[assignment]
@@ -1848,7 +1687,7 @@ class RemoteDBJobStore:
                 ) + max(0.0, (leg_end - leg_start).total_seconds())
             job.completed_at = None  # type: ignore[assignment]
             job.started_at = None  # type: ignore[assignment]
-            job.message = "Restarting" if fresh_restart else "Resuming" if bump_attempts else "Re-running grid pair"  # type: ignore[assignment]
+            job.message = "Resuming" if bump_attempts else "Re-running grid pair"  # type: ignore[assignment]
             session.commit()
             return next_attempt
         finally:
@@ -2341,14 +2180,11 @@ class RemoteDBJobStore:
         finally:
             session.close()
 
-    def recover_orphaned_jobs(self, *, budget_service: Any = None) -> int:
-        """Recover only compatible interrupted runs with reconciled remaining funding.
-
-        Args:
-            budget_service: Authoritative dispatch fence and cumulative funding service.
+    def recover_orphaned_jobs(self) -> int:
+        """Fail runs whose worker lease expired, leaving any restart to the user.
 
         Returns:
-            Number of expired jobs handled; unsupported jobs become explicit failures.
+            Number of orphaned jobs marked failed.
         """
         session = self._get_session()
         try:
@@ -2360,7 +2196,7 @@ class RemoteDBJobStore:
                 .exists()
             )
             candidates = [
-                self._job_to_dict(job)
+                (job.optimization_id, int(job.execution_generation or 0))
                 for job in session.query(JobModel)
                 .filter(
                     JobModel.status.in_(["running", "validating"]),
@@ -2371,28 +2207,7 @@ class RemoteDBJobStore:
             ]
         finally:
             session.close()
-        for job in candidates:
-            identifier = job["optimization_id"]
-            generation = int(job.get("execution_generation") or 0)
-            reason = "The interruption recovery attempt limit has been reached."
-            if int(job.get("attempts") or 0) + 1 < settings.job_max_attempts:
-                try:
-                    if (
-                        self.requeue_for_resume(
-                            identifier, automatic=True, expected_generation=generation, budget_service=budget_service
-                        )
-                        is not None
-                    ):
-                        continue
-                except (CheckpointCompatibilityError, RuntimeError, ValueError) as exc:
-                    reason = str(exc)
-                refreshed = self.get_job(identifier)
-                if (
-                    isinstance(refreshed.get("recovery"), dict)
-                    and refreshed["recovery"].get("state") == "recovering"
-                    and refreshed["recovery"].get("phase") == "waiting_for_usage"
-                ):
-                    continue
+        for identifier, generation in candidates:
             self.update_job_if_status(
                 identifier,
                 ("running", "validating"),
@@ -2400,8 +2215,8 @@ class RemoteDBJobStore:
                 status="failed",
                 stop_reason="interrupted",
                 completed_at=now.isoformat(),
-                message=reason,
-                recovery={"state": "unavailable", "reason": reason},
+                message=ORPHANED_RUN_MESSAGE,
+                recovery=None,
                 claimed_by=None,
                 claimed_at=None,
                 lease_expires_at=None,
@@ -2698,12 +2513,6 @@ class RemoteDBJobStore:
                 )
             )
             target.latest_metrics = {**(target.latest_metrics or {}), **metrics}
-            if (
-                isinstance(source.recovery, dict)
-                and source.recovery.get("state") == "recovering"
-                and source.recovery.get("phase") == "resuming"
-            ):
-                source.recovery = {**source.recovery, "state": "recovered", "phase": "complete"}
             session.commit()
             return True
         finally:

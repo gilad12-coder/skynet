@@ -235,7 +235,7 @@ class FakeJobStore:
         )
 
     def recover_orphaned_jobs(self) -> int:
-        """Reclaim in-flight jobs whose lease has expired."""
+        """Fail in-flight jobs whose lease has expired."""
         now = datetime.now(UTC)
         recovered = 0
         for job in self._jobs.values():
@@ -245,9 +245,7 @@ class FakeJobStore:
             lease_dt = datetime.fromisoformat(lease_iso) if isinstance(lease_iso, str) else None
             if lease_dt is None or lease_dt < now:
                 job["status"] = "failed"
-                job["attempts"] = int(job.get("attempts") or 0) + 1
-                job["message"] = f"Re-queued after pod failure (attempt {job['attempts']})"
-                job["status"] = "pending"
+                job["stop_reason"] = "interrupted"
                 job["claimed_by"] = None
                 job["claimed_at"] = None
                 job["lease_expires_at"] = None
