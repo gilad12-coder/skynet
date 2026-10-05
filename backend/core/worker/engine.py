@@ -24,7 +24,6 @@ import time
 import traceback
 from dataclasses import asdict
 from datetime import UTC, datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +45,6 @@ from ..billing.protected_credentials import (
     resolve_execution_credentials,
 )
 from ..billing.protected_execution import bind_protected_sandbox, claude_code_anthropic_key, protected_image
-from ..billing.recovery_admission import validate_recovery_plan
 from ..billing.runtime import BudgetRuntime, UsagePendingError
 from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..config import settings
@@ -91,7 +89,6 @@ from .budget_probe import (
     projection_evidence,
 )
 from .checkpoint_compat import (
-    CheckpointCompatibilityError,
     checkpoint_manifest,
     evaluated_incumbent_from_progress,
     supports_checkpoint,
@@ -498,78 +495,6 @@ class BackgroundWorker:
             raise WorkerShutdownError("Optimization was interrupted by worker shutdown.")
         _raise_if_cancelled(cancel_event, optimization_id)
 
-    def _recover_temporary_interruption(
-        self,
-        optimization_id: str,
-        *,
-        generation: int | None,
-        attempts: int,
-    ) -> tuple[bool, str]:
-        """Attempt one checkpoint recovery under the same fenced budget.
-
-        Args:
-            optimization_id: Existing interrupted run.
-            generation: Publication generation owned by the interrupted worker.
-            attempts: Persisted recovery-attempt count before this interruption.
-
-        Returns:
-            Whether recovery owns the lifecycle now, plus a precise unavailable reason.
-        """
-        if attempts + 1 >= settings.job_max_attempts:
-            return False, "The interruption recovery attempt limit has been reached."
-        requeue = getattr(self._job_store, "requeue_for_resume", None)
-        engine = getattr(self._job_store, "engine", None)
-        if not callable(requeue) or engine is None:
-            return False, "This worker cannot establish authoritative checkpoint recovery admission."
-        try:
-            resumed_attempt = requeue(
-                optimization_id,
-                automatic=True,
-                expected_generation=generation,
-                budget_service=BudgetService(engine=engine),
-            )
-        except CheckpointCompatibilityError as error:
-            return False, str(error)
-        refreshed = self._job_store.get_job(optimization_id)
-        recovery = refreshed.get("recovery")
-        handled = resumed_attempt is not None or (
-            isinstance(recovery, dict) and recovery.get("state") in {"recovering", "unavailable"}
-        )
-        if not handled:
-            return False, "Another lifecycle change prevented automatic checkpoint recovery."
-        logger.warning(
-            "Optimization %s infrastructure interruption; recovery %s",
-            optimization_id,
-            f"queued at attempt {resumed_attempt}"
-            if resumed_attempt is not None
-            else str((recovery or {}).get("phase") or refreshed.get("status") or "pending"),
-        )
-        return True, ""
-
-    def _active_recovery_plan(self, optimization_id: str, job: dict[str, Any]) -> dict[str, Any] | None:
-        """Reload the single checkpoint plan selected by automatic recovery.
-
-        Args:
-            optimization_id: Existing run identity.
-            job: Claimed persisted job row.
-
-        Returns:
-            Validated recovery admission evidence, or None for an initial/manual run.
-
-        Raises:
-            CheckpointCompatibilityError: When selected recovery evidence disappeared or changed.
-        """
-        recovery = job.get("recovery")
-        if not isinstance(recovery, dict) or recovery.get("phase") != "resuming":
-            return None
-        checkpoints = self._job_store.list_gepa_checkpoints(optimization_id)
-        if len(checkpoints) != 1:
-            raise CheckpointCompatibilityError("Automatic recovery no longer has one independently bounded checkpoint.")
-        manifest = checkpoints[0].manifest or {}
-        if recovery.get("checkpoint_revision") != manifest.get("checkpoint_sha256"):
-            raise CheckpointCompatibilityError("The checkpoint selected for recovery changed before execution.")
-        return validate_recovery_plan(manifest.get("recovery_admission"), manifest)
-
     def _get_next_job(self) -> str | None:
         """Return the next claimable job, picking up through the atomic claim.
 
@@ -727,7 +652,6 @@ class BackgroundWorker:
         pair_index_val = 0
         execution_generation: int | None = None
         execution_budget_snapshot: dict[str, Any] | None = None
-        recovery_attempts = 0
         # Legacy (unprotected) runs are billed from the worker, not a budget
         # gateway; the exception handler reads these to bill a leg that ended
         # without a successful completion.
@@ -744,12 +668,10 @@ class BackgroundWorker:
 
             job_data = self._job_store.get_job(optimization_id)
             execution_generation = job_data.get("execution_generation")
-            recovery_attempts = int(job_data.get("attempts") or 0)
             payload_dict = job_data.get("payload")
 
             if not payload_dict:
                 raise ValueError(f"Optimization {optimization_id} has no payload")
-            recovery_plan = self._active_recovery_plan(optimization_id, job_data)
 
             overview = job_data.get("payload_overview", {})
             if isinstance(overview, str):
@@ -957,7 +879,6 @@ class BackgroundWorker:
                             )
 
                 if job_data.get("execution_budget_id") is not None:
-                    execution_runtime = "vercel"
                     if byok_engine is None:
                         raise ValueError("Protected execution requires the authoritative ledger.")
                     uses_managed_models = payload_uses_token_source(
@@ -967,20 +888,6 @@ class BackgroundWorker:
                     )
                     if uses_managed_models and settings.openrouter_api_key is None:
                         raise ValueError("Managed model roles require the configured provider route.")
-                    recovery = job_data.get("recovery") if recovery_plan is not None else None
-                    headroom_id = recovery.get("headroom_operation_id") if isinstance(recovery, dict) else None
-                    if recovery_plan is not None and not isinstance(headroom_id, str):
-                        raise CheckpointCompatibilityError(
-                            "Automatic recovery lost its pre-authorized budget headroom."
-                        )
-                    execution_headroom = (
-                        (
-                            Decimal(str(recovery_plan["execution_max_cents"])),
-                            Decimal(str(recovery_plan["execution_max_wallet_cents"])),
-                        )
-                        if recovery_plan is not None
-                        else None
-                    )
                     budget_gateway = ModelGateway(
                         BudgetRuntime(
                             BudgetService(engine=byok_engine),
@@ -988,10 +895,7 @@ class BackgroundWorker:
                             budget_id=job_data["execution_budget_id"],
                             generation=job_data["execution_budget_generation"],
                             phase="run",
-                            recovery_headroom_operation_id=headroom_id,
-                            recovery_execution_headroom=execution_headroom,
-                        ),
-                        recovery_plan=recovery_plan,
+                        )
                     )
                     sandbox_workflow = "anything" if optimization_type == OPTIMIZATION_TYPE_BLACKBOX else "dspy"
                     current_image = protected_image(settings, sandbox_workflow)
@@ -1018,12 +922,7 @@ class BackgroundWorker:
                             else ()
                         ),
                     )
-                    budget_gateway.validate_recovery_runtime(execution_runtime)
-                    checkpoint_tracker.update(
-                        recovery_plan_builder=budget_gateway.checkpoint_recovery_plan,
-                        execution_runtime=execution_runtime,
-                        sandbox_image=sandbox_image,
-                    )
+                    checkpoint_tracker.update(sandbox_image=sandbox_image)
                     parent_payload = resolve_execution_credentials(
                         payload_dict,
                         username=execution_payload.username,
@@ -1401,7 +1300,6 @@ class BackgroundWorker:
             is_shutdown = isinstance(exc, SystemExit | KeyboardInterrupt)
             is_cancelled = isinstance(exc, CancellationError)
             is_temporary = isinstance(exc, InfrastructureInterruptionError) or is_shutdown
-            recovery_unavailable_reason = ""
             # A legacy leg that failed, was cancelled/paused, or stalled is billed
             # for the tokens it already spent. Interruptions the platform caused
             # (host pressure, provider transport drop, shutdown) are not billed.
@@ -1422,16 +1320,6 @@ class BackgroundWorker:
                         generation=execution_generation,
                         commitment_job_id=pair_parent_id,
                     )
-            if is_temporary and not is_cancelled:
-                recovered, recovery_unavailable_reason = self._recover_temporary_interruption(
-                    optimization_id,
-                    generation=execution_generation,
-                    attempts=recovery_attempts,
-                )
-                if recovered:
-                    if is_shutdown:
-                        raise
-                    return
             if is_cancelled:
                 final_status, error_message = "cancelled", CANCELLATION_REASON
                 logger.info("Optimization %s cancelled", optimization_id)
@@ -1442,8 +1330,6 @@ class BackgroundWorker:
             else:
                 final_status = "failed"
                 error_message = str(exc)
-                if is_temporary and recovery_unavailable_reason:
-                    error_message = f"{error_message} Recovery unavailable: {recovery_unavailable_reason}"
                 logger.exception("Optimization %s failed: %s", optimization_id, error_message)
             _username = overview.get(PAYLOAD_OVERVIEW_USERNAME, "") if isinstance(overview, dict) else ""
             if is_cancelled:
@@ -1469,14 +1355,7 @@ class BackgroundWorker:
                 try:
                     fields = {"status": final_status, "message": error_message, "completed_at": now}
                     if is_temporary:
-                        fields.update(
-                            stop_reason="interrupted",
-                            recovery={
-                                "state": "unavailable",
-                                "phase": "admission",
-                                "reason": recovery_unavailable_reason or error_message,
-                            },
-                        )
+                        fields["stop_reason"] = "interrupted"
                     cas = getattr(self._job_store, "update_job_if_status", None)
                     if cas is not None:
                         fence = {} if execution_generation is None else {"expected_generation": execution_generation}
@@ -2439,12 +2318,6 @@ class BackgroundWorker:
             incumbent = tracker.get("_incumbents", {}).get(pair_index)
             if incumbent is not None:
                 manifest["evaluated_incumbent"] = incumbent
-            plan_builder = tracker.get("recovery_plan_builder")
-            if callable(plan_builder):
-                manifest["recovery_admission"] = plan_builder(
-                    manifest,
-                    runtime=str(tracker.get("execution_runtime", "vercel")),
-                )
             next_n = manifest["iteration"]
             self._job_store.save_gepa_checkpoint(
                 optimization_id,

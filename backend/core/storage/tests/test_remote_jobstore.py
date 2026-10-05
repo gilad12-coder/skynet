@@ -20,7 +20,6 @@ import pickle
 import time
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
-from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -32,8 +31,6 @@ from sqlalchemy.pool import StaticPool
 
 import core.storage.remote as remote_mod
 from core.billing.budgets import BudgetService
-from core.billing.operation_pricing import OperationCharge, OperationQuote
-from core.billing.recovery_admission import build_recovery_plan, model_call_bound, runtime_bound
 from core.constants import OPTIMIZATION_TYPE_TAGGING
 from core.storage.base import JobStore
 from core.storage.models import Base, BillingCustomerModel, JobModel, OptimizationShareGrantModel
@@ -113,22 +110,6 @@ def _fund_checkpoint(store: SQLiteJobStore, optimization_id: str, monkeypatch: p
     state.total_num_evals = 12
     data = pickle.dumps(state.__dict__)
     manifest = checkpoint_manifest(data, payload, store.get_job(optimization_id)["code_version"])
-    quote = OperationQuote(
-        request_fingerprint="fixture-request",
-        maximum=OperationCharge(total=Decimal(1), wallet=Decimal(1)),
-        price_snapshot={"version": "fixture-prices", "provider": "fixture"},
-    )
-    bound = model_call_bound("task", "fixture/model", quote)
-    manifest["recovery_admission"] = build_recovery_plan(
-        manifest,
-        runtime=runtime_bound(
-            "vercel",
-            {"image": _RECOVERY_IMAGE, "lifetime_seconds": 60},
-        ),
-        seed_bounds=[bound],
-        execution_bound={"model_calls": [bound], "max_cents": "1", "max_wallet_cents": "1"},
-        seed_marker_seen=True,
-    )
     store.save_gepa_checkpoint(
         optimization_id,
         data,
@@ -864,8 +845,10 @@ def test_count_jobs_zero_when_empty(store: SQLiteJobStore) -> None:
     assert store.count_jobs() == 0
 
 
-def test_recover_orphaned_jobs_requeues_running_job(store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Recover orphaned jobs requeues a first-attempt running job.
+def test_recover_orphaned_jobs_fails_running_job_with_checkpoint(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An orphaned run stays failed even when a checkpoint could resume it.
 
     Args:
         store: Disposable job store.
@@ -873,24 +856,25 @@ def test_recover_orphaned_jobs_requeues_running_job(store: SQLiteJobStore, monke
     """
     store.create_job("r1")
     store.update_job("r1", status="running")
-    budget_service = _fund_checkpoint(store, "r1", monkeypatch)
-    store.recover_orphaned_jobs(budget_service=budget_service)
+    _fund_checkpoint(store, "r1", monkeypatch)
+    assert store.recover_orphaned_jobs() == 1
     job = store.get_job("r1")
-    assert job["status"] == "pending"
-    assert job["attempts"] == 1
-    assert job["recovery"]["state"] == "recovering"
-    assert job["recovery"]["phase"] == "resuming"
+    assert job["status"] == "failed"
+    assert job["stop_reason"] == "interrupted"
+    assert job["attempts"] == 0
+    assert job["message"] == remote_mod.ORPHANED_RUN_MESSAGE
+    assert job["completed_at"] is not None
 
 
 def _fund_without_checkpoint(store: SQLiteJobStore, optimization_id: str) -> BudgetService:
-    """Attach reconciled funding to a run that was interrupted before its first checkpoint.
+    """Attach reconciled funding to a run that has no checkpoint.
 
     Args:
         store: Private fixture database.
         optimization_id: Existing run to fund.
 
     Returns:
-        Authoritative budget service for restart admission and generation fencing.
+        Authoritative budget service for resume admission.
     """
     with Session(store.engine) as session:
         session.add(
@@ -912,27 +896,8 @@ def _fund_without_checkpoint(store: SQLiteJobStore, optimization_id: str) -> Bud
     return service
 
 
-def test_recover_orphaned_jobs_restarts_run_without_checkpoint(store: SQLiteJobStore) -> None:
-    """A run interrupted before its first checkpoint starts over instead of failing.
-
-    Args:
-        store: Disposable job store.
-    """
-    store.create_job("fresh")
-    store.update_job("fresh", status="running", optimization_type="blackbox", code_version="old-worker")
-    budget_service = _fund_without_checkpoint(store, "fresh")
-    store.recover_orphaned_jobs(budget_service=budget_service)
-    job = store.get_job("fresh")
-    assert job["status"] == "pending"
-    assert job["attempts"] == 1
-    assert job["message"] == "Restarting"
-    assert job["recovery"]["phase"] == "restarting"
-    assert job["recovery"]["checkpoint_iteration"] is None
-    assert job["code_version"] != "old-worker"
-
-
-def test_requeue_for_resume_manual_without_checkpoint_still_fails(store: SQLiteJobStore) -> None:
-    """A user's resume still needs a checkpoint; only interruption recovery restarts.
+def test_requeue_for_resume_without_checkpoint_fails(store: SQLiteJobStore) -> None:
+    """A resume needs a checkpoint; a run without one is retried or cloned instead.
 
     Args:
         store: Disposable job store.
@@ -944,18 +909,12 @@ def test_requeue_for_resume_manual_without_checkpoint_still_fails(store: SQLiteJ
         store.requeue_for_resume("manual", budget_service=budget_service)
 
 
-def test_recover_orphaned_jobs_requeues_validating_job(store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Recover orphaned jobs requeues a first-attempt validating job.
-
-    Args:
-        store: Disposable job store.
-        monkeypatch: Pytest fixture used to bind the sandbox profile.
-    """
+def test_recover_orphaned_jobs_fails_validating_job(store: SQLiteJobStore) -> None:
+    """Recover orphaned jobs fails a validating job."""
     store.create_job("r2")
     store.update_job("r2", status="validating")
-    budget_service = _fund_checkpoint(store, "r2", monkeypatch)
-    store.recover_orphaned_jobs(budget_service=budget_service)
-    assert store.get_job("r2")["status"] == "pending"
+    store.recover_orphaned_jobs()
+    assert store.get_job("r2")["status"] == "failed"
 
 
 def test_recover_orphaned_jobs_leaves_terminal_jobs_intact(store: SQLiteJobStore) -> None:
@@ -978,35 +937,6 @@ def test_recover_orphaned_jobs_returns_count(store: SQLiteJobStore) -> None:
     store.create_job("r7")
     store.update_job("r7", status="success")
     assert store.recover_orphaned_jobs() == 2
-
-
-def test_recover_orphaned_jobs_fails_at_max_attempts(store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Recover orphaned jobs fails the row when the retry cap is reached."""
-    monkeypatch.setattr(remote_mod.settings, "job_max_attempts", 3)
-    store.create_job("r8")
-    store.update_job("r8", status="running", attempts=2)
-    store.recover_orphaned_jobs()
-    job = store.get_job("r8")
-    assert job["status"] == "failed"
-    assert job["attempts"] == 2
-    assert "attempt limit" in job["message"]
-    assert job["completed_at"] is not None
-
-
-def test_recover_orphaned_jobs_reports_version_skew_at_max_attempts(
-    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Recover orphaned jobs explains incompatible code versions at the retry cap."""
-    monkeypatch.setattr(remote_mod.settings, "job_max_attempts", 3)
-    monkeypatch.setattr(remote_mod.settings, "code_version", "v2", raising=False)
-    store.create_job("r-version")
-    store.update_job("r-version", status="running", attempts=2, code_version="v1")
-
-    store.recover_orphaned_jobs()
-
-    job = store.get_job("r-version")
-    assert job["status"] == "failed"
-    assert job["recovery"]["state"] == "unavailable"
 
 
 def test_recover_orphaned_jobs_returns_zero_when_none_present(store: SQLiteJobStore) -> None:
@@ -1578,6 +1508,7 @@ def test_requeue_for_resume_flips_to_pending_and_bumps_attempts(
     assert job["attempts"] == 1
     assert job.get("claimed_by") is None
     assert job.get("completed_at") is None
+    assert job.get("recovery") is None
 
 
 def test_requeue_for_resume_missing_job_returns_none(store: SQLiteJobStore) -> None:

@@ -52,7 +52,6 @@ from ..billing import (
     start_openrouter_float_sweeper,
     warn_if_local_key_uncapped,
 )
-from ..billing.budgets import BudgetService
 from ..billing.data_policy import configure_data_policy
 from ..config import settings
 from ..connectors.registry import oauth_config_problems
@@ -745,7 +744,7 @@ def create_app(
         # peer pod's in-flight job is not orphaned and is left alone. The
         # periodic sweeper (below) covers steady-state; this one-shot keeps
         # boot latency low when a single replica restarts.
-        job_store.recover_orphaned_jobs(budget_service=BudgetService(engine=job_store.engine))
+        job_store.recover_orphaned_jobs()
         for problem in oauth_config_problems():
             logger.warning("Connector OAuth misconfigured: %s", problem)
         # ``recover_pending_jobs`` is no longer required for correctness because
