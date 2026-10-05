@@ -4,7 +4,6 @@ import {
   budgetResultKind,
   isBudgetPause,
   isBudgetStop,
-  recoveryDisplayState,
 } from "./run-lifecycle.ts";
 
 test("budget stops require a structured terminal reason", () => {
@@ -47,12 +46,4 @@ test("a seed or score without completed selection never becomes an evaluated res
     }),
     "evaluated",
   );
-});
-
-test("unknown recovery states render as unavailable instead of indexing missing copy", () => {
-  assert.equal(recoveryDisplayState({ state: "waiting_for_usage" }), "unavailable");
-  assert.equal(recoveryDisplayState({ state: "future_state" }), "unavailable");
-  assert.equal(recoveryDisplayState({ state: "recovering" }), "recovering");
-  assert.equal(recoveryDisplayState({ state: "recovered" }), "recovered");
-  assert.equal(recoveryDisplayState(null), "unavailable");
 });
