@@ -38,7 +38,7 @@ from core.constants import OPTIMIZATION_TYPE_TAGGING
 from core.storage.base import JobStore
 from core.storage.models import Base, BillingCustomerModel, JobModel, OptimizationShareGrantModel
 from core.storage.remote import RemoteDBJobStore
-from core.worker.checkpoint_compat import checkpoint_manifest
+from core.worker.checkpoint_compat import CheckpointCompatibilityError, checkpoint_manifest
 
 
 class SQLiteJobStore(RemoteDBJobStore):
@@ -880,6 +880,68 @@ def test_recover_orphaned_jobs_requeues_running_job(store: SQLiteJobStore, monke
     assert job["attempts"] == 1
     assert job["recovery"]["state"] == "recovering"
     assert job["recovery"]["phase"] == "resuming"
+
+
+def _fund_without_checkpoint(store: SQLiteJobStore, optimization_id: str) -> BudgetService:
+    """Attach reconciled funding to a run that was interrupted before its first checkpoint.
+
+    Args:
+        store: Private fixture database.
+        optimization_id: Existing run to fund.
+
+    Returns:
+        Authoritative budget service for restart admission and generation fencing.
+    """
+    with Session(store.engine) as session:
+        session.add(
+            BillingCustomerModel(
+                username="restart-owner", stripe_customer_id="local-restart", balance_cents=50, grant_remaining=0
+            )
+        )
+        session.commit()
+    service = BudgetService(engine=store.engine)
+    budget = service.create("restart-owner", 20, idempotency_key=optimization_id)
+    service.attach_to_job(budget.id, "restart-owner", optimization_id, expected_revision=budget.revision)
+    store.update_job(
+        optimization_id,
+        username="restart-owner",
+        payload={"execution_budget_id": budget.id, "execution_budget_generation": 0},
+        execution_budget_id=budget.id,
+        execution_budget_generation=0,
+    )
+    return service
+
+
+def test_recover_orphaned_jobs_restarts_run_without_checkpoint(store: SQLiteJobStore) -> None:
+    """A run interrupted before its first checkpoint starts over instead of failing.
+
+    Args:
+        store: Disposable job store.
+    """
+    store.create_job("fresh")
+    store.update_job("fresh", status="running", optimization_type="blackbox", code_version="old-worker")
+    budget_service = _fund_without_checkpoint(store, "fresh")
+    store.recover_orphaned_jobs(budget_service=budget_service)
+    job = store.get_job("fresh")
+    assert job["status"] == "pending"
+    assert job["attempts"] == 1
+    assert job["message"] == "Restarting"
+    assert job["recovery"]["phase"] == "restarting"
+    assert job["recovery"]["checkpoint_iteration"] is None
+    assert job["code_version"] != "old-worker"
+
+
+def test_requeue_for_resume_manual_without_checkpoint_still_fails(store: SQLiteJobStore) -> None:
+    """A user's resume still needs a checkpoint; only interruption recovery restarts.
+
+    Args:
+        store: Disposable job store.
+    """
+    store.create_job("manual")
+    store.update_job("manual", status="failed")
+    budget_service = _fund_without_checkpoint(store, "manual")
+    with pytest.raises(CheckpointCompatibilityError, match="No completed compatible checkpoint"):
+        store.requeue_for_resume("manual", budget_service=budget_service)
 
 
 def test_recover_orphaned_jobs_requeues_validating_job(store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch) -> None:

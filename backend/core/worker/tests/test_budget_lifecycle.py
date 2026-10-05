@@ -144,8 +144,8 @@ def test_checkpoint_incumbent_accepts_only_finite_completed_candidate_events() -
     assert checkpoint_incumbent({"evaluated_incumbent": {**incumbent, "candidate": {"predict": 3}}}) is None
 
 
-def test_orphan_without_checkpoint_does_not_fresh_restart() -> None:
-    """Fail an interrupted run explicitly when recovery evidence does not exist."""
+def test_unfunded_orphan_without_checkpoint_does_not_fresh_restart() -> None:
+    """Fail an interrupted run with no checkpoint when no cumulative budget bounds a restart."""
     store = SQLiteJobStore()
     store.create_job("no-checkpoint")
     store.update_job("no-checkpoint", payload={"optimizer_name": "GEPA"})
@@ -154,7 +154,7 @@ def test_orphan_without_checkpoint_does_not_fresh_restart() -> None:
     job = store.get_job("no-checkpoint")
     assert job["status"] == "failed"
     assert job["stop_reason"] == "interrupted"
-    assert "checkpoint" in job["message"]
+    assert "execution budget" in job["message"]
 
 
 def test_late_generation_cannot_publish_or_override_cancelled_job() -> None:
