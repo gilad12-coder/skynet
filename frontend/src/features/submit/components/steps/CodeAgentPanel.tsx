@@ -204,6 +204,7 @@ export function CodeAgentPanel({
         }
         disabled={disabled || agent.limitReached}
         streaming={streaming}
+        midTurn={agent.midTurn}
         modelMenu={
           <ComposerModelMenu
             value={model}
