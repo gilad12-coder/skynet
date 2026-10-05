@@ -1,12 +1,14 @@
 /**
  * Per-run pipeline plan for the stage tracker.
  *
- * Every flow validates, splits, measures a baseline and evaluates the winner,
- * but the middle differs by optimization type and algorithm: a DSPy compile
- * (MIPROv2, BootstrapFewShot…), a GEPA reflective search, a single black-box
- * engine, or the auto strategy's parallel exploration followed by a GEPA
- * refinement lane. The plan names those stages and their algorithm so the
- * tracker reads as the run that actually happened.
+ * Every flow validates and evaluates the winner, but the rest depends on the
+ * run. DSPy runs split their dataset and, when there is a test split, measure
+ * a baseline first; black-box runs do neither, since they score the starting
+ * point in the final evaluation. The middle differs by algorithm: a DSPy
+ * compile (MIPROv2, BootstrapFewShot…), a GEPA reflective search, a single
+ * black-box engine, or the auto strategy's parallel exploration followed by a
+ * GEPA refinement lane. The plan lists only the stages this run goes through,
+ * so the tracker reads as the run that actually happened.
  */
 import type {
   BlackboxStrategy,
@@ -17,6 +19,9 @@ import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { engineDisplayName } from "@/features/explore";
 import type { PipelineStage } from "../constants";
+import { preparationStages } from "./stage-order";
+
+export { stageInPlan } from "./stage-order";
 
 export interface PlannedStage {
   key: PipelineStage;
@@ -102,10 +107,20 @@ export function planPipelineStages(
   job: OptimizationStatusResponse,
   payload: OptimizationPayloadResponse | null | undefined,
 ): PlannedStage[] {
+  const prep = preparationStages(job, payload);
   return [
     { key: "validating", label: msg("auto.features.optimizations.constants.literal.1") },
-    { key: "splitting", label: msg("auto.features.optimizations.constants.literal.2") },
-    { key: "baseline", label: TERMS.baselineScore },
+    ...(prep.includes("splitting")
+      ? [
+          {
+            key: "splitting",
+            label: msg("auto.features.optimizations.constants.literal.2"),
+          } as const,
+        ]
+      : []),
+    ...(prep.includes("baseline")
+      ? [{ key: "baseline", label: TERMS.baselineScore } as const]
+      : []),
     ...middleStages(job, payload),
     { key: "evaluating", label: msg("auto.features.optimizations.constants.literal.3") },
   ];

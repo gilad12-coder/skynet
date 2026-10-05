@@ -26,7 +26,7 @@ import type {
 } from "@/shared/types/api";
 import type { PipelineStage } from "../constants";
 import { detectPairStage, detectStage } from "../lib/detect-stage";
-import { planPipelineStages } from "../lib/pipeline-plan";
+import { planPipelineStages, stageInPlan } from "../lib/pipeline-plan";
 import {
   formatBlackboxDelta,
   formatBlackboxScore,
@@ -169,11 +169,14 @@ function OverviewTabImpl({
 
   const pairIndex = isPairContext ? activePair.pair_index : undefined;
   const stagePlan = planPipelineStages(job, payload);
-  const currentStage = isPairContext
-    ? detectPairStage(job, activePair.pair_index)
-    : job.status === "success"
-      ? "done"
-      : detectStage(job);
+  const currentStage = stageInPlan(
+    stagePlan,
+    isPairContext
+      ? detectPairStage(job, activePair.pair_index)
+      : job.status === "success"
+        ? "done"
+        : detectStage(job),
+  );
   const stageTs = computeStageTimestamps(
     job.progress_events ?? [],
     job.started_at,
@@ -221,7 +224,11 @@ function OverviewTabImpl({
   const stageIndex = (stage: PipelineStage | "done") =>
     stage === "done" ? stagePlan.length : stagePlan.findIndex((s) => s.key === stage);
   const skippedStages: PipelineStage[] = [];
-  if (baseline == null && stageIndex(currentStage) > stageIndex("baseline"))
+  if (
+    baseline == null &&
+    stageIndex("baseline") !== -1 &&
+    stageIndex(currentStage) > stageIndex("baseline")
+  )
     skippedStages.push("baseline");
   if (optimized == null && currentStage === "done" && !stagesFailed)
     skippedStages.push("evaluating");
