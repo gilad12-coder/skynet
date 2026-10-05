@@ -1151,7 +1151,7 @@
   "agent.composer.hint_queue": "Invio per accodare",
   "agent.pending.list_label": "Messaggi in attesa",
   "agent.pending.steering": "Verrà letto al prossimo passo dell'agente",
-  "agent.pending.steer": "Indirizza nel turno in corso",
+  "agent.pending.steer": "Invia al turno in corso",
   "agent.pending.edit": "Modifica",
   "agent.pending.remove": "Rimuovi",
   "agent.model_menu.auto": "Auto",

@@ -1150,7 +1150,7 @@
   "agent.composer.hint_steer": "Yönlendirmek için Enter · Sıraya eklemek için Tab",
   "agent.composer.hint_queue": "Sıraya eklemek için Enter",
   "agent.pending.list_label": "Bekleyen mesajlar",
-  "agent.pending.steering": "Ajan bunu bir sonraki adımında okuyacak",
+  "agent.pending.steering": "Aracı bunu bir sonraki adımında okuyacak",
   "agent.pending.steer": "Mevcut tura yönlendir",
   "agent.pending.edit": "Düzenle",
   "agent.pending.remove": "Kaldır",
