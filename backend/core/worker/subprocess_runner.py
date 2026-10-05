@@ -212,6 +212,8 @@ def run_service_in_subprocess(
     forwarded_loggers = (
         logging.getLogger("dspy"),
         logging.getLogger("core.service_gateway.optimization"),
+        # Provider failures and refusals the model gateway saw for this run.
+        logging.getLogger("core.billing.model_dispatch"),
         sandbox_stream_logger,
     )
     saved_levels = [lg.level for lg in forwarded_loggers]

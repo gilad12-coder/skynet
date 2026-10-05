@@ -19,7 +19,7 @@ from .model_terms import excluded_from_managed, managed_model_refusal
 from .openrouter_float import notify_managed_refusal
 from .openrouter_quotes import PricedRequest, fetch_endpoint_prices, price_text_request
 from .operation_pricing import ChargePolicy, OperationQuote, UnpricedOperationError, exact_nonnegative, json_fingerprint
-from .responses_adapter import price_responses_request, responses_receipt
+from .responses_adapter import price_responses_request, responses_failure, responses_receipt
 from .runtime import BudgetRuntime, PaidResult
 
 MODEL_ATTEMPT_HEADER = "x-skynet-model-attempt-id"
@@ -411,9 +411,11 @@ class OpenRouterDispatcher:
             status: int, content_type: str, content: bytes, interrupted: bool, retry_after: str | None
         ) -> PaidResult[ModelHTTPResult]:
             """Turn a provider answer into its measured charge and the relay's response."""
+            failure = None
             if path == "/responses":
                 identity, usage, complete = responses_receipt(content, content_type)
                 interrupted = interrupted or not complete
+                failure = responses_failure(content, content_type)
             else:
                 interrupted = interrupted or not response_complete(content, content_type)
                 identity, usage = response_usage(content, content_type)
@@ -425,6 +427,8 @@ class OpenRouterDispatcher:
                 "usage": usage,
                 "interrupted": interrupted,
             }
+            if failure is not None:
+                evidence["failure"] = failure
             amount = None
             if not interrupted and usage is not None and usage.get("cost") is not None:
                 amount = usage_charge(usage)
@@ -465,12 +469,15 @@ class OpenRouterDispatcher:
                         }
                     ).encode(),
                 )
+            if failure is not None and amount is None:
+                logger.warning("The provider failed a %s response (%s): %s", self.model, identity, failure)
             return PaidResult(
                 value=result,
                 provider_usd=amount,
                 evidence=evidence,
                 provider_request_id=identity,
                 refused=refused,
+                failure=failure if amount is None and not refused else None,
             )
 
         return self.runtime.execute(

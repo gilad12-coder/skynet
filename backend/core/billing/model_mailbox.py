@@ -17,7 +17,7 @@ from . import guest_model_proxy
 from .budgets import BudgetError, BudgetInsufficientError
 from .model_dispatch import MODEL_ATTEMPT_HEADER, ModelHTTPResult
 from .operation_pricing import UnpricedOperationError
-from .runtime import UsagePendingError
+from .runtime import ProviderFailedError, UsagePendingError
 from .signals import BudgetReached
 
 
@@ -88,6 +88,8 @@ class ModelMailbox:
                 response = failure(402, "budget_reached", str(error))
             except BudgetInsufficientError as error:
                 response = failure(402, "budget_insufficient", str(error))
+            except ProviderFailedError as error:
+                response = failure(502, "provider_failed", str(error))
             except (BudgetError, UsagePendingError):
                 response = failure(424, "usage_pending", "Previous model usage is awaiting confirmation.")
             except (UnpricedOperationError, ValueError, TypeError) as error:

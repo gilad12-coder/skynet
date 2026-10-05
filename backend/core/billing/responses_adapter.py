@@ -180,6 +180,42 @@ def price_responses_request(
     return PricedRequest(body, quote)
 
 
+def responses_failure(body: bytes, content_type: str) -> str | None:
+    """Return the provider's message when a Responses answer ended failed or cancelled.
+
+    Args:
+        body: Fully collected provider protocol bytes.
+        content_type: JSON or event-stream content type reported by the provider.
+
+    Returns:
+        The failure message, or ``None`` when the response did not end in failure.
+    """
+    stream = "text/event-stream" in content_type
+    if stream:
+        raw_events = [
+            "\n".join(line[5:].lstrip() for line in block.splitlines() if line.startswith("data:"))
+            for block in body.decode("utf-8", errors="replace").replace("\r\n", "\n").split("\n\n")
+        ]
+    else:
+        raw_events = [body.decode("utf-8", errors="replace")]
+    failure = None
+    for raw in raw_events:
+        try:
+            event = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        response = event.get("response") if stream else event
+        error = event.get("error") if event.get("type") == "error" else None
+        if isinstance(response, dict) and response.get("status") in {"failed", "cancelled"}:
+            error = response.get("error") or {"message": f"The provider {response['status']} the response."}
+        if error is not None:
+            message = error.get("message") if isinstance(error, dict) else error
+            failure = str(message or "The provider failed the response.")[:500]
+    return failure
+
+
 def responses_receipt(body: bytes, content_type: str) -> tuple[str | None, dict[str, Any] | None, bool]:
     """Read actual nested Responses usage without inventing a zero-cost terminal receipt.
 
