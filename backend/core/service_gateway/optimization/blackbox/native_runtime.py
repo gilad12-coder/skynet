@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import math
 import os
 import re
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
+from .... import run_log
 from ....billing.model_gateway import raise_gateway_stop
 from ....billing.pricing import model_token_costs
 from ....billing.runtime import UsagePendingError
@@ -27,7 +29,7 @@ from ....config import Settings, settings
 from ....exceptions import ServiceError
 from ....models.blackbox import BLACKBOX_HARNESS_CLAUDE_CODE, BlackboxProposer, BlackboxTarget
 from ..budget_stop import BudgetReached
-from . import harness_bridge, native_runner, repo_tree
+from . import harness_bridge, native_runner, repo_tree, sandbox_log
 from .agent_eval import gateway_from_settings
 from .feedback import emit_candidate, emit_case_scored
 from .harness import GatewayConfig, build_launch, launch_payload, pinned_harness_check
@@ -66,7 +68,10 @@ _RESULT_FILE = "native_result.json"
 _ARTIFACT_FILE = "native_artifacts.tar.gz.b64"
 _INSTALL_ALLOWANCE = 600.0
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
+logger = logging.getLogger(__name__)
+
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
+_LOG_PREFIX = "SKYNET_NATIVE_LOG "
 _UUID = re.compile(r"^[0-9a-f]{32}$")
 NATIVE_ENGINES = frozenset({"meta_harness", "autoresearch", "autosaddler", "gepa_repo", "best_of_n_repo"})
 # ``gepa_repo`` and ``best_of_n_repo`` exist only for repositories; the others take either kind of task.
@@ -485,6 +490,9 @@ class _EvaluatorMailbox:
         self.progress_callback = progress_callback
         self.check_budget = check_budget
         self.error: BaseException | None = None
+        self.owner: str | None = getattr(session, "log_owner", None)
+        # Replaced once the run's environment is known, so its secrets are redacted.
+        self.scrub = sandbox_log.Scrubber(())
         self._buffer = ""
         self._responses: dict[str, str] = {}
         self._lock = threading.Lock()
@@ -502,15 +510,42 @@ class _EvaluatorMailbox:
             self._buffer += text
             while "\n" in self._buffer:
                 line, self._buffer = self._buffer.split("\n", 1)
+                framed = (
+                    f"{_RPC_PREFIX}{self.nonce} ",
+                    f"SKYNET_NATIVE_PROGRESS {self.nonce} ",
+                    f"{_LOG_PREFIX}{self.nonce} ",
+                )
+                if not line.startswith(framed):
+                    sandbox_log.stream_line(line, owner=self.owner, scrub=self.scrub, label="stdout")
+                    continue
+                if line.startswith(_LOG_PREFIX):
+                    self._log(line.split(" ", 2)[2])
+                    continue
                 try:
-                    if line.startswith(f"{_RPC_PREFIX}{self.nonce} "):
+                    if line.startswith(_RPC_PREFIX):
                         self._respond(json.loads(line.split(" ", 2)[2]))
-                    elif line.startswith(f"SKYNET_NATIVE_PROGRESS {self.nonce} "):
+                    else:
                         self._progress(json.loads(line.split(" ", 2)[2]))
                 except Exception as exc:
                     # LocalSubprocessRuntime delivers output on a reader thread;
                     # raising there would abandon the child waiting for its reply.
                     self.error = self.error or exc
+
+    def _log(self, body: str) -> None:
+        """Relay one structured record from the child into the run log.
+
+        A record the host cannot read is logged as plain output: a broken log
+        line must never stop the run the way a broken evaluation request does.
+
+        Args:
+            body: The JSON after the framing prefix.
+        """
+        try:
+            data = json.loads(body)
+        except ValueError:
+            sandbox_log.stream_line(body, owner=self.owner, scrub=self.scrub, label="stdout")
+            return
+        sandbox_log.forward(data, owner=self.owner, scrub=self.scrub)
 
     def _progress(self, event: dict[str, Any]) -> None:
         """Relay a child checkpoint: one scored case of a sweep, or a completed aggregate.
@@ -524,6 +559,20 @@ class _EvaluatorMailbox:
             return
         if event.get("event") == "case_scored":
             total = event.get("total")
+            example_id = str(event.get("example_id", "?"))
+            logger.info(
+                "Candidate %s scored %.4f on case %s",
+                candidate_id,
+                float(score),
+                example_id,
+                extra=run_log.event_extra(
+                    source="engine",
+                    event="case.scored",
+                    fields={"score": float(score), "total": total},
+                    candidate=candidate_id,
+                    case=example_id,
+                ),
+            )
             if isinstance(total, int) and not isinstance(total, bool):
                 emit_case_scored(
                     self.progress_callback,
@@ -534,6 +583,18 @@ class _EvaluatorMailbox:
                 )
             return
         per_example = event.get("per_example")
+        logger.info(
+            "Candidate %s scored %.4f after %s evaluations",
+            candidate_id,
+            float(score),
+            event.get("total_evals"),
+            extra=run_log.event_extra(
+                source="engine",
+                event="candidate.scored",
+                fields={"score": float(score), "total_evals": event.get("total_evals")},
+                candidate=candidate_id,
+            ),
+        )
         emit_candidate(
             self.progress_callback,
             candidate_id=str(candidate_id),
@@ -836,6 +897,14 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             raise ServiceError("Native optimizer runtime expired while preparing dependencies.")
         payload["timeout_seconds"] = timeout
         session.write_files({_INPUT_FILE: json.dumps(payload, default=side_info_json_default)})
+        session_env = getattr(session, "_env", None)
+        mailbox.scrub = sandbox_log.Scrubber(
+            [
+                *env.values(),
+                options.gateway.api_key,
+                *(session_env.values() if isinstance(session_env, dict) else ()),
+            ]
+        )
         completed = session.run(command, env=env, timeout_seconds=timeout, on_output=mailbox.on_output)
         text = session.read_file(_RESULT_FILE)
         document = json.loads(text) if text else {}

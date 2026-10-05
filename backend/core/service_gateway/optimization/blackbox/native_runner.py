@@ -11,6 +11,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import logging
 import math
 import os
 import signal
@@ -45,6 +46,9 @@ except ImportError:  # In the sandbox this file runs as a script beside its sibl
 
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
+_LOG_PREFIX = "SKYNET_NATIVE_LOG "
+# Loggers that narrate every HTTP call at INFO; their warnings still stream.
+_QUIET_LOGGERS = ("httpx", "httpcore", "urllib3", "LiteLLM", "litellm", "openai", "anthropic")
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _TOKEN_NAMES = ("prompt_tokens", "completion_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 _PROC_ROOT = Path("/proc")
@@ -131,6 +135,54 @@ class EvaluatorMailbox:
             print(f"{prefix}{self.nonce} {json.dumps(payload, default=str, allow_nan=False)}", flush=True)
 
 
+class RunLogHandler(logging.Handler):
+    """Stream every log record to the parent the moment it is emitted."""
+
+    def __init__(self, mailbox: EvaluatorMailbox) -> None:
+        """Bind the handler to the parent connection.
+
+        Args:
+            mailbox: Parent evaluation and progress connection.
+        """
+        super().__init__(logging.INFO)
+        self.mailbox = mailbox
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Send one record, with its run-log fields, as a framed log line.
+
+        Args:
+            record: Any record at INFO or above in this process.
+        """
+        try:
+            data = getattr(record, native_engines.RUN_LOG_ATTR, None)
+            line = {
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+                **(data if isinstance(data, dict) else {}),
+            }
+            try:
+                self.mailbox.emit(_LOG_PREFIX, line)
+            except ValueError:
+                # A non-finite number in the fields; the line itself still matters.
+                self.mailbox.emit(_LOG_PREFIX, {**line, "fields": None})
+        except Exception:
+            self.handleError(record)
+
+
+def install_run_log(mailbox: EvaluatorMailbox) -> None:
+    """Route this process's log records to the parent's run log.
+
+    Args:
+        mailbox: Parent evaluation and progress connection.
+    """
+    root = logging.getLogger()
+    root.addHandler(RunLogHandler(mailbox))
+    root.setLevel(logging.INFO)
+    for name in _QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 class ProgressEvalServer(EvalServer):
     """Forward aggregate checkpoints, and the case scores behind them, as upstream records them."""
 
@@ -193,9 +245,16 @@ class ProgressEvalServer(EvalServer):
         """
         targets = self._sweep_targets(example_ids, split)
         if set(targets) == set(self._agent_visible_ids()):
+            candidate_id = self._register_candidate(candidate)
+            native_engines.log_event(
+                "candidate.eval.start",
+                f"Evaluating candidate {candidate_id} on {len(targets)} cases",
+                candidate=candidate_id,
+                cases=len(targets),
+            )
             with self._sweep_lock:
                 self._sweeps[_candidate_key(candidate)] = {
-                    "candidate_id": self._register_candidate(candidate),
+                    "candidate_id": candidate_id,
                     "total": len(targets),
                     "scores": [],
                 }
@@ -590,6 +649,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         engine_config=config_values,
     )
     mailbox = EvaluatorMailbox(payload["nonce"], float(payload["timeout_seconds"]))
+    install_run_log(mailbox)
     server = ProgressEvalServer(task, mailbox, config, output_dir)
     engine = native_engines.ENGINES[payload["engine_id"]](config)
     document: dict[str, Any] = {}
@@ -597,6 +657,13 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
 
     def optimize() -> None:
         """Run upstream on a supervised thread so evaluator failures cannot spawn retries."""
+        native_engines.log_event(
+            "phase.start",
+            f"Starting {payload['engine_id']} with up to {config.max_evals} evaluations",
+            phase="optimize",
+            engine=payload["engine_id"],
+            max_evals=config.max_evals,
+        )
         try:
             result = engine.run(task, server)
             engine.process_result(result, output_dir)
@@ -608,8 +675,22 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
                     "metadata": result.metadata,
                 }
             )
+            native_engines.log_event(
+                "phase.end",
+                f"{payload['engine_id']} finished, best score {result.best_score}",
+                phase="optimize",
+                best_score=result.best_score,
+                total_evals=server.budget.used,
+            )
         except (Exception, EvaluationStopped) as exc:
             document["error"] = f"{type(exc).__name__}: {exc}"
+            native_engines.log_event(
+                "phase.end",
+                f"{payload['engine_id']} stopped: {document['error']}",
+                level=logging.WARNING,
+                phase="optimize",
+                error=document["error"],
+            )
         finally:
             finished.set()
 

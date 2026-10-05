@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .. import run_log
 from ..billing import (
     OpenRouterKeyProvisioner,
     ProviderKeyVault,
@@ -2075,6 +2076,9 @@ class BackgroundWorker:
         result_payload: dict[str, Any] | None = None
         error_payload: dict[str, Any] | None = None
         drained_count = 0
+        # One insert per drain tick instead of one per line: a sandbox run can
+        # emit hundreds of events a second, and the drain already runs every tick.
+        log_batch: list[dict[str, Any]] = []
         while True:
             try:
                 event = event_queue.get_nowait()
@@ -2135,17 +2139,16 @@ class BackgroundWorker:
                         timestamp = None
                 pair_index_raw = event.get("pair_index")
                 pair_index = int(pair_index_raw) if isinstance(pair_index_raw, int) else None
-                try:
-                    self._job_store.append_log(
-                        optimization_id,
-                        level=str(event.get("level", "INFO")),
-                        logger_name=str(event.get("logger", "dspy")),
-                        message=str(event.get("message", "")),
-                        timestamp=timestamp,
-                        pair_index=pair_index,
-                    )
-                except Exception:
-                    logger.exception("Optimization %s: failed to persist subprocess log entry", optimization_id)
+                log_batch.append(
+                    {
+                        "level": str(event.get("level", "INFO")),
+                        "logger": str(event.get("logger", "dspy")),
+                        "message": str(event.get("message", "")),
+                        "timestamp": timestamp,
+                        "pair_index": pair_index,
+                        **run_log.normalize(event),
+                    }
+                )
             elif event_type == EVENT_AGENT_RUN:
                 self._persist_agent_run_event(optimization_id, event.get("run"))
             elif event_type == EVENT_RESULT:
@@ -2165,6 +2168,13 @@ class BackgroundWorker:
                 }
                 error_payload = payload
 
+        if log_batch:
+            try:
+                self._job_store.append_logs(optimization_id, log_batch)
+            except Exception:
+                logger.exception(
+                    "Optimization %s: failed to persist %d subprocess log entries", optimization_id, len(log_batch)
+                )
         return result_payload, error_payload, drained_count
 
     def _persist_agent_run_event(self, optimization_id: str, run: Any) -> None:

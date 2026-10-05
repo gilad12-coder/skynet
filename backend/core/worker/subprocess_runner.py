@@ -18,6 +18,7 @@ from typing import Any
 
 import dspy
 
+from .. import run_log
 from ..config import settings
 from ..constants import OPTIMIZATION_TYPE_BLACKBOX, OPTIMIZATION_TYPE_GRID_SEARCH, OPTIMIZATION_TYPE_RUN
 from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
@@ -139,6 +140,7 @@ class SubprocessLogHandler(logging.Handler):
                 "logger": record.name,
                 "message": message,
                 "pair_index": get_current_pair_index(),
+                **run_log.entry_fields(record),
             },
         )
 

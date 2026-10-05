@@ -486,11 +486,6 @@ class Settings(BaseSettings):
         ge=1,
         description="Maximum stored progress events per optimization job before old events are evicted",
     )
-    log_entries_per_job_cap: int = Field(
-        default=5000,
-        ge=1,
-        description="Maximum stored log entries per optimization job before old entries are evicted",
-    )
     dataset_max_file_bytes: int = Field(
         default=50 * 1024 * 1024,
         ge=1,

@@ -1037,10 +1037,16 @@ class LogEntryModel(Base):
     logger: Mapped[str] = mapped_column(String(255), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     pair_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Structured run-log fields, see core.run_log. NULL source is a row written
+    # before they existed, which was always the host's.
+    source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    event: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fields: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
+    candidate: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    case_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    # Backs the per-job ordered reads (get_logs) and the oldest-first cap
-    # eviction in append_log, which otherwise scan on the single-column
-    # optimization_id index and sort timestamps in memory.
+    # Backs the per-job ordered reads (get_logs), which otherwise scan on the
+    # single-column optimization_id index and sort timestamps in memory.
     __table_args__ = (Index("ix_job_logs_optimization_timestamp", "optimization_id", "timestamp"),)
 
 

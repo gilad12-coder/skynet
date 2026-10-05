@@ -131,6 +131,7 @@ class FakeJobStore:
         message: str,
         timestamp: datetime | None = None,
         pair_index: int | None = None,
+        **run_log_fields: Any,
     ) -> None:
         """Persist a log entry and record the call for assertions.
 
@@ -141,6 +142,7 @@ class FakeJobStore:
             message: Formatted log message.
             timestamp: When the record was emitted, or ``None``.
             pair_index: Grid-search pair index, or ``None``.
+            **run_log_fields: ``source``, ``event``, ``fields``, ``candidate`` and ``case``.
         """
         entry = {
             "optimization_id": optimization_id,
@@ -149,9 +151,27 @@ class FakeJobStore:
             "message": message,
             "timestamp": timestamp,
             "pair_index": pair_index,
+            **run_log_fields,
         }
         self._logs.setdefault(optimization_id, []).append(entry)
         self.append_log_calls.append(entry)
+
+    def append_logs(self, optimization_id: str, entries: list[dict[str, Any]]) -> None:
+        """Persist several log entries, recording each like :meth:`append_log`.
+
+        Args:
+            optimization_id: ID of the job the logs belong to.
+            entries: Entries with ``logger`` in place of ``logger_name``.
+        """
+        for entry in entries:
+            fields = dict(entry)
+            self.append_log(
+                optimization_id,
+                level=fields.pop("level"),
+                logger_name=fields.pop("logger"),
+                message=fields.pop("message"),
+                **fields,
+            )
 
     def record_progress(
         self,

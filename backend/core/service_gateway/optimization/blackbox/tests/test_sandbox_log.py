@@ -112,19 +112,69 @@ def test_secrets_given_to_the_command_never_reach_the_log(captured: _Capture) ->
     assert "token=[redacted] key=[redacted] port=8080" in text
 
 
-def test_terminal_control_sequences_are_stripped_and_long_output_is_bounded(captured: _Capture) -> None:
-    """Escape codes are removed, lines are capped, and only the first lines stream."""
-    lines = [f"\x1b[31mline {i}\x1b[0m" for i in range(sandbox_log._STREAMED_LINES + 50)]
-    lines.append("x" * (sandbox_log._LINE_CHARS * 3))
+def test_every_stderr_line_streams_whole_with_control_sequences_stripped(captured: _Capture) -> None:
+    """No line is dropped or cut; only escape codes are removed."""
+    lines = [f"\x1b[31mline {i}\x1b[0m" for i in range(500)]
+    lines.append("x" * 5000)
     _FakeSession("\n".join(lines) + "\n", exit_code=2).run("cmd", on_output=lambda s, t: None)
     streamed = captured.messages(logging.DEBUG)
-    assert len(streamed) == sandbox_log._STREAMED_LINES
+    assert len(streamed) == 501
     assert streamed[0] == "[sandbox] line 0"
+    assert streamed[-1] == "[sandbox] " + "x" * 5000
     [warning] = captured.messages(logging.WARNING)
     assert "\x1b" not in warning
-    assert "(51 earlier lines not streamed)" in warning
     assert len(warning.splitlines()) == sandbox_log._TAIL_LINES + 1
-    assert warning.splitlines()[-1] == "x" * sandbox_log._LINE_CHARS + "…"
+
+
+def test_forwarded_records_cannot_pass_for_the_host(captured: _Capture) -> None:
+    """The host picks the logger, source and highest level of what a sandbox sends."""
+    sandbox_log.forward(
+        {
+            "level": "CRITICAL",
+            "logger": "core.worker",
+            "message": "Run finished",
+            "source": "host",
+            "event": "phase.end",
+        },
+        owner="job-1",
+        scrub=sandbox_log.Scrubber(()),
+    )
+    [record] = captured.records
+    assert record.name == "sandbox.core.worker"
+    assert record.levelno == logging.INFO
+    assert record.run_log["source"] == "engine"
+    assert record.run_log["event"] == "phase.end"
+    assert record.sandbox_owner == "job-1"
+
+
+def test_forwarded_records_keep_their_level_and_source_and_lose_secrets(captured: _Capture) -> None:
+    """A sandbox source and level up to ERROR pass; secrets go from message and fields alike."""
+    secret = "sk-very-secret-token"
+    sandbox_log.forward(
+        {
+            "level": "ERROR",
+            "logger": "skynet.engine",
+            "message": f"leaked {secret}",
+            "source": "proposer",
+            "fields": {"nested": [f"also {secret}"], secret: 1},
+            "candidate": 4,
+        },
+        owner="job-1",
+        scrub=sandbox_log.Scrubber([secret]),
+    )
+    [record] = captured.records
+    assert record.levelno == logging.ERROR
+    assert record.getMessage() == "leaked [redacted]"
+    assert record.run_log["source"] == "proposer"
+    assert record.run_log["fields"] == {"nested": ["also [redacted]"], "[redacted]": 1}
+    assert record.run_log["candidate"] == "4"
+    assert secret not in repr(record.__dict__)
+
+
+def test_forward_ignores_anything_but_a_record(captured: _Capture) -> None:
+    """A JSON value that is not an object is not a record."""
+    sandbox_log.forward(["not", "a", "record"], owner="job-1", scrub=sandbox_log.Scrubber(()))
+    assert captured.records == []
 
 
 def test_a_command_that_raises_logs_what_it_wrote_first(captured: _Capture) -> None:

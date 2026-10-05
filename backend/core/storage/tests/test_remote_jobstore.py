@@ -518,7 +518,7 @@ def test_append_log_warns_for_deleted_job(store: SQLiteJobStore, caplog: pytest.
     store.delete_job("l-del")
     store.append_log("l-del", level="INFO", logger_name="lg", message="after delete")
     assert store.get_logs("l-del") == []
-    assert "Discarding log entry for missing job l-del" in caplog.text
+    assert "Discarding 1 log entries for missing job l-del" in caplog.text
 
 
 def test_get_logs_level_filter(store: SQLiteJobStore) -> None:
@@ -1215,48 +1215,60 @@ def test_update_job_unknown_field_does_not_corrupt_existing_data(store: SQLiteJo
     assert store.get_job("uf-3")["status"] == "running"
 
 
-def test_log_eviction_oldest_entry_removed_when_cap_reached(
-    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Log eviction oldest entry removed when cap reached."""
-    monkeypatch.setattr(remote_mod, "MAX_LOG_ENTRIES", 3)
-    monkeypatch.setattr(remote_mod, "LOG_TRIM_SAMPLE_RATE", 1)
+def test_run_log_is_never_trimmed(store: SQLiteJobStore) -> None:
+    """A run's log keeps every line; its size counts against storage instead."""
+    store.create_job("no-trim")
+    store.append_logs("no-trim", [{"level": "INFO", "logger": "lg", "message": f"msg-{i}"} for i in range(6000)])
 
-    store.create_job("evict-log-1")
-    for i in range(3):
-        store.append_log("evict-log-1", level="INFO", logger_name="lg", message=f"msg-{i}")
-
-    # Adding a 4th entry must evict msg-0 (the oldest)
-    store.append_log("evict-log-1", level="INFO", logger_name="lg", message="msg-3")
-
-    logs = store.get_logs("evict-log-1")
-    messages = [lg["message"] for lg in logs]
-    assert "msg-0" not in messages
-    assert "msg-3" in messages
+    assert store.get_log_count("no-trim") == 6000
+    assert store.get_logs("no-trim", limit=1)[0]["message"] == "msg-0"
 
 
-def test_log_eviction_count_stays_at_cap(store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Log eviction count stays at cap."""
-    monkeypatch.setattr(remote_mod, "MAX_LOG_ENTRIES", 3)
-    monkeypatch.setattr(remote_mod, "LOG_TRIM_SAMPLE_RATE", 1)
+def test_run_log_fields_round_trip(store: SQLiteJobStore) -> None:
+    """Source, event, fields, candidate and case survive the store."""
+    store.create_job("fields")
+    store.append_log(
+        "fields",
+        level="INFO",
+        logger_name="sandbox.skynet.engine",
+        message="Candidate 3 scored 0.9 on case 7",
+        source="engine",
+        event="case.scored",
+        fields={"score": 0.9, "total": 20},
+        candidate="3",
+        case="7",
+    )
+    store.append_log("fields", level="INFO", logger_name="core.worker", message="plain")
 
-    store.create_job("evict-log-2")
-    for i in range(5):
-        store.append_log("evict-log-2", level="INFO", logger_name="lg", message=f"msg-{i}")
+    scored, plain = store.get_logs("fields")
+    assert scored["source"] == "engine"
+    assert scored["event"] == "case.scored"
+    assert scored["fields"] == {"score": 0.9, "total": 20}
+    assert (scored["candidate"], scored["case"]) == ("3", "7")
+    assert plain["source"] == "host"
+    assert plain["event"] is None
 
-    assert store.get_log_count("evict-log-2") == 3
+
+def test_run_log_cuts_text_to_its_column(store: SQLiteJobStore) -> None:
+    """A value longer than its column is cut to fit and ends with an ellipsis."""
+    store.create_job("long")
+    store.append_log("long", level="INFO", logger_name="lg", message="m" * 50_000, event="e" * 400)
+
+    (entry,) = store.get_logs("long")
+    assert len(entry["message"]) == 50_000
+    assert len(entry["event"]) == 255
+    assert entry["event"].endswith("...")
 
 
-def test_log_trim_is_sampled_and_batched(store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Sampled log trimming allows a small overshoot but keeps rows near the cap."""
-    monkeypatch.setattr(remote_mod, "MAX_LOG_ENTRIES", 200)
-    monkeypatch.setattr(remote_mod, "LOG_TRIM_SAMPLE_RATE", 50)
+def test_get_logs_resumes_after_an_id(store: SQLiteJobStore) -> None:
+    """A live reader gets only the lines written after the last one it saw."""
+    store.create_job("resume")
+    store.append_logs("resume", [{"level": "INFO", "logger": "lg", "message": f"msg-{i}"} for i in range(5)])
+    seen = store.get_logs("resume", limit=2)
 
-    store.create_job("sampled-log-trim")
-    for i in range(320):
-        store.append_log("sampled-log-trim", level="INFO", logger_name="lg", message=f"msg-{i}")
+    rest = store.get_logs("resume", after_id=seen[-1]["id"])
 
-    assert 200 <= store.get_log_count("sampled-log-trim") <= 250
+    assert [entry["message"] for entry in rest] == ["msg-2", "msg-3", "msg-4"]
 
 
 def test_progress_eviction_oldest_entry_removed_when_cap_reached(
