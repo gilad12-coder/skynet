@@ -18,6 +18,7 @@ import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { SearchInput } from "@/shared/ui/search-input";
 
 import type { SortDir } from "@/shared/lib/table-sort";
+import type { TableCollapse } from "@/shared/ui/primitives/table";
 
 // A free-text column can hold thousands of distinct values; mounting one
 // checkbox each froze the dropdown, and search reaches the rest.
@@ -40,6 +41,7 @@ export function ColumnHeader<K extends string>({
   setOpenFilter,
   width,
   onResize,
+  collapse,
 }: {
   label: string;
   sortKey: K;
@@ -54,6 +56,8 @@ export function ColumnHeader<K extends string>({
   setOpenFilter?: (col: string | null) => void;
   width?: number;
   onResize?: (key: K, width: number) => void;
+  /** Fold this column into the row's primary cell below this table width. */
+  collapse?: TableCollapse;
 }) {
   const sortActive = currentSort === sortKey;
   const hasFilter = filterCol && filterOptions && filters && onFilter && setOpenFilter;
@@ -155,6 +159,7 @@ export function ColumnHeader<K extends string>({
   return (
     <th
       ref={thRef}
+      data-collapse={collapse}
       className={`relative select-none ps-2 pe-4 py-3 text-center text-[0.75rem] font-semibold ${sortActive ? "text-foreground" : "text-muted-foreground"}`}
       style={width ? { width, minWidth: width, maxWidth: width } : undefined}
     >
