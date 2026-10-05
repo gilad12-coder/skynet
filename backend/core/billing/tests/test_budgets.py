@@ -28,7 +28,7 @@ from core.billing.budgets import (
 )
 from core.billing.operation_pricing import OperationCharge, OperationQuote
 from core.billing.pricing import ModelUsage
-from core.billing.runtime import BudgetRuntime
+from core.billing.runtime import BudgetRuntime, generation_operation_key
 from core.billing.service import StripeBillingService, committed_spend_cents, legacy_job_committed_cents
 from core.storage.models import (
     Base,
@@ -818,3 +818,30 @@ def test_uncapped_flag_is_versioned_like_the_total(engine: Engine) -> None:
     assert capped.uncapped is False
     assert capped.revision == 3
     assert capped.available_cents == 0
+
+
+def test_recovered_generation_can_repeat_a_logical_operation(engine: Engine) -> None:
+    """Admit the same logical work again after recovery fences the interrupted generation."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 10, idempotency_key="recovery-repeat")
+    service.attach_to_job(budget.id, "alice", "repeat-job", expected_revision=budget.revision)
+    quote = OperationQuote(
+        request_fingerprint="scorer-box",
+        maximum=OperationCharge(total=Decimal(1), wallet=Decimal(1)),
+        price_snapshot={"version": "fixture-v1"},
+    )
+
+    def runtime(generation: int) -> BudgetRuntime:
+        """Bind a run-phase runtime to one execution generation."""
+        return BudgetRuntime(service, username="alice", budget_id=budget.id, generation=generation, phase="run")
+
+    first = runtime(0).reserve(quote, operation_key="repo-scorer:repeat-job", cost_kind="sandbox", role="runtime")
+    service.release(first.id, "alice")
+    service.fence_generation(budget.id, "alice", expected_generation=0)
+    second = runtime(1).reserve(quote, operation_key="repo-scorer:repeat-job", cost_kind="sandbox", role="runtime")
+    retried = runtime(1).reserve(quote, operation_key="repo-scorer:repeat-job", cost_kind="sandbox", role="runtime")
+
+    assert second.id != first.id
+    assert retried.id == second.id
+    assert generation_operation_key("k" * 128, 3).endswith("#g3")
+    assert len(generation_operation_key("k" * 128, 3)) <= 128

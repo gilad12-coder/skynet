@@ -23,6 +23,31 @@ from .signals import BudgetStopLatch
 
 T = TypeVar("T")
 
+_OPERATION_KEY_LIMIT = 128
+
+
+def generation_operation_key(operation_key: str, generation: int) -> str:
+    """Scope a logical operation key to one execution generation.
+
+    A recovered run repeats work such as opening its scorer box under the same
+    logical key; the ledger's uniqueness spans every generation, so an unscoped
+    key collides with the interrupted attempt's record. Generation 0 keeps the
+    bare key so existing records and prefix lookups stay valid.
+
+    Args:
+        operation_key: Logical identity retained across delivery retries.
+        generation: Execution epoch the operation is admitted under.
+
+    Returns:
+        The key recorded for this generation, within the ledger's length bound.
+    """
+    if generation <= 0:
+        return operation_key
+    suffix = f"#g{generation}"
+    if len(operation_key) + len(suffix) <= _OPERATION_KEY_LIMIT:
+        return operation_key + suffix
+    return json_fingerprint([operation_key])[: _OPERATION_KEY_LIMIT - len(suffix)] + suffix
+
 
 class UsagePendingError(RuntimeError):
     """Prevent replay while a dispatched operation's bill remains unconfirmed."""
@@ -145,7 +170,7 @@ class BudgetRuntime:
                     operation = self.service.reserve(
                         self.budget_id,
                         self.username,
-                        operation_key=operation_key,
+                        operation_key=generation_operation_key(operation_key, self.generation),
                         generation=self.generation,
                         phase=self.phase,
                         cost_kind=cost_kind,
