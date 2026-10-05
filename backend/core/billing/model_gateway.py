@@ -39,7 +39,7 @@ from .protected_credentials import (
     SCORER_URL_REVISION_FIELD,
 )
 from .remote_evaluator import RemoteEvaluatorBroker, RemoteEvaluatorTransportError
-from .runtime import BudgetRuntime, UsagePendingError
+from .runtime import BudgetRuntime, ProviderFailedError, UsagePendingError
 from .signals import BudgetReached
 
 ROUTE_KEY = "_skynet_budget_route"
@@ -296,6 +296,9 @@ class ModelGateway:
                     self._error(402, "budget_reached", "The remaining budget cannot cover the next operation.")
                 except BudgetInsufficientError:
                     self._error(402, "budget_insufficient", "Increase the total budget or add funds to continue.")
+                except ProviderFailedError as error:
+                    # Only this attempt's bill is open; a 5xx lets the harness retry with a fresh attempt.
+                    self._error(502, "provider_failed", str(error))
                 except (UsagePendingError, BudgetError):
                     self._error(424, "usage_pending", "Previous work must settle before another attempt is admitted.")
                 except (UnpricedOperationError, ValueError, TypeError) as error:

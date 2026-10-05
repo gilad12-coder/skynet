@@ -692,7 +692,11 @@ def main(argv: list[str]) -> int:
         timeout_seconds=proposer.get("timeout_seconds"),
     )
     record_transcript(session_id, workspace, model, outcome.usage)
-    print(json.dumps(result_document(session_id, model, outcome)))
+    document = result_document(session_id, model, outcome)
+    if document["is_error"]:
+        # The result text can be the agent's last chat message, which hides why the harness failed.
+        print(failure_detail(outcome) or f"harness exited {outcome.returncode}", file=sys.stderr, flush=True)
+    print(json.dumps(document))
     sys.stdout.flush()
     return outcome.returncode if outcome.returncode is not None else 1
 

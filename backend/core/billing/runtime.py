@@ -53,6 +53,14 @@ class UsagePendingError(RuntimeError):
     """Prevent replay while a dispatched operation's bill remains unconfirmed."""
 
 
+class ProviderFailedError(UsagePendingError):
+    """Report a response the provider failed after dispatch, while its coverage stays held.
+
+    The attempt itself is over, so the caller may retry with a fresh attempt; only
+    this attempt's bill is still unconfirmed.
+    """
+
+
 class OperationCompletedError(RuntimeError):
     """Require the caller to retrieve its durable result instead of dispatching again."""
 
@@ -69,6 +77,8 @@ class PaidResult(Generic[T]):
     # A complete provider error that names no generation and reports no usage; its
     # coverage returns immediately because no receipt will ever confirm a charge.
     refused: bool = False
+    # The provider's own message for a response it failed after dispatch.
+    failure: str | None = None
 
 
 class BudgetRuntime:
@@ -257,6 +267,7 @@ class BudgetRuntime:
 
         Raises:
             UsagePendingError: When dispatch may have incurred cost without final evidence.
+            ProviderFailedError: When the provider failed the response; a fresh attempt may follow.
             OperationCompletedError: When a completed attempt is replayed without its saved result.
         """
         if quote.price_snapshot.get("policy") != policy.snapshot():
@@ -292,6 +303,8 @@ class BudgetRuntime:
                     evidence_key=json_fingerprint(dict(result.evidence)),
                     evidence=dict(result.evidence),
                 )
+                if result.failure is not None:
+                    raise ProviderFailedError(result.failure)
                 raise UsagePendingError("Provider usage is not yet confirmed; the reservation remains active.")
             charge = policy.convert(result.provider_usd)
             self.service.settle(

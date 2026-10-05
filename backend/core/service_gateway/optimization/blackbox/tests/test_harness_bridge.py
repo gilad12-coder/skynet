@@ -257,3 +257,31 @@ def test_harness_gets_an_empty_stdin(tmp_path: Path) -> None:
         proposer, workspace=workspace, prompt="x", model="m1", session_dir=tmp_path / "s", timeout_seconds=10
     )
     assert outcome.stdout.strip() == "eof"
+
+
+def test_shim_reports_why_the_harness_failed_on_stderr(tmp_path: Path) -> None:
+    """Surface the harness's own error even when its stdout ends with an ordinary chat message."""
+    home = tmp_path / "home"
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    shim_dir = install_shim(home, Path(harness_bridge.__file__).resolve(), sys.executable)
+    config = tmp_path / "proposer.json"
+    failing = {**_PLAIN, "run_command": "echo 'I will now edit the scorer.'; echo 'stream disconnected' >&2; exit 3"}
+    config.write_text(json.dumps({**failing, "model": "m1"}))
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        harness_bridge.CONFIG_ENV: str(config),
+        "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}",
+    }
+    failed = subprocess.run(
+        ["claude", "--print", "task", "--output-format", "json"],
+        cwd=workspace,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert failed.returncode == 3
+    assert json.loads(failed.stdout)["is_error"] is True
+    assert "stream disconnected" in failed.stderr
