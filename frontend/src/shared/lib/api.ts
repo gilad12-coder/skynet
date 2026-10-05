@@ -3306,11 +3306,12 @@ export function parseSteerApplied(data: Record<string, unknown>): { ids: string[
   };
 }
 
-/** Take back every message the turn opened with `steerKey` never read. */
-export async function withdrawAgentSteers(steerKey: string): Promise<string[]> {
+/** Take back messages the turn opened with `steerKey` never read: only `ids`
+ *  when given, otherwise all of them. Resolves the ids actually returned. */
+export async function withdrawAgentSteers(steerKey: string, ids?: string[]): Promise<string[]> {
   const res = await request<{ ids: string[] }>("/optimizations/agent-steer/withdraw", {
     method: "POST",
-    body: JSON.stringify({ steer_key: steerKey }),
+    body: JSON.stringify(ids ? { steer_key: steerKey, ids } : { steer_key: steerKey }),
   });
   return Array.isArray(res.ids) ? res.ids.map(String) : [];
 }

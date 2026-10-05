@@ -82,8 +82,8 @@ class SteerStore:
             session.commit()
         return message_id
 
-    def take(self, owner: str, steer_key: str) -> list[tuple[str, str]]:
-        """Take every unread message for ``steer_key``, oldest first.
+    def take(self, owner: str, steer_key: str, ids: list[str] | None = None) -> list[tuple[str, str]]:
+        """Take unread messages for ``steer_key``, oldest first.
 
         The running loop and the client's withdraw both call this; the row
         lock makes each message go to exactly one of them.
@@ -91,22 +91,33 @@ class SteerStore:
         Args:
             owner: Username the turn belongs to.
             steer_key: The turn's steer key.
+            ids: Take only these messages; ``None`` takes every unread one.
 
         Returns:
             ``(id, text)`` pairs, oldest first; empty when nothing is waiting.
         """
         if self._engine is None:
             with self._lock:
-                return self._local.pop((owner, steer_key), [])
+                waiting = self._local.pop((owner, steer_key), [])
+                if ids is None:
+                    return waiting
+                wanted = set(ids)
+                kept = [m for m in waiting if m[0] not in wanted]
+                if kept:
+                    self._local[(owner, steer_key)] = kept
+                return [m for m in waiting if m[0] in wanted]
+        conditions = [
+            AgentSteerMessageModel.steer_key == steer_key,
+            AgentSteerMessageModel.owner == owner,
+            AgentSteerMessageModel.taken_at.is_(None),
+        ]
+        if ids is not None:
+            conditions.append(AgentSteerMessageModel.id.in_(ids))
         with Session(self._engine) as session:
             rows = (
                 session.execute(
                     select(AgentSteerMessageModel)
-                    .where(
-                        AgentSteerMessageModel.steer_key == steer_key,
-                        AgentSteerMessageModel.owner == owner,
-                        AgentSteerMessageModel.taken_at.is_(None),
-                    )
+                    .where(*conditions)
                     .order_by(AgentSteerMessageModel.created_at, AgentSteerMessageModel.id)
                     .with_for_update()
                 )

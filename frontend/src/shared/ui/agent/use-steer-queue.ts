@@ -29,7 +29,7 @@ export function newSteerKey(): string {
 export function agentSteerChannel(steerKey: string): SteerChannel {
   return {
     post: (text) => postAgentSteer(steerKey, text),
-    withdraw: () => withdrawAgentSteers(steerKey),
+    withdraw: (ids) => withdrawAgentSteers(steerKey, ids),
   };
 }
 

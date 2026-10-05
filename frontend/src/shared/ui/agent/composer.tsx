@@ -130,10 +130,10 @@ export function Composer({
     resetHeight();
   };
 
-  const editPending = (id: string) => {
-    const text = midTurn?.edit(id);
+  const editPending = async (id: string) => {
+    const text = await midTurn?.edit(id);
     if (text == null) return;
-    onChange(appendToDraft(value, text));
+    onChange(appendToDraft(valueRef.current, text));
     refocus();
   };
 
@@ -178,8 +178,10 @@ export function Composer({
           steering={midTurn.steering}
           canPromote={midTurn.canSteer}
           onPromote={midTurn.promote}
-          onEdit={editPending}
+          onEdit={(id) => void editPending(id)}
           onRemove={midTurn.remove}
+          onReorderQueued={midTurn.reorderQueued}
+          onReorderSteering={midTurn.reorderSteering}
         />
       )}
       <div
@@ -335,11 +337,6 @@ export function Composer({
           </div>
         </div>
       </div>
-      {midTurn && streaming && hasDraft && (
-        <p className="mt-1 px-1 text-[11px] text-muted-foreground" aria-live="polite">
-          {msg(midTurn.canSteer ? "agent.composer.hint_steer" : "agent.composer.hint_queue")}
-        </p>
-      )}
     </form>
   );
 }
