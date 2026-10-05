@@ -1189,7 +1189,11 @@ class DspyService:
         seed = payload.seed if payload.seed is not None else (self.default_seed or 0)
 
         gen_timing = GenLMTimingCallback(student_lm)
-        react_callbacks: list[Any] = [gen_timing]
+        # Registered so reflection calls carry their stage and candidate tags like the scalar path's.
+        stage_timings: tuple[Any, ...] = (
+            (gen_timing,) if reflection_lm is student_lm else (gen_timing, ReflectionLMTimingCallback(reflection_lm))
+        )
+        react_callbacks: list[Any] = list(stage_timings)
         # Same Max Cost Ceiling hard-stop the scalar path registers. React routes
         # both the student and the reflection LM through ``gepa.optimize``; the
         # ceiling totals usage across both so the cap covers the whole run.
@@ -1234,7 +1238,7 @@ class DspyService:
                     num_threads=num_threads,
                     run_dir=trajectory_log_dir,
                     progress_callback=progress_callback,
-                    timing_callbacks=(gen_timing,),
+                    timing_callbacks=stage_timings,
                 )
             except BudgetReached as exc:
                 if not isinstance(exc.result, dict) or "program_state" not in exc.result:

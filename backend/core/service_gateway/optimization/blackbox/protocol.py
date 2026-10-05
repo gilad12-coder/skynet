@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from gepa.oa.budget import BudgetExhausted
 
+from ....billing.usage_tags import usage_scope
 from ..cost_ceiling import CostCeilingExceededError
+from ..timing import STAGE_TRAINING
 from .runner import FEEDBACK_REQUIRED
 
 if TYPE_CHECKING:
@@ -235,7 +237,8 @@ class EvalServer:
         """
         root = self._root
         self._reserve()
-        score, side_info = root._score(candidate, example)
+        with usage_scope(stage=STAGE_TRAINING):
+            score, side_info = root._score(candidate, example)
         # Per-call heartbeat at DEBUG so it surfaces only in the Logs tab's
         # verbose view — the black-box counterpart of the DSPy per-example eval
         # heartbeat, so every run type gets the same normal=aggregates /

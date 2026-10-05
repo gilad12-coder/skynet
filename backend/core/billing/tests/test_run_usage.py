@@ -100,6 +100,27 @@ def test_rows_add_up_to_every_charge_including_setup_and_sandbox() -> None:
     assert sandbox.calls == 0
 
 
+def test_caller_tag_decides_proposer_or_reflection_on_a_mixed_route() -> None:
+    """Split an auto run's optimization route into proposer and reflection rows by the caller tag."""
+    rows = aggregate(
+        [
+            _op(role="optimization", evidence=_call(caller="reflection")),
+            _op(role="optimization", evidence=_call(caller="proposer")),
+            _op(role="optimization", evidence=_call()),
+        ],
+        proposer=True,
+    )
+    assert sorted((row.role, row.calls) for row in rows) == [(ROLE_PROPOSER, 2), (ROLE_REFLECTION, 1)]
+
+
+def test_batched_calls_count_without_a_response_time() -> None:
+    """Leave economy-batch calls out of the average, since their wait is the batch window."""
+    batched = {**_call(), "batched": True}
+    del batched["latency_ms"]
+    (row,) = aggregate([_op(evidence=_call()), _op(evidence=batched)], proposer=False)
+    assert (row.calls, row.latency_calls, row.latency_ms_total) == (2, 1, 400)
+
+
 def test_byok_calls_report_the_provider_charge_behind_the_fee() -> None:
     """Invert the BYOK fee to estimate what the owner's provider charged."""
     (row,) = aggregate([_op(policy=_BYOK, cents="0.5", evidence=_call())], proposer=False)

@@ -38,6 +38,7 @@ from ....billing.pricing import (
 )
 from ....billing.protected_execution import runtime_cost_profile
 from ....billing.runtime import UsagePendingError
+from ....billing.usage_tags import CALLER_REFLECTION, usage_scope
 from ....config import settings
 from ....constants import (
     DETAIL_BASELINE,
@@ -83,7 +84,7 @@ from ...language_models import (
 from ...safe_exec import validate_scorer_code
 from ..budget_stop import BudgetReached
 from ..cost_ceiling import CostCeilingCallback
-from ..timing import STAGE_TRAINING
+from ..timing import STAGE_BASELINE, STAGE_EVALUATION, STAGE_TRAINING
 from ..trajectory import MINIBATCH_FEEDBACK_CHAR_CAP
 from .agent_eval import SandboxAgentScorer, agent_target_unavailable_reason, gateway_from_settings
 from .agent_runs import PHASE_BASELINE, PHASE_FINAL, AgentRunRecorder, AgentRunSink, run_scope
@@ -458,7 +459,8 @@ def _final_run(
             The score and side information for that case.
         """
         position, case = numbered
-        with run_scope(phase, str(position - 1)):
+        stage = STAGE_BASELINE if phase == PHASE_BASELINE else STAGE_EVALUATION
+        with run_scope(phase, str(position - 1)), usage_scope(stage=stage, case=str(position - 1) if cases else None):
             score, side_info = scorer(candidate, case)
         # Per-case heartbeats at DEBUG surface only in the Logs tab's verbose view.
         logger.debug("%s final run %d/%d score=%.3f", label, position, len(targets), score)
@@ -655,7 +657,9 @@ def _reflection_caller(lm: dspy.LM) -> tuple[Callable[[str | list[dict[str, Any]
             """
             started = time.monotonic()
             try:
-                completions = lm(messages=prompt) if isinstance(prompt, list) else lm(prompt)
+                # Best-of-N calls from its own server threads, so the tags are set here, not inherited.
+                with usage_scope(stage=STAGE_TRAINING, caller=CALLER_REFLECTION):
+                    completions = lm(messages=prompt) if isinstance(prompt, list) else lm(prompt)
             finally:
                 durations_ms.append((time.monotonic() - started) * 1000.0)
             return str(completions[0])

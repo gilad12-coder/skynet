@@ -25,6 +25,7 @@ from .... import run_log
 from ....billing.model_gateway import raise_gateway_stop
 from ....billing.pricing import model_token_costs
 from ....billing.runtime import UsagePendingError
+from ....billing.usage_tags import CALLER_PROPOSER, usage_scope
 from ....config import Settings, settings
 from ....exceptions import ServiceError
 from ....models.blackbox import BLACKBOX_HARNESS_CLAUDE_CODE, BlackboxProposer, BlackboxTarget
@@ -928,7 +929,9 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 *(session_env.values() if isinstance(session_env, dict) else ()),
             ]
         )
-        completed = session.run(command, env=env, timeout_seconds=timeout, on_output=mailbox.on_output)
+        # The proposer CLI shares the optimization route with GEPA reflection in auto mode.
+        with usage_scope(caller=CALLER_PROPOSER):
+            completed = session.run(command, env=env, timeout_seconds=timeout, on_output=mailbox.on_output)
         text = session.read_file(_RESULT_FILE)
         document = json.loads(text) if text else {}
         usage = document.get("usage_by_model", {})
