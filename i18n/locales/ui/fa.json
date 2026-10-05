@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "این مدل قیمت ثبت‌شده‌ای ندارد؛ بنابراین فراخوانی‌ها و توکن‌هایش شمرده می‌شوند اما هزینه‌اش قابل نمایش نیست.",
   "tooltip.usage_tab.unattributed": "فراخوانی‌های مدل که با نقشی برچسب نخورده‌اند. همچنان در مجموع حساب می‌شوند.",
   "usage_tab.role.rounding": "گرد کردن به سنت کامل",
-  "tooltip.usage_tab.role.rounding": "از کیف پول شما به سنت کامل کسر می‌شود و یک بار برای کل اجرا به بالا گرد می‌شود. این ردیف همان تفاوت است."
+  "tooltip.usage_tab.role.rounding": "از کیف پول شما به سنت کامل کسر می‌شود و یک بار برای کل اجرا به بالا گرد می‌شود. این ردیف همان تفاوت است.",
+  "tooltip.usage_tab.summary.limit": "بیشترین مبلغی که این اجرا مجاز به خرج آن است. با رسیدن به آن متوقف می‌شود.",
+  "tooltip.usage_tab.summary.spent": "مبلغی که اجرا از کیف پول شما کسر کرده، از جمله راه‌اندازی.",
+  "tooltip.usage_tab.summary.reserved": "پولی که برای فراخوانی‌های در حال اجرا نگه داشته شده. هر چه استفاده نشود برمی‌گردد.",
+  "tooltip.usage_tab.summary.available": "آنچه از بودجه پس از مبلغ مصرف‌شده و رزروشده باقی مانده است.",
+  "tooltip.usage_tab.summary.calls": "همهٔ فراخوانی‌های مدل در این اجرا، در همهٔ نقش‌ها.",
+  "tooltip.usage_tab.summary.tokens": "توکن‌های ورودی و خروجی در همهٔ فراخوانی‌های مدل.",
+  "tooltip.usage_tab.col.cost": "مبلغی که این فراخوانی‌ها از کیف پول شما کسر کردند.",
+  "tooltip.usage_tab.col.calls": "تعداد فراخوانی‌های مدل در این ردیف.",
+  "tooltip.usage_tab.col.input": "توکن‌های ارسال‌شده به مدل: پرامپت‌ها، نمونه‌ها و زمینه.",
+  "tooltip.usage_tab.col.output": "توکن‌هایی که مدل در پاسخ نوشت.",
+  "tooltip.usage_tab.col.latency": "میانگین زمانی که طول کشید تا یک فراخوانی پاسخ بگیرد.",
+  "tooltip.usage_tab.group.role": "هر ردیف یک کار است که مدلی در این اجرا انجام داد.",
+  "tooltip.usage_tab.group.model": "هر ردیف یک مدل است، با هر نقشی که داشته.",
+  "tooltip.usage_tab.group.stage": "هر ردیف یک مرحله از اجرا است.",
+  "tooltip.usage_tab.group.candidate": "هر ردیف یک نامزد است که بهینه‌ساز امتحان کرد.",
+  "tooltip.usage_tab.total": "جمع همهٔ ردیف‌ها. با مبلغی که اجرا کسر کرد برابر است."
 }

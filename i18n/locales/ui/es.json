@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "Este modelo no tiene precio registrado, así que sus llamadas y tokens cuentan, pero no se puede mostrar su coste.",
   "tooltip.usage_tab.unattributed": "Llamadas al modelo sin etiqueta de rol. Aun así cuentan en el total.",
   "usage_tab.role.rounding": "Redondeo a céntimos enteros",
-  "tooltip.usage_tab.role.rounding": "Al monedero se le cobra en céntimos enteros, redondeando al alza una vez por toda la ejecución. Esta fila es la diferencia."
+  "tooltip.usage_tab.role.rounding": "Al monedero se le cobra en céntimos enteros, redondeando al alza una vez por toda la ejecución. Esta fila es la diferencia.",
+  "tooltip.usage_tab.summary.limit": "Lo máximo que esta ejecución puede gastar. Se detiene al llegar a esta cifra.",
+  "tooltip.usage_tab.summary.spent": "Lo que la ejecución ha cobrado a tu monedero, incluida la preparación.",
+  "tooltip.usage_tab.summary.reserved": "Dinero retenido para llamadas que siguen en curso. Lo que no usen se devuelve.",
+  "tooltip.usage_tab.summary.available": "Lo que queda del presupuesto tras lo gastado y lo reservado.",
+  "tooltip.usage_tab.summary.calls": "Todas las llamadas al modelo de la ejecución, en todos los roles.",
+  "tooltip.usage_tab.summary.tokens": "Tokens de entrada y salida de todas las llamadas al modelo.",
+  "tooltip.usage_tab.col.cost": "Lo que estas llamadas cobraron a tu monedero.",
+  "tooltip.usage_tab.col.calls": "Cuántas llamadas al modelo hizo esta fila.",
+  "tooltip.usage_tab.col.input": "Tokens enviados al modelo: prompts, ejemplos y contexto.",
+  "tooltip.usage_tab.col.output": "Tokens que el modelo escribió de vuelta.",
+  "tooltip.usage_tab.col.latency": "Cuánto tardó de media una llamada en responder.",
+  "tooltip.usage_tab.group.role": "Cada fila es una tarea que hizo un modelo en la ejecución.",
+  "tooltip.usage_tab.group.model": "Cada fila es un modelo, sea cual sea su rol.",
+  "tooltip.usage_tab.group.stage": "Cada fila es una etapa de la ejecución.",
+  "tooltip.usage_tab.group.candidate": "Cada fila es un candidato que probó el optimizador.",
+  "tooltip.usage_tab.total": "La suma de todas las filas. Coincide con lo que cobró la ejecución."
 }

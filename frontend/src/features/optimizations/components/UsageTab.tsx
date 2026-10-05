@@ -73,6 +73,19 @@ const ROLE_TIP_KEYS: Record<string, TooltipKey> = {
   rounding: "usage_tab.role.rounding",
 };
 
+const GROUPING_TIP_KEYS: Record<UsageGrouping, TooltipKey> = {
+  role: "usage_tab.group.role",
+  model: "usage_tab.group.model",
+  stage: "usage_tab.group.stage",
+  candidate: "usage_tab.group.candidate",
+};
+
+const STAGE_TIP_KEYS: Record<string, TooltipKey> = {
+  baseline: "lm_activity.stage.baseline",
+  training: "lm_activity.stage.training",
+  evaluation: "lm_activity.stage.evaluation",
+};
+
 const STAGE_LABEL_KEYS: Record<string, Parameters<typeof msg>[0]> = {
   baseline: "auto.features.optimizations.components.lmactivitytab.stage_baseline",
   training: "auto.features.optimizations.components.lmactivitytab.stage_training",
@@ -184,9 +197,14 @@ function Summary({
       budget.uncapped
         ? msg("submit.budget.uncapped_short")
         : formatBudgetUsd(String(budget.total_cents), locale),
+      tip("usage_tab.summary.limit"),
     ]);
   }
-  items.push([spentLabel, formatCentsUsd(total.chargedCents, locale)]);
+  items.push([
+    spentLabel,
+    formatCentsUsd(total.chargedCents, locale),
+    tip("usage_tab.summary.spent"),
+  ]);
   if (splitCost && total.providerCents != null) {
     items.push([
       msg("usage_tab.provider"),
@@ -195,16 +213,26 @@ function Summary({
     ]);
   }
   if (budget) {
-    items.push([msg("usage_tab.summary.reserved"), formatBudgetUsd(budget.reserved_cents, locale)]);
+    items.push([
+      msg("usage_tab.summary.reserved"),
+      formatBudgetUsd(budget.reserved_cents, locale),
+      tip("usage_tab.summary.reserved"),
+    ]);
     items.push([
       msg("usage_tab.summary.available"),
       formatBudgetUsd(budget.available_cents, locale),
+      tip("usage_tab.summary.available"),
     ]);
   }
-  items.push([msg("usage_tab.summary.calls"), formatCount(total.calls)]);
+  items.push([
+    msg("usage_tab.summary.calls"),
+    formatCount(total.calls),
+    tip("usage_tab.summary.calls"),
+  ]);
   items.push([
     msg("usage_tab.summary.tokens"),
     formatCount(total.inputTokens + total.outputTokens),
+    tip("usage_tab.summary.tokens"),
   ]);
   return (
     <dl
@@ -331,14 +359,14 @@ export function UsageTab({
                 <TableHeader>
                   <TableRow>
                     <TableHead className="ps-4">
-                      {msg(GROUPING_LABEL_KEYS[activeGrouping])}
+                      <HelpTip text={tip(GROUPING_TIP_KEYS[activeGrouping])}>
+                        {msg(GROUPING_LABEL_KEYS[activeGrouping])}
+                      </HelpTip>
                     </TableHead>
                     <TableHead className="text-end">
-                      {splitCost ? (
-                        <HelpTip text={tip("usage_tab.charged")}>{costLabel}</HelpTip>
-                      ) : (
-                        costLabel
-                      )}
+                      <HelpTip text={tip(splitCost ? "usage_tab.charged" : "usage_tab.col.cost")}>
+                        {costLabel}
+                      </HelpTip>
                     </TableHead>
                     {splitCost && (
                       <TableHead className="text-end" collapse="sm">
@@ -347,28 +375,40 @@ export function UsageTab({
                         </HelpTip>
                       </TableHead>
                     )}
-                    <TableHead className="text-end">{msg("usage_tab.col.calls")}</TableHead>
-                    <TableHead className="text-end" collapse="md">
-                      {msg("usage_tab.col.input")}
+                    <TableHead className="text-end">
+                      <HelpTip text={tip("usage_tab.col.calls")}>
+                        {msg("usage_tab.col.calls")}
+                      </HelpTip>
                     </TableHead>
                     <TableHead className="text-end" collapse="md">
-                      {msg("usage_tab.col.output")}
+                      <HelpTip text={tip("usage_tab.col.input")}>
+                        {msg("usage_tab.col.input")}
+                      </HelpTip>
+                    </TableHead>
+                    <TableHead className="text-end" collapse="md">
+                      <HelpTip text={tip("usage_tab.col.output")}>
+                        {msg("usage_tab.col.output")}
+                      </HelpTip>
                     </TableHead>
                     <TableHead className="pe-4 text-end" collapse="lg">
-                      {msg("usage_tab.col.latency")}
+                      <HelpTip text={tip("usage_tab.col.latency")}>
+                        {msg("usage_tab.col.latency")}
+                      </HelpTip>
                     </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {groups.map((g, i) => {
                     const label = groupLabel(g, activeGrouping);
-                    const roleTipKey =
-                      activeGrouping === "role" || g.nonModel ? ROLE_TIP_KEYS[g.key] : undefined;
-                    const roleTip = roleTipKey
-                      ? tip(roleTipKey)
-                      : g.key === UNATTRIBUTED
-                        ? tip("usage_tab.unattributed")
-                        : null;
+                    const rowTipKey: TooltipKey | undefined =
+                      activeGrouping === "role" || g.nonModel
+                        ? ROLE_TIP_KEYS[g.key]
+                        : g.key === UNATTRIBUTED
+                          ? "usage_tab.unattributed"
+                          : activeGrouping === "stage"
+                            ? STAGE_TIP_KEYS[g.key]
+                            : undefined;
+                    const roleTip = rowTipKey ? tip(rowTipKey) : null;
                     return (
                       <TableRow
                         key={`${g.nonModel ? "n" : "m"}:${g.key}`}
@@ -418,7 +458,7 @@ export function UsageTab({
                   })}
                   <TableRow className="border-t border-border bg-muted/30 font-semibold hover:bg-muted/30">
                     <TableCell className="ps-4">
-                      {msg("usage_tab.total")}
+                      <HelpTip text={tip("usage_tab.total")}>{msg("usage_tab.total")}</HelpTip>
                       {running && (
                         <span className="ms-1.5 text-xs font-normal text-muted-foreground">
                           {msg("usage_tab.so_far")}

@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "אין מחיר רשום למודל הזה, ולכן הקריאות והטוקנים נספרים אבל העלות לא מוצגת.",
   "tooltip.usage_tab.unattributed": "קריאות מודל שלא סומנו באחד מהם. הן עדיין נספרות בסה״כ.",
   "usage_tab.role.rounding": "עיגול לסנטים שלמים",
-  "tooltip.usage_tab.role.rounding": "הארנק מחויב בסנטים שלמים, בעיגול כלפי מעלה פעם אחת לכל הריצה. השורה הזו היא ההפרש."
+  "tooltip.usage_tab.role.rounding": "הארנק מחויב בסנטים שלמים, בעיגול כלפי מעלה פעם אחת לכל הריצה. השורה הזו היא ההפרש.",
+  "tooltip.usage_tab.summary.limit": "הסכום המקסימלי שההרצה רשאית להוציא. היא נעצרת כשהיא מגיעה אליו.",
+  "tooltip.usage_tab.summary.spent": "מה שההרצה חייבה מהארנק שלך, כולל ההכנה.",
+  "tooltip.usage_tab.summary.reserved": "כסף שמוחזק עבור קריאות שעדיין רצות. מה שלא ינוצל יחזור לארנק.",
+  "tooltip.usage_tab.summary.available": "מה שנשאר מהמגבלה אחרי מה שהוצא ומה שמוחזק.",
+  "tooltip.usage_tab.summary.calls": "כל קריאות המודל שההרצה ביצעה, בכל התפקידים.",
+  "tooltip.usage_tab.summary.tokens": "טוקני קלט ופלט בכל קריאות המודל.",
+  "tooltip.usage_tab.col.cost": "מה שהקריאות האלה חייבו מהארנק שלך.",
+  "tooltip.usage_tab.col.calls": "כמה קריאות מודל השורה הזו ביצעה.",
+  "tooltip.usage_tab.col.input": "טוקנים שנשלחו למודל: פרומפטים, דוגמאות והקשר.",
+  "tooltip.usage_tab.col.output": "טוקנים שהמודל כתב בתשובה.",
+  "tooltip.usage_tab.col.latency": "כמה זמן לקח לקריאה לקבל תשובה, בממוצע.",
+  "tooltip.usage_tab.group.role": "כל שורה היא תפקיד אחד שמודל מילא בהרצה.",
+  "tooltip.usage_tab.group.model": "כל שורה היא מודל אחד, בלי קשר לתפקיד שמילא.",
+  "tooltip.usage_tab.group.stage": "כל שורה היא שלב אחד בהרצה.",
+  "tooltip.usage_tab.group.candidate": "כל שורה היא מועמד אחד שהאופטימייזר ניסה.",
+  "tooltip.usage_tab.total": "סכום כל השורות. הוא תואם את מה שההרצה חייבה."
 }

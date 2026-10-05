@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "This model has no price on record, so its calls and tokens count but its cost can't be shown.",
   "tooltip.usage_tab.unattributed": "Model calls that weren't tagged with one. They still count in the total.",
   "usage_tab.role.rounding": "Rounding to whole cents",
-  "tooltip.usage_tab.role.rounding": "Your wallet is charged in whole cents, rounded up once for the whole run. This row is that difference."
+  "tooltip.usage_tab.role.rounding": "Your wallet is charged in whole cents, rounded up once for the whole run. This row is that difference.",
+  "tooltip.usage_tab.summary.limit": "The most this run is allowed to spend. It stops once it reaches this.",
+  "tooltip.usage_tab.summary.spent": "What the run has charged your wallet, setup included.",
+  "tooltip.usage_tab.summary.reserved": "Money held for calls that are still running. Whatever they don't use goes back.",
+  "tooltip.usage_tab.summary.available": "What's left of the limit after what's spent and what's reserved.",
+  "tooltip.usage_tab.summary.calls": "Every model call the run made, in every role.",
+  "tooltip.usage_tab.summary.tokens": "Input and output tokens across every model call.",
+  "tooltip.usage_tab.col.cost": "What these calls charged your wallet.",
+  "tooltip.usage_tab.col.calls": "How many model calls this row made.",
+  "tooltip.usage_tab.col.input": "Tokens sent to the model: prompts, examples and context.",
+  "tooltip.usage_tab.col.output": "Tokens the model wrote back.",
+  "tooltip.usage_tab.col.latency": "How long a call took to answer, on average.",
+  "tooltip.usage_tab.group.role": "Each row is one job a model did in the run.",
+  "tooltip.usage_tab.group.model": "Each row is one model, whatever role it played.",
+  "tooltip.usage_tab.group.stage": "Each row is one stage of the run.",
+  "tooltip.usage_tab.group.candidate": "Each row is one candidate the optimizer tried.",
+  "tooltip.usage_tab.total": "Every row added up. It matches what the run charged."
 }

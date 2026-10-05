@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "이 모델은 등록된 가격이 없어 호출과 토큰은 집계되지만 비용은 표시할 수 없습니다.",
   "tooltip.usage_tab.unattributed": "역할 태그가 없는 모델 호출입니다. 합계에는 포함됩니다.",
   "usage_tab.role.rounding": "센트 단위 올림",
-  "tooltip.usage_tab.role.rounding": "지갑에는 센트 단위로 청구되며, 전체 실행에 대해 한 번만 올림합니다. 이 행은 그 차액입니다."
+  "tooltip.usage_tab.role.rounding": "지갑에는 센트 단위로 청구되며, 전체 실행에 대해 한 번만 올림합니다. 이 행은 그 차액입니다.",
+  "tooltip.usage_tab.summary.limit": "이 실행이 쓸 수 있는 최대 금액입니다. 이 금액에 도달하면 멈춥니다.",
+  "tooltip.usage_tab.summary.spent": "설정을 포함해 이 실행이 지갑에서 청구한 금액입니다.",
+  "tooltip.usage_tab.summary.reserved": "아직 진행 중인 호출을 위해 잡아 둔 금액입니다. 쓰지 않은 금액은 돌아옵니다.",
+  "tooltip.usage_tab.summary.available": "예산에서 사용 금액과 예약 금액을 뺀 나머지입니다.",
+  "tooltip.usage_tab.summary.calls": "모든 역할에서 이 실행이 수행한 모델 호출입니다.",
+  "tooltip.usage_tab.summary.tokens": "모든 모델 호출의 입력 및 출력 토큰입니다.",
+  "tooltip.usage_tab.col.cost": "이 호출들이 지갑에서 청구한 금액입니다.",
+  "tooltip.usage_tab.col.calls": "이 행이 수행한 모델 호출 수입니다.",
+  "tooltip.usage_tab.col.input": "모델에 보낸 토큰입니다. 프롬프트, 예시, 컨텍스트가 포함됩니다.",
+  "tooltip.usage_tab.col.output": "모델이 응답으로 작성한 토큰입니다.",
+  "tooltip.usage_tab.col.latency": "호출이 응답하는 데 걸린 평균 시간입니다.",
+  "tooltip.usage_tab.group.role": "각 행은 이 실행에서 모델이 맡은 작업 하나입니다.",
+  "tooltip.usage_tab.group.model": "각 행은 모델 하나입니다. 역할은 상관없습니다.",
+  "tooltip.usage_tab.group.stage": "각 행은 실행의 단계 하나입니다.",
+  "tooltip.usage_tab.group.candidate": "각 행은 옵티마이저가 시도한 후보 하나입니다.",
+  "tooltip.usage_tab.total": "모든 행을 더한 값입니다. 이 실행이 청구한 금액과 같습니다."
 }

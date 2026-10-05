@@ -4162,5 +4162,21 @@
   "tooltip.usage_tab.not_priced": "Este modelo não tem preço registado, por isso as chamadas e os tokens contam, mas o custo não pode ser mostrado.",
   "tooltip.usage_tab.unattributed": "Chamadas ao modelo que não foram marcadas com uma função. Continuam a contar para o total.",
   "usage_tab.role.rounding": "Arredondamento ao cêntimo",
-  "tooltip.usage_tab.role.rounding": "A carteira é cobrada em cêntimos inteiros, arredondados para cima uma única vez para toda a execução. Esta linha é a diferença."
+  "tooltip.usage_tab.role.rounding": "A carteira é cobrada em cêntimos inteiros, arredondados para cima uma única vez para toda a execução. Esta linha é a diferença.",
+  "tooltip.usage_tab.summary.limit": "O máximo que esta execução pode gastar. Para assim que o atinge.",
+  "tooltip.usage_tab.summary.spent": "O que a execução cobrou à sua carteira, incluindo a preparação.",
+  "tooltip.usage_tab.summary.reserved": "Dinheiro retido para chamadas que ainda estão a decorrer. O que não usarem é devolvido.",
+  "tooltip.usage_tab.summary.available": "O que resta do orçamento depois do gasto e do reservado.",
+  "tooltip.usage_tab.summary.calls": "Todas as chamadas ao modelo da execução, em todas as funções.",
+  "tooltip.usage_tab.summary.tokens": "Tokens de entrada e de saída em todas as chamadas ao modelo.",
+  "tooltip.usage_tab.col.cost": "O que estas chamadas cobraram à sua carteira.",
+  "tooltip.usage_tab.col.calls": "Quantas chamadas ao modelo esta linha fez.",
+  "tooltip.usage_tab.col.input": "Tokens enviados ao modelo: prompts, exemplos e contexto.",
+  "tooltip.usage_tab.col.output": "Tokens que o modelo escreveu de volta.",
+  "tooltip.usage_tab.col.latency": "Quanto tempo uma chamada demorou a responder, em média.",
+  "tooltip.usage_tab.group.role": "Cada linha é uma tarefa que um modelo fez na execução.",
+  "tooltip.usage_tab.group.model": "Cada linha é um modelo, seja qual for a função que teve.",
+  "tooltip.usage_tab.group.stage": "Cada linha é uma etapa da execução.",
+  "tooltip.usage_tab.group.candidate": "Cada linha é um candidato que o otimizador experimentou.",
+  "tooltip.usage_tab.total": "A soma de todas as linhas. Corresponde ao que a execução cobrou."
 }
