@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import contextvars
 from concurrent.futures import ThreadPoolExecutor
 
+import dspy.clients.lm as dspy_lm
+
+from core.billing.usage_tags import USAGE_TAGS_HEADER, header_tags
 from core.service_gateway.optimization.timing import (
     STAGE_BASELINE,
     STAGE_EVALUATION,
@@ -201,3 +205,36 @@ def test_stage_visible_from_worker_thread() -> None:
     summary = cb.stage_summary()
     assert STAGE_TRAINING in summary
     assert summary[STAGE_TRAINING][0] == 8
+
+
+def test_timed_calls_carry_stage_and_pair_usage_tags() -> None:
+    """Tag the headers DSPy builds for a timed call, and only while that call runs."""
+    contextvars.Context().run(_assert_timed_call_tagged)
+
+
+def _assert_timed_call_tagged() -> None:
+    """Check tagging from a context no earlier test has left tags open in."""
+    lm = object()
+    callback = GenLMTimingCallback(lm, pair_index=2)
+    with track_stage("training", callback):
+        callback.on_lm_start("call-1", lm, {})
+        headers = dspy_lm._add_dspy_identifier_to_headers({"X-Other": "1"})
+        callback.on_lm_end("call-1", None)
+    assert headers["X-Other"] == "1"
+    assert header_tags(headers) == {"stage": "training", "pair": "2"}
+    assert USAGE_TAGS_HEADER not in dspy_lm._add_dspy_identifier_to_headers(None)
+
+
+def test_untimed_lms_are_not_tagged() -> None:
+    """Leave calls on other LMs untagged."""
+    contextvars.Context().run(_assert_untimed_call_untagged)
+
+
+def _assert_untimed_call_untagged() -> None:
+    """Check that another LM's call opens no tags, from a clean context."""
+    timed_lm, other_lm = object(), object()
+    callback = GenLMTimingCallback(timed_lm, pair_index=0)
+    with track_stage("baseline", callback):
+        callback.on_lm_start("call-2", other_lm, {})
+        headers = dspy_lm._add_dspy_identifier_to_headers(None)
+    assert USAGE_TAGS_HEADER not in headers

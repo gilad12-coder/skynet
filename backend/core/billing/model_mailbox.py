@@ -19,6 +19,7 @@ from .model_dispatch import MODEL_ATTEMPT_HEADER, ModelHTTPResult
 from .operation_pricing import UnpricedOperationError
 from .runtime import ProviderFailedError, UsagePendingError
 from .signals import BudgetReached
+from .usage_tags import current_tags, with_tags_header
 
 
 class ModelMailbox:
@@ -56,6 +57,8 @@ class ModelMailbox:
             The sandbox's original command result.
         """
         nonce = secrets.token_hex(16)
+        # Captured here: requests are answered on pool threads, where the caller's scope is gone.
+        host_tags = current_tags()
         directory = f".skynet-model-{nonce}"
         prefix = f"SKYNET_MODEL_{nonce}:"
         source_path = f"{directory}/proxy.py"
@@ -78,7 +81,9 @@ class ModelMailbox:
         def respond(document: dict[str, Any]) -> None:
             """Write one trusted response while preserving a paid attempt on transport failure."""
             try:
-                headers = {key.lower(): value for key, value in document.get("headers", {}).items()}
+                headers = with_tags_header(
+                    {key.lower(): value for key, value in document.get("headers", {}).items()}, host_tags
+                )
                 headers[MODEL_ATTEMPT_HEADER] = document["id"]
                 token = headers.get("authorization", "").removeprefix("Bearer ") or headers.get("x-api-key", "")
                 response = self._dispatch(

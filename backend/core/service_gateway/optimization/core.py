@@ -446,8 +446,8 @@ def _run_grid_pair(
         # timing callbacks' stage state, independent of the LM cache.
         language_model = build_language_model(gen_cfg)
         reflection_lm = build_language_model(ref_cfg) if ref_cfg is not None else None
-        gen_timing = GenLMTimingCallback(language_model)
-        refl_timing = ReflectionLMTimingCallback(reflection_lm) if reflection_lm is not None else None
+        gen_timing = GenLMTimingCallback(language_model, pair_index=i)
+        refl_timing = ReflectionLMTimingCallback(reflection_lm, pair_index=i) if reflection_lm is not None else None
         # Only the timing callbacks carry per-stage state (set_stage/_current_stage),
         # so track_stage must be splatted with these alone. The cost-ceiling callback
         # is a plain on_lm_end listener and would raise AttributeError inside track_stage.

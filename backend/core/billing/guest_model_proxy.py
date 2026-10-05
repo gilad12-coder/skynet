@@ -15,6 +15,8 @@ from uuid import uuid4
 
 RELAY_URL_ENV = "SKYNET_BUDGET_RELAY_URL"
 _PRINT_LOCK = threading.Lock()
+# Mirrors usage_tags.USAGE_TAGS_HEADER: this file runs in the sandbox without Skynet's code.
+_TAGS_HEADER = "x-skynet-usage-tags"
 
 
 def main() -> int:
@@ -57,7 +59,7 @@ def main() -> int:
                 "headers": {
                     key: value
                     for key, value in self.headers.items()
-                    if key.lower() in {"authorization", "x-api-key", "anthropic-version", "anthropic-beta"}
+                    if key.lower() in {"authorization", "x-api-key", "anthropic-version", "anthropic-beta", _TAGS_HEADER}
                 },
             }
             with _PRINT_LOCK:
