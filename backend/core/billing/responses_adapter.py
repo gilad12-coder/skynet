@@ -19,6 +19,27 @@ _TERMINAL_EVENTS = {
     "response.cancelled",
 }
 _TERMINAL_STATES = {"completed", "incomplete", "failed", "cancelled"}
+_LOCAL_TOOL_TYPES = {"function", "custom"}
+
+
+def _require_local_tools(tools: Any) -> None:
+    """Refuse any tool the provider would execute itself, including inside namespaces.
+
+    Args:
+        tools: A Responses tool list, possibly nesting ``namespace`` groups.
+
+    Raises:
+        UnpricedOperationError: A tool is not a caller-executed function or custom tool.
+    """
+    if not isinstance(tools, list):
+        raise UnpricedOperationError("Provider-operated Responses tools require separately verified coverage.")
+    for tool in tools:
+        if not isinstance(tool, dict):
+            raise UnpricedOperationError("Provider-operated Responses tools require separately verified coverage.")
+        if tool.get("type") == "namespace":
+            _require_local_tools(tool.get("tools"))
+        elif tool.get("type") not in _LOCAL_TOOL_TYPES:
+            raise UnpricedOperationError("Provider-operated Responses tools require separately verified coverage.")
 
 
 def _content_parts(content: Any) -> list[dict[str, Any]]:
@@ -72,6 +93,11 @@ def _input_messages(value: Any) -> list[dict[str, Any]]:
             content = _content_parts(item.get("output"))
         elif kind in {"function_call", "custom_tool_call"}:
             content = [{"type": "text", "text": json.dumps(item)}]
+        elif kind == "additional_tools":
+            # Codex sends its tool schemas as a history item rather than in
+            # ``tools``; they bill as prompt text, but must stay caller-executed.
+            _require_local_tools(item.get("tools"))
+            content = [{"type": "text", "text": json.dumps(item["tools"])}]
         elif kind == "reasoning":
             content = _content_parts(item.get("summary") or [])
             if item.get("encrypted_content") is not None and not isinstance(item["encrypted_content"], str):
@@ -130,13 +156,9 @@ def price_responses_request(
         raise UnpricedOperationError("Stateful or server-managed Responses work has no verified cost bound.")
     if "max_tokens" in body or "max_completion_tokens" in body or "messages" in body:
         raise UnpricedOperationError("Responses requests must use their own input and max_output_tokens fields.")
-    tools = body.get("tools") or []
-    if not isinstance(tools, list) or any(
-        not isinstance(tool, dict) or tool.get("type") not in {"function", "custom"} for tool in tools
-    ):
-        raise UnpricedOperationError("Provider-operated Responses tools require separately verified coverage.")
+    _require_local_tools(body.get("tools") or [])
     choice = body.get("tool_choice")
-    if isinstance(choice, dict) and choice.get("type") not in {"function", "custom"}:
+    if isinstance(choice, dict) and choice.get("type") not in _LOCAL_TOOL_TYPES:
         raise UnpricedOperationError("This Responses tool selection has no verified cost bound.")
     messages = _input_messages(body.get("input"))
     if body.get("instructions") is not None:
