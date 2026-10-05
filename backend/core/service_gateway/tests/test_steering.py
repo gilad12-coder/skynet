@@ -83,6 +83,17 @@ def test_store_hands_each_message_out_once() -> None:
     assert store.take(_OWNER, "other-turn") == []
 
 
+def test_store_takes_back_only_the_named_messages() -> None:
+    """Withdrawing one steer leaves the others for the running turn."""
+    store = SteerStore()
+    first = store.post(_OWNER, _KEY, "one")
+    second = store.post(_OWNER, _KEY, "two")
+
+    assert store.take(_OWNER, _KEY, [second]) == [(second, "two")]
+    assert store.take(_OWNER, _KEY, [second]) == []
+    assert store.take(_OWNER, _KEY) == [(first, "one")]
+
+
 def test_steer_reaches_the_next_step_as_the_newest_user_message() -> None:
     """A message posted during a tool call is read by the very next step."""
     store = SteerStore()

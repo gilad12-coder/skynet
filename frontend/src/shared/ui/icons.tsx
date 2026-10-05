@@ -22,6 +22,7 @@
 import { forwardRef, createElement } from "react";
 import type { Icon, IconProps } from "@phosphor-icons/react";
 
+import { ArrowBendDownRight as ArrowBendDownRightBase } from "@phosphor-icons/react/dist/ssr/ArrowBendDownRight";
 import { ArrowClockwise as ArrowClockwiseBase } from "@phosphor-icons/react/dist/ssr/ArrowClockwise";
 import { ArrowCounterClockwise as ArrowCounterClockwiseBase } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise";
 import { ArrowDown as ArrowDownBase } from "@phosphor-icons/react/dist/ssr/ArrowDown";
@@ -71,6 +72,7 @@ import { CursorText as CursorTextBase } from "@phosphor-icons/react/dist/ssr/Cur
 import { Database as DatabaseBase } from "@phosphor-icons/react/dist/ssr/Database";
 import { DeviceMobile as DeviceMobileBase } from "@phosphor-icons/react/dist/ssr/DeviceMobile";
 import { DiceFive as DiceFiveBase } from "@phosphor-icons/react/dist/ssr/DiceFive";
+import { DotsSixVertical as DotsSixVerticalBase } from "@phosphor-icons/react/dist/ssr/DotsSixVertical";
 import { DotsThree as DotsThreeBase } from "@phosphor-icons/react/dist/ssr/DotsThree";
 import { DownloadSimple as DownloadSimpleBase } from "@phosphor-icons/react/dist/ssr/DownloadSimple";
 import { Envelope as EnvelopeBase } from "@phosphor-icons/react/dist/ssr/Envelope";
@@ -167,6 +169,7 @@ import { Translate as TranslateBase } from "@phosphor-icons/react/dist/ssr/Trans
 import { Trash as TrashBase } from "@phosphor-icons/react/dist/ssr/Trash";
 import { Tray as TrayBase } from "@phosphor-icons/react/dist/ssr/Tray";
 import { TreeStructure as TreeStructureBase } from "@phosphor-icons/react/dist/ssr/TreeStructure";
+import { TreeView as TreeViewBase } from "@phosphor-icons/react/dist/ssr/TreeView";
 import { TrendUp as TrendUpBase } from "@phosphor-icons/react/dist/ssr/TrendUp";
 import { Trophy as TrophyBase } from "@phosphor-icons/react/dist/ssr/Trophy";
 import { UploadSimple as UploadSimpleBase } from "@phosphor-icons/react/dist/ssr/UploadSimple";
@@ -191,6 +194,7 @@ function bold(Base: Icon): Icon {
   return Bold;
 }
 
+export const ArrowBendDownRight = /* @__PURE__ */ bold(ArrowBendDownRightBase);
 export const ArrowClockwise = /* @__PURE__ */ bold(ArrowClockwiseBase);
 export const ArrowCounterClockwise = /* @__PURE__ */ bold(ArrowCounterClockwiseBase);
 export const ArrowDown = /* @__PURE__ */ bold(ArrowDownBase);
@@ -240,6 +244,7 @@ export const CursorText = /* @__PURE__ */ bold(CursorTextBase);
 export const Database = /* @__PURE__ */ bold(DatabaseBase);
 export const DeviceMobile = /* @__PURE__ */ bold(DeviceMobileBase);
 export const DiceFive = /* @__PURE__ */ bold(DiceFiveBase);
+export const DotsSixVertical = /* @__PURE__ */ bold(DotsSixVerticalBase);
 export const DotsThree = /* @__PURE__ */ bold(DotsThreeBase);
 export const DownloadSimple = /* @__PURE__ */ bold(DownloadSimpleBase);
 export const Envelope = /* @__PURE__ */ bold(EnvelopeBase);
@@ -336,6 +341,7 @@ export const Translate = /* @__PURE__ */ bold(TranslateBase);
 export const Trash = /* @__PURE__ */ bold(TrashBase);
 export const Tray = /* @__PURE__ */ bold(TrayBase);
 export const TreeStructure = /* @__PURE__ */ bold(TreeStructureBase);
+export const TreeView = /* @__PURE__ */ bold(TreeViewBase);
 export const TrendUp = /* @__PURE__ */ bold(TrendUpBase);
 export const Trophy = /* @__PURE__ */ bold(TrophyBase);
 export const UploadSimple = /* @__PURE__ */ bold(UploadSimpleBase);

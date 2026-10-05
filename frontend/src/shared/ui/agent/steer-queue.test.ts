@@ -29,10 +29,10 @@ function fakeChannel(): FakeChannel {
       channel.unread.add(id);
       return id;
     },
-    withdraw: async () => {
+    withdraw: async (only) => {
       channel.withdrawCalls += 1;
-      const ids = [...channel.unread];
-      channel.unread.clear();
+      const ids = [...channel.unread].filter((id) => !only || only.includes(id));
+      for (const id of ids) channel.unread.delete(id);
       return ids;
     },
   };
@@ -100,6 +100,7 @@ test("a steer applied before its POST resolves is still cleared", async () => {
   });
   queue.steer("early");
   queue.applied(["srv-x"]);
+  await flush();
   resolvePost("srv-x");
   await flush();
   assert.equal(queue.getSnapshot().steering.length, 0);
@@ -202,7 +203,7 @@ test("promote is a no-op when no steerable turn runs", () => {
   assert.deepEqual(queue.getSnapshot().queued.map((q) => q.text), ["stay"]);
 });
 
-test("edit (take) and remove pull an item out of the queue", () => {
+test("take pulls an item out of the queue", () => {
   const { queue } = setup();
   queue.setBusy(true);
   queue.enqueue("a");
@@ -212,6 +213,61 @@ test("edit (take) and remove pull an item out of the queue", () => {
   assert.equal(queue.take(a.id), null);
   queue.take(b.id);
   assert.equal(queue.getSnapshot().queued.length, 0);
+});
+
+test("deleting an unread steer takes it back from the turn", async () => {
+  const { queue } = setup();
+  const channel = fakeChannel();
+  queue.openTurn(channel);
+  queue.steer("keep");
+  queue.steer("drop");
+  await flush();
+  queue.remove(queue.getSnapshot().steering[1].id);
+  assert.deepEqual(queue.getSnapshot().steering.map((s) => s.text), ["keep"]);
+  await flush();
+  assert.deepEqual([...channel.unread], ["srv-1"]);
+  assert.deepEqual(queue.getSnapshot().steering.map((s) => s.text), ["keep"]);
+});
+
+test("editing an unread steer returns its text; a read one returns null", async () => {
+  const { queue } = setup();
+  const channel = fakeChannel();
+  queue.openTurn(channel);
+  queue.steer("fix this");
+  queue.steer("already read");
+  await flush();
+  const [first, second] = queue.getSnapshot().steering;
+  channel.unread.delete("srv-2");
+  assert.equal(await queue.edit(first.id), "fix this");
+  assert.equal(await queue.edit(second.id), null);
+  assert.equal(channel.unread.size, 0);
+});
+
+test("reordering steers reposts the unread ones in the new order", async () => {
+  const { queue } = setup();
+  const channel = fakeChannel();
+  queue.openTurn(channel);
+  queue.steer("one");
+  queue.steer("two");
+  await flush();
+  const [one, two] = queue.getSnapshot().steering;
+  queue.reorderSteering([two.id, one.id]);
+  assert.deepEqual(queue.getSnapshot().steering.map((s) => s.text), ["two", "one"]);
+  await flush();
+  assert.deepEqual(channel.posted, ["one", "two", "two", "one"]);
+  assert.deepEqual([...channel.unread], ["srv-3", "srv-4"]);
+});
+
+test("reorderQueued reorders follow-ups and ignores a stale order", () => {
+  const { queue } = setup();
+  queue.setBusy(true);
+  queue.enqueue("a");
+  queue.enqueue("b");
+  const [a, b] = queue.getSnapshot().queued;
+  queue.reorderQueued([b.id, a.id]);
+  assert.deepEqual(queue.getSnapshot().queued.map((q) => q.text), ["b", "a"]);
+  queue.reorderQueued([a.id]);
+  assert.deepEqual(queue.getSnapshot().queued.map((q) => q.text), ["b", "a"]);
 });
 
 test("recallLast pulls the newest queued item", () => {

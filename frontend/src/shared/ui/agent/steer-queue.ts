@@ -26,14 +26,17 @@ export interface SteerChannel {
   /** Posts one message into the turn; resolves its server id, or null when
    *  the turn cannot take it. */
   post: (text: string) => Promise<string | null>;
-  /** Takes back every message the turn never read; resolves their server ids. */
-  withdraw: () => Promise<string[]>;
+  /** Takes back messages the turn never read (only `ids` when given);
+   *  resolves the server ids actually returned. */
+  withdraw: (ids?: string[]) => Promise<string[]>;
 }
 
 interface SteerEntry extends PendingMessage {
   turn: number;
   serverId: string | null;
   posting: Promise<void>;
+  /** Being deleted or edited; hidden while its withdraw is in flight. */
+  pulling: boolean;
 }
 
 const EMPTY: SteerQueueSnapshot = { queued: [], steering: [], canSteer: false };
@@ -58,6 +61,8 @@ export class SteerQueue {
   private listeners = new Set<() => void>();
   private nextId = 0;
   private pumpScheduled = false;
+  // Posts go out one after another so the agent reads steers in list order.
+  private postChain: Promise<void> = Promise.resolve();
   private send: (text: string) => void;
 
   constructor(send: (text: string) => void = () => {}) {
@@ -105,6 +110,7 @@ export class SteerQueue {
     this.channel = channel;
     this.busy = true;
     this.appliedIds = new Set();
+    this.postChain = Promise.resolve();
     this.emit();
   }
 
@@ -173,7 +179,14 @@ export class SteerQueue {
       turn: this.turn,
       serverId: null,
       posting: Promise.resolve(),
+      pulling: false,
     };
+    this.post(entry, channel);
+    this.steering = [...this.steering, entry];
+    this.emit();
+  }
+
+  private post(entry: SteerEntry, channel: SteerChannel): void {
     const fallBack = () => {
       if (!this.steering.includes(entry)) return;
       this.steering = this.steering.filter((e) => e !== entry);
@@ -181,19 +194,115 @@ export class SteerQueue {
       this.emit();
       this.schedulePump();
     };
-    entry.posting = channel.post(trimmed).then(
-      (serverId) => {
-        if (!serverId) {
-          fallBack();
-          return;
-        }
-        entry.serverId = serverId;
-        if (this.appliedIds.has(serverId)) this.applied([serverId]);
-      },
-      fallBack,
+    entry.posting = this.postChain.then(() =>
+      channel.post(entry.text).then(
+        (serverId) => {
+          if (!serverId) {
+            fallBack();
+            return;
+          }
+          entry.serverId = serverId;
+          if (this.appliedIds.has(serverId)) this.applied([serverId]);
+        },
+        fallBack,
+      ),
     );
-    this.steering = [...this.steering, entry];
+    this.postChain = entry.posting;
+  }
+
+  /**
+   * Take one steer back from the running turn before the agent reads it.
+   * Resolves true when it came back; false when the agent already read it
+   * (it then shows in the transcript) or its turn has ended.
+   */
+  private async pull(entry: SteerEntry): Promise<boolean> {
+    const channel = this.channel;
+    if (!channel || entry.turn !== this.turn) return false;
+    entry.pulling = true;
     this.emit();
+    await entry.posting;
+    let returned = false;
+    if (entry.serverId !== null && this.steering.includes(entry)) {
+      try {
+        returned = (await channel.withdraw([entry.serverId])).includes(entry.serverId);
+      } catch {
+        returned = false;
+      }
+    }
+    entry.pulling = false;
+    if (returned) this.steering = this.steering.filter((e) => e !== entry);
+    this.emit();
+    return returned;
+  }
+
+  /** Delete a pending message: dropped from the queue, or taken back from
+   *  the running turn when the agent has not read it yet. */
+  remove(id: string): void {
+    if (this.take(id) !== null) return;
+    const entry = this.steering.find((e) => e.id === id);
+    if (entry && !entry.pulling) void this.pull(entry);
+  }
+
+  /** Pull a pending message out for editing; resolves its text, or null when
+   *  the agent already read it. */
+  async edit(id: string): Promise<string | null> {
+    const queued = this.take(id);
+    if (queued !== null) return queued;
+    const entry = this.steering.find((e) => e.id === id);
+    if (!entry || entry.pulling) return null;
+    return (await this.pull(entry)) ? entry.text : null;
+  }
+
+  /** Put the queued follow-ups in the order of `ids`. */
+  reorderQueued(ids: readonly string[]): void {
+    const byId = new Map(this.queued.map((q) => [q.id, q]));
+    const next = ids.map((id) => byId.get(id)).filter((q): q is PendingMessage => q !== undefined);
+    if (next.length !== this.queued.length) return;
+    this.queued = next;
+    this.emit();
+  }
+
+  /**
+   * Put the steers in the order of `ids`. The turn's unread steers are taken
+   * back and posted again in the new order, since the agent reads them in
+   * the order they arrived.
+   */
+  reorderSteering(ids: readonly string[]): void {
+    const byId = new Map(this.steering.map((e) => [e.id, e]));
+    const next = ids.map((id) => byId.get(id)).filter((e): e is SteerEntry => e !== undefined);
+    if (next.length !== this.steering.length) return;
+    this.steering = next;
+    this.emit();
+    const channel = this.channel;
+    if (!channel) return;
+    const turn = this.turn;
+    const prior = this.postChain;
+    const repost = async () => {
+      await prior;
+      if (this.channel !== channel || this.turn !== turn) return;
+      const live = this.steering.filter((e) => e.turn === turn && e.serverId !== null && !e.pulling);
+      if (live.length === 0) return;
+      let returned: Set<string>;
+      try {
+        returned = new Set(await channel.withdraw(live.map((e) => e.serverId as string)));
+      } catch {
+        return;
+      }
+      const back = this.steering.filter((e) => e.serverId !== null && returned.has(e.serverId));
+      if (this.channel !== channel || this.turn !== turn) {
+        // The turn ended mid-reorder; run them as the next turn instead.
+        this.steering = this.steering.filter((e) => !back.includes(e));
+        this.queued = [...back.map(({ id, text }) => ({ id, text })), ...this.queued];
+        this.emit();
+        this.schedulePump();
+        return;
+      }
+      for (const entry of back) {
+        entry.serverId = null;
+        this.post(entry, channel);
+      }
+    };
+    this.postChain = repost();
   }
 
   /** Hold `text` until the chat is idle, then send it as its own turn. */
@@ -242,7 +351,7 @@ export class SteerQueue {
   private emit(): void {
     this.snapshot = {
       queued: this.queued,
-      steering: this.steering.map(({ id, text }) => ({ id, text })),
+      steering: this.steering.filter((e) => !e.pulling).map(({ id, text }) => ({ id, text })),
       canSteer: this.busy && this.channel !== null,
     };
     for (const listener of this.listeners) listener();
@@ -274,9 +383,12 @@ export interface MidTurnQueue extends SteerQueueSnapshot {
   steer: (text: string) => void;
   queue: (text: string) => void;
   promote: (id: string) => void;
-  /** Removes the follow-up from the queue and returns its text. */
-  edit: (id: string) => string | null;
+  /** Pulls a queued or unread steered message out; resolves its text, or
+   *  null when the agent already read it. */
+  edit: (id: string) => Promise<string | null>;
   remove: (id: string) => void;
+  reorderQueued: (ids: readonly string[]) => void;
+  reorderSteering: (ids: readonly string[]) => void;
   recallLast: () => string | null;
 }
 
@@ -291,10 +403,10 @@ export function midTurnOf(
     steer: (text) => getStore()?.steer(text),
     queue: (text) => getStore()?.enqueue(text),
     promote: (id) => getStore()?.promote(id),
-    edit: (id) => getStore()?.take(id) ?? null,
-    remove: (id) => {
-      getStore()?.take(id);
-    },
+    edit: async (id) => (await getStore()?.edit(id)) ?? null,
+    remove: (id) => getStore()?.remove(id),
+    reorderQueued: (ids) => getStore()?.reorderQueued(ids),
+    reorderSteering: (ids) => getStore()?.reorderSteering(ids),
     recallLast: () => getStore()?.recallLast() ?? null,
   };
 }

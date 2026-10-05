@@ -202,6 +202,9 @@ class SteerWithdrawRequest(BaseModel):
     """Take back the messages a finished turn never read."""
 
     steer_key: str = Field(..., min_length=1, max_length=STEER_KEY_MAX_CHARS, description="The turn's key.")
+    ids: list[str] | None = Field(
+        default=None, max_length=100, description="Take back only these messages; omitted takes back every one."
+    )
 
 
 class SteerWithdrawResponse(BaseModel):
@@ -752,19 +755,20 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
         summary="Take back steer messages a turn never read",
     )
     def withdraw_steer(req: SteerWithdrawRequest, current_user: AuthenticatedUserDep) -> SteerWithdrawResponse:
-        """Take back every message the turn under ``steer_key`` has not read.
+        """Take back messages the turn under ``steer_key`` has not read.
 
-        Called when the turn ends; each message goes either to the turn or
+        Called when the turn ends, and when the user deletes, edits or
+        reorders a steered message; each message goes either to the turn or
         back here, never both.
 
         Args:
-            req: The turn's key.
+            req: The turn's key, and optionally which messages to take back.
             current_user: The authenticated caller.
 
         Returns:
             The ids of the messages returned, oldest first.
         """
-        taken = get_steer_store().take(current_user.username, req.steer_key)
+        taken = get_steer_store().take(current_user.username, req.steer_key, req.ids)
         return SteerWithdrawResponse(ids=[message_id for message_id, _ in taken])
 
     return router
