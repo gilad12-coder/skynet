@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { cn } from "@/shared/lib/utils";
 import { CaretDown } from "@/shared/ui/icons";
+import { useTableGlide } from "@/shared/ui/primitives/table-glide";
 
 /**
  * Container width below which a column folds into its row's primary cell.
@@ -12,9 +13,13 @@ import { CaretDown } from "@/shared/ui/icons";
 type TableCollapse = "sm" | "md" | "lg";
 
 function Table({ className, ...props }: React.ComponentProps<"table">) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const tableRef = React.useRef<HTMLTableElement>(null);
+  useTableGlide(containerRef, tableRef);
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    <div ref={containerRef} data-slot="table-container" className="relative w-full overflow-x-auto">
       <table
+        ref={tableRef}
         data-slot="table"
         className={cn("w-full caption-bottom text-sm", className)}
         {...props}
