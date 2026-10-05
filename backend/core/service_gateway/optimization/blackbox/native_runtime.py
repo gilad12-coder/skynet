@@ -134,7 +134,6 @@ class NativeOptions:
     model: str
     gateway: GatewayConfig = field(repr=False)
     max_token_cost: float
-    timeout_seconds: float = 2400.0
     proposer: BlackboxProposer = field(default_factory=BlackboxProposer)
     budget_route: dict[str, str] | None = field(default=None, repr=False)
     sandbox_runtime: SandboxRuntime | None = None
@@ -700,8 +699,6 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         raise BudgetExhaustedError("The native optimizer evaluation budget is exhausted.")
     if not math.isfinite(options.max_token_cost) or options.max_token_cost <= 0:
         raise ServiceError("Native optimizers require a positive proposer cost limit.")
-    if not math.isfinite(options.timeout_seconds) or options.timeout_seconds <= 0:
-        raise ServiceError("Native optimizers require a positive timeout.")
     if not options.gateway.url or not options.gateway.api_key:
         raise ServiceError("Native optimizers require a configured model gateway.")
     if options.direct_anthropic and options.budget_route is None:
@@ -731,8 +728,9 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         protected=options.budget_route is not None,
     )
     input_price, output_price = model_token_costs(options.model)
-    lifetime = options.timeout_seconds + _INSTALL_ALLOWANCE
-    lifetime = min(lifetime, settings.vercel_sandbox_max_lifetime_seconds)
+    # Runs carry no wall-clock cap of their own: the budget and evaluation
+    # limits end them, and only the sandbox's platform lifetime bounds the box.
+    lifetime = settings.vercel_sandbox_max_lifetime_seconds
     spec = SandboxSpec(
         lifetime_seconds=lifetime,
         env={"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
@@ -763,7 +761,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             "max_concurrency": ctx.concurrency,
             "max_iterations": ctx.max_iterations,
             "stop_at_score": ctx.stop_at_score,
-            "timeout_seconds": options.timeout_seconds,
+            "timeout_seconds": lifetime,
             "proposer": {
                 **launch_payload(launch),
                 "harness": proposer.harness,
@@ -833,7 +831,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             'export PYTHONPATH="$PWD/native_vendor"; '
             f'exec "$(cat native-python.txt)" {runner_file} {_INPUT_FILE}'
         )
-        timeout = min(options.timeout_seconds, lifetime - (time.monotonic() - opened) - 1.0)
+        timeout = lifetime - (time.monotonic() - opened) - 1.0
         if timeout <= 0:
             raise ServiceError("Native optimizer runtime expired while preparing dependencies.")
         payload["timeout_seconds"] = timeout
@@ -870,7 +868,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         if artifact_error is not None:
             raise artifact_error
         if completed.timed_out:
-            raise ServiceError("Native optimizer exceeded its runtime limit.")
+            raise ServiceError(f"Native optimizer exceeded its runtime limit: the sandbox's {lifetime:.0f}s lifetime.")
         if options.budget_route is not None:
             try:
                 raise_gateway_stop(options.budget_route)

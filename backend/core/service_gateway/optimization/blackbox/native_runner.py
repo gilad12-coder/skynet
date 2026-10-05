@@ -112,6 +112,10 @@ class EvaluatorMailbox:
                     raise self.error
                 return float(response["score"]), dict(response.get("info") or {})
             time.sleep(0.05)
+        if self.stopped.is_set():
+            # The supervisor stopped the run and records why; claiming a reply
+            # timeout here would mask that reason.
+            raise self.error or EvaluationStopped("The parent evaluator has stopped this run.")
         self.error = self.error or EvaluationStopped("Native evaluator response timed out.")
         self.stopped.set()
         raise self.error

@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tarfile
+import threading
 import tomllib
 from dataclasses import replace
 from pathlib import Path
@@ -29,7 +30,7 @@ from core.models.blackbox import BlackboxProposer, BlackboxTarget
 from core.service_gateway.language_models import total_tokens_from_history, usage_by_model_from_history
 from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededError
 
-from .. import best_of_n, gepa_engine, harness_bridge, native_runner, native_runtime, repo_tree
+from .. import autosaddler_runner, best_of_n, gepa_engine, harness_bridge, native_runner, native_runtime, repo_tree
 from ..harness import GatewayConfig, build_launch, launch_payload
 from ..native_runtime import NativeOptions, _bootstrap_command, check_native_runtime, run_native_engine
 from ..protocol import EvalServer, Result, ScorerAbortError, Task
@@ -575,6 +576,33 @@ def test_native_timeout_and_missing_usage_fail_without_fallback(
         run_native_engine("autoresearch", Task("seed"), EvalServer(lambda *_: (1.0, {}), max_evals=2), ctx)
     assert len(session.calls) == 2
     assert session.closed
+
+
+def test_native_run_lives_as_long_as_its_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A run has no wall-clock cap of its own; only the sandbox's platform lifetime bounds it."""
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    monkeypatch.setattr(native_runtime.settings, "vercel_sandbox_max_lifetime_seconds", 18_000.0)
+    session = FakeSession()
+    runtime = FakeRuntime(session)
+    run_native_engine(
+        "autoresearch", Task("seed"), EvalServer(lambda *_: (1.0, {}), max_evals=2), _context(tmp_path, runtime)
+    )
+    assert runtime.spec is not None
+    assert runtime.spec.lifetime_seconds == 18_000.0
+    assert session.calls[-1][1]["timeout_seconds"] > 17_000
+
+
+@pytest.mark.parametrize("runner", [native_runner, autosaddler_runner])
+def test_supervisor_stop_is_not_reported_as_a_reply_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: Any
+) -> None:
+    """A run stopped by its supervisor keeps that reason instead of a fake evaluator timeout."""
+    monkeypatch.chdir(tmp_path)
+    mailbox = runner.EvaluatorMailbox("nonce", 60.0)
+    threading.Timer(0.2, mailbox.stopped.set).start()
+    with pytest.raises(runner.EvaluationStopped, match="stopped this run"):
+        mailbox.evaluate("candidate")
+    assert mailbox.error is None
 
 
 def test_native_usage_ledger_survives_lane_replacement() -> None:
