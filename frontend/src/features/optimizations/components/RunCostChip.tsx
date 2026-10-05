@@ -11,12 +11,18 @@ import { readBilling } from "../lib/run-billing";
  * Compact per-run cost affordance for the detail header.
  *
  * Reads the worker's billing stamp and shows what the run cost.
- * It's a quiet button — clicking opens the wallet, the same surface that holds
- * the full usage history. Renders nothing until the run settles and a billing
+ * It's a quiet button — clicking opens the run's Usage and cost tab, or the
+ * wallet where that tab isn't available. Renders nothing until the run settles and a billing
  * outcome is stamped (so it stays hidden on active runs and pairs, which carry
  * no billing of their own).
  */
-export function RunCostChip({ details }: { details?: Record<string, unknown> }) {
+export function RunCostChip({
+  details,
+  onOpen,
+}: {
+  details?: Record<string, unknown>;
+  onOpen?: () => void;
+}) {
   const { locale } = useLocale();
   const { openTo } = useSettingsModal();
   const billing = readBilling(details);
@@ -25,9 +31,9 @@ export function RunCostChip({ details }: { details?: Record<string, unknown> }) 
   return (
     <button
       type="button"
-      onClick={() => openTo("billing")}
-      title={msg("billing.action.view_wallet")}
-      aria-label={msg("billing.action.view_wallet")}
+      onClick={onOpen ?? (() => openTo("billing"))}
+      title={onOpen ? msg("usage_tab.open") : msg("billing.action.view_wallet")}
+      aria-label={onOpen ? msg("usage_tab.open") : msg("billing.action.view_wallet")}
       dir="ltr"
       className="flex min-h-[44px] items-center gap-1.5 tabular-nums transition-colors hover:text-foreground sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
     >

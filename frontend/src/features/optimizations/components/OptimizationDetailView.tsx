@@ -19,7 +19,6 @@ import {
   Copy,
   Database,
   Gear,
-  Pulse,
   Eye,
   PencilSimple,
   ArrowCounterClockwise,
@@ -55,7 +54,6 @@ import {
   STORAGE_CHANGED_EVENT,
 } from "@/shared/lib/api";
 import type {
-  LMActivity,
   ServeInfoResponse,
   WorkflowNodeTrace,
   WorkflowSpec,
@@ -100,7 +98,7 @@ import { extractCandidates, scopeToLatestLane } from "@/features/trajectory";
 import { isReactModuleName } from "../lib/is-react-module";
 import { reconstructGridResult } from "../lib/reconstruct-grid";
 import { DataTab } from "./DataTab";
-import { LogsTab } from "./LogsTab";
+import { LogsTab, type LogFocus } from "./LogsTab";
 import { DeleteJobDialog } from "./DeleteJobDialog";
 import { ShareDialog } from "./ShareDialog";
 import { StatusBadge } from "@/shared/ui/status-badge";
@@ -109,13 +107,12 @@ import { CodeTab } from "./CodeTab";
 import { ArtifactTab } from "./ArtifactTab";
 import { PairSelectionStrip } from "./PairSelectionStrip";
 import { OverviewTab } from "./OverviewTab";
-import { BudgetTab } from "./BudgetTab";
 import { RunLifecycleNotice } from "./RunLifecycleNotice";
 import { isBudgetPause } from "../lib/run-lifecycle";
 import { RunCostChip } from "./RunCostChip";
 import { BestVersionTab } from "./BestVersionTab";
 import { GridServeTab } from "./GridServeTab";
-import { BlackboxLMActivityTab, LMActivityTab } from "./LMActivityTab";
+import { UsageTab } from "./UsageTab";
 import { ReactServeChat } from "./ReactServeChat";
 import { ReactServeApi } from "./ReactServeApi";
 import { RunPlayground } from "./RunPlayground";
@@ -124,7 +121,9 @@ import { useStreamWithPollFallback } from "@/shared/hooks/use-stream-with-poll-f
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 
 const BLACKBOX_LOG_FETCH_DELAY_MS = 3000;
-const PHONE_DETAIL_TABS = new Set(["overview", "playground", "best", "artifact", "logs", "budget"]);
+const PHONE_DETAIL_TABS = new Set(["overview", "playground", "best", "artifact", "logs", "usage"]);
+/** The usage tab replaced these two; old links land on it. */
+const RENAMED_TABS: Record<string, string> = { "lm-activity": "usage", budget: "usage" };
 
 // Treat naive ISO timestamps (no trailing tz marker) as UTC — that matches the
 // backend, which stores UTC datetimes that Pydantic emits without a suffix.
@@ -275,10 +274,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const shareCanServe = isShare && (shareRole === "editor" || shareRole === "owner");
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab") ?? "overview";
+  const requestedTab = searchParams.get("tab") ?? "overview";
+  const initialTab = RENAMED_TABS[requestedTab] ?? requestedTab;
   const [detailTab, setDetailTab] = useState(initialTab);
+  const [logFocus, setLogFocus] = useState<LogFocus | null>(null);
   // Phones get the view-first subset: Overview, Usage (chat), Artifact, Logs,
-  // Spending. Data/Code/LM activity/Config are desk work; a deep link to one of
+  // Usage and cost. Data/Code/LM activity/Config are desk work; a deep link to one of
   // those tabs lands on Overview instead of an empty pane.
   const isPhone = useIsPhone();
   const activeDetailTab = isPhone && !PHONE_DETAIL_TABS.has(detailTab) ? "overview" : detailTab;
@@ -1047,11 +1048,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     : (job?.result?.program_artifact ?? job?.grid_result?.best_pair?.program_artifact ?? null);
   const showArtifactTab = !!(optimizedPrompt || reactOverlay || artifactFiles);
 
-  // LM activity is pair-scoped in pair view, otherwise the run's.
-  const viewLmActivity: LMActivity | null = isPairContext
-    ? ((activePair.lm_activity as LMActivity | undefined) ?? null)
-    : ((job?.result?.lm_activity as LMActivity | undefined) ?? null);
-
   const isActive = job ? ACTIVE_STATUSES.has(job.status) : false;
   const startedAt = job?.started_at ?? null;
   const createdAt = job?.created_at ?? null;
@@ -1147,9 +1143,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const showBestVersionTab = jobIsBlackbox && !!job.blackbox_result;
   // A remote-scorer black-box run has no code to show at all.
   const showCodeTab = !jobIsBlackbox || !!metricCode;
-  const showLmActivityTab =
-    viewLmActivity != null || (job.blackbox_result?.usage_by_model?.length ?? 0) > 0;
-  const showBudgetTab = (job.execution_budget ?? job.terminal_evidence?.execution_budget) != null;
+  // Usage reads the run's billing records, which only an authenticated viewer can fetch.
+  const showUsageTab = !skipNetwork;
 
   const pairCount = effectiveJob?.grid_result?.pair_results.length ?? 0;
   const isBestPair =
@@ -1266,7 +1261,10 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   </Link>
                 )}
                 {!isPairContext && (
-                  <RunCostChip details={job.result?.details ?? job.blackbox_result?.details} />
+                  <RunCostChip
+                    details={job.result?.details ?? job.blackbox_result?.details}
+                    onOpen={showUsageTab ? () => setDetailTab("usage") : undefined}
+                  />
                 )}
               </div>
             </div>
@@ -1584,16 +1582,10 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   {pingActive && <PingDot className="ms-1" />}
                 </TabsTrigger>
               )}
-              {showLmActivityTab && !isPhone && (
-                <TabsTrigger value="lm-activity" className={tabCls}>
-                  <Pulse className="size-3.5" />
-                  {msg("auto.app.optimizations.id.page.lm_activity")}
-                </TabsTrigger>
-              )}
-              {showBudgetTab && (
-                <TabsTrigger value="budget" className={tabCls}>
+              {showUsageTab && (
+                <TabsTrigger value="usage" className={tabCls}>
                   <Coins className="size-3.5" />
-                  {msg("optimization.budget.tab")}
+                  {msg("usage_tab.title")}
                 </TabsTrigger>
               )}
               {!isPhone && (
@@ -1711,23 +1703,21 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 <LogsTab
                   logs={isPairContext ? pairFilteredLogs : (jobLogs ?? [])}
                   liveStatus={logStreamStatus}
+                  focus={logFocus}
                 />
               </TabsContent>
             )}
 
-            {showLmActivityTab && !isPhone && (
-              <TabsContent value="lm-activity" className="mt-4">
-                {viewLmActivity ? (
-                  <LMActivityTab lmActivity={viewLmActivity} />
-                ) : (
-                  job.blackbox_result && <BlackboxLMActivityTab result={job.blackbox_result} />
-                )}
-              </TabsContent>
-            )}
-
-            {showBudgetTab && (
-              <TabsContent value="budget" className="mt-4">
-                <BudgetTab job={job} />
+            {showUsageTab && (
+              <TabsContent value="usage" className="mt-4">
+                <UsageTab
+                  job={job}
+                  pairIndex={isPairContext ? activePair.pair_index : null}
+                  onOpenLogs={(focus) => {
+                    setLogFocus(focus);
+                    setDetailTab("logs");
+                  }}
+                />
               </TabsContent>
             )}
 

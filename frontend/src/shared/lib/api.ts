@@ -39,6 +39,7 @@ import { parseTurnStats } from "@/shared/ui/agent/turn-stats";
 import { I18N_KEY, tI18n } from "@/shared/lib/i18n";
 import { reportHandledError } from "@/shared/lib/report-error";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
+import type { RunUsage } from "@/shared/types/run-usage";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { readServerSentEvents, type ServerSentEvent } from "@/shared/lib/sse";
 import { streamResumableTurn } from "@/shared/lib/resumable-turn";
@@ -1516,6 +1517,12 @@ export function getJob(
     return request<OptimizationStatusResponse>(`/optimizations/${optimizationId}?${q.toString()}`);
   }
   return cachedGet<OptimizationStatusResponse>(`/optimizations/${optimizationId}`, JOB_CACHE_MS);
+}
+
+/** A run's charges and model activity, pre-aggregated per role, model, stage, pair and candidate. */
+export function getRunUsage(optimizationId: string, pairIndex?: number | null) {
+  const qs = pairIndex == null ? "" : `?pair_index=${pairIndex}`;
+  return request<RunUsage>(`/optimizations/${encodeURIComponent(optimizationId)}/usage${qs}`);
 }
 
 export function getOptimizationPayload(optimizationId: string) {
