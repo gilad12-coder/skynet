@@ -30,7 +30,6 @@ import {
   type BlackboxWizardContext,
   type RepoSecretRow,
 } from "../../hooks/use-blackbox-wizard";
-import { RepoPathTree } from "./RepoPathTree";
 import { RepoPicker } from "./RepoPicker";
 import { Field } from "./shared";
 
@@ -38,22 +37,13 @@ import { Field } from "./shared";
 const TYPED = "__typed__";
 
 /**
- * The Goal stage of a repository run: which GitHub repository, which of its
- * paths the agent may edit, and the secrets the scorer reads. The setup
+ * The Goal stage of a repository run: which GitHub repository and branch,
+ * and the secrets the scorer reads. The agent may edit the whole repository. The setup
  * command is inferred from the repository by the server. The GitHub link
  * itself lives in Settings; this offers it when it is missing.
  */
 export function BlackboxRepoFields({ w }: { w: BlackboxWizardContext }) {
-  const {
-    repoName,
-    setRepoName,
-    repoBranch,
-    setRepoBranch,
-    repoPaths,
-    setRepoPaths,
-    repoSecrets,
-    setRepoSecrets,
-  } = w;
+  const { repoName, setRepoName, repoBranch, setRepoBranch, repoSecrets, setRepoSecrets } = w;
   const { byProvider, loading } = useConnectors();
   const github = byProvider("github");
   const linked = github?.connected === true && github.status !== "invalid";
@@ -150,39 +140,21 @@ export function BlackboxRepoFields({ w }: { w: BlackboxWizardContext }) {
             onPick={(repo) => {
               if (repo.full_name === repoName.trim()) return;
               setRepoName(repo.full_name);
-              // Another repository's branch and paths mean nothing here.
+              // Another repository's branch means nothing here.
               setRepoBranch("");
-              setRepoPaths(".");
             }}
           />
         </Field>
       )}
 
       {repoChosen && (
-        <>
-          <Field
-            label={msg("submit.blackbox.repo.branch_label")}
-            htmlFor="bb-repo-branch"
-            hint={msg("submit.blackbox.repo.branch_tip")}
-          >
-            <BranchSelect
-              repo={repoName.trim()}
-              branch={repoBranch}
-              onBranchChange={setRepoBranch}
-            />
-          </Field>
-          <Field
-            label={msg("submit.blackbox.repo.paths_label")}
-            hint={msg("submit.blackbox.repo.paths_tip")}
-          >
-            <RepoPathTree
-              repo={repoName.trim()}
-              branch={repoBranch.trim()}
-              paths={repoPaths}
-              onPathsChange={setRepoPaths}
-            />
-          </Field>
-        </>
+        <Field
+          label={msg("submit.blackbox.repo.branch_label")}
+          htmlFor="bb-repo-branch"
+          hint={msg("submit.blackbox.repo.branch_tip")}
+        >
+          <BranchSelect repo={repoName.trim()} branch={repoBranch} onBranchChange={setRepoBranch} />
+        </Field>
       )}
 
       <Field

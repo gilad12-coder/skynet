@@ -388,10 +388,9 @@ for (const codeAssistMode of ["manual", "auto"]) {
   });
 }
 
-test("a repository goal needs a name, editable paths and sound secrets, not an objective", () => {
+test("a repository goal needs a name and sound secrets, not an objective", () => {
   const validate = (fields: {
     repoName?: string;
-    repoPaths?: string;
     repoSecrets?: Array<{ name: string; value: string; savedSecretId: string | null }>;
     objective?: string;
   }) =>
@@ -401,15 +400,7 @@ test("a repository goal needs a name, editable paths and sound secrets, not an o
       isRepo: true,
       REPO_NAME_PATTERN: /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/,
       REPO_SECRET_NAME_PATTERN: /^[A-Za-z_][A-Za-z0-9_]{0,127}$/,
-      parseEditablePaths: (value: string) =>
-        value
-          .split(/[\n,]/)
-          .map((path) => path.trim())
-          .filter(Boolean),
-      editablePathIssue: (path: string) =>
-        path.startsWith("/") ? "submit.blackbox.repo.validation.path_absolute" : null,
       repoName: "acme/widgets",
-      repoPaths: ".",
       repoSecrets: [],
       objective: "Make the tests pass",
       ...fields,
@@ -417,8 +408,6 @@ test("a repository goal needs a name, editable paths and sound secrets, not an o
     })(WIZARD_STAGE.goal);
   assert.equal(validate({}), null);
   assert.equal(validate({ repoName: "widgets" })?.fieldId, "bb-repo-name");
-  assert.equal(validate({ repoPaths: " " })?.fieldId, "bb-repo-paths");
-  assert.equal(validate({ repoPaths: "/etc" })?.fieldId, "bb-repo-paths");
   assert.equal(
     validate({ repoSecrets: [{ name: "API_KEY", value: "", savedSecretId: null }] })?.message,
     "submit.blackbox.repo.validation.secret_value",
@@ -495,7 +484,11 @@ test("Anything lets a problem's own stage be reached, and holds every other move
   const onStage = evaluate(variable(wizard, "leaveStage"), {
     WIZARD_STAGE,
     blackboxIssueStage,
-    currentIssue: () => ({ stage: "evaluation", fieldId: "bb-scorer-code", message: "fix the scorer" }),
+    currentIssue: () => ({
+      stage: "evaluation",
+      fieldId: "bb-scorer-code",
+      message: "fix the scorer",
+    }),
     reportIssue: () => {},
   });
   assert.equal(onStage(WIZARD_STAGE.goal), false);
