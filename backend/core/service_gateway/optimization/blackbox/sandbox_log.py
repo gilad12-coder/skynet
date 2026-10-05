@@ -12,7 +12,8 @@ Sandbox output is untrusted, so it is stripped of terminal control sequences
 and scrubbed of every secret the command was given. :func:`forward` relays a
 structured record a sandbox sent, attributed and capped by the host. Inside an
 :func:`event_scope`, the ``log()`` events a scorer writes to stderr are relayed
-the same way, pinned to the scope's source, candidate and case.
+the same way, pinned to the scope's source, candidate and case. A multi-line
+message, such as a stack trace or a printed error object, becomes one row.
 """
 
 from __future__ import annotations
@@ -46,6 +47,9 @@ _SECRET_MIN_CHARS = 8
 _CONTROL = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]|[\x00-\x08\x0b-\x1f\x7f]")
 # The highest level a sandbox may claim: CRITICAL is reserved for the host.
 _FORWARDED_LEVELS = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING, "ERROR": logging.ERROR}
+# Lines that only close a printed object, like Node's "}" after an error's fields.
+_CLOSER = re.compile(r"^[\]\)}]+[,;]?$")
+_CHAINED = ("Caused by", "During handling of the above exception", "The above exception was the direct cause")
 
 
 # What the host knows about the command running now: the source its events
@@ -187,6 +191,59 @@ def stream_line(line: str, *, owner: str | None, scrub: Scrubber, label: str = "
         )
 
 
+class LineGroups:
+    """Join the lines of one multi-line message so it is logged as one row.
+
+    A line continues the message before it when it is indented, only closes a
+    bracket, or chains another exception. A Python traceback also takes its
+    unindented last line, the exception itself. Messages are only cut at line
+    boundaries, so a caller flushes at the end of each output chunk: one write,
+    such as a whole error object, reaches the host in one chunk.
+    """
+
+    def __init__(self, emit: Callable[[str], None]) -> None:
+        """Start with no open message.
+
+        Args:
+            emit: Called with each finished message, its lines joined by newlines.
+        """
+        self._emit = emit
+        self._lines: list[str] = []
+
+    def add(self, line: str) -> None:
+        """Take one complete, non-blank line.
+
+        Args:
+            line: The line without its newline.
+        """
+        if self._lines and self._continues(line):
+            self._lines.append(line)
+            if self._lines[0].startswith("Traceback") and not line[:1].isspace():
+                self.flush()
+            return
+        self.flush()
+        self._lines.append(line)
+
+    def _continues(self, line: str) -> bool:
+        """Whether ``line`` belongs to the open message.
+
+        Args:
+            line: The next line.
+
+        Returns:
+            True when it continues the open message.
+        """
+        if line[:1].isspace() or _CLOSER.match(line.strip()) or line.startswith(_CHAINED):
+            return True
+        return self._lines[0].startswith("Traceback")
+
+    def flush(self) -> None:
+        """Emit the open message, if any."""
+        if self._lines:
+            text, self._lines = "\n".join(self._lines), []
+            self._emit(text)
+
+
 class SandboxOutputLog:
     """The log record of one sandboxed command's stderr."""
 
@@ -206,6 +263,7 @@ class SandboxOutputLog:
         self.label = self.scrub.text(first[:_LABEL_CHARS] + ("…" if len(first) > _LABEL_CHARS else ""))
         self._pending = ""
         self._tail: deque[str] = deque(maxlen=_TAIL_LINES)
+        self._groups = LineGroups(lambda text: stream_line(text, owner=self._owner, scrub=self.scrub))
         self._lock = threading.Lock()
 
     def _line(self, line: str) -> None:
@@ -217,10 +275,11 @@ class SandboxOutputLog:
         if not line.strip():
             return
         if self._scope is not None and line.startswith(EVENT_PREFIX):
+            self._groups.flush()
             self._event(line[len(EVENT_PREFIX) :])
             return
         self._tail.append(self.scrub.text(line))
-        stream_line(line, owner=self._owner, scrub=self.scrub)
+        self._groups.add(line)
 
     def _event(self, body: str) -> None:
         """Relay one ``log()`` event, pinned to the scope it was written in.
@@ -252,6 +311,7 @@ class SandboxOutputLog:
             *lines, self._pending = self._pending.split("\n")
             for line in lines:
                 self._line(line)
+            self._groups.flush()
 
     def tee(self, on_output: Callable[[str, str], None] | None) -> Callable[[str, str], None] | None:
         """Wrap the caller's output sink so stderr is logged as it streams.
@@ -289,6 +349,7 @@ class SandboxOutputLog:
             if self._pending:
                 self._line(self._pending)
                 self._pending = ""
+            self._groups.flush()
         if result.exit_code == 0 and not result.timed_out:
             return
         state = "timed out" if result.timed_out else f"exited {result.exit_code}"
@@ -304,6 +365,7 @@ class SandboxOutputLog:
             if self._pending:
                 self._line(self._pending)
                 self._pending = ""
+            self._groups.flush()
         self._summary(logging.WARNING, f"raised {type(error).__name__}: {self.label}")
 
     def _summary(self, level: int, headline: str) -> None:
