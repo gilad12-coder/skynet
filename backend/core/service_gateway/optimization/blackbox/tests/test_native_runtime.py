@@ -721,7 +721,21 @@ def test_usage_prefers_cli_summaries_and_deduplicates_transcript_messages(tmp_pa
         "cache_read_input_tokens": 5,
         "cache_creation_input_tokens": 0,
         "total_tokens": 24,
+        "calls": 2,
     }
+
+
+def test_usage_counts_summary_turns_when_the_transcript_is_missing(tmp_path: Path) -> None:
+    """A CLI summary with no mirrored transcript still contributes its request count."""
+    summary = {
+        "session_id": "solo",
+        "num_turns": 7,
+        "modelUsage": {"openai/gpt-test": {"inputTokens": 50, "outputTokens": 5}},
+    }
+    (tmp_path / "iter1_stdout.json").write_text(json.dumps(summary))
+    usage = native_runner.collect_usage([tmp_path], "fallback")
+    assert usage["openai/gpt-test"]["calls"] == 7
+    assert usage["openai/gpt-test"]["prompt_tokens"] == 50
 
 
 def test_artifact_restore_rejects_parent_traversal(tmp_path: Path) -> None:
