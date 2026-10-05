@@ -58,6 +58,7 @@ from ..react_compat import native_tool_calling_active
 from ..safe_exec import validate_metric_code, validate_signature_code
 from .acting_react import ActingReActV2
 from .answer_options import normalize_options
+from .conduct import with_conduct
 from .constants import REASONING_FIELD
 from .parse_salvage import strip_adapter_debris
 from .repo_browser import RepoBrowser
@@ -855,7 +856,7 @@ class FixCodeArtifact(dspy.Signature):
 
 
 class CodeAssistant(dspy.Signature):
-    """Chat assistant attached to a DSPy Signature + metric-function editor.
+    __doc__ = with_conduct("""Chat assistant attached to a DSPy Signature + metric-function editor.
 
     ## Your tools
 
@@ -930,7 +931,7 @@ class CodeAssistant(dspy.Signature):
 
     When you DO edit, pass the COMPLETE replacement file body — not a
     diff, not markdown fences. Only ``dspy`` is importable.
-    """
+    """)
 
     dataset_columns: list[str] = dspy.InputField(desc="Every column name in the dataset.")
     column_roles: str = dspy.InputField(
@@ -1146,7 +1147,7 @@ class GenerateBlackboxSeedMessage(dspy.Signature):
 
 
 class BlackboxAssistant(dspy.Signature):
-    """Chat assistant attached to a black-box job's starting-point + scorer editors.
+    __doc__ = with_conduct("""Chat assistant attached to a black-box job's starting-point + scorer editors.
 
     The user is setting up an optimization job: ``current_seed`` is the
     version the optimizer starts from (a system prompt, a program or any
@@ -1243,7 +1244,7 @@ class BlackboxAssistant(dspy.Signature):
     identifiers and product terms in English. Plain prose, no markdown,
     no code fences. 2-5 sentences for explanations, 1-2 for edit
     confirmations.
-    """
+    """)
 
     objective: str = dspy.InputField(desc="What a better version achieves, in the user's words; empty until known.")
     background: str = dspy.InputField(desc="Free-form context from the user; may be empty.")
@@ -1279,7 +1280,7 @@ class BlackboxAssistant(dspy.Signature):
 
 
 class WorkflowAssistant(dspy.Signature):
-    """Chat assistant attached to a visual DSPy workflow-graph editor.
+    __doc__ = with_conduct("""Chat assistant attached to a visual DSPy workflow-graph editor.
 
     The user is building a multi-step pipeline on a canvas: an input node,
     signature (LLM) steps, optional Python transform steps, optional tool
@@ -1326,7 +1327,7 @@ class WorkflowAssistant(dspy.Signature):
     product terms (Signature, Metric, Workflow, node ids, field names) in
     English. Plain prose, no markdown, no code fences. 2-5 sentences for
     explanations, 1-2 for edit confirmations.
-    """
+    """)
 
     __doc__ = (__doc__ or "") + _WORKFLOW_JSON_SCHEMA_DOC
 

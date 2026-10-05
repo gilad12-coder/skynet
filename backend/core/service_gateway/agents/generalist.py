@@ -64,6 +64,7 @@ from ..language_models import (
 )
 from ..optimization.training_ground.registry import hash_tool_schema
 from .code import ReactReplyStream, _agent_error_payload, _format_agent_error, _reply_language
+from .conduct import with_conduct
 from .constants import REASONING_FIELD
 from .conversation_react import AppendOnlyChatAdapter, ConversationReAct, history_from_turns
 
@@ -1959,7 +1960,7 @@ CRITICAL — never claim you lack a tool you actually have:
 
 
 class GeneralistSig(dspy.Signature):
-    __doc__ = GENERALIST_SYSTEM_PROMPT
+    __doc__ = with_conduct(GENERALIST_SYSTEM_PROMPT)
 
     wizard_state: str = dspy.InputField(desc="JSON snapshot of the current wizard state.")
     reply_language: str = dspy.InputField(
