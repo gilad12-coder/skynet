@@ -427,14 +427,14 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                         })
                       : msg("submit.blackbox.review.cases_none")}
                   </Row>
-                  <HelpTip text={tip("submit.blackbox.review_cases")}>
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Columns className="size-3.5" />
-                      {parsedCases
-                        ? msg("submit.blackbox.review.cases_each")
-                        : msg("submit.blackbox.review.cases_once")}
-                    </span>
-                  </HelpTip>
+                  {parsedCases && (
+                    <HelpTip text={tip("submit.blackbox.review_cases")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Columns className="size-3.5" />
+                        {msg("submit.blackbox.review.cases_each")}
+                      </span>
+                    </HelpTip>
+                  )}
                 </div>
               )}
 
@@ -451,7 +451,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       className="w-full"
                     />
                   </ModelRow>
-                  {scorerUsesModel ? (
+                  {scorerUsesModel && (
                     <ModelRow label={scoringLabel} tipText={tip("submit.blackbox.scorer_model")}>
                       {resolvedScorerModel ? (
                         <ModelChip
@@ -464,14 +464,6 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                         <span className="text-sm text-muted-foreground">{notChosen}</span>
                       )}
                     </ModelRow>
-                  ) : (
-                    <Note
-                      icon={<Cpu className="size-3.5" />}
-                      label={msg("submit.blackbox.roles.scoring.deterministic_label")}
-                      tipText={tip("submit.blackbox.roles")}
-                    >
-                      {msg("submit.blackbox.roles.scoring.deterministic_desc")}
-                    </Note>
                   )}
                 </div>
               )}
