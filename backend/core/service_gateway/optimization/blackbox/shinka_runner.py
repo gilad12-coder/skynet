@@ -18,7 +18,10 @@ runs unchanged. Skynet contributes only:
   embedding calls;
 * for a repository target, a program that is a bundle of the files a version
   changes, with the prompts, edit application and novelty input replaced by
-  ``shinka_bundle``'s file-aware versions.
+  ``shinka_bundle``'s file-aware versions;
+* optionally, an agent editor: each new version is written by a Pi coding
+  agent (file tools only) editing the parent's files in a scratch directory,
+  instead of upstream's single model call answering with a patch.
 """
 
 from __future__ import annotations
@@ -26,13 +29,16 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import difflib
 import importlib.util
 import io
 import json
 import math
 import os
 import re
+import shutil
 import sqlite3
+import subprocess
 import sys
 import tarfile
 import threading
@@ -42,6 +48,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 try:
@@ -51,23 +58,27 @@ try:
     import shinka.llm.query as shinka_query
     from shinka.core import EvolutionConfig, ShinkaEvolveRunner
     from shinka.database import DatabaseConfig
+    from shinka.edit import summarize_diff
     from shinka.launch import LocalJobConfig
     from shinka.local_openai_config import parse_local_openai_model
+    from shinka.prompts import FULL_SYS_FORMATS
 except ImportError:  # Upstream needs Python 3.12; parent-side tests still import the helpers.
     shinka_async_runner = shinka_embedding = shinka_llm = shinka_query = EvolutionConfig = ShinkaEvolveRunner = None
-    DatabaseConfig = LocalJobConfig = parse_local_openai_model = None
+    DatabaseConfig = LocalJobConfig = parse_local_openai_model = summarize_diff = None
+    FULL_SYS_FORMATS = ()
 
 try:
-    from . import repo_tree, shinka_bundle
+    from . import harness_bridge, repo_tree, shinka_bundle
 except ImportError:  # In the sandbox this file runs as a script beside its sibling modules.
     _sibling_modules = {}
-    for _sibling in ("repo_tree", "shinka_bundle"):
+    for _sibling in ("harness_bridge", "repo_tree", "shinka_bundle"):
         _spec = importlib.util.spec_from_file_location(_sibling, Path(__file__).with_name(f"{_sibling}.py"))
         assert _spec is not None
         assert _spec.loader is not None
         _sibling_modules[_sibling] = importlib.util.module_from_spec(_spec)
         sys.modules[_sibling] = _sibling_modules[_sibling]
         _spec.loader.exec_module(_sibling_modules[_sibling])
+    harness_bridge = _sibling_modules["harness_bridge"]
     repo_tree = _sibling_modules["repo_tree"]
     shinka_bundle = _sibling_modules["shinka_bundle"]
 
@@ -76,6 +87,7 @@ _PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _TOKEN_NAMES = ("prompt_tokens", "completion_tokens")
 _LANGUAGE = "markdown"
+_LANGUAGE_EXT = "md"
 _BLOCK_START = "<!-- EVOLVE-BLOCK-START -->"
 _BLOCK_END = "<!-- EVOLVE-BLOCK-END -->"
 _PART_PREFIX = "<!-- SKYNET-PART "
@@ -90,6 +102,26 @@ _KIND_MUTATION = "mutation"
 _KIND_META_NOTES = "meta_notes"
 _KIND_NOVELTY_JUDGE = "novelty_judge"
 _KIND_EMBEDDING = "embedding"
+_AGENT_PROGRAM_FILE = "program.md"
+# Where the launch writes Pi's config inside a scratch directory; never part of a version.
+_AGENT_CONFIG_DIR = ".skynet"
+_AGENT_KEY_ENV = re.compile(r"[?&]api_key_env=([A-Za-z0-9_]+)$")
+_AGENT_NAME = re.compile(r"^\W*NAME\W*:[\s*_]*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
+_AGENT_DESCRIPTION = re.compile(r"^\W*DESCRIPTION\W*:[\s*_]*(.+)", re.MULTILINE | re.IGNORECASE | re.DOTALL)
+_AGENT_FINISH = (
+    "When you are done editing, reply with one line `NAME: <short_lowercase_name_with_underscores>` "
+    "followed by one line `DESCRIPTION: <what you changed and why it should score higher>`."
+)
+_AGENT_TEXT_TASK = (
+    f"# Task\nThe current program is the file `{_AGENT_PROGRAM_FILE}` in your working directory. Improve it so "
+    "it scores higher by editing that file in place with your tools. Change only the text between the "
+    "EVOLVE-BLOCK markers, and keep every marker and every SKYNET-PART line exactly as it is. " + _AGENT_FINISH
+)
+_AGENT_REPO_TASK = (
+    "# Task\nYour working directory is the repository as the current version holds it. Improve it so it "
+    "scores higher by editing files with your tools; read any file you need first. Only changes to the text "
+    "files you may change are kept, and deleting a file is not. " + _AGENT_FINISH
+)
 _TASK_SYSTEM_MESSAGE = (
     "You are an expert at improving text artifacts such as prompts, instructions and agent "
     "configurations. The program is a Markdown document; only the text between the "
@@ -427,14 +459,21 @@ def build_config(
     if background:
         system_message += f"\n\nBackground:\n{background}"
     max_iterations = payload.get("max_iterations")
-    evolution = {
-        "task_sys_msg": system_message,
-        "patch_types": ["diff", "full", "cross"],
-        "patch_type_probs": [
+    if settings.get("editor") == "agent":
+        # The agent edits files itself, so the prompt it gets is built from a
+        # full-rewrite prompt with the answer format stripped.
+        patch_types, patch_type_probs = ["full"], [1.0]
+    else:
+        patch_types = ["diff", "full", "cross"]
+        patch_type_probs = [
             float(settings.get("patch_diff", 0.6)),
             float(settings.get("patch_full", 0.3)),
             float(settings.get("patch_cross", 0.1)),
-        ],
+        ]
+    evolution = {
+        "task_sys_msg": system_message,
+        "patch_types": patch_types,
+        "patch_type_probs": patch_type_probs,
         "num_generations": generation_budget(int(payload["max_evals"]), examples, max_iterations),
         "max_patch_resamples": int(settings.get("max_patch_resamples", 3)),
         # A repository answer that only opens files spends an attempt; the
@@ -776,6 +815,400 @@ def install_repo_mode(bundle: Any, runner: Any) -> None:
     sampler.sample_fix = sample_fix
     shinka_async_runner.apply_patch_async = apply_bundle_patch
     shinka_async_runner.get_code_embedding_async = embed_changes
+
+
+def agent_prompt(system: str, user: str, *, repo: bool) -> str:
+    """Turn a mutation prompt into the task a coding agent gets.
+
+    Upstream's text prompt ends its system message with a full-rewrite answer
+    format and its user message with a task asking for that answer; both are
+    replaced by an instruction to edit the files in place. A repository
+    prompt built with the ``agent`` kind carries no answer format already.
+
+    Args:
+        system: The sampled system message.
+        user: The sampled user message.
+        repo: Whether the version is a repository bundle.
+
+    Returns:
+        One prompt: the system context, the version context, then the task.
+    """
+    if not repo:
+        cut = min((at for at in (system.find(fmt) for fmt in FULL_SYS_FORMATS if fmt) if at >= 0), default=-1)
+        if cut >= 0:
+            system = system[:cut]
+        task_at = user.rfind("\n# Task\n")
+        if task_at >= 0:
+            user = user[:task_at]
+    task = _AGENT_REPO_TASK if repo else _AGENT_TEXT_TASK
+    return "\n\n".join(part.strip() for part in (system, user, task) if part.strip()) + "\n"
+
+
+def parse_agent_answer(text: str | None) -> tuple[str | None, str | None]:
+    """Read the edit name and description an agent finished with.
+
+    Args:
+        text: The agent's final message.
+
+    Returns:
+        ``(name, description)``; either is ``None`` when the agent left it out.
+    """
+    if not text:
+        return None, None
+    name = _AGENT_NAME.search(text)
+    description = _AGENT_DESCRIPTION.search(text)
+    return (
+        name.group(1).strip().strip("`*_ ") if name else None,
+        description.group(1).strip() if description else None,
+    )
+
+
+def _git(cwd: Path, *arguments: str) -> str:
+    """Run git in a directory and fail loudly.
+
+    Args:
+        cwd: Directory to run in.
+        *arguments: Arguments after ``git``.
+
+    Returns:
+        Standard output.
+
+    Raises:
+        RuntimeError: When git exits non-zero.
+    """
+    result = subprocess.run(["git", *arguments], cwd=cwd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"git {arguments[0]} failed: {(result.stderr or result.stdout).strip()[-500:]}")
+    return result.stdout
+
+
+class AgentEditor:
+    """Write a new version by letting a Pi coding agent edit the parent's files."""
+
+    def __init__(
+        self,
+        config: Mapping[str, Any],
+        workdir: Path,
+        *,
+        ledger: UsageLedger,
+        deadline: float,
+        part_names: Sequence[str] | None = None,
+        bundle: Any = None,
+    ) -> None:
+        """Bind the editor to the run.
+
+        Args:
+            config: Payload ``shinka_editor``: ``launches`` (one serialized Pi
+                launch per optimization model, each naming its ``key_env``)
+                and ``max_tool_calls``.
+            workdir: Run folder the scratch directories go under.
+            ledger: Usage ledger the sessions' tokens are counted in.
+            deadline: ``time.monotonic()`` value no session may run past.
+            part_names: The starting version's part names, or ``None`` for a text version.
+            bundle: ``shinka_bundle.RepoBundle`` for a repository target.
+        """
+        self.launches = {str(launch["key_env"]): dict(launch) for launch in config.get("launches") or ()}
+        max_tool_calls = config.get("max_tool_calls")
+        self.max_tool_calls = int(max_tool_calls) if max_tool_calls else None
+        self.workdir = workdir
+        self.ledger = ledger
+        self.deadline = deadline
+        self.part_names = part_names
+        self.bundle = bundle
+        self._git_lock = threading.Lock()
+
+    def launch_for(self, model_name: str) -> dict[str, Any]:
+        """Find the Pi launch routed like an upstream model.
+
+        Args:
+            model_name: Upstream ``local/...`` model name the bandit picked.
+
+        Returns:
+            The serialized launch.
+
+        Raises:
+            ValueError: When no launch reads the model's key variable.
+        """
+        match = _AGENT_KEY_ENV.search(model_name)
+        launch = self.launches.get(match.group(1)) if match else None
+        if launch is None:
+            raise ValueError(f"No agent editor launch is configured for {model_name!r}.")
+        return launch
+
+    def prompt(
+        self,
+        sampler: Any,
+        parent: Any,
+        archive_inspirations: Sequence[Any],
+        top_k_inspirations: Sequence[Any],
+        meta_recommendations: str | None,
+    ) -> str:
+        """Build the agent's task from the same context upstream's mutation prompt holds.
+
+        Args:
+            sampler: Upstream's prompt sampler.
+            parent: Version being mutated.
+            archive_inspirations: Archive versions upstream picked.
+            top_k_inspirations: Best versions upstream picked.
+            meta_recommendations: Upstream's meta notes.
+
+        Returns:
+            The prompt.
+        """
+        if self.bundle is not None:
+            system, user = self.bundle.prompt(
+                "agent",
+                parent,
+                system_message=sampler.task_sys_msg or shinka_bundle.REPO_SYSTEM_MESSAGE,
+                inspirations=[*archive_inspirations, *top_k_inspirations],
+                meta_recommendations=meta_recommendations,
+                use_text_feedback=bool(getattr(sampler, "use_text_feedback", True)),
+            )
+            return agent_prompt(system, user, repo=True)
+        system, user, _ = sampler.sample(
+            parent=parent,
+            archive_inspirations=list(archive_inspirations),
+            top_k_inspirations=list(top_k_inspirations),
+            meta_recommendations=meta_recommendations,
+        )
+        return agent_prompt(system, user, repo=False)
+
+    def edit(self, parent_code: str, prompt: str, model_name: str, patch_dir: Path) -> dict[str, Any]:
+        """Run one agent session on a copy of the parent and read back the version it leaves.
+
+        Args:
+            parent_code: The parent's program text or bundle.
+            prompt: The agent's task.
+            model_name: Upstream model name the bandit picked.
+            patch_dir: Upstream's generation folder; the new version is written there.
+
+        Returns:
+            ``cost``, ``tool_calls``, ``tool_cap_reached``, ``name``,
+            ``description``, and either ``code``, ``patch``, ``patch_path`` and
+            ``changed`` for a new version or ``error`` when there is none.
+        """
+        launch = self.launch_for(model_name)
+        scratch = uuid.uuid4().hex[:12]
+        workspace = self.workdir / "agent-edits" / scratch
+        session_dir = self.workdir / "agent-sessions" / scratch
+        self._prepare(parent_code, workspace)
+        try:
+            outcome = harness_bridge.run_session(
+                {**launch, "instructions_file": None, "max_tool_calls": self.max_tool_calls},
+                workspace=workspace,
+                prompt=prompt,
+                model=str(launch["model"]),
+                session_dir=session_dir,
+                timeout_seconds=max(1.0, self.deadline - time.monotonic()),
+                api_key=os.environ.get(str(launch["key_env"]), ""),
+            )
+            self.ledger.record(
+                model_name,
+                SimpleNamespace(
+                    input_tokens=outcome.usage.get("input_tokens", 0),
+                    output_tokens=outcome.usage.get("output_tokens", 0),
+                ),
+            )
+            name, description = parse_agent_answer(outcome.text)
+            report: dict[str, Any] = {
+                "cost": outcome.cost_usd,
+                "tool_calls": outcome.tool_calls,
+                "tool_cap_reached": outcome.tool_cap_reached,
+                "name": name,
+                "description": description,
+            }
+            if outcome.failed:
+                report["error"] = "The agent session failed: " + harness_bridge.failure_detail(outcome, limit=1000)
+                return report
+            try:
+                code, patch, changed = self._collect(parent_code, workspace)
+            except ValueError as exc:
+                report["error"] = str(exc)
+                return report
+        finally:
+            self._discard(workspace)
+        patch_dir.mkdir(parents=True, exist_ok=True)
+        (patch_dir / f"original.{_LANGUAGE_EXT}").write_text(parent_code, encoding="utf-8")
+        (patch_dir / f"main.{_LANGUAGE_EXT}").write_text(code, encoding="utf-8")
+        patch_path = patch_dir / "edit.diff"
+        patch_path.write_text(patch, encoding="utf-8")
+        report.update(code=code, patch=patch, patch_path=patch_path, changed=changed)
+        return report
+
+    def _prepare(self, parent_code: str, workspace: Path) -> None:
+        """Lay the parent version out as real files in a fresh scratch directory.
+
+        Args:
+            parent_code: The parent's program text or bundle.
+            workspace: Scratch directory to create.
+        """
+        workspace.parent.mkdir(parents=True, exist_ok=True)
+        if self.bundle is None:
+            workspace.mkdir()
+            (workspace / _AGENT_PROGRAM_FILE).write_text(parent_code, encoding="utf-8")
+            return
+        with self._git_lock:
+            _git(self.bundle.checkout, "worktree", "add", "--quiet", "--detach", str(workspace), self.bundle.start)
+        for path, text in shinka_bundle.decode_bundle(parent_code).items():
+            target = workspace / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+
+    def _collect(self, parent_code: str, workspace: Path) -> tuple[str, str, int]:
+        """Read the version the agent left back into a program.
+
+        Args:
+            parent_code: The parent's program text or bundle.
+            workspace: The session's scratch directory.
+
+        Returns:
+            ``(code, unified_diff, changed_files)``.
+
+        Raises:
+            ValueError: When the agent changed nothing or broke the program's structure.
+        """
+        if self.bundle is None:
+            try:
+                edited = (workspace / _AGENT_PROGRAM_FILE).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise ValueError(f"The agent left no readable {_AGENT_PROGRAM_FILE}: {exc}") from exc
+            code = pack_program(unpack_program(edited, self.part_names))
+            if code == parent_code:
+                raise ValueError("The agent left the program unchanged.")
+            original = f"original.{_LANGUAGE_EXT}"
+            patch = "".join(
+                difflib.unified_diff(
+                    parent_code.splitlines(keepends=True),
+                    code.splitlines(keepends=True),
+                    fromfile=f"a/{original}",
+                    tofile=f"b/{original}",
+                )
+            )
+            return code, patch, 1
+        bundle = self.bundle
+        parent = shinka_bundle.decode_bundle(parent_code)
+        _git(workspace, "add", "--all", "--", ".", f":(exclude){_AGENT_CONFIG_DIR}")
+        listed = _git(workspace, "diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=d", "HEAD")
+        files: dict[str, str] = {}
+        for path in filter(None, listed.split("\0")):
+            if bundle.rule_problem(path) is not None:
+                continue
+            data = (workspace / path).read_bytes()
+            if b"\0" in data or len(data) > shinka_bundle.MAX_FILE_BYTES:
+                continue
+            try:
+                files[path] = data.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+        files = bundle.normalize(files)
+        if files == bundle.normalize(parent):
+            raise ValueError("The agent left every file as it was.")
+        touched = sorted(set(parent) | set(files))
+        patch = "".join(
+            shinka_bundle.file_diff(path, bundle.current(parent, path), bundle.current(files, path)) for path in touched
+        )
+        changed = sum(1 for path in touched if bundle.current(parent, path) != bundle.current(files, path))
+        return shinka_bundle.encode_bundle(files), patch, changed
+
+    def _discard(self, workspace: Path) -> None:
+        """Remove a session's scratch directory.
+
+        Args:
+            workspace: The scratch directory.
+        """
+        if self.bundle is not None:
+            with self._git_lock, contextlib.suppress(RuntimeError):
+                _git(self.bundle.checkout, "worktree", "remove", "--force", str(workspace))
+        shutil.rmtree(workspace, ignore_errors=True)
+        if self.bundle is not None:
+            with self._git_lock, contextlib.suppress(RuntimeError):
+                _git(self.bundle.checkout, "worktree", "prune")
+
+
+def install_agent_editor(editor: AgentEditor, runner: Any) -> None:
+    """Make upstream write every new version with the agent editor.
+
+    Only the patch step changes: upstream still picks the parent,
+    inspirations and model (its bandit), and files, scores and selects the
+    version the agent leaves exactly as it would one model call's patch.
+    Repairs of a failed version (upstream's fix mode) stay single calls.
+
+    Args:
+        editor: The run's agent editor.
+        runner: The constructed upstream ``ShinkaEvolveRunner``.
+    """
+
+    async def run_patch(
+        parent_program: Any,
+        archive_programs: list[Any],
+        top_k_programs: list[Any],
+        generation: int,
+        meta_recs: str | None = None,
+        novelty_attempt: int = 1,
+        resample_attempt: int = 1,
+        model_sample_probs: list[float] | None = None,
+        model_posterior: list[float] | None = None,
+    ) -> tuple[str | None, dict[str, Any], bool]:
+        """Stand in for upstream's ``_run_patch_async`` with one agent session.
+
+        Args:
+            parent_program: Version being mutated.
+            archive_programs: Archive versions upstream picked.
+            top_k_programs: Best versions upstream picked.
+            generation: Generation the new version is filed under.
+            meta_recs: Upstream's meta notes.
+            novelty_attempt: Upstream's novelty attempt number.
+            resample_attempt: Upstream's resample attempt number.
+            model_sample_probs: The bandit's model probabilities for this generation.
+            model_posterior: The bandit's posterior; unused, as upstream only logs it.
+
+        Returns:
+            Upstream's ``(patch_text, meta_patch_data, success)``.
+        """
+        llm_kwargs = runner.llm.get_kwargs(model_sample_probs=model_sample_probs)
+        model_name = str(llm_kwargs.get("model_name", "unknown"))
+        selection = getattr(runner, "llm_selection", None)
+        if selection is not None:
+            selection.update_submitted(model_name)
+        try:
+            prompt = editor.prompt(runner.prompt_sampler, parent_program, archive_programs, top_k_programs, meta_recs)
+            report = await asyncio.to_thread(
+                editor.edit,
+                str(parent_program.code),
+                prompt,
+                model_name,
+                Path(runner.results_dir) / f"gen_{generation}",
+            )
+        except Exception as exc:
+            report = {"cost": 0.0, "error": f"{type(exc).__name__}: {exc}"}
+        if selection is not None:
+            selection.update_cost(arm=model_name, cost=report["cost"])
+        meta: dict[str, Any] = {
+            "api_costs": report["cost"],
+            "patch_type": "agent",
+            "patch_name": report.get("name"),
+            "patch_description": report.get("description"),
+            "novelty_attempt": novelty_attempt,
+            "resample_attempt": resample_attempt,
+            "patch_attempt": 1,
+            "system_prompt_id": None,
+            **llm_kwargs,
+            "tool_calls": report.get("tool_calls", 0),
+            "tool_cap_reached": report.get("tool_cap_reached", False),
+            "llm_result": None,
+        }
+        if report.get("code") is None:
+            meta["error_attempt"] = "The agent editor produced no new version"
+            meta["last_error_msg"] = report.get("error")
+            return None, meta, False
+        diff_summary: dict[str, Any] = {}
+        if summarize_diff is not None:
+            diff_summary = summarize_diff(str(report["patch_path"]))
+            diff_summary = diff_summary.get(f"original.{_LANGUAGE_EXT}", diff_summary)
+        meta.update(num_applied=report["changed"], error_attempt=None, diff_summary=diff_summary)
+        return report["patch"], meta, True
+
+    runner._run_patch_async = run_patch
 
 
 def _feedback_text(info: Mapping[str, Any]) -> str:
@@ -1159,6 +1592,16 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     )
     if bundle is not None:
         install_repo_mode(bundle, runner)
+    if payload.get("shinka_editor"):
+        editor = AgentEditor(
+            payload["shinka_editor"],
+            workdir,
+            ledger=ledger,
+            deadline=time.monotonic() + timeout,
+            part_names=part_names,
+            bundle=bundle,
+        )
+        install_agent_editor(editor, runner)
     document: dict[str, Any] = {}
     finished = threading.Event()
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -481,3 +482,286 @@ def test_repository_config_uses_the_file_aware_system_message(tmp_path: Path) ->
 
     assert config["task_sys_msg"].startswith(shinka_bundle.REPO_SYSTEM_MESSAGE)
     assert config["max_patch_attempts"] == text["max_patch_attempts"] + shinka_bundle.OPEN_ROUNDS
+
+
+_EDITOR_MODEL = "local/claude-test@https://gw.example/v1?api_key_env=SKYNET_SHINKA_KEY_0"
+
+
+def _editor_config() -> dict[str, Any]:
+    """Build the ``shinka_editor`` payload block for one optimization model.
+
+    Returns:
+        The block, with a launch reading ``SKYNET_SHINKA_KEY_0``.
+    """
+    launch = {
+        "run_command": "pi",
+        "files": {".skynet/pi/models.json": "{}"},
+        "env": {},
+        "output_format": "pi",
+        "model": "claude-test",
+        "key_env": "SKYNET_SHINKA_KEY_0",
+        "price": {"input": 0.0, "output": 0.0},
+    }
+    return {"max_tool_calls": 7, "launches": [launch]}
+
+
+class _Selection:
+    """Record the bandit updates the editor makes."""
+
+    def __init__(self) -> None:
+        """Start with no updates."""
+        self.submitted: list[str] = []
+        self.costs: list[tuple[str, float]] = []
+
+    def update_submitted(self, model_name: str) -> None:
+        """Record a submission.
+
+        Args:
+            model_name: Arm submitted.
+        """
+        self.submitted.append(model_name)
+
+    def update_cost(self, arm: str, cost: float) -> None:
+        """Record a cost.
+
+        Args:
+            arm: Arm charged.
+            cost: Its cost.
+        """
+        self.costs.append((arm, cost))
+
+
+def _fake_session(edit: Callable[[Path], None], calls: list[dict[str, Any]], *, returncode: int = 0) -> Any:
+    """Stand in for ``harness_bridge.run_session``: write the launch files, then apply an edit.
+
+    Args:
+        edit: Change the fake agent makes in its workspace.
+        calls: Receives each call's launch, prompt and key.
+        returncode: Exit status the session reports.
+
+    Returns:
+        The fake.
+    """
+
+    def run(proposer: dict[str, Any], *, workspace: Path, prompt: str, api_key: str, **_: Any) -> Any:
+        """Edit the workspace like an agent would.
+
+        Args:
+            proposer: The launch.
+            workspace: The scratch directory.
+            prompt: The agent's task.
+            api_key: The route key.
+            **_: Other run options.
+
+        Returns:
+            A finished session.
+        """
+        calls.append({"proposer": proposer, "prompt": prompt, "api_key": api_key})
+        for relative, content in proposer["files"].items():
+            (workspace / relative).parent.mkdir(parents=True, exist_ok=True)
+            (workspace / relative).write_text(content)
+        edit(workspace)
+        return shinka_runner.harness_bridge.SessionOutcome(
+            text="Done.\nNAME: sharper_rules\nDESCRIPTION: Tightened the rules.",
+            stdout="",
+            stderr="boom" if returncode else "",
+            returncode=returncode,
+            usage={"input_tokens": 120, "output_tokens": 30},
+            cost_usd=0.25,
+            duration_seconds=1.0,
+            tool_calls=3,
+        )
+
+    return run
+
+
+def _install_editor(tmp_path: Path, bundle: Any = None, part_names: list[str] | None = None) -> tuple[Any, Any, Any]:
+    """Install the agent editor on a stand-in upstream runner.
+
+    Args:
+        tmp_path: Run folder.
+        bundle: Repository bundle, or ``None`` for a text target.
+        part_names: The text target's part names.
+
+    Returns:
+        ``(runner, selection, ledger)``.
+    """
+    ledger = shinka_runner.UsageLedger(None)
+    editor = shinka_runner.AgentEditor(
+        _editor_config(), tmp_path, ledger=ledger, deadline=1e12, part_names=part_names, bundle=bundle
+    )
+    sampler = SimpleNamespace(
+        task_sys_msg="TASK",
+        use_text_feedback=True,
+        sample=lambda **_: ("TASK\nANSWER FORMAT", "Current program\n\n# Task\nRewrite it.", "full"),
+    )
+    selection = _Selection()
+    runner = SimpleNamespace(
+        llm=SimpleNamespace(get_kwargs=lambda model_sample_probs=None: {"model_name": _EDITOR_MODEL}),
+        llm_selection=selection,
+        prompt_sampler=sampler,
+        results_dir=str(tmp_path / "results"),
+    )
+    shinka_runner.install_agent_editor(editor, runner)
+    return runner, selection, ledger
+
+
+def test_config_turns_the_patch_mix_into_full_rewrites_for_the_agent_editor(tmp_path: Path) -> None:
+    """Sample only full-rewrite prompts in agent mode, whatever patch mix the settings hold.
+
+    Args:
+        tmp_path: Results directory.
+    """
+    settings = BlackboxShinkaSettings(editor="agent").model_dump()
+    evolution = shinka_runner.build_config(_payload(shinka=settings), str(tmp_path), 1)["evolution"]
+
+    assert evolution["patch_types"] == ["full"]
+    assert evolution["patch_type_probs"] == [1.0]
+
+
+def test_editor_setting_accepts_only_the_two_modes() -> None:
+    """Default to upstream's single call and refuse an unknown editor."""
+    assert BlackboxShinkaSettings().editor == "single_call"
+    assert BlackboxShinkaSettings(editor="agent").editor == "agent"
+    with pytest.raises(ValueError):
+        BlackboxShinkaSettings(editor="swarm")
+
+
+def test_agent_prompt_swaps_the_answer_format_for_editing_in_place(monkeypatch: Any) -> None:
+    """Drop upstream's full-rewrite format and task, and ask the agent to edit the file itself.
+
+    Args:
+        monkeypatch: Supplies upstream's answer formats.
+    """
+    monkeypatch.setattr(shinka_runner, "FULL_SYS_FORMATS", ["\nRewrite the program. Use <NAME> and <CODE>."])
+    system = "TASK\n\nRewrite the program. Use <NAME> and <CODE>."
+    user = "Here is the program.\n\nFeedback: too long.\n\n# Task\n\nRewrite the program."
+
+    prompt = shinka_runner.agent_prompt(system, user, repo=False)
+
+    assert "<CODE>" not in prompt
+    assert "Rewrite the program." not in prompt
+    assert "Feedback: too long." in prompt
+    assert prompt.startswith("TASK")
+    assert "program.md" in prompt
+    assert "NAME:" in prompt
+
+
+def test_agent_answer_names_and_describes_the_edit() -> None:
+    """Read the closing NAME and DESCRIPTION lines, tolerating their absence."""
+    assert shinka_runner.parse_agent_answer("ok\n**NAME:** `tighter`\nDESCRIPTION: Cut filler.\nMore.") == (
+        "tighter",
+        "Cut filler.\nMore.",
+    )
+    assert shinka_runner.parse_agent_answer(None) == (None, None)
+    assert shinka_runner.parse_agent_answer("no markers") == (None, None)
+
+
+def test_agent_editor_writes_a_text_version_from_the_agents_edits(tmp_path: Path, monkeypatch: Any) -> None:
+    """Run the agent on the parent's file and hand upstream the edited program as a full replacement.
+
+    Args:
+        tmp_path: Run folder.
+        monkeypatch: Replaces the harness session and the route key.
+    """
+    monkeypatch.setenv("SKYNET_SHINKA_KEY_0", "route-key")
+    calls: list[dict[str, Any]] = []
+
+    def edit(workspace: Path) -> None:
+        """Rewrite the system part.
+
+        Args:
+            workspace: Scratch directory.
+        """
+        program = workspace / "program.md"
+        program.write_text(program.read_text().replace("\nold\n", "\nnew rules\n"))
+
+    monkeypatch.setattr(shinka_runner.harness_bridge, "run_session", _fake_session(edit, calls))
+    runner, selection, ledger = _install_editor(tmp_path, part_names=["system", "user"])
+    parent = SimpleNamespace(code=shinka_runner.pack_program({"system": "old", "user": "keep"}))
+
+    patch, meta, success = asyncio.run(runner._run_patch_async(parent, [], [], 3, "notes"))
+
+    assert success is True
+    assert "+new rules" in patch
+    assert "-old" in patch
+    written = (tmp_path / "results" / "gen_3" / "main.md").read_text()
+    assert shinka_runner.unpack_program(written, ["system", "user"]) == {"system": "new rules", "user": "keep"}
+    assert meta["patch_type"] == "agent"
+    assert meta["patch_name"] == "sharper_rules"
+    assert meta["patch_description"] == "Tightened the rules."
+    assert meta["api_costs"] == pytest.approx(0.25)
+    assert meta["tool_calls"] == 3
+    assert meta["model_name"] == _EDITOR_MODEL
+    assert meta["num_applied"] == 1
+    assert selection.submitted == [_EDITOR_MODEL]
+    assert selection.costs == [(_EDITOR_MODEL, 0.25)]
+    assert ledger.usage_by_model[_EDITOR_MODEL]["total_tokens"] == 150
+    assert calls[0]["api_key"] == "route-key"
+    assert calls[0]["proposer"]["max_tool_calls"] == 7
+    assert calls[0]["proposer"]["instructions_file"] is None
+    assert "Current program" in calls[0]["prompt"]
+    assert not list((tmp_path / "agent-edits").iterdir())
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_agent_editor_reports_no_version_for_an_unchanged_or_failed_session(
+    tmp_path: Path, monkeypatch: Any, returncode: int
+) -> None:
+    """Hand upstream a failed attempt when the agent changed nothing or its session failed.
+
+    Args:
+        tmp_path: Run folder.
+        monkeypatch: Replaces the harness session.
+        returncode: Exit status of the fake session.
+    """
+    monkeypatch.setattr(
+        shinka_runner.harness_bridge, "run_session", _fake_session(lambda _: None, [], returncode=returncode)
+    )
+    runner, selection, _ = _install_editor(tmp_path)
+    parent = SimpleNamespace(code=shinka_runner.pack_program("Answer briefly."))
+
+    patch, meta, success = asyncio.run(runner._run_patch_async(parent, [], [], 1))
+
+    assert (patch, success) == (None, False)
+    assert meta["patch_type"] == "agent"
+    assert meta["api_costs"] == pytest.approx(0.25)
+    assert ("unchanged" if returncode == 0 else "boom") in meta["last_error_msg"]
+    assert selection.costs == [(_EDITOR_MODEL, 0.25)]
+    assert not (tmp_path / "results" / "gen_1").exists()
+
+
+def test_agent_editor_runs_on_a_real_checkout_of_a_repository_version(tmp_path: Path, monkeypatch: Any) -> None:
+    """Lay the parent bundle out over the repository, and keep only allowed file changes.
+
+    Args:
+        tmp_path: Run folder.
+        monkeypatch: Replaces the harness session.
+    """
+    _, bundle = _repo(tmp_path)
+    seen: dict[str, str] = {}
+
+    def edit(workspace: Path) -> None:
+        """Change the editable file, a file outside the editable paths, and add one.
+
+        Args:
+            workspace: Scratch checkout.
+        """
+        seen["util"] = (workspace / "src/util.py").read_text()
+        (workspace / "src/util.py").write_text("SCALE = 9\n")
+        (workspace / "src/extra.py").write_text("EXTRA = 1\n")
+        (workspace / "app.py").write_text("tampered\n")
+
+    monkeypatch.setattr(shinka_runner.harness_bridge, "run_session", _fake_session(edit, []))
+    runner, _, _ = _install_editor(tmp_path, bundle=bundle)
+    parent = SimpleNamespace(code=shinka_bundle.encode_bundle({"src/util.py": "SCALE = 4\n"}))
+
+    patch, meta, success = asyncio.run(runner._run_patch_async(parent, [], [], 2))
+
+    assert success is True
+    assert seen["util"] == "SCALE = 4\n"
+    files = shinka_bundle.decode_bundle((tmp_path / "results" / "gen_2" / "main.md").read_text())
+    assert files == {"src/util.py": "SCALE = 9\n", "src/extra.py": "EXTRA = 1\n"}
+    assert "+SCALE = 9" in patch
+    assert meta["num_applied"] == 2
+    assert not list((tmp_path / "agent-edits").iterdir())

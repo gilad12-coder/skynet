@@ -23,6 +23,7 @@ from gepa.oa.task import Task as UpstreamTask
 
 from core.billing.pricing import model_token_costs
 from core.billing.runtime import UsagePendingError
+from core.billing.usage_tags import USAGE_TAGS_HEADER
 from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.constants import PROGRESS_CANDIDATE, PROGRESS_CASE_SCORED
 from core.exceptions import ServiceError
@@ -925,7 +926,13 @@ def test_native_readiness_probes_shinka_in_the_image_venv(monkeypatch: pytest.Mo
 def test_shinka_runner_files_carry_the_pinned_requirements() -> None:
     """Ship the self-contained runner with a requirements file pinning the upstream release."""
     files = native_runtime._runner_files("shinka_evolve")
-    assert set(files) == {"shinka_runner.py", "shinka_bundle.py", "repo_tree.py", "shinka_requirements.txt"}
+    assert set(files) == {
+        "shinka_runner.py",
+        "shinka_bundle.py",
+        "harness_bridge.py",
+        "repo_tree.py",
+        "shinka_requirements.txt",
+    }
     assert f"shinka-evolve=={native_runtime.SHINKA_VERSION}" in files["shinka_requirements.txt"]
 
 
@@ -974,6 +981,61 @@ def test_shinka_transport_routes_every_model_through_its_own_token(
     assert session.calls[1][0].count("shinka_runner.py") == 1
     assert result.best_candidate == {"system": "better"}
     assert result.best_score == 0.5
+    assert "shinka_editor" not in payload
+    assert payload["proposer"]["max_tool_calls"] == 100
+
+
+def test_shinka_agent_editor_ships_a_tagged_pi_launch_per_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Prepare Pi and hand the guest one file-tools-only Pi launch per optimization route, billed as mutations.
+
+    Args:
+        tmp_path: Artifact destination.
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    session = FakeSession()
+    session.candidate = "better"
+    ctx = _context(tmp_path, FakeRuntime(session))
+    ctx.native_options = replace(
+        ctx.native_options,
+        proposer=BlackboxProposer(harness="pi", max_tool_calls=12),
+        shinka={"editor": "agent"},
+        shinka_models=(
+            {"model": "claude-test", "url": "https://gateway.example/v1", "token": "route-a"},
+            {"model": "gpt-test", "url": "https://gateway.example/v1", "token": "route-b"},
+        ),
+    )
+    run_native_engine("shinka_evolve", Task("seed"), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+
+    payload = json.loads(session.files["native_input.json"])
+    editor = payload["shinka_editor"]
+    assert editor["max_tool_calls"] == 12
+    assert [launch["key_env"] for launch in editor["launches"]] == ["SKYNET_SHINKA_KEY_0", "SKYNET_SHINKA_KEY_1"]
+    launch = editor["launches"][0]
+    assert launch["model"] == "claude-test"
+    assert launch["output_format"] == "pi"
+    assert "--tools read,grep,find,ls,edit,write" in launch["run_command"]
+    assert "--no-extensions --no-skills --no-context-files" in launch["run_command"]
+    models = json.loads(launch["files"][".skynet/pi/models.json"])
+    provider = next(iter(models["providers"].values()))
+    tags = json.loads(provider["headers"][USAGE_TAGS_HEADER])
+    assert tags == {"caller": "proposer", "kind": "mutation"}
+    assert "route-a" not in session.files["native_input.json"]
+    assert "pi" in session.calls[0][0]
+    assert "node -e" in session.calls[0][0]
+
+
+def test_shinka_bootstrap_prepares_pi_only_for_the_agent_editor() -> None:
+    """Install Pi and check Node for the agent editor, and skip both for single-call ShinkaEvolve."""
+    plain = _bootstrap_command("vercel", engine_id="shinka_evolve", harness="pi", install_command="npm i -g pi@1")
+    agent = _bootstrap_command(
+        "vercel", engine_id="shinka_evolve", harness="pi", install_command="npm i -g pi@1", shinka_agent=True
+    )
+    assert "npm i -g pi@1" not in plain
+    assert "npm i -g pi@1" in agent
+    assert "node -e" in agent
 
 
 def test_shinka_novelty_hands_the_judge_and_embeddings_their_own_tokens(

@@ -103,6 +103,7 @@ _INTROS = {
         "For every file where the two differ, decide what the merged file should hold and write it in full."
     ),
     "fix": "The current version failed to score. Find the cause in the feedback and fix it by rewriting the files in full.",
+    "agent": "Improve the current version by editing its files in your working directory.",
 }
 
 
@@ -641,7 +642,9 @@ class RepoBundle:
         """Build the system and user messages for one mutation of a bundle version.
 
         Args:
-            kind: ``diff``, ``full``, ``cross`` or ``fix``.
+            kind: ``diff``, ``full``, ``cross``, ``fix``, or ``agent`` for a
+                coding agent that edits the files itself and so gets no
+                answer format.
             parent: Upstream program record being mutated.
             system_message: The run's task system message.
             inspirations: Other scored versions to learn from.
@@ -657,8 +660,9 @@ class RepoBundle:
         system = system_message
         if meta_recommendations not in (None, "none") and kind != "cross":
             system += f"\n\n# Potential Recommendations\n{meta_recommendations}"
-        system += _OPEN_FORMAT.format(files=MAX_OPEN_FILES, rounds=OPEN_ROUNDS)
-        system += _DIFF_FORMAT if kind == "diff" else _FULL_FORMAT
+        if kind != "agent":
+            system += _OPEN_FORMAT.format(files=MAX_OPEN_FILES, rounds=OPEN_ROUNDS)
+            system += _DIFF_FORMAT if kind == "diff" else _FULL_FORMAT
         budget = [_MAX_PROMPT_FILE_CHARS]
         sections = [_INTROS.get(kind, _INTROS["diff"])]
         listing = paths[:_MAX_TREE_ENTRIES]

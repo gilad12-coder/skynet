@@ -1116,7 +1116,7 @@ class HarnessTransport:
         )
         if outcome.timed_out:
             raise TimeoutError(f"Harness session {session.session_id} exceeded {timeout_seconds:.0f}s")
-        failed = outcome.returncode != 0
+        failed = outcome.failed
         usage = SessionUsage(
             input_tokens=outcome.usage.get("input_tokens", 0),
             output_tokens=outcome.usage.get("output_tokens", 0),
