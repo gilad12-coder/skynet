@@ -285,3 +285,74 @@ def test_shim_reports_why_the_harness_failed_on_stderr(tmp_path: Path) -> None:
     assert failed.returncode == 3
     assert json.loads(failed.stdout)["is_error"] is True
     assert "stream disconnected" in failed.stderr
+
+
+def _tool_events_command(count: int) -> str:
+    """Build a shell command that edits a file, streams Pi tool-call events, then lingers.
+
+    Args:
+        count: Tool calls to announce.
+
+    Returns:
+        The command.
+    """
+    lines = " ".join(
+        f"echo '{json.dumps({'type': 'tool_execution_start', 'toolCallId': f'c{index}'})}';" for index in range(count)
+    )
+    return f"echo edited > note.txt; {lines} sleep 5; echo late > late.txt"
+
+
+def test_tool_call_cap_stops_the_harness_and_keeps_its_edits(tmp_path: Path) -> None:
+    """Stop a harness once it starts more tool calls than the cap, without calling the session failed."""
+    proposer = {**_PLAIN, "output_format": "pi", "run_command": _tool_events_command(5), "max_tool_calls": 3}
+    workspace = tmp_path / "work"
+    outcome = run_session(proposer, workspace=workspace, prompt="x", model="m", session_dir=tmp_path / "session")
+    assert outcome.tool_cap_reached is True
+    # Events already in the pipe when the stop lands are still counted.
+    assert outcome.tool_calls > 3
+    assert outcome.duration_seconds < 4
+    assert outcome.failed is False
+    assert (workspace / "note.txt").read_text() == "edited\n"
+    assert not (workspace / "late.txt").exists()
+    document = result_document("sid", "m", outcome)
+    assert document["is_error"] is False
+    assert "tool-call cap" in document["result"]
+
+
+def test_tool_calls_are_counted_but_not_capped_without_a_cap(tmp_path: Path) -> None:
+    """Let a harness run to its end when the launch names no cap."""
+    command = _tool_events_command(5).replace("sleep 5; ", "")
+    proposer = {**_PLAIN, "output_format": "pi", "run_command": command}
+    outcome = run_session(proposer, workspace=tmp_path / "w", prompt="x", model="m", session_dir=tmp_path / "s")
+    assert outcome.tool_cap_reached is False
+    assert outcome.returncode == 0
+    assert (tmp_path / "w" / "late.txt").exists()
+
+
+def test_tool_call_ids_read_every_streaming_format() -> None:
+    """Name tool calls in the Pi, Codex, OpenCode and Claude stream shapes, and none in plain output."""
+    tool_call_ids = harness_bridge.tool_call_ids
+    assert tool_call_ids("pi", {"type": "tool_execution_start", "toolCallId": "a"}) == ["a"]
+    assert tool_call_ids("pi", {"type": "tool_execution_end", "toolCallId": "a"}) == []
+    started = {"type": "item.started", "item": {"id": "i1", "type": "command_execution"}}
+    assert tool_call_ids("codex", started) == ["i1"]
+    assert tool_call_ids("codex", {**started, "type": "item.completed"}) == ["i1"]
+    assert tool_call_ids("codex", {"type": "item.completed", "item": {"id": "i2", "type": "agent_message"}}) == []
+    assert tool_call_ids("opencode", {"type": "tool_use", "part": {"callID": "o1"}}) == ["o1"]
+    assistant = {
+        "type": "assistant",
+        "message": {"content": [{"type": "text"}, {"type": "tool_use", "id": "t1"}, {"type": "tool_use", "id": "t2"}]},
+    }
+    assert tool_call_ids("claude", assistant) == ["t1", "t2"]
+    assert tool_call_ids("plain", {"type": "tool_execution_start"}) == []
+
+
+def test_codex_tool_call_counts_once_across_start_and_completion(tmp_path: Path) -> None:
+    """Count a Codex item announced on start and settled on completion as one call."""
+    item = {"id": "i1", "type": "command_execution"}
+    events = [{"type": "item.started", "item": item}, {"type": "item.completed", "item": item}]
+    command = "; ".join(f"echo '{json.dumps(event)}'" for event in events)
+    proposer = {**_PLAIN, "output_format": "codex", "run_command": command, "max_tool_calls": 5}
+    outcome = run_session(proposer, workspace=tmp_path / "w", prompt="x", model="m", session_dir=tmp_path / "s")
+    assert outcome.tool_calls == 1
+    assert outcome.tool_cap_reached is False

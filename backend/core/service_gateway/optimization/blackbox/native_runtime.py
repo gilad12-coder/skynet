@@ -25,15 +25,15 @@ from .... import run_log
 from ....billing.model_gateway import raise_gateway_stop
 from ....billing.pricing import model_token_costs
 from ....billing.runtime import UsagePendingError
-from ....billing.usage_tags import CALLER_PROPOSER, usage_scope
+from ....billing.usage_tags import CALLER_PROPOSER, KIND_MUTATION, USAGE_TAGS_HEADER, encode_tags, usage_scope
 from ....config import Settings, settings
 from ....exceptions import ServiceError
-from ....models.blackbox import BLACKBOX_HARNESS_CLAUDE_CODE, BlackboxProposer, BlackboxTarget
+from ....models.blackbox import BLACKBOX_HARNESS_CLAUDE_CODE, BLACKBOX_HARNESS_PI, BlackboxProposer, BlackboxTarget
 from ..budget_stop import BudgetReached
 from . import harness_bridge, native_runner, repo_tree, sandbox_log
 from .agent_eval import gateway_from_settings
 from .feedback import emit_candidate, emit_case_scored
-from .harness import GatewayConfig, build_launch, launch_payload, pinned_harness_check
+from .harness import ENV_MODEL, GatewayConfig, build_launch, launch_payload, pi_editor_launch, pinned_harness_check
 from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, Task
 from .runner import side_info_json_default
 from .sandbox import (
@@ -251,6 +251,7 @@ def _runner_files(engine_id: str) -> dict[str, str]:
         return {
             _SHINKA_RUNNER_FILE: runner.read_text(encoding="utf-8"),
             _SHINKA_BUNDLE_FILE: runner.with_name(_SHINKA_BUNDLE_FILE).read_text(encoding="utf-8"),
+            _BRIDGE_FILE: Path(harness_bridge.__file__).read_text(encoding="utf-8"),
             _SHINKA_REQUIREMENTS_FILE: runner.with_name(_SHINKA_REQUIREMENTS_FILE).read_text(encoding="utf-8"),
             _REPO_TREE_FILE: Path(repo_tree.__file__).read_text(encoding="utf-8"),
         }
@@ -310,6 +311,7 @@ def _bootstrap_command(
     engine_id: str = "meta_harness",
     harness: str = BLACKBOX_HARNESS_CLAUDE_CODE,
     install_command: str | None = None,
+    shinka_agent: bool = False,
 ) -> str:
     """Build installation and preflight commands with immutable package versions.
 
@@ -319,15 +321,18 @@ def _bootstrap_command(
         engine_id: Native engine whose interpreter and packages are prepared.
         harness: Proposer harness the engine drives.
         install_command: Install step of a non-Claude proposer harness.
+        shinka_agent: ShinkaEvolve writes versions with Pi (its agent editor),
+            so Pi and Node are prepared as for a Pi proposer.
 
     Returns:
         Shell command that prepares the isolated source and runtime.
     """
     own_venv = engine_id in _OWN_VENV_ENGINES
     shinka = engine_id == "shinka_evolve"
-    # ShinkaEvolve calls its models directly; it never launches a proposer harness.
+    # ShinkaEvolve calls its models directly unless its agent editor runs Pi.
+    harnessless = shinka and not shinka_agent
     harness_install, harness_check = (
-        ("", "") if shinka else _harness_setup(harness, install_command, protected=protected)
+        ("", "") if harnessless else _harness_setup(harness, install_command, protected=protected)
     )
     floor = AUTOSADDLER_PYTHON_FLOOR if own_venv else PYTHON_FLOOR
     prepare = (
@@ -344,7 +349,7 @@ def _bootstrap_command(
             f"uv venv --python {_AUTOSADDLER_PYTHON} native_venv; "
             f"uv pip install --python native_venv/bin/python --no-deps {pins}; "
             'printf "%s\\n" "$PWD/native_venv/bin/python" > native-python.txt; '
-            + ("" if shinka else "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; ")
+            + ("" if harnessless else "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; ")
             + harness_install
         )
     elif not protected:
@@ -384,7 +389,7 @@ def _bootstrap_command(
         prepare += '; "$(cat native-python.txt)" -c ' + shlex.quote("import autosaddler.v2.core.engine")
     if shinka:
         prepare += '; "$(cat native-python.txt)" -c ' + shlex.quote("import shinka.core.async_runner")
-    if protected and not shinka:
+    if protected and not harnessless:
         prepare += "; node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'"
     return prepare
 
@@ -819,6 +824,43 @@ def _record_usage(options: NativeOptions, usage: dict[str, Any]) -> None:
                     destination[name] = destination.get(name, 0) + value
 
 
+def _shinka_editor(options: NativeOptions, relay: str | None) -> dict[str, Any]:
+    """Describe the Pi launch ShinkaEvolve's agent editor runs on each optimization model.
+
+    Pi talks to the same scoped route the bandit's model would, so its calls
+    are billed with the run, and tags them as mutation calls the way upstream's
+    own mutation calls are tagged.
+
+    Args:
+        options: The run's ShinkaEvolve routes, proposer settings and protection.
+        relay: The sandbox-local gateway relay, when the run has one.
+
+    Returns:
+        ``{"max_tool_calls", "launches"}``; ``launches`` follows ``shinka_models``
+        order, each a serialized launch with its ``model``, ``key_env`` and ``price``.
+    """
+    headers = {USAGE_TAGS_HEADER: encode_tags({"caller": CALLER_PROPOSER, "kind": KIND_MUTATION})}
+    launches = []
+    for index, route in enumerate(options.shinka_models):
+        launch = pi_editor_launch(
+            str(route["model"]),
+            GatewayConfig(url=relay or route["url"], api_key=harness_bridge.KEY_TOKEN),
+            headers=headers,
+            protected=options.budget_route is not None,
+        )
+        input_price, output_price = model_token_costs(route["model"])
+        launches.append(
+            {
+                **launch_payload(launch),
+                "harness": BLACKBOX_HARNESS_PI,
+                "model": launch.env[ENV_MODEL],
+                "key_env": SHINKA_KEY_ENV.format(index=index),
+                "price": {"input": input_price, "output": output_price},
+            }
+        )
+    return {"max_tool_calls": options.proposer.max_tool_calls, "launches": launches}
+
+
 def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: EngineContext) -> Result:
     """Execute an unchanged upstream agent engine inside the managed sandbox.
 
@@ -876,6 +918,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     runner_file = _SHINKA_RUNNER_FILE if shinka else _AUTOSADDLER_RUNNER_FILE if own_venv else _RUNNER_FILE
     relay = os.environ.get("SKYNET_BUDGET_RELAY_URL")
     proposer = options.proposer
+    editor = _shinka_editor(options, relay) if shinka and (options.shinka or {}).get("editor") == "agent" else None
     launch = build_launch(
         BlackboxTarget(
             kind="agent",
@@ -932,6 +975,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 "max_candidates_per_iter": proposer.max_candidates_per_iter,
                 "ralph": proposer.ralph,
                 "max_no_eval_seconds": proposer.max_no_eval_seconds,
+                "max_tool_calls": proposer.max_tool_calls,
             },
             "task": {
                 "name": engine_id,
@@ -961,6 +1005,8 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                     "key_env": SHINKA_EMBED_KEY_ENV,
                 }
                 payload["shinka_novelty_key_env"] = SHINKA_NOVELTY_KEY_ENV
+            if editor is not None:
+                payload["shinka_editor"] = editor
         if options.repo is not None:
             chunks = []
             # One upload per chunk: each is close to the per-request size cap.
@@ -984,8 +1030,9 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 options.runtime,
                 protected=options.budget_route is not None,
                 engine_id=engine_id,
-                harness=proposer.harness,
-                install_command=launch.install_command,
+                harness=BLACKBOX_HARNESS_PI if editor else proposer.harness,
+                install_command=editor["launches"][0]["install_command"] if editor else launch.install_command,
+                shinka_agent=editor is not None,
             ),
             timeout_seconds=min(_INSTALL_ALLOWANCE, lifetime - 1.0),
         )

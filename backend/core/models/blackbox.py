@@ -267,6 +267,11 @@ BLACKBOX_PROPOSER_EFFORTS = ("low", "medium", "high", "max")
 # AutoResearch, AutoSaddler and the Auto lanes built from them). Any harness
 # Skynet offers for agent targets can be the proposer; the engine knobs mirror
 # the upstream engine configs and are ignored by engines that lack them.
+# ``max_tool_calls`` caps the tool calls one proposer session may make: the
+# harness is stopped once it starts one more, and the edits it already made
+# stand. It also bounds each ShinkaEvolve agent-editor session. Harnesses whose
+# output reports no tool calls as they happen (Claude Code's single JSON
+# result, a custom command) are not capped.
 class BlackboxProposer(BaseModel):
     harness: str = BLACKBOX_HARNESS_CODEX
     install_command: str | None = None
@@ -276,6 +281,7 @@ class BlackboxProposer(BaseModel):
     max_candidates_per_iter: int | None = Field(default=None, ge=1, le=8)
     ralph: bool = True
     max_no_eval_seconds: float | None = Field(default=None, gt=0, le=7_200)
+    max_tool_calls: int = Field(default=100, ge=1, le=1000)
 
     @model_validator(mode="after")
     def _ensure_launchable(self) -> BlackboxProposer:
@@ -306,7 +312,12 @@ class BlackboxProposer(BaseModel):
 # ``patch_cross`` are the probabilities of each mutation kind and sum to 1.
 # ``novelty`` turns on duplicate rejection: proposals too close (by embedding)
 # to an existing version are judged by the first optimization model and
-# resampled when they add nothing new.
+# resampled when they add nothing new. ``editor`` picks how a version is
+# written: ``single_call`` is upstream's one model call answering with a
+# diff, full rewrite or crossover; ``agent`` runs a Pi coding agent (read,
+# search and edit tools only) on the parent's files in a scratch directory,
+# routed to the model the bandit picked, and the version is whatever it left
+# there. The patch mix is ignored in ``agent`` mode.
 class BlackboxShinkaSettings(BaseModel):
     num_islands: int = Field(default=2, ge=1, le=8)
     migration_interval: int = Field(default=10, ge=1, le=100)
@@ -334,6 +345,7 @@ class BlackboxShinkaSettings(BaseModel):
     meta_max_recommendations: int = Field(default=5, ge=1, le=20)
     max_parallel_evaluations: int = Field(default=2, ge=1, le=8)
     max_parallel_proposals: int = Field(default=2, ge=1, le=8)
+    editor: Literal["single_call", "agent"] = "single_call"
 
     @model_validator(mode="after")
     def _ensure_consistent(self) -> BlackboxShinkaSettings:
