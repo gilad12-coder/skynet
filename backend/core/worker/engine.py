@@ -949,6 +949,7 @@ class BackgroundWorker:
                                 binding_id=job_data["execution_budget_id"],
                                 engine=byok_engine,
                             )
+                            self._record_repo_commit(optimization_id, payload_dict["target"]["repo"]["commit"])
                             inferred_setup = infer_repo_setup(payload_dict, staged_repository, budget_gateway)
                             if inferred_setup is not None:
                                 self._record_setup_command(optimization_id, inferred_setup)
@@ -1567,6 +1568,24 @@ class BackgroundWorker:
         stored = self._job_store.get_job(optimization_id).get("payload")
         if isinstance(stored, dict) and isinstance(stored.get("target"), dict):
             stored["target"]["setup_command"] = command
+            self._job_store.update_job(optimization_id, payload=stored)
+
+    def _record_repo_commit(self, optimization_id: str, commit: str) -> None:
+        """Store the commit a repository run was pinned to on the run's own payload.
+
+        A run submitted on a branch is pinned at staging; recording it keeps a
+        resumed run on the same tree and lets the run page read the files its
+        versions patch.
+
+        Args:
+            optimization_id: The repository run.
+            commit: The pinned 40-character commit id.
+        """
+        stored = self._job_store.get_job(optimization_id).get("payload")
+        target = stored.get("target") if isinstance(stored, dict) else None
+        repo = target.get("repo") if isinstance(target, dict) else None
+        if isinstance(repo, dict) and repo.get("commit") != commit:
+            repo["commit"] = commit
             self._job_store.update_job(optimization_id, payload=stored)
 
     @contextlib.contextmanager

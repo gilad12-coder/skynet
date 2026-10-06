@@ -835,3 +835,12 @@ def test_an_inferred_setup_command_is_stored_on_the_run(worker: BackgroundWorker
         "repo": {"repository": "acme/app"},
         "setup_command": "uv sync --frozen",
     }
+
+
+def test_the_pinned_commit_is_stored_on_the_run(worker: BackgroundWorker, store: FakeJobStore) -> None:
+    """A run submitted on a branch keeps the commit staging pinned it to."""
+    store.seed_job("opt-repo", payload={"target": {"kind": "repo", "repo": {"repository": "acme/app"}}})
+
+    worker._record_repo_commit("opt-repo", "a" * 40)
+
+    assert store._jobs["opt-repo"]["payload"]["target"]["repo"] == {"repository": "acme/app", "commit": "a" * 40}

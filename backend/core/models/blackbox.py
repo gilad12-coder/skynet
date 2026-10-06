@@ -723,6 +723,36 @@ class BlackboxAgentRunResponse(BaseModel):
     transcript_length: int = 0
 
 
+# One file or folder of a repository run's tree at its pinned commit;
+# ``size`` is a file's byte count when GitHub reports it.
+class BlackboxRepoTreeEntry(BaseModel):
+    path: str
+    type: Literal["file", "dir"]
+    size: int | None = None
+
+
+# ``GET /optimizations/{id}/repository/tree``: every file and folder of a
+# repository run at its pinned commit, sorted by path. ``truncated`` is
+# GitHub's flag for a tree too large to list whole.
+class BlackboxRepoTreeResponse(BaseModel):
+    repository: str
+    commit: str
+    entries: list[BlackboxRepoTreeEntry]
+    truncated: bool = False
+
+
+# ``GET /optimizations/{id}/repository/file``: one file at a repository run's
+# pinned commit. ``content`` is set only for a UTF-8 text file within the size
+# cap; ``missing`` marks a path the commit lacks, which a version may add.
+class BlackboxRepoFileResponse(BaseModel):
+    path: str
+    content: str | None = None
+    binary: bool = False
+    too_large: bool = False
+    missing: bool = False
+    size: int | None = None
+
+
 # One entry of ``GET /blackbox/engines``: the catalog the wizard renders,
 # with availability resolved for the requested target kind.
 class BlackboxEngineInfo(BaseModel):
