@@ -651,15 +651,23 @@ class _EvaluatorMailbox:
         per_example = event.get("per_example")
         parent_id = event.get("parent_id")
         generation = event.get("generation")
+        fields: dict[str, Any] = {"score": float(score), "total_evals": event.get("total_evals")}
+        tool_calls = event.get("tool_calls")
+        tool_note = ""
+        if isinstance(tool_calls, int) and not isinstance(tool_calls, bool):
+            cap_reached = event.get("tool_cap_reached") is True
+            fields.update(tool_calls=tool_calls, tool_cap_reached=cap_reached)
+            tool_note = f"; the agent used {tool_calls} tool call(s)" + (", hitting the cap" if cap_reached else "")
         logger.info(
-            "Candidate %s scored %.4f after %s evaluations",
+            "Candidate %s scored %.4f after %s evaluations%s",
             candidate_id,
             float(score),
             event.get("total_evals"),
+            tool_note,
             extra=run_log.event_extra(
                 source="engine",
                 event="candidate.scored",
-                fields={"score": float(score), "total_evals": event.get("total_evals")},
+                fields=fields,
                 candidate=candidate_id,
             ),
         )

@@ -312,6 +312,33 @@ def test_lineage_reporter_names_each_versions_parent_and_depth(tmp_path: Path) -
     assert mailbox.lines[-1]["parent_id"] is None
 
 
+def test_lineage_reporter_adds_the_agents_tool_calls_to_each_version(tmp_path: Path) -> None:
+    """Sum every agent session spent on a generation into that version's progress line.
+
+    Args:
+        tmp_path: Directory for a stand-in program database.
+    """
+    db_path = tmp_path / "programs.sqlite"
+    with shinka_runner.contextlib.closing(shinka_runner.sqlite3.connect(db_path)) as db:
+        db.execute("CREATE TABLE programs (id TEXT, generation INTEGER, parent_id TEXT)")
+        db.executemany("INSERT INTO programs VALUES (?, ?, ?)", [("p0", 0, None), ("p1", 1, "p0")])
+        db.commit()
+    scorer = shinka_runner.ProgramScorer.__new__(shinka_runner.ProgramScorer)
+    scorer._lock = shinka_runner.threading.Lock()
+    scorer.scored = {generation: {"candidate": "x", "score": 0.1, "per_example": []} for generation in (0, 1)}
+    editor = shinka_runner.AgentEditor({}, tmp_path, ledger=shinka_runner.UsageLedger(None), deadline=1e12)
+    editor.record_tool_calls(1, {"tool_calls": 40, "tool_cap_reached": False})
+    editor.record_tool_calls(1, {"tool_calls": 100, "tool_cap_reached": True})
+    mailbox = _Mailbox()
+
+    shinka_runner.LineageReporter(mailbox, scorer, db_path, editor).poll()
+
+    assert "tool_calls" not in mailbox.lines[0]
+    assert mailbox.lines[1]["tool_calls"] == 140
+    assert mailbox.lines[1]["tool_cap_reached"] is True
+    assert mailbox.lines[1]["agent_sessions"] == 2
+
+
 class _RepoScorer:
     """Score repository patches by checking them out on a fresh copy of the starting tree."""
 

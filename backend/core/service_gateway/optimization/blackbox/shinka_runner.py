@@ -916,6 +916,39 @@ class AgentEditor:
         self.part_names = part_names
         self.bundle = bundle
         self._git_lock = threading.Lock()
+        self._tool_lock = threading.Lock()
+        self.tool_calls_by_generation: dict[int, dict[str, Any]] = {}
+
+    def record_tool_calls(self, generation: int, report: Mapping[str, Any]) -> None:
+        """Add one session's tool calls to the version upstream files under a generation.
+
+        Upstream may retry a generation (novelty or resample attempts), so
+        every session spent on it counts towards that version.
+
+        Args:
+            generation: Generation the session wrote for.
+            report: The session report from :meth:`edit`.
+        """
+        with self._tool_lock:
+            entry = self.tool_calls_by_generation.setdefault(
+                generation, {"tool_calls": 0, "tool_cap_reached": False, "agent_sessions": 0}
+            )
+            entry["tool_calls"] += int(report.get("tool_calls") or 0)
+            entry["tool_cap_reached"] = entry["tool_cap_reached"] or bool(report.get("tool_cap_reached"))
+            entry["agent_sessions"] += 1
+
+    def tool_calls_for(self, generation: int) -> dict[str, Any] | None:
+        """Return the tool calls spent writing a generation, if the agent wrote it.
+
+        Args:
+            generation: Upstream generation number.
+
+        Returns:
+            ``tool_calls``, ``tool_cap_reached`` and ``agent_sessions``, or ``None``.
+        """
+        with self._tool_lock:
+            entry = self.tool_calls_by_generation.get(generation)
+            return dict(entry) if entry is not None else None
 
     def launch_for(self, model_name: str) -> dict[str, Any]:
         """Find the Pi launch routed like an upstream model.
@@ -1181,6 +1214,7 @@ def install_agent_editor(editor: AgentEditor, runner: Any) -> None:
             )
         except Exception as exc:
             report = {"cost": 0.0, "error": f"{type(exc).__name__}: {exc}"}
+        editor.record_tool_calls(generation, report)
         if selection is not None:
             selection.update_cost(arm=model_name, cost=report["cost"])
         meta: dict[str, Any] = {
@@ -1417,15 +1451,19 @@ class ProgramScorer:
 class LineageReporter:
     """Report each scored version once upstream has filed it with its parent."""
 
-    def __init__(self, mailbox: EvaluatorMailbox, scorer: ProgramScorer, db_path: Path) -> None:
+    def __init__(
+        self, mailbox: EvaluatorMailbox, scorer: ProgramScorer, db_path: Path, editor: AgentEditor | None = None
+    ) -> None:
         """Bind the reporter to the scorer's results and upstream's database.
 
         Args:
             mailbox: Parent transport progress is written to.
             scorer: Scorer holding every scored version.
             db_path: Upstream's program database.
+            editor: The agent editor, whose tool calls each version reports.
         """
         self.mailbox = mailbox
+        self.editor = editor
         self.scorer = scorer
         self.db_path = db_path
         self.generation_by_id: dict[str, int] = {}
@@ -1446,6 +1484,7 @@ class LineageReporter:
                 continue
             self.reported.add(generation)
             parent = self.parent_by_generation.get(generation)
+            tool_calls = self.editor.tool_calls_for(generation) if self.editor is not None else None
             self.mailbox.emit(
                 _PROGRESS_PREFIX,
                 {
@@ -1453,6 +1492,7 @@ class LineageReporter:
                     "candidate_id": generation,
                     "parent_id": parent,
                     "generation": self.depth(generation),
+                    **(tool_calls or {}),
                 },
             )
 
@@ -1579,7 +1619,6 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         stop_at_score=payload.get("stop_at_score"),
         bundle=bundle,
     )
-    reporter = LineageReporter(mailbox, scorer, Path(config["database"]["db_path"]))
     ledger = UsageLedger(payload.get("shinka_meta_key_env"), payload.get("shinka_novelty_key_env"))
     ledger.install()
     runner = ShinkaEvolveRunner(
@@ -1592,6 +1631,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     )
     if bundle is not None:
         install_repo_mode(bundle, runner)
+    editor = None
     if payload.get("shinka_editor"):
         editor = AgentEditor(
             payload["shinka_editor"],
@@ -1602,6 +1642,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             bundle=bundle,
         )
         install_agent_editor(editor, runner)
+    reporter = LineageReporter(mailbox, scorer, Path(config["database"]["db_path"]), editor)
     document: dict[str, Any] = {}
     finished = threading.Event()
 

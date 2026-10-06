@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -1455,6 +1456,32 @@ def test_mailbox_relays_the_lineage_an_engine_reports() -> None:
     assert [(c["candidate_id"], c["parent_id"], c["generation"]) for c in candidates] == [
         ("4", "1", 2),
         ("5", None, 0),
+    ]
+
+
+def test_a_versions_agent_tool_calls_reach_the_run_log(caplog: pytest.LogCaptureFixture) -> None:
+    """Log how many tool calls the agent spent on a version, and only when the child reports them.
+
+    Args:
+        caplog: Captures the run log.
+    """
+    mailbox = native_runtime._EvaluatorMailbox(FakeSession(), EvalServer(lambda *_: (1.0, {}), max_evals=3), "nonce")
+
+    with caplog.at_level(logging.INFO, logger=native_runtime.logger.name):
+        mailbox.on_output(
+            "stdout",
+            'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 1, "candidate": "x", "score": 0.5, "total_evals": 1, '
+            '"tool_calls": 12, "tool_cap_reached": false}\n'
+            'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 2, "candidate": "y", "score": 0.6, "total_evals": 2, '
+            '"tool_calls": 100, "tool_cap_reached": true}\n'
+            'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 3, "candidate": "z", "score": 0.7, "total_evals": 3}\n',
+        )
+
+    lines = [record.getMessage() for record in caplog.records if "scored" in record.getMessage()]
+    assert lines == [
+        "Candidate 1 scored 0.5000 after 1 evaluations; the agent used 12 tool call(s)",
+        "Candidate 2 scored 0.6000 after 2 evaluations; the agent used 100 tool call(s), hitting the cap",
+        "Candidate 3 scored 0.7000 after 3 evaluations",
     ]
 
 
