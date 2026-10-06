@@ -24,6 +24,9 @@ import {
 import { Disclosure } from "../Disclosure";
 import { Field } from "./shared";
 
+// Duplicate rejection needs the gateway embeddings route; until it ships the backend refuses it.
+const SHINKA_NOVELTY_READY = false;
+
 const PARENT_SELECTIONS: readonly BlackboxShinkaParentSelection[] = [
   "weighted",
   "power_law",
@@ -169,8 +172,8 @@ export function ShinkaSettingsPanel({ w }: { w: BlackboxWizardContext }) {
 
         <Group title={msg("submit.blackbox.shinka.group.extras")}>
           {toggle("use_text_feedback")}
-          {toggle("novelty")}
-          {s.novelty && (
+          {SHINKA_NOVELTY_READY && toggle("novelty")}
+          {SHINKA_NOVELTY_READY && s.novelty && (
             <div className="grid gap-4 sm:grid-cols-2">
               {numberField("code_embed_sim_threshold")}
               {numberField("max_novelty_attempts")}
