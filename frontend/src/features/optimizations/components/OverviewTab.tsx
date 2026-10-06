@@ -146,12 +146,11 @@ function OverviewTabImpl({
     const versions = job.blackbox_result ? buildVersions(job.blackbox_result) : [];
     return {
       ...context,
-      renderRepoVersion: (prompt: Record<string, string>, parentPrompt: Record<string, string>) => (
+      renderRepoVersion: (prompt: Record<string, string>) => (
         <RepoCandidateBrowser
           optimizationId={job.optimization_id}
           versions={versions}
           prompt={prompt}
-          parentPrompt={parentPrompt}
         />
       ),
     };

@@ -56,6 +56,7 @@ import {
   fullDiffRows,
   mergeLineSpans,
   numberRows,
+  splitRows,
   type NumberedRow,
 } from "../lib/blackbox-diff";
 import { applyFilePatch, parsePatch, type ApplyResult, type FilePatch } from "../lib/repo-patch";
@@ -123,7 +124,11 @@ function useHighlight(path: string, text: string | null): HighlightToken[][] | n
     text == null ||
     text.length > MAX_HIGHLIGHT_CHARS ||
     text.split("\n", MAX_HIGHLIGHT_LINES + 1).length > MAX_HIGHLIGHT_LINES;
-  const [state, setState] = useState<{ path: string; text: string; lines: HighlightToken[][] | null } | null>(null);
+  const [state, setState] = useState<{
+    path: string;
+    text: string;
+    lines: HighlightToken[][] | null;
+  } | null>(null);
   useEffect(() => {
     if (tooLarge || text == null) return;
     let cancelled = false;
@@ -223,16 +228,10 @@ function FileTree({
   root,
   selected,
   onSelect,
-  loading,
-  failed,
-  truncated,
 }: {
   root: RepoNode;
   selected: string | null;
   onSelect: (path: string) => void;
-  loading: boolean;
-  failed: boolean;
-  truncated: boolean;
 }) {
   const [filter, setFilter] = useState("");
   const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(new Map());
@@ -325,54 +324,34 @@ function FileTree({
           className={cn(TOUCH_FIELD_SM, "ps-8 text-xs md:text-xs")}
         />
       </div>
-      {loading ? (
-        <div className="space-y-1.5 px-1" aria-hidden="true">
-          {Array.from({ length: 7 }, (_, i) => (
-            <Skeleton key={i} height={14} borderRadius={4} />
-          ))}
-        </div>
-      ) : (
-        <>
-          {failed && (
-            <p className="px-1 text-xs text-foreground/70">
-              {msg("optimization.blackbox.repo.browser.tree_error")}
-            </p>
-          )}
-          {rows.length === 0 && filter && (
-            <p className="px-1 text-xs text-foreground/70">
-              {msg("optimization.blackbox.repo.browser.no_match")}
-            </p>
-          )}
-          <div
-            role="tree"
-            aria-label={msg("optimization.blackbox.repo.browser.tree_aria")}
-            onKeyDown={onKeyDown}
-            className="max-h-[22rem] min-h-0 overflow-auto rounded-md @2xl:max-h-[32rem]"
-          >
-            {rows.map((row, i) => (
-              <TreeRow
-                key={row.node.path}
-                row={row}
-                selected={row.node.path === selected}
-                tabbable={i === focusIndex}
-                rowRef={(el) => {
-                  if (el) rowRefs.current.set(row.node.path, el);
-                  else rowRefs.current.delete(row.node.path);
-                }}
-                onActivate={() => {
-                  setFocused(row.node.path);
-                  activate(row);
-                }}
-              />
-            ))}
-          </div>
-          {truncated && (
-            <p className="px-1 text-[0.6875rem] text-foreground/70">
-              {msg("optimization.blackbox.repo.browser.truncated")}
-            </p>
-          )}
-        </>
+      {rows.length === 0 && filter && (
+        <p className="px-1 text-xs text-foreground/70">
+          {msg("optimization.blackbox.repo.browser.no_match")}
+        </p>
       )}
+      <div
+        role="tree"
+        aria-label={msg("optimization.blackbox.repo.browser.tree_aria")}
+        onKeyDown={onKeyDown}
+        className="max-h-[22rem] min-h-0 overflow-auto rounded-md @2xl:max-h-[32rem]"
+      >
+        {rows.map((row, i) => (
+          <TreeRow
+            key={row.node.path}
+            row={row}
+            selected={row.node.path === selected}
+            tabbable={i === focusIndex}
+            rowRef={(el) => {
+              if (el) rowRefs.current.set(row.node.path, el);
+              else rowRefs.current.delete(row.node.path);
+            }}
+            onActivate={() => {
+              setFocused(row.node.path);
+              activate(row);
+            }}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -392,7 +371,11 @@ function TreeRow({
 }) {
   const { node, depth, expanded } = row;
   const isDir = node.type === "dir";
-  const Icon = isDir ? (expanded ? FolderOpen : Folder) : (ICON_BY_EXTENSION[extensionOf(node.name)] ?? File);
+  const Icon = isDir
+    ? expanded
+      ? FolderOpen
+      : Folder
+    : (ICON_BY_EXTENSION[extensionOf(node.name)] ?? File);
   const change = node.change;
   const changed = node.changedCount > 0;
   return (
@@ -440,13 +423,6 @@ function TreeRow({
       >
         {node.name}
       </span>
-      {isDir && changed && (
-        <span
-          className="size-1.5 shrink-0 rounded-full bg-primary/60"
-          role="img"
-          aria-label={msg("optimization.blackbox.repo.browser.changed_folder")}
-        />
-      )}
       {!isDir && change && (
         <ChangeCounts
           added={node.removed && change.status === "renamed" ? 0 : change.added}
@@ -459,20 +435,25 @@ function TreeRow({
 
 /* ── File view ────────────────────────────────────────────────────────── */
 
-export type Compare = "base" | "parent";
 type Mode = "source" | "rendered";
-export type DiffView = "full" | "changes";
 
 function Breadcrumb({ repository, path }: { repository: string | null; path: string }) {
   const parts = [...(repository ? [repository] : []), ...path.split("/")];
   return (
     <nav aria-label={msg("optimization.blackbox.repo.browser.breadcrumb_aria")} className="min-w-0">
-      <ol className="flex min-w-0 items-center gap-1 font-mono text-xs text-muted-foreground" dir="ltr">
+      <ol
+        className="flex min-w-0 items-center gap-1 font-mono text-xs text-muted-foreground"
+        dir="ltr"
+      >
         {parts.map((part, i) => (
-          <li key={i} className={cn("flex min-w-0 items-center gap-1", i === parts.length - 1 ? "shrink" : "shrink-[2]")}>
-            {i > 0 && (
-              <CaretRight className="size-2.5 shrink-0 opacity-60" aria-hidden="true" />
+          <li
+            key={i}
+            className={cn(
+              "flex min-w-0 items-center gap-1",
+              i === parts.length - 1 ? "shrink" : "shrink-[2]",
             )}
+          >
+            {i > 0 && <CaretRight className="size-2.5 shrink-0 opacity-60" aria-hidden="true" />}
             <span
               className={cn("truncate", i === parts.length - 1 && "font-semibold text-foreground")}
               aria-current={i === parts.length - 1 ? "page" : undefined}
@@ -512,14 +493,21 @@ type Tokens = HighlightToken[] | undefined;
 function StyledLine({ row, tokens }: { row: NumberedRow; tokens: Tokens }) {
   const emphasis = row.kind === "added" ? ADDED_EMPHASIS_BG : REMOVED_EMPHASIS_BG;
   const spans =
-    tokens && (row.kind === "same" ? tokens.map((t) => ({ ...t, changed: false })) : mergeLineSpans(tokens, row.segments));
+    tokens &&
+    (row.kind === "same"
+      ? tokens.map((t) => ({ ...t, changed: false }))
+      : mergeLineSpans(tokens, row.segments));
   if (spans) {
     return (
       <>
         {spans.map((span, j) => {
           const style = span.spec == null ? undefined : SPEC_STYLE[span.spec];
           return span.changed ? (
-            <mark key={j} className="rounded-sm text-inherit" style={{ ...style, background: emphasis }}>
+            <mark
+              key={j}
+              className="rounded-sm text-inherit"
+              style={{ ...style, background: emphasis }}
+            >
               {span.text}
             </mark>
           ) : (
@@ -546,33 +534,76 @@ function StyledLine({ row, tokens }: { row: NumberedRow; tokens: Tokens }) {
   );
 }
 
+/** One side of a split diff line; null pads the side a change has no line on. */
+function DiffCell({
+  row,
+  side,
+  tokens,
+}: {
+  row: NumberedRow | null;
+  side: "old" | "new";
+  tokens: Tokens;
+}) {
+  if (!row) return <div className="min-w-0 bg-muted/60" aria-hidden="true" />;
+  const changed = row.kind !== "same";
+  const style =
+    row.kind === "added"
+      ? { background: ADDED_BG, color: ADDED_FG }
+      : row.kind === "removed"
+        ? { background: REMOVED_BG, color: REMOVED_FG }
+        : undefined;
+  const marker = row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " ";
+  return (
+    <div className="flex min-w-0 pe-3" style={style}>
+      <span
+        className="w-10 shrink-0 select-none pe-2 text-end tabular-nums opacity-50"
+        aria-hidden="true"
+      >
+        {side === "old" ? row.oldLine : row.newLine}
+      </span>
+      <span className="w-4 shrink-0 select-none opacity-70" aria-hidden="true">
+        {marker}
+      </span>
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+        {changed && (
+          <span className="sr-only">
+            {msg(
+              row.kind === "added"
+                ? "optimization.blackbox.repo.browser.line_added"
+                : "optimization.blackbox.repo.browser.line_removed",
+            )}
+          </span>
+        )}
+        <StyledLine row={row} tokens={tokens} />
+        {row.segments.every((seg) => seg.text === "") && " "}
+      </span>
+    </div>
+  );
+}
+
 /**
- * The file as this version leaves it, its changes inline: added lines tinted,
- * removed lines in place. The full view keeps every unchanged line; the
- * changes view folds long unchanged runs, each opening on click.
+ * The file's changes side by side: the pinned commit's lines on the left,
+ * this version's on the right. Long unchanged runs fold away, each opening
+ * on click.
  */
-function SourceDiff({
+function SplitDiff({
   path,
   rows,
   before,
   after,
-  changesOnly,
 }: {
   path: string;
   rows: NumberedRow[];
   before: string;
   after: string;
-  changesOnly: boolean;
 }) {
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const shown = useMemo(
-    () => (changesOnly ? foldRows(rows, DIFF_CONTEXT_LINES, expanded) : rows),
-    [changesOnly, rows, expanded],
+    () => splitRows(foldRows(rows, DIFF_CONTEXT_LINES, expanded)),
+    [rows, expanded],
   );
-  const hasChanges = rows.some((row) => row.kind !== "same");
-  const afterTokens = useHighlight(path, after);
-  // The old side is only read for removed lines, so skip it when there are none.
-  const beforeTokens = useHighlight(path, rows.some((row) => row.kind === "removed") ? before : null);
+  const afterTokens = useHighlight(path, rows.some((row) => row.kind !== "removed") ? after : null);
+  const beforeTokens = useHighlight(path, rows.some((row) => row.kind !== "added") ? before : null);
 
   // A small edit deep in a long file would otherwise open at line 1, out of view.
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -607,66 +638,31 @@ function SourceDiff({
             >
               <DotsThree className="size-3.5 shrink-0" aria-hidden="true" />
               <span dir="auto">
-                {formatMsg("optimization.blackbox.repo.browser.folded_lines", { count: row.hidden })}
+                {formatMsg("optimization.blackbox.repo.browser.folded_lines", {
+                  count: row.hidden,
+                })}
               </span>
             </button>
           );
         }
-        const changed = row.kind !== "same";
-        const style =
-          row.kind === "added"
-            ? { background: ADDED_BG, color: ADDED_FG }
-            : row.kind === "removed"
-              ? { background: REMOVED_BG, color: REMOVED_FG }
-              : undefined;
-        const marker = row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " ";
-        const tokens =
-          row.kind === "removed"
-            ? row.oldLine != null
-              ? beforeTokens?.[row.oldLine - 1]
-              : undefined
-            : row.newLine != null
-              ? afterTokens?.[row.newLine - 1]
-              : undefined;
+        const { left, right } = row;
+        const changed = left?.kind !== "same" || right?.kind !== "same";
         return (
           <div
-            key={`${row.oldLine}-${row.newLine}`}
-            className="flex min-h-[1.5em] pe-3"
-            style={style}
+            key={`${left?.oldLine ?? "-"}-${right?.newLine ?? "-"}`}
+            className="grid min-h-[1.5em] grid-cols-2 divide-x divide-border/50"
             data-changed={changed || undefined}
           >
-            {hasChanges && (
-              <span
-                className="w-10 shrink-0 select-none pe-2 text-end tabular-nums opacity-50"
-                aria-hidden="true"
-              >
-                {row.oldLine ?? ""}
-              </span>
-            )}
-            <span
-              className="w-10 shrink-0 select-none pe-2 text-end tabular-nums opacity-50"
-              aria-hidden="true"
-            >
-              {row.newLine ?? row.oldLine ?? ""}
-            </span>
-            {hasChanges && (
-              <span className="w-4 shrink-0 select-none opacity-70" aria-hidden="true">
-                {marker}
-              </span>
-            )}
-            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-              {changed && (
-                <span className="sr-only">
-                  {msg(
-                    row.kind === "added"
-                      ? "optimization.blackbox.repo.browser.line_added"
-                      : "optimization.blackbox.repo.browser.line_removed",
-                  )}
-                </span>
-              )}
-              <StyledLine row={row} tokens={tokens} />
-              {row.segments.every((seg) => seg.text === "") && " "}
-            </span>
+            <DiffCell
+              row={left}
+              side="old"
+              tokens={left?.oldLine != null ? beforeTokens?.[left.oldLine - 1] : undefined}
+            />
+            <DiffCell
+              row={right}
+              side="new"
+              tokens={right?.newLine != null ? afterTokens?.[right.newLine - 1] : undefined}
+            />
           </div>
         );
       })}
@@ -750,12 +746,6 @@ function FileView({
   repository,
   path,
   files,
-  parent,
-  parentFiles,
-  compare,
-  onCompare,
-  diffView,
-  onDiffView,
   onSelect,
   onText,
 }: {
@@ -763,12 +753,6 @@ function FileView({
   repository: string | null;
   path: string;
   files: FilePatch[];
-  parent: CandidateVersion | null;
-  parentFiles: FilePatch[];
-  compare: Compare;
-  onCompare: (compare: Compare) => void;
-  diffView: DiffView;
-  onDiffView: (view: DiffView) => void;
   onSelect: (path: string) => void;
   onText: (text: string | null) => void;
 }) {
@@ -777,50 +761,40 @@ function FileView({
   const [mode, setMode] = useState<Mode>("source");
   const [showPatch, setShowPatch] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const loadFile = useCallback((p: string) => getRepositoryFile(optimizationId, p), [optimizationId]);
+  const loadFile = useCallback(
+    (p: string) => getRepositoryFile(optimizationId, p),
+    [optimizationId],
+  );
 
   const sides = sidesOf(path, files);
   const base = useLoaded(sides.basePath, loadFile, attempt);
   const after = resolveText(sides, base);
   const before = baseTextOf(sides, base);
 
-  const useParent = compare === "parent" && parent != null;
-  const parentSides = sidesOf(path, parentFiles);
-  // Without a parent entry the parent leaves the file as the commit has it,
-  // which is this version's own base (or nothing, for a file it adds).
-  const parentOwnBase = parentSides.change ? parentSides : { ...sides, change: null, removed: false };
-  const parentBase = useLoaded(useParent ? parentOwnBase.basePath : null, loadFile, attempt);
-  const parentText = useParent ? resolveText(parentOwnBase, parentBase) : before;
-
   const afterText = after.state === "ready" ? after.text : null;
   useEffect(() => {
     onText(afterText);
   }, [afterText, onText]);
 
-  const shownBefore = parentText.state === "ready" ? trimFinalNewline(parentText.text) : null;
+  const shownBefore = before.state === "ready" ? trimFinalNewline(before.text) : null;
   const shownAfter = afterText == null ? null : trimFinalNewline(afterText);
   const rows =
-    shownBefore == null || shownAfter == null ? null : numberRows(fullDiffRows(shownBefore, shownAfter));
-  // Counted from what is on screen, so they follow the compare switch.
+    shownBefore == null || shownAfter == null
+      ? null
+      : numberRows(fullDiffRows(shownBefore, shownAfter));
   const counts = rows ? countChanges(rows) : null;
 
   const change = sides.change;
   const movedTo = sides.removed && change?.status === "renamed" ? change.path : null;
-  const status = useParent
-    ? counts && counts.added + counts.removed === 0
-      ? formatMsg("optimization.blackbox.repo.browser.status_same_as_parent", { n: parent.number })
-      : null
-    : sides.removed
-      ? msg("optimization.blackbox.repo.browser.status_deleted")
-      : change?.status === "added"
-        ? msg("optimization.blackbox.repo.browser.status_added")
-        : change?.status === "renamed"
-          ? msg("optimization.blackbox.repo.browser.status_renamed")
-          : !change
-            ? msg("optimization.blackbox.repo.browser.status_unchanged")
-            : null;
+  const status = sides.removed
+    ? msg("optimization.blackbox.repo.browser.status_deleted")
+    : change?.status === "added"
+      ? msg("optimization.blackbox.repo.browser.status_added")
+      : change?.status === "renamed"
+        ? msg("optimization.blackbox.repo.browser.status_renamed")
+        : null;
   const statusTitle =
-    !useParent && change?.status === "renamed" && change.oldPath && !sides.removed
+    change?.status === "renamed" && change.oldPath && !sides.removed
       ? formatMsg("optimization.blackbox.repo.browser.renamed", { from: change.oldPath })
       : undefined;
 
@@ -834,13 +808,8 @@ function FileView({
     </Button>
   ) : undefined;
 
-  const showingSource = !(renderable && mode === "rendered");
-  // A file the version adds or deletes is one change top to bottom, so there
-  // is nothing to fold away.
-  const foldable = !sides.removed && (useParent || (change != null && change.status !== "added"));
-
-  const blocked = [after, parentText].find((t) => t.state !== "ready" && t.state !== "loading");
-  const loading = after.state === "loading" || parentText.state === "loading";
+  const blocked = [after, before].find((t) => t.state !== "ready" && t.state !== "loading");
+  const loading = after.state === "loading" || before.state === "loading";
   let body: ReactNode;
   if (movedTo) {
     body = (
@@ -887,15 +856,7 @@ function FileView({
     body = <RenderedText text={after.text} kind={kind} title={path} />;
   } else {
     body = (
-      <SourceDiff
-        // A new diff has new row indices, so folds opened on the old one must not carry over.
-        key={compare}
-        path={path}
-        rows={rows}
-        before={shownBefore ?? ""}
-        after={shownAfter ?? ""}
-        changesOnly={foldable && diffView === "changes"}
-      />
+      <SplitDiff path={path} rows={rows} before={shownBefore ?? ""} after={shownAfter ?? ""} />
     );
   }
 
@@ -910,43 +871,6 @@ function FileView({
           {status && <StatusChip title={statusTitle}>{status}</StatusChip>}
         </div>
         <div className="ms-auto flex flex-wrap items-center gap-1.5">
-          {parent && !movedTo && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[0.6875rem] text-foreground/70">
-                {msg("optimization.blackbox.repo.browser.compare_label")}
-              </span>
-              <Segmented<Compare>
-                size="sm"
-                label={msg("optimization.blackbox.repo.browser.compare_label")}
-                value={compare}
-                onChange={onCompare}
-                options={[
-                  { value: "base", label: msg("optimization.blackbox.repo.browser.compare_base") },
-                  {
-                    value: "parent",
-                    label: formatMsg("optimization.blackbox.repo.browser.compare_parent", {
-                      n: parent.number,
-                    }),
-                  },
-                ]}
-              />
-            </div>
-          )}
-          {foldable && showingSource && (
-            <Segmented<DiffView>
-              size="sm"
-              label={msg("optimization.blackbox.repo.browser.diff_view_label")}
-              value={diffView}
-              onChange={onDiffView}
-              options={[
-                { value: "full", label: msg("optimization.blackbox.repo.browser.diff_view_full") },
-                {
-                  value: "changes",
-                  label: msg("optimization.blackbox.repo.browser.diff_view_changes"),
-                },
-              ]}
-            />
-          )}
           {renderable && !sides.removed && (
             <Segmented<Mode>
               size="sm"
@@ -955,7 +879,10 @@ function FileView({
               onChange={setMode}
               options={[
                 { value: "source", label: msg("optimization.blackbox.repo.browser.mode_source") },
-                { value: "rendered", label: msg("optimization.blackbox.repo.browser.mode_rendered") },
+                {
+                  value: "rendered",
+                  label: msg("optimization.blackbox.repo.browser.mode_rendered"),
+                },
               ]}
             />
           )}
@@ -967,77 +894,42 @@ function FileView({
   );
 }
 
-const DIFF_VIEW_STORAGE_KEY = "skynet:repo-browser:diff-view";
-
-/** The reader's full-file or changes-only choice, remembered across files, versions and visits. */
-function useDiffView(): readonly [DiffView, (view: DiffView) => void] {
-  const [view, setView] = useState<DiffView>("full");
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(DIFF_VIEW_STORAGE_KEY);
-      if (stored === "full" || stored === "changes") setView(stored);
-    } catch {
-      // Storage can be blocked; the view still works, it just isn't remembered.
-    }
-  }, []);
-  const update = useCallback((next: DiffView) => {
-    setView(next);
-    try {
-      window.localStorage.setItem(DIFF_VIEW_STORAGE_KEY, next);
-    } catch {
-      // As above.
-    }
-  }, []);
-  return [view, update] as const;
-}
-
 /* ── Browser ──────────────────────────────────────────────────────────── */
 
 /**
- * A repository version browsed like an editor's explorer: the tree at the
- * pinned commit (plus what the version adds) on the inline-end side, the
- * open file with its changes inline in the main area.
+ * A repository version browsed like an editor's explorer: the files the
+ * version changes on the inline-end side, the open file's changes side by
+ * side in the main area.
  */
 export function RepoVersionBrowser({
   optimizationId,
   version,
-  parent,
   path,
   onPathChange,
-  compare,
-  onCompareChange,
   onOpenFile,
 }: {
   optimizationId: string;
   version: CandidateVersion;
-  /** The version this one was proposed from, when the run recorded it. */
-  parent: CandidateVersion | null;
   /** The reader's last pick; kept across versions while the file exists. */
   path: string | null;
   onPathChange: (path: string) => void;
-  /** What the diff is against; owned by the host so it survives version steps. */
-  compare: Compare;
-  onCompareChange: (compare: Compare) => void;
   /** The open file and its text as this version leaves it, for copying; null while unknown. */
   onOpenFile: (file: { path: string; text: string } | null) => void;
 }) {
-  const [diffView, setDiffView] = useDiffView();
   const files = useMemo(() => parsePatch(version.text), [version.text]);
-  const parentFiles = useMemo(() => (parent ? parsePatch(parent.text) : []), [parent]);
+  // Only the repository's name is read from the tree: the explorer lists the
+  // files this version changes, not the whole commit.
   const tree = useLoaded<RepositoryTreeResponse>(optimizationId, getRepositoryTree);
-  const entries = tree?.status === "ready" ? tree.data.entries : null;
-  const root = useMemo(() => buildRepoTree(entries ?? [], files), [entries, files]);
+  const root = useMemo(() => buildRepoTree([], files), [files]);
   const mainRef = useRef<HTMLDivElement>(null);
   const asideRef = useRef<HTMLElement>(null);
 
   const firstChanged = files[0]?.path ?? null;
-  const selected =
-    path != null && (hasFile(root, path) || (entries == null && tree?.status === "loading"))
-      ? path
-      : firstChanged;
+  const selected = path != null && hasFile(root, path) ? path : firstChanged;
 
   const onText = useCallback(
-    (text: string | null) => onOpenFile(selected != null && text != null ? { path: selected, text } : null),
+    (text: string | null) =>
+      onOpenFile(selected != null && text != null ? { path: selected, text } : null),
     [selected, onOpenFile],
   );
   useEffect(() => {
@@ -1050,9 +942,15 @@ export function RepoVersionBrowser({
     // otherwise change something out of view and look like it did nothing.
     const main = mainRef.current;
     const aside = asideRef.current;
-    if (main && aside && aside.getBoundingClientRect().bottom <= main.getBoundingClientRect().top + 1) {
+    if (
+      main &&
+      aside &&
+      aside.getBoundingClientRect().bottom <= main.getBoundingClientRect().top + 1
+    ) {
       const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      requestAnimationFrame(() => main.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" }));
+      requestAnimationFrame(() =>
+        main.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" }),
+      );
     }
   };
 
@@ -1067,12 +965,6 @@ export function RepoVersionBrowser({
               repository={tree?.status === "ready" ? tree.data.repository : null}
               path={selected}
               files={files}
-              parent={parent}
-              parentFiles={parentFiles}
-              compare={compare}
-              onCompare={onCompareChange}
-              diffView={diffView}
-              onDiffView={setDiffView}
               onSelect={select}
               onText={onText}
             />
@@ -1084,14 +976,7 @@ export function RepoVersionBrowser({
           ref={asideRef}
           className="order-first min-w-0 @2xl:order-none @2xl:border-s @2xl:border-border/50 @2xl:ps-3"
         >
-          <FileTree
-            root={root}
-            selected={selected}
-            onSelect={select}
-            loading={tree?.status === "loading" && files.length === 0}
-            failed={tree?.status === "error"}
-            truncated={tree?.status === "ready" && tree.data.truncated}
-          />
+          <FileTree root={root} selected={selected} onSelect={select} />
         </aside>
       </div>
     </div>

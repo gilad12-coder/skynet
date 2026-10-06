@@ -9,6 +9,7 @@ import {
   fullDiffRows,
   mergeLineSpans,
   numberRows,
+  splitRows,
 } from "./blackbox-diff.ts";
 
 test("diffLines keeps identical texts as same lines", () => {
@@ -164,4 +165,32 @@ test("mergeLineSpans cuts tokens at change boundaries", () => {
 
 test("mergeLineSpans gives up when the texts differ", () => {
   assert.equal(mergeLineSpans([{ text: "a", spec: null }], [{ text: "b", changed: false }]), null);
+});
+
+const sideText = (row: { segments: { text: string }[] } | null) =>
+  row ? row.segments.map((s) => s.text).join("") : null;
+
+test("splitRows pairs removed and added lines and pads the shorter side", () => {
+  const rows = splitRows(numberRows(fullDiffRows("a\nb\nc\nd", "a\nB\nd\ne\nf")));
+  assert.deepEqual(
+    rows.map((r) => ("gap" in r ? "gap" : [sideText(r.left), sideText(r.right)])),
+    [
+      ["a", "a"],
+      ["b", "B"],
+      ["c", null],
+      ["d", "d"],
+      [null, "e"],
+      [null, "f"],
+    ],
+  );
+});
+
+test("splitRows keeps folded gaps between the pairs", () => {
+  const before = Array.from({ length: 20 }, (_, i) => `l${i}`).join("\n");
+  const after = before.replace("l10", "L10");
+  const rows = splitRows(foldRows(numberRows(fullDiffRows(before, after)), 1));
+  assert.deepEqual(
+    rows.map((r) => ("gap" in r ? `gap ${r.hidden}` : `${r.left?.oldLine}|${r.right?.newLine}`)),
+    ["gap 9", "10|10", "11|11", "12|12", "gap 8"],
+  );
 });

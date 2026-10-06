@@ -291,3 +291,44 @@ export function mergeLineSpans(
   }
   return out;
 }
+
+/** One line of a split diff: the old file's line on the left, the new file's on the right. */
+export interface SplitRow {
+  left: NumberedRow | null;
+  right: NumberedRow | null;
+}
+
+/**
+ * Pair rows side by side the way a split diff shows them: an unchanged line
+ * on both sides, and within each change the k-th removed line next to the
+ * k-th added one, the shorter side padded with empty cells.
+ */
+export function splitRows(rows: Array<NumberedRow | FoldedGap>): Array<SplitRow | FoldedGap> {
+  const out: Array<SplitRow | FoldedGap> = [];
+  let removed: NumberedRow[] = [];
+  let added: NumberedRow[] = [];
+  const flush = () => {
+    for (let k = 0; k < Math.max(removed.length, added.length); k++) {
+      out.push({ left: removed[k] ?? null, right: added[k] ?? null });
+    }
+    removed = [];
+    added = [];
+  };
+  for (const row of rows) {
+    if ("gap" in row) {
+      flush();
+      out.push(row);
+    } else if (row.kind === "removed") {
+      // A removal after additions starts a new change, not part of this one.
+      if (added.length > 0) flush();
+      removed.push(row);
+    } else if (row.kind === "added") {
+      added.push(row);
+    } else {
+      flush();
+      out.push({ left: row, right: row });
+    }
+  }
+  flush();
+  return out;
+}

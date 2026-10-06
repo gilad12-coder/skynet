@@ -91,13 +91,6 @@ export function buildVersions(result: BlackboxRunResult): CandidateVersion[] {
   return versions;
 }
 
-/** The lineage fields of a scored-candidate progress event (see `extractCandidates`). */
-export interface CandidateLineage {
-  candidate_id: string;
-  parent_id: string | null;
-  prompt: Record<string, string>;
-}
-
 // Engines wrap a plain-text candidate under this one synthetic key.
 const STR_CANDIDATE_KEY = "current_candidate";
 
@@ -133,37 +126,6 @@ export function versionForPrompt(
       isBest: false,
     }
   );
-}
-
-/**
- * Map each version number to the version it was proposed from, read from the
- * run's candidate events or, failing that, GEPA's candidate tree. Versions
- * whose parent is unknown or never became a distinct version are left out.
- */
-export function versionParents(
-  versions: CandidateVersion[],
-  lineage: CandidateLineage[],
-  tree: BlackboxRunResult["candidate_tree"] = [],
-): Map<number, number> {
-  const byText = new Map(versions.map((v) => [v.text, v.number]));
-  const parents = new Map<number, number>();
-  const link = (childText: string, parentText: string | null) => {
-    if (parentText == null) return;
-    const child = byText.get(childText);
-    const parent = byText.get(parentText);
-    if (child == null || parent == null || child === parent || parents.has(child)) return;
-    parents.set(child, parent);
-  };
-  const eventText = new Map(lineage.map((c) => [c.candidate_id, promptText(c.prompt)]));
-  for (const c of lineage) {
-    link(promptText(c.prompt), c.parent_id == null ? null : (eventText.get(c.parent_id) ?? null));
-  }
-  for (const node of tree ?? []) {
-    const first = node.parents[0];
-    const parentNode = first == null ? undefined : tree?.[first];
-    link(promptText(node.candidate), parentNode ? promptText(parentNode.candidate) : null);
-  }
-  return parents;
 }
 
 /** Index of the version a fresh view should open on: the returned best, else the last one. */
