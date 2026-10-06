@@ -889,9 +889,11 @@ def test_shinka_bootstrap_installs_the_pinned_requirements_into_a_python_312_ven
 
 
 def test_dockerfile_bakes_shinka_into_the_venv_the_runtime_uses() -> None:
-    """Keep the image's ShinkaEvolve venv at the runtime's path, built from the same pinned requirements."""
+    """Keep the opt-in ShinkaEvolve venv at the runtime's path, built from the same pinned requirements."""
     dockerfile = (Path(__file__).resolve().parents[5] / "Dockerfile").read_text()
     venv = native_runtime.SHINKA_IMAGE_PYTHON.removesuffix("/bin/python")
+    assert "ARG INCLUDE_SHINKA_EVOLVE=false" in dockerfile
+    assert '[ "$INCLUDE_SHINKA_EVOLVE" = "1" ]' in dockerfile
     assert f"python -m venv {venv}" in dockerfile
     assert "core/service_gateway/optimization/blackbox/shinka_requirements.txt" in dockerfile
     assert f'{native_runtime.SHINKA_IMAGE_PYTHON} -c "import shinka.core.async_runner"' in dockerfile

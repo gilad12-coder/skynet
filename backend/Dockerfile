@@ -168,13 +168,20 @@ RUN python -m venv /opt/prime-agent/kernel-venv \
 # Protected sandboxes have no network to build it at run time; the native
 # runtime uses this interpreter when present (native_runtime.SHINKA_IMAGE_PYTHON)
 # and the readiness probe reports shinka_ready from it.
+# Off by default: the layer is ~700 MB and carries GPL packages (Levenshtein,
+# imageio-ffmpeg's FFmpeg), so only the sandbox image build opts in with
+# --build-arg INCLUDE_SHINKA_EVOLVE=1; Railway API/worker and air-gap images
+# stay without it.
+ARG INCLUDE_SHINKA_EVOLVE=false
 COPY core/service_gateway/optimization/blackbox/shinka_requirements.txt /opt/shinka/requirements.txt
-RUN python -m venv /opt/shinka/venv \
-    && /opt/shinka/venv/bin/python -m pip install --no-cache-dir --no-deps \
-        ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
-        ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
-        -r /opt/shinka/requirements.txt \
-    && /opt/shinka/venv/bin/python -c "import shinka.core.async_runner"
+RUN if [ "$INCLUDE_SHINKA_EVOLVE" = "1" ] || [ "$INCLUDE_SHINKA_EVOLVE" = "true" ]; then \
+        python -m venv /opt/shinka/venv \
+        && /opt/shinka/venv/bin/python -m pip install --no-cache-dir --no-deps \
+            ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
+            ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
+            -r /opt/shinka/requirements.txt \
+        && /opt/shinka/venv/bin/python -c "import shinka.core.async_runner"; \
+    fi
 
 # dspy.Flex serve-time dependency. An optimized Flex program ALWAYS executes
 # its generated Python in a Deno/Pyodide WASM sandbox (dspy.PythonInterpreter
