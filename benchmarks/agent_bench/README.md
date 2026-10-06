@@ -39,7 +39,6 @@ harnesses running the same model over the same tools.
 | `dspy-reactv2-stable` | the same loop under `StableRosterChatAdapter`: same text tool protocol, tool roster pinned to the first user message. This is what the platform's served and optimized ReAct agents run |
 | `dspy-reactv2-fixed` | `ConversationReAct`: the same loop with an append-only native-tool-call prompt, stored native history and a pinned reply language |
 | `dspy-react` | stock classic `dspy.ReAct` |
-| `claude-code` | `claude -p` pointed at OpenRouter |
 | `codex` | `codex exec` with an OpenRouter provider |
 | `opencode` | `opencode run` with a tools-only agent |
 | `pi` | `pi -p`; Pi has no MCP client, so a small extension bridges the JSON API |
@@ -74,7 +73,6 @@ attempts per harness. The full report is `results/main/REPORT.md`.
 
 | harness | pass | median time | tool calls | list cost / 1k tasks | English prompts answered in Hebrew |
 |---|---|---|---|---|---|
-| claude-code | 97% | 36s | 2.6 | $6.38 | 11/60 |
 | dspy-react | 97% | 44s | 2.1 | $5.83 | 0/60 |
 | dspy-reactv2-fixed | 97% | 34s | 3.1 | $3.53 | 0/60 |
 | opencode | 96% | 27s | 2.3 | $6.01 | 11/60 |
@@ -84,7 +82,7 @@ attempts per harness. The full report is `results/main/REPORT.md`.
 
 Reading the table:
 
-- **The top four are tied.** With 72 attempts, a pass rate near 95% carries
+- **The top three are tied.** With 72 attempts, a pass rate near 95% carries
   roughly five points of noise either way, so the model matters more than the
   loop on these tasks.
 - **Language drift is the largest single failure cause.** 15 of the 24 failed

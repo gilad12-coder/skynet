@@ -1864,7 +1864,7 @@
       "properties": {
        "harness": {
         "type": "string",
-        "default": "claude_code"
+        "default": "codex"
        },
        "install_command": {
         "anyOf": [

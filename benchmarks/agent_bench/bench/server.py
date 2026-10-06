@@ -4,7 +4,7 @@ Run one server per (harness, task) attempt::
 
     python -m bench.server --task <task-id> --port 8765
 
-* ``/mcp``      Streamable-HTTP MCP endpoint (Claude Code, Codex, opencode, DSPy).
+* ``/mcp``      Streamable-HTTP MCP endpoint (Codex, opencode, DSPy).
 * ``/__tools``  Tool specs as JSON (used by the Pi extension).
 * ``/__call``   ``POST {"tool": ..., "args": {...}}`` runs a tool without MCP.
 * ``/__state``  Final state, initial state and the call log, for grading.
