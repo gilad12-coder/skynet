@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -53,6 +54,11 @@ SHINKA_EMBEDDING_MODEL = "openai/text-embedding-3-small"
 # reach; when present, that box is funded alongside the outer sandbox.
 PARENT_HOSTS_KEY = "parent_allowed_hosts"
 _MAX_REQUEST_BYTES = 32 * 1024 * 1024
+# The state read travels the sandbox mailbox relay, which can lag for seconds
+# under load; one slow reply must not discard a finished run's result.
+_BUDGET_STATE_ATTEMPTS = 3
+_BUDGET_STATE_TIMEOUT_SECONDS = 30
+_BUDGET_STATE_RETRY_DELAY_SECONDS = 2
 _MODEL_ATTEMPT_ID = re.compile(r"[0-9a-f]{32}\Z")
 _TRANSIENT_SANDBOX_ERROR_TYPES = frozenset(
     {
@@ -149,15 +155,20 @@ def raise_gateway_stop(route: Mapping[str, Any]) -> None:
         BudgetReached: When the authoritative parent stopped admission for budget.
         UsagePendingError: When the authority is closed for another accounting reason.
     """
-    try:
-        response = httpx.get(
-            f"{os.environ.get('SKYNET_BUDGET_RELAY_URL', str(route['url'])).rstrip('/')}/_budget/state",
-            headers={"Authorization": f"Bearer {route['token']}"},
-            timeout=10,
-            trust_env=False,
-        )
-    except httpx.TransportError as error:
-        raise InfrastructureInterruptionError("The trusted parent model transport was interrupted.") from error
+    url = f"{os.environ.get('SKYNET_BUDGET_RELAY_URL', str(route['url'])).rstrip('/')}/_budget/state"
+    for attempt in range(_BUDGET_STATE_ATTEMPTS):
+        try:
+            response = httpx.get(
+                url,
+                headers={"Authorization": f"Bearer {route['token']}"},
+                timeout=_BUDGET_STATE_TIMEOUT_SECONDS,
+                trust_env=False,
+            )
+            break
+        except httpx.TransportError as error:
+            if attempt == _BUDGET_STATE_ATTEMPTS - 1:
+                raise InfrastructureInterruptionError("The trusted parent model transport was interrupted.") from error
+            time.sleep(_BUDGET_STATE_RETRY_DELAY_SECONDS)
     response.raise_for_status()
     budget = response.json()
     if budget.get("blocked_reason") == "budget_reached":
