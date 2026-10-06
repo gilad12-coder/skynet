@@ -1526,6 +1526,7 @@ const EXPLORE_ENGINES: BlackboxEngineId[] = [
   "autoresearch",
   "meta_harness",
   "autosaddler",
+  "shinka_evolve",
 ];
 const EXPLORE_BLACKBOX_MODULE = "blackbox";
 

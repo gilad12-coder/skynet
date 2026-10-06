@@ -26,6 +26,7 @@ const ENGINE_LABELS: Record<BlackboxEngineId, string> = {
   autoresearch: "AutoResearch",
   meta_harness: "Meta-Harness",
   autosaddler: "AutoSaddler",
+  shinka_evolve: "ShinkaEvolve",
 };
 
 /**

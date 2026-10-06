@@ -37,10 +37,15 @@ interface Accumulator extends Omit<UsageGroup, "avgLatencyMs" | "unpriced"> {
   unpricedCalls: number;
 }
 
+// A call's kind is more specific than its stage, so it names the stage group when present.
+function stageOf(row: RunUsageRow): string | null {
+  return row.kind || row.stage;
+}
+
 function keyOf(row: RunUsageRow, grouping: UsageGrouping): { key: string; nonModel: boolean } {
   if (NON_MODEL_ROLES.has(row.role)) return { key: row.role, nonModel: true };
   if (grouping === "role") return { key: row.role, nonModel: false };
-  const value = grouping === "model" ? row.model : grouping === "stage" ? row.stage : row.candidate;
+  const value = grouping === "model" ? row.model : grouping === "stage" ? stageOf(row) : row.candidate;
   return { key: value || UNATTRIBUTED, nonModel: false };
 }
 
@@ -119,7 +124,7 @@ export function availableGroupings(rows: readonly RunUsageRow[]): UsageGrouping[
     (g) =>
       g === "role" ||
       (g === "model" && has((r) => r.model)) ||
-      (g === "stage" && has((r) => r.stage)) ||
+      (g === "stage" && has(stageOf)) ||
       (g === "candidate" && has((r) => r.candidate)),
   );
 }
