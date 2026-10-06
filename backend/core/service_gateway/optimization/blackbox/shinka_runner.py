@@ -14,13 +14,19 @@ runs unchanged. Skynet contributes only:
   filesystem mailbox the other native engines use;
 * model routing: every optimization model is an OpenAI-compatible
   ``local/...`` model on the run's gateway, and every call carries usage tags
-  so the run's usage splits into mutation and meta-note calls.
+  so the run's usage splits into mutation, meta-note, novelty-judge and
+  embedding calls;
+* for a repository target, a program that is a bundle of the files a version
+  changes, with the prompts, edit application and novelty input replaced by
+  ``shinka_bundle``'s file-aware versions.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
+import importlib.util
 import io
 import json
 import math
@@ -39,6 +45,8 @@ from pathlib import Path
 from typing import Any
 
 try:
+    import shinka.core.async_runner as shinka_async_runner
+    import shinka.embed.embedding as shinka_embedding
     import shinka.llm.llm as shinka_llm
     import shinka.llm.query as shinka_query
     from shinka.core import EvolutionConfig, ShinkaEvolveRunner
@@ -46,8 +54,22 @@ try:
     from shinka.launch import LocalJobConfig
     from shinka.local_openai_config import parse_local_openai_model
 except ImportError:  # Upstream needs Python 3.12; parent-side tests still import the helpers.
-    shinka_llm = shinka_query = EvolutionConfig = ShinkaEvolveRunner = None
+    shinka_async_runner = shinka_embedding = shinka_llm = shinka_query = EvolutionConfig = ShinkaEvolveRunner = None
     DatabaseConfig = LocalJobConfig = parse_local_openai_model = None
+
+try:
+    from . import repo_tree, shinka_bundle
+except ImportError:  # In the sandbox this file runs as a script beside its sibling modules.
+    _sibling_modules = {}
+    for _sibling in ("repo_tree", "shinka_bundle"):
+        _spec = importlib.util.spec_from_file_location(_sibling, Path(__file__).with_name(f"{_sibling}.py"))
+        assert _spec is not None
+        assert _spec.loader is not None
+        _sibling_modules[_sibling] = importlib.util.module_from_spec(_spec)
+        sys.modules[_sibling] = _sibling_modules[_sibling]
+        _spec.loader.exec_module(_sibling_modules[_sibling])
+    repo_tree = _sibling_modules["repo_tree"]
+    shinka_bundle = _sibling_modules["shinka_bundle"]
 
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
@@ -66,6 +88,8 @@ _USAGE_TAGS_HEADER = "x-skynet-usage-tags"
 _CALLER_PROPOSER = "proposer"
 _KIND_MUTATION = "mutation"
 _KIND_META_NOTES = "meta_notes"
+_KIND_NOVELTY_JUDGE = "novelty_judge"
+_KIND_EMBEDDING = "embedding"
 _TASK_SYSTEM_MESSAGE = (
     "You are an expert at improving text artifacts such as prompts, instructions and agent "
     "configurations. The program is a Markdown document; only the text between the "
@@ -355,13 +379,16 @@ def generation_budget(max_evals: int, examples: int, max_iterations: int | None)
     return affordable
 
 
-def build_config(payload: Mapping[str, Any], results_dir: str, examples: int) -> dict[str, dict[str, Any]]:
+def build_config(
+    payload: Mapping[str, Any], results_dir: str, examples: int, *, repo: bool = False
+) -> dict[str, dict[str, Any]]:
     """Translate the parent's payload into upstream's configuration fields.
 
     Args:
         payload: Parent configuration carrying ``shinka`` settings and ``shinka_models`` routes.
         results_dir: Directory upstream writes its programs and database to.
         examples: Scorer runs one program costs.
+        repo: Whether versions are repository bundles rather than marked text.
 
     Returns:
         Keyword arguments for ``EvolutionConfig`` (``evolution``), ``DatabaseConfig``
@@ -382,10 +409,19 @@ def build_config(payload: Mapping[str, Any], results_dir: str, examples: int) ->
         if meta_notes and meta_env
         else None
     )
+    embedding = payload.get("shinka_embedding")
+    novelty_env = payload.get("shinka_novelty_key_env")
+    novelty = bool(settings.get("novelty")) and bool(embedding) and bool(novelty_env)
+    embedding_model = (
+        local_model_name(str(embedding["model"]), str(embedding["url"]), str(embedding["key_env"])) if novelty else None
+    )
+    novelty_model = (
+        local_model_name(str(routes[0]["model"]), str(routes[0]["url"]), str(novelty_env)) if novelty else None
+    )
     task = payload.get("task") or {}
     objective = str(task.get("objective") or "").strip()
     background = str(task.get("background") or "").strip()
-    system_message = _TASK_SYSTEM_MESSAGE
+    system_message = shinka_bundle.REPO_SYSTEM_MESSAGE if repo else _TASK_SYSTEM_MESSAGE
     if objective:
         system_message += f"\n\nObjective:\n{objective}"
     if background:
@@ -401,7 +437,9 @@ def build_config(payload: Mapping[str, Any], results_dir: str, examples: int) ->
         ],
         "num_generations": generation_budget(int(payload["max_evals"]), examples, max_iterations),
         "max_patch_resamples": int(settings.get("max_patch_resamples", 3)),
-        "max_patch_attempts": int(settings.get("max_patch_attempts", 1)),
+        # A repository answer that only opens files spends an attempt; the
+        # extra rounds keep those reads from eating the edit attempts.
+        "max_patch_attempts": int(settings.get("max_patch_attempts", 1)) + (shinka_bundle.OPEN_ROUNDS if repo else 0),
         "job_type": "local",
         "language": _LANGUAGE,
         "llm_models": models,
@@ -412,11 +450,11 @@ def build_config(payload: Mapping[str, Any], results_dir: str, examples: int) ->
         "meta_rec_interval": int(settings.get("meta_rec_interval", 10)) if meta_model else None,
         "meta_llm_models": [meta_model] if meta_model else None,
         "meta_max_recommendations": int(settings.get("meta_max_recommendations", 5)),
-        "embedding_model": None,
+        "embedding_model": embedding_model,
         "results_dir": results_dir,
         "max_novelty_attempts": int(settings.get("max_novelty_attempts", 3)),
         "code_embed_sim_threshold": float(settings.get("code_embed_sim_threshold", 0.99)),
-        "novelty_llm_models": None,
+        "novelty_llm_models": [novelty_model] if novelty_model else None,
         "use_text_feedback": bool(settings.get("use_text_feedback", True)),
     }
     database = {
@@ -444,21 +482,25 @@ def build_config(payload: Mapping[str, Any], results_dir: str, examples: int) ->
     return {"evolution": evolution, "database": database, "runner": runner}
 
 
-def usage_kind(model_name: str, meta_key_env: str | None) -> str:
+def usage_kind(model_name: str, meta_key_env: str | None, novelty_key_env: str | None = None) -> str:
     """Tell what a model call is for from the model name upstream used.
 
-    The meta-notes model reads its token from its own variable, so its name
-    differs from every mutation model's even when both are the same model.
+    The meta-notes and novelty-judge models read their tokens from their own
+    variables, so their names differ from every mutation model's even when
+    all are the same model.
 
     Args:
         model_name: Upstream ``local/...`` model name.
         meta_key_env: Variable the meta-notes model reads its token from.
+        novelty_key_env: Variable the novelty-judge model reads its token from.
 
     Returns:
-        ``meta_notes`` or ``mutation``.
+        ``meta_notes``, ``novelty_judge`` or ``mutation``.
     """
     if meta_key_env and model_name.endswith(f"api_key_env={meta_key_env}"):
         return _KIND_META_NOTES
+    if novelty_key_env and model_name.endswith(f"api_key_env={novelty_key_env}"):
+        return _KIND_NOVELTY_JUDGE
     return _KIND_MUTATION
 
 
@@ -478,13 +520,15 @@ def usage_header(kind: str) -> dict[str, str]:
 class UsageLedger:
     """Count tokens per model across every upstream model call."""
 
-    def __init__(self, meta_key_env: str | None) -> None:
+    def __init__(self, meta_key_env: str | None, novelty_key_env: str | None = None) -> None:
         """Start an empty ledger.
 
         Args:
             meta_key_env: Variable the meta-notes model reads its token from.
+            novelty_key_env: Variable the novelty-judge model reads its token from.
         """
         self.meta_key_env = meta_key_env
+        self.novelty_key_env = novelty_key_env
         self.usage_by_model: dict[str, dict[str, int]] = {}
         self._lock = threading.Lock()
 
@@ -509,7 +553,10 @@ class UsageLedger:
         original_async_client = shinka_query.get_async_client_llm
         original_query = shinka_llm.query
         original_query_async = shinka_llm.query_async
+        original_embed_client = shinka_embedding.get_client_embed
+        original_async_embed_client = shinka_embedding.get_async_client_embed
         meta_key_env = self.meta_key_env
+        novelty_key_env = self.novelty_key_env
 
         def tagged(factory: Callable[..., Any]) -> Callable[..., Any]:
             """Add the usage-tags header to every client a factory builds.
@@ -534,8 +581,37 @@ class UsageLedger:
                 """
                 client, api_model, provider = factory(model_name, *args, **kwargs)
                 if provider == "local_openai" and client is not None and hasattr(client, "with_options"):
-                    client = client.with_options(default_headers=usage_header(usage_kind(model_name, meta_key_env)))
+                    kind = usage_kind(model_name, meta_key_env, novelty_key_env)
+                    client = client.with_options(default_headers=usage_header(kind))
                 return client, api_model, provider
+
+            return build
+
+        def tagged_embed(factory: Callable[..., Any]) -> Callable[..., Any]:
+            """Add the embedding usage tag to every embeddings client a factory builds.
+
+            Args:
+                factory: Upstream sync or async embeddings client factory.
+
+            Returns:
+                The wrapped factory.
+            """
+
+            def build(model_name: str, *args: Any, **kwargs: Any) -> Any:
+                """Build upstream's embeddings client, then tag its requests.
+
+                Args:
+                    model_name: Upstream embedding model name.
+                    *args: Upstream positional arguments.
+                    **kwargs: Upstream keyword arguments.
+
+                Returns:
+                    Upstream's ``(client, model)`` with the client tagged.
+                """
+                client, api_model = factory(model_name, *args, **kwargs)
+                if client is not None and hasattr(client, "with_options"):
+                    client = client.with_options(default_headers=usage_header(_KIND_EMBEDDING))
+                return client, api_model
 
             return build
 
@@ -573,6 +649,133 @@ class UsageLedger:
         shinka_query.get_async_client_llm = tagged(original_async_client)
         shinka_llm.query = counted
         shinka_llm.query_async = counted_async
+        shinka_embedding.get_client_embed = tagged_embed(original_embed_client)
+        shinka_embedding.get_async_client_embed = tagged_embed(original_async_embed_client)
+
+
+def install_repo_mode(bundle: Any, runner: Any) -> None:
+    """Make upstream evolve repository bundles instead of marked text.
+
+    Upstream's loop, selection and bookkeeping stay as they are; only the
+    prompt builders, the edit applier and the novelty input change.
+
+    Args:
+        bundle: ``shinka_bundle.RepoBundle`` bound to the run's checkout.
+        runner: The constructed upstream ``ShinkaEvolveRunner``.
+    """
+    sampler = runner.prompt_sampler
+    original_embedding = shinka_async_runner.get_code_embedding_async
+
+    def sample(
+        parent: Any,
+        archive_inspirations: Sequence[Any],
+        top_k_inspirations: Sequence[Any],
+        meta_recommendations: str | None = None,
+    ) -> tuple[str, str, str]:
+        """Build one mutation prompt for a bundle version.
+
+        Args:
+            parent: Version being mutated.
+            archive_inspirations: Archive versions upstream picked.
+            top_k_inspirations: Best versions upstream picked.
+            meta_recommendations: Upstream's meta notes.
+
+        Returns:
+            Upstream's ``(system, user, patch_type)``.
+        """
+        inspirations = [*archive_inspirations, *top_k_inspirations]
+        kind = shinka_bundle.choose_patch_type(sampler.patch_types, sampler.patch_type_probs, bool(inspirations))
+        system, user = bundle.prompt(
+            kind,
+            parent,
+            system_message=sampler.task_sys_msg or shinka_bundle.REPO_SYSTEM_MESSAGE,
+            inspirations=inspirations,
+            partner=inspirations[0] if kind == "cross" else None,
+            meta_recommendations=meta_recommendations,
+            use_text_feedback=bool(getattr(sampler, "use_text_feedback", True)),
+        )
+        return system, user, kind
+
+    def sample_fix(incorrect_program: Any, ancestor_inspirations: Sequence[Any] | None = None) -> tuple[str, str, str]:
+        """Build the prompt that repairs a bundle version that failed to score.
+
+        Args:
+            incorrect_program: Version that failed.
+            ancestor_inspirations: Its ancestors.
+
+        Returns:
+            Upstream's ``(system, user, "fix")``.
+        """
+        system, user = bundle.prompt(
+            "fix",
+            incorrect_program,
+            system_message=sampler.task_sys_msg or shinka_bundle.REPO_SYSTEM_MESSAGE,
+            inspirations=list(ancestor_inspirations or ()),
+        )
+        return system, user, "fix"
+
+    async def apply_bundle_patch(
+        original_str: str,
+        patch_str: str,
+        patch_dir: str,
+        language: str = _LANGUAGE,
+        patch_type: str = "diff",
+        verbose: bool = False,
+    ) -> tuple[Any, ...]:
+        """Apply a model answer to a bundle version, whatever patch type upstream asked for.
+
+        Args:
+            original_str: Parent bundle text.
+            patch_str: Model answer.
+            patch_dir: Generation folder.
+            language: Upstream's language; unused, the answer names its files.
+            patch_type: Upstream's patch type; unused, each FILE block says how it edits.
+            verbose: Upstream's logging flag; unused.
+
+        Returns:
+            Upstream's ``(code, applied, output_path, error, patch_text, patch_path)``.
+        """
+        return await asyncio.to_thread(bundle.write_patch, original_str, patch_str, Path(patch_dir))
+
+    def write_changes(program: Path) -> Path | None:
+        """Write a version's changes beside it as the text novelty embeds.
+
+        Args:
+            program: The version's bundle file.
+
+        Returns:
+            The diff file, or ``None`` when the version changes nothing or cannot be read.
+        """
+        try:
+            changes = bundle.changes_text(shinka_bundle.decode_bundle(program.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            return None
+        if not changes:
+            return None
+        target = program.with_name("changes.diff")
+        target.write_text(changes, encoding="utf-8")
+        return target
+
+    async def embed_changes(exec_fname: str, embedding_client: Any, max_chars: int = 10000) -> tuple[Any, float]:
+        """Embed only what a version changes, so shared untouched code cannot make versions look alike.
+
+        Args:
+            exec_fname: The version's bundle file.
+            embedding_client: Upstream's embeddings client.
+            max_chars: Upstream's input cap.
+
+        Returns:
+            Upstream's ``(embedding, cost)``; no embedding for a version without changes.
+        """
+        target = await asyncio.to_thread(write_changes, Path(exec_fname))
+        if target is None:
+            return None, 0.0
+        return await original_embedding(str(target), embedding_client, max_chars)
+
+    sampler.sample = sample
+    sampler.sample_fix = sample_fix
+    shinka_async_runner.apply_patch_async = apply_bundle_patch
+    shinka_async_runner.get_code_embedding_async = embed_changes
 
 
 def _feedback_text(info: Mapping[str, Any]) -> str:
@@ -658,6 +861,7 @@ class ProgramScorer:
         part_names: Sequence[str] | None,
         max_concurrency: int,
         stop_at_score: float | None,
+        bundle: Any = None,
     ) -> None:
         """Bind the scorer to the parent transport and the evaluation queue.
 
@@ -668,8 +872,11 @@ class ProgramScorer:
             part_names: The starting version's part names, or ``None`` for a text version.
             max_concurrency: Parallel scorer requests the parent admits.
             stop_at_score: Score that ends the search early.
+            bundle: ``shinka_bundle.RepoBundle`` for a repository target, whose
+                programs are materialized into a patch before scoring.
         """
         self.mailbox = mailbox
+        self.bundle = bundle
         self.queue = queue
         self.examples = list(examples)
         self.part_names = part_names
@@ -727,7 +934,11 @@ class ProgramScorer:
         if generation is None:
             return {"correct": False, "error": "The program is outside upstream's generation layout.", "metrics": {}}
         try:
-            value = unpack_program(Path(program_path).read_text(encoding="utf-8"), self.part_names)
+            text = Path(program_path).read_text(encoding="utf-8")
+            if self.bundle is not None:
+                value = self.bundle.materialize(shinka_bundle.decode_bundle(text))
+            else:
+                value = unpack_program(text, self.part_names)
         except ValueError as exc:
             return {
                 "correct": False,
@@ -920,7 +1131,11 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     results_dir = workdir / "results"
     queue = workdir / "eval-queue"
     results_dir.mkdir(parents=True, exist_ok=True)
-    config = build_config(payload, str(results_dir), len(examples))
+    repo = payload.get("repo")
+    bundle = shinka_bundle.RepoBundle.prepare(repo, seed, workdir / "repo-checkout") if repo else None
+    if bundle is not None and not isinstance(seed, str):
+        seed = ""
+    config = build_config(payload, str(results_dir), len(examples), repo=bundle is not None)
     mailbox = EvaluatorMailbox(payload["nonce"], timeout)
     scorer = ProgramScorer(
         mailbox=mailbox,
@@ -929,18 +1144,21 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         part_names=part_names,
         max_concurrency=int(payload.get("max_concurrency", 1)),
         stop_at_score=payload.get("stop_at_score"),
+        bundle=bundle,
     )
     reporter = LineageReporter(mailbox, scorer, Path(config["database"]["db_path"]))
-    ledger = UsageLedger(payload.get("shinka_meta_key_env"))
+    ledger = UsageLedger(payload.get("shinka_meta_key_env"), payload.get("shinka_novelty_key_env"))
     ledger.install()
     runner = ShinkaEvolveRunner(
         evo_config=EvolutionConfig(**config["evolution"]),
         job_config=LocalJobConfig(python_executable=sys.executable),
         db_config=DatabaseConfig(**config["database"]),
-        init_program_str=pack_program(seed),
+        init_program_str=shinka_bundle.encode_bundle({}) if bundle is not None else pack_program(seed),
         evaluate_str=_EVALUATE_TEMPLATE.format(queue=str(queue), timeout=timeout),
         **config["runner"],
     )
+    if bundle is not None:
+        install_repo_mode(bundle, runner)
     document: dict[str, Any] = {}
     finished = threading.Event()
 

@@ -17,7 +17,7 @@ from .data_policy import DataPolicy, apply_data_policy
 from .model_batch import BatchCollector
 from .model_terms import excluded_from_managed, managed_model_refusal
 from .openrouter_float import notify_managed_refusal
-from .openrouter_quotes import PricedRequest, fetch_endpoint_prices, price_text_request
+from .openrouter_quotes import PricedRequest, fetch_endpoint_prices, price_embedding_request, price_text_request
 from .operation_pricing import ChargePolicy, OperationQuote, UnpricedOperationError, exact_nonnegative, json_fingerprint
 from .responses_adapter import price_responses_request, responses_failure, responses_receipt
 from .runtime import BudgetRuntime, PaidResult
@@ -286,6 +286,7 @@ class OpenRouterDispatcher:
         client: httpx.Client,
         batch: BatchCollector | None = None,
         data_policy: DataPolicy | None = None,
+        embeddings: bool = False,
     ) -> None:
         """Bind one model role to a trusted transport and pricing policy.
 
@@ -300,6 +301,8 @@ class OpenRouterDispatcher:
                 OpenRouter batch at half price instead of answering directly.
             data_policy: The owner's provider privacy setting, forced onto every
                 request; ``None`` leaves BYOK routing to the caller's own account.
+            embeddings: Serve only ``/embeddings`` for an embeddings model,
+                instead of the chat protocols.
         """
         self.runtime = runtime
         self._api_key = api_key
@@ -311,6 +314,7 @@ class OpenRouterDispatcher:
         self._refusal: tuple[bytes, float] | None = None
         self._batch = batch
         self._data_policy = data_policy
+        self.embeddings = embeddings
 
     def dispatch(
         self,
@@ -324,7 +328,7 @@ class OpenRouterDispatcher:
         """Send one final request only after its physical attempt is fully reserved.
 
         Args:
-            path: Chat completions or Anthropic messages protocol path.
+            path: Chat completions, Anthropic messages, Responses, or embeddings protocol path.
             request: Fully resolved SDK body including final token and tool settings.
             operation_key: Optional stable physical-attempt identity for a transport replay.
             attempt: Physical retry number within a stable logical operation.
@@ -333,7 +337,8 @@ class OpenRouterDispatcher:
         Returns:
             Provider response after its actual charge is settled or held for reconciliation.
         """
-        if path not in {"/chat/completions", "/messages", "/responses"} or request.get("model") != self.model:
+        paths = {"/embeddings"} if self.embeddings else {"/chat/completions", "/messages", "/responses"}
+        if path not in paths or request.get("model") != self.model:
             raise UnpricedOperationError("This scoped route cannot dispatch a different model or API operation.")
         if self.policy.kind == "managed_model" and excluded_from_managed(self.model):
             return ModelHTTPResult(403, "application/json", managed_model_refusal(self.model))
@@ -352,9 +357,8 @@ class OpenRouterDispatcher:
         else:
             catalog = fetch_endpoint_prices(self.model, client=self._client)
             routed = dict(request) if self._data_policy is None else apply_data_policy(request, self._data_policy)
-            priced = (price_responses_request if path == "/responses" else price_text_request)(
-                mark_prompt_cache(path, routed), catalog, self.policy
-            )
+            pricer = {"/responses": price_responses_request, "/embeddings": price_embedding_request}
+            priced = pricer.get(path, price_text_request)(mark_prompt_cache(path, routed), catalog, self.policy)
             priced = replace(
                 priced,
                 quote=replace(

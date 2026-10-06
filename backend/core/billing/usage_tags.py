@@ -24,6 +24,8 @@ CALLER_REFLECTION = "reflection"
 # ``kind`` values: what an engine that makes several sorts of model calls used one for.
 KIND_MUTATION = "mutation"
 KIND_META_NOTES = "meta_notes"
+KIND_NOVELTY_JUDGE = "novelty_judge"
+KIND_EMBEDDING = "embedding"
 _MAX_VALUE_CHARS = 64
 _MAX_HEADER_CHARS = 512
 _VALUE = re.compile(r"[A-Za-z0-9_.:@/+ -]+")

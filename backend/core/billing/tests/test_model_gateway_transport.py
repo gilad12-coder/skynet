@@ -20,7 +20,13 @@ from core.api.preflight_execution import _verify_model_routes
 from core.billing import model_gateway as gateway_module
 from core.billing.budgets import BudgetService
 from core.billing.model_dispatch import ModelHTTPResult
-from core.billing.model_gateway import PARENT_HOSTS_KEY, ROUTE_KEY, ModelGateway
+from core.billing.model_gateway import (
+    EMBEDDING_ROUTE_KEY,
+    PARENT_HOSTS_KEY,
+    ROUTE_KEY,
+    SHINKA_EMBEDDING_MODEL,
+    ModelGateway,
+)
 from core.billing.model_mailbox import ModelMailbox
 from core.billing.operation_pricing import ChargePolicy
 from core.billing.protected_credentials import (
@@ -29,13 +35,15 @@ from core.billing.protected_credentials import (
     resolve_execution_credentials,
 )
 from core.billing.runtime import BudgetRuntime
+from core.billing.usage_tags import CALLER_PROPOSER, KIND_EMBEDDING, USAGE_TAGS_HEADER, encode_tags
 from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, settings
 from core.exceptions import ServiceError
 from core.service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
 from core.service_gateway.optimization.blackbox.sandbox import CommandResult, LocalSubprocessRuntime, SandboxSpec
 from core.service_gateway.optimization.blackbox.sandbox_broker import SandboxBroker
-from core.storage.models import Base, BillingCustomerModel, ExecutionOperationModel
+from core.storage.models import Base, BillingCustomerModel, ExecutionOperationModel, ExecutionUsageEvidenceModel
+from core.worker.scoped_relay import model_forwarder
 
 IMAGE = "fixture@sha256:" + "a" * 64
 CATALOG = {
@@ -489,3 +497,99 @@ def test_parent_registry_box_is_funded_but_unreachable_from_the_guest_route(gate
     with pytest.raises(ServiceError, match="network access"):
         remote.open(SandboxSpec(lifetime_seconds=20, image=IMAGE, allowed_hosts=("pypi.org",)))
     gateway.parent_sandbox_runtime()
+
+
+EMBEDDING_CATALOG = {
+    "id": SHINKA_EMBEDDING_MODEL,
+    "architecture": {"output_modalities": ["embeddings"]},
+    "endpoints": [
+        {
+            "tag": "openai",
+            "provider_name": "OpenAI",
+            "context_length": 8192,
+            "pricing": {"prompt": "0.00000002", "completion": "0"},
+        }
+    ],
+}
+
+
+@pytest.mark.parametrize("novelty", [True, False])
+def test_shinka_novelty_adds_a_billed_embeddings_route(gateway: ModelGateway, novelty: bool) -> None:
+    """Give only a duplicate-rejecting ShinkaEvolve run an embeddings route, billed as optimization.
+
+    Args:
+        gateway: Parent protocol over the funded fixture budget.
+        novelty: Whether the run turns duplicate rejection on.
+    """
+    sent: list[tuple[str, dict[str, Any]]] = []
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        """Serve the embeddings catalog and a measured embeddings answer.
+
+        Args:
+            request: Outbound provider request.
+
+        Returns:
+            The fake provider's answer.
+        """
+        if request.method == "GET":
+            catalog = EMBEDDING_CATALOG if "embedding" in str(request.url) else CATALOG
+            return httpx.Response(200, json={"data": catalog})
+        sent.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(
+            200,
+            json={
+                "id": "embedding-generation",
+                "object": "list",
+                "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}],
+                "usage": {"prompt_tokens": 3, "total_tokens": 3, "cost": "0.0001"},
+            },
+        )
+
+    gateway._client.close()
+    gateway._client = httpx.Client(transport=httpx.MockTransport(provider))
+    protected = gateway.protect_payload(
+        {"shinka": {"novelty": novelty}, "reflection_model_config": {"name": "fixture/text"}},
+        managed_key="provider-secret",
+    )
+    route = protected["reflection_model_config"]["extra"][ROUTE_KEY]
+    if not novelty:
+        assert EMBEDDING_ROUTE_KEY not in route
+        return
+    embedding = route[EMBEDDING_ROUTE_KEY]
+    assert embedding["model"] == SHINKA_EMBEDDING_MODEL
+    assert embedding["role"] == "optimization"
+    assert "provider-secret" not in json.dumps(protected)
+    forward = model_forwarder(protected)
+    body = {"model": SHINKA_EMBEDDING_MODEL, "input": ["def f(): pass"]}
+    tags = {USAGE_TAGS_HEADER: encode_tags({"caller": CALLER_PROPOSER, "kind": KIND_EMBEDDING})}
+    with pytest.raises(ValueError, match="unknown metered model capability"):
+        forward(route["token"], "/v1/embeddings", body, {})
+    with pytest.raises(ValueError, match="unknown metered model capability"):
+        forward(embedding["token"], "/v1/chat/completions", body, {})
+    chat = httpx.post(
+        f"{gateway.url}/chat/completions",
+        headers={"Authorization": f"Bearer {embedding['token']}"},
+        json={**body, "messages": [{"role": "user", "content": "hi"}]},
+        trust_env=False,
+    )
+    assert chat.status_code == 422
+    answer = httpx.post(
+        f"{gateway.url}/embeddings",
+        headers={"Authorization": f"Bearer {embedding['token']}", **tags},
+        json=body,
+        trust_env=False,
+    )
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["data"][0]["embedding"] == [0.1, 0.2]
+    [(path, upstream)] = sent
+    assert path == "/api/v1/embeddings"
+    assert upstream["provider"]["only"] == ["openai"]
+    snapshot = gateway.runtime.service.get(gateway.runtime.budget_id, gateway.runtime.username)
+    assert snapshot.setup_spent_cents == Decimal("0.01")
+    with Session(gateway.runtime.service._engine) as session:
+        [operation] = session.scalars(select(ExecutionOperationModel)).all()
+        [evidence] = session.scalars(select(ExecutionUsageEvidenceModel)).all()
+    assert operation.state == "settled"
+    assert operation.role == "optimization"
+    assert evidence.evidence["tags"] == {"caller": CALLER_PROPOSER, "kind": KIND_EMBEDDING}

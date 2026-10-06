@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from core.models.blackbox import BlackboxShinkaSettings
 
-from .. import shinka_runner
+from .. import repo_tree, shinka_bundle, shinka_runner
 
 
 def _payload(**overrides: Any) -> dict[str, Any]:
@@ -142,6 +145,44 @@ def test_config_turns_meta_notes_off(tmp_path: Path) -> None:
     assert evolution["meta_rec_interval"] is None
 
 
+def test_config_wires_duplicate_rejection(tmp_path: Path) -> None:
+    """Embed through the embeddings route and judge with the first optimization model on its own token.
+
+    Args:
+        tmp_path: Results directory.
+    """
+    settings = BlackboxShinkaSettings(novelty=True, code_embed_sim_threshold=0.9, max_novelty_attempts=4)
+    payload = _payload(
+        shinka=settings.model_dump(),
+        shinka_embedding={"model": "openai/emb", "url": "https://gw.example/v1", "key_env": "SKYNET_SHINKA_EMBED_KEY"},
+        shinka_novelty_key_env="SKYNET_SHINKA_NOVELTY_KEY",
+    )
+    evolution = shinka_runner.build_config(payload, str(tmp_path), 1)["evolution"]
+
+    assert evolution["embedding_model"] == "local/openai/emb@https://gw.example/v1?api_key_env=SKYNET_SHINKA_EMBED_KEY"
+    assert evolution["novelty_llm_models"] == [
+        "local/claude-test@https://gw.example/v1?api_key_env=SKYNET_SHINKA_NOVELTY_KEY"
+    ]
+    assert evolution["code_embed_sim_threshold"] == 0.9
+    assert evolution["max_novelty_attempts"] == 4
+
+
+def test_config_leaves_duplicate_rejection_off_by_default(tmp_path: Path) -> None:
+    """Configure no embeddings or judge unless the run turned duplicate rejection on.
+
+    Args:
+        tmp_path: Results directory.
+    """
+    payload = _payload(
+        shinka_embedding={"model": "openai/emb", "url": "https://gw.example/v1", "key_env": "SKYNET_SHINKA_EMBED_KEY"},
+        shinka_novelty_key_env="SKYNET_SHINKA_NOVELTY_KEY",
+    )
+    evolution = shinka_runner.build_config(payload, str(tmp_path), 1)["evolution"]
+
+    assert evolution["embedding_model"] is None
+    assert evolution["novelty_llm_models"] is None
+
+
 def test_config_needs_a_model(tmp_path: Path) -> None:
     """Refuse a payload without any optimization model route.
 
@@ -192,6 +233,8 @@ def test_usage_kind_tells_meta_notes_from_mutations() -> None:
 
     assert shinka_runner.usage_kind(meta, "SKYNET_SHINKA_META_KEY") == "meta_notes"
     assert shinka_runner.usage_kind(mutation, "SKYNET_SHINKA_META_KEY") == "mutation"
+    judge = "local/m@https://gw/v1?api_key_env=SKYNET_SHINKA_NOVELTY_KEY"
+    assert shinka_runner.usage_kind(judge, "SKYNET_SHINKA_META_KEY", "SKYNET_SHINKA_NOVELTY_KEY") == "novelty_judge"
     assert json.loads(shinka_runner.usage_header("mutation")["x-skynet-usage-tags"]) == {
         "caller": "proposer",
         "kind": "mutation",
@@ -266,3 +309,175 @@ def test_lineage_reporter_names_each_versions_parent_and_depth(tmp_path: Path) -
     reporter.poll(final=True)
     assert mailbox.lines[-1]["candidate_id"] == 3
     assert mailbox.lines[-1]["parent_id"] is None
+
+
+class _RepoScorer:
+    """Score repository patches by checking them out on a fresh copy of the starting tree."""
+
+    def __init__(self, chunks: list[str], root: Path) -> None:
+        """Keep the shipped tree to apply each patch onto.
+
+        Args:
+            chunks: The repository snapshot chunks.
+            root: Scratch folder for checkouts.
+        """
+        self.chunks = chunks
+        self.root = root
+        self.candidates: list[Any] = []
+        self.total_evals = 0
+
+    def evaluate(
+        self, candidate: Any, example: Any = None, *, candidate_id: int | None = None
+    ) -> tuple[float, dict[str, Any]]:
+        """Score a patch by the value of ``SCALE`` it leaves in ``src/util.py``.
+
+        Args:
+            candidate: The patch the runner sent.
+            example: Visible case, ignored.
+            candidate_id: Version number.
+
+        Returns:
+            The score and feedback naming the file.
+        """
+        self.candidates.append(candidate)
+        self.total_evals += 1
+        checkout = repo_tree.unpack_tree(self.chunks, self.root / f"eval-{self.total_evals}")
+        repo_tree.apply_patch(checkout, candidate)
+        scale = int((checkout / "src/util.py").read_text().split("=")[1])
+        return scale / 10, {"feedback": f"src/util.py sets SCALE={scale}"}
+
+    def emit(self, prefix: str, payload: dict[str, Any]) -> None:
+        """Drop progress lines.
+
+        Args:
+            prefix: Event family.
+            payload: Progress fields.
+        """
+
+
+def _repo(tmp_path: Path) -> tuple[list[str], shinka_bundle.RepoBundle]:
+    """Ship a two-file repository and bind a bundle to its checkout.
+
+    Args:
+        tmp_path: Scratch folder.
+
+    Returns:
+        The snapshot chunks and the bundle rules.
+    """
+    source = tmp_path / "source"
+    (source / "src").mkdir(parents=True)
+    (source / "src/app.py").write_text("from util import SCALE\n")
+    (source / "src/util.py").write_text("SCALE = 2\n")
+    archive = tmp_path / "tree.tgz"
+    subprocess.run(["tar", "-czf", str(archive), "-C", str(source), "."], check=True)
+    chunks = []
+    for index, chunk in enumerate(repo_tree.archive_chunks(archive)):
+        chunks.append(str(tmp_path / f"tree.{index}.b64"))
+        Path(chunks[-1]).write_text(chunk)
+    bundle = shinka_bundle.RepoBundle.prepare({"chunks": chunks, "editable_paths": ["src"]}, "", tmp_path / "checkout")
+    return chunks, bundle
+
+
+def test_repository_versions_reach_the_scorer_as_patches(tmp_path: Path) -> None:
+    """Materialize each bundle program into the run's patch and score it like any repository engine.
+
+    Args:
+        tmp_path: Scratch folder.
+    """
+    chunks, bundle = _repo(tmp_path)
+    mailbox = _RepoScorer(chunks, tmp_path / "evals")
+    scorer = shinka_runner.ProgramScorer(
+        mailbox=mailbox,
+        queue=tmp_path / "queue",
+        examples=[None],
+        part_names=None,
+        max_concurrency=1,
+        stop_at_score=None,
+        bundle=bundle,
+    )
+    program = tmp_path / "results" / "gen_4" / "main.md"
+    program.parent.mkdir(parents=True)
+    program.write_text(shinka_bundle.encode_bundle({"src/util.py": "SCALE = 7\n"}))
+
+    answer = scorer.score_program(str(program))
+
+    assert answer["correct"] is True
+    assert answer["metrics"]["combined_score"] == pytest.approx(0.7)
+    assert repo_tree.patch_paths(mailbox.candidates[0]) == ["src/util.py"]
+    assert scorer.best is not None
+    assert scorer.best["best_candidate"] == mailbox.candidates[0]
+    program.write_text(shinka_bundle.encode_bundle({"../escape": "x\n"}))
+    assert "not a path inside the repository" in scorer.score_program(str(program))["error"]
+
+
+def test_repository_mode_swaps_prompts_edits_and_novelty_input(tmp_path: Path, monkeypatch: Any) -> None:
+    """Route upstream's prompt sampling, patch application and embeddings through the bundle.
+
+    Args:
+        tmp_path: Scratch folder.
+        monkeypatch: Replaces upstream's async runner module.
+    """
+    _, bundle = _repo(tmp_path)
+    embedded: list[str] = []
+
+    async def fake_embedding(exec_fname: str, client: Any, max_chars: int = 10000) -> tuple[Any, float]:
+        """Record what upstream would embed.
+
+        Args:
+            exec_fname: File to embed.
+            client: Embedding client.
+            max_chars: Input cap.
+
+        Returns:
+            A stand-in vector and no cost.
+        """
+        embedded.append(exec_fname)
+        return [1.0], 0.0
+
+    upstream = SimpleNamespace(apply_patch_async=None, get_code_embedding_async=fake_embedding)
+    monkeypatch.setattr(shinka_runner, "shinka_async_runner", upstream)
+    sampler = SimpleNamespace(
+        patch_types=["diff", "full", "cross"],
+        patch_type_probs=[1.0, 0.0, 0.0],
+        task_sys_msg="TASK",
+        use_text_feedback=True,
+    )
+    shinka_runner.install_repo_mode(bundle, SimpleNamespace(prompt_sampler=sampler))
+    parent = SimpleNamespace(code=shinka_bundle.encode_bundle({}), combined_score=0.2, text_feedback="")
+
+    system, user, kind = sampler.sample(parent, [], [], None)
+    assert kind == "diff"
+    assert system.startswith("TASK")
+    assert "src/util.py" in user
+    assert sampler.sample_fix(parent, [])[2] == "fix"
+
+    response = '<FILE path="src/util.py">\n<<<<<<< SEARCH\nSCALE = 2\n=======\nSCALE = 5\n>>>>>>> REPLACE\n</FILE>'
+    code, applied, output, error, _, _ = asyncio.run(
+        upstream.apply_patch_async(parent.code, response, str(tmp_path / "gen_1"), patch_type="full")
+    )
+    assert error is None
+    assert applied == 1
+    assert shinka_bundle.decode_bundle(code) == {"src/util.py": "SCALE = 5\n"}
+
+    vector, _ = asyncio.run(upstream.get_code_embedding_async(str(output), None))
+    assert vector == [1.0]
+    embedded_text = Path(embedded[0]).read_text()
+    assert "+SCALE = 5" in embedded_text
+    assert "app.py" not in embedded_text
+    empty = tmp_path / "gen_0" / "main.md"
+    empty.parent.mkdir()
+    empty.write_text(shinka_bundle.encode_bundle({}))
+    assert asyncio.run(upstream.get_code_embedding_async(str(empty), None)) == (None, 0.0)
+
+
+def test_repository_config_uses_the_file_aware_system_message(tmp_path: Path) -> None:
+    """Give repository runs the bundle system message and room for file-opening rounds.
+
+    Args:
+        tmp_path: Directory upstream would write to.
+    """
+    config = shinka_runner.build_config(_payload(), str(tmp_path), 1, repo=True)["evolution"]
+    text = shinka_runner.build_config(_payload(), str(tmp_path), 1)["evolution"]
+
+    assert config["task_sys_msg"].startswith(shinka_bundle.REPO_SYSTEM_MESSAGE)
+    assert config["max_patch_attempts"] == text["max_patch_attempts"] + shinka_bundle.OPEN_ROUNDS
