@@ -99,6 +99,9 @@ _SHINKA_REQUIREMENTS_FILE = "shinka_requirements.txt"
 # named by position; the meta-notes model reads its own so its calls are told apart.
 SHINKA_KEY_ENV = "SKYNET_SHINKA_KEY_{index}"
 SHINKA_META_KEY_ENV = "SKYNET_SHINKA_META_KEY"
+# The protected image bakes ShinkaEvolve into its own venv (backend/Dockerfile),
+# because its pinned closure conflicts with the backend's own dependencies.
+SHINKA_IMAGE_PYTHON = "/opt/shinka/venv/bin/python"
 _BRIDGE_FILE = "harness_bridge.py"
 _ENGINES_FILE = "native_engines.py"
 _REPO_TREE_FILE = "repo_tree.py"
@@ -347,6 +350,11 @@ def _bootstrap_command(
             '"$HOME/.local/bin/uv" python find 3.11.9 > native-python.txt; fi; '
             "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; " + harness_install
         )
+    elif shinka:
+        prepare += (
+            f"if [ -x {SHINKA_IMAGE_PYTHON} ]; then printf '%s\\n' {SHINKA_IMAGE_PYTHON} > native-python.txt; "
+            "else command -v python3 > native-python.txt; fi; "
+        )
     else:
         prepare += "command -v python3 > native-python.txt; "
     extract = (
@@ -452,13 +460,19 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
                 + _failure_detail(installed, install_timeout)
             )
         probe = (
-            "import importlib.util,json,subprocess,sys; "
+            "import importlib.util,json,os,subprocess,sys; "
             "import native_runner, autosaddler_runner, shinka_runner, native_engines; "
             "native_engines.check_assets(); "
             f"autosaddler=sys.version_info >= {AUTOSADDLER_PYTHON_FLOOR!r} "
             "and importlib.util.find_spec('autosaddler') is not None; "
-            f"shinka=sys.version_info >= {AUTOSADDLER_PYTHON_FLOOR!r} "
-            "and importlib.util.find_spec('shinka') is not None; "
+            f"shinka_python={SHINKA_IMAGE_PYTHON!r} if os.access({SHINKA_IMAGE_PYTHON!r},os.X_OK) else sys.executable; "
+            "shinka=subprocess.run([shinka_python,'-c',"
+            + repr(
+                "import importlib.util,sys; "
+                f"sys.exit(0 if sys.version_info >= {AUTOSADDLER_PYTHON_FLOOR!r} "
+                "and importlib.util.find_spec('shinka') else 1)"
+            )
+            + "],capture_output=True,timeout=20).returncode == 0; "
             "prefix=[]; "
             "result=subprocess.run([*prefix,'claude','--version'],capture_output=True,text=True,timeout=20,check=True); "
             f"assert result.stdout.split(' ',1)[0] == {CLAUDE_VERSION!r}; "

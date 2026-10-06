@@ -32,9 +32,16 @@ license files in their `*.dist-info/` directories inside the image.
 | OpenCode | see `sandbox-runtime/package-lock.json` | MIT | `LICENSE` inside the package |
 
 ShinkaEvolve (`shinka-evolve==0.0.7`, Apache-2.0, Copyright Sakana AI) is
-not bundled: a ShinkaEvolve run installs it unmodified from PyPI, with the
-pinned dependencies in `core/service_gateway/optimization/blackbox/shinka_requirements.txt`,
-into a private virtual environment inside the run's sandbox.
+installed unmodified from PyPI, with the pinned dependencies in
+`core/service_gateway/optimization/blackbox/shinka_requirements.txt`, into its
+own virtual environment at `/opt/shinka/venv` in the image (or, outside the
+protected image, into a private virtual environment inside the run's sandbox).
+Each package's license text is in its `dist-info` folder. Most are MIT, BSD or
+Apache-2.0; certifi and tqdm are MPL-2.0, `Levenshtein` and
+`python-Levenshtein` 0.27.5 are GPL-2.0-or-later
+(https://github.com/rapidfuzz/Levenshtein/tree/v0.27.5), and `imageio-ffmpeg`
+0.6.0 (BSD-2-Clause) carries a static FFmpeg 7.0.2 executable built as GPL-3.0-or-later
+(https://github.com/imageio/imageio-ffmpeg/tree/v0.6.0, FFmpeg source: https://ffmpeg.org/releases/ffmpeg-7.0.2.tar.xz).
 
 Claude Code (`@anthropic-ai/claude-code`) is proprietary Anthropic software. It
 is installed only in images Skynet runs itself; images delivered to third
