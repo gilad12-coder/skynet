@@ -214,13 +214,15 @@ export interface FoldedGap {
 
 /**
  * Keep only the changed rows and `context` unchanged rows around each change,
- * folding every longer unchanged run into a gap. Gaps whose `start` is in
- * `expanded` stay open.
+ * folding every unchanged run of at least `minFold` rows into a gap. Gaps
+ * whose `start` is in `expanded` stay open.
  */
 export function foldRows(
   rows: NumberedRow[],
   context = 3,
   expanded: ReadonlySet<number> = new Set(),
+  // A fold row is as tall as a line, so folding a short run hides nothing.
+  minFold = 4,
 ): Array<NumberedRow | FoldedGap> {
   const keep = rows.map((row) => row.kind !== "same");
   const near = keep.slice();
@@ -238,8 +240,54 @@ export function foldRows(
     }
     const start = i;
     while (i < rows.length && !near[i]) i++;
-    if (expanded.has(start)) out.push(...rows.slice(start, i));
+    if (expanded.has(start) || i - start < minFold) out.push(...rows.slice(start, i));
     else out.push({ gap: true, start, hidden: i - start });
+  }
+  return out;
+}
+
+/** A piece of a diff line carrying both its syntax style and its change emphasis. */
+export interface StyledSpan {
+  text: string;
+  spec: number | null;
+  changed: boolean;
+}
+
+/**
+ * Cut a line's syntax tokens at its word-level change boundaries, so a changed
+ * line keeps its highlighting under the emphasis. Null when the two do not
+ * spell the same text.
+ */
+export function mergeLineSpans(
+  tokens: ReadonlyArray<{ text: string; spec: number | null }>,
+  segments: readonly DiffSegment[],
+): StyledSpan[] | null {
+  if (tokens.map((t) => t.text).join("") !== segments.map((s) => s.text).join("")) return null;
+  const out: StyledSpan[] = [];
+  let ti = 0;
+  let si = 0;
+  let tOffset = 0;
+  let sOffset = 0;
+  while (ti < tokens.length && si < segments.length) {
+    const token = tokens[ti]!;
+    const segment = segments[si]!;
+    const take = Math.min(token.text.length - tOffset, segment.text.length - sOffset);
+    if (take > 0) {
+      const text = token.text.slice(tOffset, tOffset + take);
+      const last = out[out.length - 1];
+      if (last && last.spec === token.spec && last.changed === segment.changed) last.text += text;
+      else out.push({ text, spec: token.spec, changed: segment.changed });
+    }
+    tOffset += take;
+    sOffset += take;
+    if (tOffset >= token.text.length) {
+      ti++;
+      tOffset = 0;
+    }
+    if (sOffset >= segment.text.length) {
+      si++;
+      sOffset = 0;
+    }
   }
   return out;
 }

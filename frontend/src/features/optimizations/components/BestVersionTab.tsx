@@ -38,7 +38,7 @@ import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
 import { CandidatePreview } from "./CandidatePreview";
 import { VersionRail } from "./VersionRail";
-import { RepoVersionBrowser } from "./RepoVersionBrowser";
+import { RepoVersionBrowser, type Compare } from "./RepoVersionBrowser";
 import {
   ADDED_BG,
   ADDED_EMPHASIS_BG,
@@ -362,6 +362,7 @@ export function BestVersionTab({
   );
   const browse = repository && !!optimizationId;
   const [repoPath, setRepoPath] = useState<string | null>(null);
+  const [repoCompare, setRepoCompare] = useState<Compare>("base");
   const [openFile, setOpenFile] = useState<{ path: string; text: string } | null>(null);
   const [index, setIndex] = useState(() => defaultVersionIndex(versions));
   const last = versions.length - 1;
@@ -442,11 +443,6 @@ export function BestVersionTab({
             <InlineWarningRow message={msg("optimization.blackbox.best.regression_guard")} />
           )}
           {pullRequest && <PullRequestRow pullRequest={pullRequest} />}
-          {repository && current.text === "" && (
-            <p className="text-xs text-muted-foreground">
-              {msg("optimization.blackbox.repo.unchanged")}
-            </p>
-          )}
           {!result.versions?.length && versions.length > 1 && (
             <p className="text-xs text-muted-foreground">
               {msg("optimization.blackbox.versions.history_missing")}
@@ -469,6 +465,8 @@ export function BestVersionTab({
                 parent={parent}
                 path={repoPath}
                 onPathChange={setRepoPath}
+                compare={repoCompare}
+                onCompareChange={setRepoCompare}
                 onOpenFile={setOpenFile}
               />
             )}

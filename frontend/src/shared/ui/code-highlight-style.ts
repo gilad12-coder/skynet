@@ -21,7 +21,7 @@ export const CODE_HIGHLIGHT_SPECS: CodeHighlightSpec[] = [
   { tag: tags.definition(tags.variableName), color: "#3D2E22" },
   { tag: tags.string, color: "#5A7247" },
   { tag: tags.special(tags.string), color: "#5A7247" },
-  { tag: tags.comment, color: "#B09878", fontStyle: "italic" },
+  { tag: tags.comment, color: "#8A7558", fontStyle: "italic" },
   { tag: tags.variableName, color: "#3D2E22" },
   { tag: tags.bracket, color: "#8C7A6B" },
   { tag: tags.tagName, color: "#8B5E3C" },
