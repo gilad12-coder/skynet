@@ -101,32 +101,22 @@ def test_broker_keeps_profile_and_ownership_in_parent() -> None:
         broker.handle("open", _open_payload(lifetime_seconds=90))
 
 
-def test_broker_opens_anthropic_only_with_the_owner_key_added_at_the_edge() -> None:
-    """Let a box reach Anthropic only when the run holds a key, and keep the key off the child's side."""
-    offline = SandboxBroker(FakeRuntime(), image=IMAGE, max_lifetime_seconds=120)
-    with pytest.raises(ServiceError, match="network access"):
-        offline.handle("open", _open_payload(allowed_hosts=["api.anthropic.com"]))
+def test_guest_boxes_never_open_network_access() -> None:
+    """Refuse every host a guest asks for, and open its boxes offline."""
     runtime = FakeRuntime()
-    broker = SandboxBroker(runtime, image=IMAGE, max_lifetime_seconds=120, anthropic_api_key="sk-ant-secret")
-    for hosts in (["evil.example"], ["api.anthropic.com", "evil.example"], "api.anthropic.com"):
-        with pytest.raises(ServiceError, match="network access") as refused:
+    broker = SandboxBroker(runtime, image=IMAGE, max_lifetime_seconds=120)
+    for hosts in (["evil.example"], ["api.anthropic.com"], "api.anthropic.com"):
+        with pytest.raises(ServiceError, match="network access"):
             broker.handle("open", _open_payload(allowed_hosts=hosts))
-        assert "sk-ant-secret" not in str(refused.value)
-    opened = broker.handle("open", _open_payload(allowed_hosts=["api.anthropic.com"]))
-    assert "sk-ant-secret" not in json.dumps(opened)
-    spec = runtime.specs[0]
-    assert spec.network_disabled is False
-    assert spec.allowed_hosts == ("api.anthropic.com",)
-    assert spec.inject_headers == {"api.anthropic.com": {"x-api-key": "sk-ant-secret"}}
-    broker.handle("open", {**_open_payload(), "request_id": "offline"})
-    assert runtime.specs[1].network_disabled is True
-    assert runtime.specs[1].inject_headers == {}
+    broker.handle("open", _open_payload())
+    assert runtime.specs[0].network_disabled is True
+    assert runtime.specs[0].inject_headers == {}
 
 
 def test_the_guest_route_never_reaches_a_package_registry() -> None:
-    """However the guest asks, its boxes stay Anthropic-only or offline, even while the parent's box is online."""
+    """However the guest asks, its boxes stay offline, even while the parent's box is online."""
     runtime = FakeRuntime()
-    broker = SandboxBroker(runtime, image=IMAGE, max_lifetime_seconds=120, anthropic_api_key="sk-ant-secret")
+    broker = SandboxBroker(runtime, image=IMAGE, max_lifetime_seconds=120)
     parent = broker.parent_runtime(PACKAGE_REGISTRY_HOSTS).open(
         SandboxSpec(lifetime_seconds=60, allowed_hosts=PACKAGE_REGISTRY_HOSTS, operation_key="repo-scorer:job")
     )
@@ -241,26 +231,6 @@ def test_remote_round_trip_streams_output_and_supports_callback_file_actions() -
     assert runtime.sessions[0].files["mailbox/response.json"] == "done"
     assert runtime.sessions[0].close_calls == 1
     assert len([request for request in requests if request["action"] == "close"]) == 1
-
-
-def test_remote_child_asks_for_anthropic_without_ever_holding_the_key() -> None:
-    """Carry the child's host request to the parent, which alone adds the key."""
-    runtime = FakeRuntime()
-    broker = SandboxBroker(runtime, image=IMAGE, max_lifetime_seconds=120, anthropic_api_key="sk-ant-secret")
-    bodies: list[bytes] = []
-
-    def parent(request: httpx.Request) -> httpx.Response:
-        """Answer the child's open with the broker's result."""
-        bodies.append(request.content)
-        body = json.loads(request.content)
-        return httpx.Response(200, json=broker.handle(body["action"], body["payload"]))
-
-    with httpx.Client(transport=httpx.MockTransport(parent)) as client:
-        remote = RemoteSandboxRuntime("http://127.0.0.1:9000/v1", "opaque-control", client=client)
-        remote.open(SandboxSpec(lifetime_seconds=60, allowed_hosts=("api.anthropic.com",)))
-    assert json.loads(bodies[0])["payload"]["spec"]["allowed_hosts"] == ["api.anthropic.com"]
-    assert all(b"sk-ant-secret" not in body for body in bodies)
-    assert runtime.specs[0].inject_headers == {"api.anthropic.com": {"x-api-key": "sk-ant-secret"}}
 
 
 @pytest.mark.parametrize("stream", [True, False])

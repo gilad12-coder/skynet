@@ -8,10 +8,6 @@ FROM ${REGISTRY_PREFIX}/node:22.22.0-bookworm-slim AS node-runtime
 FROM node-runtime AS harness-deps
 
 ARG NPM_CONFIG_REGISTRY
-# Claude Code is proprietary Anthropic software that may not be redistributed.
-# Images delivered to a third party (air-gap bundles, customer registries) must
-# build with INCLUDE_CLAUDE_CODE=false; only our own hosted deployment keeps it.
-ARG INCLUDE_CLAUDE_CODE=true
 # Prime Agent's tarballs come from its own release host, which
 # NPM_CONFIG_REGISTRY cannot redirect. Air-gap builds point this at a mirror of
 # <host>/releases; the lockfile integrity hashes still pin the content.
@@ -24,7 +20,6 @@ RUN if [ -n "$PRIME_AGENT_RELEASE_MIRROR" ]; then \
     && npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
         ${NPM_CONFIG_REGISTRY:+--registry "$NPM_CONFIG_REGISTRY"} \
     && rm -rf \
-        /usr/local/lib/skynet-harnesses/node_modules/@anthropic-ai/claude-code-linux-x64-musl \
         /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-musl \
         /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-baseline-musl \
     && mkdir -p \
@@ -50,11 +45,7 @@ RUN if [ -n "$PRIME_AGENT_RELEASE_MIRROR" ]; then \
         /usr/local/lib/skynet-harnesses/node_modules/opencode-ai \
         /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64 \
         /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-baseline \
-        /opt/skynet-harness-layers/opencode/ \
-    && if [ "$INCLUDE_CLAUDE_CODE" != "true" ]; then \
-        rm -rf /opt/skynet-harness-layers/anthropic/@anthropic-ai \
-            /usr/local/lib/skynet-harnesses/node_modules/.bin/claude; \
-    fi
+        /opt/skynet-harness-layers/opencode/
 
 # 3.12 for PEP 683 immortal objects: core interpreter objects stop taking
 # refcount writes, so job children fork()ed from the fat parent dirty far
@@ -84,7 +75,7 @@ RUN groupadd -g 1001 appuser 2>/dev/null || true \
     && chown 1001:0 /app \
     && chmod 0775 /app
 
-# Claude Code 2.1.259 requires Node >=22; Debian's nodejs may be older.
+# The pinned harness CLIs require Node >=22; Debian's nodejs may be older.
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
@@ -98,7 +89,7 @@ COPY --from=harness-deps /opt/skynet-harness-layers/codex/ /usr/local/lib/skynet
 COPY --from=harness-deps /opt/skynet-harness-layers/opencode/ /usr/local/lib/skynet-harnesses/node_modules/
 COPY --from=harness-deps /opt/skynet-harness-layers/pi/ /usr/local/lib/skynet-harnesses/node_modules/
 COPY --from=harness-deps /opt/skynet-harness-layers/prime/ /usr/local/lib/skynet-harnesses/node_modules/
-RUN for CLI in claude pi codex opencode prime-agent; do \
+RUN for CLI in pi codex opencode prime-agent; do \
         if [ -e "/usr/local/lib/skynet-harnesses/node_modules/.bin/$CLI" ]; then \
             ln -s "/usr/local/lib/skynet-harnesses/node_modules/.bin/$CLI" "/usr/local/bin/$CLI"; \
         fi; \

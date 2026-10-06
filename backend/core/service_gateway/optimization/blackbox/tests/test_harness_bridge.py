@@ -186,27 +186,6 @@ def test_shim_resumes_by_restating_the_opening_prompt(tmp_path: Path) -> None:
     assert "unsupported --output-format" in rejected.stderr
 
 
-def test_direct_anthropic_points_claude_at_the_edge_with_only_a_placeholder(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Send a direct run to Anthropic with the placeholder key, and leave other runs on the gateway."""
-    gateway = {"ANTHROPIC_BASE_URL": "http://127.0.0.1:9/mailbox", "ANTHROPIC_AUTH_TOKEN": "gateway-token"}
-    untouched = dict(gateway)
-    harness_bridge.use_direct_anthropic(untouched)
-    assert untouched == gateway
-    ca = tmp_path / "proxy-ca.crt"
-    ca.write_text("certificate")
-    monkeypatch.setattr(harness_bridge, "PROXY_CA_PATH", str(ca))
-    direct = {**gateway, "SKYNET_CLAUDE_DIRECT": "1"}
-    harness_bridge.use_direct_anthropic(direct)
-    assert direct == {
-        "SKYNET_CLAUDE_DIRECT": "1",
-        "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
-        "ANTHROPIC_API_KEY": "sk-ant-skynet-edge-injected",
-        "NODE_EXTRA_CA_CERTS": str(ca),
-    }
-
-
 def test_failed_result_names_the_error_event_codex_writes_to_stdout() -> None:
     """Keep Codex's stdout error events next to its stderr banner, which says nothing on its own."""
     stdout = "\n".join(
@@ -330,7 +309,7 @@ def test_tool_calls_are_counted_but_not_capped_without_a_cap(tmp_path: Path) -> 
 
 
 def test_tool_call_ids_read_every_streaming_format() -> None:
-    """Name tool calls in the Pi, Codex, OpenCode and Claude stream shapes, and none in plain output."""
+    """Name tool calls in the Pi, Codex and OpenCode stream shapes, and none in plain output."""
     tool_call_ids = harness_bridge.tool_call_ids
     assert tool_call_ids("pi", {"type": "tool_execution_start", "toolCallId": "a"}) == ["a"]
     assert tool_call_ids("pi", {"type": "tool_execution_end", "toolCallId": "a"}) == []
@@ -339,11 +318,6 @@ def test_tool_call_ids_read_every_streaming_format() -> None:
     assert tool_call_ids("codex", {**started, "type": "item.completed"}) == ["i1"]
     assert tool_call_ids("codex", {"type": "item.completed", "item": {"id": "i2", "type": "agent_message"}}) == []
     assert tool_call_ids("opencode", {"type": "tool_use", "part": {"callID": "o1"}}) == ["o1"]
-    assistant = {
-        "type": "assistant",
-        "message": {"content": [{"type": "text"}, {"type": "tool_use", "id": "t1"}, {"type": "tool_use", "id": "t2"}]},
-    }
-    assert tool_call_ids("claude", assistant) == ["t1", "t2"]
     assert tool_call_ids("plain", {"type": "tool_execution_start"}) == []
 
 

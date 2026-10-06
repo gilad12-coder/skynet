@@ -362,7 +362,7 @@ def _add_usage(destination: dict[str, dict[str, int]], model: str, counts: dict[
 
     Args:
         destination: Per-model cumulative usage.
-        model: Model identifier reported by Claude Code.
+        model: Model identifier reported by the proposer session.
         counts: Native token usage fields.
         camel: Whether fields use the CLI final-summary camelCase spelling.
     """
@@ -454,7 +454,7 @@ def _descendants() -> list[int]:
     """Find only processes descended from this isolated runner.
 
     Returns:
-        Child process ids, including separately grouped Claude sessions.
+        Child process ids, including separately grouped proposer sessions.
     """
     parents: dict[int, int] = {}
     if _PROC_ROOT.is_dir():
@@ -604,25 +604,24 @@ def _engine_knobs(engine_id: str, proposer: dict[str, Any]) -> dict[str, Any]:
         Only the keys the named engine's config dataclass accepts, minus unset ones.
     """
     if engine_id == "meta_harness":
-        names = ("max_candidates_per_iter", "effort", "max_thinking_tokens")
+        names: tuple[str, ...] = ("max_candidates_per_iter",)
     elif engine_id in ("gepa_repo", "best_of_n_repo"):
-        names = ("effort", "max_thinking_tokens")
+        names = ()
     else:
-        names = ("ralph", "max_no_eval_seconds", "effort", "max_thinking_tokens")
+        names = ("ralph", "max_no_eval_seconds")
     return {name: proposer[name] for name in names if proposer.get(name) is not None}
 
 
 def _install_proposer(proposer: dict[str, Any]) -> None:
     """Put the configured harness behind the ``claude`` command the upstream engines run.
 
-    Claude Code itself stays the ``claude`` command, aimed at Anthropic when the
-    run holds its owner's key.
+    A block without a ``run_command`` (only engine knobs) leaves ``claude`` as
+    whatever is on ``PATH``, which only tests provide.
 
     Args:
         proposer: Proposer block of the parent payload.
     """
-    if not proposer or proposer.get("harness") == "claude_code":
-        harness_bridge.use_direct_anthropic(os.environ)
+    if not proposer.get("run_command"):
         return
     config_file = Path("proposer.json").resolve()
     config_file.write_text(json.dumps(proposer), encoding="utf-8")

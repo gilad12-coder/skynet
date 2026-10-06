@@ -580,7 +580,7 @@ export type BlackboxEngineId =
   | "meta_harness"
   | "autosaddler"
   | "shinka_evolve";
-export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "prime" | "custom";
+export type BlackboxHarness = "pi" | "codex" | "opencode" | "prime" | "custom";
 export type BlackboxProposerRuntime = "vercel";
 
 export interface ScorerDependencyLock {
@@ -656,15 +656,11 @@ export interface BlackboxStrategy {
   engine?: BlackboxEngineId | null;
 }
 
-export type BlackboxProposerEffort = "low" | "medium" | "high" | "max";
-
 /** The coding agent that drives a harness-based engine's optimization loop. */
 export interface BlackboxProposer {
   harness: BlackboxHarness;
   install_command?: string | null;
   run_command?: string | null;
-  effort?: BlackboxProposerEffort | null;
-  max_thinking_tokens?: number | null;
   max_candidates_per_iter?: number | null;
   ralph?: boolean;
   max_no_eval_seconds?: number | null;
@@ -886,7 +882,6 @@ export interface BlackboxEngineCatalogResponse {
   auto_unavailable_reason: string | null;
   auto_checkpoint_recovery_supported: boolean;
   auto_checkpoint_recovery_reason: string | null;
-  claude_code_proposer_available: boolean;
   upstream_revision: string;
   run_recovery_eligibility: string;
   proposer_runtimes: Array<{

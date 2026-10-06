@@ -28,7 +28,7 @@ from ....billing.runtime import UsagePendingError
 from ....billing.usage_tags import CALLER_PROPOSER, KIND_MUTATION, USAGE_TAGS_HEADER, encode_tags, usage_scope
 from ....config import Settings, settings
 from ....exceptions import ServiceError
-from ....models.blackbox import BLACKBOX_HARNESS_CLAUDE_CODE, BLACKBOX_HARNESS_PI, BlackboxProposer, BlackboxTarget
+from ....models.blackbox import BLACKBOX_HARNESS_CODEX, BLACKBOX_HARNESS_PI, BlackboxProposer, BlackboxTarget
 from ..budget_stop import BudgetReached
 from . import harness_bridge, native_runner, repo_tree, sandbox_log
 from .agent_eval import gateway_from_settings
@@ -60,7 +60,6 @@ from .upstream import (
 from .upstream import GEPA_SOURCE as GEPA_PACKAGE_SOURCE
 
 GEPA_SOURCE = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
-CLAUDE_VERSION = "2.1.259"
 # The guest must already carry the parent's exact Python patch version (checkpoint_compat identity),
 # so the native floor only restates pyproject's requires-python. A stricter floor here contradicts
 # any image built to match a host below it and fails every readiness check on that host.
@@ -123,7 +122,6 @@ _AUTOSADDLER_PINS = (
     "anyio==4.15.1",
     "attrs==26.1.0",
     "cffi==2.1.1",
-    "claude-agent-sdk==0.2.152",
     "click==8.5.0",
     "cryptography==50.0.1",
     "h11==0.16.0",
@@ -164,9 +162,6 @@ class NativeOptions:
     proposer: BlackboxProposer = field(default_factory=BlackboxProposer)
     budget_route: dict[str, str] | None = field(default=None, repr=False)
     sandbox_runtime: SandboxRuntime | None = None
-    # Claude Code talks to Anthropic on the run owner's key, added at the network
-    # edge by the parent, instead of through the model gateway.
-    direct_anthropic: bool = False
     # A repository run's packed tree: ``chunks`` (files on this machine),
     # ``editable_paths`` and ``readonly_paths``.
     repo: dict[str, Any] | None = None
@@ -293,12 +288,6 @@ def _harness_setup(harness: str, install_command: str | None, *, protected: bool
     Returns:
         ``(install, check)`` shell fragments, each ending in ``"; "`` or empty.
     """
-    if harness == BLACKBOX_HARNESS_CLAUDE_CODE:
-        install = (
-            f'if ! claude --version 2>/dev/null | grep -q "^{re.escape(CLAUDE_VERSION)} "; then '
-            f'npm install --global --prefix "$HOME/.local" @anthropic-ai/claude-code@{CLAUDE_VERSION}; fi; '
-        )
-        return ("" if protected else install), f'claude --version | grep -q "^{re.escape(CLAUDE_VERSION)} "; '
     check = pinned_harness_check(harness)
     install = f"{install_command}; " if install_command and not protected else ""
     return install, (f"{check}; " if check else "")
@@ -309,7 +298,7 @@ def _bootstrap_command(
     *,
     protected: bool = False,
     engine_id: str = "meta_harness",
-    harness: str = BLACKBOX_HARNESS_CLAUDE_CODE,
+    harness: str = BLACKBOX_HARNESS_CODEX,
     install_command: str | None = None,
     shinka_agent: bool = False,
 ) -> str:
@@ -320,7 +309,7 @@ def _bootstrap_command(
         protected: Require dependencies already present in the immutable offline image.
         engine_id: Native engine whose interpreter and packages are prepared.
         harness: Proposer harness the engine drives.
-        install_command: Install step of a non-Claude proposer harness.
+        install_command: Install step of the proposer harness.
         shinka_agent: ShinkaEvolve writes versions with Pi (its agent editor),
             so Pi and Node are prepared as for a Pi proposer.
 
@@ -436,7 +425,7 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
         options: Actual runtime selection with a scoped parent gateway capability.
 
     Returns:
-        Confirmed immutable source, CLI version, engine imports and runtime selection.
+        Confirmed immutable source, engine imports and runtime selection.
 
     Raises:
         ServiceError: When the managed runtime or its pinned dependencies cannot launch.
@@ -466,7 +455,10 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
             }
         )
         install_timeout = min(60, lifetime - 1)
-        installed = session.run(_bootstrap_command(options.runtime, protected=True), timeout_seconds=install_timeout)
+        installed = session.run(
+            _bootstrap_command(options.runtime, protected=True, harness=options.proposer.harness),
+            timeout_seconds=install_timeout,
+        )
         if not installed.ok or installed.timed_out:
             raise ServiceError(
                 "The selected native runtime lacks its required pinned offline dependencies. "
@@ -486,9 +478,6 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
                 "and importlib.util.find_spec('shinka') else 1)"
             )
             + "],capture_output=True,timeout=20).returncode == 0; "
-            "prefix=[]; "
-            "result=subprocess.run([*prefix,'claude','--version'],capture_output=True,text=True,timeout=20,check=True); "
-            f"assert result.stdout.split(' ',1)[0] == {CLAUDE_VERSION!r}; "
             "print(json.dumps({'ready':True,'autosaddler':autosaddler,'shinka':shinka}))"
         )
         remaining = lifetime - (time.monotonic() - started) - 1
@@ -499,7 +488,7 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
             'export HOME="$PWD"; export PYTHONPATH="$PWD/native_vendor"; '
             f'"$(cat native-python.txt)" -c {shlex.quote(probe)}',
             timeout_seconds=probe_timeout,
-            env={"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CI": "1"},
+            env={"CI": "1"},
         )
         ready = next(
             (json.loads(line) for line in checked.stdout.splitlines() if line.strip().startswith('{"ready": true')),
@@ -519,7 +508,6 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
             "autosaddler_ready": bool(ready.get("autosaddler")),
             "shinka_version": SHINKA_VERSION,
             "shinka_ready": bool(ready.get("shinka")),
-            "claude_version": CLAUDE_VERSION,
         }
     finally:
         original_error = sys.exception()
@@ -899,8 +887,6 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         raise ServiceError("Native optimizers require a positive proposer cost limit.")
     if not options.gateway.url or not options.gateway.api_key:
         raise ServiceError("Native optimizers require a configured model gateway.")
-    if options.direct_anthropic and options.budget_route is None:
-        raise ServiceError("Claude Code on your own Anthropic key requires the protected sandbox.")
     runtime = _selected_runtime(options)
     nonce = uuid.uuid4().hex
     artifacts_dir = Path(ctx.run_dir) / f"{engine_id}-native-{nonce[:8]}"
@@ -939,7 +925,6 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         env={"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
         name=unique_sandbox_name(f"skynet-{engine_id}"),
         inject_headers=headers,
-        allowed_hosts=(harness_bridge.ANTHROPIC_HOST,) if options.direct_anthropic else (),
     )
     session = runtime.open(spec)
     final_result: Result | None = None
@@ -970,8 +955,6 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 "harness": proposer.harness,
                 "model": options.model,
                 "price": {"input": input_price, "output": output_price},
-                "effort": proposer.effort,
-                "max_thinking_tokens": proposer.max_thinking_tokens,
                 "max_candidates_per_iter": proposer.max_candidates_per_iter,
                 "ralph": proposer.ralph,
                 "max_no_eval_seconds": proposer.max_no_eval_seconds,
@@ -1044,11 +1027,9 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             "ANTHROPIC_AUTH_TOKEN": "skynet-managed" if headers else options.gateway.api_key,
             harness_bridge.KEY_ENV: "skynet-managed" if headers else options.gateway.api_key,
             "DISABLE_AUTOUPDATER": "1",
-            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
             "CI": "1",
             "NO_COLOR": "1",
             **({"SKYNET_BUDGET_RELAY_URL": relay} if relay else {}),
-            **({harness_bridge.DIRECT_ANTHROPIC_ENV: "1"} if options.direct_anthropic and not shinka else {}),
         }
         if shinka:
             env.update(

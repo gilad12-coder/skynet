@@ -8,7 +8,6 @@ import {
   MAX_TOOL_CALLS_LIMITS,
   engineSelectionIssue,
   proposerKnobs,
-  proposerTunesReasoning,
   submittedProposer,
   submittedRunProposer,
   supportsIterationLimit,
@@ -24,7 +23,6 @@ const catalog: BlackboxEngineCatalogResponse = {
   auto_unavailable_reason: null,
   auto_checkpoint_recovery_supported: false,
   auto_checkpoint_recovery_reason: "Auto recovery requires a new search.",
-  claude_code_proposer_available: false,
   upstream_revision: "pinned",
   run_recovery_eligibility:
     "Recovery also requires a compatible saved checkpoint and enough funded headroom.",
@@ -246,8 +244,7 @@ test("proposer knobs follow the engine that reads them, and Auto exposes them al
 test("submitted proposer resets every knob the form hides, and always runs research rounds", () => {
   const tuned = {
     ...DEFAULT_PROPOSER,
-    harness: "claude_code" as const,
-    effort: "high" as const,
+    harness: "pi" as const,
     max_candidates_per_iter: 4,
     ralph: false,
     max_no_eval_seconds: 600,
@@ -278,7 +275,6 @@ test("submitted proposer resets every knob the form hides, and always runs resea
   assert.deepEqual(submittedProposer({ ...tuned, harness: "opencode" }, "single", "autoresearch"), {
     ...tuned,
     harness: "opencode",
-    effort: null,
     ralph: true,
     max_candidates_per_iter: null,
     max_no_eval_seconds: stall,
@@ -302,7 +298,7 @@ test("the tool-call cap defaults to 100 within the backend range and is always s
 });
 
 test("a single ShinkaEvolve run sends a proposer only for the agent editor's tool-call cap", () => {
-  const proposer = { ...DEFAULT_PROPOSER, harness: "claude_code" as const, max_tool_calls: 250 };
+  const proposer = { ...DEFAULT_PROPOSER, harness: "opencode" as const, max_tool_calls: 250 };
   const shinka = { ...DEFAULT_SHINKA_SETTINGS };
   const single = { proposer, mode: "single" as const, engine: "shinka_evolve" as const };
   assert.equal(submittedRunProposer({ ...single, nativeProposer: false, shinka }), undefined);
@@ -330,10 +326,4 @@ test("a single ShinkaEvolve run sends a proposer only for the agent editor's too
     submittedRunProposer({ proposer, mode: "auto", engine: null, nativeProposer: true, shinka }),
     submittedProposer(proposer, "auto", null),
   );
-});
-
-test("reasoning knobs appear only for the Claude Code proposer", () => {
-  assert.equal(proposerTunesReasoning("claude_code"), true);
-  for (const harness of ["pi", "codex", "opencode", "prime"] as const)
-    assert.equal(proposerTunesReasoning(harness), false);
 });

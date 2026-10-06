@@ -55,8 +55,6 @@ except ImportError:  # In the sandbox the runner loads ``repo_tree`` as a top-le
 META_HARNESS_REVISION = "0cbc31e97c9e6d24232d1dc754827c02e1ec415c"
 AUTORESEARCH_VERSION = "1"
 PROMPTS_DIR = Path(__file__).with_name("upstream_prompts")
-# harness_bridge.DIRECT_ANTHROPIC_ENV; this module loads in the sandbox without its siblings.
-_DIRECT_ANTHROPIC_ENV = "SKYNET_CLAUDE_DIRECT"
 # Mirrors core.run_log.RECORD_ATTR: this module runs in the sandbox without Skynet's code.
 RUN_LOG_ATTR = "run_log"
 run_log = logging.getLogger("skynet.engine")
@@ -415,8 +413,6 @@ def run_proposer(
     model: str,
     session_id: str,
     resume: bool = False,
-    effort: str | None = None,
-    max_thinking_tokens: int | None = None,
     max_budget_usd: float | None = None,
     tools: str | None = None,
     append_system_prompt: str | None = None,
@@ -424,8 +420,8 @@ def run_proposer(
 ) -> ProposerOutcome:
     """Run the proposer through the ``claude`` command, exactly as the upstream drivers do.
 
-    The configured harness stands behind ``claude`` when it is not Claude Code,
-    so this is the single invocation shape every proposer must answer.
+    The harness bridge answers to ``claude`` for the configured harness, so this
+    is the single invocation shape every proposer must answer.
 
     Args:
         prompt: Task prompt for this session.
@@ -435,8 +431,6 @@ def run_proposer(
         model: Model identifier passed to the CLI.
         session_id: Session to create or, with ``resume``, to continue.
         resume: Whether to continue ``session_id`` instead of starting it.
-        effort: ``--effort`` value, or ``None``.
-        max_thinking_tokens: Fixed thinking budget, or ``None`` for adaptive.
         max_budget_usd: Remaining proposer spend passed as ``--max-budget-usd``.
         tools: Comma-separated tool whitelist, or ``None`` for the CLI default.
         append_system_prompt: Extra system prompt (the Meta-Harness skill).
@@ -451,21 +445,15 @@ def run_proposer(
         cmd.extend(["--tools", tools, "--allowedTools", tools])
     if append_system_prompt:
         cmd.extend(["--append-system-prompt", append_system_prompt])
-    if effort is not None and max_thinking_tokens is None:
-        cmd.extend(["--effort", str(effort)])
     if max_budget_usd is not None:
         cmd.extend(["--max-budget-usd", f"{max(0.0, max_budget_usd):.6f}"])
     cmd.append(prompt)
     env = {**os.environ}
-    # Upstream: a nested CLI must not believe it is already inside Claude Code,
-    # and the proposer must authenticate through the harness, not a raw key. A
-    # direct Claude Code run keeps its key: a placeholder the network edge replaces.
+    # Upstream: a nested CLI must not believe it is already inside another
+    # agent session, and the proposer must authenticate through the harness,
+    # not a raw provider key.
     env.pop("CLAUDECODE", None)
-    if env.get(_DIRECT_ANTHROPIC_ENV) != "1":
-        env.pop("ANTHROPIC_API_KEY", None)
-    if max_thinking_tokens is not None:
-        env["CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"] = "1"
-        env["MAX_THINKING_TOKENS"] = str(max_thinking_tokens)
+    env.pop("ANTHROPIC_API_KEY", None)
     log_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     killed = False
@@ -807,9 +795,6 @@ class AutoResearchEngine:
         self.multi_round = bool(engine_config.pop("ralph", True))
         no_eval = engine_config.pop("max_no_eval_seconds", None)
         self.max_no_eval_seconds = None if no_eval is None else float(no_eval)
-        self.effort = engine_config.pop("effort", None)
-        thinking = engine_config.pop("max_thinking_tokens", None)
-        self.max_thinking_tokens = None if thinking is None else int(thinking)
         # ``checkout``, ``base``, ``editable_paths``, ``readonly_paths`` and
         # ``tools`` (the folder holding ``repo_tree.py``) for a repository run.
         self.repo: dict[str, Any] | None = engine_config.pop("repo", None)
@@ -1424,8 +1409,6 @@ class AutoResearchEngine:
             name=f"round{self.round}",
             model=self.model,
             session_id=str(uuid.uuid4()),
-            effort=self.effort,
-            max_thinking_tokens=self.max_thinking_tokens,
             max_budget_usd=max_budget_usd,
             should_kill=should_kill,
         )
@@ -1513,9 +1496,6 @@ class MetaHarnessEngine:
         # Upstream CLI default: ``--iterations 20``.
         self.max_iterations = int(engine_config.pop("max_iterations", 20))
         self.candidates_per_iter = max(1, int(engine_config.pop("max_candidates_per_iter", 3)))
-        self.effort = engine_config.pop("effort", None)
-        thinking = engine_config.pop("max_thinking_tokens", None)
-        self.max_thinking_tokens = None if thinking is None else int(thinking)
         self.max_token_cost = config.max_token_cost
         self.stop_at_score = config.stop_at_score
         # ``checkout``, ``base``, ``editable_paths``, ``readonly_paths`` and
@@ -1858,8 +1838,6 @@ class MetaHarnessEngine:
             name=f"iter{iteration}",
             model=self.model,
             session_id=str(uuid.uuid4()),
-            effort=self.effort,
-            max_thinking_tokens=self.max_thinking_tokens,
             max_budget_usd=remaining_cost,
             tools=META_HARNESS_TOOLS,
             append_system_prompt=self.skill(),
@@ -2134,8 +2112,6 @@ class GepaRepoEngine:
             editable_paths=list(self.repo["editable_paths"]),
             readonly_paths=list(self.repo["readonly_paths"]),
             log_dir=Path(config.run_dir or "gepa-repo-run").resolve() / "sessions",
-            effort=engine_config.pop("effort", None),
-            max_thinking_tokens=engine_config.pop("max_thinking_tokens", None),
             max_token_cost=config.max_token_cost,
         )
         self.max_token_cost = config.max_token_cost
@@ -2254,8 +2230,6 @@ class AgentProposer:
         editable_paths: list[str],
         readonly_paths: list[str],
         log_dir: Path,
-        effort: str | None,
-        max_thinking_tokens: int | None,
         max_token_cost: float | None,
     ) -> None:
         """Record where the agent works and what it may spend.
@@ -2266,8 +2240,6 @@ class AgentProposer:
             editable_paths: Repository paths a version may change.
             readonly_paths: Submodule and Git LFS paths that stay as fetched.
             log_dir: Where each session's output lands.
-            effort: ``--effort`` value, or ``None``.
-            max_thinking_tokens: Fixed thinking budget, or ``None`` for adaptive.
             max_token_cost: Proposer spend cap in dollars, or ``None``.
         """
         self.model = model
@@ -2275,8 +2247,6 @@ class AgentProposer:
         self.editable_paths = editable_paths
         self.readonly_paths = readonly_paths
         self.log_dir = log_dir
-        self.effort = effort
-        self.max_thinking_tokens = None if max_thinking_tokens is None else int(max_thinking_tokens)
         self.max_token_cost = max_token_cost
         self.objective = ""
         self.background = ""
@@ -2320,8 +2290,6 @@ class AgentProposer:
             name=f"proposal{self.proposals}",
             model=self.model,
             session_id=str(uuid.uuid4()),
-            effort=self.effort,
-            max_thinking_tokens=self.max_thinking_tokens,
             max_budget_usd=_remaining_cost(self.max_token_cost, self.total_cost),
         )
         self.total_cost += outcome.cost_usd
@@ -2405,8 +2373,6 @@ class BestOfNRepoEngine:
             editable_paths=list(self.repo["editable_paths"]),
             readonly_paths=list(self.repo["readonly_paths"]),
             log_dir=self.run_dir / "sessions",
-            effort=engine_config.pop("effort", None),
-            max_thinking_tokens=engine_config.pop("max_thinking_tokens", None),
             max_token_cost=config.max_token_cost,
         )
         self.max_token_cost = config.max_token_cost

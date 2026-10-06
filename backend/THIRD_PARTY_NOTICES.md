@@ -45,10 +45,6 @@ Apache-2.0; certifi and tqdm are MPL-2.0, `Levenshtein` and
 0.6.0 (BSD-2-Clause) carries a static FFmpeg 7.0.2 executable built as GPL-3.0-or-later
 (https://github.com/imageio/imageio-ffmpeg/tree/v0.6.0, FFmpeg source: https://ffmpeg.org/releases/ffmpeg-7.0.2.tar.xz).
 
-Claude Code (`@anthropic-ai/claude-code`) is proprietary Anthropic software. It
-is installed only in images Skynet runs itself; images delivered to third
-parties are built with `INCLUDE_CLAUDE_CODE=false` and do not contain it.
-
 ## LGPL Python dependencies
 
 These are installed unmodified as separate packages and may be replaced with

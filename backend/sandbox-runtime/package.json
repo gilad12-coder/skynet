@@ -3,7 +3,6 @@
   "private": true,
   "version": "1.0.0",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.259",
     "@earendil-works/pi-coding-agent": "0.87.1",
     "@openai/codex": "0.153.0",
     "opencode-ai": "1.18.27",

@@ -92,7 +92,7 @@ def test_safe_relative_path_normalizes_and_rejects_escapes() -> None:
             safe_relative_path(bad)
 
 
-@pytest.mark.parametrize("harness", ["custom", "pi", "codex", "claude_code", "opencode"])
+@pytest.mark.parametrize("harness", ["custom", "pi", "codex", "opencode"])
 def test_seedless_agent_readiness_uses_real_runtime_without_candidate(harness: str) -> None:
     """Check shell syntax and pinned binaries while never launching a model or inventing input."""
     runtime = FakeSandboxRuntime()
@@ -106,7 +106,7 @@ def test_seedless_agent_readiness_uses_real_runtime_without_candidate(harness: s
     assert "bash -n .skynet/readiness-0.sh" in session.commands[0]
     assert "--version" in session.commands[0] or harness == "custom"
     assert "npm install" not in session.commands[0]
-    assert not any(name in session.files for name in (PROMPT_FILE, "AGENTS.md", "CLAUDE.md"))
+    assert not any(name in session.files for name in (PROMPT_FILE, "AGENTS.md"))
     assert result["candidate_execution"] == "awaiting_first_generated_candidate"
     assert result["readiness"] == (
         "command_syntax_verified" if harness == "custom" else "pinned_cli_and_syntax_verified"

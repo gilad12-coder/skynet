@@ -211,7 +211,6 @@ def test_native_readiness_checks_selected_isolation_without_search(
         "autosaddler_ready": True,
         "shinka_version": native_runtime.SHINKA_VERSION,
         "shinka_ready": True,
-        "claude_version": native_runtime.CLAUDE_VERSION,
     }
     assert adapter.spec.network_disabled is True
     assert "native_input.json" not in session.files
@@ -522,7 +521,7 @@ def test_real_native_runner_unpacks_the_repository_for_its_engine(
         "max_concurrency": 1,
         "timeout_seconds": 20,
         "task": {"name": "test", "seed_candidate": ""},
-        "proposer": {"harness": "claude_code", "ralph": False},
+        "proposer": {"ralph": False},
         "repo": {"chunks": chunk_names, "editable_paths": ["src"], "readonly_paths": []},
     }
     (tmp_path / "input.json").write_text(json.dumps(payload))
@@ -812,7 +811,7 @@ def test_real_native_runner_drives_upstream_with_fake_cli(tmp_path: Path, engine
         payload["task"]["train_set"] = [{"id": "a"}, {"id": "b"}]
     else:
         # One research round keeps the fake's single scripted evaluation the whole run.
-        payload["proposer"] = {"harness": "claude_code", "ralph": False}
+        payload["proposer"] = {"ralph": False}
     (tmp_path / "input.json").write_text(json.dumps(payload))
     env = {"PATH": f"{binary}{os.pathsep}/usr/bin:/bin", "HOME": str(tmp_path), "PYTHONUNBUFFERED": "1"}
     if variant == "repeated":
@@ -1261,7 +1260,6 @@ def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path
             "harness": "pi",
             "model": "claude-test",
             "price": {"input": 0.0, "output": 0.0},
-            "effort": "high",
             "ralph": False,
         },
         "task": {"name": "test", "seed_candidate": "seed"},
@@ -1310,10 +1308,9 @@ def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path
 
 
 def test_bootstrap_installs_only_the_selected_proposer_harness() -> None:
-    """Skip the Claude CLI install and probe the chosen harness when the proposer is not Claude Code."""
+    """Install and probe only the chosen harness."""
     pi_bootstrap = _bootstrap_command("vercel", harness="pi", install_command="npm install -g pi@1.2.3")
     assert "npm install -g pi@1.2.3" in pi_bootstrap
-    assert "@anthropic-ai/claude-code" not in pi_bootstrap
     assert "pi --version" in pi_bootstrap
     protected = _bootstrap_command("vercel", protected=True, harness="pi", install_command="npm install -g pi@1.2.3")
     assert "npm install" not in protected
@@ -1321,7 +1318,7 @@ def test_bootstrap_installs_only_the_selected_proposer_harness() -> None:
     custom = _bootstrap_command("vercel", harness="custom", install_command="pip install my-agent")
     assert "pip install my-agent" in custom
     assert "--version" not in custom.split("pip install my-agent", 1)[1].split("native-python", 1)[0]
-    assert "@anthropic-ai/claude-code" in _bootstrap_command("vercel")
+    assert "codex --version" in _bootstrap_command("vercel")
 
 
 def test_run_native_engine_serializes_the_proposer_without_the_gateway_key(
@@ -1332,13 +1329,12 @@ def test_run_native_engine_serializes_the_proposer_without_the_gateway_key(
     session = FakeSession()
     runtime = FakeRuntime(session)
     ctx = _context(tmp_path, runtime)
-    proposer = BlackboxProposer(harness="codex", effort="high", max_candidates_per_iter=3, ralph=False)
+    proposer = BlackboxProposer(harness="codex", max_candidates_per_iter=3, ralph=False)
     ctx.native_options = replace(ctx.native_options, proposer=proposer)
     run_native_engine("autoresearch", Task("seed"), EvalServer(lambda c, e: (0.5, {}), max_evals=3), ctx)
     payload = json.loads(session.files["native_input.json"])
     assert payload["proposer"]["harness"] == "codex"
     assert payload["proposer"]["output_format"] == "codex"
-    assert payload["proposer"]["effort"] == "high"
     assert payload["proposer"]["max_candidates_per_iter"] == 3
     assert payload["proposer"]["ralph"] is False
     assert list(payload["proposer"]["price"].values()) == list(model_token_costs("claude-test"))
@@ -1346,35 +1342,6 @@ def test_run_native_engine_serializes_the_proposer_without_the_gateway_key(
     assert harness_bridge.KEY_TOKEN in session.files["native_input.json"]
     assert session.calls[1][1]["env"][harness_bridge.KEY_ENV] == "skynet-managed"
     assert "codex --version" in session.calls[0][0]
-    assert "@anthropic-ai/claude-code" not in session.calls[0][0]
-
-
-def test_direct_claude_code_box_reaches_only_anthropic_and_flags_the_guest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Ask the parent for Anthropic egress and tell the guest runner to bypass the mailbox."""
-    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
-    session = FakeSession()
-    runtime = FakeRuntime(session)
-    monkeypatch.setattr(native_runtime, "raise_gateway_stop", lambda route: None)
-    runtime.protected = True
-    runtime.injects_headers = False
-    ctx = _context(tmp_path, runtime)
-    ctx.native_options = replace(
-        ctx.native_options,
-        model="claude-sonnet-4-5",
-        direct_anthropic=True,
-        budget_route={"url": "http://127.0.0.1:9000/v1", "token": "scoped"},
-    )
-    run_native_engine(
-        "meta_harness", Task("seed", cases=[{"id": "case"}]), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx
-    )
-    assert runtime.spec.allowed_hosts == ("api.anthropic.com",)
-    assert session.calls[1][1]["env"][harness_bridge.DIRECT_ANTHROPIC_ENV] == "1"
-    offline = _context(tmp_path, FakeRuntime(FakeSession()))
-    offline.native_options = replace(offline.native_options, direct_anthropic=True)
-    with pytest.raises(ServiceError, match="protected sandbox"):
-        run_native_engine("meta_harness", Task("seed"), EvalServer(lambda *_: (0.5, {}), max_evals=3), offline)
 
 
 class _RecordingMailbox:

@@ -1,7 +1,7 @@
 """Harness catalog: how each coding agent is installed, pointed at the gateway and run.
 
 A harness is the program that turns a model into a coding agent — Pi,
-Codex, Claude Code, OpenCode, Prime Agent, or a user-supplied command. Every entry
+Codex, OpenCode, Prime Agent, or a user-supplied command. Every entry
 knows the file its instructions live in (that file is the text under
 optimization), how to install itself, the config that routes its model
 calls to Skynet's gateway, the command that runs one case headlessly, and
@@ -20,7 +20,6 @@ from typing import Any
 
 from ....exceptions import ServiceError
 from ....models.blackbox import (
-    BLACKBOX_HARNESS_CLAUDE_CODE,
     BLACKBOX_HARNESS_CODEX,
     BLACKBOX_HARNESS_CUSTOM,
     BLACKBOX_HARNESS_OPENCODE,
@@ -30,7 +29,6 @@ from ....models.blackbox import (
 )
 from .harness_bridge import (
     PARSERS,
-    parse_claude_output,
     parse_codex_output,
     parse_opencode_output,
     parse_pi_output,
@@ -82,7 +80,6 @@ PI_PACKAGE = "@earendil-works/pi-coding-agent"
 PI_VERSION = "0.87.1"
 CODEX_VERSION = "0.153.0"
 OPENCODE_VERSION = "1.18.27"
-CLAUDE_CODE_VERSION = "2.1.259"
 # Prime Agent is a Pi fork that ships as a versioned npm tarball on its own
 # release CDN (``<base>/latest.json`` names the current one), not on npm.
 PRIME_AGENT_VERSION = "0.9.7"
@@ -99,7 +96,6 @@ PRIME_AGENT_IMAGE_KERNEL = "/opt/prime-agent/kernel-venv/bin/python"
 _PINNED_HARNESSES = {
     BLACKBOX_HARNESS_PI: ("pi", PI_VERSION),
     BLACKBOX_HARNESS_CODEX: ("codex", CODEX_VERSION),
-    BLACKBOX_HARNESS_CLAUDE_CODE: ("claude", CLAUDE_CODE_VERSION),
     BLACKBOX_HARNESS_OPENCODE: ("opencode", OPENCODE_VERSION),
     BLACKBOX_HARNESS_PRIME: ("prime-agent", PRIME_AGENT_VERSION),
 }
@@ -329,40 +325,6 @@ def _codex_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     )
 
 
-def _claude_code_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
-    """Build the launch for Claude Code (``@anthropic-ai/claude-code``).
-
-    Needs a gateway that speaks the Anthropic Messages API (LiteLLM does).
-
-    Args:
-        model: Target model id.
-        gateway: Gateway URL and key.
-
-    Returns:
-        The launch.
-    """
-    env = _base_env(model, gateway)
-    # The Anthropic SDK appends ``/v1/messages`` itself.
-    base_url = gateway.url.removesuffix("/v1")
-    env.update(
-        {
-            "ANTHROPIC_BASE_URL": base_url,
-            "ANTHROPIC_AUTH_TOKEN": gateway.api_key,
-            "DISABLE_AUTOUPDATER": "1",
-            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-        }
-    )
-    return HarnessLaunch(
-        instructions_file="CLAUDE.md",
-        install_command=_npm_install("claude", "@anthropic-ai/claude-code", CLAUDE_CODE_VERSION),
-        run_command=(
-            f'claude -p {_PROMPT_ARG} --model "${ENV_MODEL}" --output-format json --dangerously-skip-permissions'
-        ),
-        env=env,
-        parse_output=parse_claude_output,
-    )
-
-
 def _opencode_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     """Build the launch for OpenCode (``opencode-ai``).
 
@@ -506,7 +468,6 @@ def _fill(command: str | None, model: str, gateway: GatewayConfig, *, protected:
 _CATALOG: dict[str, Callable[[str, GatewayConfig], HarnessLaunch]] = {
     BLACKBOX_HARNESS_PI: _pi_launch,
     BLACKBOX_HARNESS_CODEX: _codex_launch,
-    BLACKBOX_HARNESS_CLAUDE_CODE: _claude_code_launch,
     BLACKBOX_HARNESS_OPENCODE: _opencode_launch,
     BLACKBOX_HARNESS_PRIME: _prime_agent_launch,
 }

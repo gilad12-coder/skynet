@@ -7,7 +7,7 @@ the upstream ports: a scenario whose evaluator scores candidates through the
 parent-owned budget over the same filesystem mailbox the other native engines
 use, an evidence builder that surfaces the scorer's per-case feedback, and a
 prompt pack composed from the upstream methodology plus the Skynet plugin.
-The engine loop, policies, run store and Claude provider are upstream's own.
+The engine loop, policies and run store are upstream's own.
 
 The prompt-pack wiring and plugin prompts are adapted from microsoft/AutoSaddler
 under the MIT License; see ``autosaddler_plugin/NOTICE.md`` and
@@ -50,13 +50,12 @@ try:
     from autosaddler.v2.prompting.models import SessionSpec
     from autosaddler.v2.prompting.models import Usage as SessionUsage
     from autosaddler.v2.providers.base import BaseAgentProvider, TransportOutcome
-    from autosaddler.v2.providers.claude import ClaudeAgentProvider, ClaudeProviderConfig
     from autosaddler.v2.providers.workspace_renderer import WorkspaceRenderer
     from autosaddler.v2.storage.local import LocalRunStore
 except ImportError:  # Upstream needs Python 3.12; parent-side tests still import the helpers.
     as_domain = as_policies = as_ports = as_assets = None
     AutoSaddlerEngine = RunState = ComponentMapHarnessSpace = GitHarnessSpace = GitVerificationVerdict = None
-    build_history_bundle = SessionSpec = ClaudeAgentProvider = ClaudeProviderConfig = LocalRunStore = None
+    build_history_bundle = SessionSpec = LocalRunStore = None
     SessionUsage = BaseAgentProvider = TransportOutcome = WorkspaceRenderer = None
 
 try:
@@ -89,8 +88,8 @@ _SESSION_CONTEXT_PATH = ".autosaddler/session_context.json"
 _TRAINING_EVIDENCE_PATH = ".autosaddler/training_evidence.json"
 _PROMPT_ASSETS_PATH = ".autosaddler/prompt_assets.json"
 _CAPABILITIES = frozenset({"read_workspace", "edit_workspace", "load_skills"})
-# Every harness but Claude Code brings its own tools; the renderer only needs
-# to know each capability is available. ``.agents/skills`` is the shared
+# Every harness brings its own tools; the renderer only needs to know each
+# capability is available. ``.agents/skills`` is the shared
 # skill location pi, codex and opencode all discover.
 _HARNESS_CAPABILITY_TOOLS = dict.fromkeys(
     ("read_workspace", "edit_workspace", "run_commands", "load_skills", "network"), ()
@@ -370,7 +369,7 @@ def repo_space(repo: Mapping[str, Any], seed_patch: Any, run_dir: Path, proposer
     """
     checkout = repo_tree.unpack_tree((Path(chunk) for chunk in repo["chunks"]), Path("repo-checkout").resolve())
     base = _git_output(checkout, "rev-parse", repo_tree.BASE_REF).strip()
-    # Non-Claude harnesses read skills rendered into the mutation worktree, a
+    # Harnesses read skills rendered into the mutation worktree, a
     # folder upstream does not treat as its own; left unexcluded, they would
     # count as the agent's change. Every worktree shares this exclude file.
     with (checkout / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
@@ -1133,7 +1132,7 @@ class HarnessTransport:
 
 
 def harness_provider(proposer: dict[str, Any], model: str) -> Any:
-    """Build the upstream provider for a non-Claude proposer harness.
+    """Build the upstream provider for the proposer harness.
 
     Args:
         proposer: Serialized harness launch from the parent payload.
@@ -1212,7 +1211,7 @@ def _descendants() -> list[int]:
     """Find only processes descended from this isolated runner.
 
     Returns:
-        Child process ids, including separately grouped Claude sessions.
+        Child process ids, including separately grouped proposer sessions.
     """
     parents: dict[int, int] = {}
     if _PROC_ROOT.is_dir():
@@ -1337,7 +1336,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     model = str(payload["model"])
     timeout = float(payload["timeout_seconds"])
     repo = payload.get("repo")
-    proposer = payload.get("proposer") or {"harness": "claude_code"}
+    proposer = payload["proposer"]
     examples = visible_examples(task.get("train_set"))
     train_cases = build_cases("train", examples)
     development_cases = build_cases("development", examples)
@@ -1396,19 +1395,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             },
         },
     )
-    if proposer.get("harness") == "claude_code":
-        harness_bridge.use_direct_anthropic(os.environ)
-        inner = ClaudeAgentProvider(
-            ClaudeProviderConfig(
-                model=model,
-                effort=proposer.get("effort"),
-                permission_mode="bypassPermissions",
-                base_url=os.environ["ANTHROPIC_BASE_URL"],
-            )
-        )
-    else:
-        inner = harness_provider(proposer, model)
-    provider = UsageTrackingProvider(inner, model)
+    provider = UsageTrackingProvider(harness_provider(proposer, model), model)
     max_evals = int(payload["max_evals"])
     max_iterations = payload.get("max_iterations") or max_evals
     policies = as_policies.PolicyBundle(
@@ -1423,7 +1410,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             "schema_version": "skynet-autosaddler-run/v1",
             "engine": "autosaddler",
             "source": payload.get("source"),
-            "provider": {"type": proposer.get("harness", "claude_code"), "model": model},
+            "provider": {"type": proposer["harness"], "model": model},
             "optimization": {
                 "task_selection": {"type": "fixed", "batch_size": policies.task_selection.batch_size},
                 "acceptance": {"type": "matched_valid_strict_improvement"},

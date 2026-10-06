@@ -96,9 +96,6 @@ from ...notifications import notify_job_started
 from ...registry import RegistryError
 from ...service_gateway import ServiceError
 from ...service_gateway.optimization.blackbox.service import (
-    claude_code_available,
-    claude_code_in_use,
-    claude_code_model,
     engine_catalog,
     validate_blackbox_payload,
 )
@@ -1229,19 +1226,6 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                         payload.username,
                     )
                     return cached
-
-        # Refused before any budget is reserved; the protected path below never
-        # reaches ``validate_blackbox_payload`` here.
-        if claude_code_in_use(payload):
-            if not claude_code_available(payload):
-                raise DomainError("submission.claude_code_unavailable", status=400)
-            if claude_code_model(payload.reflection_model_settings.name) is None:
-                raise DomainError("submission.claude_code_model_unsupported", status=400)
-            engine = getattr(job_store, "engine", None)
-            if engine is not None and not ProviderKeyVault(engine=engine).has_verified_connection(
-                payload.username, "anthropic"
-            ):
-                raise DomainError("submission.claude_code_needs_anthropic_key", status=400)
 
         _enforce_submission_admission(job_store, payload.username)
 
