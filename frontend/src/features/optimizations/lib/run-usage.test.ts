@@ -55,6 +55,18 @@ describe("groupUsage", () => {
     assert.deepEqual(availableGroupings([row({ role: "rounding", model: null })]), ["role"]);
   });
 
+  it("groups a call by its kind before its stage", () => {
+    const groups = groupUsage(
+      [
+        row({ stage: "training", kind: "mutation", calls: 3 }),
+        row({ stage: "training", kind: "meta_notes", calls: 1 }),
+        row({ stage: "evaluation", calls: 2 }),
+      ],
+      "stage",
+    );
+    assert.deepEqual(groups.map((g) => g.key).sort(), ["evaluation", "meta_notes", "mutation"]);
+  });
+
   it("puts model spend without a tag under unattributed, after attributed groups", () => {
     const groups = groupUsage(rows, "candidate");
     assert.deepEqual(

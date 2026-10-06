@@ -20,6 +20,8 @@ export interface RunUsageRow {
   stage: string | null;
   pair: string | null;
   candidate: string | null;
+  // What an engine that makes several sorts of model calls used this one for (ShinkaEvolve).
+  kind?: string | null;
   billing: UsageBilling | string;
   charged_cents: number;
   provider_cents: number | null;
