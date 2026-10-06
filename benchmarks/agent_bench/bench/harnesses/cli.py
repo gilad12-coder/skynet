@@ -26,8 +26,8 @@ OPENCODE_BUILTINS = [
     "websearch", "todowrite", "todoread", "task", "skill", "lsp",
 ]  # fmt: skip
 
-# Variables set by an enclosing Claude Code session; a nested headless run
-# must not inherit them.
+# Variables set by an enclosing agent session; a nested headless run must not
+# inherit them.
 _STRIP_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_API_KEY")
 
 _OPENCODE_FIRST_USE = threading.Lock()
@@ -82,57 +82,6 @@ def _execute(cmd: list[str], env: dict[str, str], workdir: Path, timeout: int) -
     (workdir / "stdout.jsonl").write_text(stdout)
     (workdir / "stderr.log").write_text(stderr)
     return stdout, error
-
-
-def run_claude_code(message: str, brief: str, port: int, workdir: Path, home: Path, key: str, timeout: int) -> Attempt:
-    """Run Claude Code headless against the world's MCP endpoint.
-
-    Args:
-        message: The user message.
-        brief: The shared system prompt.
-        port: Port of the attempt's world server.
-        workdir: Directory for this attempt's files.
-        home: Clean config directory shared by this harness's attempts.
-        key: OpenRouter API key.
-        timeout: Seconds before the harness is killed.
-
-    Returns:
-        The parsed attempt.
-    """
-    mcp_config = workdir / "mcp.json"
-    mcp_config.write_text(
-        json.dumps({"mcpServers": {"skynet": {"type": "http", "url": f"http://127.0.0.1:{port}/mcp"}}})
-    )
-    env = {
-        "CLAUDE_CONFIG_DIR": str(home),
-        "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
-        "ANTHROPIC_AUTH_TOKEN": key,
-        "ANTHROPIC_API_KEY": "",
-        "ANTHROPIC_MODEL": MODEL,
-        "ANTHROPIC_SMALL_FAST_MODEL": MODEL,
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL": MODEL,
-        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-        "DISABLE_TELEMETRY": "1",
-    }
-    cmd = [
-        "claude", "-p", message, "--system-prompt", brief, "--mcp-config", str(mcp_config),
-        "--strict-mcp-config", "--tools", "", "--setting-sources", "", "--permission-mode",
-        "bypassPermissions", "--no-session-persistence", "--output-format", "stream-json", "--verbose",
-    ]  # fmt: skip
-    stdout, error = _execute(cmd, env, workdir, timeout)
-    attempt = Attempt(error=error)
-    for event in _events(stdout):
-        if event.get("type") != "result":
-            continue
-        attempt.answer = event.get("result") or ""
-        attempt.llm_calls = event.get("num_turns") or 0
-        for usage in (event.get("modelUsage") or {}).values():
-            attempt.fresh_input_tokens += usage.get("inputTokens", 0) + usage.get("cacheCreationInputTokens", 0)
-            attempt.cached_input_tokens += usage.get("cacheReadInputTokens", 0)
-            attempt.output_tokens += usage.get("outputTokens", 0)
-        if event.get("is_error") and not attempt.error:
-            attempt.error = str(event.get("subtype") or "error")
-    return attempt
 
 
 def run_codex(message: str, brief: str, port: int, workdir: Path, home: Path, key: str, timeout: int) -> Attempt:
@@ -306,7 +255,6 @@ def run_opencode(message: str, brief: str, port: int, workdir: Path, home: Path,
 
 
 CLI_HARNESSES: dict[str, Callable[..., Attempt]] = {
-    "claude-code": run_claude_code,
     "codex": run_codex,
     "pi": run_pi,
     "opencode": run_opencode,
