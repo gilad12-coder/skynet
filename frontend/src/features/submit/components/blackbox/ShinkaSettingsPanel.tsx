@@ -10,7 +10,7 @@ import { Segmented } from "@/shared/ui/segmented";
 import { msg } from "@/shared/lib/messages";
 import { tip, type TooltipKey } from "@/shared/lib/tooltips";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
-import type { BlackboxShinkaParentSelection } from "@/shared/types/api";
+import type { BlackboxShinkaEditor, BlackboxShinkaParentSelection } from "@/shared/types/api";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import {
@@ -22,7 +22,10 @@ import {
   type ShinkaStepperField,
 } from "../../lib/shinka-settings";
 import { Disclosure } from "../Disclosure";
+import { MaxToolCallsField } from "./MaxToolCallsField";
 import { Field } from "./shared";
+
+const EDITORS: readonly BlackboxShinkaEditor[] = ["single_call", "agent"];
 
 const PARENT_SELECTIONS: readonly BlackboxShinkaParentSelection[] = [
   "weighted",
@@ -48,6 +51,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
  */
 export function ShinkaSettingsPanel({ w }: { w: BlackboxWizardContext }) {
   const { shinkaSettings: s, updateShinka, setShinkaSettings, shinkaOpen, setShinkaOpen } = w;
+  const agentEditor = s.editor === "agent";
 
   const numberField = (field: ShinkaStepperField) => {
     const { min, max, step } = SHINKA_LIMITS[field];
@@ -98,6 +102,28 @@ export function ShinkaSettingsPanel({ w }: { w: BlackboxWizardContext }) {
       onOpenChange={setShinkaOpen}
     >
       <div className="space-y-6 pt-2 pb-1">
+        <Group title={msg("submit.blackbox.shinka.group.editor")}>
+          <Field label={msg("submit.blackbox.shinka.editor")} tip="submit.blackbox.shinka.editor">
+            <Segmented<BlackboxShinkaEditor>
+              label={msg("submit.blackbox.shinka.editor")}
+              value={s.editor}
+              onChange={(value) => updateShinka({ editor: value })}
+              options={EDITORS.map((value) => ({
+                value,
+                label: msg(`submit.blackbox.shinka.editor.${value}`),
+              }))}
+            />
+            <p className="text-xs text-muted-foreground">
+              {msg(`submit.blackbox.shinka.editor.${s.editor}_hint`)}
+            </p>
+          </Field>
+          {agentEditor && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <MaxToolCallsField w={w} id="bb-shinka-max-tool-calls" />
+            </div>
+          )}
+        </Group>
+
         <Group title={msg("submit.blackbox.shinka.group.search")}>
           <div className="grid gap-4 sm:grid-cols-2">
             {numberField("num_islands")}
@@ -125,33 +151,41 @@ export function ShinkaSettingsPanel({ w }: { w: BlackboxWizardContext }) {
         </Group>
 
         <Group title={msg("submit.blackbox.shinka.group.changes")}>
-          <div className="grid gap-4 sm:grid-cols-3">
-            {SHINKA_PATCH_KINDS.map((kind) => {
-              const id = `bb-shinka-${kind}`;
-              return (
-                <Field
-                  key={kind}
-                  label={msg(`submit.blackbox.shinka.${kind}`)}
-                  htmlFor={id}
-                  tip={`submit.blackbox.shinka.${kind}`}
-                >
-                  <NumberInput
-                    id={id}
-                    value={patchPercent(s[kind])}
-                    onChange={(value) =>
-                      setShinkaSettings((prev) => setPatchPercent(prev, kind, value))
-                    }
-                    min={0}
-                    max={100}
-                    step={5}
-                  />
-                </Field>
-              );
-            })}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {msg("submit.blackbox.shinka.patch_mix_hint")}
-          </p>
+          {agentEditor ? (
+            <p className="text-xs text-muted-foreground">
+              {msg("submit.blackbox.shinka.patch_mix_agent_note")}
+            </p>
+          ) : (
+            <>
+              <div className="grid gap-4 sm:grid-cols-3">
+                {SHINKA_PATCH_KINDS.map((kind) => {
+                  const id = `bb-shinka-${kind}`;
+                  return (
+                    <Field
+                      key={kind}
+                      label={msg(`submit.blackbox.shinka.${kind}`)}
+                      htmlFor={id}
+                      tip={`submit.blackbox.shinka.${kind}`}
+                    >
+                      <NumberInput
+                        id={id}
+                        value={patchPercent(s[kind])}
+                        onChange={(value) =>
+                          setShinkaSettings((prev) => setPatchPercent(prev, kind, value))
+                        }
+                        min={0}
+                        max={100}
+                        step={5}
+                      />
+                    </Field>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {msg("submit.blackbox.shinka.patch_mix_hint")}
+              </p>
+            </>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             {numberField("max_patch_attempts")}
             {numberField("max_patch_resamples")}

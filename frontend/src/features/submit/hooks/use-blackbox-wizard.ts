@@ -64,7 +64,7 @@ import {
   AUTO_MIN_SCORER_RUNS,
   DEFAULT_PROPOSER,
   engineSelectionIssue,
-  submittedProposer,
+  submittedRunProposer,
   supportsIterationLimit,
   usesNativeProposer,
 } from "../lib/engine-contract";
@@ -729,6 +729,8 @@ export function useBlackboxWizard(
             !UNAVAILABLE_HARNESSES.includes(source.proposer.harness)
           )
             setProposer({ ...DEFAULT_PROPOSER, ...source.proposer });
+          else if (source.proposer?.max_tool_calls != null)
+            setProposer({ ...DEFAULT_PROPOSER, max_tool_calls: source.proposer.max_tool_calls });
           const budget = source.budget;
           if (budget) {
             if (budget.max_scorer_runs != null) setMaxScorerRuns(budget.max_scorer_runs);
@@ -968,7 +970,13 @@ export function useBlackboxWizard(
       },
       strategy: strategyMode === "single" ? { mode: "single", engine } : { mode: "auto" },
       proposer_runtime: proposerRuntime,
-      proposer: nativeProposer ? submittedProposer(proposer, strategyMode, engine) : undefined,
+      proposer: submittedRunProposer({
+        proposer,
+        mode: strategyMode,
+        engine,
+        nativeProposer,
+        shinka: shinkaSettings,
+      }),
       target: isRepo ? repoTarget() : { kind: "text" },
       reflection_model_config: reflection,
       extra_reflection_model_configs: submittedExtraModels(

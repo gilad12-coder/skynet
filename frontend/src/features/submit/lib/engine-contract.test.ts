@@ -5,13 +5,16 @@ import type { BlackboxEngineCatalogResponse, BlackboxEngineId } from "@/shared/t
 import {
   AUTO_MIN_SCORER_RUNS,
   DEFAULT_PROPOSER,
+  MAX_TOOL_CALLS_LIMITS,
   engineSelectionIssue,
   proposerKnobs,
   proposerTunesReasoning,
   submittedProposer,
+  submittedRunProposer,
   supportsIterationLimit,
   usesNativeProposer,
 } from "./engine-contract.ts";
+import { DEFAULT_SHINKA_SETTINGS } from "./shinka-settings.ts";
 
 const catalog: BlackboxEngineCatalogResponse = {
   target_kind: "text",
@@ -280,6 +283,53 @@ test("submitted proposer resets every knob the form hides, and always runs resea
     max_candidates_per_iter: null,
     max_no_eval_seconds: stall,
   });
+});
+
+test("the tool-call cap defaults to 100 within the backend range and is always submitted", () => {
+  assert.equal(DEFAULT_PROPOSER.max_tool_calls, 100);
+  assert.ok(DEFAULT_PROPOSER.max_tool_calls! >= MAX_TOOL_CALLS_LIMITS.min);
+  assert.ok(DEFAULT_PROPOSER.max_tool_calls! <= MAX_TOOL_CALLS_LIMITS.max);
+  for (const engine of ["meta_harness", "autoresearch", "autosaddler"] as const)
+    assert.equal(
+      submittedProposer({ ...DEFAULT_PROPOSER, max_tool_calls: 40 }, "single", engine)
+        .max_tool_calls,
+      40,
+    );
+  assert.equal(
+    submittedProposer({ ...DEFAULT_PROPOSER, max_tool_calls: null }, "auto", null).max_tool_calls,
+    100,
+  );
+});
+
+test("a single ShinkaEvolve run sends a proposer only for the agent editor's tool-call cap", () => {
+  const proposer = { ...DEFAULT_PROPOSER, harness: "claude_code" as const, max_tool_calls: 250 };
+  const shinka = { ...DEFAULT_SHINKA_SETTINGS };
+  const single = { proposer, mode: "single" as const, engine: "shinka_evolve" as const };
+  assert.equal(submittedRunProposer({ ...single, nativeProposer: false, shinka }), undefined);
+  assert.deepEqual(
+    submittedRunProposer({
+      ...single,
+      nativeProposer: false,
+      shinka: { ...shinka, editor: "agent" },
+    }),
+    { harness: DEFAULT_PROPOSER.harness, max_tool_calls: 250 },
+  );
+  // Another single engine without a coding agent never sends one.
+  assert.equal(
+    submittedRunProposer({
+      proposer,
+      mode: "single",
+      engine: "gepa",
+      nativeProposer: false,
+      shinka: { ...shinka, editor: "agent" },
+    }),
+    undefined,
+  );
+  // A coding-agent proposer sends its own settings, cap included.
+  assert.deepEqual(
+    submittedRunProposer({ proposer, mode: "auto", engine: null, nativeProposer: true, shinka }),
+    submittedProposer(proposer, "auto", null),
+  );
 });
 
 test("reasoning knobs appear only for the Claude Code proposer", () => {

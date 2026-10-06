@@ -3,6 +3,7 @@ import type {
   BlackboxEngineId,
   BlackboxHarness,
   BlackboxProposer,
+  BlackboxShinkaSettings,
   BlackboxStrategy,
 } from "@/shared/types/api";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
@@ -42,7 +43,11 @@ export const DEFAULT_PROPOSER: BlackboxProposer = {
   max_candidates_per_iter: 3,
   ralph: true,
   max_no_eval_seconds: 1_800,
+  max_tool_calls: 100,
 };
+
+/** The inclusive range the backend accepts for `max_tool_calls`. */
+export const MAX_TOOL_CALLS_LIMITS = { min: 1, max: 1_000 } as const;
 
 /** Which engine-specific proposer knobs the strategy exposes; Auto may run any engine. */
 export function proposerKnobs(
@@ -72,6 +77,29 @@ export function submittedProposer(
     // Research rounds always run until the budget is spent; stop-at-score ends them early.
     ralph: true,
     max_no_eval_seconds: knobs.ralph ? DEFAULT_PROPOSER.max_no_eval_seconds : null,
+    max_tool_calls: proposer.max_tool_calls ?? DEFAULT_PROPOSER.max_tool_calls,
+  };
+}
+
+/**
+ * The run's whole proposer block. A coding-agent proposer sends its settings;
+ * a single ShinkaEvolve run has none of its own, so it sends a block only for
+ * the agent editor's tool-call cap, with the backend's default harness unused.
+ */
+export function submittedRunProposer(input: {
+  proposer: BlackboxProposer;
+  mode: BlackboxStrategy["mode"];
+  engine: BlackboxEngineId | null;
+  nativeProposer: boolean;
+  shinka: BlackboxShinkaSettings;
+}): BlackboxProposer | undefined {
+  const { proposer, mode, engine, nativeProposer, shinka } = input;
+  if (nativeProposer) return submittedProposer(proposer, mode, engine);
+  if (mode !== "single" || engine !== "shinka_evolve" || shinka.editor !== "agent")
+    return undefined;
+  return {
+    harness: DEFAULT_PROPOSER.harness,
+    max_tool_calls: proposer.max_tool_calls ?? DEFAULT_PROPOSER.max_tool_calls,
   };
 }
 

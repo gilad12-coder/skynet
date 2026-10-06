@@ -36,6 +36,7 @@ import type {
   BlackboxBudget,
   BlackboxProposer,
   BlackboxScorer,
+  BlackboxShinkaSettings,
   BlackboxStrategy,
   BlackboxTarget,
   OptimizationStatusResponse,
@@ -166,6 +167,10 @@ export function BlackboxConfigCard({
   const target = (payload.target ?? {}) as Partial<BlackboxTarget>;
   const scorer = (payload.scorer ?? {}) as Partial<BlackboxScorer>;
   const proposer = (payload.proposer ?? null) as Partial<BlackboxProposer> | null;
+  const shinka = (payload.shinka ?? null) as Partial<BlackboxShinkaSettings> | null;
+  // A single ShinkaEvolve run has no coding-agent proposer; its proposer block
+  // only carries the agent editor's tool-call cap.
+  const shinkaRun = strategy.mode === "single" && strategy.engine === "shinka_evolve";
   const reflectionCard = toModelCard(payload.reflection_model_config);
   const taskCard = toModelCard(payload.task_model_config);
   const scorerModelCard = toModelCard(scorer.model);
@@ -331,7 +336,16 @@ export function BlackboxConfigCard({
     value: seedValue,
     icon: <Stack />,
   });
-  if (proposer?.harness) {
+  const toolCallsRow = (calls: number): ConfigRow => ({
+    label: (
+      <HelpTip text={tip("submit.blackbox.proposer_max_tool_calls")}>
+        {msg("submit.blackbox.proposer.max_tool_calls")}
+      </HelpTip>
+    ),
+    value: String(calls),
+    icon: <Wrench />,
+  });
+  if (proposer?.harness && !shinkaRun) {
     const effort = proposer.effort ? EFFORT_LABELS[proposer.effort] : null;
     optimizationRows.push({
       label: (
@@ -388,6 +402,8 @@ export function BlackboxConfigCard({
         icon: <Hourglass />,
       });
     }
+    if (proposer.max_tool_calls != null)
+      optimizationRows.push(toolCallsRow(proposer.max_tool_calls));
     const proposerInstall = command(proposer.install_command);
     if (proposerInstall) {
       optimizationRows.push({
@@ -412,6 +428,20 @@ export function BlackboxConfigCard({
         icon: <Terminal />,
       });
     }
+  }
+
+  if (shinka?.editor === "single_call" || shinka?.editor === "agent") {
+    optimizationRows.push({
+      label: (
+        <HelpTip text={tip("submit.blackbox.shinka.editor")}>
+          {msg("optimization.config.shinka_editor")}
+        </HelpTip>
+      ),
+      value: msg(`submit.blackbox.shinka.editor.${shinka.editor}`),
+      icon: <Gear />,
+    });
+    if (shinkaRun && shinka.editor === "agent" && proposer?.max_tool_calls != null)
+      optimizationRows.push(toolCallsRow(proposer.max_tool_calls));
   }
 
   const targetRows: ConfigRow[] = [];
