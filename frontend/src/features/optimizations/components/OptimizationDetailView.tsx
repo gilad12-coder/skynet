@@ -993,14 +993,18 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   // than a GEPA log line, so the chart reads the newest lane's candidates.
   const jobIsBlackbox = job?.optimization_type === "blackbox";
   const jobProgressEvents = job?.progress_events;
+  const blackboxCandidates = useMemo(
+    () => (jobIsBlackbox ? extractCandidates(scopeToLatestLane(jobProgressEvents ?? [])) : []),
+    [jobIsBlackbox, jobProgressEvents],
+  );
   const scorePoints = useMemo(
     () =>
       jobIsBlackbox
-        ? extractBlackboxScorePoints(extractCandidates(scopeToLatestLane(jobProgressEvents ?? [])))
+        ? extractBlackboxScorePoints(blackboxCandidates)
         : jobLogs?.length
           ? extractScoresFromLogs(jobLogs)
           : [],
-    [jobIsBlackbox, jobProgressEvents, jobLogs],
+    [jobIsBlackbox, blackboxCandidates, jobLogs],
   );
 
   // Optimized prompt picks the pair's artifact in pair view, otherwise falls
@@ -1668,6 +1672,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   result={job.blackbox_result}
                   jobName={job.name}
                   repository={payloadRecipe === "repo"}
+                  optimizationId={job.optimization_id}
+                  lineage={blackboxCandidates}
                 />
               </TabsContent>
             )}

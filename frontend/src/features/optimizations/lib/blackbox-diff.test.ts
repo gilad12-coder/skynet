@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { countChanges, diffLines, diffRows, diffWords } from "./blackbox-diff.ts";
+import { countChanges, diffLines, diffRows, diffWords, fullDiffRows } from "./blackbox-diff.ts";
 
 test("diffLines keeps identical texts as same lines", () => {
   assert.deepEqual(diffLines("a\nb", "a\nb"), [
@@ -62,4 +62,30 @@ test("diffRows highlights words for balanced replacements and whole lines otherw
     true,
   );
   assert.deepEqual(countChanges(unbalanced), { added: 2, removed: 0 });
+});
+
+test("fullDiffRows keeps every unchanged line around the change", () => {
+  const rows = fullDiffRows("1\n2\n3\n4\n5", "1\n2\nthree\n4\n5");
+  assert.deepEqual(
+    rows.map((r) => [r.kind, r.segments.map((s) => s.text).join("")]),
+    [
+      ["same", "1"],
+      ["same", "2"],
+      ["removed", "3"],
+      ["added", "three"],
+      ["same", "4"],
+      ["same", "5"],
+    ],
+  );
+});
+
+test("fullDiffRows shows a new file as all added and a deleted one as all removed", () => {
+  assert.deepEqual(
+    fullDiffRows("", "a\nb").map((r) => r.kind),
+    ["added", "added"],
+  );
+  assert.deepEqual(
+    fullDiffRows("a\nb", "").map((r) => r.kind),
+    ["removed", "removed"],
+  );
 });

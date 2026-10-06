@@ -146,3 +146,41 @@ export function countChanges(rows: DiffRow[]): { added: number; removed: number 
   }
   return { added, removed };
 }
+
+function plainRow(kind: DiffLine["kind"], text: string): DiffRow {
+  return { kind, segments: [{ text, changed: false }] };
+}
+
+/**
+ * Whole-file diff: every line of both texts, changes in place. The shared
+ * head and tail are matched before the line diff runs, so a small edit in a
+ * long file stays well under the LCS budget.
+ */
+export function fullDiffRows(before: string, after: string): DiffRow[] {
+  if (before === after) return before.split("\n").map((text) => plainRow("same", text));
+  const a = before === "" ? [] : before.split("\n");
+  const b = after === "" ? [] : after.split("\n");
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  ) {
+    tail++;
+  }
+  const oldMiddle = a.slice(head, a.length - tail);
+  const newMiddle = b.slice(head, b.length - tail);
+  const middle =
+    oldMiddle.length === 0
+      ? newMiddle.map((text) => plainRow("added", text))
+      : newMiddle.length === 0
+        ? oldMiddle.map((text) => plainRow("removed", text))
+        : diffRows(oldMiddle.join("\n"), newMiddle.join("\n"));
+  return [
+    ...a.slice(0, head).map((text) => plainRow("same", text)),
+    ...middle,
+    ...a.slice(a.length - tail).map((text) => plainRow("same", text)),
+  ];
+}

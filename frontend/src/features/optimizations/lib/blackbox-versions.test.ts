@@ -3,7 +3,12 @@ import { describe, it } from "node:test";
 
 import type { BlackboxRunResult } from "@/shared/types/api";
 
-import { buildVersions, candidateToText, defaultVersionIndex } from "./blackbox-versions.ts";
+import {
+  buildVersions,
+  candidateToText,
+  defaultVersionIndex,
+  versionParents,
+} from "./blackbox-versions.ts";
 
 function runResult(overrides: Partial<BlackboxRunResult>): BlackboxRunResult {
   return {
@@ -132,5 +137,43 @@ describe("buildVersions mean score", () => {
         ["best", 0.9, null],
       ],
     );
+  });
+});
+
+describe("versionParents", () => {
+  const versions = buildVersions(
+    runResult({
+      seed_candidate: "seed",
+      best_candidate: "c",
+      versions: [
+        { candidate: "seed", score: 0.1, evals: 1, first_run: 1, side_info: {} },
+        { candidate: "b", score: 0.5, evals: 1, first_run: 2, side_info: {} },
+        { candidate: "c", score: 0.9, evals: 1, first_run: 3, side_info: {} },
+      ],
+    }),
+  );
+
+  it("maps each version to the version its candidate event names as parent", () => {
+    const parents = versionParents(versions, [
+      { candidate_id: "0", parent_id: null, prompt: { current_candidate: "seed" } },
+      { candidate_id: "1", parent_id: "0", prompt: { current_candidate: "b" } },
+      { candidate_id: "2", parent_id: "0", prompt: { current_candidate: "c" } },
+    ]);
+    assert.deepEqual([...parents], [
+      [1, 0],
+      [2, 0],
+    ]);
+  });
+
+  it("falls back to the candidate tree and skips unknown parents", () => {
+    const parents = versionParents(
+      versions,
+      [{ candidate_id: "9", parent_id: "8", prompt: { current_candidate: "c" } }],
+      [
+        { candidate: "seed", parents: [] },
+        { candidate: "b", parents: [0] },
+      ] as unknown as BlackboxRunResult["candidate_tree"],
+    );
+    assert.deepEqual([...parents], [[1, 0]]);
   });
 });
