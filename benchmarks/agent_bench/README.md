@@ -85,7 +85,7 @@ Reading the table:
 - **The top three are tied.** With 72 attempts, a pass rate near 95% carries
   roughly five points of noise either way, so the model matters more than the
   loop on these tasks.
-- **Language drift is the largest single failure cause.** 15 of the 24 failed
+- **Language drift is the largest single failure cause.** 13 of the 22 failed
   attempts are correct answers written in Hebrew to an English prompt, pulled
   there by Hebrew data in tool results. `dspy.ReAct` never drifted. Production
   pins the reply language explicitly, which this benchmark does not.
