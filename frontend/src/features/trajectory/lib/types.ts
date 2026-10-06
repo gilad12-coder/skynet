@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { SideImage } from "@/shared/lib/candidate-render";
 
 // Wire shape for trajectory events. Matches CandidateEvent.to_metrics() and
@@ -107,6 +108,12 @@ export interface BlackboxTrajectoryContext {
   // Scorer-attached renders keyed by candidate (see blackboxCandidateKey),
   // from the run's version history — present once the run has finished.
   rendersByText: ReadonlyMap<string, ReadonlyArray<{ key: string; src: string }>>;
+  // A repository run's candidate is a patch, browsed as files; the run page
+  // supplies the browser so the drawer shows the same one as the Versions tab.
+  renderRepoVersion?: (
+    prompt: Record<string, string>,
+    parentPrompt: Record<string, string>,
+  ) => ReactNode;
 }
 
 // GEPA stores a plain-string black-box candidate under this one synthetic key.

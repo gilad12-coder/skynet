@@ -12,6 +12,7 @@ import {
 } from "react";
 import {
   CaretRight,
+  DotsThree,
   File,
   FileC,
   FileCode,
@@ -47,7 +48,7 @@ import { cn } from "@/shared/lib/utils";
 import { CODE_HIGHLIGHT_SPECS } from "@/shared/ui/code-highlight-style";
 import type { RepositoryFileResponse, RepositoryTreeResponse } from "@/shared/types/api";
 import type { CandidateVersion } from "../lib/blackbox-versions";
-import { fullDiffRows, type DiffRow } from "../lib/blackbox-diff";
+import { foldRows, fullDiffRows, numberRows, type DiffRow } from "../lib/blackbox-diff";
 import { applyFilePatch, parsePatch, type ApplyResult, type FilePatch } from "../lib/repo-patch";
 import {
   ancestors,
@@ -68,6 +69,9 @@ import {
   REMOVED_EMPHASIS_BG,
   REMOVED_FG,
 } from "./diff-colors";
+
+// Unchanged lines kept on each side of a change when only the changes show.
+const DIFF_CONTEXT_LINES = 3;
 
 // Past this size a file shows as plain source: tokenising it would stall the tab.
 const MAX_HIGHLIGHT_CHARS = 200_000;
@@ -429,6 +433,7 @@ function TreeRow({
 
 type Compare = "base" | "parent";
 type Mode = "source" | "rendered";
+export type DiffView = "full" | "changes";
 
 /** A small two-way switch: a radio group of pressed-style buttons. */
 function Segmented<T extends string>({
@@ -545,24 +550,54 @@ function TokensLine({ tokens }: { tokens: HighlightToken[] }) {
 }
 
 /**
- * The whole file as this version leaves it, its changes inline: added lines
- * tinted, removed lines in place, every unchanged line kept around them.
+ * The file as this version leaves it, its changes inline: added lines tinted,
+ * removed lines in place. The full view keeps every unchanged line; the
+ * changes view folds long unchanged runs, each opening on click.
  */
-function SourceDiff({ path, before, after }: { path: string; before: string; after: string }) {
+function SourceDiff({
+  path,
+  before,
+  after,
+  changesOnly,
+}: {
+  path: string;
+  before: string;
+  after: string;
+  changesOnly: boolean;
+}) {
   const shownBefore = trimFinalNewline(before);
   const shownAfter = trimFinalNewline(after);
-  const rows = useMemo(() => fullDiffRows(shownBefore, shownAfter), [shownBefore, shownAfter]);
+  const rows = useMemo(
+    () => numberRows(fullDiffRows(shownBefore, shownAfter)),
+    [shownBefore, shownAfter],
+  );
+  const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
+  const shown = useMemo(
+    () => (changesOnly ? foldRows(rows, DIFF_CONTEXT_LINES, expanded) : rows),
+    [changesOnly, rows, expanded],
+  );
   const highlighted = useHighlight(path, shownAfter);
-  let oldLine = 0;
-  let newLine = 0;
   return (
     <div
       className="max-h-[32rem] overflow-auto rounded-lg border border-border/50 bg-muted/30 py-2 font-mono text-[0.8125rem] leading-relaxed"
       dir="ltr"
     >
-      {rows.map((row, i) => {
-        if (row.kind !== "added") oldLine++;
-        if (row.kind !== "removed") newLine++;
+      {shown.map((row) => {
+        if ("gap" in row) {
+          return (
+            <button
+              key={`gap-${row.start}`}
+              type="button"
+              onClick={() => setExpanded((prev) => new Set(prev).add(row.start))}
+              className="my-0.5 flex min-h-8 w-full cursor-pointer items-center gap-2 bg-muted/60 ps-4 pe-3 text-start font-sans text-[0.6875rem] text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45 lg:min-h-6"
+            >
+              <DotsThree className="size-3.5 shrink-0" aria-hidden="true" />
+              <span dir="auto">
+                {formatMsg("optimization.blackbox.repo.browser.folded_lines", { count: row.hidden })}
+              </span>
+            </button>
+          );
+        }
         const style =
           row.kind === "added"
             ? { background: ADDED_BG, color: ADDED_FG }
@@ -570,20 +605,20 @@ function SourceDiff({ path, before, after }: { path: string; before: string; aft
               ? { background: REMOVED_BG, color: REMOVED_FG }
               : undefined;
         const marker = row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " ";
-        const tokens = row.kind === "same" ? highlighted?.[newLine - 1] : undefined;
+        const tokens = row.kind === "same" && row.newLine != null ? highlighted?.[row.newLine - 1] : undefined;
         return (
-          <div key={i} className="flex min-h-[1.5em] pe-3" style={style}>
+          <div key={`${row.oldLine}-${row.newLine}`} className="flex min-h-[1.5em] pe-3" style={style}>
             <span
               className="w-10 shrink-0 select-none pe-2 text-end tabular-nums opacity-50"
               aria-hidden="true"
             >
-              {row.kind === "added" ? "" : oldLine}
+              {row.oldLine ?? ""}
             </span>
             <span
               className="w-10 shrink-0 select-none pe-2 text-end tabular-nums opacity-50"
               aria-hidden="true"
             >
-              {row.kind === "removed" ? "" : newLine}
+              {row.newLine ?? ""}
             </span>
             <span className="w-4 shrink-0 select-none opacity-70" aria-hidden="true">
               {marker}
@@ -665,6 +700,8 @@ function FileView({
   files,
   parent,
   parentFiles,
+  diffView,
+  onDiffView,
   onText,
 }: {
   optimizationId: string;
@@ -673,6 +710,8 @@ function FileView({
   files: FilePatch[];
   parent: CandidateVersion | null;
   parentFiles: FilePatch[];
+  diffView: DiffView;
+  onDiffView: (view: DiffView) => void;
   onText: (text: string | null) => void;
 }) {
   const kind = repoFileKind(path);
@@ -721,6 +760,11 @@ function FileView({
     </Button>
   ) : undefined;
 
+  const showingSource = !(renderable && mode === "rendered");
+  // A file the version adds or deletes is one change top to bottom, so there
+  // is nothing to fold away.
+  const foldable = !sides.removed && (useParent || (change != null && change.status !== "added"));
+
   const blocked = [after, parentText].find((t) => t.state !== "ready" && t.state !== "loading");
   const loading = after.state === "loading" || parentText.state === "loading";
   let body: ReactNode;
@@ -741,7 +785,12 @@ function FileView({
       renderable && mode === "rendered" && !sides.removed ? (
         <RenderedText text={after.text} kind={kind} title={path} />
       ) : (
-        <SourceDiff path={path} before={parentText.text} after={after.text} />
+        <SourceDiff
+          path={path}
+          before={parentText.text}
+          after={after.text}
+          changesOnly={foldable && diffView === "changes"}
+        />
       );
   }
 
@@ -767,6 +816,20 @@ function FileView({
               ]}
             />
           )}
+          {foldable && showingSource && (
+            <Segmented<DiffView>
+              label={msg("optimization.blackbox.repo.browser.diff_view_label")}
+              value={diffView}
+              onChange={onDiffView}
+              options={[
+                { value: "full", label: msg("optimization.blackbox.repo.browser.diff_view_full") },
+                {
+                  value: "changes",
+                  label: msg("optimization.blackbox.repo.browser.diff_view_changes"),
+                },
+              ]}
+            />
+          )}
           {renderable && !sides.removed && (
             <Segmented<Mode>
               label={msg("optimization.blackbox.repo.browser.mode_label")}
@@ -785,6 +848,30 @@ function FileView({
       {showPatch && change && <RawPatch text={change.raw} />}
     </div>
   );
+}
+
+const DIFF_VIEW_STORAGE_KEY = "skynet:repo-browser:diff-view";
+
+/** The reader's full-file or changes-only choice, remembered across files, versions and visits. */
+function useDiffView(): readonly [DiffView, (view: DiffView) => void] {
+  const [view, setView] = useState<DiffView>("full");
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(DIFF_VIEW_STORAGE_KEY);
+      if (stored === "full" || stored === "changes") setView(stored);
+    } catch {
+      // Storage can be blocked; the view still works, it just isn't remembered.
+    }
+  }, []);
+  const update = useCallback((next: DiffView) => {
+    setView(next);
+    try {
+      window.localStorage.setItem(DIFF_VIEW_STORAGE_KEY, next);
+    } catch {
+      // As above.
+    }
+  }, []);
+  return [view, update] as const;
 }
 
 /* ── Browser ──────────────────────────────────────────────────────────── */
@@ -812,6 +899,7 @@ export function RepoVersionBrowser({
   /** The open file and its text as this version leaves it, for copying; null while unknown. */
   onOpenFile: (file: { path: string; text: string } | null) => void;
 }) {
+  const [diffView, setDiffView] = useDiffView();
   const files = useMemo(() => parsePatch(version.text), [version.text]);
   const parentFiles = useMemo(() => (parent ? parsePatch(parent.text) : []), [parent]);
   const tree = useLoaded<RepositoryTreeResponse>(optimizationId, getRepositoryTree);
@@ -844,6 +932,8 @@ export function RepoVersionBrowser({
             files={files}
             parent={parent}
             parentFiles={parentFiles}
+            diffView={diffView}
+            onDiffView={setDiffView}
             onText={onText}
           />
         ) : (

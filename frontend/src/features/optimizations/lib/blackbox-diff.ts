@@ -184,3 +184,62 @@ export function fullDiffRows(before: string, after: string): DiffRow[] {
     ...a.slice(a.length - tail).map((text) => plainRow("same", text)),
   ];
 }
+
+/** A diff row with the line numbers it has in the before and after texts. */
+export interface NumberedRow extends DiffRow {
+  oldLine: number | null;
+  newLine: number | null;
+}
+
+export function numberRows(rows: DiffRow[]): NumberedRow[] {
+  let oldLine = 0;
+  let newLine = 0;
+  return rows.map((row) => {
+    if (row.kind !== "added") oldLine++;
+    if (row.kind !== "removed") newLine++;
+    return {
+      ...row,
+      oldLine: row.kind === "added" ? null : oldLine,
+      newLine: row.kind === "removed" ? null : newLine,
+    };
+  });
+}
+
+/** A run of unchanged rows folded away; `start` is its index in the numbered rows. */
+export interface FoldedGap {
+  gap: true;
+  start: number;
+  hidden: number;
+}
+
+/**
+ * Keep only the changed rows and `context` unchanged rows around each change,
+ * folding every longer unchanged run into a gap. Gaps whose `start` is in
+ * `expanded` stay open.
+ */
+export function foldRows(
+  rows: NumberedRow[],
+  context = 3,
+  expanded: ReadonlySet<number> = new Set(),
+): Array<NumberedRow | FoldedGap> {
+  const keep = rows.map((row) => row.kind !== "same");
+  const near = keep.slice();
+  keep.forEach((changed, i) => {
+    if (!changed) return;
+    for (let j = Math.max(0, i - context); j <= Math.min(rows.length - 1, i + context); j++) near[j] = true;
+  });
+  const out: Array<NumberedRow | FoldedGap> = [];
+  let i = 0;
+  while (i < rows.length) {
+    if (near[i]) {
+      out.push(rows[i]!);
+      i++;
+      continue;
+    }
+    const start = i;
+    while (i < rows.length && !near[i]) i++;
+    if (expanded.has(start)) out.push(...rows.slice(start, i));
+    else out.push({ gap: true, start, hidden: i - start });
+  }
+  return out;
+}

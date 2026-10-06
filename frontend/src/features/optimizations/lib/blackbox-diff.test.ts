@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { countChanges, diffLines, diffRows, diffWords, fullDiffRows } from "./blackbox-diff.ts";
+import {
+  countChanges,
+  diffLines,
+  diffRows,
+  diffWords,
+  foldRows,
+  fullDiffRows,
+  numberRows,
+} from "./blackbox-diff.ts";
 
 test("diffLines keeps identical texts as same lines", () => {
   assert.deepEqual(diffLines("a\nb", "a\nb"), [
@@ -88,4 +96,37 @@ test("fullDiffRows shows a new file as all added and a deleted one as all remove
     fullDiffRows("a\nb", "").map((r) => r.kind),
     ["removed", "removed"],
   );
+});
+
+const numbered = (n: number) => Array.from({ length: n }, (_, i) => `l${i + 1}`).join("\n");
+
+test("foldRows keeps context around a change and folds the rest", () => {
+  const before = numbered(20);
+  const after = before.replace("l10\n", "L10\n");
+  const folded = foldRows(numberRows(fullDiffRows(before, after)), 2);
+  const gaps = folded.filter((r) => "gap" in r);
+  assert.equal(gaps.length, 2);
+  assert.deepEqual(
+    gaps.map((g) => ("gap" in g ? g.hidden : 0)),
+    [7, 8],
+  );
+  const shown = folded.filter((r) => !("gap" in r));
+  assert.deepEqual(
+    shown.map((r) => ("gap" in r ? "" : `${r.kind}:${r.oldLine ?? "-"}/${r.newLine ?? "-"}`)),
+    ["same:8/8", "same:9/9", "removed:10/-", "added:-/10", "same:11/11", "same:12/12"],
+  );
+});
+
+test("foldRows opens an expanded gap", () => {
+  const before = numbered(12);
+  const after = `${before}\nnew`;
+  const rows = numberRows(fullDiffRows(before, after));
+  const [gap] = foldRows(rows, 1);
+  assert.ok(gap && "gap" in gap);
+  assert.equal(foldRows(rows, 1, new Set([gap.start])).length, rows.length);
+});
+
+test("foldRows returns a single gap for an unchanged file", () => {
+  const rows = numberRows(fullDiffRows("a\nb", "a\nb"));
+  assert.deepEqual(foldRows(rows), [{ gap: true, start: 0, hidden: 2 }]);
 });
