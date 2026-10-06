@@ -278,7 +278,13 @@ export function TrajectoryDrawer({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side={isRtl ? "left" : "right"}
-        className="w-full sm:max-w-md md:max-w-[min(520px,92vw)] overflow-hidden flex flex-col"
+        className={cn(
+          "w-full overflow-hidden flex flex-col",
+          // A file tree beside the open file needs an editor's width, not a column's.
+          blackbox?.renderRepoVersion
+            ? "sm:max-w-2xl md:max-w-[min(1080px,94vw)]"
+            : "sm:max-w-md md:max-w-[min(520px,92vw)]",
+        )}
       >
         <NodeBody
           view={view}
@@ -317,6 +323,7 @@ function NodeBody({
   const [pinnedExampleId, setPinnedExampleId] = useState<string | null>(null);
   const [promptViewMode, setPromptViewMode] = usePromptView();
   const isBlackbox = blackbox !== null;
+  const repoBrowser = blackbox?.renderRepoVersion ?? null;
 
   useEffect(() => {
     setPinnedExampleId(null);
@@ -517,7 +524,7 @@ function NodeBody({
               title={msg(versionTitleKey)}
               info={msg(versionInfoKey)}
               action={
-                promptEntries.length > 0 && (hasParent || canPreview) ? (
+                promptEntries.length > 0 && !repoBrowser && (hasParent || canPreview) ? (
                   <PromptViewToggle
                     view={effectiveView}
                     onChange={setPromptViewMode}
@@ -537,6 +544,8 @@ function NodeBody({
                         : "trajectory.drawer.rejected.prompt_unavailable",
                   )}
                 />
+              ) : repoBrowser ? (
+                repoBrowser(view.prompt, view.parentPrompt)
               ) : isBlackbox ? (
                 <div className="space-y-2">
                   {blackboxParts.map((part) => (

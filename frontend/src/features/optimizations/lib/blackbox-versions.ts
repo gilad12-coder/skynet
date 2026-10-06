@@ -109,6 +109,33 @@ function promptText(prompt: Record<string, string> | BlackboxCandidate): string 
 }
 
 /**
+ * The version a candidate-tree node shows, matched by its text; a node that
+ * never became a version (rejected, or still being scored) gets one of its
+ * own with no number to name it by.
+ */
+export function versionForPrompt(
+  versions: CandidateVersion[],
+  prompt: Record<string, string>,
+): CandidateVersion | null {
+  const text = promptText(prompt);
+  if (Object.keys(prompt).length === 0) return null;
+  return (
+    versions.find((v) => v.text === text) ?? {
+      number: -1,
+      candidate: text,
+      text,
+      score: null,
+      meanScore: null,
+      evals: 0,
+      firstRun: null,
+      sideInfo: {},
+      isSeed: false,
+      isBest: false,
+    }
+  );
+}
+
+/**
  * Map each version number to the version it was proposed from, read from the
  * run's candidate events or, failing that, GEPA's candidate tree. Versions
  * whose parent is unknown or never became a distinct version are left out.

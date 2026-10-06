@@ -44,6 +44,8 @@ import { MetaHarnessPanel, TrajectoryPanel, climbEngineOf } from "@/features/tra
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { buildBlackboxTrajectoryContext } from "../lib/blackbox-trajectory";
 import { describeBlackboxArtifact } from "../lib/blackbox-artifact";
+import { buildVersions } from "../lib/blackbox-versions";
+import { RepoCandidateBrowser } from "./RepoCandidateBrowser";
 
 const ScoreChart = dynamic(() => import("@/shared/ui/score-chart").then((m) => m.ScoreChart), {
   ssr: false,
@@ -136,13 +138,24 @@ function OverviewTabImpl({
   // grid-search pair view — the goal is "exactly identical components", so a
   // pair is just a run scoped by pair_index plus aggregation around it.
   const isBlackbox = job.optimization_type === "blackbox";
-  const blackboxTrajectory = useMemo(
-    () =>
-      isBlackbox
-        ? buildBlackboxTrajectoryContext(job.blackbox_result ?? null, payload ?? null)
-        : null,
-    [isBlackbox, job.blackbox_result, payload],
-  );
+  const isRepo = isBlackbox && payload?.payload?.recipe === "repo";
+  const blackboxTrajectory = useMemo(() => {
+    if (!isBlackbox) return null;
+    const context = buildBlackboxTrajectoryContext(job.blackbox_result ?? null, payload ?? null);
+    if (!isRepo) return context;
+    const versions = job.blackbox_result ? buildVersions(job.blackbox_result) : [];
+    return {
+      ...context,
+      renderRepoVersion: (prompt: Record<string, string>, parentPrompt: Record<string, string>) => (
+        <RepoCandidateBrowser
+          optimizationId={job.optimization_id}
+          versions={versions}
+          prompt={prompt}
+          parentPrompt={parentPrompt}
+        />
+      ),
+    };
+  }, [isBlackbox, isRepo, job.blackbox_result, job.optimization_id, payload]);
   const scoreChartArtifact = useMemo(
     () =>
       isBlackbox
