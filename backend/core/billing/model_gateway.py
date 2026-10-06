@@ -430,9 +430,12 @@ class ModelGateway:
 
     def model_routes(self) -> list[dict[str, str]]:
         """Return only capabilities registered by this trusted parent for readiness probes."""
+        # Callers send chat requests to these routes; an embeddings route
+        # refuses them, which would fail every novelty run's setup.
         return [
             {"url": self.url, "token": token, "model": route.model, "role": route.role}
             for token, route in self._routes.items()
+            if not route.embeddings
         ]
 
     def bind_evaluator(self, evaluator: EvaluatorEndpoint) -> dict[str, str]:

@@ -593,3 +593,20 @@ def test_shinka_novelty_adds_a_billed_embeddings_route(gateway: ModelGateway, no
     assert operation.state == "settled"
     assert operation.role == "optimization"
     assert evidence.evidence["tags"] == {"caller": CALLER_PROPOSER, "kind": KIND_EMBEDDING}
+
+
+def test_readiness_probes_skip_the_novelty_embeddings_route(gateway: ModelGateway) -> None:
+    """Probe only chat routes, so a novelty run's embeddings route cannot fail setup with a chat call.
+
+    Args:
+        gateway: Parent protocol over the funded fixture budget.
+    """
+    protected = gateway.protect_payload(
+        {"shinka": {"novelty": True}, "reflection_model_config": {"name": "fixture/text"}},
+        managed_key="provider-secret",
+    )
+    route = protected["reflection_model_config"]["extra"][ROUTE_KEY]
+    assert [probe["token"] for probe in gateway.model_routes()] == [route["token"]]
+    assert _verify_model_routes(gateway, native=False) == [
+        {"key": "model.optimization", "status": "succeeded", "field": "optimization"}
+    ]
