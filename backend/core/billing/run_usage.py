@@ -3,7 +3,7 @@
 Every billed model call and sandbox charge of a run is an execution operation
 on the run's budget, so summing operations adds up exactly to what the run
 charged, for every optimizer alike. Rows are pre-aggregated per role, model,
-stage, pair and candidate; the client regroups them by any of those.
+stage, pair, candidate and kind; the client regroups them by any of those.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ _UNSETTLED_STATES = ("reserved", "dispatched", "pending")
 
 @dataclass
 class UsageRow:
-    """One aggregate of operations sharing a role, model, stage, pair, candidate and billing."""
+    """One aggregate of operations sharing a role, model, stage, pair, candidate, billing and kind."""
 
     role: str
     model: str | None
@@ -49,6 +49,7 @@ class UsageRow:
     pair: str | None
     candidate: str | None
     billing: str
+    kind: str | None = None
     charged_units: int = 0
     provider_cents: Decimal | None = None
     calls: int = 0
@@ -161,9 +162,9 @@ def aggregate(
 
     def row_for(role: str, model: str | None, tags: Mapping[str, Any], billing: str) -> UsageRow:
         """Return the row for one grouping key, creating it on first use."""
-        key = (role, model, tags.get("stage"), tags.get("pair"), tags.get("candidate"), billing)
+        key = (role, model, tags.get("stage"), tags.get("pair"), tags.get("candidate"), billing, tags.get("kind"))
         if key not in rows:
-            rows[key] = UsageRow(role, model, *key[2:5], billing)
+            rows[key] = UsageRow(role, model, *key[2:5], billing, kind=key[6])
         return rows[key]
 
     for record in records:

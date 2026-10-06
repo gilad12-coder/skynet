@@ -24,7 +24,9 @@ from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..config import settings
 from ..constants import OPTIMIZATION_TYPE_BLACKBOX, TOKEN_SOURCE_MANAGED
 from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
+from ..models.blackbox import BLACKBOX_ENGINE_SHINKA_EVOLVE
 from ..models.common import SplitFractions
+from ..service_gateway.optimization.blackbox.native_runtime import NATIVE_ENGINES
 from ..service_gateway.optimization.blackbox.preflight import preflight_lifetime_seconds
 from ..service_gateway.optimization.data import split_examples
 from ..storage.preflights import PreflightStore
@@ -260,9 +262,11 @@ def _verify_anything(gateway: ModelGateway, payload: dict[str, Any], *, scope: s
     if scope == "execution" and optimizer_ready:
         public = {key: value for key, value in payload.items() if not key.startswith("_")}
         typed = BlackboxRunRequest.model_validate(public)
+        # ShinkaEvolve calls its optimization models over chat completions, not
+        # through a native harness on the Anthropic protocol.
         native = (
             typed.strategy.mode != "single"
-            or typed.strategy.engine in {"meta_harness", "autoresearch"}
+            or typed.strategy.engine in NATIVE_ENGINES - {BLACKBOX_ENGINE_SHINKA_EVOLVE}
             or typed.target.kind == "repo"
         )
         optimizer_index = next(index for index, check in enumerate(result["checks"]) if check.get("key") == "optimizer")

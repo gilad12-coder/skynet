@@ -57,7 +57,7 @@ An interrupted run is never restarted automatically: a worker shutdown, a lost l
 | --- | --- |
 | DSPy GEPA, including independent GEPA grid pairs | Exact compatible persisted GEPA state |
 | Anything, single GEPA engine | Exact compatible persisted GEPA state |
-| Meta-Harness, AutoResearch, Auto/omni, other optimizers | Not supported; Retry or Clone instead |
+| Meta-Harness, AutoResearch, AutoSaddler, ShinkaEvolve, Auto/omni, other optimizers | Not supported; Retry or Clone instead |
 
 Resume requires state schema 7 at the pinned GEPA revision, matching checkpoint bytes, task/configuration/data, and the run's pinned sandbox image. It retains the same job and cumulative funded budget, fences the previous execution generation, and waits for unresolved prior usage before admitting new work. The resumed run's seed reevaluation is ordinary metered work under that budget.
 

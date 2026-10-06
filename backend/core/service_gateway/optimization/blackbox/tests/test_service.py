@@ -38,6 +38,7 @@ from .. import autosaddler as autosaddler_mod
 from .. import meta_harness as meta_harness_mod
 from .. import scorer as scorer_mod
 from .. import service as service_mod
+from .. import shinka_evolve as shinka_evolve_mod
 from ..agent_runs import PHASE_BASELINE, PHASE_FINAL
 from ..auto import LaneOutcome
 from ..harness import GatewayConfig
@@ -176,6 +177,7 @@ def fake_native_proposers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, En
     monkeypatch.setattr(autoresearch_mod, "run_native_engine", run_native)
     monkeypatch.setattr(meta_harness_mod, "run_native_engine", run_native)
     monkeypatch.setattr(autosaddler_mod, "run_native_engine", run_native)
+    monkeypatch.setattr(shinka_evolve_mod, "run_native_engine", run_native)
     return invocations
 
 
@@ -261,15 +263,24 @@ def test_auto_run_hands_off_between_engines(
 
     assert response.optimizer_name == "auto"
     assert response.strategy_mode == "auto"
-    assert {(lane.engine, lane.phase) for lane in response.lanes[:4]} == {
+    assert {(lane.engine, lane.phase) for lane in response.lanes[:5]} == {
         ("gepa", "explore"),
         ("autoresearch", "explore"),
         ("meta_harness", "explore"),
         ("autosaddler", "explore"),
+        ("shinka_evolve", "explore"),
     }
     assert (response.lanes[-1].engine, response.lanes[-1].phase) == ("gepa", "continue")
     assert response.engine_used == "gepa"
-    assert {engine for engine, _ in fake_native_proposers} == {"autoresearch", "meta_harness", "autosaddler"}
+    assert {engine for engine, _ in fake_native_proposers} == {
+        "autoresearch",
+        "meta_harness",
+        "autosaddler",
+        "shinka_evolve",
+    }
+    shinka = next(ctx.native_options for engine, ctx in fake_native_proposers if engine == "shinka_evolve")
+    assert [route["model"] for route in shinka.shinka_models] == ["fake/model"]
+    assert shinka.shinka["patch_diff"] == pytest.approx(0.6)
     assert all(ctx.native_options.model == "fake/model" for _, ctx in fake_native_proposers)
     assert all(ctx.native_options.runtime == "vercel" for _, ctx in fake_native_proposers)
     assert all(ctx.native_options.max_token_cost > 0 for _, ctx in fake_native_proposers)
@@ -1317,12 +1328,15 @@ def test_proposer_accepts_any_offered_harness_and_rejects_unlaunchable_ones() ->
 
 
 def test_engine_catalog_for_a_repository_offers_every_engine_but_not_auto() -> None:
-    """A repository run can pick any single engine the deployment offers, never Auto."""
+    """A repository run can pick any single engine the deployment offers except ShinkaEvolve, never Auto."""
     catalog = service_mod.engine_catalog("repo")
 
     available = {entry.id for entry in catalog.engines if entry.available}
     text_available = {entry.id for entry in service_mod.engine_catalog("text").engines if entry.available}
-    assert available == text_available
+    assert available == text_available - {"shinka_evolve"}
+    shinka = next(entry for entry in catalog.engines if entry.id == "shinka_evolve")
+    assert shinka.available is False
+    assert "repository targets yet" in str(shinka.unavailable_reason)
     assert "gepa" in available
     assert catalog.auto_available is False
     assert catalog.auto_unavailable_reason

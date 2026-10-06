@@ -399,7 +399,7 @@ def _scrubbable_model_configs(payload: dict[str, Any]) -> list[dict[str, Any]]:
     scorer = payload.get("scorer")
     if isinstance(scorer, dict) and isinstance(scorer.get("model"), dict):
         configs.append(scorer["model"])
-    for key in ("generation_models", "reflection_models"):
+    for key in ("generation_models", "reflection_models", "extra_reflection_model_configs"):
         if isinstance(payload.get(key), list):
             configs.extend(config for config in payload[key] if isinstance(config, dict))
     return configs
@@ -781,7 +781,7 @@ def _model_configs(payload: dict[str, Any]) -> list[dict[str, Any]]:
     scorer = payload.get("scorer")
     if isinstance(scorer, dict) and scorer.get("kind") != "remote" and isinstance(scorer.get("model"), dict):
         configs.append(scorer["model"])
-    for key in ("generation_models", "reflection_models"):
+    for key in ("generation_models", "reflection_models", "extra_reflection_model_configs"):
         if isinstance(payload.get(key), list):
             configs.extend(config for config in payload[key] if isinstance(config, dict))
     return configs

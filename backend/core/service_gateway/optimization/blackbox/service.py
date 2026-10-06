@@ -54,11 +54,13 @@ from ....constants import (
 )
 from ....exceptions import ServiceError
 from ....models.blackbox import (
+    BLACKBOX_ENGINE_SHINKA_EVOLVE,
     BLACKBOX_HARNESS_CLAUDE_CODE,
     BLACKBOX_REPO_ENGINES,
     BLACKBOX_STRATEGY_AUTO,
     BLACKBOX_TARGET_AGENT,
     BLACKBOX_TARGET_REPO,
+    SHINKA_REPO_UNSUPPORTED,
     BlackboxCandidateNode,
     BlackboxCaseResult,
     BlackboxEngineCatalogResponse,
@@ -68,6 +70,7 @@ from ....models.blackbox import (
     BlackboxProposerRuntimeInfo,
     BlackboxRunRequest,
     BlackboxRunResponse,
+    BlackboxShinkaSettings,
     BlackboxTarget,
     BlackboxVersion,
     ScorerDryRunRequest,
@@ -172,7 +175,7 @@ def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
                 unavailable_reason=(
                     spec.unavailable_reason_for(caps)
                     or (
-                        _REPO_ENGINE_REASON
+                        (SHINKA_REPO_UNSUPPORTED if spec.id == BLACKBOX_ENGINE_SHINKA_EVOLVE else _REPO_ENGINE_REASON)
                         if target_kind == BLACKBOX_TARGET_REPO and spec.id not in BLACKBOX_REPO_ENGINES
                         else None
                     )
@@ -228,7 +231,29 @@ def claude_code_proposes(payload: BlackboxRunRequest) -> bool:
     Returns:
         True when a native engine runs with the Claude Code harness.
     """
-    return uses_native_runtime(payload) and payload.proposer.harness == BLACKBOX_HARNESS_CLAUDE_CODE
+    # ShinkaEvolve calls its optimization models directly; it never launches a harness.
+    shinka_only = payload.strategy.mode == "single" and payload.strategy.engine == BLACKBOX_ENGINE_SHINKA_EVOLVE
+    return uses_native_runtime(payload) and not shinka_only and payload.proposer.harness == BLACKBOX_HARNESS_CLAUDE_CODE
+
+
+def _shinka_models(payload: BlackboxRunRequest, gateway: GatewayConfig) -> tuple[dict[str, str], ...]:
+    """Name the gateway route of every ShinkaEvolve optimization model, the reflection model first.
+
+    Args:
+        payload: The submitted job.
+        gateway: The run's model gateway, used for a model without its own scoped route.
+
+    Returns:
+        One ``{"model", "url", "token"}`` route per optimization model.
+    """
+    routes = []
+    for config in (payload.reflection_model_settings, *payload.extra_reflection_model_settings):
+        route = config.extra.get(ROUTE_KEY)
+        if route:
+            routes.append({"model": route["model"], "url": route["url"], "token": route["token"]})
+        else:
+            routes.append({"model": config.name, "url": gateway.url, "token": gateway.api_key})
+    return tuple(routes)
 
 
 def claude_code_in_use(payload: BlackboxRunRequest) -> bool:
@@ -314,12 +339,13 @@ def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: boo
             get_engine(name, caps)
     needs_native = uses_native_runtime(payload)
     if needs_native:
-        model = payload.reflection_model_settings
-        if (
+        models = [payload.reflection_model_settings, *payload.extra_reflection_model_settings]
+        if any(
             model.temperature is not None
             or model.max_tokens is not None
             or model.base_url
             or any(key != ROUTE_KEY for key in model.extra)
+            for model in models
         ):
             raise ServiceError(
                 "Native proposers accept a model selection; custom sampling and routing settings are unsupported."
@@ -901,6 +927,8 @@ def _run_job(
             claude_code_model(payload.reflection_model_settings.name) if claude_code_proposes(payload) else None
         )
         native_options = NativeOptions(
+            shinka=(payload.shinka or BlackboxShinkaSettings()).model_dump(),
+            shinka_models=_shinka_models(payload, gateway),
             runtime=payload.proposer_runtime,
             sandbox_runtime=active_runtime,
             model=direct_model or (budget_route["model"] if budget_route else payload.reflection_model_settings.name),

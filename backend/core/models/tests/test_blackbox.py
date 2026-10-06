@@ -7,7 +7,13 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from core.models.blackbox import BlackboxRepoSecret, BlackboxRepoSource, BlackboxRunRequest, BlackboxTarget
+from core.models.blackbox import (
+    BlackboxRepoSecret,
+    BlackboxRepoSource,
+    BlackboxRunRequest,
+    BlackboxShinkaSettings,
+    BlackboxTarget,
+)
 
 
 def _payload(**overrides: Any) -> dict[str, Any]:
@@ -141,6 +147,7 @@ def test_agent_target_rejects_mismatched_task_model_role() -> None:
     [
         ({"mode": "single", "engine": "meta_harness"}, True),
         ({"mode": "single", "engine": "autosaddler"}, True),
+        ({"mode": "single", "engine": "shinka_evolve"}, True),
         ({"mode": "single", "engine": "autoresearch"}, False),
         ({"mode": "single", "engine": "gepa"}, False),
         ({"mode": "single", "engine": "best_of_n"}, False),
@@ -273,3 +280,117 @@ def test_repo_run_needs_a_python_scorer() -> None:
         BlackboxRunRequest.model_validate(
             _repo_request(scorer={"kind": "remote", "url": "https://scorer.example.com/score"})
         )
+
+
+def test_shinka_settings_default_to_upstream_values() -> None:
+    """Fill every ShinkaEvolve knob from the upstream defaults, with duplicate rejection off."""
+    settings = BlackboxShinkaSettings()
+
+    assert (settings.patch_diff, settings.patch_full, settings.patch_cross) == (0.6, 0.3, 0.1)
+    assert settings.num_islands == 2
+    assert settings.parent_selection == "weighted"
+    assert settings.novelty is False
+    assert settings.meta_notes is True
+    assert settings.use_text_feedback is True
+
+
+@pytest.mark.parametrize(
+    "mix",
+    [
+        {"patch_diff": 0.5, "patch_full": 0.3, "patch_cross": 0.1},
+        {"patch_diff": 1.0, "patch_full": 0.1, "patch_cross": 0.0},
+    ],
+)
+def test_shinka_settings_require_a_mutation_mix_summing_to_one(mix: dict[str, float]) -> None:
+    """Reject mutation probabilities upstream would have to renormalize.
+
+    Args:
+        mix: Mutation probabilities that do not sum to 1.
+    """
+    with pytest.raises(ValidationError, match="must sum to 1"):
+        BlackboxShinkaSettings(**mix)
+
+
+def test_shinka_settings_accept_a_custom_mix_summing_to_one() -> None:
+    """Accept any mix whose probabilities sum to 1 within rounding."""
+    settings = BlackboxShinkaSettings(patch_diff=0.7, patch_full=0.2, patch_cross=0.1)
+
+    assert settings.patch_diff == 0.7
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        {"num_islands": 0},
+        {"num_islands": 9},
+        {"archive_size": 501},
+        {"code_embed_sim_threshold": 0.4},
+        {"max_parallel_evaluations": 9},
+        {"parent_selection": "random"},
+        {"meta_rec_interval": 0},
+    ],
+)
+def test_shinka_settings_reject_out_of_range_values(field: dict[str, Any]) -> None:
+    """Hold every knob to the range the submit form offers.
+
+    Args:
+        field: One knob set outside its range.
+    """
+    with pytest.raises(ValidationError):
+        BlackboxShinkaSettings(**field)
+
+
+def test_shinka_duplicate_rejection_is_not_supported_yet() -> None:
+    """Refuse duplicate rejection until embeddings reach the sandbox."""
+    with pytest.raises(ValidationError, match="not supported yet"):
+        BlackboxShinkaSettings(novelty=True)
+
+
+def test_shinka_run_accepts_named_parts_and_extra_models() -> None:
+    """Accept a multi-part seed, extra optimization models and settings for a single ShinkaEvolve run."""
+    request = BlackboxRunRequest.model_validate(
+        _payload(
+            seed_candidate={"system": "a", "user": "b"},
+            strategy={"mode": "single", "engine": "shinka_evolve"},
+            extra_reflection_model_configs=[{"name": "gpt-4o-mini"}],
+            shinka={"num_islands": 3, "meta_notes": False},
+        )
+    )
+
+    assert request.seed_candidate == {"system": "a", "user": "b"}
+    assert [config.name for config in request.extra_reflection_model_settings] == ["gpt-4o-mini"]
+    assert request.shinka is not None
+    assert request.shinka.num_islands == 3
+    assert request.model_dump(by_alias=True)["extra_reflection_model_configs"][0]["name"] == "gpt-4o-mini"
+
+
+def test_auto_run_accepts_extra_models_for_its_shinka_lane() -> None:
+    """Let Auto carry extra optimization models for the ShinkaEvolve lane."""
+    request = BlackboxRunRequest.model_validate(
+        _payload(strategy={"mode": "auto"}, extra_reflection_model_configs=[{"name": "gpt-4o-mini"}])
+    )
+
+    assert len(request.extra_reflection_model_settings) == 1
+
+
+def test_extra_models_are_rejected_for_other_single_engines() -> None:
+    """Refuse extra optimization models a single run of another engine would silently ignore."""
+    with pytest.raises(ValidationError, match="only used by ShinkaEvolve"):
+        BlackboxRunRequest.model_validate(_payload(extra_reflection_model_configs=[{"name": "gpt-4o-mini"}]))
+
+
+def test_extra_models_are_capped() -> None:
+    """Cap the extra optimization models at four."""
+    with pytest.raises(ValidationError):
+        BlackboxRunRequest.model_validate(
+            _payload(
+                strategy={"mode": "single", "engine": "shinka_evolve"},
+                extra_reflection_model_configs=[{"name": "gpt-4o-mini"}] * 5,
+            )
+        )
+
+
+def test_shinka_rejects_a_repository_target_for_now() -> None:
+    """Refuse repository targets for ShinkaEvolve until its multi-file support lands."""
+    with pytest.raises(ValidationError, match="does not support repository targets yet"):
+        BlackboxRunRequest.model_validate(_repo_request(strategy={"mode": "single", "engine": "shinka_evolve"}))

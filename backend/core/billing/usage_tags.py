@@ -17,10 +17,13 @@ from collections.abc import Iterator, Mapping
 from typing import Any
 
 USAGE_TAGS_HEADER = "x-skynet-usage-tags"
-TAG_KEYS = ("stage", "pair", "candidate", "case", "caller")
+TAG_KEYS = ("stage", "pair", "candidate", "case", "caller", "kind")
 # ``caller`` values: which optimizer drove an optimization-route call.
 CALLER_PROPOSER = "proposer"
 CALLER_REFLECTION = "reflection"
+# ``kind`` values: what an engine that makes several sorts of model calls used one for.
+KIND_MUTATION = "mutation"
+KIND_META_NOTES = "meta_notes"
 _MAX_VALUE_CHARS = 64
 _MAX_HEADER_CHARS = 512
 _VALUE = re.compile(r"[A-Za-z0-9_.:@/+ -]+")
@@ -110,7 +113,7 @@ def usage_scope(**tags: Any) -> Iterator[None]:
     Scopes nest: an inner one keeps the outer's tags and overrides those it sets.
 
     Args:
-        **tags: ``stage``, ``pair``, ``candidate``, ``case`` or ``caller``; ``None`` keeps the outer value.
+        **tags: ``stage``, ``pair``, ``candidate``, ``case``, ``caller`` or ``kind``; ``None`` keeps the outer value.
 
     Yields:
         Nothing; the scope ends when the block does.

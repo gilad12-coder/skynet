@@ -674,7 +674,11 @@ class ModelGateway:
             result["_skynet_evaluator_route"] = {"url": self.url, "token": self._evaluator_token}
         elif isinstance(scorer, dict) and isinstance(scorer.get("model"), dict):
             models.append((scorer["model"], "judge"))
-        for key, role in (("generation_models", "task"), ("reflection_models", "optimization")):
+        for key, role in (
+            ("generation_models", "task"),
+            ("reflection_models", "optimization"),
+            ("extra_reflection_model_configs", "optimization"),
+        ):
             models.extend((config, role) for config in result.get(key, []) if isinstance(config, dict))
         economy = bool(result.get("economy_mode"))
         for config, role in models:
