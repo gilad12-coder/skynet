@@ -54,6 +54,8 @@ from .upstream import (
     GEPA_REVISION,
     META_HARNESS_REVISION,
     META_HARNESS_SOURCE,
+    SHINKA_SOURCE,
+    SHINKA_VERSION,
 )
 from .upstream import GEPA_SOURCE as GEPA_PACKAGE_SOURCE
 
@@ -74,7 +76,9 @@ logger = logging.getLogger(__name__)
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _LOG_PREFIX = "SKYNET_NATIVE_LOG "
 _UUID = re.compile(r"^[0-9a-f]{32}$")
-NATIVE_ENGINES = frozenset({"meta_harness", "autoresearch", "autosaddler", "gepa_repo", "best_of_n_repo"})
+NATIVE_ENGINES = frozenset(
+    {"meta_harness", "autoresearch", "autosaddler", "shinka_evolve", "gepa_repo", "best_of_n_repo"}
+)
 # ``gepa_repo`` and ``best_of_n_repo`` exist only for repositories; the others take either kind of task.
 REPO_ONLY_NATIVE_ENGINES = frozenset({"gepa_repo", "best_of_n_repo"})
 _UPSTREAMS = {
@@ -83,8 +87,18 @@ _UPSTREAMS = {
     "gepa_repo": (GEPA_PACKAGE_SOURCE, GEPA_REVISION),
     "best_of_n_repo": (GEPA_PACKAGE_SOURCE, GEPA_REVISION),
     "autosaddler": (AUTOSADDLER_SOURCE, AUTOSADDLER_REVISION),
+    "shinka_evolve": (SHINKA_SOURCE, SHINKA_VERSION),
 }
+# Engines that run in their own pinned interpreter instead of the vendored GEPA
+# runner, and take a multi-part starting point.
+_OWN_VENV_ENGINES = frozenset({"autosaddler", "shinka_evolve"})
 _AUTOSADDLER_RUNNER_FILE = "autosaddler_runner.py"
+_SHINKA_RUNNER_FILE = "shinka_runner.py"
+_SHINKA_REQUIREMENTS_FILE = "shinka_requirements.txt"
+# Each ShinkaEvolve model route's token reaches the guest in its own variable,
+# named by position; the meta-notes model reads its own so its calls are told apart.
+SHINKA_KEY_ENV = "SKYNET_SHINKA_KEY_{index}"
+SHINKA_META_KEY_ENV = "SKYNET_SHINKA_META_KEY"
 _BRIDGE_FILE = "harness_bridge.py"
 _ENGINES_FILE = "native_engines.py"
 _REPO_TREE_FILE = "repo_tree.py"
@@ -149,6 +163,10 @@ class NativeOptions:
     # A repository run's packed tree: ``chunks`` (files on this machine),
     # ``editable_paths`` and ``readonly_paths``.
     repo: dict[str, Any] | None = None
+    # ShinkaEvolve's evolution settings, and its optimization models in bandit
+    # order: each ``{"model", "url", "token"}`` names one scoped gateway route.
+    shinka: dict[str, Any] | None = None
+    shinka_models: tuple[dict[str, str], ...] = field(default=(), repr=False)
     usage_by_model: dict[str, dict[str, int]] = field(default_factory=dict)
     usage_lock: Any = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -219,6 +237,12 @@ def _runner_files(engine_id: str) -> dict[str, str]:
     Returns:
         Relative file paths mapped to their text.
     """
+    if engine_id == "shinka_evolve":
+        runner = Path(native_runner.__file__).with_name(_SHINKA_RUNNER_FILE)
+        return {
+            _SHINKA_RUNNER_FILE: runner.read_text(encoding="utf-8"),
+            _SHINKA_REQUIREMENTS_FILE: runner.with_name(_SHINKA_REQUIREMENTS_FILE).read_text(encoding="utf-8"),
+        }
     bridge = {_BRIDGE_FILE: Path(harness_bridge.__file__).read_text(encoding="utf-8")}
     if engine_id != "autosaddler":
         engines = Path(native_runner.__file__).with_name(_ENGINES_FILE)
@@ -288,15 +312,19 @@ def _bootstrap_command(
     Returns:
         Shell command that prepares the isolated source and runtime.
     """
-    autosaddler = engine_id == "autosaddler"
-    harness_install, harness_check = _harness_setup(harness, install_command, protected=protected)
-    floor = AUTOSADDLER_PYTHON_FLOOR if autosaddler else PYTHON_FLOOR
+    own_venv = engine_id in _OWN_VENV_ENGINES
+    shinka = engine_id == "shinka_evolve"
+    # ShinkaEvolve calls its models directly; it never launches a proposer harness.
+    harness_install, harness_check = (
+        ("", "") if shinka else _harness_setup(harness, install_command, protected=protected)
+    )
+    floor = AUTOSADDLER_PYTHON_FLOOR if own_venv else PYTHON_FLOOR
     prepare = (
         "set -eu; mkdir -p .claude .cache .local native_vendor rpc; "
         "test -f .claude.json || printf '{}' > .claude.json; "
     )
-    if not protected and autosaddler:
-        pins = " ".join(shlex.quote(pin) for pin in _AUTOSADDLER_PINS)
+    if not protected and own_venv:
+        pins = f"-r {_SHINKA_REQUIREMENTS_FILE}" if shinka else " ".join(shlex.quote(pin) for pin in _AUTOSADDLER_PINS)
         prepare += (
             'export HOME="$PWD"; '
             'export PATH="$HOME/.local/bin:$PATH"; '
@@ -305,7 +333,8 @@ def _bootstrap_command(
             f"uv venv --python {_AUTOSADDLER_PYTHON} native_venv; "
             f"uv pip install --python native_venv/bin/python --no-deps {pins}; "
             'printf "%s\\n" "$PWD/native_venv/bin/python" > native-python.txt; '
-            "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; " + harness_install
+            + ("" if shinka else "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; ")
+            + harness_install
         )
     elif not protected:
         prepare += (
@@ -325,7 +354,7 @@ def _bootstrap_command(
         "data=base64.b64decode(pathlib.Path('native_source.tar.gz.b64').read_text()); "
         "tarfile.open(fileobj=io.BytesIO(data),mode='r:gz').extractall('native_vendor',filter='data')"
     )
-    if not autosaddler:
+    if not own_venv:
         prepare += f'"$(cat native-python.txt)" -c {shlex.quote(extract)}; '
     prepare += (
         harness_check
@@ -335,9 +364,11 @@ def _bootstrap_command(
             f"'Native optimizers need Python {'.'.join(map(str, floor))} or newer'"
         )
     )
-    if autosaddler:
+    if engine_id == "autosaddler":
         prepare += '; "$(cat native-python.txt)" -c ' + shlex.quote("import autosaddler.v2.core.engine")
-    if protected:
+    if shinka:
+        prepare += '; "$(cat native-python.txt)" -c ' + shlex.quote("import shinka.core.async_runner")
+    if protected and not shinka:
         prepare += "; node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'"
     return prepare
 
@@ -406,7 +437,12 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
     started = time.monotonic()
     try:
         session.write_files(
-            {**_runner_files("meta_harness"), **_runner_files("autosaddler"), "native_source.tar.gz.b64": source}
+            {
+                **_runner_files("meta_harness"),
+                **_runner_files("autosaddler"),
+                **_runner_files("shinka_evolve"),
+                "native_source.tar.gz.b64": source,
+            }
         )
         install_timeout = min(60, lifetime - 1)
         installed = session.run(_bootstrap_command(options.runtime, protected=True), timeout_seconds=install_timeout)
@@ -416,14 +452,17 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
                 + _failure_detail(installed, install_timeout)
             )
         probe = (
-            "import importlib.util,json,subprocess,sys; import native_runner, autosaddler_runner, native_engines; "
+            "import importlib.util,json,subprocess,sys; "
+            "import native_runner, autosaddler_runner, shinka_runner, native_engines; "
             "native_engines.check_assets(); "
             f"autosaddler=sys.version_info >= {AUTOSADDLER_PYTHON_FLOOR!r} "
             "and importlib.util.find_spec('autosaddler') is not None; "
+            f"shinka=sys.version_info >= {AUTOSADDLER_PYTHON_FLOOR!r} "
+            "and importlib.util.find_spec('shinka') is not None; "
             "prefix=[]; "
             "result=subprocess.run([*prefix,'claude','--version'],capture_output=True,text=True,timeout=20,check=True); "
             f"assert result.stdout.split(' ',1)[0] == {CLAUDE_VERSION!r}; "
-            "print(json.dumps({'ready':True,'autosaddler':autosaddler}))"
+            "print(json.dumps({'ready':True,'autosaddler':autosaddler,'shinka':shinka}))"
         )
         remaining = lifetime - (time.monotonic() - started) - 1
         if remaining <= 0:
@@ -451,6 +490,8 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
             "autoresearch_version": AUTORESEARCH_VERSION,
             "autosaddler_source": AUTOSADDLER_REVISION,
             "autosaddler_ready": bool(ready.get("autosaddler")),
+            "shinka_version": SHINKA_VERSION,
+            "shinka_ready": bool(ready.get("shinka")),
             "claude_version": CLAUDE_VERSION,
         }
     finally:
@@ -557,6 +598,9 @@ class _EvaluatorMailbox:
     def _progress(self, event: dict[str, Any]) -> None:
         """Relay a child checkpoint: one scored case of a sweep, or a completed aggregate.
 
+        An aggregate may name the version it came from (``parent_id``) and its
+        depth (``generation``); engines that do not track lineage omit both.
+
         Args:
             event: Case score or candidate aggregate reported by the child.
         """
@@ -590,6 +634,8 @@ class _EvaluatorMailbox:
                 )
             return
         per_example = event.get("per_example")
+        parent_id = event.get("parent_id")
+        generation = event.get("generation")
         logger.info(
             "Candidate %s scored %.4f after %s evaluations",
             candidate_id,
@@ -605,8 +651,8 @@ class _EvaluatorMailbox:
         emit_candidate(
             self.progress_callback,
             candidate_id=str(candidate_id),
-            parent_id=None,
-            generation=0,
+            parent_id=_label(parent_id),
+            generation=generation if isinstance(generation, int) and not isinstance(generation, bool) else 0,
             score=float(score),
             per_example=[
                 (str(example_id), float(value))
@@ -755,7 +801,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     """Execute an unchanged upstream agent engine inside the managed sandbox.
 
     Args:
-        engine_id: ``meta_harness``, ``autoresearch`` or ``autosaddler``.
+        engine_id: ``meta_harness``, ``autoresearch``, ``autosaddler`` or ``shinka_evolve``.
         task: Seed and visible training/validation examples.
         server: Skynet evaluator and shared evaluation budget.
         ctx: Run context containing native execution options.
@@ -772,12 +818,17 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         raise ServiceError("Native optimizers require the managed Vercel sandbox.")
     if engine_id not in NATIVE_ENGINES:
         raise ServiceError("Unsupported native optimizer.")
-    autosaddler = engine_id == "autosaddler"
-    if not autosaddler and not task.str_mode:
+    own_venv = engine_id in _OWN_VENV_ENGINES
+    shinka = engine_id == "shinka_evolve"
+    if not own_venv and not task.str_mode:
         raise ServiceError("Native agent engines require a single text candidate.")
     if options.repo is None and engine_id in REPO_ONLY_NATIVE_ENGINES:
         raise ServiceError("This agent proposer needs a repository checkout.")
-    if autosaddler and options.repo is None and task.seed_candidate is None:
+    if shinka and options.repo is not None:
+        raise ServiceError("ShinkaEvolve does not support repository targets yet.")
+    if shinka and not options.shinka_models:
+        raise ServiceError("ShinkaEvolve needs at least one optimization model route.")
+    if own_venv and options.repo is None and task.seed_candidate is None:
         # A blank run patches an empty starting text rather than refusing.
         task = replace(task, seed_candidate="")
     if server.remaining <= 0:
@@ -792,14 +843,18 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     nonce = uuid.uuid4().hex
     artifacts_dir = Path(ctx.run_dir) / f"{engine_id}-native-{nonce[:8]}"
     gateway_host = urlsplit(options.gateway.url).hostname
+    # ShinkaEvolve picks among several models, each on its own route token, so
+    # one header added at the network edge cannot authorize its calls; its
+    # tokens travel in the environment instead and are scrubbed from its logs.
     headers = (
         {gateway_host: {"Authorization": f"Bearer {options.gateway.api_key}"}}
-        if runtime.injects_headers and gateway_host
+        if runtime.injects_headers and gateway_host and not shinka
         else {}
     )
-    source = None if autosaddler else _source_archive()
+    source = None if own_venv else _source_archive()
     upstream_source, upstream_revision = _UPSTREAMS[engine_id]
-    runner_file = _AUTOSADDLER_RUNNER_FILE if autosaddler else _RUNNER_FILE
+    runner_file = _SHINKA_RUNNER_FILE if shinka else _AUTOSADDLER_RUNNER_FILE if own_venv else _RUNNER_FILE
+    relay = os.environ.get("SKYNET_BUDGET_RELAY_URL")
     proposer = options.proposer
     launch = build_launch(
         BlackboxTarget(
@@ -868,6 +923,17 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 "train_set": task.cases or None,
             },
         }
+        if shinka:
+            payload["shinka"] = dict(options.shinka or {})
+            payload["shinka_models"] = [
+                {
+                    "model": route["model"],
+                    "url": relay or route["url"],
+                    "key_env": SHINKA_KEY_ENV.format(index=index),
+                }
+                for index, route in enumerate(options.shinka_models)
+            ]
+            payload["shinka_meta_key_env"] = SHINKA_META_KEY_ENV
         if options.repo is not None:
             chunks = []
             # One upload per chunk: each is close to the per-request size cap.
@@ -899,7 +965,6 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         if not installed.ok or installed.timed_out:
             detail = (installed.stderr or installed.stdout)[-2000:]
             raise ServiceError(f"Native optimizer runtime setup failed: {detail}")
-        relay = os.environ.get("SKYNET_BUDGET_RELAY_URL")
         env = {
             "ANTHROPIC_BASE_URL": (relay or options.gateway.url).removesuffix("/v1"),
             "ANTHROPIC_AUTH_TOKEN": "skynet-managed" if headers else options.gateway.api_key,
@@ -909,8 +974,19 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             "CI": "1",
             "NO_COLOR": "1",
             **({"SKYNET_BUDGET_RELAY_URL": relay} if relay else {}),
-            **({harness_bridge.DIRECT_ANTHROPIC_ENV: "1"} if options.direct_anthropic else {}),
+            **({harness_bridge.DIRECT_ANTHROPIC_ENV: "1"} if options.direct_anthropic and not shinka else {}),
         }
+        if shinka:
+            env.update(
+                {
+                    SHINKA_KEY_ENV.format(index=index): route["token"]
+                    for index, route in enumerate(options.shinka_models)
+                }
+            )
+            env[SHINKA_META_KEY_ENV] = options.shinka_models[0]["token"]
+            # Upstream prices calls from a bundled catalog unless told not to;
+            # the gateway, not the guest, prices and bills every call.
+            env["SHINKA_PRICING_MODE"] = "offline"
         command = (
             'export HOME="$PWD"; export PATH="$HOME/.local/bin:$PATH"; '
             'export PYTHONPATH="$PWD/native_vendor"; '

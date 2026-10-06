@@ -16,6 +16,7 @@ from ....models.blackbox import (
     BLACKBOX_ENGINE_BEST_OF_N,
     BLACKBOX_ENGINE_GEPA,
     BLACKBOX_ENGINE_META_HARNESS,
+    BLACKBOX_ENGINE_SHINKA_EVOLVE,
     BLACKBOX_MULTI_PART_ENGINES,
 )
 from .autoresearch import AutoResearchEngine
@@ -24,6 +25,7 @@ from .best_of_n import BestOfNEngine
 from .gepa_engine import GepaEngine
 from .meta_harness import MetaHarnessEngine
 from .protocol import Engine
+from .shinka_evolve import ShinkaEvolveEngine
 
 _AGENT_TARGET_REASON = "Meta-Harness optimizes a coding agent's harness; the job's target must be an agent."
 _NO_SANDBOX_REASON = "Agent sandboxes are not configured on this deployment."
@@ -141,6 +143,13 @@ ENGINES: dict[str, EngineSpec] = {
             "only patches a fresh scorer run confirms are kept."
         ),
         factory=AutoSaddlerEngine,
+        requires_proposer=True,
+    ),
+    BLACKBOX_ENGINE_SHINKA_EVOLVE: EngineSpec(
+        id=BLACKBOX_ENGINE_SHINKA_EVOLVE,
+        label="ShinkaEvolve",
+        description="Evolves many versions in parallel islands and learns which models improve them most.",
+        factory=ShinkaEvolveEngine,
         requires_proposer=True,
     ),
 }

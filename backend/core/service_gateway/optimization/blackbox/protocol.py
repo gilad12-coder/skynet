@@ -126,7 +126,8 @@ class EngineContext:
     remaining_cost_usd: Callable[[], float] | None = None
     seed: int = 0
     stop_at_score: float | None = None
-    # Cap on proposer rounds for engines that iterate (Meta-Harness); ``None``
+    # Cap on proposer rounds for engines that iterate (Meta-Harness,
+    # AutoSaddler, ShinkaEvolve generations); ``None``
     # runs until the scorer budget is spent.
     max_iterations: int | None = None
     # How many cases an engine may score at once. Only pays off when the

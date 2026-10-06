@@ -120,6 +120,8 @@ jobs:
           from gepa.oa import list_engines
           from gepa.optimize_anything import optimize_best_of
           assert {'gepa', 'meta_harness', 'autoresearch', 'best_of_n'} <= set(list_engines())
+          from core.service_gateway.optimization.blackbox.registry import ENGINES
+          assert {'autosaddler', 'shinka_evolve'} <= set(ENGINES)
           print('pip-path image imports OK')
           "
       - name: Pinned native optimizer runtime is installed

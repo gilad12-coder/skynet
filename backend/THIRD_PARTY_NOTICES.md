@@ -11,6 +11,7 @@ license files in their `*.dist-info/` directories inside the image.
 | --- | --- | --- | --- |
 | Meta-Harness proposer skill | `core/service_gateway/optimization/blackbox/upstream_prompts/meta_harness/` | stanford-iris-lab/meta-harness@0cbc31e9, Copyright (c) 2026 Yoonho Lee | MIT, `LICENSE` beside it |
 | AutoSaddler plugin and prompt-pack wiring | `core/service_gateway/optimization/blackbox/autosaddler_plugin/`, `autosaddler_runner.py` | microsoft/AutoSaddler@9df6d2e3 | MIT, `LICENSE` beside it |
+| ShinkaEvolve runner wiring (EVOLVE-BLOCK program layout, evaluation contract) | `core/service_gateway/optimization/blackbox/shinka_runner.py` | SakanaAI/ShinkaEvolve, `shinka-evolve==0.0.7` on PyPI | Apache-2.0 |
 | Meta-Harness loop structure | `core/service_gateway/optimization/blackbox/native_engines.py` | as above | MIT |
 | GEPA sources sent to sandboxes | archived at run time with `gepa/LICENSE` | gepa-ai/gepa@0632cdb5, Copyright (c) 2025 Lakshya A Agrawal | MIT |
 | Scalar API reference bundle | `core/api/static/scalar/` | scalar/scalar, Copyright (c) 2023-present Scalar | MIT, `LICENSE` beside it |
@@ -29,6 +30,11 @@ license files in their `*.dist-info/` directories inside the image.
 | Prime Agent | see `sandbox-runtime/package-lock.json` | MIT | `licenses/prime-agent.LICENSE` |
 | Prime Agent kernel Python packages | see `sandbox-runtime/prime-agent-kernel.txt` | MIT, BSD, Apache-2.0; certifi is MPL-2.0 | license texts in their `dist-info` folders |
 | OpenCode | see `sandbox-runtime/package-lock.json` | MIT | `LICENSE` inside the package |
+
+ShinkaEvolve (`shinka-evolve==0.0.7`, Apache-2.0, Copyright Sakana AI) is
+not bundled: a ShinkaEvolve run installs it unmodified from PyPI, with the
+pinned dependencies in `core/service_gateway/optimization/blackbox/shinka_requirements.txt`,
+into a private virtual environment inside the run's sandbox.
 
 Claude Code (`@anthropic-ai/claude-code`) is proprietary Anthropic software. It
 is installed only in images Skynet runs itself; images delivered to third

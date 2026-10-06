@@ -220,8 +220,8 @@ def verify_anything_in_sandbox(
                             sandbox_runtime=runtime,
                         )
                     )
-                    # Auto merely loses its AutoSaddler lane on such an image;
-                    # a single AutoSaddler run has nothing left to do.
+                    # Auto merely loses its AutoSaddler or ShinkaEvolve lane on such an image;
+                    # a single run of either has nothing left to do.
                     if (
                         typed.strategy.mode == "single"
                         and typed.strategy.engine == "autosaddler"
@@ -229,6 +229,15 @@ def verify_anything_in_sandbox(
                     ):
                         raise ServiceError(
                             "This runtime does not ship the pinned AutoSaddler package on Python 3.12; "
+                            "choose another engine or Auto."
+                        )
+                    if (
+                        typed.strategy.mode == "single"
+                        and typed.strategy.engine == "shinka_evolve"
+                        and not readiness.get("shinka_ready")
+                    ):
+                        raise ServiceError(
+                            "This runtime does not ship the pinned ShinkaEvolve package on Python 3.12; "
                             "choose another engine or Auto."
                         )
                 checks.append(_check("optimizer", "succeeded"))

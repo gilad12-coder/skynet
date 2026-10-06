@@ -24,6 +24,7 @@ def request_model_configs(payload: _OptimizationRequestBase | BlackboxRunRequest
             for config in (
                 payload.task_model_settings,
                 payload.reflection_model_settings,
+                *payload.extra_reflection_model_settings,
                 payload.scorer.model,
             )
             if config is not None

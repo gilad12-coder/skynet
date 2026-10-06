@@ -26,10 +26,12 @@ GEPA_REVISION = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
 GEPA_SOURCE = f"git+https://github.com/gepa-ai/gepa@{GEPA_REVISION}"
 AUTOSADDLER_REVISION = "9df6d2e3e1d3946057243690bca28e136fa81179"
 AUTOSADDLER_SOURCE = f"git+https://github.com/microsoft/AutoSaddler@{AUTOSADDLER_REVISION}"
+SHINKA_VERSION = "0.0.7"
+SHINKA_SOURCE = f"shinka-evolve=={SHINKA_VERSION}"
 META_HARNESS_SOURCE = f"https://github.com/stanford-iris-lab/meta-harness@{META_HARNESS_REVISION}"
 # AutoResearch is Skynet's own engine, so its provenance is a version, not an upstream pin.
 AUTORESEARCH_SOURCE = f"skynet:autoresearch@{AUTORESEARCH_VERSION}"
-AUTO_ENGINES = ("gepa", "autoresearch", "meta_harness", "autosaddler")
+AUTO_ENGINES = ("gepa", "autoresearch", "meta_harness", "autosaddler", "shinka_evolve")
 
 
 def upstream_task(task: Task, name: str) -> UpstreamTask:

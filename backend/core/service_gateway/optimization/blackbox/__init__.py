@@ -4,7 +4,8 @@ Modules: :mod:`protocol` (task / eval server / engine contract),
 :mod:`scorer` (python and remote scorer adapters), :mod:`gepa_engine`,
 :mod:`best_of_n` and :mod:`meta_harness` (in-process engines),
 :mod:`registry` (engine catalog and capability-based availability),
-:mod:`auto` (the Auto explore → continue strategy) and :mod:`service` (job
+:mod:`autosaddler` and :mod:`shinka_evolve` (pinned upstream packages run in
+the sandbox), :mod:`auto` (the Auto explore → continue strategy) and :mod:`service` (job
 entry points used by the worker subprocess and the submissions router).
 
 Agent targets — versions that are a coding agent's harness — add

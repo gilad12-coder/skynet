@@ -171,7 +171,9 @@ class ReadinessSession(FakeSession):
         self.calls.append((command, kwargs))
         if self.bootstrap is not None and len(self.calls) == 1:
             return self.bootstrap
-        return CommandResult(exit_code=1 if self.fail else 0, stdout='{"ready": true, "autosaddler": true}\n')
+        return CommandResult(
+            exit_code=1 if self.fail else 0, stdout='{"ready": true, "autosaddler": true, "shinka": true}\n'
+        )
 
     def close(self) -> None:
         """Always record closure while preserving an unresolved sandbox usage signal."""
@@ -206,6 +208,8 @@ def test_native_readiness_checks_selected_isolation_without_search(
         "autoresearch_version": native_runtime.AUTORESEARCH_VERSION,
         "autosaddler_source": native_runtime.AUTOSADDLER_REVISION,
         "autosaddler_ready": True,
+        "shinka_version": native_runtime.SHINKA_VERSION,
+        "shinka_ready": True,
         "claude_version": native_runtime.CLAUDE_VERSION,
     }
     assert adapter.spec.network_disabled is True
@@ -870,6 +874,91 @@ def test_autosaddler_bootstrap_pins_upstream_into_a_python_312_venv() -> None:
     assert "import autosaddler.v2.core.engine" in protected
 
 
+def test_shinka_bootstrap_installs_the_pinned_requirements_into_a_python_312_venv() -> None:
+    """Install the pinned ShinkaEvolve requirements on their own interpreter, without a proposer harness."""
+    command = _bootstrap_command("vercel", engine_id="shinka_evolve")
+    assert f"uv venv --python {native_runtime._AUTOSADDLER_PYTHON} native_venv" in command
+    assert "--no-deps -r shinka_requirements.txt" in command
+    assert "import shinka.core.async_runner" in command
+    assert "native_source.tar.gz.b64" not in command
+    assert "node -e" not in command
+    protected = _bootstrap_command("vercel", protected=True, engine_id="shinka_evolve")
+    assert "uv venv" not in protected
+    assert "import shinka.core.async_runner" in protected
+
+
+def test_shinka_runner_files_carry_the_pinned_requirements() -> None:
+    """Ship the self-contained runner with a requirements file pinning the upstream release."""
+    files = native_runtime._runner_files("shinka_evolve")
+    assert set(files) == {"shinka_runner.py", "shinka_requirements.txt"}
+    assert f"shinka-evolve=={native_runtime.SHINKA_VERSION}" in files["shinka_requirements.txt"]
+
+
+def test_shinka_transport_routes_every_model_through_its_own_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hand each optimization route to the guest by variable, never in the payload or a network-edge header.
+
+    Args:
+        tmp_path: Artifact destination.
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    session = FakeSession()
+    session.candidate = {"system": "better"}
+    runtime = FakeRuntime(session)
+    ctx = _context(tmp_path, runtime)
+    ctx.native_options = replace(
+        ctx.native_options,
+        shinka={"num_islands": 3},
+        shinka_models=(
+            {"model": "claude-test", "url": "https://gateway.example/v1", "token": "route-a"},
+            {"model": "gpt-test", "url": "https://gateway.example/v1", "token": "route-b"},
+        ),
+    )
+    result = run_native_engine(
+        "shinka_evolve",
+        Task({"system": "seed"}, cases=[{"id": "case"}]),
+        EvalServer(lambda *_: (0.5, {}), max_evals=3),
+        ctx,
+    )
+
+    payload = json.loads(session.files["native_input.json"])
+    assert payload["shinka"] == {"num_islands": 3}
+    assert payload["shinka_models"] == [
+        {"model": "claude-test", "url": "https://gateway.example/v1", "key_env": "SKYNET_SHINKA_KEY_0"},
+        {"model": "gpt-test", "url": "https://gateway.example/v1", "key_env": "SKYNET_SHINKA_KEY_1"},
+    ]
+    assert payload["shinka_meta_key_env"] == "SKYNET_SHINKA_META_KEY"
+    assert "route-a" not in session.files["native_input.json"]
+    env = session.calls[1][1]["env"]
+    assert (env["SKYNET_SHINKA_KEY_0"], env["SKYNET_SHINKA_KEY_1"]) == ("route-a", "route-b")
+    assert env["SKYNET_SHINKA_META_KEY"] == "route-a"
+    assert env["SHINKA_PRICING_MODE"] == "offline"
+    assert runtime.spec.inject_headers == {}
+    assert session.calls[1][0].count("shinka_runner.py") == 1
+    assert result.best_candidate == {"system": "better"}
+    assert result.best_score == 0.5
+
+
+def test_shinka_refuses_a_repository_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse repository targets until ShinkaEvolve's multi-file support lands.
+
+    Args:
+        tmp_path: Artifact destination.
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    ctx = _context(tmp_path, FakeRuntime(FakeSession()))
+    ctx.native_options = replace(
+        ctx.native_options,
+        repo={"chunks": [], "editable_paths": ["src"], "readonly_paths": []},
+        shinka_models=({"model": "m", "url": "https://gateway.example/v1", "token": "t"},),
+    )
+    with pytest.raises(ServiceError, match="repository targets yet"):
+        run_native_engine("shinka_evolve", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+
+
 def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
     """Ship the self-contained runner with every prompt and skill of the Skynet plugin."""
     files = native_runtime._runner_files("autosaddler")
@@ -1227,6 +1316,32 @@ def test_mailbox_relays_case_scores_and_per_case_versions() -> None:
     assert candidate["parent_id"] is None
     assert candidate["score"] == 0.75
     assert candidate["per_example"] == [{"id": "0", "score": 1.0}, {"id": "1", "score": 0.5}]
+
+
+def test_mailbox_relays_the_lineage_an_engine_reports() -> None:
+    """A version's parent and generation reach the candidate event; engines that omit them keep the defaults."""
+    sink: list[tuple[str, dict[str, Any]]] = []
+    mailbox = native_runtime._EvaluatorMailbox(
+        FakeSession(),
+        EvalServer(lambda *_: (1.0, {}), max_evals=3),
+        "nonce",
+        progress_callback=lambda event, metrics: sink.append((event, metrics)),
+    )
+
+    mailbox.on_output(
+        "stdout",
+        'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 4, "candidate": "x", "score": 0.5, "total_evals": 1, '
+        '"parent_id": 1, "generation": 2}\n'
+        'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 5, "candidate": "y", "score": 0.5, "total_evals": 2, '
+        '"parent_id": null, "generation": true}\n',
+    )
+
+    assert mailbox.error is None
+    candidates = [metrics for event, metrics in sink if event == PROGRESS_CANDIDATE]
+    assert [(c["candidate_id"], c["parent_id"], c["generation"]) for c in candidates] == [
+        ("4", "1", 2),
+        ("5", None, 0),
+    ]
 
 
 def test_each_evaluation_runs_in_a_scope_of_the_candidate_and_case_the_child_names() -> None:

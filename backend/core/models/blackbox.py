@@ -26,6 +26,7 @@ BLACKBOX_ENGINE_BEST_OF_N = "best_of_n"
 BLACKBOX_ENGINE_AUTORESEARCH = "autoresearch"
 BLACKBOX_ENGINE_META_HARNESS = "meta_harness"
 BLACKBOX_ENGINE_AUTOSADDLER = "autosaddler"
+BLACKBOX_ENGINE_SHINKA_EVOLVE = "shinka_evolve"
 BLACKBOX_STRATEGY_AUTO = "auto"
 BLACKBOX_TARGET_TEXT = "text"
 BLACKBOX_TARGET_AGENT = "agent"
@@ -45,7 +46,9 @@ BLACKBOX_HARNESSES = (
     BLACKBOX_HARNESS_CUSTOM,
 )
 # Engines that accept a multi-part (named files) starting point.
-BLACKBOX_MULTI_PART_ENGINES = frozenset({BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_AUTOSADDLER})
+BLACKBOX_MULTI_PART_ENGINES = frozenset(
+    {BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_AUTOSADDLER, BLACKBOX_ENGINE_SHINKA_EVOLVE}
+)
 # Engines that can optimize a repository: each drives a coding agent that edits
 # a real checkout, and the engine only searches over the versions it writes.
 BLACKBOX_REPO_ENGINES = frozenset(
@@ -57,8 +60,13 @@ BLACKBOX_REPO_ENGINES = frozenset(
         BLACKBOX_ENGINE_AUTOSADDLER,
     }
 )
+SHINKA_REPO_UNSUPPORTED = "ShinkaEvolve does not support repository targets yet; pick another engine."
 # Single-mode engines that honor an explicit iteration cap.
-BLACKBOX_ITERATION_LIMIT_ENGINES = frozenset({BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER})
+BLACKBOX_ITERATION_LIMIT_ENGINES = frozenset(
+    {BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER, BLACKBOX_ENGINE_SHINKA_EVOLVE}
+)
+# Extra optimization models a single run may add beyond the reflection model.
+BLACKBOX_MAX_EXTRA_REFLECTION_MODELS = 4
 # Stands in for ``module_name`` in the job overview and notifications, where
 # DSPy jobs record the program they optimized.
 BLACKBOX_MODULE_NAME = "blackbox"
@@ -110,7 +118,7 @@ class BlackboxScorer(BaseModel):
 # calls (the final run that re-scores the starting point and the winner is
 # outside the cap);
 # ``max_iterations`` caps proposer rounds for the engines that iterate
-# (Meta-Harness, AutoSaddler); ``stop_at_score`` ends the run early once a version
+# (Meta-Harness, AutoSaddler, ShinkaEvolve generations); ``stop_at_score`` ends the run early once a version
 # reaches it.
 class BlackboxBudget(BaseModel):
     max_scorer_runs: int = Field(default=200, ge=1, le=100_000)
@@ -290,6 +298,58 @@ class BlackboxProposer(BaseModel):
         return self
 
 
+# ShinkaEvolve's evolution knobs (island model, parent selection, mutation
+# mix, archive and inspirations, meta notes, parallelism). Every field defaults
+# to the upstream Sakana default, except ``use_text_feedback`` which is on so
+# scorer feedback reaches the mutation prompts. ``patch_diff``/``patch_full``/
+# ``patch_cross`` are the probabilities of each mutation kind and sum to 1.
+# ``novelty`` (duplicate rejection) is not supported yet and must stay off.
+class BlackboxShinkaSettings(BaseModel):
+    num_islands: int = Field(default=2, ge=1, le=8)
+    migration_interval: int = Field(default=10, ge=1, le=100)
+    migration_rate: float = Field(default=0.0, ge=0, le=1)
+    parent_selection: Literal["weighted", "power_law", "beam_search"] = "weighted"
+    parent_selection_lambda: float = Field(default=10.0, ge=0.1, le=100)
+    exploitation_alpha: float = Field(default=1.0, ge=0, le=10)
+    exploitation_ratio: float = Field(default=0.2, ge=0, le=1)
+    num_beams: int = Field(default=5, ge=1, le=20)
+    patch_diff: float = Field(default=0.6, ge=0, le=1)
+    patch_full: float = Field(default=0.3, ge=0, le=1)
+    patch_cross: float = Field(default=0.1, ge=0, le=1)
+    max_patch_attempts: int = Field(default=1, ge=1, le=10)
+    max_patch_resamples: int = Field(default=3, ge=1, le=10)
+    archive_size: int = Field(default=40, ge=1, le=500)
+    num_archive_inspirations: int = Field(default=1, ge=0, le=10)
+    num_top_k_inspirations: int = Field(default=1, ge=0, le=10)
+    elite_selection_ratio: float = Field(default=0.3, ge=0, le=1)
+    use_text_feedback: bool = True
+    novelty: bool = False
+    code_embed_sim_threshold: float = Field(default=0.99, ge=0.5, le=1)
+    max_novelty_attempts: int = Field(default=3, ge=1, le=10)
+    meta_notes: bool = True
+    meta_rec_interval: int = Field(default=10, ge=1, le=100)
+    meta_max_recommendations: int = Field(default=5, ge=1, le=20)
+    max_parallel_evaluations: int = Field(default=2, ge=1, le=8)
+    max_parallel_proposals: int = Field(default=2, ge=1, le=8)
+
+    @model_validator(mode="after")
+    def _ensure_consistent(self) -> BlackboxShinkaSettings:
+        """Require a mutation mix that sums to 1 and duplicate rejection off.
+
+        Returns:
+            The validated settings instance.
+
+        Raises:
+            ValueError: When the three mutation probabilities do not sum to 1,
+                or duplicate rejection is requested.
+        """
+        if abs(self.patch_diff + self.patch_full + self.patch_cross - 1.0) > 1e-6:
+            raise ValueError("patch_diff, patch_full and patch_cross must sum to 1.")
+        if self.novelty:
+            raise ValueError("ShinkaEvolve duplicate rejection (novelty) is not supported yet.")
+        return self
+
+
 # ``auto`` explores every available engine on a budget slice, then continues
 # from the best version with GEPA; ``single`` runs one named engine.
 class BlackboxStrategy(BaseModel):
@@ -338,6 +398,15 @@ class BlackboxRunRequest(BaseModel):
     proposer: BlackboxProposer = Field(default_factory=BlackboxProposer)
     task_model_settings: ModelConfig | None = Field(default=None, alias="task_model_config")
     reflection_model_settings: ModelConfig = Field(alias="reflection_model_config")
+    # More optimization models for ShinkaEvolve (alone or as an Auto lane),
+    # which picks between all of them, the reflection model first, with a
+    # bandit. Other engines ignore them.
+    extra_reflection_model_settings: list[ModelConfig] = Field(
+        default_factory=list,
+        alias="extra_reflection_model_configs",
+        max_length=BLACKBOX_MAX_EXTRA_REFLECTION_MODELS,
+    )
+    shinka: BlackboxShinkaSettings | None = None
     token_source: Literal["managed", "byok"] = "managed"
     is_private: bool = False
     economy_mode: bool = Field(
@@ -390,9 +459,14 @@ class BlackboxRunRequest(BaseModel):
         Raises:
             ValueError: When the seed is blank or an empty dict; when a multi-part seed is paired with
                 an engine that only takes text; or when an iteration cap is
-                supplied outside a single Meta-Harness run.
+                supplied outside a single Meta-Harness, AutoSaddler or
+                ShinkaEvolve run; when extra optimization models are sent
+                to a single run of another engine; or when ShinkaEvolve is
+                pointed at a repository.
         """
         seed = self.seed_candidate
+        if self.strategy.engine == BLACKBOX_ENGINE_SHINKA_EVOLVE and self.target.kind == BLACKBOX_TARGET_REPO:
+            raise ValueError(SHINKA_REPO_UNSUPPORTED)
         if self.target.kind == BLACKBOX_TARGET_REPO:
             self._ensure_repo_run()
         elif seed is None:
@@ -406,7 +480,7 @@ class BlackboxRunRequest(BaseModel):
             if self.strategy.mode != "single" or self.strategy.engine not in BLACKBOX_MULTI_PART_ENGINES:
                 raise ValueError(
                     "Multi-part starting points are only supported by the "
-                    f"{' and '.join(sorted(BLACKBOX_MULTI_PART_ENGINES))} engines."
+                    f"{', '.join(sorted(BLACKBOX_MULTI_PART_ENGINES))} engines."
                 )
         elif not seed.strip():
             raise ValueError("The starting point cannot be blank.")
@@ -422,7 +496,15 @@ class BlackboxRunRequest(BaseModel):
         if self.budget.max_iterations is not None and (
             self.strategy.mode != "single" or self.strategy.engine not in BLACKBOX_ITERATION_LIMIT_ENGINES
         ):
-            raise ValueError("An iteration limit is only supported by single Meta-Harness or AutoSaddler runs.")
+            raise ValueError(
+                "An iteration limit is only supported by single Meta-Harness, AutoSaddler or ShinkaEvolve runs."
+            )
+        if (
+            self.extra_reflection_model_settings
+            and self.strategy.mode == "single"
+            and self.strategy.engine != BLACKBOX_ENGINE_SHINKA_EVOLVE
+        ):
+            raise ValueError("Extra optimization models are only used by ShinkaEvolve and Auto runs.")
         return self
 
     def _ensure_repo_run(self) -> None:

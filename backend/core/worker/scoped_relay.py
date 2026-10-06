@@ -58,7 +58,7 @@ def model_forwarder(payload: dict[str, Any]) -> Any:
     scorer = payload.get("scorer")
     if isinstance(scorer, dict):
         configs.append(scorer.get("model"))
-    for key in ("generation_models", "reflection_models"):
+    for key in ("generation_models", "reflection_models", "extra_reflection_model_configs"):
         configs.extend(payload.get(key) or [])
     for config in configs:
         if isinstance(config, dict) and isinstance(config.get("extra"), dict):
