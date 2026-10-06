@@ -95,6 +95,7 @@ _OWN_VENV_ENGINES = frozenset({"autosaddler", "shinka_evolve"})
 _AUTOSADDLER_RUNNER_FILE = "autosaddler_runner.py"
 _SHINKA_RUNNER_FILE = "shinka_runner.py"
 _SHINKA_REQUIREMENTS_FILE = "shinka_requirements.txt"
+_SHINKA_BUNDLE_FILE = "shinka_bundle.py"
 # Each ShinkaEvolve model route's token reaches the guest in its own variable,
 # named by position; the meta-notes model reads its own so its calls are told apart.
 SHINKA_KEY_ENV = "SKYNET_SHINKA_KEY_{index}"
@@ -102,6 +103,9 @@ SHINKA_META_KEY_ENV = "SKYNET_SHINKA_META_KEY"
 # The protected image bakes ShinkaEvolve into its own venv (backend/Dockerfile),
 # because its pinned closure conflicts with the backend's own dependencies.
 SHINKA_IMAGE_PYTHON = "/opt/shinka/venv/bin/python"
+# Duplicate rejection's judge and embeddings read their own variables too.
+SHINKA_NOVELTY_KEY_ENV = "SKYNET_SHINKA_NOVELTY_KEY"
+SHINKA_EMBED_KEY_ENV = "SKYNET_SHINKA_EMBED_KEY"
 _BRIDGE_FILE = "harness_bridge.py"
 _ENGINES_FILE = "native_engines.py"
 _REPO_TREE_FILE = "repo_tree.py"
@@ -170,6 +174,8 @@ class NativeOptions:
     # order: each ``{"model", "url", "token"}`` names one scoped gateway route.
     shinka: dict[str, Any] | None = None
     shinka_models: tuple[dict[str, str], ...] = field(default=(), repr=False)
+    # The embeddings route ShinkaEvolve's duplicate rejection uses, when it is on.
+    shinka_embedding: dict[str, str] | None = field(default=None, repr=False)
     usage_by_model: dict[str, dict[str, int]] = field(default_factory=dict)
     usage_lock: Any = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -244,7 +250,9 @@ def _runner_files(engine_id: str) -> dict[str, str]:
         runner = Path(native_runner.__file__).with_name(_SHINKA_RUNNER_FILE)
         return {
             _SHINKA_RUNNER_FILE: runner.read_text(encoding="utf-8"),
+            _SHINKA_BUNDLE_FILE: runner.with_name(_SHINKA_BUNDLE_FILE).read_text(encoding="utf-8"),
             _SHINKA_REQUIREMENTS_FILE: runner.with_name(_SHINKA_REQUIREMENTS_FILE).read_text(encoding="utf-8"),
+            _REPO_TREE_FILE: Path(repo_tree.__file__).read_text(encoding="utf-8"),
         }
     bridge = {_BRIDGE_FILE: Path(harness_bridge.__file__).read_text(encoding="utf-8")}
     if engine_id != "autosaddler":
@@ -838,8 +846,6 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         raise ServiceError("Native agent engines require a single text candidate.")
     if options.repo is None and engine_id in REPO_ONLY_NATIVE_ENGINES:
         raise ServiceError("This agent proposer needs a repository checkout.")
-    if shinka and options.repo is not None:
-        raise ServiceError("ShinkaEvolve does not support repository targets yet.")
     if shinka and not options.shinka_models:
         raise ServiceError("ShinkaEvolve needs at least one optimization model route.")
     if own_venv and options.repo is None and task.seed_candidate is None:
@@ -948,6 +954,13 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 for index, route in enumerate(options.shinka_models)
             ]
             payload["shinka_meta_key_env"] = SHINKA_META_KEY_ENV
+            if options.shinka_embedding is not None:
+                payload["shinka_embedding"] = {
+                    "model": options.shinka_embedding["model"],
+                    "url": relay or options.shinka_embedding["url"],
+                    "key_env": SHINKA_EMBED_KEY_ENV,
+                }
+                payload["shinka_novelty_key_env"] = SHINKA_NOVELTY_KEY_ENV
         if options.repo is not None:
             chunks = []
             # One upload per chunk: each is close to the per-request size cap.
@@ -998,6 +1011,9 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 }
             )
             env[SHINKA_META_KEY_ENV] = options.shinka_models[0]["token"]
+            if options.shinka_embedding is not None:
+                env[SHINKA_NOVELTY_KEY_ENV] = options.shinka_models[0]["token"]
+                env[SHINKA_EMBED_KEY_ENV] = options.shinka_embedding["token"]
             # Upstream prices calls from a bundled catalog unless told not to;
             # the gateway, not the guest, prices and bills every call.
             env["SHINKA_PRICING_MODE"] = "offline"

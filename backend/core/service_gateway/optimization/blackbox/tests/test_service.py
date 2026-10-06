@@ -1327,16 +1327,41 @@ def test_proposer_accepts_any_offered_harness_and_rejects_unlaunchable_ones() ->
         _payload(proposer={"max_thinking_tokens": 10})
 
 
+def test_shinka_duplicate_rejection_names_its_embeddings_route() -> None:
+    """Pass the scoped embeddings route only when duplicate rejection is on."""
+    gateway = GatewayConfig(url="https://gw.example/v1", api_key="run-key")
+    single = {"mode": "single", "engine": "shinka_evolve"}
+    route = {
+        "url": "https://relay/v1",
+        "token": "chat",
+        "model": "m",
+        "embedding": {"url": "https://relay/v1", "token": "emb", "model": "openai/e"},
+    }
+    scoped = _payload(
+        strategy=single,
+        shinka={"novelty": True},
+        reflection_model_config={"name": "fake/model", "extra": {"_skynet_budget_route": route}},
+    )
+
+    assert service_mod._shinka_embedding(_payload(strategy=single), gateway) is None
+    assert service_mod._shinka_embedding(scoped, gateway) == {
+        "model": "openai/e",
+        "url": "https://relay/v1",
+        "token": "emb",
+    }
+    unscoped = service_mod._shinka_embedding(_payload(strategy=single, shinka={"novelty": True}), gateway)
+    assert unscoped == {"model": "openai/text-embedding-3-small", "url": "https://gw.example/v1", "token": "run-key"}
+
+
 def test_engine_catalog_for_a_repository_offers_every_engine_but_not_auto() -> None:
-    """A repository run can pick any single engine the deployment offers except ShinkaEvolve, never Auto."""
+    """A repository run can pick any single engine the deployment offers, ShinkaEvolve included, never Auto."""
     catalog = service_mod.engine_catalog("repo")
 
     available = {entry.id for entry in catalog.engines if entry.available}
     text_available = {entry.id for entry in service_mod.engine_catalog("text").engines if entry.available}
-    assert available == text_available - {"shinka_evolve"}
+    assert available == text_available
     shinka = next(entry for entry in catalog.engines if entry.id == "shinka_evolve")
-    assert shinka.available is False
-    assert "repository targets yet" in str(shinka.unavailable_reason)
+    assert shinka.available is (shinka.id in text_available)
     assert "gepa" in available
     assert catalog.auto_available is False
     assert catalog.auto_unavailable_reason

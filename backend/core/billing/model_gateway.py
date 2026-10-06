@@ -44,6 +44,11 @@ from .signals import BudgetReached
 from .usage_tags import USAGE_TAGS_HEADER
 
 ROUTE_KEY = "_skynet_budget_route"
+# Key, inside the first optimization model's route, of the embeddings route
+# ShinkaEvolve's duplicate rejection uses; it bills like the model beside it.
+EMBEDDING_ROUTE_KEY = "embedding"
+# Cheap, widely served OpenRouter embeddings model with published endpoint prices.
+SHINKA_EMBEDDING_MODEL = "openai/text-embedding-3-small"
 # Descriptor key naming the hosts a parent-owned repository scoring box may
 # reach; when present, that box is funded alongside the outer sandbox.
 PARENT_HOSTS_KEY = "parent_allowed_hosts"
@@ -375,7 +380,14 @@ class ModelGateway:
         return f"http://127.0.0.1:{self._server.server_port}/v1"
 
     def register(
-        self, *, model: str, api_key: str, role: str, policy: ChargePolicy, batch: bool = False
+        self,
+        *,
+        model: str,
+        api_key: str,
+        role: str,
+        policy: ChargePolicy,
+        batch: bool = False,
+        embeddings: bool = False,
     ) -> dict[str, str]:
         """Register one fixed role without exposing its provider credential.
 
@@ -385,6 +397,7 @@ class ModelGateway:
             role: Task, judge, or optimization usage attribution.
             policy: Approved conversion policy for this particular model source.
             batch: Send this role's chat calls through half-price OpenRouter batches.
+            embeddings: Serve only ``/embeddings`` for an embeddings model instead of chat.
 
         Returns:
             Scoped guest route containing no upstream credential.
@@ -406,6 +419,7 @@ class ModelGateway:
                 if batch
                 else None
             ),
+            embeddings=embeddings,
         )
         return {"url": self.url, "token": token, "model": model, "role": role}
 
@@ -681,6 +695,8 @@ class ModelGateway:
         ):
             models.extend((config, role) for config in result.get(key, []) if isinstance(config, dict))
         economy = bool(result.get("economy_mode"))
+        shinka = result.get("shinka")
+        novelty = isinstance(shinka, dict) and bool(shinka.get("novelty"))
         for config, role in models:
             source = config.get("token_source") or result.get("token_source") or "managed"
             extra = config.get("extra") or {}
@@ -709,6 +725,17 @@ class ModelGateway:
             config.clear()
             config.update(cleaned)
             config["extra"] = dict(config.get("extra") or {})
+            if novelty and config is result.get("reflection_model_config"):
+                route = {
+                    **route,
+                    EMBEDDING_ROUTE_KEY: self.register(
+                        model=SHINKA_EMBEDDING_MODEL,
+                        api_key=str(key),
+                        role=role,
+                        policy=ChargePolicy("byok_model" if source == "byok" else "managed_model"),
+                        embeddings=True,
+                    ),
+                }
             config["extra"][ROUTE_KEY] = route
             if economy and source == "managed":
                 # A batch can outlast any per-call timeout; a guest that gave up

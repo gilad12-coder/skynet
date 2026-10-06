@@ -340,10 +340,10 @@ def test_shinka_settings_reject_out_of_range_values(field: dict[str, Any]) -> No
         BlackboxShinkaSettings(**field)
 
 
-def test_shinka_duplicate_rejection_is_not_supported_yet() -> None:
-    """Refuse duplicate rejection until embeddings reach the sandbox."""
-    with pytest.raises(ValidationError, match="not supported yet"):
-        BlackboxShinkaSettings(novelty=True)
+def test_shinka_accepts_duplicate_rejection() -> None:
+    """Accept duplicate rejection with its similarity threshold and attempt limit."""
+    settings = BlackboxShinkaSettings(novelty=True, code_embed_sim_threshold=0.95, max_novelty_attempts=2)
+    assert settings.novelty is True
 
 
 def test_shinka_run_accepts_named_parts_and_extra_models() -> None:
@@ -390,7 +390,7 @@ def test_extra_models_are_capped() -> None:
         )
 
 
-def test_shinka_rejects_a_repository_target_for_now() -> None:
-    """Refuse repository targets for ShinkaEvolve until its multi-file support lands."""
-    with pytest.raises(ValidationError, match="does not support repository targets yet"):
-        BlackboxRunRequest.model_validate(_repo_request(strategy={"mode": "single", "engine": "shinka_evolve"}))
+def test_shinka_accepts_a_repository_target() -> None:
+    """A single ShinkaEvolve run can optimize a repository, starting from the empty patch."""
+    request = BlackboxRunRequest.model_validate(_repo_request(strategy={"mode": "single", "engine": "shinka_evolve"}))
+    assert request.seed_candidate == ""

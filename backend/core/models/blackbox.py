@@ -49,8 +49,9 @@ BLACKBOX_HARNESSES = (
 BLACKBOX_MULTI_PART_ENGINES = frozenset(
     {BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_AUTOSADDLER, BLACKBOX_ENGINE_SHINKA_EVOLVE}
 )
-# Engines that can optimize a repository: each drives a coding agent that edits
-# a real checkout, and the engine only searches over the versions it writes.
+# Engines that can optimize a repository: each writes versions against a real
+# checkout (a coding agent's edits, or ShinkaEvolve's per-file bundles) and the
+# parent scores the resulting patch.
 BLACKBOX_REPO_ENGINES = frozenset(
     {
         BLACKBOX_ENGINE_AUTORESEARCH,
@@ -58,9 +59,9 @@ BLACKBOX_REPO_ENGINES = frozenset(
         BLACKBOX_ENGINE_BEST_OF_N,
         BLACKBOX_ENGINE_META_HARNESS,
         BLACKBOX_ENGINE_AUTOSADDLER,
+        BLACKBOX_ENGINE_SHINKA_EVOLVE,
     }
 )
-SHINKA_REPO_UNSUPPORTED = "ShinkaEvolve does not support repository targets yet; pick another engine."
 # Single-mode engines that honor an explicit iteration cap.
 BLACKBOX_ITERATION_LIMIT_ENGINES = frozenset(
     {BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER, BLACKBOX_ENGINE_SHINKA_EVOLVE}
@@ -303,7 +304,9 @@ class BlackboxProposer(BaseModel):
 # to the upstream Sakana default, except ``use_text_feedback`` which is on so
 # scorer feedback reaches the mutation prompts. ``patch_diff``/``patch_full``/
 # ``patch_cross`` are the probabilities of each mutation kind and sum to 1.
-# ``novelty`` (duplicate rejection) is not supported yet and must stay off.
+# ``novelty`` turns on duplicate rejection: proposals too close (by embedding)
+# to an existing version are judged by the first optimization model and
+# resampled when they add nothing new.
 class BlackboxShinkaSettings(BaseModel):
     num_islands: int = Field(default=2, ge=1, le=8)
     migration_interval: int = Field(default=10, ge=1, le=100)
@@ -334,19 +337,16 @@ class BlackboxShinkaSettings(BaseModel):
 
     @model_validator(mode="after")
     def _ensure_consistent(self) -> BlackboxShinkaSettings:
-        """Require a mutation mix that sums to 1 and duplicate rejection off.
+        """Require a mutation mix that sums to 1.
 
         Returns:
             The validated settings instance.
 
         Raises:
-            ValueError: When the three mutation probabilities do not sum to 1,
-                or duplicate rejection is requested.
+            ValueError: When the three mutation probabilities do not sum to 1.
         """
         if abs(self.patch_diff + self.patch_full + self.patch_cross - 1.0) > 1e-6:
             raise ValueError("patch_diff, patch_full and patch_cross must sum to 1.")
-        if self.novelty:
-            raise ValueError("ShinkaEvolve duplicate rejection (novelty) is not supported yet.")
         return self
 
 
@@ -460,13 +460,10 @@ class BlackboxRunRequest(BaseModel):
             ValueError: When the seed is blank or an empty dict; when a multi-part seed is paired with
                 an engine that only takes text; or when an iteration cap is
                 supplied outside a single Meta-Harness, AutoSaddler or
-                ShinkaEvolve run; when extra optimization models are sent
-                to a single run of another engine; or when ShinkaEvolve is
-                pointed at a repository.
+                ShinkaEvolve run; or when extra optimization models are sent
+                to a single run of another engine.
         """
         seed = self.seed_candidate
-        if self.strategy.engine == BLACKBOX_ENGINE_SHINKA_EVOLVE and self.target.kind == BLACKBOX_TARGET_REPO:
-            raise ValueError(SHINKA_REPO_UNSUPPORTED)
         if self.target.kind == BLACKBOX_TARGET_REPO:
             self._ensure_repo_run()
         elif seed is None:

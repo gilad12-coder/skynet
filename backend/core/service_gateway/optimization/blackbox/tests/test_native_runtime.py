@@ -925,7 +925,7 @@ def test_native_readiness_probes_shinka_in_the_image_venv(monkeypatch: pytest.Mo
 def test_shinka_runner_files_carry_the_pinned_requirements() -> None:
     """Ship the self-contained runner with a requirements file pinning the upstream release."""
     files = native_runtime._runner_files("shinka_evolve")
-    assert set(files) == {"shinka_runner.py", "shinka_requirements.txt"}
+    assert set(files) == {"shinka_runner.py", "shinka_bundle.py", "repo_tree.py", "shinka_requirements.txt"}
     assert f"shinka-evolve=={native_runtime.SHINKA_VERSION}" in files["shinka_requirements.txt"]
 
 
@@ -976,22 +976,72 @@ def test_shinka_transport_routes_every_model_through_its_own_token(
     assert result.best_score == 0.5
 
 
-def test_shinka_refuses_a_repository_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Refuse repository targets until ShinkaEvolve's multi-file support lands.
+def test_shinka_novelty_hands_the_judge_and_embeddings_their_own_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Route duplicate rejection's judge and embeddings by variable, so their calls are tagged apart.
 
     Args:
         tmp_path: Artifact destination.
         monkeypatch: Pytest fixture for replacing the pinned source archive.
     """
     monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
-    ctx = _context(tmp_path, FakeRuntime(FakeSession()))
+    session = FakeSession()
+    session.candidate = "better"
+    ctx = _context(tmp_path, FakeRuntime(session))
     ctx.native_options = replace(
         ctx.native_options,
-        repo={"chunks": [], "editable_paths": ["src"], "readonly_paths": []},
+        shinka={"novelty": True},
+        shinka_models=({"model": "claude-test", "url": "https://gateway.example/v1", "token": "route-a"},),
+        shinka_embedding={
+            "model": "openai/text-embedding-3-small",
+            "url": "https://gw.example/v1",
+            "token": "route-emb",
+        },
+    )
+    run_native_engine("shinka_evolve", Task("seed"), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+
+    payload = json.loads(session.files["native_input.json"])
+    assert payload["shinka_embedding"] == {
+        "model": "openai/text-embedding-3-small",
+        "url": "https://gw.example/v1",
+        "key_env": "SKYNET_SHINKA_EMBED_KEY",
+    }
+    assert payload["shinka_novelty_key_env"] == "SKYNET_SHINKA_NOVELTY_KEY"
+    assert "route-emb" not in session.files["native_input.json"]
+    env = session.calls[1][1]["env"]
+    assert (env["SKYNET_SHINKA_NOVELTY_KEY"], env["SKYNET_SHINKA_EMBED_KEY"]) == ("route-a", "route-emb")
+
+
+def test_shinka_ships_a_repository_checkout_with_its_bundle_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ship the repository tree and the bundle and tree helpers the runner loads beside itself.
+
+    Args:
+        tmp_path: Artifact destination.
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    chunk = tmp_path / "tree.0000.b64"
+    chunk.write_text("dHJlZQ==", encoding="ascii")
+    session = FakeSession()
+    session.candidate = "diff --git a/src/a.py b/src/a.py\n"
+    ctx = _context(tmp_path, FakeRuntime(session))
+    ctx.native_options = replace(
+        ctx.native_options,
+        repo={"chunks": [str(chunk)], "editable_paths": ["src"], "readonly_paths": ["vendor"]},
         shinka_models=({"model": "m", "url": "https://gateway.example/v1", "token": "t"},),
     )
-    with pytest.raises(ServiceError, match="repository targets yet"):
-        run_native_engine("shinka_evolve", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+    run_native_engine("shinka_evolve", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+
+    payload = json.loads(session.files["native_input.json"])
+    assert payload["repo"] == {
+        "chunks": ["repo-tree/tree.0000.b64"],
+        "editable_paths": ["src"],
+        "readonly_paths": ["vendor"],
+    }
+    assert {"shinka_runner.py", "shinka_bundle.py", "repo_tree.py"} <= set(session.files)
 
 
 def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:

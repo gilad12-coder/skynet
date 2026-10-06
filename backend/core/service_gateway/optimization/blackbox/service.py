@@ -25,7 +25,7 @@ from typing import Any
 import dspy
 
 from ....billing.budgets import BudgetError
-from ....billing.model_gateway import ROUTE_KEY
+from ....billing.model_gateway import EMBEDDING_ROUTE_KEY, ROUTE_KEY, SHINKA_EMBEDDING_MODEL
 from ....billing.operation_pricing import UnpricedOperationError
 from ....billing.pricing import (
     CENT_USD_VALUE,
@@ -60,7 +60,6 @@ from ....models.blackbox import (
     BLACKBOX_STRATEGY_AUTO,
     BLACKBOX_TARGET_AGENT,
     BLACKBOX_TARGET_REPO,
-    SHINKA_REPO_UNSUPPORTED,
     BlackboxCandidateNode,
     BlackboxCaseResult,
     BlackboxEngineCatalogResponse,
@@ -175,7 +174,7 @@ def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
                 unavailable_reason=(
                     spec.unavailable_reason_for(caps)
                     or (
-                        (SHINKA_REPO_UNSUPPORTED if spec.id == BLACKBOX_ENGINE_SHINKA_EVOLVE else _REPO_ENGINE_REASON)
+                        _REPO_ENGINE_REASON
                         if target_kind == BLACKBOX_TARGET_REPO and spec.id not in BLACKBOX_REPO_ENGINES
                         else None
                     )
@@ -254,6 +253,24 @@ def _shinka_models(payload: BlackboxRunRequest, gateway: GatewayConfig) -> tuple
         else:
             routes.append({"model": config.name, "url": gateway.url, "token": gateway.api_key})
     return tuple(routes)
+
+
+def _shinka_embedding(payload: BlackboxRunRequest, gateway: GatewayConfig) -> dict[str, str] | None:
+    """Name the embeddings route ShinkaEvolve's duplicate rejection uses, when it is on.
+
+    Args:
+        payload: The submitted job.
+        gateway: The run's model gateway, used when the job has no scoped embeddings route.
+
+    Returns:
+        One ``{"model", "url", "token"}`` route, or ``None`` when duplicate rejection is off.
+    """
+    if payload.shinka is None or not payload.shinka.novelty:
+        return None
+    route = (payload.reflection_model_settings.extra.get(ROUTE_KEY) or {}).get(EMBEDDING_ROUTE_KEY)
+    if route:
+        return {"model": route["model"], "url": route["url"], "token": route["token"]}
+    return {"model": SHINKA_EMBEDDING_MODEL, "url": gateway.url, "token": gateway.api_key}
 
 
 def claude_code_in_use(payload: BlackboxRunRequest) -> bool:
@@ -929,6 +946,7 @@ def _run_job(
         native_options = NativeOptions(
             shinka=(payload.shinka or BlackboxShinkaSettings()).model_dump(),
             shinka_models=_shinka_models(payload, gateway),
+            shinka_embedding=_shinka_embedding(payload, gateway),
             runtime=payload.proposer_runtime,
             sandbox_runtime=active_runtime,
             model=direct_model or (budget_route["model"] if budget_route else payload.reflection_model_settings.name),
