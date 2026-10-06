@@ -488,9 +488,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       label={msg("submit.blackbox.review.proposer")}
                       tipText={tip("submit.blackbox.proposer")}
                     >
-                      {proposer.effort
-                        ? `${harnessLabel(proposer.harness)} · ${msg(`submit.blackbox.proposer.effort.${proposer.effort}`)}`
-                        : harnessLabel(proposer.harness)}
+                      {harnessLabel(proposer.harness)}
                     </Row>
                   )}
                   <Row

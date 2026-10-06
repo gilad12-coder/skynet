@@ -22,7 +22,6 @@ Each paid Continue check and each submitted run creates exactly one outer Vercel
 | DSPy | `3.3.1` |
 | pip, for scorer wheel resolution | `26.2.1` |
 | Node | `22.22.0` |
-| Claude Code | `@anthropic-ai/claude-code@2.1.259` |
 | Pi | `@earendil-works/pi-coding-agent@0.87.1` |
 | Codex | `@openai/codex@0.153.0` |
 | OpenCode | `opencode-ai@1.18.27` |

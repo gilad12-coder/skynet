@@ -2,7 +2,6 @@
 
 import type { ReactNode } from "react";
 import {
-  Brain,
   Coins,
   Cpu,
   Cube,
@@ -93,13 +92,6 @@ const RECIPE_LABELS: Record<string, string> = perLocale(() => ({
   prompt: msg("optimization.config.recipe.prompt"),
   code: msg("optimization.config.recipe.code"),
   anything: msg("optimization.config.recipe.anything"),
-}));
-
-const EFFORT_LABELS: Record<string, string> = perLocale(() => ({
-  low: msg("submit.blackbox.proposer.effort.low"),
-  medium: msg("submit.blackbox.proposer.effort.medium"),
-  high: msg("submit.blackbox.proposer.effort.high"),
-  max: msg("submit.blackbox.proposer.effort.max"),
 }));
 
 function modelName(cfg: Record<string, unknown> | null): string {
@@ -346,16 +338,13 @@ export function BlackboxConfigCard({
     icon: <Wrench />,
   });
   if (proposer?.harness && !shinkaRun) {
-    const effort = proposer.effort ? EFFORT_LABELS[proposer.effort] : null;
     optimizationRows.push({
       label: (
         <HelpTip text={tip("submit.blackbox.proposer")}>
           {msg("submit.blackbox.review.proposer")}
         </HelpTip>
       ),
-      value: effort
-        ? `${harnessLabel(proposer.harness)} · ${effort}`
-        : harnessLabel(proposer.harness),
+      value: harnessLabel(proposer.harness),
       icon: <Robot />,
     });
     if (proposer.max_candidates_per_iter != null) {
@@ -378,17 +367,6 @@ export function BlackboxConfigCard({
         ),
         value: yesNo(proposer.ralph),
         icon: <Repeat />,
-      });
-    }
-    if (proposer.max_thinking_tokens != null) {
-      optimizationRows.push({
-        label: (
-          <HelpTip text={tip("config.proposer_thinking")}>
-            {msg("optimization.config.proposer_thinking")}
-          </HelpTip>
-        ),
-        value: String(proposer.max_thinking_tokens),
-        icon: <Brain />,
       });
     }
     if (proposer.max_no_eval_seconds != null) {

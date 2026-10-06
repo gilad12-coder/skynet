@@ -18,23 +18,20 @@ import { HarnessLogo } from "@/shared/ui/harness-logo";
 import { AddModelButton, ModelChip } from "@/shared/ui/model-chip";
 import {
   BLACKBOX_HARNESSES,
-  UNAVAILABLE_HARNESSES,
   harnessLabel,
 } from "@/shared/lib/blackbox-harness";
 import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { msg } from "@/shared/lib/messages";
 import { Carousel } from "@/features/agent-panel";
-import { useByokKeys } from "@/features/billing";
 import {
   AUTO_MIN_SCORER_RUNS,
   DEFAULT_PROPOSER,
   proposerKnobs,
-  proposerTunesReasoning,
 } from "../../lib/engine-contract";
 import { MAX_EXTRA_OPTIMIZATION_MODELS } from "../../lib/shinka-settings";
 
-import type { BlackboxHarness, BlackboxProposerEffort } from "@/shared/types/api";
+import type { BlackboxHarness } from "@/shared/types/api";
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig } from "../../constants";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
@@ -45,8 +42,6 @@ import { ShinkaSettingsPanel } from "./ShinkaSettingsPanel";
 import { Segmented } from "@/shared/ui/segmented";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
 import { Field, StepCard } from "./shared";
-
-const PROPOSER_EFFORTS: readonly BlackboxProposerEffort[] = ["low", "medium", "high", "max"];
 
 const MOBILE_MODEL_CHIP_CLASS =
   "min-h-[44px] max-lg:[&_button]:min-h-[44px] max-lg:[&_button]:min-w-[44px] max-lg:[&_button]:opacity-100";
@@ -88,18 +83,10 @@ export function BlackboxOptimizerStep({
     economyMode,
     setEconomyMode,
   } = w;
-  const { keyFor } = useByokKeys();
-  // Claude Code proposes only on the user's own verified Anthropic key, and
-  // only where the deployment lets its sandbox reach Anthropic.
-  const claudeCodeReady =
-    engineCatalog?.claude_code_proposer_available === true &&
-    keyFor("anthropic")?.status === "verified";
-
   const engines = engineCatalog?.engines ?? [];
   const single = strategyMode === "single";
   const selectedEngineIndex = engines.findIndex((e) => e.id === engine);
   const knobs = proposerKnobs(strategyMode, engine);
-  const reasoningKnobs = proposerTunesReasoning(proposer.harness);
   const optimizationLabel = msg("submit.blackbox.roles.optimization.label");
   const shinka = single && engine === "shinka_evolve";
 
@@ -179,8 +166,8 @@ export function BlackboxOptimizerStep({
           )}
 
           {nativeProposer && (
-            // One two-column grid: the harness and its reasoning effort share
-            // the first row, and the engine-specific knobs fill in below.
+            // One two-column grid: the harness leads and the engine-specific
+            // knobs fill in after it.
             <div id="bb-proposer" tabIndex={-1} className="grid gap-4 outline-none sm:grid-cols-2">
               <Field
                 label={msg("submit.blackbox.proposer.label")}
@@ -195,51 +182,12 @@ export function BlackboxOptimizerStep({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {BLACKBOX_HARNESSES.map((h) => {
-                      const unavailable = UNAVAILABLE_HARNESSES.includes(h) && !claudeCodeReady;
-                      return (
-                        <SelectItem key={h} value={h} disabled={unavailable}>
-                          <span className="flex items-center gap-2">
-                            <HarnessLogo harness={h} size={16} />
-                            <span>{harnessLabel(h)}</span>
-                            {unavailable && (
-                              <span className="text-xs text-muted-foreground">
-                                {engineCatalog?.claude_code_proposer_available
-                                  ? msg("submit.blackbox.start.harness.claude_code_needs_key")
-                                  : msg("submit.blackbox.start.harness.claude_code_unavailable")}
-                              </span>
-                            )}
-                          </span>
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field
-                label={msg("submit.blackbox.proposer.effort")}
-                htmlFor="bb-proposer-effort"
-                tip="submit.blackbox.proposer_effort"
-              >
-                <Select
-                  value={reasoningKnobs ? (proposer.effort ?? "default") : "default"}
-                  disabled={!reasoningKnobs}
-                  onValueChange={(value) =>
-                    updateProposer({
-                      effort: value === "default" ? null : (value as BlackboxProposerEffort),
-                    })
-                  }
-                >
-                  <SelectTrigger id="bb-proposer-effort" className={cn("w-full", TOUCH_FIELD)}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="default">
-                      {msg("submit.blackbox.proposer.effort.default")}
-                    </SelectItem>
-                    {PROPOSER_EFFORTS.map((effort) => (
-                      <SelectItem key={effort} value={effort}>
-                        {msg(`submit.blackbox.proposer.effort.${effort}`)}
+                    {BLACKBOX_HARNESSES.map((h) => (
+                      <SelectItem key={h} value={h}>
+                        <span className="flex items-center gap-2">
+                          <HarnessLogo harness={h} size={16} />
+                          <span>{harnessLabel(h)}</span>
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>

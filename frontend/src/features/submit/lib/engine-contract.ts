@@ -32,14 +32,10 @@ export function usesNativeProposer(
  * What a fresh wizard sends when the user never touches the proposer settings.
  *
  * The stall timeout has no control: half an hour without a new score covers a
- * slow scorer pass while still cutting a wedged agent loose. The thinking
- * budget is never set: a fixed budget would silence the effort level, which
- * is the one reasoning control the form offers.
+ * slow scorer pass while still cutting a wedged agent loose.
  */
 export const DEFAULT_PROPOSER: BlackboxProposer = {
   harness: "codex",
-  effort: null,
-  max_thinking_tokens: null,
   max_candidates_per_iter: 3,
   ralph: true,
   max_no_eval_seconds: 1_800,
@@ -68,11 +64,8 @@ export function submittedProposer(
   engine: BlackboxEngineId | null,
 ): BlackboxProposer {
   const knobs = proposerKnobs(mode, engine);
-  const reasoning = proposerTunesReasoning(proposer.harness);
   return {
     ...proposer,
-    effort: reasoning ? (proposer.effort ?? null) : null,
-    max_thinking_tokens: null,
     max_candidates_per_iter: knobs.candidates ? (proposer.max_candidates_per_iter ?? null) : null,
     // Research rounds always run until the budget is spent; stop-at-score ends them early.
     ralph: true,
@@ -101,11 +94,6 @@ export function submittedRunProposer(input: {
     harness: DEFAULT_PROPOSER.harness,
     max_tool_calls: proposer.max_tool_calls ?? DEFAULT_PROPOSER.max_tool_calls,
   };
-}
-
-/** Effort is a Claude Code CLI flag; other harnesses ignore it. */
-export function proposerTunesReasoning(harness: BlackboxHarness): boolean {
-  return harness === "claude_code";
 }
 
 export function supportsIterationLimit(

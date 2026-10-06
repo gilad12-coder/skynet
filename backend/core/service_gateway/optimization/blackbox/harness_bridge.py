@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -37,20 +37,12 @@ KEY_ENV = "SKYNET_API_KEY"
 # The serialized launch travels through the sandbox input file, so the gateway
 # key is replaced by this token and only restored from the process environment.
 KEY_TOKEN = "__SKYNET_API_KEY__"
-# Set in the guest when Claude Code talks to Anthropic directly on the run
-# owner's key, which Vercel's egress proxy adds; the box itself never sees it.
-DIRECT_ANTHROPIC_ENV = "SKYNET_CLAUDE_DIRECT"
-ANTHROPIC_HOST = "api.anthropic.com"
-# Only makes the CLI send an x-api-key header for the edge to replace.
-ANTHROPIC_KEY_PLACEHOLDER = "sk-ant-skynet-edge-injected"
-# Where Vercel's egress proxy leaves its CA when a network policy rewrites headers.
-PROXY_CA_PATH = "/usr/local/share/ca-certificates/vercel-proxy-ca.crt"
 SHIM_DIR = ".local/skynet-bin"
 SESSIONS_DIR = ".skynet-bridge"
 _SLUG_RE = re.compile(r"[^A-Za-z0-9-]")
 _USAGE_KEYS = ("input_tokens", "output_tokens")
-# The instruction file every harness reads on start; Claude Code has its own
-# and reads the skills the upstream engines drop under ``.claude`` natively.
+# The instruction file every harness reads on start, pointing it at the skills
+# the upstream engines drop under ``.claude``.
 _POINTER_NOTE = (
     "# Workspace notes\n\n"
     "Project instructions and skills for this task, if any, live under `.claude/` in this directory: read "
@@ -61,24 +53,6 @@ _RESUME_NOTE = (
     "\n\n---\n\nA previous session already worked on this task in this directory. Its files and progress are "
     "still here; continue from the current workspace state.\n\n"
 )
-
-
-def use_direct_anthropic(env: MutableMapping[str, str]) -> None:
-    """Point Claude Code at Anthropic itself when this run holds its owner's key.
-
-    The model mailbox points every Anthropic client at the parent for the whole
-    command, so the runner overrides that here before Claude starts.
-
-    Args:
-        env: The environment Claude will inherit, changed in place.
-    """
-    if env.get(DIRECT_ANTHROPIC_ENV) != "1":
-        return
-    env["ANTHROPIC_BASE_URL"] = f"https://{ANTHROPIC_HOST}"
-    env["ANTHROPIC_API_KEY"] = ANTHROPIC_KEY_PLACEHOLDER
-    env.pop("ANTHROPIC_AUTH_TOKEN", None)
-    if Path(PROXY_CA_PATH).is_file():
-        env["NODE_EXTRA_CA_CERTS"] = PROXY_CA_PATH
 
 
 def _json_lines(stdout: str) -> Iterator[dict[str, Any]]:
@@ -211,29 +185,6 @@ def parse_opencode_output(stdout: str) -> tuple[str | None, Usage]:
     return text, usage
 
 
-def parse_claude_output(stdout: str) -> tuple[str | None, Usage]:
-    """Read the result and usage from ``claude -p --output-format json``.
-
-    Args:
-        stdout: Captured harness output.
-
-    Returns:
-        The result text (``None`` when absent) and the usage total.
-    """
-    candidates = [stdout.strip(), *reversed(stdout.strip().splitlines())]
-    for raw in candidates:
-        try:
-            payload = json.loads(raw)
-        except ValueError:
-            continue
-        if isinstance(payload, dict) and "result" in payload:
-            used = payload.get("usage") or {}
-            result = payload.get("result")
-            text = str(result).strip() if result else None
-            return (text or None), _usage(used.get("input_tokens"), used.get("output_tokens"))
-    return None, {}
-
-
 # Codex items that are the agent acting rather than talking or thinking; each
 # is announced on ``item.started`` and settled on ``item.completed``.
 _CODEX_TOOL_ITEMS = frozenset({"command_execution", "file_change", "mcp_tool_call", "web_search"})
@@ -249,8 +200,7 @@ def tool_call_ids(output_format: str, event: dict[str, Any]) -> list[str]:
     Returns:
         One identifier per tool call the event announces; an empty identifier
         stands for a call the event does not name. Formats that stream no tool
-        events (``plain``, and Claude Code's single ``json`` result) never
-        yield any.
+        events (``plain``) never yield any.
     """
     kind = event.get("type")
     if output_format == "pi":
@@ -265,13 +215,6 @@ def tool_call_ids(output_format: str, event: dict[str, Any]) -> list[str]:
     if output_format == "opencode":
         part = event.get("part") or {}
         return [str(part.get("callID") or part.get("id") or "")] if kind == "tool_use" else []
-    if output_format == "claude" and kind == "assistant":
-        content = (event.get("message") or {}).get("content") or []
-        return [
-            str(block.get("id") or "")
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "tool_use"
-        ]
     return []
 
 
@@ -280,7 +223,6 @@ PARSERS = {
     "pi": parse_pi_output,
     "codex": parse_codex_output,
     "opencode": parse_opencode_output,
-    "claude": parse_claude_output,
 }
 
 
@@ -326,9 +268,9 @@ def workspace_files(proposer: dict[str, Any]) -> list[str]:
         proposer: Serialized harness launch.
 
     Returns:
-        Workspace-relative paths; empty for Claude Code, which writes none.
+        Workspace-relative paths; empty without a proposer.
     """
-    if not proposer or proposer.get("harness") == "claude_code":
+    if not proposer:
         return []
     paths = [str(path) for path in (proposer.get("files") or {})]
     instructions = proposer.get("instructions_file")

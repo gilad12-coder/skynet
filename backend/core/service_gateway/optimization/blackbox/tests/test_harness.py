@@ -11,7 +11,6 @@ import pytest
 
 from core.exceptions import ServiceError
 from core.models.blackbox import (
-    BLACKBOX_HARNESS_CLAUDE_CODE,
     BLACKBOX_HARNESS_CODEX,
     BLACKBOX_HARNESS_CUSTOM,
     BLACKBOX_HARNESS_OPENCODE,
@@ -32,7 +31,6 @@ from ..harness import (
     launch_payload,
 )
 from ..harness_bridge import (
-    parse_claude_output,
     parse_codex_output,
     parse_opencode_output,
     parse_pi_output,
@@ -144,18 +142,6 @@ def test_codex_launch_writes_a_gateway_config_toml() -> None:
     assert json.dumps(_GATEWAY.url) in config
     assert 'CODEX_HOME="$PWD/.skynet/codex" codex exec' in launch.run_command
     assert launch.parse_output is parse_codex_output
-
-
-def test_claude_code_launch_strips_the_v1_suffix_for_the_anthropic_sdk() -> None:
-    """Claude Code uses CLAUDE.md and an ANTHROPIC_BASE_URL without the trailing /v1."""
-    launch = build_launch(_target(BLACKBOX_HARNESS_CLAUDE_CODE), _GATEWAY)
-
-    assert launch.instructions_file == "CLAUDE.md"
-    assert launch.env["ANTHROPIC_BASE_URL"] == "https://gw.example"
-    assert launch.env["ANTHROPIC_AUTH_TOKEN"] == "secret-key"
-    assert launch.files == {}
-    assert "claude -p" in launch.run_command
-    assert launch.parse_output is parse_claude_output
 
 
 def test_opencode_launch_names_the_gateway_model() -> None:
@@ -395,20 +381,9 @@ def test_parse_opencode_output_reads_text_parts_and_step_usage() -> None:
     assert parse_opencode_output("") == (None, {})
 
 
-def test_parse_claude_output_finds_the_result_object() -> None:
-    """Claude parsing reads the result and usage whether or not the JSON is the whole output."""
-    whole = json.dumps({"result": "done", "usage": {"input_tokens": 2, "output_tokens": 3}})
-    assert parse_claude_output(whole) == ("done", {"input_tokens": 2, "output_tokens": 3})
-
-    trailing = "chatter\n" + json.dumps({"result": "later", "usage": {"input_tokens": 1, "output_tokens": 1}})
-    assert parse_claude_output(trailing) == ("later", {"input_tokens": 1, "output_tokens": 1})
-
-    assert parse_claude_output(json.dumps({"foo": "bar"})) == (None, {})
-
-
 @pytest.mark.parametrize(
     ("harness", "output_format"),
-    [("pi", "pi"), ("codex", "codex"), ("claude_code", "claude"), ("opencode", "opencode"), ("prime", "pi")],
+    [("pi", "pi"), ("codex", "codex"), ("opencode", "opencode"), ("prime", "pi")],
 )
 def test_launch_payload_names_the_parser_for_every_built_in_harness(harness: str, output_format: str) -> None:
     """Serialize a launch so the sandbox bridge can pick the right output parser by name."""

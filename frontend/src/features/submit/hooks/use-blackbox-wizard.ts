@@ -41,7 +41,7 @@ import { registerTutorialHook } from "@/features/tutorial";
 import { readPref } from "@/features/settings";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
-import { BLACKBOX_HARNESSES, UNAVAILABLE_HARNESSES } from "@/shared/lib/blackbox-harness";
+import { BLACKBOX_HARNESSES } from "@/shared/lib/blackbox-harness";
 import { parseDatasetFile, type ParsedDataset } from "@/shared/lib/parse-dataset";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
@@ -721,13 +721,9 @@ export function useBlackboxWizard(
             setStrategyMode(strategy.mode === "single" ? "single" : "auto");
             setEngine(strategy.engine ?? null);
           }
-          // A custom proposer command has no picker, and an unavailable harness
-          // cannot be submitted, so such clones keep the default.
-          if (
-            source.proposer &&
-            BLACKBOX_HARNESSES.includes(source.proposer.harness) &&
-            !UNAVAILABLE_HARNESSES.includes(source.proposer.harness)
-          )
+          // A custom proposer command has no picker, and a retired harness
+          // (claude_code) cannot be submitted, so such clones keep the default.
+          if (source.proposer && BLACKBOX_HARNESSES.includes(source.proposer.harness))
             setProposer({ ...DEFAULT_PROPOSER, ...source.proposer });
           else if (source.proposer?.max_tool_calls != null)
             setProposer({ ...DEFAULT_PROPOSER, max_tool_calls: source.proposer.max_tool_calls });

@@ -33,6 +33,8 @@ BLACKBOX_TARGET_AGENT = "agent"
 BLACKBOX_TARGET_REPO = "repo"
 BLACKBOX_HARNESS_PI = "pi"
 BLACKBOX_HARNESS_CODEX = "codex"
+# Claude Code is closed source, so Skynet neither ships nor runs it. Stored
+# runs may still name it; new requests that do are rejected.
 BLACKBOX_HARNESS_CLAUDE_CODE = "claude_code"
 BLACKBOX_HARNESS_OPENCODE = "opencode"
 BLACKBOX_HARNESS_PRIME = "prime"
@@ -40,7 +42,6 @@ BLACKBOX_HARNESS_CUSTOM = "custom"
 BLACKBOX_HARNESSES = (
     BLACKBOX_HARNESS_PI,
     BLACKBOX_HARNESS_CODEX,
-    BLACKBOX_HARNESS_CLAUDE_CODE,
     BLACKBOX_HARNESS_OPENCODE,
     BLACKBOX_HARNESS_PRIME,
     BLACKBOX_HARNESS_CUSTOM,
@@ -66,6 +67,7 @@ BLACKBOX_REPO_ENGINES = frozenset(
 BLACKBOX_ITERATION_LIMIT_ENGINES = frozenset(
     {BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER, BLACKBOX_ENGINE_SHINKA_EVOLVE}
 )
+CLAUDE_CODE_RETIRED = "Claude Code is no longer available as an agent harness. Choose another one, such as codex."
 # Extra optimization models a single run may add beyond the reflection model.
 BLACKBOX_MAX_EXTRA_REFLECTION_MODELS = 4
 # Stands in for ``module_name`` in the job overview and notifications, where
@@ -243,8 +245,8 @@ class BlackboxTarget(BaseModel):
             The validated target instance.
 
         Raises:
-            ValueError: When an agent target names no model or an unknown
-                harness, a custom harness has no run command, or the
+            ValueError: When an agent target names no model or an unknown or
+                retired harness, a custom harness has no run command, or the
                 repository and target kind disagree.
         """
         if (self.kind == BLACKBOX_TARGET_REPO) != (self.repo is not None):
@@ -253,14 +255,13 @@ class BlackboxTarget(BaseModel):
             return self
         if not (self.model or "").strip():
             raise ValueError("An agent target needs a model.")
+        if self.harness == BLACKBOX_HARNESS_CLAUDE_CODE:
+            raise ValueError(CLAUDE_CODE_RETIRED)
         if self.harness not in BLACKBOX_HARNESSES:
             raise ValueError(f"Unknown harness '{self.harness}'. Known harnesses: {', '.join(BLACKBOX_HARNESSES)}.")
         if self.harness == BLACKBOX_HARNESS_CUSTOM and not (self.run_command or "").strip():
             raise ValueError("A custom harness needs a run_command.")
         return self
-
-
-BLACKBOX_PROPOSER_EFFORTS = ("low", "medium", "high", "max")
 
 
 # The coding agent that drives a harness-based engine (Meta-Harness,
@@ -270,14 +271,11 @@ BLACKBOX_PROPOSER_EFFORTS = ("low", "medium", "high", "max")
 # ``max_tool_calls`` caps the tool calls one proposer session may make: the
 # harness is stopped once it starts one more, and the edits it already made
 # stand. It also bounds each ShinkaEvolve agent-editor session. Harnesses whose
-# output reports no tool calls as they happen (Claude Code's single JSON
-# result, a custom command) are not capped.
+# output reports no tool calls as they happen (a custom command) are not capped.
 class BlackboxProposer(BaseModel):
     harness: str = BLACKBOX_HARNESS_CODEX
     install_command: str | None = None
     run_command: str | None = None
-    effort: str | None = None
-    max_thinking_tokens: int | None = Field(default=None, ge=1_024, le=128_000)
     max_candidates_per_iter: int | None = Field(default=None, ge=1, le=8)
     ralph: bool = True
     max_no_eval_seconds: float | None = Field(default=None, gt=0, le=7_200)
@@ -291,17 +289,17 @@ class BlackboxProposer(BaseModel):
             The validated proposer instance.
 
         Raises:
-            ValueError: When the harness or effort level is unknown, or a
-                custom harness has no run command.
+            ValueError: When the harness is unknown or retired, or a custom
+                harness has no run command.
         """
+        if self.harness == BLACKBOX_HARNESS_CLAUDE_CODE:
+            raise ValueError(CLAUDE_CODE_RETIRED)
         if self.harness not in BLACKBOX_HARNESSES:
             raise ValueError(
                 f"Unknown proposer harness '{self.harness}'. Known harnesses: {', '.join(BLACKBOX_HARNESSES)}."
             )
         if self.harness == BLACKBOX_HARNESS_CUSTOM and not (self.run_command or "").strip():
             raise ValueError("A custom proposer harness needs a run_command.")
-        if self.effort is not None and self.effort not in BLACKBOX_PROPOSER_EFFORTS:
-            raise ValueError(f"Unknown effort '{self.effort}'. Known levels: {', '.join(BLACKBOX_PROPOSER_EFFORTS)}.")
         return self
 
 
@@ -768,9 +766,6 @@ class BlackboxEngineCatalogResponse(BaseModel):
     auto_unavailable_reason: str | None = None
     auto_checkpoint_recovery_supported: bool = False
     auto_checkpoint_recovery_reason: str | None = None
-    # Whether this deployment runs Claude Code as the proposer; each user still
-    # needs a verified Anthropic key of their own.
-    claude_code_proposer_available: bool = False
     proposer_runtimes: list[BlackboxProposerRuntimeInfo] = Field(default_factory=list)
     upstream_revision: str | None = None
     run_recovery_eligibility: str = "Requires a supported engine, a compatible saved checkpoint, and funded headroom."

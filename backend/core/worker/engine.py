@@ -46,7 +46,7 @@ from ..billing.protected_credentials import (
     has_exposed_execution_credentials,
     resolve_execution_credentials,
 )
-from ..billing.protected_execution import bind_protected_sandbox, claude_code_anthropic_key, protected_image
+from ..billing.protected_execution import bind_protected_sandbox, protected_image
 from ..billing.runtime import BudgetRuntime, UsagePendingError
 from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..config import settings
@@ -78,7 +78,7 @@ from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.embedding_pipeline import embed_finished_job
 from ..service_gateway.optimization.blackbox.sandbox import sandbox_runtime_from_settings
-from ..service_gateway.optimization.blackbox.service import claude_code_proposes, validate_blackbox_payload
+from ..service_gateway.optimization.blackbox.service import validate_blackbox_payload
 from ..service_gateway.optimization.core import _merge_usage_rows
 from ..service_gateway.optimization.trajectory import GEPA_STATE_FILENAME, GRID_PAIR_RESULT_FILENAME
 from ..storage import JobStore
@@ -914,12 +914,6 @@ class BackgroundWorker:
                         workflow=sandbox_workflow,
                         owner_id=optimization_id,
                         image=sandbox_image,
-                        anthropic_api_key=(
-                            claude_code_anthropic_key(ProviderKeyVault(engine=byok_engine), execution_payload.username)
-                            if optimization_type == OPTIMIZATION_TYPE_BLACKBOX
-                            and claude_code_proposes(blackbox_payload)
-                            else None
-                        ),
                         parent_hosts=(
                             PACKAGE_REGISTRY_HOSTS
                             if optimization_type == OPTIMIZATION_TYPE_BLACKBOX and is_repo_payload(payload_dict)

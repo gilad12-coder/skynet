@@ -451,7 +451,7 @@ def test_gepa_drives_an_agent_proposer_over_repository_versions(tmp_path: Path, 
             "pathlib.Path('src/app.py').write_text('better\\n')\n",
         )
         checkout = _repo_checkout(tmp_path, {"src/app.py": "x = 1\n", "README.md": "hi\n"})
-        engine = native_engines.GepaRepoEngine(_repo_config(tmp_path, checkout, effort="low"))
+        engine = native_engines.GepaRepoEngine(_repo_config(tmp_path, checkout))
         result = engine.run(task, dataset)
     finally:
         dataset.stop()
@@ -460,7 +460,6 @@ def test_gepa_drives_an_agent_proposer_over_repository_versions(tmp_path: Path, 
     assert repo_tree.patch_paths(result.best_candidate) == ["src/app.py"]
     assert result.metadata["proposals"] >= 1
     assert result.metadata["proposer_cost_usd"] == pytest.approx(0.01 * result.metadata["proposals"])
-    assert all("--effort" in argv and "low" in argv for argv in _invocations(fake_home))
     assert (checkout / "src" / "app.py").read_text() == "x = 1\n"
     output = tmp_path / "out"
     engine.process_result(result, output)
@@ -708,24 +707,19 @@ def test_meta_harness_records_named_scores_without_cases(tmp_path: Path, fake_ho
         single.stop()
 
 
-@pytest.mark.parametrize(("direct", "expected"), [(True, "sk-ant-skynet-edge-injected"), (False, None)])
-def test_only_a_direct_claude_code_run_keeps_its_anthropic_key(
-    fake_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, direct: bool, expected: str | None
+def test_the_proposer_never_inherits_a_raw_anthropic_key(
+    fake_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Keep the edge placeholder for a direct run, and drop any raw key otherwise."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-skynet-edge-injected")
-    if direct:
-        monkeypatch.setenv("SKYNET_CLAUDE_DIRECT", "1")
-    else:
-        monkeypatch.delenv("SKYNET_CLAUDE_DIRECT", raising=False)
+    """Drop any raw provider key so the proposer authenticates only through its harness."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-raw")
     _install_fake(
         fake_home,
         "(pathlib.Path.home() / 'key.json').write_text(json.dumps(os.environ.get('ANTHROPIC_API_KEY')))\n",
     )
     native_engines.run_proposer(
-        "go", work_dir=tmp_path, log_dir=tmp_path / "logs", name="iter0", model="claude-test", session_id="s1"
+        "go", work_dir=tmp_path, log_dir=tmp_path / "logs", name="iter0", model="test-model", session_id="s1"
     )
-    assert json.loads((fake_home / "key.json").read_text()) == expected
+    assert json.loads((fake_home / "key.json").read_text()) is None
 
 
 def test_named_scores_become_pareto_columns_without_cases() -> None:

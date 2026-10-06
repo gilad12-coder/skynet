@@ -5,10 +5,8 @@ from __future__ import annotations
 import math
 import re
 from typing import Any
-from urllib.parse import urlsplit
 
 from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, Settings
-from ..service_gateway.optimization.blackbox.harness_bridge import ANTHROPIC_HOST
 from ..service_gateway.optimization.blackbox.sandbox import (
     JOB_TAG,
     VercelCredentials,
@@ -95,28 +93,6 @@ def runtime_cost_profile(settings: Settings, workflow: str, runtime: str) -> dic
     }
 
 
-def claude_code_anthropic_key(vault: Any, username: str) -> str:
-    """Resolve the run owner's verified Anthropic key for Claude Code's network edge.
-
-    Args:
-        vault: The BYOK vault holding the owner's provider connections.
-        username: The run owner.
-
-    Returns:
-        The decrypted key, handed only to the parent's sandbox broker.
-
-    Raises:
-        ValueError: When the owner has no verified Anthropic key, or the key
-            targets an endpoint other than Anthropic's own API.
-    """
-    connection = vault.resolve_connection(username, "anthropic", verified_only=True)
-    if connection is None:
-        raise ValueError("Claude Code needs a verified Anthropic key. Add one in Settings, then run again.")
-    if connection.api_base and urlsplit(connection.api_base).hostname != ANTHROPIC_HOST:
-        raise ValueError(f"Claude Code reaches only {ANTHROPIC_HOST}; this Anthropic key uses a custom endpoint.")
-    return connection.secret
-
-
 def bind_protected_sandbox(
     gateway: ModelGateway,
     settings: Settings,
@@ -124,7 +100,6 @@ def bind_protected_sandbox(
     workflow: str,
     owner_id: str,
     lifetime_seconds: int | None = None,
-    anthropic_api_key: str | None = None,
     parent_hosts: tuple[str, ...] = (),
     image: str | None = None,
 ) -> dict[str, Any]:
@@ -136,8 +111,6 @@ def bind_protected_sandbox(
         workflow: Execution family selecting its immutable prebuilt image.
         owner_id: Stable job or setup identity used for cleanup after interruption.
         lifetime_seconds: Optional shorter ceiling for one bounded interaction.
-        anthropic_api_key: The owner's Anthropic key when Claude Code proposes;
-            the network edge adds it to the box's Anthropic requests.
         parent_hosts: Package registries the parent's own repository scoring
             box may reach during setup; empty when the run opens no such box.
         image: The immutable image the run is pinned to; the deployment's
@@ -178,14 +151,8 @@ def bind_protected_sandbox(
         max_lifetime_seconds=lifetime,
         tags={JOB_TAG: owner_id},
         command_runner=mailbox.run,
-        anthropic_api_key=anthropic_api_key,
     )
-    gateway.bind_sandbox(
-        broker,
-        image=image,
-        lifetime_seconds=lifetime,
-        allowed_hosts=(ANTHROPIC_HOST,) if anthropic_api_key is not None else (),
-    )
+    gateway.bind_sandbox(broker, image=image, lifetime_seconds=lifetime)
     if parent_hosts:
         gateway.fund_parent_sandbox(parent_hosts)
     return {"image": image, "lifetime_seconds": lifetime}

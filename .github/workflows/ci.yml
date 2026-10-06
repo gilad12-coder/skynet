@@ -127,9 +127,9 @@ jobs:
       - name: Pinned native optimizer runtime is installed
         run: |
           docker run --rm --network none skynet-backend:pip python -c "
-          import subprocess
+          import shutil, subprocess
           assert subprocess.check_output(['node', '--version'], text=True).strip() == 'v22.22.0'
-          assert subprocess.check_output(['claude', '--version'], text=True).strip() == '2.1.259 (Claude Code)'
+          assert shutil.which('claude') is None
           "
 
   frontend:

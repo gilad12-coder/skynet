@@ -10,10 +10,9 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, Protocol
 
-from ....billing.vercel_usage import PACKAGE_REGISTRY_HOSTS, SANDBOX_NETWORK_BYTES_CAP, quote_vercel_sandbox
+from ....billing.vercel_usage import PACKAGE_REGISTRY_HOSTS, quote_vercel_sandbox
 from ....config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
 from ....exceptions import ServiceError
-from .harness_bridge import ANTHROPIC_HOST
 from .sandbox import CommandResult, OutputSink, SandboxRuntime, SandboxSession, SandboxSpec
 
 _MAX_FILE_BYTES = 16 * 1024 * 1024
@@ -229,7 +228,6 @@ class SandboxBroker:
         vcpus: int = 2,
         tags: Mapping[str, str] | None = None,
         command_runner: SandboxCommandRunner | None = None,
-        anthropic_api_key: str | None = None,
     ) -> None:
         """Bind one parent-owned runtime and deployment-selected resource profile.
 
@@ -240,9 +238,6 @@ class SandboxBroker:
             vcpus: Fixed allocation selected by the parent.
             tags: Parent-owned job identity used by cleanup and reconciliation.
             command_runner: Optional model mailbox command wrapper.
-            anthropic_api_key: The run owner's verified Anthropic key. When set, a
-                box may ask to reach Anthropic, and the network edge adds this key
-                to those requests; it never enters the box.
         """
         self._runtime = runtime
         self._image = image
@@ -252,17 +247,11 @@ class SandboxBroker:
                 "image": image,
                 "lifetime_ms": math.ceil(self._maximum * 1000),
                 "vcpus": vcpus,
-                "network_disabled": anthropic_api_key is None,
-                **(
-                    {"allowed_hosts": [ANTHROPIC_HOST], "network_bytes_cap": SANDBOX_NETWORK_BYTES_CAP}
-                    if anthropic_api_key is not None
-                    else {}
-                ),
+                "network_disabled": True,
                 "ports": [],
                 "persistent": False,
             }
         )
-        self._anthropic_api_key = anthropic_api_key
         self._vcpus = vcpus
         self._tags = dict(tags or {})
         self._command_runner = command_runner
@@ -291,10 +280,7 @@ class SandboxBroker:
         return owned
 
     def _open(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        """Create a sandbox using the parent's fixed image, network, and resource profile.
-
-        A box stays offline unless it asks for Anthropic and this run holds its
-        owner's Anthropic key.
+        """Create an offline sandbox using the parent's fixed image and resource profile.
 
         Args:
             payload: Stable request_id and a requested guest spec.
@@ -313,10 +299,9 @@ class SandboxBroker:
             raise ServiceError("The child cannot override the trusted sandbox image or resource profile.")
         if spec.get("inject_headers"):
             raise ServiceError("Protected sandbox model calls use the parent mailbox.")
-        hosts = spec.get("allowed_hosts") or []
-        if hosts and (hosts != [ANTHROPIC_HOST] or self._anthropic_api_key is None):
+        if spec.get("allowed_hosts"):
             raise ServiceError("This run cannot open network access from its sandbox.")
-        requested = {"lifetime_seconds": lifetime, "env": _environment(spec.get("env")), "allowed_hosts": hosts}
+        requested = {"lifetime_seconds": lifetime, "env": _environment(spec.get("env"))}
         with self._lock:
             if self._closed:
                 raise ServiceError("The sandbox broker is closed.")
@@ -338,9 +323,7 @@ class SandboxBroker:
                     image=self._image,
                     vcpus=self._vcpus,
                     tags=self._tags,
-                    network_disabled=not hosts,
-                    allowed_hosts=tuple(hosts),
-                    inject_headers={ANTHROPIC_HOST: {"x-api-key": self._anthropic_api_key}} if hosts else {},
+                    network_disabled=True,
                     operation_key=f"sandbox:{request_id}",
                 )
             )

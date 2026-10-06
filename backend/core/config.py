@@ -286,11 +286,6 @@ class Settings(BaseSettings):
         le=VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS,
         description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro and Enterprise teams can raise it to 18000 (5 hours), the most Vercel accepts. A job that outlives its box reopens one on its next call.",
     )
-    claude_code_byok_egress: bool = Field(
-        default=False,
-        alias="CLAUDE_CODE_BYOK_EGRESS",
-        description="Offer Claude Code as the proposer for users with a verified Anthropic key. Its box may then reach only api.anthropic.com, Vercel's egress proxy adds the user's x-api-key there, and the CLI trusts that proxy's CA through NODE_EXTRA_CA_CERTS. Off until that path is verified on the deployed Vercel team; while off, Claude Code stays unavailable.",
-    )
     blackbox_agent_gateway_url: str | None = Field(
         default=None,
         alias="BLACKBOX_AGENT_GATEWAY_URL",

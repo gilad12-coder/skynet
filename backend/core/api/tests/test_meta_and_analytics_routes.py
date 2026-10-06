@@ -71,6 +71,24 @@ def test_get_job_payload_returns_when_present(client: TestClient, job_store: Fak
     assert body["payload"]["dataset"] == [{"q": 1}]
 
 
+def test_get_job_payload_still_shows_a_stored_claude_code_run(client: TestClient, job_store: FakeJobStore) -> None:
+    """A run stored before Claude Code was retired still loads with its harness intact."""
+    job_store.seed_job(
+        "job4",
+        payload={
+            "proposer": {"harness": "claude_code", "effort": "high"},
+            "target": {"kind": "agent", "harness": "claude_code", "model": "anthropic/claude-sonnet-4.5"},
+        },
+        payload_overview={"optimization_type": "blackbox"},
+    )
+    r = client.get("/optimizations/job4/payload")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["optimization_type"] == "blackbox"
+    assert body["payload"]["proposer"] == {"harness": "claude_code", "effort": "high"}
+    assert body["payload"]["target"]["harness"] == "claude_code"
+
+
 def test_rename_job_validates_length(client: TestClient, job_store: FakeJobStore) -> None:
     """An empty rename payload is rejected by length validation (422)."""
     job_store.seed_job("rn1", payload_overview={})
