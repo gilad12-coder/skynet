@@ -23,6 +23,8 @@ import type {
   ProfileDatasetRequest,
   ProfileDatasetResponse,
   QueueStatusResponse,
+  RepositoryFileResponse,
+  RepositoryTreeResponse,
   RunRequest,
   ServeInfoResponse,
   ServeResponse,
@@ -1531,6 +1533,27 @@ export function getOptimizationPayload(optimizationId: string) {
 
 export function getOptimizationDataset(optimizationId: string) {
   return request<OptimizationDatasetResponse>(`/optimizations/${optimizationId}/dataset`);
+}
+
+// A repository run's pinned commit never changes, so its tree and files are
+// cached for the page's lifetime.
+const REPOSITORY_CACHE_MS = Number.POSITIVE_INFINITY;
+
+/** A repository run's file tree at its pinned commit. */
+export function getRepositoryTree(optimizationId: string) {
+  return cachedGet<RepositoryTreeResponse>(
+    `/optimizations/${encodeURIComponent(optimizationId)}/repository/tree`,
+    REPOSITORY_CACHE_MS,
+  );
+}
+
+/** One file of a repository run at its pinned commit. */
+export function getRepositoryFile(optimizationId: string, path: string) {
+  const q = new URLSearchParams({ path });
+  return cachedGet<RepositoryFileResponse>(
+    `/optimizations/${encodeURIComponent(optimizationId)}/repository/file?${q.toString()}`,
+    REPOSITORY_CACHE_MS,
+  );
 }
 
 export function getTestResults(optimizationId: string) {

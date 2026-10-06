@@ -860,6 +860,33 @@ export interface BlackboxRunResult {
   details: Record<string, unknown>;
 }
 
+export interface RepositoryTreeEntry {
+  path: string;
+  type: "file" | "dir";
+  size: number | null;
+}
+
+/** A repository run's tree at its pinned commit. */
+export interface RepositoryTreeResponse {
+  repository: string;
+  commit: string;
+  entries: RepositoryTreeEntry[];
+  /** True when the listing stops short of the whole tree. */
+  truncated: boolean;
+}
+
+/** One file of a repository run at its pinned commit. */
+export interface RepositoryFileResponse {
+  path: string;
+  /** Null when the file is binary, too large, or missing. */
+  content: string | null;
+  binary: boolean;
+  too_large: boolean;
+  /** Not in the pinned commit — normal for a file a version adds. */
+  missing: boolean;
+  size: number | null;
+}
+
 export interface BlackboxEngineInfo {
   id: BlackboxEngineId;
   label: string;

@@ -11,8 +11,10 @@ import {
   Cube,
   DownloadSimple,
   Eye,
+  FolderOpen,
   GitDiff,
   GitPullRequest,
+  Image as ImageIcon,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import {
@@ -36,12 +38,23 @@ import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
 import { CandidatePreview } from "./CandidatePreview";
 import { VersionRail } from "./VersionRail";
+import { RepoVersionBrowser } from "./RepoVersionBrowser";
+import {
+  ADDED_BG,
+  ADDED_EMPHASIS_BG,
+  ADDED_FG,
+  REMOVED_BG,
+  REMOVED_EMPHASIS_BG,
+  REMOVED_FG,
+} from "./diff-colors";
 import { formatBlackboxScore } from "@/shared/lib";
 import { countChanges, diffRows } from "../lib/blackbox-diff";
 import { VersionFeedback } from "./BlackboxFinalScores";
 import {
   buildVersions,
   defaultVersionIndex,
+  versionParents,
+  type CandidateLineage,
   type CandidateVersion,
 } from "../lib/blackbox-versions";
 import {
@@ -59,18 +72,15 @@ const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m
   loading: () => <Skeleton height={180} borderRadius={8} />,
 });
 
-// Same tints the trajectory drawer uses for accepted / rejected edits, so a
-// diff reads the same everywhere in the run view.
-const ADDED_BG = "rgba(138, 154, 91, 0.28)";
-const ADDED_EMPHASIS_BG = "rgba(138, 154, 91, 0.55)";
-const ADDED_FG = "#3f4d1f";
-const REMOVED_BG = "rgba(168, 90, 59, 0.22)";
-const REMOVED_EMPHASIS_BG = "rgba(168, 90, 59, 0.45)";
-const REMOVED_FG = "#6e2e16";
+type View = "preview" | "code" | "diff" | "files" | "renders";
 
-type View = "preview" | "code" | "diff";
-
-const VIEW_ICON = { preview: Eye, code: Code, diff: GitDiff } as const;
+const VIEW_ICON = {
+  preview: Eye,
+  code: Code,
+  diff: GitDiff,
+  files: FolderOpen,
+  renders: ImageIcon,
+} as const;
 
 function LineNumbered({ text }: { text: string }) {
   return (
@@ -228,22 +238,24 @@ const PILL_TRANSITION = { type: "tween", duration: 0.18, ease: [0.22, 1, 0.36, 1
  * between the views (mirrored in RTL) and never leak out to the version
  * stepper behind them.
  */
+const VIEW_LABEL = {
+  preview: "optimization.blackbox.versions.view.preview",
+  code: "optimization.blackbox.versions.view.code",
+  diff: "optimization.blackbox.best.view_diff",
+  files: "optimization.blackbox.repo.browser.view_files",
+  renders: "optimization.blackbox.repo.browser.view_renders",
+} as const satisfies Record<View, string>;
+
 function ViewToggle({
   value,
   onChange,
-  canDiff,
+  views,
 }: {
   value: View;
   onChange: (v: View) => void;
-  canDiff: boolean;
+  views: View[];
 }) {
-  const options: Array<{ value: View; label: string }> = [
-    { value: "preview", label: msg("optimization.blackbox.versions.view.preview") },
-    { value: "code", label: msg("optimization.blackbox.versions.view.code") },
-    ...(canDiff
-      ? [{ value: "diff" as const, label: msg("optimization.blackbox.best.view_diff") }]
-      : []),
-  ];
+  const options = views.map((v) => ({ value: v, label: msg(VIEW_LABEL[v]) }));
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = arrowPageStep(event, getActiveDir() === "rtl");
     if (step === 0) return;
@@ -331,13 +343,26 @@ export function BestVersionTab({
   result,
   jobName,
   repository = false,
+  optimizationId,
+  lineage,
 }: {
   result: BlackboxRunResult;
   jobName?: string | null;
   /** Each version is a patch against the pinned commit, not a text artifact. */
   repository?: boolean;
+  /** Needed to browse a repository version's files at the pinned commit. */
+  optimizationId?: string;
+  /** The run's scored-candidate events, for each version's parent. */
+  lineage?: CandidateLineage[];
 }) {
   const versions = useMemo(() => buildVersions(result), [result]);
+  const parents = useMemo(
+    () => (repository ? versionParents(versions, lineage ?? [], result.candidate_tree) : null),
+    [repository, versions, lineage, result.candidate_tree],
+  );
+  const browse = repository && !!optimizationId;
+  const [repoPath, setRepoPath] = useState<string | null>(null);
+  const [openFile, setOpenFile] = useState<{ path: string; text: string } | null>(null);
   const [index, setIndex] = useState(() => defaultVersionIndex(versions));
   const last = versions.length - 1;
   const at = Math.min(index, last);
@@ -347,17 +372,28 @@ export function BestVersionTab({
   const runError = typeof current?.sideInfo.error === "string" ? current.sideInfo.error : null;
   const kind = detectRenderKind(current?.text ?? "");
   const [view, setView] = useState<View>(() =>
-    current && hasVisual(current, kind) ? "preview" : "code",
+    browse ? "files" : current && hasVisual(current, kind) ? "preview" : "code",
   );
   if (!current) return null;
   // A repository version is already a diff against the starting commit;
   // diffing two patches against each other reads as noise.
   const canDiff = versions.length > 1 && !repository;
   const pullRequest = repository ? readPullRequest(result.details) : null;
-  const activeView: View = view === "diff" && !canDiff ? "code" : view;
+  const hasRenders = sideInfoImages(current.sideInfo).length > 0;
+  const views: View[] = browse
+    ? hasRenders
+      ? ["files", "renders"]
+      : ["files"]
+    : canDiff
+      ? ["preview", "code", "diff"]
+      : ["preview", "code"];
+  const activeView: View = views.includes(view) ? view : browse ? "files" : "code";
+  const parentNumber = parents?.get(current.number);
+  const parent = parentNumber == null ? null : (versions.find((v) => v.number === parentNumber) ?? null);
   const title = msg("optimization.blackbox.versions.title");
   const slug = (jobName ?? "candidate").replace(/[^\w.-]+/g, "_");
   const fileName = `${slug}-v${current.number}.${repository ? "patch" : RENDER_KIND_EXTENSION[kind]}`;
+  const copyFile = browse && activeView === "files" ? openFile : null;
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     // An inner pager that already took the arrow (the preview carousel, an
@@ -397,7 +433,7 @@ export function BestVersionTab({
             </h3>
           </HelpTip>
           <span className="ms-auto shrink-0 text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
-            {msg(RENDER_KIND_LABEL[kind])}
+            {msg(repository ? "optimization.blackbox.repo.browser.kind_patch" : RENDER_KIND_LABEL[kind])}
           </span>
         </header>
 
@@ -426,6 +462,19 @@ export function BestVersionTab({
               <CandidatePreview version={current} kind={kind} onShowCode={() => setView("code")} />
             )}
             {activeView === "code" && <CodeView version={current} kind={kind} />}
+            {activeView === "files" && optimizationId && (
+              <RepoVersionBrowser
+                optimizationId={optimizationId}
+                version={current}
+                parent={parent}
+                path={repoPath}
+                onPathChange={setRepoPath}
+                onOpenFile={setOpenFile}
+              />
+            )}
+            {activeView === "renders" && (
+              <CandidatePreview version={current} kind="code" onShowCode={() => setView("files")} />
+            )}
             {activeView === "diff" && <ChangesView versions={versions} index={at} />}
           </div>
           <VersionFeedback sideInfo={current.sideInfo} />
@@ -434,12 +483,20 @@ export function BestVersionTab({
         <footer className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border/50 bg-muted/20 px-2 py-1.5">
           <VersionRail versions={versions} index={at} onSelect={setIndex} />
           <div className="ms-auto flex shrink-0 items-center gap-0.5">
-            <ViewToggle value={activeView} onChange={setView} canDiff={canDiff} />
-            <span className="mx-1 h-4 w-px bg-border/70" aria-hidden="true" />
+            {views.length > 1 && (
+              <>
+                <ViewToggle value={activeView} onChange={setView} views={views} />
+                <span className="mx-1 h-4 w-px bg-border/70" aria-hidden="true" />
+              </>
+            )}
             <CopyButton
-              text={current.text}
+              text={copyFile ? copyFile.text : current.text}
               size="icon-xs"
-              ariaLabel={formatMsg("optimization.blackbox.versions.copy", { n: current.number })}
+              ariaLabel={
+                copyFile
+                  ? formatMsg("optimization.blackbox.repo.browser.copy_file", { file: copyFile.path })
+                  : formatMsg("optimization.blackbox.versions.copy", { n: current.number })
+              }
               copiedAriaLabel={msg("clipboard.copied_short")}
             />
             <Button
