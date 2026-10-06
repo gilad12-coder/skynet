@@ -38,6 +38,7 @@ import {
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Skeleton } from "@/shared/ui/skeleton";
+import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { RenderedText } from "@/shared/ui/rendered-text";
 import { getRepositoryFile, getRepositoryTree } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -293,7 +294,7 @@ function FileTree({
           }}
           placeholder={msg("optimization.blackbox.repo.browser.filter")}
           aria-label={msg("optimization.blackbox.repo.browser.filter_aria")}
-          className="h-8 ps-8 text-xs md:text-xs"
+          className={cn(TOUCH_FIELD_SM, "ps-8 text-xs md:text-xs")}
         />
       </div>
       {loading ? (
