@@ -668,12 +668,19 @@ export interface BlackboxProposer {
   max_candidates_per_iter?: number | null;
   ralph?: boolean;
   max_no_eval_seconds?: number | null;
+  // Caps tool calls per candidate for every coding-agent proposer, and for
+  // ShinkaEvolve's agent editor.
+  max_tool_calls?: number | null;
 }
 
 export type BlackboxShinkaParentSelection = "weighted" | "power_law" | "beam_search";
 
+/** How ShinkaEvolve writes a version: one model call, or the Pi coding agent with file tools. */
+export type BlackboxShinkaEditor = "single_call" | "agent";
+
 /** ShinkaEvolve's search settings; a request without the block runs every default. */
 export interface BlackboxShinkaSettings {
+  editor: BlackboxShinkaEditor;
   num_islands: number;
   migration_interval: number;
   migration_rate: number;

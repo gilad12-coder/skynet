@@ -40,6 +40,7 @@ import { emptyModelConfig } from "../../constants";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
 import { EngineSlide } from "./EngineSlide";
 import { ModelRoleRow } from "./ModelRoleRow";
+import { MaxToolCallsField } from "./MaxToolCallsField";
 import { ShinkaSettingsPanel } from "./ShinkaSettingsPanel";
 import { Segmented } from "@/shared/ui/segmented";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
@@ -268,6 +269,7 @@ export function BlackboxOptimizerStep({
                   />
                 </Field>
               )}
+              <MaxToolCallsField w={w} />
             </div>
           )}
 

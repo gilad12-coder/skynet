@@ -12,6 +12,7 @@ import type {
  * upstream `EvolutionConfig` defaults.
  */
 export const DEFAULT_SHINKA_SETTINGS: Readonly<BlackboxShinkaSettings> = {
+  editor: "single_call",
   num_islands: 2,
   migration_interval: 10,
   migration_rate: 0,

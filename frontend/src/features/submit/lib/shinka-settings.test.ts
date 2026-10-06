@@ -24,6 +24,7 @@ test("defaults match the backend contract", () => {
   assert.deepEqual(
     { ...DEFAULT_SHINKA_SETTINGS },
     {
+      editor: "single_call",
       num_islands: 2,
       migration_interval: 10,
       migration_rate: 0,
@@ -111,6 +112,12 @@ test("a single ShinkaEvolve run always sends its settings", () => {
   assert.notEqual(sent, DEFAULT_SHINKA_SETTINGS);
 });
 
+test("the editor choice goes out with the settings, in single and Auto", () => {
+  const agent = { ...DEFAULT_SHINKA_SETTINGS, editor: "agent" as const };
+  assert.equal(submittedShinka(agent, "single", "shinka_evolve", false)?.editor, "agent");
+  assert.equal(submittedShinka(agent, "auto", null, true)?.editor, "agent");
+});
+
 test("other single engines never send ShinkaEvolve settings", () => {
   for (const engine of ["gepa", "meta_harness", "autosaddler", null] as const) {
     assert.equal(submittedShinka(DEFAULT_SHINKA_SETTINGS, "single", engine, true), undefined);
@@ -148,4 +155,7 @@ test("a cloned run's partial settings fill in over the defaults", () => {
   assert.equal(restored.num_islands, 6);
   assert.equal(restored.novelty, true);
   assert.equal(restored.archive_size, DEFAULT_SHINKA_SETTINGS.archive_size);
+  // Runs from before the editor choice existed clone as the single-call editor.
+  assert.equal(restored.editor, "single_call");
+  assert.equal(shinkaSettingsFrom({ editor: "agent" }).editor, "agent");
 });
