@@ -8,6 +8,7 @@ API; CSV, TSV, JSON, JSONL and Parquet files are importable.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import re
 import threading
@@ -65,17 +66,21 @@ def oauth_available() -> bool:
     return _oauth_available(oauth_app())
 
 
-def _headers(token: str, accept: str = "application/vnd.github+json") -> dict[str, str]:
+def _headers(token: str | None, accept: str = "application/vnd.github+json") -> dict[str, str]:
     """Bearer headers for the GitHub API.
 
     Args:
-        token: The access token.
+        token: The access token; empty or ``None`` calls anonymously, which
+            reaches public repositories only.
         accept: Media type to request.
 
     Returns:
         The headers.
     """
-    return {"Authorization": f"Bearer {token}", "Accept": accept, "X-GitHub-Api-Version": "2022-11-28"}
+    headers = {"Accept": accept, "X-GitHub-Api-Version": "2022-11-28"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def fetch_account_label(token: str) -> str | None:
@@ -311,13 +316,14 @@ def repository_tree(secret: ConnectorSecret, full_name: str, branch: str) -> dic
     return tree_entries(secret.access_token, full_name, branch)
 
 
-def tree_entries(token: str, full_name: str, branch: str) -> dict[str, Any]:
+def tree_entries(token: str | None, full_name: str, branch: str) -> dict[str, Any]:
     """List every file and folder of a repository at a branch with a bare token.
 
     Args:
-        token: Bearer token with read access to the repository.
+        token: Bearer token with read access to the repository; ``None`` for
+            an anonymous read of a public repository.
         full_name: The repository as ``owner/name``.
-        branch: Branch name; empty for the default branch.
+        branch: Branch name or commit id; empty for the default branch.
 
     Returns:
         ``{"entries": [{"path", "type": "file" | "dir", "size"?}], "truncated": bool}``;
@@ -371,6 +377,52 @@ def read_text_file(token: str, full_name: str, branch: str, path: str, max_bytes
         params=params,
     )
     return content.decode("utf-8", errors="replace"), truncated
+
+
+def file_at(token: str | None, full_name: str, ref: str, path: str, max_bytes: int) -> dict[str, Any]:
+    """Read one file of a repository at a ref as raw bytes, unless it is too large.
+
+    Args:
+        token: Bearer token with read access to the repository; ``None`` for
+            an anonymous read of a public repository.
+        full_name: The repository as ``owner/name``.
+        ref: Commit id, branch or tag.
+        path: File path inside the repository.
+        max_bytes: Files larger than this are reported but not read.
+
+    Returns:
+        ``{"content": bytes | None, "size": int | None, "missing": bool,
+        "too_large": bool}``; ``missing`` covers a path that is absent or is
+        not a regular file (a folder, symlink or submodule) at ``ref``.
+
+    Raises:
+        DomainError: When GitHub refuses the read for any reason other than
+            the path being absent.
+    """
+    owner, name = _split_repo(full_name)
+    try:
+        body = get_json(
+            _contents_url(owner, name, path.strip("/")),
+            provider=PROVIDER,
+            headers=_headers(token),
+            params={"ref": ref},
+        )
+    except DomainError as exc:
+        if exc.code != "connectors.not_found":
+            raise
+        body = None
+    if not isinstance(body, dict) or body.get("type") != "file":
+        return {"content": None, "size": None, "missing": True, "too_large": False}
+    size = body.get("size") if isinstance(body.get("size"), int) else None
+    if size is not None and size > max_bytes:
+        return {"content": None, "size": size, "missing": False, "too_large": True}
+    encoded = body.get("content")
+    if body.get("encoding") != "base64" or not isinstance(encoded, str):
+        raise DomainError("connectors.provider_error", status=502, provider=label(PROVIDER), status_code=200)
+    content = base64.b64decode(encoded)
+    if len(content) > max_bytes:
+        return {"content": None, "size": len(content), "missing": False, "too_large": True}
+    return {"content": content, "size": len(content), "missing": False, "too_large": False}
 
 
 def _contents_url(owner: str, repo: str, path: str) -> str:

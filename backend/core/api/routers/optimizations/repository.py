@@ -1,0 +1,307 @@
+"""Read a repository run's files at its pinned commit. [INTERNAL]
+
+Frontend-only (hidden from public docs):
+- ``GET /optimizations/{id}/repository/tree`` — every file and folder at the commit.
+- ``GET /optimizations/{id}/repository/file`` — one file's text at the commit.
+
+Every version of a repository run is a patch against one pinned commit; the
+run page applies the patches itself and only needs the base tree and files.
+GitHub is read with the run owner's connection, since the commit belongs to
+the run rather than to whoever is viewing it, and anonymously when the owner
+has none, so public repositories still open.
+"""
+
+from __future__ import annotations
+
+import threading
+from collections import OrderedDict
+from collections.abc import Callable
+from typing import Annotated, Any, TypeVar
+
+from fastapi import APIRouter, Depends, Query
+
+from ....connectors import github
+from ....connectors.github_repo import RepoFetchError, github_token
+from ....models import BlackboxRepoFileResponse, BlackboxRepoTreeEntry, BlackboxRepoTreeResponse
+from ...auth import AuthenticatedUser, get_authenticated_user
+from ...converters import job_owner
+from ...errors import DomainError
+from .._helpers import load_job_for_user
+
+AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
+
+MAX_FILE_BYTES = 1024 * 1024
+_TREE_CACHE_ENTRIES = 32
+_FILE_CACHE_ENTRIES = 2048
+_FILE_CACHE_BYTES = 64 * 1024 * 1024
+
+T = TypeVar("T")
+
+
+class _BoundedCache:
+    """A thread-safe least-recently-used cache capped by entry count and total weight."""
+
+    def __init__(self, max_entries: int, max_weight: int | None = None) -> None:
+        """Create an empty cache.
+
+        Args:
+            max_entries: Most entries kept at once.
+            max_weight: Most total weight kept at once; ``None`` for no cap.
+        """
+        self._entries: OrderedDict[tuple[str, ...], tuple[Any, int]] = OrderedDict()
+        self._max_entries = max_entries
+        self._max_weight = max_weight
+        self._weight = 0
+        self._lock = threading.Lock()
+
+    def get(self, key: tuple[str, ...]) -> Any | None:
+        """Return a cached value and mark it recently used.
+
+        Args:
+            key: Cache key.
+
+        Returns:
+            The value, or ``None`` when absent.
+        """
+        with self._lock:
+            hit = self._entries.get(key)
+            if hit is None:
+                return None
+            self._entries.move_to_end(key)
+            return hit[0]
+
+    def put(self, key: tuple[str, ...], value: Any, weight: int = 0) -> None:
+        """Store a value, evicting the least recently used entries past the caps.
+
+        Args:
+            key: Cache key.
+            value: Value to keep.
+            weight: The value's share of ``max_weight``, such as its byte size.
+        """
+        with self._lock:
+            previous = self._entries.pop(key, None)
+            if previous is not None:
+                self._weight -= previous[1]
+            self._entries[key] = (value, weight)
+            self._weight += weight
+            while len(self._entries) > self._max_entries or (
+                self._max_weight is not None and self._weight > self._max_weight and len(self._entries) > 1
+            ):
+                _, (_, evicted) = self._entries.popitem(last=False)
+                self._weight -= evicted
+
+    def clear(self) -> None:
+        """Drop every entry."""
+        with self._lock:
+            self._entries.clear()
+            self._weight = 0
+
+
+# Keyed by owner as well as (repository, commit): a run only proves its
+# owner could read the repository, so another owner's run on the same commit
+# must not be served from it without its own read.
+_trees = _BoundedCache(_TREE_CACHE_ENTRIES)
+_files = _BoundedCache(_FILE_CACHE_ENTRIES, _FILE_CACHE_BYTES)
+
+
+def clean_repo_path(raw: str) -> str:
+    """Normalize a repository-relative path, refusing ones that leave the repository.
+
+    Args:
+        raw: The path the caller asked for.
+
+    Returns:
+        The ``/``-joined path without leading or trailing slashes.
+
+    Raises:
+        DomainError: 400 when the path is empty, absolute, or walks out with ``..``.
+    """
+    path = raw.strip().replace("\\", "/")
+    if not path or path.startswith("/") or (len(path) > 1 and path[1] == ":"):
+        raise DomainError("connectors.invalid_ref", status=400)
+    path = path.rstrip("/")
+    if any(part in ("", ".", "..") for part in path.split("/")):
+        raise DomainError("connectors.invalid_ref", status=400)
+    return path
+
+
+def _repo_target(job_data: dict[str, Any], optimization_id: str) -> tuple[str, str]:
+    """Read the repository and pinned commit of a repository run.
+
+    Args:
+        job_data: The stored job row.
+        optimization_id: The run, for the error message.
+
+    Returns:
+        ``(repository, commit)``.
+
+    Raises:
+        DomainError: 404 when the run is not a repository run; 409 while its
+            commit is not pinned yet, which happens before it first starts.
+    """
+    payload = job_data.get("payload")
+    target = payload.get("target") if isinstance(payload, dict) else None
+    repo = target.get("repo") if isinstance(target, dict) and target.get("kind") == "repo" else None
+    if not isinstance(repo, dict) or not isinstance(repo.get("repository"), str):
+        raise DomainError("optimization.not_found", status=404, optimization_id=optimization_id)
+    commit = repo.get("commit")
+    if not isinstance(commit, str) or not commit:
+        raise DomainError("optimization.no_result_pending", status=409)
+    return repo["repository"], commit
+
+
+def _read_as_owner(engine: Any, owner: str | None, read: Callable[[str | None], T]) -> T:
+    """Run a GitHub read with the owner's connection, falling back to an anonymous read.
+
+    Args:
+        engine: SQLAlchemy engine holding the connector vault, or ``None``.
+        owner: The run's owner.
+        read: The read, given a token or ``None``.
+
+    Returns:
+        What ``read`` returns.
+
+    Raises:
+        DomainError: GitHub's refusal of the anonymous read, or of the owner's
+            read when it failed for another reason than a rejected token.
+    """
+    token = None
+    if engine is not None and owner:
+        try:
+            token = github_token(engine, owner)
+        except RepoFetchError:
+            token = None
+    if token is None:
+        return read(None)
+    try:
+        return read(token)
+    except DomainError as exc:
+        # A revoked or narrowed token must not hide a repository anyone can read.
+        if exc.code != "connectors.rejected":
+            raise
+        return read(None)
+
+
+def _file_response(path: str, fetched: dict[str, Any]) -> BlackboxRepoFileResponse:
+    """Turn a fetched file into the response, decoding text and flagging binaries.
+
+    Args:
+        path: The cleaned repository path.
+        fetched: What :func:`core.connectors.github.file_at` returned.
+
+    Returns:
+        The response.
+    """
+    content: bytes | None = fetched["content"]
+    text = None
+    binary = False
+    if content is not None:
+        if b"\x00" in content:
+            binary = True
+        else:
+            try:
+                text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                binary = True
+    return BlackboxRepoFileResponse(
+        path=path,
+        content=text,
+        binary=binary,
+        too_large=fetched["too_large"],
+        missing=fetched["missing"],
+        size=fetched["size"],
+    )
+
+
+def register_repository_routes(router: APIRouter, *, job_store) -> None:
+    """Register the repository-run file routes on ``router``.
+
+    Args:
+        router: The router to attach the routes to.
+        job_store: Job-store the runs are read from; its ``engine`` holds the
+            connector vault.
+    """
+
+    @router.get(
+        "/optimizations/{optimization_id}/repository/tree",
+        response_model=BlackboxRepoTreeResponse,
+        summary="Every file and folder of a repository run at its pinned commit",
+    )
+    def get_repository_tree(optimization_id: str, current_user: AuthenticatedUserDep) -> BlackboxRepoTreeResponse:
+        """List the repository a run optimizes, at the commit its versions patch.
+
+        Args:
+            optimization_id: The repository run.
+            current_user: Authenticated caller resolved from the bearer token.
+
+        Returns:
+            The repository, the commit, every path sorted, and whether GitHub
+            truncated the tree.
+
+        Raises:
+            DomainError: 404 when the run is unknown, inaccessible or not a
+                repository run; 409 before its commit is pinned; GitHub's
+                refusal (404/409/502) when the tree cannot be read.
+        """
+        job_data = load_job_for_user(job_store, optimization_id, current_user)
+        repository, commit = _repo_target(job_data, optimization_id)
+        owner = job_owner(job_data) or ""
+        key = (owner, repository, commit)
+        cached = _trees.get(key)
+        if cached is None:
+            tree = _read_as_owner(
+                getattr(job_store, "engine", None),
+                owner,
+                lambda token: github.tree_entries(token, repository, commit),
+            )
+            entries = sorted(
+                (BlackboxRepoTreeEntry(path=e["path"], type=e["type"], size=e.get("size")) for e in tree["entries"]),
+                key=lambda entry: entry.path,
+            )
+            cached = BlackboxRepoTreeResponse(
+                repository=repository, commit=commit, entries=entries, truncated=tree["truncated"]
+            )
+            _trees.put(key, cached)
+        return cached
+
+    @router.get(
+        "/optimizations/{optimization_id}/repository/file",
+        response_model=BlackboxRepoFileResponse,
+        summary="One file of a repository run at its pinned commit",
+    )
+    def get_repository_file(
+        optimization_id: str,
+        current_user: AuthenticatedUserDep,
+        path: str = Query(min_length=1, max_length=4096),
+    ) -> BlackboxRepoFileResponse:
+        """Read one file of the repository a run optimizes, at the commit its versions patch.
+
+        Args:
+            optimization_id: The repository run.
+            current_user: Authenticated caller resolved from the bearer token.
+            path: Repository-relative, ``/``-separated file path.
+
+        Returns:
+            The file's text, or flags for a missing, binary or over-1 MB file.
+
+        Raises:
+            DomainError: 400 for a path outside the repository; 404 when the
+                run is unknown, inaccessible or not a repository run; 409
+                before its commit is pinned; GitHub's refusal (409/502) when
+                the file cannot be read.
+        """
+        job_data = load_job_for_user(job_store, optimization_id, current_user)
+        clean = clean_repo_path(path)
+        repository, commit = _repo_target(job_data, optimization_id)
+        owner = job_owner(job_data) or ""
+        key = (owner, repository, commit, clean)
+        cached = _files.get(key)
+        if cached is None:
+            fetched = _read_as_owner(
+                getattr(job_store, "engine", None),
+                owner,
+                lambda token: github.file_at(token, repository, commit, clean, MAX_FILE_BYTES),
+            )
+            cached = _file_response(clean, fetched)
+            _files.put(key, cached, weight=len(cached.content or ""))
+        return cached
