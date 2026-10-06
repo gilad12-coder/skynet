@@ -250,7 +250,7 @@
     "serve.chat_requires_live_mcp": "लाइव चैट के लिए लाइव-MCP टूल स्रोत आवश्यक है; इस रन में डेटासेट स्नैपशॉट का उपयोग किया गया।",
     "serve.missing_inputs": "आवश्यक इनपुट फ़ील्ड अनुपस्थित हैं: {missing}। अपेक्षित: {input_fields}",
     "serve.no_declared_inputs": "आर्टिफैक्ट में कोई घोषित इनपुट फ़ील्ड नहीं है; इनपुट को सुरक्षित रूप से मान्य नहीं किया जा सकता।",
-    "serve.no_model_config": "इस रन के लिए कोई मॉडल कॉन्फ़िग नहीं मिला। model_config_override प्रदान करें।",
+    "serve.no_model_config": "इस रन के लिए कोई मॉडल कॉन्फ़िग नहीं मिला।",
     "submission.module_resolve_failed": "मॉड्यूल लोड विफल हुआ: {error}",
     "submission.staged_dataset_not_found": "इस उपयोगकर्ता के लिए staged_dataset_id '{staged_dataset_id}' नहीं मिला — डेटासेट फिर से अपलोड करें और पुनः प्रयास करें।",
     "submission.validation_failed": "पेलोड मान्यकरण विफल हुआ। ऑप्टिमाइज़र, मॉड्यूल और कॉलम मैपिंग जाँचें।",

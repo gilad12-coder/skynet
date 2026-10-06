@@ -250,7 +250,7 @@
     "serve.chat_requires_live_mcp": "Для живого чата требуется источник инструментов live-MCP; в этом запуске использовался снимок набора данных.",
     "serve.missing_inputs": "Отсутствуют обязательные входные поля: {missing}. Ожидалось: {input_fields}",
     "serve.no_declared_inputs": "У артефакта нет объявленных входных полей; невозможно безопасно проверить входные данные.",
-    "serve.no_model_config": "Для запуска не найдена конфигурация модели. Укажите model_config_override.",
+    "serve.no_model_config": "Для запуска не найдена конфигурация модели.",
     "submission.module_resolve_failed": "Не удалось загрузить модуль: {error}",
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' не найден для этого пользователя — загрузите набор данных заново и повторите попытку.",
     "submission.validation_failed": "Проверка данных не пройдена. Проверьте оптимизатор, модуль и сопоставление столбцов.",

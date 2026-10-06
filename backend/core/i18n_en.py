@@ -182,7 +182,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "serve.chat_requires_live_mcp": "Live chat requires a live-MCP tool source; this run used a dataset snapshot.",
     "serve.missing_inputs": "Missing required input fields: {missing}. Expected: {input_fields}",
     "serve.no_declared_inputs": "Artifact has no declared input fields; cannot safely validate inputs.",
-    "serve.no_model_config": "No model config found for the run. Provide model_config_override.",
+    "serve.no_model_config": "No model config found for the run.",
     "share.cannot_grant_self": "You cannot invite yourself to an optimization you own.",
     "share.cannot_modify_self": "You cannot change or remove your own access.",
     "share.inference_forbidden": "This share link is view-only; running inference requires being invited.",

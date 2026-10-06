@@ -250,7 +250,7 @@
     "serve.chat_requires_live_mcp": "La chat dal vivo richiede una fonte di strumenti live-MCP; questa esecuzione ha usato uno snapshot del dataset.",
     "serve.missing_inputs": "Campi di input obbligatori mancanti: {missing}. Previsti: {input_fields}",
     "serve.no_declared_inputs": "L'artefatto non ha campi di input dichiarati; impossibile convalidare in sicurezza gli input.",
-    "serve.no_model_config": "Nessuna configurazione del modello trovata per l'esecuzione. Fornisci model_config_override.",
+    "serve.no_model_config": "Nessuna configurazione del modello trovata per l'esecuzione.",
     "submission.module_resolve_failed": "Caricamento del modulo non riuscito: {error}",
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' non trovato per questo utente: ricarica il dataset e riprova.",
     "submission.validation_failed": "Convalida del payload non riuscita. Controlla l'ottimizzatore, il modulo e la mappatura delle colonne.",

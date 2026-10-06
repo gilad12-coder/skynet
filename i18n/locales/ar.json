@@ -250,7 +250,7 @@
     "serve.chat_requires_live_mcp": "تتطلّب المحادثة المباشرة مصدر أداة MCP مباشرًا؛ استخدم هذا التشغيل لقطة مجموعة بيانات.",
     "serve.missing_inputs": "حقول إدخال مطلوبة مفقودة: {missing}. المتوقّع: {input_fields}",
     "serve.no_declared_inputs": "لا يملك المخرج أي حقول إدخال معلَنة؛ لا يمكن التحقّق من الإدخالات بأمان.",
-    "serve.no_model_config": "لم يُعثر على أي إعدادات نموذج لهذا التشغيل. وفّر model_config_override.",
+    "serve.no_model_config": "لم يُعثر على أي إعدادات نموذج لهذا التشغيل.",
     "submission.module_resolve_failed": "فشل تحميل الوحدة: {error}",
     "submission.staged_dataset_not_found": "لم يُعثر على staged_dataset_id '{staged_dataset_id}' لهذا المستخدم — أعِد رفع مجموعة البيانات وحاول مجددًا.",
     "submission.validation_failed": "فشل التحقّق من الحمولة. تحقّق من المُحسِّن والوحدة وتعيين الأعمدة.",
