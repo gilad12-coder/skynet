@@ -250,7 +250,7 @@
     "serve.chat_requires_live_mcp": "Live-Chat erfordert eine Live-MCP-Werkzeugquelle; dieser Durchlauf hat einen Datensatz-Snapshot verwendet.",
     "serve.missing_inputs": "Erforderliche Eingabefelder fehlen: {missing}. Erwartet: {input_fields}",
     "serve.no_declared_inputs": "Das Artefakt hat keine deklarierten Eingabefelder; Eingaben können nicht sicher validiert werden.",
-    "serve.no_model_config": "Keine Modellkonfiguration für den Durchlauf gefunden. Geben Sie model_config_override an.",
+    "serve.no_model_config": "Keine Modellkonfiguration für den Durchlauf gefunden.",
     "submission.module_resolve_failed": "Das Laden des Moduls ist fehlgeschlagen: {error}",
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' für diesen Benutzer nicht gefunden — laden Sie den Datensatz erneut hoch und versuchen Sie es noch einmal.",
     "submission.validation_failed": "Die Validierung der Nutzlast ist fehlgeschlagen. Überprüfen Sie den Optimierer, das Modul und die Spaltenzuordnung.",

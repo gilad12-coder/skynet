@@ -210,7 +210,7 @@
     "serve.chat_requires_live_mcp": "Live chat requires a live MCP tool source; this run used a dataset snapshot.",
     "serve.missing_inputs": "Missing required input fields: {missing}. Expected: {input_fields}",
     "serve.no_declared_inputs": "Artifact has no declared input fields; cannot safely validate inputs.",
-    "serve.no_model_config": "No model config found for the run. Provide model_config_override.",
+    "serve.no_model_config": "No model config found for the run.",
     "submission.capacity_reached": "Skynet is at capacity right now. Please try again shortly.",
     "submission.module_resolve_failed": "Module load failed: {error}",
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' not found for this user — re-upload the dataset and retry.",

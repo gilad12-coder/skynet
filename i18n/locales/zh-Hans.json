@@ -250,7 +250,7 @@
     "serve.chat_requires_live_mcp": "实时聊天需要实时 MCP 工具源；本次运行使用的是数据集快照。",
     "serve.missing_inputs": "缺少必填的输入字段：{missing}。预期为：{input_fields}",
     "serve.no_declared_inputs": "产物没有声明任何输入字段；无法安全地校验输入。",
-    "serve.no_model_config": "未找到本次运行的模型配置。请提供 model_config_override。",
+    "serve.no_model_config": "未找到本次运行的模型配置。",
     "submission.module_resolve_failed": "模块加载失败：{error}",
     "submission.staged_dataset_not_found": "未找到该用户的 staged_dataset_id '{staged_dataset_id}'——请重新上传数据集后重试。",
     "submission.validation_failed": "载荷校验失败。请检查优化器、模块和列映射。",

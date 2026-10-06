@@ -19,7 +19,7 @@ from typing import Annotated, Any
 import dspy
 from dspy.streaming import StreamListener, StreamResponse
 from fastapi import APIRouter, Depends, Header
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 from starlette.responses import StreamingResponse
 
 from ...billing import ProviderKeyVault, resolve_byok_model_config
@@ -40,6 +40,7 @@ from ...constants import (
     TOKEN_SOURCE_MANAGED,
 )
 from ...models import ModelConfig, ServeInfoResponse, ServeRequest, ServeResponse
+from ...models.serve import reject_model_override
 from ...service_gateway.agents.generalist import TrustMode, get_approval_registry
 from ...service_gateway.agents.react_serve import run_react_chat
 from ...service_gateway.language_models import build_language_model
@@ -100,23 +101,16 @@ def _resolve_inference_model_config(job_store, username: str, model_config: Mode
         raise DomainError("billing.byok_missing_connection", status=400, provider=str(exc)) from exc
 
 
-def _pair_model_config(
-    model_name: str,
-    overview: dict[str, Any],
-    override: ModelConfig | None,
-) -> ModelConfig:
-    """Resolve a grid pair's persisted model config or an explicit override.
+def _pair_model_config(model_name: str, overview: dict[str, Any]) -> ModelConfig:
+    """Resolve a grid pair's persisted model config.
 
     Args:
         model_name: Pair generation-model identifier.
         overview: Parent grid payload overview.
-        override: Optional caller-supplied model config.
 
     Returns:
-        The matching persisted config, explicit override, or legacy name-only config.
+        The matching persisted config, or a legacy name-only config.
     """
-    if override is not None:
-        return override
     for raw_config in overview.get(PAYLOAD_OVERVIEW_GENERATION_MODELS, []):
         if not isinstance(raw_config, dict):
             continue
@@ -169,10 +163,6 @@ class ServeChatRequest(BaseModel):
         default="ask",
         description="'ask'/'auto_safe' confirm every tool, 'yolo' confirms none.",
     )
-    model_config_override: ModelConfig | None = Field(
-        default=None,
-        description="Optional model override. Uses the run's model if omitted.",
-    )
     max_cost_cents: int | None = Field(
         validation_alias=AliasChoices("max_cost_cents", "max_cost_credits"),
         default=None,
@@ -181,6 +171,19 @@ class ServeChatRequest(BaseModel):
         strict=True,
         description="Optional cap in cents for this one chat turn; omitted, the turn draws on the account balance.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _locked_model(cls, data: Any) -> Any:
+        """Refuse a caller-chosen model; the program runs on the one it was optimized with.
+
+        Args:
+            data: Raw request body.
+
+        Returns:
+            The unchanged body.
+        """
+        return reject_model_override(data)
 
 
 class ServeChatConfirmRequest(BaseModel):
@@ -346,7 +349,7 @@ def _protected_program_call(
         job_store: Store backing artifacts and billing.
         job_data: Persisted protected optimization row.
         optimization_id: Program identity.
-        req: Caller inputs, model override, and optional one-request maximum.
+        req: Caller inputs and optional one-request maximum.
         current_user: Authenticated spending owner.
         idempotency_key: Transport replay identity.
         pair_index: Optional grid pair selection.
@@ -360,9 +363,7 @@ def _protected_program_call(
     if pair_index is None:
         artifact, overview, model_name = load_program_metadata(job_store, optimization_id, current_user)
         model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
-        if req.model_config_override is not None:
-            model_config = req.model_config_override
-        elif model_settings:
+        if model_settings:
             model_config = ModelConfig.model_validate(model_settings)
         elif model_name:
             model_config = ModelConfig(name=model_name)
@@ -371,7 +372,7 @@ def _protected_program_call(
     else:
         artifact, pair, overview = load_pair_program_metadata(job_store, optimization_id, pair_index, current_user)
         pair_model = pair.get("generation_model", "") if isinstance(pair, dict) else pair.generation_model
-        model_config = _pair_model_config(pair_model, overview, req.model_config_override)
+        model_config = _pair_model_config(pair_model, overview)
     input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
     workflow = workflow_spec_from_overview(overview)
     if workflow is not None:
@@ -923,13 +924,13 @@ def create_serve_router(*, job_store) -> APIRouter:
     ) -> ServeResponse:
         """Run a blocking inference call through the compiled program.
 
-        Model resolution: ``model_config_override`` → stored job settings →
-        stored model name. All ``input_fields`` must be supplied; extras are
+        The program always runs on the model settings it was optimized with:
+        stored job settings, else the stored model name. All ``input_fields`` must be supplied; extras are
         ignored.
 
         Args:
             optimization_id: Optimization id whose program should run.
-            req: Inference request carrying inputs and optional model override.
+            req: Inference request carrying inputs.
             current_user: Authenticated caller resolved from the bearer token.
 
         Returns:
@@ -955,17 +956,14 @@ def create_serve_router(*, job_store) -> APIRouter:
         program, result, overview = load_program(job_store, optimization_id, current_user)
         artifact = result.program_artifact
 
-        if req.model_config_override:
-            model_config = req.model_config_override
+        model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
+        model_name = overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, "")
+        if model_settings:
+            model_config = ModelConfig.model_validate(model_settings)
+        elif model_name:
+            model_config = ModelConfig(name=model_name)
         else:
-            model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
-            model_name = overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, "")
-            if model_settings:
-                model_config = ModelConfig.model_validate(model_settings)
-            elif model_name:
-                model_config = ModelConfig(name=model_name)
-            else:
-                raise DomainError("serve.no_model_config", status=400)
+            raise DomainError("serve.no_model_config", status=400)
 
         input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
         workflow_spec = workflow_spec_from_overview(overview)
@@ -1047,7 +1045,7 @@ def create_serve_router(*, job_store) -> APIRouter:
 
         Args:
             optimization_id: Optimization id whose program should run.
-            req: Inference request carrying inputs and optional model override.
+            req: Inference request carrying inputs.
             current_user: Authenticated caller resolved from the bearer token.
 
         Returns:
@@ -1093,17 +1091,14 @@ def create_serve_router(*, job_store) -> APIRouter:
         program, result, overview = await asyncio.to_thread(load_program, job_store, optimization_id, current_user)
         artifact = result.program_artifact
 
-        if req.model_config_override:
-            model_config = req.model_config_override
+        model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
+        model_name = overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, "")
+        if model_settings:
+            model_config = ModelConfig.model_validate(model_settings)
+        elif model_name:
+            model_config = ModelConfig(name=model_name)
         else:
-            model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
-            model_name = overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, "")
-            if model_settings:
-                model_config = ModelConfig.model_validate(model_settings)
-            elif model_name:
-                model_config = ModelConfig(name=model_name)
-            else:
-                raise DomainError("serve.no_model_config", status=400)
+            raise DomainError("serve.no_model_config", status=400)
 
         input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
         workflow_spec = workflow_spec_from_overview(overview)
@@ -1218,14 +1213,13 @@ def create_serve_router(*, job_store) -> APIRouter:
     ) -> ServeResponse:
         """Run inference through one grid-search pair's compiled program.
 
-        Default model is the pair's generation model; override with
-        ``model_config_override``. All ``input_fields`` must be supplied;
+        The program always runs on the pair's generation model. All ``input_fields`` must be supplied;
         extras are ignored.
 
         Args:
             optimization_id: Grid-search optimization id.
             pair_index: Index of the pair in the grid-search result.
-            req: Inference request carrying inputs and optional model override.
+            req: Inference request carrying inputs.
             current_user: Authenticated caller resolved from the bearer token.
 
         Returns:
@@ -1252,7 +1246,7 @@ def create_serve_router(*, job_store) -> APIRouter:
         program, pair, overview = load_pair_program(job_store, optimization_id, pair_index, current_user)
         artifact = pair.program_artifact
 
-        model_config = _pair_model_config(pair.generation_model, overview, req.model_config_override)
+        model_config = _pair_model_config(pair.generation_model, overview)
 
         input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
 
@@ -1321,7 +1315,7 @@ def create_serve_router(*, job_store) -> APIRouter:
         Args:
             optimization_id: Grid-search optimization id.
             pair_index: Index of the pair in the grid-search result.
-            req: Inference request carrying inputs and optional model override.
+            req: Inference request carrying inputs.
             current_user: Authenticated caller resolved from the bearer token.
 
         Returns:
@@ -1370,7 +1364,7 @@ def create_serve_router(*, job_store) -> APIRouter:
         )
         artifact = pair.program_artifact
 
-        model_config = _pair_model_config(pair.generation_model, overview, req.model_config_override)
+        model_config = _pair_model_config(pair.generation_model, overview)
 
         input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
 
@@ -1440,8 +1434,7 @@ def create_serve_router(*, job_store) -> APIRouter:
 
         Args:
             optimization_id: The react run to chat against.
-            req: Chat request with the user's message, prior turns, trust mode,
-                and an optional model override.
+            req: Chat request with the user's message, prior turns and trust mode.
             current_user: Authenticated caller; non-admins are restricted to
                 their own runs.
             authorization: Caller's bearer token, forwarded into the agent's MCP
@@ -1475,9 +1468,7 @@ def create_serve_router(*, job_store) -> APIRouter:
             if not isinstance(tool_source, dict) or tool_source.get("kind") != "live_mcp":
                 raise DomainError("serve.chat_requires_live_mcp", status=409)
             model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
-            if req.model_config_override is not None:
-                model_config = req.model_config_override
-            elif model_settings:
+            if model_settings:
                 model_config = ModelConfig.model_validate(model_settings)
             elif model_name:
                 model_config = ModelConfig(name=model_name)
@@ -1526,17 +1517,14 @@ def create_serve_router(*, job_store) -> APIRouter:
             load_react_chat_inputs, job_store, optimization_id, current_user
         )
 
-        if req.model_config_override:
-            model_config = req.model_config_override
+        model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
+        model_name = overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, "")
+        if model_settings:
+            model_config = ModelConfig.model_validate(model_settings)
+        elif model_name:
+            model_config = ModelConfig(name=model_name)
         else:
-            model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
-            model_name = overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, "")
-            if model_settings:
-                model_config = ModelConfig.model_validate(model_settings)
-            elif model_name:
-                model_config = ModelConfig(name=model_name)
-            else:
-                raise DomainError("serve.no_model_config", status=400)
+            raise DomainError("serve.no_model_config", status=400)
 
         await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
         model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)

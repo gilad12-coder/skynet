@@ -417,9 +417,8 @@ def test_serve_program_happy_path(serve_client: TestClient, serve_store: _FakeJo
     assert "model_used" in body
 
 
-def test_serve_program_model_resolution_from_override(serve_client: TestClient, serve_store: _FakeJobStore) -> None:
-    """``model_config_override`` wins over stored ``model_settings``."""
-    # model_config_override must beat stored model_settings.
+def test_serve_program_rejects_model_override(serve_client: TestClient, serve_store: _FakeJobStore) -> None:
+    """A caller-chosen model is refused; the program stays on its optimized model."""
     _seed_run_job(serve_store, "ov", overview_extra={"model_settings": {"name": "openai/gpt-4o"}})
 
     with _PATCH_LM, _PATCH_DSPY_CTX:
@@ -431,8 +430,22 @@ def test_serve_program_model_resolution_from_override(serve_client: TestClient, 
             },
         )
 
+    assert resp.status_code == 422
+    assert "model_config_override" in resp.text
+
+
+def test_serve_program_runs_on_exact_stored_settings(serve_client: TestClient, serve_store: _FakeJobStore) -> None:
+    """Every stored model setting, not just the name, reaches the language model."""
+    settings = {"name": "openai/gpt-4o", "temperature": 0.3, "max_tokens": 512, "extra": {"top_p": 0.9}}
+    _seed_run_job(serve_store, "ex", overview_extra={"model_settings": settings})
+    build = MagicMock(return_value=MagicMock())
+
+    with patch("core.api.routers.serve.build_language_model", build), _PATCH_DSPY_CTX:
+        resp = serve_client.post("/serve/ex", json={"inputs": {"question": "hi"}})
+
     assert resp.status_code == 200
-    assert resp.json()["model_used"] == "openai/gpt-3.5-turbo"
+    used = build.call_args.args[0]
+    assert (used.name, used.temperature, used.max_tokens, used.extra) == ("openai/gpt-4o", 0.3, 512, {"top_p": 0.9})
 
 
 def test_serve_program_model_resolution_from_stored_settings(
@@ -467,7 +480,7 @@ def test_serve_program_model_resolution_from_model_name_only(
 
 
 def test_serve_program_returns_400_when_no_model_config(serve_client: TestClient, serve_store: _FakeJobStore) -> None:
-    """Lack of any usable model config produces a 400 mentioning ``model_config_override``."""
+    """Lack of any usable model config produces a localized 400."""
     _seed_run_job(serve_store, "nm", overview_extra={"model_name": "", "model_settings": {}})
     # Clear override so the fallback chain reaches the 400 branch
     # (model_name key present but empty, model_settings empty dict)
@@ -477,7 +490,7 @@ def test_serve_program_returns_400_when_no_model_config(serve_client: TestClient
         resp = serve_client.post("/serve/nm", json={"inputs": {"question": "hi"}})
 
     assert resp.status_code == 400
-    assert "model_config_override" in resp.json()["detail"]
+    assert resp.json()["code"] == I18nKey.SERVE_NO_MODEL_CONFIG.value
 
 
 def test_serve_program_returns_400_for_no_input_fields(serve_client: TestClient, serve_store: _FakeJobStore) -> None:
@@ -612,18 +625,17 @@ def test_serve_pair_returns_400_for_missing_inputs(
     assert "missing" in body["params"]
 
 
-def test_serve_pair_uses_override_model(
+def test_serve_pair_rejects_model_override(
     grid_client: TestClient,
 ) -> None:
-    """``model_config_override`` is honoured on a pair serve request."""
+    """A pair serve request cannot swap the pair's generation model."""
     with _PATCH_LM, _PATCH_DSPY_CTX:
         resp = grid_client.post(
             "/serve/grid1/pair/0",
             json={"inputs": {"question": "hi"}, "model_config_override": {"name": "openai/gpt-3.5-turbo"}},
         )
 
-    assert resp.status_code == 200
-    assert resp.json()["model_used"] == "openai/gpt-3.5-turbo"
+    assert resp.status_code == 422
 
 
 def test_serve_pair_info_happy_path(grid_client: TestClient) -> None:

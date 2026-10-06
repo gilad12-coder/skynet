@@ -239,7 +239,7 @@
     "serve.chat_requires_live_mcp": "即時對話需要即時 MCP 工具來源；本次執行使用咗資料集快照。",
     "serve.missing_inputs": "缺少必要嘅輸入欄位：{missing}。預期為：{input_fields}",
     "serve.no_declared_inputs": "成品（Artifact）未宣告輸入欄位，無法安全驗證輸入內容。",
-    "serve.no_model_config": "搵唔到本次執行嘅模型設定。請提供 model_config_override。",
+    "serve.no_model_config": "搵唔到本次執行嘅模型設定。",
     "submission.capacity_reached": "Skynet 目前處理能力已滿載。請稍後再試。",
     "submission.module_resolve_failed": "載入模組失敗：{error}",
     "submission.staged_dataset_not_found": "搵唔到此用戶嘅 staged_dataset_id '{staged_dataset_id}' — 請重新上傳資料集後再試。",

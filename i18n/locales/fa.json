@@ -250,7 +250,7 @@
     "serve.chat_requires_live_mcp": "گفتگوی زنده به یک منبع ابزار live-MCP نیاز دارد؛ این اجرا از یک عکس فوری مجموعه‌داده استفاده کرده است.",
     "serve.missing_inputs": "فیلدهای ورودی الزامی موجود نیست: {missing}. مورد انتظار: {input_fields}",
     "serve.no_declared_inputs": "آرتیفکت هیچ فیلد ورودی اعلام‌شده‌ای ندارد؛ نمی‌توان ورودی‌ها را به‌طور ایمن اعتبارسنجی کرد.",
-    "serve.no_model_config": "هیچ پیکربندی مدلی برای این اجرا یافت نشد. model_config_override را ارائه کنید.",
+    "serve.no_model_config": "هیچ پیکربندی مدلی برای این اجرا یافت نشد.",
     "submission.module_resolve_failed": "بارگذاری ماژول ناموفق بود: {error}",
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' برای این کاربر یافت نشد — مجموعه‌داده را دوباره بارگذاری کرده و تلاش کنید.",
     "submission.validation_failed": "اعتبارسنجی داده‌های ارسالی ناموفق بود. بهینه‌ساز، ماژول و نگاشت ستون را بررسی کنید.",

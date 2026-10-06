@@ -7,17 +7,33 @@ from typing import Any
 
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
-from .common import ModelConfig
+
+def reject_model_override(data: Any) -> Any:
+    """Refuse a request body that tries to pick the inference model.
+
+    A compiled program's prompts and demos were tuned against one model and its
+    settings, so running it on anything else silently serves a different program.
+
+    Args:
+        data: Raw request body before field validation.
+
+    Returns:
+        The unchanged body.
+
+    Raises:
+        ValueError: When the body carries ``model_config_override``.
+    """
+    if isinstance(data, dict) and "model_config_override" in data:
+        raise ValueError(
+            "model_config_override is not supported: a program always runs on the model settings it was optimized with."
+        )
+    return data
 
 
 class ServeRequest(BaseModel):
     """Request payload for running inference on an optimized program."""
 
     inputs: dict[str, Any] = Field(..., description="Input field values matching the program's signature.")
-    model_config_override: ModelConfig | None = Field(
-        default=None,
-        description="Optional model config override. Uses the original optimization model if omitted.",
-    )
     max_cost_cents: int | None = Field(
         validation_alias=AliasChoices("max_cost_cents", "max_cost_credits"),
         default=None,
@@ -26,6 +42,19 @@ class ServeRequest(BaseModel):
         strict=True,
         description="Maximum cents authorized for this one invocation; required for protected runs.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _locked_model(cls, data: Any) -> Any:
+        """Refuse a caller-chosen model; the program runs on the one it was optimized with.
+
+        Args:
+            data: Raw request body.
+
+        Returns:
+            The unchanged body.
+        """
+        return reject_model_override(data)
 
     @model_validator(mode="after")
     def _ensure_inputs(self) -> ServeRequest:

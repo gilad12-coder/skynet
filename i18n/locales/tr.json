@@ -250,7 +250,7 @@
     "serve.chat_requires_live_mcp": "Canlı sohbet, canlı bir MCP araç kaynağı gerektirir; bu çalıştırma bir veri kümesi anlık görüntüsü kullandı.",
     "serve.missing_inputs": "Gerekli girdi alanları eksik: {missing}. Beklenen: {input_fields}",
     "serve.no_declared_inputs": "Yapay nesnenin bildirilmiş girdi alanı yok; girdiler güvenli bir şekilde doğrulanamıyor.",
-    "serve.no_model_config": "Çalıştırma için model yapılandırması bulunamadı. model_config_override sağlayın.",
+    "serve.no_model_config": "Çalıştırma için model yapılandırması bulunamadı.",
     "submission.module_resolve_failed": "Modül yüklenemedi: {error}",
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' bu kullanıcı için bulunamadı — veri kümesini yeniden yükleyin ve tekrar deneyin.",
     "submission.validation_failed": "Yük doğrulaması başarısız oldu. Optimize edici, modül ve sütun eşlemesini kontrol edin.",

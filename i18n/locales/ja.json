@@ -250,7 +250,7 @@
     "serve.chat_requires_live_mcp": "ライブチャットにはライブMCPツールソースが必要です。この実行はデータセットのスナップショットを使用しています。",
     "serve.missing_inputs": "必須の入力フィールドがありません: {missing}。期待される値: {input_fields}",
     "serve.no_declared_inputs": "アーティファクトに宣言された入力フィールドがないため、入力を安全に検証できません。",
-    "serve.no_model_config": "この実行のモデル設定が見つかりません。model_config_override を指定してください。",
+    "serve.no_model_config": "この実行のモデル設定が見つかりません。",
     "submission.module_resolve_failed": "モジュールの読み込みに失敗しました: {error}",
     "submission.staged_dataset_not_found": "このユーザーの staged_dataset_id '{staged_dataset_id}' が見つかりません。データセットを再アップロードして再試行してください。",
     "submission.validation_failed": "ペイロードの検証に失敗しました。オプティマイザ、モジュール、および列マッピングを確認してください。",

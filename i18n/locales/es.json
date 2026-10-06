@@ -250,7 +250,7 @@
     "serve.chat_requires_live_mcp": "El chat en vivo requiere una fuente de herramientas MCP en vivo; esta ejecución usó una instantánea del conjunto de datos.",
     "serve.missing_inputs": "Faltan campos de entrada obligatorios: {missing}. Se esperaba: {input_fields}",
     "serve.no_declared_inputs": "El artefacto no tiene campos de entrada declarados; no se pueden validar las entradas de forma segura.",
-    "serve.no_model_config": "No se encontró ninguna configuración del modelo para la ejecución. Proporciona model_config_override.",
+    "serve.no_model_config": "No se encontró ninguna configuración del modelo para la ejecución.",
     "submission.module_resolve_failed": "Error al cargar el módulo: {error}",
     "submission.staged_dataset_not_found": "No se encontró staged_dataset_id '{staged_dataset_id}' para este usuario; vuelve a subir el conjunto de datos e inténtalo de nuevo.",
     "submission.validation_failed": "La validación de la carga útil falló. Comprueba el optimizador, el módulo y la asignación de columnas.",

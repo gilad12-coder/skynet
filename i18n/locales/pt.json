@@ -250,7 +250,7 @@
     "serve.chat_requires_live_mcp": "O chat em direto requer uma fonte de ferramentas MCP em direto; esta execução usou um instantâneo do conjunto de dados.",
     "serve.missing_inputs": "Faltam campos de entrada obrigatórios: {missing}. Esperado: {input_fields}",
     "serve.no_declared_inputs": "O artefacto não tem campos de entrada declarados; não é possível validar as entradas com segurança.",
-    "serve.no_model_config": "Nenhuma configuração de modelo encontrada para a execução. Forneça model_config_override.",
+    "serve.no_model_config": "Nenhuma configuração de modelo encontrada para a execução.",
     "submission.module_resolve_failed": "Falha ao carregar o módulo: {error}",
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' não encontrado para este utilizador — volte a carregar o conjunto de dados e tente novamente.",
     "submission.validation_failed": "A validação do payload falhou. Verifique o otimizador, o módulo e o mapeamento de colunas.",
