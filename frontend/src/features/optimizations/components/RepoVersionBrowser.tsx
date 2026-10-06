@@ -37,6 +37,8 @@ import {
   MagnifyingGlass,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
+import { RetryIconButton } from "@/shared/ui/retry-icon-button";
+import { Segmented } from "@/shared/ui/segmented";
 import { Input } from "@/shared/ui/primitives/input";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
@@ -48,7 +50,14 @@ import { cn } from "@/shared/lib/utils";
 import { CODE_HIGHLIGHT_SPECS } from "@/shared/ui/code-highlight-style";
 import type { RepositoryFileResponse, RepositoryTreeResponse } from "@/shared/types/api";
 import type { CandidateVersion } from "../lib/blackbox-versions";
-import { foldRows, fullDiffRows, numberRows, type DiffRow } from "../lib/blackbox-diff";
+import {
+  countChanges,
+  foldRows,
+  fullDiffRows,
+  mergeLineSpans,
+  numberRows,
+  type NumberedRow,
+} from "../lib/blackbox-diff";
 import { applyFilePatch, parsePatch, type ApplyResult, type FilePatch } from "../lib/repo-patch";
 import {
   ancestors,
@@ -79,25 +88,34 @@ const MAX_HIGHLIGHT_LINES = 5_000;
 
 type Loaded<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "error" };
 
-/** Fetch keyed data; a null key means nothing to fetch. `load` must be stable. */
-function useLoaded<T>(key: string | null, load: (key: string) => Promise<T>): Loaded<T> | null {
-  const [state, setState] = useState<{ key: string; value: Loaded<T> } | null>(null);
+/**
+ * Fetch keyed data; a null key means nothing to fetch. `load` must be stable.
+ * Bumping `attempt` fetches again (failures are not cached, so this retries).
+ */
+function useLoaded<T>(
+  key: string | null,
+  load: (key: string) => Promise<T>,
+  attempt = 0,
+): Loaded<T> | null {
+  const [state, setState] = useState<{ key: string; attempt: number; value: Loaded<T> } | null>(
+    null,
+  );
   useEffect(() => {
     if (key == null) return;
     let cancelled = false;
     load(key)
       .then((data) => {
-        if (!cancelled) setState({ key, value: { status: "ready", data } });
+        if (!cancelled) setState({ key, attempt, value: { status: "ready", data } });
       })
       .catch(() => {
-        if (!cancelled) setState({ key, value: { status: "error" } });
+        if (!cancelled) setState({ key, attempt, value: { status: "error" } });
       });
     return () => {
       cancelled = true;
     };
-  }, [key, load]);
+  }, [key, load, attempt]);
   if (key == null) return null;
-  return state?.key === key ? state.value : { status: "loading" };
+  return state?.key === key && state.attempt === attempt ? state.value : { status: "loading" };
 }
 
 function useHighlight(path: string, text: string | null): HighlightToken[][] | null {
@@ -231,6 +249,12 @@ function FileTree({
     return open;
   }, [root, selected, overrides]);
   const rows = useMemo(() => visibleRows(root, expanded, filter), [root, expanded, filter]);
+
+  // A file opened from outside the tree (the first change, a moved-file link)
+  // can sit far down a long list; bring it into view without moving the page.
+  useEffect(() => {
+    if (selected) rowRefs.current.get(selected)?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
   const focusIndex = Math.max(
     0,
     rows.findIndex((row) => row.node.path === (focused ?? selected)),
@@ -310,12 +334,12 @@ function FileTree({
       ) : (
         <>
           {failed && (
-            <p className="px-1 text-xs text-muted-foreground">
+            <p className="px-1 text-xs text-foreground/70">
               {msg("optimization.blackbox.repo.browser.tree_error")}
             </p>
           )}
           {rows.length === 0 && filter && (
-            <p className="px-1 text-xs text-muted-foreground">
+            <p className="px-1 text-xs text-foreground/70">
               {msg("optimization.blackbox.repo.browser.no_match")}
             </p>
           )}
@@ -323,7 +347,7 @@ function FileTree({
             role="tree"
             aria-label={msg("optimization.blackbox.repo.browser.tree_aria")}
             onKeyDown={onKeyDown}
-            className="max-h-[22rem] min-h-0 overflow-auto rounded-md md:max-h-[32rem]"
+            className="max-h-[22rem] min-h-0 overflow-auto rounded-md @2xl:max-h-[32rem]"
           >
             {rows.map((row, i) => (
               <TreeRow
@@ -343,7 +367,7 @@ function FileTree({
             ))}
           </div>
           {truncated && (
-            <p className="px-1 text-[0.6875rem] text-muted-foreground">
+            <p className="px-1 text-[0.6875rem] text-foreground/70">
               {msg("optimization.blackbox.repo.browser.truncated")}
             </p>
           )}
@@ -381,10 +405,12 @@ function TreeRow({
       tabIndex={tabbable ? 0 : -1}
       onClick={onActivate}
       className={cn(
-        "flex min-h-8 cursor-pointer select-none items-center gap-1.5 rounded-md pe-2 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-7",
-        selected ? "bg-accent/70 text-foreground" : "text-foreground/80 hover:bg-muted/70",
+        "relative flex min-h-8 cursor-pointer select-none items-center gap-1.5 rounded-md pe-2 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-7",
+        selected
+          ? "bg-primary/10 font-medium text-foreground before:absolute before:inset-y-1 before:start-0 before:w-0.5 before:rounded-full before:bg-primary"
+          : "text-foreground/80 hover:bg-muted/70",
       )}
-      style={{ paddingInlineStart: `${depth * 0.75 + 0.25}rem` }}
+      style={{ paddingInlineStart: `${depth + 0.25}rem` }}
     >
       <span className="flex size-3.5 shrink-0 items-center justify-center" aria-hidden="true">
         {isDir && (
@@ -402,7 +428,9 @@ function TreeRow({
       />
       <span
         className={cn(
-          "min-w-0 flex-1 truncate font-mono",
+          // The name stays LTR for paths, but in an RTL row it must still sit
+          // next to its icon, so its text aligns to the row's start.
+          "min-w-0 flex-1 truncate font-mono rtl:text-right",
           node.removed && "line-through decoration-1",
           changed && !isDir && "font-medium text-foreground",
         )}
@@ -431,48 +459,9 @@ function TreeRow({
 
 /* ── File view ────────────────────────────────────────────────────────── */
 
-type Compare = "base" | "parent";
+export type Compare = "base" | "parent";
 type Mode = "source" | "rendered";
 export type DiffView = "full" | "changes";
-
-/** A small two-way switch: a radio group of pressed-style buttons. */
-function Segmented<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: Array<{ value: T; label: string }>;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div
-      role="radiogroup"
-      aria-label={label}
-      className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5"
-    >
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          role="radio"
-          aria-checked={o.value === value}
-          onClick={() => onChange(o.value)}
-          className={cn(
-            "min-h-8 cursor-pointer rounded px-2 text-[0.6875rem] font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-6",
-            o.value === value
-              ? "bg-background text-foreground shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
-              : "text-foreground/60 hover:text-foreground",
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function Breadcrumb({ repository, path }: { repository: string | null; path: string }) {
   const parts = [...(repository ? [repository] : []), ...path.split("/")];
@@ -500,7 +489,7 @@ function Breadcrumb({ repository, path }: { repository: string | null; path: str
 function Notice({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border/60 px-6 py-8 text-center">
-      <p className="max-w-md text-sm text-muted-foreground">{children}</p>
+      <p className="max-w-md text-sm text-foreground/70">{children}</p>
       {action}
     </div>
   );
@@ -517,34 +506,42 @@ function RawPatch({ text }: { text: string }) {
   );
 }
 
-function SegmentsLine({ row }: { row: DiffRow }) {
+type Tokens = HighlightToken[] | undefined;
+
+/** One diff line: syntax colours where known, change emphasis on top. */
+function StyledLine({ row, tokens }: { row: NumberedRow; tokens: Tokens }) {
+  const emphasis = row.kind === "added" ? ADDED_EMPHASIS_BG : REMOVED_EMPHASIS_BG;
+  const spans =
+    tokens && (row.kind === "same" ? tokens.map((t) => ({ ...t, changed: false })) : mergeLineSpans(tokens, row.segments));
+  if (spans) {
+    return (
+      <>
+        {spans.map((span, j) => {
+          const style = span.spec == null ? undefined : SPEC_STYLE[span.spec];
+          return span.changed ? (
+            <mark key={j} className="rounded-sm text-inherit" style={{ ...style, background: emphasis }}>
+              {span.text}
+            </mark>
+          ) : (
+            <span key={j} style={style}>
+              {span.text}
+            </span>
+          );
+        })}
+      </>
+    );
+  }
   return (
     <>
       {row.segments.map((seg, j) =>
         seg.changed ? (
-          <mark
-            key={j}
-            className="rounded-sm text-inherit"
-            style={{ background: row.kind === "added" ? ADDED_EMPHASIS_BG : REMOVED_EMPHASIS_BG }}
-          >
+          <mark key={j} className="rounded-sm text-inherit" style={{ background: emphasis }}>
             {seg.text}
           </mark>
         ) : (
           <span key={j}>{seg.text}</span>
         ),
       )}
-    </>
-  );
-}
-
-function TokensLine({ tokens }: { tokens: HighlightToken[] }) {
-  return (
-    <>
-      {tokens.map((token, j) => (
-        <span key={j} style={token.spec == null ? undefined : SPEC_STYLE[token.spec]}>
-          {token.text}
-        </span>
-      ))}
     </>
   );
 }
@@ -556,40 +553,57 @@ function TokensLine({ tokens }: { tokens: HighlightToken[] }) {
  */
 function SourceDiff({
   path,
+  rows,
   before,
   after,
   changesOnly,
 }: {
   path: string;
+  rows: NumberedRow[];
   before: string;
   after: string;
   changesOnly: boolean;
 }) {
-  const shownBefore = trimFinalNewline(before);
-  const shownAfter = trimFinalNewline(after);
-  const rows = useMemo(
-    () => numberRows(fullDiffRows(shownBefore, shownAfter)),
-    [shownBefore, shownAfter],
-  );
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const shown = useMemo(
     () => (changesOnly ? foldRows(rows, DIFF_CONTEXT_LINES, expanded) : rows),
     [changesOnly, rows, expanded],
   );
-  const highlighted = useHighlight(path, shownAfter);
+  const hasChanges = rows.some((row) => row.kind !== "same");
+  const afterTokens = useHighlight(path, after);
+  // The old side is only read for removed lines, so skip it when there are none.
+  const beforeTokens = useHighlight(path, rows.some((row) => row.kind === "removed") ? before : null);
+
+  // A small edit deep in a long file would otherwise open at line 1, out of view.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = scrollRef.current;
+    const first = box?.querySelector<HTMLElement>("[data-changed]");
+    if (!box || !first) return;
+    box.scrollTop = Math.max(0, first.offsetTop - 3 * first.offsetHeight);
+  }, [rows]);
+
   return (
     <div
-      className="max-h-[32rem] overflow-auto rounded-lg border border-border/50 bg-muted/30 py-2 font-mono text-[0.8125rem] leading-relaxed"
+      ref={scrollRef}
+      className="relative max-h-[32rem] overflow-auto rounded-lg border border-border/50 bg-muted/30 py-2 font-mono text-[0.8125rem] leading-relaxed"
       dir="ltr"
     >
       {shown.map((row) => {
         if ("gap" in row) {
+          const from = rows[row.start]?.newLine;
+          const to = rows[row.start + row.hidden - 1]?.newLine;
           return (
             <button
               key={`gap-${row.start}`}
               type="button"
               onClick={() => setExpanded((prev) => new Set(prev).add(row.start))}
-              className="my-0.5 flex min-h-8 w-full cursor-pointer items-center gap-2 bg-muted/60 ps-4 pe-3 text-start font-sans text-[0.6875rem] text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45 lg:min-h-6"
+              aria-label={
+                from != null && to != null
+                  ? formatMsg("optimization.blackbox.repo.browser.fold_aria", { from, to })
+                  : undefined
+              }
+              className="my-0.5 flex min-h-8 w-full cursor-pointer items-center gap-2 bg-muted/60 ps-4 pe-3 text-start font-sans text-[0.6875rem] text-foreground/70 transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45 lg:min-h-6"
             >
               <DotsThree className="size-3.5 shrink-0" aria-hidden="true" />
               <span dir="auto">
@@ -598,6 +612,7 @@ function SourceDiff({
             </button>
           );
         }
+        const changed = row.kind !== "same";
         const style =
           row.kind === "added"
             ? { background: ADDED_BG, color: ADDED_FG }
@@ -605,27 +620,52 @@ function SourceDiff({
               ? { background: REMOVED_BG, color: REMOVED_FG }
               : undefined;
         const marker = row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " ";
-        const tokens = row.kind === "same" && row.newLine != null ? highlighted?.[row.newLine - 1] : undefined;
+        const tokens =
+          row.kind === "removed"
+            ? row.oldLine != null
+              ? beforeTokens?.[row.oldLine - 1]
+              : undefined
+            : row.newLine != null
+              ? afterTokens?.[row.newLine - 1]
+              : undefined;
         return (
-          <div key={`${row.oldLine}-${row.newLine}`} className="flex min-h-[1.5em] pe-3" style={style}>
+          <div
+            key={`${row.oldLine}-${row.newLine}`}
+            className="flex min-h-[1.5em] pe-3"
+            style={style}
+            data-changed={changed || undefined}
+          >
+            {hasChanges && (
+              <span
+                className="w-10 shrink-0 select-none pe-2 text-end tabular-nums opacity-50"
+                aria-hidden="true"
+              >
+                {row.oldLine ?? ""}
+              </span>
+            )}
             <span
               className="w-10 shrink-0 select-none pe-2 text-end tabular-nums opacity-50"
               aria-hidden="true"
             >
-              {row.oldLine ?? ""}
+              {row.newLine ?? row.oldLine ?? ""}
             </span>
-            <span
-              className="w-10 shrink-0 select-none pe-2 text-end tabular-nums opacity-50"
-              aria-hidden="true"
-            >
-              {row.newLine ?? ""}
-            </span>
-            <span className="w-4 shrink-0 select-none opacity-70" aria-hidden="true">
-              {marker}
-            </span>
+            {hasChanges && (
+              <span className="w-4 shrink-0 select-none opacity-70" aria-hidden="true">
+                {marker}
+              </span>
+            )}
             <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-              {tokens ? <TokensLine tokens={tokens} /> : <SegmentsLine row={row} />}
-              {row.segments.every((s) => s.text === "") && !tokens?.length && " "}
+              {changed && (
+                <span className="sr-only">
+                  {msg(
+                    row.kind === "added"
+                      ? "optimization.blackbox.repo.browser.line_added"
+                      : "optimization.blackbox.repo.browser.line_removed",
+                  )}
+                </span>
+              )}
+              <StyledLine row={row} tokens={tokens} />
+              {row.segments.every((seg) => seg.text === "") && " "}
             </span>
           </div>
         );
@@ -693,6 +733,18 @@ function baseTextOf(sides: FileSides, base: Loaded<RepositoryFileResponse> | nul
   return { state: "ready", text: base.data.content ?? "" };
 }
 
+function StatusChip({ children, title }: { children: ReactNode; title?: string }) {
+  return (
+    <span
+      className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.6875rem] font-medium text-foreground/75"
+      title={title}
+      dir="auto"
+    >
+      {children}
+    </span>
+  );
+}
+
 function FileView({
   optimizationId,
   repository,
@@ -700,8 +752,11 @@ function FileView({
   files,
   parent,
   parentFiles,
+  compare,
+  onCompare,
   diffView,
   onDiffView,
+  onSelect,
   onText,
 }: {
   optimizationId: string;
@@ -710,19 +765,22 @@ function FileView({
   files: FilePatch[];
   parent: CandidateVersion | null;
   parentFiles: FilePatch[];
+  compare: Compare;
+  onCompare: (compare: Compare) => void;
   diffView: DiffView;
   onDiffView: (view: DiffView) => void;
+  onSelect: (path: string) => void;
   onText: (text: string | null) => void;
 }) {
   const kind = repoFileKind(path);
   const renderable = kind === "markdown" || kind === "html";
-  const [compare, setCompare] = useState<Compare>("base");
   const [mode, setMode] = useState<Mode>("source");
   const [showPatch, setShowPatch] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const loadFile = useCallback((p: string) => getRepositoryFile(optimizationId, p), [optimizationId]);
 
   const sides = sidesOf(path, files);
-  const base = useLoaded(sides.basePath, loadFile);
+  const base = useLoaded(sides.basePath, loadFile, attempt);
   const after = resolveText(sides, base);
   const before = baseTextOf(sides, base);
 
@@ -731,7 +789,7 @@ function FileView({
   // Without a parent entry the parent leaves the file as the commit has it,
   // which is this version's own base (or nothing, for a file it adds).
   const parentOwnBase = parentSides.change ? parentSides : { ...sides, change: null, removed: false };
-  const parentBase = useLoaded(useParent ? parentOwnBase.basePath : null, loadFile);
+  const parentBase = useLoaded(useParent ? parentOwnBase.basePath : null, loadFile, attempt);
   const parentText = useParent ? resolveText(parentOwnBase, parentBase) : before;
 
   const afterText = after.state === "ready" ? after.text : null;
@@ -739,16 +797,32 @@ function FileView({
     onText(afterText);
   }, [afterText, onText]);
 
+  const shownBefore = parentText.state === "ready" ? trimFinalNewline(parentText.text) : null;
+  const shownAfter = afterText == null ? null : trimFinalNewline(afterText);
+  const rows =
+    shownBefore == null || shownAfter == null ? null : numberRows(fullDiffRows(shownBefore, shownAfter));
+  // Counted from what is on screen, so they follow the compare switch.
+  const counts = rows ? countChanges(rows) : null;
+
   const change = sides.change;
-  const statusNote = sides.removed
-    ? msg("optimization.blackbox.repo.browser.deleted")
-    : change?.status === "added"
-      ? msg("optimization.blackbox.repo.browser.added")
-      : change?.status === "renamed" && change.oldPath
-        ? formatMsg("optimization.blackbox.repo.browser.renamed", { from: change.oldPath })
-        : !change
-          ? msg("optimization.blackbox.repo.browser.unchanged_file")
-          : null;
+  const movedTo = sides.removed && change?.status === "renamed" ? change.path : null;
+  const status = useParent
+    ? counts && counts.added + counts.removed === 0
+      ? formatMsg("optimization.blackbox.repo.browser.status_same_as_parent", { n: parent.number })
+      : null
+    : sides.removed
+      ? msg("optimization.blackbox.repo.browser.status_deleted")
+      : change?.status === "added"
+        ? msg("optimization.blackbox.repo.browser.status_added")
+        : change?.status === "renamed"
+          ? msg("optimization.blackbox.repo.browser.status_renamed")
+          : !change
+            ? msg("optimization.blackbox.repo.browser.status_unchanged")
+            : null;
+  const statusTitle =
+    !useParent && change?.status === "renamed" && change.oldPath && !sides.removed
+      ? formatMsg("optimization.blackbox.repo.browser.renamed", { from: change.oldPath })
+      : undefined;
 
   const patchAction = change ? (
     <Button type="button" variant="outline" size="sm" onClick={() => setShowPatch((v) => !v)}>
@@ -768,56 +842,99 @@ function FileView({
   const blocked = [after, parentText].find((t) => t.state !== "ready" && t.state !== "loading");
   const loading = after.state === "loading" || parentText.state === "loading";
   let body: ReactNode;
-  if (blocked?.state === "binary") {
+  if (movedTo) {
+    body = (
+      <Notice
+        action={
+          <Button type="button" variant="outline" size="sm" onClick={() => onSelect(movedTo)}>
+            <span dir="ltr" className="font-mono">
+              {movedTo.split("/").pop()}
+            </span>
+          </Button>
+        }
+      >
+        {formatMsg("optimization.blackbox.repo.browser.moved_to", { path: movedTo })}
+      </Notice>
+    );
+  } else if (blocked?.state === "binary") {
     body = <Notice>{msg("optimization.blackbox.repo.browser.binary")}</Notice>;
+  } else if (blocked?.state === "failed") {
+    body = (
+      <Notice
+        action={
+          <div className="flex items-center gap-2">
+            <RetryIconButton
+              label={msg("optimization.blackbox.repo.browser.retry")}
+              className="ms-0"
+              onClick={() => setAttempt((n) => n + 1)}
+            />
+            {patchAction}
+          </div>
+        }
+      >
+        {msg("optimization.blackbox.repo.browser.fetch_failed")}
+      </Notice>
+    );
   } else if (blocked) {
     const key =
       blocked.state === "too_large"
         ? "optimization.blackbox.repo.browser.too_large"
-        : blocked.state === "conflict"
-          ? "optimization.blackbox.repo.browser.apply_failed"
-          : "optimization.blackbox.repo.browser.fetch_failed";
+        : "optimization.blackbox.repo.browser.apply_failed";
     body = <Notice action={patchAction}>{msg(key)}</Notice>;
-  } else if (loading) {
+  } else if (loading || !rows || after.state !== "ready") {
     body = <Skeleton height={240} borderRadius={8} />;
-  } else if (after.state === "ready" && parentText.state === "ready") {
-    body =
-      renderable && mode === "rendered" && !sides.removed ? (
-        <RenderedText text={after.text} kind={kind} title={path} />
-      ) : (
-        <SourceDiff
-          path={path}
-          before={parentText.text}
-          after={after.text}
-          changesOnly={foldable && diffView === "changes"}
-        />
-      );
+  } else if (renderable && mode === "rendered" && !sides.removed) {
+    body = <RenderedText text={after.text} kind={kind} title={path} />;
+  } else {
+    body = (
+      <SourceDiff
+        // A new diff has new row indices, so folds opened on the old one must not carry over.
+        key={compare}
+        path={path}
+        rows={rows}
+        before={shownBefore ?? ""}
+        after={shownAfter ?? ""}
+        changesOnly={foldable && diffView === "changes"}
+      />
+    );
   }
 
   return (
     <div className="min-w-0 space-y-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <Breadcrumb repository={repository} path={path} />
-        {change && !sides.removed && <ChangeCounts added={change.added} removed={change.removed} />}
+        <div className="flex min-w-0 items-center gap-2">
+          <Breadcrumb repository={repository} path={path} />
+          {counts && counts.added + counts.removed > 0 && !movedTo && (
+            <ChangeCounts added={counts.added} removed={counts.removed} />
+          )}
+          {status && <StatusChip title={statusTitle}>{status}</StatusChip>}
+        </div>
         <div className="ms-auto flex flex-wrap items-center gap-1.5">
-          {parent && (
-            <Segmented<Compare>
-              label={msg("optimization.blackbox.repo.browser.compare_label")}
-              value={compare}
-              onChange={setCompare}
-              options={[
-                { value: "base", label: msg("optimization.blackbox.repo.browser.compare_base") },
-                {
-                  value: "parent",
-                  label: formatMsg("optimization.blackbox.repo.browser.compare_parent", {
-                    n: parent.number,
-                  }),
-                },
-              ]}
-            />
+          {parent && !movedTo && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[0.6875rem] text-foreground/70">
+                {msg("optimization.blackbox.repo.browser.compare_label")}
+              </span>
+              <Segmented<Compare>
+                size="sm"
+                label={msg("optimization.blackbox.repo.browser.compare_label")}
+                value={compare}
+                onChange={onCompare}
+                options={[
+                  { value: "base", label: msg("optimization.blackbox.repo.browser.compare_base") },
+                  {
+                    value: "parent",
+                    label: formatMsg("optimization.blackbox.repo.browser.compare_parent", {
+                      n: parent.number,
+                    }),
+                  },
+                ]}
+              />
+            </div>
           )}
           {foldable && showingSource && (
             <Segmented<DiffView>
+              size="sm"
               label={msg("optimization.blackbox.repo.browser.diff_view_label")}
               value={diffView}
               onChange={onDiffView}
@@ -832,6 +949,7 @@ function FileView({
           )}
           {renderable && !sides.removed && (
             <Segmented<Mode>
+              size="sm"
               label={msg("optimization.blackbox.repo.browser.mode_label")}
               value={mode}
               onChange={setMode}
@@ -843,7 +961,6 @@ function FileView({
           )}
         </div>
       </div>
-      {statusNote && <p className="text-[0.6875rem] text-muted-foreground">{statusNote}</p>}
       {body}
       {showPatch && change && <RawPatch text={change.raw} />}
     </div>
@@ -887,6 +1004,8 @@ export function RepoVersionBrowser({
   parent,
   path,
   onPathChange,
+  compare,
+  onCompareChange,
   onOpenFile,
 }: {
   optimizationId: string;
@@ -896,6 +1015,9 @@ export function RepoVersionBrowser({
   /** The reader's last pick; kept across versions while the file exists. */
   path: string | null;
   onPathChange: (path: string) => void;
+  /** What the diff is against; owned by the host so it survives version steps. */
+  compare: Compare;
+  onCompareChange: (compare: Compare) => void;
   /** The open file and its text as this version leaves it, for copying; null while unknown. */
   onOpenFile: (file: { path: string; text: string } | null) => void;
 }) {
@@ -905,6 +1027,8 @@ export function RepoVersionBrowser({
   const tree = useLoaded<RepositoryTreeResponse>(optimizationId, getRepositoryTree);
   const entries = tree?.status === "ready" ? tree.data.entries : null;
   const root = useMemo(() => buildRepoTree(entries ?? [], files), [entries, files]);
+  const mainRef = useRef<HTMLDivElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
 
   const firstChanged = files[0]?.path ?? null;
   const selected =
@@ -920,42 +1044,56 @@ export function RepoVersionBrowser({
     if (selected == null) onOpenFile(null);
   }, [selected, onOpenFile]);
 
+  const select = (next: string) => {
+    onPathChange(next);
+    // In the narrow layout the tree sits above the file, so a pick would
+    // otherwise change something out of view and look like it did nothing.
+    const main = mainRef.current;
+    const aside = asideRef.current;
+    if (main && aside && aside.getBoundingClientRect().bottom <= main.getBoundingClientRect().top + 1) {
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      requestAnimationFrame(() => main.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" }));
+    }
+  };
+
   return (
-    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_15rem] lg:grid-cols-[minmax(0,1fr)_17rem]">
-      <div className="min-w-0">
-        {selected ? (
-          <FileView
-            key={selected}
-            optimizationId={optimizationId}
-            repository={tree?.status === "ready" ? tree.data.repository : null}
-            path={selected}
-            files={files}
-            parent={parent}
-            parentFiles={parentFiles}
-            diffView={diffView}
-            onDiffView={setDiffView}
-            onText={onText}
+    <div className="@container">
+      <div className="grid gap-3 @2xl:grid-cols-[minmax(0,1fr)_15rem] @4xl:grid-cols-[minmax(0,1fr)_17rem]">
+        <div ref={mainRef} className="min-w-0 scroll-mt-4">
+          {selected ? (
+            <FileView
+              key={selected}
+              optimizationId={optimizationId}
+              repository={tree?.status === "ready" ? tree.data.repository : null}
+              path={selected}
+              files={files}
+              parent={parent}
+              parentFiles={parentFiles}
+              compare={compare}
+              onCompare={onCompareChange}
+              diffView={diffView}
+              onDiffView={setDiffView}
+              onSelect={select}
+              onText={onText}
+            />
+          ) : (
+            <Notice>{msg("optimization.blackbox.repo.unchanged")}</Notice>
+          )}
+        </div>
+        <aside
+          ref={asideRef}
+          className="order-first min-w-0 @2xl:order-none @2xl:border-s @2xl:border-border/50 @2xl:ps-3"
+        >
+          <FileTree
+            root={root}
+            selected={selected}
+            onSelect={select}
+            loading={tree?.status === "loading" && files.length === 0}
+            failed={tree?.status === "error"}
+            truncated={tree?.status === "ready" && tree.data.truncated}
           />
-        ) : (
-          <Notice>
-            {msg(
-              files.length === 0
-                ? "optimization.blackbox.repo.unchanged"
-                : "optimization.blackbox.repo.browser.pick_file",
-            )}
-          </Notice>
-        )}
+        </aside>
       </div>
-      <aside className="order-first min-w-0 md:order-none md:border-s md:border-border/50 md:ps-3">
-        <FileTree
-          root={root}
-          selected={selected}
-          onSelect={onPathChange}
-          loading={tree?.status === "loading" && files.length === 0}
-          failed={tree?.status === "error"}
-          truncated={tree?.status === "ready" && tree.data.truncated}
-        />
-      </aside>
     </div>
   );
 }

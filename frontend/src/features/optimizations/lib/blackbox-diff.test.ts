@@ -7,6 +7,7 @@ import {
   diffWords,
   foldRows,
   fullDiffRows,
+  mergeLineSpans,
   numberRows,
 } from "./blackbox-diff.ts";
 
@@ -127,6 +128,40 @@ test("foldRows opens an expanded gap", () => {
 });
 
 test("foldRows returns a single gap for an unchanged file", () => {
-  const rows = numberRows(fullDiffRows("a\nb", "a\nb"));
-  assert.deepEqual(foldRows(rows), [{ gap: true, start: 0, hidden: 2 }]);
+  const rows = numberRows(fullDiffRows(numbered(10), numbered(10)));
+  assert.deepEqual(foldRows(rows), [{ gap: true, start: 0, hidden: 10 }]);
+});
+
+test("foldRows leaves runs shorter than minFold unfolded", () => {
+  const before = numbered(9);
+  const after = before.replace("l5\n", "L5\n");
+  const folded = foldRows(numberRows(fullDiffRows(before, after)), 1);
+  assert.equal(folded.filter((r) => "gap" in r).length, 0);
+  assert.equal(foldRows(numberRows(fullDiffRows(before, after)), 1, new Set(), 3).filter((r) => "gap" in r).length, 2);
+});
+
+test("mergeLineSpans cuts tokens at change boundaries", () => {
+  assert.deepEqual(
+    mergeLineSpans(
+      [
+        { text: "return", spec: 1 },
+        { text: " x + 1", spec: null },
+      ],
+      [
+        { text: "retu", changed: false },
+        { text: "rn x", changed: true },
+        { text: " + 1", changed: false },
+      ],
+    ),
+    [
+      { text: "retu", spec: 1, changed: false },
+      { text: "rn", spec: 1, changed: true },
+      { text: " x", spec: null, changed: true },
+      { text: " + 1", spec: null, changed: false },
+    ],
+  );
+});
+
+test("mergeLineSpans gives up when the texts differ", () => {
+  assert.equal(mergeLineSpans([{ text: "a", spec: null }], [{ text: "b", changed: false }]), null);
 });

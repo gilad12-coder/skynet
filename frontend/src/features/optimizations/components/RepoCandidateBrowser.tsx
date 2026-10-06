@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { versionForPrompt, type CandidateVersion } from "../lib/blackbox-versions";
-import { RepoVersionBrowser } from "./RepoVersionBrowser";
+import { RepoVersionBrowser, type Compare } from "./RepoVersionBrowser";
 
 const ignoreOpenFile = () => {};
 
@@ -19,6 +19,7 @@ export function RepoCandidateBrowser({
   parentPrompt: Record<string, string>;
 }) {
   const [path, setPath] = useState<string | null>(null);
+  const [compare, setCompare] = useState<Compare>("base");
   const version = versionForPrompt(versions, prompt);
   const parent = versionForPrompt(versions, parentPrompt);
   if (!version) return null;
@@ -31,6 +32,8 @@ export function RepoCandidateBrowser({
       parent={parent && parent.number >= 0 ? parent : null}
       path={path}
       onPathChange={setPath}
+      compare={compare}
+      onCompareChange={setCompare}
       onOpenFile={ignoreOpenFile}
     />
   );
