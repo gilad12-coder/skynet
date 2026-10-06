@@ -38,7 +38,7 @@ from core.billing.runtime import BudgetRuntime
 from core.billing.usage_tags import CALLER_PROPOSER, KIND_EMBEDDING, USAGE_TAGS_HEADER, encode_tags
 from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, settings
-from core.exceptions import ServiceError
+from core.exceptions import InfrastructureInterruptionError, ServiceError
 from core.service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
 from core.service_gateway.optimization.blackbox.sandbox import CommandResult, LocalSubprocessRuntime, SandboxSpec
 from core.service_gateway.optimization.blackbox.sandbox_broker import SandboxBroker
@@ -610,3 +610,52 @@ def test_readiness_probes_skip_the_novelty_embeddings_route(gateway: ModelGatewa
     assert _verify_model_routes(gateway, native=False) == [
         {"key": "model.optimization", "status": "succeeded", "field": "optimization"}
     ]
+
+
+class _FlakyGet:
+    """Fail a set number of budget-state reads before answering."""
+
+    def __init__(self, failures: int) -> None:
+        """Remember how many reads time out before one succeeds.
+
+        Args:
+            failures: Reads that raise a transport timeout first.
+        """
+        self.failures = failures
+        self.calls = 0
+
+    def __call__(self, url: str, **_: Any) -> httpx.Response:
+        """Time out until the failures are used up, then report an open budget.
+
+        Args:
+            url: Requested budget-state endpoint.
+
+        Returns:
+            An open budget state.
+
+        Raises:
+            httpx.ReadTimeout: While failures remain.
+        """
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise httpx.ReadTimeout("timed out")
+        return httpx.Response(200, json={"blocked_reason": None}, request=httpx.Request("GET", url))
+
+
+def test_budget_check_survives_a_slow_relay_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One slow relay reply after a finished run is retried, not treated as an interruption."""
+    flaky = _FlakyGet(failures=2)
+    monkeypatch.setattr(gateway_module.httpx, "get", flaky)
+    monkeypatch.setattr(gateway_module.time, "sleep", lambda _: None)
+    gateway_module.raise_gateway_stop({"url": "http://relay", "token": "t"})
+    assert flaky.calls == 3
+
+
+def test_budget_check_reports_an_interruption_once_retries_run_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A relay that never answers still surfaces as an infrastructure interruption."""
+    flaky = _FlakyGet(failures=10)
+    monkeypatch.setattr(gateway_module.httpx, "get", flaky)
+    monkeypatch.setattr(gateway_module.time, "sleep", lambda _: None)
+    with pytest.raises(InfrastructureInterruptionError):
+        gateway_module.raise_gateway_stop({"url": "http://relay", "token": "t"})
+    assert flaky.calls == gateway_module._BUDGET_STATE_ATTEMPTS
