@@ -885,6 +885,41 @@ def test_shinka_bootstrap_installs_the_pinned_requirements_into_a_python_312_ven
     protected = _bootstrap_command("vercel", protected=True, engine_id="shinka_evolve")
     assert "uv venv" not in protected
     assert "import shinka.core.async_runner" in protected
+    assert f"if [ -x {native_runtime.SHINKA_IMAGE_PYTHON} ]" in protected
+
+
+def test_dockerfile_bakes_shinka_into_the_venv_the_runtime_uses() -> None:
+    """Keep the opt-in ShinkaEvolve venv at the runtime's path, built from the same pinned requirements."""
+    dockerfile = (Path(__file__).resolve().parents[5] / "Dockerfile").read_text()
+    venv = native_runtime.SHINKA_IMAGE_PYTHON.removesuffix("/bin/python")
+    assert "ARG INCLUDE_SHINKA_EVOLVE=false" in dockerfile
+    assert '[ "$INCLUDE_SHINKA_EVOLVE" = "1" ]' in dockerfile
+    assert f"python -m venv {venv}" in dockerfile
+    assert "core/service_gateway/optimization/blackbox/shinka_requirements.txt" in dockerfile
+    assert f'{native_runtime.SHINKA_IMAGE_PYTHON} -c "import shinka.core.async_runner"' in dockerfile
+
+
+def test_native_readiness_probes_shinka_in_the_image_venv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Report ShinkaEvolve readiness from the image's own venv rather than the backend interpreter.
+
+    Args:
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "verified-source")
+    session = ReadinessSession()
+    options = NativeOptions(
+        runtime="vercel",
+        model="test/model",
+        gateway=GatewayConfig(url="http://127.0.0.1:9000/v1", api_key="scoped"),
+        budget_route={"url": "http://127.0.0.1:9000/v1", "token": "scoped"},
+        sandbox_runtime=FakeRuntime(session),
+        max_token_cost=1,
+    )
+    check_native_runtime(options)
+    probe = session.calls[1][0]
+    assert native_runtime.SHINKA_IMAGE_PYTHON in probe
+    assert "os.X_OK" in probe
+    assert "find_spec(" in probe
 
 
 def test_shinka_runner_files_carry_the_pinned_requirements() -> None:
