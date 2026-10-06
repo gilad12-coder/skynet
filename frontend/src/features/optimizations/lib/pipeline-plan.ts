@@ -30,7 +30,12 @@ export interface PlannedStage {
   detail?: string;
 }
 
-const HILL_CLIMBING_ENGINES = new Set(["autoresearch", "meta_harness", "autosaddler"]);
+const HILL_CLIMBING_ENGINES = new Set([
+  "autoresearch",
+  "meta_harness",
+  "autosaddler",
+  "shinka_evolve",
+]);
 
 // Optimizer names arrive as dotted DSPy paths ("dspy.teleprompt.MIPROv2") or
 // the bare "gepa" alias; the tracker wants the class name alone.

@@ -639,6 +639,7 @@ function EngineTable() {
     ["AutoResearch", msg("auto.features.tutorial.components.concepts.guide.literal.375")],
     ["Meta-Harness", msg("auto.features.tutorial.components.concepts.guide.literal.376")],
     ["AutoSaddler", msg("auto.features.tutorial.components.concepts.guide.literal.377")],
+    ["ShinkaEvolve", msg("auto.features.tutorial.components.concepts.guide.literal.501")],
   ];
   return (
     <div className="my-3 overflow-x-auto rounded-lg border border-[#E5DDD4] bg-white shadow-[0_1px_2px_rgba(28,22,18,0.05)]">

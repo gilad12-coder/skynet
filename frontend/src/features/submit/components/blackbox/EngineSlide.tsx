@@ -2,7 +2,15 @@
 
 import type { ComponentType } from "react";
 
-import { ArrowsClockwise, Cube, GitBranch, Robot, Shuffle, Wrench } from "@/shared/ui/icons";
+import {
+  ArrowsClockwise,
+  Cube,
+  GitBranch,
+  Robot,
+  Shuffle,
+  SquaresFour,
+  Wrench,
+} from "@/shared/ui/icons";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
@@ -217,6 +225,36 @@ function AutoSaddlerBanner() {
   );
 }
 
+// Two islands evolve apart through the shared model pool, and the dashed
+// return path is migration between them.
+function ShinkaEvolveBanner() {
+  return (
+    <BannerFrame>
+      <GBox x={22} y={15} w={34} h={20} />
+      <GBar x={30} y={23} w={18} />
+      <GBox x={22} y={53} w={34} h={20} />
+      <GBar x={30} y={61} w={14} />
+      <GWire d="M56 25 H76 C86 25 86 44 96 44" />
+      <GWire d="M56 63 H76 C86 63 86 44 96 44" />
+      <GArrow x={100} y={44} dir="right" />
+      <GBox x={100} y={29} w={40} h={30} accent />
+      <GBar x={109} y={37} w={22} />
+      <GBar x={109} y={43} w={16} />
+      <GBar x={109} y={49} w={20} />
+      <GWire d="M140 44 H150 C160 44 160 25 180 25" />
+      <GWire d="M140 44 H150 C160 44 160 63 180 63" />
+      <GArrow x={184} y={25} dir="right" />
+      <GArrow x={184} y={63} dir="right" />
+      <GBox x={184} y={15} w={34} h={20} />
+      <GBar x={192} y={23} w={18} />
+      <GBox x={184} y={53} w={34} h={20} />
+      <GBar x={192} y={61} w={12} />
+      <GWire d="M201 73 V82 H39 V78" />
+      <GArrow x={39} y={73} dir="up" />
+    </BannerFrame>
+  );
+}
+
 function GenericBanner() {
   return (
     <BannerFrame>
@@ -240,4 +278,5 @@ const ENGINE_VISUALS: Record<BlackboxEngineId, EngineVisual> = {
   autoresearch: { Banner: AutoResearchBanner, icon: Robot },
   meta_harness: { Banner: MetaHarnessBanner, icon: Wrench },
   autosaddler: { Banner: AutoSaddlerBanner, icon: ArrowsClockwise },
+  shinka_evolve: { Banner: ShinkaEvolveBanner, icon: SquaresFour },
 };

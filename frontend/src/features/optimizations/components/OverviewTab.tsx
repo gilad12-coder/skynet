@@ -150,7 +150,7 @@ function OverviewTabImpl({
         : undefined,
     [isBlackbox, job.blackbox_result, payload],
   );
-  // A hill-climbing lane (Meta-Harness, AutoResearch, AutoSaddler) gets the
+  // A hill-climbing lane (Meta-Harness, AutoResearch, AutoSaddler, ShinkaEvolve) gets the
   // climb view instead of the tree; the lane that produced the newest
   // versions decides.
   const strategyEngine = (payload?.payload.strategy as Partial<BlackboxStrategy> | undefined)

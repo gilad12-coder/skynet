@@ -16,6 +16,7 @@ import type {
   BlackboxProposer,
   BlackboxRunRequest,
   BlackboxScorer,
+  BlackboxShinkaSettings,
   BlackboxTarget,
   ScorerDependencyLock,
   ModelConfig,
@@ -60,6 +61,7 @@ import { blackboxIssueStage } from "../lib/blackbox-issue-stage";
 import { preflightDestination } from "../lib/preflight-destination";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import {
+  AUTO_MIN_SCORER_RUNS,
   DEFAULT_PROPOSER,
   engineSelectionIssue,
   submittedProposer,
@@ -72,6 +74,12 @@ import {
   resolveScoringModel,
   type ScoringModelMode,
 } from "../lib/model-roles";
+import {
+  DEFAULT_SHINKA_SETTINGS,
+  shinkaSettingsFrom,
+  submittedExtraModels,
+  submittedShinka,
+} from "../lib/shinka-settings";
 import {
   preflightIdentity,
   type ValidationEvidence,
@@ -388,6 +396,22 @@ export function useBlackboxWizard(
   const [maxIterations, setMaxIterations] = useState<number | "">("");
   const [stopAtScore, setStopAtScore] = useState("");
   const [reflectionModel, setReflectionModel] = useState<ModelConfig>(emptyModelConfig());
+  const [extraOptimizationModels, setExtraOptimizationModels] = useState<ModelConfig[]>([]);
+  const [shinkaSettings, setShinkaSettings] =
+    useState<BlackboxShinkaSettings>(DEFAULT_SHINKA_SETTINGS);
+  const updateShinka = useCallback(
+    (patch: Partial<BlackboxShinkaSettings>) =>
+      setShinkaSettings((prev) => ({ ...prev, ...patch })),
+    [],
+  );
+  const [shinkaOpen, setShinkaOpen] = useState(false);
+  // Latched once the panel opens: in Auto only a user who looked at the
+  // settings sends them, and closing the panel again keeps their edits.
+  const [shinkaOpened, setShinkaOpened] = useState(false);
+  const toggleShinka = useCallback((open: boolean) => {
+    setShinkaOpen(open);
+    if (open) setShinkaOpened(true);
+  }, []);
   const nativeProposer = usesNativeProposer(strategyMode, engine, isRepo);
   const iterationLimitSupported = supportsIterationLimit(strategyMode, engine);
   const effectiveReflectionModel = useMemo(
@@ -716,6 +740,20 @@ export function useBlackboxWizard(
         // Both recipes store the reflection model the same way.
         const reflection = stored.reflection_model_config as ModelConfig | undefined;
         if (reflection?.name) setReflectionModel({ ...emptyModelConfig(), ...reflection });
+        if (source) {
+          // The backend may store the extra models under the field name
+          // rather than the request alias.
+          const extras = (source.extra_reflection_model_configs ??
+            stored.extra_reflection_model_settings) as ModelConfig[] | undefined;
+          if (Array.isArray(extras))
+            setExtraOptimizationModels(
+              extras.filter((m) => m?.name).map((m) => ({ ...emptyModelConfig(), ...m })),
+            );
+          if (source.shinka) {
+            setShinkaSettings(shinkaSettingsFrom(source.shinka));
+            setShinkaOpened(true);
+          }
+        }
         // A Program run's seed still has to be drafted here, so only an
         // Anything clone rules the interview out.
         setCloned(source != null);
@@ -884,6 +922,7 @@ export function useBlackboxWizard(
   ]);
   const tokenSource = aggregateTokenSource([
     effectiveReflectionModel,
+    ...(submittedExtraModels(extraOptimizationModels, strategyMode, engine) ?? []),
     ...(scorerUsesModel && resolvedScorerModel ? [resolvedScorerModel] : []),
   ]);
   const suggestedCeiling = useMemo(
@@ -932,6 +971,12 @@ export function useBlackboxWizard(
       proposer: nativeProposer ? submittedProposer(proposer, strategyMode, engine) : undefined,
       target: isRepo ? repoTarget() : { kind: "text" },
       reflection_model_config: reflection,
+      extra_reflection_model_configs: submittedExtraModels(
+        extraOptimizationModels,
+        strategyMode,
+        engine,
+      )?.map(prepareModelConfig),
+      shinka: submittedShinka(shinkaSettings, strategyMode, engine, shinkaOpened),
       token_source: tokenSource,
       is_private: isPrivate,
       ...(economyMode && { economy_mode: true }),
@@ -1338,7 +1383,7 @@ export function useBlackboxWizard(
             "submit.blackbox.validation.reflection_model_required",
             "bb-optimization-model",
           );
-        if (strategyMode === "auto" && maxScorerRuns < 5)
+        if (strategyMode === "auto" && maxScorerRuns < AUTO_MIN_SCORER_RUNS)
           return fail("submit.blackbox.validation.auto_budget", "bb-max-runs");
         if (maxScorerRuns < 1)
           return fail("submit.blackbox.validation.budget_required", "bb-max-runs");
@@ -1736,6 +1781,13 @@ export function useBlackboxWizard(
     setStopAtScore,
     reflectionModel: effectiveReflectionModel,
     setReflectionModel,
+    extraOptimizationModels,
+    setExtraOptimizationModels,
+    shinkaSettings,
+    setShinkaSettings,
+    updateShinka,
+    shinkaOpen,
+    setShinkaOpen: toggleShinka,
     editingModel,
     setEditingModel,
     costBracket,

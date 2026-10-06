@@ -15,14 +15,24 @@ import { Switch } from "@/shared/ui/primitives/switch";
 import { NumberInput } from "@/shared/ui/number-input";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { HarnessLogo } from "@/shared/ui/harness-logo";
-import { ModelChip } from "@/shared/ui/model-chip";
-import { BLACKBOX_HARNESSES, UNAVAILABLE_HARNESSES, harnessLabel } from "@/shared/lib/blackbox-harness";
+import { AddModelButton, ModelChip } from "@/shared/ui/model-chip";
+import {
+  BLACKBOX_HARNESSES,
+  UNAVAILABLE_HARNESSES,
+  harnessLabel,
+} from "@/shared/lib/blackbox-harness";
 import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { msg } from "@/shared/lib/messages";
 import { Carousel } from "@/features/agent-panel";
 import { useByokKeys } from "@/features/billing";
-import { DEFAULT_PROPOSER, proposerKnobs, proposerTunesReasoning } from "../../lib/engine-contract";
+import {
+  AUTO_MIN_SCORER_RUNS,
+  DEFAULT_PROPOSER,
+  proposerKnobs,
+  proposerTunesReasoning,
+} from "../../lib/engine-contract";
+import { MAX_EXTRA_OPTIMIZATION_MODELS } from "../../lib/shinka-settings";
 
 import type { BlackboxHarness, BlackboxProposerEffort } from "@/shared/types/api";
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
@@ -30,6 +40,7 @@ import { emptyModelConfig } from "../../constants";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
 import { EngineSlide } from "./EngineSlide";
 import { ModelRoleRow } from "./ModelRoleRow";
+import { ShinkaSettingsPanel } from "./ShinkaSettingsPanel";
 import { Segmented } from "@/shared/ui/segmented";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
 import { Field, StepCard } from "./shared";
@@ -66,6 +77,8 @@ export function BlackboxOptimizerStep({
     setStopAtScore,
     reflectionModel,
     setReflectionModel,
+    extraOptimizationModels,
+    setExtraOptimizationModels,
     optimizationFamily,
     scorerUsesModel,
     scorerModelMode,
@@ -87,6 +100,7 @@ export function BlackboxOptimizerStep({
   const knobs = proposerKnobs(strategyMode, engine);
   const reasoningKnobs = proposerTunesReasoning(proposer.harness);
   const optimizationLabel = msg("submit.blackbox.roles.optimization.label");
+  const shinka = single && engine === "shinka_evolve";
 
   return (
     <StepCard
@@ -301,6 +315,45 @@ export function BlackboxOptimizerStep({
                 reflectionModel.name ? () => setReflectionModel(emptyModelConfig()) : undefined
               }
             />
+            {shinka &&
+              extraOptimizationModels.map((model, index) => (
+                <ModelChip
+                  key={index}
+                  config={model}
+                  className={MOBILE_MODEL_CHIP_CLASS}
+                  roleLabel={optimizationLabel}
+                  catalogModels={catalog?.models}
+                  onClick={() =>
+                    setEditingModel({
+                      config: model,
+                      onSave: (next) =>
+                        setExtraOptimizationModels((prev) =>
+                          prev.map((m, i) => (i === index ? next : m)),
+                        ),
+                      label: optimizationLabel,
+                    })
+                  }
+                  onRemove={() =>
+                    setExtraOptimizationModels((prev) => prev.filter((_, i) => i !== index))
+                  }
+                />
+              ))}
+            {shinka && extraOptimizationModels.length < MAX_EXTRA_OPTIMIZATION_MODELS && (
+              <HelpTip text={tip("submit.blackbox.shinka.extra_models")}>
+                <AddModelButton
+                  label={msg("submit.blackbox.shinka.add_model")}
+                  onClick={() =>
+                    setEditingModel({
+                      config: emptyModelConfig(),
+                      onSave: (next) => {
+                        if (next.name.trim()) setExtraOptimizationModels((prev) => [...prev, next]);
+                      },
+                      label: optimizationLabel,
+                    })
+                  }
+                />
+              </HelpTip>
+            )}
           </ModelRoleRow>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -313,11 +366,11 @@ export function BlackboxOptimizerStep({
                 id="bb-max-runs"
                 value={maxScorerRuns}
                 onChange={setMaxScorerRuns}
-                min={strategyMode === "auto" ? 5 : 1}
+                min={strategyMode === "auto" ? AUTO_MIN_SCORER_RUNS : 1}
                 max={100000}
                 step={10}
               />
-              {strategyMode === "auto" && maxScorerRuns < 5 && (
+              {strategyMode === "auto" && maxScorerRuns < AUTO_MIN_SCORER_RUNS && (
                 <p className="text-xs text-[var(--warning)]" role="status">
                   {msg("submit.blackbox.validation.auto_budget")}
                 </p>
@@ -353,6 +406,8 @@ export function BlackboxOptimizerStep({
               </Field>
             )}
           </div>
+
+          {(shinka || !single) && <ShinkaSettingsPanel w={w} />}
 
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-1">

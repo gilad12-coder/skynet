@@ -84,12 +84,21 @@ const STAGE_TIP_KEYS: Record<string, TooltipKey> = {
   baseline: "lm_activity.stage.baseline",
   training: "lm_activity.stage.training",
   evaluation: "lm_activity.stage.evaluation",
+  mutation: "usage_tab.stage.mutation",
+  novelty_judge: "usage_tab.stage.novelty_judge",
+  meta_notes: "usage_tab.stage.meta_notes",
+  embedding: "usage_tab.stage.embedding",
 };
 
 const STAGE_LABEL_KEYS: Record<string, Parameters<typeof msg>[0]> = {
   baseline: "auto.features.optimizations.components.lmactivitytab.stage_baseline",
   training: "auto.features.optimizations.components.lmactivitytab.stage_training",
   evaluation: "auto.features.optimizations.components.lmactivitytab.stage_evaluation",
+  // ShinkaEvolve tags each of its model calls with the step that made it.
+  mutation: "usage_tab.stage.mutation",
+  novelty_judge: "usage_tab.stage.novelty_judge",
+  meta_notes: "usage_tab.stage.meta_notes",
+  embedding: "usage_tab.stage.embedding",
 };
 
 function readGrouping(): UsageGrouping {

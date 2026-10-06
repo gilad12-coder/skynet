@@ -7,12 +7,17 @@ import type {
 } from "@/shared/types/api";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 
-/** Whether the run's proposer is a coding agent; every engine drives one through a repository. */
+/**
+ * Whether the run's proposer is a coding agent. Every other engine drives one
+ * through a repository; ShinkaEvolve never does, since it calls its
+ * optimization models directly and edits a repository as a bundle of files.
+ */
 export function usesNativeProposer(
   mode: BlackboxStrategy["mode"],
   engine: BlackboxEngineId | null,
   repo = false,
 ): boolean {
+  if (mode === "single" && engine === "shinka_evolve") return false;
   return (
     repo ||
     mode !== "single" ||
@@ -79,8 +84,14 @@ export function supportsIterationLimit(
   mode: BlackboxStrategy["mode"],
   engine: BlackboxEngineId | null,
 ): boolean {
-  return mode === "single" && (engine === "meta_harness" || engine === "autosaddler");
+  return (
+    mode === "single" &&
+    (engine === "meta_harness" || engine === "autosaddler" || engine === "shinka_evolve")
+  );
 }
+
+/** Auto explores with five engines and then continues the leader: one scorer run each at least. */
+export const AUTO_MIN_SCORER_RUNS = 6;
 
 interface EngineIssue {
   key: MessageKey;

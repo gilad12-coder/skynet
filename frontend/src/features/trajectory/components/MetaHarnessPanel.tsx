@@ -59,12 +59,13 @@ function isLive(job: OptimizationStatusResponse): boolean {
 const ENGINE_EXPLAINERS: Record<string, MessageKey> = {
   autoresearch: "meta_harness.explainer.autoresearch",
   autosaddler: "meta_harness.explainer.autosaddler",
+  shinka_evolve: "meta_harness.explainer.shinka_evolve",
 };
 
 export interface MetaHarnessPanelProps {
   job: OptimizationStatusResponse;
   // The hill-climbing engine that produced the versions: meta_harness,
-  // autoresearch or autosaddler.
+  // autoresearch, autosaddler or shinka_evolve.
   engine: string;
   // Run configuration of the black-box run, forwarded to the drawer so it
   // names versions by kind and shows per-case scores only when cases exist.
@@ -72,7 +73,8 @@ export interface MetaHarnessPanelProps {
 }
 
 /**
- * Run view of a hill-climbing lane (Meta-Harness, AutoResearch, AutoSaddler).
+ * Run view of a hill-climbing lane (Meta-Harness, AutoResearch, AutoSaddler,
+ * ShinkaEvolve).
  * The engine rewrites the best version so far and scores every candidate on
  * all cases, so the run is a climb rather than a tree: the chart lays versions out in scoring order
  * with the best so far as a staircase, and a version's drawer shows how it did

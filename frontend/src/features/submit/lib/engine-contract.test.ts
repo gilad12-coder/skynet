@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import type { BlackboxEngineCatalogResponse, BlackboxEngineId } from "@/shared/types/api";
 import {
+  AUTO_MIN_SCORER_RUNS,
   DEFAULT_PROPOSER,
   engineSelectionIssue,
   proposerKnobs,
@@ -15,7 +16,7 @@ import {
 const catalog: BlackboxEngineCatalogResponse = {
   target_kind: "text",
   sandbox_available: true,
-  auto_engines: ["gepa", "autoresearch", "meta_harness", "autosaddler"],
+  auto_engines: ["gepa", "autoresearch", "meta_harness", "autosaddler", "shinka_evolve"],
   auto_available: true,
   auto_unavailable_reason: null,
   auto_checkpoint_recovery_supported: false,
@@ -41,14 +42,21 @@ const catalog: BlackboxEngineCatalogResponse = {
     },
   ],
   engines: (
-    ["gepa", "best_of_n", "autoresearch", "meta_harness", "autosaddler"] as BlackboxEngineId[]
+    [
+      "gepa",
+      "best_of_n",
+      "autoresearch",
+      "meta_harness",
+      "autosaddler",
+      "shinka_evolve",
+    ] as BlackboxEngineId[]
   ).map((id) => ({
     id,
     label: id,
     description: id,
     available: true,
     unavailable_reason: null,
-    supports_parts: id === "gepa",
+    supports_parts: id === "gepa" || id === "shinka_evolve",
     requires_agent_target: false,
     checkpoint_recovery_supported: id === "gepa",
     checkpoint_recovery_reason: id === "gepa" ? null : `${id} cannot restore checkpoints.`,
@@ -62,13 +70,19 @@ const selection = {
   hasParts: false,
 };
 
-test("iteration limits apply only to a single Meta-Harness run", () => {
-  assert.equal(supportsIterationLimit("single", "meta_harness"), true);
+test("iteration limits apply only to a single version-capped engine", () => {
+  for (const engine of ["meta_harness", "autosaddler", "shinka_evolve"] as const) {
+    assert.equal(supportsIterationLimit("single", engine), true);
+  }
   for (const engine of ["gepa", "best_of_n", "autoresearch", null] as const) {
     assert.equal(supportsIterationLimit("single", engine), false);
   }
   assert.equal(supportsIterationLimit("auto", "meta_harness"), false);
   assert.equal(supportsIterationLimit("auto", null), false);
+});
+
+test("Auto's minimum budget covers every listed lane plus the continuation", () => {
+  assert.equal(AUTO_MIN_SCORER_RUNS, catalog.auto_engines.length + 1);
 });
 
 test("Auto requires the complete server recipe even when its lanes are listed", () => {
@@ -118,6 +132,25 @@ test("native engines accept text evaluation in the managed sandbox without an ag
   }
 });
 
+test("ShinkaEvolve calls its models directly, even on a repository", () => {
+  assert.equal(usesNativeProposer("single", "shinka_evolve"), false);
+  assert.equal(usesNativeProposer("single", "shinka_evolve", true), false);
+  const unavailable: BlackboxEngineCatalogResponse = {
+    ...catalog,
+    proposer_runtimes: [{ ...catalog.proposer_runtimes[0], available: false }],
+  };
+  assert.equal(
+    engineSelectionIssue({
+      ...selection,
+      catalog: unavailable,
+      mode: "single",
+      engine: "shinka_evolve",
+      repo: true,
+    }),
+    null,
+  );
+});
+
 test("managed sandbox availability gates native engines without disabling GEPA", () => {
   const unavailable: BlackboxEngineCatalogResponse = {
     ...catalog,
@@ -158,6 +191,15 @@ test("parts follow each single engine's capabilities", () => {
     null,
   );
   assert.equal(
+    engineSelectionIssue({
+      ...selection,
+      mode: "single",
+      engine: "shinka_evolve",
+      hasParts: true,
+    }),
+    null,
+  );
+  assert.equal(
     engineSelectionIssue({ ...selection, mode: "single", engine: "best_of_n", hasParts: true })
       ?.key,
     "submit.blackbox.validation.engine_parts",
@@ -172,6 +214,7 @@ test("every engine and Auto run without cases", () => {
     "autoresearch",
     "meta_harness",
     "autosaddler",
+    "shinka_evolve",
   ] as const) {
     assert.equal(engineSelectionIssue({ ...selection, mode: "single", engine }), null);
   }
@@ -187,6 +230,10 @@ test("proposer knobs follow the engine that reads them, and Auto exposes them al
     ralph: true,
   });
   assert.deepEqual(proposerKnobs("single", "autosaddler"), {
+    candidates: false,
+    ralph: false,
+  });
+  assert.deepEqual(proposerKnobs("single", "shinka_evolve"), {
     candidates: false,
     ralph: false,
   });

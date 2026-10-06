@@ -578,7 +578,8 @@ export type BlackboxEngineId =
   | "best_of_n"
   | "autoresearch"
   | "meta_harness"
-  | "autosaddler";
+  | "autosaddler"
+  | "shinka_evolve";
 export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "prime" | "custom";
 export type BlackboxProposerRuntime = "vercel";
 
@@ -669,6 +670,38 @@ export interface BlackboxProposer {
   max_no_eval_seconds?: number | null;
 }
 
+export type BlackboxShinkaParentSelection = "weighted" | "power_law" | "beam_search";
+
+/** ShinkaEvolve's search settings; a request without the block runs every default. */
+export interface BlackboxShinkaSettings {
+  num_islands: number;
+  migration_interval: number;
+  migration_rate: number;
+  parent_selection: BlackboxShinkaParentSelection;
+  parent_selection_lambda: number;
+  exploitation_alpha: number;
+  exploitation_ratio: number;
+  num_beams: number;
+  patch_diff: number;
+  patch_full: number;
+  patch_cross: number;
+  max_patch_attempts: number;
+  max_patch_resamples: number;
+  archive_size: number;
+  num_archive_inspirations: number;
+  num_top_k_inspirations: number;
+  elite_selection_ratio: number;
+  use_text_feedback: boolean;
+  novelty: boolean;
+  code_embed_sim_threshold: number;
+  max_novelty_attempts: number;
+  meta_notes: boolean;
+  meta_rec_interval: number;
+  meta_max_recommendations: number;
+  max_parallel_evaluations: number;
+  max_parallel_proposals: number;
+}
+
 export interface BlackboxRunRequest {
   execution_budget_id?: string;
   execution_budget_revision?: number;
@@ -693,6 +726,10 @@ export interface BlackboxRunRequest {
   target: BlackboxTarget;
   task_model_config?: ModelConfig | null;
   reflection_model_config: ModelConfig;
+  // More optimization models for ShinkaEvolve, which learns which one
+  // improves scores most; every other engine ignores them.
+  extra_reflection_model_configs?: ModelConfig[];
+  shinka?: BlackboxShinkaSettings | null;
   token_source?: "managed" | "byok";
   is_private?: boolean;
   // Batch managed chat model calls at half price; coding-agent proposer calls
