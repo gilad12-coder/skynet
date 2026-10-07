@@ -44,7 +44,9 @@ import { MetaHarnessPanel, TrajectoryPanel, climbEngineOf } from "@/features/tra
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { buildBlackboxTrajectoryContext } from "../lib/blackbox-trajectory";
 import { describeBlackboxArtifact } from "../lib/blackbox-artifact";
-import { buildVersions } from "../lib/blackbox-versions";
+import { buildVersions, versionForPrompt } from "../lib/blackbox-versions";
+import { VersionFeedback } from "./BlackboxFinalScores";
+import { sideInfoFeedback, sideInfoNamedScores } from "@/shared/lib/blackbox-scores";
 import { RepoCandidateBrowser } from "./RepoCandidateBrowser";
 
 const ScoreChart = dynamic(() => import("@/shared/ui/score-chart").then((m) => m.ScoreChart), {
@@ -142,10 +144,19 @@ function OverviewTabImpl({
   const blackboxTrajectory = useMemo(() => {
     if (!isBlackbox) return null;
     const context = buildBlackboxTrajectoryContext(job.blackbox_result ?? null, payload ?? null);
-    if (!isRepo) return context;
     const versions = job.blackbox_result ? buildVersions(job.blackbox_result) : [];
+    const renderVersionFeedback = (prompt: Record<string, string>) => {
+      const version = versionForPrompt(versions, prompt);
+      if (!version) return null;
+      const hasFeedback =
+        sideInfoFeedback(version.sideInfo) !== null ||
+        Object.keys(sideInfoNamedScores(version.sideInfo)).length > 0;
+      return hasFeedback ? <VersionFeedback sideInfo={version.sideInfo} /> : null;
+    };
+    if (!isRepo) return { ...context, renderVersionFeedback };
     return {
       ...context,
+      renderVersionFeedback,
       renderRepoVersion: (prompt: Record<string, string>) => (
         <RepoCandidateBrowser
           optimizationId={job.optimization_id}
