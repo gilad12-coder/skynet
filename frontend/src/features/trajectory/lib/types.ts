@@ -65,6 +65,8 @@ export interface MinibatchEntry {
   // null when the event predates iteration plumbing or fires outside a
   // propose() call (baseline / full-valset evaluation).
   iteration: number | null;
+  // Version the note scored, set by engines without proposal iterations.
+  candidate_id: string | null;
   // Renders the scorer attached, whole. They ride on the event outside the
   // feedback text cap; older events only had them inside the text.
   images: SideImage[];
