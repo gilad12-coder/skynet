@@ -1201,7 +1201,18 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
             <div className="space-y-2 min-w-0 sm:flex-1">
               <div className="flex flex-col items-start gap-1.5">
-                <StatusBadge status={job.status} />
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <StatusBadge status={job.status} />
+                  {job.status === "cancelled" && !isPairContext && (
+                    <span className="text-xs text-muted-foreground" dir="auto">
+                      {job.message
+                        ? localizeStoredReason(job.message)
+                        : formatMsg("auto.app.optimizations.id.page.template.4", {
+                            p1: TERMS.optimization,
+                          })}
+                    </span>
+                  )}
+                </div>
                 {job.name && (
                   <h2 className="text-lg sm:text-xl font-bold tracking-tight" dir="auto">
                     {job.name}
@@ -1484,27 +1495,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         </FadeIn>
       )}
 
-      {job.status === "cancelled" && !isPairContext && (
-        <FadeIn>
-          <div className="flex items-center gap-3 p-4 rounded-xl border border-stone-300 bg-stone-50 text-stone-700">
-            <XCircle className="size-5 shrink-0" />
-            <div>
-              <p className="text-sm font-semibold">
-                {msg("auto.app.optimizations.id.page.7")}
-                {TERMS.optimization}
-                {msg("auto.app.optimizations.id.page.8")}
-              </p>
-              <p className="text-xs text-stone-500 mt-0.5">
-                {job.message
-                  ? localizeStoredReason(job.message)
-                  : formatMsg("auto.app.optimizations.id.page.template.4", {
-                      p1: TERMS.optimization,
-                    })}
-              </p>
-            </div>
-          </div>
-        </FadeIn>
-      )}
 
       {job.optimization_type === "grid_search" &&
         activePairIndex !== null &&
