@@ -41,8 +41,6 @@
   "optimization.blackbox.repo.browser.filter": "파일 필터…",
   "optimization.blackbox.versions.download_repo": "v{n}을(를) 전체 저장소 zip으로 다운로드",
   "optimization.blackbox.versions.archive_failed": "저장소를 다운로드할 수 없습니다",
-  "optimization.blackbox.repo.browser.section_changed": "변경됨",
-  "optimization.blackbox.repo.browser.section_other": "기타 파일",
   "optimization.blackbox.repo.browser.show_files": "파일 표시",
   "optimization.blackbox.repo.browser.hide_files": "파일 숨기기",
   "optimization.blackbox.repo.browser.filter_aria": "경로로 파일 필터",

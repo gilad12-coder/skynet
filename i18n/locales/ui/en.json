@@ -4143,8 +4143,6 @@
   "optimization.blackbox.repo.browser.filter": "Filter files…",
   "optimization.blackbox.versions.download_repo": "Download v{n} as a zip of the whole repository",
   "optimization.blackbox.versions.archive_failed": "The repository couldn't be downloaded",
-  "optimization.blackbox.repo.browser.section_changed": "Changed",
-  "optimization.blackbox.repo.browser.section_other": "Other files",
   "optimization.blackbox.repo.browser.show_files": "Show files",
   "optimization.blackbox.repo.browser.hide_files": "Hide files",
   "optimization.blackbox.repo.browser.filter_aria": "Filter files by path",

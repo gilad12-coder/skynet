@@ -41,8 +41,6 @@
   "optimization.blackbox.repo.browser.filter": "ファイルを絞り込む…",
   "optimization.blackbox.versions.download_repo": "v{n} をリポジトリ全体の zip としてダウンロード",
   "optimization.blackbox.versions.archive_failed": "リポジトリをダウンロードできませんでした",
-  "optimization.blackbox.repo.browser.section_changed": "変更あり",
-  "optimization.blackbox.repo.browser.section_other": "その他のファイル",
   "optimization.blackbox.repo.browser.show_files": "ファイルを表示",
   "optimization.blackbox.repo.browser.hide_files": "ファイルを非表示",
   "optimization.blackbox.repo.browser.filter_aria": "パスでファイルを絞り込む",

@@ -41,8 +41,6 @@
   "optimization.blackbox.repo.browser.filter": "篩選檔案…",
   "optimization.blackbox.versions.download_repo": "將 v{n} 下載成成個儲存庫嘅 zip",
   "optimization.blackbox.versions.archive_failed": "下載唔到儲存庫",
-  "optimization.blackbox.repo.browser.section_changed": "改咗",
-  "optimization.blackbox.repo.browser.section_other": "其他檔案",
   "optimization.blackbox.repo.browser.show_files": "顯示檔案",
   "optimization.blackbox.repo.browser.hide_files": "隱藏檔案",
   "optimization.blackbox.repo.browser.filter_aria": "按路徑篩選檔案",

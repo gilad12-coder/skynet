@@ -368,42 +368,6 @@ function TreeList({
   );
 }
 
-function TreeSection({
-  title,
-  count,
-  open,
-  onToggle,
-  children,
-}: {
-  title: string;
-  count: number;
-  open: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <section>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex min-h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1 text-start text-[0.6875rem] font-medium uppercase tracking-wide text-foreground/70 transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-7"
-      >
-        <CaretRight
-          className={cn(
-            "size-3 shrink-0 transition-transform duration-150 rtl:-scale-x-100",
-            open && "rotate-90 rtl:-rotate-90",
-          )}
-          aria-hidden="true"
-        />
-        <span className="min-w-0 flex-1 truncate">{title}</span>
-        <span className="shrink-0 font-mono tabular-nums normal-case">{count}</span>
-      </button>
-      {open && <div className="mt-0.5">{children}</div>}
-    </section>
-  );
-}
-
 function FileTree({
   root,
   selected,
@@ -414,9 +378,6 @@ function FileTree({
   onSelect: (path: string) => void;
 }) {
   const [filter, setFilter] = useState("");
-  const [changedOpen, setChangedOpen] = useState(true);
-  const [othersOpen, setOthersOpen] = useState(true);
-  const others = root.fileCount - root.changedCount;
   const treeLabel = msg("optimization.blackbox.repo.browser.tree_aria");
 
   return (
@@ -444,40 +405,14 @@ function FileTree({
         </div>
       </div>
       <div className="max-h-[22rem] min-h-0 overflow-auto rounded-md @2xl:max-h-[32rem]">
-        <div className="space-y-1">
-          <TreeSection
-            title={msg("optimization.blackbox.repo.browser.section_changed")}
-            count={root.changedCount}
-            open={changedOpen || !!filter}
-            onToggle={() => setChangedOpen((v) => !v)}
-          >
-            <TreeList
-              root={root}
-              scope="changed"
-              filter={filter}
-              selected={selected}
-              label={msg("optimization.blackbox.repo.browser.section_changed")}
-              onSelect={onSelect}
-            />
-          </TreeSection>
-          {others > 0 && (
-            <TreeSection
-              title={msg("optimization.blackbox.repo.browser.section_other")}
-              count={others}
-              open={othersOpen || !!filter}
-              onToggle={() => setOthersOpen((v) => !v)}
-            >
-              <TreeList
-                root={root}
-                scope="unchanged"
-                filter={filter}
-                selected={selected}
-                label={msg("optimization.blackbox.repo.browser.section_other")}
-                onSelect={onSelect}
-              />
-            </TreeSection>
-          )}
-        </div>
+        <TreeList
+          root={root}
+          scope="all"
+          filter={filter}
+          selected={selected}
+          label={treeLabel}
+          onSelect={onSelect}
+        />
       </div>
     </div>
   );
