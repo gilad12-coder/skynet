@@ -357,8 +357,8 @@ function NodeBody({
   // iteration filter, which would miss the untagged full sweep of an accepted
   // version and show the seed the whole run's tail.
   const scorerEntries = useMemo(
-    () => (isBlackbox ? scorerEntriesForNode(minibatch, view.iteration) : minibatch),
-    [isBlackbox, minibatch, view.iteration],
+    () => (isBlackbox ? scorerEntriesForNode(minibatch, view.iteration, view.rawId) : minibatch),
+    [isBlackbox, minibatch, view.iteration, view.rawId],
   );
   const scorerNotes = useMemo(() => scorerNotesByCase(scorerEntries), [scorerEntries]);
   const valsetById = useMemo(() => {
@@ -3083,8 +3083,13 @@ function blackboxSectionKey(
 function scorerEntriesForNode(
   entries: MinibatchEntry[],
   iteration: number | null,
+  candidateId: string,
 ): MinibatchEntry[] {
   const ordered = [...entries].sort((a, b) => a.sequence - b.sequence);
+  // Engines without proposal iterations tag each note with the version it scored.
+  if (ordered.some((entry) => entry.candidate_id !== null)) {
+    return ordered.filter((entry) => entry.candidate_id === candidateId);
+  }
   if (iteration === null) {
     const firstTagged = ordered.findIndex((entry) => entry.iteration !== null);
     return firstTagged === -1 ? ordered : ordered.slice(0, firstTagged);

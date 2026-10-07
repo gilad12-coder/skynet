@@ -29,10 +29,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # at the gateway via env. Requires OPENROUTER_API_KEY otherwise.
 DEFAULT_AGENT_MODEL_ID = "openrouter/z-ai/glm-5.3-flash"
 
-# Vercel's API refuses any sandbox timeout above five hours (``timeout`` should
-# be <= 18000000), whatever a plan allows below that, so a larger configured
-# ceiling can never be admitted and would fail at creation.
-VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 18_000
+# Vercel's API refuses any sandbox timeout above 24 hours (raised from five in
+# June 2026, Pro and Enterprise only), so a larger configured ceiling can never
+# be admitted and would fail at creation.
+VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 86_400
 
 
 # Keyed on the raw CSV rather than cached on the instance: tests monkeypatch
@@ -284,7 +284,7 @@ class Settings(BaseSettings):
         alias="VERCEL_SANDBOX_MAX_LIFETIME_SECONDS",
         gt=0.0,
         le=VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS,
-        description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro and Enterprise teams can raise it to 18000 (5 hours), the most Vercel accepts. A job that outlives its box reopens one on its next call.",
+        description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro and Enterprise teams can raise it to 86400 (24 hours), the most Vercel accepts. A job that outlives its box reopens one on its next call.",
     )
     blackbox_agent_gateway_url: str | None = Field(
         default=None,

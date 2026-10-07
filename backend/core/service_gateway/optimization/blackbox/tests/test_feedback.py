@@ -130,6 +130,18 @@ def test_emit_carries_renders_whole_next_to_the_text() -> None:
     assert event[1]["images_dropped"] == 0
 
 
+def test_emit_tags_the_version_only_when_named() -> None:
+    """Engines without proposal iterations tie a note to its version; others leave the field out."""
+    sink: list[tuple[str, dict]] = []
+    emit = lambda e, m: sink.append((e, m))  # noqa: E731
+
+    emit_scorer_feedback(emit, example_id="?", score=0.9, side_info={"feedback": "ok"}, candidate_id="3")
+    emit_scorer_feedback(emit, example_id="?", score=0.9, side_info={"feedback": "ok"})
+
+    assert sink[0][1]["candidate_id"] == "3"
+    assert "candidate_id" not in sink[1][1]
+
+
 def test_renders_past_the_byte_budget_are_counted_not_cut(monkeypatch) -> None:
     """The first renders that fit are kept whole; the rest are counted so the UI can say so."""
     monkeypatch.setattr(feedback, "MINIBATCH_IMAGES_BYTE_CAP", len(PNG) + 1)

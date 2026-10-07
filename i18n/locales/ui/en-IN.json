@@ -27,7 +27,7 @@
   "auto.features.submit.components.steps.basicsstep.literal.1": "For example: analysing math questions",
   "auto.features.submit.components.steps.modelstep.14": "No models available in the catalogue — add a provider API key to enable grid search.",
   "auto.features.submit.components.steps.summarystep.2": " models in the catalogue",
-  "auto.features.tutorial.components.concepts.guide.literal.270": "The feedback model that reads GEPA trajectories and written feedback and proposes revised instructions.",
+  "auto.features.tutorial.components.concepts.guide.literal.270": "The optimization model that reads GEPA trajectories and written feedback and proposes revised instructions.",
   "auto.features.tutorial.lib.demo.data.literal.34": "User intent labelling",
   "auto.features.tutorial.lib.steps.literal.29": "Labelling setup form",
   "auto.features.tutorial.lib.steps.template.27": "Submitting an optimisation",

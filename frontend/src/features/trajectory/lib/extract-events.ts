@@ -229,6 +229,7 @@ function coerceMinibatch(
     prediction: coercePrediction(prediction),
     sequence,
     iteration: typeof iteration === "number" ? iteration : null,
+    candidate_id: typeof metrics.candidate_id === "string" ? metrics.candidate_id : null,
     images: coerceImages(metrics.images),
     images_dropped: typeof images_dropped === "number" && images_dropped > 0 ? images_dropped : 0,
   };

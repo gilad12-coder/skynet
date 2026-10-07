@@ -318,32 +318,32 @@ export function ConfigCarousel({
           aria-label={currentSlide.label}
         >
           {slides.map((slide, index) => (
-            <button
-              key={slide.id}
-              type="button"
-              onClick={() => goToSlide(index)}
-              aria-label={slide.label}
-              aria-current={activeSlide === index ? "step" : undefined}
-              className={cn(
-                "flex min-w-0 cursor-pointer items-center gap-2 rounded-xl border px-2.5 py-2 text-start transition-[background-color,border-color,color,transform] duration-150",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 focus-visible:ring-offset-2 active:scale-[0.98]",
-                activeSlide === index
-                  ? "border-[#C8A882]/70 bg-background text-foreground shadow-sm"
-                  : "border-transparent text-muted-foreground hover:border-border/60 hover:bg-background/55 hover:text-foreground",
-              )}
-            >
-              <span
+            <TooltipButton key={slide.id} tooltip={slide.label}>
+              <button
+                type="button"
+                onClick={() => goToSlide(index)}
+                aria-label={slide.label}
+                aria-current={activeSlide === index ? "step" : undefined}
                 className={cn(
-                  "grid size-8 shrink-0 place-items-center rounded-lg transition-colors [&_svg]:size-4",
+                  "flex shrink-0 cursor-pointer items-center rounded-xl border p-1.5 transition-[background-color,border-color,color,transform] duration-150",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 focus-visible:ring-offset-2 active:scale-[0.98]",
                   activeSlide === index
-                    ? "bg-[#3D2E22] text-[#FAF8F5]"
-                    : "bg-[#EDE7DD] text-[#8C7A6B]",
+                    ? "border-[#C8A882]/70 bg-background text-foreground shadow-sm"
+                    : "border-transparent text-muted-foreground hover:border-border/60 hover:bg-background/55 hover:text-foreground",
                 )}
               >
-                {slide.icon}
-              </span>
-              <span className="hidden truncate text-xs font-semibold lg:block">{slide.label}</span>
-            </button>
+                <span
+                  className={cn(
+                    "grid size-8 shrink-0 place-items-center rounded-lg transition-colors [&_svg]:size-4",
+                    activeSlide === index
+                      ? "bg-[#3D2E22] text-[#FAF8F5]"
+                      : "bg-[#EDE7DD] text-[#8C7A6B]",
+                  )}
+                >
+                  {slide.icon}
+                </span>
+              </button>
+            </TooltipButton>
           ))}
         </div>
       </div>

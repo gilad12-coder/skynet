@@ -224,6 +224,7 @@ def emit_scorer_feedback(
     score: float,
     side_info: SideInfo,
     iteration: int | None = None,
+    candidate_id: str | None = None,
 ) -> None:
     """Forward one scorer call as a mini-batch feedback event, if it said anything.
 
@@ -240,6 +241,8 @@ def emit_scorer_feedback(
         iteration: The version the call scores. Engines that score from
             worker threads pass it explicitly; unset, it is read from the
             proposal-iteration context GEPA maintains on the calling thread.
+        candidate_id: The version the call scores, for engines that have no
+            proposal iterations and so tie a note to its version by id.
     """
     if progress_callback is None:
         return
@@ -260,6 +263,7 @@ def emit_scorer_feedback(
                 "iteration": iteration,
                 "images": images,
                 "images_dropped": images_dropped,
+                **({"candidate_id": candidate_id} if candidate_id is not None else {}),
             },
         )
     except Exception:

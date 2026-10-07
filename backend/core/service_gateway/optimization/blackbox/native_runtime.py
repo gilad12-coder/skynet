@@ -32,7 +32,7 @@ from ....models.blackbox import BLACKBOX_HARNESS_CODEX, BLACKBOX_HARNESS_PI, Bla
 from ..budget_stop import BudgetReached
 from . import harness_bridge, native_runner, repo_tree, sandbox_log
 from .agent_eval import gateway_from_settings
-from .feedback import emit_candidate, emit_case_scored
+from .feedback import emit_candidate, emit_case_scored, emit_scorer_feedback
 from .harness import ENV_MODEL, GatewayConfig, build_launch, launch_payload, pi_editor_launch, pinned_harness_check
 from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, Task
 from .runner import side_info_json_default
@@ -687,6 +687,31 @@ class _EvaluatorMailbox:
             iteration=None,
         )
 
+    def _forward_feedback(self, request: dict[str, Any], score: Any, info: Any) -> None:
+        """Send the scorer's notes on one evaluation to the candidate tree drawer.
+
+        Native engines have no proposal iterations, so each note carries the
+        id of the version it scored instead.
+
+        Args:
+            request: The evaluation request, naming the version and case.
+            score: The score the scorer returned.
+            info: What the scorer returned next to the score.
+        """
+        candidate_id = request.get("candidate_id")
+        if not _finite(score) or not isinstance(info, dict):
+            return
+        if isinstance(candidate_id, bool) or not isinstance(candidate_id, int):
+            return
+        case = request.get("case")
+        emit_scorer_feedback(
+            self.progress_callback,
+            example_id="?" if case is None else str(case),
+            score=float(score),
+            side_info=info,
+            candidate_id=str(candidate_id),
+        )
+
     def _respond(self, request: dict[str, Any]) -> None:
         """Evaluate a request once and persist its response.
 
@@ -716,6 +741,7 @@ class _EvaluatorMailbox:
                     if self.check_budget is not None:
                         self.check_budget()
                     response = {"score": score, "info": info}
+                    self._forward_feedback(request, score, info)
                 except (Exception, BudgetReached) as exc:
                     self.error = exc
                     response = {"error": "The parent evaluator stopped this run."}
