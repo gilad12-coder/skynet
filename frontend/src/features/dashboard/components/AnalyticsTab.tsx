@@ -348,7 +348,6 @@ function AnalyticsTabImpl({
                     {msg("dashboard.analytics.section_distributions")}
                   </HelpTip>
                 }
-                defaultOpen={true}
                 className="border-border/60"
               >
                 <div className="grid gap-6 md:grid-cols-2">
@@ -399,7 +398,6 @@ function AnalyticsTabImpl({
                     {msg("auto.features.dashboard.components.analyticstab.30")}
                   </HelpTip>
                 }
-                defaultOpen={true}
                 className="border-border/60"
               >
                 <StackedTimeline
@@ -418,7 +416,6 @@ function AnalyticsTabImpl({
                       {msg("dashboard.analytics.optimizer_comparison")}
                     </HelpTip>
                   }
-                  defaultOpen={true}
                   className="border-border/60"
                 >
                   <OptimizerTable rows={chartData.optimizerStats} onSelect={setOptimizer} />
@@ -429,7 +426,6 @@ function AnalyticsTabImpl({
             <StaggerItem>
               <AnalyticsSection
                 title={msg("dashboard.analytics.section_breakdown")}
-                defaultOpen={true}
                 className="border-border/60"
               >
                 <div className="grid gap-6 md:grid-cols-3">
@@ -472,7 +468,6 @@ function AnalyticsTabImpl({
               <StaggerItem>
                 <AnalyticsSection
                   title={msg("auto.features.dashboard.components.analyticstab.33")}
-                  defaultOpen={true}
                   className="border-border/60"
                 >
                   <div className="space-y-3">
@@ -530,7 +525,6 @@ function AnalyticsTabImpl({
                       {msg("dashboard.analytics.leaderboard")}
                     </HelpTip>
                   }
-                  defaultOpen={true}
                   className="border-border/60"
                 >
                   <Leaderboard jobs={chartData.topJobs} onOpenJob={onOpenJob} />
@@ -542,7 +536,6 @@ function AnalyticsTabImpl({
               <StaggerItem>
                 <AnalyticsSection
                   title={msg("dashboard.analytics.sharing_breakdown")}
-                  defaultOpen={true}
                   className="border-border/60"
                 >
                   <SharingBreakdown
