@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "또는",
   "tagger.setup.library_pick": "라이브러리에서 선택",
   "tagger.setup.synthetic_pick": "합성 데이터셋 생성",
-  "tagger.setup.synthetic_hint": "아직 데이터셋이 없나요? 이 옵션을 고르면 어시스턴트가 필요한 데이터를 묻고, 라벨링을 시작하기 전에 직접 작성합니다.",
   "tagger.setup.synthetic_source_name": "합성 데이터셋",
   "tagger.setup.synthetic_manual_hint": "합성 데이터셋은 인터뷰에서 정해지므로 어시스턴트가 필요합니다.",
   "tooltip.code.metric": "예측의 품질을 측정하는 함수 — 각 예제에 대해 숫자 점수를 반환합니다",

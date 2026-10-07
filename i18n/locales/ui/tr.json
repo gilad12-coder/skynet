@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "veya",
   "tagger.setup.library_pick": "Kitaplığınızdan seçin",
   "tagger.setup.synthetic_pick": "Sentetik veri kümesi oluştur",
-  "tagger.setup.synthetic_hint": "Henüz veri kümeniz yok mu? Bunu seçin; asistan hangi verilere ihtiyacınız olduğunu sorar ve etiketleme başlamadan önce yazar.",
   "tagger.setup.synthetic_source_name": "Sentetik veri kümesi",
   "tagger.setup.synthetic_manual_hint": "Sentetik veri kümesi görüşmede belirlenir, bu yüzden asistan gerekir.",
   "tooltip.code.metric": "Tahminin kalitesini ölçen bir fonksiyon — her örnek için sayısal bir puan döndürür",

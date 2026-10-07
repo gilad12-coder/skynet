@@ -2976,7 +2976,6 @@
   "tagger.setup.library_or": "או",
   "tagger.setup.library_pick": "בחירה מהספרייה שלכם",
   "tagger.setup.synthetic_pick": "יצירת דאטאסט סינתטי",
-  "tagger.setup.synthetic_hint": "עדיין אין דאטאסט? בחרו כאן והעוזר ישאל אילו נתונים אתם צריכים, ואז יכתוב אותם לפני שהתיוג מתחיל.",
   "tagger.setup.synthetic_source_name": "דאטאסט סינתטי",
   "tagger.setup.synthetic_manual_hint": "דאטאסט סינתטי נבנה בראיון, אז הוא דורש את העוזר.",
   "tooltip.analytics.submissions_per_day": "מספר ה{term.optimizationPlural} שהוגשו בכל יום, שבוע או חודש — הרזולוציה נבחרת לפי טווח הזמן — בפילוח לפי הצלחה וכישלון",

@@ -429,15 +429,13 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
         <CardTitle className="text-lg">{msg("tagger.setup.data_title")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {libraryName || synthetic ? (
+        {libraryName ? (
           <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 text-center">
             <p className="font-medium text-foreground" dir="auto">
-              {libraryName ?? msg("tagger.setup.synthetic_source_name")}
+              {libraryName}
             </p>
             <p className="text-sm text-muted-foreground">
-              {libraryName
-                ? formatMsg("datasets.count.rows", { count: parsedRows.length })
-                : msg("tagger.setup.synthetic_hint")}
+              {formatMsg("datasets.count.rows", { count: parsedRows.length })}
             </p>
           </div>
         ) : null}
@@ -495,6 +493,10 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
                 setParsedCols([]);
                 setInputCols([]);
                 setSynthetic(true);
+                // Synthetic data needs nothing more on this step, so move on
+                // the way Next would.
+                setDirection(1);
+                setStep(step + 1);
               }}
               className={cn(
                 "w-full justify-center gap-2",

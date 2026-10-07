@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "ou",
   "tagger.setup.library_pick": "Choisir dans votre bibliothèque",
   "tagger.setup.synthetic_pick": "Générer un jeu de données synthétique",
-  "tagger.setup.synthetic_hint": "Pas encore de données ? Choisissez ceci : l'assistant vous demande quelles données il vous faut, puis les écrit avant le début de l'étiquetage.",
   "tagger.setup.synthetic_source_name": "Jeu de données synthétique",
   "tagger.setup.synthetic_manual_hint": "Un jeu de données synthétique se définit dans l'entretien, il nécessite donc l'assistant.",
   "tooltip.code.metric": "Une fonction qui mesure la qualité de la prédiction — renvoie un score numérique pour chaque exemple",

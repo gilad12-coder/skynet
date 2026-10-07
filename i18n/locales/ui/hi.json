@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "या",
   "tagger.setup.library_pick": "अपनी लाइब्रेरी से चुनें",
   "tagger.setup.synthetic_pick": "सिंथेटिक डेटासेट बनाएँ",
-  "tagger.setup.synthetic_hint": "अभी डेटासेट नहीं है? इसे चुनें, असिस्टेंट पूछेगा कि आपको कौन सा डेटा चाहिए और लेबलिंग शुरू होने से पहले उसे लिख देगा।",
   "tagger.setup.synthetic_source_name": "सिंथेटिक डेटासेट",
   "tagger.setup.synthetic_manual_hint": "सिंथेटिक डेटासेट इंटरव्यू में तय होता है, इसलिए इसके लिए असिस्टेंट ज़रूरी है।",
   "tooltip.code.metric": "एक फ़ंक्शन जो भविष्यवाणी की गुणवत्ता मापता है — प्रत्येक उदाहरण के लिए एक संख्यात्मक स्कोर लौटाता है",

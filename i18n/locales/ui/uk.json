@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "або",
   "tagger.setup.library_pick": "Виберіть зі своєї бібліотеки",
   "tagger.setup.synthetic_pick": "Згенерувати синтетичний датасет",
-  "tagger.setup.synthetic_hint": "Ще немає датасету? Оберіть це: асистент запитає, які дані потрібні, і напише їх до початку розмітки.",
   "tagger.setup.synthetic_source_name": "Синтетичний датасет",
   "tagger.setup.synthetic_manual_hint": "Синтетичний датасет визначається в інтерв'ю, тому потребує асистента.",
   "tooltip.code.metric": "Функція, що вимірює якість прогнозу — повертає числову оцінку для кожного прикладу",

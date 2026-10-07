@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "أو",
   "tagger.setup.library_pick": "اختر من مكتبتك",
   "tagger.setup.synthetic_pick": "إنشاء مجموعة بيانات اصطناعية",
-  "tagger.setup.synthetic_hint": "لا توجد مجموعة بيانات بعد؟ اختر هذا وسيسألك المساعد عن البيانات التي تحتاجها، ثم يكتبها قبل بدء الوسم.",
   "tagger.setup.synthetic_source_name": "مجموعة بيانات اصطناعية",
   "tagger.setup.synthetic_manual_hint": "تُحدَّد مجموعة البيانات الاصطناعية في المقابلة، لذا تحتاج إلى المساعد.",
   "tooltip.code.metric": "دالة تقيس جودة التنبؤ — تُرجِع نتيجة رقمية لكل مثال",
