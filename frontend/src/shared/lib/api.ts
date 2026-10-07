@@ -1575,6 +1575,40 @@ export function getAgentRun(optimizationId: string, runId: number, sinceTranscri
 }
 
 /**
+ * Download a repository run's whole repository at its pinned commit with one
+ * version's patch applied, as a zip. The version is named by its patch text,
+ * which the server checks against the ones the run recorded.
+ */
+export async function downloadRepositoryArchive(
+  optimizationId: string,
+  patch: string,
+  fileName: string,
+): Promise<void> {
+  const res = await fetchWithAuthRetry(
+    `${apiBase()}/optimizations/${optimizationId}/repository/archive`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patch }),
+    },
+  );
+  if (!res.ok) {
+    const parsed = parseError(await res.text().catch(() => ""));
+    throw new ApiError(
+      parsed.message ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status }),
+      { status: res.status, code: parsed.code, params: parsed.params },
+    );
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/**
  * Download the self-contained, runnable DSPy program export as a zip and hand
  * it to the browser. Unlike the other `request`-based calls this returns binary
  * (a `StreamingResponse` attachment), so it goes through `fetchWithAuthRetry`

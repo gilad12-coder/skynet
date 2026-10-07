@@ -1,25 +1,19 @@
 "use client";
 
 import { MessageMarkdown } from "@/shared/ui/agent/message-markdown";
-import { msg } from "@/shared/lib/messages";
 import { formatJson, svgDocument, type RenderKind } from "@/shared/lib/candidate-render";
 
 function SandboxFrame({ doc, scripts, title }: { doc: string; scripts: boolean; title: string }) {
   // Candidates are model-written: HTML may run its own scripts but never
   // shares this origin, and SVG gets no scripts at all.
   return (
-    <div className="space-y-1">
-      <iframe
-        title={title}
-        srcDoc={doc}
-        sandbox={scripts ? "allow-scripts" : ""}
-        referrerPolicy="no-referrer"
-        className="h-[28rem] w-full rounded-lg border border-border/50 bg-white"
-      />
-      <p className="text-[0.6875rem] text-muted-foreground">
-        {msg("optimization.blackbox.versions.sandboxed")}
-      </p>
-    </div>
+    <iframe
+      title={title}
+      srcDoc={doc}
+      sandbox={scripts ? "allow-scripts" : ""}
+      referrerPolicy="no-referrer"
+      className="h-[28rem] w-full rounded-lg border border-border/50 bg-white"
+    />
   );
 }
 

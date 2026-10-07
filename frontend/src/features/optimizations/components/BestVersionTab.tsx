@@ -4,11 +4,13 @@ import { InlineWarningRow } from "@/shared/ui/inline-warning-row";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import dynamic from "next/dynamic";
 import { useMemo, useState, type KeyboardEvent } from "react";
+import { toast } from "react-toastify";
 import { motion } from "framer-motion";
 import {
   ArrowSquareOut,
   Code,
   Cube,
+  CircleNotch,
   DownloadSimple,
   Eye,
   FolderOpen,
@@ -30,6 +32,7 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { Skeleton } from "@/shared/ui/skeleton";
 import type { BlackboxRunResult } from "@/shared/types/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { downloadRepositoryArchive } from "@/shared/lib/api";
 import { tip } from "@/shared/lib/tooltips";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { arrowPageStep, isEditableTarget } from "@/shared/lib/arrow-paging";
@@ -354,6 +357,7 @@ export function BestVersionTab({
   const browse = repository && !!optimizationId;
   const [repoPath, setRepoPath] = useState<string | null>(null);
   const [openFile, setOpenFile] = useState<{ path: string; text: string } | null>(null);
+  const [archiving, setArchiving] = useState(false);
   const [index, setIndex] = useState(() => defaultVersionIndex(versions));
   const last = versions.length - 1;
   const at = Math.min(index, last);
@@ -382,6 +386,21 @@ export function BestVersionTab({
   const title = msg("optimization.blackbox.versions.title");
   const slug = (jobName ?? "candidate").replace(/[^\w.-]+/g, "_");
   const fileName = `${slug}-v${current.number}.${repository ? "patch" : RENDER_KIND_EXTENSION[kind]}`;
+
+  const download = async () => {
+    if (!browse || !optimizationId) {
+      downloadText(fileName, current.text);
+      return;
+    }
+    setArchiving(true);
+    try {
+      await downloadRepositoryArchive(optimizationId, current.text, `${slug}-v${current.number}.zip`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : msg("optimization.blackbox.versions.archive_failed"));
+    } finally {
+      setArchiving(false);
+    }
+  };
   const copyFile = browse && activeView === "files" ? openFile : null;
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -485,12 +504,21 @@ export function BestVersionTab({
             <Button
               variant="ghost"
               size="icon-xs"
-              onClick={() => downloadText(fileName, current.text)}
-              aria-label={formatMsg("optimization.blackbox.versions.download", {
-                n: current.number,
-              })}
+              onClick={download}
+              disabled={archiving}
+              aria-busy={archiving}
+              aria-label={formatMsg(
+                browse
+                  ? "optimization.blackbox.versions.download_repo"
+                  : "optimization.blackbox.versions.download",
+                { n: current.number },
+              )}
             >
-              <DownloadSimple aria-hidden="true" />
+              {archiving ? (
+                <CircleNotch className="animate-spin" aria-hidden="true" />
+              ) : (
+                <DownloadSimple aria-hidden="true" />
+              )}
             </Button>
           </div>
         </footer>

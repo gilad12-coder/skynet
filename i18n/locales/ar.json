@@ -227,6 +227,8 @@
     "optimization.no_result": "لا يملك التحسين أي بيانات نتيجة.",
     "optimization.no_result_for_artifact": "لا يملك التحسين أي نتيجة.",
     "optimization.no_result_pending": "لا يملك التحسين أي نتيجة بعد.",
+    "optimization.repo_version_unknown": "هذا الإصدار ليس جزءًا من هذا التشغيل.",
+    "optimization.repo_archive_failed": "تعذّر حزم المستودع: {reason}",
     "optimization.not_finished": "لم ينتهِ التحسين.",
     "optimization.not_found": "لم يُعثر على التحسين: '{optimization_id}'.",
     "optimization.agent_run_not_found": "لم يُعثر على تشغيل الوكيل {run_id} للتحسين '{optimization_id}'.",

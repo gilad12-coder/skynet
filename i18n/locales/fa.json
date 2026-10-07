@@ -227,6 +227,8 @@
     "optimization.no_result": "بهینه‌سازی هیچ داده‌ی نتیجه‌ای ندارد.",
     "optimization.no_result_for_artifact": "بهینه‌سازی هیچ نتیجه‌ای ندارد.",
     "optimization.no_result_pending": "بهینه‌سازی هنوز هیچ نتیجه‌ای ندارد.",
+    "optimization.repo_version_unknown": "این نسخه بخشی از این اجرا نیست.",
+    "optimization.repo_archive_failed": "بسته‌بندی مخزن ممکن نشد: {reason}",
     "optimization.not_finished": "بهینه‌سازی به پایان نرسیده است.",
     "optimization.not_found": "بهینه‌سازی یافت نشد: '{optimization_id}'.",
     "optimization.agent_run_not_found": "اجرای عامل {run_id} برای بهینه‌سازی '{optimization_id}' یافت نشد.",

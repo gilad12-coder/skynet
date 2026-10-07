@@ -521,7 +521,9 @@ function NodeBody({
 
           {view.kind === "rejected" || view.pending !== null || promptEntries.length > 0 ? (
             <Section
-              title={msg(versionTitleKey)}
+              // The file browser carries its own context; a kind word above it
+              // would only mislabel a whole repository.
+              title={repoBrowser && view.kind !== "rejected" ? undefined : msg(versionTitleKey)}
               info={msg(versionInfoKey)}
               action={
                 promptEntries.length > 0 && !repoBrowser && (hasParent || canPreview) ? (
@@ -2616,7 +2618,7 @@ function Section({
   action,
   children,
 }: {
-  title: string;
+  title?: string;
   info?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
@@ -2628,10 +2630,18 @@ function Section({
   );
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        {info !== undefined ? <HelpTip text={info}>{titleNode}</HelpTip> : titleNode}
-        {action}
-      </div>
+      {(title !== undefined || action) && (
+        <div className="flex items-center justify-between gap-2">
+          {title === undefined ? (
+            <span />
+          ) : info !== undefined ? (
+            <HelpTip text={info}>{titleNode}</HelpTip>
+          ) : (
+            titleNode
+          )}
+          {action}
+        </div>
+      )}
       {children}
     </div>
   );

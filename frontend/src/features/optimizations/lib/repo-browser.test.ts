@@ -110,3 +110,14 @@ test("repoFileKind reads the extension", () => {
   assert.equal(repoFileKind("a.py"), "python");
   assert.equal(repoFileKind("Makefile"), "code");
 });
+
+test("scoped rows split the changed files from the rest", () => {
+  const root = buildRepoTree(ENTRIES, parsePatch(PATCH));
+  const all = new Set(["src", "src/new", "docs"]);
+  const changed = visibleRows(root, all, "", "changed").map((r) => r.node.path);
+  const other = visibleRows(root, all, "", "unchanged").map((r) => r.node.path);
+  assert.deepEqual(changed, ["src", "src/new", "src/new/mod.py", "src/app.py", "src/old.py"]);
+  assert.deepEqual(other, ["docs", "docs/guide.md", "README.md"]);
+  assert.equal(root.fileCount, 5);
+  assert.equal(root.changedCount, 3);
+});

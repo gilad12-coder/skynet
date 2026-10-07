@@ -227,6 +227,8 @@
     "optimization.no_result": "Оптимізація не має даних результату.",
     "optimization.no_result_for_artifact": "Оптимізація не має результату.",
     "optimization.no_result_pending": "Оптимізація ще не має результату.",
+    "optimization.repo_version_unknown": "Ця версія не належить до цього запуску.",
+    "optimization.repo_archive_failed": "Не вдалося запакувати репозиторій: {reason}",
     "optimization.not_finished": "Оптимізацію не завершено.",
     "optimization.not_found": "Оптимізацію не знайдено: '{optimization_id}'.",
     "optimization.agent_run_not_found": "Запуск агента {run_id} для оптимізації '{optimization_id}' не знайдено.",

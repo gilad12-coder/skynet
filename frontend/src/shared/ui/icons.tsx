@@ -108,6 +108,8 @@ import { FloppyDisk as FloppyDiskBase } from "@phosphor-icons/react/dist/ssr/Flo
 import { FlowArrow as FlowArrowBase } from "@phosphor-icons/react/dist/ssr/FlowArrow";
 import { Folder as FolderBase } from "@phosphor-icons/react/dist/ssr/Folder";
 import { FolderOpen as FolderOpenBase } from "@phosphor-icons/react/dist/ssr/FolderOpen";
+import { Folders as FoldersBase } from "@phosphor-icons/react/dist/ssr/Folders";
+import { ListBullets as ListBulletsBase } from "@phosphor-icons/react/dist/ssr/ListBullets";
 import { FolderPlus as FolderPlusBase } from "@phosphor-icons/react/dist/ssr/FolderPlus";
 import { Funnel as FunnelBase } from "@phosphor-icons/react/dist/ssr/Funnel";
 import { FunnelSimple as FunnelSimpleBase } from "@phosphor-icons/react/dist/ssr/FunnelSimple";
@@ -298,6 +300,8 @@ export const FloppyDisk = /* @__PURE__ */ bold(FloppyDiskBase);
 export const FlowArrow = /* @__PURE__ */ bold(FlowArrowBase);
 export const Folder = /* @__PURE__ */ bold(FolderBase);
 export const FolderOpen = /* @__PURE__ */ bold(FolderOpenBase);
+export const Folders = /* @__PURE__ */ bold(FoldersBase);
+export const ListBullets = /* @__PURE__ */ bold(ListBulletsBase);
 export const FolderPlus = /* @__PURE__ */ bold(FolderPlusBase);
 export const Funnel = /* @__PURE__ */ bold(FunnelBase);
 export const FunnelSimple = /* @__PURE__ */ bold(FunnelSimpleBase);

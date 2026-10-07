@@ -753,6 +753,12 @@ class BlackboxRepoFileResponse(BaseModel):
     size: int | None = None
 
 
+# ``POST /optimizations/{id}/repository/archive``: the version to zip, sent as
+# its patch text so the request names it exactly as the run recorded it.
+class BlackboxRepoArchiveRequest(BaseModel):
+    patch: str = Field(max_length=10 * 1024 * 1024)
+
+
 # One entry of ``GET /blackbox/engines``: the catalog the wizard renders,
 # with availability resolved for the requested target kind.
 class BlackboxEngineInfo(BaseModel):

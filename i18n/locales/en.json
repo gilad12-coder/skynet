@@ -185,6 +185,8 @@
     "optimization.no_result": "Optimization has no result data.",
     "optimization.no_result_for_artifact": "Optimization has no result.",
     "optimization.no_result_pending": "Optimization has no result yet.",
+    "optimization.repo_version_unknown": "That version isn't part of this run.",
+    "optimization.repo_archive_failed": "The repository couldn't be packed: {reason}",
     "optimization.not_finished": "Optimization is not finished.",
     "optimization.not_found": "Optimization not found: '{optimization_id}'.",
     "optimization.agent_run_not_found": "Agent run {run_id} not found for optimization '{optimization_id}'.",

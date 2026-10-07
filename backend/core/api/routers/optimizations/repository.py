@@ -3,6 +3,7 @@
 Frontend-only (hidden from public docs):
 - ``GET /optimizations/{id}/repository/tree`` — every file and folder at the commit.
 - ``GET /optimizations/{id}/repository/file`` — one file's text at the commit.
+- ``POST /optimizations/{id}/repository/archive`` — the whole repository with one version applied, as a zip.
 
 Every version of a repository run is a patch against one pinned commit; the
 run page applies the patches itself and only needs the base tree and files.
@@ -13,16 +14,26 @@ has none, so public repositories still open.
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
+from pathlib import Path
 from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from ....connectors import github
-from ....connectors.github_repo import RepoFetchError, github_token
-from ....models import BlackboxRepoFileResponse, BlackboxRepoTreeEntry, BlackboxRepoTreeResponse
+from ....connectors.github_repo import RepoFetchError, github_token, patched_repo_zip
+from ....models import (
+    BlackboxRepoArchiveRequest,
+    BlackboxRepoFileResponse,
+    BlackboxRepoTreeEntry,
+    BlackboxRepoTreeResponse,
+)
 from ...auth import AuthenticatedUser, get_authenticated_user
 from ...converters import job_owner
 from ...errors import DomainError
@@ -213,6 +224,33 @@ def _file_response(path: str, fetched: dict[str, Any]) -> BlackboxRepoFileRespon
     )
 
 
+def recorded_patches(job_data: dict[str, Any]) -> set[str]:
+    """Collect every version text a repository run recorded.
+
+    Args:
+        job_data: The stored job row.
+
+    Returns:
+        The patches of its starting point, versions, lineage and winner, plus
+        the empty patch for the pinned commit itself.
+    """
+    result = job_data.get("result")
+    found = {""}
+    if not isinstance(result, dict):
+        return found
+    candidates = [result.get("seed_candidate"), result.get("best_candidate")]
+    for key in ("versions", "candidate_tree", "lanes"):
+        entries = result.get(key)
+        if isinstance(entries, list):
+            candidates.extend(entry.get("candidate") for entry in entries if isinstance(entry, dict))
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            found.add(candidate)
+        elif isinstance(candidate, dict):
+            found.update(value for value in candidate.values() if isinstance(value, str))
+    return found
+
+
 def register_repository_routes(router: APIRouter, *, job_store) -> None:
     """Register the repository-run file routes on ``router``.
 
@@ -305,3 +343,59 @@ def register_repository_routes(router: APIRouter, *, job_store) -> None:
             cached = _file_response(clean, fetched)
             _files.put(key, cached, weight=len(cached.content or ""))
         return cached
+
+    @router.post(
+        "/optimizations/{optimization_id}/repository/archive",
+        response_class=FileResponse,
+        summary="The whole repository of a repository run with one version applied, as a zip",
+    )
+    def get_repository_archive(
+        optimization_id: str,
+        body: BlackboxRepoArchiveRequest,
+        current_user: AuthenticatedUserDep,
+    ) -> FileResponse:
+        """Zip the repository a run optimizes at its pinned commit with one version's patch applied.
+
+        Args:
+            optimization_id: The repository run.
+            body: The version, as the patch text the run recorded.
+            current_user: Authenticated caller resolved from the bearer token.
+
+        Returns:
+            The zip, removed from disk once it is sent.
+
+        Raises:
+            DomainError: 404 when the run is unknown, inaccessible or not a
+                repository run, or the patch is not one of its versions; 409
+                before its commit is pinned; 502 when the clone or the patch
+                fails.
+        """
+        job_data = load_job_for_user(job_store, optimization_id, current_user)
+        repository, commit = _repo_target(job_data, optimization_id)
+        # Only a recorded version is zipped, so the route cannot be used to
+        # stamp arbitrary content into a download that looks like the run's.
+        if body.patch not in recorded_patches(job_data):
+            raise DomainError("optimization.repo_version_unknown", status=404)
+        owner = job_owner(job_data) or ""
+        engine = getattr(job_store, "engine", None)
+        token = None
+        if engine is not None and owner:
+            try:
+                token = github_token(engine, owner)
+            except RepoFetchError:
+                token = None
+        workdir = Path(tempfile.mkdtemp(prefix="repo-archive-"))
+        try:
+            archive = patched_repo_zip(repository, commit, body.patch, token, workdir)
+        except RepoFetchError as error:
+            shutil.rmtree(workdir, ignore_errors=True)
+            raise DomainError("optimization.repo_archive_failed", status=502, reason=str(error)) from None
+        except BaseException:
+            shutil.rmtree(workdir, ignore_errors=True)
+            raise
+        return FileResponse(
+            archive,
+            media_type="application/zip",
+            filename=archive.name,
+            background=BackgroundTask(shutil.rmtree, workdir, ignore_errors=True),
+        )

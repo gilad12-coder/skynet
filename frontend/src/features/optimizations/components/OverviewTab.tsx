@@ -423,7 +423,9 @@ function OverviewTabImpl({
                   {msg("optimization.blackbox.stats.runtime")}
                 </HelpTip>
               }
-              value={formatDuration(bbResult.runtime_seconds)}
+              // The header clock counts the whole run (clone, baseline, wrap-up), not
+              // just the engine's search, so the card reads the same number.
+              value={formatDuration(job.elapsed_seconds ?? bbResult.runtime_seconds)}
               icon={<Timer className="size-3.5" />}
             />
           </div>
