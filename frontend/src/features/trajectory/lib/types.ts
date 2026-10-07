@@ -116,6 +116,9 @@ export interface BlackboxTrajectoryContext {
     prompt: Record<string, string>,
     parentPrompt: Record<string, string>,
   ) => ReactNode;
+  // The scorer feedback the run saved on a version, for engines that never
+  // stream per-case notes; null when that version has none.
+  renderVersionFeedback?: (prompt: Record<string, string>) => ReactNode;
 }
 
 // GEPA stores a plain-string black-box candidate under this one synthetic key.

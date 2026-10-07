@@ -361,6 +361,12 @@ function NodeBody({
     [isBlackbox, minibatch, view.iteration, view.rawId],
   );
   const scorerNotes = useMemo(() => scorerNotesByCase(scorerEntries), [scorerEntries]);
+  // Some engines never stream per-case notes; the feedback the run saved on
+  // the version is then the only feedback there is.
+  const versionFeedback =
+    isBlackbox && scorerEntries.length === 0
+      ? (blackbox?.renderVersionFeedback?.(view.prompt) ?? null)
+      : null;
   const valsetById = useMemo(() => {
     const m = new Map<string, ValsetRow>();
     for (const row of valsetRows) m.set(row.id, row);
@@ -582,7 +588,9 @@ function NodeBody({
 
           {/* The cases grid already carries each case's scorer note, so a
               blackbox version with cases has nothing left for this section. */}
-          {isBlackbox && showCases ? null : (
+          {versionFeedback ? (
+            versionFeedback
+          ) : isBlackbox && showCases ? null : (
             <Section
               title={msg(
                 isBlackbox
