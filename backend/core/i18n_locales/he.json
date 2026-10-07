@@ -102,6 +102,8 @@
     "optimization.not_finished": "ה{term.optimization} עדיין לא הסתיימה.",
     "optimization.no_result": "ל{term.optimization} אין נתוני תוצאה.",
     "optimization.no_result_pending": "ל{term.optimization} עדיין אין תוצאה.",
+    "optimization.repo_version_unknown": "הגרסה הזו אינה חלק מההרצה.",
+    "optimization.repo_archive_failed": "לא ניתן היה לארוז את המאגר: {reason}",
     "optimization.no_result_for_artifact": "ל{term.optimization} אין תוצאה.",
     "optimization.no_payload": "ל{term.optimization} אין הגדרות שמורות.",
     "optimization.payload_unavailable": "ההגדרות השמורות של ה{term.optimization} אינן זמינות.",

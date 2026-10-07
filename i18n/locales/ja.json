@@ -227,6 +227,8 @@
     "optimization.no_result": "最適化に結果データがありません。",
     "optimization.no_result_for_artifact": "最適化に結果がありません。",
     "optimization.no_result_pending": "最適化にはまだ結果がありません。",
+    "optimization.repo_version_unknown": "そのバージョンはこの実行に含まれていません。",
+    "optimization.repo_archive_failed": "リポジトリをまとめられませんでした: {reason}",
     "optimization.not_finished": "最適化が完了していません。",
     "optimization.not_found": "最適化が見つかりません: '{optimization_id}'。",
     "optimization.agent_run_not_found": "最適化 '{optimization_id}' のエージェント実行 {run_id} が見つかりません。",

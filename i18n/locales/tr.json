@@ -227,6 +227,8 @@
     "optimization.no_result": "Optimizasyonun sonuç verisi yok.",
     "optimization.no_result_for_artifact": "Optimizasyonun sonucu yok.",
     "optimization.no_result_pending": "Optimizasyonun henüz bir sonucu yok.",
+    "optimization.repo_version_unknown": "Bu sürüm bu çalıştırmaya ait değil.",
+    "optimization.repo_archive_failed": "Depo paketlenemedi: {reason}",
     "optimization.not_finished": "Optimizasyon tamamlanmadı.",
     "optimization.not_found": "Optimizasyon bulunamadı: '{optimization_id}'.",
     "optimization.agent_run_not_found": "'{optimization_id}' optimizasyonu için {run_id} numaralı ajan çalışması bulunamadı.",

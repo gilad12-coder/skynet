@@ -382,3 +382,57 @@ def test_github_refusal_surfaces_as_a_domain_error(store: FakeJobStore) -> None:
 
     assert response.status_code == 404
     assert response.json()["code"] == "connectors.not_found"
+
+
+def test_archive_zips_only_a_recorded_version(store: FakeJobStore) -> None:
+    """Zip a patch the run recorded; refuse one it never produced."""
+    store.seed_job(
+        "done-run",
+        payload={
+            "username": "alice",
+            "target": {"kind": "repo", "repo": {"repository": "acme/app", "commit": COMMIT}},
+        },
+        result={"best_candidate": "PATCH-B", "versions": [{"candidate": "PATCH-A"}]},
+    )
+    seen: list[str] = []
+
+    def fake_zip(repository, commit, patch_text, token, workdir, **_):
+        """Record the call and write a stand-in zip.
+
+        Args:
+            repository: Repository name.
+            commit: Pinned commit.
+            patch_text: The version's patch.
+            token: GitHub token.
+            workdir: Folder for the zip.
+            **_: Ignored keywords.
+
+        Returns:
+            The zip path.
+        """
+        seen.append(patch_text)
+        out = workdir / "app.zip"
+        out.write_bytes(b"PK")
+        return out
+
+    client = _client(store)
+    with patch.object(repository_module, "patched_repo_zip", side_effect=fake_zip):
+        ok = client.post("/optimizations/done-run/repository/archive", json={"patch": "PATCH-A"})
+        refused = client.post("/optimizations/done-run/repository/archive", json={"patch": "rm -rf"})
+
+    assert ok.status_code == 200, ok.text
+    assert ok.headers["content-type"] == "application/zip"
+    assert 'filename="app.zip"' in ok.headers["content-disposition"]
+    assert refused.status_code == 404
+    assert refused.json()["code"] == "optimization.repo_version_unknown"
+    assert seen == ["PATCH-A"]
+
+
+def test_archive_reports_a_failed_clone(store: FakeJobStore) -> None:
+    """Turn a clone or apply failure into a 502 the page can show."""
+    client = _client(store)
+    with patch.object(repository_module, "patched_repo_zip", side_effect=RepoFetchError("git fetch failed: nope")):
+        response = client.post("/optimizations/repo-run/repository/archive", json={"patch": ""})
+
+    assert response.status_code == 502
+    assert response.json()["code"] == "optimization.repo_archive_failed"

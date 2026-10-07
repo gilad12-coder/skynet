@@ -227,6 +227,8 @@
     "optimization.no_result": "优化没有结果数据。",
     "optimization.no_result_for_artifact": "优化没有结果。",
     "optimization.no_result_pending": "优化尚无结果。",
+    "optimization.repo_version_unknown": "该版本不属于此次运行。",
+    "optimization.repo_archive_failed": "无法打包仓库：{reason}",
     "optimization.not_finished": "优化尚未完成。",
     "optimization.not_found": "未找到优化：'{optimization_id}'。",
     "optimization.agent_run_not_found": "未找到优化 '{optimization_id}' 的代理运行 {run_id}。",

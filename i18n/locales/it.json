@@ -227,6 +227,8 @@
     "optimization.no_result": "L'ottimizzazione non ha alcun dato di risultato.",
     "optimization.no_result_for_artifact": "L'ottimizzazione non ha alcun risultato.",
     "optimization.no_result_pending": "L'ottimizzazione non ha ancora alcun risultato.",
+    "optimization.repo_version_unknown": "Questa versione non fa parte di questa esecuzione.",
+    "optimization.repo_archive_failed": "Impossibile creare l'archivio del repository: {reason}",
     "optimization.not_finished": "L'ottimizzazione non è terminata.",
     "optimization.not_found": "Ottimizzazione non trovata: '{optimization_id}'.",
     "optimization.agent_run_not_found": "Esecuzione dell'agente {run_id} non trovata per l'ottimizzazione '{optimization_id}'.",

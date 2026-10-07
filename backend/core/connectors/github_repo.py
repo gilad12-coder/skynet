@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import tarfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -243,3 +244,58 @@ def fetch_snapshot(
         archive.unlink()
         raise RepoFetchError(f"The repository is larger than {MAX_ARCHIVE_BYTES // (1024 * 1024)} MB compressed.")
     return RepoSnapshot(commit=commit, archive=archive, readonly_paths=readonly, size_bytes=size)
+
+
+def patched_repo_zip(
+    repository: str,
+    commit: str,
+    patch: str,
+    token: str | None,
+    workdir: Path,
+    *,
+    remote: str | None = None,
+) -> Path:
+    """Clone ``repository`` at ``commit``, apply ``patch`` and zip the resulting tree.
+
+    Submodules and Git LFS content are left out: the zip is the files a run's
+    versions can change, not a working checkout.
+
+    Args:
+        repository: ``owner/name``.
+        commit: The pinned commit id.
+        patch: A unified diff against ``commit``; empty for the commit as is.
+        token: GitHub token; ``None`` for a public or local remote.
+        workdir: Empty folder the clone and zip go in.
+        remote: Clone URL override, used by tests with a local repository.
+
+    Returns:
+        The zip, its entries under one ``<name>/`` folder.
+
+    Raises:
+        RepoFetchError: When the clone fails, the patch does not apply, or the
+            zip is larger than the limit.
+    """
+    environment = git_auth_env(token)
+    checkout = workdir / "checkout"
+    checkout.mkdir(parents=True)
+    _git(["init", "--quiet"], checkout, environment)
+    _git(["remote", "add", "origin", remote or f"{GITHUB_HOST}/{repository}.git"], checkout, environment)
+    _git(["fetch", "--quiet", "--depth", "1", "origin", commit], checkout, environment)
+    _git(["-c", "advice.detachedHead=false", "checkout", "--quiet", "FETCH_HEAD"], checkout, environment)
+    if patch.strip():
+        patch_file = workdir / "version.patch"
+        patch_file.write_text(patch if patch.endswith("\n") else patch + "\n", encoding="utf-8")
+        _git(["apply", "--whitespace=nowarn", str(patch_file)], checkout, environment)
+    folder = repository.rsplit("/", 1)[-1]
+    archive = workdir / f"{folder}.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as packed:
+        for path in sorted(checkout.rglob("*")):
+            relative = path.relative_to(checkout)
+            if ".git" in relative.parts or path.is_symlink() or not path.is_file():
+                continue
+            packed.write(path, f"{folder}/{relative.as_posix()}")
+    shutil.rmtree(checkout, ignore_errors=True)
+    if archive.stat().st_size > MAX_ARCHIVE_BYTES:
+        archive.unlink()
+        raise RepoFetchError(f"The repository is larger than {MAX_ARCHIVE_BYTES // (1024 * 1024)} MB compressed.")
+    return archive

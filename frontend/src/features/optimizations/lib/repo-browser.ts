@@ -18,6 +18,8 @@ export interface RepoNode {
   removed: boolean;
   /** Changed files at or below this node. */
   changedCount: number;
+  /** Files at or below this node. */
+  fileCount: number;
 }
 
 export interface RepoRow {
@@ -33,14 +35,15 @@ function sortChildren(node: RepoNode): void {
   node.children.forEach(sortChildren);
 }
 
-function countChanged(node: RepoNode): number {
-  node.changedCount =
-    node.type === "file"
-      ? node.change || node.removed
-        ? 1
-        : 0
-      : node.children.reduce((sum, child) => sum + countChanged(child), 0);
-  return node.changedCount;
+function countFiles(node: RepoNode): void {
+  if (node.type === "file") {
+    node.changedCount = node.change || node.removed ? 1 : 0;
+    node.fileCount = 1;
+    return;
+  }
+  node.children.forEach(countFiles);
+  node.changedCount = node.children.reduce((sum, child) => sum + child.changedCount, 0);
+  node.fileCount = node.children.reduce((sum, child) => sum + child.fileCount, 0);
 }
 
 /** Build the tree of the commit's entries plus every path the patch touches. */
@@ -53,6 +56,7 @@ export function buildRepoTree(entries: RepositoryTreeEntry[], files: FilePatch[]
     change: null,
     removed: false,
     changedCount: 0,
+    fileCount: 0,
   };
   const byPath = new Map<string, RepoNode>([["", root]]);
   const ensure = (path: string, type: "file" | "dir"): RepoNode => {
@@ -68,6 +72,7 @@ export function buildRepoTree(entries: RepositoryTreeEntry[], files: FilePatch[]
       change: null,
       removed: false,
       changedCount: 0,
+      fileCount: 0,
     };
     parent.children.push(node);
     byPath.set(path, node);
@@ -87,7 +92,7 @@ export function buildRepoTree(entries: RepositoryTreeEntry[], files: FilePatch[]
     }
   }
   sortChildren(root);
-  countChanged(root);
+  countFiles(root);
   return root;
 }
 
@@ -113,11 +118,25 @@ export function hasFile(root: RepoNode, path: string): boolean {
   return node.type === "file";
 }
 
+/** Which files a tree shows: all of them, only the changed ones, or only the rest. */
+export type RepoScope = "all" | "changed" | "unchanged";
+
+function inScope(node: RepoNode, scope: RepoScope): boolean {
+  if (scope === "changed") return node.changedCount > 0;
+  if (scope === "unchanged") return node.fileCount > node.changedCount;
+  return true;
+}
+
 /**
  * The rows a reader sees, in display order. With a filter, only files whose
  * path contains it (any case) and their folders show, every folder open.
  */
-export function visibleRows(root: RepoNode, expanded: ReadonlySet<string>, filter: string): RepoRow[] {
+export function visibleRows(
+  root: RepoNode,
+  expanded: ReadonlySet<string>,
+  filter: string,
+  scope: RepoScope = "all",
+): RepoRow[] {
   const needle = filter.trim().toLowerCase();
   const rows: RepoRow[] = [];
   const matches = new Map<RepoNode, boolean>();
@@ -133,7 +152,7 @@ export function visibleRows(root: RepoNode, expanded: ReadonlySet<string>, filte
   };
   const walk = (node: RepoNode, depth: number) => {
     for (const child of node.children) {
-      if (needle && !matching(child)) continue;
+      if (!inScope(child, scope) || (needle && !matching(child))) continue;
       const open = child.type === "dir" && (needle ? true : expanded.has(child.path));
       rows.push({ node: child, depth, expanded: open });
       if (open) walk(child, depth + 1);

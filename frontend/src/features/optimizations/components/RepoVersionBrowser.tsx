@@ -34,7 +34,10 @@ import {
   FileZip,
   Folder,
   FolderOpen,
+  Folders,
+  ListBullets,
   MagnifyingGlass,
+  TreeStructure,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
@@ -43,12 +46,12 @@ import { Input } from "@/shared/ui/primitives/input";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { RenderedText } from "@/shared/ui/rendered-text";
-import { getRepositoryFile } from "@/shared/lib/api";
+import { getRepositoryFile, getRepositoryTree } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 import { CODE_HIGHLIGHT_SPECS } from "@/shared/ui/code-highlight-style";
-import type { RepositoryFileResponse } from "@/shared/types/api";
+import type { RepositoryFileResponse, RepositoryTreeEntry } from "@/shared/types/api";
 import type { CandidateVersion } from "../lib/blackbox-versions";
 import {
   countChanges,
@@ -69,6 +72,7 @@ import {
   visibleRows,
   type RepoNode,
   type RepoRow,
+  type RepoScope,
 } from "../lib/repo-browser";
 import type { HighlightToken } from "../lib/repo-highlight";
 import {
@@ -86,6 +90,8 @@ const DIFF_CONTEXT_LINES = 3;
 // Past this size a file shows as plain source: tokenising it would stall the tab.
 const MAX_HIGHLIGHT_CHARS = 200_000;
 const MAX_HIGHLIGHT_LINES = 5_000;
+
+const EMPTY_ENTRIES: RepositoryTreeEntry[] = [];
 
 type Loaded<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "error" };
 
@@ -224,30 +230,68 @@ function ChangeCounts({ added, removed }: { added: number; removed: number }) {
 
 /* ── Tree ─────────────────────────────────────────────────────────────── */
 
-function FileTree({
+/** How the explorer lists files: one tree, or the changed files above the rest. */
+export type TreeLayout = "tree" | "grouped";
+
+const LAYOUT_KEY = "repo-browser.layout";
+const TREE_OPEN_KEY = "repo-browser.tree-open";
+
+function readSetting(key: string): string | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeSetting(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // A blocked store only costs the reader their choice on the next visit.
+  }
+}
+
+/** Folders open by default in one list: those holding a change, plus the open file's. */
+function defaultOpen(root: RepoNode, scope: RepoScope, selected: string | null): Set<string> {
+  // The other-files list hides every change, so opening a folder for one
+  // would show it full of unrelated files.
+  const open = scope === "unchanged" ? new Set<string>() : changedFolders(root);
+  if (selected) ancestors(selected).forEach((path) => open.add(path));
+  return open;
+}
+
+function TreeList({
   root,
+  scope,
+  filter,
   selected,
+  label,
   onSelect,
 }: {
   root: RepoNode;
+  scope: RepoScope;
+  filter: string;
   selected: string | null;
+  label: string;
   onSelect: (path: string) => void;
 }) {
-  const [filter, setFilter] = useState("");
   const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(new Map());
   const [focused, setFocused] = useState<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
   const expanded = useMemo(() => {
-    const open = changedFolders(root);
-    if (selected) ancestors(selected).forEach((path) => open.add(path));
+    const open = defaultOpen(root, scope, selected);
     for (const [path, isOpen] of overrides) {
       if (isOpen) open.add(path);
       else open.delete(path);
     }
     return open;
-  }, [root, selected, overrides]);
-  const rows = useMemo(() => visibleRows(root, expanded, filter), [root, expanded, filter]);
+  }, [root, scope, selected, overrides]);
+  const rows = useMemo(
+    () => visibleRows(root, expanded, filter, scope),
+    [root, expanded, filter, scope],
+  );
 
   // A file opened from outside the tree (the first change, a moved-file link)
   // can sit far down a long list; bring it into view without moving the page.
@@ -302,55 +346,181 @@ function FileTree({
     }
   };
 
+  if (rows.length === 0) {
+    return filter ? (
+      <p className="px-1 py-1 text-xs text-foreground/70">
+        {msg("optimization.blackbox.repo.browser.no_match")}
+      </p>
+    ) : null;
+  }
   return (
-    <div className="flex min-h-0 flex-col gap-2">
-      <div className="relative">
-        <MagnifyingGlass
-          className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+    <div role="tree" aria-label={label} onKeyDown={onKeyDown}>
+      {rows.map((row, i) => (
+        <TreeRow
+          key={row.node.path}
+          row={row}
+          selected={row.node.path === selected}
+          tabbable={i === focusIndex}
+          rowRef={(el) => {
+            if (el) rowRefs.current.set(row.node.path, el);
+            else rowRefs.current.delete(row.node.path);
+          }}
+          onActivate={() => {
+            setFocused(row.node.path);
+            activate(row);
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function TreeSection({
+  title,
+  count,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex min-h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1 text-start text-[0.6875rem] font-medium uppercase tracking-wide text-foreground/70 transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-7"
+      >
+        <CaretRight
+          className={cn(
+            "size-3 shrink-0 transition-transform duration-150 rtl:-scale-x-100",
+            open && "rotate-90 rtl:-rotate-90",
+          )}
           aria-hidden="true"
         />
-        <Input
-          type="search"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && filter) {
-              event.stopPropagation();
-              setFilter("");
-            }
-          }}
-          placeholder={msg("optimization.blackbox.repo.browser.filter")}
-          aria-label={msg("optimization.blackbox.repo.browser.filter_aria")}
-          className={cn(TOUCH_FIELD_SM, "ps-8 text-xs md:text-xs")}
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <span className="shrink-0 font-mono tabular-nums normal-case">{count}</span>
+      </button>
+      {open && <div className="mt-0.5">{children}</div>}
+    </section>
+  );
+}
+
+function FileTree({
+  root,
+  selected,
+  layout,
+  onLayoutChange,
+  onSelect,
+}: {
+  root: RepoNode;
+  selected: string | null;
+  layout: TreeLayout;
+  onLayoutChange: (layout: TreeLayout) => void;
+  onSelect: (path: string) => void;
+}) {
+  const [filter, setFilter] = useState("");
+  const [changedOpen, setChangedOpen] = useState(true);
+  const [othersOpen, setOthersOpen] = useState(true);
+  const others = root.fileCount - root.changedCount;
+  const treeLabel = msg("optimization.blackbox.repo.browser.tree_aria");
+
+  return (
+    <div className="flex min-h-0 flex-col gap-2">
+      <div className="flex items-center gap-1.5">
+        <div className="relative min-w-0 flex-1">
+          <MagnifyingGlass
+            className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <Input
+            type="search"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && filter) {
+                event.stopPropagation();
+                setFilter("");
+              }
+            }}
+            placeholder={msg("optimization.blackbox.repo.browser.filter")}
+            aria-label={msg("optimization.blackbox.repo.browser.filter_aria")}
+            className={cn(TOUCH_FIELD_SM, "ps-8 text-xs md:text-xs")}
+          />
+        </div>
+        <Segmented<TreeLayout>
+          size="sm"
+          iconOnly
+          label={msg("optimization.blackbox.repo.browser.layout_label")}
+          value={layout}
+          onChange={onLayoutChange}
+          options={[
+            {
+              value: "grouped",
+              label: msg("optimization.blackbox.repo.browser.layout_grouped"),
+              icon: <ListBullets className="size-3.5" aria-hidden="true" />,
+              tip: msg("optimization.blackbox.repo.browser.layout_grouped"),
+            },
+            {
+              value: "tree",
+              label: msg("optimization.blackbox.repo.browser.layout_tree"),
+              icon: <TreeStructure className="size-3.5" aria-hidden="true" />,
+              tip: msg("optimization.blackbox.repo.browser.layout_tree"),
+            },
+          ]}
         />
       </div>
-      {rows.length === 0 && filter && (
-        <p className="px-1 text-xs text-foreground/70">
-          {msg("optimization.blackbox.repo.browser.no_match")}
-        </p>
-      )}
-      <div
-        role="tree"
-        aria-label={msg("optimization.blackbox.repo.browser.tree_aria")}
-        onKeyDown={onKeyDown}
-        className="max-h-[22rem] min-h-0 overflow-auto rounded-md @2xl:max-h-[32rem]"
-      >
-        {rows.map((row, i) => (
-          <TreeRow
-            key={row.node.path}
-            row={row}
-            selected={row.node.path === selected}
-            tabbable={i === focusIndex}
-            rowRef={(el) => {
-              if (el) rowRefs.current.set(row.node.path, el);
-              else rowRefs.current.delete(row.node.path);
-            }}
-            onActivate={() => {
-              setFocused(row.node.path);
-              activate(row);
-            }}
+      <div className="max-h-[22rem] min-h-0 overflow-auto rounded-md @2xl:max-h-[32rem]">
+        {layout === "tree" ? (
+          <TreeList
+            root={root}
+            scope="all"
+            filter={filter}
+            selected={selected}
+            label={treeLabel}
+            onSelect={onSelect}
           />
-        ))}
+        ) : (
+          <div className="space-y-1">
+            <TreeSection
+              title={msg("optimization.blackbox.repo.browser.section_changed")}
+              count={root.changedCount}
+              open={changedOpen || !!filter}
+              onToggle={() => setChangedOpen((v) => !v)}
+            >
+              <TreeList
+                root={root}
+                scope="changed"
+                filter={filter}
+                selected={selected}
+                label={msg("optimization.blackbox.repo.browser.section_changed")}
+                onSelect={onSelect}
+              />
+            </TreeSection>
+            {others > 0 && (
+              <TreeSection
+                title={msg("optimization.blackbox.repo.browser.section_other")}
+                count={others}
+                open={othersOpen || !!filter}
+                onToggle={() => setOthersOpen((v) => !v)}
+              >
+                <TreeList
+                  root={root}
+                  scope="unchanged"
+                  filter={filter}
+                  selected={selected}
+                  label={msg("optimization.blackbox.repo.browser.section_other")}
+                  onSelect={onSelect}
+                />
+              </TreeSection>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -652,6 +822,27 @@ function SplitDiff({
   );
 }
 
+/** An unchanged file's source, one column with line numbers. */
+function SourceView({ path, rows, text }: { path: string; rows: NumberedRow[]; text: string }) {
+  const tokens = useHighlight(path, text);
+  return (
+    <div
+      className="max-h-[32rem] overflow-auto rounded-lg border border-border/50 bg-muted/30 py-2 font-mono text-[0.8125rem] leading-relaxed"
+      dir="ltr"
+    >
+      {rows.map((row) => (
+        <div key={row.newLine} className="min-h-[1.5em]">
+          <DiffCell
+            row={row}
+            side="new"
+            tokens={row.newLine != null ? tokens?.[row.newLine - 1] : undefined}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * The file drawn twice side by side: as it was at the pinned commit and as
  * this version leaves it. A side the file is missing from says so.
@@ -770,12 +961,15 @@ function FileView({
   files,
   onSelect,
   onText,
+  toolbar,
 }: {
   optimizationId: string;
   path: string;
   files: FilePatch[];
   onSelect: (path: string) => void;
   onText: (text: string | null) => void;
+  /** Controls for the whole browser, at the end of the file's header row. */
+  toolbar?: ReactNode;
 }) {
   const kind = repoFileKind(path);
   const renderable = kind === "markdown" || kind === "html";
@@ -873,6 +1067,10 @@ function FileView({
     body = <Notice action={patchAction}>{msg(key)}</Notice>;
   } else if (loading || !rows || after.state !== "ready") {
     body = <Skeleton height={240} borderRadius={8} />;
+  } else if (!change && renderable && mode === "rendered") {
+    body = <RenderedText text={after.text} kind={kind} title={path} />;
+  } else if (!change) {
+    body = <SourceView path={path} rows={rows} text={shownAfter ?? ""} />;
   } else if (renderable && mode === "rendered") {
     body = (
       <RenderedSplit
@@ -914,6 +1112,7 @@ function FileView({
               ]}
             />
           )}
+          {toolbar}
         </div>
       </div>
       {body}
@@ -924,10 +1123,34 @@ function FileView({
 
 /* ── Browser ──────────────────────────────────────────────────────────── */
 
+const loadTree = (optimizationId: string) => getRepositoryTree(optimizationId);
+
+function TreeToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const label = msg(
+    open
+      ? "optimization.blackbox.repo.browser.hide_files"
+      : "optimization.blackbox.repo.browser.show_files",
+  );
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      onClick={onToggle}
+      aria-pressed={open}
+      aria-label={label}
+      title={label}
+      className={cn("rounded-full", open && "bg-primary/10 text-primary hover:bg-primary/15")}
+    >
+      <Folders aria-hidden="true" />
+    </Button>
+  );
+}
+
 /**
- * A repository version browsed like an editor's explorer: the files the
- * version changes on the inline-end side, the open file's changes side by
- * side in the main area.
+ * A repository version browsed like an editor's explorer: the repository's
+ * files on the inline-end side, changed ones marked, and the open file's
+ * changes side by side in the main area. The explorer can be hidden.
  */
 export function RepoVersionBrowser({
   optimizationId,
@@ -945,9 +1168,27 @@ export function RepoVersionBrowser({
   onOpenFile: (file: { path: string; text: string } | null) => void;
 }) {
   const files = useMemo(() => parsePatch(version.text), [version.text]);
-  const root = useMemo(() => buildRepoTree([], files), [files]);
+  // The changed files alone still browse while the full listing loads or fails.
+  const tree = useLoaded(optimizationId, loadTree);
+  const entries = tree?.status === "ready" ? tree.data.entries : EMPTY_ENTRIES;
+  const root = useMemo(() => buildRepoTree(entries, files), [entries, files]);
   const mainRef = useRef<HTMLDivElement>(null);
   const asideRef = useRef<HTMLElement>(null);
+  const [layout, setLayout] = useState<TreeLayout>(() =>
+    readSetting(LAYOUT_KEY) === "tree" ? "tree" : "grouped",
+  );
+  const [treeOpen, setTreeOpen] = useState(() => readSetting(TREE_OPEN_KEY) !== "0");
+
+  const changeLayout = (next: TreeLayout) => {
+    setLayout(next);
+    writeSetting(LAYOUT_KEY, next);
+  };
+  const toggleTree = () => {
+    setTreeOpen((open) => {
+      writeSetting(TREE_OPEN_KEY, open ? "0" : "1");
+      return !open;
+    });
+  };
 
   const firstChanged = files[0]?.path ?? null;
   const selected = path != null && hasFile(root, path) ? path : firstChanged;
@@ -979,9 +1220,15 @@ export function RepoVersionBrowser({
     }
   };
 
+  const toggle = <TreeToggle open={treeOpen} onToggle={toggleTree} />;
   return (
     <div className="@container">
-      <div className="grid gap-3 @2xl:grid-cols-[minmax(0,1fr)_15rem] @4xl:grid-cols-[minmax(0,1fr)_17rem]">
+      <div
+        className={cn(
+          "grid gap-3",
+          treeOpen && "@2xl:grid-cols-[minmax(0,1fr)_15rem] @4xl:grid-cols-[minmax(0,1fr)_17rem]",
+        )}
+      >
         <div ref={mainRef} className="min-w-0 scroll-mt-4">
           {selected ? (
             <FileView
@@ -991,17 +1238,29 @@ export function RepoVersionBrowser({
               files={files}
               onSelect={select}
               onText={onText}
+              toolbar={toggle}
             />
           ) : (
-            <Notice>{msg("optimization.blackbox.repo.unchanged")}</Notice>
+            <div className="space-y-2">
+              <div className="flex justify-end">{toggle}</div>
+              <Notice>{msg("optimization.blackbox.repo.unchanged")}</Notice>
+            </div>
           )}
         </div>
-        <aside
-          ref={asideRef}
-          className="order-first min-w-0 @2xl:order-none @2xl:border-s @2xl:border-border/50 @2xl:ps-3"
-        >
-          <FileTree root={root} selected={selected} onSelect={select} />
-        </aside>
+        {treeOpen && (
+          <aside
+            ref={asideRef}
+            className="order-first min-w-0 @2xl:order-none @2xl:border-s @2xl:border-border/50 @2xl:ps-3"
+          >
+            <FileTree
+              root={root}
+              selected={selected}
+              layout={layout}
+              onLayoutChange={changeLayout}
+              onSelect={select}
+            />
+          </aside>
+        )}
       </div>
     </div>
   );
