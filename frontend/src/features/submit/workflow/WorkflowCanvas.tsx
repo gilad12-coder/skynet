@@ -77,6 +77,7 @@ import {
   CanvasZoomReadout,
 } from "@/shared/ui/canvas-control-button";
 import { cn } from "@/shared/lib/utils";
+import { WORKFLOW_CANVAS_HEIGHT_CLASS, WORKFLOW_TOOLBAR_CLASS } from "./WorkflowCanvasSkeleton";
 import {
   COMPACT_POPOVER_ICON_CLASS,
   COMPACT_POPOVER_ITEM_CLASS,
@@ -815,7 +816,7 @@ function CanvasInner({
       )}
       data-tutorial="workflow-canvas"
     >
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border/40 bg-[#FAF8F5] px-3 py-2">
+      <div className={WORKFLOW_TOOLBAR_CLASS}>
         {/* Fullscreen swaps the start-side editing buttons for the agent
             toggle: node adding + tidy stay reachable via the context menu,
             and the agent panel toggles like the generalist panel does —
@@ -915,7 +916,7 @@ function CanvasInner({
         <div
           dir="ltr"
           ref={flowWrapRef}
-          className={cn("min-w-0 flex-1", fullscreen ? "min-h-0" : "h-[480px]")}
+          className={cn("min-w-0 flex-1", fullscreen ? "min-h-0" : WORKFLOW_CANVAS_HEIGHT_CLASS)}
         >
           <ReactFlow
             nodes={nodes}

@@ -600,13 +600,16 @@ export function Sidebar() {
           mobile drawer isn't resizable). Also the collapse control: dragging it
           past the threshold snaps the rail shut, and it stays grabbable on the
           collapsed rail's edge to drag back open. Invisible until hovered, then a
-          primary hairline; the grab math is mirrored for RTL in ``startResize``. */}
+          primary hairline; the grab math is mirrored for RTL in ``startResize``.
+          The global coarse-pointer rule would widen this button to 44px, laying
+          an invisible z-20 strip over every row's menu button on iPad, so the
+          minimum width is pinned back to its 6px hairline. */}
       <button
         type="button"
         onMouseDown={startResize}
         aria-label={msg("auto.features.sidebar.components.sidebar.literal.15")}
         tabIndex={-1}
-        className="group absolute inset-y-0 end-0 z-20 hidden w-1.5 cursor-col-resize md:block"
+        className="group absolute inset-y-0 end-0 z-20 hidden w-1.5 cursor-col-resize md:block any-pointer-coarse:min-w-0!"
       >
         <span
           aria-hidden="true"

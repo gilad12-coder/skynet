@@ -2,7 +2,6 @@
 
 import { FieldKey } from "@/shared/ui/field-key";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import dynamic from "next/dynamic";
 import {
   CaretRight,
   CheckCircle,
@@ -62,7 +61,7 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { Segmented } from "@/shared/ui/segmented";
 import { PingDot } from "@/shared/ui/ping-dot";
 import { MessageMarkdown } from "@/shared/ui/agent/message-markdown";
-import { Skeleton } from "@/shared/ui/skeleton";
+import { LazyCodeEditor } from "@/shared/ui/lazy-code-editor";
 import { RenderedText } from "@/shared/ui/rendered-text";
 import {
   AGENT_RUN_PHASE_FINAL,
@@ -122,16 +121,6 @@ const ToolSeveritiesContext = createContext<Record<string, string>>({});
 // context a fresh identity every render and re-render all consumers.
 const EMPTY_SEVERITIES: Record<string, string> = {};
 const EMPTY_DESCRIPTIONS: Record<string, string> = {};
-
-// A Flex submodule's optimizable candidate value is its full Python source — one
-// dspy.Module subclass whose predictors carry their instructions inline — not an
-// instruction string. GEPA rewrites that whole source, so a code candidate must
-// read as CODE. Rendered read-only through the same CodeMirror viewer the artifact
-// tab uses; lazy so CodeMirror stays out of the drawer's initial bundle.
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={140} borderRadius={8} />,
-});
 
 export type DrawerSelection =
   | { kind: "candidate"; node: TrajectoryNode; parent: TrajectoryNode | null }
@@ -2170,10 +2159,13 @@ function PromptBody({
 
 // Plain-mode render of a code candidate: the same read-only CodeMirror viewer the
 // artifact tab uses, height-fit to the source (capped so a long module scrolls
-// inside the drawer rather than stretching it).
+// inside the drawer rather than stretching it). A Flex submodule's candidate is
+// its full Python source, which GEPA rewrites whole, so it must read as code. The
+// lazy wrapper keeps CodeMirror out of the drawer's initial bundle and reserves
+// the editor's height while it loads, so the drawer does not jump.
 function PromptCodeView({ value }: { value: string }) {
   return (
-    <CodeEditor
+    <LazyCodeEditor
       value={value}
       onChange={() => {}}
       height={readOnlyEditorHeight(value, { maxPx: 480 })}

@@ -17,20 +17,26 @@ import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import { tip } from "@/shared/lib/tooltips";
 import { msg } from "@/shared/lib/messages";
 import type { WorkflowSpec } from "@/shared/types/api";
 
 import { compileWorkflowToCode } from "../lib/workflow-code";
 
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={180} borderRadius={8} />,
-});
-
 const WorkflowGraphView = dynamic(
   () => import("./WorkflowGraphView").then((m) => m.WorkflowGraphView),
-  { ssr: false, loading: () => <Skeleton height={480} borderRadius={8} /> },
+  {
+    ssr: false,
+    // Same height rule as the canvas, which shrinks to 65dvh on short phone screens.
+    loading: () => (
+      <Skeleton
+        height="100%"
+        borderRadius={8}
+        containerClassName="block h-[min(480px,65dvh)] sm:h-[480px]"
+      />
+    ),
+  },
 );
 
 export function CodeTab({

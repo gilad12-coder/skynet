@@ -692,9 +692,14 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             animate={{ x: 0, opacity: 1 }}
             exit={reduceMotion ? { opacity: 0 } : { x: isRtl ? -24 : 24, opacity: 0 }}
             transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-            style={{ width: isNarrow ? "100vw" : `min(${width}px, 92vw)` }}
+            style={isNarrow ? undefined : { width: `min(${width}px, 92vw)` }}
             className={cn(
               "fixed end-0 inset-y-0 z-40 flex h-dvh shrink-0",
+              // Full-screen only in the phone shell. Tablet-width windows
+              // (iPad portrait at 834, 2/3 Split View) keep a side drawer over
+              // the backdrop instead of a stretched phone sheet; the resize
+              // handle is hidden below lg, so this is MIN_WIDTH (480).
+              isNarrow && "w-screen md:w-[min(480px,92vw)]",
               "bg-background/95 backdrop-blur-xl border-s border-border/60",
               // Shadow falls from the panel toward the page content — rightward
               // when docked left (RTL), leftward when docked right (LTR).

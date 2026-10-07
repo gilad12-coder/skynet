@@ -61,6 +61,34 @@ function RepoSummary({ repo }: { repo: GithubRepository }) {
 }
 
 /**
+ * Loading rows at a listed repository's geometry: icon, name with its
+ * visibility badge, one description line and the language/pushed line, in the
+ * list's own gap, so the swap to real rows shifts nothing.
+ */
+export function RepoRowsSkeleton() {
+  return (
+    <div className="flex flex-col gap-1.5" aria-busy="true">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="flex items-start gap-3 rounded-xl border border-border/60 p-3">
+          <Skeleton width={16} height={16} containerClassName="mt-0.5 flex shrink-0 leading-none" />
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <div className="flex h-[22px] items-center">
+              <Skeleton width="45%" height={14} containerClassName="flex-1 leading-none" />
+            </div>
+            <div className="flex h-4 items-center">
+              <Skeleton width="80%" height={10} containerClassName="flex-1 leading-none" />
+            </div>
+            <div className="flex h-4 items-center">
+              <Skeleton width="30%" height={10} containerClassName="flex-1 leading-none" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
  * The linked account's repositories as a searchable list. Typing a full
  * ``owner/name`` the list lacks asks GitHub for it, so a public repository
  * outside the account can still be chosen.
@@ -183,14 +211,7 @@ export function RepoPicker({
           }
         />
       ) : repos === null ? (
-        <div className="flex flex-col gap-2" aria-busy="true">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="rounded-xl border border-border/60 p-3">
-              <Skeleton width="45%" height={14} />
-              <Skeleton width="80%" height={10} className="mt-2" />
-            </div>
-          ))}
-        </div>
+        <RepoRowsSkeleton />
       ) : rows.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
           {lookup

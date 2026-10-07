@@ -1402,7 +1402,7 @@ export function SettingsModal() {
           id={settingsTabsId}
           className={cn(
             "flex h-[calc(100dvh-5.75rem)] min-h-0 flex-col gap-0 transition-[height] duration-200 ease-out motion-reduce:transition-none md:flex-row",
-            expanded ? "sm:h-[calc(94dvh-5.75rem)]" : "max-h-[680px] sm:h-[min(72vh,680px)]",
+            expanded ? "sm:h-[calc(94dvh-5.75rem)]" : "max-h-[680px] sm:h-[min(72dvh,680px)]",
           )}
         >
           <TabsList

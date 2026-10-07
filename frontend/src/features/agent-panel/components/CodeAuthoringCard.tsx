@@ -9,6 +9,7 @@ import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { TERMS } from "@/shared/lib/terms";
 import { Skeleton } from "@/shared/ui/skeleton";
+import { LazyCodeEditor } from "@/shared/ui/lazy-code-editor";
 import { ActivityBreadcrumb } from "@/shared/ui/agent/activity-breadcrumb";
 import { ChatErrorBanner } from "@/shared/ui/agent/chat-error-banner";
 import { ThinkingSection } from "@/shared/ui/agent/thinking-section";
@@ -16,11 +17,6 @@ import { getActiveDir } from "@/shared/lib/runtime-locale";
 import type { ValidateCodeResponse } from "@/shared/types/api";
 
 import type { CodeAuthoringAgentState } from "../hooks/use-code-authoring-agent";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={150} borderRadius={8} />,
-});
 
 // The same react-flow canvas the /submit wizard uses, mounted inline so a
 // workflow (multi-module) run can be authored and edited without leaving chat.
@@ -153,7 +149,7 @@ function ArtifactBlock({
       >
         {label}
       </span>
-      <CodeEditor
+      <LazyCodeEditor
         value={code}
         onChange={NOOP}
         height="150px"

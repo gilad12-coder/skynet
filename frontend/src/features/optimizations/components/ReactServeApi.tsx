@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import dynamic from "next/dynamic";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import { Separator } from "@/shared/ui/primitives/separator";
-import { Skeleton } from "@/shared/ui/skeleton";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { msg } from "@/shared/lib/messages";
@@ -13,12 +11,8 @@ import { tip } from "@/shared/lib/tooltips";
 
 import { CopyButton } from "@/shared/ui/copy-button";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import { LangPicker } from "./ui-primitives";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={180} borderRadius={8} />,
-});
 
 export interface ReactServeApiProps {
   optimizationId: string;

@@ -6,6 +6,7 @@ import { toast } from "react-toastify";
 import { FloppyDisk, GitBranch, GithubLogo, Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
+import { Skeleton } from "@/shared/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -30,7 +31,7 @@ import {
   type BlackboxWizardContext,
   type RepoSecretRow,
 } from "../../hooks/use-blackbox-wizard";
-import { RepoPicker } from "./RepoPicker";
+import { RepoPicker, RepoRowsSkeleton } from "./RepoPicker";
 import { Field } from "./shared";
 
 // The select's value for a row whose secret is typed into this run only.
@@ -131,6 +132,17 @@ export function BlackboxRepoFields({ w }: { w: BlackboxWizardContext }) {
             {msg("submit.blackbox.repo.connect")}
           </Button>
         </div>
+      )}
+
+      {/* Most repository runs already have GitHub linked, so the wait holds
+          the picker's place rather than leaving a gap the list then fills. */}
+      {loading && !linked && (
+        <Field label={msg("submit.blackbox.repo.repository_label")}>
+          <div className="flex flex-col gap-2">
+            <Skeleton height={44} borderRadius={16} />
+            <RepoRowsSkeleton />
+          </div>
+        </Field>
       )}
 
       {linked && (

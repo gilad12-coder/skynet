@@ -12,7 +12,6 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { Label } from "@/shared/ui/primitives/label";
 import { Separator } from "@/shared/ui/primitives/separator";
 import { HelpTip } from "@/shared/ui/help-tip";
-import { Skeleton } from "@/shared/ui/skeleton";
 import { tip, type TooltipKey } from "@/shared/lib/tooltips";
 import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
@@ -26,6 +25,7 @@ import { CodeInterviewPanel } from "./CodeInterviewPanel";
 import { ReactConfigSection } from "./ReactConfigSection";
 import { BannerFrame, GArrow, GBar, GBox, GWire, PickerSlide } from "./PickerSlide";
 import { workflowUsesTools } from "../../workflow/model";
+import { WorkflowCanvasSkeleton } from "../../workflow/WorkflowCanvasSkeleton";
 import { WIZARD_STAGE } from "../../lib/wizard-steps";
 
 // The atomic DSPy modules offered on the picker's "single module" tier. Names
@@ -103,7 +103,7 @@ function moduleLabel(value: string): string {
 // React Flow ships ~100KB of canvas code; only workflow runs pay for it.
 const WorkflowCanvas = dynamic(
   () => import("../../workflow/WorkflowCanvas").then((m) => m.WorkflowCanvas),
-  { ssr: false, loading: () => <Skeleton height={480} borderRadius={8} /> },
+  { ssr: false, loading: () => <WorkflowCanvasSkeleton /> },
 );
 
 export function CodeStep({

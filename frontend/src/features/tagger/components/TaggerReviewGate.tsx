@@ -65,7 +65,14 @@ export function TaggerReviewGate({
   }, [unlocked]);
 
   if (roundLoading) {
-    return <LoadingState label={msg("tagger.assist.gate.preparing")} className="min-h-[40vh]" />;
+    // Holds the rail's width so the annotation column beside it does not
+    // widen while the round loads and snap back when the rail arrives.
+    return (
+      <LoadingState
+        label={msg("tagger.assist.gate.preparing")}
+        className="min-h-[40vh] w-full lg:w-[300px]"
+      />
+    );
   }
 
   return (

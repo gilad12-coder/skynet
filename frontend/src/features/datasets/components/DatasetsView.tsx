@@ -31,7 +31,6 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { DATASET_UPLOAD_ACCEPT, parseDatasetFile } from "@/shared/lib/parse-dataset";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { cn } from "@/shared/lib/utils";
-import { ListPageSkeleton } from "@/shared/ui/list-page-skeleton";
 import { ImportFromMenu } from "@/features/connectors";
 import { registerTutorialHook } from "@/features/tutorial";
 import { useDatasets } from "../hooks/use-datasets";
@@ -39,6 +38,7 @@ import { DatasetCard } from "./DatasetCard";
 import { DatasetDetailDialog } from "./DatasetDetailDialog";
 import { DatasetRenameDialog } from "./DatasetRenameDialog";
 import { DatasetShareDialog } from "./DatasetShareDialog";
+import { DatasetsSkeleton } from "./DatasetsSkeleton";
 
 /**
  * Top-level /datasets page: the personal dataset library. Lists owned and
@@ -214,7 +214,7 @@ export function DatasetsView() {
     return (
       <div className="pb-16" data-tutorial="datasets-library">
         <DataHubTabs active="datasets" />
-        <ListPageSkeleton />
+        <DatasetsSkeleton />
       </div>
     );
   }

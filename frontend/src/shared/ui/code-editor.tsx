@@ -446,7 +446,7 @@ export function CodeEditor({
   return (
     <div
       className="rounded-xl border border-border/60 overflow-visible flex flex-col shadow-sm w-full"
-      style={readOnly ? undefined : { maxHeight: "60vh" }}
+      style={readOnly ? undefined : { maxHeight: "60svh" }}
       dir="ltr"
     >
       <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 bg-[#F3ECE3] text-[0.6875rem] text-[#8C7A6B] border-b border-[#E5DDD4] rounded-t-xl">
@@ -555,8 +555,8 @@ export function CodeEditor({
             <div
               className="relative overflow-y-auto [&_.cm-editor]:!outline-none"
               style={{
-                minHeight: readOnly ? height : `min(${height}, calc(60vh - 4rem))`,
-                maxHeight: readOnly ? undefined : "calc(60vh - 4rem)",
+                minHeight: readOnly ? height : `min(${height}, calc(60svh - 4rem))`,
+                maxHeight: readOnly ? undefined : "calc(60svh - 4rem)",
               }}
             >
               {lite ? (

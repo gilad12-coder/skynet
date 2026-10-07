@@ -252,7 +252,7 @@ export function LegalDocument({ document, kind }: { document: LegalDoc; kind: Le
           <aside className="print:hidden">
             <nav
               aria-label={CHROME.contentsAria}
-              className="border-y border-border/70 py-6 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:overscroll-contain"
+              className="border-y border-border/70 py-6 lg:sticky lg:top-24 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto lg:overscroll-contain"
             >
               <div className="mb-5 flex items-center justify-between gap-4">
                 <p className="text-xs font-bold uppercase tracking-[0.15em] text-foreground">

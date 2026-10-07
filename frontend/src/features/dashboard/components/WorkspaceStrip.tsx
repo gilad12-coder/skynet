@@ -99,9 +99,13 @@ function SectionDivider() {
   );
 }
 
-function RowSkeleton({ nameWidth }: { nameWidth: number }) {
+// Header and item rows are links/buttons, which take a 44px floor below lg and
+// on any coarse pointer (globals.css), so their bones reserve the same height.
+const TAP_ROW_CLASS = "min-h-[44px] lg:min-h-0 any-pointer-coarse:min-h-[44px]";
+
+function RowSkeleton({ nameWidth, link = false }: { nameWidth: number; link?: boolean }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
+    <div className={cn("flex items-center justify-between gap-3 text-xs", link && TAP_ROW_CLASS)}>
       <Skeleton width={nameWidth} height={12} />
       <Skeleton width={40} height={12} />
     </div>
@@ -112,7 +116,7 @@ function RowSkeleton({ nameWidth }: { nameWidth: number }) {
 function SectionSkeleton({ children }: { children: ReactNode }) {
   return (
     <div aria-hidden="true" className="min-w-0 p-4 sm:p-5 lg:flex-1">
-      <div className="flex items-center gap-2">
+      <div className={cn("flex items-center gap-2 text-xs", TAP_ROW_CLASS)}>
         <Skeleton width={24} height={24} borderRadius={6} />
         <Skeleton width={104} height={12} />
         <Skeleton width={16} height={12} />
@@ -125,14 +129,36 @@ function SectionSkeleton({ children }: { children: ReactNode }) {
 function BalanceSectionSkeleton() {
   return (
     <SectionSkeleton>
-      <div className="flex items-baseline gap-1.5">
+      <div className="text-xl leading-none">
         <Skeleton width={64} height={20} />
-        <Skeleton width={48} height={12} />
       </div>
       <RowSkeleton nameWidth={148} />
       <RowSkeleton nameWidth={96} />
       <RowSkeleton nameWidth={120} />
     </SectionSkeleton>
+  );
+}
+
+/** Loading band at the loaded geometry; the dashboard skeleton reuses it so the two never drift. */
+export function WorkspaceStripSkeleton() {
+  return (
+    <div className="flex flex-col border-t border-[#DDD4C8]/50 first:border-t-0 lg:flex-row lg:items-stretch">
+      <SectionSkeleton>
+        <RowSkeleton nameWidth={168} link />
+        <RowSkeleton nameWidth={128} link />
+      </SectionSkeleton>
+      <SectionDivider />
+      <SectionSkeleton>
+        <RowSkeleton nameWidth={112} link />
+        <RowSkeleton nameWidth={144} link />
+        <div className="mt-1 flex items-center gap-2 text-[0.6875rem]">
+          <Skeleton height={4} borderRadius={999} containerClassName="flex-1" />
+          <Skeleton width={96} height={11} />
+        </div>
+      </SectionSkeleton>
+      <SectionDivider />
+      <BalanceSectionSkeleton />
+    </div>
   );
 }
 
@@ -152,27 +178,7 @@ export function WorkspaceStrip() {
   const { openTo } = useSettingsModal();
   const locale = getActiveIntlLocale();
 
-  if (loading) {
-    return (
-      <div className="flex flex-col border-t border-[#DDD4C8]/50 first:border-t-0 lg:flex-row lg:items-stretch">
-        <SectionSkeleton>
-          <RowSkeleton nameWidth={168} />
-          <RowSkeleton nameWidth={128} />
-        </SectionSkeleton>
-        <SectionDivider />
-        <SectionSkeleton>
-          <RowSkeleton nameWidth={112} />
-          <RowSkeleton nameWidth={144} />
-          <div className="mt-1 flex items-center gap-2">
-            <Skeleton height={4} borderRadius={999} containerClassName="flex-1" />
-            <Skeleton width={96} height={11} />
-          </div>
-        </SectionSkeleton>
-        <SectionDivider />
-        <BalanceSectionSkeleton />
-      </div>
-    );
-  }
+  if (loading) return <WorkspaceStripSkeleton />;
   if (!tagging && !datasets && walletLoading) return null;
 
   const usagePct = datasets

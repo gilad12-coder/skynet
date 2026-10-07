@@ -162,7 +162,7 @@ export function ServeChat({
                       variant="ghost"
                       size="icon-xs"
                       onClick={() => setEditingRunTs(run.ts)}
-                      className="ms-1.5 self-center text-muted-foreground opacity-100 transition-opacity hover:text-foreground focus-visible:opacity-100 sm:opacity-0 sm:group-hover/user:opacity-100 [@media(hover:none)_and_(pointer:coarse)]:opacity-100"
+                      className="ms-1.5 self-center text-muted-foreground opacity-100 transition-opacity hover:text-foreground focus-visible:opacity-100 sm:opacity-0 sm:group-hover/user:opacity-100 any-pointer-coarse:opacity-100"
                       aria-label={msg("auto.features.optimizations.components.servechat.literal.1")}
                     >
                       <PencilSimple className="size-3.5" />

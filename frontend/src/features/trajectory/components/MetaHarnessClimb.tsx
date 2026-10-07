@@ -9,7 +9,15 @@ import {
   Minus,
   Plus,
 } from "@/shared/ui/icons";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { createPortal } from "react-dom";
 import { formatBlackboxScore } from "@/shared/lib";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -27,6 +35,7 @@ import {
   type ClimbModel,
   type ClimbPoint,
 } from "../lib/meta-harness";
+import { usePinchZoom } from "../lib/pinch-zoom";
 import { displayCandidateId } from "../lib/types";
 
 // The palette mirrors TrajectoryTree so a climb and a tree read as one family.
@@ -50,11 +59,30 @@ const GRID_LINE_COLOR = "oklch(0.91 0.006 50)";
 const AXIS_INK = "rgba(28, 22, 18, 0.55)";
 const SURFACE_GRADIENT = "radial-gradient(ellipse at 50% 0%, var(--muted), var(--background) 70%)";
 // Room under the plot for the legend that floats over the chart's bottom edge.
+// A coarse pointer (any iPad, even with a trackpad attached) grows every legend
+// toggle to a 44px target, so the legend needs more room there or it covers
+// the axis labels.
 const LEGEND_ROOM_PX = 48;
+const LEGEND_ROOM_COARSE_PX = 68;
+const COARSE_POINTER_QUERY = "(any-pointer: coarse)";
 // Inline the chart is as tall as the climb's natural layout plus that room;
 // maximized, the climb stretches to the screen instead.
-const CHART_HEIGHT_PX =
-  CLIMB_LAYOUT.padTop + CLIMB_LAYOUT.plotHeight + CLIMB_LAYOUT.padBottom + LEGEND_ROOM_PX;
+const PLOT_HEIGHT_PX = CLIMB_LAYOUT.padTop + CLIMB_LAYOUT.plotHeight + CLIMB_LAYOUT.padBottom;
+
+function subscribeCoarsePointer(onChange: () => void): () => void {
+  const query = window.matchMedia(COARSE_POINTER_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+function useLegendRoom(): number {
+  const coarse = useSyncExternalStore(
+    subscribeCoarsePointer,
+    () => window.matchMedia(COARSE_POINTER_QUERY).matches,
+    () => false,
+  );
+  return coarse ? LEGEND_ROOM_COARSE_PX : LEGEND_ROOM_PX;
+}
 
 // The map controls mirror TrajectoryTree, except that zooming out stops where
 // the whole climb is in view rather than at a fixed floor.
@@ -98,14 +126,14 @@ export interface MetaHarnessClimbProps {
 }
 
 // At rest the climb sits at its natural size against the start edge, shrunk
-// only when it would not fit; the viewer zooms in and pans from there.
-function fitView(size: { w: number; h: number }, layoutW: number, layoutH: number): View {
-  if (size.w < 2 || size.h < 2 || layoutW <= 0 || layoutH <= 0) {
+// only when it would not fit; the viewer zooms in and pans from there. ``plot``
+// is the canvas above the legend's room.
+function fitView(plot: { w: number; h: number }, layoutW: number, layoutH: number): View {
+  if (plot.w < 2 || plot.h < 2 || layoutW <= 0 || layoutH <= 0) {
     return { k: 1, tx: 0, ty: 0 };
   }
-  const plotH = size.h - LEGEND_ROOM_PX;
-  const k = Math.min(1, size.w / layoutW, plotH / layoutH);
-  return { k, tx: 0, ty: Math.max(0, (plotH - layoutH * k) / 2) };
+  const k = Math.min(1, plot.w / layoutW, plot.h / layoutH);
+  return { k, tx: 0, ty: Math.max(0, (plot.h - layoutH * k) / 2) };
 }
 
 // The resting frame is the zoom floor: the climb never shrinks below the size
@@ -115,15 +143,15 @@ function fitView(size: { w: number; h: number }, layoutW: number, layoutH: numbe
 // opens up beside the drawing.
 function clampView(
   view: View,
-  size: { w: number; h: number },
+  plot: { w: number; h: number },
   layoutW: number,
   layoutH: number,
 ): View {
-  const rest = fitView(size, layoutW, layoutH);
+  const rest = fitView(plot, layoutW, layoutH);
   if (view.k <= rest.k) return rest;
   const k = Math.min(ZOOM_MAX, view.k);
-  const slackX = size.w - layoutW * k;
-  const slackY = size.h - LEGEND_ROOM_PX - layoutH * k;
+  const slackX = plot.w - layoutW * k;
+  const slackY = plot.h - layoutH * k;
   return {
     k,
     tx: slackX >= 0 ? 0 : Math.max(slackX, Math.min(0, view.tx)),
@@ -236,14 +264,16 @@ export function MetaHarnessClimb({
     };
   }, [isMaximized]);
 
+  const legendRoom = useLegendRoom();
+  const plot = useMemo(() => ({ w: size.w, h: size.h - legendRoom }), [size, legendRoom]);
   const layout = useMemo(
     () =>
       layoutClimb(model, {
-        availableWidth: size.w,
-        availableHeight: isMaximized ? size.h - LEGEND_ROOM_PX : undefined,
+        availableWidth: plot.w,
+        availableHeight: isMaximized ? plot.h : undefined,
         showPending: live,
       }),
-    [model, size.w, size.h, isMaximized, live],
+    [model, plot, isMaximized, live],
   );
   const bestPoint = useMemo(
     () => layout.points.find((point) => point.id === model.bestId) ?? null,
@@ -254,15 +284,15 @@ export function MetaHarnessClimb({
     if (size.w < 2 || size.h < 2) return;
     setView((v) =>
       userInteractedRef.current
-        ? clampView(v, size, layout.width, layout.height)
-        : fitView(size, layout.width, layout.height),
+        ? clampView(v, plot, layout.width, layout.height)
+        : fitView(plot, layout.width, layout.height),
     );
-  }, [size, layout.width, layout.height]);
+  }, [size, plot, layout.width, layout.height]);
 
   const zoomAt = useCallback(
     (cx: number, cy: number, factor: number) => {
       setView((v) => {
-        const rest = fitView(size, layout.width, layout.height);
+        const rest = fitView(plot, layout.width, layout.height);
         const nextK = Math.max(rest.k, Math.min(ZOOM_MAX, v.k * factor));
         if (nextK === v.k) return v;
         // Zooming all the way out lands on the resting frame, which then keeps
@@ -276,13 +306,13 @@ export function MetaHarnessClimb({
         const wy = (cy - v.ty) / v.k;
         return clampView(
           { k: nextK, tx: cx - wx * nextK, ty: cy - wy * nextK },
-          size,
+          plot,
           layout.width,
           layout.height,
         );
       });
     },
-    [size, layout.width, layout.height],
+    [plot, layout.width, layout.height],
   );
 
   useEffect(() => {
@@ -299,11 +329,18 @@ export function MetaHarnessClimb({
     // Same portal caveat as the ResizeObserver: the listener follows the host.
   }, [zoomAt, isMaximized]);
 
+  const { start: pinchStart, move: pinchMove, end: pinchEnd } = usePinchZoom(containerRef, zoomAt);
+
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       const target = e.target as Element | null;
       if (target?.closest("[data-trajectory-controls]")) return;
+      if (pinchStart(e)) {
+        if (panStateRef.current?.moved) setIsDragging(false);
+        panStateRef.current = null;
+        return;
+      }
       // Capturing here would steal the click from the node under the pointer,
       // so capture waits until the pointer actually starts panning.
       panStateRef.current = {
@@ -315,11 +352,12 @@ export function MetaHarnessClimb({
         moved: false,
       };
     },
-    [view.tx, view.ty],
+    [view.tx, view.ty, pinchStart],
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
+      if (pinchMove(e)) return;
       const ps = panStateRef.current;
       if (!ps || ps.pointerId !== e.pointerId) return;
       const dx = e.clientX - ps.startClientX;
@@ -334,25 +372,29 @@ export function MetaHarnessClimb({
         setView((v) =>
           clampView(
             { k: v.k, tx: ps.startTx + dx, ty: ps.startTy + dy },
-            size,
+            plot,
             layout.width,
             layout.height,
           ),
         );
       }
     },
-    [size, layout.width, layout.height],
+    [plot, layout.width, layout.height, pinchMove],
   );
 
-  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const ps = panStateRef.current;
-    if (!ps || ps.pointerId !== e.pointerId) return;
-    panStateRef.current = null;
-    if (ps.moved) {
-      (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
-      setIsDragging(false);
-    }
-  }, []);
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      pinchEnd(e);
+      const ps = panStateRef.current;
+      if (!ps || ps.pointerId !== e.pointerId) return;
+      panStateRef.current = null;
+      if (ps.moved) {
+        (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+        setIsDragging(false);
+      }
+    },
+    [pinchEnd],
+  );
 
   // A release that ends a pan must not also select the node it lands on.
   const handleSelect = useCallback(
@@ -368,8 +410,8 @@ export function MetaHarnessClimb({
     [size.w, size.h, zoomAt],
   );
   const restView = useMemo(
-    () => fitView(size, layout.width, layout.height),
-    [size, layout.width, layout.height],
+    () => fitView(plot, layout.width, layout.height),
+    [plot, layout.width, layout.height],
   );
   const resetView = useCallback(() => {
     userInteractedRef.current = false;
@@ -393,7 +435,7 @@ export function MetaHarnessClimb({
       style={
         isMaximized
           ? { background: SURFACE_GRADIENT }
-          : { height: CHART_HEIGHT_PX, background: SURFACE_GRADIENT }
+          : { height: PLOT_HEIGHT_PX + legendRoom, background: SURFACE_GRADIENT }
       }
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -556,7 +598,7 @@ export function MetaHarnessClimb({
         <div
           aria-hidden
           className="w-full rounded-xl border border-[#DDD4C8]/60 opacity-40"
-          style={{ height: CHART_HEIGHT_PX, background: SURFACE_GRADIENT }}
+          style={{ height: PLOT_HEIGHT_PX + legendRoom, background: SURFACE_GRADIENT }}
         />
         {createPortal(body, document.body)}
       </>

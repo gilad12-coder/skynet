@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { XCircle } from "@/shared/ui/icons";
 
@@ -45,6 +45,8 @@ type GateState =
 export function OptimizationDetailGate() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  // A grid pair deep link renders the pair strip above the tabs.
+  const isPairLink = useSearchParams().get("pair") != null;
   const { data: session, status } = useSession();
   const [state, setState] = useState<GateState>({ mode: "loading" });
   // The id whose probe already resolved to a stable view. The session token
@@ -120,11 +122,11 @@ export function OptimizationDetailGate() {
     };
   }, [id, isDemo, status, session?.backendAccessToken, router]);
 
-  if (state.mode === "loading") return <OptimizationDetailSkeleton />;
+  if (state.mode === "loading") return <OptimizationDetailSkeleton pair={isPairLink} />;
   if (state.mode === "public") return <OptimizationDetailView shareData={state.data} />;
   if (state.mode === "notfound") {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+      <div className="flex flex-col items-center justify-center min-h-[60dvh] gap-4">
         <XCircle className="size-12 text-destructive" />
         <p className="text-lg text-muted-foreground">
           {formatMsg("auto.app.optimizations.id.page.template.2", { p1: TERMS.optimization })}

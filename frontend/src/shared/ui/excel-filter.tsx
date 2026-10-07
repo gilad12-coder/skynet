@@ -358,7 +358,7 @@ function FilterDropdown({
         />
       </div>
 
-      <label className="group flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] font-semibold text-muted-foreground hover:bg-muted/70 lg:min-h-9">
+      <label className="group flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] font-semibold text-muted-foreground hover:bg-muted/70 lg:min-h-9 any-pointer-coarse:min-h-11">
         <input
           type="checkbox"
           className="peer sr-only"
@@ -386,7 +386,7 @@ function FilterDropdown({
           visibleOptions.slice(0, OPTION_RENDER_CAP).map((opt) => (
             <label
               key={opt.value}
-              className="group flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] text-muted-foreground hover:bg-muted/70 lg:min-h-9"
+              className="group flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] text-muted-foreground hover:bg-muted/70 lg:min-h-9 any-pointer-coarse:min-h-11"
               title={clipText(opt.value)}
             >
               <input

@@ -8,6 +8,7 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { Segmented } from "@/shared/ui/segmented";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
+import { Skeleton } from "@/shared/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -39,6 +40,11 @@ import {
 import { LiveMarker } from "./LogsTab";
 
 const GROUPING_STORAGE_KEY = "skynet.usage.grouping";
+// Shared by the summary strip and its skeleton. Seven columns wait for xl:
+// at lg the main column beside the sidebar is only about 780px wide (iPad
+// portrait), too narrow for seven money figures.
+const SUMMARY_GRID_CLASS =
+  "grid grid-cols-2 gap-3 rounded-xl border border-border/50 bg-card/40 p-4 text-sm sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7";
 /** Refresh interval while the run is going. */
 const LIVE_REFRESH_MS = 2000;
 /** Poll interval while a finished run's ledger is still settling. */
@@ -244,12 +250,7 @@ function Summary({
     tip("usage_tab.summary.tokens"),
   ]);
   return (
-    <dl
-      className={cn(
-        "grid grid-cols-2 gap-3 rounded-xl border border-border/50 bg-card/40 p-4 text-sm sm:grid-cols-3 lg:grid-cols-7",
-        budgetHit && "border-[#9a6a10]/40",
-      )}
-    >
+    <dl className={cn(SUMMARY_GRID_CLASS, budgetHit && "border-[#9a6a10]/40")}>
       {items.map(([label, value, help]) => (
         <div key={label} className="min-w-0 space-y-1">
           <dt className="text-xs text-muted-foreground">
@@ -264,6 +265,55 @@ function Summary({
         <p className="col-span-full text-xs text-[#9a6a10]">{msg("usage_tab.budget_stopped")}</p>
       )}
     </dl>
+  );
+}
+
+// Segmented and icon buttons are 44px tall below lg and under any coarse
+// pointer (iPad, even with a trackpad), so the bones grow at the same points.
+const SEGMENT_BONE = "block h-7 w-48 max-lg:h-12 any-pointer-coarse:h-12";
+const ICON_BONE = "block size-8 any-pointer-coarse:size-11";
+
+/** The summary strip, toolbar and table while the first usage fetch is in flight. */
+function UsageTabSkeleton({ budgeted }: { budgeted: boolean }) {
+  return (
+    <div className="space-y-4" aria-hidden="true">
+      <div className={SUMMARY_GRID_CLASS}>
+        {Array.from({ length: budgeted ? 6 : 3 }).map((_, i) => (
+          <div key={i} className="min-w-0 space-y-1">
+            <div className="flex h-4 items-center">
+              <Skeleton width="60%" height={10} containerClassName="block w-full" />
+            </div>
+            <div className="flex h-5 items-center">
+              <Skeleton width="45%" height={14} containerClassName="block w-full" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-1.5">
+          <span className="size-3" />
+          <Skeleton height="100%" borderRadius={8} containerClassName={SEGMENT_BONE} />
+        </div>
+        <Skeleton height="100%" containerClassName={ICON_BONE} />
+      </div>
+      <div className="overflow-hidden rounded-2xl border border-[#DDD4C8]/50">
+        <div className="flex h-12 items-center gap-4 border-b border-border/60 px-4">
+          <Skeleton width="40%" height={12} containerClassName="flex-1" />
+          <Skeleton width="50%" height={12} containerClassName="flex-1 text-end" />
+          <Skeleton width="50%" height={12} containerClassName="flex-1 text-end" />
+        </div>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="flex h-[41px] items-center gap-4 border-b border-border/60 px-4 last:border-0"
+          >
+            <Skeleton width="60%" height={12} containerClassName="flex-1" />
+            <Skeleton width="40%" height={12} containerClassName="flex-1 text-end" />
+            <Skeleton width="30%" height={12} containerClassName="flex-1 text-end" />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -295,7 +345,13 @@ export function UsageTab({
   const firstNonModel = groups.findIndex((g) => g.nonModel);
 
   if (!usage) {
-    return error ? <EmptyState icon={Coins} title={msg("usage_tab.load_error")} /> : null;
+    return error ? (
+      <EmptyState icon={Coins} title={msg("usage_tab.load_error")} />
+    ) : (
+      <UsageTabSkeleton
+        budgeted={!!(job.execution_budget ?? job.terminal_evidence?.execution_budget)}
+      />
+    );
   }
 
   const cost = (g: UsageGroup) =>

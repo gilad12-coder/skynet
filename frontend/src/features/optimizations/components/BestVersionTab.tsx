@@ -2,7 +2,6 @@
 
 import { InlineWarningRow } from "@/shared/ui/inline-warning-row";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
-import dynamic from "next/dynamic";
 import { useMemo, useState, type KeyboardEvent } from "react";
 import { toast } from "react-toastify";
 import { motion } from "framer-motion";
@@ -29,7 +28,6 @@ import {
 import { CopyButton } from "@/shared/ui/copy-button";
 import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
-import { Skeleton } from "@/shared/ui/skeleton";
 import type { BlackboxRunResult } from "@/shared/types/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { downloadRepositoryArchive } from "@/shared/lib/api";
@@ -39,6 +37,7 @@ import { arrowPageStep, isEditableTarget } from "@/shared/lib/arrow-paging";
 import { cn } from "@/shared/lib/utils";
 import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import { CandidatePreview } from "./CandidatePreview";
 import { VersionRail } from "./VersionRail";
 import { RepoVersionBrowser } from "./RepoVersionBrowser";
@@ -66,11 +65,6 @@ import {
   type RenderKind,
   isDrawable,
 } from "@/shared/lib/candidate-render";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={180} borderRadius={8} />,
-});
 
 type View = "preview" | "code" | "diff" | "files" | "renders";
 

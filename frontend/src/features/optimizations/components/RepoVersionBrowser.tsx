@@ -450,7 +450,7 @@ function TreeRow({
       tabIndex={tabbable ? 0 : -1}
       onClick={onActivate}
       className={cn(
-        "relative flex min-h-8 cursor-pointer select-none items-center gap-1.5 rounded-md pe-2 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-7",
+        "relative flex min-h-8 cursor-pointer select-none items-center gap-1.5 rounded-md pe-2 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-7 any-pointer-coarse:min-h-11",
         selected
           ? "bg-primary/10 font-medium text-foreground before:absolute before:inset-y-1 before:start-0 before:w-0.5 before:rounded-full before:bg-primary"
           : "text-foreground/80 hover:bg-muted/70",

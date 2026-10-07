@@ -482,7 +482,9 @@ function GridOverviewImpl({
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}
             >
-              <div className="grid gap-4 md:grid-cols-2">
+              {/* Two charts side by side need lg: at md the content beside the sidebar
+                  (834px iPad portrait) leaves each chart under 300px. */}
+              <div className="grid gap-4 lg:grid-cols-2">
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">

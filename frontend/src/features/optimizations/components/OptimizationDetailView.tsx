@@ -1076,12 +1076,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   );
 
   if (loading || !authReady) {
-    return <OptimizationDetailSkeleton />;
+    return <OptimizationDetailSkeleton pair={activePairIndex !== null} />;
   }
 
   if (error || !job) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+      <div className="flex flex-col items-center justify-center min-h-[60dvh] gap-4">
         <XCircle className="size-12 text-destructive" />
         <p className="text-lg text-muted-foreground">
           {error ??

@@ -11,7 +11,6 @@
  */
 
 import * as React from "react";
-import dynamic from "next/dynamic";
 import { Copy, Plus, Trash, X } from "@/shared/ui/icons";
 
 import { Button } from "@/shared/ui/primitives/button";
@@ -19,16 +18,13 @@ import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import { Separator } from "@/shared/ui/primitives/separator";
 import { Segmented } from "@/shared/ui/segmented";
-import { Skeleton } from "@/shared/ui/skeleton";
 import { cn } from "@/shared/lib/utils";
 import { msg } from "@/shared/lib/messages";
 import type { WorkflowFieldSpec, WorkflowNodeSpec } from "@/shared/types/api";
 import { TOUCH_FIELD, TOUCH_FIELD_SM } from "@/shared/ui/touch";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={160} borderRadius={8} />,
-});
+// The shared lazy wrapper reserves the editor's header band and body height
+// while its bundle loads, so the inspector does not grow once it arrives.
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 
 const MODULE_CHOICES = [
   ["predict", "Predict"],
