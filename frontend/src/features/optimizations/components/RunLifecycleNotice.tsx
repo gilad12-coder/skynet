@@ -12,11 +12,7 @@ import { TERMS } from "@/shared/lib/terms";
 import { formatBlackboxScore, formatPercent } from "@/shared/lib/formatters";
 import { centsToUsd, formatBudgetUsd, usdToCents } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import {
-  budgetResultKind,
-  isBudgetPause,
-  isBudgetStop,
-} from "../lib/run-lifecycle";
+import { budgetResultKind, isBudgetPause, isBudgetStop } from "../lib/run-lifecycle";
 import { Label } from "@/shared/ui/primitives/label";
 
 const RESULT_COPY = {
@@ -122,8 +118,7 @@ export function RunLifecycleNotice({
   );
   const requested = Math.max(minimumLimit, requestedLimit ?? suggestedLimit);
   const settling = (budget?.pending_operations ?? 0) > 0;
-  const canContinue =
-    canEdit && job.resumable === true && budget != null && !budget.uncapped;
+  const canContinue = canEdit && job.resumable === true && budget != null && !budget.uncapped;
 
   const handleRaise = async () => {
     if (!budget || raising) return;
