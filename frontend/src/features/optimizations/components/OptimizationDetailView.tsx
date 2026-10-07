@@ -1558,8 +1558,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               )}
               {showBestVersionTab && (
                 <TabsTrigger value="best" className={tabCls}>
-                  <Cube className="size-3.5" />
-                  {msg("optimization.blackbox.best.tab")}
+                  <Package className="size-3.5" />
+                  {msg("optimization.artifact.tab")}
                 </TabsTrigger>
               )}
               {showDataTab && !isPhone && (

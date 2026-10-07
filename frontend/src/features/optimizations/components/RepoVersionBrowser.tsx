@@ -43,12 +43,12 @@ import { Input } from "@/shared/ui/primitives/input";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { RenderedText } from "@/shared/ui/rendered-text";
-import { getRepositoryFile, getRepositoryTree } from "@/shared/lib/api";
+import { getRepositoryFile } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 import { CODE_HIGHLIGHT_SPECS } from "@/shared/ui/code-highlight-style";
-import type { RepositoryFileResponse, RepositoryTreeResponse } from "@/shared/types/api";
+import type { RepositoryFileResponse } from "@/shared/types/api";
 import type { CandidateVersion } from "../lib/blackbox-versions";
 import {
   countChanges,
@@ -437,33 +437,15 @@ function TreeRow({
 
 type Mode = "source" | "rendered";
 
-function Breadcrumb({ repository, path }: { repository: string | null; path: string }) {
-  const parts = [...(repository ? [repository] : []), ...path.split("/")];
+function Breadcrumb({ path }: { path: string }) {
   return (
-    <nav aria-label={msg("optimization.blackbox.repo.browser.breadcrumb_aria")} className="min-w-0">
-      <ol
-        className="flex min-w-0 items-center gap-1 font-mono text-xs text-muted-foreground"
-        dir="ltr"
-      >
-        {parts.map((part, i) => (
-          <li
-            key={i}
-            className={cn(
-              "flex min-w-0 items-center gap-1",
-              i === parts.length - 1 ? "shrink" : "shrink-[2]",
-            )}
-          >
-            {i > 0 && <CaretRight className="size-2.5 shrink-0 opacity-60" aria-hidden="true" />}
-            <span
-              className={cn("truncate", i === parts.length - 1 && "font-semibold text-foreground")}
-              aria-current={i === parts.length - 1 ? "page" : undefined}
-            >
-              {part}
-            </span>
-          </li>
-        ))}
-      </ol>
-    </nav>
+    <span
+      className="min-w-0 truncate font-mono text-xs font-semibold text-foreground"
+      dir="ltr"
+      title={path}
+    >
+      {path.split("/").pop()}
+    </span>
   );
 }
 
@@ -691,7 +673,7 @@ function RenderedSplit({
   ] as const;
   return (
     <div className="@container">
-      <div className="grid gap-3 @2xl:grid-cols-2">
+      <div className="grid gap-3 @sm:grid-cols-2">
         {sides.map((side) => (
           <section key={side.key} className="min-w-0 space-y-1.5" aria-label={msg(side.label)}>
             <h4 className="text-[0.6875rem] font-medium uppercase tracking-wide text-foreground/70">
@@ -784,14 +766,12 @@ function StatusChip({ children, title }: { children: ReactNode; title?: string }
 
 function FileView({
   optimizationId,
-  repository,
   path,
   files,
   onSelect,
   onText,
 }: {
   optimizationId: string;
-  repository: string | null;
   path: string;
   files: FilePatch[];
   onSelect: (path: string) => void;
@@ -912,7 +892,7 @@ function FileView({
     <div className="min-w-0 space-y-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <div className="flex min-w-0 items-center gap-2">
-          <Breadcrumb repository={repository} path={path} />
+          <Breadcrumb path={path} />
           {counts && counts.added + counts.removed > 0 && !movedTo && (
             <ChangeCounts added={counts.added} removed={counts.removed} />
           )}
@@ -965,9 +945,6 @@ export function RepoVersionBrowser({
   onOpenFile: (file: { path: string; text: string } | null) => void;
 }) {
   const files = useMemo(() => parsePatch(version.text), [version.text]);
-  // Only the repository's name is read from the tree: the explorer lists the
-  // files this version changes, not the whole commit.
-  const tree = useLoaded<RepositoryTreeResponse>(optimizationId, getRepositoryTree);
   const root = useMemo(() => buildRepoTree([], files), [files]);
   const mainRef = useRef<HTMLDivElement>(null);
   const asideRef = useRef<HTMLElement>(null);
@@ -1010,7 +987,6 @@ export function RepoVersionBrowser({
             <FileView
               key={selected}
               optimizationId={optimizationId}
-              repository={tree?.status === "ready" ? tree.data.repository : null}
               path={selected}
               files={files}
               onSelect={select}
