@@ -24,6 +24,7 @@ import {
 } from "@/features/tutorial/lib/demo-data";
 import { OptimizationDetailView } from "./OptimizationDetailView";
 import { OptimizationDetailSkeleton } from "./OptimizationDetailSkeleton";
+import { rememberRunKind, useRunKindHint } from "../lib/run-kind-hint";
 
 type GateState =
   | { mode: "loading" }
@@ -56,6 +57,7 @@ export function OptimizationDetailGate() {
   // and tab state mid-use. "notfound" is deliberately not latched so a later
   // sign-in can still upgrade it.
   const resolvedIdRef = useRef<string | null>(null);
+  const kindHint = useRunKindHint(id);
 
   const isDemo =
     id === DEMO_OPTIMIZATION_ID ||
@@ -86,7 +88,8 @@ export function OptimizationDetailGate() {
         // gets misrendered as "wasn't found" while it is happily training.
         for (let attempt = 0; ; attempt++) {
           try {
-            await getJob(id);
+            const probed = await getJob(id);
+            rememberRunKind(id, probed.optimization_type);
             if (cancelled) return;
             resolvedIdRef.current = id;
             setState({ mode: "owned" });
@@ -122,7 +125,9 @@ export function OptimizationDetailGate() {
     };
   }, [id, isDemo, status, session?.backendAccessToken, router]);
 
-  if (state.mode === "loading") return <OptimizationDetailSkeleton pair={isPairLink} />;
+  if (state.mode === "loading") {
+    return <OptimizationDetailSkeleton pair={isPairLink} grid={kindHint === "grid_search"} />;
+  }
   if (state.mode === "public") return <OptimizationDetailView shareData={state.data} />;
   if (state.mode === "notfound") {
     return (

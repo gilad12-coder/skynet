@@ -219,6 +219,179 @@ def aggregate(
     return list(rows.values())
 
 
+def _model_key(model: str | None) -> str:
+    """Reduce a model id to its bare name, so a route prefix doesn't break matching.
+
+    The submitted model and the one the LM history recorded often differ only
+    in their route (``openrouter/openai/gpt-4.1`` vs ``litellm_proxy/openai/gpt-4.1``).
+
+    Args:
+        model: A model id, or ``None``.
+
+    Returns:
+        The lowercased last path segment, or ``""``.
+    """
+    return (model or "").rsplit("/", 1)[-1].lower()
+
+
+def _leg_rows(
+    leg: Mapping[str, Any],
+    *,
+    task_model: str | None,
+    reflection_model: str | None,
+    reflection_role: str,
+    billing: str,
+    pair: str | None,
+) -> list[UsageRow]:
+    """Build the usage rows of one run or grid pair from its recorded result.
+
+    Args:
+        leg: A single-run result or one grid pair's result.
+        task_model: Model the task program ran on.
+        reflection_model: Model the optimizer reflected or proposed with.
+        reflection_role: ``ROLE_REFLECTION`` or ``ROLE_PROPOSER``.
+        billing: Billing label every row carries.
+        pair: Grid pair tag, or ``None`` for a single run.
+
+    Returns:
+        One row per role and model, with tokens, calls and latency but no charge yet.
+    """
+    rows: dict[tuple[str, str | None], UsageRow] = {}
+
+    def row_for(role: str, model: str | None) -> UsageRow:
+        """Return the row for one role and model, creating it on first use."""
+        if (role, model) not in rows:
+            rows[(role, model)] = UsageRow(role, model, None, pair, None, billing)
+        return rows[(role, model)]
+
+    reflection_key = _model_key(reflection_model)
+    usages = leg.get("usage_by_model")
+    for usage in usages if isinstance(usages, list) else ():
+        if not isinstance(usage, Mapping) or not isinstance(usage.get("model"), str):
+            continue
+        key = _model_key(usage["model"])
+        reflection = bool(reflection_key) and key == reflection_key and key != _model_key(task_model)
+        row = row_for(reflection_role if reflection else ROLE_TASK, usage["model"])
+        row.input_tokens += _int(usage.get("input_tokens"))
+        row.output_tokens += _int(usage.get("output_tokens"))
+    activity = leg.get("lm_activity") if isinstance(leg.get("lm_activity"), Mapping) else {}
+    for side, role, model in (
+        ("generation", ROLE_TASK, task_model),
+        ("reflection", reflection_role, reflection_model),
+    ):
+        stages = activity.get(side)
+        if not isinstance(stages, Mapping):
+            continue
+        row = next((row for (row_role, _), row in rows.items() if row_role == role), None)
+        for stats in stages.values():
+            calls = _int(stats.get("calls")) if isinstance(stats, Mapping) else 0
+            if not calls:
+                continue
+            row = row or row_for(role, model)
+            row.calls += calls
+            latency = stats.get("avg_response_time_ms")
+            if isinstance(latency, int | float) and not isinstance(latency, bool) and latency >= 0:
+                row.latency_ms_total += round(latency * calls)
+                row.latency_calls += calls
+    return list(rows.values())
+
+
+def _usd(row: UsageRow) -> float:
+    """Price a row's tokens at provider cost, or ``0.0`` when it names no model."""
+    if row.model is None:
+        return 0.0
+    return usage_cost_usd(ModelUsage(row.model, row.input_tokens, row.output_tokens))
+
+
+def _spread(rows: list[UsageRow], units: int) -> None:
+    """Split a charge across rows by provider cost, falling back to tokens, then evenly.
+
+    Args:
+        rows: Rows to charge; mutated in place.
+        units: The charge in cent units; the rows sum to it exactly.
+    """
+    if not rows or units <= 0:
+        return
+    weights = [_usd(row) for row in rows]
+    if sum(weights) <= 0:
+        weights = [float(row.input_tokens + row.output_tokens) for row in rows]
+    if sum(weights) <= 0:
+        weights = [1.0] * len(rows)
+    total = sum(weights)
+    for row, weight in zip(rows, weights, strict=True):
+        row.charged_units = int(units * weight / total)
+    heaviest = max(range(len(rows)), key=weights.__getitem__)
+    rows[heaviest].charged_units += units - sum(row.charged_units for row in rows)
+
+
+def from_result(
+    result: Mapping[str, Any],
+    *,
+    task_model: str | None,
+    reflection_model: str | None,
+    proposer: bool,
+    byok: bool,
+    pair: str | None = None,
+) -> list[UsageRow]:
+    """Rebuild a run's usage rows from its own result, for runs charged without an execution budget.
+
+    Older runs were debited once at the end from the result's ``usage_by_model``
+    and left no billing operations, so this is the only record of what they
+    used. The charge is the worker's ``details.billing`` stamp, split across the
+    model rows so they add up to exactly what the run header shows.
+
+    Args:
+        result: The run's result, single run or grid envelope.
+        task_model: The run's task model, used when the result is a single run.
+        reflection_model: The run's reflection or proposer model, likewise.
+        proposer: Whether the optimizer model is a proposer agent rather than DSPy reflection.
+        byok: Whether the run's tokens were paid on the owner's own key.
+        pair: Keep only this grid pair.
+
+    Returns:
+        Rows in result order; empty when the result recorded no usage.
+    """
+    reflection_role = ROLE_PROPOSER if proposer else ROLE_REFLECTION
+    billing = BILLING_BYOK if byok else BILLING_SKYNET
+    pairs = result.get("pair_results")
+    if isinstance(pairs, list):
+        rows: list[UsageRow] = []
+        for leg in pairs:
+            if not isinstance(leg, Mapping) or (pair is not None and str(leg.get("pair_index")) != pair):
+                continue
+            rows += _leg_rows(
+                leg,
+                task_model=leg.get("generation_model"),
+                reflection_model=leg.get("reflection_model"),
+                reflection_role=reflection_role,
+                billing=billing,
+                pair=str(leg.get("pair_index")),
+            )
+        return rows
+    if pair is not None:
+        return []
+    rows = _leg_rows(
+        result,
+        task_model=task_model,
+        reflection_model=reflection_model,
+        reflection_role=reflection_role,
+        billing=billing,
+        pair=None,
+    )
+    details = result.get("details") if isinstance(result.get("details"), Mapping) else {}
+    stamp = details.get("billing") if isinstance(details.get("billing"), Mapping) else {}
+    units = _int(stamp.get("cents")) * CENT_SCALE if stamp.get("outcome") == "billed" else 0
+    if units and not rows:
+        rows.append(UsageRow(ROLE_OTHER, None, None, None, None, billing))
+    _spread(rows, units)
+    if byok:
+        for row in rows:
+            usd = _usd(row)
+            row.provider_cents = Decimal(str(usd)) / Decimal(str(CENT_USD_VALUE)) if usd > 0 else None
+            row.unpriced_calls = row.calls if row.provider_cents is None else 0
+    return rows
+
+
 def load_records(engine: Engine, budget_id: str) -> list[OperationRecord]:
     """Read a budget's operations with each one's latest evidence.
 

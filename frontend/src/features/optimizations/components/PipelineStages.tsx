@@ -13,7 +13,6 @@
  * non-interactive renderer.
  */
 
-import { useEffect, useRef, useState } from "react";
 import { Check, CircleNotch, Minus, X } from "@/shared/ui/icons";
 import type { PipelineStage } from "../constants";
 import type { PlannedStage } from "../lib/pipeline-plan";
@@ -22,8 +21,6 @@ import { msg } from "@/shared/lib/messages";
 import { formatDuration } from "@/shared/lib/formatters";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
-
-const VERTICAL_BREAKPOINT_PX = 600;
 
 interface StageTs {
   iso: string;
@@ -217,20 +214,6 @@ export function PipelineStages({
   const completedStageIdx =
     currentStage === "done" ? stageCount : plan.findIndex((s) => s.key === currentStage);
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [isVertical, setIsVertical] = useState(false);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) {
-        setIsVertical(e.contentRect.width < VERTICAL_BREAKPOINT_PX);
-      }
-    });
-    ro.observe(containerRef.current);
-    return () => ro.disconnect();
-  }, []);
-
   // The rail runs between the first and last node centres; each node sits in
   // the middle of an equal column, so the ends are half a column in.
   const railInsetPct = 50 / stageCount;
@@ -268,9 +251,12 @@ export function PipelineStages({
 
   const railColor = isFailed ? "bg-destructive/70" : "bg-primary";
 
-  if (isVertical) {
-    return (
-      <div ref={containerRef} className="relative flex flex-col" data-tutorial={dataTutorial}>
+  // Both layouts are rendered and a container query picks one below 600px of
+  // the component's own width, so the first paint already has the right
+  // orientation (a ResizeObserver flip shifted the page on phones).
+  return (
+    <div className="@container" data-tutorial={dataTutorial}>
+      <div className="relative flex flex-col @min-[600px]:hidden">
         <div
           className="absolute bottom-[22px] top-[22px] w-[2px] rounded-full bg-border/60"
           style={{ insetInlineStart: "calc(1rem + 0.25rem - 1px)" }}
@@ -310,59 +296,54 @@ export function PipelineStages({
           </div>
         ))}
       </div>
-    );
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      className="relative grid"
-      style={{ gridTemplateColumns: `repeat(${stageCount}, minmax(0, 1fr))` }}
-      data-tutorial={dataTutorial}
-    >
       <div
-        className="absolute top-[15px] h-[2px] rounded-full bg-border/60"
-        style={{ insetInlineStart: `${railInsetPct}%`, insetInlineEnd: `${railInsetPct}%` }}
-        aria-hidden="true"
-      />
-      <div
-        className={cn(
-          "absolute top-[15px] h-[2px] rounded-full transition-[width] duration-700 ease-out",
-          railColor,
-        )}
-        style={{
-          insetInlineStart: `${railInsetPct}%`,
-          width: `${railSpanPct * progressFraction}%`,
-        }}
-        aria-hidden="true"
-      />
-      {stages.map((s) => (
+        className="relative hidden @min-[600px]:grid"
+        style={{ gridTemplateColumns: `repeat(${stageCount}, minmax(0, 1fr))` }}
+      >
         <div
-          key={s.key}
-          aria-current={s.state === "current" ? "step" : undefined}
-          className="relative z-10 flex min-w-0 flex-col items-center gap-2 px-1 pb-1"
-        >
-          <StageNode state={s.state} />
-          <span className="flex max-w-full flex-col items-center leading-tight">
-            <span className={cn("max-w-full truncate text-xs", LABEL_STYLES[s.state])}>
-              {s.label}
+          className="absolute top-[15px] h-[2px] rounded-full bg-border/60"
+          style={{ insetInlineStart: `${railInsetPct}%`, insetInlineEnd: `${railInsetPct}%` }}
+          aria-hidden="true"
+        />
+        <div
+          className={cn(
+            "absolute top-[15px] h-[2px] rounded-full transition-[width] duration-700 ease-out",
+            railColor,
+          )}
+          style={{
+            insetInlineStart: `${railInsetPct}%`,
+            width: `${railSpanPct * progressFraction}%`,
+          }}
+          aria-hidden="true"
+        />
+        {stages.map((s) => (
+          <div
+            key={s.key}
+            aria-current={s.state === "current" ? "step" : undefined}
+            className="relative z-10 flex min-w-0 flex-col items-center gap-2 px-1 pb-1"
+          >
+            <StageNode state={s.state} />
+            <span className="flex max-w-full flex-col items-center leading-tight">
+              <span className={cn("max-w-full truncate text-xs", LABEL_STYLES[s.state])}>
+                {s.label}
+              </span>
+              {s.detail && <StageDetail state={s.state} text={s.detail} />}
             </span>
-            {s.detail && <StageDetail state={s.state} text={s.detail} />}
-          </span>
-          <span className="-mt-1 flex flex-col items-center gap-1 leading-tight" dir="ltr">
-            {s.statusText ? (
-              <StatusText state={s.state} text={s.statusText} />
-            ) : s.ts ? (
-              <>
-                {s.elapsed != null && <ElapsedChip seconds={s.elapsed} />}
-                <span className="font-mono text-[0.625rem] tabular-nums text-muted-foreground">
-                  {s.dateChanged ? `${s.ts.date} · ${s.ts.time}` : s.ts.time}
-                </span>
-              </>
-            ) : null}
-          </span>
-        </div>
-      ))}
+            <span className="-mt-1 flex flex-col items-center gap-1 leading-tight" dir="ltr">
+              {s.statusText ? (
+                <StatusText state={s.state} text={s.statusText} />
+              ) : s.ts ? (
+                <>
+                  {s.elapsed != null && <ElapsedChip seconds={s.elapsed} />}
+                  <span className="font-mono text-[0.625rem] tabular-nums text-muted-foreground">
+                    {s.dateChanged ? `${s.ts.date} · ${s.ts.time}` : s.ts.time}
+                  </span>
+                </>
+              ) : null}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

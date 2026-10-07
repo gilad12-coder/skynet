@@ -17,6 +17,8 @@ import {
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { useLiteMode } from "@/features/settings";
 import type { OptimizationStatusResponse } from "@/shared/types/api";
+import { TERMINAL_STATUSES } from "@/shared/constants/job-status";
+import { GridEmptyState } from "./grid-overview-helpers";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 type PairSnapshot = {
@@ -135,7 +137,9 @@ export function GridLiveChart({ job }: { job: OptimizationStatusResponse }) {
     }
     return null;
   }, [job.progress_events]);
-  if (pairs.length === 0) return null;
+  // A running grid with no pair yet just has nothing to chart; a finished one
+  // never will, so say so instead of leaving Overview blank.
+  if (pairs.length === 0) return TERMINAL_STATUSES.has(job.status) ? <GridEmptyState /> : null;
   const toggle = (key: string) => {
     setHidden((prev) => {
       const next = new Set(prev);

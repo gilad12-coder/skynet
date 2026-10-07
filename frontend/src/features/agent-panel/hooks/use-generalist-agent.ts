@@ -4,6 +4,7 @@ import * as React from "react";
 import { toast } from "react-toastify";
 import { readPref } from "@/features/settings";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { I18N_KEY } from "@/shared/lib/i18n";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
 
 import type { AgentMessage, AgentStatus, AgentToolCall } from "@/shared/ui/agent/types";
@@ -37,6 +38,8 @@ export interface GeneralistAgentState {
   reasoningStartedAt: number | null;
   reasoningEndedAt: number | null;
   error: string | null;
+  /** Machine code of the error, e.g. the balance gate's, so the panel can offer its way out. */
+  errorCode: string | null;
   pendingApproval: PendingApprovalPayload | null;
   conversationId: string | null;
   /** LiteLLM id of the composer menu's chosen model; null runs the default. */
@@ -149,6 +152,8 @@ interface SessionView {
   reasoningStartedAt: number | null;
   reasoningEndedAt: number | null;
   error: string | null;
+  /** Machine code of the error, e.g. the balance gate's, so the panel can offer its way out. */
+  errorCode: string | null;
   pendingApproval: PendingApprovalPayload | null;
 }
 
@@ -186,6 +191,7 @@ function blankSession(key: string): SessionView {
     reasoningStartedAt: null,
     reasoningEndedAt: null,
     error: null,
+    errorCode: null,
     pendingApproval: null,
   };
 }
@@ -429,6 +435,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         reasoningStartedAt: Date.now(),
         reasoningEndedAt: null,
         error: null,
+        errorCode: null,
         pendingApproval: null,
       });
 
@@ -614,7 +621,12 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
               // Known machine codes get a localized message; anything else
               // shows the backend's text as-is.
               error:
-                code === "context_too_long" ? msg("agent.error.context_too_long") : message,
+                code === "context_too_long"
+                  ? msg("agent.error.context_too_long")
+                  : code === I18N_KEY.BILLING_INSUFFICIENT_FUNDS
+                    ? msg("agent.error.insufficient_funds")
+                    : message,
+              errorCode: code ?? null,
             });
             patchMessages(key, (prev) => {
               const last = prev[prev.length - 1];
@@ -759,6 +771,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           reasoningStartedAt: null,
           reasoningEndedAt: null,
           error: null,
+          errorCode: null,
           pendingApproval: null,
         });
       });
@@ -1007,6 +1020,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     reasoningStartedAt: active.reasoningStartedAt,
     reasoningEndedAt: active.reasoningEndedAt,
     error: active.error,
+    errorCode: active.errorCode,
     pendingApproval: active.pendingApproval,
     conversationId: active.conversationId,
     model,

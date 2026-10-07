@@ -205,9 +205,12 @@ function OverviewTabImpl({
     job.status === "stopped" ? null : job.completed_at,
     pairIndex,
   );
-  const stagesActive = isPairContext
-    ? isActive && currentStage !== "done" && !activePair.error
-    : isActive;
+  // A pending job sits in the queue unclaimed: nothing has started, so no
+  // stage may read as in progress even though the status counts as active.
+  const isQueued = job.status === "pending";
+  const stagesActive =
+    !isQueued &&
+    (isPairContext ? isActive && currentStage !== "done" && !activePair.error : isActive);
   const stagesFailed = isPairContext
     ? !!activePair.error || (!isActive && job.status !== "stopped" && currentStage !== "done")
     : job.status === "failed" || job.status === "cancelled";
@@ -296,7 +299,8 @@ function OverviewTabImpl({
 
   // Status text reflects what the user is looking at — for a pair, that is
   // the pair's own state (running/done/failed), not the parent grid.
-  const viewStatus: "running" | "success" | "failed" | "cancelled" | "other" = (() => {
+  const viewStatus: "queued" | "running" | "success" | "failed" | "cancelled" | "other" = (() => {
+    if (isQueued) return "queued";
     if (isPairContext) {
       if (activePair.error) return "failed";
       if (currentStage === "done") return "success";
@@ -315,21 +319,23 @@ function OverviewTabImpl({
       {renderRunBlocks && job.status !== "stopped" && job.recovery?.state !== "recovering" && (
         <FadeIn>
           <p className="text-sm text-muted-foreground">
-            {viewStatus === "running"
-              ? formatMsg("auto.features.optimizations.components.overviewtab.template.1", {
-                  p1: TERMS.optimization,
-                })
-              : viewStatus === "cancelled"
-                ? formatMsg("auto.features.optimizations.components.overviewtab.template.2", {
+            {viewStatus === "queued"
+              ? formatMsg("optimization.overview.queued", { p1: TERMS.optimization })
+              : viewStatus === "running"
+                ? formatMsg("auto.features.optimizations.components.overviewtab.template.1", {
                     p1: TERMS.optimization,
                   })
-                : viewStatus === "failed"
-                  ? formatMsg("auto.features.optimizations.components.overviewtab.template.3", {
+                : viewStatus === "cancelled"
+                  ? formatMsg("auto.features.optimizations.components.overviewtab.template.2", {
                       p1: TERMS.optimization,
                     })
-                  : formatMsg("auto.features.optimizations.components.overviewtab.template.4", {
-                      p1: TERMS.optimization,
-                    })}
+                  : viewStatus === "failed"
+                    ? formatMsg("auto.features.optimizations.components.overviewtab.template.3", {
+                        p1: TERMS.optimization,
+                      })
+                    : formatMsg("auto.features.optimizations.components.overviewtab.template.4", {
+                        p1: TERMS.optimization,
+                      })}
           </p>
         </FadeIn>
       )}

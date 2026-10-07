@@ -70,7 +70,7 @@ export function TaggerReviewGate({
     return (
       <LoadingState
         label={msg("tagger.assist.gate.preparing")}
-        className="min-h-[40vh] w-full lg:w-[300px]"
+        className="min-h-[40dvh] w-full lg:w-[300px]"
       />
     );
   }

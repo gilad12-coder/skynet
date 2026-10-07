@@ -7,8 +7,16 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 
-from ....billing.run_usage import aggregate, billed_cents, load_records, serialize, with_rounding
-from ....constants import OPTIMIZATION_TYPE_BLACKBOX, PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE
+from ....billing.run_usage import aggregate, billed_cents, from_result, load_records, serialize, with_rounding
+from ....constants import (
+    OPTIMIZATION_TYPE_BLACKBOX,
+    PAYLOAD_OVERVIEW_MODEL_NAME,
+    PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
+    PAYLOAD_OVERVIEW_REFLECTION_MODEL,
+    PAYLOAD_OVERVIEW_TASK_MODEL,
+    PAYLOAD_OVERVIEW_TOKEN_SOURCE,
+    TOKEN_SOURCE_BYOK,
+)
 from ...auth import AuthenticatedUser, get_authenticated_user
 from ...converters import parse_overview
 from .._helpers import load_job_for_user
@@ -26,9 +34,10 @@ def run_usage(job_store: Any, job_data: dict[str, Any], pair_index: int | None) 
         pair_index: Grid pair to narrow to, or ``None`` for the whole run.
 
     Returns:
-        ``{"rows", "settling", "proposer"}``; ``rows`` is empty when the run has no budget.
+        ``{"rows", "settling", "proposer"}``; a run without a budget is read from its own result.
     """
-    blackbox = parse_overview(job_data).get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_BLACKBOX
+    overview = parse_overview(job_data)
+    blackbox = overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_BLACKBOX
     budget_id = job_data.get("execution_budget_id")
     engine = getattr(job_store, "engine", None)
     records = load_records(engine, budget_id) if budget_id and engine is not None else []
@@ -41,6 +50,18 @@ def run_usage(job_store: Any, job_data: dict[str, Any], pair_index: int | None) 
         direct_usage=direct if isinstance(direct, list) else (),
         pair=None if pair_index is None else str(pair_index),
     )
+    if not budget_id:
+        rows = [
+            *from_result(
+                result,
+                task_model=overview.get(PAYLOAD_OVERVIEW_TASK_MODEL) or overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
+                reflection_model=overview.get(PAYLOAD_OVERVIEW_REFLECTION_MODEL),
+                proposer=blackbox,
+                byok=overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE) == TOKEN_SOURCE_BYOK,
+                pair=None if pair_index is None else str(pair_index),
+            ),
+            *rows,
+        ]
     finished = job_data.get("status") in TERMINAL_STATUSES
     settling = finished and any(row.pending_calls for row in rows)
     # Rounding is per budget, so a single grid pair's view can't carry it.

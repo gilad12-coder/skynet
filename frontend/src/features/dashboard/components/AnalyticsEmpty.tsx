@@ -76,7 +76,7 @@ export function AnalyticsEmpty({
         title={config.title}
         description={config.description}
         action={config.action}
-        className={isNoData ? undefined : "min-h-[40vh] justify-center"}
+        className={isNoData ? undefined : "min-h-[40dvh] justify-center"}
       />
     </FadeIn>
   );

@@ -20,12 +20,7 @@ function parseTimestampMs(value: string | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-export function LiveElapsed({
-  startedAt,
-  createdAt,
-  elapsedSeconds,
-  isActive,
-}: LiveElapsedProps) {
+export function LiveElapsed({ startedAt, createdAt, elapsedSeconds, isActive }: LiveElapsedProps) {
   // Anchor on the server-computed elapsed_seconds and tick locally between
   // refreshes — immune to client/server clock skew that otherwise drives the
   // wall-clock derivation negative.

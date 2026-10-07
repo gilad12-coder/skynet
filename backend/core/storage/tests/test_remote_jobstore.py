@@ -33,7 +33,15 @@ import core.storage.remote as remote_mod
 from core.billing.budgets import BudgetService
 from core.constants import OPTIMIZATION_TYPE_TAGGING
 from core.storage.base import JobStore
-from core.storage.models import Base, BillingCustomerModel, JobModel, OptimizationShareGrantModel
+from core.storage.models import (
+    Base,
+    BillingCustomerModel,
+    ExecutionBudgetModel,
+    ExecutionOperationModel,
+    JobModel,
+    OptimizationShareGrantModel,
+    WalletLedgerModel,
+)
 from core.storage.remote import RemoteDBJobStore
 from core.worker.checkpoint_compat import CheckpointCompatibilityError, checkpoint_manifest
 
@@ -383,6 +391,75 @@ def test_delete_jobs_removes_associated_logs_and_progress(store: SQLiteJobStore)
     store.delete_jobs(["b5"])
     assert store.get_logs("b5") == []
     assert store.get_progress_events("b5") == []
+
+
+def _attached_budget_with_hold(store: SQLiteJobStore, optimization_id: str) -> tuple[str, str, str]:
+    """Give a job a settled charge and an unstarted hold, as a terminal run can leave them.
+
+    Args:
+        store: Private fixture database.
+        optimization_id: Existing job to attach the budget to.
+
+    Returns:
+        The budget id, the settled operation id and the still-reserved operation id.
+    """
+    with Session(store.engine) as session:
+        session.add(
+            BillingCustomerModel(
+                username="payer", stripe_customer_id="local-payer", balance_cents=50, grant_remaining=0
+            )
+        )
+        session.commit()
+    service = BudgetService(engine=store.engine)
+    budget = service.create("payer", 20, idempotency_key=optimization_id)
+    service.attach_to_job(budget.id, "payer", optimization_id, expected_revision=budget.revision)
+    shared = {
+        "generation": 0,
+        "phase": "run",
+        "cost_kind": "model",
+        "request_fingerprint": "req",
+        "price_snapshot": {"version": "fixture-v1"},
+        "max_cents": 5,
+    }
+    spent = service.reserve(budget.id, "payer", operation_key="spent", **shared)
+    service.mark_dispatched(spent.id, "payer")
+    service.settle(spent.id, "payer", evidence_key="final", actual_cents=3, evidence={"actual": True})
+    held = service.reserve(budget.id, "payer", operation_key="held", **shared)
+    return budget.id, spent.id, held.id
+
+
+@pytest.mark.parametrize("bulk", [False, True])
+def test_delete_job_closes_budget_and_keeps_ledger(store: SQLiteJobStore, bulk: bool) -> None:
+    """Deleting a run releases its unstarted hold and keeps the budget and ledger as history.
+
+    Args:
+        store: Private fixture database.
+        bulk: Whether the job goes through ``delete_jobs`` instead of ``delete_job``.
+    """
+    store.create_job("billed-run")
+    budget_id, spent_id, held_id = _attached_budget_with_hold(store, "billed-run")
+
+    if bulk:
+        store.delete_jobs(["billed-run"])
+    else:
+        store.delete_job("billed-run")
+
+    assert not store.job_exists("billed-run")
+    with Session(store.engine) as session:
+        budget = session.get(ExecutionBudgetModel, budget_id)
+        assert budget is not None
+        assert budget.job_id is None
+        assert (budget.state, budget.blocked_reason) == ("closed", "job_deleted")
+        assert (budget.reserved_units, budget.wallet_reserved_units) == (0, 0)
+        assert budget.billed_cents == 3
+        assert session.get(ExecutionOperationModel, held_id).state == "released"
+        assert session.get(ExecutionOperationModel, spent_id).state == "settled"
+        ledger = session.query(WalletLedgerModel).filter(WalletLedgerModel.budget_id == budget_id).all()
+        assert [row.delta_cents for row in ledger] == [-3]
+        assert session.get(BillingCustomerModel, "payer").balance_cents == 47
+    snapshot = BudgetService(engine=store.engine).get(budget_id, "payer")
+    assert snapshot.reserved_cents == 0
+    assert snapshot.job_id is None
 
 
 def test_delete_jobs_tolerates_missing_ids(store: SQLiteJobStore) -> None:

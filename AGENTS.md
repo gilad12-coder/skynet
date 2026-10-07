@@ -222,9 +222,12 @@ When extracting a FastAPI route from `app.py` into a domain router, any
 inline `class FooRequest(BaseModel)` you move must **keep or drop docstrings
 exactly as in the source**. Pydantic emits the class docstring into the
 OpenAPI schema as `components.schemas.FooRequest.description` — add one
-where there wasn't one (or remove one that existed) and the `openapi.json`
-hash drifts, failing the regression gate. If you need to document the
-class for readers, use a comment above the class, not a docstring.
+where there wasn't one (or remove one that existed) and the published
+`openapi.json` changes. No test guards this any more (the old schema-hash
+regression test was removed), so compare the schema before and after by hand,
+e.g. with `.claude/skills/verify-skynet-api/scripts/openapi-hash.sh`. If you
+need to document the class for readers, use a comment above the class, not a
+docstring.
 
 ### Backend — domain router factory pattern
 

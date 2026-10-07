@@ -20,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, defer, sessionmaker
 
 from .. import run_log
+from ..billing.budgets import BudgetService
 from ..billing.plans import has_pro_entitlement
 from ..config import settings
 from ..constants import (
@@ -1027,12 +1028,32 @@ class RemoteDBJobStore:
                 BlackboxAgentRunModel.optimization_id == optimization_id
             ).delete()
             session.query(RunFolderItemModel).filter(RunFolderItemModel.optimization_id == optimization_id).delete()
+            self._close_deleted_job_budgets(session, [optimization_id])
             self._delete_grid_pair_children(session, optimization_id)
             session.query(JobModel).filter(JobModel.optimization_id == optimization_id).delete()
             session.commit()
         finally:
             session.close()
         self._evict_job_counters([optimization_id])
+
+    def _close_deleted_job_budgets(self, session: Session, optimization_ids: list[str]) -> None:
+        """Close the execution budgets of jobs (and their grid pairs) about to be deleted.
+
+        Budgets and ledger rows are financial history with no foreign key to
+        ``jobs``, so they are kept; this releases unstarted holds and drops the
+        link that would otherwise point at a deleted job.
+
+        Args:
+            session: The open delete session the caller commits.
+            optimization_ids: Root job ids being deleted.
+        """
+        child_ids = [
+            row[0]
+            for row in session.query(JobModel.optimization_id)
+            .filter(JobModel.parent_optimization_id.in_(optimization_ids))
+            .all()
+        ]
+        BudgetService(engine=self._engine).close_for_deleted_jobs([*optimization_ids, *child_ids], session=session)
 
     @staticmethod
     def _delete_grid_pair_children(session: Session, parent_optimization_id: str) -> None:
@@ -1155,6 +1176,7 @@ class RemoteDBJobStore:
             session.query(RunFolderItemModel).filter(RunFolderItemModel.optimization_id.in_(optimization_ids)).delete(
                 synchronize_session=False
             )
+            self._close_deleted_job_budgets(session, optimization_ids)
             for parent_id in optimization_ids:
                 self._delete_grid_pair_children(session, parent_id)
             deleted = (

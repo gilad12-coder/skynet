@@ -143,9 +143,12 @@ function BalanceSectionSkeleton() {
 export function WorkspaceStripSkeleton() {
   return (
     <div className="flex flex-col border-t border-[#DDD4C8]/50 first:border-t-0 lg:flex-row lg:items-stretch">
+      {/* Most accounts have no labeling sessions, so this reserves the one-line
+          EmptyHint; two session rows would leave 80px to collapse on load. */}
       <SectionSkeleton>
-        <RowSkeleton nameWidth={168} link />
-        <RowSkeleton nameWidth={128} link />
+        <div className="flex h-4 items-center">
+          <Skeleton width={136} height={12} containerClassName="leading-none" />
+        </div>
       </SectionSkeleton>
       <SectionDivider />
       <SectionSkeleton>

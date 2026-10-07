@@ -212,6 +212,13 @@ export const INSUFFICIENT_FUNDS_EVENT = "billing-insufficient-credits";
 /** Browser event fired when storage usage changes, such as a delete or a full quota, so the meter re-reads usage. */
 export const STORAGE_CHANGED_EVENT = "storage-changed";
 
+/** Fire {@link STORAGE_CHANGED_EVENT} once a mutation that adds or frees stored bytes succeeds. */
+async function changesStorage<T>(mutation: Promise<T>): Promise<T> {
+  const res = await mutation;
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(STORAGE_CHANGED_EVENT));
+  return res;
+}
+
 /**
  * Error carrying the backend's structured envelope so callers can branch on the
  * machine-readable ``code`` (not just the rendered message). Subclasses ``Error``
@@ -1222,10 +1229,12 @@ export function importHuggingFaceDataset(body: {
   split: string;
   name?: string;
 }) {
-  return request<SaveDatasetResponse>("/connectors/huggingface/import", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return changesStorage(
+    request<SaveDatasetResponse>("/connectors/huggingface/import", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
 }
 
 /** Every connector the backend knows, in the order ``GET /connectors`` lists them. */
@@ -1895,10 +1904,12 @@ export function saveDataset(body: {
   dataset: Array<Record<string, unknown>>;
   column_schema?: DatasetColumnSchema;
 }) {
-  return request<SaveDatasetResponse>("/datasets/library", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return changesStorage(
+    request<SaveDatasetResponse>("/datasets/library", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
 }
 
 /** Replace a saved dataset's rows in place, keeping its identity (editor+). */
@@ -1907,17 +1918,21 @@ export function editDatasetRows(
   rows: Array<Record<string, unknown>>,
   columnSchema?: DatasetColumnSchema,
 ) {
-  return request<DatasetSummary>(`/datasets/library/${datasetId}/rows`, {
-    method: "PUT",
-    body: JSON.stringify({ rows, column_schema: columnSchema }),
-  });
+  return changesStorage(
+    request<DatasetSummary>(`/datasets/library/${datasetId}/rows`, {
+      method: "PUT",
+      body: JSON.stringify({ rows, column_schema: columnSchema }),
+    }),
+  );
 }
 
 /** Clone a dataset shared with the caller into their own library (viewer+). */
 export function cloneDataset(datasetId: string) {
-  return request<SaveDatasetResponse>(`/datasets/library/${datasetId}/clone`, {
-    method: "POST",
-  });
+  return changesStorage(
+    request<SaveDatasetResponse>(`/datasets/library/${datasetId}/clone`, {
+      method: "POST",
+    }),
+  );
 }
 
 /**
@@ -2059,9 +2074,11 @@ export async function moveTaggerSessionToLibrary(
     column_schema?: DatasetColumnSchema;
   },
 ) {
-  const res = await request<SaveDatasetResponse>(
-    `/datasets/library/from-tagging-session/${sessionId}`,
-    { method: "POST", body: JSON.stringify(body) },
+  const res = await changesStorage(
+    request<SaveDatasetResponse>(`/datasets/library/from-tagging-session/${sessionId}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   );
   invalidateCache("/tagging-sessions");
   return res;
@@ -2110,15 +2127,17 @@ export function synthesizeTaggerDataset(
   sessionId: string,
   body: { brief: string; rows: number; columns: string[] },
 ) {
-  return request<{
-    columns: string[];
-    rows: Array<Record<string, unknown>>;
-    cents: number;
-    model: string;
-  }>(`/tagging-sessions/${sessionId}/assist/synthesize`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return changesStorage(
+    request<{
+      columns: string[];
+      rows: Array<Record<string, unknown>>;
+      cents: number;
+      model: string;
+    }>(`/tagging-sessions/${sessionId}/assist/synthesize`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
 }
 
 /**
@@ -2181,9 +2200,11 @@ export function renameDataset(datasetId: string, name: string) {
 
 /** Delete a saved dataset and its bytes (owner only). */
 export function deleteDataset(datasetId: string) {
-  return request<{ deleted: boolean }>(`/datasets/library/${datasetId}`, {
-    method: "DELETE",
-  });
+  return changesStorage(
+    request<{ deleted: boolean }>(`/datasets/library/${datasetId}`, {
+      method: "DELETE",
+    }),
+  );
 }
 
 /** List the runs the caller can see that were submitted from a dataset. */
@@ -2415,6 +2436,7 @@ export async function bulkDeleteDatasets(ids: string[]): Promise<BulkDeleteResul
     body: JSON.stringify({ ids }),
   });
   invalidateCache("/datasets/library", "/usage/storage");
+  window.dispatchEvent(new Event(STORAGE_CHANGED_EVENT));
   return res;
 }
 

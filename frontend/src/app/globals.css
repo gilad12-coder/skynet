@@ -381,6 +381,7 @@ html[lang="yue"] {
 
 body {
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--text-1);
   background: var(--bg);
   font-family: var(--font-ui);

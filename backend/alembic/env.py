@@ -13,6 +13,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
+import core.storage.preflights  # noqa: F401  # registers WizardPreflightModel on Base.metadata
 from alembic import context
 from core.storage.models import Base
 
@@ -37,6 +38,43 @@ if env_url:
 
 target_metadata = Base.metadata
 
+# Objects that live in the database but deliberately not in the ORM metadata,
+# so autogenerate must not propose dropping them:
+# - HNSW vector indexes: SQLAlchemy can't express ``USING hnsw ... vector_cosine_ops``;
+#   the baseline migration and RemoteStorage._bootstrap_vector_indexes create them
+#   with raw SQL, and only when pgvector is installed.
+# - byok_provider_keys: a stray table no migration or code in this repo creates or
+#   reads (BYOK keys live in billing_provider_keys); some local databases carry it.
+_UNMANAGED_INDEXES = frozenset(
+    {
+        "idx_job_embeddings_summary_hnsw",
+        "idx_job_embeddings_code_hnsw",
+        "idx_job_embeddings_schema_hnsw",
+        "idx_conversation_embeddings_summary_hnsw",
+    }
+)
+_UNMANAGED_TABLES = frozenset({"byok_provider_keys"})
+
+
+def include_object(obj: object, name: str | None, type_: str, reflected: bool, compare_to: object | None) -> bool:
+    """Tell autogenerate to skip database objects the ORM metadata intentionally omits.
+
+    Args:
+        obj: The schema item under comparison.
+        name: Its name.
+        type_: Alembic's kind for it ("table", "index", "column", ...).
+        reflected: Whether it was reflected from the database.
+        compare_to: The matching metadata object, or None when only the database has it.
+
+    Returns:
+        False for the unmanaged objects above, True for everything else.
+    """
+    if type_ == "table":
+        return name not in _UNMANAGED_TABLES
+    if type_ == "index":
+        return name not in _UNMANAGED_INDEXES
+    return True
+
 
 def run_migrations_offline() -> None:
     """Run migrations in offline mode (emit SQL to stdout, no connection).
@@ -48,6 +86,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        include_object=include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -67,7 +106,7 @@ def run_migrations_online() -> None:
     """
     shared = config.attributes.get("connection")
     if shared is not None:
-        context.configure(connection=shared, target_metadata=target_metadata)
+        context.configure(connection=shared, target_metadata=target_metadata, include_object=include_object)
         context.run_migrations()
         return
     connectable = engine_from_config(
@@ -76,7 +115,7 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(connection=connection, target_metadata=target_metadata, include_object=include_object)
         with context.begin_transaction():
             context.run_migrations()
 

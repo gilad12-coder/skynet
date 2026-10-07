@@ -474,6 +474,10 @@ class WalletLedgerModel(Base):
     """
 
     __tablename__ = "wallet_ledger"
+    # A named unique index, not a column UNIQUE constraint: migration 927cb56e104a
+    # created it with CREATE UNIQUE INDEX (renamed with the table), so declaring it
+    # the same way keeps autogenerate from proposing a drop-and-recreate.
+    __table_args__ = (Index("wallet_ledger_settlement_key_key", "settlement_key", unique=True),)
 
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer(), "sqlite"),
@@ -486,7 +490,7 @@ class WalletLedgerModel(Base):
     description: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     budget_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    settlement_key: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    settlement_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Measured usage behind a run row's charge; None on top-ups/grants and on
     # rows written before token metering landed.
     input_tokens: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)

@@ -21,5 +21,8 @@
   "share.you": "(o próprio)",
   "tooltip.submit.blackbox.scorer_install": "É executado uma vez na Vercel Sandbox offline. Use pacotes já presentes na imagem fixada ou artefatos de pacotes geridos pela implantação; os repositórios públicos de apt e de pacotes não estão disponíveis.",
   "submit.budget.byok_note": "O seu fornecedor cobra os tokens do modelo na sua chave. Este limite cobre apenas a taxa de plataforma da Skynet e o ambiente de execução.",
-  "submit.blackbox.roles.optimization.managed_hint": "Usa as definições de amostragem predefinidas do modelo; o pagamento pode usar o seu saldo Skynet ou a sua chave OpenRouter."
+  "submit.blackbox.roles.optimization.managed_hint": "Usa as definições de amostragem predefinidas do modelo; o pagamento pode usar o seu saldo Skynet ou a sua chave OpenRouter.",
+  "optimizations.grid.open_pair": "Abrir o par {pair}",
+  "optimizations.grid.empty.title": "Sem resultados de pares",
+  "optimizations.grid.empty.description": "Esta pesquisa em grelha terminou sem resultados para nenhum par de modelos, por isso não há nada para comparar."
 }

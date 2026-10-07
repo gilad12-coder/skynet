@@ -28,13 +28,18 @@ function StatCell() {
 
 function StatStrip() {
   return (
-    <div className="grid grid-cols-2 items-stretch sm:flex">
-      {Array.from({ length: STAT_CELLS }).map((_, i) => (
-        <Fragment key={i}>
-          {i > 0 && <div className="my-4 hidden w-px shrink-0 bg-[#DDD4C8]/50 sm:block" />}
-          <StatCell />
-        </Fragment>
-      ))}
+    // Same container breakpoints as DashboardHeader.
+    <div className="@container">
+      <div className="grid grid-cols-2 items-stretch @min-[26rem]:grid-cols-3 @min-[40rem]:flex">
+        {Array.from({ length: STAT_CELLS }).map((_, i) => (
+          <Fragment key={i}>
+            {i > 0 && (
+              <div className="my-4 hidden w-px shrink-0 bg-[#DDD4C8]/50 @min-[40rem]:block" />
+            )}
+            <StatCell />
+          </Fragment>
+        ))}
+      </div>
     </div>
   );
 }

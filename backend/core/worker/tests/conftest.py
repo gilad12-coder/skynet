@@ -122,6 +122,26 @@ class FakeJobStore:
         )
         return next_attempt
 
+    def pin_sandbox_image(self, optimization_id: str, image: str) -> str:
+        """Record the image a protected run executes in, keeping any earlier pin.
+
+        Args:
+            optimization_id: The run about to open its sandbox.
+            image: The deployment's current image, used only when none is pinned.
+
+        Returns:
+            The image every sandbox of this run must boot from.
+
+        Raises:
+            KeyError: When no job with the given ID exists.
+        """
+        if optimization_id not in self._jobs:
+            raise KeyError(optimization_id)
+        job = self._jobs[optimization_id]
+        if job.get("sandbox_image") is None:
+            job["sandbox_image"] = image
+        return str(job["sandbox_image"])
+
     def append_log(
         self,
         optimization_id: str,

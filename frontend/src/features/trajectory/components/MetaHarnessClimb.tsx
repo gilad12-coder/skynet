@@ -68,6 +68,11 @@ const COARSE_POINTER_QUERY = "(any-pointer: coarse)";
 // Inline the chart is as tall as the climb's natural layout plus that room;
 // maximized, the climb stretches to the screen instead.
 const PLOT_HEIGHT_PX = CLIMB_LAYOUT.padTop + CLIMB_LAYOUT.plotHeight + CLIMB_LAYOUT.padBottom;
+/** The inline chart's height, for skeletons that stand in for it. */
+export const CLIMB_CHART_HEIGHT_PX = {
+  fine: PLOT_HEIGHT_PX + LEGEND_ROOM_PX,
+  coarse: PLOT_HEIGHT_PX + LEGEND_ROOM_COARSE_PX,
+} as const;
 
 function subscribeCoarsePointer(onChange: () => void): () => void {
   const query = window.matchMedia(COARSE_POINTER_QUERY);

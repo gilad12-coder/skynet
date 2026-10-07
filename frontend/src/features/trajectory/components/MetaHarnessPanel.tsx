@@ -29,6 +29,7 @@ import {
   type AgentRunSummary,
 } from "../lib/meta-harness";
 import { displayCandidateId, type BlackboxTrajectoryContext } from "../lib/types";
+import { rememberClimbView } from "../lib/climb-view-hint";
 import { AgentRunViewer } from "./AgentRunViewer";
 import { MetaHarnessClimb } from "./MetaHarnessClimb";
 import { MetaHarnessOutline } from "./MetaHarnessOutline";
@@ -83,6 +84,11 @@ export interface MetaHarnessPanelProps {
 export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProps) {
   const live = isLive(job);
   const lite = useLiteMode();
+  const optimizationId = job.optimization_id;
+
+  useEffect(() => {
+    if (!lite) rememberClimbView(optimizationId);
+  }, [lite, optimizationId]);
   const blackboxCtx = blackbox ?? BLACKBOX_FALLBACK;
   const { candidates, caseScores, valsetRows, minibatch, valsetOutputs, agentRuns } =
     useMemo(() => {
