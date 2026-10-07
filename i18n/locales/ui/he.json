@@ -4275,5 +4275,8 @@
   "optimization.blackbox.repo.browser.retry": "ניסיון נוסף",
   "optimization.blackbox.repo.browser.line_added": "שורה שנוספה",
   "optimization.blackbox.repo.browser.line_removed": "שורה שהוסרה",
-  "optimization.blackbox.repo.browser.fold_aria": "הצגת שורות {from}–{to}"
+  "optimization.blackbox.repo.browser.fold_aria": "הצגת שורות {from}–{to}",
+  "optimization.blackbox.repo.browser.rendered_before": "קומיט ההתחלה",
+  "optimization.blackbox.repo.browser.rendered_after": "הגרסה הזו",
+  "optimization.blackbox.repo.browser.rendered_absent": "הקובץ הזה לא קיים כאן."
 }

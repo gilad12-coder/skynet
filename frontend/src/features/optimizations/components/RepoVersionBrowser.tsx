@@ -670,6 +670,47 @@ function SplitDiff({
   );
 }
 
+/**
+ * The file drawn twice side by side: as it was at the pinned commit and as
+ * this version leaves it. A side the file is missing from says so.
+ */
+function RenderedSplit({
+  path,
+  kind,
+  before,
+  after,
+}: {
+  path: string;
+  kind: "markdown" | "html";
+  before: string | null;
+  after: string | null;
+}) {
+  const sides = [
+    { key: "before", label: "optimization.blackbox.repo.browser.rendered_before", text: before },
+    { key: "after", label: "optimization.blackbox.repo.browser.rendered_after", text: after },
+  ] as const;
+  return (
+    <div className="@container">
+      <div className="grid gap-3 @2xl:grid-cols-2">
+        {sides.map((side) => (
+          <section key={side.key} className="min-w-0 space-y-1.5" aria-label={msg(side.label)}>
+            <h4 className="text-[0.6875rem] font-medium uppercase tracking-wide text-foreground/70">
+              {msg(side.label)}
+            </h4>
+            {side.text == null ? (
+              <div className="rounded-lg border border-dashed border-border/60 px-4 py-6 text-center text-sm text-muted-foreground">
+                {msg("optimization.blackbox.repo.browser.rendered_absent")}
+              </div>
+            ) : (
+              <RenderedText text={side.text} kind={kind} title={`${path} (${msg(side.label)})`} />
+            )}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface FileSides {
   /** The file at the pinned commit; null for a file the version adds. */
   basePath: string | null;
@@ -852,8 +893,15 @@ function FileView({
     body = <Notice action={patchAction}>{msg(key)}</Notice>;
   } else if (loading || !rows || after.state !== "ready") {
     body = <Skeleton height={240} borderRadius={8} />;
-  } else if (renderable && mode === "rendered" && !sides.removed) {
-    body = <RenderedText text={after.text} kind={kind} title={path} />;
+  } else if (renderable && mode === "rendered") {
+    body = (
+      <RenderedSplit
+        path={path}
+        kind={kind}
+        before={sides.basePath == null ? null : shownBefore}
+        after={sides.removed ? null : after.text}
+      />
+    );
   } else {
     body = (
       <SplitDiff path={path} rows={rows} before={shownBefore ?? ""} after={shownAfter ?? ""} />
@@ -871,7 +919,7 @@ function FileView({
           {status && <StatusChip title={statusTitle}>{status}</StatusChip>}
         </div>
         <div className="ms-auto flex flex-wrap items-center gap-1.5">
-          {renderable && !sides.removed && (
+          {renderable && !movedTo && (
             <Segmented<Mode>
               size="sm"
               label={msg("optimization.blackbox.repo.browser.mode_label")}

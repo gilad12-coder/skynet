@@ -4275,5 +4275,8 @@
   "optimization.blackbox.repo.browser.retry": "Tekrar dene",
   "optimization.blackbox.repo.browser.line_added": "Eklenen satır",
   "optimization.blackbox.repo.browser.line_removed": "Kaldırılan satır",
-  "optimization.blackbox.repo.browser.fold_aria": "{from}–{to}. satırları göster"
+  "optimization.blackbox.repo.browser.fold_aria": "{from}–{to}. satırları göster",
+  "optimization.blackbox.repo.browser.rendered_before": "Başlangıç commit'i",
+  "optimization.blackbox.repo.browser.rendered_after": "Bu sürüm",
+  "optimization.blackbox.repo.browser.rendered_absent": "Bu dosya burada yok."
 }

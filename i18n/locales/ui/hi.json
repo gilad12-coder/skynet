@@ -4275,5 +4275,8 @@
   "optimization.blackbox.repo.browser.retry": "फिर से कोशिश करें",
   "optimization.blackbox.repo.browser.line_added": "जोड़ी गई पंक्ति",
   "optimization.blackbox.repo.browser.line_removed": "हटाई गई पंक्ति",
-  "optimization.blackbox.repo.browser.fold_aria": "पंक्तियाँ {from}–{to} दिखाएँ"
+  "optimization.blackbox.repo.browser.fold_aria": "पंक्तियाँ {from}–{to} दिखाएँ",
+  "optimization.blackbox.repo.browser.rendered_before": "शुरुआती कमिट",
+  "optimization.blackbox.repo.browser.rendered_after": "यह संस्करण",
+  "optimization.blackbox.repo.browser.rendered_absent": "यह फ़ाइल यहाँ मौजूद नहीं है।"
 }

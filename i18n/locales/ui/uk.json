@@ -4275,5 +4275,8 @@
   "optimization.blackbox.repo.browser.retry": "Спробувати ще",
   "optimization.blackbox.repo.browser.line_added": "Додано рядок",
   "optimization.blackbox.repo.browser.line_removed": "Видалено рядок",
-  "optimization.blackbox.repo.browser.fold_aria": "Показати рядки {from}–{to}"
+  "optimization.blackbox.repo.browser.fold_aria": "Показати рядки {from}–{to}",
+  "optimization.blackbox.repo.browser.rendered_before": "Початковий коміт",
+  "optimization.blackbox.repo.browser.rendered_after": "Ця версія",
+  "optimization.blackbox.repo.browser.rendered_absent": "Цього файлу тут немає."
 }

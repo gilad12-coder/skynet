@@ -4275,5 +4275,8 @@
   "optimization.blackbox.repo.browser.retry": "다시 시도",
   "optimization.blackbox.repo.browser.line_added": "추가된 줄",
   "optimization.blackbox.repo.browser.line_removed": "삭제된 줄",
-  "optimization.blackbox.repo.browser.fold_aria": "{from}–{to}번째 줄 표시"
+  "optimization.blackbox.repo.browser.fold_aria": "{from}–{to}번째 줄 표시",
+  "optimization.blackbox.repo.browser.rendered_before": "시작 커밋",
+  "optimization.blackbox.repo.browser.rendered_after": "이 버전",
+  "optimization.blackbox.repo.browser.rendered_absent": "이 파일은 여기에 없습니다."
 }

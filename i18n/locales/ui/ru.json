@@ -4275,5 +4275,8 @@
   "optimization.blackbox.repo.browser.retry": "Повторить",
   "optimization.blackbox.repo.browser.line_added": "Добавленная строка",
   "optimization.blackbox.repo.browser.line_removed": "Удалённая строка",
-  "optimization.blackbox.repo.browser.fold_aria": "Показать строки {from}–{to}"
+  "optimization.blackbox.repo.browser.fold_aria": "Показать строки {from}–{to}",
+  "optimization.blackbox.repo.browser.rendered_before": "Начальный коммит",
+  "optimization.blackbox.repo.browser.rendered_after": "Эта версия",
+  "optimization.blackbox.repo.browser.rendered_absent": "Этого файла здесь нет."
 }

@@ -4275,5 +4275,8 @@
   "optimization.blackbox.repo.browser.retry": "تلاش دوباره",
   "optimization.blackbox.repo.browser.line_added": "خط افزوده‌شده",
   "optimization.blackbox.repo.browser.line_removed": "خط حذف‌شده",
-  "optimization.blackbox.repo.browser.fold_aria": "نمایش خطوط {from}–{to}"
+  "optimization.blackbox.repo.browser.fold_aria": "نمایش خطوط {from}–{to}",
+  "optimization.blackbox.repo.browser.rendered_before": "کامیت آغازین",
+  "optimization.blackbox.repo.browser.rendered_after": "این نسخه",
+  "optimization.blackbox.repo.browser.rendered_absent": "این فایل اینجا وجود ندارد."
 }

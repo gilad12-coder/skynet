@@ -4275,5 +4275,8 @@
   "optimization.blackbox.repo.browser.retry": "إعادة المحاولة",
   "optimization.blackbox.repo.browser.line_added": "سطر مُضاف",
   "optimization.blackbox.repo.browser.line_removed": "سطر محذوف",
-  "optimization.blackbox.repo.browser.fold_aria": "عرض الأسطر {from}–{to}"
+  "optimization.blackbox.repo.browser.fold_aria": "عرض الأسطر {from}–{to}",
+  "optimization.blackbox.repo.browser.rendered_before": "الالتزام الأولي",
+  "optimization.blackbox.repo.browser.rendered_after": "هذا الإصدار",
+  "optimization.blackbox.repo.browser.rendered_absent": "هذا الملف غير موجود هنا."
 }

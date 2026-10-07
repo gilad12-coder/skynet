@@ -4275,5 +4275,8 @@
   "optimization.blackbox.repo.browser.retry": "Erneut versuchen",
   "optimization.blackbox.repo.browser.line_added": "Hinzugefügte Zeile",
   "optimization.blackbox.repo.browser.line_removed": "Entfernte Zeile",
-  "optimization.blackbox.repo.browser.fold_aria": "Zeilen {from}–{to} anzeigen"
+  "optimization.blackbox.repo.browser.fold_aria": "Zeilen {from}–{to} anzeigen",
+  "optimization.blackbox.repo.browser.rendered_before": "Ausgangs-Commit",
+  "optimization.blackbox.repo.browser.rendered_after": "Diese Version",
+  "optimization.blackbox.repo.browser.rendered_absent": "Diese Datei gibt es hier nicht."
 }

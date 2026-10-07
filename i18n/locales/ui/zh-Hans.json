@@ -4275,5 +4275,8 @@
   "optimization.blackbox.repo.browser.retry": "重试",
   "optimization.blackbox.repo.browser.line_added": "新增的行",
   "optimization.blackbox.repo.browser.line_removed": "删除的行",
-  "optimization.blackbox.repo.browser.fold_aria": "显示第 {from}–{to} 行"
+  "optimization.blackbox.repo.browser.fold_aria": "显示第 {from}–{to} 行",
+  "optimization.blackbox.repo.browser.rendered_before": "起始提交",
+  "optimization.blackbox.repo.browser.rendered_after": "此版本",
+  "optimization.blackbox.repo.browser.rendered_absent": "此处不存在该文件。"
 }

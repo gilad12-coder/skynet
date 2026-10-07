@@ -4275,5 +4275,8 @@
   "optimization.blackbox.repo.browser.retry": "Riprova",
   "optimization.blackbox.repo.browser.line_added": "Riga aggiunta",
   "optimization.blackbox.repo.browser.line_removed": "Riga rimossa",
-  "optimization.blackbox.repo.browser.fold_aria": "Mostra righe {from}–{to}"
+  "optimization.blackbox.repo.browser.fold_aria": "Mostra righe {from}–{to}",
+  "optimization.blackbox.repo.browser.rendered_before": "Commit iniziale",
+  "optimization.blackbox.repo.browser.rendered_after": "Questa versione",
+  "optimization.blackbox.repo.browser.rendered_absent": "Questo file non esiste qui."
 }
