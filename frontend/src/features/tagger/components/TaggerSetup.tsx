@@ -3,7 +3,6 @@
 import { Badge } from "@/shared/ui/primitives/badge";
 import { useState, useCallback, useEffect } from "react";
 import {
-  UploadSimple,
   Binary,
   ListChecks,
   CursorText,
@@ -27,7 +26,6 @@ import { Separator } from "@/shared/ui/primitives/separator";
 import { cn } from "@/shared/lib/utils";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
-import { DATASET_UPLOAD_ACCEPT, parseDatasetFile } from "@/shared/lib/parse-dataset";
 import { getDatasetRows } from "@/shared/lib/api";
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
 import type { CatalogModel, ModelConfig } from "@/shared/types/api";
@@ -63,8 +61,7 @@ interface TaggerSetupProps {
 }
 
 const BASE_STEPS = perLocale(
-  () =>
-    [{ id: "data", label: msg("auto.features.tagger.components.taggersetup.literal.1") }] as const,
+  () => [{ id: "data", label: msg("tagger.setup.data_title") }] as const,
 );
 
 const TASK_STEP = perLocale(
@@ -104,13 +101,6 @@ const ASSIST_OPTIONS: Array<{
 ]);
 
 /** "support_tickets.csv" → "support tickets" — a readable session-card name. */
-function cleanSourceName(fileName: string): string {
-  const base = fileName
-    .replace(/\.[^.]+$/, "")
-    .replace(/[_-]+/g, " ")
-    .trim();
-  return base || fileName;
-}
 
 const slideVariants = {
   enter: (direction: number) => ({
@@ -156,7 +146,8 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState(1);
 
-  const [file, setFile] = useState<File | null>(null);
+  // The guided tour's fake rows; cleared when the tour exits.
+  const [demoData, setDemoData] = useState(false);
   const [parsedRows, setParsedRows] = useState<DataRow[]>([]);
   const [parsedCols, setParsedCols] = useState<string[]>([]);
   const [inputCols, setInputCols] = useState<string[]>([]);
@@ -190,7 +181,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   const [libraryName, setLibraryName] = useState<string | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  // The third data source: no file at all. Nothing is configured here — the
+  // The other data source: no dataset at all. Nothing is configured here — the
   // interview asks what data is wanted and the rows are written from its
   // answers — so it needs the assistant, and it rules out the manual flow.
   const [synthetic, setSynthetic] = useState(false);
@@ -231,7 +222,9 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   useEffect(
     () =>
       registerTutorialHook("setTaggerDemoData", (data) => {
-        setFile(new File([""], "demo_dataset.csv"));
+        setDemoData(true);
+        setLibraryName(null);
+        setSynthetic(false);
         setParsedRows(data.rows as DataRow[]);
         setParsedCols(data.cols);
         setInputCols(Array.isArray(data.textCol) ? data.textCol : [data.textCol]);
@@ -250,31 +243,15 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   // setup, one click from starting a (possibly paid) run on them.
   useEffect(() => {
     const onExit = () => {
-      if (file?.name !== "demo_dataset.csv") return;
-      setFile(null);
+      if (!demoData) return;
+      setDemoData(false);
       setParsedRows([]);
       setParsedCols([]);
       setInputCols([]);
     };
     window.addEventListener("tutorial-exited", onExit);
     return () => window.removeEventListener("tutorial-exited", onExit);
-  }, [file]);
-
-  const handleFile = useCallback(async (f: File) => {
-    setError(null);
-    setFile(f);
-    setLibraryName(null);
-    setSynthetic(false);
-    try {
-      const { columns, rows } = await parseDatasetFile(f);
-      setParsedRows(rows as DataRow[]);
-      setParsedCols(columns);
-      const guessText = columns.find((c) => c.toLowerCase() === "text") ?? columns[0];
-      setInputCols(guessText ? [guessText] : []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : msg("tagger.upload.parse_failed"));
-    }
-  }, []);
+  }, [demoData]);
 
   // Deep link from the dataset editor ("Tag with AI"): /tagger?dataset={id}
   // loads the library dataset by reference; the saved column roles pre-select
@@ -287,7 +264,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
       const detail = await getDatasetRows(datasetId);
       setParsedRows(detail.rows as DataRow[]);
       setParsedCols(detail.columns);
-      setFile(null);
+      setDemoData(false);
       setSynthetic(false);
       setLibraryName(name || msg("tagger.setup.library_fallback_name"));
       const roles = detail.column_schema?.column_roles ?? {};
@@ -312,15 +289,6 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
     const datasetId = params.get("dataset");
     if (datasetId) void loadLibraryDataset(datasetId, params.get("name"));
   }, [loadLibraryDataset]);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      const f = e.dataTransfer.files[0];
-      if (f) void handleFile(f);
-    },
-    [handleFile],
-  );
 
   const addCategory = () => {
     setCategories((prev) => [...prev, { id: crypto.randomUUID(), label: "" }]);
@@ -445,8 +413,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
       config.categories = categories.filter((c) => c.label.trim());
     }
     config.assistMode = effectiveAssistMode;
-    const source = libraryName ?? (file ? cleanSourceName(file.name) : null);
-    if (source) config.sourceName = source;
+    if (libraryName) config.sourceName = libraryName;
     onStart(
       config,
       mapped,
@@ -459,63 +426,21 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   const steps = [
     <Card key="data" data-tutorial="tagger-data">
       <CardHeader>
-        <CardTitle className="text-lg">
-          <HelpTip text={tip("tagger.upload_file")}>
-            {msg("auto.features.tagger.components.taggersetup.1")}
-          </HelpTip>
-        </CardTitle>
+        <CardTitle className="text-lg">{msg("tagger.setup.data_title")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <label
-          onDrop={handleDrop}
-          onDragOver={(e) => e.preventDefault()}
-          className={cn(
-            "flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 cursor-pointer transition-all duration-300 group",
-            file || libraryName || synthetic
-              ? "border-primary/40 bg-primary/5"
-              : "hover:border-primary/50 hover:bg-muted/30",
-          )}
-        >
-          <UploadSimple className="size-8 text-muted-foreground group-hover:text-primary/70 transition-colors duration-300" />
-          {file ? (
-            <div className="text-center">
-              <p className="font-medium text-foreground">{file.name}</p>
-              <p className="text-sm text-muted-foreground">
-                {parsedRows.length}
-                {msg("auto.features.tagger.components.taggersetup.2")}
-              </p>
-            </div>
-          ) : libraryName ? (
-            <div className="text-center">
-              <p className="font-medium text-foreground" dir="auto">
-                {libraryName}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {formatMsg("datasets.count.rows", { count: parsedRows.length })}
-              </p>
-            </div>
-          ) : synthetic ? (
-            <div className="text-center">
-              <p className="font-medium text-foreground" dir="auto">
-                {msg("tagger.setup.synthetic_source_name")}
-              </p>
-              <p className="text-sm text-muted-foreground">{msg("tagger.setup.synthetic_hint")}</p>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {msg("auto.features.tagger.components.taggersetup.3")}
+        {libraryName || synthetic ? (
+          <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 text-center">
+            <p className="font-medium text-foreground" dir="auto">
+              {libraryName ?? msg("tagger.setup.synthetic_source_name")}
             </p>
-          )}
-          <input
-            type="file"
-            accept={DATASET_UPLOAD_ACCEPT}
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handleFile(f);
-            }}
-          />
-        </label>
+            <p className="text-sm text-muted-foreground">
+              {libraryName
+                ? formatMsg("datasets.count.rows", { count: parsedRows.length })
+                : msg("tagger.setup.synthetic_hint")}
+            </p>
+          </div>
+        ) : null}
         {libraryLoading && (
           <p className="text-sm text-muted-foreground">{msg("tagger.setup.library_loading")}</p>
         )}
@@ -525,17 +450,14 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
           </p>
         )}
 
-        <div className="flex items-center gap-3">
-          <Separator className="flex-1" />
-          <span className="text-xs text-muted-foreground">{msg("tagger.setup.library_or")}</span>
-          <Separator className="flex-1" />
-        </div>
-
         <Button
           type="button"
           variant="outline"
           onClick={() => setPickerOpen(true)}
-          className="w-full justify-center gap-2"
+          className={cn(
+            "w-full justify-center gap-2",
+            libraryName && "border-primary/40 bg-primary/5 text-primary",
+          )}
         >
           <Books className="size-4" />
           {msg("tagger.setup.library_pick")}
@@ -567,7 +489,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
                   return;
                 }
                 setError(null);
-                setFile(null);
+                setDemoData(false);
                 setLibraryName(null);
                 setParsedRows([]);
                 setParsedCols([]);
