@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "یا",
   "tagger.setup.library_pick": "از کتابخانه خود انتخاب کنید",
   "tagger.setup.synthetic_pick": "ساخت مجموعه‌داده مصنوعی",
-  "tagger.setup.synthetic_hint": "هنوز مجموعه‌داده‌ای ندارید؟ این را انتخاب کنید تا دستیار بپرسد چه داده‌ای لازم دارید و پیش از شروع برچسب‌گذاری آن را بنویسد.",
   "tagger.setup.synthetic_source_name": "مجموعه‌داده مصنوعی",
   "tagger.setup.synthetic_manual_hint": "مجموعه‌داده مصنوعی در مصاحبه مشخص می‌شود، پس به دستیار نیاز دارد.",
   "tooltip.code.metric": "تابعی که کیفیت پیش‌بینی را می‌سنجد — برای هر نمونه یک امتیاز عددی بازمی‌گرداند",

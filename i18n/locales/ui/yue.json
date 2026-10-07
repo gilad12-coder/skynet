@@ -3306,7 +3306,6 @@
   "tagger.setup.library_or": "或",
   "tagger.setup.library_pick": "從你嘅資料庫中選取",
   "tagger.setup.synthetic_pick": "生成合成數據集",
-  "tagger.setup.synthetic_hint": "仲未有數據集？揀呢個，助手會問你需要咩數據，然後喺標記開始前幫你寫好。",
   "tagger.setup.synthetic_source_name": "合成數據集",
   "tagger.setup.synthetic_manual_hint": "合成數據集喺訪談入面決定，所以需要助手。",
   "tooltip.code.metric": "用嚟評估預測品質嘅函式——會為每個範例傳回一個數值分數",

@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "oder",
   "tagger.setup.library_pick": "Aus deiner Bibliothek wählen",
   "tagger.setup.synthetic_pick": "Synthetischen Datensatz erzeugen",
-  "tagger.setup.synthetic_hint": "Noch kein Datensatz? Wähle das aus, dann fragt der Assistent, welche Daten du brauchst, und schreibt sie, bevor das Labeln beginnt.",
   "tagger.setup.synthetic_source_name": "Synthetischer Datensatz",
   "tagger.setup.synthetic_manual_hint": "Ein synthetischer Datensatz wird im Interview festgelegt und braucht daher den Assistenten.",
   "tooltip.code.metric": "Eine Funktion, die die Qualität der Vorhersage misst — sie gibt für jedes Beispiel einen numerischen Score zurück",

@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "ou",
   "tagger.setup.library_pick": "Escolher da sua biblioteca",
   "tagger.setup.synthetic_pick": "Gerar um conjunto de dados sintético",
-  "tagger.setup.synthetic_hint": "Ainda sem dados? Escolha isto e o assistente pergunta que dados precisa, depois escreve-os antes de a rotulagem começar.",
   "tagger.setup.synthetic_source_name": "Conjunto de dados sintético",
   "tagger.setup.synthetic_manual_hint": "Um conjunto de dados sintético é definido na entrevista, por isso precisa do assistente.",
   "tooltip.code.metric": "Uma função que mede a qualidade da previsão — devolve uma pontuação numérica para cada exemplo",

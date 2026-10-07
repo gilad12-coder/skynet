@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "或",
   "tagger.setup.library_pick": "从你的库中选择",
   "tagger.setup.synthetic_pick": "生成合成数据集",
-  "tagger.setup.synthetic_hint": "还没有数据集？选择此项，助手会询问你需要什么数据，并在标注开始前写好。",
   "tagger.setup.synthetic_source_name": "合成数据集",
   "tagger.setup.synthetic_manual_hint": "合成数据集在访谈中确定，因此需要助手。",
   "tooltip.code.metric": "衡量预测质量的函数——为每个样例返回一个数值分数",

@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "または",
   "tagger.setup.library_pick": "ライブラリから選択",
   "tagger.setup.synthetic_pick": "合成データセットを生成",
-  "tagger.setup.synthetic_hint": "まだデータセットがありませんか？これを選ぶと、アシスタントが必要なデータを尋ね、ラベル付け開始前に作成します。",
   "tagger.setup.synthetic_source_name": "合成データセット",
   "tagger.setup.synthetic_manual_hint": "合成データセットはインタビューで決めるため、アシスタントが必要です。",
   "tooltip.code.metric": "予測の品質を測定する関数 — 各サンプルに数値スコアを返します",

@@ -3591,7 +3591,6 @@
   "tagger.setup.library_or": "oppure",
   "tagger.setup.library_pick": "Scegli dalla tua libreria",
   "tagger.setup.synthetic_pick": "Genera un dataset sintetico",
-  "tagger.setup.synthetic_hint": "Non hai ancora un dataset? Scegli questo: l'assistente ti chiede quali dati ti servono e li scrive prima che inizi l'etichettatura.",
   "tagger.setup.synthetic_source_name": "Dataset sintetico",
   "tagger.setup.synthetic_manual_hint": "Un dataset sintetico si definisce nell'intervista, quindi richiede l'assistente.",
   "tooltip.code.metric": "Una funzione che misura la qualità della previsione — restituisce un punteggio numerico per ogni esempio",
