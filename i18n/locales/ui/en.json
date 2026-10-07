@@ -3122,7 +3122,7 @@
   "usage.col.tokens": "Tokens",
   "usage.empty.desc": "Managed runs will appear here with a cost breakdown.",
   "usage.empty.title": "No usage yet",
-  "usage.model.unknown": "No model",
+  "usage.model.unknown": "Sandbox compute",
   "usage.panel.by_model": "By model",
   "usage.panel.by_run": "By optimization run",
   "usage.panel.over_time": "Spend over time",

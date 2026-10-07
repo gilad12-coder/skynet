@@ -3748,7 +3748,7 @@
   "usage.col.tokens": "Tokens",
   "usage.empty.desc": "Verwaltete Läufe erscheinen hier mit einer Kostenaufschlüsselung.",
   "usage.empty.title": "Noch keine Nutzung",
-  "usage.model.unknown": "Kein Modell",
+  "usage.model.unknown": "Sandbox-Rechenzeit",
   "usage.panel.by_model": "Nach Modell",
   "usage.panel.by_run": "Nach Optimierungslauf",
   "usage.panel.over_time": "Ausgaben im Zeitverlauf",

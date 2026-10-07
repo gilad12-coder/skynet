@@ -3748,7 +3748,7 @@
   "usage.col.tokens": "Tokens",
   "usage.empty.desc": "Las ejecuciones gestionadas aparecerán aquí con un desglose de costes.",
   "usage.empty.title": "Aún no hay uso",
-  "usage.model.unknown": "Sin modelo",
+  "usage.model.unknown": "Cómputo de sandbox",
   "usage.panel.by_model": "Por modelo",
   "usage.panel.by_run": "Por ejecución de optimización",
   "usage.panel.over_time": "Gasto a lo largo del tiempo",

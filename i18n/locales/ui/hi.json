@@ -3748,7 +3748,7 @@
   "usage.col.tokens": "टोकन",
   "usage.empty.desc": "प्रबंधित रन यहाँ लागत-विवरण के साथ दिखाई देंगे।",
   "usage.empty.title": "अभी कोई उपयोग नहीं",
-  "usage.model.unknown": "कोई मॉडल नहीं",
+  "usage.model.unknown": "सैंडबॉक्स कंप्यूट",
   "usage.panel.by_model": "मॉडल के अनुसार",
   "usage.panel.by_run": "ऑप्टिमाइज़ेशन रन के अनुसार",
   "usage.panel.over_time": "समय के साथ खर्च",

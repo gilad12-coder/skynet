@@ -3748,7 +3748,7 @@
   "usage.col.tokens": "توکن‌ها",
   "usage.empty.desc": "اجراهای مدیریت‌شده با تفکیک هزینه اینجا نمایش داده می‌شوند.",
   "usage.empty.title": "هنوز مصرفی نیست",
-  "usage.model.unknown": "بدون مدل",
+  "usage.model.unknown": "پردازش سندباکس",
   "usage.panel.by_model": "بر اساس مدل",
   "usage.panel.by_run": "بر اساس اجرای بهینه‌سازی",
   "usage.panel.over_time": "هزینه در طول زمان",

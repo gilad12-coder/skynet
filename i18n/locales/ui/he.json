@@ -3415,7 +3415,7 @@
   "usage.col.tokens": "טוקנים",
   "usage.empty.desc": "ריצות מנוהלות יופיעו כאן עם פירוט עלויות.",
   "usage.empty.title": "אין ניצול עדיין",
-  "usage.model.unknown": "ללא מודל",
+  "usage.model.unknown": "מחשוב בסביבה מבודדת",
   "usage.panel.by_model": "לפי מודל",
   "usage.panel.by_run": "לפי ריצה",
   "usage.panel.over_time": "ניצול לאורך זמן",

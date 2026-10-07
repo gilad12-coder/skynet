@@ -3748,7 +3748,7 @@
   "usage.col.tokens": "Токени",
   "usage.empty.desc": "Керовані запуски з’являться тут із розбивкою витрат.",
   "usage.empty.title": "Поки що немає використання",
-  "usage.model.unknown": "Без моделі",
+  "usage.model.unknown": "Обчислення в пісочниці",
   "usage.panel.by_model": "За моделлю",
   "usage.panel.by_run": "За запуском оптимізації",
   "usage.panel.over_time": "Витрати з часом",

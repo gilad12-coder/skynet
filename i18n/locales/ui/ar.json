@@ -3748,7 +3748,7 @@
   "usage.col.tokens": "الرموز",
   "usage.empty.desc": "ستظهر التشغيلات المُدارة هنا مع تفصيل للتكلفة.",
   "usage.empty.title": "لا استخدام بعد",
-  "usage.model.unknown": "بلا نموذج",
+  "usage.model.unknown": "حوسبة بيئة معزولة",
   "usage.panel.by_model": "حسب النموذج",
   "usage.panel.by_run": "حسب تشغيلة التحسين",
   "usage.panel.over_time": "الإنفاق عبر الزمن",

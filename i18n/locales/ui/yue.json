@@ -3633,7 +3633,7 @@
   "usage.col.tokens": "Token 數",
   "usage.empty.desc": "受管執行記錄會喺度顯示，並附帶費用明細。",
   "usage.empty.title": "仲未有用量紀錄",
-  "usage.model.unknown": "無指定模型",
+  "usage.model.unknown": "沙盒運算",
   "usage.panel.by_model": "按模型劃分",
   "usage.panel.by_run": "按最佳化執行劃分",
   "usage.panel.over_time": "隨時間嘅支出",

@@ -3748,7 +3748,7 @@
   "usage.col.tokens": "Токены",
   "usage.empty.desc": "Управляемые запуски появятся здесь с разбивкой по стоимости.",
   "usage.empty.title": "Пока нет использования",
-  "usage.model.unknown": "Без модели",
+  "usage.model.unknown": "Вычисления в песочнице",
   "usage.panel.by_model": "По модели",
   "usage.panel.by_run": "По запуску оптимизации",
   "usage.panel.over_time": "Расходы со временем",

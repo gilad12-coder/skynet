@@ -3748,7 +3748,7 @@
   "usage.col.tokens": "토큰",
   "usage.empty.desc": "관리형 실행이 비용 내역과 함께 여기에 표시됩니다.",
   "usage.empty.title": "아직 사용 내역이 없습니다",
-  "usage.model.unknown": "모델 없음",
+  "usage.model.unknown": "샌드박스 컴퓨팅",
   "usage.panel.by_model": "모델별",
   "usage.panel.by_run": "최적화 실행별",
   "usage.panel.over_time": "기간별 지출",

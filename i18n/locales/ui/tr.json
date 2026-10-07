@@ -3748,7 +3748,7 @@
   "usage.col.tokens": "Token",
   "usage.empty.desc": "Yönetilen çalıştırmalar, maliyet dökümüyle birlikte burada görünecek.",
   "usage.empty.title": "Henüz kullanım yok",
-  "usage.model.unknown": "Model yok",
+  "usage.model.unknown": "Sandbox işlem gücü",
   "usage.panel.by_model": "Modele göre",
   "usage.panel.by_run": "Optimizasyon çalıştırmasına göre",
   "usage.panel.over_time": "Zaman içindeki harcama",
