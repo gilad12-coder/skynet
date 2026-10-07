@@ -38,7 +38,7 @@ import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
 import { CandidatePreview } from "./CandidatePreview";
 import { VersionRail } from "./VersionRail";
-import { RepoVersionBrowser, type Compare } from "./RepoVersionBrowser";
+import { RepoVersionBrowser } from "./RepoVersionBrowser";
 import {
   ADDED_BG,
   ADDED_EMPHASIS_BG,
@@ -53,8 +53,6 @@ import { VersionFeedback } from "./BlackboxFinalScores";
 import {
   buildVersions,
   defaultVersionIndex,
-  versionParents,
-  type CandidateLineage,
   type CandidateVersion,
 } from "../lib/blackbox-versions";
 import {
@@ -344,7 +342,6 @@ export function BestVersionTab({
   jobName,
   repository = false,
   optimizationId,
-  lineage,
 }: {
   result: BlackboxRunResult;
   jobName?: string | null;
@@ -352,17 +349,10 @@ export function BestVersionTab({
   repository?: boolean;
   /** Needed to browse a repository version's files at the pinned commit. */
   optimizationId?: string;
-  /** The run's scored-candidate events, for each version's parent. */
-  lineage?: CandidateLineage[];
 }) {
   const versions = useMemo(() => buildVersions(result), [result]);
-  const parents = useMemo(
-    () => (repository ? versionParents(versions, lineage ?? [], result.candidate_tree) : null),
-    [repository, versions, lineage, result.candidate_tree],
-  );
   const browse = repository && !!optimizationId;
   const [repoPath, setRepoPath] = useState<string | null>(null);
-  const [repoCompare, setRepoCompare] = useState<Compare>("base");
   const [openFile, setOpenFile] = useState<{ path: string; text: string } | null>(null);
   const [index, setIndex] = useState(() => defaultVersionIndex(versions));
   const last = versions.length - 1;
@@ -389,8 +379,6 @@ export function BestVersionTab({
       ? ["preview", "code", "diff"]
       : ["preview", "code"];
   const activeView: View = views.includes(view) ? view : browse ? "files" : "code";
-  const parentNumber = parents?.get(current.number);
-  const parent = parentNumber == null ? null : (versions.find((v) => v.number === parentNumber) ?? null);
   const title = msg("optimization.blackbox.versions.title");
   const slug = (jobName ?? "candidate").replace(/[^\w.-]+/g, "_");
   const fileName = `${slug}-v${current.number}.${repository ? "patch" : RENDER_KIND_EXTENSION[kind]}`;
@@ -462,11 +450,8 @@ export function BestVersionTab({
               <RepoVersionBrowser
                 optimizationId={optimizationId}
                 version={current}
-                parent={parent}
                 path={repoPath}
                 onPathChange={setRepoPath}
-                compare={repoCompare}
-                onCompareChange={setRepoCompare}
                 onOpenFile={setOpenFile}
               />
             )}

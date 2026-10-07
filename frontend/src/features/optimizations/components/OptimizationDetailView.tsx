@@ -1673,7 +1673,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   jobName={job.name}
                   repository={payloadRecipe === "repo"}
                   optimizationId={job.optimization_id}
-                  lineage={blackboxCandidates}
                 />
               </TabsContent>
             )}
