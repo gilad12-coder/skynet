@@ -12,7 +12,7 @@ export const WORKFLOW_CANVAS_HEIGHT_CLASS = "h-[480px]";
 
 // Toolbar buttons are h-7, but touch pointers (globals.css) and the wizard's
 // below-lg rule (CodeStep) lift every button to 44px; the bones follow both.
-const TOOL_BONE_CLASS = "block h-7 leading-none max-lg:h-11 any-pointer-coarse:h-11";
+const TOOL_BONE_CLASS = "block h-7 leading-none max-lg:h-[44px] any-pointer-coarse:h-[44px]";
 
 /** The canvas toolbar and graph area, held while the React Flow chunk loads. */
 export function WorkflowCanvasSkeleton() {
@@ -25,7 +25,7 @@ export function WorkflowCanvasSkeleton() {
         <Skeleton height="100%" containerClassName={cn(TOOL_BONE_CLASS, "w-[84px]")} />
         <Skeleton
           height="100%"
-          containerClassName={cn(TOOL_BONE_CLASS, "w-7 max-lg:w-11 any-pointer-coarse:w-11")}
+          containerClassName={cn(TOOL_BONE_CLASS, "w-7 max-lg:w-[44px] any-pointer-coarse:w-[44px]")}
         />
       </div>
       <div className={cn(WORKFLOW_CANVAS_HEIGHT_CLASS, "bg-[#FDFCFA]")} />

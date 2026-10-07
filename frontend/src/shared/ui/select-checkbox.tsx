@@ -57,8 +57,10 @@ export function SelectCheckbox({
       onKeyDown={(e) => e.stopPropagation()}
       className={cn(
         checkboxBoxClass(state),
-        // The ::after grows the 20px box to a 44px hit area without changing its look.
-        "relative cursor-pointer after:absolute after:-inset-3 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 disabled:cursor-not-allowed disabled:opacity-50",
+        // The ::after grows the box to a 44px hit area without changing its look. It is
+        // a centred 44px square, not ``-inset-3``: that inset is rem (the fluid root is
+        // ~15px on iPad) and measured inside the border, which left only ~39px.
+        "relative cursor-pointer after:absolute after:left-1/2 after:top-1/2 after:-mt-[22px] after:-ml-[22px] after:size-[44px] after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 disabled:cursor-not-allowed disabled:opacity-50",
         !state && "hover:border-foreground/40",
       )}
     >

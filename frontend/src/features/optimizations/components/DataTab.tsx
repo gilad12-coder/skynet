@@ -18,7 +18,8 @@ import {
   ResetColumnsButton,
   ResetFiltersButton,
 } from "@/shared/ui/excel-filter";
-import { DataTabSkeleton } from "./DataTabSkeleton";
+import { DataTabSkeleton, dataTabLayoutKey, type DataTabShape } from "./DataTabSkeleton";
+import { rememberLayout } from "@/shared/lib/layout-hint";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { FadeIn } from "@/shared/ui/motion";
 import { Segmented } from "@/shared/ui/segmented";
@@ -369,7 +370,22 @@ export function DataTab({
 
   const evalCount = Object.keys(currentResults).length;
 
-  if (loading) return <DataTabSkeleton />;
+  const scoreColumns = split === "test" && evalCount > 0;
+  const columnCount =
+    inputFields.length +
+    outputFields.length +
+    (scoreColumns ? 1 + outputFields.length + loggedMetricNames.length : 0);
+  const tableRows = Math.min(filtered.length, 200);
+  useEffect(() => {
+    if (loading || error || sharedDataset) return;
+    rememberLayout(dataTabLayoutKey(job.optimization_id), {
+      columns: columnCount,
+      rows: tableRows,
+      score: scoreColumns,
+    } satisfies DataTabShape);
+  }, [loading, error, sharedDataset, job.optimization_id, columnCount, tableRows, scoreColumns]);
+
+  if (loading) return <DataTabSkeleton optimizationId={job.optimization_id} />;
   if (error || !dataset)
     return (
       <InlineErrorRow

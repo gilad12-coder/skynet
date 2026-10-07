@@ -38,7 +38,8 @@ import { DatasetCard } from "./DatasetCard";
 import { DatasetDetailDialog } from "./DatasetDetailDialog";
 import { DatasetRenameDialog } from "./DatasetRenameDialog";
 import { DatasetShareDialog } from "./DatasetShareDialog";
-import { DatasetsSkeleton } from "./DatasetsSkeleton";
+import { DATASETS_LAYOUT_KEY, DatasetsSkeleton } from "./DatasetsSkeleton";
+import { rememberLayout } from "@/shared/lib/layout-hint";
 
 /**
  * Top-level /datasets page: the personal dataset library. Lists owned and
@@ -209,6 +210,11 @@ export function DatasetsView() {
     },
     [uploading, refetch],
   );
+
+  const datasetCount = loading || demoDatasets || error ? null : datasets.length;
+  React.useEffect(() => {
+    if (datasetCount != null) rememberLayout(DATASETS_LAYOUT_KEY, datasetCount);
+  }, [datasetCount]);
 
   if (loading && !demoDatasets) {
     return (

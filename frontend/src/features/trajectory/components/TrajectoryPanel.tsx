@@ -20,6 +20,7 @@ import {
   extractValsetOutputs,
 } from "../lib/extract-events";
 import { layoutTrajectory } from "../lib/layout";
+import { rememberTrajectoryView } from "../lib/climb-view-hint";
 import type { BlackboxTrajectoryContext } from "../lib/types";
 import { TimelineScrubber } from "./TimelineScrubber";
 import { TrajectoryTree } from "./TrajectoryTree";
@@ -91,6 +92,12 @@ export function TrajectoryPanel({
     return m;
   }, [candidates]);
   const [generationFilter, setGenerationFilter] = useState<number | null>(null);
+  const hintKey = pairIndex === undefined ? job.optimization_id : `${job.optimization_id}#pair`;
+  const view = candidates.length === 0 ? "none" : maxGeneration > 0 ? "scrubber" : "plain";
+  useEffect(() => {
+    // The lite outline's height follows the candidate count, so it is not remembered.
+    if (!lite) rememberTrajectoryView(hintKey, view);
+  }, [lite, hintKey, view]);
   const visibleCandidates = useMemo(() => {
     if (generationFilter === null) return candidates;
     return candidates.filter((c) => c.generation <= generationFilter);

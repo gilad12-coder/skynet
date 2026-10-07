@@ -31,7 +31,7 @@ export function ConversationDrawerSkeleton() {
                       <Skeleton width="55%" />
                     </div>
                   </div>
-                  <div className="flex size-7 shrink-0 items-center justify-center any-pointer-coarse:size-11">
+                  <div className="flex size-7 shrink-0 items-center justify-center any-pointer-coarse:size-[44px]">
                     <Skeleton width={14} height={14} borderRadius={4} />
                   </div>
                 </div>

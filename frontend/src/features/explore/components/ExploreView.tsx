@@ -36,7 +36,12 @@ import { SearchBar } from "./SearchBar";
 import { FiltersDrawer, FilterSummary, type DrawerField } from "./FiltersDrawer";
 import { ResultsList } from "./ResultsList";
 import { ResultsToolbar } from "./ResultsToolbar";
-import { ResultsSkeleton } from "./ResultsSkeleton";
+import {
+  exploreLayoutKey,
+  ResultsPaneSkeleton,
+  type ExploreResultsLayout,
+} from "./ResultsSkeleton";
+import { rememberLayout, useLayoutHint } from "@/shared/lib/layout-hint";
 import { Pagination } from "./Pagination";
 
 /**
@@ -307,18 +312,34 @@ function ListPane({
   hasFilters: boolean;
   sessionUser: string;
 }) {
+  const layoutKey = exploreLayoutKey(query.corpus);
+  const remembered = useLayoutHint<ExploreResultsLayout>(layoutKey);
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const shown = !response.loading && !response.error ? response.results : null;
+  React.useEffect(() => {
+    const list = listRef.current;
+    if (!shown || !list) return;
+    const lines = (el: Element | null) =>
+      el ? Math.round(el.clientHeight / parseFloat(getComputedStyle(el).lineHeight)) : 0;
+    const layout: ExploreResultsLayout = {
+      rows: [...list.querySelectorAll("#explore-results > li")].map((li) => [
+        lines(li.querySelector("h3")),
+        lines(li.querySelector("p")),
+      ]),
+      page: query.page,
+      size: query.size,
+      total: response.total,
+    };
+    rememberLayout(layoutKey, layout);
+    rememberLayout(exploreLayoutKey("last"), layout);
+  }, [shown, layoutKey, query.page, query.size, response.total]);
+
   if (response.error) {
     return <InlineErrorRow message={msg("explore.results.error")} className="mx-auto max-w-2xl" />;
   }
 
   if (response.loading && response.results.length === 0) {
-    return (
-      <div className="flex flex-col gap-2">
-        <div className="border-t border-border/55">
-          <ResultsSkeleton rows={4} />
-        </div>
-      </div>
-    );
+    return <ResultsPaneSkeleton layout={remembered} />;
   }
 
   if (!response.loading && response.results.length === 0) {
@@ -398,6 +419,7 @@ function ListPane({
         hasQuery={query.text.trim().length > 0}
       />
       <motion.div
+        ref={listRef}
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}

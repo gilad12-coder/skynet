@@ -7,6 +7,15 @@ import type { ReactNode } from "react";
 
 export { Skeleton };
 
+/**
+ * Paints a real component (a badge, a pill, a button) as a bone, so the bone
+ * takes that component's exact size at every breakpoint and in every locale.
+ * Its text and icons stay laid out but invisible (see `.skeleton-ghost`).
+ */
+export function Ghost({ children }: { children: ReactNode }) {
+  return <span className="skeleton-ghost">{children}</span>;
+}
+
 const BASE_COLOR = "#ebe4d8";
 const HIGHLIGHT_COLOR = "#f7f1e6";
 const DURATION_SECONDS = 1.4;

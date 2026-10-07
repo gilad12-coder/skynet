@@ -1,9 +1,16 @@
 "use client";
 
 import { Skeleton } from "@/shared/ui/skeleton";
-import { CorpusToggleSkeleton, ResultsSkeleton, ResultsToolbarSkeleton } from "./ResultsSkeleton";
+import { useLayoutHint } from "@/shared/lib/layout-hint";
+import {
+  CorpusToggleSkeleton,
+  exploreLayoutKey,
+  ResultsPaneSkeleton,
+  type ExploreResultsLayout,
+} from "./ResultsSkeleton";
 
 export function ExploreSkeleton() {
+  const layout = useLayoutHint<ExploreResultsLayout>(exploreLayoutKey("last"));
   return (
     <div className="pb-16" aria-hidden="true">
       <div className="flex flex-col gap-1.5">
@@ -15,12 +22,7 @@ export function ExploreSkeleton() {
             <Skeleton height={44} borderRadius={16} containerClassName="block leading-none" />
           </div>
         </div>
-        <div className="flex flex-col gap-2">
-          <ResultsToolbarSkeleton />
-          <div className="border-t border-border/55">
-            <ResultsSkeleton rows={4} />
-          </div>
-        </div>
+        <ResultsPaneSkeleton layout={layout} />
       </div>
     </div>
   );

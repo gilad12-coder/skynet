@@ -8,7 +8,8 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { Segmented } from "@/shared/ui/segmented";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
-import { Skeleton } from "@/shared/ui/skeleton";
+import { Ghost, Skeleton } from "@/shared/ui/skeleton";
+import { rememberLayout, useLayoutHint } from "@/shared/lib/layout-hint";
 import {
   Table,
   TableBody,
@@ -268,13 +269,41 @@ function Summary({
   );
 }
 
-// Segmented and icon buttons are 44px tall below lg and under any coarse
-// pointer (iPad, even with a trackpad), so the bones grow at the same points.
-const SEGMENT_BONE = "block h-7 w-48 max-lg:h-12 any-pointer-coarse:h-12";
-const ICON_BONE = "block size-8 any-pointer-coarse:size-11";
+const ICON_BONE = "block size-8 any-pointer-coarse:size-[44px]";
 
-/** The summary strip, toolbar and table while the first usage fetch is in flight. */
-function UsageTabSkeleton({ budgeted }: { budgeted: boolean }) {
+/** The Usage tab as it last rendered, so its loading skeleton draws the same toolbar and rows. */
+interface UsageShape {
+  groupings: UsageGrouping[];
+  grouping: UsageGrouping;
+  rows: number;
+  splitCost: boolean;
+  /** Row index that carries the "not a model" caption (model grouping only), or -1. */
+  notModelAt: number;
+  /** The run had an execution budget, which adds a summary tile. */
+  budgeted?: boolean;
+}
+
+const usageLayoutKey = (id: string, pairIndex: number | null) =>
+  `usage-tab:${id}:${pairIndex ?? ""}`;
+
+const COLD_USAGE_SHAPE: UsageShape = {
+  groupings: ["role", "model"],
+  grouping: "role",
+  rows: 3,
+  splitCost: false,
+  notModelAt: -1,
+};
+
+const noop = () => {};
+
+/**
+ * The summary strip, toolbar and table while the first usage fetch is in
+ * flight, built from the same table primitives (and the grouping control
+ * itself, ghosted) so every row folds and wraps like the loaded one.
+ */
+function UsageTabSkeleton({ budgeted, shape }: { budgeted: boolean; shape?: UsageShape }) {
+  const s = shape ?? COLD_USAGE_SHAPE;
+  const bone = <Skeleton width={40} height={12} inline />;
   return (
     <div className="space-y-4" aria-hidden="true">
       <div className={SUMMARY_GRID_CLASS}>
@@ -290,31 +319,113 @@ function UsageTabSkeleton({ budgeted }: { budgeted: boolean }) {
         ))}
       </div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-1.5">
-          <span className="size-3" />
-          <Skeleton height="100%" borderRadius={8} containerClassName={SEGMENT_BONE} />
+        <div className="flex min-w-0 items-center gap-3 overflow-x-auto no-scrollbar">
+          <div className="inline-flex items-center gap-1.5">
+            <span className="size-3" />
+            <Ghost>
+              <Segmented
+                size="sm"
+                label={msg("usage_tab.group.label")}
+                value={s.grouping}
+                onChange={noop}
+                options={s.groupings.map((g) => ({ value: g, label: msg(GROUPING_LABEL_KEYS[g]) }))}
+              />
+            </Ghost>
+          </div>
         </div>
         <Skeleton height="100%" containerClassName={ICON_BONE} />
       </div>
-      <div className="overflow-hidden rounded-2xl border border-[#DDD4C8]/50">
-        <div className="flex h-12 items-center gap-4 border-b border-border/60 px-4">
-          <Skeleton width="40%" height={12} containerClassName="flex-1" />
-          <Skeleton width="50%" height={12} containerClassName="flex-1 text-end" />
-          <Skeleton width="50%" height={12} containerClassName="flex-1 text-end" />
-        </div>
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div
-            key={i}
-            className="flex h-[41px] items-center gap-4 border-b border-border/60 px-4 last:border-0"
-          >
-            <Skeleton width="60%" height={12} containerClassName="flex-1" />
-            <Skeleton width="40%" height={12} containerClassName="flex-1 text-end" />
-            <Skeleton width="30%" height={12} containerClassName="flex-1 text-end" />
-          </div>
-        ))}
-      </div>
+      <Card className="overflow-hidden py-0">
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="ps-4">
+                  <Skeleton width={56} height={12} inline />
+                </TableHead>
+                <TableHead className="text-end">{bone}</TableHead>
+                {s.splitCost && (
+                  <TableHead className="text-end" collapse="sm">
+                    {bone}
+                  </TableHead>
+                )}
+                <TableHead className="text-end">{bone}</TableHead>
+                <TableHead className="text-end" collapse="md">
+                  {bone}
+                </TableHead>
+                <TableHead className="text-end" collapse="md">
+                  {bone}
+                </TableHead>
+                <TableHead className="pe-4 text-end" collapse="lg">
+                  {bone}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Array.from({ length: s.rows + 1 }).map((_, i) => {
+                const total = i === s.rows;
+                return (
+                  <TableRow
+                    key={i}
+                    className={cn(
+                      ((total && s.rows > 0) || (i === s.notModelAt && i > 0)) &&
+                        "border-t border-border",
+                    )}
+                  >
+                    <TableCell className="max-w-[18rem] ps-4">
+                      {i === s.notModelAt && (
+                        <span className="mb-0.5 block text-[0.6875rem]">
+                          <Skeleton width={72} height={9} inline />
+                        </span>
+                      )}
+                      <span
+                        className={cn(
+                          "block truncate",
+                          !total &&
+                            s.grouping === "model" &&
+                            (s.notModelAt < 0 || i < s.notModelAt) &&
+                            "font-mono text-xs",
+                        )}
+                      >
+                        <Skeleton width={total ? 40 : 96} height={12} inline />
+                      </span>
+                      {!total && (
+                        <TableInline at="md">
+                          <Skeleton width={32} height={10} inline />
+                        </TableInline>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-end">{bone}</TableCell>
+                    {s.splitCost && (
+                      <TableCell className="text-end" collapse="sm">
+                        {bone}
+                      </TableCell>
+                    )}
+                    <TableCell className="text-end">{bone}</TableCell>
+                    <TableCell className="text-end" collapse="md">
+                      {bone}
+                    </TableCell>
+                    <TableCell className="text-end" collapse="md">
+                      {bone}
+                    </TableCell>
+                    <TableCell className="pe-4 text-end" collapse="lg">
+                      {bone}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
+}
+
+/** The Usage tab's skeleton for a run page still loading, from what the tab last rendered. */
+export function UsageTabBone({ optimizationId }: { optimizationId: string }) {
+  const shape = useLayoutHint<UsageShape>(usageLayoutKey(optimizationId, null));
+  return <UsageTabSkeleton budgeted={shape?.budgeted ?? false} shape={shape} />;
 }
 
 /**
@@ -343,14 +454,36 @@ export function UsageTab({
   const total = useMemo(() => usageTotal(rows), [rows]);
   const splitCost = hasProviderSpend(rows);
   const firstNonModel = groups.findIndex((g) => g.nonModel);
+  const budgeted = !!(job.execution_budget ?? job.terminal_evidence?.execution_budget);
+  const layoutKey = usageLayoutKey(job.optimization_id, pairIndex);
+  const shapeHint = useLayoutHint<UsageShape>(layoutKey);
+  const offeredKey = offered.join(",");
+  useEffect(() => {
+    if (!usage) return;
+    rememberLayout(layoutKey, {
+      groupings: offeredKey.split(",") as UsageGrouping[],
+      grouping: activeGrouping,
+      rows: groups.length,
+      splitCost,
+      notModelAt: activeGrouping === "model" ? firstNonModel : -1,
+      budgeted,
+    } satisfies UsageShape);
+  }, [
+    usage,
+    layoutKey,
+    offeredKey,
+    activeGrouping,
+    groups.length,
+    splitCost,
+    firstNonModel,
+    budgeted,
+  ]);
 
   if (!usage) {
     return error ? (
       <EmptyState icon={Coins} title={msg("usage_tab.load_error")} />
     ) : (
-      <UsageTabSkeleton
-        budgeted={!!(job.execution_budget ?? job.terminal_evidence?.execution_budget)}
-      />
+      <UsageTabSkeleton budgeted={budgeted} shape={shapeHint} />
     );
   }
 

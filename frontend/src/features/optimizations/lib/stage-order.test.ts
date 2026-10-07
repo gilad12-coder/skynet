@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OptimizationStatusResponse, ProgressEvent } from "@/shared/types/api";
 import type { PipelineStage } from "../constants";
-import { preparationStages, stageInPlan } from "./stage-order.ts";
+import { plannedStageKeys, preparationStages, singleEngineOf, stageInPlan } from "./stage-order.ts";
 
 const ev = (event: string, metrics: Record<string, unknown> = {}): ProgressEvent => ({
   timestamp: "",
@@ -50,4 +50,54 @@ test("a stage the plan skips resolves to the next one it lists", () => {
     "evaluating",
   );
   assert.equal(stageInPlan(blackbox, "done"), "done");
+});
+
+const bbPayload = (strategy: Record<string, unknown>) => ({
+  optimization_id: "x",
+  optimization_type: "blackbox" as const,
+  payload: { strategy },
+});
+
+test("a single-engine black-box run plans three stages", () => {
+  const fromPayload = job({ optimization_type: "blackbox" });
+  assert.deepEqual(
+    plannedStageKeys(fromPayload, bbPayload({ mode: "single", engine: "best_of_n" })),
+    ["validating", "optimizing", "evaluating"],
+  );
+  const fromLane = job({
+    optimization_type: "blackbox",
+    progress_events: [ev("lane_started", { phase: "single", engine: "meta_harness" })],
+  });
+  assert.equal(singleEngineOf(fromLane, null), "meta_harness");
+  assert.equal(plannedStageKeys(fromLane, null).length, 3);
+});
+
+test("a finished single-engine run is single even without its payload", () => {
+  const finished = job({
+    optimization_type: "blackbox",
+    blackbox_result: { strategy_mode: "single", engine_used: "gepa" } as never,
+  });
+  assert.equal(singleEngineOf(finished, null), "gepa");
+  assert.equal(plannedStageKeys(finished, null).length, 3);
+});
+
+test("an auto black-box run refines after exploring", () => {
+  assert.deepEqual(
+    plannedStageKeys(job({ optimization_type: "blackbox" }), bbPayload({ mode: "auto" })),
+    ["validating", "optimizing", "refining", "evaluating"],
+  );
+});
+
+test("a DSPy run plans four or five stages by its test split", () => {
+  assert.equal(plannedStageKeys(job({ optimization_type: "run" }), null).length, 5);
+  const noTest = job({
+    optimization_type: "run",
+    progress_events: [ev("dataset_splits_ready", { test_examples: 0 })],
+  });
+  assert.deepEqual(plannedStageKeys(noTest, null), [
+    "validating",
+    "splitting",
+    "optimizing",
+    "evaluating",
+  ]);
 });

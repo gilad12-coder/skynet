@@ -12,7 +12,9 @@ import {
 } from "react";
 import {
   CaretRight,
+  Code,
   DotsThree,
+  Eye,
   File,
   FileC,
   FileCode,
@@ -947,14 +949,21 @@ function FileView({
         {renderable && !movedTo && (
           <Segmented<Mode>
             size="sm"
+            iconOnly
             label={msg("optimization.blackbox.repo.browser.mode_label")}
             value={mode}
             onChange={setMode}
+            segmentClassName="min-w-9"
             options={[
-              { value: "source", label: msg("optimization.blackbox.repo.browser.mode_source") },
+              {
+                value: "source",
+                label: msg("optimization.blackbox.repo.browser.mode_source"),
+                icon: <Code aria-hidden="true" className="size-3.5" />,
+              },
               {
                 value: "rendered",
                 label: msg("optimization.blackbox.repo.browser.mode_rendered"),
+                icon: <Eye aria-hidden="true" className="size-3.5" />,
               },
             ]}
           />
