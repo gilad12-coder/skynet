@@ -53,11 +53,7 @@ import {
   serveSharedOptimization,
   STORAGE_CHANGED_EVENT,
 } from "@/shared/lib/api";
-import type {
-  ServeInfoResponse,
-  WorkflowNodeTrace,
-  WorkflowSpec,
-} from "@/shared/types/api";
+import type { ServeInfoResponse, WorkflowNodeTrace, WorkflowSpec } from "@/shared/types/api";
 // Leaf import on purpose — the tutorial barrel deliberately does not re-export
 // the demo fixtures (see features/tutorial/index.ts).
 // eslint-disable-next-line no-restricted-imports -- deliberate leaf import; see above
@@ -77,7 +73,7 @@ import {
 import { OptimizationDetailSkeleton } from "./OptimizationDetailSkeleton";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { formatBytes } from "@/shared/lib/formatters";
-import { localizeStoredReason, TERMS } from "@/shared/lib/terms";
+import { TERMS } from "@/shared/lib/terms";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
@@ -1203,15 +1199,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               <div className="flex flex-col items-start gap-1.5">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <StatusBadge status={job.status} />
-                  {job.status === "cancelled" && !isPairContext && (
-                    <span className="text-xs text-muted-foreground" dir="auto">
-                      {job.message
-                        ? localizeStoredReason(job.message)
-                        : formatMsg("auto.app.optimizations.id.page.template.4", {
-                            p1: TERMS.optimization,
-                          })}
-                    </span>
-                  )}
                 </div>
                 {job.name && (
                   <h2 className="text-lg sm:text-xl font-bold tracking-tight" dir="auto">
@@ -1495,7 +1482,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         </FadeIn>
       )}
 
-
       {job.optimization_type === "grid_search" &&
         activePairIndex !== null &&
         (!activePair || !effectiveJob?.grid_result) && (
@@ -1705,10 +1691,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
             {showUsageTab && (
               <TabsContent value="usage" className="mt-4">
-                <UsageTab
-                  job={job}
-                  pairIndex={isPairContext ? activePair.pair_index : null}
-                />
+                <UsageTab job={job} pairIndex={isPairContext ? activePair.pair_index : null} />
               </TabsContent>
             )}
 

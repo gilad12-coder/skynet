@@ -35,9 +35,7 @@ import {
   Folder,
   FolderOpen,
   Folders,
-  ListBullets,
   MagnifyingGlass,
-  TreeStructure,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
@@ -54,7 +52,6 @@ import { CODE_HIGHLIGHT_SPECS } from "@/shared/ui/code-highlight-style";
 import type { RepositoryFileResponse, RepositoryTreeEntry } from "@/shared/types/api";
 import type { CandidateVersion } from "../lib/blackbox-versions";
 import {
-  countChanges,
   foldRows,
   fullDiffRows,
   mergeLineSpans,
@@ -230,10 +227,6 @@ function ChangeCounts({ added, removed }: { added: number; removed: number }) {
 
 /* ── Tree ─────────────────────────────────────────────────────────────── */
 
-/** How the explorer lists files: one tree, or the changed files above the rest. */
-export type TreeLayout = "tree" | "grouped";
-
-const LAYOUT_KEY = "repo-browser.layout";
 const TREE_OPEN_KEY = "repo-browser.tree-open";
 
 function readSetting(key: string): string | null {
@@ -414,14 +407,10 @@ function TreeSection({
 function FileTree({
   root,
   selected,
-  layout,
-  onLayoutChange,
   onSelect,
 }: {
   root: RepoNode;
   selected: string | null;
-  layout: TreeLayout;
-  onLayoutChange: (layout: TreeLayout) => void;
   onSelect: (path: string) => void;
 }) {
   const [filter, setFilter] = useState("");
@@ -453,74 +442,42 @@ function FileTree({
             className={cn(TOUCH_FIELD_SM, "ps-8 text-xs md:text-xs")}
           />
         </div>
-        <Segmented<TreeLayout>
-          size="sm"
-          iconOnly
-          label={msg("optimization.blackbox.repo.browser.layout_label")}
-          value={layout}
-          onChange={onLayoutChange}
-          options={[
-            {
-              value: "grouped",
-              label: msg("optimization.blackbox.repo.browser.layout_grouped"),
-              icon: <ListBullets className="size-3.5" aria-hidden="true" />,
-              tip: msg("optimization.blackbox.repo.browser.layout_grouped"),
-            },
-            {
-              value: "tree",
-              label: msg("optimization.blackbox.repo.browser.layout_tree"),
-              icon: <TreeStructure className="size-3.5" aria-hidden="true" />,
-              tip: msg("optimization.blackbox.repo.browser.layout_tree"),
-            },
-          ]}
-        />
       </div>
       <div className="max-h-[22rem] min-h-0 overflow-auto rounded-md @2xl:max-h-[32rem]">
-        {layout === "tree" ? (
-          <TreeList
-            root={root}
-            scope="all"
-            filter={filter}
-            selected={selected}
-            label={treeLabel}
-            onSelect={onSelect}
-          />
-        ) : (
-          <div className="space-y-1">
+        <div className="space-y-1">
+          <TreeSection
+            title={msg("optimization.blackbox.repo.browser.section_changed")}
+            count={root.changedCount}
+            open={changedOpen || !!filter}
+            onToggle={() => setChangedOpen((v) => !v)}
+          >
+            <TreeList
+              root={root}
+              scope="changed"
+              filter={filter}
+              selected={selected}
+              label={msg("optimization.blackbox.repo.browser.section_changed")}
+              onSelect={onSelect}
+            />
+          </TreeSection>
+          {others > 0 && (
             <TreeSection
-              title={msg("optimization.blackbox.repo.browser.section_changed")}
-              count={root.changedCount}
-              open={changedOpen || !!filter}
-              onToggle={() => setChangedOpen((v) => !v)}
+              title={msg("optimization.blackbox.repo.browser.section_other")}
+              count={others}
+              open={othersOpen || !!filter}
+              onToggle={() => setOthersOpen((v) => !v)}
             >
               <TreeList
                 root={root}
-                scope="changed"
+                scope="unchanged"
                 filter={filter}
                 selected={selected}
-                label={msg("optimization.blackbox.repo.browser.section_changed")}
+                label={msg("optimization.blackbox.repo.browser.section_other")}
                 onSelect={onSelect}
               />
             </TreeSection>
-            {others > 0 && (
-              <TreeSection
-                title={msg("optimization.blackbox.repo.browser.section_other")}
-                count={others}
-                open={othersOpen || !!filter}
-                onToggle={() => setOthersOpen((v) => !v)}
-              >
-                <TreeList
-                  root={root}
-                  scope="unchanged"
-                  filter={filter}
-                  selected={selected}
-                  label={msg("optimization.blackbox.repo.browser.section_other")}
-                  onSelect={onSelect}
-                />
-              </TreeSection>
-            )}
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
@@ -606,18 +563,6 @@ function TreeRow({
 /* ── File view ────────────────────────────────────────────────────────── */
 
 type Mode = "source" | "rendered";
-
-function Breadcrumb({ path }: { path: string }) {
-  return (
-    <span
-      className="min-w-0 truncate font-mono text-xs font-semibold text-foreground"
-      dir="ltr"
-      title={path}
-    >
-      {path.split("/").pop()}
-    </span>
-  );
-}
 
 function Notice({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
@@ -943,18 +888,6 @@ function baseTextOf(sides: FileSides, base: Loaded<RepositoryFileResponse> | nul
   return { state: "ready", text: base.data.content ?? "" };
 }
 
-function StatusChip({ children, title }: { children: ReactNode; title?: string }) {
-  return (
-    <span
-      className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.6875rem] font-medium text-foreground/75"
-      title={title}
-      dir="auto"
-    >
-      {children}
-    </span>
-  );
-}
-
 function FileView({
   optimizationId,
   path,
@@ -997,22 +930,9 @@ function FileView({
     shownBefore == null || shownAfter == null
       ? null
       : numberRows(fullDiffRows(shownBefore, shownAfter));
-  const counts = rows ? countChanges(rows) : null;
 
   const change = sides.change;
   const movedTo = sides.removed && change?.status === "renamed" ? change.path : null;
-  const status = sides.removed
-    ? msg("optimization.blackbox.repo.browser.status_deleted")
-    : change?.status === "added"
-      ? msg("optimization.blackbox.repo.browser.status_added")
-      : change?.status === "renamed"
-        ? msg("optimization.blackbox.repo.browser.status_renamed")
-        : null;
-  const statusTitle =
-    change?.status === "renamed" && change.oldPath && !sides.removed
-      ? formatMsg("optimization.blackbox.repo.browser.renamed", { from: change.oldPath })
-      : undefined;
-
   const patchAction = change ? (
     <Button type="button" variant="outline" size="sm" onClick={() => setShowPatch((v) => !v)}>
       {msg(
@@ -1089,31 +1009,22 @@ function FileView({
   return (
     <div className="min-w-0 space-y-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <Breadcrumb path={path} />
-          {counts && counts.added + counts.removed > 0 && !movedTo && (
-            <ChangeCounts added={counts.added} removed={counts.removed} />
-          )}
-          {status && <StatusChip title={statusTitle}>{status}</StatusChip>}
-        </div>
-        <div className="ms-auto flex flex-wrap items-center gap-1.5">
-          {renderable && !movedTo && (
-            <Segmented<Mode>
-              size="sm"
-              label={msg("optimization.blackbox.repo.browser.mode_label")}
-              value={mode}
-              onChange={setMode}
-              options={[
-                { value: "source", label: msg("optimization.blackbox.repo.browser.mode_source") },
-                {
-                  value: "rendered",
-                  label: msg("optimization.blackbox.repo.browser.mode_rendered"),
-                },
-              ]}
-            />
-          )}
-          {toolbar}
-        </div>
+        {renderable && !movedTo && (
+          <Segmented<Mode>
+            size="sm"
+            label={msg("optimization.blackbox.repo.browser.mode_label")}
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: "source", label: msg("optimization.blackbox.repo.browser.mode_source") },
+              {
+                value: "rendered",
+                label: msg("optimization.blackbox.repo.browser.mode_rendered"),
+              },
+            ]}
+          />
+        )}
+        <div className="ms-auto flex flex-wrap items-center gap-1.5">{toolbar}</div>
       </div>
       {body}
       {showPatch && change && <RawPatch text={change.raw} />}
@@ -1174,15 +1085,8 @@ export function RepoVersionBrowser({
   const root = useMemo(() => buildRepoTree(entries, files), [entries, files]);
   const mainRef = useRef<HTMLDivElement>(null);
   const asideRef = useRef<HTMLElement>(null);
-  const [layout, setLayout] = useState<TreeLayout>(() =>
-    readSetting(LAYOUT_KEY) === "tree" ? "tree" : "grouped",
-  );
   const [treeOpen, setTreeOpen] = useState(() => readSetting(TREE_OPEN_KEY) !== "0");
 
-  const changeLayout = (next: TreeLayout) => {
-    setLayout(next);
-    writeSetting(LAYOUT_KEY, next);
-  };
   const toggleTree = () => {
     setTreeOpen((open) => {
       writeSetting(TREE_OPEN_KEY, open ? "0" : "1");
@@ -1209,6 +1113,7 @@ export function RepoVersionBrowser({
     const main = mainRef.current;
     const aside = asideRef.current;
     if (
+      treeOpen &&
       main &&
       aside &&
       aside.getBoundingClientRect().bottom <= main.getBoundingClientRect().top + 1
@@ -1225,8 +1130,10 @@ export function RepoVersionBrowser({
     <div className="@container">
       <div
         className={cn(
-          "grid gap-3",
-          treeOpen && "@2xl:grid-cols-[minmax(0,1fr)_15rem] @4xl:grid-cols-[minmax(0,1fr)_17rem]",
+          "grid gap-y-3 transition-[grid-template-columns] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+          treeOpen
+            ? "@2xl:grid-cols-[minmax(0,1fr)_15rem] @4xl:grid-cols-[minmax(0,1fr)_17rem]"
+            : "@2xl:grid-cols-[minmax(0,1fr)_0rem]",
         )}
       >
         <div ref={mainRef} className="min-w-0 scroll-mt-4">
@@ -1247,20 +1154,21 @@ export function RepoVersionBrowser({
             </div>
           )}
         </div>
-        {treeOpen && (
-          <aside
-            ref={asideRef}
-            className="order-first min-w-0 @2xl:order-none @2xl:border-s @2xl:border-border/50 @2xl:ps-3"
-          >
-            <FileTree
-              root={root}
-              selected={selected}
-              layout={layout}
-              onLayoutChange={changeLayout}
-              onSelect={select}
-            />
-          </aside>
-        )}
+        {/* Kept mounted while closed so the column can slide shut; inert keeps
+            the hidden files out of the tab order. */}
+        <aside
+          ref={asideRef}
+          inert={!treeOpen}
+          aria-hidden={!treeOpen || undefined}
+          className={cn(
+            "order-first min-w-0 overflow-hidden transition-opacity duration-500 motion-reduce:transition-none @2xl:order-none",
+            treeOpen ? "opacity-100" : "hidden opacity-0 @2xl:block",
+          )}
+        >
+          <div className="@2xl:ms-3 @2xl:w-[14.25rem] @2xl:border-s @2xl:border-border/50 @2xl:ps-3 @4xl:w-[16.25rem]">
+            <FileTree root={root} selected={selected} onSelect={select} />
+          </div>
+        </aside>
       </div>
     </div>
   );

@@ -62,7 +62,6 @@ import {
   detectRenderKind,
   formatJson,
   RENDER_KIND_EXTENSION,
-  RENDER_KIND_LABEL,
   sideInfoImages,
   type RenderKind,
   isDrawable,
@@ -394,9 +393,15 @@ export function BestVersionTab({
     }
     setArchiving(true);
     try {
-      await downloadRepositoryArchive(optimizationId, current.text, `${slug}-v${current.number}.zip`);
+      await downloadRepositoryArchive(
+        optimizationId,
+        current.text,
+        `${slug}-v${current.number}.zip`,
+      );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("optimization.blackbox.versions.archive_failed"));
+      toast.error(
+        err instanceof Error ? err.message : msg("optimization.blackbox.versions.archive_failed"),
+      );
     } finally {
       setArchiving(false);
     }
@@ -440,9 +445,6 @@ export function BestVersionTab({
               {title}
             </h3>
           </HelpTip>
-          <span className="ms-auto shrink-0 text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
-            {msg(repository ? "optimization.blackbox.repo.browser.kind_patch" : RENDER_KIND_LABEL[kind])}
-          </span>
         </header>
 
         <div className="space-y-3 p-3 sm:p-4">
@@ -496,7 +498,9 @@ export function BestVersionTab({
               size="icon-xs"
               ariaLabel={
                 copyFile
-                  ? formatMsg("optimization.blackbox.repo.browser.copy_file", { file: copyFile.path })
+                  ? formatMsg("optimization.blackbox.repo.browser.copy_file", {
+                      file: copyFile.path,
+                    })
                   : formatMsg("optimization.blackbox.versions.copy", { n: current.number })
               }
               copiedAriaLabel={msg("clipboard.copied_short")}

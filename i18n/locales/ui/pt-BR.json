@@ -19,7 +19,6 @@
   "auto.app.optimizations.id.layout.template.1": "Veja os detalhes, registros, pontuações e resultados da {p1}",
   "auto.app.optimizations.id.page.18": "Registros",
   "auto.app.optimizations.id.page.20": "Execute o programa otimizado em tempo real — Insira uma entrada e obtenha uma previsão.",
-  "auto.app.optimizations.id.page.template.4": "A {p1} foi cancelada pelo usuário.",
   "auto.features.agent.panel.components.datasetuploadcard.drop_label": "Arraste um arquivo para aqui ou clique para escolher",
   "auto.features.agent.panel.components.datasetuploadcard.parse_error": "Não foi possível ler o arquivo. Utilize um arquivo CSV, JSON ou XLSX.",
   "auto.features.agent.panel.components.datasetuploadcard.parsing": "Lendo o arquivo…",

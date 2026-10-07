@@ -1,11 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { CaretDown } from "@/shared/ui/icons";
 import { ProgressBar } from "@/shared/ui/progress-bar";
 import { formatBlackboxScore } from "@/shared/lib/formatters";
 import { msg } from "@/shared/lib/messages";
-import { cn } from "@/shared/lib/utils";
 import { sideInfoFeedback, sideInfoNamedScores } from "@/shared/lib/blackbox-scores";
 import type { BlackboxNamedScore } from "@/shared/types/api";
 
@@ -46,7 +43,6 @@ function Clauses({ text }: { text: string }) {
 
 /** The scorer's feedback and named scores on one version, as the run recorded them. */
 export function VersionFeedback({ sideInfo }: { sideInfo: Record<string, unknown> }) {
-  const [showFull, setShowFull] = useState(false);
   const feedback = sideInfoFeedback(sideInfo);
   // Weakest first: that is where the next version has room to improve.
   const named: Array<[string, BlackboxNamedScore]> = Object.entries(
@@ -56,53 +52,19 @@ export function VersionFeedback({ sideInfo }: { sideInfo: Record<string, unknown
   const unitScale = named.every(
     ([, e]) => Number.isFinite(e.score) && e.score >= 0 && e.score <= 1,
   );
-  // Many scorers build the overall text by joining the named feedback, so it
-  // only repeats the list below; keep it one click away instead of up front.
-  const redundant =
-    !!feedback &&
-    named.length > 0 &&
-    named.every(([, e]) => !e.feedback || feedback.includes(e.feedback.trim().replace(/\.$/, "")));
-  const fullId = "version-feedback-full";
-
   return (
     <section
       aria-label={msg("optimization.blackbox.versions.feedback")}
       className="@container rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5"
     >
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground">
-          {msg("optimization.blackbox.versions.feedback")}
-        </h3>
-        {redundant && (
-          <button
-            type="button"
-            aria-expanded={showFull}
-            aria-controls={fullId}
-            onClick={() => setShowFull((v) => !v)}
-            className="inline-flex items-center gap-1 rounded text-[0.6875rem] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {msg(
-              showFull
-                ? "optimization.blackbox.versions.feedback_full_hide"
-                : "optimization.blackbox.versions.feedback_full_show",
-            )}
-            <CaretDown
-              aria-hidden="true"
-              className={cn(
-                "size-3 transition-transform motion-reduce:transition-none",
-                showFull && "rotate-180",
-              )}
-            />
-          </button>
-        )}
-      </div>
+      <h3 className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground">
+        {msg("optimization.blackbox.versions.feedback")}
+      </h3>
 
-      {feedback && (!redundant || showFull) && (
-        <p
-          id={fullId}
-          className="mt-1.5 whitespace-pre-wrap break-words text-xs text-foreground/90"
-          dir="auto"
-        >
+      {/* The overall text mostly restates the named feedback, so it shows only
+          when there are no named scores to read instead. */}
+      {feedback && named.length === 0 && (
+        <p className="mt-1.5 whitespace-pre-wrap break-words text-xs text-foreground/90" dir="auto">
           {feedback}
         </p>
       )}
