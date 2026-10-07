@@ -595,15 +595,15 @@ def test_native_timeout_and_missing_usage_fail_without_fallback(
 def test_native_run_lives_as_long_as_its_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A run has no wall-clock cap of its own; only the sandbox's platform lifetime bounds it."""
     monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
-    monkeypatch.setattr(native_runtime.settings, "vercel_sandbox_max_lifetime_seconds", 18_000.0)
+    monkeypatch.setattr(native_runtime.settings, "vercel_sandbox_max_lifetime_seconds", 86_400.0)
     session = FakeSession()
     runtime = FakeRuntime(session)
     run_native_engine(
         "autoresearch", Task("seed"), EvalServer(lambda *_: (1.0, {}), max_evals=2), _context(tmp_path, runtime)
     )
     assert runtime.spec is not None
-    assert runtime.spec.lifetime_seconds == 18_000.0
-    assert session.calls[-1][1]["timeout_seconds"] > 17_000
+    assert runtime.spec.lifetime_seconds == 86_400.0
+    assert session.calls[-1][1]["timeout_seconds"] > 85_000
 
 
 @pytest.mark.parametrize("runner", [native_runner, autosaddler_runner])

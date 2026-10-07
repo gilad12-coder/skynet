@@ -120,7 +120,7 @@ def test_quote_covers_all_regions_and_settles_cpu_separately_from_wall_time() ->
         {"ports": [8080]},
         {"persistent": True},
         {"lifetime_ms": 0},
-        {"lifetime_ms": 18_000_001},
+        {"lifetime_ms": 86_400_001},
         {"vcpus": 3},
     ],
 )
@@ -245,7 +245,7 @@ def _mock_provider(
                 return httpx.Response(
                     400,
                     json={
-                        "error": {"code": "bad_request", "message": "Invalid request: `timeout` should be <= 18000000."}
+                        "error": {"code": "bad_request", "message": "Invalid request: `timeout` should be <= 86400000."}
                     },
                 )
             if fail_create:
@@ -397,7 +397,7 @@ def test_refused_creation_releases_the_hold_and_admits_the_next_attempt(
     runtime = _runtime(database)
     requests = _mock_provider(monkeypatch, runtime, reject_create=True)
     sandbox_runtime = _sandbox_runtime(runtime)
-    with pytest.raises(SandboxApiError, match="18000000"):
+    with pytest.raises(SandboxApiError, match="86400000"):
         sandbox_runtime.open(_spec())
     assert [request.method for request in requests] == ["POST"]
     snapshot = runtime.service.get(runtime.budget_id, "alice")
