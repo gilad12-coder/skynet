@@ -791,7 +791,7 @@ function MoveDialog({
               : msg("folders.move.runs_hint")}
           </DialogDescription>
         </DialogHeader>
-        <div role="radiogroup" className="max-h-[50vh] overflow-y-auto">
+        <div role="radiogroup" className="max-h-[50dvh] overflow-y-auto">
           {row(null, msg("folders.move.none"), 0, FolderOpen)}
           {options.map(({ folder, depth }) => row(folder.id, folder.name, depth))}
           {options.length === 0 && (

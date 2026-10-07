@@ -65,7 +65,7 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
 
   const shell = (
     <div
-      className="flex min-h-screen flex-col"
+      className="flex min-h-dvh flex-col"
       style={{
         ["--header-height" as string]: `${HEADER_HEIGHT_PX}px`,
         ["--tabbar-height" as string]: `calc(${TABBAR_HEIGHT_PX}px + env(safe-area-inset-bottom))`,

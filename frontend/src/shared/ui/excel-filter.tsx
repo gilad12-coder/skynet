@@ -42,6 +42,7 @@ export function ColumnHeader<K extends string>({
   width,
   onResize,
   collapse,
+  primary = false,
 }: {
   label: string;
   sortKey: K;
@@ -58,6 +59,10 @@ export function ColumnHeader<K extends string>({
   onResize?: (key: K, width: number) => void;
   /** Fold this column into the row's primary cell below this table width. */
   collapse?: TableCollapse;
+  /** The row's primary cell, which takes in the collapsed columns' values. Once
+   *  the table narrows that cell widens and its values start at the cell's
+   *  edge, so the header moves to the start too instead of floating mid-column. */
+  primary?: boolean;
 }) {
   const sortActive = currentSort === sortKey;
   const hasFilter = filterCol && filterOptions && filters && onFilter && setOpenFilter;
@@ -160,10 +165,12 @@ export function ColumnHeader<K extends string>({
     <th
       ref={thRef}
       data-collapse={collapse}
-      className={`relative select-none ps-2 pe-4 py-3 text-center text-[0.75rem] font-semibold ${sortActive ? "text-foreground" : "text-muted-foreground"}`}
+      className={`relative select-none ps-2 pe-4 py-3 text-center text-[0.75rem] font-semibold ${sortActive ? "text-foreground" : "text-muted-foreground"} ${primary ? "@max-[60rem]/table:text-start" : ""}`}
       style={width ? { width, minWidth: width, maxWidth: width } : undefined}
     >
-      <div className="flex items-center justify-center gap-0.5 overflow-hidden">
+      <div
+        className={`flex items-center justify-center gap-0.5 overflow-hidden ${primary ? "@max-[60rem]/table:justify-start" : ""}`}
+      >
         <button
           type="button"
           onClick={() => onSort(sortKey)}
@@ -358,7 +365,7 @@ function FilterDropdown({
         />
       </div>
 
-      <label className="group flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] font-semibold text-muted-foreground hover:bg-muted/70 lg:min-h-9">
+      <label className="group flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] font-semibold text-muted-foreground hover:bg-muted/70 lg:min-h-9 any-pointer-coarse:min-h-11">
         <input
           type="checkbox"
           className="peer sr-only"
@@ -386,7 +393,7 @@ function FilterDropdown({
           visibleOptions.slice(0, OPTION_RENDER_CAP).map((opt) => (
             <label
               key={opt.value}
-              className="group flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] text-muted-foreground hover:bg-muted/70 lg:min-h-9"
+              className="group flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] text-muted-foreground hover:bg-muted/70 lg:min-h-9 any-pointer-coarse:min-h-11"
               title={clipText(opt.value)}
             >
               <input

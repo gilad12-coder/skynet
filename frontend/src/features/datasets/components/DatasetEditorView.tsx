@@ -1,7 +1,6 @@
 "use client";
 
 import { EmptyState } from "@/shared/ui/empty-state";
-import { LoadingState } from "@/shared/ui/loading-state";
 import { RolePill } from "@/shared/ui/role-pill";
 import { BackLink } from "@/shared/ui/back-link";
 import * as React from "react";
@@ -44,6 +43,7 @@ import {
 } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
+import { DatasetEditorSkeleton } from "./DatasetEditorSkeleton";
 
 const PAGE_SIZE = 100;
 const SAVE_DEBOUNCE_MS = 800;
@@ -344,11 +344,11 @@ export function DatasetEditorView() {
   }, [id]);
 
   if (state.mode === "loading") {
-    return <LoadingState fullPage />;
+    return <DatasetEditorSkeleton />;
   }
   if (state.mode === "notfound") {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
+      <div className="flex min-h-[60dvh] flex-col items-center justify-center gap-4">
         <XCircle className="size-12 text-destructive" />
         <p className="text-lg text-muted-foreground">{msg("datasets.editor.notfound")}</p>
         <Button asChild variant="outline">

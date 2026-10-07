@@ -50,6 +50,7 @@ import { computePairScores } from "../lib/pair-scores";
 import { ReasoningPill } from "./ui-primitives";
 import {
   CombinedTip,
+  GridEmptyState,
   ScatterTip,
   ScoreTip,
   computePareto,
@@ -208,6 +209,7 @@ function GridOverviewImpl({
   }, [gridResult]);
 
   if (!derived) return null;
+  if (derived.prs.length === 0) return <GridEmptyState />;
   const {
     prs,
     completedPrs,
@@ -482,7 +484,9 @@ function GridOverviewImpl({
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}
             >
-              <div className="grid gap-4 md:grid-cols-2">
+              {/* Two charts side by side need lg: at md the content beside the sidebar
+                  (834px iPad portrait) leaves each chart under 300px. */}
+              <div className="grid gap-4 lg:grid-cols-2">
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -999,16 +1003,25 @@ function GridOverviewImpl({
           return (
             <div
               key={pr.pair_index}
-              className={`group rounded-xl border p-4 transition-colors duration-200 cursor-pointer hover:shadow-sm ${
+              className={`group relative rounded-xl border p-4 transition-colors duration-200 hover:shadow-sm ${
                 pr.error
                   ? "border-[#B04030]/30 bg-[#B04030]/[0.02] hover:border-[#B04030]/50"
                   : isOverall
                     ? "border-[#3D2E22]/40 bg-[#3D2E22]/[0.03] hover:border-[#3D2E22]/60"
                     : "border-border/50 bg-card/80 hover:border-border"
               }`}
-              onClick={() => onPairSelect(pr.pair_index)}
             >
-              <div className="flex items-center gap-3">
+              {/* The whole card opens the pair. A stretched button (not a
+                  button wrapping the card) keeps Rerun and Delete as sibling
+                  controls instead of invalid nested interactive elements. */}
+              <button
+                type="button"
+                onClick={() => onPairSelect(pr.pair_index)}
+                aria-label={formatMsg("optimizations.grid.open_pair", { pair: pairLabel(pr) })}
+                title={pairLabel(pr)}
+                className="absolute inset-0 cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              />
+              <div className="pointer-events-none relative flex items-center gap-3">
                 {isOverall && <Crown className="size-4 text-[#C8A882] shrink-0" />}
                 {pr.error && <XCircle className="size-4 text-[#B04030] shrink-0" />}
 
@@ -1077,7 +1090,7 @@ function GridOverviewImpl({
                     <Button
                       variant="ghost"
                       size="icon-xs"
-                      className="shrink-0 text-muted-foreground/50 hover:text-foreground"
+                      className="pointer-events-auto shrink-0 text-muted-foreground/50 hover:text-foreground"
                       disabled={rerunBusy}
                       aria-label={msg(
                         pairResumable
@@ -1110,7 +1123,7 @@ function GridOverviewImpl({
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    className="pointer-events-auto shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     aria-label={msg(
                       "auto.features.optimizations.components.gridoverview.literal.29",
                     )}
@@ -1131,7 +1144,7 @@ function GridOverviewImpl({
                   value={barRatio * 100}
                   size="sm"
                   color={isOverall ? "#3D2E22" : "#C8A882"}
-                  className="mt-2.5"
+                  className="pointer-events-none relative mt-2.5"
                   fillClassName={isOverall ? "opacity-60" : "opacity-30"}
                 />
               )}

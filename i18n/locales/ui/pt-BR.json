@@ -199,5 +199,9 @@
   "submit.blackbox.roles.optimization.managed_hint": "Usa as configurações de amostragem padrão do modelo; o pagamento pode usar seu saldo Skynet ou sua chave OpenRouter.",
   "auto.features.tutorial.lib.steps.template.22": "A Assinatura diz o que entra e o que sai. A métrica é uma função que dá a cada resposta uma pontuação de 0 a 1, e o otimizador tenta aumentar essa pontuação. Por padrão, um assistente de IA faz um rascunho das duas para você, então confira e edite.",
   "auto.features.tutorial.lib.steps.template.25": "O Modelo de tarefa responde a cada exemplo. O Modelo de otimização lê os erros e escreve um prompt melhor. Clique em um modelo para trocá-lo ou alterar as configurações dele.",
-  "auto.features.tutorial.lib.steps.literal.41": "Logo abaixo, copie o endpoint da API ou um trecho de código pronto para usar o programa no seu app."
+  "auto.features.tutorial.lib.steps.literal.41": "Logo abaixo, copie o endpoint da API ou um trecho de código pronto para usar o programa no seu app.",
+  "optimizations.grid.open_pair": "Abrir o par {pair}",
+  "optimizations.grid.empty.title": "Nenhum resultado de pares",
+  "optimizations.grid.empty.description": "Esta busca em grade terminou sem resultados para nenhum par de modelos, então não há nada para comparar.",
+  "agent.error.insufficient_funds": "Seu saldo está vazio. Adicione fundos para continuar conversando com o agente."
 }

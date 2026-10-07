@@ -14,7 +14,14 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { cn } from "@/shared/lib/utils";
-import { ACCENT_DOT, ACCENT_TEXT, STATUS_COLORS, type StatAccent } from "../constants";
+import {
+  ACCENT_DOT,
+  ACCENT_TEXT,
+  BREAKDOWN_GRID_CLASS,
+  BREAKDOWN_WIDE_CELL_CLASS,
+  STATUS_COLORS,
+  type StatAccent,
+} from "../constants";
 import { AnalyticsEmpty } from "./AnalyticsEmpty";
 import { AnalyticsFilterChips } from "./AnalyticsFilterChips";
 import { AnalyticsSection } from "./AnalyticsSection";
@@ -428,7 +435,7 @@ function AnalyticsTabImpl({
                 title={msg("dashboard.analytics.section_breakdown")}
                 className="border-border/60"
               >
-                <div className="grid gap-6 md:grid-cols-3">
+                <div className={BREAKDOWN_GRID_CLASS}>
                   <div className="min-w-0">
                     <PanelHeading>
                       {msg("auto.features.dashboard.components.analyticstab.22")}
@@ -446,7 +453,7 @@ function AnalyticsTabImpl({
                     </PanelHeading>
                     <ShareBars bars={chartData.jobTypes} onSelect={setJobType} />
                   </div>
-                  <div className="min-w-0">
+                  <div className={cn("min-w-0", BREAKDOWN_WIDE_CELL_CLASS)}>
                     <PanelHeading>{msg("dashboard.analytics.by_module")}</PanelHeading>
                     {chartData.modules.length > 0 ? (
                       <ShareBars

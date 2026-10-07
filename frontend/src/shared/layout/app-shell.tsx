@@ -28,7 +28,18 @@ import {
   isGeneralistAgentEnabled,
 } from "@/features/agent-panel";
 
-const Sidebar = dynamic(() => import("@/features/sidebar").then((m) => m.Sidebar), { ssr: false });
+// The rail's surface holds its place (the width .app-main already reserves)
+// while the chunk loads, so the md+ rail doesn't pop in beside the page.
+const Sidebar = dynamic(() => import("@/features/sidebar").then((m) => m.Sidebar), {
+  ssr: false,
+  loading: () => (
+    <div
+      aria-hidden="true"
+      className="hidden h-full border-e border-sidebar-border/60 bg-sidebar/80 backdrop-blur-xl md:block"
+      style={{ width: "var(--app-sidebar-width, min(240px, 40vw, 92vw))" }}
+    />
+  ),
+});
 
 const HEADER_HEIGHT_PX = 53;
 const SIDEBAR_ID = "app-sidebar";
@@ -46,7 +57,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // authenticated (the route is login-gated like the rest of the app).
   if (pathname.startsWith("/share/")) {
     return (
-      <main className="min-h-screen" dir={dir}>
+      <main className="min-h-dvh" dir={dir}>
         {children}
       </main>
     );
@@ -59,7 +70,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // "loading" and the branch is stable from first render.
   if (pathname.startsWith("/optimizations/") && status === "unauthenticated") {
     return (
-      <main className="min-h-screen" dir={dir}>
+      <main className="min-h-dvh" dir={dir}>
         {children}
       </main>
     );
@@ -67,7 +78,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (pathname === "/login") {
     return (
-      <main className="min-h-screen" dir={dir}>
+      <main className="min-h-dvh" dir={dir}>
         {children}
       </main>
     );
@@ -78,7 +89,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // force dir="ltr" regardless of the UI locale.
   if (pathname === "/terms" || pathname === "/privacy") {
     return (
-      <main className="min-h-screen" dir="ltr">
+      <main className="min-h-dvh" dir="ltr">
         {children}
       </main>
     );
@@ -145,7 +156,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
 
   const shell = (
     <div
-      className="flex min-h-screen flex-col"
+      className="flex min-h-dvh flex-col"
       style={{ ["--header-height" as string]: `${HEADER_HEIGHT_PX}px` }}
     >
       <div ref={progressRef} className="scroll-progress" aria-hidden="true" />

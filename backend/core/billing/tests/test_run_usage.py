@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session
 
+from core.api.routers.optimizations.usage import run_usage
 from core.billing.budget_amounts import cent_units
 from core.billing.run_usage import (
     BILLING_BYOK,
@@ -27,6 +28,7 @@ from core.billing.run_usage import (
     OperationRecord,
     aggregate,
     billed_cents,
+    from_result,
     load_records,
     serialize,
     with_rounding,
@@ -191,6 +193,86 @@ def test_serialize_renders_cents() -> None:
     assert document["charged_cents"] == 1.2346
     assert document["provider_cents"] is None
     assert document["billing"] == BILLING_SKYNET
+
+
+_LEGACY_RESULT: dict[str, Any] = {
+    "usage_by_model": [
+        {"model": "litellm_proxy/openai/gpt-4.1-nano", "input_tokens": 15465, "output_tokens": 923},
+        {"model": "litellm_proxy/openai/gpt-4.1", "input_tokens": 4476, "output_tokens": 311},
+    ],
+    "lm_activity": {
+        "generation": {
+            "baseline": {"calls": 5, "avg_response_time_ms": 1000.0},
+            "training": {"calls": 61, "avg_response_time_ms": 500.0},
+        },
+        "reflection": {"training": {"calls": 1, "avg_response_time_ms": 7000.0}},
+    },
+    "details": {"billing": {"outcome": "billed", "cents": 3}},
+}
+
+
+def test_budgetless_run_is_rebuilt_from_its_result_and_adds_up_to_the_stamp() -> None:
+    """Split a pre-budget run by model and role, with the billed stamp spread across the rows."""
+    rows = from_result(
+        _LEGACY_RESULT,
+        task_model="openrouter/openai/gpt-4.1-nano",
+        reflection_model="openrouter/openai/gpt-4.1",
+        proposer=False,
+        byok=False,
+    )
+    assert [(row.role, row.model, row.calls, row.input_tokens) for row in rows] == [
+        (ROLE_TASK, "litellm_proxy/openai/gpt-4.1-nano", 66, 15465),
+        (ROLE_REFLECTION, "litellm_proxy/openai/gpt-4.1", 1, 4476),
+    ]
+    assert rows[0].latency_ms_total == 5 * 1000 + 61 * 500
+    assert all(row.billing == BILLING_SKYNET for row in rows)
+    assert sum(row.charged_units for row in rows) == cent_units(3)
+    assert (
+        from_result(_LEGACY_RESULT, task_model=None, reflection_model=None, proposer=False, byok=False, pair="0") == []
+    )
+
+
+def test_budgetless_charge_without_usage_keeps_its_own_row() -> None:
+    """Keep a stamped charge visible even when the result recorded no model usage."""
+    (row,) = from_result(
+        {"details": {"billing": {"outcome": "billed", "cents": 2}}},
+        task_model=None,
+        reflection_model=None,
+        proposer=False,
+        byok=False,
+    )
+    assert row.charged_units == cent_units(2)
+
+
+def test_budgetless_grid_pairs_carry_their_own_models() -> None:
+    """Read each grid pair's usage under its pair tag and narrow to one pair."""
+    pair = {
+        "pair_index": 1,
+        "generation_model": "openai/gpt-4o-mini",
+        "reflection_model": "openai/gpt-5",
+        "usage_by_model": [{"model": "openai/gpt-5", "input_tokens": 10, "output_tokens": 5}],
+    }
+    result = {"pair_results": [{**pair, "pair_index": 0}, pair]}
+    rows = from_result(result, task_model=None, reflection_model=None, proposer=False, byok=False, pair="1")
+    assert [(row.pair, row.role, row.input_tokens) for row in rows] == [("1", ROLE_REFLECTION, 10)]
+
+
+def test_usage_route_falls_back_to_the_result_when_the_run_has_no_budget() -> None:
+    """Show an older run's recorded usage instead of an empty tab when no budget is linked."""
+    job = {
+        "status": "success",
+        "execution_budget_id": None,
+        "payload_overview": {
+            "model_name": "openrouter/openai/gpt-4.1-nano",
+            "reflection_model_name": "openrouter/openai/gpt-4.1",
+        },
+        "result": _LEGACY_RESULT,
+    }
+    usage = run_usage(object(), job, None)
+    assert sum(row["calls"] for row in usage["rows"]) == 67
+    assert sum(row["input_tokens"] + row["output_tokens"] for row in usage["rows"]) == 21175
+    assert sum(row["charged_cents"] for row in usage["rows"]) == pytest.approx(3)
+    assert usage["settling"] is False
 
 
 @pytest.fixture

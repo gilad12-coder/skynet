@@ -86,14 +86,18 @@ export async function streamGeneralistAgent(
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
     let detail: string | undefined;
+    let code: string | undefined;
     try {
-      const raw = JSON.parse(text).detail;
+      const body = JSON.parse(text);
+      const raw = body.detail;
       detail = typeof raw === "string" ? raw : raw != null ? JSON.stringify(raw) : undefined;
+      code = typeof body.code === "string" ? body.code : undefined;
     } catch {
       /* not json */
     }
     handlers.onError(
       detail ?? formatMsg("auto.features.agent.panel.lib.stream.template.1", { p1: res.status }),
+      code,
     );
     return;
   }

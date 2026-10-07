@@ -66,7 +66,10 @@ function TooltipCard({ title, rows }: { title: string; rows: TooltipRow[] }) {
               />
             )}
             <span className="text-xs">{row.label}:</span>
-            <span className="ms-auto font-mono font-semibold tabular-nums text-foreground" dir="ltr">
+            <span
+              className="ms-auto font-mono font-semibold tabular-nums text-foreground"
+              dir="ltr"
+            >
               {row.value}
             </span>
           </div>
@@ -284,7 +287,8 @@ export function StackedTimeline({
   const totalLabel = msg("dashboard.analytics.runs");
   const dateLabel = msg("dashboard.analytics.col_date");
   const clickable = onSelect != null;
-  const select = (point: TimelinePoint) => onSelect?.(point.date, bucketEnd(point.date, granularity));
+  const select = (point: TimelinePoint) =>
+    onSelect?.(point.date, bucketEnd(point.date, granularity));
 
   if (data.length === 0) return <ChartEmptyState />;
 
@@ -322,7 +326,11 @@ export function StackedTimeline({
   return (
     <div className="h-[220px] min-w-0" dir="ltr">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ left: 4, right: 8, top: 10, bottom: 20 }} barCategoryGap="20%">
+        <BarChart
+          data={data}
+          margin={{ left: 4, right: 8, top: 10, bottom: 20 }}
+          barCategoryGap="20%"
+        >
           <CartesianGrid vertical={false} strokeDasharray="3 3" className={GRID_CLASS} />
           <XAxis
             dataKey="label"

@@ -11,7 +11,6 @@
 
 import * as React from "react";
 import { createPortal } from "react-dom";
-import dynamic from "next/dynamic";
 import {
   Background,
   MarkerType,
@@ -40,18 +39,13 @@ import {
   CanvasZoomReadout,
 } from "@/shared/ui/canvas-control-button";
 import { Label } from "@/shared/ui/primitives/label";
-import { Skeleton } from "@/shared/ui/skeleton";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import { cn } from "@/shared/lib/utils";
 import { msg } from "@/shared/lib/messages";
 import { autoLayoutSpec } from "@/features/submit/workflow/model";
 import { NODE_TYPES, flowTypeFor, type CanvasNode } from "@/features/submit/workflow/nodes";
 import type { WorkflowNodeSpec, WorkflowSpec } from "@/shared/types/api";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={160} borderRadius={8} />,
-});
 
 const FIT_VIEW = { padding: 0.2, maxZoom: 1 };
 

@@ -24,7 +24,8 @@ import { SubmitSplashOverlay, SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-s
 import { cn } from "@/shared/lib/utils";
 import { formatMsg } from "@/shared/lib/messages";
 
-import { parseAgentPreferencePatch, useUserPrefs } from "@/features/settings";
+import { parseAgentPreferencePatch, useSettingsModal, useUserPrefs } from "@/features/settings";
+import { I18N_KEY } from "@/shared/lib/i18n";
 
 import { useConversationStore } from "../hooks/use-conversation-store";
 import { useGeneralistAgent, type SessionEventContext } from "../hooks/use-generalist-agent";
@@ -242,6 +243,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     }
   }, []);
 
+  const { openTo: openSettingsTo } = useSettingsModal();
   const agent = useGeneralistAgent({
     wizardState: effectiveWizard,
     trustMode,
@@ -692,9 +694,14 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             animate={{ x: 0, opacity: 1 }}
             exit={reduceMotion ? { opacity: 0 } : { x: isRtl ? -24 : 24, opacity: 0 }}
             transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-            style={{ width: isNarrow ? "100vw" : `min(${width}px, 92vw)` }}
+            style={isNarrow ? undefined : { width: `min(${width}px, 92vw)` }}
             className={cn(
               "fixed end-0 inset-y-0 z-40 flex h-dvh shrink-0",
+              // Full-screen only in the phone shell. Tablet-width windows
+              // (iPad portrait at 834, 2/3 Split View) keep a side drawer over
+              // the backdrop instead of a stretched phone sheet; the resize
+              // handle is hidden below lg, so this is MIN_WIDTH (480).
+              isNarrow && "w-screen md:w-[min(480px,92vw)]",
               "bg-background/95 backdrop-blur-xl border-s border-border/60",
               // Shadow falls from the panel toward the page content — rightward
               // when docked left (RTL), leftward when docked right (LTR).
@@ -875,6 +882,13 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
                             "auto.features.agent.panel.components.generalistpanel.error_retry",
                           )}
                           onRetry={agent.retry}
+                          action={
+                            agent.errorCode === I18N_KEY.BILLING_INSUFFICIENT_FUNDS ? (
+                              <Button size="sm" onClick={() => openSettingsTo("billing")}>
+                                {msg("billing.action.add_funds")}
+                              </Button>
+                            ) : undefined
+                          }
                         />
                       )}
                     </>

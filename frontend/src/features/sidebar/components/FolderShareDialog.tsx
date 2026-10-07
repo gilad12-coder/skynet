@@ -180,7 +180,7 @@ export function FolderShareDialog({
           className="w-[min(32rem,92vw)] max-w-[min(32rem,92vw)] overflow-hidden p-0 sm:max-w-lg"
           aria-describedby={undefined}
         >
-          <div className="flex max-h-[85vh] flex-col">
+          <div className="flex max-h-[85dvh] flex-col">
             <DialogHeader className="shrink-0 border-b border-border/40 px-4 pb-4 pt-6 sm:px-6">
               <DialogTitle className="flex min-w-0 items-center gap-2">
                 <FolderOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

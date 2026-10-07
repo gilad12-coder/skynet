@@ -29,6 +29,7 @@ import type { OptimizationStatusResponse, PairResult, ServeInfoResponse } from "
 import { CopyButton } from "@/shared/ui/copy-button";
 import { ServeChat } from "./ServeChat";
 import { ServeCodeSnippets } from "./ServeCodeSnippets";
+import { GridEmptyState } from "./grid-overview-helpers";
 import { computePairScores } from "../lib/pair-scores";
 
 function shortEffort(value: string | null | undefined): string | null {
@@ -148,7 +149,7 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
     };
   }, []);
 
-  if (!job.grid_result) return null;
+  if (!job.grid_result || job.grid_result.pair_results.length === 0) return <GridEmptyState />;
 
   const readInputs = () => {
     const vals: Record<string, string> = {};

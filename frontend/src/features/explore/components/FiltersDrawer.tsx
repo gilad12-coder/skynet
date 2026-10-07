@@ -655,7 +655,7 @@ function FacetField({
           aria-multiselectable="true"
           aria-label={section}
           aria-busy={loading}
-          className="-mx-3 mt-1 max-h-[min(40vh,18rem)] overflow-y-auto py-1"
+          className="-mx-3 mt-1 max-h-[min(40dvh,18rem)] overflow-y-auto py-1"
         >
           {rows.map((row, index) => (
             <li

@@ -8,7 +8,6 @@
 import Link from "next/link";
 import type { Icon } from "@phosphor-icons/react";
 import {
-  ArrowLeft,
   CalendarBlank,
   CheckCircle,
   Clock,
@@ -26,7 +25,7 @@ import {
   Users,
 } from "@/shared/ui/icons";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
-import { Button } from "@/shared/ui/primitives/button";
+import { LegalActionLink } from "./LegalActionLink";
 import { LEGAL_CONFIG } from "./legal-config";
 import type { LegalBlock, LegalDocument as LegalDoc } from "./types";
 import styles from "./legal-document.module.css";
@@ -134,12 +133,7 @@ export function LegalDocument({ document, kind }: { document: LegalDoc; kind: Le
     >
       <header className="sticky top-0 z-20 border-b border-border/60 bg-[#FAF8F5]/95 backdrop-blur-md print:static print:bg-white">
         <div className="mx-auto flex min-h-16 w-full max-w-[96rem] items-center justify-between gap-4 px-4 sm:px-8 lg:px-12 xl:px-16">
-          <Button asChild variant="outline" size="sm" className="min-h-[44px] lg:min-h-0">
-            <Link href="/" aria-label={CHROME.backToApp}>
-              <ArrowLeft className="size-4" aria-hidden="true" />
-              <span className="hidden sm:inline">{CHROME.backToApp}</span>
-            </Link>
-          </Button>
+          <LegalActionLink kind="home" href="/" label={CHROME.backToApp} />
 
           <Link
             href="/"
@@ -252,7 +246,7 @@ export function LegalDocument({ document, kind }: { document: LegalDoc; kind: Le
           <aside className="print:hidden">
             <nav
               aria-label={CHROME.contentsAria}
-              className="border-y border-border/70 py-6 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:overscroll-contain"
+              className="border-y border-border/70 py-6 lg:sticky lg:top-24 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto lg:overscroll-contain"
             >
               <div className="mb-5 flex items-center justify-between gap-4">
                 <p className="text-xs font-bold uppercase tracking-[0.15em] text-foreground">
@@ -326,17 +320,7 @@ export function LegalDocument({ document, kind }: { document: LegalDoc; kind: Le
                 {CHROME.contactPrompt}
               </p>
             </div>
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              className="min-h-[44px] max-w-full lg:min-h-0"
-            >
-              <a href={`mailto:${contactEmail}`}>
-                <Envelope className="size-4" aria-hidden="true" />
-                <span className="truncate">{contactEmail}</span>
-              </a>
-            </Button>
+            <LegalActionLink kind="mail" href={`mailto:${contactEmail}`} label={contactEmail} />
           </div>
         </footer>
       </article>

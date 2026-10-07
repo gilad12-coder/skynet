@@ -93,6 +93,7 @@ import { extractBlackboxScorePoints } from "../lib/blackbox";
 import { extractCandidates, scopeToLatestLane } from "@/features/trajectory";
 import { isReactModuleName } from "../lib/is-react-module";
 import { reconstructGridResult } from "../lib/reconstruct-grid";
+import { rememberRunKind, useRunKindHint } from "../lib/run-kind-hint";
 import { DataTab } from "./DataTab";
 import { LogsTab } from "./LogsTab";
 import { DeleteJobDialog } from "./DeleteJobDialog";
@@ -298,6 +299,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const [job, setJob] = useState<OptimizationStatusResponse | null>(null);
   const [payload, setPayload] = useState<OptimizationPayloadResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  // Shapes the loading skeleton like this run's kind when an earlier fetch saw it.
+  const kindHint = useRunKindHint(id);
   const [error, setError] = useState<string | null>(null);
 
   // Stamp this run as recent only while it's actually in progress, so the
@@ -502,6 +505,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           }
         : undefined;
       const data = await getJob(id, cursor);
+      rememberRunKind(id, data.optimization_type);
       setJob((cur) => mergeJobDelta(cur, data));
       setError(null);
     } catch (err) {
@@ -739,6 +743,10 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       );
     };
     const isGrid = job.optimization_type === "grid_search";
+    // The grid summary never reads this: its Usage tab (GridServeTab) loads
+    // each pair's own serve info. Asking anyway 409s on a grid with no pair
+    // results, as does a pair link to a pair that isn't there.
+    if (isGrid && !isPairContext) return;
     const loader =
       isGrid && activePairIndex != null ? getPairServeInfo(id, activePairIndex) : getServeInfo(id);
     loader
@@ -747,7 +755,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         setServeInfoError(null);
       })
       .catch(onFail);
-  }, [id, job?.status, job?.optimization_type, activePairIndex, isAnyDemoMode]);
+  }, [id, job?.status, job?.optimization_type, activePairIndex, isPairContext, isAnyDemoMode]);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -1076,12 +1084,17 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   );
 
   if (loading || !authReady) {
-    return <OptimizationDetailSkeleton />;
+    return (
+      <OptimizationDetailSkeleton
+        pair={activePairIndex !== null}
+        grid={(job?.optimization_type ?? kindHint) === "grid_search"}
+      />
+    );
   }
 
   if (error || !job) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+      <div className="flex flex-col items-center justify-center min-h-[60dvh] gap-4">
         <XCircle className="size-12 text-destructive" />
         <p className="text-lg text-muted-foreground">
           {error ??

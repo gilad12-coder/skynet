@@ -312,6 +312,7 @@ export function JobsTab({
                     setOpenFilter={setOpenFilter}
                     width={colResize.widths["name"] ?? DEFAULT_COL_WIDTHS.name}
                     onResize={colResize.setColumnWidth}
+                    primary
                   />
                   {showSharedColumns && (
                     <>
@@ -522,17 +523,24 @@ export function JobsTab({
                           </div>
                         </TableCell>
                         <TableCell
-                          className="px-2 max-w-[140px] text-sm overflow-hidden @max-[44rem]/table:max-w-none"
+                          className="px-2 max-w-[140px] text-sm overflow-hidden @max-[44rem]/table:w-full @max-[44rem]/table:max-w-0"
                           title={job.name ?? ""}
                           data-label={msg("auto.features.dashboard.components.jobstab.literal.9")}
                         >
-                          <div className="flex min-w-0 items-center gap-2">
+                          {/* In a narrow table the folded values drop under the name
+                            instead of widening the column past the card. */}
+                          <div className="flex min-w-0 items-center gap-2 @max-[32rem]/table:flex-wrap @max-[32rem]/table:gap-y-0.5">
                             {job.name ? (
-                              <span className="truncate text-foreground" dir="auto">
+                              <span
+                                className="truncate text-foreground @max-[32rem]/table:basis-full"
+                                dir="auto"
+                              >
                                 {job.name}
                               </span>
                             ) : (
-                              <span className="text-muted-foreground/60">—</span>
+                              <span className="text-muted-foreground/60 @max-[32rem]/table:basis-full">
+                                —
+                              </span>
                             )}
                             {showSharedColumns && job.username && (
                               <TableInline at="md" dir="ltr">

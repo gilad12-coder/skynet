@@ -18,7 +18,10 @@ export const config = {
     // because a public (Explore-corpus) run must be openable signed-out — the
     // detail gate probes the anonymous public composite itself and bounces to
     // /login only when the run turns out not to be public. ``api/version`` is
-    // read by the external uptime monitor, which never signs in.
-    "/((?!login|terms|privacy|optimizations|api/auth|api/register|api/webauthn|api/2fa|api/password-reset|api/email-verify|api/version|_next/static|_next/image|favicon\\.svg|notification-icon\\.png|robots\\.txt|sitemap\\.xml).*)",
+    // read by the external uptime monitor, which never signs in. Every
+    // ``public/`` entry (``fonts``, ``licenses``, the notices file) is excluded
+    // too: signed-out pages load the bundled fonts, and a gated font request
+    // gets the /login HTML back instead of the woff2.
+    "/((?!login|terms|privacy|optimizations|api/auth|api/register|api/webauthn|api/2fa|api/password-reset|api/email-verify|api/version|_next/static|_next/image|fonts/|licenses/|THIRD_PARTY_NOTICES\\.txt|favicon\\.svg|notification-icon\\.png|robots\\.txt|sitemap\\.xml).*)",
   ],
 };

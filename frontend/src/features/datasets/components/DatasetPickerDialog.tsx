@@ -81,7 +81,7 @@ export function DatasetPickerDialog({
           <div
             ref={listRef}
             onScroll={updateEdges}
-            className="max-h-[min(24rem,55vh)] space-y-1.5 overflow-y-auto px-0.5 py-1"
+            className="max-h-[min(24rem,55dvh)] space-y-1.5 overflow-y-auto px-0.5 py-1"
           >
             {loading ? (
               <LoadingState />

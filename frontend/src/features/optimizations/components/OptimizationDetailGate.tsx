@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { XCircle } from "@/shared/ui/icons";
 
@@ -24,6 +24,7 @@ import {
 } from "@/features/tutorial/lib/demo-data";
 import { OptimizationDetailView } from "./OptimizationDetailView";
 import { OptimizationDetailSkeleton } from "./OptimizationDetailSkeleton";
+import { rememberRunKind, useRunKindHint } from "../lib/run-kind-hint";
 
 type GateState =
   | { mode: "loading" }
@@ -45,6 +46,8 @@ type GateState =
 export function OptimizationDetailGate() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  // A grid pair deep link renders the pair strip above the tabs.
+  const isPairLink = useSearchParams().get("pair") != null;
   const { data: session, status } = useSession();
   const [state, setState] = useState<GateState>({ mode: "loading" });
   // The id whose probe already resolved to a stable view. The session token
@@ -54,6 +57,7 @@ export function OptimizationDetailGate() {
   // and tab state mid-use. "notfound" is deliberately not latched so a later
   // sign-in can still upgrade it.
   const resolvedIdRef = useRef<string | null>(null);
+  const kindHint = useRunKindHint(id);
 
   const isDemo =
     id === DEMO_OPTIMIZATION_ID ||
@@ -84,7 +88,8 @@ export function OptimizationDetailGate() {
         // gets misrendered as "wasn't found" while it is happily training.
         for (let attempt = 0; ; attempt++) {
           try {
-            await getJob(id);
+            const probed = await getJob(id);
+            rememberRunKind(id, probed.optimization_type);
             if (cancelled) return;
             resolvedIdRef.current = id;
             setState({ mode: "owned" });
@@ -120,11 +125,13 @@ export function OptimizationDetailGate() {
     };
   }, [id, isDemo, status, session?.backendAccessToken, router]);
 
-  if (state.mode === "loading") return <OptimizationDetailSkeleton />;
+  if (state.mode === "loading") {
+    return <OptimizationDetailSkeleton pair={isPairLink} grid={kindHint === "grid_search"} />;
+  }
   if (state.mode === "public") return <OptimizationDetailView shareData={state.data} />;
   if (state.mode === "notfound") {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+      <div className="flex flex-col items-center justify-center min-h-[60dvh] gap-4">
         <XCircle className="size-12 text-destructive" />
         <p className="text-lg text-muted-foreground">
           {formatMsg("auto.app.optimizations.id.page.template.2", { p1: TERMS.optimization })}

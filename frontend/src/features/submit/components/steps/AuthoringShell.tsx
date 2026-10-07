@@ -115,7 +115,7 @@ export function AuthoringShell({
   children,
 }: AuthoringShellProps) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl shadow-lg">
+    <div className="@container overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl shadow-lg">
       <ModeToggle
         value={value}
         onChange={onChange}
@@ -128,15 +128,21 @@ export function AuthoringShell({
           editors stay the wider side. On desktop the pane also sets the
           card's height: it reaches the nav (22rem is the stepper, header
           band, nav and page paddings around it) but never drops under
-          56rem, so a conversation and a long brief both have room. */}
+          56rem, so a conversation and a long brief both have room. The split
+          keys off the card's own width, not the viewport: beside the sidebar
+          a 1024px iPad portrait leaves the card ~640px, too narrow for touch
+          targets in both panes, so it stacks there and splits from 48rem up.
+          A desktop window of the same width leaves the same card, so a fine
+          pointer splits from 36rem, as it did at the old 1024px breakpoint. */}
       <div
         className={cn(
           "grid grid-cols-1",
-          value === "auto" && "lg:grid-cols-[minmax(20rem,5fr)_minmax(0,6fr)]",
+          value === "auto" &&
+            "@3xl:grid-cols-[minmax(20rem,5fr)_minmax(0,6fr)] pointer-fine:@min-[36rem]:grid-cols-[minmax(20rem,5fr)_minmax(0,6fr)]",
         )}
       >
         {value === "auto" && (
-          <div className="relative h-[70svh] min-h-[30rem] max-h-[700px] self-stretch overflow-hidden border-b border-border/40 lg:h-auto lg:min-h-[max(56rem,calc(100svh-22rem))] lg:max-h-none lg:border-b-0 lg:border-e">
+          <div className="relative h-[70svh] min-h-[30rem] max-h-[700px] self-stretch overflow-hidden border-b border-border/40 @3xl:h-auto @3xl:min-h-[max(56rem,calc(100svh-22rem))] @3xl:max-h-none @3xl:border-b-0 @3xl:border-e pointer-fine:@min-[36rem]:h-auto pointer-fine:@min-[36rem]:min-h-[max(56rem,calc(100svh-22rem))] pointer-fine:@min-[36rem]:max-h-none pointer-fine:@min-[36rem]:border-b-0 pointer-fine:@min-[36rem]:border-e">
             {sidePanel}
           </div>
         )}

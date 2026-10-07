@@ -28,10 +28,11 @@ export function BalanceChip({ className }: { className?: string }) {
 
   if (loading) {
     return (
+      // The chip is a button, so on a coarse pointer it takes the 44px floor.
       <Skeleton
         width={64}
-        height={26}
         borderRadius={8}
+        className="h-[26px] any-pointer-coarse:h-11"
         containerClassName={cn("leading-none", className)}
       />
     );

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSession } from "next-auth/react";
 import {
   getProviderKeys,
   saveProviderKey,
@@ -66,8 +67,9 @@ export function useByokKeys(): ByokContextValue {
  * keys are fetched on mount, and every mutation round-trips to the backend so a
  * secret is never held only in memory — the plaintext is sent once on save,
  * encrypted server-side, and never returned. The context exposes only the
- * masked tail + verification state. If the fetch fails (no backend, signed-out)
- * the store stays empty so the settings UI still renders its add-a-key rows.
+ * masked tail + verification state. Signed-out pages skip the fetch, and if it
+ * fails (no backend) the store stays empty so the settings UI still renders its
+ * add-a-key rows.
  *
  * Args:
  *   initialKeys: Override the seed keys (tests / story scenarios).
@@ -83,8 +85,15 @@ export function ByokKeysProvider({
   const [keys, setKeys] = React.useState<ProviderKey[]>(initialKeys);
   const [loading, setLoading] = React.useState(true);
   const [openrouterOAuthAvailable, setOpenrouterOAuthAvailable] = React.useState(false);
+  const { status: sessionStatus } = useSession();
 
   React.useEffect(() => {
+    // The vault only answers a signed-in caller; skip it on signed-out pages.
+    if (sessionStatus === "loading") return;
+    if (sessionStatus === "unauthenticated") {
+      setLoading(false);
+      return;
+    }
     let active = true;
     getProviderKeys()
       .then((r) => {
@@ -93,7 +102,7 @@ export function ByokKeysProvider({
         setOpenrouterOAuthAvailable(r.openrouter_oauth_available ?? false);
       })
       .catch(() => {
-        /* keep the current keys — no backend or signed-out */
+        /* keep the current keys — no backend */
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -101,7 +110,7 @@ export function ByokKeysProvider({
     return () => {
       active = false;
     };
-  }, []);
+  }, [sessionStatus]);
 
   const keyFor = React.useCallback(
     (provider: string) => keys.find((k) => k.provider === provider) ?? null,

@@ -84,16 +84,24 @@ export function DashboardHeader({ stats }: DashboardHeaderProps) {
     });
   }
 
+  // Sized by the strip's own width, not the viewport: iPad portrait with the
+  // sidebar open and Split View leave too little room for five labelled
+  // cells in one row, so they wrap to three columns there.
   return (
-    <div className="grid grid-cols-2 items-stretch sm:flex" data-tutorial="dashboard-kpis">
-      {cells.map((cell, i) => (
-        <Fragment key={cell.label}>
-          {i > 0 && (
-            <div aria-hidden className="my-4 hidden w-px shrink-0 bg-[#DDD4C8]/50 sm:block" />
-          )}
-          <StatCell {...cell} />
-        </Fragment>
-      ))}
+    <div className="@container" data-tutorial="dashboard-kpis">
+      <div className="grid grid-cols-2 items-stretch @min-[26rem]:grid-cols-3 @min-[40rem]:flex">
+        {cells.map((cell, i) => (
+          <Fragment key={cell.label}>
+            {i > 0 && (
+              <div
+                aria-hidden
+                className="my-4 hidden w-px shrink-0 bg-[#DDD4C8]/50 @min-[40rem]:block"
+              />
+            )}
+            <StatCell {...cell} />
+          </Fragment>
+        ))}
+      </div>
     </div>
   );
 }

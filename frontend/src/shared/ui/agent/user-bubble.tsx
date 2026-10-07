@@ -38,7 +38,10 @@ export function UserBubble({ content, onEdit, editable = true }: UserBubbleProps
       <div
         className={cn(
           "self-center ms-1.5 flex items-center gap-0.5",
-          "opacity-0 group-hover/user:opacity-100 transition-opacity",
+          "opacity-0 group-hover/user:opacity-100 focus-within:opacity-100 transition-opacity",
+          // The global coarse-pointer reveal only matches the unnamed
+          // `group-hover:` spelling, so touch screens (iPad) need their own.
+          "any-pointer-coarse:opacity-100",
         )}
       >
         <CopyButton

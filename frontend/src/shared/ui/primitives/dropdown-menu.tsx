@@ -23,7 +23,7 @@ const panelClass = cn(
 
 const rowClass = cn(
   "flex min-h-[44px] w-full cursor-pointer select-none items-center gap-2 px-3 py-2 text-start text-sm",
-  "outline-none data-[highlighted]:bg-accent/60 lg:min-h-0",
+  "outline-none data-[highlighted]:bg-accent/60 lg:min-h-0 any-pointer-coarse:min-h-[44px]",
   "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
 );
 

@@ -10,6 +10,8 @@ import {
 } from "@/shared/charts/chart-utils";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
+import { EmptyState } from "@/shared/ui/empty-state";
+import { GridFour } from "@/shared/ui/icons";
 
 export interface ScatterPoint {
   pair_index: number;
@@ -160,5 +162,18 @@ export function ScatterTip({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Shown in place of the grid summary when a grid run ended with no pair results. */
+export function GridEmptyState() {
+  return (
+    <EmptyState
+      icon={GridFour}
+      variant="compact"
+      title={msg("optimizations.grid.empty.title")}
+      description={msg("optimizations.grid.empty.description")}
+      className="rounded-xl border border-border/50 bg-card/80"
+    />
   );
 }

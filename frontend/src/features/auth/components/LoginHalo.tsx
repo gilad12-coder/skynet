@@ -47,7 +47,11 @@ function HaloChip({
     <div className={wrapperClassName} style={pos}>
       <motion.div
         className="pointer-events-auto cursor-default"
-        initial={reduce ? { opacity: 1 } : { opacity: 0, scale: 0.9, y: 10 }}
+        // Constant, not keyed on `reduce`: useReducedMotion() is null during SSR
+        // but already true on the first client render, so a reduce-dependent
+        // `initial` serialized different inline styles and failed hydration.
+        // Reduced motion still settles instantly via the zero-duration transition.
+        initial={{ opacity: 0, scale: 0.9, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={
           reduce ? { duration: 0 } : { duration: 0.7, delay: 0.15 + i * 0.03, ease: EASE_OUT_EXPO }

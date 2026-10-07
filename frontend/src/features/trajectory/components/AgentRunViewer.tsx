@@ -244,12 +244,9 @@ function RunBody({ optimizationId, run }: { optimizationId: string; run: AgentRu
       <div className="flex min-h-0 flex-1 flex-col px-4 pb-6 pt-3">
         {failed ? (
           <p className="text-[11px] text-[#a85a3b]">{msg("agent_run.error.load")}</p>
-        ) : record === null ? (
-          <div className="space-y-2" aria-busy="true" aria-label={msg("agent_run.loading")}>
-            <Skeleton height={16} width="33%" />
-            <Skeleton height={96} />
-          </div>
         ) : (
+          // The tab row is known before the record arrives, so it renders from
+          // the start and only the tab body waits: nothing shifts on load.
           <Tabs
             value={tab}
             onValueChange={(value) => setTab(value as RunTab)}
@@ -267,33 +264,42 @@ function RunBody({ optimizationId, run }: { optimizationId: string; run: AgentRu
                 </TabsTrigger>
               ))}
             </TabsList>
-            {record.error ? (
-              <p
-                className="rounded-md border border-[#a85a3b]/30 bg-[#a85a3b]/8 px-3 py-2 font-mono text-[11px] text-[#7a3a22] whitespace-pre-wrap"
-                dir="ltr"
-              >
-                {record.error}
-              </p>
-            ) : null}
-            <TabsContent value="answer" className="min-h-0 overflow-y-auto">
-              <AnswerTab record={record} />
-            </TabsContent>
-            <TabsContent value="transcript" className="min-h-0">
-              <AgentRunTranscript
-                transcript={record.transcript}
-                live={record.status === AGENT_RUN_STATUS_RUNNING}
-              />
-            </TabsContent>
-            {record.check != null ? (
-              <TabsContent value="check" className="min-h-0 overflow-y-auto">
-                <pre
-                  className="whitespace-pre-wrap break-words rounded-lg border border-border/50 bg-muted/30 p-4 font-mono text-[0.8125rem] leading-relaxed text-foreground/90"
-                  dir="ltr"
-                >
-                  {JSON.stringify(record.check, null, 2)}
-                </pre>
-              </TabsContent>
-            ) : null}
+            {record === null ? (
+              <div className="space-y-2" aria-busy="true" aria-label={msg("agent_run.loading")}>
+                <Skeleton height={16} width="33%" />
+                <Skeleton height={96} />
+              </div>
+            ) : (
+              <>
+                {record.error ? (
+                  <p
+                    className="rounded-md border border-[#a85a3b]/30 bg-[#a85a3b]/8 px-3 py-2 font-mono text-[11px] text-[#7a3a22] whitespace-pre-wrap"
+                    dir="ltr"
+                  >
+                    {record.error}
+                  </p>
+                ) : null}
+                <TabsContent value="answer" className="min-h-0 overflow-y-auto">
+                  <AnswerTab record={record} />
+                </TabsContent>
+                <TabsContent value="transcript" className="min-h-0">
+                  <AgentRunTranscript
+                    transcript={record.transcript}
+                    live={record.status === AGENT_RUN_STATUS_RUNNING}
+                  />
+                </TabsContent>
+                {record.check != null ? (
+                  <TabsContent value="check" className="min-h-0 overflow-y-auto">
+                    <pre
+                      className="whitespace-pre-wrap break-words rounded-lg border border-border/50 bg-muted/30 p-4 font-mono text-[0.8125rem] leading-relaxed text-foreground/90"
+                      dir="ltr"
+                    >
+                      {JSON.stringify(record.check, null, 2)}
+                    </pre>
+                  </TabsContent>
+                ) : null}
+              </>
+            )}
           </Tabs>
         )}
       </div>

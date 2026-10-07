@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -287,6 +287,12 @@ class BudgetService:
         Returns:
             Locked wallet and budget.
         """
+        # Ownership first, without a lock, so a caller with no wallet probing
+        # someone else's budget gets not-found rather than a funding error. An
+        # owner never changes, so the locked re-check below cannot disagree.
+        owner = session.scalar(select(ExecutionBudgetModel.username).where(ExecutionBudgetModel.id == budget_id))
+        if owner != username:
+            raise BudgetNotFoundError("Budget not found.")
         wallet = self._wallet(session, username)
         budget = session.get(ExecutionBudgetModel, budget_id, with_for_update=True)
         if budget is None or budget.username != username:
@@ -1133,6 +1139,49 @@ class BudgetService:
             budget.blocked_reason = _identifier(reason)
             budget.updated_at = datetime.now(UTC)
             return self._snapshot(session, budget, wallet)
+
+    def close_for_deleted_jobs(self, job_ids: Sequence[str], *, session: Session) -> int:
+        """Close and detach the budgets of jobs being hard-deleted, keeping their money history.
+
+        Budgets and their ledger rows are the account's financial record, so they
+        outlive the job. Unstarted reservations are released so no money stays
+        held; dispatched work keeps its coverage until its usage reconciles.
+
+        Args:
+            job_ids: Root and grid-child job ids being deleted in ``session``.
+            session: The caller's delete transaction, so budget and job go together.
+
+        Returns:
+            Number of budgets closed.
+        """
+        if not job_ids:
+            return 0
+        owned = session.execute(
+            select(ExecutionBudgetModel.id, ExecutionBudgetModel.username)
+            .where(ExecutionBudgetModel.job_id.in_(list(job_ids)))
+            .order_by(ExecutionBudgetModel.username, ExecutionBudgetModel.id)
+        ).all()
+        now = datetime.now(UTC)
+        for budget_id, username in owned:
+            # Wallet before budget, the same lock order as every other mutation.
+            session.get(BillingCustomerModel, username, with_for_update=True)
+            budget = session.get(ExecutionBudgetModel, budget_id, with_for_update=True)
+            assert budget is not None
+            for operation in session.scalars(
+                select(ExecutionOperationModel).where(
+                    ExecutionOperationModel.budget_id == budget_id, ExecutionOperationModel.state == "reserved"
+                )
+            ):
+                budget.reserved_units -= operation.max_units
+                budget.wallet_reserved_units -= operation.max_wallet_units
+                operation.state = "released"
+                operation.updated_at = now
+            if budget.state != "blocked":
+                budget.state = "closed"
+                budget.blocked_reason = "job_deleted"
+            budget.job_id = None
+            budget.updated_at = now
+        return len(owned)
 
     def resume_admission(self, budget_id: str, username: str, *, expected_generation: int) -> BudgetSnapshot:
         """Reopen an explicitly resumed attached job after obligations are reconciled.

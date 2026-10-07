@@ -17,6 +17,7 @@ import {
   TRAJECTORY_LAYOUT,
   type LayoutResult,
 } from "../lib/layout";
+import { usePinchZoom } from "../lib/pinch-zoom";
 import { displayCandidateId, type RejectedNode, type TrajectoryNode } from "../lib/types";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
@@ -444,12 +445,19 @@ export function TrajectoryTree({
     // previous listener orphaned (same reason the ResizeObserver re-binds).
   }, [zoomAt, isMaximized]);
 
+  const { start: pinchStart, move: pinchMove, end: pinchEnd } = usePinchZoom(containerRef, zoomAt);
+
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       // Don't hijack pointers that land on the floating zoom controls.
       const target = e.target as Element | null;
       if (target?.closest("[data-trajectory-controls]")) return;
+      if (pinchStart(e)) {
+        if (panStateRef.current?.moved) setIsDragging(false);
+        panStateRef.current = null;
+        return;
+      }
       // Capturing on pointerdown would steal the synthesized click from child
       // nodes — defer until the user actually starts panning (see pointermove).
       panStateRef.current = {
@@ -461,35 +469,43 @@ export function TrajectoryTree({
         moved: false,
       };
     },
-    [view.tx, view.ty],
+    [view.tx, view.ty, pinchStart],
   );
 
-  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const ps = panStateRef.current;
-    if (!ps || ps.pointerId !== e.pointerId) return;
-    const dx = e.clientX - ps.startClientX;
-    const dy = e.clientY - ps.startClientY;
-    if (!ps.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
-      ps.moved = true;
-      userInteractedRef.current = true;
-      setIsDragging(true);
-      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-    }
-    if (ps.moved) {
-      setView((v) => ({ k: v.k, tx: ps.startTx + dx, ty: ps.startTy + dy }));
-    }
-  }, []);
-
-  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const ps = panStateRef.current;
-    if (ps && ps.pointerId === e.pointerId) {
-      panStateRef.current = null;
-      if (ps.moved) {
-        (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
-        setIsDragging(false);
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (pinchMove(e)) return;
+      const ps = panStateRef.current;
+      if (!ps || ps.pointerId !== e.pointerId) return;
+      const dx = e.clientX - ps.startClientX;
+      const dy = e.clientY - ps.startClientY;
+      if (!ps.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+        ps.moved = true;
+        userInteractedRef.current = true;
+        setIsDragging(true);
+        (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
       }
-    }
-  }, []);
+      if (ps.moved) {
+        setView((v) => ({ k: v.k, tx: ps.startTx + dx, ty: ps.startTy + dy }));
+      }
+    },
+    [pinchMove],
+  );
+
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      pinchEnd(e);
+      const ps = panStateRef.current;
+      if (ps && ps.pointerId === e.pointerId) {
+        panStateRef.current = null;
+        if (ps.moved) {
+          (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+          setIsDragging(false);
+        }
+      }
+    },
+    [pinchEnd],
+  );
 
   const handleNodeClick = useCallback(
     (id: string, e: React.MouseEvent) => {
