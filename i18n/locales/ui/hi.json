@@ -41,8 +41,6 @@
   "optimization.blackbox.repo.browser.filter": "फ़ाइलें फ़िल्टर करें…",
   "optimization.blackbox.versions.download_repo": "v{n} को पूरी रिपॉज़िटरी के zip के रूप में डाउनलोड करें",
   "optimization.blackbox.versions.archive_failed": "रिपॉज़िटरी डाउनलोड नहीं हो सकी",
-  "optimization.blackbox.repo.browser.section_changed": "बदली गई",
-  "optimization.blackbox.repo.browser.section_other": "अन्य फ़ाइलें",
   "optimization.blackbox.repo.browser.show_files": "फ़ाइलें दिखाएँ",
   "optimization.blackbox.repo.browser.hide_files": "फ़ाइलें छिपाएँ",
   "optimization.blackbox.repo.browser.filter_aria": "पथ के अनुसार फ़ाइलें फ़िल्टर करें",

@@ -41,8 +41,6 @@
   "optimization.blackbox.repo.browser.filter": "筛选文件…",
   "optimization.blackbox.versions.download_repo": "将 v{n} 下载为整个仓库的 zip",
   "optimization.blackbox.versions.archive_failed": "无法下载仓库",
-  "optimization.blackbox.repo.browser.section_changed": "已更改",
-  "optimization.blackbox.repo.browser.section_other": "其他文件",
   "optimization.blackbox.repo.browser.show_files": "显示文件",
   "optimization.blackbox.repo.browser.hide_files": "隐藏文件",
   "optimization.blackbox.repo.browser.filter_aria": "按路径筛选文件",

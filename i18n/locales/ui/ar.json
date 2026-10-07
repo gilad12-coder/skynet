@@ -41,8 +41,6 @@
   "optimization.blackbox.repo.browser.filter": "تصفية الملفات…",
   "optimization.blackbox.versions.download_repo": "تنزيل v{n} كملف zip للمستودع بالكامل",
   "optimization.blackbox.versions.archive_failed": "تعذّر تنزيل المستودع",
-  "optimization.blackbox.repo.browser.section_changed": "المتغيرة",
-  "optimization.blackbox.repo.browser.section_other": "ملفات أخرى",
   "optimization.blackbox.repo.browser.show_files": "إظهار الملفات",
   "optimization.blackbox.repo.browser.hide_files": "إخفاء الملفات",
   "optimization.blackbox.repo.browser.filter_aria": "تصفية الملفات حسب المسار",

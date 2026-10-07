@@ -41,8 +41,6 @@
   "optimization.blackbox.repo.browser.filter": "Dosyaları filtrele…",
   "optimization.blackbox.versions.download_repo": "v{n} sürümünü tüm deponun zip'i olarak indir",
   "optimization.blackbox.versions.archive_failed": "Depo indirilemedi",
-  "optimization.blackbox.repo.browser.section_changed": "Değişenler",
-  "optimization.blackbox.repo.browser.section_other": "Diğer dosyalar",
   "optimization.blackbox.repo.browser.show_files": "Dosyaları göster",
   "optimization.blackbox.repo.browser.hide_files": "Dosyaları gizle",
   "optimization.blackbox.repo.browser.filter_aria": "Dosyaları yola göre filtrele",

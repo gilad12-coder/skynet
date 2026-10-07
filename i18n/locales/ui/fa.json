@@ -41,8 +41,6 @@
   "optimization.blackbox.repo.browser.filter": "فیلتر فایل‌ها…",
   "optimization.blackbox.versions.download_repo": "دانلود v{n} به‌صورت zip کل مخزن",
   "optimization.blackbox.versions.archive_failed": "دانلود مخزن ممکن نشد",
-  "optimization.blackbox.repo.browser.section_changed": "تغییریافته",
-  "optimization.blackbox.repo.browser.section_other": "فایل‌های دیگر",
   "optimization.blackbox.repo.browser.show_files": "نمایش فایل‌ها",
   "optimization.blackbox.repo.browser.hide_files": "پنهان کردن فایل‌ها",
   "optimization.blackbox.repo.browser.filter_aria": "فیلتر فایل‌ها بر اساس مسیر",

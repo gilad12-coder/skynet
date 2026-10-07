@@ -41,8 +41,6 @@
   "optimization.blackbox.repo.browser.filter": "Dateien filtern…",
   "optimization.blackbox.versions.download_repo": "v{n} als ZIP des gesamten Repositorys herunterladen",
   "optimization.blackbox.versions.archive_failed": "Das Repository konnte nicht heruntergeladen werden",
-  "optimization.blackbox.repo.browser.section_changed": "Geändert",
-  "optimization.blackbox.repo.browser.section_other": "Weitere Dateien",
   "optimization.blackbox.repo.browser.show_files": "Dateien anzeigen",
   "optimization.blackbox.repo.browser.hide_files": "Dateien ausblenden",
   "optimization.blackbox.repo.browser.filter_aria": "Dateien nach Pfad filtern",

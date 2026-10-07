@@ -41,8 +41,6 @@
   "optimization.blackbox.repo.browser.filter": "Фільтр файлів…",
   "optimization.blackbox.versions.download_repo": "Завантажити v{n} як zip усього репозиторію",
   "optimization.blackbox.versions.archive_failed": "Не вдалося завантажити репозиторій",
-  "optimization.blackbox.repo.browser.section_changed": "Змінені",
-  "optimization.blackbox.repo.browser.section_other": "Інші файли",
   "optimization.blackbox.repo.browser.show_files": "Показати файли",
   "optimization.blackbox.repo.browser.hide_files": "Сховати файли",
   "optimization.blackbox.repo.browser.filter_aria": "Фільтрувати файли за шляхом",
