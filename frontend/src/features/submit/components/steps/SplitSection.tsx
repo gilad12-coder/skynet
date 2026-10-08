@@ -21,6 +21,7 @@ import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 import { SplitRecommendationCard, type SplitPlanControls } from "../SplitRecommendationCard";
 import { splitExampleCounts } from "../../lib/split-example-counts";
 import { GuidedChoiceLine, isVisible } from "@/features/experience";
+import { useSettingsModal } from "@/features/settings";
 import { useSurfaceLevel } from "@/features/tutorial";
 
 export type SplitControls = SplitPlanControls &
@@ -30,6 +31,7 @@ export type SplitControls = SplitPlanControls &
 // only appear once the user picks manual selection, each with the number
 // of examples it takes from the dataset.
 export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: number }) {
+  const { openTo } = useSettingsModal();
   const { split, updateSplit, splitSum, splitMode, splitPlan, profileLoading } = w;
   const locale = getActiveIntlLocale();
   // Guided keeps the recommended split and says so; a manual split the user
@@ -66,7 +68,10 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
       </CardHeader>
       <CardContent className="space-y-3 px-4 sm:px-6" data-tutorial="data-splits">
         {guidedAuto ? (
-          <GuidedChoiceLine text={msg("experience.guided.split")} />
+          <GuidedChoiceLine
+            text={msg("experience.guided.split")}
+            onShowMore={() => openTo("account")}
+          />
         ) : (
           <>
             {!splitPlan && !profileLoading && (

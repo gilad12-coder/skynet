@@ -43,6 +43,7 @@ import { Segmented } from "@/shared/ui/segmented";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
 import { Field, StepCard } from "./shared";
 import { GuidedChoiceLine, isVisible } from "@/features/experience";
+import { useSettingsModal } from "@/features/settings";
 import { useSurfaceLevel } from "@/features/tutorial";
 
 const MOBILE_MODEL_CHIP_CLASS =
@@ -55,6 +56,7 @@ export function BlackboxOptimizerStep({
   w: BlackboxWizardContext;
   part: "strategy" | "model";
 }) {
+  const { openTo } = useSettingsModal();
   const {
     strategyMode,
     setStrategyMode,
@@ -107,7 +109,10 @@ export function BlackboxOptimizerStep({
     >
       {part === "strategy" && guidedAuto && (
         <>
-          <GuidedChoiceLine text={msg("experience.guided.blackbox_strategy")} />
+          <GuidedChoiceLine
+            text={msg("experience.guided.blackbox_strategy")}
+            onShowMore={() => openTo("account")}
+          />
           {runDisabledReason && (
             <p className="flex items-start gap-2 text-xs text-[var(--warning)]" role="status">
               <Warning className="mt-0.5 size-4 shrink-0" aria-hidden="true" />

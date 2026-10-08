@@ -20,6 +20,7 @@ import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { GuidedChoiceLine, isVisible } from "@/features/experience";
+import { useSettingsModal } from "@/features/settings";
 import { useSurfaceLevel } from "@/features/tutorial";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
@@ -30,6 +31,7 @@ const DEPTH_LEVELS = ["light", "medium", "heavy", ""] as const;
 type DepthLevel = (typeof DEPTH_LEVELS)[number];
 
 export function ParamsStep({ w }: { w: SubmitWizardContext }) {
+  const { openTo } = useSettingsModal();
   const {
     autoLevel,
     setAutoLevel,
@@ -83,7 +85,10 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
       </CardHeader>
       <CardContent className="space-y-6 px-4 sm:px-6">
         {!showDepth && (
-          <GuidedChoiceLine text={msg("experience.guided.params")} />
+          <GuidedChoiceLine
+            text={msg("experience.guided.params")}
+            onShowMore={() => openTo("account")}
+          />
         )}
         {showDepth && (
           <div className="space-y-3" data-tutorial="auto-level">

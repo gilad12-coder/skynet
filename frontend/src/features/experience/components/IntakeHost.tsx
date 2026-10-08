@@ -38,7 +38,8 @@ import {
   type IntakeSourceKind,
 } from "../lib/intake";
 import { useExperienceOptional } from "../providers/experience-provider";
-import { levelDescription, levelLabel, levelOptions } from "./ExperienceLevelControl";
+import { levelDescription, levelLabel } from "./ExperienceLevelControl";
+import { LevelSlider } from "./LevelSlider";
 import { IntakeConnect } from "./IntakeConnect";
 import { IntakeKeyCheck } from "./IntakeKeyCheck";
 import { NotificationCadenceFields } from "./NotificationCadenceFields";
@@ -87,6 +88,7 @@ const GOAL_CHIPS = [
   "experience.intake.q1.chip.classify",
   "experience.intake.q1.chip.extract",
   "experience.intake.q1.chip.agent",
+  "experience.intake.q1.chip.code",
 ] as const satisfies readonly MessageKey[];
 
 const SOURCE_CHIPS = [
@@ -284,7 +286,6 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
   const canContinue =
     step === 0 ? answers.goal.trim().length > 0 : step === 1 ? answers.source !== null : true;
 
-  const levelChoices: Array<SegmentedOption<ExperienceLevel>> = levelOptions();
   const billingOptions: Array<SegmentedOption<"platform" | "byok">> = [
     { value: "platform", label: msg("experience.intake.q3.billing.platform") },
     { value: "byok", label: msg("experience.intake.q3.billing.byok") },
@@ -500,13 +501,10 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
                       })
                 }
               >
-                <Segmented<ExperienceLevel>
+                <LevelSlider
                   value={answers.level}
                   onChange={(level) => update({ level, level_chosen: true })}
-                  options={levelChoices}
                   label={msg("experience.level.title")}
-                  size="sm"
-                  className="w-full"
                 />
               </SummaryRow>
 
@@ -543,36 +541,21 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
                 label={msg("experience.intake.summary.limit")}
                 hint={msg("experience.intake.summary.limit_hint")}
               >
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{msg("experience.intake.summary.limit_usd")}</span>
-                    <NumberInput
-                      size="sm"
-                      className="w-28"
-                      value={
-                        answers.spending_limit_cents === null ? "" : answers.spending_limit_cents / 100
-                      }
-                      min={1}
-                      max={10000}
-                      step={1}
-                      onChange={(usd) => update({ spending_limit_cents: Math.round(usd * 100) })}
-                      onClear={() => update({ spending_limit_cents: null })}
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{msg("experience.intake.summary.deadline_hours")}</span>
-                    <NumberInput
-                      size="sm"
-                      className="w-24"
-                      value={answers.deadline_hours ?? ""}
-                      min={1}
-                      max={720}
-                      step={1}
-                      onChange={(hours) => update({ deadline_hours: hours })}
-                      onClear={() => update({ deadline_hours: null })}
-                    />
-                  </label>
-                </div>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>{msg("experience.intake.summary.limit_usd")}</span>
+                  <NumberInput
+                    size="sm"
+                    className="w-28"
+                    value={
+                      answers.spending_limit_cents === null ? "" : answers.spending_limit_cents / 100
+                    }
+                    min={1}
+                    max={10000}
+                    step={1}
+                    onChange={(usd) => update({ spending_limit_cents: Math.round(usd * 100) })}
+                    onClear={() => update({ spending_limit_cents: null })}
+                  />
+                </label>
               </SummaryRow>
 
               <SummaryRow label={msg("experience.intake.summary.notify")}>

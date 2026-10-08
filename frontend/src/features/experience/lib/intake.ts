@@ -46,8 +46,6 @@ export interface IntakeAnswers {
   level_chosen: boolean;
   /** Spending limit in cents; null = the wizard's own default. */
   spending_limit_cents: number | null;
-  /** Wall-clock deadline in hours; null = no deadline. */
-  deadline_hours: number | null;
   notifications: IntakeNotifications;
 }
 
@@ -66,7 +64,6 @@ export const DEFAULT_NOTIFICATIONS: IntakeNotifications = {
  * run does without the user having chosen it.
  */
 export const DEFAULT_SPENDING_LIMIT_CENTS: number | null = null;
-export const DEFAULT_DEADLINE_HOURS: number | null = null;
 
 export function emptyIntake(): IntakeAnswers {
   return {
@@ -80,7 +77,6 @@ export function emptyIntake(): IntakeAnswers {
     level: "standard",
     level_chosen: false,
     spending_limit_cents: DEFAULT_SPENDING_LIMIT_CENTS,
-    deadline_hours: DEFAULT_DEADLINE_HOURS,
     notifications: { ...DEFAULT_NOTIFICATIONS },
   };
 }
@@ -123,8 +119,6 @@ export function parseIntakeAnswers(value: unknown): IntakeAnswers | null {
         : typeof raw.spending_limit_cents === "number" && raw.spending_limit_cents > 0
           ? Math.round(raw.spending_limit_cents)
           : base.spending_limit_cents,
-    deadline_hours:
-      typeof raw.deadline_hours === "number" && raw.deadline_hours > 0 ? raw.deadline_hours : null,
     notifications: {
       cadence: CADENCES.find((c) => c === notes.cadence) ?? DEFAULT_NOTIFICATIONS.cadence,
       live_mode: LIVE_MODES.find((m) => m === notes.live_mode) ?? DEFAULT_NOTIFICATIONS.live_mode,
