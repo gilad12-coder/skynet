@@ -13,8 +13,7 @@ import {
   type StageShape,
 } from "../lib/run-kind-hint";
 import { PHONE_DETAIL_TABS, requestedDetailTab, shownDetailTab } from "../lib/detail-tabs";
-import { detailTabGate } from "@/features/experience";
-import { useSurfaceLevel } from "@/features/tutorial";
+import { detailTabGate, useExperienceLevel } from "@/features/experience";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { PipelineStagesBone } from "./PipelineStages";
 import { DataTabSkeleton } from "./DataTabSkeleton";
@@ -244,7 +243,7 @@ export function OptimizationDetailSkeleton({
   let tabBones: Array<{ key: string | number; active: boolean; phone: boolean }>;
   // The same level gate as the loaded tab bar, so a level changed since the
   // last visit (or a first visit) draws the tabs the page will actually show.
-  const level = useSurfaceLevel();
+  const level = useExperienceLevel();
   const levelTab = detailTabGate(level);
   const linkedTab = requestedDetailTab(searchParams.get("tab"));
   const keepsTab = (id: string) => levelTab(id) || id === linkedTab;

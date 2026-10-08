@@ -19,9 +19,8 @@ import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
-import { GuidedChoiceLine, isVisible } from "@/features/experience";
+import { GuidedChoiceLine, isVisible, useExperienceLevel } from "@/features/experience";
 import { useSettingsModal } from "@/features/settings";
-import { useSurfaceLevel } from "@/features/tutorial";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 import { AUTO_METRIC_CALLS } from "../../lib/cost-bracket";
@@ -67,7 +66,7 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
   const pxnBatch = (parseInt(pxnParents, 10) || 1) * (parseInt(pxnProposals, 10) || 1);
   // Guided hides these only while they hold their defaults, so a value set by
   // a draft, a clone or the agent always stays on screen.
-  const level = useSurfaceLevel();
+  const level = useExperienceLevel();
   const showDepth = isVisible("wizard.search_depth", level) || depth !== "light";
   const showOptimizer =
     isVisible("wizard.optimizer_settings", level) || optimizerSettingsCustomized;

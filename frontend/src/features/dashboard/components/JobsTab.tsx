@@ -58,8 +58,7 @@ import {
   visibleJobsColumns,
 } from "../lib/jobs-columns";
 import { rememberLayout } from "@/shared/lib/layout-hint";
-import { jobsColumnGate } from "@/features/experience";
-import { useSurfaceLevel } from "@/features/tutorial";
+import { jobsColumnGate, useExperienceLevel } from "@/features/experience";
 import { formatScore, typeBadge } from "../lib/status-badges";
 import { StatusBadge } from "@/shared/ui/status-badge";
 
@@ -191,7 +190,7 @@ export function JobsTab({
   const rtl = getActiveDir() === "rtl";
   const isPhone = useIsPhone();
   // Guided keeps Name, Status, Created and Score; the skeleton reads the same gate.
-  const showCol = jobsColumnGate(useSurfaceLevel());
+  const showCol = jobsColumnGate(useExperienceLevel());
   const PrevIcon = rtl ? CaretRight : CaretLeft;
   const NextIcon = rtl ? CaretLeft : CaretRight;
 

@@ -18,8 +18,7 @@ import { BlackboxRepoFields } from "./BlackboxRepoFields";
 import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
 import { Disclosure } from "../Disclosure";
 import { Field, TEXTAREA_CLASS } from "./shared";
-import { defaultOpen } from "@/features/experience";
-import { useSurfaceLevel } from "@/features/tutorial";
+import { defaultOpen, useExperienceLevel } from "@/features/experience";
 
 export function BlackboxStartStep({
   w,
@@ -70,7 +69,7 @@ export function BlackboxStartStep({
   // Background is optional, so it folds away until it has something to say:
   // opening by itself when a clone, a draft or the interview's brief fills it.
   // Expert starts it open; opening only reveals the field, it sends nothing.
-  const level = useSurfaceLevel();
+  const level = useExperienceLevel();
   const [backgroundOpen, setBackgroundOpen] = useState(
     () => background.trim() !== "" || defaultOpen("wizard.blackbox_background", level),
   );

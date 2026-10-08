@@ -30,8 +30,7 @@ import type { OptimizationLogEntry } from "@/shared/types/api";
 import type { RunLogStreamStatus } from "../hooks/use-run-log-stream";
 import { formatLogTimestamp, logTimeBucket } from "@/shared/lib";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import { defaultOpen } from "@/features/experience";
-import { useSurfaceLevel } from "@/features/tutorial";
+import { defaultOpen, useExperienceLevel } from "@/features/experience";
 
 type Verbosity = "quiet" | "normal" | "verbose";
 
@@ -152,7 +151,7 @@ export function LogsTab({
   // the operator opts into "verbose". Seeding here (vs. an effect) keeps the
   // first paint already filtered, and resets to Normal on every mount.
   // Expert opens at Verbose (no level filter) instead.
-  const verboseFirst = defaultOpen("logs.verbose", useSurfaceLevel());
+  const verboseFirst = defaultOpen("logs.verbose", useExperienceLevel());
   const logFilters = useColumnFilters({
     level: verboseFirst ? new Set<string>() : new Set(VERBOSITY_LEVELS.normal),
   });

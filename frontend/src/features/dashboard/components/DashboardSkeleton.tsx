@@ -29,8 +29,7 @@ import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { cn } from "@/shared/lib/utils";
 import { WorkspaceStripSkeleton } from "./WorkspaceStrip";
 import { AnalyticsTabSkeleton } from "./AnalyticsTabSkeleton";
-import { isVisible, jobsColumnGate } from "@/features/experience";
-import { useSurfaceLevel } from "@/features/tutorial";
+import { isVisible, jobsColumnGate, useExperienceLevel } from "@/features/experience";
 
 // DashboardHeader always shows these five cells; the stopped/shared cells only
 // appear when their counts are non-zero, so they are not reserved here.
@@ -218,7 +217,7 @@ export function DashboardSkeleton() {
   const isPhone = useIsPhone();
   const remembered = useLayoutHint<JobsLayout>(JOBS_LAYOUT_KEY);
   const layout = remembered?.groups ? remembered : DEFAULT_JOBS_LAYOUT;
-  const level = useSurfaceLevel();
+  const level = useExperienceLevel();
   const keepColumn = jobsColumnGate(level);
   const columns = visibleJobsColumns(layout.shared, keepColumn);
   const rowCount = layout.groups.reduce((sum, n) => sum + n, 0);

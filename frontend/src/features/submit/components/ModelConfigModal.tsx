@@ -25,8 +25,7 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import { defaultOpen, isVisible } from "@/features/experience";
-import { useSurfaceLevel } from "@/features/tutorial";
+import { defaultOpen, isVisible, useExperienceLevel } from "@/features/experience";
 
 interface ModelConfigModalProps {
   open: boolean;
@@ -96,7 +95,7 @@ export function ModelConfigModal({
   const [parametersOpen, setParametersOpen] = React.useState(false);
   // Expert opens Parameters by default; Guided leaves them out unless the
   // config already carries a value, which then stays on screen to edit.
-  const level = useSurfaceLevel();
+  const level = useExperienceLevel();
   const paramsFirstOpen = defaultOpen("wizard.model_params", level);
   const hasParams = (c: ModelConfig) =>
     c.temperature != null || c.max_tokens != null || !!c.extra?.reasoning_effort;

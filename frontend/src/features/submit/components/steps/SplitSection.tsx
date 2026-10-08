@@ -20,9 +20,8 @@ import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 import { SplitRecommendationCard, type SplitPlanControls } from "../SplitRecommendationCard";
 import { splitExampleCounts } from "../../lib/split-example-counts";
-import { GuidedChoiceLine, isVisible } from "@/features/experience";
+import { GuidedChoiceLine, isVisible, useExperienceLevel } from "@/features/experience";
 import { useSettingsModal } from "@/features/settings";
-import { useSurfaceLevel } from "@/features/tutorial";
 
 export type SplitControls = SplitPlanControls &
   Pick<SubmitWizardContext, "split" | "updateSplit" | "splitSum">;
@@ -36,7 +35,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
   const locale = getActiveIntlLocale();
   // Guided keeps the recommended split and says so; a manual split the user
   // (or a draft) set stays fully on screen.
-  const level = useSurfaceLevel();
+  const level = useExperienceLevel();
   const guidedAuto = !isVisible("wizard.split", level) && splitMode === "auto";
   const counts = splitExampleCounts(totalRows, split);
   const examples = (count: number) =>

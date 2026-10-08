@@ -42,9 +42,8 @@ import { ShinkaSettingsPanel } from "./ShinkaSettingsPanel";
 import { Segmented } from "@/shared/ui/segmented";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
 import { Field, StepCard } from "./shared";
-import { GuidedChoiceLine, isVisible } from "@/features/experience";
+import { GuidedChoiceLine, isVisible, useExperienceLevel } from "@/features/experience";
 import { useSettingsModal } from "@/features/settings";
-import { useSurfaceLevel } from "@/features/tutorial";
 
 const MOBILE_MODEL_CHIP_CLASS =
   "min-h-[44px] max-lg:[&_button]:min-h-[44px] max-lg:[&_button]:min-w-[44px] max-lg:[&_button]:opacity-100";
@@ -95,7 +94,7 @@ export function BlackboxOptimizerStep({
   const shinka = single && engine === "shinka_evolve";
   // Guided runs Auto with its default proposer and says so in one line; a
   // single-engine strategy (from a draft, a clone or the agent) stays visible.
-  const level = useSurfaceLevel();
+  const level = useExperienceLevel();
   const guidedAuto = !isVisible("wizard.blackbox_strategy", level) && !single;
 
   return (

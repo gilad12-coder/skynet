@@ -48,8 +48,7 @@ import { BulkActionBar } from "./BulkActionBar";
 import { DeleteDialogs } from "./DeleteDialogs";
 import { JobsTab } from "./JobsTab";
 import { AnalyticsTab } from "./AnalyticsTab";
-import { isVisible } from "@/features/experience";
-import { useSurfaceLevel } from "@/features/tutorial";
+import { isVisible, useExperienceLevel } from "@/features/experience";
 
 function getJobField(job: OptimizationSummaryResponse, key: string): unknown {
   return (job as unknown as Record<string, unknown>)[key];
@@ -84,7 +83,7 @@ export function DashboardView() {
   // Guided drops Analytics (and with one tab left, the tab bar); a deep link
   // to it still opens it.
   const showAnalytics =
-    isVisible("dashboard.analytics", useSurfaceLevel()) || urlTab === "analytics";
+    isVisible("dashboard.analytics", useExperienceLevel()) || urlTab === "analytics";
   useEffect(() => {
     if (urlTab === "jobs" || urlTab === "analytics") {
       setActiveTab(urlTab);

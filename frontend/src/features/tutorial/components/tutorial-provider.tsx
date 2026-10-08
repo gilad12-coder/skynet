@@ -4,11 +4,7 @@ import * as React from "react";
 import { useReducer, useEffect, useCallback, useRef, createContext, useContext } from "react";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import {
-  useExperienceLevel,
-  useExperienceOptional,
-  type ExperienceLevel,
-} from "@/features/experience";
+import { useExperienceLevel, useExperienceOptional } from "@/features/experience";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { track as trackEvent, TelemetryEvent } from "@/shared/lib/telemetry";
 import type { TutorialTrack, TutorialStep } from "../lib/steps";
@@ -17,6 +13,7 @@ import {
   loadStepsModule,
   resetLoadedTutorialOneShotState,
 } from "../lib/steps-loader";
+import { registerTutorialQuery } from "../lib/bridge";
 
 interface TutorialState {
   activeTrack: TutorialTrack | null;
@@ -262,6 +259,11 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timer);
   }, [firstLoginIdentity, pathname, startTrack, intakeBlocking]);
 
+  // Guides show the screens at the user's own level, so the steps read it to
+  // leave out what that level hides and to word the rest for it.
+  const level = useExperienceLevel();
+  useEffect(() => registerTutorialQuery("experienceLevel", () => level), [level]);
+
   const nextStep = useCallback(() => dispatch({ type: "NEXT_STEP" }), []);
   const prevStep = useCallback(() => dispatch({ type: "PREV_STEP" }), []);
   const goToStep = useCallback((index: number) => dispatch({ type: "GO_TO_STEP", index }), []);
@@ -326,17 +328,6 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
       {children}
     </TutorialContext.Provider>
   );
-}
-
-/**
- * The abstraction level a surface should render at. While a tour runs every
- * surface renders at Standard, so the steps it points at (the description
- * field, the run tabs) exist whatever the user's own level is.
- */
-export function useSurfaceLevel(): ExperienceLevel {
-  const level = useExperienceLevel();
-  const touring = !!useContext(TutorialContext)?.state.activeTrack;
-  return touring && level === "guided" ? "standard" : level;
 }
 
 export function useTutorialContext() {

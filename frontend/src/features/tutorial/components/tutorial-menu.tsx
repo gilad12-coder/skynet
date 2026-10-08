@@ -8,6 +8,7 @@ import { useTutorialContext } from "./tutorial-provider";
 import type { TutorialTrack } from "../lib/steps";
 import { getLoadedTrack, loadStepsModule } from "../lib/steps-loader";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { useExperienceLevel } from "@/features/experience";
 
 /** How long each track is — filled in once the lazy steps module resolves. */
 type TrackSize = { steps: number; minutes: number };
@@ -42,6 +43,8 @@ const TRACKS = [
     icon: TrendUp,
     nameKey: "tutorial.track.results.name",
     descKey: "tutorial.track.results.desc",
+    // Guided drops the Data and Logs steps from this guide.
+    guidedDescKey: "tutorial.track.results.desc_guided",
   },
   {
     id: "workspace",
@@ -54,6 +57,7 @@ const TRACKS = [
   icon: typeof Lightning;
   nameKey: Parameters<typeof msg>[0];
   descKey: Parameters<typeof msg>[0];
+  guidedDescKey?: Parameters<typeof msg>[0];
 }>;
 
 /**
@@ -65,6 +69,7 @@ export function TutorialMenu() {
   const prefersReducedMotion = useReducedMotion();
   const [sizes, setSizes] = React.useState<Partial<Record<TutorialTrack, TrackSize>>>({});
   const trackChosenRef = React.useRef(false);
+  const guided = useExperienceLevel() === "guided";
 
   const startAfterMenuCloses = React.useCallback(
     (track: TutorialTrack) => {
@@ -115,13 +120,15 @@ export function TutorialMenu() {
         }}
         className="z-50 w-[min(calc(100vw-24px),360px)] max-w-none origin-[var(--radix-popover-content-transform-origin)] rounded-2xl border border-border/40 bg-card py-1.5 shadow-[0_4px_24px_rgba(28,22,18,0.1)] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 motion-reduce:animate-none"
       >
-        {TRACKS.map(({ id, icon: Icon, nameKey, descKey }) => (
+        {TRACKS.map(({ id, icon: Icon, nameKey, descKey, ...copy }) => (
           <TrackItem
             key={id}
             track={id}
             Icon={Icon}
             label={msg(nameKey)}
-            description={msg(descKey)}
+            description={msg(
+              guided && "guidedDescKey" in copy ? copy.guidedDescKey : descKey,
+            )}
             size={sizes[id]}
             onStart={startAfterMenuCloses}
           />

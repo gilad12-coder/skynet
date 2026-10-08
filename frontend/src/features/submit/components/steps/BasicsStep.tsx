@@ -21,8 +21,7 @@ import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
-import { isVisible } from "@/features/experience";
-import { useSurfaceLevel } from "@/features/tutorial";
+import { isVisible, useExperienceLevel } from "@/features/experience";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 import { Disclosure } from "../Disclosure";
@@ -50,7 +49,7 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
   }, [jobDescription]);
   // Guided hides these only while they hold their defaults, so a draft or an
   // agent patch that set them is never submitted out of sight.
-  const level = useSurfaceLevel();
+  const level = useExperienceLevel();
   const showDescription = isVisible("wizard.description", level) || jobDescription.trim() !== "";
   const showType = isVisible("wizard.optimization_type", level) || jobType !== "run";
 

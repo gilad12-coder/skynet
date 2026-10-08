@@ -79,8 +79,8 @@ import { ACTIVE_STATUSES, TERMINAL_STATUSES } from "@/shared/constants/job-statu
 import { useLiteMode } from "@/features/settings";
 import { useRunLogStream } from "../hooks/use-run-log-stream";
 import { QUOTA_FULL_EVENT, maxLogId, mergeLiveLogs, pruneLiveLogs } from "../lib/run-log-merge";
-import { registerTutorialHook, useSurfaceLevel } from "@/features/tutorial";
-import { detailTabGate } from "@/features/experience";
+import { registerTutorialHook } from "@/features/tutorial";
+import { detailTabGate, useExperienceLevel } from "@/features/experience";
 import type {
   OptimizationLogEntry,
   OptimizationStatusResponse,
@@ -359,7 +359,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   // those tabs lands on Overview instead of an empty pane.
   const isPhone = useIsPhone();
   const activeDetailTab = shownDetailTab(detailTab, isPhone);
-  const surfaceLevel = useSurfaceLevel();
+  const surfaceLevel = useExperienceLevel();
   const levelTabGate = detailTabGate(surfaceLevel);
   const linkedDetailTab = requestedDetailTab(searchParams.get("tab"));
   // Expose for tutorial via the typed bridge (features/tutorial/lib/bridge.ts).
