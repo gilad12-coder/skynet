@@ -23,6 +23,7 @@ import {
 } from "@/shared/ui/primitives/dialog";
 import { Input } from "@/shared/ui/primitives/input";
 import { Segmented, type SegmentedOption } from "@/shared/ui/segmented";
+import { Check } from "@/shared/ui/icons";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
 import type { CatalogModel } from "@/shared/types/api";
 
@@ -57,7 +58,7 @@ import { TOUCH_TAP } from "./touch";
 const DRAFT_KEY = "skynet.intake.draft";
 const DRAFT_STEP_KEY = "skynet.intake.draft-step";
 const STEPS = 3;
-const MAX_MODEL_CHIPS = 6;
+const MAX_MODEL_OPTIONS = 6;
 
 function readDraft(): { answers: IntakeAnswers; step: number } | null {
   try {
@@ -89,14 +90,14 @@ function clearDraft() {
   }
 }
 
-const GOAL_CHIPS = [
+const GOAL_OPTIONS = [
   "experience.intake.q1.chip.classify",
   "experience.intake.q1.chip.extract",
   "experience.intake.q1.chip.agent",
   "experience.intake.q1.chip.code",
 ] as const satisfies readonly MessageKey[];
 
-const SOURCE_CHIPS = [
+const SOURCE_OPTIONS = [
   { source: "spreadsheet", label: "experience.intake.q2.chip.spreadsheet" },
   { source: "file", label: "experience.intake.q2.chip.file" },
   { source: "dataset", label: "experience.intake.q2.chip.dataset" },
@@ -110,8 +111,21 @@ const SOURCE_LABELS: Record<IntakeSourceKind, MessageKey> = {
   dataset: "experience.intake.q2.chip.dataset",
 };
 
-/** A one-tap suggestion; pressed when it is the current answer. */
-function Chip({
+/** A stacked list of answers: one full-width row each, a check on the chosen ones. */
+function OptionList({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className="flex flex-col divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60"
+    >
+      {children}
+    </div>
+  );
+}
+
+/** One answer row; pressed when it is (one of) the current answers. */
+function Option({
   pressed,
   onClick,
   children,
@@ -126,15 +140,21 @@ function Chip({
       aria-pressed={pressed}
       onClick={onClick}
       className={cn(
-        TOUCH_TAP,
-        "cursor-pointer rounded-full border px-3 py-1 text-xs font-medium transition-colors duration-150",
-        "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        "flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 px-3.5 py-2.5 text-start text-sm transition-colors duration-150",
+        "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50",
         pressed
-          ? "border-foreground/25 bg-accent text-foreground"
-          : "border-border/60 text-muted-foreground hover:text-foreground",
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
-      {children}
+      <span>{children}</span>
+      <Check
+        aria-hidden
+        className={cn(
+          "size-4 shrink-0 text-primary transition-opacity duration-150",
+          pressed ? "opacity-100" : "opacity-0",
+        )}
+      />
     </button>
   );
 }
@@ -274,7 +294,7 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
       .then((catalog) => {
         if (cancelled) return;
         const featured = catalog.models.filter((m) => m.featured);
-        setModels((featured.length > 0 ? featured : catalog.models).slice(0, MAX_MODEL_CHIPS));
+        setModels((featured.length > 0 ? featured : catalog.models).slice(0, MAX_MODEL_OPTIONS));
       })
       .catch(() => {
         if (!cancelled) setModelsFailed(true);
@@ -405,20 +425,20 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
                   }}
                   className={cn(TOUCH_FIELD, "text-sm")}
                 />
-                <div className="flex flex-wrap gap-1.5">
-                  {GOAL_CHIPS.map((key) => {
+                <OptionList label={msg("experience.intake.q1.title")}>
+                  {GOAL_OPTIONS.map((key) => {
                     const text = msg(key);
                     return (
-                      <Chip
+                      <Option
                         key={key}
                         pressed={answers.goal === text}
                         onClick={() => update({ goal: text })}
                       >
                         {text}
-                      </Chip>
+                      </Option>
                     );
                   })}
-                </div>
+                </OptionList>
               </div>
             </section>
           )}
@@ -450,9 +470,9 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
                         : msg("experience.intake.q2.unrecognized")}
                   </p>
                 )}
-                <div className="flex flex-wrap gap-1.5">
-                  {SOURCE_CHIPS.map((chip) => (
-                    <Chip
+                <OptionList label={msg("experience.intake.q2.title")}>
+                  {SOURCE_OPTIONS.map((chip) => (
+                    <Option
                       key={chip.source}
                       pressed={answers.source === chip.source}
                       onClick={() => {
@@ -461,9 +481,9 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
                       }}
                     >
                       {msg(chip.label)}
-                    </Chip>
+                    </Option>
                   ))}
-                </div>
+                </OptionList>
                 {connector ? (
                   <IntakeConnect
                     provider={connector}
@@ -492,31 +512,29 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
                 hint={msg("experience.intake.q3.hint")}
               />
               <div className="flex flex-col gap-3">
-                <div
-                  className="flex flex-wrap gap-1.5"
-                  role="group"
-                  aria-label={msg("experience.intake.q3.models_label")}
-                >
-                  {models === null && !modelsFailed && (
-                    <span className="text-xs text-muted-foreground" role="status">
-                      {msg("experience.intake.q3.models_loading")}
-                    </span>
-                  )}
-                  {(modelsFailed || models?.length === 0) && (
-                    <span className="text-xs text-muted-foreground">
-                      {msg("experience.intake.q3.models_empty")}
-                    </span>
-                  )}
-                  {models?.map((model) => (
-                    <Chip
-                      key={model.value}
-                      pressed={answers.models.includes(model.value)}
-                      onClick={() => toggleModel(model.value)}
-                    >
-                      {model.label}
-                    </Chip>
-                  ))}
-                </div>
+                {models === null && !modelsFailed && (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    {msg("experience.intake.q3.models_loading")}
+                  </p>
+                )}
+                {(modelsFailed || models?.length === 0) && (
+                  <p className="text-xs text-muted-foreground">
+                    {msg("experience.intake.q3.models_empty")}
+                  </p>
+                )}
+                {models && models.length > 0 && (
+                  <OptionList label={msg("experience.intake.q3.models_label")}>
+                    {models.map((model) => (
+                      <Option
+                        key={model.value}
+                        pressed={answers.models.includes(model.value)}
+                        onClick={() => toggleModel(model.value)}
+                      >
+                        {model.label}
+                      </Option>
+                    ))}
+                  </OptionList>
+                )}
                 <Segmented<"platform" | "byok">
                   value={answers.billing}
                   onChange={(billing) => update({ billing })}
