@@ -280,6 +280,21 @@
     "wizard.split_fractions_sum": "split_fractions deve sommare a 1.0, ottenuto {total}",
     "budget.idempotency_required": "Invia una Idempotency-Key univoca per questa richiesta.",
     "serve.caller_tool_connection_required": "Questa esecuzione usa una connessione a strumenti associata al proprietario. Collega lo strumento al tuo account prima di richiamarlo.",
-    "serve.protected_interaction_failed": "La richiesta nella sandbox non è riuscita: {error}"
+    "serve.protected_interaction_failed": "La richiesta nella sandbox non è riuscita: {error}",
+    "notifier.body.needs_input": "La spesa prevista supera il limite di spesa, quindi l'esecuzione è stata sospesa. Aumenta il limite per riprendere da dove si è fermata.",
+    "notifier.body.stuck": "Nessun miglioramento nell'ultimo {percent}% del budget di valutazione dell'esecuzione.",
+    "notifier.label.best": "punteggio migliore",
+    "notifier.label.spent": "speso",
+    "notifier.label.stage": "fase",
+    "notifier.stage.baseline": "Valutazione di riferimento",
+    "notifier.stage.evaluating": "Valutazione finale",
+    "notifier.stage.optimizing": "Ottimizzazione in corso",
+    "notifier.stage.prepared": "Dati pronti",
+    "notifier.title.budget": "La tua ottimizzazione si avvicina al limite di spesa",
+    "notifier.title.digest": "Aggiornamento sull'ottimizzazione",
+    "notifier.title.needs_input": "La tua ottimizzazione ti aspetta",
+    "notifier.title.new_best": "La tua ottimizzazione ha trovato una versione migliore",
+    "notifier.title.stage": "La tua ottimizzazione è passata a una nuova fase",
+    "notifier.title.stuck": "La tua ottimizzazione non sta migliorando"
   }
 }

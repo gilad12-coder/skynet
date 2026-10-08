@@ -96,7 +96,7 @@ logger = logging.getLogger(__name__)
 MAX_PROGRESS_EVENTS = 5000
 ORPHANED_RUN_MESSAGE = "The run stopped because its worker went away. Resume, retry or clone it to continue."
 PROGRESS_TRIM_SAMPLE_RATE = 100
-_IMMUTABLE_JOB_COLUMNS = frozenset({"optimization_id", "notified_at", "idempotency_key"})
+_IMMUTABLE_JOB_COLUMNS = frozenset({"optimization_id", "notified_at", "notification_claims", "idempotency_key"})
 # The JSON columns whose serialized size dominates a job's storage footprint and
 # therefore make up ``jobs.stored_bytes``. ``latest_metrics`` / ``message`` are
 # tiny and intentionally excluded to keep the recompute read narrow.
@@ -769,6 +769,59 @@ class RemoteDBJobStore:
             )
             session.commit()
             return rows > 0
+        finally:
+            session.close()
+
+    def claim_job_notification(
+        self,
+        optimization_id: str,
+        claim: str,
+        *,
+        cap_prefix: str | None = None,
+        cap: int | None = None,
+    ) -> bool:
+        """Atomically claim the right to send one in-run email for a job.
+
+        The in-run counterpart of :meth:`claim_completion_notification`: each
+        email kind (``new_best``, ``stage:baseline``, ``digest:<window>`` ...)
+        is recorded on the job row under a row lock, so a resumed run, an
+        orphan-recovered run or parallel grid pairs all writing to one parent
+        send it once. ``cap_prefix``/``cap`` bound how many claims sharing a
+        prefix a run may hold (the per-run progress-email cap).
+
+        Args:
+            optimization_id: Job the email is about.
+            claim: Stable identifier of the email kind for this run.
+            cap_prefix: Prefix of the claims counted against ``cap``.
+            cap: Maximum number of claims starting with ``cap_prefix``.
+
+        Returns:
+            ``True`` when the caller won the claim and should send the email,
+            ``False`` when it was already claimed, the cap is reached, or the
+            job is missing.
+        """
+        session = self._get_session()
+        try:
+            job = (
+                session.query(JobModel)
+                .filter(JobModel.optimization_id == optimization_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if job is None:
+                return False
+            claims = list(job.notification_claims or [])
+            if claim in claims:
+                return False
+            if (
+                cap_prefix is not None
+                and cap is not None
+                and sum(1 for existing in claims if existing.startswith(cap_prefix)) >= cap
+            ):
+                return False
+            job.notification_claims = [*claims, claim]  # type: ignore[assignment]
+            session.commit()
+            return True
         finally:
             session.close()
 
@@ -1820,6 +1873,7 @@ class RemoteDBJobStore:
             # Cleared so the fresh run is free to emit its own completion
             # notification — the flag is a single-shot guard set per finished run.
             job.notified_at = None  # type: ignore[assignment]
+            job.notification_claims = None  # type: ignore[assignment]
             job.accumulated_runtime_seconds = 0.0  # type: ignore[assignment]
             # The result is gone, so the footprint shrinks to payload + overview.
             job.stored_bytes = sum(  # type: ignore[assignment]

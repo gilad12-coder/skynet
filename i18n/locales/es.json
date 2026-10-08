@@ -280,6 +280,21 @@
     "wizard.split_fractions_sum": "split_fractions debe sumar 1.0, pero se obtuvo {total}",
     "budget.idempotency_required": "Envía una Idempotency-Key única para esta solicitud.",
     "serve.caller_tool_connection_required": "Esta ejecución usa una conexión de herramienta vinculada al propietario. Conecta la herramienta a tu cuenta antes de invocarla.",
-    "serve.protected_interaction_failed": "La solicitud en el entorno aislado falló: {error}"
+    "serve.protected_interaction_failed": "La solicitud en el entorno aislado falló: {error}",
+    "notifier.body.needs_input": "El gasto previsto supera el límite de gasto, así que la ejecución se pausó. Aumenta el límite para continuar desde donde se detuvo.",
+    "notifier.body.stuck": "Sin mejoras en el último {percent}% del presupuesto de evaluación de la ejecución.",
+    "notifier.label.best": "mejor puntuación",
+    "notifier.label.spent": "gastado",
+    "notifier.label.stage": "etapa",
+    "notifier.stage.baseline": "Evaluación de referencia",
+    "notifier.stage.evaluating": "Evaluación final",
+    "notifier.stage.optimizing": "Optimizando",
+    "notifier.stage.prepared": "Datos listos",
+    "notifier.title.budget": "Tu optimización se acerca a su límite de gasto",
+    "notifier.title.digest": "Novedades sobre tu optimización",
+    "notifier.title.needs_input": "Tu optimización te está esperando",
+    "notifier.title.new_best": "Tu optimización encontró una versión mejor",
+    "notifier.title.stage": "Tu optimización pasó a una nueva etapa",
+    "notifier.title.stuck": "Tu optimización no está mejorando"
   }
 }

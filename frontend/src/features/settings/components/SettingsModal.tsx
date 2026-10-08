@@ -53,6 +53,7 @@ import { CopyButton } from "@/shared/ui/copy-button";
 import { ExpandToggleButton } from "@/shared/ui/expand-toggle-button";
 import { WalletTab, UsageTab, ByokKeysSection } from "@/features/billing";
 import { ConnectorsTab } from "@/features/connectors";
+import { ExperienceLevelControl } from "@/features/experience";
 import { Input } from "@/shared/ui/primitives/input";
 import { NumberInput } from "@/shared/ui/number-input";
 import {
@@ -284,6 +285,7 @@ function AgentTab() {
 
 function AccountTab() {
   const { data: session } = useSession();
+  const { setOpen } = useSettingsModal();
   const { prefs, setPref } = useUserPrefs();
   const username = session?.user?.name ?? "";
   const role = (session?.user as Record<string, unknown> | undefined)?.role;
@@ -308,16 +310,7 @@ function AccountTab() {
       </SettingsRow>
 
       <>
-        <SettingsRow
-          icon={Sparkle}
-          label={msg("settings.account.expand_advanced.label")}
-          description={msg("settings.account.expand_advanced.description")}
-        >
-          <Switch
-            checked={prefs.expandAdvanced}
-            onCheckedChange={(v) => setPref("expandAdvanced", v)}
-          />
-        </SettingsRow>
+        <ExperienceLevelControl onRerun={() => setOpen(false)} />
 
         <SettingsRow
           icon={Feather}

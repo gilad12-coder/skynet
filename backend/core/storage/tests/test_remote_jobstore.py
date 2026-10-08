@@ -1539,9 +1539,44 @@ def test_claim_completion_notification_missing_job_returns_false(store: SQLiteJo
     assert store.claim_completion_notification("no-such-job") is False
 
 
+def test_claim_job_notification_is_once_per_kind(store: SQLiteJobStore) -> None:
+    """Each in-run email kind is claimable once; distinct kinds are independent."""
+    store.create_job("run-claim-1")
+
+    assert store.claim_job_notification("run-claim-1", "new_best") is True
+    assert store.claim_job_notification("run-claim-1", "new_best") is False
+    assert store.claim_job_notification("run-claim-1", "stuck") is True
+
+
+def test_claim_job_notification_honours_prefix_cap(store: SQLiteJobStore) -> None:
+    """Claims sharing a prefix stop at the cap while other kinds still succeed."""
+    store.create_job("run-claim-2")
+
+    assert store.claim_job_notification("run-claim-2", "stage:a", cap_prefix="stage:", cap=2) is True
+    assert store.claim_job_notification("run-claim-2", "stage:b", cap_prefix="stage:", cap=2) is True
+    assert store.claim_job_notification("run-claim-2", "stage:c", cap_prefix="stage:", cap=2) is False
+    assert store.claim_job_notification("run-claim-2", "budget") is True
+
+
+def test_claim_job_notification_missing_job_returns_false(store: SQLiteJobStore) -> None:
+    """A missing job id reports ``False`` rather than raising."""
+    assert store.claim_job_notification("no-such-run", "new_best") is False
+
+
+def test_requeue_for_rerun_clears_notification_claims(store: SQLiteJobStore) -> None:
+    """A from-scratch rerun may send its in-run emails again."""
+    store.create_job("run-claim-3")
+    store.claim_job_notification("run-claim-3", "new_best")
+    store.update_job("run-claim-3", status="failed")
+
+    assert store.requeue_for_rerun("run-claim-3") is True
+    assert store.claim_job_notification("run-claim-3", "new_best") is True
+
+
 def test_immutable_columns_include_notification_and_idempotency_fields() -> None:
     """``_IMMUTABLE_JOB_COLUMNS`` guards the new dedup columns from ``update_job``."""
     assert "notified_at" in remote_mod._IMMUTABLE_JOB_COLUMNS
+    assert "notification_claims" in remote_mod._IMMUTABLE_JOB_COLUMNS
     assert "idempotency_key" in remote_mod._IMMUTABLE_JOB_COLUMNS
 
 

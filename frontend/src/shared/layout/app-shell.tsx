@@ -27,6 +27,7 @@ import {
   WizardStateProvider,
   isGeneralistAgentEnabled,
 } from "@/features/agent-panel";
+import { IntakeHost } from "@/features/experience";
 
 // The rail's surface holds its place (the width .app-main already reserves)
 // while the chunk loads, so the md+ rail doesn't pop in beside the page.
@@ -316,13 +317,23 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
     </div>
   );
 
-  if (!generalistEnabled) return <JobsStreamProvider>{shell}</JobsStreamProvider>;
+  // The shared wizard state is mounted with or without the agent: the
+  // first-login setup prefills the wizard through it either way.
+  if (!generalistEnabled) {
+    return (
+      <WizardStateProvider>
+        <JobsStreamProvider>{shell}</JobsStreamProvider>
+        <IntakeHost agentEnabled={false} />
+      </WizardStateProvider>
+    );
+  }
 
   return (
     <WizardStateProvider>
       <GeneralistPanelProvider>
         <JobsStreamProvider>{shell}</JobsStreamProvider>
         <GeneralistPanel />
+        <IntakeHost agentEnabled />
       </GeneralistPanelProvider>
     </WizardStateProvider>
   );

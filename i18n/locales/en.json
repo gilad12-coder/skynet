@@ -280,6 +280,21 @@
     "secrets.limit_reached": "You can save up to {limit} secrets. Delete one to add another.",
     "secrets.not_found": "That secret doesn't exist, or it isn't yours.",
     "secrets.undecryptable": "This secret can no longer be read. Save it again.",
-    "blackbox.repo_target_unavailable": "Optimizing a repository isn't available yet."
+    "blackbox.repo_target_unavailable": "Optimizing a repository isn't available yet.",
+    "notifier.body.needs_input": "Projected spend exceeds the spending limit, so the run was paused. Raise the limit to continue from where it stopped.",
+    "notifier.body.stuck": "No improvement over the last {percent}% of the run's evaluation budget.",
+    "notifier.label.best": "best score",
+    "notifier.label.spent": "spent",
+    "notifier.label.stage": "stage",
+    "notifier.stage.baseline": "Baseline evaluation",
+    "notifier.stage.evaluating": "Final evaluation",
+    "notifier.stage.optimizing": "Optimizing",
+    "notifier.stage.prepared": "Data ready",
+    "notifier.title.budget": "Your optimization is nearing its spending limit",
+    "notifier.title.digest": "Progress update on your optimization",
+    "notifier.title.needs_input": "Your optimization is waiting for you",
+    "notifier.title.new_best": "Your optimization found a better version",
+    "notifier.title.stage": "Your optimization moved to a new stage",
+    "notifier.title.stuck": "Your optimization is not improving"
   }
 }

@@ -22,6 +22,7 @@
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { PaginatedJobsResponse } from "@/shared/types/api";
 import type { DashboardAnalytics, DatasetSummary, PublicDashboardPoint } from "@/shared/lib/api";
+import type { ExperienceLevel } from "@/features/experience";
 import type { TutorialTrack } from "./steps";
 
 /**
@@ -154,6 +155,8 @@ export interface TutorialQueries {
   taggerAssistAvailable: () => boolean;
   /** The guide that is running, or null when none is. */
   activeTutorialTrack: () => TutorialTrack | null;
+  /** The user's abstraction level, which decides which steps a guide shows. */
+  experienceLevel: () => ExperienceLevel;
 }
 
 const registry: Partial<TutorialHooks> = {};

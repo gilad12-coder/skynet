@@ -140,6 +140,32 @@ def test_register_persists_profile_fields(accounts_client: TestClient) -> None:
         assert row.job_role is None
 
 
+@pytest.mark.parametrize(
+    ("sent", "stored"),
+    [
+        ("new", "guided"),
+        ("familiar", "standard"),
+        ("expert", "expert"),
+        ("guided", "guided"),
+        ("standard", "standard"),
+        ("wizard", None),
+    ],
+)
+def test_register_maps_experience_vocabularies(accounts_client: TestClient, sent: str, stored: str | None) -> None:
+    """Both the legacy sign-up and the abstraction-level vocabularies store the new values."""
+    email = f"level-{sent}@example.com"
+    created = accounts_client.post(
+        "/auth/register",
+        json={"email": email, "password": "longenough1", "experience_level": sent},
+        headers=_AUTH_HEADER,
+    )
+    assert created.status_code == 201
+    with Session(accounts_client.app.state.job_store.engine) as session:
+        row = session.get(UserModel, email)
+        assert row is not None
+        assert row.experience_level == stored
+
+
 def test_register_rejects_duplicate_email(accounts_client: TestClient) -> None:
     """Re-registering an existing email is a 409, regardless of casing."""
     body = {"email": "bob@example.com", "password": "longenough1", "name": "Bob"}

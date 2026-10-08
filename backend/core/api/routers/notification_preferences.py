@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -15,14 +15,42 @@ from ..auth import AuthenticatedUser, get_authenticated_user
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
 
+CadenceValue = Literal["done", "milestones", "live"]
+LiveModeValue = Literal["per_stage", "per_run_count", "digest"]
+
+
 class NotificationPreferencesResponse(BaseModel):
     job_updates_enabled: bool = Field(description="Email when the caller's optimization starts or finishes.")
     sharing_updates_enabled: bool = Field(description="Email when an optimization is shared or access changes.")
+    cadence: CadenceValue = Field(
+        default="done",
+        description="Run email cadence: finished/failed only, plus milestones, or plus live progress.",
+    )
+    live_mode: LiveModeValue = Field(
+        default="per_stage",
+        description="How live progress mail is throttled: per stage change, capped per run, or a digest window.",
+    )
+    live_count: int = Field(default=3, description="Maximum progress emails per run in per_run_count mode.")
+    digest_minutes: int = Field(default=60, description="Minimum minutes between progress emails in digest mode.")
+    stuck_fraction: float = Field(
+        default=0.25,
+        description="Email once when the best score stalls for this fraction of the run's evaluation budget.",
+    )
+    budget_alert_fraction: float = Field(
+        default=0.8,
+        description="Email once when spend reaches this fraction of the run's spending limit.",
+    )
 
 
 class NotificationPreferencesUpdate(BaseModel):
     job_updates_enabled: bool | None = Field(default=None)
     sharing_updates_enabled: bool | None = Field(default=None)
+    cadence: CadenceValue | None = Field(default=None)
+    live_mode: LiveModeValue | None = Field(default=None)
+    live_count: int | None = Field(default=None, ge=1, le=20)
+    digest_minutes: int | None = Field(default=None, ge=15, le=1440)
+    stuck_fraction: float | None = Field(default=None, ge=0.05, le=1.0)
+    budget_alert_fraction: float | None = Field(default=None, ge=0.1, le=1.0)
 
 
 def _response(row: NotificationPreferenceModel | None) -> NotificationPreferencesResponse:
@@ -32,7 +60,7 @@ def _response(row: NotificationPreferenceModel | None) -> NotificationPreference
         row: Stored preferences, or ``None`` for an identity without overrides.
 
     Returns:
-        API response with both effective category values.
+        API response with the effective category switches and cadence.
     """
     if row is None:
         return NotificationPreferencesResponse(
@@ -42,6 +70,12 @@ def _response(row: NotificationPreferenceModel | None) -> NotificationPreference
     return NotificationPreferencesResponse(
         job_updates_enabled=bool(row.job_updates_enabled),
         sharing_updates_enabled=bool(row.sharing_updates_enabled),
+        cadence=row.cadence,
+        live_mode=row.live_mode,
+        live_count=row.live_count,
+        digest_minutes=row.digest_minutes,
+        stuck_fraction=row.stuck_fraction,
+        budget_alert_fraction=row.budget_alert_fraction,
     )
 
 
@@ -84,7 +118,7 @@ def create_notification_preferences_router(*, job_store) -> APIRouter:
         body: NotificationPreferencesUpdate,
         user: AuthenticatedUserDep,
     ) -> NotificationPreferencesResponse:
-        """Persist the supplied category switches for the caller.
+        """Persist the supplied category switches and cadence settings for the caller.
 
         Args:
             body: Partial set of preference changes.

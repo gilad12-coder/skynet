@@ -182,3 +182,56 @@ def test_target_score_is_a_percentage(wizard_client: TestClient) -> None:
     assert ok.status_code == 200
     assert ok.json()["wizard_state"]["target_score"] == 90.0
     assert too_high.status_code == 422
+
+
+def test_blackbox_strategy_engine_and_proposer_round_trip(wizard_client: TestClient) -> None:
+    """Strategy mode, engine and proposer harness are echoed under their wizard keys."""
+    resp = wizard_client.post(
+        "/wizard/update",
+        json={"blackbox_strategy_mode": "single", "blackbox_engine": "gepa", "blackbox_proposer_harness": "codex"},
+    )
+
+    assert resp.status_code == 200
+    state = resp.json()["wizard_state"]
+    assert state["blackbox_strategy_mode"] == "single"
+    assert state["blackbox_engine"] == "gepa"
+    assert state["blackbox_proposer_harness"] == "codex"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"blackbox_strategy_mode": "plateau"},
+        {"blackbox_engine": "not_an_engine"},
+        {"blackbox_proposer_harness": "custom"},
+        {"blackbox_proposer_harness": "claude_code"},
+        {"spending_limit_usd": 0},
+        {"spending_limit_usd": -5},
+    ],
+)
+def test_blackbox_run_fields_reject_invalid_values(wizard_client: TestClient, body: dict) -> None:
+    """Unknown strategies, engines, non-agent harnesses and non-positive limits are 422."""
+    resp = wizard_client.post("/wizard/update", json=body)
+
+    assert resp.status_code == 422
+
+
+def test_spending_limit_converts_to_cents(wizard_client: TestClient) -> None:
+    """A dollar limit lands as ``max_cost_cents``, the submit payload's field."""
+    resp = wizard_client.post("/wizard/update", json={"spending_limit_usd": 12.5})
+
+    assert resp.status_code == 200
+    state = resp.json()["wizard_state"]
+    assert state["max_cost_cents"] == 1250
+    assert "spending_limit_usd" not in state
+
+
+def test_spending_limit_null_removes_the_limit(wizard_client: TestClient) -> None:
+    """An explicit null clears the limit; omitting the field leaves it alone."""
+    cleared = wizard_client.post("/wizard/update", json={"spending_limit_usd": None})
+    untouched = wizard_client.post("/wizard/update", json={"is_private": True})
+
+    assert cleared.status_code == 200
+    assert "max_cost_cents" in cleared.json()["wizard_state"]
+    assert cleared.json()["wizard_state"]["max_cost_cents"] is None
+    assert "max_cost_cents" not in untouched.json()["wizard_state"]

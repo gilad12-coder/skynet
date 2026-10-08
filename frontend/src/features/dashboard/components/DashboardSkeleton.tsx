@@ -29,6 +29,7 @@ import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { cn } from "@/shared/lib/utils";
 import { WorkspaceStripSkeleton } from "./WorkspaceStrip";
 import { AnalyticsTabSkeleton } from "./AnalyticsTabSkeleton";
+import { isVisible, jobsColumnGate, useExperienceLevel } from "@/features/experience";
 
 // DashboardHeader always shows these five cells; the stopped/shared cells only
 // appear when their counts are non-zero, so they are not reserved here.
@@ -216,9 +217,13 @@ export function DashboardSkeleton() {
   const isPhone = useIsPhone();
   const remembered = useLayoutHint<JobsLayout>(JOBS_LAYOUT_KEY);
   const layout = remembered?.groups ? remembered : DEFAULT_JOBS_LAYOUT;
-  const columns = visibleJobsColumns(layout.shared);
+  const level = useExperienceLevel();
+  const keepColumn = jobsColumnGate(level);
+  const columns = visibleJobsColumns(layout.shared, keepColumn);
   const rowCount = layout.groups.reduce((sum, n) => sum + n, 0);
   const analytics = useOpensOnAnalytics();
+  // The same rule as the loaded tab bar: Guided hides it unless linked to Analytics.
+  const showTabs = isVisible("dashboard.analytics", level) || analytics;
 
   return (
     <div className="flex flex-col gap-6 -mt-2 md:-mt-4 pb-16" aria-hidden="true">
@@ -229,10 +234,12 @@ export function DashboardSkeleton() {
 
       {/* Tabs root is flex-col gap-2; the pill list is a fixed 44px row. */}
       <div className="flex flex-col gap-2">
-        <div className={cn(SLIDING_PILL_TABS_LIST_CLASS, "h-11")}>
-          <Skeleton containerClassName="flex flex-1" className="h-full" borderRadius={999} />
-          <Skeleton containerClassName="flex flex-1" className="h-full" borderRadius={999} />
-        </div>
+        {showTabs && (
+          <div className={cn(SLIDING_PILL_TABS_LIST_CLASS, "h-11")}>
+            <Skeleton containerClassName="flex flex-1" className="h-full" borderRadius={999} />
+            <Skeleton containerClassName="flex flex-1" className="h-full" borderRadius={999} />
+          </div>
+        )}
 
         {analytics ? (
           <AnalyticsTabSkeleton />
@@ -261,7 +268,7 @@ export function DashboardSkeleton() {
                       </TableHeader>
                       {layout.groups.map((rows, g) => (
                         <tbody key={g}>
-                          <GroupRow colSpan={jobsColSpan(layout.shared)} />
+                          <GroupRow colSpan={jobsColSpan(layout.shared, keepColumn)} />
                           {Array.from({ length: rows }).map((_, i) => (
                             <BodyRow key={i} columns={columns} shared={layout.shared} />
                           ))}

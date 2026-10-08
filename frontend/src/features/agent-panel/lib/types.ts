@@ -1,4 +1,4 @@
-import type { WorkflowSpec } from "@/shared/types/api";
+import type { BlackboxProposer, BlackboxStrategy, WorkflowSpec } from "@/shared/types/api";
 
 /** Trust mode — how much the agent must ask before acting. */
 export type TrustMode = "ask" | "auto_safe" | "yolo";
@@ -61,6 +61,12 @@ export interface WizardState {
   blackbox_objective?: string;
   blackbox_seed?: string;
   blackbox_scorer_code?: string;
+  // Named after the black-box run request's own fields (strategy, proposer,
+  // max_cost_cents) so an agent patch maps 1:1 onto the submit payload.
+  blackbox_strategy?: BlackboxStrategy;
+  blackbox_proposer?: Partial<BlackboxProposer>;
+  /** The run's spending limit in cents; null = no cap. */
+  max_cost_cents?: number | null;
 }
 
 export interface ToolStartPayload {

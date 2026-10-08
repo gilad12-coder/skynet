@@ -280,6 +280,21 @@
     "wizard.split_fractions_sum": "split_fractions doit totaliser 1.0, obtenu {total}",
     "budget.idempotency_required": "Envoyez une Idempotency-Key unique pour cette requête.",
     "serve.caller_tool_connection_required": "Cette exécution utilise une connexion d'outil liée au propriétaire. Connectez l'outil à votre compte avant de l'invoquer.",
-    "serve.protected_interaction_failed": "La requête en bac à sable a échoué : {error}"
+    "serve.protected_interaction_failed": "La requête en bac à sable a échoué : {error}",
+    "notifier.body.needs_input": "Les dépenses prévues dépassent la limite de dépenses, l'exécution a donc été mise en pause. Augmentez la limite pour reprendre là où elle s'est arrêtée.",
+    "notifier.body.stuck": "Aucune amélioration sur les derniers {percent} % du budget d'évaluation de l'exécution.",
+    "notifier.label.best": "meilleur score",
+    "notifier.label.spent": "dépensé",
+    "notifier.label.stage": "étape",
+    "notifier.stage.baseline": "Évaluation de référence",
+    "notifier.stage.evaluating": "Évaluation finale",
+    "notifier.stage.optimizing": "Optimisation en cours",
+    "notifier.stage.prepared": "Données prêtes",
+    "notifier.title.budget": "Votre optimisation approche de sa limite de dépenses",
+    "notifier.title.digest": "Point d'avancement de votre optimisation",
+    "notifier.title.needs_input": "Votre optimisation attend votre action",
+    "notifier.title.new_best": "Votre optimisation a trouvé une meilleure version",
+    "notifier.title.stage": "Votre optimisation est passée à une nouvelle étape",
+    "notifier.title.stuck": "Votre optimisation ne progresse plus"
   }
 }

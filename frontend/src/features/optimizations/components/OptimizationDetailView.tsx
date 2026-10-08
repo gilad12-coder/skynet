@@ -80,6 +80,7 @@ import { useLiteMode } from "@/features/settings";
 import { useRunLogStream } from "../hooks/use-run-log-stream";
 import { QUOTA_FULL_EVENT, maxLogId, mergeLiveLogs, pruneLiveLogs } from "../lib/run-log-merge";
 import { registerTutorialHook } from "@/features/tutorial";
+import { detailTabGate, useExperienceLevel } from "@/features/experience";
 import type {
   OptimizationLogEntry,
   OptimizationStatusResponse,
@@ -358,6 +359,9 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   // those tabs lands on Overview instead of an empty pane.
   const isPhone = useIsPhone();
   const activeDetailTab = shownDetailTab(detailTab, isPhone);
+  const surfaceLevel = useExperienceLevel();
+  const levelTabGate = detailTabGate(surfaceLevel);
+  const linkedDetailTab = requestedDetailTab(searchParams.get("tab"));
   // Expose for tutorial via the typed bridge (features/tutorial/lib/bridge.ts).
   useEffect(() => registerTutorialHook("setDetailTab", setDetailTab), []);
 
@@ -1244,18 +1248,25 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   // Share view: only editor+ may run inference (it spends the owner's key),
   // and only through the single non-streaming /share serve endpoint, so it
   // needs a seeded serveInfo (the backend nulls serve_info below editor).
+  // The level trims desk tabs, but a deep link to one still opens it: the
+  // linked tab is kept rather than stranding the link on Overview.
+  const levelShowsTab = (tab: string) => isShare || levelTabGate(tab) || tab === linkedDetailTab;
   const showPlaygroundTab = isShare
     ? shareCanServe && job.status === "success" && !!serveInfo
     : job.status === "success" && (job.optimization_type === "grid_search" || !!serveInfo);
-  const showDataTab = isShare
-    ? !!shareData?.dataset
-    : isPairContext
-      ? isPairTerminal
-      : isTerminal && job.optimization_type !== "grid_search" && !jobIsBlackbox;
-  const showLogsTab = job.optimization_type !== "grid_search" || isPairContext;
+  const showDataTab =
+    (isShare
+      ? !!shareData?.dataset
+      : isPairContext
+        ? isPairTerminal
+        : isTerminal && job.optimization_type !== "grid_search" && !jobIsBlackbox) &&
+    levelShowsTab("data");
+  const showLogsTab =
+    (job.optimization_type !== "grid_search" || isPairContext) && levelShowsTab("logs");
   const showBestVersionTab = jobIsBlackbox && !!job.blackbox_result;
   // A remote-scorer black-box run has no code to show at all.
-  const showCodeTab = !jobIsBlackbox || !!metricCode;
+  const showCodeTab = (!jobIsBlackbox || !!metricCode) && levelShowsTab("code");
+  const showConfigTab = levelShowsTab("config");
   // Usage reads the run's billing records, which only an authenticated viewer can fetch.
   const showUsageTab = !skipNetwork;
 
@@ -1609,7 +1620,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 access: sharedTier ? { tier: sharedTier, owner: sharedByOwner ?? null } : null,
                 actions: headerActionCounts,
                 tabs:
-                  2 +
+                  1 +
+                  Number(showConfigTab) +
                   Number(showPlaygroundTab) +
                   Number(showBestVersionTab) +
                   Number(showDataTab) +
@@ -1633,7 +1645,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   ...(showArtifactTab ? ["artifact"] : []),
                   ...(showLogsTab ? ["logs"] : []),
                   ...(showUsageTab ? ["usage"] : []),
-                  "config",
+                  ...(showConfigTab ? ["config"] : []),
                 ],
               }}
             />
@@ -1690,7 +1702,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   {msg("usage_tab.title")}
                 </TabsTrigger>
               )}
-              {!isPhone && (
+              {!isPhone && showConfigTab && (
                 <TabsTrigger value="config" className={tabCls}>
                   <Gear className="size-3.5" />
                   {msg("auto.app.optimizations.id.page.19")}

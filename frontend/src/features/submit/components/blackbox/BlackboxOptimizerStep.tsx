@@ -42,6 +42,8 @@ import { ShinkaSettingsPanel } from "./ShinkaSettingsPanel";
 import { Segmented } from "@/shared/ui/segmented";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
 import { Field, StepCard } from "./shared";
+import { GuidedChoiceLine, isVisible, useExperienceLevel } from "@/features/experience";
+import { useSettingsModal } from "@/features/settings";
 
 const MOBILE_MODEL_CHIP_CLASS =
   "min-h-[44px] max-lg:[&_button]:min-h-[44px] max-lg:[&_button]:min-w-[44px] max-lg:[&_button]:opacity-100";
@@ -53,6 +55,7 @@ export function BlackboxOptimizerStep({
   w: BlackboxWizardContext;
   part: "strategy" | "model";
 }) {
+  const { openTo } = useSettingsModal();
   const {
     strategyMode,
     setStrategyMode,
@@ -89,6 +92,10 @@ export function BlackboxOptimizerStep({
   const knobs = proposerKnobs(strategyMode, engine);
   const optimizationLabel = msg("submit.blackbox.roles.optimization.label");
   const shinka = single && engine === "shinka_evolve";
+  // Guided runs Auto with its default proposer and says so in one line; a
+  // single-engine strategy (from a draft, a clone or the agent) stays visible.
+  const level = useExperienceLevel();
+  const guidedAuto = !isVisible("wizard.blackbox_strategy", level) && !single;
 
   return (
     <StepCard
@@ -99,7 +106,22 @@ export function BlackboxOptimizerStep({
       }
       description={msg("submit.blackbox.optimizer.desc")}
     >
-      {part === "strategy" && (
+      {part === "strategy" && guidedAuto && (
+        <>
+          <GuidedChoiceLine
+            text={msg("experience.guided.blackbox_strategy")}
+            onShowMore={() => openTo("account")}
+          />
+          {runDisabledReason && (
+            <p className="flex items-start gap-2 text-xs text-[var(--warning)]" role="status">
+              <Warning className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <span dir="auto">{runDisabledReason}</span>
+            </p>
+          )}
+        </>
+      )}
+
+      {part === "strategy" && !guidedAuto && (
         <>
           <Segmented<"auto" | "single">
             label={msg("submit.blackbox.review.strategy")}

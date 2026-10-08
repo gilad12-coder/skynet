@@ -25,6 +25,7 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { defaultOpen, isVisible, useExperienceLevel } from "@/features/experience";
 
 interface ModelConfigModalProps {
   open: boolean;
@@ -92,6 +93,13 @@ export function ModelConfigModal({
   // layoutId must be unique per instance or Framer pairs them up.
   const parametersId = React.useId();
   const [parametersOpen, setParametersOpen] = React.useState(false);
+  // Expert opens Parameters by default; Guided leaves them out unless the
+  // config already carries a value, which then stays on screen to edit.
+  const level = useExperienceLevel();
+  const paramsFirstOpen = defaultOpen("wizard.model_params", level);
+  const hasParams = (c: ModelConfig) =>
+    c.temperature != null || c.max_tokens != null || !!c.extra?.reasoning_effort;
+  const showParameters = isVisible("wizard.model_params", level) || hasParams(config);
   const [draft, setDraft] = React.useState<ModelConfig>(() => withoutInlineConnection(config));
   const mode = nameOnly ? "managed" : (draft.token_source ?? "managed");
 
@@ -139,9 +147,7 @@ export function ModelConfigModal({
   React.useEffect(() => {
     if (open) {
       setDraft(withoutInlineConnection(config));
-      setParametersOpen(
-        config.temperature != null || config.max_tokens != null || !!config.extra?.reasoning_effort,
-      );
+      setParametersOpen(paramsFirstOpen || hasParams(config));
     }
   }, [open, config]);
 
@@ -249,17 +255,13 @@ export function ModelConfigModal({
                         type="button"
                         onClick={() => {
                           setDraft(withoutInlineConnection(rc));
-                          setParametersOpen(
-                            rc.temperature != null ||
-                              rc.max_tokens != null ||
-                              !!rc.extra?.reasoning_effort,
-                          );
+                          setParametersOpen(paramsFirstOpen || hasParams(rc));
                         }}
                         className="flex items-center gap-1.5 cursor-pointer outline-none"
                       >
                         <ProviderLogo slug={modelProviderSlug(rc.name)} size={16} />
                         <span className="truncate max-w-[120px]">{rc.name.split("/").pop()}</span>
-                        {!nameOnly && !modelDefaultsOnly && (
+                        {!nameOnly && !modelDefaultsOnly && showParameters && (
                           <span className="text-[9px] opacity-60">{rc.temperature}</span>
                         )}
                       </button>

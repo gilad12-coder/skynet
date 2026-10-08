@@ -59,14 +59,23 @@ export function columnCollapse(key: JobsColumnKey): TableCollapse | undefined {
   return BY_KEY[key].collapse;
 }
 
-/** The columns a list shows: the shared ones only when it holds shared runs. */
-export function visibleJobsColumns(showShared: boolean): JobsColumn[] {
-  return JOBS_COLUMNS.filter((c) => showShared || !c.shared);
+/**
+ * The columns a list shows: the shared ones only when it holds shared runs,
+ * and only those `keep` allows (the abstraction level's column gate).
+ */
+export function visibleJobsColumns(
+  showShared: boolean,
+  keep: (key: JobsColumnKey) => boolean = () => true,
+): JobsColumn[] {
+  return JOBS_COLUMNS.filter((c) => (showShared || !c.shared) && keep(c.key));
 }
 
 /** The full row span: the checkbox, the data columns, and the trailing chevron. */
-export function jobsColSpan(showShared: boolean): number {
-  return visibleJobsColumns(showShared).length + 2;
+export function jobsColSpan(
+  showShared: boolean,
+  keep: (key: JobsColumnKey) => boolean = () => true,
+): number {
+  return visibleJobsColumns(showShared, keep).length + 2;
 }
 
 /** What the jobs list last rendered, for its next loading skeleton. */

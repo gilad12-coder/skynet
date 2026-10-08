@@ -21,6 +21,8 @@ import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
+import { isVisible, useExperienceLevel } from "@/features/experience";
+
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 import { Disclosure } from "../Disclosure";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
@@ -45,6 +47,11 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
   useEffect(() => {
     if (jobDescription.trim()) setDescriptionOpen(true);
   }, [jobDescription]);
+  // Guided hides these only while they hold their defaults, so a draft or an
+  // agent patch that set them is never submitted out of sight.
+  const level = useExperienceLevel();
+  const showDescription = isVisible("wizard.description", level) || jobDescription.trim() !== "";
+  const showType = isVisible("wizard.optimization_type", level) || jobType !== "run";
 
   return (
     <Card
@@ -79,48 +86,50 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
             className={TOUCH_FIELD}
           />
         </div>
-        <ExpandableTextarea
-          id="job-description"
-          label={msg("auto.features.submit.components.steps.basicsstep.4")}
-          value={jobDescription}
-          onChange={(value) => {
-            if (value.length <= 280) setJobDescription(value);
-          }}
-          placeholder={formatMsg("auto.features.submit.components.steps.basicsstep.template.1", {
-            p1: TERMS.optimization,
-          })}
-          rows={4}
-          tutorial="job-description"
-          className={TEXTAREA_SURFACE_CLASS}
-        >
-          {({ textarea, trigger }) => (
-            <Disclosure
-              id="job-description-panel"
-              label={msg("auto.features.submit.components.steps.basicsstep.4")}
-              tip={tip("submit.description")}
-              open={descriptionOpen}
-              onOpenChange={setDescriptionOpen}
-              trailing={
-                <>
-                  <span
-                    className={cn(
-                      "text-[0.625rem] tabular-nums transition-colors",
-                      jobDescription.length > 280
-                        ? "text-destructive font-medium"
-                        : "text-muted-foreground/50",
-                    )}
-                  >
-                    {jobDescription.length}
-                    {msg("auto.features.submit.components.steps.basicsstep.5")}
-                  </span>
-                  {trigger}
-                </>
-              }
-            >
-              {textarea}
-            </Disclosure>
-          )}
-        </ExpandableTextarea>
+        {showDescription && (
+          <ExpandableTextarea
+            id="job-description"
+            label={msg("auto.features.submit.components.steps.basicsstep.4")}
+            value={jobDescription}
+            onChange={(value) => {
+              if (value.length <= 280) setJobDescription(value);
+            }}
+            placeholder={formatMsg("auto.features.submit.components.steps.basicsstep.template.1", {
+              p1: TERMS.optimization,
+            })}
+            rows={4}
+            tutorial="job-description"
+            className={TEXTAREA_SURFACE_CLASS}
+          >
+            {({ textarea, trigger }) => (
+              <Disclosure
+                id="job-description-panel"
+                label={msg("auto.features.submit.components.steps.basicsstep.4")}
+                tip={tip("submit.description")}
+                open={descriptionOpen}
+                onOpenChange={setDescriptionOpen}
+                trailing={
+                  <>
+                    <span
+                      className={cn(
+                        "text-[0.625rem] tabular-nums transition-colors",
+                        jobDescription.length > 280
+                          ? "text-destructive font-medium"
+                          : "text-muted-foreground/50",
+                      )}
+                    >
+                      {jobDescription.length}
+                      {msg("auto.features.submit.components.steps.basicsstep.5")}
+                    </span>
+                    {trigger}
+                  </>
+                }
+              >
+                {textarea}
+              </Disclosure>
+            )}
+          </ExpandableTextarea>
+        )}
         <div className="space-y-3">
           <Label>
             <HelpTip text={tip("submit.privacy")}>{msg("submit.basics.privacy.label")}</HelpTip>
@@ -144,61 +153,69 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
             ]}
           />
         </div>
-        <Separator />
-        <div className="space-y-3">
-          <button
-            type="button"
-            onClick={() => setOptimizationTypeOpen(!optimizationTypeOpen)}
-            aria-expanded={optimizationTypeOpen}
-            className="flex min-h-[44px] w-full cursor-pointer items-center justify-between gap-2 lg:min-h-0"
-          >
-            <span className="flex items-baseline gap-2">
-              <HelpTip text={tip("submit.optimization_type")}>
-                <span className="text-sm leading-none font-medium">
-                  {msg("auto.features.submit.components.steps.basicsstep.6")}
-                  {TERMS.optimization}
-                </span>
-              </HelpTip>
-              {!optimizationTypeOpen && (
-                <span className="text-xs text-muted-foreground">
-                  {jobType === "run" ? TERMS.optimizationTypeRun : TERMS.optimizationTypeGrid}
-                </span>
-              )}
-            </span>
-            <CaretDown
-              className={cn(
-                "size-4 shrink-0 text-muted-foreground transition-transform duration-150",
-                optimizationTypeOpen && "rotate-180",
-              )}
-            />
-          </button>
-          {optimizationTypeOpen && (
-            <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-200">
-              <Segmented<"run" | "grid_search">
-                segmentClassName="sm:px-4"
-                value={jobType}
-                onChange={setOptimizationType}
-                options={[
-                  {
-                    value: "run",
-                    label: TERMS.optimizationTypeRun,
-                    desc: formatMsg("auto.features.submit.components.steps.basicsstep.template.2", {
-                      p1: TERMS.optimization,
-                      p2: TERMS.model,
-                    }),
-                  },
-                  {
-                    value: "grid_search",
-                    label: TERMS.optimizationTypeGrid,
-                    desc: formatMsg("auto.features.submit.components.steps.basicsstep.template.3", {
-                      p1: TERMS.optimizationTypeGrid,
-                    }),
-                  },
-                ]}
+        {showType && <Separator />}
+        {showType && (
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => setOptimizationTypeOpen(!optimizationTypeOpen)}
+              aria-expanded={optimizationTypeOpen}
+              className="flex min-h-[44px] w-full cursor-pointer items-center justify-between gap-2 lg:min-h-0"
+            >
+              <span className="flex items-baseline gap-2">
+                <HelpTip text={tip("submit.optimization_type")}>
+                  <span className="text-sm leading-none font-medium">
+                    {msg("auto.features.submit.components.steps.basicsstep.6")}
+                    {TERMS.optimization}
+                  </span>
+                </HelpTip>
+                {!optimizationTypeOpen && (
+                  <span className="text-xs text-muted-foreground">
+                    {jobType === "run" ? TERMS.optimizationTypeRun : TERMS.optimizationTypeGrid}
+                  </span>
+                )}
+              </span>
+              <CaretDown
+                className={cn(
+                  "size-4 shrink-0 text-muted-foreground transition-transform duration-150",
+                  optimizationTypeOpen && "rotate-180",
+                )}
               />
-            </div>
-          )}
-        </div>
+            </button>
+            {optimizationTypeOpen && (
+              <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-200">
+                <Segmented<"run" | "grid_search">
+                  segmentClassName="sm:px-4"
+                  value={jobType}
+                  onChange={setOptimizationType}
+                  options={[
+                    {
+                      value: "run",
+                      label: TERMS.optimizationTypeRun,
+                      desc: formatMsg(
+                        "auto.features.submit.components.steps.basicsstep.template.2",
+                        {
+                          p1: TERMS.optimization,
+                          p2: TERMS.model,
+                        },
+                      ),
+                    },
+                    {
+                      value: "grid_search",
+                      label: TERMS.optimizationTypeGrid,
+                      desc: formatMsg(
+                        "auto.features.submit.components.steps.basicsstep.template.3",
+                        {
+                          p1: TERMS.optimizationTypeGrid,
+                        },
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

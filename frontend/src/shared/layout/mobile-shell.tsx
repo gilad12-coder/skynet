@@ -19,6 +19,7 @@ import {
   WizardStateProvider,
   isGeneralistAgentEnabled,
 } from "@/features/agent-panel";
+import { IntakeHost } from "@/features/experience";
 
 const HEADER_HEIGHT_PX = 53;
 const TABBAR_HEIGHT_PX = 56;
@@ -140,13 +141,23 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 
-  if (!generalistEnabled) return <JobsStreamProvider>{shell}</JobsStreamProvider>;
+  // The shared wizard state is mounted with or without the agent: the
+  // first-login setup prefills the wizard through it either way.
+  if (!generalistEnabled) {
+    return (
+      <WizardStateProvider>
+        <JobsStreamProvider>{shell}</JobsStreamProvider>
+        <IntakeHost agentEnabled={false} />
+      </WizardStateProvider>
+    );
+  }
 
   return (
     <WizardStateProvider>
       <GeneralistPanelProvider>
         <JobsStreamProvider>{shell}</JobsStreamProvider>
         <GeneralistPanel />
+        <IntakeHost agentEnabled />
       </GeneralistPanelProvider>
     </WizardStateProvider>
   );

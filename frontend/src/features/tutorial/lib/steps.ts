@@ -77,6 +77,8 @@ export interface TutorialStep {
   afterHide?: () => void | Promise<void>;
   /** Focused guides that include this step. */
   tracks: readonly TutorialTrack[];
+  /** The gated surface the step points at; the step drops out at levels that hide it. */
+  surface?: Surface;
   readingTimeSec: number;
 }
 
@@ -100,6 +102,16 @@ import {
 } from "./bridge";
 import { isGeneralistAgentEnabled } from "@/features/agent-panel";
 import { WIZARD_STAGE } from "@/features/submit";
+import { DEFAULT_LEVEL, isVisible, type ExperienceLevel, type Surface } from "@/features/experience";
+
+/** The user's level; a guide shows the screens as that level renders them. */
+function tutorialLevel(): ExperienceLevel {
+  return queryTutorialHook("experienceLevel") ?? DEFAULT_LEVEL;
+}
+
+function isGuided(): boolean {
+  return tutorialLevel() === "guided";
+}
 
 function navigateTo(path: string) {
   // Prefer in-app client navigation via the tutorial-overlay hook.
@@ -522,7 +534,10 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     id: "dd-models",
     stage: "optimize",
     title: msg("auto.features.tutorial.lib.steps.template.24"),
-    description: msg("tutorial.step.models.body"),
+    // Guided hides each model's Parameters, so the step stops asking for them.
+    get description() {
+      return isGuided() ? msg("tutorial.step.models.body_guided") : msg("tutorial.step.models.body");
+    },
     target: "[data-tutorial='model-catalog']",
     placement: "bottom",
     beforeShow: async () => {
@@ -538,7 +553,12 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     id: "dd-review",
     stage: "optimize",
     title: msg("auto.features.tutorial.lib.steps.template.27"),
-    description: msg("tutorial.step.review.body"),
+    // Expert starts the optimizer settings open, so the summary points back to them.
+    get description() {
+      return tutorialLevel() === "expert"
+        ? msg("tutorial.step.review.body_expert")
+        : msg("tutorial.step.review.body");
+    },
     target: "[data-tutorial='wizard-stage-review']",
     placement: "bottom",
     beforeShow: async () => {
@@ -597,8 +617,14 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "bb-engines",
-    title: msg("tutorial.step.bb_engines.title"),
-    description: msg("tutorial.step.bb_engines.body"),
+    // Guided shows one line saying the engines run on Auto instead of the
+    // picker, so the step explains what Skynet does rather than the choice.
+    get title() {
+      return isGuided() ? msg("tutorial.step.bb_engines.title_guided") : msg("tutorial.step.bb_engines.title");
+    },
+    get description() {
+      return isGuided() ? msg("tutorial.step.bb_engines.body_guided") : msg("tutorial.step.bb_engines.body");
+    },
     target: "[data-tutorial='wizard-stage-optimization']",
     placement: "left",
     beforeShow: async () => {
@@ -708,6 +734,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-code",
+    surface: "run.tab.code",
     stage: "results",
     title: msg("tutorial.step.code.title"),
     description: msg("tutorial.step.code.body"),
@@ -738,6 +765,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-data-tab",
+    surface: "run.tab.data",
     stage: "results",
     title: msg("auto.features.tutorial.lib.steps.literal.24"),
     description: msg("auto.features.tutorial.lib.steps.template.35"),
@@ -754,9 +782,15 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-logs",
+    surface: "run.tab.logs",
     stage: "results",
     title: msg("auto.features.tutorial.lib.steps.literal.26"),
-    description: msg("auto.features.tutorial.lib.steps.template.37"),
+    // Expert opens the log on Verbose, so the step says where it starts.
+    get description() {
+      return tutorialLevel() === "expert"
+        ? msg("tutorial.step.logs.body_expert")
+        : msg("auto.features.tutorial.lib.steps.template.37");
+    },
     target: "[data-tutorial='live-logs']",
     placement: "top",
     beforeShow: async () => {
@@ -818,6 +852,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-analytics",
+    surface: "dashboard.analytics",
     title: msg("auto.features.tutorial.lib.steps.literal.9"),
     description: msg("auto.features.tutorial.lib.steps.template.47"),
     target: "[data-tutorial='analytics-content']",
@@ -887,9 +922,11 @@ function isPhoneViewport(): boolean {
 function getVisibleSteps(): TutorialStep[] {
   const generalist = isGeneralistAgentEnabled();
   const phone = isPhoneViewport();
+  const level = tutorialLevel();
   return tutorialSteps.filter((s) => {
     if (!generalist && AGENT_PANEL_STEP_IDS.has(s.id)) return false;
     if (phone && DESKTOP_ONLY_STEP_IDS.has(s.id)) return false;
+    if (s.surface && !isVisible(s.surface, level)) return false;
     return true;
   });
 }
@@ -900,6 +937,7 @@ function getVisibleSteps(): TutorialStep[] {
 const STEP_OVERHEAD_SEC = 6;
 
 export function getTrack(trackId: TutorialTrack): TutorialTrackDefinition | undefined {
+  const level = tutorialLevel();
   const steps = getVisibleSteps().filter((s) => s.tracks.includes(trackId));
   if (steps.length === 0) return undefined;
   const seconds = steps.reduce((sum, s) => sum + s.readingTimeSec + STEP_OVERHEAD_SEC, 0);
@@ -918,7 +956,10 @@ export function getTrack(trackId: TutorialTrack): TutorialTrackDefinition | unde
     },
     results: {
       name: msg("tutorial.track.results.name"),
-      description: msg("tutorial.track.results.desc"),
+      // Guided drops the Data and Logs steps, so the summary stops promising them.
+      description: msg(
+        level === "guided" ? "tutorial.track.results.desc_guided" : "tutorial.track.results.desc",
+      ),
     },
     workspace: {
       name: msg("tutorial.track.workspace.name"),

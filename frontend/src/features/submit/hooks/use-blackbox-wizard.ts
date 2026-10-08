@@ -39,6 +39,7 @@ import {
 import { useWizardStateOptional } from "@/features/agent-panel";
 import { registerTutorialHook } from "@/features/tutorial";
 import { readPref } from "@/features/settings";
+import { defaultOpen, useExperienceLevel } from "@/features/experience";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
 import { BLACKBOX_HARNESSES } from "@/shared/lib/blackbox-harness";
@@ -283,6 +284,7 @@ export function useBlackboxWizard(
   const username = session?.user?.name ?? "";
   const catalog = useModelCatalog();
   const { recentConfigs, saveToRecent, removeRecentConfig } = useRecentModelConfigs();
+  const experienceLevel = useExperienceLevel();
 
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState(0);
@@ -399,15 +401,18 @@ export function useBlackboxWizard(
   const [extraOptimizationModels, setExtraOptimizationModels] = useState<ModelConfig[]>([]);
   const [shinkaSettings, setShinkaSettings] =
     useState<BlackboxShinkaSettings>(DEFAULT_SHINKA_SETTINGS);
-  const updateShinka = useCallback(
-    (patch: Partial<BlackboxShinkaSettings>) =>
-      setShinkaSettings((prev) => ({ ...prev, ...patch })),
-    [],
-  );
-  const [shinkaOpen, setShinkaOpen] = useState(false);
   // Latched once the panel opens: in Auto only a user who looked at the
   // settings sends them, and closing the panel again keeps their edits.
   const [shinkaOpened, setShinkaOpened] = useState(false);
+  const updateShinka = useCallback((patch: Partial<BlackboxShinkaSettings>) => {
+    setShinkaSettings((prev) => ({ ...prev, ...patch }));
+    // Expert starts the panel open without latching (so an untouched panel
+    // submits exactly what a closed one does); an edit there still counts.
+    setShinkaOpened(true);
+  }, []);
+  const [shinkaOpen, setShinkaOpen] = useState(() =>
+    defaultOpen("wizard.shinka_settings", experienceLevel),
+  );
   const toggleShinka = useCallback((open: boolean) => {
     setShinkaOpen(open);
     if (open) setShinkaOpened(true);
@@ -482,6 +487,19 @@ export function useBlackboxWizard(
         setScorerKind("python");
         setMetricCode(shared.blackbox_scorer_code);
         setScorerManuallyEdited(true);
+      } else if (key === "blackbox_strategy" && shared.blackbox_strategy) {
+        setStrategyMode(shared.blackbox_strategy.mode);
+        setEngine(shared.blackbox_strategy.engine ?? null);
+      } else if (key === "blackbox_proposer" && shared.blackbox_proposer) {
+        updateProposer(shared.blackbox_proposer);
+      } else if (key === "max_cost_cents" && shared.max_cost_cents !== undefined) {
+        setMaxCostCents(shared.max_cost_cents);
+      } else if (
+        key === "reflection_model_config" &&
+        typeof shared.reflection_model_config?.name === "string" &&
+        shared.reflection_model_config.name
+      ) {
+        setReflectionModel({ ...emptyModelConfig(), ...(shared.reflection_model_config as unknown as Partial<ModelConfig>) });
       } else if (
         key === "staged_dataset_id" &&
         typeof shared.staged_dataset_id === "string" &&

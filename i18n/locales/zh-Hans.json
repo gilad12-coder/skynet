@@ -280,6 +280,21 @@
     "wizard.split_fractions_sum": "split_fractions 之和必须为 1.0，实际得到 {total}。",
     "budget.idempotency_required": "请为该请求发送唯一的 Idempotency-Key。",
     "serve.caller_tool_connection_required": "本次运行使用绑定所有者的工具连接。请先将该工具连接到您的账户，再进行调用。",
-    "serve.protected_interaction_failed": "沙盒请求失败：{error}"
+    "serve.protected_interaction_failed": "沙盒请求失败：{error}",
+    "notifier.body.needs_input": "预计支出超出支出上限，因此运行已暂停。提高上限即可从暂停处继续。",
+    "notifier.body.stuck": "在运行评估预算的最后 {percent}% 中没有改进。",
+    "notifier.label.best": "最高分数",
+    "notifier.label.spent": "已花费",
+    "notifier.label.stage": "阶段",
+    "notifier.stage.baseline": "基线评估",
+    "notifier.stage.evaluating": "最终评估",
+    "notifier.stage.optimizing": "正在优化",
+    "notifier.stage.prepared": "数据已就绪",
+    "notifier.title.budget": "你的优化即将达到支出上限",
+    "notifier.title.digest": "你的优化进展",
+    "notifier.title.needs_input": "你的优化正在等待你",
+    "notifier.title.new_best": "你的优化找到了更好的版本",
+    "notifier.title.stage": "你的优化进入了新阶段",
+    "notifier.title.stuck": "你的优化没有改进"
   }
 }

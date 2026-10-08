@@ -51,6 +51,12 @@ import {
   DialogTitle,
 } from "@/shared/ui/primitives/dialog";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
+import {
+  NotificationCadenceFields,
+  buildNotificationPatch,
+  notificationsFromPrefs,
+  type IntakeNotifications,
+} from "@/features/experience";
 
 /** Localize a data-action failure: semantic backend codes when present. */
 function describeError(err: unknown, fallback: string): string {
@@ -161,6 +167,32 @@ export function PrivacyTab() {
       }
     },
     [],
+  );
+
+  // Cadence edits apply at once on screen and save after a short pause, so a
+  // number typed digit by digit is one request rather than one per key.
+  const cadenceTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(
+    () => () => {
+      if (cadenceTimer.current) clearTimeout(cadenceTimer.current);
+    },
+    [],
+  );
+  const setCadence = React.useCallback(
+    (patch: Partial<IntakeNotifications>) => {
+      if (!notificationPreferences) return;
+      const next = { ...notificationsFromPrefs(notificationPreferences), ...patch };
+      setNotificationPreferences({ ...notificationPreferences, ...next });
+      if (cadenceTimer.current) clearTimeout(cadenceTimer.current);
+      cadenceTimer.current = setTimeout(() => {
+        updateNotificationPreferences(buildNotificationPatch(next))
+          .then(() => toast.success(msg("settings.notifications.saved")))
+          .catch((err) =>
+            toast.error(describeError(err, msg("settings.notifications.save_error"))),
+          );
+      }, 600);
+    },
+    [notificationPreferences],
   );
 
   const loadModelPolicy = React.useCallback(async () => {
@@ -300,6 +332,17 @@ export function PrivacyTab() {
             aria-label={msg("settings.notifications.jobs.label")}
           />
         </SettingsRow>
+
+        {notificationPreferences?.job_updates_enabled && (
+          <div className="ps-7 pb-3">
+            <NotificationCadenceFields
+              idPrefix="settings-notify"
+              value={notificationsFromPrefs(notificationPreferences)}
+              onChange={setCadence}
+              disabled={signedOut || notificationSaving !== null}
+            />
+          </div>
+        )}
 
         <SettingsRow
           icon={Envelope}

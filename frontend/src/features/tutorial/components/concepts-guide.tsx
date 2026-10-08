@@ -19,6 +19,7 @@ import {
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { perLocale } from "@/shared/lib/per-locale";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
+import { useExperienceLevel } from "@/features/experience";
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
   ssr: false,
@@ -32,10 +33,16 @@ interface ConceptsGuideProps {
 
 interface SectionMeta {
   id: string;
-  num: string;
   title: string;
   Icon: React.ComponentType<{ className?: string }>;
 }
+
+// Engine choice and run parameters are settings Guided takes off screen, so
+// their sections would explain controls the reader cannot reach.
+const HIDDEN_IN_GUIDED: ReadonlySet<string> = new Set(["engines", "parameters"]);
+
+/** Each shown section's number, counted after the level drops some. */
+const SectionNumbers = React.createContext<Record<string, string>>({});
 
 const SECTIONS: readonly SectionMeta[] = perLocale(() => [
   {
@@ -112,6 +119,16 @@ export function ConceptsGuide({ open, onClose }: ConceptsGuideProps) {
   const closeBtnRef = React.useRef<HTMLButtonElement | null>(null);
   const [activeId, setActiveId] = React.useState<string>(SECTIONS[0]!.id);
   const titleId = React.useId();
+  const guided = useExperienceLevel() === "guided";
+  const sections = React.useMemo(
+    () => SECTIONS.filter((s) => !guided || !HIDDEN_IN_GUIDED.has(s.id)),
+    [guided],
+  );
+  const numbers = React.useMemo(
+    () => Object.fromEntries(sections.map((s, i) => [s.id, String(i + 1)])),
+    [sections],
+  );
+  const shows = (id: string) => id in numbers;
 
   React.useEffect(() => {
     if (!open) return;
@@ -163,12 +180,12 @@ export function ConceptsGuide({ open, onClose }: ConceptsGuideProps) {
       { root, rootMargin: "-15% 0px -70% 0px", threshold: [0, 1] },
     );
 
-    SECTIONS.forEach((s) => {
+    sections.forEach((s) => {
       const el = document.getElementById(`guide-${s.id}`);
       if (el) observer.observe(el);
     });
     return () => observer.disconnect();
-  }, [open]);
+  }, [open, sections]);
 
   const jumpTo = React.useCallback((id: string) => {
     const el = document.getElementById(`guide-${id}`);
@@ -194,19 +211,26 @@ export function ConceptsGuide({ open, onClose }: ConceptsGuideProps) {
         <GuideHeader titleId={titleId} onClose={onClose} closeBtnRef={closeBtnRef} />
 
         <div className="grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)] flex-1 min-h-0">
-          <GuideSidebar activeId={activeId} onJump={jumpTo} />
+          <GuideSidebar
+            sections={sections}
+            numbers={numbers}
+            activeId={activeId}
+            onJump={jumpTo}
+          />
           <div ref={scrollRef} className="min-w-0 overflow-y-auto px-5 sm:px-8 py-6 scroll-smooth">
-            <SectionBackground />
-            <SectionRecipes />
-            <SectionGepa />
-            <SectionEngines />
-            <SectionScorers />
-            <SectionParameters />
-            <SectionTaskDefinition />
-            <SectionWorkflow />
-            <SectionApp />
-            <SectionTips />
-            <SectionGlossary />
+            <SectionNumbers.Provider value={numbers}>
+              <SectionBackground />
+              <SectionRecipes />
+              <SectionGepa />
+              {shows("engines") && <SectionEngines />}
+              <SectionScorers />
+              {shows("parameters") && <SectionParameters />}
+              <SectionTaskDefinition />
+              <SectionWorkflow />
+              <SectionApp />
+              <SectionTips />
+              <SectionGlossary />
+            </SectionNumbers.Provider>
           </div>
         </div>
       </div>
@@ -250,14 +274,24 @@ function GuideHeader({
   );
 }
 
-function GuideSidebar({ activeId, onJump }: { activeId: string; onJump: (id: string) => void }) {
+function GuideSidebar({
+  sections,
+  numbers,
+  activeId,
+  onJump,
+}: {
+  sections: readonly SectionMeta[];
+  numbers: Record<string, string>;
+  activeId: string;
+  onJump: (id: string) => void;
+}) {
   return (
     <aside className="border-e border-[#E5DDD4] bg-[#F5F1EC]/40 px-3 py-4 hidden md:block overflow-y-auto">
       <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B] px-2 mb-2">
         {msg("auto.features.tutorial.components.concepts.guide.literal.11")}
       </p>
       <ol className="space-y-0.5">
-        {SECTIONS.map((s) => {
+        {sections.map((s) => {
           const isActive = activeId === s.id;
           return (
             <li key={s.id}>
@@ -277,7 +311,7 @@ function GuideSidebar({ activeId, onJump }: { activeId: string; onJump: (id: str
                     isActive ? "bg-[#3D2E22] text-[#FAF8F5]" : "bg-[#E5DDD4] text-[#7C6350]",
                   ].join(" ")}
                 >
-                  {s.num}
+                  {numbers[s.id]}
                 </span>
                 <span className="leading-snug">{s.title}</span>
               </button>
@@ -291,22 +325,23 @@ function GuideSidebar({ activeId, onJump }: { activeId: string; onJump: (id: str
 
 function GuideSection({
   id,
-  num,
   title,
   kicker,
   children,
 }: {
   id: string;
-  num: string;
   title: string;
   kicker?: string;
   children: React.ReactNode;
 }) {
+  const num = React.useContext(SectionNumbers)[id] ?? "";
   return (
     <section id={`guide-${id}`} className="scroll-mt-4 mb-12 first:mt-0">
       <div className="flex items-baseline gap-2 mb-1">
         <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7C6350]">
-          {formatMsg("auto.features.tutorial.components.concepts.guide.template.1", { p1: num })}
+          {formatMsg("auto.features.tutorial.components.concepts.guide.template.1", {
+            p1: num,
+          })}
         </span>
         {kicker && <span className="text-[11px] text-[#A69585]">· {kicker}</span>}
       </div>
@@ -411,7 +446,6 @@ function SectionBackground() {
   return (
     <GuideSection
       id="background"
-      num="1"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.1")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.16")}
     >
@@ -455,7 +489,6 @@ function SectionRecipes() {
   return (
     <GuideSection
       id="recipes"
-      num="2"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.350")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.354")}
     >
@@ -588,7 +621,6 @@ function SectionGepa() {
   return (
     <GuideSection
       id="gepa"
-      num="3"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.2")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.63")}
     >
@@ -679,7 +711,6 @@ function SectionEngines() {
   return (
     <GuideSection
       id="engines"
-      num="4"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.351")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.366")}
     >
@@ -768,7 +799,6 @@ function SectionScorers() {
   return (
     <GuideSection
       id="scorers"
-      num="5"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.352")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.403")}
     >
@@ -821,7 +851,6 @@ function SectionParameters() {
   return (
     <GuideSection
       id="parameters"
-      num="6"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.3")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.100")}
     >
@@ -901,7 +930,6 @@ function SectionTaskDefinition() {
   return (
     <GuideSection
       id="task-definition"
-      num="7"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.4")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.128")}
     >
@@ -1127,7 +1155,6 @@ function SectionWorkflow() {
   return (
     <GuideSection
       id="workflow"
-      num="8"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.5")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.170")}
     >
@@ -1276,7 +1303,6 @@ function SectionApp() {
   return (
     <GuideSection
       id="app"
-      num="9"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.353")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.425")}
     >
@@ -1348,7 +1374,6 @@ function SectionTips() {
   return (
     <GuideSection
       id="tips"
-      num="10"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.6")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.220")}
     >
@@ -1545,7 +1570,6 @@ function SectionGlossary() {
   return (
     <GuideSection
       id="glossary"
-      num="11"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.7")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.252")}
     >
