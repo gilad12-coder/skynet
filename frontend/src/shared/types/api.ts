@@ -1059,6 +1059,12 @@ export interface CatalogModel {
   featured?: boolean;
   // The best-value default thinker that the composer's Auto mode runs.
   is_default?: boolean;
+  // The fast, cheap model every agent interview runs when the user picks
+  // nothing; at most one model carries it.
+  is_interview_default?: boolean;
+  // OpenRouter's human name without the vendor prefix ("Claude Haiku 5.5");
+  // null for models OpenRouter does not list.
+  display_name?: string | null;
   supports_vision: boolean;
   available: boolean;
   max_input_tokens?: number | null;

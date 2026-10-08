@@ -156,6 +156,7 @@ export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
                 onChange={interview.setModel}
                 effort={interview.reasoningEffort}
                 onEffortChange={interview.setReasoningEffort}
+                defaultFlag="is_interview_default"
               />
             }
           />

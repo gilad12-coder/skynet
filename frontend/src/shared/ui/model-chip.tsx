@@ -21,7 +21,12 @@ import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { Button } from "@/shared/ui/primitives/button";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
-import { modelProviderSlug } from "@/shared/lib/model-provider";
+import {
+  catalogFallbackModel,
+  modelDisplayName,
+  modelProviderSlug,
+  type DefaultModelFlag,
+} from "@/shared/lib/model-provider";
 
 interface ModelChipProps {
   config: ModelConfig;
@@ -38,6 +43,11 @@ interface ModelChipProps {
   catalogModels?: CatalogModel[];
   /** Placeholder when no model is set; overrides the required/not-configured copy. */
   emptyLabel?: string;
+  /**
+   * With no model set, name the catalog model carrying this flag (the one
+   * that actually runs) instead of `emptyLabel`, marked as the default.
+   */
+  defaultFlag?: DefaultModelFlag;
   /** Explanation shown when hovering or focusing the card's Info button. */
   tooltip?: string | null;
   className?: string;
@@ -101,6 +111,7 @@ export function ModelChip({
   required,
   catalogModels,
   emptyLabel,
+  defaultFlag,
   tooltip,
   className,
 }: ModelChipProps) {
@@ -114,21 +125,43 @@ export function ModelChip({
     emptyLabel ||
     (required ? msg("shared.model_chip.choose_model") : msg("shared.model_chip.not_configured"));
   const isEmpty = !config.name;
+  const fallback =
+    isEmpty && defaultFlag && catalogModels
+      ? catalogFallbackModel(
+          catalogModels.filter((m) => m.available),
+          defaultFlag,
+        )
+      : null;
+  const fallbackName = fallback ? modelDisplayName(fallback.value, catalogModels) : null;
+  const ariaName = fallbackName
+    ? `${fallbackName} (${msg("shared.model_chip.default_suffix")})`
+    : name;
   const supportsVision = !!catalogModels?.find((m) => m.value === config.name)?.supports_vision;
 
   const content = (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span
-        className={cn(
-          "truncate text-sm",
-          isEmpty ? "text-muted-foreground" : "text-foreground font-mono font-medium",
-        )}
-        // Placeholder text is localized, so it follows the active direction;
-        // a concrete model id is always Latin and stays LTR.
-        dir={isEmpty ? getActiveDir() : "ltr"}
-      >
-        {isEmpty ? name : (name.split("/").pop() ?? name)}
-      </span>
+      {fallbackName ? (
+        <span className="flex min-w-0 items-baseline gap-1.5 text-sm">
+          <span className="truncate font-mono font-medium text-foreground" dir="ltr">
+            {fallbackName}
+          </span>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {msg("shared.model_chip.default_suffix")}
+          </span>
+        </span>
+      ) : (
+        <span
+          className={cn(
+            "truncate text-sm",
+            isEmpty ? "text-muted-foreground" : "text-foreground font-mono font-medium",
+          )}
+          // Placeholder text is localized, so it follows the active direction;
+          // a concrete model id is always Latin and stays LTR.
+          dir={isEmpty ? getActiveDir() : "ltr"}
+        >
+          {isEmpty ? name : modelDisplayName(name, catalogModels)}
+        </span>
+      )}
       {/* A config that carries only a model id (e.g. the tagger's tagging
             model) renders no parameter row at all — a fabricated temperature
             would read as a setting the surface doesn't actually have. */}
@@ -187,10 +220,11 @@ export function ModelChip({
         type="button"
         onClick={onClick}
         aria-haspopup="dialog"
-        aria-label={roleLabel ? `${roleLabel}: ${name}` : name}
+        aria-label={roleLabel ? `${roleLabel}: ${ariaName}` : ariaName}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {!isEmpty && <ProviderLogo slug={modelProviderSlug(config.name)} size={24} />}
+        {fallback && <ProviderLogo slug={modelProviderSlug(fallback.value)} size={24} />}
         {content}
       </button>
 

@@ -14,7 +14,7 @@ import { Switch } from "@/shared/ui/primitives/switch";
 import { Separator } from "@/shared/ui/primitives/separator";
 import { ModelPicker, modelSupportsThinking } from "./ModelPicker";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
-import { modelProviderSlug } from "@/shared/lib/model-provider";
+import { modelDisplayName, modelProviderSlug } from "@/shared/lib/model-provider";
 import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
 import { NumberInput } from "@/shared/ui/number-input";
 import { Segmented } from "@/shared/ui/segmented";
@@ -260,7 +260,9 @@ export function ModelConfigModal({
                         className="flex items-center gap-1.5 cursor-pointer outline-none"
                       >
                         <ProviderLogo slug={modelProviderSlug(rc.name)} size={16} />
-                        <span className="truncate max-w-[120px]">{rc.name.split("/").pop()}</span>
+                        <span className="truncate max-w-[120px]" dir="ltr">
+                          {modelDisplayName(rc.name, detectionModels)}
+                        </span>
                         {!nameOnly && !modelDefaultsOnly && showParameters && (
                           <span className="text-[9px] opacity-60">{rc.temperature}</span>
                         )}
@@ -270,7 +272,7 @@ export function ModelConfigModal({
                           type="button"
                           aria-label={formatMsg(
                             "auto.features.submit.components.modelconfigmodal.recent.remove",
-                            { model: rc.name.split("/").pop() ?? rc.name },
+                            { model: modelDisplayName(rc.name, detectionModels) },
                           )}
                           onClick={(e) => {
                             e.stopPropagation();

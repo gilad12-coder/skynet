@@ -870,6 +870,15 @@ class Settings(BaseSettings):
         description="Optional custom base URL for the generalist agent LM (e.g. internal OpenAI-compatible gateway)",
     )
 
+    interview_agent_model: str = Field(
+        default="",
+        description=(
+            "LiteLLM model id every agent interview runs when the user picks "
+            "none (onboarding, code interview, tagger dataset interview). Empty "
+            "follows the catalog's measured fastest small featured model."
+        ),
+    )
+
     tagger_assist_model: str = Field(
         default="",
         description=(

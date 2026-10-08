@@ -12,6 +12,7 @@ import logging
 
 from ..config import settings
 from ..models import ModelConfig
+from .interview_model import interview_model_id
 from .model_catalog import (
     REASONING_EFFORTS,
     agent_model_id,
@@ -143,3 +144,22 @@ def route_menu_model(model: str | None) -> str | None:
         require_known_model(name)
         return name
     return default_model_id()
+
+
+def route_interview_model(model: str | None) -> str | None:
+    """Resolve an agent interview's model field, defaulting to the interview pick.
+
+    Args:
+        model: Raw ``model`` value from the request.
+
+    Returns:
+        The validated catalog id when one was picked, else the measured
+        interview model (see :mod:`core.api.interview_model`).
+
+    Raises:
+        DomainError: 422 when an explicit id is not a catalog model.
+    """
+    name = str(model or "").strip()
+    if name and name != _RETIRED_AUTO_ID and not is_removed_model(name):
+        return route_menu_model(name)
+    return interview_model_id()

@@ -177,7 +177,10 @@ export function ModelPicker({
     const q = query.trim().toLowerCase();
     if (!q) return byPurpose;
     return byPurpose.filter(
-      (m) => m.value.toLowerCase().includes(q) || m.label.toLowerCase().includes(q),
+      (m) =>
+        m.value.toLowerCase().includes(q) ||
+        m.label.toLowerCase().includes(q) ||
+        !!m.display_name?.toLowerCase().includes(q),
     );
   }, [allModels, purpose, query]);
 
@@ -247,7 +250,7 @@ export function ModelPicker({
             <span className="flex min-w-0 flex-1 items-center gap-2" dir="ltr">
               <ProviderLogo slug={modelProviderSlug(value)} size={16} />
               <span className="truncate font-mono text-[0.8125rem]">
-                {selectedModel?.label ?? value}
+                {selectedModel?.display_name || selectedModel?.label || value}
               </span>
             </span>
           ) : (
@@ -339,7 +342,7 @@ export function ModelPicker({
                   aria-selected={isSelected(m)}
                 >
                   <span className="flex min-w-0 flex-1 items-center gap-1.5" dir="ltr">
-                    <span className="truncate text-[0.8125rem]">{m.label}</span>
+                    <span className="truncate text-[0.8125rem]">{m.display_name || m.label}</span>
                     {m.supports_vision && (
                       <MicroPill tone="primary" title={msg("shared.model_chip.vision_badge")}>
                         <Eye className="size-2.5" />

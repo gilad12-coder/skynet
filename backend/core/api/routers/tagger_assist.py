@@ -52,7 +52,7 @@ from ...worker.tagging_job import TaggingAutotagPayload, untagged_rows
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort, get_catalog_cached, is_hidden_model
-from ..model_router import effective_reasoning_effort, route_menu_model
+from ..model_router import effective_reasoning_effort, route_interview_model
 from ..sharing_access import ShareRole
 from ..tagging_session_access import require_role
 from ._helpers import enforce_llm_balance, sse_from_events, stream_with_llm_metering
@@ -358,7 +358,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             config = _interview_config(row)
             columns = cast("list[str]", row.columns)
             data = cast("list[dict[str, Any]]", row.data)
-        model = route_menu_model(req.model)
+        model = route_interview_model(req.model)
         usage_sink: list = []
         try:
             turn = tagging.interview_turn(
@@ -415,7 +415,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                 sse_from_events(oversized_kickoff("data")), media_type="text/event-stream", headers=_SSE_HEADERS
             )
         await asyncio.to_thread(enforce_llm_balance, job_store, user.username)
-        model = route_menu_model(req.model)
+        model = await asyncio.to_thread(route_interview_model, req.model)
         usage_sink: list = []
 
         async def source() -> Any:

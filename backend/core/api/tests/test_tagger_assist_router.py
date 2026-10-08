@@ -342,8 +342,9 @@ def test_interview_stream_tolerates_turn_bookkeeping_fields(monkeypatch) -> None
     ]
 
 
-def test_interview_stream_auto_runs_catalog_default(monkeypatch) -> None:
+def test_interview_stream_auto_runs_interview_default(monkeypatch) -> None:
     """No chosen model runs the catalog default with no router extras."""
+    monkeypatch.setattr(model_router, "interview_model_id", lambda: "openrouter/anthropic/claude-sonnet-5")
     seen: dict = {}
 
     async def fake_stream(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):

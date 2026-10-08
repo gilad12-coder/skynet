@@ -89,8 +89,9 @@ def test_interview_streams_events_and_forwards_args(monkeypatch) -> None:
     assert seen["reasoning_effort"] == "high"
 
 
-def test_interview_without_model_runs_catalog_default(monkeypatch) -> None:
-    """An absent model and the retired 'auto:intelligent' both run the catalog default."""
+def test_interview_without_model_runs_interview_default(monkeypatch) -> None:
+    """An absent model and the retired 'auto:intelligent' both run the interview pick."""
+    monkeypatch.setattr(model_router, "interview_model_id", lambda: "openrouter/anthropic/claude-sonnet-5")
     seen: list[dict[str, Any]] = []
 
     async def fake_stream(**kwargs: Any) -> Any:

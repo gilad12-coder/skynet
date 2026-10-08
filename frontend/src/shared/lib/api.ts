@@ -3586,6 +3586,102 @@ export async function streamCodeInterviewTurn(
   if (!finished) handlers.onError(msg("submit.code.interview.error"));
 }
 
+export interface IntakeInterviewRequest {
+  /** The open question being asked; each phase is its own short conversation. */
+  phase: "goal" | "source";
+  /** This phase's transcript only; empty asks for its opening question. */
+  turns: CodeAgentChatTurn[];
+  /** What the user has answered so far, in the `profile_patch` shape. */
+  profile: Record<string, unknown>;
+  locale?: string;
+  model?: string;
+  reasoning_effort?: string;
+}
+
+export interface IntakeInterviewTurnResult {
+  message: string;
+  options: InterviewOption[];
+  /** The phase's question is answered; the client moves to the next one. */
+  phase_done: boolean;
+  /** Raw answers the model heard, coerced by the caller before use. */
+  profile_patch: unknown;
+  /** Later phases the answer made moot (raw; coerced by the caller). */
+  skip_phases: unknown;
+  /** The user asked to take the defaults for everything left. */
+  skip_rest: boolean;
+  model?: string | null;
+  served_model?: string | null;
+}
+
+export type IntakeInterviewHandlers = Omit<CodeInterviewHandlers, "onDone"> & {
+  onDone: (turn: IntakeInterviewTurnResult) => void;
+};
+
+/**
+ * Stream one first-login setup interview turn via SSE — the code
+ * interview's transport and event shapes, ending in `interview_done`.
+ * Any failure (an `error` event, a dropped connection, a server without the
+ * endpoint) reaches `onError`, so the setup can switch to fixed questions.
+ */
+export async function streamIntakeInterviewTurn(
+  req: IntakeInterviewRequest,
+  handlers: IntakeInterviewHandlers,
+): Promise<void> {
+  let finished = false;
+  const result = await streamResumableTurn({
+    fetch: fetchWithAuthRetry,
+    read: readServerSentEvents,
+    apiBase: apiBase(),
+    startPath: "/account/intake-interview",
+    startInit: {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(req),
+    },
+    signal: handlers.signal,
+    onEvent: ({ event, data }) => {
+      if (finished) return;
+      switch (event) {
+        case "reasoning_patch":
+          handlers.onReasoningPatch?.(String(data.chunk ?? ""));
+          break;
+        case "message_patch":
+          handlers.onMessagePatch?.(String(data.chunk ?? ""));
+          break;
+        case "message_end":
+          handlers.onMessageEnd?.();
+          break;
+        case "turn_hint":
+          handlers.onTurnHint?.(data.final === true);
+          break;
+        case "message_reset":
+          handlers.onMessageReset?.();
+          break;
+        case "interview_done":
+          finished = true;
+          handlers.onDone({
+            message: String(data.message ?? ""),
+            options: parseInterviewOptions(data.options),
+            phase_done: data.phase_done === true,
+            profile_patch: data.profile_patch ?? null,
+            skip_phases: data.skip_phases ?? [],
+            skip_rest: data.skip_rest === true,
+            model: typeof data.model === "string" && data.model ? data.model : null,
+            served_model:
+              typeof data.served_model === "string" && data.served_model ? data.served_model : null,
+          });
+          break;
+        case "error":
+          finished = true;
+          handlers.onError(msg("experience.intake.chat.error"));
+          break;
+      }
+    },
+  });
+  if (result.status === "aborted") return;
+  if (!finished) handlers.onError(msg("experience.intake.chat.error"));
+}
+
 export interface PublicDashboardPoint {
   optimization_id: string;
   optimization_type: string | null;
