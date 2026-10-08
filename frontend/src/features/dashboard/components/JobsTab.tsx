@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   CaretLeft,
   CaretRight,
@@ -47,27 +48,18 @@ import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { TERMS } from "@/shared/lib/terms";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { FETCH_PAGE_SIZE } from "../constants";
+import {
+  columnCollapse,
+  DEFAULT_COL_WIDTHS,
+  JOBS_LAYOUT_KEY,
+  JOBS_TABLE_CLASS,
+  jobsColSpan,
+  type JobsLayout,
+  visibleJobsColumns,
+} from "../lib/jobs-columns";
+import { rememberLayout } from "@/shared/lib/layout-hint";
 import { formatScore, typeBadge } from "../lib/status-badges";
 import { StatusBadge } from "@/shared/ui/status-badge";
-
-// Default widths sized so all columns fit on screen at once (no horizontal
-// scroll) while each header still shows its full Hebrew label. This works in
-// tandem with the compact density overrides on the <Table> below (smaller
-// header font, tighter padding, smaller sort/filter icons) — without those
-// the labels would clip at these widths. Users can still resize individually.
-const DEFAULT_COL_WIDTHS: Record<string, number> = {
-  optimization_id: 86,
-  name: 104,
-  username: 94,
-  role: 92,
-  optimization_type: 80,
-  status: 94,
-  module_name: 94,
-  dataset_rows: 72,
-  created_at: 94,
-  elapsed_seconds: 66,
-  optimized_test_metric: 94,
-};
 
 type ColResize = ReturnType<typeof useColumnResize>;
 
@@ -199,6 +191,19 @@ export function JobsTab({
   const PrevIcon = rtl ? CaretRight : CaretLeft;
   const NextIcon = rtl ? CaretLeft : CaretRight;
 
+  const layout: JobsLayout | null =
+    !loading && data
+      ? {
+          groups: groupJobsByStatus(filteredItems).map(([, jobs]) => jobs.length),
+          shared: showSharedColumns,
+          pager: data.total > FETCH_PAGE_SIZE,
+        }
+      : null;
+  const layoutJson = layout && JSON.stringify(layout);
+  useEffect(() => {
+    if (layoutJson) rememberLayout(JOBS_LAYOUT_KEY, JSON.parse(layoutJson));
+  }, [layoutJson]);
+
   return (
     <Card className="overflow-hidden border-border/60">
       <CardContent className="px-3 pt-4 sm:px-6 sm:pt-5">
@@ -216,18 +221,7 @@ export function JobsTab({
               iconOnly
               className="ms-auto"
               getData={() => {
-                const cols = [
-                  "optimization_id",
-                  "name",
-                  ...(showSharedColumns ? ["username", "role"] : []),
-                  "optimization_type",
-                  "status",
-                  "module_name",
-                  "dataset_rows",
-                  "created_at",
-                  "elapsed_seconds",
-                  "optimized_test_metric",
-                ];
+                const cols = visibleJobsColumns(showSharedColumns).map((c) => c.key);
                 return {
                   columns: cols,
                   rows: filteredItems.map((job) => {
@@ -267,11 +261,15 @@ export function JobsTab({
             className="overflow-x-auto rounded-2xl border border-border/40 bg-card/60"
             data-tutorial="dashboard-table"
           >
-            <Table className="no-copy-underline [&_thead_th]:ps-1 [&_thead_th]:pe-2 [&_thead_th]:py-2 [&_thead_th]:text-[0.6875rem] [&_thead_th_button]:px-1 [&_thead_svg]:size-2.5 [&_tbody_td]:px-1.5">
+            <Table className={JOBS_TABLE_CLASS}>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-12 px-0 text-center">
-                    <div className="flex justify-center">
+                    {/* On touch the column is squeezed below w-12 (to ~24px on iPad
+                        portrait), so the checkbox's 44px hit area ran out of the scroll
+                        container and under the next, positioned header. A 44px wrapper
+                        keeps the whole hit area inside this column. */}
+                    <div className="flex justify-center any-pointer-coarse:min-w-[44px]">
                       <SelectCheckbox
                         checked={pageAllSelected}
                         indeterminate={pageSomeSelected}
@@ -330,7 +328,7 @@ export function JobsTab({
                         setOpenFilter={setOpenFilter}
                         width={colResize.widths["username"] ?? DEFAULT_COL_WIDTHS.username}
                         onResize={colResize.setColumnWidth}
-                        collapse="md"
+                        collapse={columnCollapse("username")}
                       />
                       <ColumnHeader
                         label={msg("dashboard.col.role")}
@@ -346,7 +344,7 @@ export function JobsTab({
                         setOpenFilter={setOpenFilter}
                         width={colResize.widths["role"] ?? DEFAULT_COL_WIDTHS.role}
                         onResize={colResize.setColumnWidth}
-                        collapse="lg"
+                        collapse={columnCollapse("role")}
                       />
                     </>
                   )}
@@ -366,7 +364,7 @@ export function JobsTab({
                       colResize.widths["optimization_type"] ?? DEFAULT_COL_WIDTHS.optimization_type
                     }
                     onResize={colResize.setColumnWidth}
-                    collapse="md"
+                    collapse={columnCollapse("optimization_type")}
                   />
                   <ColumnHeader
                     label={msg("auto.features.dashboard.components.jobstab.literal.3")}
@@ -382,7 +380,7 @@ export function JobsTab({
                     setOpenFilter={setOpenFilter}
                     width={colResize.widths["status"] ?? DEFAULT_COL_WIDTHS.status}
                     onResize={colResize.setColumnWidth}
-                    collapse="lg"
+                    collapse={columnCollapse("status")}
                   />
                   <ColumnHeader
                     label={msg("auto.features.dashboard.components.jobstab.literal.4")}
@@ -398,7 +396,7 @@ export function JobsTab({
                     setOpenFilter={setOpenFilter}
                     width={colResize.widths["module_name"] ?? DEFAULT_COL_WIDTHS.module_name}
                     onResize={colResize.setColumnWidth}
-                    collapse="lg"
+                    collapse={columnCollapse("module_name")}
                   />
                   <ColumnHeader
                     label={msg("auto.features.dashboard.components.jobstab.literal.5")}
@@ -408,7 +406,7 @@ export function JobsTab({
                     onSort={toggleSort}
                     width={colResize.widths["dataset_rows"] ?? DEFAULT_COL_WIDTHS.dataset_rows}
                     onResize={colResize.setColumnWidth}
-                    collapse="lg"
+                    collapse={columnCollapse("dataset_rows")}
                   />
                   <ColumnHeader
                     label={msg("auto.features.dashboard.components.jobstab.literal.6")}
@@ -418,7 +416,7 @@ export function JobsTab({
                     onSort={toggleSort}
                     width={colResize.widths["created_at"] ?? DEFAULT_COL_WIDTHS.created_at}
                     onResize={colResize.setColumnWidth}
-                    collapse="sm"
+                    collapse={columnCollapse("created_at")}
                   />
                   <ColumnHeader
                     label={msg("auto.features.dashboard.components.jobstab.literal.7")}
@@ -430,7 +428,7 @@ export function JobsTab({
                       colResize.widths["elapsed_seconds"] ?? DEFAULT_COL_WIDTHS.elapsed_seconds
                     }
                     onResize={colResize.setColumnWidth}
-                    collapse="md"
+                    collapse={columnCollapse("elapsed_seconds")}
                   />
                   <ColumnHeader
                     label={msg("auto.features.dashboard.components.jobstab.literal.8")}
@@ -453,7 +451,7 @@ export function JobsTab({
                   key={status}
                   label={getStatusLabel(status)}
                   count={jobs.length}
-                  colSpan={showSharedColumns ? 13 : 11}
+                  colSpan={jobsColSpan(showSharedColumns)}
                   icon={
                     <span
                       aria-hidden="true"
@@ -484,7 +482,7 @@ export function JobsTab({
                         }}
                       >
                         <TableCell className="w-12 px-0 text-center">
-                          <div className="flex justify-center">
+                          <div className="flex justify-center any-pointer-coarse:min-w-[44px]">
                             <SelectCheckbox
                               checked={isSelected}
                               onToggle={() => toggleRowSelected(job.optimization_id)}
@@ -570,7 +568,7 @@ export function JobsTab({
                               className="px-2 max-w-[120px] text-sm truncate overflow-hidden"
                               title={job.username ?? ""}
                               data-label={msg("dashboard.col.owner")}
-                              collapse="md"
+                              collapse={columnCollapse("username")}
                             >
                               {job.username ? (
                                 job.username.toLowerCase() === sessionUser.toLowerCase() ? (
@@ -589,7 +587,7 @@ export function JobsTab({
                             <TableCell
                               className="px-2"
                               data-label={msg("dashboard.col.role")}
-                              collapse="lg"
+                              collapse={columnCollapse("role")}
                             >
                               <RoleBadge role={job.role} />
                             </TableCell>
@@ -598,14 +596,14 @@ export function JobsTab({
                         <TableCell
                           className="px-2 truncate overflow-hidden"
                           data-label={msg("auto.features.dashboard.components.jobstab.literal.2")}
-                          collapse="md"
+                          collapse={columnCollapse("optimization_type")}
                         >
                           {typeBadge(job.optimization_type)}
                         </TableCell>
                         <TableCell
                           className="px-2 truncate overflow-hidden"
                           data-label={msg("auto.features.dashboard.components.jobstab.literal.3")}
-                          collapse="lg"
+                          collapse={columnCollapse("status")}
                         >
                           <StatusBadge status={job.status} compact />
                         </TableCell>
@@ -613,7 +611,7 @@ export function JobsTab({
                           className="px-2 max-w-[120px] text-sm truncate overflow-hidden"
                           title={job.module_name ?? ""}
                           data-label={msg("auto.features.dashboard.components.jobstab.literal.4")}
-                          collapse="lg"
+                          collapse={columnCollapse("module_name")}
                         >
                           {moduleLabel(job.module_name)}
                         </TableCell>
@@ -621,7 +619,7 @@ export function JobsTab({
                           className="px-2 text-sm tabular-nums truncate overflow-hidden"
                           title={String(job.dataset_rows ?? "")}
                           data-label={msg("auto.features.dashboard.components.jobstab.literal.5")}
-                          collapse="lg"
+                          collapse={columnCollapse("dataset_rows")}
                         >
                           {job.dataset_rows ?? "-"}
                         </TableCell>
@@ -629,14 +627,14 @@ export function JobsTab({
                           className="px-2 text-xs text-muted-foreground truncate overflow-hidden whitespace-nowrap"
                           title={formatDate(job.created_at)}
                           data-label={msg("auto.features.dashboard.components.jobstab.literal.6")}
-                          collapse="sm"
+                          collapse={columnCollapse("created_at")}
                         >
                           {formatRelativeTime(job.created_at)}
                         </TableCell>
                         <TableCell
                           className="px-2 text-xs tabular-nums truncate overflow-hidden whitespace-nowrap"
                           data-label={msg("auto.features.dashboard.components.jobstab.literal.7")}
-                          collapse="md"
+                          collapse={columnCollapse("elapsed_seconds")}
                         >
                           <LiveElapsed
                             startedAt={job.started_at}

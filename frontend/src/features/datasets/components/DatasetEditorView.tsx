@@ -43,9 +43,14 @@ import {
 } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
-import { DatasetEditorSkeleton } from "./DatasetEditorSkeleton";
+import {
+  DatasetEditorSkeleton,
+  EDITOR_PAGE_SIZE,
+  editorLayoutKey,
+} from "./DatasetEditorSkeleton";
+import { rememberLayout } from "@/shared/lib/layout-hint";
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = EDITOR_PAGE_SIZE;
 const SAVE_DEBOUNCE_MS = 800;
 const SAVE_RETRY_MS = 10_000;
 const HISTORY_LIMIT = 100;
@@ -342,6 +347,19 @@ export function DatasetEditorView() {
       }
     };
   }, [id]);
+
+  const readyShape =
+    state.mode === "ready"
+      ? {
+          cols: state.columns.length,
+          rows: Math.max(0, Math.min(state.rows.length - page * EDITOR_PAGE_SIZE, EDITOR_PAGE_SIZE)),
+          pager: state.rows.length > EDITOR_PAGE_SIZE,
+        }
+      : null;
+  const readyShapeJson = readyShape && JSON.stringify(readyShape);
+  React.useEffect(() => {
+    if (readyShapeJson) rememberLayout(editorLayoutKey(id), JSON.parse(readyShapeJson));
+  }, [id, readyShapeJson]);
 
   if (state.mode === "loading") {
     return <DatasetEditorSkeleton />;

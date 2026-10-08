@@ -3,7 +3,11 @@
  * maps onto a run's plan. Kept free of runtime imports so it unit-tests
  * without the app's module aliases.
  */
-import type { OptimizationPayloadResponse, OptimizationStatusResponse } from "@/shared/types/api";
+import type {
+  BlackboxStrategy,
+  OptimizationPayloadResponse,
+  OptimizationStatusResponse,
+} from "@/shared/types/api";
 import type { PipelineStage } from "../constants";
 
 const STAGE_ORDER: readonly PipelineStage[] = [
@@ -38,6 +42,48 @@ export function preparationStages(
 ): PipelineStage[] {
   if (job.optimization_type === "blackbox") return [];
   return hasTestSplit(job, payload) ? ["splitting", "baseline"] : ["splitting"];
+}
+
+/**
+ * The engine of a single-engine black-box run, or null for the auto strategy
+ * (and for DSPy runs). The run's own lane event wins; before it lands, the
+ * submitted strategy and then the result name the engine.
+ */
+export function singleEngineOf(
+  job: OptimizationStatusResponse,
+  payload: OptimizationPayloadResponse | null | undefined,
+): string | null {
+  if (job.optimization_type !== "blackbox") return null;
+  const singleLane = job.progress_events?.find(
+    (e) => e.event === "lane_started" && e.metrics?.phase === "single",
+  );
+  const laneEngine = singleLane?.metrics?.engine;
+  if (typeof laneEngine === "string") return laneEngine;
+  const strategy = payload?.payload.strategy as Partial<BlackboxStrategy> | undefined;
+  if (strategy?.mode === "single")
+    return strategy.engine ?? job.blackbox_result?.engine_used ?? null;
+  // Without the payload (a share view, the detail gate's probe) the finished
+  // result still records the strategy it ran.
+  if (!strategy && job.blackbox_result?.strategy_mode === "single")
+    return job.blackbox_result.engine_used;
+  return null;
+}
+
+/**
+ * The keys of every stage a run's pipeline tracker shows, in order. The
+ * tracker (`planPipelineStages`) labels these, and the loading skeleton
+ * remembers how many there are, so both always agree on the count.
+ */
+export function plannedStageKeys(
+  job: OptimizationStatusResponse,
+  payload: OptimizationPayloadResponse | null | undefined,
+): PipelineStage[] {
+  // The auto strategy races explore lanes, then refines the winner with GEPA.
+  const middle: PipelineStage[] =
+    job.optimization_type === "blackbox" && singleEngineOf(job, payload) === null
+      ? ["optimizing", "refining"]
+      : ["optimizing"];
+  return ["validating", ...preparationStages(job, payload), ...middle, "evaluating"];
 }
 
 /**

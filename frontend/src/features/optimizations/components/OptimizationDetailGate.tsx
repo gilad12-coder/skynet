@@ -24,7 +24,8 @@ import {
 } from "@/features/tutorial/lib/demo-data";
 import { OptimizationDetailView } from "./OptimizationDetailView";
 import { OptimizationDetailSkeleton } from "./OptimizationDetailSkeleton";
-import { rememberRunKind, useRunKindHint } from "../lib/run-kind-hint";
+import { rememberProbedRun, useRunKindHint } from "../lib/run-kind-hint";
+import { planPipelineStages } from "../lib/pipeline-plan";
 
 type GateState =
   | { mode: "loading" }
@@ -89,7 +90,11 @@ export function OptimizationDetailGate() {
         for (let attempt = 0; ; attempt++) {
           try {
             const probed = await getJob(id);
-            rememberRunKind(id, probed.optimization_type);
+            rememberProbedRun(
+              id,
+              probed.optimization_type,
+              planPipelineStages(probed, null).map((s) => ({ detail: !!s.detail, foot: "time" })),
+            );
             if (cancelled) return;
             resolvedIdRef.current = id;
             setState({ mode: "owned" });

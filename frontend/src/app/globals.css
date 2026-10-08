@@ -1125,8 +1125,29 @@ header {
     box-shadow: none;
   }
 
-  /* Active state instead of hover */
-  [data-slot="card"]:active {
+  /* Active state instead of hover. Not while a control inside the card is the one
+     being pressed: the shrink lands between touchend and the synthesized click, so
+     a large card (the dashboard table) slid small targets out from under the finger
+     and taps near a checkbox's edge clicked the cell behind it. */
+  [data-slot="card"]:active:not(
+      :has(
+          :is(
+              button,
+              a,
+              input,
+              select,
+              textarea,
+              label,
+              [role="button"],
+              [role="checkbox"],
+              [role="switch"],
+              [role="tab"],
+              [role="radio"],
+              [role="link"],
+              [role="menuitem"]
+            ):active
+        )
+    ) {
     transform: scale(0.98);
     transition-duration: 100ms;
   }
@@ -1375,6 +1396,22 @@ table {
   table.table-stack td:not([data-label])::before {
     content: none;
   }
+}
+
+/* A real component drawn as a loading bone (Ghost in shared/ui/skeleton): it
+   keeps its exact box while its text and icons are hidden. */
+.skeleton-ghost {
+  display: contents;
+}
+.skeleton-ghost > * {
+  background: #ebe4d8 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: transparent !important;
+  pointer-events: none;
+}
+.skeleton-ghost > * * {
+  visibility: hidden;
 }
 
 /* Gliding columns. A table whose cells opt in with ``collapse`` becomes a

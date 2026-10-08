@@ -9,7 +9,8 @@ import { formatStorageSize } from "@/shared/lib/formatters";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { StorageCategoryDrawer } from "./StorageCategoryDrawer";
-import { StorageSkeleton } from "./StorageSkeleton";
+import { STORAGE_LAYOUT_KEY, StorageSkeleton } from "./StorageSkeleton";
+import { rememberLayout } from "@/shared/lib/layout-hint";
 import { categoryLabel } from "../lib/categories";
 
 /**
@@ -58,6 +59,11 @@ export function StorageView() {
       .filter(([, bytes]) => bytes > 0)
       .sort((a, b) => b[1] - a[1]);
   }, [usage]);
+
+  const categoryCount = usage ? breakdown.length : null;
+  React.useEffect(() => {
+    if (categoryCount != null) rememberLayout(STORAGE_LAYOUT_KEY, categoryCount);
+  }, [categoryCount]);
 
   if (loading) return <StorageSkeleton />;
 

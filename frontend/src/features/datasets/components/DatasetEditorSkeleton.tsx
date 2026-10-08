@@ -1,21 +1,39 @@
 "use client";
 
+import { useParams } from "next/navigation";
 import { AppSkeletonTheme, Skeleton } from "@/shared/ui/skeleton";
+import { hintedCount, useLayoutHint } from "@/shared/lib/layout-hint";
 
-const COLUMNS = 3;
-const ROWS = 8;
+/** Rows the editor shows per page. */
+export const EDITOR_PAGE_SIZE = 100;
+
+/** What the editor last rendered for a dataset: its columns, rows on the page, and pager. */
+interface EditorLayout {
+  cols: number;
+  rows: number;
+  pager: boolean;
+}
+
+export function editorLayoutKey(id: string): string {
+  return `dataset-editor:${id}`;
+}
 
 // Touch targets (links, icon buttons, inputs) grow to 44px under a coarse
 // pointer through the global rule, so the matching bones grow with them.
-const COARSE_44 = "any-pointer-coarse:h-11";
+const COARSE_44 = "any-pointer-coarse:h-[44px]";
 
 /**
  * Loading silhouette for /datasets/[id]/edit, in DatasetEditorView's order: the
  * back link, the title row with its icon actions, then the editable grid inside
  * the same horizontally scrolling card, with the header, cell and add-row
- * heights the real table renders.
+ * heights the real table renders. A revisit draws the dataset's own column
+ * and row counts, and its pager, as the editor last showed them.
  */
 export function DatasetEditorSkeleton() {
+  const { id } = useParams<{ id?: string }>() ?? {};
+  const layout = useLayoutHint<EditorLayout>(id ? editorLayoutKey(id) : undefined);
+  const COLUMNS = hintedCount(layout?.cols, 3, 12);
+  const ROWS = hintedCount(layout?.rows, 8, EDITOR_PAGE_SIZE);
   return (
     <AppSkeletonTheme>
       <div className="flex flex-col gap-4 pb-12" aria-hidden="true">
@@ -25,17 +43,18 @@ export function DatasetEditorSkeleton() {
 
         <div className="flex flex-wrap items-center gap-2 lg:gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex h-7 items-center">
-              <Skeleton height={18} width="40%" containerClassName="flex-1 leading-none" />
-            </div>
-            <div className="flex h-4 items-center">
-              <Skeleton height={10} width={120} containerClassName="flex leading-none" />
-            </div>
+            {/* The real tags: the global h2 size wins over the text-* classes. */}
+            <h2 className="truncate text-lg sm:text-xl font-bold tracking-tight">
+              <Skeleton width="40%" />
+            </h2>
+            <p className="text-xs">
+              <Skeleton width={120} />
+            </p>
           </div>
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="flex size-8 items-center justify-center any-pointer-coarse:size-11"
+              className="flex size-8 items-center justify-center any-pointer-coarse:size-[44px]"
             >
               <Skeleton
                 width={16}
@@ -75,12 +94,14 @@ export function DatasetEditorSkeleton() {
                     <Skeleton width={12} height={10} containerClassName="flex leading-none" />
                   </td>
                   {Array.from({ length: COLUMNS }).map((_, col) => (
-                    <td key={col} className="px-1 py-0.5">
-                      <div className={`flex h-[30px] items-center px-2 ${COARSE_44}`}>
+                    <td key={col} className="px-1 py-0.5 align-top">
+                      {/* The cell input's own box: border, px-2 py-1, one text-sm line. */}
+                      <div
+                        className="flex items-center rounded-md border border-transparent px-2 py-1 text-sm any-pointer-coarse:min-h-[44px]"
+                      >
                         <Skeleton
-                          height={11}
                           width={`${45 + (((row + 1) * (col + 3) * 7) % 40)}%`}
-                          containerClassName="flex-1 leading-none"
+                          containerClassName="flex-1"
                         />
                       </div>
                     </td>
@@ -100,6 +121,20 @@ export function DatasetEditorSkeleton() {
             </tfoot>
           </table>
         </div>
+
+        {layout?.pager && (
+          <div className="flex items-center justify-end gap-2">
+            <span className="flex size-8 any-pointer-coarse:size-[44px]">
+              <Skeleton containerClassName="flex flex-1" className="h-full" borderRadius={8} />
+            </span>
+            <span className="text-xs">
+              <Skeleton width={96} />
+            </span>
+            <span className="flex size-8 any-pointer-coarse:size-[44px]">
+              <Skeleton containerClassName="flex flex-1" className="h-full" borderRadius={8} />
+            </span>
+          </div>
+        )}
       </div>
     </AppSkeletonTheme>
   );

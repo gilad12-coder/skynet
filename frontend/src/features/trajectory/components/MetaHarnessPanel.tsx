@@ -29,7 +29,7 @@ import {
   type AgentRunSummary,
 } from "../lib/meta-harness";
 import { displayCandidateId, type BlackboxTrajectoryContext } from "../lib/types";
-import { rememberClimbView } from "../lib/climb-view-hint";
+import { rememberTrajectoryView } from "../lib/climb-view-hint";
 import { AgentRunViewer } from "./AgentRunViewer";
 import { MetaHarnessClimb } from "./MetaHarnessClimb";
 import { MetaHarnessOutline } from "./MetaHarnessOutline";
@@ -86,9 +86,6 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
   const lite = useLiteMode();
   const optimizationId = job.optimization_id;
 
-  useEffect(() => {
-    if (!lite) rememberClimbView(optimizationId);
-  }, [lite, optimizationId]);
   const blackboxCtx = blackbox ?? BLACKBOX_FALLBACK;
   const { candidates, caseScores, valsetRows, minibatch, valsetOutputs, agentRuns } =
     useMemo(() => {
@@ -227,7 +224,12 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
     [fullModel, runsByCell, selectedId, pendingId],
   );
 
-  if (fullModel.versions.length === 0 && (!live || fullModel.pending === null)) return null;
+  const hidden = fullModel.versions.length === 0 && (!live || fullModel.pending === null);
+  useEffect(() => {
+    if (!lite) rememberTrajectoryView(optimizationId, hidden ? "none" : "climb");
+  }, [lite, optimizationId, hidden]);
+
+  if (hidden) return null;
 
   const versionCount = formatMsg("meta_harness.header.versions", {
     n: fullModel.versions.length,

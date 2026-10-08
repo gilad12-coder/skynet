@@ -28,6 +28,7 @@ import type {
 import type { PipelineStage } from "../constants";
 import { detectPairStage, detectStage } from "../lib/detect-stage";
 import { planPipelineStages, stageInPlan } from "../lib/pipeline-plan";
+import { runShapeKey } from "../lib/run-kind-hint";
 import {
   formatBlackboxDelta,
   formatBlackboxScore,
@@ -418,6 +419,7 @@ function OverviewTabImpl({
             isFailed={stagesFailed}
             skippedStages={skippedStages}
             dataTutorial={isPairContext ? undefined : "pipeline-stages"}
+            hintKey={runShapeKey(job.optimization_id, isPairContext)}
           />
         </FadeIn>
       )}

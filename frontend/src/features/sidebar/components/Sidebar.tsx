@@ -25,7 +25,13 @@ import {
   Users,
   FolderOpen,
 } from "@/shared/ui/icons";
-import { SidebarMoreSkeleton } from "./SidebarMoreSkeleton";
+import {
+  SIDEBAR_RUNS_LAYOUT_KEY,
+  SidebarMoreSkeleton,
+  SidebarRunsSkeleton,
+  sidebarRunGroups,
+} from "./SidebarMoreSkeleton";
+import { rememberLayout, useLayoutHint } from "@/shared/lib/layout-hint";
 import { cn } from "@/shared/lib/utils";
 import { Button } from "@/shared/ui/primitives/button";
 import {
@@ -553,6 +559,15 @@ export function Sidebar() {
   );
   const showFolders = groupByFolder && rootFolders.length > 0;
 
+  // The first page lands into an empty list; remembering its groups lets that
+  // first load draw the same date headings and rows instead of three bare bones.
+  const runGroupsHint = useLayoutHint<number[]>(SIDEBAR_RUNS_LAYOUT_KEY);
+  const runGroupSizes = groupedJobs.map((group) => group.jobs.length).join(",");
+  React.useEffect(() => {
+    if (renderedTab !== "mine" || showFolders || !runGroupSizes) return;
+    rememberLayout(SIDEBAR_RUNS_LAYOUT_KEY, sidebarRunGroups(runGroupSizes.split(",").map(Number)));
+  }, [renderedTab, showFolders, runGroupSizes]);
+
   const deleteJobInfo = React.useMemo(() => {
     if (!deleteConfirm) return null;
     const job = jobs.find((j) => j.optimization_id === deleteConfirm.id);
@@ -765,7 +780,8 @@ export function Sidebar() {
                 )}
               </motion.div>
             </AnimatePresence>
-            {loadingMore && (
+            {loadingMore && jobs.length === 0 && <SidebarRunsSkeleton groups={runGroupsHint} />}
+            {loadingMore && jobs.length > 0 && (
               <div className="px-1 pt-1 pb-2" aria-hidden="true">
                 <SidebarMoreSkeleton />
               </div>

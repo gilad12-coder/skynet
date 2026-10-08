@@ -13,7 +13,9 @@
  * non-interactive renderer.
  */
 
+import { useEffect } from "react";
 import { Check, CircleNotch, Minus, X } from "@/shared/ui/icons";
+import { Skeleton } from "@/shared/ui/skeleton";
 import type { PipelineStage } from "../constants";
 import type { PlannedStage } from "../lib/pipeline-plan";
 import type { ProgressEvent } from "@/shared/types/api";
@@ -21,6 +23,7 @@ import { msg } from "@/shared/lib/messages";
 import { formatDuration } from "@/shared/lib/formatters";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
+import { rememberRunShape, type StageShape } from "../lib/run-kind-hint";
 
 interface StageTs {
   iso: string;
@@ -197,6 +200,7 @@ export function PipelineStages({
   isFailed,
   skippedStages = [],
   dataTutorial,
+  hintKey,
 }: {
   /** The run's stages in order, with the algorithm behind each. */
   plan: readonly PlannedStage[];
@@ -209,6 +213,8 @@ export function PipelineStages({
   /** Stages the run went past without executing (no test split, no starting point). */
   skippedStages?: readonly PipelineStage[];
   dataTutorial?: string;
+  /** Run-shape hint key: records how the stages render, for the next loading skeleton. */
+  hintKey?: string;
 }) {
   const stageCount = plan.length;
   const completedStageIdx =
@@ -251,11 +257,20 @@ export function PipelineStages({
 
   const railColor = isFailed ? "bg-destructive/70" : "bg-primary";
 
+  const shape: StageShape[] = stages.map((s) => ({
+    detail: !!s.detail,
+    foot: s.statusText ? "status" : s.ts ? (s.elapsed != null ? "chip" : "time") : "none",
+  }));
+  const shapeJson = JSON.stringify(shape);
+  useEffect(() => {
+    if (hintKey) rememberRunShape(hintKey, { stages: JSON.parse(shapeJson) as StageShape[] });
+  }, [hintKey, shapeJson]);
+
   // Both layouts are rendered and a container query picks one below 600px of
   // the component's own width, so the first paint already has the right
   // orientation (a ResizeObserver flip shifted the page on phones).
   return (
-    <div className="@container" data-tutorial={dataTutorial}>
+    <div className="@container" data-tutorial={dataTutorial} data-stage-tracker="">
       <div className="relative flex flex-col @min-[600px]:hidden">
         <div
           className="absolute bottom-[22px] top-[22px] w-[2px] rounded-full bg-border/60"
@@ -345,5 +360,84 @@ export function PipelineStages({
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * The loading skeleton of `PipelineStages`: the same two layouts, columns and
+ * line boxes, with bones in place of nodes and text. `stages` is the shape a
+ * previous render remembered; a run seen for the first time passes a generic one.
+ */
+export function PipelineStagesBone({ stages }: { stages: readonly StageShape[] }) {
+  return (
+    <div className="@container">
+      <div className="flex flex-col @min-[600px]:hidden">
+        {stages.map((s, i) => (
+          <div key={i} className="flex w-full min-w-0 items-center gap-3 px-1 py-1.5">
+            <NodeBone />
+            <span className="flex min-w-0 flex-col leading-tight">
+              <span className="text-xs">
+                <Skeleton width={88} />
+              </span>
+              {s.detail && (
+                <span className="text-[0.625rem]">
+                  <Skeleton width={40} />
+                </span>
+              )}
+            </span>
+            {s.foot !== "none" && (
+              <span className="ms-auto flex shrink-0 items-center font-mono text-[0.6875rem]">
+                <Skeleton width={s.foot === "status" ? 48 : 64} />
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      <div
+        className="hidden @min-[600px]:grid"
+        style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))` }}
+      >
+        {stages.map((s, i) => (
+          <div key={i} className="flex min-w-0 flex-col items-center gap-2 px-1 pb-1">
+            <NodeBone />
+            <span className="flex max-w-full flex-col items-center leading-tight">
+              <span className="text-xs">
+                <Skeleton width={64} />
+              </span>
+              {s.detail && (
+                <span className="text-[0.625rem]">
+                  <Skeleton width={36} />
+                </span>
+              )}
+            </span>
+            <span className="-mt-1 flex flex-col items-center gap-1 leading-tight">
+              {s.foot === "chip" && (
+                <span className="inline-flex h-4">
+                  <Skeleton
+                    width={32}
+                    height="100%"
+                    borderRadius={999}
+                    containerClassName="leading-none"
+                  />
+                </span>
+              )}
+              {s.foot !== "none" && (
+                <span className="font-mono text-[0.625rem]">
+                  <Skeleton width={s.foot === "status" ? 44 : 96} />
+                </span>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NodeBone() {
+  return (
+    <span className="flex size-8 shrink-0">
+      <Skeleton circle height="100%" width="100%" containerClassName="flex-1 leading-none" />
+    </span>
   );
 }

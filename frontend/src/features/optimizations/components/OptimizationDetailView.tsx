@@ -19,8 +19,6 @@ import {
   Copy,
   Database,
   Gear,
-  Eye,
-  PencilSimple,
   ArrowCounterClockwise,
   Play,
   Pause,
@@ -93,11 +91,22 @@ import { extractBlackboxScorePoints } from "../lib/blackbox";
 import { extractCandidates, scopeToLatestLane } from "@/features/trajectory";
 import { isReactModuleName } from "../lib/is-react-module";
 import { reconstructGridResult } from "../lib/reconstruct-grid";
-import { rememberRunKind, useRunKindHint } from "../lib/run-kind-hint";
+import {
+  rememberRunKind,
+  measureOverview,
+  rememberRunShape,
+  runShapeHint,
+  runShapeKey,
+  useRunKindHint,
+  type RunShape,
+} from "../lib/run-kind-hint";
+import { runCostCents } from "../lib/run-billing";
+import { requestedDetailTab, shownDetailTab } from "../lib/detail-tabs";
 import { DataTab } from "./DataTab";
 import { LogsTab } from "./LogsTab";
 import { DeleteJobDialog } from "./DeleteJobDialog";
 import { ShareDialog } from "./ShareDialog";
+import { RunAccessBanner } from "./RunAccessBanner";
 import { StatusBadge } from "@/shared/ui/status-badge";
 import { ConfigTab } from "./ConfigTab";
 import { CodeTab } from "./CodeTab";
@@ -118,9 +127,81 @@ import { useStreamWithPollFallback } from "@/shared/hooks/use-stream-with-poll-f
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 
 const BLACKBOX_LOG_FETCH_DELAY_MS = 3000;
-const PHONE_DETAIL_TABS = new Set(["overview", "playground", "best", "artifact", "logs", "usage"]);
-/** The usage tab replaced these two; old links land on it. */
-const RENAMED_TABS: Record<string, string> = { "lm-activity": "usage", budget: "usage" };
+/**
+ * Records the Overview's block heights for this view's next loading skeleton,
+ * again whenever they change (a live run grows, a chart lands).
+ */
+function useRememberOverview(hintKey: string) {
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!node) return;
+    let frame = 0;
+    const record = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const overview = measureOverview(node);
+        if (overview) rememberRunShape(hintKey, { overview });
+      });
+    };
+    const observer = new ResizeObserver(record);
+    observer.observe(node);
+    for (const child of Array.from(node.children)) observer.observe(child);
+    const mutations = new MutationObserver(() => {
+      for (const child of Array.from(node.children)) observer.observe(child);
+      record();
+    });
+    mutations.observe(node, { childList: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      mutations.disconnect();
+    };
+  }, [node, hintKey]);
+  return setNode;
+}
+
+/**
+ * Records the open tab's panel height (any tab but Overview, which keeps its
+ * own block-level record) for the skeleton of a deep link back to that tab.
+ */
+function useRememberPanel(hintKey: string, tab: string) {
+  useEffect(() => {
+    if (tab === "overview") return;
+    const panel = document.querySelector<HTMLElement>(
+      `[data-detail-tabs] > [role="tabpanel"][data-state="active"]`,
+    );
+    if (!panel) return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const box = panel.getBoundingClientRect();
+        if (box.height === 0) return;
+        // A tab whose content carries its own top margin (Logs) starts lower.
+        const first = panel.firstElementChild?.getBoundingClientRect();
+        const gap = first ? Math.max(0, Math.round((first.top - box.top) * 100) / 100) : 0;
+        const h = Math.round((box.height - gap) * 100) / 100;
+        const panels = {
+          ...runShapeHint(hintKey)?.panels,
+          [tab]: { vw: window.innerWidth, gap, h },
+        };
+        rememberRunShape(hintKey, { panels });
+      });
+    });
+    observer.observe(panel);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [hintKey, tab]);
+}
+
+/** Records this view's tab bar and header for its next loading skeleton. */
+function RememberRunShape({ hintKey, shape }: { hintKey: string; shape: RunShape }) {
+  const json = JSON.stringify(shape);
+  useEffect(() => rememberRunShape(hintKey, JSON.parse(json) as RunShape), [hintKey, json]);
+  return null;
+}
 
 // Treat naive ISO timestamps (no trailing tz marker) as UTC — that matches the
 // backend, which stores UTC datetimes that Pydantic emits without a suffix.
@@ -271,14 +352,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const shareCanServe = isShare && (shareRole === "editor" || shareRole === "owner");
   const router = useRouter();
   const searchParams = useSearchParams();
-  const requestedTab = searchParams.get("tab") ?? "overview";
-  const initialTab = RENAMED_TABS[requestedTab] ?? requestedTab;
-  const [detailTab, setDetailTab] = useState(initialTab);
+  const [detailTab, setDetailTab] = useState(() => requestedDetailTab(searchParams.get("tab")));
   // Phones get the view-first subset: Overview, Usage (chat), Artifact, Logs,
   // Usage and cost. Data/Code/LM activity/Config are desk work; a deep link to one of
   // those tabs lands on Overview instead of an empty pane.
   const isPhone = useIsPhone();
-  const activeDetailTab = isPhone && !PHONE_DETAIL_TABS.has(detailTab) ? "overview" : detailTab;
+  const activeDetailTab = shownDetailTab(detailTab, isPhone);
   // Expose for tutorial via the typed bridge (features/tutorial/lib/bridge.ts).
   useEffect(() => registerTutorialHook("setDetailTab", setDetailTab), []);
 
@@ -427,6 +506,11 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       : (effectiveJob.grid_result.pair_results.find((p) => p.pair_index === activePairIndex) ??
         null);
   const isPairContext = activePair != null;
+  const overviewRef = useRememberOverview(runShapeKey(id, isPairContext));
+  useRememberPanel(
+    runShapeKey(id, isPairContext),
+    loading || !authReady || !job ? "overview" : activeDetailTab,
+  );
 
   // Hoisted so the memos below depend on a plain local — the React Compiler lint
   // can't equate an inferred `job.logs` path with a `job?.logs` dependency
@@ -1124,9 +1208,26 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const callerRole = isShare ? shareRole : effectiveRole;
   const sharedTier = callerRole === "editor" ? "editor" : callerRole === "viewer" ? "viewer" : null;
   const sharedByOwner = isShare ? shareData?.owner : job.username;
-  // Split "מאת {name}" so the emphasis (semibold/foreground) lands only on the
-  // owner name; the "by" prefix stays muted meta text.
-  const [sharedByPrefix, sharedBySuffix] = msg("optimization.readonly_by").split("{name}");
+  // The header's icon actions below, counted for the loading skeleton. The
+  // phone shell keeps only share and cancel; a share view has just the clone
+  // button, on wide screens, and otherwise no action row.
+  const canRestart =
+    canEditRun &&
+    (job.status === "failed" || job.status === "cancelled" || job.status === "paused") &&
+    !isBudgetPause(job);
+  const canCancel = canEditRun && isActive;
+  const headerActionCounts = isShare
+    ? { wide: shareCanInteract ? 1 : null, phone: null }
+    : {
+        wide:
+          Number(canManageShare) +
+          1 +
+          Number(canRestart) +
+          Number(canCancel && !!job.pausable) +
+          Number(canCancel) +
+          Number(canDeleteRun && isTerminal),
+        phone: Number(canManageShare) + Number(canCancel),
+      };
   // Pair-aware terminal: a pair is considered "available for data export" once
   // it has either a program artifact or an error recorded. This mirrors the
   // standalone job's "isTerminal" gate so the data/export surfaces appear
@@ -1164,44 +1265,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
   return (
     <div className="space-y-6 pb-12">
-      {sharedTier && (
-        <div
-          role="status"
-          className="flex w-full flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-gradient-to-br from-muted/60 to-muted/25 px-4 py-2.5 shadow-sm"
-        >
-          <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary/5 text-primary/80">
-            {sharedTier === "editor" ? (
-              <PencilSimple className="size-4" aria-hidden="true" />
-            ) : (
-              <Eye className="size-4" aria-hidden="true" />
-            )}
-          </span>
-          <span className="min-w-0 text-sm font-medium text-foreground/90">
-            {msg(
-              sharedTier === "editor"
-                ? "optimization.access_banner.editor"
-                : "optimization.access_banner.viewer",
-            )}
-          </span>
-          {sharedByOwner && (
-            <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5 text-xs text-muted-foreground sm:ms-auto sm:flex-none">
-              <span dir="auto" className="min-w-0 truncate">
-                {sharedByPrefix}
-                <span dir="auto" className="font-semibold text-foreground">
-                  {sharedByOwner}
-                </span>
-                {sharedBySuffix}
-              </span>
-              <span
-                aria-hidden="true"
-                className="grid size-4 shrink-0 place-items-center rounded-full bg-primary/10 text-[0.5625rem] font-semibold uppercase text-primary"
-              >
-                {sharedByOwner.trim().charAt(0)}
-              </span>
-            </span>
-          )}
-        </div>
-      )}
+      {sharedTier && <RunAccessBanner tier={sharedTier} owner={sharedByOwner} />}
       <FadeIn delay={0.1}>
         <div
           className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5"
@@ -1528,7 +1592,51 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             !(activePair.program_artifact || activePair.optimized_test_metric != null)
           : isActive;
         return (
-          <Tabs value={activeDetailTab} onValueChange={setDetailTab}>
+          <Tabs value={activeDetailTab} onValueChange={setDetailTab} data-detail-tabs="">
+            <RememberRunShape
+              hintKey={runShapeKey(id, isPairContext)}
+              shape={{
+                name: job.name ?? null,
+                description: job.description ?? null,
+                costChip:
+                  !isPairContext &&
+                  runCostCents(
+                    job.result?.details ?? job.blackbox_result?.details,
+                    job.execution_budget ?? job.terminal_evidence?.execution_budget,
+                    isActive,
+                  ) != null,
+                storageLink: !isPairContext && (job.stored_bytes ?? 0) > 0,
+                access: sharedTier ? { tier: sharedTier, owner: sharedByOwner ?? null } : null,
+                actions: headerActionCounts,
+                tabs:
+                  2 +
+                  Number(showPlaygroundTab) +
+                  Number(showBestVersionTab) +
+                  Number(showDataTab) +
+                  Number(showCodeTab) +
+                  Number(showArtifactTab) +
+                  Number(showLogsTab) +
+                  Number(showUsageTab),
+                phoneTabs:
+                  1 +
+                  Number(showPlaygroundTab) +
+                  Number(showBestVersionTab) +
+                  Number(showArtifactTab) +
+                  Number(showLogsTab) +
+                  Number(showUsageTab),
+                tabIds: [
+                  "overview",
+                  ...(showPlaygroundTab ? ["playground"] : []),
+                  ...(showBestVersionTab ? ["best"] : []),
+                  ...(showDataTab ? ["data"] : []),
+                  ...(showCodeTab ? ["code"] : []),
+                  ...(showArtifactTab ? ["artifact"] : []),
+                  ...(showLogsTab ? ["logs"] : []),
+                  ...(showUsageTab ? ["usage"] : []),
+                  "config",
+                ],
+              }}
+            />
             <TabsList
               variant="line"
               className="w-full justify-start gap-0 overflow-x-auto border-b border-border/50 pb-0 no-scrollbar"
@@ -1591,6 +1699,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             </TabsList>
 
             <TabsContent
+              ref={overviewRef}
               value="overview"
               className="space-y-6 mt-4"
               data-tutorial={isPairContext ? "pair-detail" : "overview-tab"}
