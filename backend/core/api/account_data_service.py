@@ -32,6 +32,7 @@ from typing import Any
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from ..notifications.preferences import RunNotificationSettings
 from ..storage.models import (
     AgentConversationModel,
     AgentMessageModel,
@@ -146,6 +147,8 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
             "use_case": user.use_case,
             "experience_level": user.experience_level,
             "job_role": user.job_role,
+            "intake_completed_at": _iso(user.intake_completed_at),
+            "intake_profile": user.intake_profile,
             "two_factor": {
                 "totp_enabled": user.totp_secret is not None,
                 "email_codes_enabled": bool(user.email_2fa_enabled),
@@ -162,6 +165,15 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
             bool(notification_row.sharing_updates_enabled) if notification_row is not None else True
         ),
     }
+    cadence_source = notification_row if notification_row is not None else RunNotificationSettings()
+    notification_preferences.update(
+        cadence=cadence_source.cadence,
+        live_mode=cadence_source.live_mode,
+        live_count=cadence_source.live_count,
+        digest_minutes=cadence_source.digest_minutes,
+        stuck_fraction=cadence_source.stuck_fraction,
+        budget_alert_fraction=cadence_source.budget_alert_fraction,
+    )
 
     jobs = session.scalars(select(JobModel).where(JobModel.username == username).order_by(JobModel.created_at)).all()
     optimizations = [

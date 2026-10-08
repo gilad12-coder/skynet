@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseAgentPreferencePatch } from "./prefs.ts";
+import { DEFAULT_PREFS, PREF_KEYS, parseAgentPreferencePatch, readPref } from "./prefs.ts";
 
 test("parseAgentPreferencePatch accepts the validated agent response envelope", () => {
   assert.deepEqual(
@@ -33,4 +33,15 @@ test("parseAgentPreferencePatch handles nested JSON and ignores invalid fields",
     ),
     { taggerAssist: false },
   );
+});
+
+test("the retired expand-advanced pref is gone: no key, no default, agent patches drop it", () => {
+  assert.equal("expandAdvanced" in PREF_KEYS, false);
+  assert.equal("expandAdvanced" in DEFAULT_PREFS, false);
+  assert.equal(Object.values(PREF_KEYS).includes("skynet.prefs.expand-advanced"), false);
+  assert.deepEqual(parseAgentPreferencePatch({ updates: { expand_advanced: true } }), {});
+});
+
+test("readPref falls back to the default outside the browser", () => {
+  assert.equal(readPref("liteMode"), false);
 });

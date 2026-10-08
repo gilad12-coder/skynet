@@ -16,6 +16,7 @@ import {
 } from "@/shared/providers";
 import { SplashScreen } from "@/shared/layout/splash-screen";
 import { TutorialOverlay, TutorialProvider } from "@/features/tutorial";
+import { ExperienceProvider } from "@/features/experience";
 import {
   UserPrefsProvider,
   LiteModeProvider,
@@ -241,6 +242,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                         <TooltipProvider>
                           <AppSkeletonTheme>
                             <SplashScreen />
+                            <ExperienceProvider>
                             <TutorialProvider>
                               <SettingsModalProvider>
                                 <AppShell>{children}</AppShell>
@@ -251,6 +253,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                               </SettingsModalProvider>
                               <TutorialOverlay />
                             </TutorialProvider>
+                            </ExperienceProvider>
                           </AppSkeletonTheme>
                         </TooltipProvider>
                       </ThemeProvider>

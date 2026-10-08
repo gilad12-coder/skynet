@@ -53,6 +53,7 @@ import { ToolCallRow } from "./ToolCallRow";
 import { ToolsCarousel } from "./ToolsCarousel";
 import { TrustToggle } from "./TrustToggle";
 import { getToolRenderer } from "./tool-renderers";
+import { AGENT_PROMPT_EVENT, takeQueuedAgentPrompt } from "../lib/prompt-queue";
 
 const REQUEST_DATASET_TOOL = "request_user_dataset_datasets_request_upload_post";
 const REQUEST_LIBRARY_TOOL = "request_user_dataset_from_library";
@@ -583,6 +584,20 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     agent.send(trimmed);
     setDraft("");
   }, [agent, draft]);
+
+  // Prompts other features queue (the first-login setup) open the panel and
+  // go out as if typed; one queued before the lazy panel mounted drains here.
+  React.useEffect(() => {
+    const drain = () => {
+      const prompt = takeQueuedAgentPrompt();
+      if (!prompt) return;
+      setOpen(true);
+      agentSend(prompt);
+    };
+    drain();
+    window.addEventListener(AGENT_PROMPT_EVENT, drain);
+    return () => window.removeEventListener(AGENT_PROMPT_EVENT, drain);
+  }, [agentSend, setOpen]);
 
   const handleRunCode = React.useCallback(
     (code: string, language: string) => {

@@ -179,8 +179,15 @@ class UserModel(Base):
     # OAuth-provisioned rows and rows created before these columns existed
     # never set them, and ``job_role`` is optional even on the sign-up form.
     use_case: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # One of ``guided`` / ``standard`` / ``expert``: how much of the product
+    # surface the UI shows this account. Rows from the original sign-up form
+    # stored ``new`` / ``familiar``; the abstraction-level migration remapped them.
     experience_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     job_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # First-login intake: NULL means the account has not finished (or chose to
+    # rerun) the onboarding intake, so every pre-existing account sees it once.
+    intake_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    intake_profile: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
     # Two-factor state for password sign-ins. A non-null ``totp_secret`` means
     # TOTP is enabled; ``totp_pending_secret`` holds the secret between setup
     # and the first verified code, so an abandoned setup never locks the
@@ -250,6 +257,15 @@ class NotificationPreferenceModel(Base):
     username: Mapped[str] = mapped_column(String(255), primary_key=True)
     job_updates_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sharing_updates_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Run-email cadence. ``done`` keeps the historical finished/failed-only
+    # mail; ``milestones`` adds new-best / stuck / budget / needs-input mail;
+    # ``live`` adds stage-change progress mail throttled by ``live_mode``.
+    cadence: Mapped[str] = mapped_column(String(16), nullable=False, default="done", server_default="done")
+    live_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="per_stage", server_default="per_stage")
+    live_count: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
+    digest_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60, server_default="60")
+    stuck_fraction: Mapped[float] = mapped_column(Float, nullable=False, default=0.25, server_default="0.25")
+    budget_alert_fraction: Mapped[float] = mapped_column(Float, nullable=False, default=0.8, server_default="0.8")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -976,6 +992,11 @@ class JobModel(Base):
     # ``claim_completion_notification`` — guarantees a single Slack/Teams
     # message per job even when orphan recovery re-runs a row.
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Kinds of in-run email already sent for this run (``new_best``,
+    # ``stage:baseline``, ``digest:<window>`` ...). Kept on the row rather than
+    # in worker memory so a resumed or orphan-recovered run never re-sends one,
+    # and cleared with ``notified_at`` when the run is restarted from scratch.
+    notification_claims: Mapped[list[str] | None] = mapped_column(JSON_STORE, nullable=True)
     # Optional client-supplied dedup key; lookups are scoped per submitter so
     # two users may legitimately reuse the same key without colliding.
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)

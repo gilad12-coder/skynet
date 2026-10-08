@@ -21,9 +21,19 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ...models import WORKFLOW_MODULE_NAME
+from ...models.blackbox import (
+    BLACKBOX_ENGINE_AUTORESEARCH,
+    BLACKBOX_ENGINE_AUTOSADDLER,
+    BLACKBOX_ENGINE_BEST_OF_N,
+    BLACKBOX_ENGINE_GEPA,
+    BLACKBOX_ENGINE_META_HARNESS,
+    BLACKBOX_ENGINE_SHINKA_EVOLVE,
+    BLACKBOX_HARNESS_CUSTOM,
+    BLACKBOX_HARNESSES,
+)
 from ...registry import ResolverError, resolve_module_factory, resolve_optimizer_factory
 from ..errors import DomainError
 
@@ -37,6 +47,18 @@ _METRIC_DEF_RE = re.compile(r"\bdef\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 
 _VALID_COLUMN_ROLES = frozenset({"input", "output", "ignore"})
+
+_BLACKBOX_ENGINES = (
+    BLACKBOX_ENGINE_GEPA,
+    BLACKBOX_ENGINE_BEST_OF_N,
+    BLACKBOX_ENGINE_AUTORESEARCH,
+    BLACKBOX_ENGINE_META_HARNESS,
+    BLACKBOX_ENGINE_AUTOSADDLER,
+    BLACKBOX_ENGINE_SHINKA_EVOLVE,
+)
+# A custom harness also needs its own run command, which only the wizard form
+# collects, so the agent may pick any built-in harness but not that one.
+_AGENT_PROPOSER_HARNESSES = tuple(h for h in BLACKBOX_HARNESSES if h != BLACKBOX_HARNESS_CUSTOM)
 
 
 # Tool roster for a react/flex program, in the camelCase shape the submit
@@ -170,6 +192,33 @@ class WizardUpdateRequest(BaseModel):
         max_length=100_000,
         description="Black-box mode only: Python source defining score(candidate, case=None).",
     )
+    blackbox_strategy_mode: Literal["auto", "single"] | None = Field(
+        default=None,
+        description=(
+            "Black-box mode only: 'auto' explores every engine then continues with the best; "
+            "'single' runs the one engine named in blackbox_engine."
+        ),
+    )
+    blackbox_engine: str | None = Field(
+        default=None,
+        description=(
+            "Black-box mode only: engine for strategy 'single'. One of: " + ", ".join(_BLACKBOX_ENGINES) + "."
+        ),
+    )
+    blackbox_proposer_harness: str | None = Field(
+        default=None,
+        description=(
+            "Black-box mode only: coding-agent harness that proposes new versions. One of: "
+            + ", ".join(_AGENT_PROPOSER_HARNESSES)
+            + "."
+        ),
+    )
+    spending_limit_usd: float | None = Field(
+        default=None,
+        gt=0,
+        le=100_000,
+        description="Total spending limit for the run in US dollars. Send null explicitly to remove the limit.",
+    )
 
     signature_code: str | None = Field(
         default=None,
@@ -179,6 +228,50 @@ class WizardUpdateRequest(BaseModel):
         default=None,
         description="Full metric function source to replace the current one.",
     )
+
+    @field_validator("blackbox_engine")
+    @classmethod
+    def _known_engine(cls, value: str | None) -> str | None:
+        """Reject an engine id the black-box runner does not know.
+
+        Args:
+            value: Requested engine id.
+
+        Returns:
+            The trimmed engine id.
+
+        Raises:
+            ValueError: When the id is not a known engine.
+        """
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if cleaned not in _BLACKBOX_ENGINES:
+            raise ValueError(f"Unknown engine '{value}'. Known engines: {', '.join(_BLACKBOX_ENGINES)}.")
+        return cleaned
+
+    @field_validator("blackbox_proposer_harness")
+    @classmethod
+    def _known_harness(cls, value: str | None) -> str | None:
+        """Reject a proposer harness the agent cannot configure on its own.
+
+        Args:
+            value: Requested harness id.
+
+        Returns:
+            The trimmed harness id.
+
+        Raises:
+            ValueError: When the harness is unknown, retired or ``custom``.
+        """
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if cleaned not in _AGENT_PROPOSER_HARNESSES:
+            raise ValueError(
+                f"Unknown proposer harness '{value}'. Known harnesses: {', '.join(_AGENT_PROPOSER_HARNESSES)}."
+            )
+        return cleaned
 
 
 class WizardUpdateResponse(BaseModel):
@@ -451,6 +544,16 @@ def create_wizard_router() -> APIRouter:
 
         if "target_score" in supplied and supplied["target_score"] is not None:
             patch["target_score"] = float(supplied["target_score"])
+
+        for blackbox_key in ("blackbox_strategy_mode", "blackbox_engine", "blackbox_proposer_harness"):
+            if supplied.get(blackbox_key) is not None:
+                patch[blackbox_key] = supplied[blackbox_key]
+
+        # Unlike the other fields an explicit null is meaningful here (remove
+        # the limit), and the patch carries cents to match ``max_cost_cents``.
+        if "spending_limit_usd" in supplied:
+            dollars = supplied["spending_limit_usd"]
+            patch["max_cost_cents"] = None if dollars is None else max(1, round(dollars * 100))
 
         # Signature/Metric code is authored ONLY via ``request_code_authoring``
         # (the inline card runs the dedicated code agent, which validates and

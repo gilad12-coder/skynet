@@ -11,6 +11,11 @@ from core.notifications.notifier import (
     notify_job_started,
     notify_ownership_transfer,
     notify_role_change,
+    notify_run_budget,
+    notify_run_needs_input,
+    notify_run_new_best,
+    notify_run_progress,
+    notify_run_stuck,
     notify_share_invite,
 )
 
@@ -226,3 +231,52 @@ def test_ownership_transfer_emails_new_owner(monkeypatch: pytest.MonkeyPatch, fa
     assert call["to"] == "bob"
     assert call["subject"] == t("notifier.share.transfer.subject")
     assert "alice" in call["html"]
+
+
+_RUN_EMAILS = [
+    (lambda: notify_run_new_best("run9", "alice", 0.8125), "notifier.title.new_best", "0.812"),
+    (lambda: notify_run_stuck("run9", "alice", 0.5, 0.25), "notifier.title.stuck", "25"),
+    (lambda: notify_run_budget("run9", "alice", 800, 1000), "notifier.title.budget", "$8.00"),
+    (lambda: notify_run_needs_input("run9", "alice"), "notifier.title.needs_input", None),
+    (lambda: notify_run_progress("run9", "alice", "baseline", best_score=0.4), "notifier.title.stage", None),
+    (
+        lambda: notify_run_progress("run9", "alice", "optimizing", detail="gepa", digest=True),
+        "notifier.title.digest",
+        "gepa",
+    ),
+]
+
+
+@pytest.mark.parametrize(("send", "title_key", "body_text"), _RUN_EMAILS)
+def test_run_emails_deliver_with_title_and_link(
+    monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail, send, title_key: str, body_text: str | None
+) -> None:
+    """Each in-run email goes to the owner with its own title and the run link."""
+    _patch_delivery(monkeypatch, fake_mail)
+
+    send()
+
+    assert fake_mail.call_count == 1
+    sent = fake_mail.last()
+    assert sent["to"] == "alice"
+    assert sent["subject"] == t(title_key)
+    assert "run9" in sent["html"]
+    if body_text is not None:
+        assert body_text in sent["html"]
+
+
+@pytest.mark.parametrize(("send", "title_key", "body_text"), _RUN_EMAILS)
+def test_run_emails_respect_the_job_updates_switch(
+    monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail, send, title_key: str, body_text: str | None
+) -> None:
+    """``job_updates_enabled=false`` silences every in-run email."""
+    _patch_delivery(monkeypatch, fake_mail)
+    monkeypatch.setattr(
+        notifier_module,
+        "notification_category_enabled",
+        lambda username, category: category != "job_updates",
+    )
+
+    send()
+
+    assert fake_mail.call_count == 0

@@ -13,6 +13,8 @@ import {
   type StageShape,
 } from "../lib/run-kind-hint";
 import { PHONE_DETAIL_TABS, requestedDetailTab, shownDetailTab } from "../lib/detail-tabs";
+import { detailTabGate } from "@/features/experience";
+import { useSurfaceLevel } from "@/features/tutorial";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { PipelineStagesBone } from "./PipelineStages";
 import { DataTabSkeleton } from "./DataTabSkeleton";
@@ -237,17 +239,31 @@ export function OptimizationDetailSkeleton({
   // An owner's finished run: share, clone and delete; the phone shell keeps share.
   const remembered = isPhone ? shape?.actions?.phone : shape?.actions?.wide;
   const headerActions = remembered === undefined ? (isPhone ? 1 : 3) : remembered;
-  const tab = shownDetailTab(requestedDetailTab(useSearchParams().get("tab")), isPhone);
+  const searchParams = useSearchParams();
+  const tab = shownDetailTab(requestedDetailTab(searchParams.get("tab")), isPhone);
   let tabBones: Array<{ key: string | number; active: boolean; phone: boolean }>;
+  // The same level gate as the loaded tab bar, so a level changed since the
+  // last visit (or a first visit) draws the tabs the page will actually show.
+  const level = useSurfaceLevel();
+  const levelTab = detailTabGate(level);
+  const linkedTab = requestedDetailTab(searchParams.get("tab"));
+  const keepsTab = (id: string) => levelTab(id) || id === linkedTab;
   if (shape?.tabIds) {
-    tabBones = shape.tabIds.map((id) => ({
+    tabBones = shape.tabIds.filter(keepsTab).map((id) => ({
       key: id,
       active: id === tab,
       phone: PHONE_DETAIL_TABS.has(id),
     }));
   } else {
-    const tabs = shape?.tabs ?? (gridSummary ? 5 : 6);
-    const phoneTabs = Math.min(tabs, shape?.phoneTabs ?? (gridSummary ? 3 : 4));
+    // Without remembered ids, Guided's hidden desk tabs (Data, Code, Config;
+    // Logs also on phones) come off the default counts.
+    const guided = !levelTab("logs");
+    const tabs =
+      shape?.tabs ?? Math.max(1, (gridSummary ? 5 : 6) - (guided ? (gridSummary ? 1 : 4) : 0));
+    const phoneTabs = Math.min(
+      tabs,
+      shape?.phoneTabs ?? Math.max(1, (gridSummary ? 3 : 4) - (guided && !gridSummary ? 1 : 0)),
+    );
     tabBones = Array.from({ length: tabs }, (_, i) => ({
       key: i,
       active: i === 0 && tab === "overview",

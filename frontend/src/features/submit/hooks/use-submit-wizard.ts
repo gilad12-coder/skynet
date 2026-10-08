@@ -44,6 +44,7 @@ import { getModelCatalog } from "@/shared/lib/model-catalog";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { useWizardStateOptional } from "@/features/agent-panel";
 import { readPref, useUserPrefs } from "@/features/settings";
+import { defaultOpen, useExperienceLevel } from "@/features/experience";
 
 import { emptyModelConfig, defaultSplit, defaultReactConfig } from "../constants";
 import type { ReactConfig, ColumnRole } from "../constants";
@@ -154,6 +155,7 @@ export function useSubmitWizard(folderId: string | null = null) {
   const searchParams = useSearchParams();
   const { data: session } = useSession();
   const { prefs } = useUserPrefs();
+  const experienceLevel = useExperienceLevel();
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState(0);
   const [furthestReachedStep, setFurthestReachedStep] = useState(0);
@@ -420,14 +422,17 @@ export function useSubmitWizard(folderId: string | null = null) {
   // components so the deep-dive tour can open the sections through the
   // bridge, and so a restored non-default value surfaces itself instead of
   // hiding behind a collapsed row. Opening is one-way: nothing auto-closes.
-  const [optimizationTypeOpen, setOptimizationTypeOpen] = useState(false);
-  const [optimizerSettingsOpen, setOptimizerSettingsOpen] = useState(false);
+  // Expert starts both open; the level only changes what is shown first.
+  const [optimizationTypeOpen, setOptimizationTypeOpen] = useState(() =>
+    defaultOpen("wizard.optimization_type", experienceLevel),
+  );
+  const [optimizerSettingsOpen, setOptimizerSettingsOpen] = useState(() =>
+    defaultOpen("wizard.optimizer_settings", experienceLevel),
+  );
   useEffect(() => {
-    if (prefs.expandAdvanced) {
-      setOptimizationTypeOpen(true);
-      setOptimizerSettingsOpen(true);
-    }
-  }, [prefs.expandAdvanced]);
+    if (defaultOpen("wizard.optimization_type", experienceLevel)) setOptimizationTypeOpen(true);
+    if (defaultOpen("wizard.optimizer_settings", experienceLevel)) setOptimizerSettingsOpen(true);
+  }, [experienceLevel]);
   useEffect(() => {
     if (jobType !== "run") setOptimizationTypeOpen(true);
   }, [jobType]);
@@ -696,6 +701,8 @@ export function useSubmitWizard(folderId: string | null = null) {
           setMaxMetricCalls(String(kw.max_metric_calls));
         }
         if (typeof kw.use_merge === "boolean") setUseMerge(kw.use_merge);
+      } else if (key === "max_cost_cents" && sharedState.max_cost_cents !== undefined) {
+        setMaxCostCents(sharedState.max_cost_cents);
       } else if (key === "target_score") {
         if (typeof sharedState.target_score === "number") {
           setTargetScore(String(sharedState.target_score));

@@ -1,6 +1,10 @@
 export { TutorialOverlay } from "./components/tutorial-overlay";
 export { TutorialMenu } from "./components/tutorial-menu";
-export { TutorialProvider, useTutorialContext } from "./components/tutorial-provider";
+export {
+  TutorialProvider,
+  useSurfaceLevel,
+  useTutorialContext,
+} from "./components/tutorial-provider";
 export { ConceptsGuide } from "./components/concepts-guide.lazy";
 export { registerTutorialHook, registerTutorialQuery } from "./lib/bridge";
 // Demo fixtures are deliberately NOT re-exported here: this barrel sits in

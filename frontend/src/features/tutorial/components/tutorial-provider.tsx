@@ -4,6 +4,11 @@ import * as React from "react";
 import { useReducer, useEffect, useCallback, useRef, createContext, useContext } from "react";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
+import {
+  useExperienceLevel,
+  useExperienceOptional,
+  type ExperienceLevel,
+} from "@/features/experience";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { track as trackEvent, TelemetryEvent } from "@/shared/lib/telemetry";
 import type { TutorialTrack, TutorialStep } from "../lib/steps";
@@ -245,13 +250,17 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const firstLoginIdentity =
     status === "authenticated" && session?.user?.firstLogin ? sessionIdentity(session) : "";
+  // The first-login setup goes first: the tour waits until it is finished or
+  // skipped (or the server is known to have nothing to ask).
+  const experience = useExperienceOptional();
+  const intakeBlocking = !!experience && (!experience.loaded || experience.intakeOpen);
   useEffect(() => {
-    if (!firstLoginIdentity || isBareRoute(pathname)) return;
+    if (!firstLoginIdentity || isBareRoute(pathname) || intakeBlocking) return;
     const timer = setTimeout(() => {
       if (claimFirstLoginTour(firstLoginIdentity)) startTrack("quick");
     }, FIRST_LOGIN_TOUR_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [firstLoginIdentity, pathname, startTrack]);
+  }, [firstLoginIdentity, pathname, startTrack, intakeBlocking]);
 
   const nextStep = useCallback(() => dispatch({ type: "NEXT_STEP" }), []);
   const prevStep = useCallback(() => dispatch({ type: "PREV_STEP" }), []);
@@ -317,6 +326,17 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
       {children}
     </TutorialContext.Provider>
   );
+}
+
+/**
+ * The abstraction level a surface should render at. While a tour runs every
+ * surface renders at Standard, so the steps it points at (the description
+ * field, the run tabs) exist whatever the user's own level is.
+ */
+export function useSurfaceLevel(): ExperienceLevel {
+  const level = useExperienceLevel();
+  const touring = !!useContext(TutorialContext)?.state.activeTrack;
+  return touring && level === "guided" ? "standard" : level;
 }
 
 export function useTutorialContext() {

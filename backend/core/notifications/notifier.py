@@ -306,3 +306,102 @@ def notify_ownership_transfer(optimization_id: str, new_owner: str, actor: str) 
     body = t("notifier.share.transfer.body", actor=actor)
     html_body = _html_email(subject, [body], t("notifier.link.open"), _job_url(optimization_id), optimization_id)
     _deliver(new_owner, subject, html_body, "sharing_updates")
+
+
+def _format_score(score: float) -> str:
+    """Render a raw run score compactly (``0.8125`` -> ``0.812``, ``73.5`` -> ``73.5``)."""
+    return f"{score:.3g}" if abs(score) < 1 else f"{score:.1f}"
+
+
+def _format_dollars(cents: float) -> str:
+    """Render a cent amount as dollars, wrapped LTR so ``$`` keeps its side in RTL mail."""
+    return f"{_LRI}${cents / 100:,.2f}{_PDI}"
+
+
+def notify_run_new_best(optimization_id: str, username: str, score: float) -> None:
+    """Email the owner when a running optimization finds a new best version.
+
+    Args:
+        optimization_id: Running job identifier.
+        username: Owner and recipient.
+        score: The new best score as the run reports it.
+    """
+    subject = t("notifier.title.new_best")
+    lines = [f"{t('notifier.label.best')}: {_format_score(score)}"]
+    html_body = _html_email(subject, lines, t("notifier.link.follow"), _job_url(optimization_id), optimization_id)
+    _deliver(username, subject, html_body, "job_updates")
+
+
+def notify_run_stuck(optimization_id: str, username: str, best_score: float | None, stuck_fraction: float) -> None:
+    """Email the owner when a run's best score stalls over part of its budget.
+
+    Args:
+        optimization_id: Running job identifier.
+        username: Owner and recipient.
+        best_score: Best score so far, when one was observed.
+        stuck_fraction: Fraction of the evaluation budget spent without improvement.
+    """
+    subject = t("notifier.title.stuck")
+    lines = [t("notifier.body.stuck", percent=round(stuck_fraction * 100))]
+    if best_score is not None:
+        lines.append(f"{t('notifier.label.best')}: {_format_score(best_score)}")
+    html_body = _html_email(subject, lines, t("notifier.link.details"), _job_url(optimization_id), optimization_id)
+    _deliver(username, subject, html_body, "job_updates")
+
+
+def notify_run_budget(optimization_id: str, username: str, spent_cents: float, limit_cents: int) -> None:
+    """Email the owner when a run's spend crosses the alert fraction of its limit.
+
+    Args:
+        optimization_id: Running job identifier.
+        username: Owner and recipient.
+        spent_cents: Cents settled so far.
+        limit_cents: The run's spending limit in cents.
+    """
+    subject = t("notifier.title.budget")
+    lines = [f"{t('notifier.label.spent')}: {_format_dollars(spent_cents)} / {_format_dollars(limit_cents)}"]
+    html_body = _html_email(subject, lines, t("notifier.link.details"), _job_url(optimization_id), optimization_id)
+    _deliver(username, subject, html_body, "job_updates")
+
+
+def notify_run_needs_input(optimization_id: str, username: str) -> None:
+    """Email the owner when a run paused because it needs a higher spending limit.
+
+    Args:
+        optimization_id: Paused job identifier.
+        username: Owner and recipient.
+    """
+    subject = t("notifier.title.needs_input")
+    lines = [t("notifier.body.needs_input")]
+    html_body = _html_email(subject, lines, t("notifier.link.open"), _job_url(optimization_id), optimization_id)
+    _deliver(username, subject, html_body, "job_updates")
+
+
+def notify_run_progress(
+    optimization_id: str,
+    username: str,
+    stage: str,
+    *,
+    detail: str | None = None,
+    best_score: float | None = None,
+    digest: bool = False,
+) -> None:
+    """Email the owner a live progress update for a running optimization.
+
+    Args:
+        optimization_id: Running job identifier.
+        username: Owner and recipient.
+        stage: Stage key under ``notifier.stage.*``.
+        detail: Optional qualifier appended to the stage label (an engine name).
+        best_score: Best score so far, when one was observed.
+        digest: Whether this is a periodic digest rather than a stage-change mail.
+    """
+    subject = t("notifier.title.digest" if digest else "notifier.title.stage")
+    stage_label = t(f"notifier.stage.{stage}")
+    if detail:
+        stage_label = f"{stage_label} ({_LRI}{detail}{_PDI})"
+    lines = [f"{t('notifier.label.stage')}: {stage_label}"]
+    if best_score is not None:
+        lines.append(f"{t('notifier.label.best')}: {_format_score(best_score)}")
+    html_body = _html_email(subject, lines, t("notifier.link.follow"), _job_url(optimization_id), optimization_id)
+    _deliver(username, subject, html_body, "job_updates")

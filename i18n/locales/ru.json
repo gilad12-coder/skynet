@@ -280,6 +280,21 @@
     "wizard.split_fractions_sum": "Сумма split_fractions должна быть равна 1.0, получено {total}",
     "budget.idempotency_required": "Отправьте уникальный Idempotency-Key для этого запроса.",
     "serve.caller_tool_connection_required": "В этом запуске используется подключение инструмента, привязанное к владельцу. Подключите инструмент к своему аккаунту, прежде чем вызывать его.",
-    "serve.protected_interaction_failed": "Запрос в песочнице не выполнен: {error}"
+    "serve.protected_interaction_failed": "Запрос в песочнице не выполнен: {error}",
+    "notifier.body.needs_input": "Прогнозируемые расходы превышают лимит, поэтому запуск приостановлен. Увеличьте лимит, чтобы продолжить с того же места.",
+    "notifier.body.stuck": "Нет улучшений за последние {percent}% бюджета оценок запуска.",
+    "notifier.label.best": "лучшая оценка",
+    "notifier.label.spent": "потрачено",
+    "notifier.label.stage": "этап",
+    "notifier.stage.baseline": "Базовая оценка",
+    "notifier.stage.evaluating": "Итоговая оценка",
+    "notifier.stage.optimizing": "Оптимизация",
+    "notifier.stage.prepared": "Данные готовы",
+    "notifier.title.budget": "Ваша оптимизация приближается к лимиту расходов",
+    "notifier.title.digest": "Ход вашей оптимизации",
+    "notifier.title.needs_input": "Ваша оптимизация ждёт вас",
+    "notifier.title.new_best": "Ваша оптимизация нашла лучшую версию",
+    "notifier.title.stage": "Ваша оптимизация перешла на новый этап",
+    "notifier.title.stuck": "Ваша оптимизация не улучшается"
   }
 }

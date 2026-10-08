@@ -48,6 +48,8 @@ import { BulkActionBar } from "./BulkActionBar";
 import { DeleteDialogs } from "./DeleteDialogs";
 import { JobsTab } from "./JobsTab";
 import { AnalyticsTab } from "./AnalyticsTab";
+import { isVisible } from "@/features/experience";
+import { useSurfaceLevel } from "@/features/tutorial";
 
 function getJobField(job: OptimizationSummaryResponse, key: string): unknown {
   return (job as unknown as Record<string, unknown>)[key];
@@ -79,6 +81,10 @@ export function DashboardView() {
   // Sync from URL on mount / when ?tab= changes (supports deep-linking from
   // UserFieldPreview and bookmarked tab URLs).
   const urlTab = searchParams.get("tab");
+  // Guided drops Analytics (and with one tab left, the tab bar); a deep link
+  // to it still opens it.
+  const showAnalytics =
+    isVisible("dashboard.analytics", useSurfaceLevel()) || urlTab === "analytics";
   useEffect(() => {
     if (urlTab === "jobs" || urlTab === "analytics") {
       setActiveTab(urlTab);
@@ -468,40 +474,42 @@ export function DashboardView() {
         <FadeIn delay={0.2}>
           {mounted && (
             <Tabs value={activeTab} onValueChange={handleTabChange}>
-              <TabsList className={SLIDING_PILL_TABS_LIST_CLASS}>
-                <TabsTrigger value="jobs" className={SLIDING_PILL_TABS_TRIGGER_CLASS}>
-                  {activeTab === "jobs" && (
-                    <motion.span
-                      layoutId="dashboardTabPill"
-                      transition={tabPillTransition}
-                      className="absolute inset-0 z-0 rounded-full bg-background shadow-sm"
-                      aria-hidden="true"
-                    />
-                  )}
-                  <span className="relative z-10 inline-flex items-center gap-1.5">
-                    <Table className="size-3.5" />
-                    {TERMS.optimizationPlural}
-                  </span>
-                </TabsTrigger>
-                <TabsTrigger
-                  value="analytics"
-                  data-tutorial="analytics-tab"
-                  className={SLIDING_PILL_TABS_TRIGGER_CLASS}
-                >
-                  {activeTab === "analytics" && (
-                    <motion.span
-                      layoutId="dashboardTabPill"
-                      transition={tabPillTransition}
-                      className="absolute inset-0 z-0 rounded-full bg-background shadow-sm"
-                      aria-hidden="true"
-                    />
-                  )}
-                  <span className="relative z-10 inline-flex items-center gap-1.5">
-                    <ChartBar className="size-3.5" />
-                    {msg("auto.features.dashboard.components.dashboardview.1")}
-                  </span>
-                </TabsTrigger>
-              </TabsList>
+              {showAnalytics && (
+                <TabsList className={SLIDING_PILL_TABS_LIST_CLASS}>
+                  <TabsTrigger value="jobs" className={SLIDING_PILL_TABS_TRIGGER_CLASS}>
+                    {activeTab === "jobs" && (
+                      <motion.span
+                        layoutId="dashboardTabPill"
+                        transition={tabPillTransition}
+                        className="absolute inset-0 z-0 rounded-full bg-background shadow-sm"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span className="relative z-10 inline-flex items-center gap-1.5">
+                      <Table className="size-3.5" />
+                      {TERMS.optimizationPlural}
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="analytics"
+                    data-tutorial="analytics-tab"
+                    className={SLIDING_PILL_TABS_TRIGGER_CLASS}
+                  >
+                    {activeTab === "analytics" && (
+                      <motion.span
+                        layoutId="dashboardTabPill"
+                        transition={tabPillTransition}
+                        className="absolute inset-0 z-0 rounded-full bg-background shadow-sm"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span className="relative z-10 inline-flex items-center gap-1.5">
+                      <ChartBar className="size-3.5" />
+                      {msg("auto.features.dashboard.components.dashboardview.1")}
+                    </span>
+                  </TabsTrigger>
+                </TabsList>
+              )}
 
               <TabsContent value="jobs">
                 <JobsTab

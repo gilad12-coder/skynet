@@ -280,6 +280,21 @@
     "wizard.split_fractions_sum": "split_fractions müssen sich zu 1.0 summieren, ergab {total}",
     "budget.idempotency_required": "Senden Sie einen eindeutigen Idempotency-Key für diese Anfrage.",
     "serve.caller_tool_connection_required": "Dieser Durchlauf verwendet eine an den Eigentümer gebundene Tool-Verbindung. Verbinden Sie das Tool mit Ihrem Konto, bevor Sie es aufrufen.",
-    "serve.protected_interaction_failed": "Die Anfrage in der Sandbox ist fehlgeschlagen: {error}"
+    "serve.protected_interaction_failed": "Die Anfrage in der Sandbox ist fehlgeschlagen: {error}",
+    "notifier.body.needs_input": "Die erwarteten Kosten überschreiten das Ausgabenlimit, daher wurde der Lauf pausiert. Erhöhen Sie das Limit, um an derselben Stelle fortzufahren.",
+    "notifier.body.stuck": "Keine Verbesserung in den letzten {percent}% des Bewertungsbudgets des Laufs.",
+    "notifier.label.best": "bester Score",
+    "notifier.label.spent": "ausgegeben",
+    "notifier.label.stage": "Phase",
+    "notifier.stage.baseline": "Basisbewertung",
+    "notifier.stage.evaluating": "Abschließende Bewertung",
+    "notifier.stage.optimizing": "Optimierung läuft",
+    "notifier.stage.prepared": "Daten bereit",
+    "notifier.title.budget": "Ihre Optimierung nähert sich dem Ausgabenlimit",
+    "notifier.title.digest": "Fortschritt Ihrer Optimierung",
+    "notifier.title.needs_input": "Ihre Optimierung wartet auf Sie",
+    "notifier.title.new_best": "Ihre Optimierung hat eine bessere Version gefunden",
+    "notifier.title.stage": "Ihre Optimierung ist in eine neue Phase übergegangen",
+    "notifier.title.stuck": "Ihre Optimierung verbessert sich nicht"
   }
 }

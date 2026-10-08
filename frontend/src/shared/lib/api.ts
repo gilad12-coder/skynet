@@ -779,9 +779,19 @@ export function checkPackageRegistry(indexUrl: string) {
   });
 }
 
+export type NotificationCadence = "done" | "milestones" | "live";
+export type NotificationLiveMode = "per_stage" | "per_run_count" | "digest";
+
 export interface NotificationPreferences {
   job_updates_enabled: boolean;
   sharing_updates_enabled: boolean;
+  /** How often run emails arrive. Absent on a server that predates cadence. */
+  cadence?: NotificationCadence;
+  live_mode?: NotificationLiveMode;
+  live_count?: number;
+  digest_minutes?: number;
+  stuck_fraction?: number;
+  budget_alert_fraction?: number;
 }
 
 /** Fetch the caller's optional product-email preferences. */
@@ -792,6 +802,33 @@ export function getNotificationPreferences() {
 /** Persist one or more optional product-email preference switches. */
 export function updateNotificationPreferences(patch: Partial<NotificationPreferences>) {
   return request<NotificationPreferences>("/account/notification-preferences", {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export type ExperienceLevelValue = "guided" | "standard" | "expert";
+
+export interface AccountExperience {
+  level: ExperienceLevelValue | null;
+  intake_completed: boolean;
+  intake: Record<string, unknown> | null;
+}
+
+export interface AccountExperiencePatch {
+  level?: ExperienceLevelValue;
+  intake?: Record<string, unknown>;
+  intake_completed?: boolean;
+}
+
+/** Fetch the caller's abstraction level and first-login setup answers. */
+export function getAccountExperience() {
+  return request<AccountExperience>("/account/experience");
+}
+
+/** Persist the caller's abstraction level and/or setup answers. */
+export function updateAccountExperience(patch: AccountExperiencePatch) {
+  return request<AccountExperience>("/account/experience", {
     method: "PATCH",
     body: JSON.stringify(patch),
   });

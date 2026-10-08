@@ -5,8 +5,6 @@ type SplitModeDefault = "auto" | "manual";
 type TrustModeDefault = "ask" | "auto_safe" | "yolo";
 
 export interface UserPrefs {
-  // Layout preference: the wizard's collapsible sections start expanded.
-  expandAdvanced: boolean;
   // Lightweight mode for low-resource machines: kills motion/blur and swaps the
   // heavy visualizations (charts, SVG trajectory tree, code editor) for static
   // equivalents. See LiteModeProvider.
@@ -33,7 +31,6 @@ export interface UserPrefs {
 export type AgentPreferencePatch = Partial<
   Pick<
     UserPrefs,
-    | "expandAdvanced"
     | "liteMode"
     | "wizardCodeAssist"
     | "wizardSplitMode"
@@ -43,7 +40,6 @@ export type AgentPreferencePatch = Partial<
 >;
 
 const AGENT_PREFERENCE_FIELDS: Record<string, keyof AgentPreferencePatch> = {
-  expand_advanced: "expandAdvanced",
   lite_mode: "liteMode",
   wizard_code_assist: "wizardCodeAssist",
   wizard_split_mode: "wizardSplitMode",
@@ -88,7 +84,6 @@ export function parseAgentPreferencePatch(value: unknown): AgentPreferencePatch 
 }
 
 export const PREF_KEYS: Record<keyof UserPrefs, string> = {
-  expandAdvanced: "skynet.prefs.expand-advanced",
   liteMode: "skynet.prefs.lite-mode",
   wizardCodeAssist: "skynet.prefs.wizard.code-assist",
   wizardSplitMode: "skynet.prefs.wizard.split-mode",
@@ -101,7 +96,6 @@ export const PREF_KEYS: Record<keyof UserPrefs, string> = {
 };
 
 export const DEFAULT_PREFS: UserPrefs = {
-  expandAdvanced: false,
   liteMode: false,
   wizardCodeAssist: "auto",
   wizardSplitMode: "auto",
@@ -115,8 +109,9 @@ export const DEFAULT_PREFS: UserPrefs = {
   taggerAssistModel: { name: "" },
 };
 
-// `skynet.prefs.advanced-mode` belonged to a retired toggle; a stale value in
-// an old browser is simply ignored now.
+// `skynet.prefs.advanced-mode` and `skynet.prefs.expand-advanced` belonged to
+// retired toggles (the second is now the server-side Expert level); a stale
+// value in an old browser is simply ignored.
 export function migrateLegacyPrefs(): void {
   /* No pending migrations. Kept so callers don't churn when one appears. */
 }

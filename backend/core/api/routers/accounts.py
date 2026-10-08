@@ -40,12 +40,12 @@ from ..password_reset import issue_reset_code, reset_code_on_cooldown, verify_re
 from ..passwords import hash_password, verify_password
 from ..rate_limit import enforce_account_rate
 from ..two_factor import enforce_second_factor
+from .experience import normalize_experience_level
 
 logger = logging.getLogger(__name__)
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _USE_CASES = frozenset({"classification", "extraction", "rag_agents", "generation", "other"})
-_EXPERIENCE_LEVELS = frozenset({"new", "familiar", "expert"})
 _JOB_ROLES = frozenset({"engineer", "researcher", "pm", "other"})
 
 
@@ -344,7 +344,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
                     created_at=datetime.now(UTC),
                     email_verified=verified,
                     use_case=_coerce_choice(body.use_case, _USE_CASES),
-                    experience_level=_coerce_choice(body.experience_level, _EXPERIENCE_LEVELS),
+                    experience_level=normalize_experience_level(body.experience_level),
                     job_role=_coerce_choice(body.job_role, _JOB_ROLES),
                 )
             )

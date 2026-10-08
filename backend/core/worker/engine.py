@@ -74,6 +74,7 @@ from ..i18n import CANCELLATION_REASON, PAUSE_REASON
 from ..models import BlackboxRunRequest, GridSearchRequest, GridSearchResponse, PairResult, RunRequest, SplitCounts
 from ..models.results import TerminalOutcome, result_scores
 from ..notifications import notify_job_completed
+from ..notifications.run_watcher import RunNotificationWatcher
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.embedding_pipeline import embed_finished_job
@@ -833,6 +834,15 @@ class BackgroundWorker:
                     events_target = pair_parent_id
                     payload_dict["_pair_index_base"] = pair_index_val
                     payload_dict["_grid_total_pairs"] = payload_dict.pop("_parent_total_pairs", 1)
+                # Grid scores and stages are per pair, so in-run mail (new best,
+                # stuck, stage changes) is only meaningful for a single run.
+                run_watcher = (
+                    RunNotificationWatcher.for_run(
+                        optimization_id, overview.get(PAYLOAD_OVERVIEW_USERNAME), self._job_store
+                    )
+                    if not is_grid and pair_parent_id is None
+                    else None
+                )
 
                 # BYOK bridge: for a run that bills the user's own provider key,
                 # resolve each model's key from the vault and stamp it onto the
@@ -1024,6 +1034,7 @@ class BackgroundWorker:
                         generation=execution_generation,
                         checkpoint_tracker=checkpoint_tracker,
                         usage_tracker=usage_tracker,
+                        run_watcher=run_watcher,
                     )
                     if drained_result is not None:
                         result_dict = drained_result
@@ -1041,8 +1052,14 @@ class BackgroundWorker:
                         self._persist_gepa_checkpoint(optimization_id, gepa_dir, checkpoint_tracker, is_grid=is_grid)
                         if budget_gateway is not None and not is_grid:
                             self._pause_if_over_projection(
-                                optimization_id, budget_gateway, checkpoint_tracker, execution_generation
+                                optimization_id,
+                                budget_gateway,
+                                checkpoint_tracker,
+                                execution_generation,
+                                run_watcher=run_watcher,
                             )
+                    if run_watcher is not None and budget_gateway is not None and run_watcher.spend_check_due():
+                        self._observe_run_spend(optimization_id, run_watcher, budget_gateway)
 
                 drained_result, drained_error, _ = self._drain_subprocess_events(
                     events_target,
@@ -1052,6 +1069,7 @@ class BackgroundWorker:
                     generation=execution_generation,
                     checkpoint_tracker=checkpoint_tracker,
                     usage_tracker=usage_tracker,
+                    run_watcher=run_watcher,
                 )
                 if drained_result is not None:
                     result_dict = drained_result
@@ -1660,6 +1678,8 @@ class BackgroundWorker:
         gateway: ModelGateway,
         tracker: dict[str, Any],
         generation: int | None,
+        *,
+        run_watcher: RunNotificationWatcher | None = None,
     ) -> None:
         """Pause a run whose measured burn projects past its spending limit.
 
@@ -1679,6 +1699,8 @@ class BackgroundWorker:
             tracker: Checkpoint cursor holding the planned count reported by
                 the optimizer and the metric calls of the last saved state.
             generation: Worker epoch allowed to publish the pause.
+            run_watcher: The run's in-run email watcher, told the run now
+                waits for the owner to raise the limit.
 
         Raises:
             CancellationError: After the pause is published, to unwind the run.
@@ -1725,7 +1747,30 @@ class BackgroundWorker:
             cas(optimization_id, ("running", "validating"), **fence, **fields)
         else:
             self._job_store.update_job(optimization_id, **fields)
+        if run_watcher is not None:
+            run_watcher.notify_needs_input()
         raise CancellationError()
+
+    def _observe_run_spend(
+        self, optimization_id: str, run_watcher: RunNotificationWatcher, gateway: ModelGateway
+    ) -> None:
+        """Feed the run's settled spend to its email watcher for the budget alert.
+
+        Args:
+            optimization_id: The running job.
+            run_watcher: The run's in-run email watcher.
+            gateway: Trusted parent transport whose runtime owns the budget.
+        """
+        runtime = gateway.runtime
+        try:
+            snapshot = runtime.service.get(runtime.budget_id, runtime.username)
+        except Exception:
+            # A ledger read hiccup only delays the alert to the next check.
+            logger.warning("Optimization %s: spend read for budget alert failed", optimization_id, exc_info=True)
+            return
+        if snapshot.uncapped:
+            return
+        run_watcher.observe_spend(float(snapshot.setup_spent_cents + snapshot.run_spent_cents), snapshot.total_cents)
 
     def _raise_if_store_cancelled(self, optimization_id: str) -> None:
         """Raise ``CancellationError`` when a peer pod has cancelled/paused the job.
@@ -2054,6 +2099,7 @@ class BackgroundWorker:
         generation: int | None = None,
         checkpoint_tracker: dict[str, Any] | None = None,
         usage_tracker: dict[str, Any] | None = None,
+        run_watcher: RunNotificationWatcher | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, int]:
         """Drain all pending events from the subprocess queue, routing each by type.
 
@@ -2079,6 +2125,8 @@ class BackgroundWorker:
             usage_tracker: Mutable dict that receives the latest cumulative
                 ``usage_by_model`` snapshot a progress or error event carried,
                 so a run that ends without a result can still be billed.
+            run_watcher: The run's in-run email watcher, fed each persisted
+                progress event.
 
         Returns:
             ``(result_dict, error_dict, drained_count)`` — the first two may be
@@ -2140,6 +2188,8 @@ class BackgroundWorker:
                         )
                     else:
                         self._job_store.record_progress(optimization_id, event.get("event"), metrics)
+                    if run_watcher is not None:
+                        run_watcher.observe_progress(event.get("event"), metrics)
                 except Exception:
                     logger.exception("Optimization %s: failed to persist subprocess progress event", optimization_id)
             elif event_type == EVENT_LOG:

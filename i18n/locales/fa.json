@@ -280,6 +280,21 @@
     "wizard.split_fractions_sum": "split_fractions باید جمعاً برابر 1.0 شود، {total} دریافت شد.",
     "budget.idempotency_required": "یک Idempotency-Key یکتا برای این درخواست ارسال کنید.",
     "serve.caller_tool_connection_required": "این اجرا از یک اتصال ابزارِ وابسته به مالک استفاده می‌کند. پیش از فراخوانی، ابزار را به حساب خود متصل کنید.",
-    "serve.protected_interaction_failed": "درخواست در سندباکس ناموفق بود: {error}"
+    "serve.protected_interaction_failed": "درخواست در سندباکس ناموفق بود: {error}",
+    "notifier.body.needs_input": "هزینه پیش‌بینی‌شده از سقف هزینه بیشتر است، بنابراین اجرا متوقف شد. سقف را افزایش دهید تا از همان نقطه ادامه یابد.",
+    "notifier.body.stuck": "در {percent}% پایانی بودجه ارزیابی اجرا هیچ بهبودی دیده نشد.",
+    "notifier.label.best": "بهترین امتیاز",
+    "notifier.label.spent": "هزینه‌شده",
+    "notifier.label.stage": "مرحله",
+    "notifier.stage.baseline": "ارزیابی پایه",
+    "notifier.stage.evaluating": "ارزیابی نهایی",
+    "notifier.stage.optimizing": "در حال بهینه‌سازی",
+    "notifier.stage.prepared": "داده‌ها آماده است",
+    "notifier.title.budget": "بهینه‌سازی شما به سقف هزینه نزدیک می‌شود",
+    "notifier.title.digest": "گزارش پیشرفت بهینه‌سازی شما",
+    "notifier.title.needs_input": "بهینه‌سازی شما منتظر شماست",
+    "notifier.title.new_best": "بهینه‌سازی شما نسخه بهتری پیدا کرد",
+    "notifier.title.stage": "بهینه‌سازی شما وارد مرحله جدیدی شد",
+    "notifier.title.stuck": "بهینه‌سازی شما بهتر نمی‌شود"
   }
 }

@@ -2,6 +2,13 @@
 
 import * as React from "react";
 
+import type {
+  BlackboxEngineId,
+  BlackboxHarness,
+  BlackboxProposer,
+  BlackboxStrategy,
+} from "@/shared/types/api";
+
 import type { WizardState } from "../lib/types";
 
 type WizardKey =
@@ -33,6 +40,9 @@ type WizardKey =
   | "blackbox_objective"
   | "blackbox_seed"
   | "blackbox_scorer_code"
+  | "blackbox_strategy"
+  | "blackbox_proposer"
+  | "max_cost_cents"
   | "staged_dataset_id"
   | "source_dataset_id";
 type WriteSource = "user" | "agent";
@@ -313,6 +323,80 @@ export function extractWizardPatch(result: unknown): Partial<WizardState> {
   if (typeof wrap.blackbox_scorer_code === "string") {
     patch.blackbox_scorer_code = wrap.blackbox_scorer_code;
   }
+  // The request's bare names (`strategy`, `proposer`) are only trusted inside
+  // an explicit `wizard_state` block: other tool results echo them too.
+  const wrapped = wrap !== r;
+  // The wizard tool's patch spells these flat (blackbox_strategy_mode,
+  // blackbox_engine, blackbox_proposer_harness); the nested run-request shape
+  // is accepted too.
+  const flatStrategy =
+    wrap.blackbox_strategy_mode !== undefined
+      ? { mode: wrap.blackbox_strategy_mode, engine: wrap.blackbox_engine }
+      : wrap.blackbox_engine !== undefined
+        ? { mode: "single", engine: wrap.blackbox_engine }
+        : undefined;
+  const strategy = parseBlackboxStrategy(
+    wrap.blackbox_strategy ?? (wrapped ? wrap.strategy : undefined) ?? flatStrategy,
+  );
+  if (strategy) patch.blackbox_strategy = strategy;
+  const flatProposer =
+    wrap.blackbox_proposer_harness !== undefined
+      ? { harness: wrap.blackbox_proposer_harness }
+      : undefined;
+  const proposer = parseBlackboxProposer(
+    wrap.blackbox_proposer ?? (wrapped ? wrap.proposer : undefined) ?? flatProposer,
+  );
+  if (proposer) patch.blackbox_proposer = proposer;
+  if (wrap.max_cost_cents === null) {
+    patch.max_cost_cents = null;
+  } else if (
+    typeof wrap.max_cost_cents === "number" &&
+    Number.isInteger(wrap.max_cost_cents) &&
+    wrap.max_cost_cents > 0
+  ) {
+    patch.max_cost_cents = wrap.max_cost_cents;
+  }
 
   return patch;
+}
+
+const BLACKBOX_ENGINES: readonly BlackboxEngineId[] = [
+  "gepa",
+  "best_of_n",
+  "autoresearch",
+  "meta_harness",
+  "autosaddler",
+  "shinka_evolve",
+];
+const BLACKBOX_HARNESSES: readonly BlackboxHarness[] = ["pi", "codex", "opencode", "prime", "custom"];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/** `{mode, engine}` as the run request spells it; an unknown engine is dropped. */
+function parseBlackboxStrategy(value: unknown): BlackboxStrategy | null {
+  if (!isRecord(value) || (value.mode !== "auto" && value.mode !== "single")) return null;
+  const engine = BLACKBOX_ENGINES.find((id) => id === value.engine) ?? null;
+  // A single-engine strategy without a known engine cannot be submitted.
+  if (value.mode === "single" && !engine) return null;
+  return { mode: value.mode, engine: value.mode === "single" ? engine : null };
+}
+
+/** The proposer fields an agent may set; anything malformed is left out. */
+function parseBlackboxProposer(value: unknown): Partial<BlackboxProposer> | null {
+  if (!isRecord(value)) return null;
+  const out: Partial<BlackboxProposer> = {};
+  const harness = BLACKBOX_HARNESSES.find((h) => h === value.harness);
+  if (harness) out.harness = harness;
+  const positiveInt = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v > 0;
+  if (positiveInt(value.max_candidates_per_iter)) {
+    out.max_candidates_per_iter = value.max_candidates_per_iter as number;
+  }
+  if (positiveInt(value.max_tool_calls)) out.max_tool_calls = value.max_tool_calls as number;
+  if (positiveInt(value.max_no_eval_seconds)) {
+    out.max_no_eval_seconds = value.max_no_eval_seconds as number;
+  }
+  if (typeof value.ralph === "boolean") out.ralph = value.ralph;
+  return Object.keys(out).length > 0 ? out : null;
 }

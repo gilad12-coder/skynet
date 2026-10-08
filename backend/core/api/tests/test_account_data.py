@@ -146,7 +146,15 @@ def test_export_returns_owned_data_without_secrets(harness: SimpleNamespace) -> 
     assert body["notification_preferences"] == {
         "job_updates_enabled": False,
         "sharing_updates_enabled": True,
+        "cadence": "done",
+        "live_mode": "per_stage",
+        "live_count": 3,
+        "digest_minutes": 60,
+        "stuck_fraction": 0.25,
+        "budget_alert_fraction": 0.8,
     }
+    assert body["account"]["intake_completed_at"] is None
+    assert body["account"]["intake_profile"] is None
     # No other account's rows leak into this export.
     assert all(job["optimization_id"] != f"job-{_OTHER}" for job in body["optimizations"])
 

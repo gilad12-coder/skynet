@@ -1723,7 +1723,10 @@ Capabilities worth knowing about:
   shuffle, optimizer_kwargs, target_score (GEPA stops early once its
   validation score reaches this PERCENTAGE, 1–100), react_config,
   is_private, job_name, job_description, job_type, and in black-box
-  mode blackbox_objective / blackbox_seed / blackbox_scorer_code.
+  mode blackbox_objective / blackbox_seed / blackbox_scorer_code /
+  blackbox_strategy_mode (``auto`` or ``single``) / blackbox_engine
+  (with ``single``) / blackbox_proposer_harness, plus
+  spending_limit_usd (dollars; send null to remove the limit).
   Supply only the fields you want to change; everything else is left
   alone. Prefer it over the narrow per-field tools when changing one
   thing. Do NOT patch ``signature_code`` / ``metric_code`` here — they
@@ -1731,8 +1734,7 @@ Capabilities worth knowing about:
   ``update_wizard_state`` endpoint REJECTS those two fields.
 * User preferences: when the user explicitly asks to turn a local
   preference on or off, call ``update_user_preferences``. Supported fields
-  are ``expand_advanced``, ``lite_mode``,
-  ``wizard_code_assist`` (``auto`` or ``manual``), ``wizard_split_mode``
+  are ``lite_mode``, ``wizard_code_assist`` (``auto`` or ``manual``), ``wizard_split_mode``
   (``auto`` or ``manual``), ``tagger_assist``, and ``dictation_enabled``.
   Bundle all requested changes into one call and end the turn with a
   concise status.

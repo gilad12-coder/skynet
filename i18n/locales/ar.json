@@ -280,6 +280,21 @@
     "wizard.split_fractions_sum": "يجب أن يكون مجموع split_fractions مساويًا 1.0، وكان {total}",
     "budget.idempotency_required": "أرسِل Idempotency-Key فريدًا لهذا الطلب.",
     "serve.caller_tool_connection_required": "يستخدم هذا التشغيل اتصال أداة مرتبطًا بالمالك. اربط الأداة بحسابك قبل استدعائها.",
-    "serve.protected_interaction_failed": "فشل الطلب داخل صندوق الحماية: {error}"
+    "serve.protected_interaction_failed": "فشل الطلب داخل صندوق الحماية: {error}",
+    "notifier.body.needs_input": "تجاوز الإنفاق المتوقع حد الإنفاق، لذا أُوقف التشغيل مؤقتًا. ارفع الحد للمتابعة من حيث توقف.",
+    "notifier.body.stuck": "لا يوجد تحسن خلال آخر {percent}% من ميزانية التقييم للتشغيل.",
+    "notifier.label.best": "أفضل نتيجة",
+    "notifier.label.spent": "المنفق",
+    "notifier.label.stage": "المرحلة",
+    "notifier.stage.baseline": "التقييم الأساسي",
+    "notifier.stage.evaluating": "التقييم النهائي",
+    "notifier.stage.optimizing": "جارٍ التحسين",
+    "notifier.stage.prepared": "البيانات جاهزة",
+    "notifier.title.budget": "يقترب التحسين من حد الإنفاق",
+    "notifier.title.digest": "تحديث حول تقدم التحسين",
+    "notifier.title.needs_input": "التحسين بانتظارك",
+    "notifier.title.new_best": "وجد التحسين نسخة أفضل",
+    "notifier.title.stage": "انتقل التحسين إلى مرحلة جديدة",
+    "notifier.title.stuck": "التحسين لا يتقدم"
   }
 }
