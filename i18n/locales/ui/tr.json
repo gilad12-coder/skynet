@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "Skynet motoru otomatik seçer ve varsayılan öneri üreticisini kullanır.",
   "experience.guided.change_level": "Ayarlarda daha fazlasını göster",
   "experience.intake.step": "Soru {n} / {total}",
-  "experience.intake.skip": "Atla",
+  "experience.intake.skip": "Kurulumu atla",
   "experience.intake.back": "Geri",
   "experience.intake.next": "Devam",
   "experience.intake.finish": "Kurulumumu aç",

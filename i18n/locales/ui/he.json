@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "Skynet בוחר את המנוע אוטומטית ומשתמש במציע ברירת המחדל שלו.",
   "experience.guided.change_level": "להציג עוד בהגדרות",
   "experience.intake.step": "שאלה {n} מתוך {total}",
-  "experience.intake.skip": "דילוג",
+  "experience.intake.skip": "דילוג על ההגדרה",
   "experience.intake.back": "חזרה",
   "experience.intake.next": "המשך",
   "experience.intake.finish": "פתיחת ההגדרה שלי",

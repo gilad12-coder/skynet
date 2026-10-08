@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "يختار Skynet المحرّك تلقائيًا ويستخدم مولّد الاقتراحات الافتراضي.",
   "experience.guided.change_level": "عرض المزيد في الإعدادات",
   "experience.intake.step": "السؤال {n} من {total}",
-  "experience.intake.skip": "تخطّي",
+  "experience.intake.skip": "تخطّي الإعداد",
   "experience.intake.back": "رجوع",
   "experience.intake.next": "متابعة",
   "experience.intake.finish": "افتح إعدادي",

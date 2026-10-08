@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "Skynet इंजन अपने आप चुनता है और अपना डिफ़ॉल्ट प्रपोज़र इस्तेमाल करता है।",
   "experience.guided.change_level": "सेटिंग्स में और दिखाएँ",
   "experience.intake.step": "सवाल {n} / {total}",
-  "experience.intake.skip": "छोड़ें",
+  "experience.intake.skip": "सेटअप छोड़ें",
   "experience.intake.back": "वापस",
   "experience.intake.next": "आगे बढ़ें",
   "experience.intake.finish": "मेरा सेटअप खोलें",

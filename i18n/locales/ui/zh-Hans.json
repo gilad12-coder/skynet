@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "Skynet 会自动选择引擎,并使用默认的提议器。",
   "experience.guided.change_level": "在设置中显示更多",
   "experience.intake.step": "第 {n} 个问题,共 {total} 个",
-  "experience.intake.skip": "跳过",
+  "experience.intake.skip": "跳过设置",
   "experience.intake.back": "返回",
   "experience.intake.next": "继续",
   "experience.intake.finish": "打开我的设置",

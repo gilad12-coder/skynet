@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "Skynet موتور را خودکار انتخاب می‌کند و از پیشنهاددهنده پیش‌فرض استفاده می‌کند.",
   "experience.guided.change_level": "نمایش موارد بیشتر در تنظیمات",
   "experience.intake.step": "پرسش {n} از {total}",
-  "experience.intake.skip": "رد شدن",
+  "experience.intake.skip": "رد شدن از راه‌اندازی",
   "experience.intake.back": "بازگشت",
   "experience.intake.next": "ادامه",
   "experience.intake.finish": "باز کردن راه‌اندازی من",

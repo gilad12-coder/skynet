@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "Skynet elige el motor automáticamente y usa su proposer predeterminado.",
   "experience.guided.change_level": "Mostrar más en Ajustes",
   "experience.intake.step": "Pregunta {n} de {total}",
-  "experience.intake.skip": "Omitir",
+  "experience.intake.skip": "Omitir configuración",
   "experience.intake.back": "Atrás",
   "experience.intake.next": "Continuar",
   "experience.intake.finish": "Abrir mi configuración",

@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "O Skynet escolhe o mecanismo automaticamente e usa o proposer padrão.",
   "experience.guided.change_level": "Mostrar mais nas Configurações",
   "experience.intake.step": "Pergunta {n} de {total}",
-  "experience.intake.skip": "Pular",
+  "experience.intake.skip": "Pular configuração",
   "experience.intake.back": "Voltar",
   "experience.intake.next": "Continuar",
   "experience.intake.finish": "Abrir minha configuração",

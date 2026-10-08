@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "Skynet はエンジンを自動で選び、既定のプロポーザーを使用します。",
   "experience.guided.change_level": "設定でさらに表示",
   "experience.intake.step": "質問 {n}/{total}",
-  "experience.intake.skip": "スキップ",
+  "experience.intake.skip": "セットアップをスキップ",
   "experience.intake.back": "戻る",
   "experience.intake.next": "次へ",
   "experience.intake.finish": "セットアップを開く",

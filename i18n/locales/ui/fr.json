@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "Skynet choisit le moteur automatiquement et utilise son proposer par défaut.",
   "experience.guided.change_level": "Afficher plus dans les paramètres",
   "experience.intake.step": "Question {n} sur {total}",
-  "experience.intake.skip": "Passer",
+  "experience.intake.skip": "Passer la configuration",
   "experience.intake.back": "Retour",
   "experience.intake.next": "Continuer",
   "experience.intake.finish": "Ouvrir ma configuration",

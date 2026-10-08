@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "Skynet picks the engine automatically and uses its default proposer.",
   "experience.guided.change_level": "Show more in Settings",
   "experience.intake.step": "Question {n} of {total}",
-  "experience.intake.skip": "Skip",
+  "experience.intake.skip": "Skip setup",
   "experience.intake.back": "Back",
   "experience.intake.next": "Continue",
   "experience.intake.finish": "Open my setup",

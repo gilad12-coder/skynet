@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "Skynet сам обирає рушій і використовує типовий генератор пропозицій.",
   "experience.guided.change_level": "Показати більше в налаштуваннях",
   "experience.intake.step": "Запитання {n} з {total}",
-  "experience.intake.skip": "Пропустити",
+  "experience.intake.skip": "Пропустити налаштування",
   "experience.intake.back": "Назад",
   "experience.intake.next": "Продовжити",
   "experience.intake.finish": "Відкрити моє налаштування",

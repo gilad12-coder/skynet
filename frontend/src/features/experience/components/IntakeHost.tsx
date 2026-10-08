@@ -15,7 +15,12 @@ import { getModelCatalog } from "@/shared/lib/model-catalog";
 import { cn } from "@/shared/lib/utils";
 import { NumberInput } from "@/shared/ui/number-input";
 import { Button } from "@/shared/ui/primitives/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/shared/ui/primitives/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/shared/ui/primitives/dialog";
 import { Input } from "@/shared/ui/primitives/input";
 import { Segmented, type SegmentedOption } from "@/shared/ui/segmented";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
@@ -134,6 +139,57 @@ function Chip({
   );
 }
 
+/** Three questions and the summary, drawn as a bar; the count is read out, not shown. */
+function IntakeProgress({ step }: { step: number }) {
+  return (
+    <div className="px-5 pt-5 sm:px-7">
+      <div className="flex gap-1.5" aria-hidden>
+        {Array.from({ length: STEPS + 1 }, (_, i) => (
+          <span
+            key={i}
+            className={cn(
+              "h-1 flex-1 rounded-full transition-colors duration-300 ease-out",
+              i <= step ? "bg-foreground" : "bg-border",
+            )}
+          />
+        ))}
+      </div>
+      <span className="sr-only" aria-live="polite">
+        {step < STEPS
+          ? formatMsg("experience.intake.step", { n: step + 1, total: STEPS })
+          : msg("experience.intake.summary.eyebrow")}
+      </span>
+    </div>
+  );
+}
+
+/** The question carries the screen; the hint sits tight beneath it. */
+function QuestionHeading({
+  titleId,
+  title,
+  hint,
+  className,
+}: {
+  titleId: string;
+  title: string;
+  hint: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex flex-col gap-1.5", className)}>
+      <DialogTitle
+        id={titleId}
+        className="text-lg font-semibold leading-snug tracking-tight text-balance sm:text-xl"
+      >
+        {title}
+      </DialogTitle>
+      <DialogDescription className="text-sm leading-relaxed text-muted-foreground">
+        {hint}
+      </DialogDescription>
+    </div>
+  );
+}
+
 /** One editable line of the summary. */
 function SummaryRow({
   label,
@@ -154,7 +210,12 @@ function SummaryRow({
           {hint && <span className="text-xs text-muted-foreground/80">{hint}</span>}
         </div>
         {onChange && (
-          <Button variant="ghost" size="sm" className={cn(TOUCH_TAP, "-me-2 shrink-0")} onClick={onChange}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(TOUCH_TAP, "-me-2 shrink-0")}
+            onClick={onChange}
+          >
             {msg("experience.intake.summary.change")}
           </Button>
         )}
@@ -254,8 +315,9 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
 
   const byokProvider =
     answers.byok_provider ??
-    BYOK_PROVIDERS.find((p) => models?.find((m) => m.value === answers.models[0])?.provider === p.slug)
-      ?.slug ??
+    BYOK_PROVIDERS.find(
+      (p) => models?.find((m) => m.value === answers.models[0])?.provider === p.slug,
+    )?.slug ??
     BYOK_PROVIDERS[0]!.slug;
 
   const finish = async () => {
@@ -268,7 +330,9 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
     await experience.save(buildExperiencePatch(final));
     wizard?.applyAgentPatch(extractWizardPatch(buildWizardPrefill(final)));
     if (agentEnabled) {
-      const brief = agentBrief(final, (values) => formatMsg("experience.intake.agent_brief", values));
+      const brief = agentBrief(final, (values) =>
+        formatMsg("experience.intake.agent_brief", values),
+      );
       if (brief) queueAgentPrompt(brief);
     }
     clearDraft();
@@ -316,180 +380,175 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
         className={cn(
           "flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl",
         )}
+        showCloseButton={false}
         onInteractOutside={(e) => e.preventDefault()}
       >
-        <div className="flex items-center justify-between gap-3 border-b border-border/40 px-4 py-3 pe-14 sm:px-5">
-          <span className="text-xs font-medium text-muted-foreground tabular-nums" aria-live="polite">
-            {step < STEPS
-              ? formatMsg("experience.intake.step", { n: step + 1, total: STEPS })
-              : msg("experience.intake.summary.eyebrow")}
-          </span>
-          <Button
-            variant="link"
-            size="sm"
-            className={cn(TOUCH_TAP, "h-auto px-0 text-muted-foreground")}
-            onClick={skip}
-            disabled={finishing}
-          >
-            {msg("experience.intake.skip")}
-          </Button>
-        </div>
+        <IntakeProgress step={step} />
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-5">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pt-6 pb-8 sm:px-7 sm:pt-7">
           {step === 0 && (
-            <section className="flex flex-col gap-3">
-              <DialogTitle id={titleId} className="text-base leading-snug text-balance">
-                {msg("experience.intake.q1.title")}
-              </DialogTitle>
-              <DialogDescription className="text-sm text-muted-foreground">
-                {msg("experience.intake.q1.hint")}
-              </DialogDescription>
-              <Input
-                autoFocus
-                value={answers.goal}
-                placeholder={msg("experience.intake.q1.placeholder")}
-                aria-label={msg("experience.intake.q1.title")}
-                onChange={(e) => update({ goal: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && canContinue) setStep(1);
-                }}
-                className={cn(TOUCH_FIELD, "text-sm")}
+            <section className="flex flex-col gap-6">
+              <QuestionHeading
+                titleId={titleId}
+                title={msg("experience.intake.q1.title")}
+                hint={msg("experience.intake.q1.hint")}
               />
-              <div className="flex flex-wrap gap-1.5">
-                {GOAL_CHIPS.map((key) => {
-                  const text = msg(key);
-                  return (
-                    <Chip key={key} pressed={answers.goal === text} onClick={() => update({ goal: text })}>
-                      {text}
-                    </Chip>
-                  );
-                })}
+              <div className="flex flex-col gap-3">
+                <Input
+                  autoFocus
+                  value={answers.goal}
+                  placeholder={msg("experience.intake.q1.placeholder")}
+                  aria-label={msg("experience.intake.q1.title")}
+                  onChange={(e) => update({ goal: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && canContinue) setStep(1);
+                  }}
+                  className={cn(TOUCH_FIELD, "text-sm")}
+                />
+                <div className="flex flex-wrap gap-1.5">
+                  {GOAL_CHIPS.map((key) => {
+                    const text = msg(key);
+                    return (
+                      <Chip
+                        key={key}
+                        pressed={answers.goal === text}
+                        onClick={() => update({ goal: text })}
+                      >
+                        {text}
+                      </Chip>
+                    );
+                  })}
+                </div>
               </div>
             </section>
           )}
 
           {step === 1 && (
-            <section className="flex flex-col gap-3">
-              <DialogTitle id={titleId} className="text-base leading-snug text-balance">
-                {msg("experience.intake.q2.title")}
-              </DialogTitle>
-              <DialogDescription className="text-sm text-muted-foreground">
-                {msg("experience.intake.q2.hint")}
-              </DialogDescription>
-              <Input
-                autoFocus
-                dir="ltr"
-                inputMode="url"
-                value={sourceText}
-                placeholder={msg("experience.intake.q2.placeholder")}
-                aria-label={msg("experience.intake.q2.title")}
-                onChange={(e) => setSourceFromText(e.target.value)}
-                className={cn(TOUCH_FIELD, "text-sm")}
+            <section className="flex flex-col gap-6">
+              <QuestionHeading
+                titleId={titleId}
+                title={msg("experience.intake.q2.title")}
+                hint={msg("experience.intake.q2.hint")}
               />
-              {sourceText.trim() && (
-                <p className="text-xs text-muted-foreground" role="status">
-                  {detected?.kind === "repo"
-                    ? formatMsg("experience.intake.q2.detected_repo", { name: detected.value })
-                    : detected?.kind === "api"
-                      ? msg("experience.intake.q2.detected_api")
-                      : msg("experience.intake.q2.unrecognized")}
-                </p>
-              )}
-              <div className="flex flex-wrap gap-1.5">
-                {SOURCE_CHIPS.map((chip) => (
-                  <Chip
-                    key={chip.source}
-                    pressed={answers.source === chip.source}
-                    onClick={() => {
-                      setSourceText("");
-                      update({ source: chip.source, source_url: "", connector: "none" });
-                    }}
-                  >
-                    {msg(chip.label)}
-                  </Chip>
-                ))}
-              </div>
-              {connector ? (
-                <IntakeConnect
-                  provider={connector}
-                  state={answers.connector}
-                  onState={(state) => update({ connector: state })}
-                  beforeRedirect={() => writeDraft(answers, step)}
+              <div className="flex flex-col gap-3">
+                <Input
+                  autoFocus
+                  dir="ltr"
+                  inputMode="url"
+                  value={sourceText}
+                  placeholder={msg("experience.intake.q2.placeholder")}
+                  aria-label={msg("experience.intake.q2.title")}
+                  onChange={(e) => setSourceFromText(e.target.value)}
+                  className={cn(TOUCH_FIELD, "text-sm")}
                 />
-              ) : (
-                answers.source && (
-                  <p className="text-xs text-muted-foreground">
-                    {answers.source === "api"
-                      ? msg("experience.intake.q2.api_note")
-                      : msg("experience.intake.q2.file_note")}
+                {sourceText.trim() && (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    {detected?.kind === "repo"
+                      ? formatMsg("experience.intake.q2.detected_repo", { name: detected.value })
+                      : detected?.kind === "api"
+                        ? msg("experience.intake.q2.detected_api")
+                        : msg("experience.intake.q2.unrecognized")}
                   </p>
-                )
-              )}
+                )}
+                <div className="flex flex-wrap gap-1.5">
+                  {SOURCE_CHIPS.map((chip) => (
+                    <Chip
+                      key={chip.source}
+                      pressed={answers.source === chip.source}
+                      onClick={() => {
+                        setSourceText("");
+                        update({ source: chip.source, source_url: "", connector: "none" });
+                      }}
+                    >
+                      {msg(chip.label)}
+                    </Chip>
+                  ))}
+                </div>
+                {connector ? (
+                  <IntakeConnect
+                    provider={connector}
+                    state={answers.connector}
+                    onState={(state) => update({ connector: state })}
+                    beforeRedirect={() => writeDraft(answers, step)}
+                  />
+                ) : (
+                  answers.source && (
+                    <p className="text-xs text-muted-foreground">
+                      {answers.source === "api"
+                        ? msg("experience.intake.q2.api_note")
+                        : msg("experience.intake.q2.file_note")}
+                    </p>
+                  )
+                )}
+              </div>
             </section>
           )}
 
           {step === 2 && (
-            <section className="flex flex-col gap-3">
-              <DialogTitle id={titleId} className="text-base leading-snug text-balance">
-                {msg("experience.intake.q3.title")}
-              </DialogTitle>
-              <DialogDescription className="text-sm text-muted-foreground">
-                {msg("experience.intake.q3.hint")}
-              </DialogDescription>
-              <div
-                className="flex flex-wrap gap-1.5"
-                role="group"
-                aria-label={msg("experience.intake.q3.models_label")}
-              >
-                {models === null && !modelsFailed && (
-                  <span className="text-xs text-muted-foreground" role="status">
-                    {msg("experience.intake.q3.models_loading")}
-                  </span>
-                )}
-                {(modelsFailed || models?.length === 0) && (
-                  <span className="text-xs text-muted-foreground">
-                    {msg("experience.intake.q3.models_empty")}
-                  </span>
-                )}
-                {models?.map((model) => (
-                  <Chip
-                    key={model.value}
-                    pressed={answers.models.includes(model.value)}
-                    onClick={() => toggleModel(model.value)}
-                  >
-                    {model.label}
-                  </Chip>
-                ))}
-              </div>
-              <Segmented<"platform" | "byok">
-                value={answers.billing}
-                onChange={(billing) => update({ billing })}
-                options={billingOptions}
-                label={msg("experience.intake.q3.billing.label")}
-                size="sm"
-                className="w-full"
+            <section className="flex flex-col gap-6">
+              <QuestionHeading
+                titleId={titleId}
+                title={msg("experience.intake.q3.title")}
+                hint={msg("experience.intake.q3.hint")}
               />
-              {answers.billing === "byok" && (
-                <IntakeKeyCheck
-                  provider={byokProvider}
-                  onProvider={(slug) => update({ byok_provider: slug })}
-                  onVerified={() => update({ byok_provider: byokProvider })}
-                  onUsePlatform={() => update({ billing: "platform", byok_provider: null })}
+              <div className="flex flex-col gap-3">
+                <div
+                  className="flex flex-wrap gap-1.5"
+                  role="group"
+                  aria-label={msg("experience.intake.q3.models_label")}
+                >
+                  {models === null && !modelsFailed && (
+                    <span className="text-xs text-muted-foreground" role="status">
+                      {msg("experience.intake.q3.models_loading")}
+                    </span>
+                  )}
+                  {(modelsFailed || models?.length === 0) && (
+                    <span className="text-xs text-muted-foreground">
+                      {msg("experience.intake.q3.models_empty")}
+                    </span>
+                  )}
+                  {models?.map((model) => (
+                    <Chip
+                      key={model.value}
+                      pressed={answers.models.includes(model.value)}
+                      onClick={() => toggleModel(model.value)}
+                    >
+                      {model.label}
+                    </Chip>
+                  ))}
+                </div>
+                <Segmented<"platform" | "byok">
+                  value={answers.billing}
+                  onChange={(billing) => update({ billing })}
+                  options={billingOptions}
+                  label={msg("experience.intake.q3.billing.label")}
+                  size="sm"
+                  className="w-full"
                 />
-              )}
+                {answers.billing === "byok" && (
+                  <IntakeKeyCheck
+                    provider={byokProvider}
+                    onProvider={(slug) => update({ byok_provider: slug })}
+                    onVerified={() => update({ byok_provider: byokProvider })}
+                    onUsePlatform={() => update({ billing: "platform", byok_provider: null })}
+                  />
+                )}
+              </div>
             </section>
           )}
 
           {step === STEPS && (
             <section className="flex flex-col">
-              <DialogTitle id={titleId} className="text-base leading-snug">
-                {msg("experience.intake.summary.title")}
-              </DialogTitle>
-              <DialogDescription className="pt-1 pb-2 text-sm text-muted-foreground">
-                {agentEnabled
-                  ? msg("experience.intake.summary.agent_on")
-                  : msg("experience.intake.summary.agent_off")}
-              </DialogDescription>
+              <QuestionHeading
+                titleId={titleId}
+                title={msg("experience.intake.summary.title")}
+                hint={
+                  agentEnabled
+                    ? msg("experience.intake.summary.agent_on")
+                    : msg("experience.intake.summary.agent_off")
+                }
+                className="pb-3"
+              />
 
               <SummaryRow
                 label={msg("experience.level.title")}
@@ -547,7 +606,9 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
                     size="sm"
                     className="w-28"
                     value={
-                      answers.spending_limit_cents === null ? "" : answers.spending_limit_cents / 100
+                      answers.spending_limit_cents === null
+                        ? ""
+                        : answers.spending_limit_cents / 100
                     }
                     min={1}
                     max={10000}
@@ -571,32 +632,41 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-border/40 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
-          {step > 0 ? (
-            <Button
-              variant="ghost"
-              className={TOUCH_TAP}
-              onClick={() => setStep((s) => s - 1)}
-              disabled={finishing}
-            >
-              {msg("experience.intake.back")}
-            </Button>
-          ) : (
-            <span />
-          )}
-          {step < STEPS ? (
-            <Button
-              className={TOUCH_TAP}
-              onClick={() => setStep((s) => s + 1)}
-              disabled={!canContinue}
-            >
-              {msg("experience.intake.next")}
-            </Button>
-          ) : (
-            <Button className={TOUCH_TAP} onClick={() => void finish()} disabled={finishing}>
-              {finishing ? msg("experience.intake.finishing") : msg("experience.intake.finish")}
-            </Button>
-          )}
+        <div className="flex items-center gap-2 border-t border-border/40 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
+          {/* Leaving sits apart from moving forward, so neither is hit by mistake. */}
+          <Button
+            variant="ghost"
+            className={cn(TOUCH_TAP, "-ms-3 text-muted-foreground hover:text-foreground")}
+            onClick={skip}
+            disabled={finishing}
+          >
+            {msg("experience.intake.skip")}
+          </Button>
+          <div className="ms-auto flex items-center gap-2">
+            {step > 0 && (
+              <Button
+                variant="ghost"
+                className={TOUCH_TAP}
+                onClick={() => setStep((s) => s - 1)}
+                disabled={finishing}
+              >
+                {msg("experience.intake.back")}
+              </Button>
+            )}
+            {step < STEPS ? (
+              <Button
+                className={TOUCH_TAP}
+                onClick={() => setStep((s) => s + 1)}
+                disabled={!canContinue}
+              >
+                {msg("experience.intake.next")}
+              </Button>
+            ) : (
+              <Button className={TOUCH_TAP} onClick={() => void finish()} disabled={finishing}>
+                {finishing ? msg("experience.intake.finishing") : msg("experience.intake.finish")}
+              </Button>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>

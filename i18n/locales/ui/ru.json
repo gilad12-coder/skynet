@@ -4296,7 +4296,7 @@
   "experience.guided.blackbox_strategy": "Skynet сам выбирает движок и использует генератор предложений по умолчанию.",
   "experience.guided.change_level": "Показать больше в настройках",
   "experience.intake.step": "Вопрос {n} из {total}",
-  "experience.intake.skip": "Пропустить",
+  "experience.intake.skip": "Пропустить настройку",
   "experience.intake.back": "Назад",
   "experience.intake.next": "Продолжить",
   "experience.intake.finish": "Открыть мою настройку",
