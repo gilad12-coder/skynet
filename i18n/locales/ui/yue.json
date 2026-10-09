@@ -4333,8 +4333,6 @@
   "experience.intake.phase.trust": "助手",
   "experience.intake.language.title": "Skynet 應該用邊種語言?",
   "experience.intake.language.hint": "應用程式同助手都會切換到呢種語言。你隨時可以喺設定更改。",
-  "experience.intake.language.keep": "保持 {language}",
-  "experience.intake.language.keep_description": "推薦:你而家用緊嘅語言。",
   "experience.intake.language.default": "使用預設語言",
   "experience.intake.language.default_description": "沿用呢個瀏覽器揀嘅語言。",
   "experience.intake.chat.title": "設定你嘅第一次運行",

@@ -4333,8 +4333,6 @@
   "experience.intake.phase.trust": "העוזר",
   "experience.intake.language.title": "באיזו שפה Skynet ידבר איתכם?",
   "experience.intake.language.hint": "גם האפליקציה וגם העוזר יעברו לשפה הזו. אפשר לשנות אותה בכל רגע בהגדרות.",
-  "experience.intake.language.keep": "להישאר ב{language}",
-  "experience.intake.language.keep_description": "מומלץ: השפה שבה אתם משתמשים עכשיו.",
   "experience.intake.language.default": "ברירת המחדל",
   "experience.intake.language.default_description": "להמשיך בשפה שהדפדפן בחר.",
   "experience.intake.chat.title": "בואו נגדיר את הריצה הראשונה שלכם",

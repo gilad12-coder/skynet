@@ -4333,8 +4333,6 @@
   "experience.intake.phase.trust": "어시스턴트",
   "experience.intake.language.title": "Skynet이 어떤 언어로 말할까요?",
   "experience.intake.language.hint": "앱과 어시스턴트 모두 이 언어로 바뀝니다. 설정에서 언제든 바꿀 수 있습니다.",
-  "experience.intake.language.keep": "{language} 유지",
-  "experience.intake.language.keep_description": "추천: 지금 사용 중인 언어입니다.",
   "experience.intake.language.default": "기본값 사용",
   "experience.intake.language.default_description": "이 브라우저가 선택한 언어를 그대로 씁니다.",
   "experience.intake.chat.title": "첫 실행을 설정해 볼게요",

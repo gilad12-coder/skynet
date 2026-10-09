@@ -4333,8 +4333,6 @@
   "experience.intake.phase.trust": "Ассистент",
   "experience.intake.language.title": "На каком языке должен говорить Skynet?",
   "experience.intake.language.hint": "Приложение и ассистент переключатся на него. Изменить язык можно в любой момент в настройках.",
-  "experience.intake.language.keep": "Оставить {language}",
-  "experience.intake.language.keep_description": "Рекомендуется: язык, которым вы пользуетесь сейчас.",
   "experience.intake.language.default": "Использовать по умолчанию",
   "experience.intake.language.default_description": "Остаться на языке, выбранном браузером.",
   "experience.intake.chat.title": "Настроим ваш первый запуск",

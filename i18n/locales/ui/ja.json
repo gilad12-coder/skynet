@@ -4333,8 +4333,6 @@
   "experience.intake.phase.trust": "アシスタント",
   "experience.intake.language.title": "Skynet はどの言語で話しますか?",
   "experience.intake.language.hint": "アプリとアシスタントの両方が切り替わります。設定からいつでも変更できます。",
-  "experience.intake.language.keep": "{language} のままにする",
-  "experience.intake.language.keep_description": "おすすめ:現在使っている言語です。",
   "experience.intake.language.default": "デフォルトを使う",
   "experience.intake.language.default_description": "このブラウザが選んだ言語のままにします。",
   "experience.intake.chat.title": "最初の実行を設定しましょう",

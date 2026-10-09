@@ -4333,8 +4333,6 @@
   "experience.intake.phase.trust": "असिस्टेंट",
   "experience.intake.language.title": "Skynet किस भाषा में बात करे?",
   "experience.intake.language.hint": "ऐप और असिस्टेंट, दोनों इसी भाषा में बदल जाएँगे। आप इसे कभी भी सेटिंग में बदल सकते हैं।",
-  "experience.intake.language.keep": "{language} ही रखें",
-  "experience.intake.language.keep_description": "सुझाव: वही भाषा जो आप अभी इस्तेमाल कर रहे हैं।",
   "experience.intake.language.default": "डिफ़ॉल्ट इस्तेमाल करें",
   "experience.intake.language.default_description": "इस ब्राउज़र की चुनी हुई भाषा ही रहने दें।",
   "experience.intake.chat.title": "चलिए आपका पहला रन सेट करें",

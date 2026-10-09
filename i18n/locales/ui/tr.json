@@ -4333,8 +4333,6 @@
   "experience.intake.phase.trust": "Asistan",
   "experience.intake.language.title": "Skynet hangi dilde konuşsun?",
   "experience.intake.language.hint": "Uygulama ve asistan bu dile geçer. İstediğiniz zaman Ayarlar'dan değiştirebilirsiniz.",
-  "experience.intake.language.keep": "{language} kalsın",
-  "experience.intake.language.keep_description": "Önerilen: şu an kullandığınız dil.",
   "experience.intake.language.default": "Varsayılanı kullan",
   "experience.intake.language.default_description": "Tarayıcının seçtiği dilde kal.",
   "experience.intake.chat.title": "İlk çalıştırmanızı hazırlayalım",
