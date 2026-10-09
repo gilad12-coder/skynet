@@ -3587,8 +3587,8 @@ export async function streamCodeInterviewTurn(
 }
 
 export interface IntakeInterviewRequest {
-  /** The open question being asked; each phase is its own short conversation. */
-  phase: "goal" | "source";
+  /** The agenda phase being asked; each phase is its own short conversation. */
+  phase: "goal" | "source" | "billing" | "budget" | "privacy" | "emails" | "trust";
   /** This phase's transcript only; empty asks for its opening question. */
   turns: CodeAgentChatTurn[];
   /** What the user has answered so far, in the `profile_patch` shape. */

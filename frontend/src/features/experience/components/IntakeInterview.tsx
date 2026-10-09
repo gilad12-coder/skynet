@@ -180,7 +180,7 @@ export function IntakeInterview({ phase, turns, options, profile, onTurn, onFail
         <ChatTranscript
           messages={messages}
           streaming={busy}
-          // Earlier answers are edited on the summary, not re-sent here.
+          // An earlier answer is changed by going Back, not re-sent here.
           editAndResend={() => {}}
           thinking={thinking ?? undefined}
           animatePairs

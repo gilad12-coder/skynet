@@ -1,14 +1,15 @@
 /*
- * The first-login setup: a short interview (two open questions a language
- * model asks, the rest fixed multiple choice), then a summary. Everything here
- * is pure so the answers → level → server payload → wizard prefill path, the
- * interviewer's profile coercion and the resumable draft can be tested
- * without a browser.
+ * The first-login setup: the language as a fixed first question, then a short
+ * interview a language model runs phase by phase (each phase falls back to a
+ * fixed multiple-choice question when the model is unavailable). Model choice
+ * and the wizard defaults are not asked: they keep the app's defaults.
+ * Everything here is pure so the answers → level → server payload → wizard
+ * prefill path, the interviewer's profile coercion and the resumable draft can
+ * be tested without a browser.
  */
 
 import type {
   AccountExperiencePatch,
-  ConnectorProvider,
   NotificationCadence,
   NotificationLiveMode,
   NotificationPreferences,
@@ -22,9 +23,6 @@ import type { ExperienceLevel } from "./abstraction";
 export type IntakeSourceKind = "repo" | "api" | "spreadsheet" | "file" | "dataset" | "none";
 
 export type IntakeTrustMode = "ask" | "auto_safe" | "yolo";
-export type IntakeAutoManual = "auto" | "manual";
-
-export type IntakeConnectorState = "connected" | "later" | "none";
 
 export interface IntakeNotifications {
   cadence: NotificationCadence;
@@ -49,14 +47,11 @@ export interface IntakeAnswers {
   source: IntakeSourceKind | null;
   /** The pasted repo / API link, when the source has one. */
   source_url: string;
-  connector: IntakeConnectorState;
-  /** Catalog model ids; empty leaves the pick to the wizard. */
-  models: string[];
   billing: "platform" | "byok";
   /** Vault provider slug of the key the user brought, when they did. */
   byok_provider: string | null;
   level: ExperienceLevel;
-  /** True once the user picked the level on the summary instead of keeping the guess. */
+  /** True once the interviewer named a level, instead of the client's own guess. */
   level_chosen: boolean;
   /** Spending limit in cents; null = the wizard's own default. */
   spending_limit_cents: number | null;
@@ -67,8 +62,6 @@ export interface IntakeAnswers {
    */
   privacy: ModelDataPolicy | null;
   trust: IntakeTrustMode | null;
-  code_assist: IntakeAutoManual | null;
-  split_mode: IntakeAutoManual | null;
 }
 
 export const DEFAULT_NOTIFICATIONS: IntakeNotifications = {
@@ -94,8 +87,6 @@ export function emptyIntake(): IntakeAnswers {
     success_signal: "",
     source: null,
     source_url: "",
-    connector: "none",
-    models: [],
     billing: "platform",
     byok_provider: null,
     level: "standard",
@@ -104,8 +95,6 @@ export function emptyIntake(): IntakeAnswers {
     notifications: { ...DEFAULT_NOTIFICATIONS },
     privacy: null,
     trust: null,
-    code_assist: null,
-    split_mode: null,
   };
 }
 
@@ -132,9 +121,6 @@ function oneOf<T extends string>(values: readonly T[], value: unknown): T | null
   return values.find((v) => v === value) ?? null;
 }
 
-function autoManual(value: unknown): IntakeAutoManual | null {
-  return value === "auto" || value === "manual" ? value : null;
-}
 const CADENCES: readonly NotificationCadence[] = ["done", "milestones", "live"];
 const LIVE_MODES: readonly NotificationLiveMode[] = ["per_stage", "per_run_count", "digest"];
 
@@ -160,10 +146,6 @@ export function parseIntakeAnswers(value: unknown): IntakeAnswers | null {
     success_signal: typeof raw.success_signal === "string" ? raw.success_signal : "",
     source: oneOf(SOURCES, raw.source),
     source_url: typeof raw.source_url === "string" ? raw.source_url : "",
-    connector: raw.connector === "connected" || raw.connector === "later" ? raw.connector : "none",
-    models: Array.isArray(raw.models)
-      ? raw.models.filter((m): m is string => typeof m === "string" && m.length > 0)
-      : [],
     billing: raw.billing === "byok" ? "byok" : "platform",
     byok_provider: typeof raw.byok_provider === "string" ? raw.byok_provider : null,
     level: level === "guided" || level === "expert" ? level : "standard",
@@ -191,8 +173,6 @@ export function parseIntakeAnswers(value: unknown): IntakeAnswers | null {
     },
     privacy: oneOf(PRIVACY_POLICIES, raw.privacy),
     trust: oneOf(TRUST_MODES, raw.trust),
-    code_assist: autoManual(raw.code_assist),
-    split_mode: autoManual(raw.split_mode),
   };
 }
 
@@ -231,14 +211,6 @@ export function inferLevel(
   }
   if (answers.source === "repo" || answers.source === "api") return "standard";
   return "guided";
-}
-
-/** The one connector a source implies, or null when it needs none. */
-export function connectorFor(source: IntakeSourceKind | null): ConnectorProvider | null {
-  if (source === "repo") return "github";
-  if (source === "spreadsheet") return "google_sheets";
-  if (source === "dataset") return "huggingface";
-  return null;
 }
 
 /** The `/submit?recipe=` the setup opens. */
@@ -291,7 +263,7 @@ export function buildNotificationPatch(
 /**
  * The shared-wizard patch the setup applies before opening `/submit` — the
  * same path the agent's writes take. Only fields the answers decide are set;
- * everything else keeps the wizard's defaults.
+ * everything else, the models included, keeps the wizard's defaults.
  */
 export function buildWizardPrefill(answers: IntakeAnswers): Record<string, unknown> {
   const recipe = recipeFor(answers.source);
@@ -300,12 +272,6 @@ export function buildWizardPrefill(answers: IntakeAnswers): Record<string, unkno
   };
   const goal = goalLine(answers);
   if (recipe !== "program" && goal) patch.blackbox_objective = goal;
-  const model = answers.models[0];
-  if (model) {
-    const config = { name: model };
-    if (recipe === "program") patch.model_config = config;
-    else patch.reflection_model_config = config;
-  }
   if (answers.spending_limit_cents !== null) patch.max_cost_cents = answers.spending_limit_cents;
   return patch;
 }
@@ -328,7 +294,6 @@ export function agentBrief(
   return template({
     goal,
     source: answers.source_url.trim() || (answers.source !== "none" ? answers.source : null) || "",
-    models: answers.models.join(", "),
   });
 }
 
@@ -336,57 +301,35 @@ export function agentBrief(
 /* The interview agenda                                                       */
 /* ------------------------------------------------------------------------- */
 
-export type IntakePhase =
-  | "language"
-  | "goal"
-  | "source"
-  | "models"
-  | "billing"
-  | "budget"
-  | "privacy"
-  | "emails"
-  | "trust"
-  | "defaults"
-  | "level";
-
-/** The agenda in the order it is asked. */
-export const INTAKE_PHASES: readonly IntakePhase[] = [
-  "language",
+/** The interviewer's phases, in the order it runs them (the server's agenda). */
+export const INTAKE_LLM_PHASES = [
   "goal",
   "source",
-  "models",
   "billing",
   "budget",
   "privacy",
   "emails",
   "trust",
-  "defaults",
-  "level",
-];
+] as const;
 
-/** The open questions a language model asks; every other phase is fixed multiple choice. */
-export type IntakeLlmPhase = "goal" | "source";
-
-export function isLlmPhase(phase: IntakePhase): phase is IntakeLlmPhase {
-  return phase === "goal" || phase === "source";
-}
-
-/** The level the summary opens on: the user's pick, else what the answers point to. */
-export function effectiveLevel(answers: IntakeAnswers): ExperienceLevel {
-  return answers.level_chosen ? answers.level : inferLevel(answers);
-}
+export type IntakeLlmPhase = (typeof INTAKE_LLM_PHASES)[number];
 
 /*
- * The wizard defaults only matter to someone who sees the code and split
- * steps, so Guided does not ask about them. An answer already given keeps its
- * phase on the agenda so the user can still see and change it.
+ * The language comes first and is always a fixed question: its answer
+ * reloads the page into that language, and the interviewer then speaks it.
  */
-export function visiblePhases(
-  answers: IntakeAnswers,
-  answered: readonly IntakePhase[] = [],
-): IntakePhase[] {
-  const showDefaults = effectiveLevel(answers) !== "guided" || answered.includes("defaults");
-  return INTAKE_PHASES.filter((phase) => phase !== "defaults" || showDefaults);
+export type IntakePhase = "language" | IntakeLlmPhase;
+
+/** The agenda in the order it is asked. */
+export const INTAKE_PHASES: readonly IntakePhase[] = ["language", ...INTAKE_LLM_PHASES];
+
+export function isLlmPhase(phase: IntakePhase): phase is IntakeLlmPhase {
+  return phase !== "language";
+}
+
+/** The level the setup saves: the interviewer's read, else what the answers point to. */
+export function effectiveLevel(answers: IntakeAnswers): ExperienceLevel {
+  return answers.level_chosen ? answers.level : inferLevel(answers);
 }
 
 /**
@@ -394,13 +337,11 @@ export function visiblePhases(
  * wrapping to any earlier one still open; null when everything is answered.
  */
 export function nextPhase(
-  answers: IntakeAnswers,
   answered: readonly IntakePhase[],
   from: IntakePhase | null,
 ): IntakePhase | null {
-  const phases = visiblePhases(answers, answered);
-  const start = from ? phases.indexOf(from) + 1 : 0;
-  const ordered = [...phases.slice(start), ...phases.slice(0, start)];
+  const start = from ? INTAKE_PHASES.indexOf(from) + 1 : 0;
+  const ordered = [...INTAKE_PHASES.slice(start), ...INTAKE_PHASES.slice(0, start)];
   return ordered.find((phase) => phase !== from && !answered.includes(phase)) ?? null;
 }
 
@@ -430,14 +371,11 @@ export type IntakeProfilePatch = Partial<
     | "success_signal"
     | "source"
     | "source_url"
-    | "models"
     | "billing"
     | "byok_provider"
     | "spending_limit_cents"
     | "privacy"
     | "trust"
-    | "code_assist"
-    | "split_mode"
     | "level"
   >
 > & { cadence?: NotificationCadence };
@@ -497,16 +435,6 @@ export function coerceProfilePatch(raw: unknown): {
     phases.push("source");
   }
 
-  if (Array.isArray(r.models)) {
-    const models = [
-      ...new Set(r.models.filter((m): m is string => typeof m === "string" && m.trim() !== "")),
-    ].map((m) => m.trim());
-    if (models.length > 0) {
-      patch.models = models;
-      phases.push("models");
-    }
-  }
-
   if (r.billing === "platform" || r.billing === "byok") {
     patch.billing = r.billing;
     patch.byok_provider =
@@ -543,13 +471,7 @@ export function coerceProfilePatch(raw: unknown): {
     phases.push("trust");
   }
 
-  const codeAssist = autoManual(r.code_assist);
-  const splitMode = autoManual(r.split_mode);
-  if (codeAssist) patch.code_assist = codeAssist;
-  if (splitMode) patch.split_mode = splitMode;
-  if (codeAssist && splitMode) phases.push("defaults");
-
-  // The level is always inferred, so it only pre-selects the level question.
+  // The level is never asked: the interviewer's read only replaces the client's guess.
   const level = oneOf(LEVELS, r.level);
   if (level) patch.level = level;
 
@@ -562,14 +484,13 @@ export function coerceSkipPhases(raw: unknown): IntakePhase[] {
   return INTAKE_PHASES.filter((phase) => raw.includes(phase));
 }
 
-/** Merge a coerced patch into the answers; a new source drops the old connector state. */
+/** Merge a coerced patch into the answers. */
 export function applyProfilePatch(
   answers: IntakeAnswers,
   patch: IntakeProfilePatch,
 ): IntakeAnswers {
   const { cadence, ...rest } = patch;
   const next: IntakeAnswers = { ...answers, ...rest };
-  if (patch.source !== undefined && patch.source !== answers.source) next.connector = "none";
   if (patch.level !== undefined) next.level_chosen = true;
   if (cadence) next.notifications = { ...answers.notifications, cadence };
   return next;
@@ -592,16 +513,16 @@ export function profileSoFar(
     profile.source = answers.source;
     if (answers.source_url) profile.source_url = answers.source_url;
   }
-  if (has("models") && answers.models.length > 0) profile.models = answers.models;
   if (has("billing")) {
     profile.billing = answers.billing;
     if (answers.billing === "byok" && answers.byok_provider) {
       profile.byok_provider = answers.byok_provider;
     }
   }
-  // An absent budget is "suggest from the estimate"; the interviewer never sees null.
-  if (has("budget") && answers.spending_limit_cents !== null) {
-    profile.budget_usd = answers.spending_limit_cents / 100;
+  // An absent budget is the wizard's per-run suggestion; the interviewer never sees null.
+  if (has("budget")) {
+    profile.budget_usd =
+      answers.spending_limit_cents === null ? "suggest" : answers.spending_limit_cents / 100;
   }
   // The stored policy says `deny`; the interviewer's vocabulary is `no_training`.
   if (has("privacy") && answers.privacy) {
@@ -609,11 +530,7 @@ export function profileSoFar(
   }
   if (has("emails")) profile.email_cadence = answers.notifications.cadence;
   if (has("trust") && answers.trust) profile.trust = answers.trust;
-  if (has("defaults")) {
-    if (answers.code_assist) profile.code_assist = answers.code_assist;
-    if (answers.split_mode) profile.split_mode = answers.split_mode;
-  }
-  if (has("level")) profile.level = answers.level;
+  if (answers.level_chosen) profile.level = answers.level;
   return profile;
 }
 
@@ -624,8 +541,8 @@ export const BUDGET_PRESETS_USD: readonly number[] = [20, 5, 50];
 /* The resumable draft                                                        */
 /* ------------------------------------------------------------------------- */
 
-/** Where the setup is: a phase, or the summary. */
-export type IntakeScreen = IntakePhase | "summary";
+/** Where the setup is: a phase, or the closing line once every phase is done. */
+export type IntakeScreen = IntakePhase | "done";
 
 /**
  * Everything needed to come back to the same screen: the answers, which
@@ -641,13 +558,20 @@ export interface IntakeDraft {
   fixed: boolean;
 }
 
+function perPhase<T>(make: (phase: IntakeLlmPhase) => T): Record<IntakeLlmPhase, T> {
+  return Object.fromEntries(INTAKE_LLM_PHASES.map((phase) => [phase, make(phase)])) as Record<
+    IntakeLlmPhase,
+    T
+  >;
+}
+
 export function emptyDraft(answers: IntakeAnswers = emptyIntake()): IntakeDraft {
   return {
     answers,
     screen: "language",
     answered: [],
-    turns: { goal: [], source: [] },
-    options: { goal: [], source: [] },
+    turns: perPhase(() => []),
+    options: perPhase(() => []),
     fixed: false,
   };
 }
@@ -673,6 +597,12 @@ function parseOptions(value: unknown): InterviewOption[] {
   });
 }
 
+/** A stored screen name; an older build's "summary" is today's closing screen. */
+function screenOf(value: unknown): IntakeScreen | null {
+  if (value === "done" || value === "summary") return "done";
+  return oneOf(INTAKE_PHASES, value);
+}
+
 /** Read a stored draft back; anything unreadable starts the setup over. */
 export function parseDraft(raw: string | null): IntakeDraft | null {
   if (!raw) return null;
@@ -686,24 +616,22 @@ export function parseDraft(raw: string | null): IntakeDraft | null {
   const d = value as Record<string, unknown>;
   const answers = parseIntakeAnswers(d.answers);
   if (!answers) return null;
-  const screen: IntakeScreen =
-    d.screen === "summary" ? "summary" : (oneOf(INTAKE_PHASES, d.screen) ?? "language");
+  const screen = screenOf(d.screen) ?? "language";
   const turns = (d.turns ?? {}) as Record<string, unknown>;
   const options = (d.options ?? {}) as Record<string, unknown>;
   return {
     answers,
     screen,
     answered: coerceSkipPhases(d.answered),
-    turns: { goal: parseTurns(turns.goal), source: parseTurns(turns.source) },
-    options: { goal: parseOptions(options.goal), source: parseOptions(options.source) },
+    turns: perPhase((phase) => parseTurns(turns[phase])),
+    options: perPhase((phase) => parseOptions(options[phase])),
     fixed: d.fixed === true,
   };
 }
 
 /*
- * The draft survives the connector's OAuth round trip (the redirect leaves
- * the page) and a reload mid-setup; finishing, skipping or rerunning the
- * setup from Settings clears it.
+ * The draft survives a reload mid-setup (the language switch makes one);
+ * finishing, skipping or rerunning the setup from Settings clears it.
  */
 const DRAFT_KEY = "skynet.intake.draft";
 
@@ -746,7 +674,7 @@ export function clearIntakeDraft(): void {
 const RESUME_KEY = "skynet.intake.resume";
 
 export interface IntakeResume {
-  /** The next open question, or the summary when the language was changed from it. */
+  /** The next open question, or the closing screen when nothing is left. */
   resumePhase: IntakeScreen;
   profile: Record<string, unknown>;
 }
@@ -763,7 +691,7 @@ export function languageChoices<L extends string>(active: L, available: readonly
 export function prepareLanguageSwitch(draft: IntakeDraft, next: string): IntakeDraft {
   const answers = { ...draft.answers, language: next };
   const answered = markAnswered(draft.answered, ["language"]);
-  const resumePhase = nextPhase(answers, answered, "language") ?? "summary";
+  const resumePhase = nextPhase(answered, "language") ?? "done";
   const prepared: IntakeDraft = { ...draft, answers, answered, screen: resumePhase };
   writeIntakeResume({ resumePhase, profile: profileSoFar(answers, answered) });
   writeIntakeDraft(prepared);
@@ -790,8 +718,7 @@ export function takeIntakeResume(): IntakeResume | null {
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
-    const resumePhase: IntakeScreen | null =
-      value?.resumePhase === "summary" ? "summary" : oneOf(INTAKE_PHASES, value?.resumePhase);
+    const resumePhase = screenOf(value?.resumePhase);
     if (!resumePhase) return null;
     const profile =
       value.profile && typeof value.profile === "object" && !Array.isArray(value.profile)
@@ -849,7 +776,8 @@ export interface IntakeTurnOutcome {
  * Fold one finished interviewer turn into the draft. `sent` is the
  * transcript the request carried (ending in the user's answer). Volunteered
  * answers for later phases are kept and those phases skipped; a finished
- * phase moves the setup on, to the summary when the user asked to skip ahead.
+ * phase moves the setup on, to the closing screen when the user asked to
+ * skip ahead.
  */
 export function applyInterviewTurn(
   draft: IntakeDraft,
@@ -891,18 +819,13 @@ export function applyInterviewTurn(
     answered,
     turns: { ...draft.turns, [phase]: turns },
     options: { ...draft.options, [phase]: [] },
-    screen: outcome.skip_rest ? "summary" : (nextPhase(answers, answered, phase) ?? "summary"),
+    screen: outcome.skip_rest ? "done" : (nextPhase(answered, phase) ?? "done"),
   };
 }
 
 /** Where Back goes: the agenda question before this screen, or null on the first one. */
-export function previousScreen(
-  answers: IntakeAnswers,
-  answered: readonly IntakePhase[],
-  screen: IntakeScreen,
-): IntakePhase | null {
-  const phases = visiblePhases(answers, answered);
-  if (screen === "summary") return phases[phases.length - 1] ?? null;
-  const index = phases.indexOf(screen);
-  return index > 0 ? phases[index - 1]! : null;
+export function previousScreen(screen: IntakeScreen): IntakePhase | null {
+  if (screen === "done") return INTAKE_PHASES[INTAKE_PHASES.length - 1] ?? null;
+  const index = INTAKE_PHASES.indexOf(screen);
+  return index > 0 ? INTAKE_PHASES[index - 1]! : null;
 }

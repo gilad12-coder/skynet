@@ -10,52 +10,23 @@ from dspy.utils.dummies import DummyLM
 
 from core.service_gateway.agents import intake_interview
 from core.service_gateway.agents.intake_interview import (
+    _PHASE_BRIEFS,
+    AGENDA,
+    LLM_PHASES,
     MAX_PHASE_QUESTIONS,
     IntakeInterviewTurnSig,
     answered_phases,
-    featured_model_list,
     intake_inputs,
     parse_intake_prediction,
     validate_profile_patch,
 )
 
-_CATALOG = [
-    SimpleNamespace(
-        value="openai/gpt-4o-mini",
-        label="gpt-4o-mini",
-        featured=True,
-        available=True,
-        input_cost_per_token=1e-7,
-        output_cost_per_token=4e-7,
-        reasoning_mandatory=False,
-    ),
-    SimpleNamespace(
-        value="openai/o9",
-        label="o9",
-        featured=True,
-        available=True,
-        input_cost_per_token=1e-8,
-        output_cost_per_token=1e-8,
-        reasoning_mandatory=True,
-    ),
-    SimpleNamespace(
-        value="anthropic/claude-sonnet-5",
-        label="claude-sonnet-5",
-        featured=False,
-        available=True,
-        input_cost_per_token=1e-9,
-        output_cost_per_token=1e-9,
-        reasoning_mandatory=False,
-    ),
-]
 _SLUGS = ["openai", "anthropic"]
 
 
 def _parse(pred: SimpleNamespace | None, asked: int = 0, phase: str = "goal", turns=None) -> dict:
     """Parse a prediction against the test catalog."""
-    return parse_intake_prediction(
-        pred, asked, phase=phase, turns=turns or [], catalog_models=_CATALOG, provider_slugs=_SLUGS
-    )
+    return parse_intake_prediction(pred, asked, phase=phase, turns=turns or [], provider_slugs=_SLUGS)
 
 
 def _pred(**fields: str) -> SimpleNamespace:
@@ -91,13 +62,9 @@ def test_parse_question_turn() -> None:
     assert turn["message"] == "Where do the tickets live?"
     assert turn["phase_done"] is False
     assert [o["label"] for o in turn["options"]] == ["Zendesk export (CSV)", "An API I call"]
-    assert turn["profile_patch"] == {
-        "goal": "route tickets right",
-        "models": ["openai/gpt-4o-mini"],
-        "budget_usd": 5.0,
-        "level": "guided",
-    }
-    assert turn["skip_phases"] == ["goal", "models", "budget"]
+    # Models are not on the agenda, so a volunteered model is dropped.
+    assert turn["profile_patch"] == {"goal": "route tickets right", "budget_usd": 5.0, "level": "guided"}
+    assert turn["skip_phases"] == ["goal", "budget"]
     assert turn["skip_rest"] is False
     assert set(turn) == {
         "message",
@@ -151,7 +118,7 @@ def test_validate_patch_coerces_enums_and_drops_invalid_keys() -> None:
         {
             "source": "GitHub",
             "source_url": "  https://github.com/acme/bot  ",
-            "models": ["openai/gpt-4o-mini", "made-up/model", "claude-sonnet-5", "openai/gpt-4o-mini"],
+            "models": ["openai/gpt-4o-mini"],
             "billing": "BYOK",
             "byok_provider": "OpenAI",
             "budget_usd": -3,
@@ -164,19 +131,15 @@ def test_validate_patch_coerces_enums_and_drops_invalid_keys() -> None:
             "goal": "",
             "mystery": "x",
         },
-        catalog_models=_CATALOG,
         provider_slugs=_SLUGS,
     )
     assert patch == {
         "source": "repo",
         "source_url": "https://github.com/acme/bot",
-        "models": ["openai/gpt-4o-mini", "anthropic/claude-sonnet-5"],
         "billing": "byok",
         "byok_provider": "openai",
         "privacy": "no_training",
         "trust": "auto_safe",
-        "code_assist": "auto",
-        "split_mode": "manual",
         "level": "standard",
     }
 
@@ -188,64 +151,72 @@ def test_validate_patch_rejects_bad_urls_providers_and_budgets() -> None:
             "source_url": "not a url",
             "byok_provider": "acme",
             "budget_usd": True,
-            "models": "nope",
         },
-        catalog_models=_CATALOG,
         provider_slugs=_SLUGS,
     )
     assert patch == {}
-    assert validate_profile_patch({"budget_usd": 1e9}, catalog_models=_CATALOG, provider_slugs=_SLUGS) == {}
-    assert validate_profile_patch("[]", catalog_models=_CATALOG, provider_slugs=_SLUGS) == {}
+    assert validate_profile_patch({"budget_usd": 1e9}, provider_slugs=_SLUGS) == {}
+    assert validate_profile_patch("[]", provider_slugs=_SLUGS) == {}
+
+
+def test_budget_accepts_the_wizard_suggestion() -> None:
+    """'Use the default' on the budget is the wizard's per-run suggestion, which answers the phase."""
+    patch = validate_profile_patch({"budget_usd": " Suggest "}, provider_slugs=_SLUGS)
+    assert patch == {"budget_usd": "suggest"}
+    assert answered_phases(patch) == ["budget"]
 
 
 def test_platform_billing_drops_byok_provider() -> None:
     """A platform-billed patch carries no BYOK provider."""
-    patch = validate_profile_patch(
-        {"billing": "platform", "byok_provider": "openai"}, catalog_models=_CATALOG, provider_slugs=_SLUGS
-    )
+    patch = validate_profile_patch({"billing": "platform", "byok_provider": "openai"}, provider_slugs=_SLUGS)
     assert patch == {"billing": "platform"}
 
 
 def test_answered_phases() -> None:
-    """Phases skip only when fully answered; level never skips."""
+    """Phases skip only when fully answered; level is never a phase."""
     assert answered_phases({"billing": "byok"}) == []
     assert answered_phases({"billing": "byok", "byok_provider": "openai"}) == ["billing"]
-    assert answered_phases({"code_assist": "auto"}) == []
     assert answered_phases(
         {
-            "code_assist": "auto",
-            "split_mode": "auto",
             "privacy": "zdr",
             "email_cadence": "live",
             "trust": "ask",
             "source": "none",
             "level": "expert",
         }
-    ) == ["source", "privacy", "emails", "trust", "defaults"]
+    ) == ["source", "privacy", "emails", "trust"]
 
 
-def test_featured_model_list_and_inputs() -> None:
-    """The prompt gets the featured models, the validated profile and the per-phase question note."""
-    featured = featured_model_list(_CATALOG)
-    assert featured == [
-        {"id": "openai/gpt-4o-mini", "label": "gpt-4o-mini"},
-        {"id": "openai/o9", "label": "o9"},
-    ]
+def test_every_agenda_phase_runs_on_the_model() -> None:
+    """The model runs the whole agenda, and every phase has a brief; models and defaults are gone."""
+    assert LLM_PHASES == AGENDA
+    assert AGENDA == ("goal", "source", "billing", "budget", "privacy", "emails", "trust")
+    assert set(_PHASE_BRIEFS) == set(AGENDA)
+    for phase in AGENDA:
+        if phase != "goal":
+            assert "Use the default" in _PHASE_BRIEFS[phase]
+
+
+def test_intake_inputs() -> None:
+    """The prompt gets the provider slugs, the validated profile and the per-phase question note."""
     inputs = intake_inputs(
-        phase="source",
+        phase="billing",
         turns=[{"role": "assistant", "content": "Q?"}, {"role": "user", "content": "A"}],
         profile={"goal": "g"},
-        featured=featured,
+        provider_slugs=["openai", "anthropic"],
         locale="en",
     )
-    assert inputs["phase"] == "source"
+    assert inputs["phase"] == "billing"
+    assert inputs["phase_brief"] == _PHASE_BRIEFS["billing"]
+    assert json.loads(inputs["byok_providers"]) == ["anthropic", "openai"]
     assert inputs["reply_language"] == "English"
     assert json.loads(inputs["profile_json"]) == {"goal": "g"}
     transcript = json.loads(inputs["transcript_json"])
     assert transcript[-1]["role"] == "system"
     assert f"1 of at most {MAX_PHASE_QUESTIONS}" in transcript[-1]["content"]
     assert (
-        json.loads(intake_inputs(phase="goal", turns=[], profile={}, featured=[], locale="he")["transcript_json"]) == []
+        json.loads(intake_inputs(phase="goal", turns=[], profile={}, provider_slugs=[], locale="he")["transcript_json"])
+        == []
     )
 
 
@@ -255,7 +226,7 @@ def test_intake_turn_stream_end_to_end_with_dummy_lm(monkeypatch) -> None:
         "message": "Where do the tickets live?",
         "done": "false",
         "options_json": json.dumps([{"label": "Zendesk export (CSV)", "description": "A file"}]),
-        "profile_patch_json": json.dumps({"goal": "route tickets", "models": ["gpt-4o-mini", "x/unknown"]}),
+        "profile_patch_json": json.dumps({"goal": "route tickets", "trust": "ask"}),
         "skip_rest": "false",
     }
     built: list[dict] = []
@@ -275,7 +246,6 @@ def test_intake_turn_stream_end_to_end_with_dummy_lm(monkeypatch) -> None:
                 phase="goal",
                 turns=[{"role": "user", "content": "our support bot misroutes tickets"}],
                 profile={"level": "bogus"},
-                catalog_models=_CATALOG,
                 provider_slugs=_SLUGS,
                 locale="en",
                 model="openai/gpt-4o-mini",
@@ -290,7 +260,7 @@ def test_intake_turn_stream_end_to_end_with_dummy_lm(monkeypatch) -> None:
     assert done["data"]["message"] == "Where do the tickets live?"
     assert done["data"]["phase_done"] is False
     assert done["data"]["options"] == [{"label": "Zendesk export (CSV)", "description": "A file"}]
-    assert done["data"]["profile_patch"] == {"goal": "route tickets", "models": ["openai/gpt-4o-mini"]}
-    assert done["data"]["skip_phases"] == ["goal", "models"]
+    assert done["data"]["profile_patch"] == {"goal": "route tickets", "trust": "ask"}
+    assert done["data"]["skip_phases"] == ["goal", "trust"]
     assert done["data"]["model"] == "openai/gpt-4o-mini"
     assert "served_model" in done["data"]

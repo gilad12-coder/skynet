@@ -161,7 +161,7 @@ def test_streams_events_and_forwards_args(monkeypatch) -> None:
     assert seen["model"] == "openai/cheap"
     assert seen["reasoning_effort"] == "low"
     assert seen["provider_slugs"] == ["openai"]
-    assert len(seen["catalog_models"]) == 2
+    assert "catalog_models" not in seen
 
 
 def test_explicit_model_and_effort_are_honoured_for_paying_accounts(monkeypatch) -> None:
@@ -191,12 +191,13 @@ def test_empty_turns_opens_the_phase(monkeypatch) -> None:
     [
         {**_BODY, "turns": [{"role": "user", "content": "x"}] * 9},
         {**_BODY, "phase": "models"},
+        {**_BODY, "phase": "language"},
         {**_BODY, "turns": [{"role": "system", "content": "x"}]},
         {**_BODY, "profile": {"goal": "x" * 20_000}},
     ],
 )
 def test_rejects_invalid_requests(monkeypatch, body: dict[str, Any]) -> None:
-    """Over 8 turns, a fixed phase, a bad role or an oversized profile is a 422."""
+    """Over 8 turns, a phase off the agenda, a bad role or an oversized profile is a 422."""
     _record_stream(monkeypatch, {})
     assert _client().post("/account/intake-interview", json=body).status_code == 422
 
