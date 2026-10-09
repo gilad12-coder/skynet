@@ -4,12 +4,6 @@ import * as React from "react";
 
 import { streamIntakeInterviewTurn } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
-import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
-import {
-  catalogFallbackModel,
-  modelDisplayName,
-  modelProviderSlug,
-} from "@/shared/lib/model-provider";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import {
   AgentThread,
@@ -21,8 +15,6 @@ import {
   type AgentThinking,
 } from "@/shared/ui/agent";
 import { LoadingState } from "@/shared/ui/loading-state";
-import { ProviderLogo } from "@/shared/ui/provider-logo";
-import type { ModelCatalogResponse } from "@/shared/types/api";
 
 import {
   requestTurns,
@@ -60,22 +52,6 @@ export function IntakeInterview({ phase, turns, options, profile, onTurn, onFail
   const [pending, setPending] = React.useState(false);
   const [sending, setSending] = React.useState<IntakeTurn[] | null>(null);
   const abortRef = React.useRef<AbortController | null>(null);
-  // The model the server reported for the last turn; before any turn lands,
-  // the catalog's interview default is what will run.
-  const [servedModel, setServedModel] = React.useState<string | null>(null);
-  const [catalog, setCatalog] = React.useState<ModelCatalogResponse | null>(() => cachedCatalog());
-  React.useEffect(() => {
-    let cancelled = false;
-    getModelCatalog()
-      .then((c) => {
-        if (!cancelled) setCatalog(c);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const onTurnRef = React.useRef(onTurn);
   const onFailRef = React.useRef(onFail);
   const profileRef = React.useRef(profile);
@@ -134,8 +110,6 @@ export function IntakeInterview({ phase, turns, options, profile, onTurn, onFail
           },
           onDone: (turn) => {
             settle();
-            const ran = turn.served_model ?? turn.model ?? null;
-            if (ran) setServedModel(ran);
             onTurnRef.current(sent, turn);
           },
           onError: () => {
@@ -189,10 +163,6 @@ export function IntakeInterview({ phase, turns, options, profile, onTurn, onFail
     run([...turns, { role: "user", content: text }]);
   };
 
-  const availableModels = catalog?.models.filter((m) => m.available) ?? [];
-  const runningModel =
-    servedModel ?? catalogFallbackModel(availableModels, "is_interview_default")?.value ?? null;
-
   const shown = sending ?? turns;
   const messages: AgentMessage[] = shown.map((t) => ({ role: t.role, content: t.content }));
   if (busy && (streamText || thinking)) messages.push({ role: "assistant", content: streamText });
@@ -238,15 +208,6 @@ export function IntakeInterview({ phase, turns, options, profile, onTurn, onFail
         streaming={busy}
         placeholder={msg("experience.intake.chat.placeholder")}
       />
-      {runningModel && (
-        <p className="flex items-center gap-1.5 px-5 pb-2 text-xs text-muted-foreground sm:px-7">
-          <span>{msg("experience.intake.chat.running_on")}</span>
-          <ProviderLogo slug={modelProviderSlug(runningModel)} size={14} />
-          <span className="min-w-0 truncate" dir="ltr">
-            {modelDisplayName(runningModel, catalog?.models)}
-          </span>
-        </p>
-      )}
     </div>
   );
 }

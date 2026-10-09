@@ -1119,15 +1119,6 @@ function IntakeDialog({ agentEnabled }: { agentEnabled: boolean }) {
             {msg("experience.intake.skip")}
           </Button>
           <div className="ms-auto flex items-center gap-2">
-            {screen !== "summary" && answered.includes("goal") && (
-              <Button
-                variant="ghost"
-                className={cn(TOUCH_TAP, "text-muted-foreground hover:text-foreground")}
-                onClick={() => goTo("summary")}
-              >
-                {msg("experience.intake.chat.use_defaults")}
-              </Button>
-            )}
             {back && (
               <Button
                 variant="ghost"
