@@ -198,8 +198,6 @@ const ENGLISH_ENTRY: Partial<Record<MessageKey, string>> = {
   "experience.intake.language.title": "Which language should Skynet speak?",
   "experience.intake.language.hint":
     "The app and the assistant both switch to it. You can change it any time in Settings.",
-  "experience.intake.language.default": "Use the default",
-  "experience.intake.language.default_description": "Stay with the language this browser picked.",
   "experience.intake.phase.language": "Language",
   "experience.intake.step": "Question {n} of {total}",
   "experience.intake.skip": "Skip setup",
@@ -457,16 +455,10 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
     switch (phase) {
       case "language": {
         const choices = languageChoices<Locale>("en", FULL_TRANSLATION_LOCALES);
-        const options: InterviewOption[] = [
-          ...choices.map((l) => ({
-            label: LOCALE_REGISTRY[l].nativeName,
-            description: LOCALE_REGISTRY[l].englishName,
-          })),
-          {
-            label: t("experience.intake.language.default"),
-            description: t("experience.intake.language.default_description"),
-          },
-        ];
+        const options: InterviewOption[] = choices.map((l) => ({
+          label: LOCALE_REGISTRY[l].nativeName,
+          description: LOCALE_REGISTRY[l].englishName,
+        }));
         const picked = isLocale(answers.language) ? answers.language : "en";
         return (
           <section className="flex flex-col gap-6">

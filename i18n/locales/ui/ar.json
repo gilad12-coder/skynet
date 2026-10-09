@@ -4333,8 +4333,6 @@
   "experience.intake.phase.trust": "المساعد",
   "experience.intake.language.title": "بأي لغة يتحدث Skynet؟",
   "experience.intake.language.hint": "يتحوّل التطبيق والمساعد إليها معًا. يمكنك تغييرها في أي وقت من الإعدادات.",
-  "experience.intake.language.default": "استخدام الافتراضية",
-  "experience.intake.language.default_description": "البقاء على اللغة التي اختارها هذا المتصفح.",
   "experience.intake.chat.title": "لنُعدّ أول تشغيل لك",
   "experience.intake.chat.description": "بضعة أسئلة سريعة ليناسب أول تشغيل ما تعمل عليه.",
   "experience.intake.chat.reading": "جارٍ تجهيز السؤال الأول…",

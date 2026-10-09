@@ -4333,8 +4333,6 @@
   "experience.intake.phase.trust": "助手",
   "experience.intake.language.title": "Skynet 应该使用哪种语言?",
   "experience.intake.language.hint": "应用和助手都会切换到该语言。你可以随时在设置中更改。",
-  "experience.intake.language.default": "使用默认语言",
-  "experience.intake.language.default_description": "沿用此浏览器选择的语言。",
   "experience.intake.chat.title": "设置你的第一次运行",
   "experience.intake.chat.description": "几个简单的问题,让第一次运行更贴合你的工作。",
   "experience.intake.chat.reading": "正在准备第一个问题…",

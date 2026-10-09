@@ -81,15 +81,15 @@ _PHASE_BRIEFS = {
         "when there is one. Adapt to the goal: for a support bot that misroutes "
         "tickets ask where the tickets live, with options such as 'Zendesk export "
         "(CSV)', 'A database table', 'An API I call'. The default is 'none' (start "
-        "from scratch with a few examples); end the options with 'Use the default' "
-        "naming it."
+        "from scratch with a few examples); offer it as a concrete option such as "
+        "'Nothing yet', never as 'Use the default'."
     ),
     "billing": (
         "Learn who pays for the model calls: platform credits (billing 'platform', "
         "nothing to set up) or the user's own provider key (billing 'byok'). When "
         "they bring a key, learn which provider it is from (byok_provider, one of "
-        "``byok_providers``) before finishing. The default is platform credits; end "
-        "the options with 'Use the default' naming it."
+        "``byok_providers``) before finishing. Offer exactly two options, platform "
+        "credits first; never add 'Use the default': platform credits is the default."
     ),
     "budget": (
         "Learn how much one run may spend, in US dollars (budget_usd); a run stops "
@@ -109,7 +109,8 @@ _PHASE_BRIEFS = {
     "emails": (
         "Learn when Skynet should email the user about their runs: done (only when a "
         "run finishes), milestones (at key points of a run) or live (as it goes). "
-        "The default is done; end the options with 'Use the default' naming it."
+        "Offer exactly those three, done first; never add 'Use the default': done is "
+        "the default."
     ),
     "trust": (
         "Learn how freely the assistant may change the wizard for the user: ask "
@@ -140,9 +141,12 @@ class IntakeInterviewTurnSig(dspy.Signature):
     pickable answer (<= 6 words) with a one-line description, the
     recommended option first. Options are concrete answers — never "other",
     "something else" or anything meaning "I'll type it": the user always has
-    a free-text box. When the phase has a sensible default, the LAST option
-    is "Use the default" (in ``reply_language``) with the default named in
-    its description; when the user picks it, the phase is done (patch only
+    a free-text box. Every option must mean something different: never offer
+    two that lead to the same setting, and never one the question does not
+    ask about. Add "Use the default" (in ``reply_language``) as the LAST
+    option only when the brief asks for it, i.e. when the default is not
+    already one of the concrete options; name the default in its
+    description, and when the user picks it the phase is done (patch only
     the default the brief names as a value). Options are [] once ``done``.
 
     In ``profile_patch_json`` extract every setting the user's own words

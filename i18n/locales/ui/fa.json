@@ -4333,8 +4333,6 @@
   "experience.intake.phase.trust": "دستیار",
   "experience.intake.language.title": "Skynet به چه زبانی صحبت کند؟",
   "experience.intake.language.hint": "برنامه و دستیار هر دو به این زبان تغییر می‌کنند. هر زمان بخواهید می‌توانید آن را در تنظیمات عوض کنید.",
-  "experience.intake.language.default": "استفاده از پیش‌فرض",
-  "experience.intake.language.default_description": "ماندن روی زبانی که این مرورگر انتخاب کرده است.",
   "experience.intake.chat.title": "اجرای اولتان را راه بیندازیم",
   "experience.intake.chat.description": "چند پرسش کوتاه تا اجرای اول با کارتان جور شود.",
   "experience.intake.chat.reading": "در حال آماده‌سازی پرسش اول…",

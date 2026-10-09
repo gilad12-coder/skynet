@@ -4333,8 +4333,6 @@
   "experience.intake.phase.trust": "Asistente",
   "experience.intake.language.title": "¿En qué idioma debe hablar Skynet?",
   "experience.intake.language.hint": "La app y el asistente cambian a ese idioma. Puedes cambiarlo cuando quieras en Ajustes.",
-  "experience.intake.language.default": "Usar el predeterminado",
-  "experience.intake.language.default_description": "Seguir con el idioma que eligió este navegador.",
   "experience.intake.chat.title": "Configuremos tu primera ejecución",
   "experience.intake.chat.description": "Unas preguntas rápidas para que la primera ejecución se ajuste a lo que haces.",
   "experience.intake.chat.reading": "Preparando la primera pregunta…",
