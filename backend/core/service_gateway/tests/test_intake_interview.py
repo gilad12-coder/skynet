@@ -192,9 +192,12 @@ def test_every_agenda_phase_runs_on_the_model() -> None:
     assert LLM_PHASES == AGENDA
     assert AGENDA == ("goal", "source", "billing", "budget", "privacy", "emails", "trust")
     assert set(_PHASE_BRIEFS) == set(AGENDA)
-    for phase in AGENDA:
-        if phase != "goal":
-            assert "Use the default" in _PHASE_BRIEFS[phase]
+    # A default option appears only where the default is not already a concrete answer.
+    for phase in ("budget", "privacy", "trust"):
+        assert "end the options with 'Use the default'" in _PHASE_BRIEFS[phase]
+    for phase in ("goal", "source", "billing", "emails"):
+        assert "never" in _PHASE_BRIEFS[phase]
+        assert "end the options with 'Use the default'" not in _PHASE_BRIEFS[phase]
 
 
 def test_intake_inputs() -> None:

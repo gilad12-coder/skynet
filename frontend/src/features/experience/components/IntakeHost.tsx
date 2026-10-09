@@ -17,11 +17,18 @@ import {
   type InterviewOption,
 } from "@/shared/lib/api";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
-import { FULL_TRANSLATION_LOCALES, LOCALE_REGISTRY, isLocale } from "@/shared/lib/locale";
-import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import {
+  FULL_TRANSLATION_LOCALES,
+  LOCALE_REGISTRY,
+  isLocale,
+  type Locale,
+} from "@/shared/lib/locale";
+import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { useLocale } from "@/shared/providers";
 import { cn } from "@/shared/lib/utils";
 import { QuestionChoices } from "@/shared/ui/agent";
+import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
+import { CaretLeft, CaretRight } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
@@ -176,10 +183,44 @@ const APP_GLANCE_MS = 2000;
 const TITLE_HOLD_MS = 1500;
 const ENTER_MS = 900;
 const REDUCED_ENTER_MS = 200;
+/*
+ * The finale mirrors it: the logo works while the answers are saved, holds
+ * long enough to read "You're set", then the setup fades off the app it has
+ * already configured.
+ */
+const FINALE_HOLD_MS = 2200;
+const REDUCED_FINALE_HOLD_MS = 900;
+const FINALE_FADE_MS = 700;
 
 const EASE_OUT: Transition["ease"] = [0.16, 1, 0.3, 1];
 
 type Stage = "glance" | "title" | "questions";
+
+/*
+ * The entrance and the language question always read in English, whatever
+ * language the browser or a past visit left active: the user has not chosen
+ * one yet. Only the active locale's catalog reaches the browser, so the few
+ * strings these screens need are kept here rather than in a locale file.
+ */
+const ENGLISH_ENTRY: Partial<Record<MessageKey, string>> = {
+  "experience.intake.entrance.title": "New to Skynet? Let's get you set up.",
+  "experience.intake.language.title": "Which language should Skynet speak?",
+  "experience.intake.language.hint":
+    "The app and the assistant both switch to it. You can change it any time in Settings.",
+  "experience.intake.phase.language": "Language",
+  "experience.intake.step": "Question {n} of {total}",
+  "experience.intake.skip": "Skip setup",
+  "experience.intake.next": "Continue",
+};
+
+function englishEntry(key: MessageKey, params?: Record<string, string | number>): string {
+  const template = ENGLISH_ENTRY[key];
+  if (!template) return msg(key, params);
+  return Object.entries(params ?? {}).reduce(
+    (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
+    template,
+  );
+}
 
 function usd(amount: number): string {
   return new Intl.NumberFormat(getActiveIntlLocale(), {
@@ -266,18 +307,23 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
     // Back from the reload a language switch makes: carry on at the next question.
     const resume = takeIntakeResume();
     const stored = readIntakeDraft();
-    const draft = resume
+    const restored = resume
       ? resumeAfterLanguageSwitch(stored, resume, locale)
       : (stored ?? emptyDraft());
+    // Nothing is asked before the language, even from a draft an older setup left.
+    const draft: IntakeDraft = restored.answered.includes("language")
+      ? restored
+      : { ...restored, screen: "language" };
     // A setup already under way picks up where it was, without the entrance again.
-    const underway = !!resume || draft.answered.length > 0 || draft.screen !== "language";
+    const underway = draft.answered.includes("language");
     const stage: Stage = underway ? "questions" : experience.rerunning ? "title" : "glance";
     return { draft, stage };
   });
   const [draft, setDraft] = React.useState<IntakeDraft>(initial.draft);
   const [stage, setStage] = React.useState<Stage>(initial.stage);
   const [fallbackNote, setFallbackNote] = React.useState(false);
-  const [finishing, setFinishing] = React.useState(false);
+  const [leaving, setLeaving] = React.useState(false);
+  const finishStarted = React.useRef(false);
 
   const { answers, screen, answered } = draft;
   const fixed = draft.fixed || !agentEnabled;
@@ -343,7 +389,6 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
   };
 
   const finish = async () => {
-    setFinishing(true);
     const final: IntakeAnswers = {
       ...answers,
       level: effectiveLevel(answers),
@@ -351,14 +396,23 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
     };
     // Only answers the user gave are written; an untouched setting keeps its value.
     if (final.trust) setPref("agentTrustMode", final.trust);
-    if (final.privacy) {
-      await updateModelPrivacy({ data_policy: final.privacy }).catch(() => undefined);
-    }
-    // Notifications before the experience PATCH, which closes the setup.
-    await updateNotificationPreferences(buildNotificationPatch(final.notifications)).catch(
-      () => undefined,
+    const hold = new Promise((resolve) =>
+      setTimeout(resolve, reduceMotion ? REDUCED_FINALE_HOLD_MS : FINALE_HOLD_MS),
     );
-    await experience.save(buildExperiencePatch(final));
+    // Notifications before the experience PATCH, which closes the setup.
+    await Promise.all([
+      hold,
+      final.privacy
+        ? updateModelPrivacy({ data_policy: final.privacy }).catch(() => undefined)
+        : undefined,
+      updateNotificationPreferences(buildNotificationPatch(final.notifications)).catch(
+        () => undefined,
+      ),
+    ]);
+    // The level and answers land while the setup still covers the app, so the
+    // wizard is configured before it shows; marking the setup complete is what
+    // closes it, so that waits for the fade.
+    await experience.save({ ...buildExperiencePatch(final), intake_completed: undefined });
     wizard?.applyAgentPatch(extractWizardPatch(buildWizardPrefill(final)));
     if (agentEnabled) {
       const brief = agentBrief(final, (values) =>
@@ -367,8 +421,13 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
       if (brief) queueAgentPrompt(brief);
     }
     clearIntakeDraft();
-    experience.closeIntake();
     router.push(`/submit?recipe=${recipeFor(final.source)}`);
+    setLeaving(true);
+  };
+
+  const closeAfterFade = () => {
+    void experience.save({ intake_completed: true });
+    experience.closeIntake();
   };
 
   const skip = () => {
@@ -379,13 +438,23 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
   };
 
   const done = screen === "done";
+
+  // The last answer starts the finale on its own; the ref keeps it to one run.
+  React.useEffect(() => {
+    if (!done || finishStarted.current) return;
+    finishStarted.current = true;
+    void finish();
+  }, [done]);
   const interviewing = !done && isLlmPhase(screen) && !fixed && !answered.includes(screen);
   const back = previousScreen(screen);
   const total = INTAKE_PHASES.length;
   const progressIndex = done ? total : INTAKE_PHASES.indexOf(screen);
+  // Until a language is chosen the setup speaks English; see ENGLISH_ENTRY.
+  const inEnglish = stage !== "questions" || screen === "language";
+  const t = inEnglish ? englishEntry : msg;
   const progressLabel = done
     ? ""
-    : `${msg(PHASE_LABELS[screen])} · ${formatMsg("experience.intake.step", {
+    : `${t(PHASE_LABELS[screen])} · ${t("experience.intake.step", {
         n: progressIndex + 1,
         total,
       })}`;
@@ -402,49 +471,36 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
     description: msg("experience.intake.chat.keep_current_description"),
   };
 
+  const chooseLanguage = (next: string) => {
+    if (next === locale || !isLocale(next)) {
+      answer("language", { language: locale });
+      return;
+    }
+    // The switch reloads the page; the draft and its note bring the user back here.
+    setDraft(prepareLanguageSwitch(draft, next));
+    setLocale(next);
+  };
+
   const renderQuestion = (phase: IntakePhase) => {
     switch (phase) {
       case "language": {
-        const choices = languageChoices(locale, FULL_TRANSLATION_LOCALES);
-        const options: InterviewOption[] = [
-          ...choices.map((l, index) => ({
-            label:
-              index === 0
-                ? formatMsg("experience.intake.language.keep", {
-                    language: LOCALE_REGISTRY[l].nativeName,
-                  })
-                : LOCALE_REGISTRY[l].nativeName,
-            description:
-              index === 0
-                ? msg("experience.intake.language.keep_description")
-                : LOCALE_REGISTRY[l].englishName,
-          })),
-          {
-            label: msg("experience.intake.language.default"),
-            description: msg("experience.intake.language.default_description"),
-          },
-        ];
-        const picked = isLocale(answers.language) ? answers.language : locale;
+        const choices = languageChoices<Locale>("en", FULL_TRANSLATION_LOCALES);
+        const options: InterviewOption[] = choices.map((l) => ({
+          label: LOCALE_REGISTRY[l].nativeName,
+          description: LOCALE_REGISTRY[l].englishName,
+        }));
+        const picked = isLocale(answers.language) ? answers.language : "en";
         return (
           <section className="flex flex-col gap-6">
             <QuestionHeading
-              title={msg("experience.intake.language.title")}
-              hint={msg("experience.intake.language.hint")}
+              title={t("experience.intake.language.title")}
+              hint={t("experience.intake.language.hint")}
             />
             <Choices
               options={options}
               selected={options[Math.max(0, choices.indexOf(picked))]!.label}
-              ariaLabel={msg("experience.intake.language.title")}
-              onSelect={(_, index) => {
-                const next = choices[index] ?? locale;
-                if (next === locale) {
-                  answer("language", { language: locale });
-                  return;
-                }
-                // The switch reloads the page; the draft and its note bring the user back here.
-                setDraft(prepareLanguageSwitch(draft, next));
-                setLocale(next);
-              }}
+              ariaLabel={t("experience.intake.language.title")}
+              onSelect={(_, index) => chooseLanguage(choices[index] ?? locale)}
             />
           </section>
         );
@@ -683,6 +739,37 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
   // A gentle rise only when motion is welcome; a plain fade otherwise.
   const rise = (y: number, scale = 1) => (reduceMotion ? { opacity: 0 } : { opacity: 0, y, scale });
 
+  // Back and forward travel as one tight pair right under the answer, shaped
+  // like the wizard's own step buttons.
+  const rtl = !inEnglish && getActiveDir() === "rtl";
+  const BackChevron = rtl ? CaretRight : CaretLeft;
+  const NextChevron = rtl ? CaretLeft : CaretRight;
+  const navButton = "min-h-[44px] lg:min-h-0 min-w-0 flex-1 gap-2 sm:flex-none";
+  const actions = (
+    <div className="flex items-stretch gap-2">
+      {back && (
+        <Button variant="outline" className={navButton} onClick={() => goTo(back)}>
+          <BackChevron className="size-4" aria-hidden />
+          {msg("experience.intake.back")}
+        </Button>
+      )}
+      {!interviewing && !done && (
+        <Button
+          className={cn(navButton, "sm:min-w-[88px]")}
+          onClick={() =>
+            screen === "language"
+              ? chooseLanguage(isLocale(answers.language) ? answers.language : "en")
+              : answer(screen)
+          }
+          disabled={!canContinue}
+        >
+          {t("experience.intake.next")}
+          <NextChevron className="size-4" aria-hidden />
+        </Button>
+      )}
+    </div>
+  );
+
   if (stage === "glance") return null;
 
   return (
@@ -698,10 +785,23 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
         >
           <motion.div
             className="fixed inset-0 isolate flex flex-col overflow-hidden text-foreground outline-none"
+            dir={inEnglish ? "ltr" : undefined}
+            lang={inEnglish ? "en" : undefined}
             style={{ zIndex: 50 }}
+            variants={{
+              gone: {
+                opacity: 0,
+                transition: reduceMotion
+                  ? { duration: REDUCED_ENTER_MS / 1000 }
+                  : { duration: FINALE_FADE_MS / 1000, ease: EASE_OUT },
+              },
+            }}
             initial="hidden"
-            animate="shown"
+            animate={leaving ? "gone" : "shown"}
             exit="hidden"
+            onAnimationComplete={(definition) => {
+              if (definition === "gone") closeAfterFade();
+            }}
           >
             {/*
              * Two layers dissolve the app: a frosted veil first, so the page
@@ -721,7 +821,7 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
             />
 
             <DialogPrimitive.Title className="sr-only">
-              {msg("experience.intake.entrance.title")}
+              {t("experience.intake.entrance.title")}
             </DialogPrimitive.Title>
 
             <AnimatePresence mode="wait" initial={false}>
@@ -732,16 +832,38 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
                   initial={rise(16, 0.98)}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -24, scale: 0.96 }}
-                  transition={
-                    reduceMotion ? ease : { ...ease, delay: (ENTER_MS * 0.45) / 1000 }
-                  }
+                  transition={reduceMotion ? ease : { ...ease, delay: (ENTER_MS * 0.45) / 1000 }}
                 >
                   <p
                     aria-hidden
                     className="max-w-[18ch] text-center text-4xl font-semibold leading-tight tracking-tight text-balance sm:text-5xl"
                   >
-                    {msg("experience.intake.entrance.title")}
+                    {t("experience.intake.entrance.title")}
                   </p>
+                </motion.div>
+              ) : done ? (
+                <motion.div
+                  key="finale"
+                  role="status"
+                  className="flex flex-1 flex-col items-center justify-center gap-10 px-6 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-center"
+                  initial={rise(12, 0.98)}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={ease}
+                >
+                  <AnimatedWordmark size={56} autoMorph={!reduceMotion} morphSpeed={180} />
+                  <motion.div
+                    className="flex flex-col items-center gap-3"
+                    initial={rise(8)}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={reduceMotion ? ease : { ...ease, delay: 0.2 }}
+                  >
+                    <p className="text-4xl font-semibold leading-tight tracking-tight text-balance sm:text-5xl">
+                      {msg("experience.intake.done.title")}
+                    </p>
+                    <p className="max-w-[36ch] text-base text-muted-foreground text-pretty">
+                      {msg("experience.intake.done.hint")}
+                    </p>
+                  </motion.div>
                 </motion.div>
               ) : (
                 <motion.div
@@ -749,10 +871,25 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
                   className="flex min-h-0 flex-1 flex-col"
                   initial={rise(12)}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -12 }}
                   transition={ease}
                 >
-                  <div className="mx-auto w-full max-w-2xl px-5 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8 sm:pt-10">
-                    <IntakeProgress index={progressIndex} total={total} label={progressLabel} />
+                  {/*
+                   * Leaving lives up with the progress, away from the answer and
+                   * Continue, so it is never hit while moving forward.
+                   */}
+                  <div className="mx-auto flex w-full max-w-2xl items-center gap-4 px-5 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-7 sm:pt-10">
+                    <div className="min-w-0 flex-1">
+                      <IntakeProgress index={progressIndex} total={total} label={progressLabel} />
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={cn(TOUCH_TAP, "-me-3 text-muted-foreground hover:text-foreground")}
+                      onClick={skip}
+                    >
+                      {t("experience.intake.skip")}
+                    </Button>
                   </div>
 
                   {interviewing ? (
@@ -774,13 +911,17 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
                         }
                         onFail={fallBack}
                       />
+                      {back && (
+                        <div className="px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
+                          {actions}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                       <div
                         className={cn(
-                          "mx-auto w-full max-w-2xl px-5 pt-8 pb-10 sm:px-7 sm:pt-12",
-                          done && "flex min-h-full items-center",
+                          "mx-auto w-full max-w-2xl px-5 pt-8 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:px-7 sm:pt-12",
                         )}
                       >
                         {fallbackNote && (
@@ -788,68 +929,11 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
                             {msg("experience.intake.chat.error")}
                           </p>
                         )}
-                        {done ? (
-                          <motion.div
-                            key="done"
-                            initial={rise(8)}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            transition={ease}
-                          >
-                            <QuestionHeading title={msg("experience.intake.done.title")} />
-                          </motion.div>
-                        ) : (
-                          renderQuestion(screen)
-                        )}
+                        {renderQuestion(screen)}
+                        <div className="pt-8">{actions}</div>
                       </div>
                     </div>
                   )}
-
-                  <div className="border-t border-border/40">
-                    <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center gap-2 px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
-                      {/* Leaving sits apart from moving forward, so neither is hit by mistake. */}
-                      <Button
-                        variant="ghost"
-                        className={cn(TOUCH_TAP, "-ms-3 text-muted-foreground hover:text-foreground")}
-                        onClick={skip}
-                        disabled={finishing}
-                      >
-                        {msg("experience.intake.skip")}
-                      </Button>
-                      <div className="ms-auto flex items-center gap-2">
-                        {back && (
-                          <Button
-                            variant="ghost"
-                            className={TOUCH_TAP}
-                            onClick={() => goTo(back)}
-                            disabled={finishing}
-                          >
-                            {msg("experience.intake.back")}
-                          </Button>
-                        )}
-                        {done ? (
-                          <Button
-                            className={TOUCH_TAP}
-                            onClick={() => void finish()}
-                            disabled={finishing}
-                          >
-                            {finishing
-                              ? msg("experience.intake.finishing")
-                              : msg("experience.intake.finish")}
-                          </Button>
-                        ) : (
-                          !interviewing && (
-                            <Button
-                              className={TOUCH_TAP}
-                              onClick={() => answer(screen)}
-                              disabled={!canContinue}
-                            >
-                              {msg("experience.intake.next")}
-                            </Button>
-                          )
-                        )}
-                      </div>
-                    </div>
-                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
