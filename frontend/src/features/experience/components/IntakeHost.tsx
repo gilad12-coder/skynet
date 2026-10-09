@@ -23,10 +23,11 @@ import {
   isLocale,
   type Locale,
 } from "@/shared/lib/locale";
-import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { useLocale } from "@/shared/providers";
 import { cn } from "@/shared/lib/utils";
 import { QuestionChoices } from "@/shared/ui/agent";
+import { CaretLeft, CaretRight, CircleNotch } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
@@ -716,6 +717,63 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
   // A gentle rise only when motion is welcome; a plain fade otherwise.
   const rise = (y: number, scale = 1) => (reduceMotion ? { opacity: 0 } : { opacity: 0, y, scale });
 
+  // Back and forward travel as one tight pair right under the answer, shaped
+  // like the wizard's own step buttons.
+  const rtl = !inEnglish && getActiveDir() === "rtl";
+  const BackChevron = rtl ? CaretRight : CaretLeft;
+  const NextChevron = rtl ? CaretLeft : CaretRight;
+  const navButton = "min-h-[44px] lg:min-h-0 min-w-0 flex-1 gap-2 sm:flex-none";
+  const actions = (
+    <div className="flex items-stretch gap-2">
+      {back && (
+        <Button
+          variant="outline"
+          className={navButton}
+          onClick={() => goTo(back)}
+          disabled={finishing}
+        >
+          <BackChevron className="size-4" aria-hidden />
+          {msg("experience.intake.back")}
+        </Button>
+      )}
+      {done ? (
+        <Button
+          className={cn(navButton, "sm:min-w-[88px]")}
+          onClick={() => void finish()}
+          disabled={finishing}
+          aria-busy={finishing || undefined}
+        >
+          {finishing ? (
+            <>
+              <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden />
+              {msg("experience.intake.finishing")}
+            </>
+          ) : (
+            <>
+              {msg("experience.intake.finish")}
+              <NextChevron className="size-4" aria-hidden />
+            </>
+          )}
+        </Button>
+      ) : (
+        !interviewing && (
+          <Button
+            className={cn(navButton, "sm:min-w-[88px]")}
+            onClick={() =>
+              screen === "language"
+                ? chooseLanguage(isLocale(answers.language) ? answers.language : "en")
+                : answer(screen)
+            }
+            disabled={!canContinue}
+          >
+            {t("experience.intake.next")}
+            <NextChevron className="size-4" aria-hidden />
+          </Button>
+        )
+      )}
+    </div>
+  );
+
   if (stage === "glance") return null;
 
   return (
@@ -784,8 +842,23 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={ease}
                 >
-                  <div className="mx-auto w-full max-w-2xl px-5 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8 sm:pt-10">
-                    <IntakeProgress index={progressIndex} total={total} label={progressLabel} />
+                  {/*
+                   * Leaving lives up with the progress, away from the answer and
+                   * Continue, so it is never hit while moving forward.
+                   */}
+                  <div className="mx-auto flex w-full max-w-2xl items-center gap-4 px-5 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-7 sm:pt-10">
+                    <div className="min-w-0 flex-1">
+                      <IntakeProgress index={progressIndex} total={total} label={progressLabel} />
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={cn(TOUCH_TAP, "-me-3 text-muted-foreground hover:text-foreground")}
+                      onClick={skip}
+                      disabled={finishing}
+                    >
+                      {t("experience.intake.skip")}
+                    </Button>
                   </div>
 
                   {interviewing ? (
@@ -807,13 +880,18 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
                         }
                         onFail={fallBack}
                       />
+                      {back && (
+                        <div className="px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
+                          {actions}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                       <div
                         className={cn(
-                          "mx-auto w-full max-w-2xl px-5 pt-8 pb-10 sm:px-7 sm:pt-12",
-                          done && "flex min-h-full items-center",
+                          "mx-auto w-full max-w-2xl px-5 pt-8 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:px-7 sm:pt-12",
+                          done && "flex min-h-full flex-col justify-center",
                         )}
                       >
                         {fallbackNote && (
@@ -833,65 +911,10 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
                         ) : (
                           renderQuestion(screen)
                         )}
+                        <div className="pt-8">{actions}</div>
                       </div>
                     </div>
                   )}
-
-                  <div className="border-t border-border/40">
-                    <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center gap-2 px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
-                      {/* Leaving sits apart from moving forward, so neither is hit by mistake. */}
-                      <Button
-                        variant="ghost"
-                        className={cn(
-                          TOUCH_TAP,
-                          "-ms-3 text-muted-foreground hover:text-foreground",
-                        )}
-                        onClick={skip}
-                        disabled={finishing}
-                      >
-                        {t("experience.intake.skip")}
-                      </Button>
-                      <div className="ms-auto flex items-center gap-2">
-                        {back && (
-                          <Button
-                            variant="ghost"
-                            className={TOUCH_TAP}
-                            onClick={() => goTo(back)}
-                            disabled={finishing}
-                          >
-                            {msg("experience.intake.back")}
-                          </Button>
-                        )}
-                        {done ? (
-                          <Button
-                            className={TOUCH_TAP}
-                            onClick={() => void finish()}
-                            disabled={finishing}
-                          >
-                            {finishing
-                              ? msg("experience.intake.finishing")
-                              : msg("experience.intake.finish")}
-                          </Button>
-                        ) : (
-                          !interviewing && (
-                            <Button
-                              className={TOUCH_TAP}
-                              onClick={() =>
-                                screen === "language"
-                                  ? chooseLanguage(
-                                      isLocale(answers.language) ? answers.language : "en",
-                                    )
-                                  : answer(screen)
-                              }
-                              disabled={!canContinue}
-                            >
-                              {t("experience.intake.next")}
-                            </Button>
-                          )
-                        )}
-                      </div>
-                    </div>
-                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
