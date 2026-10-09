@@ -2,13 +2,7 @@
 
 import type { Icon } from "@phosphor-icons/react";
 
-import {
-  ArrowCounterClockwise,
-  Compass,
-  FadersHorizontal,
-  Gauge,
-  Wrench,
-} from "@/shared/ui/icons";
+import { ArrowCounterClockwise, Compass, FadersHorizontal, Gauge, Wrench } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { Button } from "@/shared/ui/primitives/button";
@@ -43,10 +37,7 @@ export function ExperienceLevelControl({ onRerun }: { onRerun?: () => void }) {
   return (
     <>
       <div className="flex items-start gap-3 border-b border-border/40 py-3">
-        <Gauge
-          className="size-4 mt-0.5 text-muted-foreground shrink-0"
-          aria-hidden="true"
-        />
+        <Gauge className="size-4 mt-0.5 text-muted-foreground shrink-0" aria-hidden="true" />
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex flex-col gap-0.5">
             <span className="text-sm font-medium text-foreground">
