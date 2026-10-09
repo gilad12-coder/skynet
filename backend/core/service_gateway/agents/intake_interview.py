@@ -1,12 +1,13 @@
 """LLM engine for the first-login onboarding intake interview. [INTERNAL]
 
-The intake walks a fixed agenda of phases, and the model runs every one of
-them (the client asks only the interface language itself, before the
-interview, because that answer reloads the page). Each model turn asks at
-most one short question, and also extracts any answer the user volunteered
-for a later phase into a validated ``profile_patch`` so the client can skip
-those phases. Model choice and the wizard's code / data-split defaults are
-not on the agenda: a new account takes the app's existing defaults.
+The intake is settings only: a fixed agenda of account settings, and the
+model runs every phase of it (the client asks only the interface language
+itself, before the interview, because that answer reloads the page). Each
+model turn asks at most one short question, and also extracts any answer the
+user volunteered for a later phase into a validated ``profile_patch`` so the
+client can skip those phases. Nothing about the user's first run (what to
+improve, where the data lives) is asked, nor model choice or the wizard's
+defaults: a new account takes the app's existing defaults.
 
 The turn streams over the Signature & Metric interview's machinery
 (:func:`~.code_interview.relay_interview_turn`): same events, same retries,
@@ -31,14 +32,13 @@ from .code import _build_agent_lm, _reply_language
 from .code_interview import _parse_json, relay_interview_turn
 from .conduct import with_conduct
 
-AGENDA = ("goal", "source", "billing", "budget", "privacy", "emails", "trust")
+AGENDA = ("billing", "budget", "privacy", "emails", "trust")
 LLM_PHASES = AGENDA
 MAX_PHASE_QUESTIONS = 2
 MAX_REQUEST_TURNS = 8
 INTAKE_MAX_TOKENS = 4000
 """Completion budget per turn, reasoning included; a turn is a sentence or two plus small JSON."""
 
-SOURCES = ("repo", "api", "spreadsheet", "file", "dataset", "none")
 BILLING = ("platform", "byok")
 PRIVACY = ("allow", "no_training", "zdr")
 EMAIL_CADENCES = ("done", "milestones", "live")
@@ -47,43 +47,13 @@ EMAIL_CADENCES = ("done", "milestones", "live")
 TRUST_MODES = ("ask", "auto_safe", "yolo")
 LEVELS = ("guided", "standard", "expert")
 
-_SOURCE_ALIASES = {
-    "github": "repo",
-    "gitlab": "repo",
-    "git": "repo",
-    "repository": "repo",
-    "http": "api",
-    "endpoint": "api",
-    "csv": "spreadsheet",
-    "excel": "spreadsheet",
-    "sheet": "spreadsheet",
-    "xlsx": "spreadsheet",
-    "huggingface": "dataset",
-    "hf": "dataset",
-    "nothing": "none",
-}
 # The privacy setting is stored as ``deny`` (see ``billing.data_policy``); the
 # intake speaks ``no_training``, so accept the stored spelling too.
 _PRIVACY_ALIASES = {"deny": "no_training"}
 _LEVEL_ALIASES = {"new": "guided", "familiar": "standard"}
-_TEXT_LIMIT = 500
-_URL_LIMIT = 2000
 _MAX_BUDGET_USD = 100_000.0
 
 _PHASE_BRIEFS = {
-    "goal": (
-        "Learn what should get better and how the user will know it got better "
-        "(the success signal). No default: never offer 'Use the default' here."
-    ),
-    "source": (
-        "Learn where the thing lives: a GitHub/GitLab repository URL, an HTTP API, a "
-        "spreadsheet/CSV, a file, a Hugging Face dataset, or nothing yet; and its URL "
-        "when there is one. Adapt to the goal: for a support bot that misroutes "
-        "tickets ask where the tickets live, with options such as 'Zendesk export "
-        "(CSV)', 'A database table', 'An API I call'. The default is 'none' (start "
-        "from scratch with a few examples); offer it as a concrete option such as "
-        "'Nothing yet', never as 'Use the default'."
-    ),
     "billing": (
         "Learn who pays for the model calls: platform credits (billing 'platform', "
         "nothing to set up) or the user's own provider key (billing 'byok'). When "
@@ -93,11 +63,11 @@ _PHASE_BRIEFS = {
     ),
     "budget": (
         "Learn how much one run may spend, in US dollars (budget_usd); a run stops "
-        "when it reaches the limit. Offer a few amounts that suit the goal, e.g. $5 "
-        "for a small trial, $20 for a typical first optimization, $50 for larger "
-        "data. The default is no fixed amount: the wizard suggests a limit from each "
-        "run's cost estimate (budget_usd 'suggest'); end the options with 'Use the "
-        "default' naming it."
+        "when it reaches the limit. Offer a few distinct amounts, e.g. $20 for a "
+        "typical first optimization, $5 for a small trial, $50 for larger data. The "
+        "default is no fixed amount: the wizard suggests a limit from each run's cost "
+        "estimate (budget_usd 'suggest'); end the options with 'Use the default' "
+        "naming it."
     ),
     "privacy": (
         "Learn whether model providers may use the user's data: allow (providers may "
@@ -126,10 +96,12 @@ class IntakeInterviewTurnSig(dspy.Signature):
     __doc__ = with_conduct("""Run one phase of a new user's onboarding interview, one short question at a time.
 
     You are a sharp engineer onboarding someone to a prompt- and
-    program-optimization platform. The onboarding is a fixed agenda of
-    phases; you run only ``phase`` (``phase_brief`` says what it must learn).
-    ``profile_json`` holds what is already known — never ask about it again.
-    Never ask which models to use, nor the level: the platform picks those.
+    program-optimization platform. The onboarding sets up account settings
+    only, as a fixed agenda of phases; you run only ``phase`` (``phase_brief``
+    says what it must learn). ``profile_json`` holds what is already known —
+    never ask about it again. Ask only about the phase's setting: never about
+    what the user wants to optimize, where their code or data lives, which
+    models to use, or their level.
     Ask ONE short question at a time: ``message`` is one or two short
     sentences. If the transcript already answers the phase, or the
     question-count note says the limit is reached, set ``done`` to true and
@@ -151,16 +123,14 @@ class IntakeInterviewTurnSig(dspy.Signature):
 
     In ``profile_patch_json`` extract every setting the user's own words
     settle so far, for ANY phase of the agenda, omitting keys you do not
-    know: goal (short, their words), success_signal, source (repo | api |
-    spreadsheet | file | dataset | none), source_url, billing (platform |
-    byok), byok_provider (one of ``byok_providers``), budget_usd (a number,
-    per run, or 'suggest'), privacy (allow | no_training | zdr),
-    email_cadence (done | milestones | live), trust (ask | auto_safe |
-    yolo), level. Always infer level, never ask it: 'guided' for someone
-    describing a business task with a spreadsheet or file and no ML
-    vocabulary; 'standard' for an engineer with a repository or an API;
-    'expert' when they name optimizers, data splits, metrics, or DSPy/GEPA
-    settings.
+    know: billing (platform | byok), byok_provider (one of
+    ``byok_providers``), budget_usd (a number, per run, or 'suggest'),
+    privacy (allow | no_training | zdr), email_cadence (done | milestones |
+    live), trust (ask | auto_safe | yolo), level. Never ask the level and
+    set it only when the user's own words clearly show it: 'guided' when
+    they say they are new to machine learning, 'expert' when they name
+    optimizers, data splits, metrics, or DSPy/GEPA settings; otherwise omit
+    it.
     """)
 
     phase: str = dspy.InputField(desc="The agenda phase this turn runs, one of ``agenda``.")
@@ -216,38 +186,6 @@ def _enum(value: Any, allowed: Iterable[str], aliases: dict[str, str] | None = N
     return cleaned if cleaned in allowed else None
 
 
-def _text(value: Any, limit: int = _TEXT_LIMIT) -> str | None:
-    """Trim a free-text value, dropping it when blank or not a string.
-
-    Args:
-        value: Raw value.
-        limit: Maximum characters kept.
-
-    Returns:
-        The trimmed text, or ``None``.
-    """
-    if not isinstance(value, str) or not value.strip():
-        return None
-    return value.strip()[:limit]
-
-
-def _url(value: Any) -> str | None:
-    """Trim a URL, dropping blanks, overlong values and anything with inner whitespace.
-
-    Args:
-        value: Raw value.
-
-    Returns:
-        The trimmed URL, or ``None``.
-    """
-    if not isinstance(value, str):
-        return None
-    cleaned = value.strip().strip("<>").strip()
-    if not cleaned or len(cleaned) > _URL_LIMIT or any(c.isspace() for c in cleaned):
-        return None
-    return cleaned
-
-
 def _budget(value: Any) -> float | str | None:
     """Coerce a per-run budget to a positive dollar amount, or the wizard's suggestion.
 
@@ -287,10 +225,6 @@ def validate_profile_patch(raw: Any, *, provider_slugs: Iterable[str]) -> dict[s
         return {}
     slugs = {s.strip().lower() for s in provider_slugs if s}
     checks: dict[str, Any] = {
-        "goal": _text,
-        "success_signal": _text,
-        "source": lambda v: _enum(v, SOURCES, _SOURCE_ALIASES),
-        "source_url": _url,
         "billing": lambda v: _enum(v, BILLING),
         "byok_provider": lambda v: v.strip().lower() if isinstance(v, str) and v.strip().lower() in slugs else None,
         "budget_usd": _budget,
@@ -322,8 +256,6 @@ def answered_phases(patch: dict[str, Any]) -> list[str]:
         Phase ids in agenda order.
     """
     answered = {
-        "goal": "goal" in patch,
-        "source": "source" in patch,
         "billing": patch.get("billing") == "platform" or bool(patch.get("byok_provider")),
         "budget": "budget_usd" in patch,
         "privacy": "privacy" in patch,
@@ -392,21 +324,13 @@ def parse_intake_prediction(
     pred: Any,
     asked: int,
     *,
-    phase: str,
-    turns: list[dict[str, str]],
     provider_slugs: Iterable[str],
 ) -> dict[str, Any]:
     """Turn a raw ``IntakeInterviewTurnSig`` prediction into the ``interview_done`` payload.
 
-    A finished ``goal`` phase whose patch carries no goal (an unparseable
-    final turn) falls back to the user's first answer, so the setup never
-    loses what they said.
-
     Args:
         pred: The prediction, or ``None`` when the stream produced nothing.
         asked: Assistant questions asked in this phase before this turn.
-        phase: The phase the turn ran.
-        turns: This phase's prior turns.
         provider_slugs: Provider slugs ``byok_provider`` may name.
 
     Returns:
@@ -418,10 +342,6 @@ def parse_intake_prediction(
     patch = validate_profile_patch(
         _parse_json(getattr(pred, "profile_patch_json", "{}"), {}), provider_slugs=provider_slugs
     )
-    if phase == "goal" and phase_done and "goal" not in patch:
-        first = next((t.get("content", "") for t in turns if t.get("role") == "user"), "")
-        if goal := _text(first):
-            patch["goal"] = goal
     options = [] if phase_done else normalize_options(_parse_json(getattr(pred, "options_json", "[]"), []))
     return {
         "message": str(getattr(pred, "message", "") or "").strip(),
@@ -479,7 +399,7 @@ async def intake_turn_stream(
         Returns:
             The ``interview_done`` payload.
         """
-        return parse_intake_prediction(pred, count, phase=phase, turns=turns, provider_slugs=provider_slugs)
+        return parse_intake_prediction(pred, count, provider_slugs=provider_slugs)
 
     async for event in relay_interview_turn(
         predict=dspy.Predict(IntakeInterviewTurnSig), lm=lm, inputs=inputs, asked=asked, model=model, parse=parse

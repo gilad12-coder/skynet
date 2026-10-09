@@ -65,8 +65,11 @@ _CATALOG = SimpleNamespace(
 )
 
 _BODY = {
-    "phase": "goal",
-    "turns": [{"role": "assistant", "content": "What should get better?"}, {"role": "user", "content": "Routing"}],
+    "phase": "billing",
+    "turns": [
+        {"role": "assistant", "content": "Who pays for the model calls?"},
+        {"role": "user", "content": "Credits"},
+    ],
     "profile": {"level": "standard"},
     "locale": "en",
 }
@@ -154,7 +157,7 @@ def test_streams_events_and_forwards_args(monkeypatch) -> None:
     assert "event: turn_started" in resp.text
     assert "event: message_patch" in resp.text
     assert "event: interview_done" in resp.text
-    assert seen["phase"] == "goal"
+    assert seen["phase"] == "billing"
     assert seen["turns"] == _BODY["turns"]
     assert seen["profile"] == {"level": "standard"}
     assert seen["locale"] == "en"
@@ -180,7 +183,7 @@ def test_empty_turns_opens_the_phase(monkeypatch) -> None:
     """Empty turns are the phase's opening question."""
     seen: dict[str, Any] = {}
     _record_stream(monkeypatch, seen)
-    resp = _client().post("/account/intake-interview", json={"phase": "source"})
+    resp = _client().post("/account/intake-interview", json={"phase": "budget"})
     assert resp.status_code == 200
     assert seen["turns"] == []
     assert seen["profile"] == {}
@@ -192,8 +195,10 @@ def test_empty_turns_opens_the_phase(monkeypatch) -> None:
         {**_BODY, "turns": [{"role": "user", "content": "x"}] * 9},
         {**_BODY, "phase": "models"},
         {**_BODY, "phase": "language"},
+        {**_BODY, "phase": "goal"},
+        {**_BODY, "phase": "source"},
         {**_BODY, "turns": [{"role": "system", "content": "x"}]},
-        {**_BODY, "profile": {"goal": "x" * 20_000}},
+        {**_BODY, "profile": {"trust": "x" * 20_000}},
     ],
 )
 def test_rejects_invalid_requests(monkeypatch, body: dict[str, Any]) -> None:
