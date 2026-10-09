@@ -7,7 +7,6 @@ import {
   buildNotificationPatch,
   buildWizardPrefill,
   classifySourceText,
-  connectorFor,
   emptyIntake,
   inferLevel,
   notificationsFromPrefs,
@@ -43,12 +42,7 @@ test("inferLevel: data without code is Guided, repo/API is Standard, engine talk
   assert.equal(inferLevel({ goal: "try ShinkaEvolve islands", source: "repo" }), "expert");
 });
 
-test("each source implies at most one connector and one recipe", () => {
-  assert.equal(connectorFor("repo"), "github");
-  assert.equal(connectorFor("spreadsheet"), "google_sheets");
-  assert.equal(connectorFor("dataset"), "huggingface");
-  assert.equal(connectorFor("file"), null);
-  assert.equal(connectorFor("api"), null);
+test("each source implies one recipe", () => {
   assert.equal(recipeFor("repo"), "repo");
   assert.equal(recipeFor("api"), "anything");
   assert.equal(recipeFor("spreadsheet"), "program");
@@ -92,12 +86,10 @@ test("parseIntakeAnswers round-trips stored answers and clamps out-of-range numb
     ...emptyIntake(),
     goal: "g",
     source: "api",
-    models: ["openai/gpt-4o", ""],
     spending_limit_cents: 500,
   }).intake;
   const parsed = parseIntakeAnswers(stored);
   assert.equal(parsed?.source, "api");
-  assert.deepEqual(parsed?.models, ["openai/gpt-4o"]);
   assert.equal(parsed?.spending_limit_cents, 500);
   const clamped = parseIntakeAnswers({ notifications: { live_count: 99, stuck_fraction: 0, cadence: "hourly" } });
   assert.equal(clamped?.notifications.live_count, 20);
@@ -112,11 +104,8 @@ test("notificationsFromPrefs fills server gaps with the defaults", () => {
   assert.equal(notificationsFromPrefs({ cadence: "milestones" }).cadence, "milestones");
 });
 
-test("buildWizardPrefill sets only what the answers decide", () => {
-  assert.deepEqual(buildWizardPrefill({ ...emptyIntake(), goal: "g", models: ["m1", "m2"] }), {
-    job_type: "run",
-    model_config: { name: "m1" },
-  });
+test("buildWizardPrefill sets only what the answers decide; models keep the wizard default", () => {
+  assert.deepEqual(buildWizardPrefill({ ...emptyIntake(), goal: "g" }), { job_type: "run" });
   assert.deepEqual(
     buildWizardPrefill({ ...emptyIntake(), goal: " faster ", source: "repo", spending_limit_cents: 900 }),
     { job_type: "blackbox", blackbox_objective: "faster", max_cost_cents: 900 },
@@ -124,10 +113,10 @@ test("buildWizardPrefill sets only what the answers decide", () => {
 });
 
 test("agentBrief needs a goal and fills the template", () => {
-  const template = (v: Record<string, string>) => `${v.goal}|${v.source}|${v.models}`;
+  const template = (v: Record<string, string>) => `${v.goal}|${v.source}`;
   assert.equal(agentBrief(emptyIntake(), template), null);
   assert.equal(
-    agentBrief({ ...emptyIntake(), goal: "g", source: "repo", source_url: "acme/r", models: ["a", "b"] }, template),
-    "g|acme/r|a, b",
+    agentBrief({ ...emptyIntake(), goal: "g", source: "repo", source_url: "acme/r" }, template),
+    "g|acme/r",
   );
 });

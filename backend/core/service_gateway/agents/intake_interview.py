@@ -1,10 +1,12 @@
 """LLM engine for the first-login onboarding intake interview. [INTERNAL]
 
-The intake walks a fixed agenda of phases. Only the open-ended phases
-(``goal`` and ``source``) call a model; the rest are fixed multiple choice the
-client renders itself. Each model turn asks at most one short question, and
-also extracts any answer the user volunteered for a later phase into a
-validated ``profile_patch`` so the client can skip those phases.
+The intake walks a fixed agenda of phases, and the model runs every one of
+them (the client asks only the interface language itself, before the
+interview, because that answer reloads the page). Each model turn asks at
+most one short question, and also extracts any answer the user volunteered
+for a later phase into a validated ``profile_patch`` so the client can skip
+those phases. Model choice and the wizard's code / data-split defaults are
+not on the agenda: a new account takes the app's existing defaults.
 
 The turn streams over the Signature & Metric interview's machinery
 (:func:`~.code_interview.relay_interview_turn`): same events, same retries,
@@ -29,8 +31,8 @@ from .code import _build_agent_lm, _reply_language
 from .code_interview import _parse_json, relay_interview_turn
 from .conduct import with_conduct
 
-LLM_PHASES = ("goal", "source")
-AGENDA = ("goal", "source", "models", "billing", "budget", "privacy", "emails", "trust", "defaults", "level")
+AGENDA = ("goal", "source", "billing", "budget", "privacy", "emails", "trust")
+LLM_PHASES = AGENDA
 MAX_PHASE_QUESTIONS = 2
 MAX_REQUEST_TURNS = 8
 INTAKE_MAX_TOKENS = 4000
@@ -43,7 +45,6 @@ EMAIL_CADENCES = ("done", "milestones", "live")
 # Mirrors ``TrustMode`` in ``agents.generalist``; importing it would pull the
 # whole generalist agent into this module.
 TRUST_MODES = ("ask", "auto_safe", "yolo")
-AUTO_MANUAL = ("auto", "manual")
 LEVELS = ("guided", "standard", "expert")
 
 _SOURCE_ALIASES = {
@@ -67,7 +68,6 @@ _PRIVACY_ALIASES = {"deny": "no_training"}
 _LEVEL_ALIASES = {"new": "guided", "familiar": "standard"}
 _TEXT_LIMIT = 500
 _URL_LIMIT = 2000
-_MAX_MODELS = 5
 _MAX_BUDGET_USD = 100_000.0
 
 _PHASE_BRIEFS = {
@@ -84,6 +84,40 @@ _PHASE_BRIEFS = {
         "from scratch with a few examples); end the options with 'Use the default' "
         "naming it."
     ),
+    "billing": (
+        "Learn who pays for the model calls: platform credits (billing 'platform', "
+        "nothing to set up) or the user's own provider key (billing 'byok'). When "
+        "they bring a key, learn which provider it is from (byok_provider, one of "
+        "``byok_providers``) before finishing. The default is platform credits; end "
+        "the options with 'Use the default' naming it."
+    ),
+    "budget": (
+        "Learn how much one run may spend, in US dollars (budget_usd); a run stops "
+        "when it reaches the limit. Offer a few amounts that suit the goal, e.g. $5 "
+        "for a small trial, $20 for a typical first optimization, $50 for larger "
+        "data. The default is no fixed amount: the wizard suggests a limit from each "
+        "run's cost estimate (budget_usd 'suggest'); end the options with 'Use the "
+        "default' naming it."
+    ),
+    "privacy": (
+        "Learn whether model providers may use the user's data: allow (providers may "
+        "train on it), no_training (they may not train on it), or zdr (zero "
+        "retention: nothing is stored). It applies to every model call made for the "
+        "user. The default keeps the account's current setting; end the options with "
+        "'Use the default' naming it, and set no privacy key when they pick it."
+    ),
+    "emails": (
+        "Learn when Skynet should email the user about their runs: done (only when a "
+        "run finishes), milestones (at key points of a run) or live (as it goes). "
+        "The default is done; end the options with 'Use the default' naming it."
+    ),
+    "trust": (
+        "Learn how freely the assistant may change the wizard for the user: ask "
+        "(asks before every change), auto_safe (makes safe changes, asks for the "
+        "rest) or yolo (makes every change without asking). The default keeps the "
+        "current setting; end the options with 'Use the default' naming it, and set "
+        "no trust key when they pick it."
+    ),
 }
 
 
@@ -94,6 +128,7 @@ class IntakeInterviewTurnSig(dspy.Signature):
     program-optimization platform. The onboarding is a fixed agenda of
     phases; you run only ``phase`` (``phase_brief`` says what it must learn).
     ``profile_json`` holds what is already known — never ask about it again.
+    Never ask which models to use, nor the level: the platform picks those.
     Ask ONE short question at a time: ``message`` is one or two short
     sentences. If the transcript already answers the phase, or the
     question-count note says the limit is reached, set ``done`` to true and
@@ -107,29 +142,29 @@ class IntakeInterviewTurnSig(dspy.Signature):
     "something else" or anything meaning "I'll type it": the user always has
     a free-text box. When the phase has a sensible default, the LAST option
     is "Use the default" (in ``reply_language``) with the default named in
-    its description. Options are [] once ``done``.
+    its description; when the user picks it, the phase is done (patch only
+    the default the brief names as a value). Options are [] once ``done``.
 
     In ``profile_patch_json`` extract every setting the user's own words
     settle so far, for ANY phase of the agenda, omitting keys you do not
     know: goal (short, their words), success_signal, source (repo | api |
-    spreadsheet | file | dataset | none), source_url, models (ids from
-    ``featured_models`` only), billing (platform | byok), byok_provider
-    (provider slug, e.g. openai), budget_usd (a number, per run), privacy
-    (allow | no_training | zdr), email_cadence (done | milestones | live),
-    trust (ask | auto_safe | yolo), code_assist (auto | manual), split_mode
-    (auto | manual), level. Always infer level: 'guided' for someone
+    spreadsheet | file | dataset | none), source_url, billing (platform |
+    byok), byok_provider (one of ``byok_providers``), budget_usd (a number,
+    per run, or 'suggest'), privacy (allow | no_training | zdr),
+    email_cadence (done | milestones | live), trust (ask | auto_safe |
+    yolo), level. Always infer level, never ask it: 'guided' for someone
     describing a business task with a spreadsheet or file and no ML
     vocabulary; 'standard' for an engineer with a repository or an API;
     'expert' when they name optimizers, data splits, metrics, or DSPy/GEPA
     settings.
     """)
 
-    phase: str = dspy.InputField(desc="The agenda phase this turn runs: 'goal' or 'source'.")
+    phase: str = dspy.InputField(desc="The agenda phase this turn runs, one of ``agenda``.")
     phase_brief: str = dspy.InputField(desc="What this phase must learn, and its default if any.")
     agenda: list[str] = dspy.InputField(desc="Every phase of the onboarding, in order.")
     profile_json: str = dspy.InputField(desc="JSON object of settings already known; never ask about these.")
-    featured_models: str = dspy.InputField(
-        desc="JSON array of {id, label} catalog models; models in the patch must use these ids."
+    byok_providers: str = dspy.InputField(
+        desc="JSON array of provider slugs; byok_provider in the patch must be one of these."
     )
     transcript_json: str = dspy.InputField(desc="JSON array of this phase's prior {role, content} turns.")
     reply_language: str = dspy.InputField(desc="Language the message and options are written in.")
@@ -209,61 +244,18 @@ def _url(value: Any) -> str | None:
     return cleaned
 
 
-def _model_lookup(catalog_models: Iterable[Any]) -> dict[str, str]:
-    """Index catalog models by id, label and bare name for tolerant matching.
+def _budget(value: Any) -> float | str | None:
+    """Coerce a per-run budget to a positive dollar amount, or the wizard's suggestion.
 
     Args:
-        catalog_models: Catalog entries with ``value`` and ``label``.
+        value: Raw value (number, a string such as ``"$5"``, or ``"suggest"``).
 
     Returns:
-        Lower-cased spelling → catalog id; ids win over labels and bare names.
+        The amount, ``"suggest"`` for the wizard's per-run estimate, or ``None``
+        when missing, non-positive or absurd.
     """
-    lookup: dict[str, str] = {}
-    entries = list(catalog_models)
-    for entry in entries:
-        value = str(getattr(entry, "value", "") or "")
-        if not value:
-            continue
-        for alias in (str(getattr(entry, "label", "") or ""), value.rsplit("/", 1)[-1]):
-            if alias:
-                lookup.setdefault(alias.strip().lower(), value)
-    for entry in entries:
-        value = str(getattr(entry, "value", "") or "")
-        if value:
-            lookup[value.lower()] = value
-    return lookup
-
-
-def _models(value: Any, lookup: dict[str, str]) -> list[str] | None:
-    """Keep the catalog models a patch names, dropping unknown ids.
-
-    Args:
-        value: Raw ``models`` value (a list, or a single string).
-        lookup: Output of :func:`_model_lookup`.
-
-    Returns:
-        Up to five distinct catalog ids, or ``None`` when none matched.
-    """
-    items = [value] if isinstance(value, str) else value
-    if not isinstance(items, list):
-        return None
-    picked: list[str] = []
-    for item in items:
-        model_id = lookup.get(str(item).strip().lower()) if isinstance(item, str) else None
-        if model_id and model_id not in picked:
-            picked.append(model_id)
-    return picked[:_MAX_MODELS] or None
-
-
-def _budget(value: Any) -> float | None:
-    """Coerce a per-run budget to a positive dollar amount.
-
-    Args:
-        value: Raw value (number, or a string such as ``"$5"``).
-
-    Returns:
-        The amount, or ``None`` when missing, non-positive or absurd.
-    """
+    if isinstance(value, str) and value.strip().lower() in {"suggest", "auto"}:
+        return "suggest"
     if isinstance(value, bool):
         return None
     if isinstance(value, str):
@@ -277,17 +269,11 @@ def _budget(value: Any) -> float | None:
     return round(amount, 2)
 
 
-def validate_profile_patch(
-    raw: Any,
-    *,
-    catalog_models: Iterable[Any],
-    provider_slugs: Iterable[str],
-) -> dict[str, Any]:
+def validate_profile_patch(raw: Any, *, provider_slugs: Iterable[str]) -> dict[str, Any]:
     """Validate and coerce a model-written profile patch, dropping every invalid key.
 
     Args:
         raw: The parsed ``profile_patch_json`` (or a client profile).
-        catalog_models: Catalog entries ``models`` may name.
         provider_slugs: Provider slugs ``byok_provider`` may name.
 
     Returns:
@@ -301,15 +287,12 @@ def validate_profile_patch(
         "success_signal": _text,
         "source": lambda v: _enum(v, SOURCES, _SOURCE_ALIASES),
         "source_url": _url,
-        "models": lambda v: _models(v, _model_lookup(catalog_models)),
         "billing": lambda v: _enum(v, BILLING),
         "byok_provider": lambda v: v.strip().lower() if isinstance(v, str) and v.strip().lower() in slugs else None,
         "budget_usd": _budget,
         "privacy": lambda v: _enum(v, PRIVACY, _PRIVACY_ALIASES),
         "email_cadence": lambda v: _enum(v, EMAIL_CADENCES),
         "trust": lambda v: _enum(v, TRUST_MODES),
-        "code_assist": lambda v: _enum(v, AUTO_MANUAL),
-        "split_mode": lambda v: _enum(v, AUTO_MANUAL),
         "level": lambda v: _enum(v, LEVELS, _LEVEL_ALIASES),
     }
     patch: dict[str, Any] = {}
@@ -326,8 +309,7 @@ def validate_profile_patch(
 def answered_phases(patch: dict[str, Any]) -> list[str]:
     """List the agenda phases a validated patch fully answers.
 
-    ``level`` is never listed: the model always infers it, and the client
-    shows the level step pre-selected rather than skipping it.
+    ``level`` is never listed: it is not a phase, the model always infers it.
 
     Args:
         patch: Output of :func:`validate_profile_patch`.
@@ -338,31 +320,13 @@ def answered_phases(patch: dict[str, Any]) -> list[str]:
     answered = {
         "goal": "goal" in patch,
         "source": "source" in patch,
-        "models": bool(patch.get("models")),
         "billing": patch.get("billing") == "platform" or bool(patch.get("byok_provider")),
         "budget": "budget_usd" in patch,
         "privacy": "privacy" in patch,
         "emails": "email_cadence" in patch,
         "trust": "trust" in patch,
-        "defaults": "code_assist" in patch and "split_mode" in patch,
     }
     return [phase for phase in AGENDA if answered.get(phase)]
-
-
-def featured_model_list(catalog_models: Iterable[Any]) -> list[dict[str, str]]:
-    """Return the featured catalog models the interviewer may name, as ``{id, label}``.
-
-    Args:
-        catalog_models: Catalog entries.
-
-    Returns:
-        The featured entries (the same list the frontend's pickers lead with).
-    """
-    return [
-        {"id": str(m.value), "label": str(getattr(m, "label", "") or m.value)}
-        for m in catalog_models
-        if getattr(m, "featured", False)
-    ]
 
 
 def _transcript_json(turns: list[dict[str, str]]) -> str:
@@ -394,16 +358,16 @@ def intake_inputs(
     phase: str,
     turns: list[dict[str, str]],
     profile: dict[str, Any],
-    featured: list[dict[str, str]],
+    provider_slugs: Iterable[str],
     locale: str | None,
 ) -> dict[str, Any]:
     """Assemble the ``IntakeInterviewTurnSig`` inputs for one turn.
 
     Args:
-        phase: ``goal`` or ``source``.
+        phase: One of :data:`AGENDA`.
         turns: This phase's prior turns.
         profile: The validated profile so far.
-        featured: Output of :func:`featured_model_list`.
+        provider_slugs: Provider slugs ``byok_provider`` may name.
         locale: UI locale code; replies are written in that language.
 
     Returns:
@@ -414,7 +378,7 @@ def intake_inputs(
         "phase_brief": _PHASE_BRIEFS[phase],
         "agenda": list(AGENDA),
         "profile_json": json.dumps(profile, ensure_ascii=False),
-        "featured_models": json.dumps(featured, ensure_ascii=False),
+        "byok_providers": json.dumps(sorted(provider_slugs), ensure_ascii=False),
         "transcript_json": _transcript_json(turns),
         "reply_language": _reply_language(locale),
     }
@@ -426,13 +390,12 @@ def parse_intake_prediction(
     *,
     phase: str,
     turns: list[dict[str, str]],
-    catalog_models: Iterable[Any],
     provider_slugs: Iterable[str],
 ) -> dict[str, Any]:
     """Turn a raw ``IntakeInterviewTurnSig`` prediction into the ``interview_done`` payload.
 
     A finished ``goal`` phase whose patch carries no goal (an unparseable
-    final turn) falls back to the user's first answer, so the summary never
+    final turn) falls back to the user's first answer, so the setup never
     loses what they said.
 
     Args:
@@ -440,7 +403,6 @@ def parse_intake_prediction(
         asked: Assistant questions asked in this phase before this turn.
         phase: The phase the turn ran.
         turns: This phase's prior turns.
-        catalog_models: Catalog entries the patch's ``models`` may name.
         provider_slugs: Provider slugs ``byok_provider`` may name.
 
     Returns:
@@ -450,9 +412,7 @@ def parse_intake_prediction(
     skip_rest = _truthy(getattr(pred, "skip_rest", ""))
     phase_done = _truthy(getattr(pred, "done", "")) or skip_rest or asked >= MAX_PHASE_QUESTIONS
     patch = validate_profile_patch(
-        _parse_json(getattr(pred, "profile_patch_json", "{}"), {}),
-        catalog_models=catalog_models,
-        provider_slugs=provider_slugs,
+        _parse_json(getattr(pred, "profile_patch_json", "{}"), {}), provider_slugs=provider_slugs
     )
     if phase == "goal" and phase_done and "goal" not in patch:
         first = next((t.get("content", "") for t in turns if t.get("role") == "user"), "")
@@ -475,7 +435,6 @@ async def intake_turn_stream(
     phase: str,
     turns: list[dict[str, str]],
     profile: dict[str, Any],
-    catalog_models: list[Any],
     provider_slugs: list[str],
     locale: str | None,
     model: str | None,
@@ -490,10 +449,9 @@ async def intake_turn_stream(
     :func:`parse_intake_prediction`, plus ``served_model``).
 
     Args:
-        phase: ``goal`` or ``source``.
+        phase: One of :data:`AGENDA`.
         turns: This phase's prior turns, oldest first.
         profile: The client's profile so far (validated again here).
-        catalog_models: Catalog entries (patch validation, featured list).
         provider_slugs: Provider slugs ``byok_provider`` may name.
         locale: UI locale code.
         model: LiteLLM id conducting the turn; ``None`` runs the server default.
@@ -504,10 +462,8 @@ async def intake_turn_stream(
     lm = _build_agent_lm(model, reasoning_effort, max_tokens=INTAKE_MAX_TOKENS)
     if usage_sink is not None:
         usage_sink.append(lm)
-    known = validate_profile_patch(profile, catalog_models=catalog_models, provider_slugs=provider_slugs)
-    inputs = intake_inputs(
-        phase=phase, turns=turns, profile=known, featured=featured_model_list(catalog_models), locale=locale
-    )
+    known = validate_profile_patch(profile, provider_slugs=provider_slugs)
+    inputs = intake_inputs(phase=phase, turns=turns, profile=known, provider_slugs=provider_slugs, locale=locale)
 
     def parse(pred: Any, count: int) -> dict[str, Any]:
         """Bind the turn's context onto :func:`parse_intake_prediction`.
@@ -519,9 +475,7 @@ async def intake_turn_stream(
         Returns:
             The ``interview_done`` payload.
         """
-        return parse_intake_prediction(
-            pred, count, phase=phase, turns=turns, catalog_models=catalog_models, provider_slugs=provider_slugs
-        )
+        return parse_intake_prediction(pred, count, phase=phase, turns=turns, provider_slugs=provider_slugs)
 
     async for event in relay_interview_turn(
         predict=dspy.Predict(IntakeInterviewTurnSig), lm=lm, inputs=inputs, asked=asked, model=model, parse=parse

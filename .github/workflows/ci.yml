@@ -7,8 +7,14 @@ on:
 
 jobs:
   backend:
-    name: backend · ruff + core tests
+    name: backend · ruff + core tests (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    # The core suite takes over four minutes on one runner; four shards run
+    # side by side and the one-off gates below run on shard 0 only.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     services:
       postgres:
         image: postgres:16-alpine
@@ -36,17 +42,22 @@ jobs:
       - name: Install dependencies (runtime + dev)
         run: uv sync --extra dev --frozen
       - name: Ruff lint
+        if: matrix.shard == 0
         run: uv run ruff check .
       # The credential-free `core/` tier runs without Postgres, an LLM, or a live
       # server; the `tests/` integration tier (DB + paid LLM) is a separate,
       # nightly concern and is intentionally not gated here.
       - name: Core test suite
+        env:
+          SKYNET_TEST_SHARD: ${{ matrix.shard }}/4
         run: uv run pytest core/ -q -n auto
       - name: PostgreSQL budget concurrency and migration gates
+        if: matrix.shard == 0
         env:
           SKYNET_BUDGET_TEST_DB_URL: postgresql+psycopg2://budget_test:budget_test@127.0.0.1:5432/budget_test
         run: uv run pytest core/billing/tests/test_budgets_postgres.py -q
       - name: Load-test release-gate unit tests
+        if: matrix.shard == 0
         run: uv run pytest tests/unit/test_load_test_slo.py -q
       # requirements.txt is the pip install path's copy of uv.lock. When only
       # one of the two moves, the pip-path image silently ships a different
@@ -55,6 +66,7 @@ jobs:
       # missing from the export entirely. Compare pins only, so the hand-written
       # header block above the export is free to differ.
       - name: requirements.txt in sync with uv.lock
+        if: matrix.shard == 0
         run: |
           uv export --no-emit-project --no-hashes --no-header -o /tmp/req-expected.txt >/dev/null
           if ! diff -u <(grep -vE '^\s*#|^\s*$' requirements.txt) \

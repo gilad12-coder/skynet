@@ -198,7 +198,7 @@ def _intake_catalog() -> tuple[list[Any], list[str]]:
 
     Returns:
         ``(models, provider slugs)``; both empty when the catalog is unavailable,
-        which leaves the turn on the server default model with no model extraction.
+        which leaves the turn on the server default model with no BYOK provider to name.
     """
     try:
         catalog = get_catalog_cached()
@@ -452,7 +452,9 @@ class IntakeTurn(BaseModel):
 class IntakeInterviewRequest(BaseModel):
     """Request body for ``POST /account/intake-interview``."""
 
-    phase: Literal["goal", "source"] = Field(..., description="The open-ended intake phase this turn runs.")
+    phase: Literal["goal", "source", "billing", "budget", "privacy", "emails", "trust"] = Field(
+        ..., description="The intake phase this turn runs."
+    )
     turns: list[IntakeTurn] = Field(
         default_factory=list,
         max_length=MAX_REQUEST_TURNS,
@@ -783,7 +785,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         summary="Stream one onboarding intake interview turn",
     )
     async def intake_interview(req: IntakeInterviewRequest, current_user: AuthenticatedUserDep) -> StreamingResponse:
-        """Stream one turn of an open-ended intake phase as SSE.
+        """Stream one turn of an intake phase as SSE.
 
         Same events as ``/optimizations/code-interview`` (``reasoning_patch``,
         ``message_patch``, ``message_end``, ``turn_hint`` with ``final`` =
@@ -819,7 +821,6 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
                     phase=req.phase,
                     turns=[t.model_dump() for t in req.turns],
                     profile=req.profile,
-                    catalog_models=catalog_models,
                     provider_slugs=provider_slugs,
                     locale=req.locale,
                     model=model,

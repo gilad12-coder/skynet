@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   compress: true,
   poweredByHeader: false,
+  // CI's `npm run typecheck` is the type gate; repeating it inside `next build`
+  // added about 90 seconds to every Railway deploy.
+  typescript: { ignoreBuildErrors: true },
   images: {
     formats: ["image/avif", "image/webp"],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920],

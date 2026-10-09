@@ -20,7 +20,6 @@ import {
   requestTurns,
   resumeAfterLanguageSwitch,
   takeIntakeResume,
-  visiblePhases,
   writeIntakeDraft,
   type IntakeTurnOutcome,
 } from "./intake.ts";
@@ -62,21 +61,18 @@ test("coerceProfilePatch keeps valid answers and drops anything unknown or out o
     goal: "  route tickets  ",
     source: "nonsense",
     source_url: "https://github.com/acme/router",
-    models: ["openai/gpt-4o", "", 3, "openai/gpt-4o"],
     billing: "byok",
     byok_provider: " OpenAI ",
     budget_usd: "$20",
     privacy: "no_training",
     email_cadence: "hourly",
     trust: "yolo",
-    code_assist: "auto",
     level: "wizard",
   });
   assert.equal(patch.goal, "route tickets");
   // An unknown source falls back to what the pasted link says.
   assert.equal(patch.source, "repo");
   assert.equal(patch.source_url, "acme/router");
-  assert.deepEqual(patch.models, ["openai/gpt-4o"]);
   assert.equal(patch.billing, "byok");
   assert.equal(patch.byok_provider, "openai");
   assert.equal(patch.spending_limit_cents, 2000);
@@ -84,8 +80,7 @@ test("coerceProfilePatch keeps valid answers and drops anything unknown or out o
   assert.equal(patch.cadence, undefined);
   assert.equal(patch.trust, "yolo");
   assert.equal(patch.level, undefined);
-  // Code assist alone does not answer the two-part defaults question.
-  assert.deepEqual(phases, ["goal", "source", "models", "billing", "budget", "privacy", "trust"]);
+  assert.deepEqual(phases, ["goal", "source", "billing", "budget", "privacy", "trust"]);
 });
 
 test("coerceProfilePatch: a key without a provider leaves billing open; junk yields nothing", () => {
@@ -98,18 +93,25 @@ test("coerceProfilePatch: a key without a provider leaves billing open; junk yie
   assert.deepEqual(coerceSkipPhases(["trust", "bogus", "language"]), ["language", "trust"]);
 });
 
-test("the agenda opens on the language and hides the wizard defaults from Guided", () => {
-  assert.equal(INTAKE_PHASES[0], "language");
-  const guided = { ...emptyIntake(), source: "spreadsheet" as const };
-  assert.ok(!visiblePhases(guided).includes("defaults"));
-  assert.ok(visiblePhases({ ...guided, source: "repo" }).includes("defaults"));
-  assert.ok(visiblePhases(guided, ["defaults"]).includes("defaults"));
-  assert.equal(nextPhase(guided, [], null), "language");
-  assert.equal(nextPhase(guided, ["language"], "language"), "goal");
-  // Wraps back to an earlier open question before the summary.
-  assert.equal(nextPhase(guided, markAnswered([], ["goal", "source"]), "level"), "language");
-  assert.equal(previousScreen(guided, [], "language"), null);
-  assert.equal(previousScreen(guided, [], "goal"), "language");
+test("the agenda opens on the language and asks nothing about models or wizard defaults", () => {
+  assert.deepEqual(INTAKE_PHASES, [
+    "language",
+    "goal",
+    "source",
+    "billing",
+    "budget",
+    "privacy",
+    "emails",
+    "trust",
+  ]);
+  assert.equal(nextPhase([], null), "language");
+  assert.equal(nextPhase(["language"], "language"), "goal");
+  // Wraps back to an earlier open question before the closing line.
+  assert.equal(nextPhase(markAnswered([], ["goal", "source"]), "trust"), "language");
+  assert.equal(nextPhase(INTAKE_PHASES, "trust"), null);
+  assert.equal(previousScreen("language"), null);
+  assert.equal(previousScreen("goal"), "language");
+  assert.equal(previousScreen("done"), "trust");
 });
 
 test("profileSoFar only reports what the user answered, in the interviewer's words", () => {
@@ -124,6 +126,7 @@ test("profileSoFar only reports what the user answered, in the interviewer's wor
   assert.deepEqual(profileSoFar(answers, ["language", "privacy", "budget", "emails"]), {
     language: "he",
     goal: "g",
+    budget_usd: "suggest",
     privacy: "no_training",
     email_cadence: "done",
   });
@@ -152,7 +155,7 @@ test("applyInterviewTurn keeps an open phase's transcript and options", () => {
   assert.equal(draft.answers.trust, "ask");
 });
 
-test("applyInterviewTurn finishing a phase moves on, or to the summary on skip_rest", () => {
+test("applyInterviewTurn finishing a phase moves on, or to the closing line on skip_rest", () => {
   const base = {
     ...emptyDraft(),
     answered: markAnswered([], ["language"]),
@@ -171,7 +174,16 @@ test("applyInterviewTurn finishing a phase moves on, or to the summary on skip_r
     sent,
     outcome({ phase_done: true, skip_rest: true }),
   );
-  assert.equal(rest.screen, "summary");
+  assert.equal(rest.screen, "done");
+  // The last phase done leads to the closing line too.
+  const last = applyInterviewTurn(
+    { ...base, answered: markAnswered([], INTAKE_PHASES.slice(0, -1)), screen: "trust" },
+    "trust",
+    [{ role: "user", content: "ask me" }],
+    outcome({ phase_done: true, profile_patch: { trust: "ask" } }),
+  );
+  assert.equal(last.screen, "done");
+  assert.equal(last.answers.trust, "ask");
 });
 
 test("requestTurns caps the transcript a request carries", () => {
@@ -186,10 +198,10 @@ test("requestTurns caps the transcript a request carries", () => {
 test("drafts round-trip through storage and survive junk", () => {
   const draft = {
     ...emptyDraft({ ...emptyIntake(), goal: "g", language: "fr" as const }),
-    screen: "summary" as const,
+    screen: "done" as const,
     answered: markAnswered([], ["goal", "language"]),
-    turns: { goal: [{ role: "user" as const, content: "g" }], source: [] },
-    options: { goal: [{ label: "A", description: "" }], source: [] },
+    turns: { ...emptyDraft().turns, goal: [{ role: "user" as const, content: "g" }] },
+    options: { ...emptyDraft().options, billing: [{ label: "A", description: "" }] },
     fixed: true,
   };
   writeIntakeDraft(draft);
@@ -245,18 +257,19 @@ test("a language switch reloads straight into the next question in the new langu
   assert.equal(reopened.answers.goal, "kept");
   assert.ok(reopened.answered.includes("language"));
   // The language question is not asked again.
-  assert.equal(nextPhase(reopened.answers, reopened.answered, null), "goal");
+  assert.equal(nextPhase(reopened.answered, null), "goal");
 });
 
-test("a language change from the summary comes back to the summary", () => {
-  const all = markAnswered([], ["goal", "source", "models", "billing", "budget", "privacy"]);
-  const fromSummary = {
+test("a language change with everything answered comes back to the closing line", () => {
+  const fromDone = {
     ...emptyDraft({ ...emptyIntake(), source: "spreadsheet" }),
-    answered: markAnswered(all, ["emails", "trust", "level"]),
+    answered: markAnswered([], INTAKE_PHASES.slice(1)),
   };
-  prepareLanguageSwitch(fromSummary, "ja");
+  prepareLanguageSwitch(fromDone, "ja");
   const resume = takeIntakeResume();
-  assert.equal(resume?.resumePhase, "summary");
+  assert.equal(resume?.resumePhase, "done");
+  // An older build's stored "summary" resumes on the closing line.
+  assert.equal(parseDraft(JSON.stringify({ answers: {}, screen: "summary" }))?.screen, "done");
   // Storage lost the draft: still resumes, with the active locale.
   const reopened = resumeAfterLanguageSwitch(null, { resumePhase: "goal", profile: {} }, "ja");
   assert.equal(reopened.answers.language, "ja");
