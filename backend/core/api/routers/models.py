@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from ...config import settings
 from ..auth import AuthenticatedUser, get_authenticated_user
+from ..interview_model import with_interview_default
 from ..model_catalog import (
     CatalogModel,
     ModelCatalogResponse,
@@ -306,7 +307,7 @@ def create_models_router() -> APIRouter:
         Returns:
             The cached catalog including each model's availability flag.
         """
-        return with_zero_retention(get_catalog_cached())
+        return with_interview_default(with_zero_retention(get_catalog_cached()))
 
     @router.get(
         "/models/byok",

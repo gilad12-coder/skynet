@@ -202,6 +202,7 @@ function TaggingTab() {
         <ModelChip
           config={prefs.taggerAssistModel}
           emptyLabel={msg("tagger.assist.model.placeholder")}
+          defaultFlag="is_default"
           catalogModels={catalogModels ?? undefined}
           onClick={() => setModelDialogOpen(true)}
           onRemove={

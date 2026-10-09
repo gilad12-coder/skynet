@@ -273,6 +273,7 @@ export function TaggerInterview({
                 onChange={onSetInterviewModel}
                 effort={interviewComposerEffort(assist)}
                 onEffortChange={onSetInterviewEffort}
+                defaultFlag="is_interview_default"
               />
             }
           />
@@ -699,6 +700,7 @@ function RubricCard({
               <ModelChip
                 config={modelConfig}
                 emptyLabel={msg("tagger.assist.model.placeholder")}
+                defaultFlag="is_default"
                 catalogModels={catalogModels ?? undefined}
                 onClick={() => setModelDialogOpen(true)}
                 onRemove={assist.model ? () => onSetModel({ name: "" }) : undefined}

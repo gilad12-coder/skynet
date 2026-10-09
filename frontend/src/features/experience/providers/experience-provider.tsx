@@ -10,7 +10,7 @@ import {
 } from "@/shared/lib/api";
 
 import { DEFAULT_LEVEL, normalizeLevel, type ExperienceLevel } from "../lib/abstraction";
-import { parseIntakeAnswers, type IntakeAnswers } from "../lib/intake";
+import { clearIntakeDraft, parseIntakeAnswers, type IntakeAnswers } from "../lib/intake";
 
 interface ExperienceContextValue {
   /** The user's level; Standard until (and unless) the server says otherwise. */
@@ -90,6 +90,8 @@ export function ExperienceProvider({ children }: { children: React.ReactNode }) 
   const setLevel = React.useCallback((next: ExperienceLevel) => save({ level: next }), [save]);
 
   const rerunIntake = React.useCallback(() => {
+    // A rerun is a fresh interview; only the last saved answers carry over.
+    clearIntakeDraft();
     setRerunOpen(true);
     void save({ intake_completed: false });
   }, [save]);

@@ -1844,6 +1844,7 @@ class ReactReplyStream:
 def _build_agent_lm(
     model_name_override: str | None = None,
     reasoning_effort: str | None = None,
+    max_tokens: int = 32000,
 ) -> dspy.LM:
     """Construct the LM used by the code agent from global settings.
 
@@ -1853,6 +1854,8 @@ def _build_agent_lm(
             code-agent model.
         reasoning_effort: Explicit effort level for the chosen model; ``None``
             keeps the model's default.
+        max_tokens: Completion budget, reasoning included; short-answer
+            callers (the onboarding intake) lower it to bound latency and cost.
 
     Reasoning knobs we send, by provider:
 
@@ -1887,7 +1890,7 @@ def _build_agent_lm(
         # more multi-second subprocess validations). A chat step that rewrites
         # a whole scorer often drafts it in its reasoning first and then emits
         # it again as the tool argument, which overran 16000.
-        max_tokens=32000,
+        max_tokens=max_tokens,
         extra=extra,
     )
     config = apply_reasoning_effort(config, reasoning_effort)

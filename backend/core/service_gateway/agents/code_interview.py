@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import dspy
@@ -325,6 +326,7 @@ async def _drive_interview_turn(
     asked: int,
     model: str | None,
     queue: asyncio.Queue[dict | None],
+    parse: Callable[[Any, int], dict[str, Any]] | None = None,
 ) -> None:
     """Drive the interview predictor to completion, fanning events onto ``queue``.
 
@@ -350,6 +352,10 @@ async def _drive_interview_turn(
         model: LiteLLM id conducting the interview; stamped on the parsed turn
             when set. ``None`` runs the default.
         queue: SSE event queue; receives event dicts and a trailing ``None``.
+        parse: Turns the final prediction (and ``asked``) into the
+            ``interview_done`` payload; ``None`` parses a Signature & Metric
+            turn. The predictor's signature must stream a ``message`` and a
+            ``done`` output field either way.
     """
     prediction: Any = None
     try:
@@ -399,7 +405,7 @@ async def _drive_interview_turn(
                 if attempt + 1 >= INTERVIEW_TURN_ATTEMPTS:
                     raise
                 logger.warning("code interview turn failed; retrying", exc_info=True)
-        turn = _parse_interview_prediction(prediction, asked)
+        turn = (parse or _parse_interview_prediction)(prediction, asked)
         if model:
             turn["model"] = model
         turn["served_model"] = served_model_from(lm)
@@ -466,12 +472,39 @@ async def interview_turn_stream(
         predict = dspy.Predict(CodeInterviewTurnSig)
         inputs = _interview_inputs(dataset_columns, column_roles, column_kinds, sample_rows, job_model, turns, locale)
 
+    async for item in relay_interview_turn(predict=predict, lm=lm, inputs=inputs, asked=asked, model=model):
+        yield item
+
+
+async def relay_interview_turn(
+    *,
+    predict: dspy.Predict,
+    lm: dspy.LM,
+    inputs: dict[str, Any],
+    asked: int,
+    model: str | None,
+    parse: Callable[[Any, int], dict[str, Any]] | None = None,
+) -> Any:
+    """Run :func:`_drive_interview_turn` in its own task and yield its events.
+
+    Args:
+        predict: The interview predictor.
+        lm: Language model conducting the interview.
+        inputs: Keyword inputs for the predictor.
+        asked: Assistant questions asked before this turn.
+        model: LiteLLM id stamped on the parsed turn; ``None`` keeps the default.
+        parse: Builds the ``interview_done`` payload; ``None`` parses a
+            Signature & Metric turn.
+
+    Yields:
+        ``{"event", "data"}`` mappings, ending with ``interview_done``.
+    """
     # Drive the streamify loop in its own task and relay its events off a queue:
     # yielding directly from inside the loop finalizes the dspy.context token and
     # streamify's anyio task group in the SSE consumer's task, corrupting both.
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
     task = asyncio.create_task(
-        _drive_interview_turn(predict=predict, lm=lm, inputs=inputs, asked=asked, model=model, queue=queue)
+        _drive_interview_turn(predict=predict, lm=lm, inputs=inputs, asked=asked, model=model, queue=queue, parse=parse)
     )
     try:
         while True:

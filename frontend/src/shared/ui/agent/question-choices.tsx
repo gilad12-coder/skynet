@@ -9,7 +9,13 @@ import type { QuestionChoice } from "./types";
 interface QuestionChoicesProps {
   options: QuestionChoice[];
   /** Send the picked option's label as the user's answer. */
-  onSelect: (label: string) => void;
+  onSelect: (label: string, index: number) => void;
+  /**
+   * Label(s) of the current answer, drawn pressed. For pickers that answer
+   * in place (a revisited question, a multi-select confirmed elsewhere);
+   * absent, the cards look and behave exactly as before.
+   */
+  selected?: string | string[];
   disabled?: boolean;
   /** Muted line pointing at the composer for a free-text answer. */
   hint?: string;
@@ -29,6 +35,7 @@ interface QuestionChoicesProps {
 export function QuestionChoices({
   options,
   onSelect,
+  selected,
   disabled,
   hint,
   ariaLabel,
@@ -36,6 +43,8 @@ export function QuestionChoices({
 }: QuestionChoicesProps) {
   const buttonsRef = React.useRef<Array<HTMLButtonElement | null>>([]);
   const [focusedIndex, setFocusedIndex] = React.useState(0);
+  const pressedLabels =
+    selected === undefined ? null : new Set(Array.isArray(selected) ? selected : [selected]);
 
   // A fresh question resets the roving focus to its first option.
   React.useEffect(() => {
@@ -63,7 +72,7 @@ export function QuestionChoices({
       const choice = options[Number(event.key) - 1];
       if (choice) {
         event.preventDefault();
-        onSelect(choice.label);
+        onSelect(choice.label, Number(event.key) - 1);
       }
     }
   };
@@ -85,48 +94,55 @@ export function QuestionChoices({
           by side, so four options stop stacking into a column that pushes
           the question itself out of the thread above. */}
       <div className="grid grid-cols-1 gap-1.5 @md:grid-cols-2">
-        {options.map((option, index) => (
-          <button
-            key={`${index}-${option.label}`}
-            ref={(el) => {
-              buttonsRef.current[index] = el;
-            }}
-            type="button"
-            disabled={disabled}
-            tabIndex={index === focusedIndex ? 0 : -1}
-            onFocus={() => setFocusedIndex(index)}
-            onClick={() => onSelect(option.label)}
-            className={cn(
-              "group flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-start",
-              "border-border bg-background transition-colors duration-100 motion-reduce:transition-none",
-              "cursor-pointer hover:border-primary/50 hover:bg-primary/5",
-              "focus-visible:border-primary/60 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
-              "disabled:pointer-events-none disabled:opacity-50",
-            )}
-          >
-            <span
-              aria-hidden
+        {options.map((option, index) => {
+          const pressed = pressedLabels?.has(option.label);
+          return (
+            <button
+              key={`${index}-${option.label}`}
+              ref={(el) => {
+                buttonsRef.current[index] = el;
+              }}
+              type="button"
+              disabled={disabled}
+              tabIndex={index === focusedIndex ? 0 : -1}
+              onFocus={() => setFocusedIndex(index)}
+              aria-pressed={pressedLabels ? pressed : undefined}
+              onClick={() => onSelect(option.label, index)}
               className={cn(
-                "mt-px flex size-5 shrink-0 items-center justify-center rounded-md text-[11px] font-medium tabular-nums",
-                "border border-border/70 bg-muted text-muted-foreground",
+                "group flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-start",
                 "transition-colors duration-100 motion-reduce:transition-none",
-                "group-hover:border-primary/40 group-hover:bg-primary/10 group-hover:text-primary",
+                pressed ? "border-primary bg-primary/5" : "border-border bg-background",
+                "cursor-pointer hover:border-primary/50 hover:bg-primary/5",
+                "focus-visible:border-primary/60 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
+                "disabled:pointer-events-none disabled:opacity-50",
               )}
             >
-              {index + 1}
-            </span>
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-sm font-medium leading-snug text-foreground" dir="auto">
-                {option.label}
+              <span
+                aria-hidden
+                className={cn(
+                  "mt-px flex size-5 shrink-0 items-center justify-center rounded-md text-[11px] font-medium tabular-nums",
+                  pressed
+                    ? "border border-primary/40 bg-primary/10 text-primary"
+                    : "border border-border/70 bg-muted text-muted-foreground",
+                  "transition-colors duration-100 motion-reduce:transition-none",
+                  "group-hover:border-primary/40 group-hover:bg-primary/10 group-hover:text-primary",
+                )}
+              >
+                {index + 1}
               </span>
-              {option.description && (
-                <span className="text-xs leading-snug text-muted-foreground" dir="auto">
-                  {option.description}
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-sm font-medium leading-snug text-foreground" dir="auto">
+                  {option.label}
                 </span>
-              )}
-            </span>
-          </button>
-        ))}
+                {option.description && (
+                  <span className="text-xs leading-snug text-muted-foreground" dir="auto">
+                    {option.description}
+                  </span>
+                )}
+              </span>
+            </button>
+          );
+        })}
       </div>
       {hint && <p className="px-0.5 pt-0.5 text-xs text-muted-foreground/70">{hint}</p>}
     </div>

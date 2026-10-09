@@ -102,6 +102,21 @@ class CatalogModel(BaseModel):
             "score per dollar; runs the composer's Auto mode. At most one per catalog."
         ),
     )
+    is_interview_default: bool = Field(
+        default=False,
+        description=(
+            "The model agent interviews run when the user picks none: the fastest "
+            "of the cheaper half of the featured models, by OpenRouter's live "
+            "latency and throughput. At most one per catalog."
+        ),
+    )
+    display_name: str | None = Field(
+        default=None,
+        description=(
+            "The provider's human-readable model name without the lab prefix "
+            "(e.g. 'Claude Haiku 5.5'). Display only; None when the listing gives none."
+        ),
+    )
     supports_vision: bool = Field(
         default=False,
         description="Model accepts image inputs (required when the dataset has a dspy.Image column).",
@@ -456,6 +471,10 @@ _PRACTICAL_WINDOW_SECONDS = 2 * 365 * 24 * 3600
 # keeps running rather than failing validation.
 _hidden_model_values: frozenset[str] = frozenset()
 
+# Benchmark score of each featured model, from the last catalog build. The
+# interview-model pick ranks on it without the catalog exposing the score.
+_featured_scores: dict[str, float] = {}
+
 # LiteLLM provider prefixes offered for bring-your-own-key. The BYOK catalog
 # lists these providers' registry models regardless of platform API keys, since
 # a BYOK run authenticates with the user's own key. Sourced from the canonical
@@ -695,6 +714,37 @@ def _probe_item_intelligence(item: dict) -> float | None:
         return None
     value = analysis.get("intelligence_index")
     return float(value) if isinstance(value, (int, float)) else None
+
+
+def _probe_item_display_name(item: dict) -> str | None:
+    """Read the listing's human-readable model name, without its lab prefix.
+
+    OpenRouter names read ``"Anthropic: Claude Haiku 5.5"``; the logo beside
+    the name already shows the lab.
+
+    Args:
+        item: The raw provider item dict.
+
+    Returns:
+        The bare name, or ``None`` when the listing carries none.
+    """
+    name = item.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    return name.split(":", 1)[-1].strip() or None
+
+
+def featured_score(value: str) -> float | None:
+    """Return the benchmark score of a featured model from the last catalog build.
+
+    Args:
+        value: A catalog model id.
+
+    Returns:
+        The Artificial Analysis intelligence index, or ``None`` when the model
+        is not featured or unbenchmarked.
+    """
+    return _featured_scores.get(value)
 
 
 def _model_family(model_id: str) -> str:
@@ -1324,13 +1374,19 @@ def get_catalog() -> ModelCatalogResponse:
                 )
             )
 
-    global _hidden_model_values
+    global _hidden_model_values, _featured_scores
     featured_values: set[str] = set()
     practical_by_dc: dict[tuple[str, str | None], set[str]] = {}
     best_value: tuple[str, float] | None = None
+    display_names: dict[str, str] = {}
+    scores: dict[str, float] = {}
     for (probe_slug, dc_label), deployed in deployed_by_dc.items():
         if not deployed:
             continue
+        for probe_id, item in deployed.items():
+            name = _probe_item_display_name(item)
+            if name:
+                display_names[_probe_prefixed_id(probe_slug, probe_id)] = name
         practical_ids = _practical_probe_ids(deployed)
         if practical_ids is not None:
             practical_by_dc[(probe_slug, dc_label)] = {
@@ -1338,6 +1394,10 @@ def get_catalog() -> ModelCatalogResponse:
             }
         featured_ids = _featured_probe_ids(deployed)
         featured_values.update(_probe_prefixed_id(probe_slug, probe_id) for probe_id in featured_ids)
+        for probe_id in featured_ids:
+            score = _probe_item_intelligence(deployed[probe_id])
+            if score is not None:
+                scores[_probe_prefixed_id(probe_slug, probe_id)] = score
         winner = _best_value_probe_id(deployed, featured_ids)
         if winner and (best_value is None or winner[1] > best_value[1]):
             best_value = (_probe_prefixed_id(probe_slug, winner[0]), winner[1])
@@ -1352,12 +1412,16 @@ def get_catalog() -> ModelCatalogResponse:
     )
     models = [m for m in models if _practical(m) and not excluded_from_managed(m.value)]
     models = [
-        m.model_copy(update={"featured": True, "is_default": m.value == default_value})
-        if m.value in featured_values
-        else m
+        m.model_copy(
+            update={
+                "display_name": display_names.get(m.value),
+                **({"featured": True, "is_default": m.value == default_value} if m.value in featured_values else {}),
+            }
+        )
         for m in models
         if m.available and not _REMOVED_MODEL_RE.search(m.value)
     ]
+    _featured_scores = scores
 
     models.sort(key=lambda m: (m.provider, m.data_center or "", m.value))
 
@@ -1374,6 +1438,15 @@ _cached_response: ModelCatalogResponse | None = None
 _cached_at_monotonic: float = 0.0
 _cache_lock = Lock()
 _refresh_in_flight = False
+
+
+def catalog_snapshot() -> ModelCatalogResponse | None:
+    """Return the last built catalog without ever building one.
+
+    Returns:
+        The cached catalog, or ``None`` before the boot prewarm lands.
+    """
+    return _cached_response
 
 
 def agent_model_id(configured: str = "") -> str:

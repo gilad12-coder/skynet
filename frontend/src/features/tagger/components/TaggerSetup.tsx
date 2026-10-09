@@ -725,6 +725,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
               <ModelChip
                 config={assistModel}
                 emptyLabel={msg("tagger.assist.model.placeholder")}
+                defaultFlag="is_default"
                 catalogModels={catalogModels ?? undefined}
                 onClick={() => setModelDialogOpen(true)}
                 onRemove={assistModel.name ? () => setAssistModel({ name: "" }) : undefined}
