@@ -28,9 +28,10 @@ import { useLocale } from "@/shared/providers";
 import { cn } from "@/shared/lib/utils";
 import { QuestionChoices } from "@/shared/ui/agent";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
-import { CaretLeft, CaretRight } from "@/shared/ui/icons";
+import { ArrowLineRight, CaretLeft, CaretRight } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
 import type { ModelDataPolicy } from "@/shared/types/api";
 
@@ -67,7 +68,6 @@ import {
 } from "../lib/intake";
 import { useExperienceOptional } from "../providers/experience-provider";
 import { IntakeInterview } from "./IntakeInterview";
-import { TOUCH_TAP } from "./touch";
 
 const PHASE_LABELS: Record<IntakePhase, MessageKey> = {
   language: "experience.intake.phase.language",
@@ -180,7 +180,7 @@ const BUDGET_DESCRIPTIONS: Record<number, MessageKey> = {
  * which holds long enough to read before the questions take its place.
  */
 const APP_GLANCE_MS = 2000;
-const TITLE_HOLD_MS = 1500;
+const TITLE_HOLD_MS = 2200;
 const ENTER_MS = 900;
 const REDUCED_ENTER_MS = 200;
 /*
@@ -767,6 +767,25 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
           <NextChevron className="size-4" aria-hidden />
         </Button>
       )}
+      {/* Pushed to the far end so it is never the button under a thumb heading forward. */}
+      {!done && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              className="ms-auto size-11 shrink-0 text-muted-foreground hover:text-foreground lg:size-9"
+              aria-label={t("experience.intake.skip")}
+              onClick={skip}
+            >
+              <ArrowLineRight className={cn("size-4", rtl && "-scale-x-100")} aria-hidden />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent dir={inEnglish ? "ltr" : getActiveDir()}>
+            {t("experience.intake.skip")}
+          </TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 
@@ -828,15 +847,27 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
               {stage === "title" ? (
                 <motion.div
                   key="title"
-                  className="flex flex-1 items-center justify-center px-6 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+                  className="flex flex-1 flex-col items-center justify-center gap-10 px-6 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:gap-12"
                   initial={rise(16, 0.98)}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -24, scale: 0.96 }}
                   transition={reduceMotion ? ease : { ...ease, delay: (ENTER_MS * 0.45) / 1000 }}
                 >
+                  {/* The same wordmark entrance as the splash after submitting a run. */}
+                  <motion.div
+                    initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={
+                      reduceMotion
+                        ? ease
+                        : { ...ease, duration: 0.4, delay: (ENTER_MS * 0.6) / 1000 }
+                    }
+                  >
+                    <AnimatedWordmark size={64} autoMorph={!reduceMotion} morphSpeed={120} />
+                  </motion.div>
                   <p
                     aria-hidden
-                    className="max-w-[18ch] text-center text-4xl font-semibold leading-tight tracking-tight text-balance sm:text-5xl"
+                    className="max-w-[16ch] text-center text-5xl font-semibold leading-[1.05] tracking-tight text-balance sm:text-7xl"
                   >
                     {t("experience.intake.entrance.title")}
                   </p>
@@ -874,22 +905,8 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
                   exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -12 }}
                   transition={ease}
                 >
-                  {/*
-                   * Leaving lives up with the progress, away from the answer and
-                   * Continue, so it is never hit while moving forward.
-                   */}
-                  <div className="mx-auto flex w-full max-w-2xl items-center gap-4 px-5 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-7 sm:pt-10">
-                    <div className="min-w-0 flex-1">
-                      <IntakeProgress index={progressIndex} total={total} label={progressLabel} />
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className={cn(TOUCH_TAP, "-me-3 text-muted-foreground hover:text-foreground")}
-                      onClick={skip}
-                    >
-                      {t("experience.intake.skip")}
-                    </Button>
+                  <div className="mx-auto w-full max-w-2xl px-5 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-7 sm:pt-10">
+                    <IntakeProgress index={progressIndex} total={total} label={progressLabel} />
                   </div>
 
                   {interviewing ? (
@@ -911,11 +928,9 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
                         }
                         onFail={fallBack}
                       />
-                      {back && (
-                        <div className="px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
-                          {actions}
-                        </div>
-                      )}
+                      <div className="px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
+                        {actions}
+                      </div>
                     </div>
                   ) : (
                     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">

@@ -1,28 +1,32 @@
 "use client";
 
-import { ArrowCounterClockwise, Gauge } from "@/shared/ui/icons";
+import type { Icon } from "@phosphor-icons/react";
+
+import { ArrowCounterClockwise, Compass, FadersHorizontal, Gauge, Wrench } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
+import { cn } from "@/shared/lib/utils";
 import { Button } from "@/shared/ui/primitives/button";
+import { Segmented } from "@/shared/ui/segmented";
 import { SettingsRow } from "@/shared/ui/settings-row";
 
-import type { ExperienceLevel } from "../lib/abstraction";
+import { EXPERIENCE_LEVELS, type ExperienceLevel } from "../lib/abstraction";
 import { useExperienceOptional } from "../providers/experience-provider";
 import { LEVEL_KEYS } from "./level-keys";
-import { LevelSlider } from "./LevelSlider";
 import { TOUCH_TAP } from "./touch";
+
+const LEVEL_ICONS: Record<ExperienceLevel, Icon> = {
+  guided: Compass,
+  standard: FadersHorizontal,
+  expert: Wrench,
+};
 
 /** The localized name of a level, for the setup's summary row. */
 export function levelLabel(level: ExperienceLevel): string {
   return msg(LEVEL_KEYS[level].label);
 }
 
-/** The level's longer description, shown under the control for the current choice. */
-export function levelDescription(level: ExperienceLevel): string {
-  return msg(LEVEL_KEYS[level].description);
-}
-
 /**
- * Settings' Guided / Standard / Expert slider and "Run the setup again" —
+ * Settings' Guided / Standard / Expert picker and "Run the setup again" —
  * the only place the level changes.
  */
 export function ExperienceLevelControl({ onRerun }: { onRerun?: () => void }) {
@@ -33,10 +37,7 @@ export function ExperienceLevelControl({ onRerun }: { onRerun?: () => void }) {
   return (
     <>
       <div className="flex items-start gap-3 border-b border-border/40 py-3">
-        <Gauge
-          className="size-4 mt-0.5 text-muted-foreground shrink-0"
-          aria-hidden="true"
-        />
+        <Gauge className="size-4 mt-0.5 text-muted-foreground shrink-0" aria-hidden="true" />
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex flex-col gap-0.5">
             <span className="text-sm font-medium text-foreground">
@@ -46,15 +47,31 @@ export function ExperienceLevelControl({ onRerun }: { onRerun?: () => void }) {
               {msg("experience.level.subtitle")}
             </span>
           </div>
-          <LevelSlider
+          <Segmented
             value={level}
             onChange={(next) => void setLevel(next)}
             label={msg("experience.level.title")}
-            disabled={!loaded}
+            segmentClassName="transition-[color,transform] duration-150 ease-out active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100"
+            options={EXPERIENCE_LEVELS.map((value) => {
+              const LevelIcon = LEVEL_ICONS[value];
+              return {
+                value,
+                label: msg(LEVEL_KEYS[value].label),
+                tip: msg(LEVEL_KEYS[value].description),
+                disabled: !loaded,
+                icon: (
+                  <LevelIcon
+                    aria-hidden="true"
+                    weight={value === level ? "fill" : "bold"}
+                    className={cn(
+                      "size-3.5 shrink-0 transition-colors duration-200",
+                      value === level ? "text-primary" : "text-current",
+                    )}
+                  />
+                ),
+              };
+            })}
           />
-          <p className="text-xs text-muted-foreground/80" aria-live="polite">
-            {levelDescription(level)}
-          </p>
         </div>
       </div>
 
