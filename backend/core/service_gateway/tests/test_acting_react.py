@@ -71,6 +71,26 @@ def test_step_without_tool_call_is_retried_with_low_effort(monkeypatch: pytest.M
     assert ("tool_choice" in configs[1]) is native
 
 
+def test_retry_lowers_the_native_effort_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The retry keeps ``reasoning_effort`` and ``extra_body.reasoning.effort`` equal, as OpenRouter requires."""
+    monkeypatch.setattr(acting_react, "native_tool_calling_active", lambda: False)
+    configs = _scripted(
+        monkeypatch,
+        [dspy.Prediction(tool_calls=_calls()), dspy.Prediction(tool_calls=_calls("edit_scorer"))],
+    )
+    lm = dspy.LM(
+        "litellm_proxy/z-ai/glm-5.3",
+        reasoning_effort="high",
+        extra_body={"reasoning": {"effort": "high", "summary": "auto"}, "cache": {"no-cache": True}},
+    )
+
+    with dspy.context(lm=lm):
+        _ActingPredict(_Sig).forward(question="q")
+
+    assert configs[1]["reasoning_effort"] == "low"
+    assert configs[1]["extra_body"] == {"reasoning": {"effort": "low", "summary": "auto"}, "cache": {"no-cache": True}}
+
+
 def test_parse_failure_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     """A step cut off mid-output that fails to parse gets the same one retry."""
     monkeypatch.setattr(acting_react, "native_tool_calling_active", lambda: True)

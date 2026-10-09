@@ -24,9 +24,9 @@ from core.service_gateway.agents.intake_interview import (
 _SLUGS = ["openai", "anthropic"]
 
 
-def _parse(pred: SimpleNamespace | None, asked: int = 0, phase: str = "goal", turns=None) -> dict:
+def _parse(pred: SimpleNamespace | None, asked: int = 0) -> dict:
     """Parse a prediction against the test catalog."""
-    return parse_intake_prediction(pred, asked, phase=phase, turns=turns or [], provider_slugs=_SLUGS)
+    return parse_intake_prediction(pred, asked, provider_slugs=_SLUGS)
 
 
 def _pred(**fields: str) -> SimpleNamespace:
@@ -45,26 +45,32 @@ def test_parse_question_turn() -> None:
     """A question turn carries its options and a validated patch, and the phase stays open."""
     turn = _parse(
         _pred(
-            message="Where do the tickets live?",
+            message="Who pays for the model calls?",
             done="false",
             options_json=json.dumps(
                 [
-                    {"label": "Zendesk export (CSV)", "description": "A file you download"},
-                    {"label": "An API I call", "description": "Live endpoint"},
+                    {"label": "Platform credits", "description": "Nothing to set up"},
+                    {"label": "My own key", "description": "Billed to your provider"},
                 ]
             ),
             profile_patch_json=json.dumps(
-                {"goal": " route tickets right ", "models": ["gpt-4o-mini"], "budget_usd": "$5", "level": "guided"}
+                {
+                    "goal": "route tickets right",
+                    "source": "repo",
+                    "models": ["gpt-4o-mini"],
+                    "budget_usd": "$5",
+                    "level": "guided",
+                }
             ),
             skip_rest="false",
         )
     )
-    assert turn["message"] == "Where do the tickets live?"
+    assert turn["message"] == "Who pays for the model calls?"
     assert turn["phase_done"] is False
-    assert [o["label"] for o in turn["options"]] == ["Zendesk export (CSV)", "An API I call"]
-    # Models are not on the agenda, so a volunteered model is dropped.
-    assert turn["profile_patch"] == {"goal": "route tickets right", "budget_usd": 5.0, "level": "guided"}
-    assert turn["skip_phases"] == ["goal", "budget"]
+    assert [o["label"] for o in turn["options"]] == ["Platform credits", "My own key"]
+    # The setup is settings only: a volunteered goal, source or model is dropped.
+    assert turn["profile_patch"] == {"budget_usd": 5.0, "level": "guided"}
+    assert turn["skip_phases"] == ["budget"]
     assert turn["skip_rest"] is False
     assert set(turn) == {
         "message",
@@ -92,20 +98,17 @@ def test_parse_skip_rest_finishes_the_phase() -> None:
     assert turn["options"] == []
 
 
-def test_parse_unparseable_final_goal_turn_falls_back_to_first_answer() -> None:
-    """A finished goal phase without a parseable patch keeps the user's first answer as the goal."""
-    turns = [
-        {"role": "assistant", "content": "What should get better?"},
-        {"role": "user", "content": "  Our support bot misroutes tickets  "},
-    ]
-    turn = _parse(_pred(message="Got it.", done="true", profile_patch_json="not json"), asked=1, turns=turns)
-    assert turn["profile_patch"] == {"goal": "Our support bot misroutes tickets"}
-    assert turn["skip_phases"] == ["goal"]
+def test_parse_unparseable_final_turn_answers_nothing() -> None:
+    """A finished phase without a parseable patch sets nothing and skips nothing."""
+    turn = _parse(_pred(message="Got it.", done="true", profile_patch_json="not json"), asked=1)
+    assert turn["phase_done"] is True
+    assert turn["profile_patch"] == {}
+    assert turn["skip_phases"] == []
 
 
 def test_parse_tolerates_missing_prediction() -> None:
     """A stream that produced nothing yields a safe, empty turn."""
-    turn = _parse(None, phase="source")
+    turn = _parse(None)
     assert turn["message"] == ""
     assert turn["profile_patch"] == {}
     assert turn["options"] == []
@@ -113,11 +116,11 @@ def test_parse_tolerates_missing_prediction() -> None:
 
 
 def test_validate_patch_coerces_enums_and_drops_invalid_keys() -> None:
-    """Enum aliases are canonicalised; unknown values, keys, models and providers are dropped."""
+    """Enum aliases are canonicalised; unknown values, keys, models, providers and run details are dropped."""
     patch = validate_profile_patch(
         {
             "source": "GitHub",
-            "source_url": "  https://github.com/acme/bot  ",
+            "source_url": "https://github.com/acme/bot",
             "models": ["openai/gpt-4o-mini"],
             "billing": "BYOK",
             "byok_provider": "OpenAI",
@@ -134,8 +137,6 @@ def test_validate_patch_coerces_enums_and_drops_invalid_keys() -> None:
         provider_slugs=_SLUGS,
     )
     assert patch == {
-        "source": "repo",
-        "source_url": "https://github.com/acme/bot",
         "billing": "byok",
         "byok_provider": "openai",
         "privacy": "no_training",
@@ -144,11 +145,10 @@ def test_validate_patch_coerces_enums_and_drops_invalid_keys() -> None:
     }
 
 
-def test_validate_patch_rejects_bad_urls_providers_and_budgets() -> None:
-    """Whitespace URLs, unknown providers, booleans and absurd budgets never pass."""
+def test_validate_patch_rejects_bad_providers_and_budgets() -> None:
+    """Unknown providers, booleans and absurd budgets never pass."""
     patch = validate_profile_patch(
         {
-            "source_url": "not a url",
             "byok_provider": "acme",
             "budget_usd": True,
         },
@@ -181,21 +181,20 @@ def test_answered_phases() -> None:
             "privacy": "zdr",
             "email_cadence": "live",
             "trust": "ask",
-            "source": "none",
             "level": "expert",
         }
-    ) == ["source", "privacy", "emails", "trust"]
+    ) == ["privacy", "emails", "trust"]
 
 
 def test_every_agenda_phase_runs_on_the_model() -> None:
-    """The model runs the whole agenda, and every phase has a brief; models and defaults are gone."""
+    """The model runs the whole agenda, which is settings only, and every phase has a brief."""
     assert LLM_PHASES == AGENDA
-    assert AGENDA == ("goal", "source", "billing", "budget", "privacy", "emails", "trust")
+    assert AGENDA == ("billing", "budget", "privacy", "emails", "trust")
     assert set(_PHASE_BRIEFS) == set(AGENDA)
     # A default option appears only where the default is not already a concrete answer.
     for phase in ("budget", "privacy", "trust"):
         assert "end the options with 'Use the default'" in _PHASE_BRIEFS[phase]
-    for phase in ("goal", "source", "billing", "emails"):
+    for phase in ("billing", "emails"):
         assert "never" in _PHASE_BRIEFS[phase]
         assert "end the options with 'Use the default'" not in _PHASE_BRIEFS[phase]
 
@@ -205,7 +204,7 @@ def test_intake_inputs() -> None:
     inputs = intake_inputs(
         phase="billing",
         turns=[{"role": "assistant", "content": "Q?"}, {"role": "user", "content": "A"}],
-        profile={"goal": "g"},
+        profile={"trust": "ask"},
         provider_slugs=["openai", "anthropic"],
         locale="en",
     )
@@ -213,12 +212,14 @@ def test_intake_inputs() -> None:
     assert inputs["phase_brief"] == _PHASE_BRIEFS["billing"]
     assert json.loads(inputs["byok_providers"]) == ["anthropic", "openai"]
     assert inputs["reply_language"] == "English"
-    assert json.loads(inputs["profile_json"]) == {"goal": "g"}
+    assert json.loads(inputs["profile_json"]) == {"trust": "ask"}
     transcript = json.loads(inputs["transcript_json"])
     assert transcript[-1]["role"] == "system"
     assert f"1 of at most {MAX_PHASE_QUESTIONS}" in transcript[-1]["content"]
     assert (
-        json.loads(intake_inputs(phase="goal", turns=[], profile={}, provider_slugs=[], locale="he")["transcript_json"])
+        json.loads(
+            intake_inputs(phase="trust", turns=[], profile={}, provider_slugs=[], locale="he")["transcript_json"]
+        )
         == []
     )
 
@@ -226,9 +227,9 @@ def test_intake_inputs() -> None:
 def test_intake_turn_stream_end_to_end_with_dummy_lm(monkeypatch) -> None:
     """A full turn runs over the shared driver and ends in a validated ``interview_done``."""
     answer = {
-        "message": "Where do the tickets live?",
+        "message": "Who pays for the model calls?",
         "done": "false",
-        "options_json": json.dumps([{"label": "Zendesk export (CSV)", "description": "A file"}]),
+        "options_json": json.dumps([{"label": "Platform credits", "description": "Nothing to set up"}]),
         "profile_patch_json": json.dumps({"goal": "route tickets", "trust": "ask"}),
         "skip_rest": "false",
     }
@@ -246,8 +247,8 @@ def test_intake_turn_stream_end_to_end_with_dummy_lm(monkeypatch) -> None:
         return [
             event
             async for event in intake_interview.intake_turn_stream(
-                phase="goal",
-                turns=[{"role": "user", "content": "our support bot misroutes tickets"}],
+                phase="billing",
+                turns=[{"role": "user", "content": "ask me before every change"}],
                 profile={"level": "bogus"},
                 provider_slugs=_SLUGS,
                 locale="en",
@@ -260,10 +261,11 @@ def test_intake_turn_stream_end_to_end_with_dummy_lm(monkeypatch) -> None:
     done = events[-1]
     assert done["event"] == "interview_done"
     assert built == [{"model": "openai/gpt-4o-mini", "effort": "low", "max_tokens": intake_interview.INTAKE_MAX_TOKENS}]
-    assert done["data"]["message"] == "Where do the tickets live?"
+    assert done["data"]["message"] == "Who pays for the model calls?"
     assert done["data"]["phase_done"] is False
-    assert done["data"]["options"] == [{"label": "Zendesk export (CSV)", "description": "A file"}]
-    assert done["data"]["profile_patch"] == {"goal": "route tickets", "trust": "ask"}
-    assert done["data"]["skip_phases"] == ["goal", "trust"]
+    assert done["data"]["options"] == [{"label": "Platform credits", "description": "Nothing to set up"}]
+    # The volunteered trust answer is kept; a goal is not on the agenda and is dropped.
+    assert done["data"]["profile_patch"] == {"trust": "ask"}
+    assert done["data"]["skip_phases"] == ["trust"]
     assert done["data"]["model"] == "openai/gpt-4o-mini"
     assert "served_model" in done["data"]

@@ -1,11 +1,11 @@
 /*
- * The first-login setup: the language as a fixed first question, then a short
- * interview a language model runs phase by phase (each phase falls back to a
- * fixed multiple-choice question when the model is unavailable). Model choice
- * and the wizard defaults are not asked: they keep the app's defaults.
- * Everything here is pure so the answers → level → server payload → wizard
- * prefill path, the interviewer's profile coercion and the resumable draft can
- * be tested without a browser.
+ * The first-login setup, which is settings only: the language as a fixed
+ * first question, then a short interview a language model runs phase by phase
+ * (each phase falls back to a fixed multiple-choice question when the model is
+ * unavailable). Nothing about the user's first run is asked, nor model choice
+ * or the wizard defaults: those keep the app's defaults. Everything here is
+ * pure so the answers → server payload path, the interviewer's profile
+ * coercion and the resumable draft can be tested without a browser.
  */
 
 import type {
@@ -18,9 +18,6 @@ import type {
 import type { ModelDataPolicy } from "@/shared/types/api";
 
 import type { ExperienceLevel } from "./abstraction";
-
-/** Where the thing to improve lives; "none" when there is nothing to point at yet. */
-export type IntakeSourceKind = "repo" | "api" | "spreadsheet" | "file" | "dataset" | "none";
 
 export type IntakeTrustMode = "ask" | "auto_safe" | "yolo";
 
@@ -40,13 +37,6 @@ export interface IntakeAnswers {
    * module stays free of runtime imports for the unit tests.
    */
   language: string | null;
-  /** What should get better. */
-  goal: string;
-  /** How the user will know it did; empty when the goal line already says it. */
-  success_signal: string;
-  source: IntakeSourceKind | null;
-  /** The pasted repo / API link, when the source has one. */
-  source_url: string;
   billing: "platform" | "byok";
   /** Vault provider slug of the key the user brought, when they did. */
   byok_provider: string | null;
@@ -83,10 +73,6 @@ export const DEFAULT_SPENDING_LIMIT_CENTS: number | null = null;
 export function emptyIntake(): IntakeAnswers {
   return {
     language: null,
-    goal: "",
-    success_signal: "",
-    source: null,
-    source_url: "",
     billing: "platform",
     byok_provider: null,
     level: "standard",
@@ -98,14 +84,6 @@ export function emptyIntake(): IntakeAnswers {
   };
 }
 
-const SOURCES: readonly IntakeSourceKind[] = [
-  "repo",
-  "api",
-  "spreadsheet",
-  "file",
-  "dataset",
-  "none",
-];
 const PRIVACY_POLICIES: readonly ModelDataPolicy[] = ["allow", "deny", "zdr"];
 const TRUST_MODES: readonly IntakeTrustMode[] = ["ask", "auto_safe", "yolo"];
 const LEVELS: readonly ExperienceLevel[] = ["guided", "standard", "expert"];
@@ -142,10 +120,6 @@ export function parseIntakeAnswers(value: unknown): IntakeAnswers | null {
   const level = raw.level;
   return {
     language: localeCode(raw.language),
-    goal: typeof raw.goal === "string" ? raw.goal : "",
-    success_signal: typeof raw.success_signal === "string" ? raw.success_signal : "",
-    source: oneOf(SOURCES, raw.source),
-    source_url: typeof raw.source_url === "string" ? raw.source_url : "",
     billing: raw.billing === "byok" ? "byok" : "platform",
     byok_provider: typeof raw.byok_provider === "string" ? raw.byok_provider : null,
     level: level === "guided" || level === "expert" ? level : "standard",
@@ -174,50 +148,6 @@ export function parseIntakeAnswers(value: unknown): IntakeAnswers | null {
     privacy: oneOf(PRIVACY_POLICIES, raw.privacy),
     trust: oneOf(TRUST_MODES, raw.trust),
   };
-}
-
-/** A GitHub link (or bare owner/name) pasted as the answer to "Where does it live?". */
-const GITHUB_REPO =
-  /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?(?:[/?#].*)?$/i;
-const BARE_REPO = /^[\w.-]+\/[\w.-]+$/;
-const HTTP_URL = /^https?:\/\/\S+$/i;
-
-/** Classify pasted text: a GitHub repository, an HTTP endpoint, or nothing recognizable. */
-export function classifySourceText(text: string): { kind: "repo" | "api"; value: string } | null {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-  const github = GITHUB_REPO.exec(trimmed);
-  if (github?.[1]) return { kind: "repo", value: github[1] };
-  if (BARE_REPO.test(trimmed)) return { kind: "repo", value: trimmed };
-  if (HTTP_URL.test(trimmed)) return { kind: "api", value: trimmed };
-  return null;
-}
-
-/*
- * Words that only someone who already drives optimizers types unprompted:
- * engine and optimizer names, sampling parameters. Matched as whole words so
- * "temperature" in a weather goal still counts, which is fine: it costs a
- * Standard user nothing to see the Expert defaults and they can change it.
- */
-const EXPERT_TERMS =
-  /\b(gepa|mipro(?:v2)?|copro|simba|bootstrap\s*few[- ]?shot|shinka(?:evolve)?|openevolve|autoresearch|best[- _]of[- _]n|meta[- _]harness|temperature|top[- _]?p|top[- _]?k|max[- _]tokens|reasoning[- _]effort|few[- ]shot|grid\s*search|hyperparam\w*|islands?|mutation\s*rate)\b/i;
-
-/** The level the answers point to: data without code → Guided, a repo or API → Standard, engine talk → Expert. */
-export function inferLevel(
-  answers: Pick<IntakeAnswers, "goal" | "source"> & { success_signal?: string },
-): ExperienceLevel {
-  if (EXPERT_TERMS.test(answers.goal) || EXPERT_TERMS.test(answers.success_signal ?? "")) {
-    return "expert";
-  }
-  if (answers.source === "repo" || answers.source === "api") return "standard";
-  return "guided";
-}
-
-/** The `/submit?recipe=` the setup opens. */
-export function recipeFor(source: IntakeSourceKind | null): "program" | "repo" | "anything" {
-  if (source === "repo") return "repo";
-  if (source === "api") return "anything";
-  return "program";
 }
 
 /** The account-experience PATCH that finishes the setup. */
@@ -260,57 +190,12 @@ export function buildNotificationPatch(
   return patch;
 }
 
-/**
- * The shared-wizard patch the setup applies before opening `/submit` — the
- * same path the agent's writes take. Only fields the answers decide are set;
- * everything else, the models included, keeps the wizard's defaults.
- */
-export function buildWizardPrefill(answers: IntakeAnswers): Record<string, unknown> {
-  const recipe = recipeFor(answers.source);
-  const patch: Record<string, unknown> = {
-    job_type: recipe === "program" ? "run" : "blackbox",
-  };
-  const goal = goalLine(answers);
-  if (recipe !== "program" && goal) patch.blackbox_objective = goal;
-  if (answers.spending_limit_cents !== null) patch.max_cost_cents = answers.spending_limit_cents;
-  return patch;
-}
-
-/** The goal and how success shows, as one line. */
-export function goalLine(answers: Pick<IntakeAnswers, "goal" | "success_signal">): string {
-  const goal = answers.goal.trim();
-  const signal = answers.success_signal.trim();
-  if (!signal || goal.includes(signal)) return goal;
-  return goal ? `${goal}; ${signal}` : signal;
-}
-
-/** The message handed to the agent so it can fill what the answers leave open. */
-export function agentBrief(
-  answers: IntakeAnswers,
-  template: (values: Record<string, string>) => string,
-): string | null {
-  const goal = goalLine(answers);
-  if (!goal) return null;
-  return template({
-    goal,
-    source: answers.source_url.trim() || (answers.source !== "none" ? answers.source : null) || "",
-  });
-}
-
 /* ------------------------------------------------------------------------- */
 /* The interview agenda                                                       */
 /* ------------------------------------------------------------------------- */
 
 /** The interviewer's phases, in the order it runs them (the server's agenda). */
-export const INTAKE_LLM_PHASES = [
-  "goal",
-  "source",
-  "billing",
-  "budget",
-  "privacy",
-  "emails",
-  "trust",
-] as const;
+export const INTAKE_LLM_PHASES = ["billing", "budget", "privacy", "emails", "trust"] as const;
 
 export type IntakeLlmPhase = (typeof INTAKE_LLM_PHASES)[number];
 
@@ -325,11 +210,6 @@ export const INTAKE_PHASES: readonly IntakePhase[] = ["language", ...INTAKE_LLM_
 
 export function isLlmPhase(phase: IntakePhase): phase is IntakeLlmPhase {
   return phase !== "language";
-}
-
-/** The level the setup saves: the interviewer's read, else what the answers point to. */
-export function effectiveLevel(answers: IntakeAnswers): ExperienceLevel {
-  return answers.level_chosen ? answers.level : inferLevel(answers);
 }
 
 /**
@@ -367,25 +247,11 @@ export interface IntakeTurn {
 export type IntakeProfilePatch = Partial<
   Pick<
     IntakeAnswers,
-    | "goal"
-    | "success_signal"
-    | "source"
-    | "source_url"
-    | "billing"
-    | "byok_provider"
-    | "spending_limit_cents"
-    | "privacy"
-    | "trust"
-    | "level"
+    "billing" | "byok_provider" | "spending_limit_cents" | "privacy" | "trust" | "level"
   >
 > & { cadence?: NotificationCadence };
 
 const MAX_BUDGET_USD = 10_000;
-const MAX_TEXT = 500;
-
-function cleanText(value: unknown): string | null {
-  return typeof value === "string" ? value.trim().slice(0, MAX_TEXT) : null;
-}
 
 function budgetCents(value: unknown): number | null | undefined {
   if (value === null || value === "suggest" || value === "auto") return null;
@@ -414,26 +280,6 @@ export function coerceProfilePatch(raw: unknown): {
   const phases: IntakePhase[] = [];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { patch, phases };
   const r = raw as Record<string, unknown>;
-
-  const goal = cleanText(r.goal);
-  if (goal) patch.goal = goal;
-  const signal = cleanText(r.success_signal);
-  if (signal) patch.success_signal = signal;
-  if (goal || signal) phases.push("goal");
-
-  const url = cleanText(r.source_url) ?? "";
-  const detected = url ? classifySourceText(url) : null;
-  const source = oneOf(SOURCES, r.source) ?? detected?.kind ?? null;
-  if (source) {
-    patch.source = source;
-    patch.source_url =
-      detected && (source === "repo" || source === "api") && detected.kind === source
-        ? detected.value
-        : source === "none"
-          ? ""
-          : url;
-    phases.push("source");
-  }
 
   if (r.billing === "platform" || r.billing === "byok") {
     patch.billing = r.billing;
@@ -507,12 +353,6 @@ export function profileSoFar(
   const has = (phase: IntakePhase) => answered.includes(phase);
   const profile: Record<string, unknown> = {};
   if (has("language") && answers.language) profile.language = answers.language;
-  if (answers.goal.trim()) profile.goal = answers.goal.trim();
-  if (answers.success_signal.trim()) profile.success_signal = answers.success_signal.trim();
-  if (has("source") && answers.source) {
-    profile.source = answers.source;
-    if (answers.source_url) profile.source_url = answers.source_url;
-  }
   if (has("billing")) {
     profile.billing = answers.billing;
     if (answers.billing === "byok" && answers.byok_provider) {
@@ -786,7 +626,7 @@ export function applyInterviewTurn(
   outcome: IntakeTurnOutcome,
 ): IntakeDraft {
   const { patch, phases } = coerceProfilePatch(outcome.profile_patch);
-  let answers = applyProfilePatch(draft.answers, patch);
+  const answers = applyProfilePatch(draft.answers, patch);
   const skipped = [...phases, ...coerceSkipPhases(outcome.skip_phases)];
   const message = outcome.message.trim();
   const turns: IntakeTurn[] = message
@@ -807,11 +647,6 @@ export function applyInterviewTurn(
     };
   }
 
-  // A goal phase that ends without a parsed goal keeps what the user said.
-  if (phase === "goal" && !answers.goal.trim()) {
-    const first = sent.find((t) => t.role === "user")?.content.trim() ?? "";
-    if (first) answers = { ...answers, goal: first.slice(0, MAX_TEXT) };
-  }
   const answered = markAnswered(draft.answered, [phase, ...skipped]);
   return {
     ...draft,

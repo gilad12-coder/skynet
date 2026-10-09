@@ -41,6 +41,31 @@ def _has_tool_calls(prediction: dspy.Prediction) -> bool:
     return bool(calls)
 
 
+def _low_effort(predictor: dspy.Predict, config: dict) -> dict:
+    """Build the LM kwargs that drop a retry to low reasoning effort.
+
+    Gateway LMs carry the effort twice, as ``reasoning_effort`` and as
+    ``extra_body.reasoning.effort``, and OpenRouter rejects a request whose two
+    values disagree, so both are lowered together. A per-call ``extra_body``
+    replaces the LM's whole one, so the LM's body is copied first.
+
+    Args:
+        predictor: The step predictor, whose own LM wins over the context LM.
+        config: The step's per-call LM kwargs.
+
+    Returns:
+        ``reasoning_effort`` set to ``"low"``, plus a matching ``extra_body``
+        when the LM or the call sends a native ``reasoning`` object.
+    """
+    lm = predictor.lm or dspy.settings.lm
+    lm_kwargs = getattr(lm, "kwargs", None) or {}
+    body = config.get("extra_body", lm_kwargs.get("extra_body"))
+    out: dict = {"reasoning_effort": "low"}
+    if isinstance(body, dict) and isinstance(body.get("reasoning"), dict) and "effort" in body["reasoning"]:
+        out["extra_body"] = {**body, "reasoning": {**body["reasoning"], "effort": "low"}}
+    return out
+
+
 class _ActingPredict(dspy.Predict):
     """The loop's step predictor, retried once when a step names no tool."""
 
@@ -73,7 +98,7 @@ class _ActingPredict(dspy.Predict):
             logger.warning("Agent step ended without a tool call; retrying it with a required tool call.")
         except (AdapterParseError, ValueError) as err:
             logger.warning("Agent step failed to parse; retrying it with a required tool call: %s", err)
-        retry_config = {**config, "reasoning_effort": "low"}
+        retry_config = {**config, **_low_effort(self, config)}
         # The text tool protocol sends no tools, and providers reject a
         # tool_choice without them.
         if native_tool_calling_active():

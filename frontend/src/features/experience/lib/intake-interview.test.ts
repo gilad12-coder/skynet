@@ -59,8 +59,7 @@ function outcome(partial: Partial<IntakeTurnOutcome>): IntakeTurnOutcome {
 test("coerceProfilePatch keeps valid answers and drops anything unknown or out of range", () => {
   const { patch, phases } = coerceProfilePatch({
     goal: "  route tickets  ",
-    source: "nonsense",
-    source_url: "https://github.com/acme/router",
+    source: "repo",
     billing: "byok",
     byok_provider: " OpenAI ",
     budget_usd: "$20",
@@ -69,10 +68,9 @@ test("coerceProfilePatch keeps valid answers and drops anything unknown or out o
     trust: "yolo",
     level: "wizard",
   });
-  assert.equal(patch.goal, "route tickets");
-  // An unknown source falls back to what the pasted link says.
-  assert.equal(patch.source, "repo");
-  assert.equal(patch.source_url, "acme/router");
+  // The setup is settings only: anything about a first run is dropped.
+  assert.equal("goal" in patch, false);
+  assert.equal("source" in patch, false);
   assert.equal(patch.billing, "byok");
   assert.equal(patch.byok_provider, "openai");
   assert.equal(patch.spending_limit_cents, 2000);
@@ -80,7 +78,7 @@ test("coerceProfilePatch keeps valid answers and drops anything unknown or out o
   assert.equal(patch.cadence, undefined);
   assert.equal(patch.trust, "yolo");
   assert.equal(patch.level, undefined);
-  assert.deepEqual(phases, ["goal", "source", "billing", "budget", "privacy", "trust"]);
+  assert.deepEqual(phases, ["billing", "budget", "privacy", "trust"]);
 });
 
 test("coerceProfilePatch: a key without a provider leaves billing open; junk yields nothing", () => {
@@ -89,28 +87,19 @@ test("coerceProfilePatch: a key without a provider leaves billing open; junk yie
   assert.equal(coerceProfilePatch({ budget_usd: 99_999 }).patch.spending_limit_cents, 1_000_000);
   assert.deepEqual(coerceProfilePatch({ budget_usd: -5 }).phases, []);
   assert.deepEqual(coerceProfilePatch(null), { patch: {}, phases: [] });
-  assert.deepEqual(coerceProfilePatch(["goal"]), { patch: {}, phases: [] });
+  assert.deepEqual(coerceProfilePatch(["billing"]), { patch: {}, phases: [] });
   assert.deepEqual(coerceSkipPhases(["trust", "bogus", "language"]), ["language", "trust"]);
 });
 
-test("the agenda opens on the language and asks nothing about models or wizard defaults", () => {
-  assert.deepEqual(INTAKE_PHASES, [
-    "language",
-    "goal",
-    "source",
-    "billing",
-    "budget",
-    "privacy",
-    "emails",
-    "trust",
-  ]);
+test("the agenda is settings only: the language, then the account settings", () => {
+  assert.deepEqual(INTAKE_PHASES, ["language", "billing", "budget", "privacy", "emails", "trust"]);
   assert.equal(nextPhase([], null), "language");
-  assert.equal(nextPhase(["language"], "language"), "goal");
+  assert.equal(nextPhase(["language"], "language"), "billing");
   // Wraps back to an earlier open question before the closing line.
-  assert.equal(nextPhase(markAnswered([], ["goal", "source"]), "trust"), "language");
+  assert.equal(nextPhase(markAnswered([], ["billing", "budget"]), "trust"), "language");
   assert.equal(nextPhase(INTAKE_PHASES, "trust"), null);
   assert.equal(previousScreen("language"), null);
-  assert.equal(previousScreen("goal"), "language");
+  assert.equal(previousScreen("billing"), "language");
   assert.equal(previousScreen("done"), "trust");
 });
 
@@ -118,14 +107,13 @@ test("profileSoFar only reports what the user answered, in the interviewer's wor
   const answers = {
     ...emptyIntake(),
     language: "he" as const,
-    goal: "g",
+    billing: "byok" as const,
     privacy: "deny" as const,
     spending_limit_cents: null,
   };
-  assert.deepEqual(profileSoFar(answers, []), { goal: "g" });
+  assert.deepEqual(profileSoFar(answers, []), {});
   assert.deepEqual(profileSoFar(answers, ["language", "privacy", "budget", "emails"]), {
     language: "he",
-    goal: "g",
     budget_usd: "suggest",
     privacy: "no_training",
     email_cadence: "done",
@@ -133,23 +121,23 @@ test("profileSoFar only reports what the user answered, in the interviewer's wor
 });
 
 test("applyInterviewTurn keeps an open phase's transcript and options", () => {
-  const sent = [{ role: "user" as const, content: "sort tickets" }];
+  const sent = [{ role: "user" as const, content: "not sure" }];
   const draft = applyInterviewTurn(
-    { ...emptyDraft(), screen: "goal" },
-    "goal",
+    { ...emptyDraft(), screen: "billing" },
+    "billing",
     sent,
     outcome({
-      message: " How will you know? ",
-      options: [{ label: "Accuracy", description: "d" }],
+      message: " Do you have your own key? ",
+      options: [{ label: "Yes, OpenAI", description: "d" }],
       profile_patch: { trust: "ask" },
     }),
   );
-  assert.equal(draft.screen, "goal");
-  assert.deepEqual(draft.turns.goal, [
+  assert.equal(draft.screen, "billing");
+  assert.deepEqual(draft.turns.billing, [
     ...sent,
-    { role: "assistant", content: "How will you know?" },
+    { role: "assistant", content: "Do you have your own key?" },
   ]);
-  assert.deepEqual(draft.options.goal, [{ label: "Accuracy", description: "d" }]);
+  assert.deepEqual(draft.options.billing, [{ label: "Yes, OpenAI", description: "d" }]);
   // A volunteered later answer is kept and its phase skipped.
   assert.deepEqual(draft.answered, ["trust"]);
   assert.equal(draft.answers.trust, "ask");
@@ -159,18 +147,22 @@ test("applyInterviewTurn finishing a phase moves on, or to the closing line on s
   const base = {
     ...emptyDraft(),
     answered: markAnswered([], ["language"]),
-    screen: "goal" as const,
+    screen: "billing" as const,
   };
-  const sent = [{ role: "user" as const, content: "make my agent pass more tests" }];
-  const done = applyInterviewTurn(base, "goal", sent, outcome({ phase_done: true }));
-  // No parsed goal: the user's own words become it.
-  assert.equal(done.answers.goal, "make my agent pass more tests");
-  assert.deepEqual(done.answered, ["language", "goal"]);
-  assert.equal(done.screen, "source");
-  assert.deepEqual(done.options.goal, []);
+  const sent = [{ role: "user" as const, content: "use your credits" }];
+  const done = applyInterviewTurn(
+    base,
+    "billing",
+    sent,
+    outcome({ phase_done: true, profile_patch: { billing: "platform" } }),
+  );
+  assert.equal(done.answers.billing, "platform");
+  assert.deepEqual(done.answered, ["language", "billing"]);
+  assert.equal(done.screen, "budget");
+  assert.deepEqual(done.options.billing, []);
   const rest = applyInterviewTurn(
     base,
-    "goal",
+    "billing",
     sent,
     outcome({ phase_done: true, skip_rest: true }),
   );
@@ -197,10 +189,10 @@ test("requestTurns caps the transcript a request carries", () => {
 
 test("drafts round-trip through storage and survive junk", () => {
   const draft = {
-    ...emptyDraft({ ...emptyIntake(), goal: "g", language: "fr" as const }),
+    ...emptyDraft({ ...emptyIntake(), billing: "byok" as const, language: "fr" as const }),
     screen: "done" as const,
-    answered: markAnswered([], ["goal", "language"]),
-    turns: { ...emptyDraft().turns, goal: [{ role: "user" as const, content: "g" }] },
+    answered: markAnswered([], ["billing", "language"]),
+    turns: { ...emptyDraft().turns, budget: [{ role: "user" as const, content: "g" }] },
     options: { ...emptyDraft().options, billing: [{ label: "A", description: "" }] },
     fixed: true,
   };
@@ -214,20 +206,22 @@ test("drafts round-trip through storage and survive junk", () => {
     JSON.stringify({
       answers: {},
       screen: "elsewhere",
-      answered: ["goal", "nope"],
+      answered: ["goal", "budget", "nope"],
       turns: {
-        goal: [
+        budget: [
           { role: "system", content: "x" },
           { role: "user", content: "y" },
         ],
       },
-      options: { goal: [{ label: " " }, { label: "B" }] },
+      options: { budget: [{ label: " " }, { label: "B" }] },
     }),
   );
   assert.equal(odd?.screen, "language");
-  assert.deepEqual(odd?.answered, ["goal"]);
-  assert.deepEqual(odd?.turns.goal, [{ role: "user", content: "y" }]);
-  assert.deepEqual(odd?.options.goal, [{ label: "B", description: "" }]);
+  // An older draft's goal / source answers are dropped with the questions.
+  assert.deepEqual(odd?.answered, ["budget"]);
+  assert.deepEqual(odd?.turns.budget, [{ role: "user", content: "y" }]);
+  assert.deepEqual(odd?.options.budget, [{ label: "B", description: "" }]);
+  assert.equal(parseDraft(JSON.stringify({ answers: {}, screen: "goal" }))?.screen, "language");
   // Only a locale-shaped code is kept; the registry check happens where it is used.
   assert.equal(parseIntakeAnswers({ language: "Hebrew!" })?.language, null);
   assert.equal(parseIntakeAnswers({ language: 7 })?.language, null);
@@ -242,27 +236,27 @@ test("languageChoices puts the active language first, once", () => {
 });
 
 test("a language switch reloads straight into the next question in the new language", () => {
-  const before = { ...emptyDraft(), answers: { ...emptyIntake(), goal: "kept" } };
+  const before = { ...emptyDraft(), answers: { ...emptyIntake(), privacy: "zdr" as const } };
   const prepared = prepareLanguageSwitch(before, "he");
-  assert.equal(prepared.screen, "goal");
+  assert.equal(prepared.screen, "billing");
   assert.equal(prepared.answers.language, "he");
 
   // The reload: a fresh mount reads the note once, then the draft alone.
   const resume = takeIntakeResume();
-  assert.deepEqual(resume, { resumePhase: "goal", profile: { language: "he", goal: "kept" } });
+  assert.deepEqual(resume, { resumePhase: "billing", profile: { language: "he" } });
   assert.equal(takeIntakeResume(), null);
   const reopened = resumeAfterLanguageSwitch(readIntakeDraft(), resume!, "he");
-  assert.equal(reopened.screen, "goal");
+  assert.equal(reopened.screen, "billing");
   assert.equal(reopened.answers.language, "he");
-  assert.equal(reopened.answers.goal, "kept");
+  assert.equal(reopened.answers.privacy, "zdr");
   assert.ok(reopened.answered.includes("language"));
   // The language question is not asked again.
-  assert.equal(nextPhase(reopened.answered, null), "goal");
+  assert.equal(nextPhase(reopened.answered, null), "billing");
 });
 
 test("a language change with everything answered comes back to the closing line", () => {
   const fromDone = {
-    ...emptyDraft({ ...emptyIntake(), source: "spreadsheet" }),
+    ...emptyDraft({ ...emptyIntake(), billing: "byok" }),
     answered: markAnswered([], INTAKE_PHASES.slice(1)),
   };
   prepareLanguageSwitch(fromDone, "ja");
@@ -271,9 +265,9 @@ test("a language change with everything answered comes back to the closing line"
   // An older build's stored "summary" resumes on the closing line.
   assert.equal(parseDraft(JSON.stringify({ answers: {}, screen: "summary" }))?.screen, "done");
   // Storage lost the draft: still resumes, with the active locale.
-  const reopened = resumeAfterLanguageSwitch(null, { resumePhase: "goal", profile: {} }, "ja");
+  const reopened = resumeAfterLanguageSwitch(null, { resumePhase: "billing", profile: {} }, "ja");
   assert.equal(reopened.answers.language, "ja");
-  assert.equal(reopened.screen, "goal");
+  assert.equal(reopened.screen, "billing");
 });
 
 test("finishing or skipping clears the resume note", () => {

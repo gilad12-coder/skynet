@@ -452,7 +452,7 @@ class IntakeTurn(BaseModel):
 class IntakeInterviewRequest(BaseModel):
     """Request body for ``POST /account/intake-interview``."""
 
-    phase: Literal["goal", "source", "billing", "budget", "privacy", "emails", "trust"] = Field(
+    phase: Literal["billing", "budget", "privacy", "emails", "trust"] = Field(
         ..., description="The intake phase this turn runs."
     )
     turns: list[IntakeTurn] = Field(
