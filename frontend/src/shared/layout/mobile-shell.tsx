@@ -147,7 +147,7 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
     return (
       <WizardStateProvider>
         <JobsStreamProvider>{shell}</JobsStreamProvider>
-        <IntakeHost agentEnabled={false} />
+        <IntakeHost />
       </WizardStateProvider>
     );
   }
@@ -157,7 +157,7 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
       <GeneralistPanelProvider>
         <JobsStreamProvider>{shell}</JobsStreamProvider>
         <GeneralistPanel />
-        <IntakeHost agentEnabled />
+        <IntakeHost />
       </GeneralistPanelProvider>
     </WizardStateProvider>
   );

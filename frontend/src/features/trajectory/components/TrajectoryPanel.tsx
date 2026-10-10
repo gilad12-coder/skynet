@@ -10,7 +10,6 @@ import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
-import { useLiteMode } from "@/features/settings";
 import {
   extractCandidates,
   extractMinibatch,
@@ -24,7 +23,6 @@ import { rememberTrajectoryView } from "../lib/climb-view-hint";
 import type { BlackboxTrajectoryContext } from "../lib/types";
 import { TimelineScrubber } from "./TimelineScrubber";
 import { TrajectoryTree } from "./TrajectoryTree";
-import { TrajectoryOutline } from "./TrajectoryOutline";
 import { TrajectoryDrawer, type DrawerSelection } from "./TrajectoryDrawer";
 
 const NEWEST_HIGHLIGHT_MS = 2200;
@@ -71,7 +69,6 @@ export function TrajectoryPanel({
   blackbox,
 }: TrajectoryPanelProps) {
   const live = isLive(job);
-  const lite = useLiteMode();
   const blackboxCtx = blackbox ?? (job.optimization_type === "blackbox" ? BLACKBOX_FALLBACK : null);
   const { candidates, rejected, valsetRows, minibatch, valsetOutputs } = useMemo(() => {
     const events = job.progress_events ?? [];
@@ -95,9 +92,8 @@ export function TrajectoryPanel({
   const hintKey = pairIndex === undefined ? job.optimization_id : `${job.optimization_id}#pair`;
   const view = candidates.length === 0 ? "none" : maxGeneration > 0 ? "scrubber" : "plain";
   useEffect(() => {
-    // The lite outline's height follows the candidate count, so it is not remembered.
-    if (!lite) rememberTrajectoryView(hintKey, view);
-  }, [lite, hintKey, view]);
+    rememberTrajectoryView(hintKey, view);
+  }, [hintKey, view]);
   const visibleCandidates = useMemo(() => {
     if (generationFilter === null) return candidates;
     return candidates.filter((c) => c.generation <= generationFilter);
@@ -246,28 +242,16 @@ export function TrajectoryPanel({
               liveText={msg("trajectory.scrubber.live")}
             />
           ) : null}
-          {lite ? (
-            <TrajectoryOutline
-              candidates={visibleCandidates}
-              rejected={visibleRejected}
-              winnerId={layout.winnerId}
-              selectedId={selectedTreeId}
-              newestId={newestId}
-              onSelectCandidate={handleSelectCandidate}
-              onSelectRejected={handleSelectRejected}
-            />
-          ) : (
-            <TrajectoryTree
-              layout={layout}
-              layoutWithoutRejected={layoutWithoutRejected}
-              selectedId={selectedTreeId}
-              newestId={newestId}
-              onSelectCandidate={handleSelectCandidate}
-              onSelectRejected={handleSelectRejected}
-              previewLayout={previewLayout}
-              ringMode={blackboxCtx === null ? "pass_fail" : "score"}
-            />
-          )}
+          <TrajectoryTree
+            layout={layout}
+            layoutWithoutRejected={layoutWithoutRejected}
+            selectedId={selectedTreeId}
+            newestId={newestId}
+            onSelectCandidate={handleSelectCandidate}
+            onSelectRejected={handleSelectRejected}
+            previewLayout={previewLayout}
+            ringMode={blackboxCtx === null ? "pass_fail" : "score"}
+          />
           <TrajectoryDrawer
             selection={drawerSelection}
             open={drawerOpen}

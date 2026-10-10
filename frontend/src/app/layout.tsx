@@ -17,12 +17,7 @@ import {
 import { SplashScreen } from "@/shared/layout/splash-screen";
 import { TutorialOverlay, TutorialProvider } from "@/features/tutorial";
 import { ExperienceProvider } from "@/features/experience";
-import {
-  UserPrefsProvider,
-  LiteModeProvider,
-  SettingsModalProvider,
-  SettingsModal,
-} from "@/features/settings";
+import { UserPrefsProvider, SettingsModalProvider, SettingsModal } from "@/features/settings";
 import { StorageQuotaModalHost } from "@/features/storage";
 import { PreflightNotifications } from "@/features/submit";
 import { BalanceProvider, ByokKeysProvider, InsufficientFundsModalHost } from "@/features/billing";
@@ -237,27 +232,25 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <BalanceProvider>
                 <ByokKeysProvider>
                   <UserPrefsProvider>
-                    <LiteModeProvider>
-                      <ThemeProvider>
-                        <TooltipProvider>
-                          <AppSkeletonTheme>
-                            <SplashScreen />
-                            <ExperienceProvider>
+                    <ThemeProvider>
+                      <TooltipProvider>
+                        <AppSkeletonTheme>
+                          <SplashScreen />
+                          <ExperienceProvider>
                             <TutorialProvider>
                               <SettingsModalProvider>
                                 <AppShell>{children}</AppShell>
                                 <SettingsModal />
                                 {/* Inside SettingsModalProvider: its CTA opens the
-                                    wallet settings tab now that /upgrade is gone. */}
+                                  wallet settings tab now that /upgrade is gone. */}
                                 <InsufficientFundsModalHost />
                               </SettingsModalProvider>
                               <TutorialOverlay />
                             </TutorialProvider>
-                            </ExperienceProvider>
-                          </AppSkeletonTheme>
-                        </TooltipProvider>
-                      </ThemeProvider>
-                    </LiteModeProvider>
+                          </ExperienceProvider>
+                        </AppSkeletonTheme>
+                      </TooltipProvider>
+                    </ThemeProvider>
                   </UserPrefsProvider>
                 </ByokKeysProvider>
               </BalanceProvider>

@@ -6,13 +6,11 @@ test("parseAgentPreferencePatch accepts the validated agent response envelope", 
   assert.deepEqual(
     parseAgentPreferencePatch({
       updates: {
-        lite_mode: true,
         wizard_split_mode: "manual",
         agent_trust_mode: "yolo",
       },
     }),
     {
-      liteMode: true,
       wizardSplitMode: "manual",
     },
   );
@@ -43,5 +41,5 @@ test("the retired expand-advanced pref is gone: no key, no default, agent patche
 });
 
 test("readPref falls back to the default outside the browser", () => {
-  assert.equal(readPref("liteMode"), false);
+  assert.equal(readPref("taggerAssist"), true);
 });

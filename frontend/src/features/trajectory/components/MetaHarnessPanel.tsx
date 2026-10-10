@@ -9,7 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives
 import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
-import { useLiteMode } from "@/features/settings";
 import {
   extractCandidates,
   extractMinibatch,
@@ -32,7 +31,6 @@ import { displayCandidateId, type BlackboxTrajectoryContext } from "../lib/types
 import { rememberTrajectoryView } from "../lib/climb-view-hint";
 import { AgentRunViewer } from "./AgentRunViewer";
 import { MetaHarnessClimb } from "./MetaHarnessClimb";
-import { MetaHarnessOutline } from "./MetaHarnessOutline";
 import { TimelineScrubber } from "./TimelineScrubber";
 import { TrajectoryDrawer, type DrawerSelection } from "./TrajectoryDrawer";
 
@@ -83,7 +81,6 @@ export interface MetaHarnessPanelProps {
  */
 export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProps) {
   const live = isLive(job);
-  const lite = useLiteMode();
   const optimizationId = job.optimization_id;
 
   const blackboxCtx = blackbox ?? BLACKBOX_FALLBACK;
@@ -226,8 +223,8 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
 
   const hidden = fullModel.versions.length === 0 && (!live || fullModel.pending === null);
   useEffect(() => {
-    if (!lite) rememberTrajectoryView(optimizationId, hidden ? "none" : "climb");
-  }, [lite, optimizationId, hidden]);
+    rememberTrajectoryView(optimizationId, hidden ? "none" : "climb");
+  }, [optimizationId, hidden]);
 
   if (hidden) return null;
 
@@ -282,23 +279,13 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
               tickText={versionTick}
             />
           ) : null}
-          {lite ? (
-            <MetaHarnessOutline
-              model={model}
-              live={live}
-              selectedId={selectedId}
-              newestId={newestId}
-              onSelect={handleSelect}
-            />
-          ) : (
-            <MetaHarnessClimb
-              model={model}
-              live={live}
-              selectedId={selectedId}
-              newestId={newestId}
-              onSelect={handleSelect}
-            />
-          )}
+          <MetaHarnessClimb
+            model={model}
+            live={live}
+            selectedId={selectedId}
+            newestId={newestId}
+            onSelect={handleSelect}
+          />
           <AgentRunViewer
             optimizationId={job.optimization_id}
             run={openRun}

@@ -1,6 +1,6 @@
 {
   "app.shell.search.kw.about": "sobre versão URL da API feedback redefinir preferências about version feedback reset",
-  "app.shell.search.kw.account": "conta nome de usuário função idioma interface opções avançadas modo leve account username role language lite",
+  "app.shell.search.kw.account": "conta nome de usuário função idioma interface opções avançadas account username role language",
   "app.shell.search.kw.admin": "administração armazenamento cota orçamentos usuários admin storage quota users",
   "app.shell.search.kw.agent": "agente painel assistente modelo padrão voz ditado nível de confiança agent assistant model voice dictation trust yolo",
   "app.shell.search.kw.api": "API token desenvolvedor integração gerar revogar documentação API token developer documentation",
@@ -141,8 +141,6 @@
   "optimization.resume.success": "Retomando a execução",
   "optimizations.duration.lt_0_1s": "<0.1s",
   "optimizations.duration.seconds": "{value}s",
-  "optimizations.grid.format.percent": "{value}%",
-  "optimizations.grid.format.seconds": "{value}s",
   "optimizations.grid.response_time_seconds": "{value}s",
   "optimizations.logs.verbosity.aria": "Nível de detalhe dos registros",
   "optimizations.logs.verbosity.empty_filtered": "Nenhum registro corresponde ao filtro",

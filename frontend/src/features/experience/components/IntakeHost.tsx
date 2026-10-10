@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { AnimatePresence, motion, useReducedMotion, type Transition } from "framer-motion";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { useUserPrefs } from "@/features/settings";
@@ -23,28 +23,24 @@ import { useLocale } from "@/shared/providers";
 import { cn } from "@/shared/lib/utils";
 import { QuestionChoices } from "@/shared/ui/agent";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
-import { ArrowLineRight, CaretLeft, CaretRight } from "@/shared/ui/icons";
+import { ArrowLeft, ArrowLineRight, ArrowRight } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { SubmitSplashOverlay, SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 import type { ModelDataPolicy } from "@/shared/types/api";
 
 import {
-  BUDGET_PRESETS_USD,
   INTAKE_PHASES,
   SKIP_PATCH,
-  applyInterviewTurn,
   buildExperiencePatch,
   buildNotificationPatch,
   clearIntakeDraft,
   emptyDraft,
-  isLlmPhase,
   languageChoices,
   markAnswered,
   nextPhase,
   prepareLanguageSwitch,
   previousScreen,
-  profileSoFar,
   readIntakeDraft,
   resumeAfterLanguageSwitch,
   takeIntakeResume,
@@ -55,12 +51,11 @@ import {
   type IntakeTrustMode,
 } from "../lib/intake";
 import { useExperienceOptional } from "../providers/experience-provider";
-import { IntakeInterview } from "./IntakeInterview";
+import { TOUCH_TAP_SQUARE } from "./touch";
 
 const PHASE_LABELS: Record<IntakePhase, MessageKey> = {
   language: "experience.intake.phase.language",
   billing: "experience.intake.phase.billing",
-  budget: "experience.intake.phase.budget",
   privacy: "experience.intake.phase.privacy",
   emails: "experience.intake.phase.emails",
   trust: "experience.intake.phase.trust",
@@ -120,12 +115,6 @@ const TRUST_OPTIONS: ReadonlyArray<{
   },
 ];
 
-const BUDGET_DESCRIPTIONS: Record<number, MessageKey> = {
-  20: "experience.intake.budget.preset_20",
-  5: "experience.intake.budget.preset_5",
-  50: "experience.intake.budget.preset_50",
-};
-
 /*
  * The setup moves like the splash that plays when an optimization is sent
  * (`SubmitSplashOverlay`). On a first login the app shows as normal for a
@@ -170,6 +159,18 @@ const ENGLISH_ENTRY: Partial<Record<MessageKey, string>> = {
   "experience.intake.next": "Continue",
 };
 
+/*
+ * The English screens set Latin text in the app's English face (Geist) even
+ * when the active locale's UI font leads with another script's face, whose
+ * Latin glyphs would otherwise draw the title. Other scripts on these screens
+ * (the language names) still fall through to the locale's font.
+ */
+const ENGLISH_FONT = '"Geist Variable", var(--font-ui)';
+
+/** Short screens (a landscape laptop, a phone with its browser bars) get a tighter setup. */
+const QUESTION_SECTION =
+  "flex min-h-0 flex-col gap-4 sm:gap-6 [@media(max-height:700px)]:gap-3 [@media(min-height:860px)]:sm:gap-8";
+
 function englishEntry(key: MessageKey, params?: Record<string, string | number>): string {
   const template = ENGLISH_ENTRY[key];
   if (!template) return msg(key, params);
@@ -177,14 +178,6 @@ function englishEntry(key: MessageKey, params?: Record<string, string | number>)
     (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
     template,
   );
-}
-
-function usd(amount: number): string {
-  return new Intl.NumberFormat(getActiveIntlLocale(), {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(amount);
 }
 
 /** The agenda as a bar, the current question named under it. */
@@ -213,29 +206,49 @@ function IntakeProgress({ index, total, label }: { index: number; total: number;
 function QuestionHeading({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <h2 className="text-xl font-semibold leading-snug tracking-tight text-balance sm:text-2xl">
+      <h2 className="text-xl font-semibold leading-snug tracking-tight text-balance sm:text-3xl [@media(max-height:700px)]:text-xl">
         {title}
       </h2>
-      {hint && <p className="text-sm leading-relaxed text-muted-foreground">{hint}</p>}
+      {hint && (
+        <p className="text-sm leading-relaxed text-muted-foreground sm:text-base [@media(max-height:700px)]:text-sm">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
 
-/** The interview's answer cards, set in the question screen instead of under a chat. */
-function Choices(props: React.ComponentProps<typeof QuestionChoices>) {
-  return <QuestionChoices {...props} className="border-t-0 px-0 pt-0" />;
+/**
+ * The interview's answer cards, set in the question screen instead of under a
+ * chat. They are laid out to fit the screen; should a very short one still run
+ * out of room, only the cards scroll, never the page or the buttons under them.
+ */
+function Choices({ className, ...props }: React.ComponentProps<typeof QuestionChoices>) {
+  return (
+    <QuestionChoices
+      {...props}
+      // The 1px inset keeps the cards' focus ring clear of the scroll clip.
+      className={cn(
+        "-m-1 min-h-0 overflow-y-auto overscroll-contain border-t-0 p-1",
+        // A short list reads as one column of roomy cards; taller screens give each more air.
+        "[&>div]:grid-cols-1 [&>div]:gap-2.5 sm:[&_button]:px-4 sm:[&_button]:py-3.5",
+        "[@media(min-height:860px)]:sm:[&_button]:py-4.5 [@media(min-height:860px)]:[&>div]:gap-3",
+        "[@media(max-height:700px)]:[&_button]:py-2 [@media(max-height:700px)]:[&>div]:gap-1.5",
+        className,
+      )}
+    />
+  );
 }
 
 /**
- * The first-login setup, settings only: the language first, then a short
- * interview a language model runs (billing, budget, privacy, emails, the
- * assistant's freedom); finishing saves them and leaves the user on the page
- * they were on. Nothing about a first run is asked, and model choice and the
- * wizard defaults keep the app's defaults. When the interviewer is unavailable each phase turns into a fixed
- * question. A full-screen surface over the app, shown to every account whose
- * setup is not done, before the tour; Settings can rerun it.
+ * The first-login setup, settings only: the language, billing, privacy,
+ * emails and the assistant's freedom, each a fixed question; finishing saves
+ * them and opens a new optimization. Nothing about a first run is asked, and
+ * model choice and the wizard defaults keep the app's defaults. A full-screen
+ * surface over the app, shown to every account whose setup is not done,
+ * before the tour; Settings can rerun it.
  */
-export function IntakeHost({ agentEnabled }: { agentEnabled: boolean }) {
+export function IntakeHost() {
   const experience = useExperienceOptional();
   const open = !!experience?.intakeOpen;
   const pathname = usePathname();
@@ -247,16 +260,17 @@ export function IntakeHost({ agentEnabled }: { agentEnabled: boolean }) {
     pathname.startsWith("/share/");
   return (
     <AnimatePresence>
-      {experience && open && !bare && <IntakeSurface key="intake" agentEnabled={agentEnabled} />}
+      {experience && open && !bare && <IntakeSurface key="intake" />}
     </AnimatePresence>
   );
 }
 
-function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
+function IntakeSurface() {
   const experience = useExperienceOptional()!;
   const { setPref } = useUserPrefs();
   const { locale, setLocale } = useLocale();
   const reduceMotion = useReducedMotion() ?? false;
+  const router = useRouter();
 
   const [initial] = React.useState(() => {
     // Back from the reload a language switch makes: carry on at the next question.
@@ -276,12 +290,10 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
   });
   const [draft, setDraft] = React.useState<IntakeDraft>(initial.draft);
   const [stage, setStage] = React.useState<Stage>(initial.stage);
-  const [fallbackNote, setFallbackNote] = React.useState(false);
   const [finale, setFinale] = React.useState<Finale>("none");
   const finishStarted = React.useRef(false);
 
-  const { answers, screen, answered } = draft;
-  const fixed = draft.fixed || !agentEnabled;
+  const { answers, screen } = draft;
 
   React.useEffect(() => {
     writeIntakeDraft(draft);
@@ -298,13 +310,11 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
   }, [stage, reduceMotion]);
 
   const goTo = (next: IntakeDraft["screen"]) => {
-    setFallbackNote(false);
     setDraft((prev) => ({ ...prev, screen: next }));
   };
 
   /** Record a fixed question's answer and move to the next open one. */
   const answer = (phase: IntakePhase, patch: Partial<IntakeAnswers> = {}) => {
-    setFallbackNote(false);
     setDraft((prev) => {
       const nextAnswered = markAnswered(prev.answered, [phase]);
       return {
@@ -314,11 +324,6 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
         screen: nextPhase(nextAnswered, phase) ?? "done",
       };
     });
-  };
-
-  const fallBack = () => {
-    setFallbackNote(true);
-    setDraft((prev) => ({ ...prev, fixed: true }));
   };
 
   const finish = async () => {
@@ -351,6 +356,8 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
     // unmounts it (and the splash with it), so that waits for the slide out.
     await experience.save({ ...buildExperiencePatch(final), intake_completed: undefined });
     clearIntakeDraft();
+    // The splash still covers the screen, so it slides up onto a new optimization.
+    router.push("/submit");
     setFinale("out");
   };
 
@@ -374,7 +381,6 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
     finishStarted.current = true;
     void finish();
   }, [done]);
-  const interviewing = !done && isLlmPhase(screen) && !fixed && !answered.includes(screen);
   const back = previousScreen(screen);
   const total = INTAKE_PHASES.length;
   const progressIndex = done ? total : INTAKE_PHASES.indexOf(screen);
@@ -413,7 +419,7 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
         }));
         const picked = isLocale(answers.language) ? answers.language : "en";
         return (
-          <section className="flex flex-col gap-6">
+          <section className={QUESTION_SECTION}>
             <QuestionHeading
               title={t("experience.intake.language.title")}
               hint={t("experience.intake.language.hint")}
@@ -422,6 +428,9 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
               options={options}
               selected={options[Math.max(0, choices.indexOf(picked))]!.label}
               ariaLabel={t("experience.intake.language.title")}
+              // Seventeen languages fit as a three-column grid (two on a
+              // phone, where each card shows only the language's own name).
+              className="[&>div]:grid-cols-2 [&>div]:gap-2 sm:[&>div]:grid-cols-3 sm:[&_button]:py-2.5 max-sm:[&_[dir=auto]+[dir=auto]]:hidden [@media(min-height:860px)]:sm:[&_button]:py-3 [@media(max-height:700px)]:[&_button]:py-1.5"
               onSelect={(_, index) => chooseLanguage(choices[index] ?? locale)}
             />
           </section>
@@ -439,7 +448,7 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
           },
         ];
         return (
-          <section className="flex flex-col gap-6">
+          <section className={QUESTION_SECTION}>
             <QuestionHeading
               title={msg("experience.intake.billing.title")}
               hint={msg("experience.intake.billing.hint")}
@@ -458,45 +467,6 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
           </section>
         );
       }
-      case "budget": {
-        const suggest: InterviewOption = {
-          label: msg("experience.intake.budget.suggest"),
-          description: msg("experience.intake.budget.suggest_description"),
-        };
-        const options: InterviewOption[] = [
-          ...BUDGET_PRESETS_USD.map((amount) => ({
-            label: usd(amount),
-            description: msg(BUDGET_DESCRIPTIONS[amount]!),
-          })),
-          suggest,
-        ];
-        const limit = answers.spending_limit_cents;
-        return (
-          <section className="flex flex-col gap-6">
-            <QuestionHeading
-              title={msg("experience.intake.budget.title")}
-              hint={msg("experience.intake.budget.hint")}
-            />
-            <Choices
-              options={options}
-              selected={
-                limit === null
-                  ? suggest.label
-                  : BUDGET_PRESETS_USD.includes(limit / 100)
-                    ? usd(limit / 100)
-                    : []
-              }
-              ariaLabel={msg("experience.intake.budget.title")}
-              onSelect={(_, index) => {
-                const amount = BUDGET_PRESETS_USD[index];
-                answer("budget", {
-                  spending_limit_cents: amount === undefined ? null : amount * 100,
-                });
-              }}
-            />
-          </section>
-        );
-      }
       case "privacy": {
         const options: InterviewOption[] = [
           ...PRIVACY_OPTIONS.map((o) => ({ label: msg(o.label), description: msg(o.description) })),
@@ -504,7 +474,7 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
         ];
         const current = PRIVACY_OPTIONS.find((o) => o.value === answers.privacy);
         return (
-          <section className="flex flex-col gap-6">
+          <section className={QUESTION_SECTION}>
             <QuestionHeading
               title={msg("experience.intake.privacy.title")}
               hint={msg("experience.intake.privacy.hint")}
@@ -527,7 +497,7 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
         }));
         const current = CADENCE_OPTIONS.find(([value]) => value === answers.notifications.cadence);
         return (
-          <section className="flex flex-col gap-6">
+          <section className={QUESTION_SECTION}>
             <QuestionHeading
               title={msg("experience.intake.emails.title")}
               hint={msg("experience.intake.emails.hint")}
@@ -552,7 +522,7 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
         ];
         const current = TRUST_OPTIONS.find((o) => o.value === answers.trust);
         return (
-          <section className="flex flex-col gap-6">
+          <section className={QUESTION_SECTION}>
             <QuestionHeading
               title={msg("experience.intake.trust.title")}
               hint={msg("experience.intake.trust.hint")}
@@ -584,52 +554,61 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
       };
   const stepTransition = splash(0, STEP_S);
 
-  // Back and forward travel as one tight pair right under the answer, shaped
-  // like the wizard's own step buttons.
+  // Back, then Skip, sit together at the start; Continue, the forward step,
+  // has the far end to itself. Each is an icon named by its tooltip.
   const rtl = !inEnglish && getActiveDir() === "rtl";
-  const BackChevron = rtl ? CaretRight : CaretLeft;
-  const NextChevron = rtl ? CaretLeft : CaretRight;
-  const navButton = "min-h-[44px] lg:min-h-0 min-w-0 flex-1 gap-2 sm:flex-none";
+  const BackArrow = rtl ? ArrowRight : ArrowLeft;
+  const NextArrow = rtl ? ArrowLeft : ArrowRight;
+  const navTip = (label: string, button: React.ReactElement) => (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent dir={inEnglish ? "ltr" : getActiveDir()}>{label}</TooltipContent>
+    </Tooltip>
+  );
   const actions = (
-    <div className="flex items-stretch gap-2">
-      {back && (
-        <Button variant="outline" className={navButton} onClick={() => goTo(back)}>
-          <BackChevron className="size-4" aria-hidden />
-          {msg("experience.intake.back")}
-        </Button>
-      )}
-      {!interviewing && !done && (
-        <Button
-          className={cn(navButton, "sm:min-w-[88px]")}
-          onClick={() =>
-            screen === "language"
-              ? chooseLanguage(isLocale(answers.language) ? answers.language : "en")
-              : answer(screen)
-          }
-        >
-          {t("experience.intake.next")}
-          <NextChevron className="size-4" aria-hidden />
-        </Button>
-      )}
-      {/* Pushed to the far end so it is never the button under a thumb heading forward. */}
-      {!done && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon"
-              className="ms-auto size-11 shrink-0 text-muted-foreground hover:text-foreground lg:size-9"
-              aria-label={t("experience.intake.skip")}
-              onClick={skip}
-            >
-              <ArrowLineRight className={cn("size-4", rtl && "-scale-x-100")} aria-hidden />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent dir={inEnglish ? "ltr" : getActiveDir()}>
-            {t("experience.intake.skip")}
-          </TooltipContent>
-        </Tooltip>
-      )}
+    <div className="flex shrink-0 items-center gap-2">
+      {back &&
+        navTip(
+          msg("experience.intake.back"),
+          <Button
+            variant="outline"
+            size="icon-lg"
+            className={TOUCH_TAP_SQUARE}
+            aria-label={msg("experience.intake.back")}
+            onClick={() => goTo(back)}
+          >
+            <BackArrow className="size-4" aria-hidden />
+          </Button>,
+        )}
+      {!done &&
+        navTip(
+          t("experience.intake.skip"),
+          <Button
+            variant="outline"
+            size="icon-lg"
+            className={cn(TOUCH_TAP_SQUARE, "text-muted-foreground hover:text-foreground")}
+            aria-label={t("experience.intake.skip")}
+            onClick={skip}
+          >
+            <ArrowLineRight className={cn("size-4", rtl && "-scale-x-100")} aria-hidden />
+          </Button>,
+        )}
+      {!done &&
+        navTip(
+          t("experience.intake.next"),
+          <Button
+            size="icon-lg"
+            className={cn(TOUCH_TAP_SQUARE, "ms-auto")}
+            aria-label={t("experience.intake.next")}
+            onClick={() =>
+              screen === "language"
+                ? chooseLanguage(isLocale(answers.language) ? answers.language : "en")
+                : answer(screen)
+            }
+          >
+            <NextArrow className="size-4" aria-hidden />
+          </Button>,
+        )}
     </div>
   );
 
@@ -648,10 +627,14 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
         >
           {/* The splash's panel: down from the top on the way in, back up on the way out. */}
           <motion.div
-            className="fixed inset-0 isolate flex flex-col overflow-hidden text-foreground outline-none"
+            className="fixed inset-0 isolate flex h-dvh flex-col overflow-hidden text-foreground outline-none"
             dir={inEnglish ? "ltr" : undefined}
             lang={inEnglish ? "en" : undefined}
-            style={{ zIndex: 50, backgroundColor: SPLASH_GROUND }}
+            style={{
+              zIndex: 50,
+              backgroundColor: SPLASH_GROUND,
+              fontFamily: inEnglish ? ENGLISH_FONT : undefined,
+            }}
             initial={reduceMotion ? { opacity: 0 } : { y: "-100%" }}
             animate={
               finale === "none"
@@ -676,7 +659,7 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
               {stage === "title" ? (
                 <motion.div
                   key="title"
-                  className="flex flex-1 flex-col items-center justify-center gap-10 px-6 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:gap-12"
+                  className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[clamp(1.5rem,6dvh,3rem)] px-6 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
                   exit={step.exit}
                   transition={stepTransition}
                 >
@@ -689,7 +672,7 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
                   </motion.div>
                   <motion.p
                     aria-hidden
-                    className="max-w-[16ch] text-center text-5xl font-semibold leading-[1.05] tracking-tight text-balance sm:text-7xl"
+                    className="max-w-[16ch] text-center text-[clamp(2.25rem,min(11vw,9dvh),4.5rem)] font-semibold leading-[1.05] tracking-tight text-balance"
                     initial={step.initial}
                     animate={step.animate}
                     transition={splash(TITLE_DELAY_S)}
@@ -705,54 +688,26 @@ function IntakeSurface({ agentEnabled }: { agentEnabled: boolean }) {
                   animate={{ opacity: 1 }}
                   transition={stepTransition}
                 >
-                  <div className="mx-auto w-full max-w-2xl px-5 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-7 sm:pt-10">
+                  <div className="mx-auto w-full max-w-2xl shrink-0 px-5 pt-[max(1rem,env(safe-area-inset-top))] sm:px-7 sm:pt-10 [@media(max-height:700px)]:sm:pt-5">
                     <IntakeProgress index={progressIndex} total={total} label={progressLabel} />
                   </div>
 
                   <AnimatePresence mode="wait" initial={false}>
-                    {done ? null : interviewing ? (
-                      <motion.div
-                        key={`chat-${screen}`}
-                        className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col"
-                        {...step}
-                        transition={stepTransition}
-                      >
-                        <div className="px-5 pt-6 sm:px-7">
-                          <QuestionHeading
-                            title={msg("experience.intake.chat.title")}
-                            hint={msg("experience.intake.chat.description")}
-                          />
-                        </div>
-                        <IntakeInterview
-                          key={screen}
-                          phase={screen}
-                          turns={draft.turns[screen]}
-                          options={draft.options[screen]}
-                          profile={profileSoFar(answers, answered)}
-                          onTurn={(sent, outcome) =>
-                            setDraft((prev) => applyInterviewTurn(prev, screen, sent, outcome))
-                          }
-                          onFail={fallBack}
-                        />
-                        <div className="px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
-                          {actions}
-                        </div>
-                      </motion.div>
-                    ) : (
+                    {done ? null : (
                       <motion.div
                         key={`fixed-${screen}`}
-                        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+                        className="flex min-h-0 flex-1 flex-col"
                         {...step}
                         transition={stepTransition}
                       >
-                        <div className="mx-auto w-full max-w-2xl px-5 pt-8 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:px-7 sm:pt-12">
-                          {fallbackNote && (
-                            <p className="pb-4 text-xs text-muted-foreground" role="status">
-                              {msg("experience.intake.chat.error")}
-                            </p>
-                          )}
-                          {renderQuestion(screen)}
-                          <div className="pt-8">{actions}</div>
+                        <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-6 px-5 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))] sm:gap-8 sm:px-7 sm:pt-10 [@media(max-height:700px)]:gap-4 [@media(max-height:700px)]:sm:pt-5">
+                          {/* The question and its buttons sit as one group in the optical
+                              middle of the screen; safe centering keeps the top in view
+                              when a short screen has no room to spare. */}
+                          <div className="flex min-h-0 flex-1 flex-col gap-6 pb-[6dvh] [justify-content:safe_center] sm:gap-8 [@media(max-height:700px)]:gap-4 [@media(max-height:700px)]:pb-0">
+                            {renderQuestion(screen)}
+                            {actions}
+                          </div>
                         </div>
                       </motion.div>
                     )}

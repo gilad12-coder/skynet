@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import { Popover as PopoverPrimitive } from "radix-ui";
-import { List, GraduationCap, Lightbulb, Feather } from "@/shared/ui/icons";
+import { List, GraduationCap, Lightbulb } from "@/shared/ui/icons";
 import { ConceptsGuide, registerTutorialHook, TutorialMenu } from "@/features/tutorial";
 import { Button } from "@/shared/ui/primitives/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/shared/ui/primitives/tooltip";
@@ -19,7 +19,6 @@ import { JobsStreamProvider } from "@/shared/hooks/use-jobs-stream";
 import { PageContainer } from "@/shared/layout/page-container";
 import { MobileShell } from "@/shared/layout/mobile-shell";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
-import { useUserPrefs, LiteModeHint } from "@/features/settings";
 import { BalanceChip } from "@/features/billing";
 import {
   GeneralistPanel,
@@ -110,7 +109,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
   const { locale } = useLocale();
   const dir = dirForLocale(locale);
   const isRtl = dir === "rtl";
-  const { prefs, setPref } = useUserPrefs();
   const generalistEnabled = isGeneralistAgentEnabled();
   const progressRef = React.useRef<HTMLDivElement>(null);
 
@@ -192,24 +190,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
           >
             SKYNET
           </span>
-          {prefs.liteMode && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setPref("liteMode", false)}
-                  className="inline-flex items-center gap-1 rounded-full border border-border bg-accent/60 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
-                  aria-label={msg("app.shell.lite.exit_aria")}
-                >
-                  <Feather className="size-3" aria-hidden="true" />
-                  {msg("app.shell.lite.badge")}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" dir={dir}>
-                {msg("app.shell.lite.tooltip")}
-              </TooltipContent>
-            </Tooltip>
-          )}
         </div>
 
         <div className="flex flex-1 justify-center px-2">
@@ -313,7 +293,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
       </div>
 
       {conceptsOpen && <ConceptsGuide open onClose={() => setConceptsOpen(false)} />}
-      <LiteModeHint />
     </div>
   );
 
@@ -323,7 +302,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
     return (
       <WizardStateProvider>
         <JobsStreamProvider>{shell}</JobsStreamProvider>
-        <IntakeHost agentEnabled={false} />
+        <IntakeHost />
       </WizardStateProvider>
     );
   }
@@ -333,7 +312,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
       <GeneralistPanelProvider>
         <JobsStreamProvider>{shell}</JobsStreamProvider>
         <GeneralistPanel />
-        <IntakeHost agentEnabled />
+        <IntakeHost />
       </GeneralistPanelProvider>
     </WizardStateProvider>
   );

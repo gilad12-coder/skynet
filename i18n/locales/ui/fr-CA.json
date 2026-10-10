@@ -1,6 +1,6 @@
 {
   "app.shell.search.kw.about": "à propos version URL de l'API avis réinitialiser préférences about version feedback reset",
-  "app.shell.search.kw.account": "compte nom d'utilisateur rôle langue interface options avancées mode allégé account username role language lite",
+  "app.shell.search.kw.account": "compte nom d'utilisateur rôle langue interface options avancées account username role language",
   "app.shell.search.kw.admin": "administration stockage quota budgets utilisateurs admin storage quota users",
   "app.shell.search.kw.agent": "agent panneau assistant modèle par défaut voix dictée niveau de confiance agent assistant model voice dictation trust yolo",
   "app.shell.search.kw.api": "API jeton développeur intégration générer révoquer documentation API token developer documentation",
@@ -28,8 +28,6 @@
   "common.empty": "—",
   "optimizations.duration.lt_0_1s": "<0.1s",
   "optimizations.duration.seconds": "{value}s",
-  "optimizations.grid.format.percent": "{value}%",
-  "optimizations.grid.format.seconds": "{value}s",
   "optimizations.grid.response_time_seconds": "{value}s",
   "optimizations.reasoning_effort.short.min": "min",
   "optimizations.serve.field_separator": ": ",

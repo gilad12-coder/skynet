@@ -34,7 +34,6 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { FIND_SHORTCUT, useEditorFind } from "@/shared/ui/code-editor-find";
-import { useLiteMode } from "@/features/settings";
 import { CODE_HIGHLIGHT_SPECS } from "@/shared/ui/code-highlight-style";
 
 const beigeEditorTheme = EditorView.theme(
@@ -371,7 +370,6 @@ export function CodeEditor({
   const [running, setRunning] = useState(false);
   const [formatting, setFormatting] = useState(false);
   const [result, setResult] = useState<ValidationResult | null>(null);
-  const lite = useLiteMode();
 
   useEffect(() => {
     if (validationResult !== undefined) setResult(dedupeIssues(validationResult));
@@ -454,7 +452,7 @@ export function CodeEditor({
           {shownLabel}
         </span>
 
-        {!lite && !collapsed && (
+        {!collapsed && (
           <TooltipButton
             tooltip={formatMsg("shared.code_editor.find.open_tip", { shortcut: FIND_SHORTCUT })}
           >
@@ -559,52 +557,31 @@ export function CodeEditor({
                 maxHeight: readOnly ? undefined : "calc(60svh - 4rem)",
               }}
             >
-              {lite ? (
-                readOnly ? (
-                  <pre
-                    dir="ltr"
-                    className="m-0 overflow-auto bg-[#FAF6F0] px-4 py-3 font-mono text-[12.5px] leading-relaxed text-[#3D2E22] whitespace-pre"
-                    style={{ minHeight: height }}
-                  >
-                    {value}
-                  </pre>
-                ) : (
-                  <textarea
-                    dir="ltr"
-                    value={value}
-                    onChange={(e) => handleChange(e.target.value)}
-                    spellCheck={false}
-                    className="block w-full resize-y bg-[#FAF6F0] px-4 py-3 font-mono text-[12.5px] leading-relaxed text-[#3D2E22] outline-none"
-                    style={{ height }}
-                  />
-                )
-              ) : (
-                <>
-                  <CodeMirror
-                    ref={editorRef}
-                    value={value}
-                    height={height}
-                    theme={beigeTheme}
-                    extensions={extensions}
-                    onChange={handleChange}
-                    readOnly={readOnly}
-                    basicSetup={{
-                      lineNumbers: true,
-                      foldGutter: true,
-                      bracketMatching: true,
-                      autocompletion: true,
-                      completionKeymap: true,
-                      // The find panel extension binds its own search keys.
-                      searchKeymap: false,
-                      highlightActiveLine: true,
-                      highlightSelectionMatches: false,
-                      indentOnInput: true,
-                      tabSize: 4,
-                    }}
-                  />
-                  {find.panel}
-                </>
-              )}
+              <>
+                <CodeMirror
+                  ref={editorRef}
+                  value={value}
+                  height={height}
+                  theme={beigeTheme}
+                  extensions={extensions}
+                  onChange={handleChange}
+                  readOnly={readOnly}
+                  basicSetup={{
+                    lineNumbers: true,
+                    foldGutter: true,
+                    bracketMatching: true,
+                    autocompletion: true,
+                    completionKeymap: true,
+                    // The find panel extension binds its own search keys.
+                    searchKeymap: false,
+                    highlightActiveLine: true,
+                    highlightSelectionMatches: false,
+                    indentOnInput: true,
+                    tabSize: 4,
+                  }}
+                />
+                {find.panel}
+              </>
             </div>
           </motion.div>
         )}

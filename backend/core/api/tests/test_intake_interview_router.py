@@ -183,7 +183,7 @@ def test_empty_turns_opens_the_phase(monkeypatch) -> None:
     """Empty turns are the phase's opening question."""
     seen: dict[str, Any] = {}
     _record_stream(monkeypatch, seen)
-    resp = _client().post("/account/intake-interview", json={"phase": "budget"})
+    resp = _client().post("/account/intake-interview", json={"phase": "privacy"})
     assert resp.status_code == 200
     assert seen["turns"] == []
     assert seen["profile"] == {}

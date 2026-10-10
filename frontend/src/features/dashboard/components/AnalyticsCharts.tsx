@@ -12,8 +12,6 @@ import {
   YAxis,
 } from "recharts";
 import { ChartEmptyState } from "@/shared/charts/chart-utils";
-import { ChartTable } from "@/shared/charts/chart-table";
-import { useLiteMode } from "@/features/settings";
 import { getStatusLabel } from "@/shared/constants/job-status";
 import type { DashboardAnalyticsGranularity } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
@@ -85,8 +83,8 @@ function TooltipCard({ title, rows }: { title: string; rows: TooltipRow[] }) {
  * the user has three runs or three thousand. When `withAverage` is set (the
  * dataset-size breakdown) a line traces the mean improvement per bucket so the
  * "does more data help?" question is answered on the same axis. Clicking a
- * bar (or a row in lite mode) hands its bucket edges to `onBucketClick` so
- * the dashboard can narrow to that range.
+ * bar hands its bucket edges to `onBucketClick` so the dashboard can narrow
+ * to that range.
  */
 export function RangeHistogram({
   data,
@@ -101,7 +99,6 @@ export function RangeHistogram({
   emptyMessage?: string;
   onBucketClick?: (bar: HistogramBar) => void;
 }) {
-  const lite = useLiteMode();
   const runsLabel = msg("dashboard.analytics.runs");
   const avgLabel = msg("auto.features.dashboard.components.analyticstab.8");
 
@@ -114,35 +111,6 @@ export function RangeHistogram({
         if (bar) onBucketClick(bar);
       }
     : undefined;
-
-  if (lite) {
-    return (
-      <div className="h-[240px]">
-        <ChartTable
-          rows={data}
-          onRowClick={clickable ? (row) => onBucketClick(row) : undefined}
-          columns={[
-            {
-              key: "label",
-              label: `${msg("dashboard.analytics.col_range")} (${unitLabel})`,
-              format: (value) => <span dir="ltr">{String(value)}</span>,
-            },
-            { key: "count", label: runsLabel, align: "end" },
-            ...(withAverage
-              ? [
-                  {
-                    key: "avgImprovement" as const,
-                    label: avgLabel,
-                    align: "end" as const,
-                    format: (value: unknown) => formatPoints(value as number | null),
-                  },
-                ]
-              : []),
-          ]}
-        />
-      </div>
-    );
-  }
 
   const tooltip = (
     <Tooltip
@@ -280,7 +248,6 @@ export function StackedTimeline({
   granularity: DashboardAnalyticsGranularity;
   onSelect?: (start: string, end: string) => void;
 }) {
-  const lite = useLiteMode();
   const successLabel = getStatusLabel("success");
   const failedLabel = getStatusLabel("failed");
   const otherLabel = msg("dashboard.analytics.legend_other");
@@ -291,24 +258,6 @@ export function StackedTimeline({
     onSelect?.(point.date, bucketEnd(point.date, granularity));
 
   if (data.length === 0) return <ChartEmptyState />;
-
-  if (lite) {
-    return (
-      <div className="h-[240px]">
-        <ChartTable
-          rows={data}
-          columns={[
-            { key: "label", label: msg("dashboard.analytics.col_date") },
-            { key: "success", label: successLabel, align: "end" },
-            { key: "failed", label: failedLabel, align: "end" },
-            { key: "other", label: otherLabel, align: "end" },
-            { key: "total", label: totalLabel, align: "end" },
-          ]}
-          onRowClick={clickable ? (row) => select(row) : undefined}
-        />
-      </div>
-    );
-  }
 
   const handleClick = clickable
     ? (_: unknown, index: number) => {

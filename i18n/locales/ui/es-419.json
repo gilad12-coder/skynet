@@ -1,6 +1,6 @@
 {
   "app.shell.search.kw.about": "acerca de versión URL de API comentarios restablecer preferencias about version feedback reset",
-  "app.shell.search.kw.account": "cuenta nombre de usuario rol idioma interfaz opciones avanzadas modo ligero account username role language lite",
+  "app.shell.search.kw.account": "cuenta nombre de usuario rol idioma interfaz opciones avanzadas account username role language",
   "app.shell.search.kw.admin": "administración almacenamiento cuota presupuestos usuarios admin storage quota users",
   "app.shell.search.kw.agent": "agente panel asistente modelo predeterminado voz dictado nivel de confianza agent assistant model voice dictation trust yolo",
   "app.shell.search.kw.api": "API token desarrollador integración generar revocar documentación API token developer documentation",
@@ -16,8 +16,6 @@
   "optimizations.detail.title": "Optimization Details",
   "optimizations.duration.lt_0_1s": "<0.1s",
   "optimizations.duration.seconds": "{value}s",
-  "optimizations.grid.format.percent": "{value}%",
-  "optimizations.grid.format.seconds": "{value}s",
   "optimizations.grid.response_time_seconds": "{value}s",
   "optimizations.reasoning_effort.short.med": "med",
   "optimizations.serve.field_separator": ": ",

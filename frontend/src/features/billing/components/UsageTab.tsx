@@ -5,8 +5,6 @@ import * as React from "react";
 import { ArrowsClockwise, ChartBar, Coins, Sparkle, type Icon } from "@/shared/ui/icons";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartTooltip, ChartEmptyState } from "@/shared/charts/chart-utils";
-import { ChartTable } from "@/shared/charts/chart-table";
-import { useLiteMode } from "@/features/settings";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { modelDisplayName } from "@/shared/lib/formatters";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
@@ -176,29 +174,12 @@ function StatCard({ icon: Icon, label, value }: { icon: Icon; label: string; val
 
 /**
  * Billed spend over time, shown in dollars. The bucket values stay in cents
- * (the ledger's unit); every display path — Y-axis ticks, tooltip, and the Lite
- * table — renders them through `formatCentsUsd` so the chart reads in the same
- * dollars as the "Spent" stat above it. Lite mode falls back to a table.
+ * (the ledger's unit); every display path — Y-axis ticks and tooltip — renders
+ * them through `formatCentsUsd` so the chart reads in the same dollars as the
+ * "Spent" stat above it.
  */
 function SpendChart({ buckets, locale }: { buckets: Bucket[]; locale: string }) {
-  const lite = useLiteMode();
   if (buckets.length === 0) return <ChartEmptyState message={msg("usage.empty.title")} />;
-  if (lite) {
-    return (
-      <ChartTable
-        rows={buckets}
-        columns={[
-          { key: "label", label: msg("usage.col.day") },
-          {
-            key: "billed",
-            label: msg("usage.series.billed"),
-            align: "end",
-            format: (value) => formatCentsUsd(value as number, locale),
-          },
-        ]}
-      />
-    );
-  }
   return (
     <div className="h-[220px] min-w-0">
       <ResponsiveContainer width="100%" height="100%">
@@ -240,7 +221,7 @@ function SpendChart({ buckets, locale }: { buckets: Bucket[]; locale: string }) 
   );
 }
 
-/** Per-model spend as a ranked bar list. Lite mode falls back to a table. */
+/** Per-model spend as a ranked bar list. */
 /** Compact token count for the per-model rows ("1.2M"). */
 function formatTokens(count: number, locale: string): string {
   return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(
@@ -260,27 +241,8 @@ function ModelBreakdown({
   rows: BillingUsageResponse["by_model"];
   locale: string;
 }) {
-  const lite = useLiteMode();
   if (rows.length === 0) {
     return <EmptyState variant="list" title={msg("usage.empty.title")} />;
-  }
-  if (lite) {
-    return (
-      <ChartTable
-        rows={rows.map((row) => ({
-          model: row.model ? modelDisplayName(row.model) : msg("usage.model.unknown"),
-          cents: formatCentsUsd(row.cents, locale),
-          runs: row.runs,
-          tokens: rowTokens(row) > 0 ? formatTokens(rowTokens(row), locale) : "—",
-        }))}
-        columns={[
-          { key: "model", label: msg("usage.col.model") },
-          { key: "cents", label: msg("usage.col.amount"), align: "end" },
-          { key: "runs", label: msg("usage.col.runs"), align: "end" },
-          { key: "tokens", label: msg("usage.col.tokens"), align: "end" },
-        ]}
-      />
-    );
   }
   const max = Math.max(...rows.map((row) => row.cents), 1);
   return (

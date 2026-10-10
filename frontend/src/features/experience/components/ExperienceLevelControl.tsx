@@ -82,15 +82,19 @@ export function ExperienceLevelControl({ onRerun }: { onRerun?: () => void }) {
       >
         <Button
           variant="outline"
-          size="sm"
-          className={TOUCH_TAP}
+          size="icon-sm"
+          className={cn(
+            TOUCH_TAP,
+            "min-w-[44px] sm:min-w-0 [@media(hover:none)_and_(pointer:coarse)]:min-w-[44px]",
+          )}
           disabled={!loaded}
+          aria-label={msg("experience.rerun.action")}
           onClick={() => {
             onRerun?.();
             rerunIntake();
           }}
         >
-          {msg("experience.rerun.action")}
+          <ArrowCounterClockwise aria-hidden="true" />
         </Button>
       </SettingsRow>
     </>

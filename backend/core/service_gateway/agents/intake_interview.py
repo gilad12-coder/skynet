@@ -19,7 +19,6 @@ client-owned and re-sent on every turn.
 from __future__ import annotations
 
 import json
-import math
 from collections.abc import Iterable
 from typing import Any
 
@@ -32,7 +31,7 @@ from .code import _build_agent_lm, _reply_language
 from .code_interview import _parse_json, relay_interview_turn
 from .conduct import with_conduct
 
-AGENDA = ("billing", "budget", "privacy", "emails", "trust")
+AGENDA = ("billing", "privacy", "emails", "trust")
 LLM_PHASES = AGENDA
 MAX_PHASE_QUESTIONS = 2
 MAX_REQUEST_TURNS = 8
@@ -51,7 +50,6 @@ LEVELS = ("guided", "standard", "expert")
 # intake speaks ``no_training``, so accept the stored spelling too.
 _PRIVACY_ALIASES = {"deny": "no_training"}
 _LEVEL_ALIASES = {"new": "guided", "familiar": "standard"}
-_MAX_BUDGET_USD = 100_000.0
 
 _PHASE_BRIEFS = {
     "billing": (
@@ -60,14 +58,6 @@ _PHASE_BRIEFS = {
         "they bring a key, learn which provider it is from (byok_provider, one of "
         "``byok_providers``) before finishing. Offer exactly two options, platform "
         "credits first; never add 'Use the default': platform credits is the default."
-    ),
-    "budget": (
-        "Learn how much one run may spend, in US dollars (budget_usd); a run stops "
-        "when it reaches the limit. Offer a few distinct amounts, e.g. $20 for a "
-        "typical first optimization, $5 for a small trial, $50 for larger data. The "
-        "default is no fixed amount: the wizard suggests a limit from each run's cost "
-        "estimate (budget_usd 'suggest'); end the options with 'Use the default' "
-        "naming it."
     ),
     "privacy": (
         "Learn whether model providers may use the user's data: allow (providers may "
@@ -124,8 +114,7 @@ class IntakeInterviewTurnSig(dspy.Signature):
     In ``profile_patch_json`` extract every setting the user's own words
     settle so far, for ANY phase of the agenda, omitting keys you do not
     know: billing (platform | byok), byok_provider (one of
-    ``byok_providers``), budget_usd (a number, per run, or 'suggest'),
-    privacy (allow | no_training | zdr), email_cadence (done | milestones |
+    ``byok_providers``), privacy (allow | no_training | zdr), email_cadence (done | milestones |
     live), trust (ask | auto_safe | yolo), level. Never ask the level and
     set it only when the user's own words clearly show it: 'guided' when
     they say they are new to machine learning, 'expert' when they name
@@ -186,31 +175,6 @@ def _enum(value: Any, allowed: Iterable[str], aliases: dict[str, str] | None = N
     return cleaned if cleaned in allowed else None
 
 
-def _budget(value: Any) -> float | str | None:
-    """Coerce a per-run budget to a positive dollar amount, or the wizard's suggestion.
-
-    Args:
-        value: Raw value (number, a string such as ``"$5"``, or ``"suggest"``).
-
-    Returns:
-        The amount, ``"suggest"`` for the wizard's per-run estimate, or ``None``
-        when missing, non-positive or absurd.
-    """
-    if isinstance(value, str) and value.strip().lower() in {"suggest", "auto"}:
-        return "suggest"
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, str):
-        value = value.strip().lstrip("$").replace(",", "").strip()
-    try:
-        amount = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(amount) or amount <= 0 or amount > _MAX_BUDGET_USD:
-        return None
-    return round(amount, 2)
-
-
 def validate_profile_patch(raw: Any, *, provider_slugs: Iterable[str]) -> dict[str, Any]:
     """Validate and coerce a model-written profile patch, dropping every invalid key.
 
@@ -227,7 +191,6 @@ def validate_profile_patch(raw: Any, *, provider_slugs: Iterable[str]) -> dict[s
     checks: dict[str, Any] = {
         "billing": lambda v: _enum(v, BILLING),
         "byok_provider": lambda v: v.strip().lower() if isinstance(v, str) and v.strip().lower() in slugs else None,
-        "budget_usd": _budget,
         "privacy": lambda v: _enum(v, PRIVACY, _PRIVACY_ALIASES),
         "email_cadence": lambda v: _enum(v, EMAIL_CADENCES),
         "trust": lambda v: _enum(v, TRUST_MODES),
@@ -257,7 +220,6 @@ def answered_phases(patch: dict[str, Any]) -> list[str]:
     """
     answered = {
         "billing": patch.get("billing") == "platform" or bool(patch.get("byok_provider")),
-        "budget": "budget_usd" in patch,
         "privacy": "privacy" in patch,
         "emails": "email_cadence" in patch,
         "trust": "trust" in patch,

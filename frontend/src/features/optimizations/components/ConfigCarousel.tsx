@@ -16,7 +16,6 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Dialog, DialogContent } from "@/shared/ui/primitives/dialog";
 import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
-import { useUserPrefs } from "@/features/settings";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { msg } from "@/shared/lib/messages";
 import { perLocale } from "@/shared/lib/per-locale";
@@ -249,8 +248,7 @@ export function ConfigCarousel({
   slides: ConfigSlide[];
   renderSlide: (index: number) => ReactNode;
 }) {
-  const { prefs } = useUserPrefs();
-  const prefersReducedMotion = useReducedMotion() || prefs.liteMode;
+  const prefersReducedMotion = useReducedMotion();
   const isRtl = getActiveDir() === "rtl";
   const [activeSlide, setActiveSlide] = useState(0);
   const [slideDirection, setSlideDirection] = useState<1 | -1>(isRtl ? -1 : 1);
@@ -383,16 +381,19 @@ export function ConfigCarousel({
       </div>
 
       <div className="flex items-center justify-between gap-3 border-t border-border/60 bg-secondary/25 px-4 py-3 sm:px-6">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={() => goToSlide(activeSlide - 1)}
           disabled={!previousSlide}
-          aria-label={msg("auto.features.agent.panel.components.toolscarousel.literal.14")}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-xl px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 disabled:cursor-not-allowed disabled:opacity-30"
+          aria-label={
+            previousSlide?.label ??
+            msg("auto.features.agent.panel.components.toolscarousel.literal.14")
+          }
+          className="text-muted-foreground hover:text-foreground [@media(hover:none)_and_(pointer:coarse)]:size-11"
         >
           <PreviousIcon className="size-4" aria-hidden="true" />
-          <span className="hidden sm:inline">{previousSlide?.label}</span>
-        </button>
+        </Button>
 
         <div className="flex items-center justify-center gap-1 sm:hidden">
           {slides.map((slide, index) => (
@@ -414,16 +415,18 @@ export function ConfigCarousel({
           ))}
         </div>
 
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={() => goToSlide(activeSlide + 1)}
           disabled={!nextSlide}
-          aria-label={msg("auto.features.agent.panel.components.toolscarousel.literal.15")}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-xl px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 disabled:cursor-not-allowed disabled:opacity-30"
+          aria-label={
+            nextSlide?.label ?? msg("auto.features.agent.panel.components.toolscarousel.literal.15")
+          }
+          className="text-muted-foreground hover:text-foreground [@media(hover:none)_and_(pointer:coarse)]:size-11"
         >
-          <span className="hidden sm:inline">{nextSlide?.label}</span>
           <NextIcon className="size-4" aria-hidden="true" />
-        </button>
+        </Button>
       </div>
     </motion.section>
   );

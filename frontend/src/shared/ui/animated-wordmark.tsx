@@ -201,12 +201,6 @@ export function AnimatedWordmark({
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reducedMotionRef = useRef(false);
-  // Lite mode is signalled by LiteModeProvider via a data-lite attribute on
-  // <html>. Read it straight from the DOM rather than the settings hook so this
-  // shared/ui leaf imports nothing from features/: a feature import here closes
-  // a client-module cycle (wordmark → settings → prefs → tutorial barrel →
-  // tutorial-overlay → wordmark) that traps Turbopack in an endless recompile.
-  const [lite, setLite] = useState(false);
 
   useEffect(() => {
     const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -216,15 +210,6 @@ export function AnimatedWordmark({
     };
     mql.addEventListener("change", handler);
     return () => mql.removeEventListener("change", handler);
-  }, []);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const read = () => setLite(root.hasAttribute("data-lite"));
-    read();
-    const observer = new MutationObserver(read);
-    observer.observe(root, { attributes: true, attributeFilter: ["data-lite"] });
-    return () => observer.disconnect();
   }, []);
 
   const startMorph = useCallback(() => {
@@ -254,10 +239,10 @@ export function AnimatedWordmark({
 
   const handleMouseEnter = useCallback(() => {
     // When autoMorph owns the lifecycle the wordmark is already morphing — hover
-    // must not spin up a second interval. Lite mode disables the morph outright.
-    if (autoMorph || lite) return;
+    // must not spin up a second interval.
+    if (autoMorph) return;
     if (!reducedMotionRef.current) startMorph();
-  }, [autoMorph, lite, startMorph]);
+  }, [autoMorph, startMorph]);
 
   const handleMouseLeave = useCallback(() => {
     // Never reset a continuously-morphing wordmark on leave; it should keep
@@ -267,12 +252,6 @@ export function AnimatedWordmark({
   }, [autoMorph, stopMorph]);
 
   useEffect(() => {
-    // Lite mode keeps the wordmark static — kill any running morph and never
-    // start one, even for callers that opt into autoMorph (splash/idle states).
-    if (lite) {
-      stopMorph();
-      return;
-    }
     if (autoMorph && !reducedMotionRef.current) {
       // Clear any stale ref before starting to avoid the guard in startMorph
       if (intervalRef.current) {
@@ -294,7 +273,7 @@ export function AnimatedWordmark({
         stopTimeoutRef.current = null;
       }
     };
-  }, [autoMorph, autoMorphDuration, lite, startMorph, stopMorph]);
+  }, [autoMorph, autoMorphDuration, startMorph, stopMorph]);
 
   const aspectRatio = TOTAL_WIDTH / 92;
   const svgWidth = size * aspectRatio;

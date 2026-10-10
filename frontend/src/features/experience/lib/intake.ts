@@ -195,7 +195,7 @@ export function buildNotificationPatch(
 /* ------------------------------------------------------------------------- */
 
 /** The interviewer's phases, in the order it runs them (the server's agenda). */
-export const INTAKE_LLM_PHASES = ["billing", "budget", "privacy", "emails", "trust"] as const;
+export const INTAKE_LLM_PHASES = ["billing", "privacy", "emails", "trust"] as const;
 
 export type IntakeLlmPhase = (typeof INTAKE_LLM_PHASES)[number];
 
@@ -251,15 +251,6 @@ export type IntakeProfilePatch = Partial<
   >
 > & { cadence?: NotificationCadence };
 
-const MAX_BUDGET_USD = 10_000;
-
-function budgetCents(value: unknown): number | null | undefined {
-  if (value === null || value === "suggest" || value === "auto") return null;
-  const usd = typeof value === "string" ? Number(value.replace(/[$,\s]/g, "")) : value;
-  if (typeof usd !== "number" || !Number.isFinite(usd) || usd <= 0) return undefined;
-  return Math.round(Math.min(MAX_BUDGET_USD, Math.max(1, usd)) * 100);
-}
-
 function privacyPolicy(value: unknown): ModelDataPolicy | null {
   if (value === "no_training" || value === "no training") return "deny";
   if (value === "zero_retention" || value === "zero retention") return "zdr";
@@ -289,14 +280,6 @@ export function coerceProfilePatch(raw: unknown): {
         : null;
     // "My own key" without a provider still needs the billing question.
     if (r.billing === "platform" || patch.byok_provider) phases.push("billing");
-  }
-
-  if ("budget_usd" in r) {
-    const cents = budgetCents(r.budget_usd);
-    if (cents !== undefined) {
-      patch.spending_limit_cents = cents;
-      phases.push("budget");
-    }
   }
 
   const privacy = privacyPolicy(r.privacy);
@@ -359,11 +342,6 @@ export function profileSoFar(
       profile.byok_provider = answers.byok_provider;
     }
   }
-  // An absent budget is the wizard's per-run suggestion; the interviewer never sees null.
-  if (has("budget")) {
-    profile.budget_usd =
-      answers.spending_limit_cents === null ? "suggest" : answers.spending_limit_cents / 100;
-  }
   // The stored policy says `deny`; the interviewer's vocabulary is `no_training`.
   if (has("privacy") && answers.privacy) {
     profile.privacy = answers.privacy === "deny" ? "no_training" : answers.privacy;
@@ -373,9 +351,6 @@ export function profileSoFar(
   if (answers.level_chosen) profile.level = answers.level;
   return profile;
 }
-
-/** Spending-limit presets offered by the budget question, in USD. */
-export const BUDGET_PRESETS_USD: readonly number[] = [20, 5, 50];
 
 /* ------------------------------------------------------------------------- */
 /* The resumable draft                                                        */

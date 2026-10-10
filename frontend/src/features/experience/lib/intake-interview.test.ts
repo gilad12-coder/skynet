@@ -62,7 +62,6 @@ test("coerceProfilePatch keeps valid answers and drops anything unknown or out o
     source: "repo",
     billing: "byok",
     byok_provider: " OpenAI ",
-    budget_usd: "$20",
     privacy: "no_training",
     email_cadence: "hourly",
     trust: "yolo",
@@ -73,30 +72,26 @@ test("coerceProfilePatch keeps valid answers and drops anything unknown or out o
   assert.equal("source" in patch, false);
   assert.equal(patch.billing, "byok");
   assert.equal(patch.byok_provider, "openai");
-  assert.equal(patch.spending_limit_cents, 2000);
   assert.equal(patch.privacy, "deny");
   assert.equal(patch.cadence, undefined);
   assert.equal(patch.trust, "yolo");
   assert.equal(patch.level, undefined);
-  assert.deepEqual(phases, ["billing", "budget", "privacy", "trust"]);
+  assert.deepEqual(phases, ["billing", "privacy", "trust"]);
 });
 
 test("coerceProfilePatch: a key without a provider leaves billing open; junk yields nothing", () => {
   assert.deepEqual(coerceProfilePatch({ billing: "byok" }).phases, []);
-  assert.equal(coerceProfilePatch({ budget_usd: "suggest" }).patch.spending_limit_cents, null);
-  assert.equal(coerceProfilePatch({ budget_usd: 99_999 }).patch.spending_limit_cents, 1_000_000);
-  assert.deepEqual(coerceProfilePatch({ budget_usd: -5 }).phases, []);
   assert.deepEqual(coerceProfilePatch(null), { patch: {}, phases: [] });
   assert.deepEqual(coerceProfilePatch(["billing"]), { patch: {}, phases: [] });
   assert.deepEqual(coerceSkipPhases(["trust", "bogus", "language"]), ["language", "trust"]);
 });
 
 test("the agenda is settings only: the language, then the account settings", () => {
-  assert.deepEqual(INTAKE_PHASES, ["language", "billing", "budget", "privacy", "emails", "trust"]);
+  assert.deepEqual(INTAKE_PHASES, ["language", "billing", "privacy", "emails", "trust"]);
   assert.equal(nextPhase([], null), "language");
   assert.equal(nextPhase(["language"], "language"), "billing");
   // Wraps back to an earlier open question before the closing line.
-  assert.equal(nextPhase(markAnswered([], ["billing", "budget"]), "trust"), "language");
+  assert.equal(nextPhase(markAnswered([], ["billing", "privacy"]), "trust"), "language");
   assert.equal(nextPhase(INTAKE_PHASES, "trust"), null);
   assert.equal(previousScreen("language"), null);
   assert.equal(previousScreen("billing"), "language");
@@ -112,9 +107,8 @@ test("profileSoFar only reports what the user answered, in the interviewer's wor
     spending_limit_cents: null,
   };
   assert.deepEqual(profileSoFar(answers, []), {});
-  assert.deepEqual(profileSoFar(answers, ["language", "privacy", "budget", "emails"]), {
+  assert.deepEqual(profileSoFar(answers, ["language", "privacy", "emails"]), {
     language: "he",
-    budget_usd: "suggest",
     privacy: "no_training",
     email_cadence: "done",
   });
@@ -158,7 +152,7 @@ test("applyInterviewTurn finishing a phase moves on, or to the closing line on s
   );
   assert.equal(done.answers.billing, "platform");
   assert.deepEqual(done.answered, ["language", "billing"]);
-  assert.equal(done.screen, "budget");
+  assert.equal(done.screen, "privacy");
   assert.deepEqual(done.options.billing, []);
   const rest = applyInterviewTurn(
     base,
@@ -192,7 +186,7 @@ test("drafts round-trip through storage and survive junk", () => {
     ...emptyDraft({ ...emptyIntake(), billing: "byok" as const, language: "fr" as const }),
     screen: "done" as const,
     answered: markAnswered([], ["billing", "language"]),
-    turns: { ...emptyDraft().turns, budget: [{ role: "user" as const, content: "g" }] },
+    turns: { ...emptyDraft().turns, privacy: [{ role: "user" as const, content: "g" }] },
     options: { ...emptyDraft().options, billing: [{ label: "A", description: "" }] },
     fixed: true,
   };
@@ -206,21 +200,21 @@ test("drafts round-trip through storage and survive junk", () => {
     JSON.stringify({
       answers: {},
       screen: "elsewhere",
-      answered: ["goal", "budget", "nope"],
+      answered: ["goal", "budget", "privacy", "nope"],
       turns: {
-        budget: [
+        privacy: [
           { role: "system", content: "x" },
           { role: "user", content: "y" },
         ],
       },
-      options: { budget: [{ label: " " }, { label: "B" }] },
+      options: { privacy: [{ label: " " }, { label: "B" }] },
     }),
   );
   assert.equal(odd?.screen, "language");
-  // An older draft's goal / source answers are dropped with the questions.
-  assert.deepEqual(odd?.answered, ["budget"]);
-  assert.deepEqual(odd?.turns.budget, [{ role: "user", content: "y" }]);
-  assert.deepEqual(odd?.options.budget, [{ label: "B", description: "" }]);
+  // An older draft's goal / source / budget answers are dropped with the questions.
+  assert.deepEqual(odd?.answered, ["privacy"]);
+  assert.deepEqual(odd?.turns.privacy, [{ role: "user", content: "y" }]);
+  assert.deepEqual(odd?.options.privacy, [{ label: "B", description: "" }]);
   assert.equal(parseDraft(JSON.stringify({ answers: {}, screen: "goal" }))?.screen, "language");
   // Only a locale-shaped code is kept; the registry check happens where it is used.
   assert.equal(parseIntakeAnswers({ language: "Hebrew!" })?.language, null);

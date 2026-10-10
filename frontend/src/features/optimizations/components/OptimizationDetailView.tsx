@@ -76,7 +76,6 @@ import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { ACTIVE_STATUSES, TERMINAL_STATUSES } from "@/shared/constants/job-status";
-import { useLiteMode } from "@/features/settings";
 import { useRunLogStream } from "../hooks/use-run-log-stream";
 import { QUOTA_FULL_EVENT, maxLogId, mergeLiveLogs, pruneLiveLogs } from "../lib/run-log-merge";
 import { registerTutorialHook } from "@/features/tutorial";
@@ -528,12 +527,11 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     fetchedLogsRef.current = fetchedLogs;
     if (fetchedLogs) setLiveLogs((cur) => pruneLiveLogs(fetchedLogs, cur));
   }, [fetchedLogs]);
-  const lite = useLiteMode();
   const hasJob = !!job;
   const jobRunning = !!job && !TERMINAL_STATUSES.has(job.status);
   const quotaToastShownRef = useRef(false);
   const logStreamStatus = useRunLogStream(
-    !skipNetwork && authReady && !lite && hasJob && jobRunning
+    !skipNetwork && authReady && hasJob && jobRunning
       ? `${getRuntimeEnv().apiUrl}/optimizations/${encodeURIComponent(id)}/logs/stream`
       : "",
     () => maxLogId(fetchedLogsRef.current),

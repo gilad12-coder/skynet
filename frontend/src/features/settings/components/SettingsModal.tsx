@@ -18,7 +18,6 @@ import {
   Cpu,
   Key,
   ArrowSquareOut,
-  Feather,
   HardDrive,
   Translate,
   Microphone,
@@ -287,7 +286,6 @@ function AgentTab() {
 function AccountTab() {
   const { data: session } = useSession();
   const { setOpen } = useSettingsModal();
-  const { prefs, setPref } = useUserPrefs();
   const username = session?.user?.name ?? "";
   const role = (session?.user as Record<string, unknown> | undefined)?.role;
   const isAdmin = role === "admin";
@@ -310,17 +308,7 @@ function AccountTab() {
         <LanguageSwitcher />
       </SettingsRow>
 
-      <>
-        <ExperienceLevelControl onRerun={() => setOpen(false)} />
-
-        <SettingsRow
-          icon={Feather}
-          label={msg("settings.account.lite.label")}
-          description={msg("settings.account.lite.description")}
-        >
-          <Switch checked={prefs.liteMode} onCheckedChange={(v) => setPref("liteMode", v)} />
-        </SettingsRow>
-      </>
+      <ExperienceLevelControl onRerun={() => setOpen(false)} />
     </div>
   );
 }
