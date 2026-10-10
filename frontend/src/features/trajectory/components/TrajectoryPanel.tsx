@@ -50,9 +50,6 @@ export interface TrajectoryPanelProps {
   // When set, only candidate events tagged with this pair_index are kept —
   // grid-search pair views need to scope the tree to a single pair.
   pairIndex?: number;
-  // Forwarded to TrajectoryTree — see its prop docs. The tutorial demo uses
-  // it to open the tree at the eventual extent before any node streams in.
-  previewLayout?: { width: number; height: number };
   // Tool name → approval severity from the run's persisted react_overlay,
   // forwarded to the drawer so its tool cards match the Code tab.
   toolSeverities?: Record<string, string>;
@@ -64,7 +61,6 @@ export interface TrajectoryPanelProps {
 export function TrajectoryPanel({
   job,
   pairIndex,
-  previewLayout,
   toolSeverities,
   blackbox,
 }: TrajectoryPanelProps) {
@@ -197,10 +193,7 @@ export function TrajectoryPanel({
 
   return (
     <FadeIn delay={0.12}>
-      <Card
-        className="relative overflow-hidden shadow-[0_1px_3px_rgba(28,22,18,0.04),inset_0_1px_0_rgba(255,255,255,0.5)]"
-        data-tutorial="trajectory-panel"
-      >
+      <Card className="relative overflow-hidden shadow-[0_1px_3px_rgba(28,22,18,0.04),inset_0_1px_0_rgba(255,255,255,0.5)]">
         <div
           className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-[#C8A882]/40 to-transparent"
           aria-hidden="true"
@@ -249,7 +242,6 @@ export function TrajectoryPanel({
             newestId={newestId}
             onSelectCandidate={handleSelectCandidate}
             onSelectRejected={handleSelectRejected}
-            previewLayout={previewLayout}
             ringMode={blackboxCtx === null ? "pass_fail" : "score"}
           />
           <TrajectoryDrawer

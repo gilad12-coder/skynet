@@ -14,14 +14,6 @@ import {
 } from "@/shared/lib/api";
 import { formatMsg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
-// Leaf import on purpose — the tutorial barrel deliberately does not re-export
-// the demo fixtures (see features/tutorial/index.ts).
-// eslint-disable-next-line no-restricted-imports -- deliberate leaf import; see above
-import {
-  DEMO_OPTIMIZATION_ID,
-  DEMO_GRID_OPTIMIZATION_ID,
-  DEMO_BLACKBOX_OPTIMIZATION_ID,
-} from "@/features/tutorial/lib/demo-data";
 import { OptimizationDetailView } from "./OptimizationDetailView";
 import { OptimizationDetailSkeleton } from "./OptimizationDetailSkeleton";
 import { rememberProbedRun, useRunKindHint } from "../lib/run-kind-hint";
@@ -42,7 +34,7 @@ type GateState =
  * to 404 on the access-gated detail route. This probes ``getJob`` first (with the
  * bearer attached, so the owner path is unchanged) and only on a no-access
  * failure falls back to the public composite — keeping public discoverability
- * and view access in sync. Demo ids skip the probe (they never hit the network).
+ * and view access in sync.
  */
 export function OptimizationDetailGate() {
   const { id } = useParams<{ id: string }>();
@@ -60,16 +52,7 @@ export function OptimizationDetailGate() {
   const resolvedIdRef = useRef<string | null>(null);
   const kindHint = useRunKindHint(id);
 
-  const isDemo =
-    id === DEMO_OPTIMIZATION_ID ||
-    id === DEMO_GRID_OPTIMIZATION_ID ||
-    id === DEMO_BLACKBOX_OPTIMIZATION_ID;
-
   useEffect(() => {
-    if (isDemo) {
-      setState({ mode: "owned" });
-      return;
-    }
     if (status === "loading") return;
     // Attach the bearer before probing — effects run child-before-parent, so the
     // root ApiAuthTokenBridge may not have synced it yet; without this the
@@ -128,7 +111,7 @@ export function OptimizationDetailGate() {
     return () => {
       cancelled = true;
     };
-  }, [id, isDemo, status, session?.backendAccessToken, router]);
+  }, [id, status, session?.backendAccessToken, router]);
 
   if (state.mode === "loading") {
     return <OptimizationDetailSkeleton pair={isPairLink} grid={kindHint === "grid_search"} />;

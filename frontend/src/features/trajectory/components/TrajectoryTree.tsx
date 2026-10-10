@@ -99,11 +99,6 @@ export interface TrajectoryTreeProps {
   newestId: string | null;
   onSelectCandidate: (id: string) => void;
   onSelectRejected: (rejectionId: string) => void;
-  // Optional viewport hint. When provided, the initial fit uses
-  // MAX(currentLayout, previewLayout) so the tree opens at the eventual
-  // extent — useful in scripted demos where the final size is known up
-  // front and we want viewers to see the full graph before nodes stream in.
-  previewLayout?: { width: number; height: number };
   // Black-box scorers grade each case on their own scale rather than
   // pass/fail, so those runs swap the per-example split for a single arc
   // that fills with the candidate's aggregate score.
@@ -285,7 +280,6 @@ export function TrajectoryTree({
   newestId,
   onSelectCandidate,
   onSelectRejected,
-  previewLayout,
   ringMode = "pass_fail",
 }: TrajectoryTreeProps) {
   const reduceMotion = useReducedMotion();
@@ -334,8 +328,6 @@ export function TrajectoryTree({
   // glide is running.
   const recenterFromRef = useRef<number | null>(null);
   const { nodes, ghosts, edges, width, height } = layout;
-  const fitWidth = Math.max(width, previewLayout?.width ?? 0);
-  const fitHeight = Math.max(height, previewLayout?.height ?? 0);
   const idIndex = useMemo(() => {
     const m = new Map<string, TrajectoryNode>();
     for (const n of nodes) m.set(n.candidate_id, n);
@@ -374,7 +366,7 @@ export function TrajectoryTree({
   useEffect(() => {
     if (size.w < 2 || size.h < 2) return;
     if (userInteractedRef.current) return;
-    const fit = fitView(size, fitWidth, fitHeight);
+    const fit = fitView(size, width, height);
     const from = recenterFromRef.current;
     if (from === null || from >= 1) {
       setView(fit);
@@ -389,7 +381,7 @@ export function TrajectoryTree({
       tx: v.tx + (fit.tx - v.tx) * step,
       ty: v.ty + (fit.ty - v.ty) * step,
     }));
-  }, [size, fitWidth, fitHeight, morphProgress]);
+  }, [size, width, height, morphProgress]);
 
   // Toggling maximize resizes the container; release the interaction lock so
   // the new viewport gets a fresh fit.
@@ -533,12 +525,12 @@ export function TrajectoryTree({
   );
   const resetView = useCallback(() => {
     userInteractedRef.current = false;
-    setView(fitView(size, fitWidth, fitHeight));
-  }, [size, fitWidth, fitHeight]);
+    setView(fitView(size, width, height));
+  }, [size, width, height]);
   const isTransformed = useMemo(() => {
-    const baseline = fitView(size, fitWidth, fitHeight);
+    const baseline = fitView(size, width, height);
     return view.k !== baseline.k || view.tx !== baseline.tx || view.ty !== baseline.ty;
-  }, [view, size, fitWidth, fitHeight]);
+  }, [view, size, width, height]);
 
   if (nodes.length === 0) return null;
 

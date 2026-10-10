@@ -76,7 +76,7 @@ export function RunPlayground({
           )}
         </div>
       </FadeIn>
-      <div data-tutorial="serve-playground">
+      <div>
         <ServeChat
           serveInfo={serveInfo}
           runHistory={runHistory}

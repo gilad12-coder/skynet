@@ -239,7 +239,7 @@ function GridOverviewImpl({
     pairFilter != null ? (prs.find((p) => p.pair_index === pairFilter) ?? null) : null;
 
   return (
-    <div className="space-y-4" data-tutorial="grid-search">
+    <div className="space-y-4">
       <StaggerContainer className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <StaggerItem>
           <TiltCard
@@ -829,7 +829,7 @@ function GridOverviewImpl({
         </FadeIn>
       )}
 
-      <div className="space-y-2" data-tutorial="grid-pair-list">
+      <div className="space-y-2">
         {visiblePrs.map((pr) => {
           const isOverall = scoring.overallWinner === pr.pair_index;
           const isQuality = scoring.qualityWinner === pr.pair_index;

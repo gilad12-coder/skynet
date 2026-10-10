@@ -81,7 +81,7 @@ export function CodeTab({
   const share = 100 / Math.max(1, tabs.length);
 
   return (
-    <div className="space-y-6" data-tutorial="code-output">
+    <div className="space-y-6">
       <FadeIn>
         <p className="text-sm text-muted-foreground">
           {workflowSpec
@@ -92,7 +92,7 @@ export function CodeTab({
         </p>
       </FadeIn>
       {(signatureCode || metricCode || workflowSpec) && (
-        <Card data-tutorial="code-sources">
+        <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Code className="size-4" aria-hidden="true" />

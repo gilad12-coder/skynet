@@ -4,12 +4,11 @@ import { Kbd } from "@/shared/ui/kbd";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
-import { ArrowUpRight, GraduationCap, MagnifyingGlass, Robot, SignOut } from "@/shared/ui/icons";
+import { ArrowUpRight, MagnifyingGlass, Robot, SignOut } from "@/shared/ui/icons";
 import type { Icon } from "@/shared/ui/icons";
 
 import { useGeneralistPanelStateOptional } from "@/features/agent-panel";
 import { SETTINGS_TABS, useSettingsModal, visibleSettingsTabs } from "@/features/settings";
-import { useTutorialContext } from "@/features/tutorial";
 import { APP_PAGES, matchesQuery, splitKeywords } from "@/shared/lib/app-pages";
 import { APP_PAGE_ICONS, appPageDescription, appPageKeywords, appPageLabel } from "@/shared/lib/app-pages-ui";
 import { useLocale } from "@/shared/providers";
@@ -47,7 +46,6 @@ export function GlobalSearch() {
   const isAdmin = session?.user?.role === "admin";
   const { open: settingsOpen, openTo } = useSettingsModal();
   const agentPanel = useGeneralistPanelStateOptional();
-  const { startTrack } = useTutorialContext();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [activeIndex, setActiveIndex] = React.useState(0);
@@ -79,14 +77,6 @@ export function GlobalSearch() {
           ]
         : []),
       {
-        id: "action-tour",
-        group: "actions",
-        label: msg("app.shell.search.action.tour"),
-        keywords: splitKeywords(msg("app.shell.search.kw.tour")),
-        icon: GraduationCap,
-        run: () => startTrack("quick"),
-      },
-      {
         id: "action-sign-out",
         group: "actions",
         label: msg("app.shell.logout"),
@@ -105,7 +95,7 @@ export function GlobalSearch() {
       run: () => openTo(tab),
     }));
     return [...pages, ...actions, ...settings];
-  }, [agentPanel, isAdmin, openTo, router, startTrack, locale]);
+  }, [agentPanel, isAdmin, openTo, router, locale]);
 
   const filteredItems = React.useMemo(() => {
     if (!query.trim()) return items.filter((item) => item.group !== "settings");

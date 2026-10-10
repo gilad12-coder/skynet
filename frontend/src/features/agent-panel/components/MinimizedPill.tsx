@@ -32,7 +32,7 @@ export function MinimizedPill({
     <button
       type="button"
       onClick={onOpen}
-      data-tutorial="agent-pill"
+      data-setup="agent"
       aria-label={ariaLabel}
       title={ariaLabel}
       // Set the writing direction on the pill itself so its logical `end-4`

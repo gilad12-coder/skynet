@@ -31,7 +31,7 @@ test("every public/ asset is excluded from the auth matcher", () => {
     .readdirSync(publicDir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => "/" + path.relative(publicDir, path.join(entry.parentPath, entry.name)));
-  assert.ok(assets.includes("/fonts/geist-latin-wght-normal.woff2"));
+  assert.ok(assets.includes("/fonts/onest-latin-wght-normal.woff2"));
   assert.deepEqual(
     assets.filter((asset) => matcher.test(asset)),
     [],

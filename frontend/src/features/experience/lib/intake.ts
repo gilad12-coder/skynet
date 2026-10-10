@@ -159,9 +159,6 @@ export function buildExperiencePatch(answers: IntakeAnswers): AccountExperienceP
   };
 }
 
-/** What Skip sends: today's app, and never ask again. */
-export const SKIP_PATCH: AccountExperiencePatch = { level: "standard", intake_completed: true };
-
 /** Read the server's preferences into the editable shape; absent fields take the defaults. */
 export function notificationsFromPrefs(
   prefs: Partial<NotificationPreferences> | null | undefined,
@@ -631,11 +628,4 @@ export function applyInterviewTurn(
     options: { ...draft.options, [phase]: [] },
     screen: outcome.skip_rest ? "done" : (nextPhase(answered, phase) ?? "done"),
   };
-}
-
-/** Where Back goes: the agenda question before this screen, or null on the first one. */
-export function previousScreen(screen: IntakeScreen): IntakePhase | null {
-  if (screen === "done") return INTAKE_PHASES[INTAKE_PHASES.length - 1] ?? null;
-  const index = INTAKE_PHASES.indexOf(screen);
-  return index > 0 ? INTAKE_PHASES[index - 1]! : null;
 }

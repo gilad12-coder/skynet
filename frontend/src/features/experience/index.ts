@@ -14,6 +14,7 @@ export {
   notificationsFromPrefs,
   type IntakeNotifications,
 } from "./lib/intake";
+export { SETUP_SETTING_EVENT, type SetupSettingDetail } from "./lib/setup-tour";
 export {
   ExperienceProvider,
   useExperienceLevel,

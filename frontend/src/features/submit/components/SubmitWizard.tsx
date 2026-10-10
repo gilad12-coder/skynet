@@ -6,7 +6,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ValidationFrame, ValidationGate, ValidationPlan } from "./ValidationFrame";
 import { msg } from "@/shared/lib/messages";
 import { useBalance } from "@/features/billing";
-import { registerTutorialHook } from "@/features/tutorial";
 
 import { TotalBudgetCard } from "./TotalBudgetCard";
 import { WizardSubsteps } from "./WizardSubsteps";
@@ -64,7 +63,6 @@ export function SubmitWizard({
     if (stage === "optimization")
       setOptimizationPart(field === "totalBudgetInput" ? 2 : field === "model-catalog" ? 1 : 0);
   }, []);
-  useEffect(() => registerTutorialHook("showWizardSubstep", routeSubstep), [routeSubstep]);
   // A reported problem opens the substep that holds its field and lands focus there.
   useEffect(() => {
     if (!w.issue) return;

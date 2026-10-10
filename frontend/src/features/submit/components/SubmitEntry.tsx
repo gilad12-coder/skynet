@@ -6,7 +6,6 @@ import { useSession } from "next-auth/react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer-motion";
 
 import { useWizardStateOptional } from "@/features/agent-panel";
-import { registerTutorialHook } from "@/features/tutorial";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 
 import { SubmitWizard } from "./SubmitWizard";
@@ -62,12 +61,6 @@ export function SubmitEntry() {
   // `shown` trails `picking` by one exit: the outgoing screen has left the
   // column before the incoming one takes it.
   const [shown, setShown] = useState<Screen>(initial === null || cloning ? "picker" : "wizard");
-  // The tour hands the wizard a fresh instance per recipe: the hooks hydrate
-  // once at mount, so a live instance is never re-seeded underneath the user.
-  const [wizardKey, setWizardKey] = useState(0);
-  // Set while the guided tour drives this page: which screen it opened last.
-  // The tour always leaves `/submit` when it ends, which unmounts this state.
-  const [touring, setTouring] = useState<Recipe | "picker" | null>(null);
   const variants = useReducedMotion() ? STILL_VARIANTS : SCREEN_VARIANTS;
 
   const { data: session, status } = useSession();
@@ -76,28 +69,6 @@ export function SubmitEntry() {
   useEffect(() => {
     clearRetiredDrafts();
   }, []);
-
-  useEffect(() => {
-    const offWizard = registerTutorialHook("openTutorialWizard", (next) => {
-      // Each tour step asks for its wizard again; only a change of recipe
-      // gets a fresh instance, so demo data seeded by earlier steps survives.
-      if (touring !== next) {
-        wizardState?.reset();
-        setWizardKey((k) => k + 1);
-        setTouring(next);
-        setRecipe(next);
-      }
-      setPicking(false);
-    });
-    const offPicker = registerTutorialHook("openTutorialRecipePicker", () => {
-      setTouring((current) => current ?? "picker");
-      setPicking(true);
-    });
-    return () => {
-      offWizard();
-      offPicker();
-    };
-  }, [touring, wizardState]);
 
   // The shared agent state outlives either wizard. Fields that only mean
   // something to the workflow being left (its staged rows, the black-box task)
@@ -146,7 +117,7 @@ export function SubmitEntry() {
 
   return (
     <>
-      <ExecutionBudgetProvider key={`${accountId}:${wizardKey}`}>
+      <ExecutionBudgetProvider key={`${accountId}`}>
         <AnimatePresence initial={false} onExitComplete={() => setShown("wizard")}>
           {shown === "picker" && picking && (
             <motion.div
@@ -177,14 +148,13 @@ export function SubmitEntry() {
           >
             {recipe === "anything" ? (
               <BlackboxWizard
-                key={`${accountId}:${wizardKey}`}
+                key={`${accountId}`}
                 header={chip}
                 initialRecipe={link?.kind ?? "anything"}
                 folderId={folderId}
-                touring={touring !== null}
               />
             ) : (
-              <SubmitWizard key={`${accountId}:${wizardKey}`} header={chip} folderId={folderId} />
+              <SubmitWizard key={`${accountId}`} header={chip} folderId={folderId} />
             )}
           </motion.div>
         )}

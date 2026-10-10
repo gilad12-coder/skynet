@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  SKIP_PATCH,
   buildExperiencePatch,
   buildNotificationPatch,
   emptyIntake,
@@ -16,7 +15,6 @@ test("buildExperiencePatch finishes the setup with the chosen level and the answ
   assert.equal(patch.intake_completed, true);
   assert.equal((patch.intake as Record<string, unknown>).billing, "byok");
   assert.equal((patch.intake as Record<string, unknown>).version, 1);
-  assert.deepEqual(SKIP_PATCH, { level: "standard", intake_completed: true });
 });
 
 test("buildNotificationPatch only sends Live's sub-settings with Live", () => {

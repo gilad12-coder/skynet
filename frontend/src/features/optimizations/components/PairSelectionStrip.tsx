@@ -71,7 +71,6 @@ export function PairSelectionStrip({
     <>
       <FadeIn>
         <div
-          data-tutorial="pair-detail-summary"
           className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#C8A882]/30 bg-gradient-to-l from-[#FAF8F5] to-[#F5F1EC] p-3"
           onKeyDown={(event) => {
             const step = arrowPageStep(event, rtl);

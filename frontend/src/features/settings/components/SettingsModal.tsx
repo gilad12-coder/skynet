@@ -91,7 +91,6 @@ import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { LEGAL_CONFIG } from "@/features/legal";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
-import { useTutorialContext } from "@/features/tutorial";
 import {
   deleteStorageQuotaOverride,
   generateApiToken,
@@ -1315,8 +1314,7 @@ function SettingsPanelHeader({ tab, action }: { tab: SettingsTab; action?: React
 }
 
 export function SettingsModal() {
-  const { open, setOpen, targetTab, clearTarget } = useSettingsModal();
-  const { state: tutorialState } = useTutorialContext();
+  const { open, setOpen, targetTab, clearTarget, guided } = useSettingsModal();
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "admin";
   const isPhone = useIsPhone();
@@ -1353,11 +1351,19 @@ export function SettingsModal() {
     wasOpen.current = open;
   }, [open]);
   return (
-    <Dialog open={open} onOpenChange={setOpen} modal={!tutorialState.isVisible}>
+    // The setup frames a setting here from its own card over the page, so
+    // while it guides, the modal is left to the setup's dim and its buttons.
+    <Dialog open={open} onOpenChange={setOpen} modal={!guided}>
       <DialogContent
         data-settings-text-buttons
         aria-describedby={undefined}
+        onOpenAutoFocus={guided ? (e) => e.preventDefault() : undefined}
+        onInteractOutside={guided ? (e) => e.preventDefault() : undefined}
         onEscapeKeyDown={(e) => {
+          if (guided) {
+            e.preventDefault();
+            return;
+          }
           // Escape leaves full screen before it closes settings.
           if (expanded) {
             e.preventDefault();
@@ -1389,7 +1395,6 @@ export function SettingsModal() {
         >
           <TabsList
             aria-label={msg("settings.title")}
-            data-tutorial="settings-navigation"
             className="relative flex h-auto w-full shrink-0 items-stretch justify-start gap-1 overflow-x-auto rounded-none border-0 border-b border-border/40 bg-transparent px-3 pb-3 pt-2 shadow-none no-scrollbar max-md:flex-row! md:w-[220px] md:overflow-x-visible md:overflow-y-auto md:border-b-0 md:border-e"
           >
             {SETTINGS_GROUPS.map((group) => (
@@ -1458,13 +1463,13 @@ export function SettingsModal() {
               <TabsContent value="agent">
                 <AgentTab />
               </TabsContent>
-              <TabsContent value="account" data-tutorial="settings-account">
+              <TabsContent value="account">
                 <AccountTab />
               </TabsContent>
               <TabsContent value="security">
                 <SecurityTab />
               </TabsContent>
-              <TabsContent value="privacy" data-tutorial="settings-privacy">
+              <TabsContent value="privacy">
                 <PrivacyTab />
               </TabsContent>
               <TabsContent value="billing">
@@ -1473,7 +1478,7 @@ export function SettingsModal() {
               <TabsContent value="usage">
                 <UsageTab />
               </TabsContent>
-              <TabsContent value="providers" data-tutorial="settings-providers">
+              <TabsContent value="providers">
                 <ByokKeysSection />
               </TabsContent>
               <TabsContent value="connectors">

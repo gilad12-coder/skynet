@@ -29,7 +29,6 @@ import { tip } from "@/shared/lib/tooltips";
 import { getDatasetRows } from "@/shared/lib/api";
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
 import type { CatalogModel, ModelConfig } from "@/shared/types/api";
-import { registerTutorialHook, registerTutorialQuery } from "@/features/tutorial";
 import { ModelConfigModal, useRecentModelConfigs } from "@/features/submit";
 import { DatasetPickerDialog } from "@/features/datasets";
 import { ModelChip } from "@/shared/ui/model-chip";
@@ -146,8 +145,6 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState(1);
 
-  // The guided tour's fake rows; cleared when the tour exits.
-  const [demoData, setDemoData] = useState(false);
   const [parsedRows, setParsedRows] = useState<DataRow[]>([]);
   const [parsedCols, setParsedCols] = useState<string[]>([]);
   const [inputCols, setInputCols] = useState<string[]>([]);
@@ -210,49 +207,6 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
     { id: "cat2", label: msg("auto.features.tagger.components.taggersetup.literal.12") },
   ]);
 
-  // Tutorial hooks — let the guided tour inject demo data and navigate steps
-  useEffect(
-    () =>
-      registerTutorialHook("setTaggerStep", (s: number) => {
-        setDirection(s > step ? 1 : -1);
-        setStep(s);
-      }),
-    [step],
-  );
-  useEffect(
-    () =>
-      registerTutorialHook("setTaggerDemoData", (data) => {
-        setDemoData(true);
-        setLibraryName(null);
-        setSynthetic(false);
-        setParsedRows(data.rows as DataRow[]);
-        setParsedCols(data.cols);
-        setInputCols(Array.isArray(data.textCol) ? data.textCol : [data.textCol]);
-      }),
-    [],
-  );
-  useEffect(
-    () => registerTutorialQuery("hasTaggerData", () => parsedRows.length > 0),
-    [parsedRows],
-  );
-  useEffect(
-    () => registerTutorialQuery("taggerAssistAvailable", () => assistAvailable),
-    [assistAvailable],
-  );
-  // Finishing or leaving the guide must not strand its fake rows in a real
-  // setup, one click from starting a (possibly paid) run on them.
-  useEffect(() => {
-    const onExit = () => {
-      if (!demoData) return;
-      setDemoData(false);
-      setParsedRows([]);
-      setParsedCols([]);
-      setInputCols([]);
-    };
-    window.addEventListener("tutorial-exited", onExit);
-    return () => window.removeEventListener("tutorial-exited", onExit);
-  }, [demoData]);
-
   // Deep link from the dataset editor ("Tag with AI"): /tagger?dataset={id}
   // loads the library dataset by reference; the saved column roles pre-select
   // the input columns (a tagger-saved dataset marks its own label/provenance
@@ -264,7 +218,6 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
       const detail = await getDatasetRows(datasetId);
       setParsedRows(detail.rows as DataRow[]);
       setParsedCols(detail.columns);
-      setDemoData(false);
       setSynthetic(false);
       setLibraryName(name || msg("tagger.setup.library_fallback_name"));
       const roles = detail.column_schema?.column_roles ?? {};
@@ -424,7 +377,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   };
 
   const steps = [
-    <Card key="data" data-tutorial="tagger-data">
+    <Card key="data">
       <CardHeader>
         <CardTitle className="text-lg">{msg("tagger.setup.data_title")}</CardTitle>
       </CardHeader>
@@ -487,7 +440,6 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
                   return;
                 }
                 setError(null);
-                setDemoData(false);
                 setLibraryName(null);
                 setParsedRows([]);
                 setParsedCols([]);
@@ -553,7 +505,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   // The manual task step: pick the answer style, then define it inline —
   // one decision surface instead of the old separate mode + settings steps.
   const taskCard = (
-    <Card key="task" data-tutorial={assistAvailable ? undefined : "tagger-modes"}>
+    <Card key="task">
       <CardHeader>
         <CardTitle className="text-lg">
           <HelpTip text={tip("tagger.mode")}>
@@ -674,7 +626,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   );
   if (assistAvailable) {
     steps.push(
-      <Card key="assist" data-tutorial="tagger-modes">
+      <Card key="assist">
         <CardHeader>
           <CardTitle className="text-lg">{msg("tagger.assist.setup.title")}</CardTitle>
           <CardDescription>{msg("tagger.assist.setup.description")}</CardDescription>
@@ -746,10 +698,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   const NextIcon = rtl ? CaretLeft : CaretRight;
 
   return (
-    <div
-      className="mx-auto max-w-2xl space-y-4 md:space-y-6 pb-6 md:pb-8 md:-mt-4"
-      data-tutorial="tagger-setup"
-    >
+    <div className="mx-auto max-w-2xl space-y-4 md:space-y-6 pb-6 md:pb-8 md:-mt-4">
       <ModelConfigModal
         open={modelDialogOpen}
         onOpenChange={setModelDialogOpen}

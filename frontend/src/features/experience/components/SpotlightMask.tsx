@@ -47,13 +47,13 @@ export function SpotlightMask({
     <motion.svg
       aria-hidden="true"
       className="pointer-events-auto absolute inset-0 h-full w-full"
-      data-tutorial-spotlight="true"
+     
       initial={prefersReducedMotion ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: prefersReducedMotion ? 0 : 0.18 }}
     >
       <defs>
-        <mask id="tutorial-spotlight-mask">
+        <mask id="setup-spotlight-mask">
           <rect x="0" y="0" width="100%" height="100%" fill="white" />
           <motion.rect
             animate={{ x, y, width: w, height: h, rx: borderRadius }}
@@ -70,7 +70,7 @@ export function SpotlightMask({
         width="100%"
         height="100%"
         fill="rgba(28,22,18,0.56)"
-        mask="url(#tutorial-spotlight-mask)"
+        mask="url(#setup-spotlight-mask)"
       />
 
       <motion.rect

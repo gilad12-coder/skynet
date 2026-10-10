@@ -199,7 +199,6 @@ export function PipelineStages({
   isActive,
   isFailed,
   skippedStages = [],
-  dataTutorial,
   hintKey,
 }: {
   /** The run's stages in order, with the algorithm behind each. */
@@ -212,7 +211,6 @@ export function PipelineStages({
   isFailed: boolean;
   /** Stages the run went past without executing (no test split, no starting point). */
   skippedStages?: readonly PipelineStage[];
-  dataTutorial?: string;
   /** Run-shape hint key: records how the stages render, for the next loading skeleton. */
   hintKey?: string;
 }) {
@@ -270,7 +268,7 @@ export function PipelineStages({
   // the component's own width, so the first paint already has the right
   // orientation (a ResizeObserver flip shifted the page on phones).
   return (
-    <div className="@container" data-tutorial={dataTutorial} data-stage-tracker="">
+    <div className="@container" data-stage-tracker="">
       <div className="relative flex flex-col @min-[600px]:hidden">
         <div
           className="absolute bottom-[22px] top-[22px] w-[2px] rounded-full bg-border/60"

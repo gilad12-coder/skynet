@@ -280,10 +280,7 @@ export function OptimizationDetailSkeleton({
           </Ghost>
         </div>
       )}
-      <div
-        className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5"
-        data-tutorial="detail-header-skeleton"
-      >
+      <div className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
           <div className="min-w-0 space-y-2 sm:flex-1">
             <div className="flex flex-col items-start gap-1.5">

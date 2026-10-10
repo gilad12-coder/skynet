@@ -277,7 +277,6 @@ export function ConfigCarousel({
       animate={{ opacity: 1, y: 0 }}
       transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.3 }}
       className="w-full overflow-hidden rounded-2xl border border-border bg-card/80 shadow-lg backdrop-blur-xl"
-      data-tutorial="config-summary"
       role="region"
       aria-label={currentSlide.label}
       tabIndex={0}

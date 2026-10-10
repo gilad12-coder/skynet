@@ -11,7 +11,6 @@
   "app.shell.search.kw.tagging": "etiquetado etiquetas asistido por IA etiquetado automático modelo predeterminado tagging labels autotag model",
   "app.shell.search.kw.usage": "uso gasto costo dólares gastados tokens ejecuciones por modelo actividad usage spend cost tokens",
   "app.shell.search.kw.wizard": "optimización asistente generación de código conjunto de datos división registro de paquetes modelos optimization wizard split package registry pip models",
-  "auto.features.tutorial.components.concepts.guide.literal.140": "Para un solo módulo, signature_code declara las entradas y salidas de la tarea. Un flujo de trabajo almacena ese contrato en los nodos de su módulo. column_mapping conecta cada campo de firma con la columna del conjunto de datos coincidente.",
   "common.empty": "—",
   "optimizations.detail.title": "Optimization Details",
   "optimizations.duration.lt_0_1s": "<0.1s",

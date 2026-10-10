@@ -15,7 +15,6 @@ import {
   ToastContainer,
 } from "@/shared/providers";
 import { SplashScreen } from "@/shared/layout/splash-screen";
-import { TutorialOverlay, TutorialProvider } from "@/features/tutorial";
 import { ExperienceProvider } from "@/features/experience";
 import { UserPrefsProvider, SettingsModalProvider, SettingsModal } from "@/features/settings";
 import { StorageQuotaModalHost } from "@/features/storage";
@@ -38,9 +37,10 @@ import { buildActiveCatalog } from "@/shared/lib/messages.server";
 import { getSiteUrl } from "@/shared/lib/site-config";
 import { auth } from "@/shared/lib/auth";
 import "@fontsource-variable/heebo/index.css";
-import "@fontsource-variable/geist/index.css";
+import "@fontsource-variable/onest/index.css";
+import "@fontsource-variable/bricolage-grotesque/opsz.css";
 import "@fontsource-variable/jetbrains-mono/index.css";
-// Script-matched faces for locales Geist/Heebo don't cover. Each ships
+// Script-matched faces for locales Onest/Heebo don't cover. Each ships
 // unicode-range subsets, so a font's glyphs download only when that script is
 // actually on screen — an English visitor never fetches the CJK/Arabic bytes.
 import "@fontsource-variable/noto-sans-arabic/index.css";
@@ -163,12 +163,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // <head> gets emitted twice (literal + React's resource hoist). URLs are the
   // stable public/ copies the globals.css overrides point at; crossOrigin is
   // required since fonts fetch in CORS mode. JetBrains Mono stays non-preloaded.
-  // Geist sits ahead of Heebo in --font-ui, so Heebo's Latin subset never paints
+  // Onest sits ahead of Heebo in --font-ui, so Heebo's Latin subset never paints
   // and its Hebrew subset only paints on Hebrew pages; preloading either
   // elsewhere wastes bandwidth and trips Chrome's unused-preload warning.
   const fontPreload = { as: "font", type: "font/woff2", crossOrigin: "anonymous" } as const;
   if (locale === "he") preload("/fonts/heebo-hebrew-wght-normal.woff2", fontPreload);
-  preload("/fonts/geist-latin-wght-normal.woff2", fontPreload);
+  preload("/fonts/onest-latin-wght-normal.woff2", fontPreload);
+  preload("/fonts/bricolage-grotesque-latin-opsz-normal.woff2", fontPreload);
   const runtimeEnv = getServerRuntimeEnv();
   // First-paint guess for the phone shell; the client re-derives it from the
   // viewport after mount (see DeviceClassProvider).
@@ -237,16 +238,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                         <AppSkeletonTheme>
                           <SplashScreen />
                           <ExperienceProvider>
-                            <TutorialProvider>
-                              <SettingsModalProvider>
-                                <AppShell>{children}</AppShell>
-                                <SettingsModal />
-                                {/* Inside SettingsModalProvider: its CTA opens the
-                                  wallet settings tab now that /upgrade is gone. */}
-                                <InsufficientFundsModalHost />
-                              </SettingsModalProvider>
-                              <TutorialOverlay />
-                            </TutorialProvider>
+                            <SettingsModalProvider>
+                              <AppShell>{children}</AppShell>
+                              <SettingsModal />
+                              {/* Inside SettingsModalProvider: its CTA opens the
+                                wallet settings tab now that /upgrade is gone. */}
+                              <InsufficientFundsModalHost />
+                            </SettingsModalProvider>
                           </ExperienceProvider>
                         </AppSkeletonTheme>
                       </TooltipProvider>

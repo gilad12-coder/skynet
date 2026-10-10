@@ -609,7 +609,6 @@ export function Sidebar() {
         // bubbling up from descendant width animations (e.g. the storage bar).
         if (e.target === e.currentTarget && e.propertyName === "width") setSnapping(false);
       }}
-      data-tutorial="sidebar-full"
     >
       {/* Drag-to-resize grip on the rail's inline-end edge (desktop only — the
           mobile drawer isn't resizable). Also the collapse control: dragging it
@@ -636,7 +635,6 @@ export function Sidebar() {
           className={cn("flex flex-col gap-1 pb-3 pt-3", isCollapsed ? "px-2" : "px-3")}
           role="navigation"
           aria-label={msg("auto.features.sidebar.components.sidebar.literal.7")}
-          data-tutorial="sidebar-nav"
         >
           {NAV_ITEMS.map((item) => (
             <NavItem
@@ -654,7 +652,7 @@ export function Sidebar() {
               badge={
                 item.href === "/" && renderedTab === "mine" && activeCount > 0 ? activeCount : null
               }
-              tutorialId={item.href === "/datasets" ? "sidebar-data" : undefined}
+              setupAnchor={item.href === "/submit" ? "new-optimization" : undefined}
               resume={
                 item.href === "/submit"
                   ? { kind: "optimization", detailBase: "/optimizations" }
@@ -723,6 +721,7 @@ export function Sidebar() {
             from the same fetch — so hide rather than unmount. */}
         <div
           className={cn("flex-1 overflow-hidden flex flex-col min-h-0", isCollapsed && "hidden")}
+          data-setup="runs"
         >
           <div ref={listRef} className="flex-1 overflow-y-auto px-3 pt-1 pb-2 no-scrollbar">
             <AnimatePresence mode="wait" initial={false}>
@@ -796,7 +795,10 @@ export function Sidebar() {
 
         <div className="border-t border-sidebar-border/60">
           <StorageMeter collapsed={isCollapsed} />
-          <div className={cn("py-2", isCollapsed ? "flex justify-center px-2" : "px-2")}>
+          <div
+            className={cn("py-2", isCollapsed ? "flex justify-center px-2" : "px-2")}
+            data-setup="account"
+          >
             <AccountMenu collapsed={isCollapsed} />
           </div>
         </div>
@@ -865,7 +867,7 @@ function NavItem({
   badge,
   collapsed,
   tooltipSide,
-  tutorialId,
+  setupAnchor,
   resume,
 }: {
   href: string;
@@ -877,8 +879,8 @@ function NavItem({
   collapsed: boolean;
   /** Which side the collapsed tooltip opens toward (content-ward). */
   tooltipSide: "left" | "right";
-  /** ``data-tutorial`` anchor for entries the tutorial spotlights. */
-  tutorialId?: string;
+  /** ``data-setup`` anchor for the entry a first-login setup stop points at. */
+  setupAnchor?: string;
   resume?: { kind: "tagger" | "optimization"; detailBase: string };
 }) {
   const router = useRouter();
@@ -904,7 +906,7 @@ function NavItem({
           <Link
             href={href}
             onClick={onClick}
-            {...(tutorialId ? { "data-tutorial": tutorialId } : {})}
+            data-setup={setupAnchor}
             aria-label={label}
             aria-current={active ? "page" : undefined}
             className={cn(
@@ -932,7 +934,7 @@ function NavItem({
     <Link
       href={href}
       onClick={onClick}
-      {...(tutorialId ? { "data-tutorial": tutorialId } : {})}
+      data-setup={setupAnchor}
       className={cn(
         "group relative flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 lg:min-h-0",
         active

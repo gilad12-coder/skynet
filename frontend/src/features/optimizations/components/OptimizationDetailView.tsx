@@ -52,22 +52,6 @@ import {
   STORAGE_CHANGED_EVENT,
 } from "@/shared/lib/api";
 import type { ServeInfoResponse, WorkflowNodeTrace, WorkflowSpec } from "@/shared/types/api";
-// Leaf import on purpose — the tutorial barrel deliberately does not re-export
-// the demo fixtures (see features/tutorial/index.ts).
-// eslint-disable-next-line no-restricted-imports -- deliberate leaf import; see above
-import {
-  DEMO_OPTIMIZATION_ID,
-  DEMO_GRID_OPTIMIZATION_ID,
-  DEMO_BLACKBOX_OPTIMIZATION_ID,
-  DEMO_TRAJECTORY_PREVIEW_LAYOUT,
-  buildDemoOptimizationPayload,
-  buildGridDemoJob,
-  buildBlackboxDemoJob,
-  buildBlackboxDemoPayload,
-  finishDemoSimulation,
-  resetDemoSimulation,
-  startDemoSimulation,
-} from "@/features/tutorial/lib/demo-data";
 import { OptimizationDetailSkeleton } from "./OptimizationDetailSkeleton";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { formatBytes } from "@/shared/lib/formatters";
@@ -78,7 +62,6 @@ import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { ACTIVE_STATUSES, TERMINAL_STATUSES } from "@/shared/constants/job-status";
 import { useRunLogStream } from "../hooks/use-run-log-stream";
 import { QUOTA_FULL_EVENT, maxLogId, mergeLiveLogs, pruneLiveLogs } from "../lib/run-log-merge";
-import { registerTutorialHook } from "@/features/tutorial";
 import { detailTabGate, useExperienceLevel } from "@/features/experience";
 import type {
   OptimizationLogEntry,
@@ -361,22 +344,16 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const surfaceLevel = useExperienceLevel();
   const levelTabGate = detailTabGate(surfaceLevel);
   const linkedDetailTab = requestedDetailTab(searchParams.get("tab"));
-  // Expose for tutorial via the typed bridge (features/tutorial/lib/bridge.ts).
-  useEffect(() => registerTutorialHook("setDetailTab", setDetailTab), []);
 
-  const isDemoMode = id === DEMO_OPTIMIZATION_ID;
-  const isGridDemoMode = id === DEMO_GRID_OPTIMIZATION_ID;
-  const isBlackboxDemoMode = id === DEMO_BLACKBOX_OPTIMIZATION_ID;
-  const isAnyDemoMode = isDemoMode || isGridDemoMode || isBlackboxDemoMode;
   // Public read-only share view: seed from props; never call authed endpoints.
-  const skipNetwork = isAnyDemoMode || isShare;
+  const skipNetwork = isShare;
 
   // The NextAuth session resolves asynchronously on the client. Without this
   // gate the first getJob() fires before setApiAuthToken() runs, returns 401,
   // and flashes the "not found" UI until SSE/poll refetches a few seconds
   // later with the token now in place.
   const { status: sessionStatus } = useSession();
-  const authReady = isAnyDemoMode || isShare || sessionStatus === "authenticated";
+  const authReady = isShare || sessionStatus === "authenticated";
 
   const [job, setJob] = useState<OptimizationStatusResponse | null>(null);
   const [payload, setPayload] = useState<OptimizationPayloadResponse | null>(null);
@@ -387,7 +364,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
   // Stamp this run as recent only while it's actually in progress, so the
   // sidebar's Optimize button resumes ongoing work — never a finished run the
-  // user merely opened to look at. Share/demo views aren't the caller's to resume.
+  // user merely opened to look at. Share views aren't the caller's to resume.
   useEffect(() => {
     if (skipNetwork || !id || !job || !ACTIVE_STATUSES.has(job.status)) return;
     markRecentSession("optimization", id);
@@ -395,64 +372,20 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   }, [id, skipNetwork, job?.status]);
   // Funnel milestone: the user has seen a finished run's results. Once per
   // run per mount — the poll re-renders, and a run that finishes while open
-  // counts the moment it flips to success. Demo runs are excluded.
+  // counts the moment it flips to success.
   const resultsViewedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!id || isAnyDemoMode || job?.status !== "success" || resultsViewedFor.current === id)
-      return;
+    if (!id || job?.status !== "success" || resultsViewedFor.current === id) return;
     resultsViewedFor.current = id;
     track(TelemetryEvent.ResultsViewed, {
       optimization_type: job.optimization_type,
       shared: isShare,
     });
-  }, [id, isAnyDemoMode, isShare, job?.status, job?.optimization_type]);
+  }, [id, isShare, job?.status, job?.optimization_type]);
   // Re-run mints a brand-new run per call, so guard against a double-click
   // firing two retries (and creating two duplicate runs).
   const [resuming, setResuming] = useState(false);
   const [pausing, setPausing] = useState(false);
-
-  // Bump to replay the demo optimization simulation. The deep-dive tour
-  // triggers this when reaching the trajectory step so users watch the tree
-  // grow live instead of seeing the already-completed final state.
-  const [demoReplayKey, setDemoReplayKey] = useState(0);
-
-  useEffect(
-    () =>
-      registerTutorialHook("replayDemoSimulation", () => {
-        resetDemoSimulation();
-        setDemoReplayKey((k) => k + 1);
-      }),
-    [],
-  );
-  // Re-running the simulation effect clears the pending replay timers, and a
-  // completed simulation starts straight at the finished run.
-  useEffect(
-    () =>
-      registerTutorialHook("finishDemoSimulation", () => {
-        if (finishDemoSimulation()) setDemoReplayKey((k) => k + 1);
-      }),
-    [],
-  );
-
-  useEffect(() => {
-    if (!isDemoMode) return;
-    setPayload(buildDemoOptimizationPayload());
-    const fromTrajectory = demoReplayKey > 0;
-    return startDemoSimulation({ setJob: (fn) => setJob(fn), setLoading }, { fromTrajectory });
-  }, [isDemoMode, demoReplayKey]);
-
-  useEffect(() => {
-    if (!isGridDemoMode) return;
-    setJob(buildGridDemoJob());
-    setLoading(false);
-  }, [isGridDemoMode]);
-
-  useEffect(() => {
-    if (!isBlackboxDemoMode) return;
-    setPayload(buildBlackboxDemoPayload());
-    setJob(buildBlackboxDemoJob());
-    setLoading(false);
-  }, [isBlackboxDemoMode]);
 
   // Seed the read-only share view from the public composite; no fetching.
   useEffect(() => {
@@ -618,7 +551,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     getOptimizationPayload(id)
       .then(setPayload)
       .catch(() => {});
-  }, [id, isAnyDemoMode, authReady]);
+  }, [id, skipNetwork, authReady]);
 
   useEffect(() => {
     jobRef.current = job;
@@ -647,7 +580,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     if (skipNetwork) return;
     if (!authReady) return;
     void fetchJob();
-  }, [id, isAnyDemoMode, authReady, fetchJob]);
+  }, [id, skipNetwork, authReady, fetchJob]);
 
   const API = getRuntimeEnv().apiUrl;
   useStreamWithPollFallback({
@@ -725,7 +658,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       window.removeEventListener("optimization-renamed", onRenamed);
       window.removeEventListener("optimization-updated", onUpdated);
     };
-  }, [id, fetchJob, isAnyDemoMode]);
+  }, [id, fetchJob, skipNetwork]);
 
   const handleCancel = async () => {
     if (skipNetwork) return;
@@ -776,34 +709,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     }
   };
 
-  useEffect(() => {
-    if (isDemoMode && job?.status === "success") {
-      setServeInfo({
-        optimization_id: id,
-        module_name: "Predict",
-        optimizer_name: "GEPA",
-        model_name: "gpt-4o-mini",
-        input_fields: ["email_text"],
-        output_fields: ["category"],
-        instructions: "Classify an email into a category: spam, important, or promotional.",
-        demo_count: 3,
-      });
-    }
-    if (isGridDemoMode && job?.status === "success") {
-      const best = job.grid_result?.best_pair;
-      setServeInfo({
-        optimization_id: id,
-        module_name: "ChainOfThought",
-        optimizer_name: "GEPA",
-        model_name: best?.generation_model ?? "openai/gpt-4o-mini",
-        input_fields: ["article"],
-        output_fields: ["summary"],
-        instructions: best?.program_artifact?.optimized_prompt?.instructions ?? "",
-        demo_count: 1,
-      });
-    }
-  }, [isDemoMode, isGridDemoMode, id, job?.status, job?.grid_result]);
-
   // Share view: seed the playground serve info from the public composite.
   // It is non-null only for viewer+ (the backend nulls it for anonymous view).
   useEffect(() => {
@@ -841,7 +746,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         setServeInfoError(null);
       })
       .catch(onFail);
-  }, [id, job?.status, job?.optimization_type, activePairIndex, isPairContext, isAnyDemoMode]);
+  }, [id, job?.status, job?.optimization_type, activePairIndex, isPairContext, skipNetwork]);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -1276,10 +1181,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     <div className="space-y-6 pb-12">
       {sharedTier && <RunAccessBanner tier={sharedTier} owner={sharedByOwner} />}
       <FadeIn delay={0.1}>
-        <div
-          className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5"
-          data-tutorial="detail-header"
-        >
+        <div className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
             <div className="space-y-2 min-w-0 sm:flex-1">
               <div className="flex flex-col items-start gap-1.5">
@@ -1358,10 +1260,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               </div>
             </div>
             {!isShare && (
-              <div
-                className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:shrink-0 sm:flex-nowrap sm:gap-2"
-                data-tutorial="result-actions"
-              >
+              <div className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:shrink-0 sm:flex-nowrap sm:gap-2">
                 {canManageShare && <ShareDialog optimizationId={job.optimization_id} />}
                 {!isPhone && (
                   <TooltipButton tooltip={msg("auto.app.optimizations.id.page.4")}>
@@ -1650,7 +1549,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             <TabsList
               variant="line"
               className="w-full justify-start gap-0 overflow-x-auto border-b border-border/50 pb-0 no-scrollbar"
-              data-tutorial="detail-tabs"
             >
               <TabsTrigger value="overview" className={tabCls}>
                 <TrendUp className="size-3.5" />
@@ -1708,12 +1606,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               )}
             </TabsList>
 
-            <TabsContent
-              ref={overviewRef}
-              value="overview"
-              className="space-y-6 mt-4"
-              data-tutorial={isPairContext ? "pair-detail" : "overview-tab"}
-            >
+            <TabsContent ref={overviewRef} value="overview" className="space-y-6 mt-4">
               <OverviewTab
                 job={effectiveJob ?? job}
                 isActive={isActive}
@@ -1723,9 +1616,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 onPairSelect={handlePairSelect}
                 onPairDeleted={handlePairDeleted}
                 payload={payload}
-                trajectoryPreviewLayout={
-                  isDemoMode && !isPairContext ? DEMO_TRAJECTORY_PREVIEW_LAYOUT : undefined
-                }
               />
             </TabsContent>
 
@@ -1775,7 +1665,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             )}
 
             {showBestVersionTab && job.blackbox_result && (
-              <TabsContent value="best" className="mt-4" data-tutorial="best-version">
+              <TabsContent value="best" className="mt-4">
                 <BestVersionTab
                   result={job.blackbox_result}
                   jobName={job.name}
@@ -1828,7 +1718,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             )}
 
             {!isPhone && (
-              <TabsContent value="config" className="mt-4" data-tutorial="config-section">
+              <TabsContent value="config" className="mt-4">
                 <ConfigTab job={job} payload={payload} activePair={activePair ?? undefined} />
               </TabsContent>
             )}

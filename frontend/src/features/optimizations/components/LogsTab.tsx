@@ -284,10 +284,7 @@ export function LogsTab({
   return (
     <div className="mt-4">
       <FadeIn>
-        <div
-          className="mb-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between"
-          data-tutorial="live-logs"
-        >
+        <div className="mb-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3 overflow-x-auto pb-0.5 no-scrollbar sm:overflow-visible sm:pb-0">
             <div className="shrink-0">
               <VerbosityControl active={activeVerbosity} onChange={setVerbosity} />

@@ -58,6 +58,7 @@ export function BalanceChip({ className }: { className?: string }) {
             p1: !available ? msg("billing.chip.unavailable") : formatCentsUsd(totalCents, locale),
           })}
           aria-busy={syncing || undefined}
+          data-setup="balance"
           className={cn(
             "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-semibold transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45",
             triggerTone,

@@ -120,7 +120,6 @@ function OverviewTabImpl({
   activePair,
   onPairSelect,
   onPairDeleted,
-  trajectoryPreviewLayout,
   payload,
 }: {
   job: OptimizationStatusResponse;
@@ -130,7 +129,6 @@ function OverviewTabImpl({
   activePair?: PairResult | null;
   onPairSelect: (pairIndex: number) => void;
   onPairDeleted?: (pairIndex: number) => void;
-  trajectoryPreviewLayout?: { width: number; height: number };
   // The submitted payload: a black-box run's recipe and cases tell the
   // candidate tree what a candidate is and whether per-case scores exist.
   payload?: OptimizationPayloadResponse | null;
@@ -418,7 +416,6 @@ function OverviewTabImpl({
             isActive={stagesActive}
             isFailed={stagesFailed}
             skippedStages={skippedStages}
-            dataTutorial={isPairContext ? undefined : "pipeline-stages"}
             hintKey={runShapeKey(job.optimization_id, isPairContext)}
           />
         </FadeIn>
@@ -490,7 +487,7 @@ function OverviewTabImpl({
         )}
 
       {renderRunBlocks && showScoreCards && (
-        <div data-tutorial="score-cards">
+        <div>
           <StaggerContainer className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <StaggerItem>
               <TiltCard className=" rounded-xl border border-border/50 bg-card p-6 text-center">
@@ -649,7 +646,6 @@ function OverviewTabImpl({
         <TrajectoryPanel
           job={job}
           pairIndex={pairIndex}
-          previewLayout={trajectoryPreviewLayout}
           toolSeverities={runResult?.program_artifact?.react_overlay?.tool_severities}
           blackbox={blackboxTrajectory}
         />
@@ -657,10 +653,7 @@ function OverviewTabImpl({
 
       {renderRunBlocks && scorePoints.length > 1 && (
         <FadeIn delay={0.1}>
-          <Card
-            className="relative overflow-hidden shadow-[0_1px_3px_rgba(28,22,18,0.04),inset_0_1px_0_rgba(255,255,255,0.5)]"
-            data-tutorial="score-chart"
-          >
+          <Card className="relative overflow-hidden shadow-[0_1px_3px_rgba(28,22,18,0.04),inset_0_1px_0_rgba(255,255,255,0.5)]">
             <div
               className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-[#C8A882]/40 to-transparent"
               aria-hidden="true"

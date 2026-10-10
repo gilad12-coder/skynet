@@ -53,9 +53,11 @@ import {
 import { TOUCH_FIELD } from "@/shared/ui/touch";
 import {
   NotificationCadenceFields,
+  SETUP_SETTING_EVENT,
   buildNotificationPatch,
   notificationsFromPrefs,
   type IntakeNotifications,
+  type SetupSettingDetail,
 } from "@/features/experience";
 
 /** Localize a data-action failure: semantic backend codes when present. */
@@ -226,6 +228,30 @@ export function PrivacyTab() {
     }
   }, []);
 
+  // The first-login setup asks these two from its own card while this tab is
+  // open behind it; its answer lands here and saves at once, since the setup
+  // closes the tab right after (a debounced cadence save would be dropped).
+  React.useEffect(() => {
+    const onSetupAnswer = (event: Event) => {
+      const detail = (event as CustomEvent<SetupSettingDetail>).detail;
+      if (detail.privacy) {
+        setModelPolicy(detail.privacy);
+        void saveModelPolicy(detail.privacy);
+        return;
+      }
+      const { cadence } = detail;
+      setNotificationPreferences((prev) => (prev ? { ...prev, cadence } : prev));
+      updateNotificationPreferences({ cadence })
+        .then((updated) => {
+          setNotificationPreferences(updated);
+          toast.success(msg("settings.notifications.saved"));
+        })
+        .catch((err) => toast.error(describeError(err, msg("settings.notifications.save_error"))));
+    };
+    window.addEventListener(SETUP_SETTING_EVENT, onSetupAnswer);
+    return () => window.removeEventListener(SETUP_SETTING_EVENT, onSetupAnswer);
+  }, [saveModelPolicy]);
+
   const modelPolicyDisabled = signedOut || modelPolicy === null || modelPolicySaving;
   const modelPolicyOptions: Array<SegmentedOption<ModelDataPolicy>> = (
     Object.keys(MODEL_POLICY_KEYS) as ModelDataPolicy[]
@@ -318,31 +344,35 @@ export function PrivacyTab() {
           />
         )}
 
-        <SettingsRow
-          icon={Envelope}
-          label={msg("settings.notifications.jobs.label")}
-          description={msg("settings.notifications.jobs.description")}
-        >
-          <Switch
-            checked={notificationPreferences?.job_updates_enabled ?? false}
-            disabled={signedOut || notificationPreferences === null || notificationSaving !== null}
-            onCheckedChange={(enabled) =>
-              void setNotificationPreference("job_updates_enabled", enabled)
-            }
-            aria-label={msg("settings.notifications.jobs.label")}
-          />
-        </SettingsRow>
-
-        {notificationPreferences?.job_updates_enabled && (
-          <div className="ps-7 pb-3">
-            <NotificationCadenceFields
-              idPrefix="settings-notify"
-              value={notificationsFromPrefs(notificationPreferences)}
-              onChange={setCadence}
-              disabled={signedOut || notificationSaving !== null}
+        <div data-setup="email-updates" className="space-y-1">
+          <SettingsRow
+            icon={Envelope}
+            label={msg("settings.notifications.jobs.label")}
+            description={msg("settings.notifications.jobs.description")}
+          >
+            <Switch
+              checked={notificationPreferences?.job_updates_enabled ?? false}
+              disabled={
+                signedOut || notificationPreferences === null || notificationSaving !== null
+              }
+              onCheckedChange={(enabled) =>
+                void setNotificationPreference("job_updates_enabled", enabled)
+              }
+              aria-label={msg("settings.notifications.jobs.label")}
             />
-          </div>
-        )}
+          </SettingsRow>
+
+          {notificationPreferences?.job_updates_enabled && (
+            <div className="ps-7 pb-3">
+              <NotificationCadenceFields
+                idPrefix="settings-notify"
+                value={notificationsFromPrefs(notificationPreferences)}
+                onChange={setCadence}
+                disabled={signedOut || notificationSaving !== null}
+              />
+            </div>
+          )}
+        </div>
 
         <SettingsRow
           icon={Envelope}
@@ -376,7 +406,7 @@ export function PrivacyTab() {
             }
           />
         )}
-        <div className="flex items-start gap-3 pt-3">
+        <div data-setup="model-privacy" className="flex items-start gap-3 pt-3">
           <ShieldCheck
             className="size-4 mt-0.5 text-muted-foreground shrink-0"
             aria-hidden="true"

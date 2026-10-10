@@ -125,7 +125,7 @@ function AnalyticsTabImpl({
   if ((analyticsData?.filtered_total ?? 0) === 0) {
     if (hasFilters) {
       return (
-        <div data-tutorial="analytics-content" className="space-y-6">
+        <div className="space-y-6">
           {toolbar}
           <AnalyticsEmpty variant="no-results" onClearFilters={clearAll} />
         </div>
@@ -139,7 +139,7 @@ function AnalyticsTabImpl({
   const noSuccessMessage = msg("dashboard.analytics.no_successful_runs");
 
   return (
-    <div data-tutorial="analytics-content" className="space-y-6">
+    <div className="space-y-6">
       {toolbar}
 
       {chartData.truncated && <InlineWarningRow message={msg("dashboard.analytics.truncated")} />}
@@ -155,10 +155,7 @@ function AnalyticsTabImpl({
           <StaggerContainer className="space-y-6" staggerDelay={0.03}>
             {kpis && (
               <StaggerItem>
-                <div
-                  data-tutorial="dashboard-stats"
-                  className="grid auto-rows-fr grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-5"
-                >
+                <div className="grid auto-rows-fr grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-5">
                   <KpiCard
                     label={labels[0]}
                     accent="default"

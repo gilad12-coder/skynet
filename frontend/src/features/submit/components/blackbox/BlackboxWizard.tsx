@@ -6,7 +6,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ValidationFrame, ValidationGate, ValidationPlan } from "../ValidationFrame";
 import { msg } from "@/shared/lib/messages";
 import { useBalance } from "@/features/billing";
-import { registerTutorialHook } from "@/features/tutorial";
 import { SubmitSplashOverlay } from "@/shared/ui/submit-splash-overlay";
 import { TERMS } from "@/shared/lib/terms";
 
@@ -50,15 +49,12 @@ export function BlackboxWizard({
   header,
   initialRecipe,
   folderId = null,
-  touring = false,
 }: {
   header?: ReactNode;
   initialRecipe: BlackboxRecipe;
   folderId?: string | null;
-  /** The guided tour drives the wizard with demo data: no paid assistant starts. */
-  touring?: boolean;
 }) {
-  const w = useBlackboxWizard(initialRecipe, folderId, touring);
+  const w = useBlackboxWizard(initialRecipe, folderId);
   const wallet = useBalance();
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
@@ -84,7 +80,6 @@ export function BlackboxWizard({
     },
     [evaluationSteps],
   );
-  useEffect(() => registerTutorialHook("showWizardSubstep", routeSubstep), [routeSubstep]);
   // A reported problem opens the substep that holds its field and lands focus there.
   useEffect(() => {
     if (!w.issue) return;

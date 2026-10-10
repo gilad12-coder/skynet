@@ -32,7 +32,6 @@ import { DATASET_UPLOAD_ACCEPT, parseDatasetFile } from "@/shared/lib/parse-data
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { cn } from "@/shared/lib/utils";
 import { ImportFromMenu } from "@/features/connectors";
-import { registerTutorialHook } from "@/features/tutorial";
 import { useDatasets } from "../hooks/use-datasets";
 import { DatasetCard } from "./DatasetCard";
 import { DatasetDetailDialog } from "./DatasetDetailDialog";
@@ -49,11 +48,7 @@ import { rememberLayout } from "@/shared/lib/layout-hint";
  * preview and the reverse link to every optimization that used the dataset.
  */
 export function DatasetsView() {
-  const { datasets: fetchedDatasets, loading, error, refetch } = useDatasets();
-  // Demo overlay the guided tour injects, so a new account still has a card to
-  // select; background refetches can never overwrite it.
-  const [demoDatasets, setDemoDatasets] = React.useState<DatasetSummary[] | null>(null);
-  const datasets = demoDatasets ?? fetchedDatasets;
+  const { datasets, loading, error, refetch } = useDatasets();
   const handleImported = (dataset: DatasetSummary, provider: ConnectorProvider) => {
     track(TelemetryEvent.DatasetCreated, { source: provider, rows: dataset.row_count });
     refetch();
@@ -74,21 +69,6 @@ export function DatasetsView() {
   const [renameOpen, setRenameOpen] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const deepLinkedRef = React.useRef(false);
-
-  React.useEffect(() => registerTutorialHook("setDemoDatasets", setDemoDatasets), []);
-  React.useEffect(
-    () => registerTutorialHook("setSelectedDatasetIds", (ids) => setSelectedIds(new Set(ids))),
-    [],
-  );
-  React.useEffect(() => {
-    const onExit = () => {
-      setDemoDatasets(null);
-      setSelectedIds(new Set());
-      setAnchorId(null);
-    };
-    window.addEventListener("tutorial-exited", onExit);
-    return () => window.removeEventListener("tutorial-exited", onExit);
-  }, []);
 
   // Drop selections that stopped resolving to an owned dataset (deleted in
   // another tab, or ownership changed), so the bar never counts ghosts.
@@ -211,14 +191,14 @@ export function DatasetsView() {
     [uploading, refetch],
   );
 
-  const datasetCount = loading || demoDatasets || error ? null : datasets.length;
+  const datasetCount = loading || error ? null : datasets.length;
   React.useEffect(() => {
     if (datasetCount != null) rememberLayout(DATASETS_LAYOUT_KEY, datasetCount);
   }, [datasetCount]);
 
-  if (loading && !demoDatasets) {
+  if (loading) {
     return (
-      <div className="pb-16" data-tutorial="datasets-library">
+      <div className="pb-16">
         <DataHubTabs active="datasets" />
         <DatasetsSkeleton />
       </div>
@@ -226,7 +206,7 @@ export function DatasetsView() {
   }
 
   return (
-    <div className="pb-16" data-tutorial="datasets-library">
+    <div className="pb-16">
       <DataHubTabs active="datasets" />
       <input
         ref={fileInputRef}
@@ -240,10 +220,7 @@ export function DatasetsView() {
       />
 
       {datasets.length > 0 && (
-        <div
-          className="flex flex-col gap-2.5 sm:flex-row sm:items-center"
-          data-tutorial="datasets-add"
-        >
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
           <SearchField
             value={search}
             onValueChange={setSearch}
@@ -287,7 +264,7 @@ export function DatasetsView() {
           dragging ? "border-[#3D2E22]/50 bg-[#3D2E22]/[0.03]" : "border-transparent",
         )}
       >
-        {error && !demoDatasets ? (
+        {error ? (
           <EmptyState icon={Database} title={msg("datasets.error")} />
         ) : datasets.length === 0 ? (
           <EmptyState
@@ -334,7 +311,6 @@ export function DatasetsView() {
           setAnchorId(null);
         }}
         onDelete={() => setBulkOpen(true)}
-        tutorialId="datasets-selection"
       >
         {soleSelected && (
           <>

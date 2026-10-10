@@ -260,10 +260,7 @@ export function JobsTab({
         )}
 
         {filteredItems.length > 0 && !isPhone && (
-          <div
-            className="overflow-x-auto rounded-2xl border border-border/40 bg-card/60"
-            data-tutorial="dashboard-table"
-          >
+          <div className="overflow-x-auto rounded-2xl border border-border/40 bg-card/60">
             <Table className={JOBS_TABLE_CLASS}>
               <TableHeader>
                 <TableRow>

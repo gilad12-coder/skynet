@@ -88,7 +88,7 @@ export function DashboardHeader({ stats }: DashboardHeaderProps) {
   // sidebar open and Split View leave too little room for five labelled
   // cells in one row, so they wrap to three columns there.
   return (
-    <div className="@container" data-tutorial="dashboard-kpis">
+    <div className="@container">
       <div className="grid grid-cols-2 items-stretch @min-[26rem]:grid-cols-3 @min-[40rem]:flex">
         {cells.map((cell, i) => (
           <Fragment key={cell.label}>

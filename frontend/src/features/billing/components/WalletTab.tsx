@@ -920,7 +920,7 @@ export function WalletTab() {
           }
         />
       )}
-      <section className="flex flex-col gap-5" data-tutorial="settings-billing">
+      <section className="flex flex-col gap-5">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="flex flex-col gap-1">
             <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">

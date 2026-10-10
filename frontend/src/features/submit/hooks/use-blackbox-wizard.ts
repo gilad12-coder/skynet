@@ -37,7 +37,6 @@ import {
   type DatasetSummary,
 } from "@/shared/lib/api";
 import { useWizardStateOptional } from "@/features/agent-panel";
-import { registerTutorialHook } from "@/features/tutorial";
 import { readPref } from "@/features/settings";
 import { defaultOpen, useExperienceLevel } from "@/features/experience";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
@@ -276,7 +275,6 @@ function parseOptionalNumber(value: string): number | undefined {
 export function useBlackboxWizard(
   initialRecipe: BlackboxRecipe,
   folderId: string | null = null,
-  touring = false,
 ) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -330,23 +328,6 @@ export function useBlackboxWizard(
 
   const [scorerKind, setScorerKind] = useState<"python" | "remote">("python");
   const [metricCode, setMetricCode] = useState(scorerTemplateFor(initialRecipe));
-  // The guided tour drives this wizard from plain-JS steps through the typed
-  // tutorial bridge. Its demo setup counts as hand-written, so the writing
-  // assistant never starts a paid pass over it.
-  useEffect(() => {
-    const unregister = [
-      registerTutorialHook("setWizardStep", setStep),
-      registerTutorialHook("setCodeAssistMode", setCodeAssistMode),
-      registerTutorialHook("setBlackboxDemo", (demo) => {
-        setSeedText(demo.seedText);
-        setSeedManuallyEdited(true);
-        setObjective(demo.objective);
-        setMetricCode(demo.metricCode);
-        setScorerManuallyEdited(true);
-      }),
-    ];
-    return () => unregister.forEach((fn) => fn());
-  }, []);
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
   const [scorerInstall, setScorerInstall] = useState("");
@@ -1212,10 +1193,8 @@ export function useBlackboxWizard(
     ],
   );
 
-  // The guided tour drives the wizard with demo data, so no paid assistant starts.
   const interviewPossible =
     !isRepo &&
-    !touring &&
     codeAssistMode === "auto" &&
     !cloned &&
     !seedManuallyEdited &&
@@ -1297,8 +1276,7 @@ export function useBlackboxWizard(
     interviewBrief: interview.confirmedBrief,
     blackbox: authoringContext,
     onBrief: agentSetBrief,
-    // The guided tour's demo repository must not start the agent.
-    kickoffEnabled: isRepo && !touring,
+    kickoffEnabled: isRepo,
     model: interview.model,
     reasoningEffort: interview.reasoningEffort,
   });

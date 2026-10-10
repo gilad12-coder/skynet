@@ -14,7 +14,6 @@ import {
   parseDraft,
   parseIntakeAnswers,
   prepareLanguageSwitch,
-  previousScreen,
   profileSoFar,
   readIntakeDraft,
   requestTurns,
@@ -93,9 +92,6 @@ test("the agenda is settings only: the language, then the account settings", () 
   // Wraps back to an earlier open question before the closing line.
   assert.equal(nextPhase(markAnswered([], ["billing", "privacy"]), "trust"), "language");
   assert.equal(nextPhase(INTAKE_PHASES, "trust"), null);
-  assert.equal(previousScreen("language"), null);
-  assert.equal(previousScreen("billing"), "language");
-  assert.equal(previousScreen("done"), "trust");
 });
 
 test("profileSoFar only reports what the user answered, in the interviewer's words", () => {

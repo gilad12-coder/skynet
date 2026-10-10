@@ -5,11 +5,8 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
-import { Popover as PopoverPrimitive } from "radix-ui";
-import { List, GraduationCap, Lightbulb } from "@/shared/ui/icons";
-import { ConceptsGuide, registerTutorialHook, TutorialMenu } from "@/features/tutorial";
+import { List } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/shared/ui/primitives/tooltip";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
 import { GlobalSearch } from "@/shared/layout/global-search";
 import { useLocale } from "@/shared/providers";
@@ -103,7 +100,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function ShellChrome({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
-  const [conceptsOpen, setConceptsOpen] = React.useState(false);
   const [isDesktop, setIsDesktop] = React.useState(false);
   const pathname = usePathname();
   const { locale } = useLocale();
@@ -115,10 +111,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     setSidebarOpen(false);
   }, [pathname]);
-
-  // Let the tutorial slide the sidebar drawer in/out so its spotlight steps
-  // have an on-screen target below 768px, where the sidebar is off-canvas.
-  React.useEffect(() => registerTutorialHook("setSidebarOpen", setSidebarOpen), []);
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -201,46 +193,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
               never more than a glance away; the chip's own popover carries the
               breakdown and the wallet path. */}
           <BalanceChip />
-          {/* Tutorials are grouped by workflow so this button opens a replayable
-              guide chooser rather than starting one long product tour. */}
-          <PopoverPrimitive.Root>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <PopoverPrimitive.Trigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground hover:text-foreground"
-                    aria-label={msg("app.shell.tour_aria")}
-                  >
-                    <GraduationCap className="size-4" />
-                  </Button>
-                </PopoverPrimitive.Trigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" dir={dir}>
-                {msg("app.shell.tour_tooltip")}
-              </TooltipContent>
-            </Tooltip>
-            <TutorialMenu />
-          </PopoverPrimitive.Root>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setConceptsOpen(true)}
-                className="text-muted-foreground hover:text-foreground"
-                aria-label={msg("app.shell.concepts_aria")}
-              >
-                <Lightbulb className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" dir={dir}>
-              {msg("app.shell.concepts_tooltip")}
-            </TooltipContent>
-          </Tooltip>
           <Button
             type="button"
             variant="ghost"
@@ -292,7 +244,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      {conceptsOpen && <ConceptsGuide open onClose={() => setConceptsOpen(false)} />}
     </div>
   );
 

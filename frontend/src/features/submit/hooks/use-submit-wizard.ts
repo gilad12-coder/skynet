@@ -26,7 +26,6 @@ import {
 } from "@/shared/lib/api";
 import type {
   ExecutionRuntime,
-  ModelCatalogResponse,
   ModelConfig,
   SplitFractions,
   ValidateCodeResponse,
@@ -39,8 +38,6 @@ import type {
 } from "@/shared/types/api";
 import { parseDatasetFile, type ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidationResult as EditorValidationResult } from "@/shared/ui/code-editor";
-import { registerTutorialHook } from "@/features/tutorial";
-import { getModelCatalog } from "@/shared/lib/model-catalog";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { useWizardStateOptional } from "@/features/agent-panel";
 import { readPref, useUserPrefs } from "@/features/settings";
@@ -113,13 +110,6 @@ const DEFAULT_TARGET_SCORE = "100";
 // 1x1 is GEPA's classic single-mutation sampling. Left at the default the
 // wizard sends nothing, so the server-wide GEPA_PXN_* settings still apply.
 const DEFAULT_PXN = "1";
-
-// The tour's model pick: the catalog's flagged default, else its first managed
-// model. BYOK-only models are skipped because the demo user may hold no key.
-function demoModelName(catalog: ModelCatalogResponse): string | null {
-  const managed = catalog.models.filter((m) => m.available && !m.byok_provider);
-  return (managed.find((m) => m.is_default) ?? managed[0])?.value ?? null;
-}
 
 export function prepareModelConfig(config: ModelConfig): ModelConfig {
   const { base_url: _baseUrl, ...fields } = config;
@@ -208,7 +198,6 @@ export function useSubmitWizard(folderId: string | null = null) {
     setModuleName(name);
     setModuleChosen(true);
   }, []);
-  const reopenModulePicker = useCallback(() => setModuleChosen(false), []);
 
   // Workflow graph spec — the canvas's single source of truth. `null` until
   // the user first picks the workflow module (the starter graph is seeded
@@ -419,8 +408,7 @@ export function useSubmitWizard(folderId: string | null = null) {
 
   // Disclosure state for the advanced wizard sections (Basics: optimization
   // type, Params: optimizer settings). Held here rather than in the step
-  // components so the deep-dive tour can open the sections through the
-  // bridge, and so a restored non-default value surfaces itself instead of
+  // components so a restored non-default value surfaces itself instead of
   // hiding behind a collapsed row. Opening is one-way: nothing auto-closes.
   // Expert starts both open; the level only changes what is shown first.
   const [optimizationTypeOpen, setOptimizationTypeOpen] = useState(() =>
@@ -489,53 +477,6 @@ export function useSubmitWizard(folderId: string | null = null) {
   const [cloneLoading, setCloneLoading] = useState(false);
   const [issue, setIssue] = useState<WizardIssue | null>(null);
   const cloneRan = useRef(false);
-
-  // Register setters with the typed tutorial bridge so the tutorial system
-  // can drive the wizard from plain-JS steps (see lib/tutorial-bridge.ts).
-  useEffect(() => {
-    const unregister = [
-      registerTutorialHook("setWizardStep", setStep),
-      registerTutorialHook("setParsedDataset", setParsedDataset),
-      registerTutorialHook("setColumnRoles", setColumnRoles),
-      registerTutorialHook("setDatasetFileName", setDatasetFileName),
-      registerTutorialHook("chooseModule", chooseModule),
-      registerTutorialHook("reopenModulePicker", reopenModulePicker),
-      registerTutorialHook("setCodeAssistMode", setCodeAssistMode),
-      registerTutorialHook("setModelConfigOpen", (open) => {
-        setEditingModel(
-          open
-            ? {
-                config: modelConfig,
-                onSave: setModelConfig,
-                label: msg("model.generation.label"),
-              }
-            : null,
-        );
-      }),
-      registerTutorialHook("setDemoModels", () => {
-        void getModelCatalog().then((c) => {
-          const name = demoModelName(c);
-          if (!name) return;
-          setModelConfig({ ...emptyModelConfig(), name });
-          setSecondModelConfig({ ...emptyModelConfig(), name });
-        });
-      }),
-      registerTutorialHook("setSignatureCode", (code) => {
-        setSignatureCode(code);
-        setSignatureManuallyEdited(true);
-      }),
-      registerTutorialHook("setMetricCode", (code) => {
-        setMetricCode(code);
-        setMetricManuallyEdited(true);
-      }),
-      registerTutorialHook("setOptimizerName", setOptimizerName),
-      registerTutorialHook("setAdvancedSectionsOpen", (open) => {
-        setOptimizationTypeOpen(open);
-        setOptimizerSettingsOpen(open);
-      }),
-    ];
-    return () => unregister.forEach((fn) => fn());
-  }, []);
 
   // Shared wizard-state bridge: the generalist agent writes wizard fields
   // into WizardStateContext. We mirror those agent writes into the local
@@ -2405,7 +2346,6 @@ export function useSubmitWizard(folderId: string | null = null) {
     setModuleName,
     moduleChosen,
     chooseModule,
-    reopenModulePicker,
     moduleSelectionRequired,
     isReact,
     isWorkflow,

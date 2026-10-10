@@ -100,7 +100,7 @@ export function ArtifactTab({
   // Downloads (pickle/program JSON/logs) are desk work; phones read and copy only.
 
   return (
-    <div className="space-y-6" data-tutorial="artifact-output">
+    <div className="space-y-6">
       <FadeIn>
         <p className="text-sm text-muted-foreground">{msg("optimization.artifact.description")}</p>
       </FadeIn>
