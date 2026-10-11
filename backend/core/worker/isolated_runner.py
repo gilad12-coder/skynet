@@ -15,6 +15,8 @@ from typing import Any
 
 from core.billing.signals import BudgetReached
 from core.constants import OPTIMIZATION_TYPE_BLACKBOX
+from core.models.unified import UNIFIED_PAYLOAD_KIND
+from core.service_gateway.optimization.blackbox import preflight as blackbox_preflight
 from core.service_gateway.optimization.blackbox.preflight import verify_anything_in_sandbox
 from core.service_gateway.optimization.blackbox.sandbox import (
     ContainedSubprocessRuntime,
@@ -76,9 +78,69 @@ def _export_checkpoints(directory: Path, events: EventQueue, seen: dict[str, str
             seen[relative] = digest
 
 
+def _forget_request(path: Path) -> None:
+    """Remove the request file once it is in memory, so no proposer can read the metric from disk.
+
+    The document carries ``workspace.metric_code`` (unified runs) or
+    ``scorer.metric_code`` (legacy black-box runs). Proposers run as
+    contained commands in this same box and could otherwise find it.
+
+    Args:
+        path: The request file the supervisor wrote.
+    """
+    with contextlib.suppress(OSError):
+        path.unlink()
+
+
+def _is_blackbox_family(payload: dict[str, Any]) -> bool:
+    """Tell whether a payload runs on the black-box engine layer.
+
+    Args:
+        payload: The guest request payload.
+
+    Returns:
+        True for legacy black-box runs and for unified runs.
+    """
+    return (
+        payload.get("_optimization_type") == OPTIMIZATION_TYPE_BLACKBOX
+        or payload.get("payload_kind") == UNIFIED_PAYLOAD_KIND
+    )
+
+
+def _run_preflight(payload: dict[str, Any], preflight: dict[str, Any], events: EventQueue) -> dict[str, Any]:
+    """Dispatch a setup check to the verifier that matches the payload kind.
+
+    Args:
+        payload: The guest request payload.
+        preflight: Scope and identity of the requested check.
+        events: Parent-owned event transport, for DSPy preview tokens.
+
+    Returns:
+        The verifier's result document.
+
+    Raises:
+        RuntimeError: When a black-box check did not enter its sandbox.
+    """
+    if payload.get("payload_kind") == UNIFIED_PAYLOAD_KIND:
+        return blackbox_preflight.verify_unified_in_sandbox(payload, preflight["scope"])
+    if payload.get("_optimization_type") == OPTIMIZATION_TYPE_BLACKBOX:
+        runtime = current_sandbox_runtime()
+        if runtime is None:
+            raise RuntimeError("Anything setup did not enter its selected sandbox.")
+        return verify_anything_in_sandbox(
+            payload,
+            scope=preflight["scope"],
+            identity=preflight["identity"],
+            runtime=runtime,
+        )
+    return run_dspy_preflight(payload, preflight, lambda token: events.put({"type": "preview_token", **token}))
+
+
 def main() -> None:
     """Load the scoped request and execute the normal service entry point."""
-    document = json.loads(Path(sys.argv[1]).read_text())
+    request_path = Path(sys.argv[1])
+    document = json.loads(request_path.read_text())
+    _forget_request(request_path)
     events = EventQueue(document["nonce"])
     if document.get("protocol") != SANDBOX_PROTOCOL:
         events.put({"type": "error", "error": INCOMPATIBLE_IMAGE_MESSAGE, "traceback": ""})
@@ -114,7 +176,7 @@ def main() -> None:
         thread.start()
     runtime_scope = (
         sandbox_runtime_context(ContainedSubprocessRuntime())
-        if document["payload"].get("_optimization_type") == OPTIMIZATION_TYPE_BLACKBOX
+        if _is_blackbox_family(document["payload"])
         else contextlib.nullcontext()
     )
     try:
@@ -123,22 +185,7 @@ def main() -> None:
                 result = run_interaction(document["payload"], interaction, events.put)
                 events.put({"type": "interaction_result", "result": result})
             elif preflight is not None:
-                if document["payload"].get("_optimization_type") == OPTIMIZATION_TYPE_BLACKBOX:
-                    runtime = current_sandbox_runtime()
-                    if runtime is None:
-                        raise RuntimeError("Anything setup did not enter its selected sandbox.")
-                    result = verify_anything_in_sandbox(
-                        document["payload"],
-                        scope=preflight["scope"],
-                        identity=preflight["identity"],
-                        runtime=runtime,
-                    )
-                else:
-                    result = run_dspy_preflight(
-                        document["payload"],
-                        preflight,
-                        lambda token: events.put({"type": "preview_token", **token}),
-                    )
+                result = _run_preflight(document["payload"], preflight, events)
                 events.put({"type": "preflight_result", "result": result})
             else:
                 run_service_in_subprocess(document["payload"], document["artifact_id"], events, "spawn")

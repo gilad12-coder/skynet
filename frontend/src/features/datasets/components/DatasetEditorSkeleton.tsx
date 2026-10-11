@@ -2,6 +2,14 @@
 
 import { useParams } from "next/navigation";
 import { AppSkeletonTheme, Skeleton } from "@/shared/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/primitives/table";
 import { hintedCount, useLayoutHint } from "@/shared/lib/layout-hint";
 
 /** Rows the editor shows per page. */
@@ -66,60 +74,58 @@ export function DatasetEditorSkeleton() {
           ))}
         </div>
 
-        <div className="overflow-x-auto rounded-2xl border border-border/40 bg-card/60">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-border/60 bg-muted/40">
-                <th className="w-12 px-2 py-2">
+        <div className="overflow-hidden rounded-2xl border border-border/40 bg-card/60">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-12">
                   <Skeleton width={10} height={10} containerClassName="flex leading-none" />
-                </th>
+                </TableHead>
                 {Array.from({ length: COLUMNS }).map((_, i) => (
-                  <th key={i} className="min-w-[10rem] px-1 py-1">
+                  <TableHead key={i} className="h-auto min-w-[10rem] px-1 py-1">
                     <div className={`flex h-[26px] items-center px-2 ${COARSE_44}`}>
                       <Skeleton height={10} width="55%" containerClassName="flex-1 leading-none" />
                     </div>
-                  </th>
+                  </TableHead>
                 ))}
-                <th className="w-40 px-2 py-1">
+                <TableHead className="h-auto w-40 py-1">
                   <div className={`flex h-8 items-center ${COARSE_44}`}>
                     <Skeleton height={10} width={80} containerClassName="flex leading-none" />
                   </div>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {Array.from({ length: ROWS }).map((_, row) => (
-                <tr key={row} className="border-b border-border/30 last:border-b-0">
-                  <td className="px-2 py-1">
+                <TableRow key={row}>
+                  <TableCell className="px-2 py-1">
                     <Skeleton width={12} height={10} containerClassName="flex leading-none" />
-                  </td>
+                  </TableCell>
                   {Array.from({ length: COLUMNS }).map((_, col) => (
-                    <td key={col} className="px-1 py-0.5 align-top">
+                    <TableCell key={col} className="px-1 py-0.5 align-top">
                       {/* The cell input's own box: border, px-2 py-1, one text-sm line. */}
-                      <div
-                        className="flex items-center rounded-md border border-transparent px-2 py-1 text-sm any-pointer-coarse:min-h-[44px]"
-                      >
+                      <div className="flex items-center rounded-md border border-transparent px-2 py-1 text-sm any-pointer-coarse:min-h-[44px]">
                         <Skeleton
                           width={`${45 + (((row + 1) * (col + 3) * 7) % 40)}%`}
                           containerClassName="flex-1"
                         />
                       </div>
-                    </td>
+                    </TableCell>
                   ))}
-                  <td />
-                </tr>
+                  <TableCell />
+                </TableRow>
               ))}
-            </tbody>
+            </TableBody>
             <tfoot>
-              <tr className="border-t border-border/40">
-                <td colSpan={COLUMNS + 2} className="p-1">
+              <TableRow className="border-t">
+                <TableCell colSpan={COLUMNS + 2} className="p-1">
                   <div className={`flex h-8 items-center px-3 ${COARSE_44}`}>
                     <Skeleton width={70} height={10} containerClassName="flex leading-none" />
                   </div>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             </tfoot>
-          </table>
+          </Table>
         </div>
 
         {layout?.pager && (

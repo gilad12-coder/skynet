@@ -9,7 +9,12 @@ the two sides cannot drift apart.
 
 Contract: ``python3 skynet_runner.py <call_dir>`` reads ``<call_dir>/input.json``::
 
-    {"code": "...", "candidate": ..., "case": ..., "gateway": {...} | null}
+    {"candidate": ..., "case": ..., "gateway": {...} | null}
+
+The scorer source is written once per box to ``skynet_scorer_code.txt`` next
+to the runner, never into a call's input, so the per-call files carry only
+candidates and cases. A legacy input that still holds ``"code"`` wins over
+that file.
 
 and writes ``<call_dir>/output.json``::
 
@@ -42,6 +47,7 @@ from pathlib import Path
 from typing import Any
 
 INPUT_FILE = "input.json"
+CODE_FILE = "skynet_scorer_code.txt"
 OUTPUT_FILE = "output.json"
 SCORER_FILENAME = "<scorer_code>"
 # Names the scorer namespace binds the model helper and the image wrapper to.
@@ -746,6 +752,8 @@ def run_call(payload: dict[str, Any]) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     """Run one scorer call from ``<call_dir>/input.json`` into ``<call_dir>/output.json``.
 
+    The scorer source comes from the box's code file unless the input carries it.
+
     Args:
         argv: Command-line arguments; ``sys.argv`` when unset.
 
@@ -758,6 +766,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     call_dir = Path(args[0])
     payload = json.loads((call_dir / INPUT_FILE).read_text(encoding="utf-8"))
+    if "code" not in payload:
+        code_path = Path(__file__).resolve().with_name(CODE_FILE)
+        payload["code"] = code_path.read_text(encoding="utf-8") if code_path.is_file() else ""
     result = run_call(payload)
     partial = call_dir / (OUTPUT_FILE + ".part")
     partial.write_text(json.dumps(result), encoding="utf-8")

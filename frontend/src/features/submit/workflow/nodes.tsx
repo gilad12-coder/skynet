@@ -61,30 +61,30 @@ const MODULE_STYLES = {
   predict: {
     icon: Sparkle,
     label: "LLM-Predict",
-    header: "bg-[#F9F3E4]",
-    accent: "text-[#A07C3B]",
-    border: "border-[#E5D8BC] hover:border-[#A07C3B]",
+    header: "bg-[#F9F3E4] dark:bg-[#3f3a2e]",
+    accent: "text-[#A07C3B] dark:text-[#deb776]",
+    border: "border-[#E5D8BC] dark:border-[#645b48] hover:border-[#A07C3B]",
   },
   cot: {
     icon: Brain,
     label: "LLM-CoT",
-    header: "bg-[#EDF1F8]",
-    accent: "text-[#4A6FA5]",
-    border: "border-[#CBD7E9] hover:border-[#4A6FA5]",
+    header: "bg-[#EDF1F8] dark:bg-[#363c48]",
+    accent: "text-[#4A6FA5] dark:text-[#97c0fb]",
+    border: "border-[#CBD7E9] dark:border-[#555d6a] hover:border-[#4A6FA5]",
   },
   react: {
     icon: Lightning,
     label: "LLM-ReAct",
-    header: "bg-[#EAF3F1]",
-    accent: "text-[#2F7A6E]",
-    border: "border-[#C4DDD7] hover:border-[#2F7A6E]",
+    header: "bg-[#EAF3F1] dark:bg-[#30403d]",
+    accent: "text-[#2F7A6E] dark:text-[#85cec0]",
+    border: "border-[#C4DDD7] dark:border-[#50615d] hover:border-[#2F7A6E]",
   },
   flex: {
     icon: FadersHorizontal,
     label: "LLM-Flex",
-    header: "bg-[#F1EEF7]",
-    accent: "text-[#7B5EA7]",
-    border: "border-[#D7CDE8] hover:border-[#7B5EA7]",
+    header: "bg-[#F1EEF7] dark:bg-[#3e3a46]",
+    accent: "text-[#7B5EA7] dark:text-[#caacfc]",
+    border: "border-[#D7CDE8] dark:border-[#615a6d] hover:border-[#7B5EA7]",
   },
 } as const;
 
@@ -126,8 +126,8 @@ function PortRow({ port, side, nodeId }: { port: PortInfo; side: "in" | "out"; n
         position={side === "in" ? Position.Left : Position.Right}
         id={port.name}
         className={cn(
-          "!size-5 !border-2 !border-[#FDFCFA] lg:!size-3",
-          isStr ? "!bg-[#3D2E22]" : "!bg-[#C8A882]",
+          "!size-5 !border-2 !border-[#FDFCFA] dark:!border-[#585347] lg:!size-3",
+          isStr ? "!bg-primary-fill" : "!bg-chart-3",
         )}
         aria-label={`${nodeId}.${port.name}`}
       />
@@ -147,25 +147,25 @@ function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
     <div
       className={cn(
         "wf-node-enter min-w-44 max-w-60 select-none rounded-xl border-[1.5px] bg-card text-card-foreground",
-        "shadow-[0_1px_3px_rgba(61,46,34,0.08)] transition-[box-shadow,border-color] duration-150",
+        "transition-[box-shadow,border-color] duration-150",
         selected
-          ? "border-[#3D2E22] shadow-[0_4px_16px_rgba(61,46,34,0.16)] ring-4 ring-[#3D2E22]/10"
+          ? "border-primary-fill ring-4 ring-primary/10"
           : cn(
-              moduleStyle?.border ?? "border-[#E2D8CA] hover:border-[#C8A882]",
-              "hover:shadow-[0_3px_10px_rgba(61,46,34,0.12)]",
+              moduleStyle?.border ?? "border-border hover:border-primary-fill",
+              "",
             ),
         trace?.status === "error" && "border-destructive",
-        pulse && "animate-pulse border-[#C8A882] ring-4 ring-[#C8A882]/40",
+        pulse && "animate-pulse border-primary-fill ring-4 ring-primary/40",
       )}
       data-node-kind={spec.kind}
     >
       <div
         className={cn(
           "flex items-center gap-1.5 rounded-t-[10px] border-b border-border/60 px-3 py-1.5",
-          moduleStyle?.header ?? (isAnchor ? "bg-[#F3EDE3]" : "bg-[#FAF8F5]"),
+          moduleStyle?.header ?? (isAnchor ? "bg-[#F3EDE3] dark:bg-[#433c30]" : "bg-background"),
         )}
       >
-        <Icon className={cn("size-3.5 shrink-0", moduleStyle?.accent ?? "text-[#3D2E22]")} />
+        <Icon className={cn("size-3.5 shrink-0", moduleStyle?.accent ?? "text-primary")} />
         <span className="truncate text-xs font-semibold text-foreground" dir="ltr">
           {displayName(spec)}
         </span>
@@ -194,7 +194,7 @@ function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
         <div className="flex items-center gap-2 border-t border-border/60 px-3 py-1">
           {hasIssues && (
             <span
-              className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-[#A3512B]"
+              className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-[#A3512B] dark:text-[#fea47d]"
               title={issues.join("\n")}
             >
               <Warning className="size-3" />
@@ -205,7 +205,7 @@ function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
             <span
               className={cn(
                 "ms-auto inline-flex items-center gap-1 text-[0.625rem] font-medium tabular-nums",
-                trace.status === "ok" ? "text-[#5A7247]" : "text-destructive",
+                trace.status === "ok" ? "text-[#5A7247] dark:text-[#adc899]" : "text-destructive",
               )}
               title={trace.error ?? undefined}
             >

@@ -131,6 +131,36 @@ class Settings(BaseSettings):
     smtp_starttls: bool = Field(
         default=True, alias="SMTP_STARTTLS", description="Upgrade the SMTP connection with STARTTLS."
     )
+    vapid_public_key: str | None = Field(
+        default=None,
+        alias="VAPID_PUBLIC_KEY",
+        description="Web Push VAPID public key (urlsafe base64, uncompressed P-256 point) browsers subscribe with. Unset turns the Chrome notification channel off.",
+    )
+    vapid_private_key: SecretStr | None = Field(
+        default=None,
+        alias="VAPID_PRIVATE_KEY",
+        description="Web Push VAPID private key (urlsafe base64 raw P-256 scalar, or a PEM) that signs push requests.",
+    )
+    vapid_subject: str | None = Field(
+        default=None,
+        alias="VAPID_SUBJECT",
+        description="VAPID contact claim, a mailto: or https: URL push services can reach the sender at. Unset falls back to APP_PUBLIC_URL.",
+    )
+    slack_client_id: str | None = Field(
+        default=None,
+        alias="SLACK_CLIENT_ID",
+        description="Client ID of the Skynet Slack app. Unset (or SLACK_CLIENT_SECRET / BYOK_VAULT_KEY unset) turns the Slack notification channel off.",
+    )
+    slack_client_secret: SecretStr | None = Field(
+        default=None,
+        alias="SLACK_CLIENT_SECRET",
+        description="Client secret of the Skynet Slack app, used to trade the OAuth code for the bot token.",
+    )
+    slack_redirect_url: str | None = Field(
+        default=None,
+        alias="SLACK_REDIRECT_URL",
+        description="Absolute URL of this backend's /notifications/slack/oauth/callback as registered on the Slack app. Unset derives it from the incoming request.",
+    )
     webauthn_rp_id: str | None = Field(
         default=None,
         alias="WEBAUTHN_RP_ID",

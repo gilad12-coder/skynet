@@ -174,7 +174,7 @@ export function ColumnHeader<K extends string>({
         <button
           type="button"
           onClick={() => onSort(sortKey)}
-          className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 hover:bg-accent/60 hover:text-foreground cursor-pointer"
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-accent/60 hover:text-foreground cursor-pointer"
           aria-label={formatMsg("shared.excel_filter.sort_by", { label })}
         >
           <span>{label}</span>
@@ -218,7 +218,7 @@ export function ColumnHeader<K extends string>({
       ) : null}
       {onResize && (
         <div
-          className="absolute top-0 bottom-0 w-[5px] cursor-col-resize end-0 z-10 after:absolute after:inset-y-2 after:start-[2px] after:w-px after:bg-border/40 hover:after:bg-primary/50 active:after:bg-primary/70 after:transition-colors"
+          className="absolute top-0 bottom-0 w-[5px] cursor-col-resize end-0 z-10 after:absolute after:inset-y-2 after:start-[2px] after:w-px after:bg-border/40 hover:after:bg-primary-fill/50 active:after:bg-primary-fill/70 after:transition-colors"
           onMouseDown={handleResizeStart}
           onDoubleClick={handleResizeDblClick}
         />
@@ -344,7 +344,7 @@ function FilterDropdown({
       // mounts on body, so it must re-enable its own pointer events, and the
       // modal-safe marker keeps the dialog from dismissing on clicks here.
       data-modal-safe-portal=""
-      className="pointer-events-auto fixed z-[9999] max-w-[min(90vw,320px)] w-full rounded-[22px] border border-border/70 bg-popover/95 p-2 shadow-[var(--shadow-card)] backdrop-blur-xl"
+      className="pointer-events-auto fixed z-[9999] max-w-[min(90vw,320px)] w-full rounded-[22px] border border-border/70 bg-popover/95 p-2 shadow-[var(--shadow-float)] backdrop-blur-xl"
       style={
         pos
           ? { top: pos.top, left: pos.left, minWidth: "clamp(180px, 25vw, 260px)" }

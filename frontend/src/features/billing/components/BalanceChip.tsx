@@ -16,7 +16,7 @@ import { formatCentsUsd } from "../lib/wallet";
  * Header balance chip — the spine of the billing UI.
  *
  * Sits inline-end beside the language switcher. Shows the total spendable balance
- * (free grant + purchased). Theming is calm by design: gold `#C8A882` marks a healthy balance and the
+ * (free grant + purchased). Theming is calm by design: the brand `primary` marks a healthy balance and the
  * primary "Add funds" affordance only; a low balance reads as quiet taupe, not
  * an alarm.
  */
@@ -47,7 +47,7 @@ export function BalanceChip({ className }: { className?: string }) {
       ? "border-border/70 text-foreground hover:bg-accent"
       : status === "low"
         ? "border-border/70 text-muted-foreground hover:bg-accent"
-        : "border-[#C8A882]/60 text-foreground hover:bg-[#C8A882]/10";
+        : "border-primary-fill bg-primary-fill text-primary-foreground hover:border-primary hover:bg-primary";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -58,8 +58,9 @@ export function BalanceChip({ className }: { className?: string }) {
             p1: !available ? msg("billing.chip.unavailable") : formatCentsUsd(totalCents, locale),
           })}
           aria-busy={syncing || undefined}
+          data-setup="balance"
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-semibold transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45",
+            "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-semibold transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
             triggerTone,
             className,
           )}
@@ -71,7 +72,7 @@ export function BalanceChip({ className }: { className?: string }) {
             </>
           ) : status === "empty" ? (
             <>
-              <Plus className="size-3.5 text-[#C8A882]" aria-hidden="true" />
+              <Plus className="size-3.5" aria-hidden="true" />
               <span>{msg("billing.chip.empty")}</span>
             </>
           ) : (
@@ -79,7 +80,7 @@ export function BalanceChip({ className }: { className?: string }) {
               <Coins
                 className={cn(
                   "size-3.5",
-                  status === "healthy" ? "text-[#C8A882]" : "text-muted-foreground",
+                  status === "healthy" ? "text-primary" : "text-muted-foreground",
                 )}
                 aria-hidden="true"
               />

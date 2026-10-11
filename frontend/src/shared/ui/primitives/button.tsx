@@ -18,12 +18,12 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary-hover",
+        default: "bg-primary-fill text-primary-foreground hover:bg-primary-hover",
         destructive:
-          "bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/20",
+          "bg-destructive text-white dark:text-primary-foreground hover:bg-destructive/90 focus-visible:ring-destructive/20",
         outline:
-          "border-input bg-background shadow-xs hover:bg-accent hover:text-accent-foreground",
-        secondary: "bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80",
+          "border-input bg-background hover:bg-accent hover:text-accent-foreground",
+        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "h-auto border-none px-0 py-0 text-primary underline-offset-4 hover:underline",
       },
@@ -54,6 +54,8 @@ type IconButtonSize = Extract<ButtonSize, `icon${string}`>;
 type ButtonProps = Omit<React.ComponentProps<"button">, "aria-label"> &
   Omit<ButtonVariantProps, "size"> & {
     asChild?: boolean;
+    /** Icon-size buttons show their aria-label as a tooltip; false skips it for self-evident icons. */
+    autoTooltip?: boolean;
   } & (
     | {
         size: IconButtonSize;
@@ -70,6 +72,7 @@ function Button({
   variant = "default",
   size = "default",
   asChild = false,
+  autoTooltip = true,
   "aria-label": ariaLabel,
   ...props
 }: ButtonProps) {
@@ -88,7 +91,7 @@ function Button({
     />
   );
 
-  if (typeof size !== "string" || !size.startsWith("icon") || hasExplicitTooltip) {
+  if (typeof size !== "string" || !size.startsWith("icon") || hasExplicitTooltip || !autoTooltip) {
     return button;
   }
 

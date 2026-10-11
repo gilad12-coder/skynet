@@ -32,7 +32,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/primitives/select";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import {
   getHuggingFaceSplits,
   importHuggingFaceDataset,
@@ -381,26 +380,22 @@ export function HuggingFaceImportDialog({
                 >
                   {repoId}
                 </span>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      asChild
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={msg("hf_import.view_on_hub")}
-                      className="shrink-0 text-muted-foreground hover:text-foreground"
-                    >
-                      <a
-                        href={`https://huggingface.co/datasets/${repoId}`}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                      >
-                        <ArrowUpRight className="size-4" />
-                      </a>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{msg("hf_import.view_on_hub")}</TooltipContent>
-                </Tooltip>
+                <Button
+                  asChild
+                  variant="ghost"
+                  size="icon-sm"
+                  autoTooltip={false}
+                  aria-label={msg("hf_import.view_on_hub")}
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                >
+                  <a
+                    href={`https://huggingface.co/datasets/${repoId}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                  >
+                    <ArrowUpRight className="size-4" />
+                  </a>
+                </Button>
               </div>
 
               {splitsLoading ? (

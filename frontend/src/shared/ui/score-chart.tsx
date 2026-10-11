@@ -11,8 +11,6 @@ import {
 } from "recharts";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { detectRenderKind, RENDER_KIND_LABEL } from "@/shared/lib/candidate-render";
-import { useLiteMode } from "@/features/settings";
-import { ChartTable } from "@/shared/charts/chart-table";
 import {
   CHART_TOOLTIP_CARD_CLASS,
   CHART_TOOLTIP_ROW_CLASS,
@@ -33,10 +31,6 @@ export type ScoreChartArtifact =
   | { kind: "text"; text: string };
 
 const PROMPT: ScoreChartArtifact = { kind: "prompt" };
-
-function formatScore(value: unknown): string {
-  return typeof value === "number" ? value.toFixed(1) : "—";
-}
 
 function artifactName(artifact: ScoreChartArtifact): string | null {
   if (artifact.kind === "file") return artifact.name;
@@ -99,29 +93,6 @@ export function ScoreChart({
   data: Array<{ trial: number; score: number; best: number }>;
   artifact?: ScoreChartArtifact;
 }) {
-  const lite = useLiteMode();
-  if (lite) {
-    return (
-      <ChartTable
-        rows={data}
-        columns={[
-          { key: "trial", label: axisLabel(artifact) },
-          {
-            key: "score",
-            label: msg("shared.score_chart.version_score"),
-            align: "end",
-            format: formatScore,
-          },
-          {
-            key: "best",
-            label: msg("shared.score_chart.best"),
-            align: "end",
-            format: formatScore,
-          },
-        ]}
-      />
-    );
-  }
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data} margin={{ top: 5, right: 10, left: 5, bottom: 18 }}>

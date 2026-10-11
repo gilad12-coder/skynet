@@ -100,13 +100,13 @@ export function ArtifactTab({
   // Downloads (pickle/program JSON/logs) are desk work; phones read and copy only.
 
   return (
-    <div className="space-y-6" data-tutorial="artifact-output">
+    <div className="space-y-6">
       <FadeIn>
         <p className="text-sm text-muted-foreground">{msg("optimization.artifact.description")}</p>
       </FadeIn>
 
       {hasExports && (
-        <div className="flex flex-col items-stretch gap-3 rounded-xl border border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10 p-4 shadow-[0_0_20px_rgba(var(--primary),0.06)] sm:flex-row sm:items-center sm:p-5">
+        <div className="flex flex-col items-stretch gap-3 rounded-xl border border-border/60 bg-card p-4 sm:flex-row sm:items-center sm:p-5">
           <p className="flex-1 text-sm font-medium">
             {activePair
               ? msg("auto.features.optimizations.components.pairdetailview.2")
@@ -136,9 +136,7 @@ export function ArtifactTab({
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2">
                   <Sparkle className="size-4" />
-                  <HelpTip text={tip("prompt.optimized")}>
-                    {msg("auto.features.optimizations.components.codetab.5")}
-                  </HelpTip>
+                  {msg("auto.features.optimizations.components.codetab.5")}
                 </CardTitle>
               </CardHeader>
               <CardContent>

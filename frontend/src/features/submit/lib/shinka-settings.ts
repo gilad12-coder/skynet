@@ -1,10 +1,13 @@
 import type {
-  BlackboxEngineId,
   BlackboxShinkaParentSelection,
   BlackboxShinkaSettings,
-  BlackboxStrategy,
   ModelConfig,
 } from "@/shared/types/api";
+import {
+  resolveOptimizer,
+  type ArtifactKind,
+  type OptimizerChoice,
+} from "@/shared/types/unified-run";
 
 /**
  * ShinkaEvolve's defaults, mirroring `BlackboxShinkaSettings` on the backend.
@@ -130,27 +133,33 @@ export function patchPercent(share: number): number {
 }
 
 /**
- * The settings block to submit. A single ShinkaEvolve run always sends it;
- * Auto, where ShinkaEvolve is one lane, sends it only once the user opened
- * the panel, so an untouched Auto run keeps the server's defaults.
+ * The settings block to submit. A ShinkaEvolve run always sends it, with the
+ * defaults when the panel was never touched; black-box Auto, where
+ * ShinkaEvolve is one lane, sends it only once the user edited it (`settings`
+ * non-null), so an untouched Auto run keeps the server's defaults.
  */
 export function submittedShinka(
-  settings: BlackboxShinkaSettings,
-  mode: BlackboxStrategy["mode"],
-  engine: BlackboxEngineId | null,
-  panelOpened: boolean,
+  settings: BlackboxShinkaSettings | null,
+  choice: OptimizerChoice,
+  kind: ArtifactKind,
 ): BlackboxShinkaSettings | undefined {
-  if (mode === "single") return engine === "shinka_evolve" ? { ...settings } : undefined;
-  return panelOpened ? { ...settings } : undefined;
+  const resolved = resolveOptimizer(choice, kind);
+  if (resolved === "shinka_evolve") return { ...(settings ?? DEFAULT_SHINKA_SETTINGS) };
+  if (resolved === "auto") return settings ? { ...settings } : undefined;
+  return undefined;
+}
+
+/** Whether the choice takes extra optimization models: only ShinkaEvolve samples from a pool. */
+export function takesExtraModels(choice: OptimizerChoice): boolean {
+  return choice === "shinka_evolve";
 }
 
 /** The extra optimization models to submit: chosen ones only, and only for ShinkaEvolve. */
 export function submittedExtraModels(
   models: readonly ModelConfig[],
-  mode: BlackboxStrategy["mode"],
-  engine: BlackboxEngineId | null,
+  choice: OptimizerChoice,
 ): ModelConfig[] | undefined {
-  if (mode !== "single" || engine !== "shinka_evolve") return undefined;
+  if (!takesExtraModels(choice)) return undefined;
   const chosen = models.filter((model) => model.name.trim());
   return chosen.length > 0 ? chosen.slice(0, MAX_EXTRA_OPTIMIZATION_MODELS) : undefined;
 }

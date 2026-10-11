@@ -8,16 +8,16 @@ export type StatAccent = "default" | "success" | "warning" | "danger";
 
 export const ACCENT_DOT: Record<StatAccent, string> = {
   default: "bg-foreground/25",
-  success: "bg-[var(--success)]",
-  warning: "bg-[var(--warning)]",
-  danger: "bg-[var(--danger)]",
+  success: "bg-[var(--status-success)]",
+  warning: "bg-[var(--status-running)]",
+  danger: "bg-[var(--status-failed)]",
 };
 
 export const ACCENT_TEXT: Record<StatAccent, string> = {
   default: "text-foreground",
-  success: "text-[var(--success)]",
-  warning: "text-[var(--warning)]",
-  danger: "text-[var(--danger)]",
+  success: "text-[var(--status-success)]",
+  warning: "text-[var(--status-running)]",
+  danger: "text-[var(--status-failed)]",
 };
 
 // Shared by AnalyticsTab and its skeleton. Three columns wait for lg: at md

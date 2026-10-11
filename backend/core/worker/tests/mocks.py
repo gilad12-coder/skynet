@@ -48,7 +48,6 @@ def load_fixture(name: str) -> Any:
     return json.loads(_read_fixture_text(name))
 
 
-_GRID = load_fixture("jobs/success_grid.detail.json")
 _GEPA = load_fixture("jobs/success_single_gepa.detail.json")
 
 # Real result payload from the gepa run (sans large blobs).
@@ -79,17 +78,28 @@ REAL_RUN_PAYLOAD: dict = {
     "_optimization_type": "run",
 }
 
-REAL_GRID_PAYLOAD: dict = {
-    "username": _GRID["username"],
-    "module_name": _GRID["module_name"],
-    "signature_code": "question -> answer",
-    "metric_code": "def metric(example, pred, trace=None): return True",
-    "optimizer_name": _GRID["optimizer_name"],
-    "dataset": [{"question": "Q1", "answer": "A1"}],
-    "column_mapping": _GRID["column_mapping"],
-    "generation_models": _GRID["generation_models"],
-    "reflection_models": _GRID["reflection_models"],
-    "_optimization_type": "grid_search",
+# A unified wizard run as POST /optimize persists it: a black-box run marked
+# with payload_kind so the worker routes it to the unified service.
+REAL_UNIFIED_PAYLOAD: dict = {
+    "payload_kind": "unified_v1",
+    "username": _GEPA["username"],
+    "task": {
+        "objective": "Answer the question correctly.",
+        "artifact": {"kind": "prompt", "starting_version": "Answer the question."},
+    },
+    "data": {
+        "mode": "pairs",
+        "cases": [{"input": {"question": "Q1"}, "expected": "A1"}, {"input": {"question": "Q2"}, "expected": "A2"}],
+        "input_fields": ["question"],
+    },
+    "optimizer": {"choice": "gepa"},
+    "models": {"reflection_model": {"name": _GEPA["model_settings"]["name"]}},
+    "workspace": {
+        "run_code": "def run(artifact, input):\n    return artifact\n",
+        "metric_code": "def score(input, output, expected=None):\n    return 1.0, {'feedback': ''}\n",
+    },
+    "seed": 7,
+    "_optimization_type": "blackbox",
 }
 
 _GEPA_PROGRESS = _GEPA["progress_events"]
@@ -133,13 +143,13 @@ def make_result_event(result: dict | None = None) -> dict:
 
 
 def fake_dspy_service(result: dict | None = None) -> MagicMock:
-    """Return a MagicMock DspyService with ``run`` and ``run_grid_search`` wired.
+    """Return a MagicMock DspyService with ``run`` wired.
 
     Args:
         result: Result dict the mock should yield via ``model_dump``.
 
     Returns:
-        A MagicMock whose run/run_grid_search return the same fake result.
+        A MagicMock whose ``run`` returns the fake result.
     """
     result_payload = result if result is not None else dict(REAL_RESULT)
     fake_result = MagicMock()
@@ -147,7 +157,6 @@ def fake_dspy_service(result: dict | None = None) -> MagicMock:
 
     svc = MagicMock()
     svc.run.return_value = fake_result
-    svc.run_grid_search.return_value = fake_result
     return svc
 
 

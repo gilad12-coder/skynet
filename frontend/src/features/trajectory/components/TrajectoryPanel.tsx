@@ -10,7 +10,6 @@ import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
-import { useLiteMode } from "@/features/settings";
 import {
   extractCandidates,
   extractMinibatch,
@@ -24,7 +23,6 @@ import { rememberTrajectoryView } from "../lib/climb-view-hint";
 import type { BlackboxTrajectoryContext } from "../lib/types";
 import { TimelineScrubber } from "./TimelineScrubber";
 import { TrajectoryTree } from "./TrajectoryTree";
-import { TrajectoryOutline } from "./TrajectoryOutline";
 import { TrajectoryDrawer, type DrawerSelection } from "./TrajectoryDrawer";
 
 const NEWEST_HIGHLIGHT_MS = 2200;
@@ -52,9 +50,6 @@ export interface TrajectoryPanelProps {
   // When set, only candidate events tagged with this pair_index are kept —
   // grid-search pair views need to scope the tree to a single pair.
   pairIndex?: number;
-  // Forwarded to TrajectoryTree — see its prop docs. The tutorial demo uses
-  // it to open the tree at the eventual extent before any node streams in.
-  previewLayout?: { width: number; height: number };
   // Tool name → approval severity from the run's persisted react_overlay,
   // forwarded to the drawer so its tool cards match the Code tab.
   toolSeverities?: Record<string, string>;
@@ -66,12 +61,10 @@ export interface TrajectoryPanelProps {
 export function TrajectoryPanel({
   job,
   pairIndex,
-  previewLayout,
   toolSeverities,
   blackbox,
 }: TrajectoryPanelProps) {
   const live = isLive(job);
-  const lite = useLiteMode();
   const blackboxCtx = blackbox ?? (job.optimization_type === "blackbox" ? BLACKBOX_FALLBACK : null);
   const { candidates, rejected, valsetRows, minibatch, valsetOutputs } = useMemo(() => {
     const events = job.progress_events ?? [];
@@ -95,9 +88,8 @@ export function TrajectoryPanel({
   const hintKey = pairIndex === undefined ? job.optimization_id : `${job.optimization_id}#pair`;
   const view = candidates.length === 0 ? "none" : maxGeneration > 0 ? "scrubber" : "plain";
   useEffect(() => {
-    // The lite outline's height follows the candidate count, so it is not remembered.
-    if (!lite) rememberTrajectoryView(hintKey, view);
-  }, [lite, hintKey, view]);
+    rememberTrajectoryView(hintKey, view);
+  }, [hintKey, view]);
   const visibleCandidates = useMemo(() => {
     if (generationFilter === null) return candidates;
     return candidates.filter((c) => c.generation <= generationFilter);
@@ -201,12 +193,9 @@ export function TrajectoryPanel({
 
   return (
     <FadeIn delay={0.12}>
-      <Card
-        className="relative overflow-hidden shadow-[0_1px_3px_rgba(28,22,18,0.04),inset_0_1px_0_rgba(255,255,255,0.5)]"
-        data-tutorial="trajectory-panel"
-      >
+      <Card className="relative overflow-hidden">
         <div
-          className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-[#C8A882]/40 to-transparent"
+          className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-primary-fill/40 to-transparent"
           aria-hidden="true"
         />
         <CardHeader className="flex flex-row items-start justify-between gap-3">
@@ -222,7 +211,7 @@ export function TrajectoryPanel({
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground/80 shadow-xs backdrop-blur"
+              className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground/80 backdrop-blur"
             >
               <PingDot size="sm" />
               <span className="tabular-nums">{candidates.length}</span>
@@ -246,28 +235,15 @@ export function TrajectoryPanel({
               liveText={msg("trajectory.scrubber.live")}
             />
           ) : null}
-          {lite ? (
-            <TrajectoryOutline
-              candidates={visibleCandidates}
-              rejected={visibleRejected}
-              winnerId={layout.winnerId}
-              selectedId={selectedTreeId}
-              newestId={newestId}
-              onSelectCandidate={handleSelectCandidate}
-              onSelectRejected={handleSelectRejected}
-            />
-          ) : (
-            <TrajectoryTree
-              layout={layout}
-              layoutWithoutRejected={layoutWithoutRejected}
-              selectedId={selectedTreeId}
-              newestId={newestId}
-              onSelectCandidate={handleSelectCandidate}
-              onSelectRejected={handleSelectRejected}
-              previewLayout={previewLayout}
-              ringMode={blackboxCtx === null ? "pass_fail" : "score"}
-            />
-          )}
+          <TrajectoryTree
+            layout={layout}
+            layoutWithoutRejected={layoutWithoutRejected}
+            selectedId={selectedTreeId}
+            newestId={newestId}
+            onSelectCandidate={handleSelectCandidate}
+            onSelectRejected={handleSelectRejected}
+            ringMode={blackboxCtx === null ? "pass_fail" : "score"}
+          />
           <TrajectoryDrawer
             selection={drawerSelection}
             open={drawerOpen}

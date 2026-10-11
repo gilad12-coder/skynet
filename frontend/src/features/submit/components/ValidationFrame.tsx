@@ -27,7 +27,6 @@ import type {
   ValidationUsageWait,
 } from "../lib/preflight-store";
 import { USAGE_WAIT_ATTEMPTS, USAGE_WAIT_INTERVAL_MS } from "../lib/wait-for-preflight-usage";
-import { cnGrid } from "./blackbox/shared";
 
 type PreflightCheck = WizardPreflightResponse["checks"][number];
 
@@ -63,6 +62,7 @@ const checkKeys: Record<string, MessageKey> = {
   "scorer.model": "submit.validation.check.scorer.model",
   "scorer.readiness": "submit.validation.check.scorer.readiness",
   "target.readiness": "submit.validation.check.target.readiness",
+  "metric.contract": "submit.validation.check.metric.contract" as MessageKey,
 };
 
 const roleKeys: Record<string, MessageKey> = {
@@ -80,14 +80,12 @@ const checkStateKeys: Record<PreflightCheck["status"], MessageKey> = {
 
 // The steps a check walks through, in order. A step the server skips drops
 // out of "up next" as soon as a later one starts.
+// The unified run checks its code contract (metric.contract) in the evaluator
+// step, after the sandbox is up and before the models are probed.
 const PLAN: Record<PreflightWorkflow, Record<PreflightScope, readonly ValidationPhase[]>> = {
-  dspy: {
+  unified: {
     evaluation: ["budget", "sandbox", "evaluator", "usage"],
     execution: ["budget", "sandbox", "evaluator", "models", "usage"],
-  },
-  anything: {
-    evaluation: ["budget", "dependencies", "sandbox", "evaluator", "usage"],
-    execution: ["budget", "dependencies", "sandbox", "evaluator", "models", "usage"],
   },
 };
 
@@ -132,6 +130,14 @@ function phaseForCheck(key: string, thrown: ValidationPhase): ValidationPhase {
   // "setup" is the run itself giving up, wherever it stood at the time.
   if (key === "setup") return thrown;
   return "evaluator";
+}
+
+/** Collapse/expand a block with a grid-rows transition. */
+function cnGrid(open: boolean): string {
+  return cn(
+    "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
+    open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+  );
 }
 
 function duration(ms: number): string {
@@ -302,7 +308,7 @@ export function ValidationFrame({
 
   return (
     <section
-      className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg backdrop-blur-xl"
+      className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl"
       aria-busy={running}
       data-tutorial={settled ? undefined : "wizard-validation"}
     >
@@ -418,7 +424,7 @@ export function ValidationPlan({
   stale: boolean;
 }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg backdrop-blur-xl">
+    <section className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl">
       <div className="flex items-start gap-4 px-6 pt-7 pb-6 sm:px-8">
         <div
           className="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted text-foreground"

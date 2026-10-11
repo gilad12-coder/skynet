@@ -25,8 +25,8 @@ from ..constants import EVENT_ERROR, EVENT_RESULT
 from ..engine import BackgroundWorker, WorkerShutdownError, reset_worker_for_tests
 from .conftest import FakeJobStore
 from .mocks import (
-    REAL_GRID_PAYLOAD,
     REAL_RUN_PAYLOAD,
+    REAL_UNIFIED_PAYLOAD,
     fake_mp_process,
     fake_mp_queue,
     make_mp_context,
@@ -110,7 +110,6 @@ def test_process_job_parses_json_string_payload_overview(
 
     with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service") as mock_svc:
         mock_svc.return_value.validate_payload = MagicMock()
-        mock_svc.return_value.validate_grid_search_payload = MagicMock()
         worker._process_job("opt-2", 0)
 
     # If the JSON-string branch worked, job succeeded (not failed due to bad overview).
@@ -309,73 +308,60 @@ def test_process_job_sets_status_failed_when_subprocess_sends_no_result(
     assert store._jobs["opt-5"]["status"] == "failed"
 
 
-def test_process_job_grid_search_all_pairs_failed_sets_status_failed(
+def test_process_job_fails_a_queued_grid_search_without_running_it(
     worker: BackgroundWorker,
     store: FakeJobStore,
 ) -> None:
-    """A grid search whose pairs all error out is marked failed."""
-    payload = REAL_GRID_PAYLOAD
+    """A grid search queued before grid search was retired fails instead of executing."""
     store.seed_job(
         "opt-6",
-        payload=payload,
+        payload=REAL_RUN_PAYLOAD,
         payload_overview={"optimization_type": "grid_search", "username": "bob"},
     )
     worker.enqueue_job("opt-6")
-
-    grid_result = {
-        "completed_pairs": 0,
-        "total_pairs": 3,
-        "pair_results": [
-            {"error": "model timeout"},
-            {"error": "out of memory"},
-            {"error": "model timeout"},
-        ],
-    }
-    ctx, _proc = make_mp_context(
-        exitcode=0,
-        result_events=[{"type": EVENT_RESULT, "result": grid_result}],
-    )
+    ctx, _proc = make_mp_context(exitcode=0, result_events=[])
     worker._mp_ctx = ctx
     worker._mp_start_method = "spawn"
 
-    with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service") as mock_svc:
-        mock_svc.return_value.validate_grid_search_payload = MagicMock()
+    with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service"):
         worker._process_job("opt-6", 0)
 
     assert store._jobs["opt-6"]["status"] == "failed"
-    assert "model timeout" in store._jobs["opt-6"]["message"]
+    assert store._jobs["opt-6"]["message"] == engine_module.GRID_SEARCH_RETIRED_MESSAGE
+    ctx.Process.assert_not_called()
 
 
-def test_process_job_grid_search_all_pairs_failed_message_includes_first_error(
+def test_process_job_validates_unified_payload_against_its_contract(
     worker: BackgroundWorker,
     store: FakeJobStore,
 ) -> None:
-    """The failure message includes the first pair error."""
-    payload = REAL_GRID_PAYLOAD
+    """A unified run is parsed as a unified request and checked by the workspace contract."""
     store.seed_job(
         "opt-7",
-        payload=payload,
-        payload_overview={"optimization_type": "grid_search", "username": "bob"},
+        payload=REAL_UNIFIED_PAYLOAD,
+        payload_overview={"optimization_type": "blackbox", "username": "bob"},
+        execution_budget_id="budget-7",
     )
     worker.enqueue_job("opt-7")
-
-    grid_result = {
-        "completed_pairs": 0,
-        "total_pairs": 2,
-        "pair_results": [{"error": "first error detail"}, {"error": "second error"}],
-    }
-    ctx, _proc = make_mp_context(
-        exitcode=0,
-        result_events=[{"type": EVENT_RESULT, "result": grid_result}],
-    )
+    ctx, _proc = make_mp_context(exitcode=0, result_events=[])
     worker._mp_ctx = ctx
     worker._mp_start_method = "spawn"
 
-    with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service") as mock_svc:
-        mock_svc.return_value.validate_grid_search_payload = MagicMock()
+    with (
+        patch("core.worker.engine.notify_job_completed"),
+        patch.object(worker, "_get_service"),
+        patch.object(engine_module, "validate_blackbox_payload") as legacy_validate,
+        patch.object(
+            engine_module, "validate_unified_payload", side_effect=ValueError("metric shape mismatch")
+        ) as validate,
+    ):
         worker._process_job("opt-7", 0)
 
-    assert "first error detail" in store._jobs["opt-7"]["message"]
+    validate.assert_called_once()
+    assert validate.call_args.args[0].payload_kind == "unified_v1"
+    legacy_validate.assert_not_called()
+    assert store._jobs["opt-7"]["status"] == "failed"
+    assert "metric shape mismatch" in store._jobs["opt-7"]["message"]
 
 
 def test_process_job_handles_key_error_when_job_deleted_mid_run(

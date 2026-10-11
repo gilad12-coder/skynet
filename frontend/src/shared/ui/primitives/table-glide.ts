@@ -22,6 +22,9 @@ function visibleBox(el: Element, origin: DOMRect): Box | null {
 function glidePieces(table: HTMLTableElement, viewport: DOMRect) {
   const rows: HTMLTableRowElement[] = [];
   for (const row of table.rows) {
+    // The header stays put: column titles and the select-all box sliding
+    // around on a fold reads as jitter, not motion.
+    if (row.parentElement?.tagName === "THEAD") continue;
     const r = row.getBoundingClientRect();
     if (r.bottom < viewport.top - r.height || r.top > viewport.bottom + r.height) continue;
     rows.push(row);

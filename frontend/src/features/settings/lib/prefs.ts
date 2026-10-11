@@ -5,10 +5,6 @@ type SplitModeDefault = "auto" | "manual";
 type TrustModeDefault = "ask" | "auto_safe" | "yolo";
 
 export interface UserPrefs {
-  // Lightweight mode for low-resource machines: kills motion/blur and swaps the
-  // heavy visualizations (charts, SVG trajectory tree, code editor) for static
-  // equivalents. See LiteModeProvider.
-  liteMode: boolean;
   wizardCodeAssist: CodeAssistDefault;
   wizardSplitMode: SplitModeDefault;
   agentTrustMode: TrustModeDefault;
@@ -29,18 +25,10 @@ export interface UserPrefs {
 }
 
 export type AgentPreferencePatch = Partial<
-  Pick<
-    UserPrefs,
-    | "liteMode"
-    | "wizardCodeAssist"
-    | "wizardSplitMode"
-    | "taggerAssist"
-    | "dictationEnabled"
-  >
+  Pick<UserPrefs, "wizardCodeAssist" | "wizardSplitMode" | "taggerAssist" | "dictationEnabled">
 >;
 
 const AGENT_PREFERENCE_FIELDS: Record<string, keyof AgentPreferencePatch> = {
-  lite_mode: "liteMode",
   wizard_code_assist: "wizardCodeAssist",
   wizard_split_mode: "wizardSplitMode",
   tagger_assist: "taggerAssist",
@@ -84,7 +72,6 @@ export function parseAgentPreferencePatch(value: unknown): AgentPreferencePatch 
 }
 
 export const PREF_KEYS: Record<keyof UserPrefs, string> = {
-  liteMode: "skynet.prefs.lite-mode",
   wizardCodeAssist: "skynet.prefs.wizard.code-assist",
   wizardSplitMode: "skynet.prefs.wizard.split-mode",
   agentTrustMode: "skynet.prefs.agent.trust-mode",
@@ -96,7 +83,6 @@ export const PREF_KEYS: Record<keyof UserPrefs, string> = {
 };
 
 export const DEFAULT_PREFS: UserPrefs = {
-  liteMode: false,
   wizardCodeAssist: "auto",
   wizardSplitMode: "auto",
   agentTrustMode: "ask",

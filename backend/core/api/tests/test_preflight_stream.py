@@ -78,7 +78,7 @@ def test_stream_reports_admission_failure_without_success(monkeypatch: pytest.Mo
         response = client.post(
             "/wizard/preflight/stream",
             json={
-                "workflow": "dspy",
+                "workflow": "anything",
                 "scope": "evaluation",
                 "payload": {},
                 "execution_budget_id": "draft",

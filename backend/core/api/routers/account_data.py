@@ -10,15 +10,17 @@ call to Stripe or any other provider (see :mod:`core.api.account_data_service`).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ...storage.models import UserModel
 from ..account_data_service import delete_account, export_account
+from ..account_export_formats import ExportFormat, render_export
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..passwords import verify_password
@@ -57,10 +59,20 @@ def create_account_data_router(*, job_store) -> APIRouter:
 
     @router.get(
         "/account/export",
-        summary="Export all of the caller's account data as a JSON download",
+        summary="Export all of the caller's account data as a file download",
     )
-    def export_my_data(user: AuthenticatedUserDep) -> JSONResponse:
-        """Gather every record the caller owns into a downloadable JSON bundle.
+    def export_my_data(
+        user: AuthenticatedUserDep,
+        export_format: Annotated[
+            ExportFormat,
+            Query(
+                alias="format",
+                description="json or pkl for the whole bundle; csv, parquet or feather for a ZIP "
+                "with one file per table; xlsx for one workbook with a sheet per table.",
+            ),
+        ] = "json",
+    ) -> Response:
+        """Gather every record the caller owns into a downloadable file.
 
         Secrets (password hash, 2FA secrets, encrypted provider keys, token
         hashes) are never included — only the non-sensitive fact that each
@@ -68,17 +80,18 @@ def create_account_data_router(*, job_store) -> APIRouter:
 
         Args:
             user: Authenticated caller; only their own data is gathered.
+            export_format: File format to render the bundle in.
 
         Returns:
-            A JSON response carrying the export bundle as a file attachment.
+            The rendered export as a file attachment.
         """
         with Session(job_store.engine) as session:
             bundle = export_account(session, user.username)
-        return JSONResponse(
-            content=bundle,
-            headers={
-                "Content-Disposition": 'attachment; filename="skynet-account-export.json"'
-            },
+        rendered = render_export(bundle, export_format, datetime.now(UTC).date().isoformat())
+        return Response(
+            content=rendered.content,
+            media_type=rendered.media_type,
+            headers={"Content-Disposition": f'attachment; filename="{rendered.filename}"'},
         )
 
     @router.post(

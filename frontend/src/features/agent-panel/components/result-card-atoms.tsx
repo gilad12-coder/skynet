@@ -82,7 +82,7 @@ export function PassDot({ pass }: { pass: boolean }) {
 export function TypeBadge({ type }: { type: string }) {
   if (type === "grid_search") {
     return (
-      <Badge variant="outline" className="border-primary/30 text-primary">
+      <Badge variant="outline" className="border-primary-fill/30 text-primary">
         {TERMS.optimizationTypeGrid}
       </Badge>
     );

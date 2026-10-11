@@ -62,18 +62,27 @@ def candidate_key(candidate: Candidate) -> str:
 
 @dataclass
 class Task:
-    """What an engine optimizes: the starting point, the goal and the cases.
+    """What an engine optimizes: the starting point, the goal and its cases.
 
-    The cases are not split: every engine scores a version on all of them
-    (each case is also a Pareto axis), and with none it scores the version
-    on its own. The service's final run re-scores the starting point and the
-    winner afresh on the same cases.
+    ``cases`` is the train split: the cases an engine scores versions on
+    while searching (each case is also a Pareto axis); with none it scores
+    a version on its own. ``valset`` is the validation split an engine
+    selects its incumbent on when it can; when empty, engines select on
+    ``cases``. The test split never reaches a task: the service's final run
+    re-scores the starting point and the winner on it afterwards.
+
+    ``context`` is private run context (artifact kind, workspace code,
+    models, DSPy optimizer settings) for in-process adapters such as the
+    DSPy engine. It holds the metric source, so it must never be exported to
+    a proposer, a native engine payload, a prompt or an agent workspace.
     """
 
     seed_candidate: Candidate | None
     objective: str | None = None
     background: str | None = None
     cases: list[Any] = field(default_factory=list)
+    valset: list[Any] = field(default_factory=list)
+    context: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
     def has_dataset(self) -> bool:
@@ -94,6 +103,8 @@ class Result:
     best_score: float | None
     total_evals: int
     metadata: dict[str, Any] = field(default_factory=dict)
+    # A DSPy engine's compiled program (``ProgramArtifact.model_dump()``).
+    artifact: dict[str, Any] | None = None
 
 
 @dataclass
@@ -245,15 +256,46 @@ class EvalServer:
         # heartbeat, so every run type gets the same normal=aggregates /
         # verbose=per-call split. Counted against the run-wide budget.
         logger.debug("scorer eval %d/%d score=%.3f", root.used, root.max_evals, score)
+        self._account(candidate, score, side_info)
+        return score, side_info
+
+    def charge(self, candidate: Candidate | None, score: float, side_info: SideInfo | None = None) -> None:
+        """Count one evaluation scored outside the scorer against every budget in the chain.
+
+        In-process adapters (the DSPy engine) run the metric themselves; this
+        keeps their metric calls inside the run's scorer-run budget and
+        progress, so budgets hold for every optimizer.
+
+        Args:
+            candidate: The version that was scored, or ``None`` when the
+                caller cannot name it; an unnamed evaluation is counted but
+                not recorded in the version history.
+            score: The score it got.
+            side_info: What the metric said about it.
+
+        Raises:
+            BudgetExhaustedError: When no scorer calls remain.
+        """
+        self._reserve()
+        self._account(candidate, score, side_info or {})
+
+    def _account(self, candidate: Candidate | None, score: float, side_info: SideInfo) -> None:
+        """Record a reserved evaluation in every server of the chain and notify the listener.
+
+        Args:
+            candidate: The scored version, or ``None`` to count it without recording.
+            score: Its score.
+            side_info: What the scorer said about it.
+        """
+        root = self._root
         server: EvalServer | None = self
-        while server is not None:
+        while server is not None and candidate is not None:
             with server._lock:
                 server._record(candidate, score, side_info)
             server = server._parent
         if root._on_eval is not None:
             with root._lock:
                 root._on_eval(root, score)
-        return score, side_info
 
     def _reserve(self) -> None:
         """Claim one scorer call here and in every ancestor, or claim nothing.

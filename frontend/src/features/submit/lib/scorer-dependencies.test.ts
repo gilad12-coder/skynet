@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { scorerCallsModel, withScorerImports } from "./scorer-dependencies.ts";
+import { metricUsesModel, scorerCallsModel, withScorerImports } from "./scorer-dependencies.ts";
 
 test("detects direct, qualified and aliased model calls but ignores comments and strings", () => {
   for (const code of [
     'llm("judge")',
     'skynet.llm("judge")',
     'from skynet import llm as judge\njudge("x")',
+    "from skynet import (\n    llm,\n)\n\ndef score(i, o, e):\n    return llm(o)",
+    "import skynet\n\ndef score(i, o, e):\n    return skynet.llm(o)",
+    'from skynet import llm\njudge = llm\njudge("x")',
   ])
     assert.equal(scorerCallsModel(code), true);
   assert.equal(scorerCallsModel('# llm("x")\ntext = "llm(x)"'), false);
@@ -29,4 +32,34 @@ test("preserves existing imports, qualified calls and locally defined helpers", 
     'def llm(x): return x\nllm("x")',
   ])
     assert.equal(withScorerImports(code), code);
+});
+
+test("prefers the contract check's uses_llm while it was run on the current metric code", () => {
+  const code = "from skynet import llm\n\ndef score(i, o, e):\n    return 1.0";
+  const snapshot = JSON.stringify({ metricCode: code, runCode: "x" });
+  const state = (
+    metricCode: string,
+    uses_llm?: boolean,
+    lastCheckSnapshot: string | null = snapshot,
+  ) => ({
+    workspace: {
+      metricCode,
+      lastCheck: uses_llm === undefined ? null : { uses_llm },
+      lastCheckSnapshot,
+    },
+  });
+  assert.equal(metricUsesModel(state(code)), true);
+  assert.equal(metricUsesModel(state(code, false)), false);
+  assert.equal(
+    metricUsesModel(
+      state(
+        "def score(i, o, e):\n    return 1.0",
+        true,
+        JSON.stringify({ metricCode: "def score(i, o, e):\n    return 1.0" }),
+      ),
+    ),
+    true,
+  );
+  assert.equal(metricUsesModel(state(`${code}\n`, false)), true);
+  assert.equal(metricUsesModel(state(code, false, null)), true);
 });

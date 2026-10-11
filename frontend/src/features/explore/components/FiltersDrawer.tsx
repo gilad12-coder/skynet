@@ -13,7 +13,6 @@ import { cn } from "@/shared/lib/utils";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { Button } from "@/shared/ui/primitives/button";
 import { Sheet, SheetContent, SheetTitle } from "@/shared/ui/primitives/sheet";
-import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { SkynetDatePicker } from "@/shared/ui/skynet-date-picker";
 import { CheckboxIndicator } from "@/shared/ui/select-checkbox";
 import { useIsWideViewport } from "../hooks/use-wide-viewport";
@@ -78,7 +77,7 @@ function typeLabel(value: string): string {
 }
 
 const FOCUS_RING =
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45";
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45";
 
 const SEARCHABLE: ReadonlyArray<{
   dimension: Exclude<FacetDimension, "types">;
@@ -452,16 +451,14 @@ function FieldRow({
           {count > 1 && <CountPill className="shrink-0">{numberFormat.format(count)}</CountPill>}
         </button>
         {onClear && (
-          <TooltipButton tooltip={msg("explore.filters.picker.clear")} side="top">
-            <button
-              type="button"
-              onClick={onClear}
-              aria-label={msg("explore.filters.picker.clear")}
-              className="close-button [--close-btn-size:20px] [--close-btn-radius:6px] [--close-btn-icon:12px] shrink-0"
-            >
-              <X aria-hidden="true" />
-            </button>
-          </TooltipButton>
+          <button
+            type="button"
+            onClick={onClear}
+            aria-label={msg("explore.filters.picker.clear")}
+            className="close-button [--close-btn-size:20px] [--close-btn-radius:6px] [--close-btn-icon:12px] shrink-0"
+          >
+            <X aria-hidden="true" />
+          </button>
         )}
         <button
           type="button"
@@ -641,7 +638,7 @@ function FacetField({
                 setHighlight(0);
               }}
               aria-label={msg("explore.filters.search.clear")}
-              className="size-7 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              className="size-7 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
             >
               <X className="size-3.5" aria-hidden="true" />
             </button>

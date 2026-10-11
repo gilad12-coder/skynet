@@ -55,7 +55,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
   return (
     <tr
       data-slot="table-row"
-      className={cn("border-b border-border/60 data-[state=selected]:bg-primary/[0.08]", className)}
+      className={cn("border-b border-border/60 data-[state=selected]:bg-primary-fill/[0.08]", className)}
       {...props}
     />
   );
@@ -150,7 +150,14 @@ function TableGroup({
 }) {
   const [open, setOpen] = React.useState(defaultOpen);
   return (
-    <tbody data-slot="table-group" data-state={open ? "open" : "closed"}>
+    // Closed rows stay mounted with ``visibility: collapse`` instead of being
+    // removed: collapsed rows still count toward auto column widths, so
+    // toggling a group never makes the header columns shift.
+    <tbody
+      data-slot="table-group"
+      data-state={open ? "open" : "closed"}
+      className="data-[state=closed]:[&>tr:not([data-slot=table-group-header])]:collapse"
+    >
       <tr data-slot="table-group-header" className="border-b border-border/60 bg-muted/30">
         <th scope="rowgroup" colSpan={colSpan} className="p-0 text-start font-normal">
           <button
@@ -171,7 +178,7 @@ function TableGroup({
           </button>
         </th>
       </tr>
-      {open && children}
+      {children}
     </tbody>
   );
 }

@@ -2,49 +2,17 @@
 
 import * as React from "react";
 
-import type {
-  BlackboxEngineId,
-  BlackboxHarness,
-  BlackboxProposer,
-  BlackboxStrategy,
-} from "@/shared/types/api";
+import {
+  BLACKBOX_OPTIMIZERS,
+  DSPY_OPTIMIZERS,
+  type ArtifactKind,
+  type DataMode,
+  type OptimizerChoice,
+} from "@/shared/types/unified-run";
 
 import type { WizardState } from "../lib/types";
 
-type WizardKey =
-  | "dataset_ready"
-  | "columns_configured"
-  | "signature_code"
-  | "metric_code"
-  | "model_configured"
-  | "job_name"
-  | "job_description"
-  | "job_type"
-  | "optimizer_name"
-  | "module_name"
-  | "workflow"
-  | "react_config"
-  | "dataset_columns"
-  | "column_roles"
-  | "model_config"
-  | "reflection_model_config"
-  | "generation_models"
-  | "reflection_models"
-  | "split_fractions"
-  | "split_mode"
-  | "seed"
-  | "shuffle"
-  | "is_private"
-  | "optimizer_kwargs"
-  | "target_score"
-  | "blackbox_objective"
-  | "blackbox_seed"
-  | "blackbox_scorer_code"
-  | "blackbox_strategy"
-  | "blackbox_proposer"
-  | "max_cost_cents"
-  | "staged_dataset_id"
-  | "source_dataset_id";
+type WizardKey = keyof WizardState;
 type WriteSource = "user" | "agent";
 
 interface WizardStateContextValue {
@@ -193,160 +161,85 @@ export function useWizardStateOptional(): WizardStateContextValue | null {
   return React.useContext(Ctx);
 }
 
+const ARTIFACT_KINDS: readonly ArtifactKind[] = ["prompt", "code", "dspy_program", "text"];
+const DATA_MODES: readonly DataMode[] = ["single", "pairs"];
+const OPTIMIZER_CHOICES: readonly string[] = ["auto", ...DSPY_OPTIMIZERS, ...BLACKBOX_OPTIMIZERS];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((x) => typeof x === "string");
+
+/** A starting version is text or a map of named text parts; anything else is dropped. */
+function parseStartingVersion(value: unknown): string | Record<string, string> | null {
+  if (typeof value === "string") return value;
+  if (!isRecord(value)) return null;
+  const entries = Object.entries(value);
+  return entries.every(([, part]) => typeof part === "string")
+    ? (Object.fromEntries(entries) as Record<string, string>)
+    : null;
+}
+
 /**
  * Extract the subset of a tool result that updates the wizard. Defensive:
  * accepts any object and picks only known wizard keys with expected types.
  */
 export function extractWizardPatch(result: unknown): Partial<WizardState> {
-  if (!result || typeof result !== "object") return {};
-  const r = result as Record<string, unknown>;
-  const wrap =
-    r.wizard_state && typeof r.wizard_state === "object"
-      ? (r.wizard_state as Record<string, unknown>)
-      : r;
+  if (!isRecord(result)) return {};
+  const wrap = isRecord(result.wizard_state) ? result.wizard_state : result;
   const patch: Partial<WizardState> = {};
 
-  if (typeof wrap.dataset_ready === "boolean") patch.dataset_ready = wrap.dataset_ready;
-  if (typeof wrap.columns_configured === "boolean")
-    patch.columns_configured = wrap.columns_configured;
-  if (typeof wrap.model_configured === "boolean") patch.model_configured = wrap.model_configured;
+  for (const key of [
+    "dataset_ready",
+    "columns_configured",
+    "model_configured",
+    "shuffle",
+    "is_private",
+  ] as const) {
+    if (typeof wrap[key] === "boolean") patch[key] = wrap[key] as boolean;
+  }
+  for (const key of [
+    "job_name",
+    "job_description",
+    "task_objective",
+    "task_background",
+    "optimizer_name",
+    "run_code",
+    "metric_code",
+  ] as const) {
+    if (typeof wrap[key] === "string") patch[key] = wrap[key] as string;
+  }
+  for (const key of ["staged_dataset_id", "source_dataset_id", "expected_field"] as const) {
+    if (typeof wrap[key] === "string" && wrap[key]) patch[key] = wrap[key] as string;
+  }
+  if (isStringList(wrap.dataset_columns)) patch.dataset_columns = wrap.dataset_columns;
+  if (isStringList(wrap.input_fields)) patch.input_fields = wrap.input_fields;
 
-  if (typeof wrap.staged_dataset_id === "string" && wrap.staged_dataset_id) {
-    patch.staged_dataset_id = wrap.staged_dataset_id;
-  }
-  if (typeof wrap.source_dataset_id === "string" && wrap.source_dataset_id) {
-    patch.source_dataset_id = wrap.source_dataset_id;
-  }
+  const kind = ARTIFACT_KINDS.find((k) => k === wrap.artifact_kind);
+  if (kind) patch.artifact_kind = kind;
+  const startingVersion = parseStartingVersion(wrap.starting_version);
+  if (startingVersion !== null) patch.starting_version = startingVersion;
+  const mode = DATA_MODES.find((m) => m === wrap.data_mode);
+  if (mode) patch.data_mode = mode;
+  if (typeof wrap.optimizer_choice === "string" && OPTIMIZER_CHOICES.includes(wrap.optimizer_choice))
+    patch.optimizer_choice = wrap.optimizer_choice as OptimizerChoice;
 
-  if (typeof wrap.signature_code === "string") patch.signature_code = wrap.signature_code;
-  if (typeof wrap.metric_code === "string") patch.metric_code = wrap.metric_code;
+  if (isRecord(wrap.workflow) && Array.isArray(wrap.workflow.nodes)) {
+    patch.workflow = wrap.workflow as unknown as WizardState["workflow"];
+  }
+  if (isRecord(wrap.model_config)) patch.model_config = wrap.model_config;
+  if (isRecord(wrap.reflection_model_config))
+    patch.reflection_model_config = wrap.reflection_model_config;
 
-  if (typeof wrap.job_name === "string") patch.job_name = wrap.job_name;
-  if (typeof wrap.job_description === "string") patch.job_description = wrap.job_description;
-  if (wrap.job_type === "run" || wrap.job_type === "grid_search" || wrap.job_type === "blackbox") {
-    patch.job_type = wrap.job_type;
-  }
-
-  if (typeof wrap.optimizer_name === "string") patch.optimizer_name = wrap.optimizer_name;
-  if (typeof wrap.module_name === "string") patch.module_name = wrap.module_name;
-
-  if (
-    wrap.workflow &&
-    typeof wrap.workflow === "object" &&
-    !Array.isArray(wrap.workflow) &&
-    Array.isArray((wrap.workflow as Record<string, unknown>).nodes)
-  ) {
-    patch.workflow = wrap.workflow as WizardState["workflow"];
-  }
-
-  if (
-    wrap.react_config &&
-    typeof wrap.react_config === "object" &&
-    !Array.isArray(wrap.react_config)
-  ) {
-    patch.react_config = wrap.react_config as Record<string, unknown>;
-  }
-
-  if (
-    Array.isArray(wrap.dataset_columns) &&
-    wrap.dataset_columns.every((x) => typeof x === "string")
-  ) {
-    patch.dataset_columns = wrap.dataset_columns as string[];
-  }
-  if (
-    wrap.column_roles &&
-    typeof wrap.column_roles === "object" &&
-    !Array.isArray(wrap.column_roles)
-  ) {
-    patch.column_roles = wrap.column_roles as Record<string, string>;
-  }
-
-  if (
-    wrap.model_config &&
-    typeof wrap.model_config === "object" &&
-    !Array.isArray(wrap.model_config)
-  ) {
-    patch.model_config = wrap.model_config as Record<string, unknown>;
-  }
-  if (
-    wrap.reflection_model_config &&
-    typeof wrap.reflection_model_config === "object" &&
-    !Array.isArray(wrap.reflection_model_config)
-  ) {
-    patch.reflection_model_config = wrap.reflection_model_config as Record<string, unknown>;
-  }
-
-  if (
-    Array.isArray(wrap.generation_models) &&
-    wrap.generation_models.every((m) => m && typeof m === "object" && !Array.isArray(m))
-  ) {
-    patch.generation_models = wrap.generation_models as Array<Record<string, unknown>>;
-  }
-  if (
-    Array.isArray(wrap.reflection_models) &&
-    wrap.reflection_models.every((m) => m && typeof m === "object" && !Array.isArray(m))
-  ) {
-    patch.reflection_models = wrap.reflection_models as Array<Record<string, unknown>>;
-  }
-  if (
-    wrap.split_fractions &&
-    typeof wrap.split_fractions === "object" &&
-    !Array.isArray(wrap.split_fractions)
-  ) {
-    const sf = wrap.split_fractions as Record<string, unknown>;
-    const train = typeof sf.train === "number" ? sf.train : NaN;
-    const val = typeof sf.val === "number" ? sf.val : NaN;
-    const test = typeof sf.test === "number" ? sf.test : NaN;
-    if (!Number.isNaN(train) && !Number.isNaN(val) && !Number.isNaN(test)) {
+  if (isRecord(wrap.split_fractions)) {
+    const { train, val, test } = wrap.split_fractions;
+    if (typeof train === "number" && typeof val === "number" && typeof test === "number") {
       patch.split_fractions = { train, val, test };
     }
   }
-  if (wrap.split_mode === "auto" || wrap.split_mode === "manual") {
-    patch.split_mode = wrap.split_mode;
-  }
   if (typeof wrap.seed === "number" && Number.isFinite(wrap.seed)) patch.seed = wrap.seed;
-  if (typeof wrap.shuffle === "boolean") patch.shuffle = wrap.shuffle;
-  if (typeof wrap.is_private === "boolean") patch.is_private = wrap.is_private;
-
-  if (
-    wrap.optimizer_kwargs &&
-    typeof wrap.optimizer_kwargs === "object" &&
-    !Array.isArray(wrap.optimizer_kwargs)
-  ) {
-    patch.optimizer_kwargs = wrap.optimizer_kwargs as Record<string, unknown>;
-  }
-  if (typeof wrap.target_score === "number" && Number.isFinite(wrap.target_score)) {
-    patch.target_score = wrap.target_score;
-  }
-  if (typeof wrap.blackbox_objective === "string") patch.blackbox_objective = wrap.blackbox_objective;
-  if (typeof wrap.blackbox_seed === "string") patch.blackbox_seed = wrap.blackbox_seed;
-  if (typeof wrap.blackbox_scorer_code === "string") {
-    patch.blackbox_scorer_code = wrap.blackbox_scorer_code;
-  }
-  // The request's bare names (`strategy`, `proposer`) are only trusted inside
-  // an explicit `wizard_state` block: other tool results echo them too.
-  const wrapped = wrap !== r;
-  // The wizard tool's patch spells these flat (blackbox_strategy_mode,
-  // blackbox_engine, blackbox_proposer_harness); the nested run-request shape
-  // is accepted too.
-  const flatStrategy =
-    wrap.blackbox_strategy_mode !== undefined
-      ? { mode: wrap.blackbox_strategy_mode, engine: wrap.blackbox_engine }
-      : wrap.blackbox_engine !== undefined
-        ? { mode: "single", engine: wrap.blackbox_engine }
-        : undefined;
-  const strategy = parseBlackboxStrategy(
-    wrap.blackbox_strategy ?? (wrapped ? wrap.strategy : undefined) ?? flatStrategy,
-  );
-  if (strategy) patch.blackbox_strategy = strategy;
-  const flatProposer =
-    wrap.blackbox_proposer_harness !== undefined
-      ? { harness: wrap.blackbox_proposer_harness }
-      : undefined;
-  const proposer = parseBlackboxProposer(
-    wrap.blackbox_proposer ?? (wrapped ? wrap.proposer : undefined) ?? flatProposer,
-  );
-  if (proposer) patch.blackbox_proposer = proposer;
   if (wrap.max_cost_cents === null) {
     patch.max_cost_cents = null;
   } else if (
@@ -358,45 +251,4 @@ export function extractWizardPatch(result: unknown): Partial<WizardState> {
   }
 
   return patch;
-}
-
-const BLACKBOX_ENGINES: readonly BlackboxEngineId[] = [
-  "gepa",
-  "best_of_n",
-  "autoresearch",
-  "meta_harness",
-  "autosaddler",
-  "shinka_evolve",
-];
-const BLACKBOX_HARNESSES: readonly BlackboxHarness[] = ["pi", "codex", "opencode", "prime", "custom"];
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-/** `{mode, engine}` as the run request spells it; an unknown engine is dropped. */
-function parseBlackboxStrategy(value: unknown): BlackboxStrategy | null {
-  if (!isRecord(value) || (value.mode !== "auto" && value.mode !== "single")) return null;
-  const engine = BLACKBOX_ENGINES.find((id) => id === value.engine) ?? null;
-  // A single-engine strategy without a known engine cannot be submitted.
-  if (value.mode === "single" && !engine) return null;
-  return { mode: value.mode, engine: value.mode === "single" ? engine : null };
-}
-
-/** The proposer fields an agent may set; anything malformed is left out. */
-function parseBlackboxProposer(value: unknown): Partial<BlackboxProposer> | null {
-  if (!isRecord(value)) return null;
-  const out: Partial<BlackboxProposer> = {};
-  const harness = BLACKBOX_HARNESSES.find((h) => h === value.harness);
-  if (harness) out.harness = harness;
-  const positiveInt = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v > 0;
-  if (positiveInt(value.max_candidates_per_iter)) {
-    out.max_candidates_per_iter = value.max_candidates_per_iter as number;
-  }
-  if (positiveInt(value.max_tool_calls)) out.max_tool_calls = value.max_tool_calls as number;
-  if (positiveInt(value.max_no_eval_seconds)) {
-    out.max_no_eval_seconds = value.max_no_eval_seconds as number;
-  }
-  if (typeof value.ralph === "boolean") out.ralph = value.ralph;
-  return Object.keys(out).length > 0 ? out : null;
 }

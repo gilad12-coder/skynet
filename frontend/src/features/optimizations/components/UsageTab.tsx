@@ -80,13 +80,6 @@ const ROLE_TIP_KEYS: Record<string, TooltipKey> = {
   rounding: "usage_tab.role.rounding",
 };
 
-const GROUPING_TIP_KEYS: Record<UsageGrouping, TooltipKey> = {
-  role: "usage_tab.group.role",
-  model: "usage_tab.group.model",
-  stage: "usage_tab.group.stage",
-  candidate: "usage_tab.group.candidate",
-};
-
 const STAGE_TIP_KEYS: Record<string, TooltipKey> = {
   baseline: "lm_activity.stage.baseline",
   training: "lm_activity.stage.training",
@@ -213,13 +206,11 @@ function Summary({
       budget.uncapped
         ? msg("submit.budget.uncapped_short")
         : formatBudgetUsd(String(budget.total_cents), locale),
-      tip("usage_tab.summary.limit"),
     ]);
   }
   items.push([
     spentLabel,
     formatCentsUsd(total.chargedCents, locale),
-    tip("usage_tab.summary.spent"),
   ]);
   if (splitCost && total.providerCents != null) {
     items.push([
@@ -243,12 +234,10 @@ function Summary({
   items.push([
     msg("usage_tab.summary.calls"),
     formatCount(total.calls),
-    tip("usage_tab.summary.calls"),
   ]);
   items.push([
     msg("usage_tab.summary.tokens"),
     formatCount(total.inputTokens + total.outputTokens),
-    tip("usage_tab.summary.tokens"),
   ]);
   return (
     <dl className={cn(SUMMARY_GRID_CLASS, budgetHit && "border-[#9a6a10]/40")}>
@@ -263,7 +252,7 @@ function Summary({
         </div>
       ))}
       {budgetHit && (
-        <p className="col-span-full text-xs text-[#9a6a10]">{msg("usage_tab.budget_stopped")}</p>
+        <p className="col-span-full text-xs text-[#9a6a10] dark:text-[#e7b466]">{msg("usage_tab.budget_stopped")}</p>
       )}
     </dl>
   );
@@ -560,9 +549,7 @@ export function UsageTab({
                 <TableHeader>
                   <TableRow>
                     <TableHead className="ps-4">
-                      <HelpTip text={tip(GROUPING_TIP_KEYS[activeGrouping])}>
-                        {msg(GROUPING_LABEL_KEYS[activeGrouping])}
-                      </HelpTip>
+                      {msg(GROUPING_LABEL_KEYS[activeGrouping])}
                     </TableHead>
                     <TableHead className="text-end">
                       <HelpTip text={tip(splitCost ? "usage_tab.charged" : "usage_tab.col.cost")}>
@@ -577,24 +564,16 @@ export function UsageTab({
                       </TableHead>
                     )}
                     <TableHead className="text-end">
-                      <HelpTip text={tip("usage_tab.col.calls")}>
-                        {msg("usage_tab.col.calls")}
-                      </HelpTip>
+                      {msg("usage_tab.col.calls")}
                     </TableHead>
                     <TableHead className="text-end" collapse="md">
-                      <HelpTip text={tip("usage_tab.col.input")}>
-                        {msg("usage_tab.col.input")}
-                      </HelpTip>
+                      {msg("usage_tab.col.input")}
                     </TableHead>
                     <TableHead className="text-end" collapse="md">
-                      <HelpTip text={tip("usage_tab.col.output")}>
-                        {msg("usage_tab.col.output")}
-                      </HelpTip>
+                      {msg("usage_tab.col.output")}
                     </TableHead>
                     <TableHead className="pe-4 text-end" collapse="lg">
-                      <HelpTip text={tip("usage_tab.col.latency")}>
-                        {msg("usage_tab.col.latency")}
-                      </HelpTip>
+                      {msg("usage_tab.col.latency")}
                     </TableHead>
                   </TableRow>
                 </TableHeader>
@@ -659,7 +638,7 @@ export function UsageTab({
                   })}
                   <TableRow className="border-t border-border bg-muted/30 font-semibold hover:bg-muted/30">
                     <TableCell className="ps-4">
-                      <HelpTip text={tip("usage_tab.total")}>{msg("usage_tab.total")}</HelpTip>
+                      {msg("usage_tab.total")}
                       {running && (
                         <span className="ms-1.5 text-xs font-normal text-muted-foreground">
                           {msg("usage_tab.so_far")}

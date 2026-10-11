@@ -215,11 +215,11 @@ const RENDERERS: Record<string, ToolRenderer> = {
       }),
   },
 
-  submit_job_run_post: {
+  submit_unified_run_optimize_post: {
     card: (call) => <SubmitSummaryCard call={call} />,
     summary: (call) => {
       const args = getArgs(call);
-      const raw = typeof args.job_name === "string" ? args.job_name : undefined;
+      const raw = typeof args.name === "string" ? args.name : undefined;
       const name = raw ? truncate(raw, 24) : undefined;
       return byStatus(call, {
         running: name
@@ -240,22 +240,6 @@ const RENDERERS: Record<string, ToolRenderer> = {
         }),
       });
     },
-  },
-
-  submit_grid_search_grid_search_post: {
-    card: (call) => <SubmitSummaryCard call={call} />,
-    summary: (call) =>
-      byStatus(call, {
-        running: formatMsg("auto.features.agent.panel.lib.tool.renderers.template.29", {
-          p1: TERMS.optimizationTypeGrid,
-        }),
-        done: formatMsg("auto.features.agent.panel.lib.tool.renderers.template.30", {
-          p1: TERMS.optimizationTypeGrid,
-        }),
-        error: formatMsg("auto.features.agent.panel.lib.tool.renderers.template.31", {
-          p1: TERMS.optimizationTypeGrid,
-        }),
-      }),
   },
 
   update_user_preferences: {

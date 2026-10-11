@@ -35,26 +35,19 @@ import type {
   OptimizationStatusResponse,
   EvalExampleResult,
 } from "@/shared/types/api";
-// Leaf import on purpose — the tutorial barrel deliberately does not re-export
-// the demo fixtures (see features/tutorial/index.ts).
-// eslint-disable-next-line no-restricted-imports -- deliberate leaf import; see above
-import { DEMO_OPTIMIZATION_ID } from "@/features/tutorial/lib/demo-data";
 
 type Split = "all" | "train" | "val" | "test";
 type ProgramType = "optimized" | "baseline";
 
 /**
- * Map a score (0–1) to a warm earth-tone color: terracotta → ochre → olive.
+ * Map a score (0–1) onto a single-hue ramp from muted ink to the theme accent.
  *
- * The hue range (35°→130°) is shifted off pure red/green so the scale sits in
- * the same family as the cream/coffee/taupe chrome (#3D2E22, #8C7A6B, #E5DDD4)
- * instead of clashing with it. Constant OKLCH lightness keeps text contrast
- * stable across the cream backgrounds.
+ * One hue keeps the table calm: strong scores read as accent, weak ones fade
+ * back, instead of a red → amber → green traffic light on every row.
  */
 function scoreColor(score: number): string {
-  const t = Math.max(0, Math.min(1, score));
-  const hue = 35 + t * 95;
-  return `oklch(0.5 0.13 ${hue.toFixed(1)})`;
+  const pct = Math.round(Math.max(0, Math.min(1, score)) * 100);
+  return `color-mix(in oklch, var(--primary) ${pct}%, var(--muted-foreground))`;
 }
 
 /**
@@ -105,99 +98,7 @@ export function DataTab({
   const { sortKey, sortDir, toggleSort } = useTableSort<string>("");
   const colResize = useColumnResize();
 
-  const isDemoMode = job.optimization_id === DEMO_OPTIMIZATION_ID;
-
   useEffect(() => {
-    if (isDemoMode) {
-      setDataset({
-        total_rows: 12,
-        splits: {
-          train: [
-            { index: 0, row: { email_text: "Click here to win $1000 now!", category: "spam" } },
-            {
-              index: 1,
-              row: { email_text: "Meeting moved to 3pm tomorrow", category: "important" },
-            },
-            {
-              index: 2,
-              row: { email_text: "50% off all items this weekend only", category: "promotional" },
-            },
-            {
-              index: 3,
-              row: { email_text: "Your account has been compromised! Act now!", category: "spam" },
-            },
-            {
-              index: 4,
-              row: {
-                email_text: "Q3 budget review attached for your approval",
-                category: "important",
-              },
-            },
-            {
-              index: 5,
-              row: { email_text: "Flash sale: 70% off electronics today", category: "promotional" },
-            },
-            {
-              index: 6,
-              row: {
-                email_text: "Reminder: dentist appointment on Thursday",
-                category: "important",
-              },
-            },
-          ],
-          val: [
-            {
-              index: 7,
-              row: { email_text: "You've won a free iPhone! Claim here", category: "spam" },
-            },
-            {
-              index: 8,
-              row: {
-                email_text: "New company policy update effective Monday",
-                category: "important",
-              },
-            },
-          ],
-          test: [
-            {
-              index: 9,
-              row: { email_text: "Limited time offer: buy 1 get 1 free", category: "promotional" },
-            },
-            {
-              index: 10,
-              row: { email_text: "Team standup notes from Monday", category: "important" },
-            },
-            {
-              index: 11,
-              row: {
-                email_text: "Congratulations! You've been selected for a prize",
-                category: "spam",
-              },
-            },
-          ],
-        },
-        column_mapping: { inputs: { email_text: "email_text" }, outputs: { category: "category" } },
-        split_counts: { train: 7, val: 2, test: 3 },
-      });
-      setTestResults({
-        optimized: {
-          7: { index: 7, outputs: { category: "promotional" }, score: 0.0, pass: false },
-          8: { index: 8, outputs: { category: "important" }, score: 1.0, pass: true },
-          9: { index: 9, outputs: { category: "promotional" }, score: 1.0, pass: true },
-          10: { index: 10, outputs: { category: "promotional" }, score: 0.0, pass: false },
-          11: { index: 11, outputs: { category: "spam" }, score: 1.0, pass: true },
-        },
-        baseline: {
-          7: { index: 7, outputs: { category: "promotional" }, score: 0.0, pass: false },
-          8: { index: 8, outputs: { category: "important" }, score: 1.0, pass: true },
-          9: { index: 9, outputs: { category: "spam" }, score: 0.0, pass: false },
-          10: { index: 10, outputs: { category: "important" }, score: 1.0, pass: true },
-          11: { index: 11, outputs: { category: "promotional" }, score: 0.0, pass: false },
-        },
-      });
-      setLoading(false);
-      return;
-    }
     if (sharedDataset) {
       setDataset(sharedDataset);
       setLoading(false);
@@ -207,7 +108,7 @@ export function DataTab({
       .then(setDataset)
       .catch(() => setError(msg("auto.features.optimizations.components.datatab.literal.1")))
       .finally(() => setLoading(false));
-  }, [job.optimization_id, isDemoMode, sharedDataset]);
+  }, [job.optimization_id, sharedDataset]);
 
   // Share view: index the injected baseline/optimized results by example index
   // (mirrors the fetch path's reshaping) instead of calling the authed endpoint.
@@ -221,7 +122,7 @@ export function DataTab({
   }, [sharedTestResults]);
 
   useEffect(() => {
-    if (isDemoMode || sharedDataset || job.status !== "success") return;
+    if (sharedDataset || job.status !== "success") return;
     setTestResultsLoading(true);
     const fetchResults =
       pairIndex != null
@@ -241,7 +142,7 @@ export function DataTab({
         console.warn("test results fetch failed:", err);
       })
       .finally(() => setTestResultsLoading(false));
-  }, [job.optimization_id, job.status, pairIndex, isDemoMode, sharedDataset]);
+  }, [job.optimization_id, job.status, pairIndex, sharedDataset]);
 
   const inputFields = useMemo(
     () => (dataset ? Object.values(dataset.column_mapping.inputs) : []),
@@ -401,13 +302,10 @@ export function DataTab({
       {/* Test evaluation bar — shows cached results */}
       {split === "test" && (
         <FadeIn delay={0.2}>
-          <div
-            className="rounded-2xl border border-[#E5DDD4] bg-gradient-to-l from-[#FAF8F5] to-[#F5F1EC] p-4 space-y-3"
-            data-tutorial="eval-bar"
-          >
+          <div className="rounded-2xl border border-border-subtle bg-muted/40 p-4 space-y-3">
             <div className="flex items-center gap-3">
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-[#3D2E22]">
+                <div className="text-sm font-semibold text-foreground">
                   <HelpTip text={tip("code.predictions_table")}>
                     {msg("auto.features.optimizations.components.datatab.1")}
                   </HelpTip>
@@ -436,7 +334,7 @@ export function DataTab({
                 ]}
               />
               {testResultsLoading && (
-                <CircleNotch className="size-4 animate-spin text-[#8C7A6B] shrink-0" />
+                <CircleNotch className="size-4 animate-spin text-muted-foreground shrink-0" />
               )}
             </div>
           </div>
@@ -445,7 +343,7 @@ export function DataTab({
 
       <FadeIn delay={0.3}>
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="w-full" data-tutorial="split-selector">
+          <div className="w-full">
             <Segmented<Split>
               size="sm"
               className="w-full"
@@ -501,7 +399,6 @@ export function DataTab({
         ) : (
           <Card
             id="data-tab-table"
-            data-tutorial="data-table"
             onKeyDown={(e) => {
               if (e.key !== "Escape") return;
               if (readerIndex !== null) setReaderIndex(null);
@@ -680,7 +577,7 @@ export function DataTab({
                                     />
                                   </div>
                                 ) : (
-                                  <span className="text-[0.625rem] text-[#E5DDD4] flex justify-center">
+                                  <span className="text-[0.625rem] text-border-subtle flex justify-center">
                                     —
                                   </span>
                                 )}

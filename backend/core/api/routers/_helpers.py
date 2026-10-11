@@ -766,8 +766,7 @@ def _resume_candidate_id(job_data: dict) -> str | None:
     resumable_status = status in {OptimizationStatus.failed, OptimizationStatus.cancelled, OptimizationStatus.paused}
     if not resumable_status and not budget_stop:
         return None
-    # A grid is resumed per pair (in its results), not via a whole-job button, so
-    # the top-level flag stays False for grids — see ``grid_resumable_pairs``.
+    # Grid searches are retired: a stored grid stays readable but never resumes.
     if parse_overview(job_data).get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_GRID_SEARCH:
         return None
     # A manual pause or a budget stop is user-driven, not failure recovery, so it is
@@ -898,27 +897,6 @@ def _has_resumable_state(job_store: Any, optimization_id: str) -> bool:
         return True
     has_pairs = getattr(job_store, "has_grid_pair_results", None)
     return bool(callable(has_pairs) and has_pairs(optimization_id))
-
-
-def grid_resumable_pairs(job_store: Any, optimization_id: str) -> list[int]:
-    """Return the grid pair indices that have a saved checkpoint to resume from.
-
-    Drives the per-pair control in the grid results: a failed pair whose index is
-    here crashed mid-GEPA and offers Resume; a failed pair not here failed without
-    state and offers Restart. Successful pairs have no checkpoint (dropped when
-    they finished), so they never appear.
-
-    Args:
-        job_store: The job store to query.
-        optimization_id: The grid job id.
-
-    Returns:
-        Sorted pair indices with a checkpoint (empty when none or unsupported).
-    """
-    lister = getattr(job_store, "list_gepa_checkpoints", None)
-    if not callable(lister):
-        return []
-    return sorted(cp.pair_index for cp in lister(optimization_id) if cp.pair_index >= 0)
 
 
 def build_summary(job_data: dict) -> OptimizationSummaryResponse:

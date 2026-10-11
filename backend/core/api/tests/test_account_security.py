@@ -224,7 +224,7 @@ def test_email_code_flow(client: TestClient, monkeypatch: pytest.MonkeyPatch) ->
     sent: list[tuple[str, str, str]] = []
     monkeypatch.setattr(settings, "smtp_host", "smtp.test")
     monkeypatch.setattr(
-        security_module, "send_email", lambda to, subject, body: sent.append((to, subject, body))
+        security_module, "send_email", lambda to, subject, body, html_body=None: sent.append((to, subject, body))
     )
     assert client.put("/auth/security/email-codes", json={"enabled": True}).status_code == 200
 

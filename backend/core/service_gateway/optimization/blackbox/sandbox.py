@@ -102,6 +102,14 @@ _RELAY_ENDPOINT_ENVS = ("OPENAI_BASE_URL", "SKYNET_GATEWAY_URL")
 # A custom network policy denies every host it does not list; this entry keeps the
 # network open, so only the header injection distinguishes it from ``allow-all``.
 _ANY_HOST = "*"
+# Scorer workspaces live under their own root, apart from proposer workspaces
+# (``skynet-sandbox-*`` in the shared temp directory), so a proposer cannot find
+# metric code by listing its parent directory. Owner write+search only: the
+# root cannot be listed without first changing its mode. Under one uid that is
+# a speed bump, not a boundary; separate boxes are the real boundary.
+_PRIVATE_ROOT_MODE = 0o311
+_private_root_path: Path | None = None
+_private_root_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -122,6 +130,9 @@ class SandboxSpec:
     allowed_hosts: tuple[str, ...] = ()
     vcpus: int = 2
     operation_key: str | None = None
+    # Holds code no optimizer may read (the metric): a local workspace opens
+    # under a private root instead of beside proposer workspaces.
+    private: bool = False
 
 
 @dataclass(frozen=True)
@@ -797,6 +808,23 @@ def _contained_environment(environment: Mapping[str, str], relay: str) -> dict[s
     return result
 
 
+def _private_root() -> Path:
+    """Return the process's private workspace root, creating it on first use.
+
+    The path is never placed in any environment, so only this process knows it.
+
+    Returns:
+        A random, unlistable directory under the temp directory.
+    """
+    global _private_root_path
+    with _private_root_lock:
+        if _private_root_path is None or not _private_root_path.is_dir():
+            root = Path(tempfile.mkdtemp(prefix=f".{uuid.uuid4().hex}-")).resolve()
+            root.chmod(_PRIVATE_ROOT_MODE)
+            _private_root_path = root
+        return _private_root_path
+
+
 class LocalSubprocessSession:
     """Session over a temp directory on the worker host: a development stand-in, not a security boundary.
 
@@ -809,10 +837,14 @@ class LocalSubprocessSession:
 
         Args:
             spec: Environment for the sandbox; lifetime and labels are ignored
-                because per-command timeouts already bound local work.
+                because per-command timeouts already bound local work. A
+                ``private`` spec opens under the private root.
             protected_relay: Outer sandbox mailbox forced onto nested commands.
         """
-        self._dir = Path(tempfile.mkdtemp(prefix="skynet-sandbox-")).resolve()
+        if spec.private:
+            self._dir = Path(tempfile.mkdtemp(prefix=f"{uuid.uuid4().hex}-", dir=_private_root())).resolve()
+        else:
+            self._dir = Path(tempfile.mkdtemp(prefix="skynet-sandbox-")).resolve()
         self._protected_relay = protected_relay
         self.log_owner = spec.tags.get(JOB_TAG)
         (self._dir / "tmp").mkdir()

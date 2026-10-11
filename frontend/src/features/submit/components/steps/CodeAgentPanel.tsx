@@ -1,16 +1,9 @@
 "use client";
 
 import * as React from "react";
-import {
-  Robot,
-  Ruler,
-  FileCode,
-  ChatCenteredDots,
-  ShareNetwork,
-  FolderOpen,
-  Target,
-} from "@/shared/ui/icons";
+import { Robot, Ruler, FileCode, ChatCenteredDots, ShareNetwork, Target } from "@/shared/ui/icons";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 
 import { cn } from "@/shared/lib/utils";
 import { TERMS } from "@/shared/lib/terms";
@@ -36,10 +29,8 @@ interface Props {
   disabled?: boolean;
   disabledReason?: string;
   className?: string;
-  /** Black-box wizard: the agent drafts a starting point + scorer, not DSPy code. */
-  blackbox?: boolean;
-  /** Black-box repository job with no repository picked yet: picking one starts the agent. */
-  awaitingRepo?: boolean;
+  /** Unified wizard: the agent drafts run code and a metric, not DSPy code. */
+  unified?: boolean;
   model: string | null;
   onModelChange: (model: string | null) => void;
   reasoningEffort: string | null;
@@ -51,8 +42,7 @@ export function CodeAgentPanel({
   disabled,
   disabledReason,
   className,
-  blackbox,
-  awaitingRepo,
+  unified,
   model,
   onModelChange,
   reasoningEffort,
@@ -81,27 +71,27 @@ export function CodeAgentPanel({
 
   const renderToolCall = React.useCallback(
     (call: SharedAgentToolCall, { isRetry }: { isRetry: boolean }) => (
-      <ToolCallCard call={call} isRetry={isRetry} />
+      <ToolCallCard call={call} isRetry={isRetry} unified={unified} />
     ),
-    [],
+    [unified],
   );
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}>
       {hasConversation && !disabled && (
-        <div className="border-b border-[#3D2E22]/10 px-3 py-2 shrink-0">
+        <div className="border-b border-primary-fill/10 px-3 py-2 shrink-0">
           <button
             type="button"
             onClick={handleNewChat}
             className={cn(
               "group flex w-full items-center justify-center gap-1.5 rounded-full",
-              "border border-[#3D2E22]/10 bg-[#3D2E22]/[0.02]",
-              "min-h-[44px] px-2.5 py-1.5 text-[0.6875rem] font-medium text-[#3D2E22]/75 lg:min-h-0",
-              "shadow-[inset_0_-1px_0_rgba(61,46,34,0.04)]",
+              "border border-primary-fill/10 bg-primary-fill/[0.02]",
+              "min-h-[44px] px-2.5 py-1.5 text-[0.6875rem] font-medium text-primary/75 lg:min-h-0",
+              "shadow-[inset_0_-1px_0_rgba(0,0,0,0.04)]",
               "transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out",
-              "hover:border-[#3D2E22]/20 hover:bg-[#3D2E22]/[0.06] hover:text-[#3D2E22]",
-              "active:scale-[0.99] active:bg-[#3D2E22]/[0.08]",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/60 focus-visible:ring-offset-1 focus-visible:ring-offset-[#FAF8F5]",
+              "hover:border-primary-fill/20 hover:bg-primary-fill/[0.06] hover:text-primary",
+              "active:scale-[0.99] active:bg-primary-fill/[0.08]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
               "cursor-pointer",
             )}
             title={msg("auto.features.submit.components.steps.codeagentpanel.literal.2")}
@@ -117,18 +107,9 @@ export function CodeAgentPanel({
       )}
       <AgentThread
         scrollDeps={[agent.messages, agent.status]}
-        isEmpty={
-          agent.openingRepo !== null ||
-          (agent.messages.length === 0 && !streaming && agent.status !== "error")
-        }
+        isEmpty={agent.messages.length === 0 && !streaming && agent.status !== "error"}
         emptyState={
-          <EmptyState
-            disabled={disabled}
-            disabledReason={disabledReason}
-            blackbox={blackbox}
-            awaitingRepo={awaitingRepo}
-            openingRepo={agent.openingRepo}
-          />
+          <EmptyState disabled={disabled} disabledReason={disabledReason} unified={unified} />
         }
       >
         <ChatTranscript
@@ -150,7 +131,7 @@ export function CodeAgentPanel({
                   <ActivityBreadcrumb
                     signatureStatus={agent.signatureStatus}
                     metricStatus={agent.metricStatus}
-                    blackbox={blackbox}
+                    blackbox={unified}
                   />
                 </div>
               )}
@@ -199,7 +180,7 @@ export function CodeAgentPanel({
             ? disabledReason ||
               msg("auto.features.submit.components.steps.codeagentpanel.literal.4")
             : agent.limitReached
-              ? msg("submit.blackbox.agent.limit_placeholder")
+              ? unifiedMsg("submit.v2.metric.agent.limit_placeholder")
               : msg("auto.features.submit.components.steps.codeagentpanel.literal.1")
         }
         disabled={disabled || agent.limitReached}
@@ -297,36 +278,43 @@ function computeLineDiff(oldText: string, newText: string): DiffLine[] {
   return out;
 }
 
-function ToolCallCard({ call, isRetry = false }: { call: SharedAgentToolCall; isRetry?: boolean }) {
+// The unified wizard's agent copy is new; its keys land in the generated
+// catalog with the wizard v2 strings.
+function unifiedMsg(key: string): string {
+  return msg(key as MessageKey);
+}
+
+function ToolCallCard({
+  call,
+  isRetry = false,
+  unified = false,
+}: {
+  call: SharedAgentToolCall;
+  isRetry?: boolean;
+  unified?: boolean;
+}) {
   const codeCall = call as AgentToolCall;
   const isSignature = codeCall.tool === "edit_signature" || codeCall.tool === "edit_seed";
   const isMetric = codeCall.tool === "edit_metric" || codeCall.tool === "edit_scorer";
-  const isRepoRead = codeCall.tool === "read_repo_file" || codeCall.tool === "list_repo_folder";
   const Icon = isSignature
     ? FileCode
     : isMetric
       ? Ruler
-      : isRepoRead
-        ? FolderOpen
-        : codeCall.tool === "set_brief"
-          ? Target
-          : ShareNetwork;
+      : codeCall.tool === "set_brief"
+        ? Target
+        : ShareNetwork;
   const title =
-    codeCall.tool === "read_repo_file"
-      ? formatMsg("submit.blackbox.agent.tool.read_file", { path: codeCall.reason })
-      : codeCall.tool === "list_repo_folder"
-        ? formatMsg("submit.blackbox.agent.tool.list_folder", { path: codeCall.reason })
-        : codeCall.tool === "set_brief"
-          ? msg("submit.blackbox.agent.tool.brief")
-          : codeCall.tool === "edit_seed"
-            ? msg("submit.blackbox.agent.tool.seed")
-            : codeCall.tool === "edit_scorer"
-              ? msg("submit.blackbox.agent.tool.scorer")
-              : isSignature
-                ? msg("submit.code.agent.tool.signature.title")
-                : isMetric
-                  ? msg("submit.code.agent.tool.metric.title")
-                  : msg(`workflow.agent.tool.${codeCall.tool}` as Parameters<typeof msg>[0]);
+    codeCall.tool === "set_brief"
+      ? unifiedMsg("submit.v2.metric.agent.tool.brief")
+      : unified && isSignature
+        ? unifiedMsg("submit.v2.metric.agent.tool.run")
+        : unified && isMetric
+          ? unifiedMsg("submit.v2.metric.agent.tool.metric")
+          : isSignature
+            ? msg("submit.code.agent.tool.signature.title")
+            : isMetric
+              ? msg("submit.code.agent.tool.metric.title")
+              : msg(`workflow.agent.tool.${codeCall.tool}` as Parameters<typeof msg>[0]);
 
   const diff = React.useMemo<DiffLine[]>(() => {
     if (!codeCall.newCode) return [];
@@ -379,17 +367,19 @@ function ToolCallCard({ call, isRetry = false }: { call: SharedAgentToolCall; is
 function DiffRow({ line }: { line: DiffLine }) {
   const marker = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
   const bg =
-    line.kind === "add" ? "bg-[#3D2E22]/[0.06]" : line.kind === "del" ? "bg-[#3D2E22]/[0.03]" : "";
+    line.kind === "add"
+      ? "bg-primary-fill/[0.06]"
+      : line.kind === "del"
+        ? "bg-primary-fill/[0.03]"
+        : "";
   const markerColor =
     line.kind === "add"
-      ? "text-[#3D2E22]"
+      ? "text-primary"
       : line.kind === "del"
-        ? "text-[#3D2E22]/45"
+        ? "text-primary/45"
         : "text-muted-foreground/40";
   const textColor =
-    line.kind === "del"
-      ? "text-[#3D2E22]/55 line-through decoration-[#3D2E22]/30"
-      : "text-[#3D2E22]/85";
+    line.kind === "del" ? "text-primary/55 line-through decoration-primary/30" : "text-primary/85";
   return (
     <div className={cn("flex gap-2 px-3 whitespace-pre", bg)}>
       <span aria-hidden className={cn("select-none shrink-0 w-3 text-center", markerColor)}>
@@ -405,27 +395,12 @@ function DiffRow({ line }: { line: DiffLine }) {
 function EmptyState({
   disabled,
   disabledReason,
-  blackbox,
-  awaitingRepo,
-  openingRepo,
+  unified,
 }: {
   disabled?: boolean;
   disabledReason?: string;
-  blackbox?: boolean;
-  awaitingRepo?: boolean;
-  openingRepo?: string | null;
+  unified?: boolean;
 }) {
-  if (openingRepo && !disabled) {
-    return (
-      <SharedEmptyState
-        icon={FolderOpen}
-        iconWrap="tile"
-        variant="compact"
-        title={formatMsg("submit.blackbox.agent.opening_title", { repo: openingRepo })}
-        description={msg("submit.blackbox.agent.opening_hint")}
-      />
-    );
-  }
   return (
     <SharedEmptyState
       icon={Robot}
@@ -439,12 +414,8 @@ function EmptyState({
       description={
         disabled
           ? disabledReason || msg("auto.features.submit.components.steps.codeagentpanel.literal.16")
-          : blackbox
-            ? msg(
-                awaitingRepo
-                  ? "submit.blackbox.agent.empty_hint_repo"
-                  : "submit.blackbox.agent.empty_hint",
-              )
+          : unified
+            ? unifiedMsg("submit.v2.metric.agent.empty_hint")
             : formatMsg("auto.features.submit.components.steps.codeagentpanel.template.2", {
                 p1: TERMS.dataset,
                 p2: TERMS.signature,

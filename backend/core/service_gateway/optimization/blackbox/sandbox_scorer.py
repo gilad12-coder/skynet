@@ -1,9 +1,10 @@
 """Python scorers behind the sandbox seam: one box per job, one runner call per evaluation.
 
 User scorer code never runs on the worker. :class:`SandboxPythonScorer`
-opens a sandbox lazily on the first evaluation, ships :mod:`.runner` into
-it once, and turns every ``(candidate, case)`` into a ``calls/NNNNNN/``
-directory the runner scores from ``input.json`` into ``output.json``. The
+opens a sandbox lazily on the first evaluation, ships :mod:`.runner` and the
+scorer source into it once, and turns every ``(candidate, case)`` into a
+``calls/NNNNNN/`` directory the runner scores from ``input.json`` into
+``output.json``. The per-call inputs never repeat the scorer source. The
 scorer's ``llm()`` calls leave the box for the gateway
 :func:`scorer_gateway` resolves; their token usage comes back with each
 result and lands in a :class:`ScorerUsage` ledger the run's cost ceiling
@@ -350,6 +351,7 @@ class SandboxPythonScorer:
             inject_headers=injected,
             network_disabled=self._protected,
             operation_key=f"scorer:{uuid.uuid4().hex}" if self._protected else None,
+            private=True,
         )
         self._session: SandboxSession | None = None
         self._calls = 0
@@ -390,7 +392,6 @@ class SandboxPythonScorer:
             ServiceError: When the box could not run the scorer at all.
         """
         payload = {
-            "code": self._code,
             "candidate": candidate,
             "case": case,
             "gateway": self._gateway.runner_payload() if self._gateway is not None else None,
@@ -438,7 +439,6 @@ class SandboxPythonScorer:
         """
         payload = {
             "mode": "readiness",
-            "code": self._code,
             "gateway": self._gateway.runner_payload() if self._gateway is not None else None,
         }
         with self._lock:
@@ -516,7 +516,7 @@ class SandboxPythonScorer:
             session = self._runtime.open(replace(self._spec, name=name))
             logger.info("scorer sandbox: ready in %.1fs", time.perf_counter() - opened)
             try:
-                session.write_files({RUNNER_FILE: RUNNER_SOURCE})
+                session.write_files({RUNNER_FILE: RUNNER_SOURCE, runner.CODE_FILE: self._code})
                 self._install(session)
             except BaseException:
                 session.close()

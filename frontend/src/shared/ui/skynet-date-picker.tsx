@@ -274,7 +274,7 @@ export function SkynetDatePicker({
           type="button"
           aria-label={ariaLabel ?? msg("explore.datepicker.open")}
           data-has-value={displayValue ? "true" : "false"}
-          className={`group inline-flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-[13px] text-foreground transition-colors cursor-pointer hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 data-[state=open]:border-foreground/40 ${className ?? ""}`}
+          className={`group inline-flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-[13px] text-foreground transition-colors cursor-pointer hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 data-[state=open]:border-foreground/40 ${className ?? ""}`}
         >
           <span
             dir={displayValue ? "ltr" : undefined}
@@ -300,7 +300,7 @@ export function SkynetDatePicker({
               onClick={() => setViewDate(addMonths(viewDate, -1))}
               aria-label={msg("explore.datepicker.previous_month")}
               disabled={prevMonthDisabled}
-              className="inline-flex size-7 items-center justify-center rounded-md text-foreground/60 transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/25 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              className="inline-flex size-7 items-center justify-center rounded-md text-foreground/60 transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/25 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
             >
               <PrevMonthIcon className="size-4" aria-hidden="true" />
             </button>
@@ -315,7 +315,7 @@ export function SkynetDatePicker({
               onClick={() => setViewDate(addMonths(viewDate, 1))}
               aria-label={msg("explore.datepicker.next_month")}
               disabled={nextMonthDisabled}
-              className="inline-flex size-7 items-center justify-center rounded-md text-foreground/60 transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/25 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              className="inline-flex size-7 items-center justify-center rounded-md text-foreground/60 transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/25 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
             >
               <NextMonthIcon className="size-4" aria-hidden="true" />
             </button>
@@ -376,7 +376,7 @@ export function SkynetDatePicker({
                     tabIndex={isFocused ? 0 : -1}
                     onClick={() => handleSelect(cell)}
                     onFocus={() => setFocusedDate(cell)}
-                    className={`relative inline-flex size-9 items-center justify-center rounded-md text-[12.5px] tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 ${
+                    className={`relative inline-flex size-9 items-center justify-center rounded-md text-[12.5px] tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${
                       oor
                         ? "cursor-not-allowed text-foreground/25"
                         : isSelected
@@ -398,7 +398,7 @@ export function SkynetDatePicker({
               type="button"
               onClick={goToday}
               disabled={isOutOfRange(today, minDate, maxDate)}
-              className="inline-flex items-center justify-center rounded-md px-2 py-1 text-[12px] text-foreground/65 transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/25 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              className="inline-flex items-center justify-center rounded-md px-2 py-1 text-[12px] text-foreground/65 transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/25 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
             >
               {msg("explore.datepicker.today")}
             </button>
@@ -406,7 +406,7 @@ export function SkynetDatePicker({
               type="button"
               onClick={handleClear}
               disabled={!selectedDate}
-              className="inline-flex items-center justify-center rounded-md px-2 py-1 text-[12px] text-foreground/65 transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/25 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              className="inline-flex items-center justify-center rounded-md px-2 py-1 text-[12px] text-foreground/65 transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/25 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
             >
               {msg("explore.datepicker.clear")}
             </button>

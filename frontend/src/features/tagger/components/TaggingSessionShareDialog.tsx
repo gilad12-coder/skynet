@@ -321,17 +321,16 @@ export function TaggingSessionShareDialog({ sessionId }: { sessionId: string }) 
                             )}
                           </SelectContent>
                         </Select>
-                        <TooltipButton tooltip={msg("share.remove_member_aria")}>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                            onClick={() => handleRemove(member.username)}
-                            aria-label={msg("share.remove_member_aria")}
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                        </TooltipButton>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => handleRemove(member.username)}
+                          aria-label={msg("share.remove_member_aria")}
+                          autoTooltip={false}
+                        >
+                          <X className="size-3.5" />
+                        </Button>
                       </SettingsRow>
                     ),
                   )}
@@ -390,21 +389,20 @@ export function TaggingSessionShareDialog({ sessionId }: { sessionId: string }) 
                   {shareUrl && state.general_access === "anyone" && (
                     <div
                       dir="ltr"
-                      className="flex items-center gap-1 rounded-xl border border-input/90 bg-background/75 ps-3 pe-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.72),0_12px_26px_-24px_rgba(15,23,42,0.45)] backdrop-blur-sm transition-[color,box-shadow,border-color] duration-120 ease-[cubic-bezier(0.2,0.8,0.2,1)] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50"
+                      className="flex items-center gap-1 rounded-xl border border-input/90 bg-background/75 ps-3 pe-1 backdrop-blur-sm transition-[color,box-shadow,border-color] duration-120 ease-[cubic-bezier(0.2,0.8,0.2,1)] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50"
                     >
                       <code className="min-w-0 flex-1 truncate py-2 font-mono text-[0.6875rem] text-muted-foreground">
                         {shareUrl}
                       </code>
                       <div aria-hidden className="h-5 w-px shrink-0 bg-border/70" />
-                      <TooltipButton tooltip={msg("share.copy_link")}>
-                        <CopyButton
-                          text={shareUrl}
-                          ariaLabel={msg("share.copy_link")}
-                          onCopied={() => toast.success(msg("share.link_copied"))}
-                          onCopyError={() => toast.error(msg("clipboard.copy_failed"))}
-                          className="shrink-0 focus-visible:bg-accent focus-visible:ring-0"
-                        />
-                      </TooltipButton>
+                      <CopyButton
+                        text={shareUrl}
+                        ariaLabel={msg("share.copy_link")}
+                        autoTooltip={false}
+                        onCopied={() => toast.success(msg("share.link_copied"))}
+                        onCopyError={() => toast.error(msg("clipboard.copy_failed"))}
+                        className="shrink-0 focus-visible:bg-accent focus-visible:ring-0"
+                      />
                     </div>
                   )}
                 </div>
@@ -537,7 +535,7 @@ function InvitePeople({
     <div className="space-y-2">
       <Label htmlFor={inviteId}>{msg("share.invite_label")}</Label>
       <div className="relative">
-        <div className="flex items-center gap-1 rounded-xl border border-input/90 bg-background/75 ps-3 pe-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.72),0_12px_26px_-24px_rgba(15,23,42,0.45)] backdrop-blur-sm transition-[color,box-shadow,border-color] duration-120 ease-[cubic-bezier(0.2,0.8,0.2,1)] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+        <div className="flex items-center gap-1 rounded-xl border border-input/90 bg-background/75 ps-3 pe-1 backdrop-blur-sm transition-[color,box-shadow,border-color] duration-120 ease-[cubic-bezier(0.2,0.8,0.2,1)] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
           <Input
             value={query}
             onChange={(e) => {
@@ -590,28 +588,27 @@ function InvitePeople({
               )}
             </SelectContent>
           </Select>
-          <TooltipButton tooltip={msg("share.invite")}>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => void submit(query)}
-              disabled={inviting || query.trim().length === 0}
-              aria-label={msg("share.invite")}
-              className="shrink-0 text-muted-foreground hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-0"
-            >
-              {inviting ? (
-                <CircleNotch
-                  className="animate-spin motion-reduce:animate-none"
-                  aria-hidden="true"
-                />
-              ) : (
-                <UserPlus className="size-4" />
-              )}
-            </Button>
-          </TooltipButton>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => void submit(query)}
+            disabled={inviting || query.trim().length === 0}
+            aria-label={msg("share.invite")}
+            autoTooltip={false}
+            className="shrink-0 text-muted-foreground hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-0"
+          >
+            {inviting ? (
+              <CircleNotch
+                className="animate-spin motion-reduce:animate-none"
+                aria-hidden="true"
+              />
+            ) : (
+              <UserPlus className="size-4" />
+            )}
+          </Button>
         </div>
         {open && query.trim().length > 0 && (
-          <div className="absolute inset-x-0 top-full z-30 mt-2 max-h-48 overflow-y-auto rounded-md border border-border/70 bg-popover shadow-lg">
+          <div className="absolute inset-x-0 top-full z-30 mt-2 max-h-48 overflow-y-auto rounded-md border border-border/70 bg-popover shadow-[var(--shadow-float)]">
             {searching ? (
               <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
                 <CircleNotch className="size-3.5 animate-spin" />

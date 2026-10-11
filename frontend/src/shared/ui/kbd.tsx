@@ -15,7 +15,7 @@ export function Kbd({
       className={cn(
         KBD_CLASS,
         "h-[18px] min-w-5 px-1 text-[0.6875rem]",
-        active && "border-primary/40 bg-primary/10 text-primary",
+        active && "border-primary-fill bg-primary-fill text-primary-foreground",
         className,
       )}
       {...props}

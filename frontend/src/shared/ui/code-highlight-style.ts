@@ -8,29 +8,30 @@ export interface CodeHighlightSpec {
 }
 
 /**
- * The beige syntax palette, shared by the code editor and the read-only
- * file views that highlight without an editor.
+ * The syntax palette, shared by the code editor and the read-only file
+ * views that highlight without an editor. Colours resolve from the
+ * `--code-*` tokens in globals.css so they follow the colour theme.
  */
 export const CODE_HIGHLIGHT_SPECS: CodeHighlightSpec[] = [
-  { tag: tags.keyword, color: "#8B5E3C", fontWeight: "bold" },
-  { tag: tags.operator, color: "#7C6350" },
-  { tag: tags.special(tags.variableName), color: "#6B4226" },
-  { tag: tags.typeName, color: "#8B6914" },
-  { tag: tags.atom, color: "#8B6914" },
-  { tag: tags.number, color: "#986832" },
-  { tag: tags.definition(tags.variableName), color: "#3D2E22" },
-  { tag: tags.string, color: "#5A7247" },
-  { tag: tags.special(tags.string), color: "#5A7247" },
-  { tag: tags.comment, color: "#8A7558", fontStyle: "italic" },
-  { tag: tags.variableName, color: "#3D2E22" },
-  { tag: tags.bracket, color: "#8C7A6B" },
-  { tag: tags.tagName, color: "#8B5E3C" },
-  { tag: tags.attributeName, color: "#8B6914" },
-  { tag: tags.propertyName, color: "#6B4226" },
-  { tag: tags.className, color: "#6B4226" },
-  { tag: tags.function(tags.variableName), color: "#7C5030" },
-  { tag: tags.bool, color: "#8B6914" },
-  { tag: tags.null, color: "#8B6914" },
-  { tag: tags.self, color: "#8B5E3C", fontStyle: "italic" },
-  { tag: tags.punctuation, color: "#8C7A6B" },
+  { tag: tags.keyword, color: "var(--code-keyword)", fontWeight: "bold" },
+  { tag: tags.operator, color: "var(--code-operator)" },
+  { tag: tags.special(tags.variableName), color: "var(--code-accent)" },
+  { tag: tags.typeName, color: "var(--code-type)" },
+  { tag: tags.atom, color: "var(--code-type)" },
+  { tag: tags.number, color: "var(--code-number)" },
+  { tag: tags.definition(tags.variableName), color: "var(--code-text)" },
+  { tag: tags.string, color: "var(--code-string)" },
+  { tag: tags.special(tags.string), color: "var(--code-string)" },
+  { tag: tags.comment, color: "var(--code-comment)", fontStyle: "italic" },
+  { tag: tags.variableName, color: "var(--code-text)" },
+  { tag: tags.bracket, color: "var(--code-punct)" },
+  { tag: tags.tagName, color: "var(--code-keyword)" },
+  { tag: tags.attributeName, color: "var(--code-type)" },
+  { tag: tags.propertyName, color: "var(--code-accent)" },
+  { tag: tags.className, color: "var(--code-accent)" },
+  { tag: tags.function(tags.variableName), color: "var(--code-function)" },
+  { tag: tags.bool, color: "var(--code-type)" },
+  { tag: tags.null, color: "var(--code-type)" },
+  { tag: tags.self, color: "var(--code-keyword)", fontStyle: "italic" },
+  { tag: tags.punctuation, color: "var(--code-punct)" },
 ];

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   CaretLeft,
   CaretRight,
@@ -159,6 +160,23 @@ type JobsTabProps = {
   onOpenJob: (id: string) => void;
 };
 
+const MotionTableRow = motion.create(TableRow);
+
+const ROW_EASE = [0.2, 0.8, 0.2, 1] as const;
+
+// Rows keep their identity across sort and filter changes so a sort glides
+// each row to its new place and a filter fades the dropped rows out.
+const ROW_MOTION = {
+  initial: { opacity: 0, y: 4 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, transition: { duration: 0.15, ease: ROW_EASE } },
+};
+
+function rowTransition(idx: number) {
+  const enter = { duration: 0.3, ease: ROW_EASE, delay: Math.min(idx, 12) * 0.03 };
+  return { layout: { duration: 0.3, ease: ROW_EASE }, opacity: enter, y: enter };
+}
+
 export function JobsTab({
   data,
   loading,
@@ -260,10 +278,7 @@ export function JobsTab({
         )}
 
         {filteredItems.length > 0 && !isPhone && (
-          <div
-            className="overflow-x-auto rounded-2xl border border-border/40 bg-card/60"
-            data-tutorial="dashboard-table"
-          >
+          <div className="overflow-x-auto rounded-2xl border border-border/40 bg-card/60">
             <Table className={JOBS_TABLE_CLASS}>
               <TableHeader>
                 <TableRow>
@@ -474,225 +489,240 @@ export function JobsTab({
                     />
                   }
                 >
-                  {jobs.map((job, idx) => {
-                    const isSelected = selectedIds.has(job.optimization_id);
-                    return (
-                      <TableRow
-                        key={job.optimization_id}
-                        data-selected={isSelected}
-                        className="group border-border/30 transition-colors duration-150 hover:bg-muted/50 data-[selected=true]:bg-primary/[0.08] data-[selected=true]:hover:bg-primary/[0.12] cursor-pointer [&_td:first-child]:cursor-default"
-                        style={{
-                          animation: `fadeSlideIn 0.25s ease-out ${idx * 0.03}s both`,
-                        }}
-                        onClick={(e) => {
-                          // Convenience target only — the ID button remains the
-                          // accessible/keyboard path. The checkbox cell is
-                          // excluded so a missed checkbox click can't navigate.
-                          const target = e.target as HTMLElement;
-                          if (target.closest("button, a, input")) return;
-                          const td = target.closest("td");
-                          if (!td || td === td.parentElement?.firstElementChild) return;
-                          onOpenJob(job.optimization_id);
-                        }}
-                      >
-                        <TableCell className="w-12 px-0 text-center">
-                          <div className="flex justify-center any-pointer-coarse:min-w-[44px]">
-                            <SelectCheckbox
-                              checked={isSelected}
-                              onToggle={() => toggleRowSelected(job.optimization_id)}
-                              ariaLabel={formatMsg(
-                                "auto.features.dashboard.components.jobstab.template.2",
-                                { p1: TERMS.optimization, p2: job.optimization_id },
+                  <AnimatePresence initial={false}>
+                    {jobs.map((job, idx) => {
+                      const isSelected = selectedIds.has(job.optimization_id);
+                      return (
+                        <MotionTableRow
+                          key={job.optimization_id}
+                          layout="position"
+                          initial={ROW_MOTION.initial}
+                          animate={ROW_MOTION.animate}
+                          exit={ROW_MOTION.exit}
+                          transition={rowTransition(idx)}
+                          data-selected={isSelected}
+                          className="group border-border/30 transition-colors duration-150 hover:bg-muted/50 data-[selected=true]:bg-primary-fill/[0.08] data-[selected=true]:hover:bg-primary-fill/[0.12] cursor-pointer [&_td:first-child]:cursor-default"
+                          onClick={(e) => {
+                            // Convenience target only — the ID button remains the
+                            // accessible/keyboard path. The checkbox cell is
+                            // excluded so a missed checkbox click can't navigate.
+                            const target = e.target as HTMLElement;
+                            if (target.closest("button, a, input")) return;
+                            const td = target.closest("td");
+                            if (!td || td === td.parentElement?.firstElementChild) return;
+                            onOpenJob(job.optimization_id);
+                          }}
+                        >
+                          <TableCell className="w-12 px-0 text-center">
+                            <div className="flex justify-center any-pointer-coarse:min-w-[44px]">
+                              <SelectCheckbox
+                                checked={isSelected}
+                                onToggle={() => toggleRowSelected(job.optimization_id)}
+                                ariaLabel={formatMsg(
+                                  "auto.features.dashboard.components.jobstab.template.2",
+                                  { p1: TERMS.optimization, p2: job.optimization_id },
+                                )}
+                              />
+                            </div>
+                          </TableCell>
+                          {showCol("optimization_id") && (
+                            <TableCell
+                              className="px-2 max-w-[100px]"
+                              data-label={msg(
+                                "auto.features.dashboard.components.jobstab.template.1",
                               )}
-                            />
-                          </div>
-                        </TableCell>
-                        {showCol("optimization_id") && (
-                          <TableCell
-                            className="px-2 max-w-[100px]"
-                            data-label={msg(
-                              "auto.features.dashboard.components.jobstab.template.1",
-                            )}
-                          >
-                            {/* ``min-w-0`` lets the flex item shrink so the
+                            >
+                              {/* ``min-w-0`` lets the flex item shrink so the
                               cell's overflow-hidden + text-ellipsis can
                               actually fire on the button below; without it
                               the flex child claims its content's intrinsic
                               width and overflows past the cell boundary. */}
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              {ACTIVE_STATUSES.has(job.status) && <PingDot className="shrink-0" />}
-                              {/* ``dir="ltr"`` keeps hex IDs that start with a
-                                digit from bidi-reordering in RTL locales. */}
-                              <button
-                                type="button"
-                                dir="ltr"
-                                onClick={() => onOpenJob(job.optimization_id)}
-                                className="font-mono text-xs text-primary truncate min-w-0 rounded-md cursor-pointer underline-offset-2 group-hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                                aria-label={formatMsg(
-                                  "auto.features.dashboard.components.jobstab.template.3",
-                                  { p1: TERMS.optimization },
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                {ACTIVE_STATUSES.has(job.status) && (
+                                  <PingDot className="shrink-0" />
                                 )}
-                              >
-                                {formatId(job.optimization_id)}
-                              </button>
+                                {/* ``dir="ltr"`` keeps hex IDs that start with a
+                                digit from bidi-reordering in RTL locales. */}
+                                <button
+                                  type="button"
+                                  dir="ltr"
+                                  onClick={() => onOpenJob(job.optimization_id)}
+                                  className="font-mono text-xs text-primary truncate min-w-0 rounded-md cursor-pointer underline-offset-2 group-hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                                  aria-label={formatMsg(
+                                    "auto.features.dashboard.components.jobstab.template.3",
+                                    { p1: TERMS.optimization },
+                                  )}
+                                >
+                                  {formatId(job.optimization_id)}
+                                </button>
+                              </div>
+                            </TableCell>
+                          )}
+                          <TableCell
+                            className="px-2 max-w-[140px] text-sm overflow-hidden @max-[44rem]/table:w-full @max-[44rem]/table:max-w-0"
+                            title={job.name ?? ""}
+                            data-label={msg("auto.features.dashboard.components.jobstab.literal.9")}
+                          >
+                            {/* In a narrow table the folded values drop under the name
+                            instead of widening the column past the card. */}
+                            <div className="flex min-w-0 items-center gap-2 @max-[32rem]/table:flex-wrap @max-[32rem]/table:gap-y-0.5">
+                              {job.name ? (
+                                <span
+                                  className="truncate text-foreground @max-[32rem]/table:basis-full"
+                                  dir="auto"
+                                >
+                                  {job.name}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground/60 @max-[32rem]/table:basis-full">
+                                  —
+                                </span>
+                              )}
+                              {showSharedColumns && job.username && (
+                                <TableInline at="md" dir="ltr">
+                                  {job.username.toLowerCase() === sessionUser.toLowerCase()
+                                    ? msg("dashboard.owner.me")
+                                    : job.username}
+                                </TableInline>
+                              )}
+                              {showCol("optimization_type") && (
+                                <TableInline at="md">
+                                  {typeBadge(job.optimization_type)}
+                                </TableInline>
+                              )}
+                              {showCol("module_name") && (
+                                <TableInline at="lg">{moduleLabel(job.module_name)}</TableInline>
+                              )}
+                              {showCol("elapsed_seconds") && (
+                                <TableInline at="md">
+                                  <LiveElapsed
+                                    startedAt={job.started_at}
+                                    createdAt={job.created_at}
+                                    elapsedSeconds={job.elapsed_seconds}
+                                    isActive={ACTIVE_STATUSES.has(job.status)}
+                                  />
+                                </TableInline>
+                              )}
+                              <TableInline at="sm" title={formatDate(job.created_at)}>
+                                {formatRelativeTime(job.created_at)}
+                              </TableInline>
                             </div>
                           </TableCell>
-                        )}
-                        <TableCell
-                          className="px-2 max-w-[140px] text-sm overflow-hidden @max-[44rem]/table:w-full @max-[44rem]/table:max-w-0"
-                          title={job.name ?? ""}
-                          data-label={msg("auto.features.dashboard.components.jobstab.literal.9")}
-                        >
-                          {/* In a narrow table the folded values drop under the name
-                            instead of widening the column past the card. */}
-                          <div className="flex min-w-0 items-center gap-2 @max-[32rem]/table:flex-wrap @max-[32rem]/table:gap-y-0.5">
-                            {job.name ? (
-                              <span
-                                className="truncate text-foreground @max-[32rem]/table:basis-full"
-                                dir="auto"
+                          {showSharedColumns && (
+                            <>
+                              <TableCell
+                                className="px-2 max-w-[120px] text-sm truncate overflow-hidden"
+                                title={job.username ?? ""}
+                                data-label={msg("dashboard.col.owner")}
+                                collapse={columnCollapse("username")}
                               >
-                                {job.name}
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground/60 @max-[32rem]/table:basis-full">
-                                —
-                              </span>
-                            )}
-                            {showSharedColumns && job.username && (
-                              <TableInline at="md" dir="ltr">
-                                {job.username.toLowerCase() === sessionUser.toLowerCase()
-                                  ? msg("dashboard.owner.me")
-                                  : job.username}
-                              </TableInline>
-                            )}
-                            {showCol("optimization_type") && (
-                              <TableInline at="md">{typeBadge(job.optimization_type)}</TableInline>
-                            )}
-                            {showCol("module_name") && (
-                              <TableInline at="lg">{moduleLabel(job.module_name)}</TableInline>
-                            )}
-                            {showCol("elapsed_seconds") && (
-                              <TableInline at="md">
-                                <LiveElapsed
-                                  startedAt={job.started_at}
-                                  createdAt={job.created_at}
-                                  elapsedSeconds={job.elapsed_seconds}
-                                  isActive={ACTIVE_STATUSES.has(job.status)}
-                                />
-                              </TableInline>
-                            )}
-                            <TableInline at="sm" title={formatDate(job.created_at)}>
-                              {formatRelativeTime(job.created_at)}
-                            </TableInline>
-                          </div>
-                        </TableCell>
-                        {showSharedColumns && (
-                          <>
-                            <TableCell
-                              className="px-2 max-w-[120px] text-sm truncate overflow-hidden"
-                              title={job.username ?? ""}
-                              data-label={msg("dashboard.col.owner")}
-                              collapse={columnCollapse("username")}
-                            >
-                              {job.username ? (
-                                job.username.toLowerCase() === sessionUser.toLowerCase() ? (
-                                  <span className="font-semibold text-foreground">
-                                    {msg("dashboard.owner.me")}
-                                  </span>
+                                {job.username ? (
+                                  job.username.toLowerCase() === sessionUser.toLowerCase() ? (
+                                    <span className="font-semibold text-foreground">
+                                      {msg("dashboard.owner.me")}
+                                    </span>
+                                  ) : (
+                                    <span className="font-semibold text-foreground" dir="ltr">
+                                      {job.username}
+                                    </span>
+                                  )
                                 ) : (
-                                  <span className="font-semibold text-foreground" dir="ltr">
-                                    {job.username}
-                                  </span>
-                                )
-                              ) : (
-                                <span className="text-muted-foreground/40">—</span>
-                              )}
-                            </TableCell>
+                                  <span className="text-muted-foreground/40">—</span>
+                                )}
+                              </TableCell>
+                              <TableCell
+                                className="px-2"
+                                data-label={msg("dashboard.col.role")}
+                                collapse={columnCollapse("role")}
+                              >
+                                <RoleBadge role={job.role} />
+                              </TableCell>
+                            </>
+                          )}
+                          {showCol("optimization_type") && (
                             <TableCell
-                              className="px-2"
-                              data-label={msg("dashboard.col.role")}
-                              collapse={columnCollapse("role")}
+                              className="px-2 truncate overflow-hidden"
+                              data-label={msg(
+                                "auto.features.dashboard.components.jobstab.literal.2",
+                              )}
+                              collapse={columnCollapse("optimization_type")}
                             >
-                              <RoleBadge role={job.role} />
+                              {typeBadge(job.optimization_type)}
                             </TableCell>
-                          </>
-                        )}
-                        {showCol("optimization_type") && (
+                          )}
                           <TableCell
                             className="px-2 truncate overflow-hidden"
-                            data-label={msg("auto.features.dashboard.components.jobstab.literal.2")}
-                            collapse={columnCollapse("optimization_type")}
+                            data-label={msg("auto.features.dashboard.components.jobstab.literal.3")}
+                            collapse={columnCollapse("status")}
                           >
-                            {typeBadge(job.optimization_type)}
+                            <StatusBadge status={job.status} compact />
                           </TableCell>
-                        )}
-                        <TableCell
-                          className="px-2 truncate overflow-hidden"
-                          data-label={msg("auto.features.dashboard.components.jobstab.literal.3")}
-                          collapse={columnCollapse("status")}
-                        >
-                          <StatusBadge status={job.status} compact />
-                        </TableCell>
-                        {showCol("module_name") && (
+                          {showCol("module_name") && (
+                            <TableCell
+                              className="px-2 max-w-[120px] text-sm truncate overflow-hidden"
+                              title={job.module_name ?? ""}
+                              data-label={msg(
+                                "auto.features.dashboard.components.jobstab.literal.4",
+                              )}
+                              collapse={columnCollapse("module_name")}
+                            >
+                              {moduleLabel(job.module_name)}
+                            </TableCell>
+                          )}
+                          {showCol("dataset_rows") && (
+                            <TableCell
+                              className="px-2 text-sm tabular-nums truncate overflow-hidden"
+                              data-label={msg(
+                                "auto.features.dashboard.components.jobstab.literal.5",
+                              )}
+                              collapse={columnCollapse("dataset_rows")}
+                            >
+                              {job.dataset_rows ?? "-"}
+                            </TableCell>
+                          )}
                           <TableCell
-                            className="px-2 max-w-[120px] text-sm truncate overflow-hidden"
-                            title={job.module_name ?? ""}
-                            data-label={msg("auto.features.dashboard.components.jobstab.literal.4")}
-                            collapse={columnCollapse("module_name")}
+                            className="px-2 text-xs text-muted-foreground truncate overflow-hidden whitespace-nowrap"
+                            title={formatDate(job.created_at)}
+                            data-label={msg("auto.features.dashboard.components.jobstab.literal.6")}
+                            collapse={columnCollapse("created_at")}
                           >
-                            {moduleLabel(job.module_name)}
+                            {formatRelativeTime(job.created_at)}
                           </TableCell>
-                        )}
-                        {showCol("dataset_rows") && (
+                          {showCol("elapsed_seconds") && (
+                            <TableCell
+                              className="px-2 text-xs tabular-nums truncate overflow-hidden whitespace-nowrap"
+                              data-label={msg(
+                                "auto.features.dashboard.components.jobstab.literal.7",
+                              )}
+                              collapse={columnCollapse("elapsed_seconds")}
+                            >
+                              <LiveElapsed
+                                startedAt={job.started_at}
+                                createdAt={job.created_at}
+                                elapsedSeconds={job.elapsed_seconds}
+                                isActive={ACTIVE_STATUSES.has(job.status)}
+                              />
+                            </TableCell>
+                          )}
                           <TableCell
-                            className="px-2 text-sm tabular-nums truncate overflow-hidden"
-                            title={String(job.dataset_rows ?? "")}
-                            data-label={msg("auto.features.dashboard.components.jobstab.literal.5")}
-                            collapse={columnCollapse("dataset_rows")}
+                            className="px-2 truncate overflow-hidden"
+                            data-label={msg("auto.features.dashboard.components.jobstab.literal.8")}
                           >
-                            {job.dataset_rows ?? "-"}
+                            {formatScore(job)}
                           </TableCell>
-                        )}
-                        <TableCell
-                          className="px-2 text-xs text-muted-foreground truncate overflow-hidden whitespace-nowrap"
-                          title={formatDate(job.created_at)}
-                          data-label={msg("auto.features.dashboard.components.jobstab.literal.6")}
-                          collapse={columnCollapse("created_at")}
-                        >
-                          {formatRelativeTime(job.created_at)}
-                        </TableCell>
-                        {showCol("elapsed_seconds") && (
-                          <TableCell
-                            className="px-2 text-xs tabular-nums truncate overflow-hidden whitespace-nowrap"
-                            data-label={msg("auto.features.dashboard.components.jobstab.literal.7")}
-                            collapse={columnCollapse("elapsed_seconds")}
-                          >
-                            <LiveElapsed
-                              startedAt={job.started_at}
-                              createdAt={job.created_at}
-                              elapsedSeconds={job.elapsed_seconds}
-                              isActive={ACTIVE_STATUSES.has(job.status)}
-                            />
-                          </TableCell>
-                        )}
-                        <TableCell
-                          className="px-2 truncate overflow-hidden"
-                          data-label={msg("auto.features.dashboard.components.jobstab.literal.8")}
-                        >
-                          {formatScore(job)}
-                        </TableCell>
-                        {/* Open-affordance chevron: always faintly visible so the
+                          {/* Open-affordance chevron: always faintly visible so the
                           row reads as navigable, brightening and nudging on
                           hover. */}
-                        <TableCell className="w-8 pe-3">
-                          <CaretRight
-                            aria-hidden="true"
-                            className="size-3.5 text-muted-foreground/40 transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-primary rtl:rotate-180 rtl:group-hover:-translate-x-0.5"
-                          />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                          <TableCell className="w-8 pe-3">
+                            <CaretRight
+                              aria-hidden="true"
+                              className="size-3.5 text-muted-foreground/40 transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-primary rtl:rotate-180 rtl:group-hover:-translate-x-0.5"
+                            />
+                          </TableCell>
+                        </MotionTableRow>
+                      );
+                    })}
+                  </AnimatePresence>
                 </TableGroup>
               ))}
             </Table>

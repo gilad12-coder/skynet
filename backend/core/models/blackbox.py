@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+from .artifacts import ProgramArtifact
 from .common import ModelConfig
 from .results import LMActivity, ModelTokenUsage
 from .scorer_dependencies import ScorerDependencyLock
@@ -610,6 +611,19 @@ class BlackboxCaseResult(BaseModel):
     best_feedback: str | None = None
 
 
+# How a unified run's cases were split. Selection (the winner and the
+# regression guard) used ``selection_split``; the reported scores were measured
+# on ``report_split``. ``held_out`` is true only when the report used test
+# cases no optimizer saw.
+class UnifiedSplitCounts(BaseModel):
+    train: int
+    val: int
+    test: int
+    held_out: bool
+    selection_split: Literal["val", "train", "all"]
+    report_split: Literal["test", "val", "all"]
+
+
 # Result persisted for a finished black-box job. The winner is chosen from the
 # optimization run's scores; ``baseline_score`` / ``best_score`` come from a
 # separate final run that scores the starting point and the winner afresh (on
@@ -646,6 +660,15 @@ class BlackboxRunResponse(BaseModel):
     lm_activity: LMActivity | None = None
     optimization_metadata: dict[str, Any] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)
+    # Unified runs only: how cases were split, the selection scores measured
+    # on ``split_counts.selection_split`` (``baseline_score``/``best_score``
+    # stay the reported scores, on ``split_counts.report_split``), the
+    # optimizer Auto resolved to, and a DSPy optimizer's compiled program.
+    split_counts: UnifiedSplitCounts | None = None
+    baseline_val_score: float | None = None
+    best_val_score: float | None = None
+    optimizer_resolved: str | None = None
+    program_artifact: ProgramArtifact | None = None
 
     # Results stored before the final run existed carry the DSPy names for
     # their held-out scores; read them as the baseline and best scores.
@@ -661,8 +684,15 @@ class BlackboxRunResponse(BaseModel):
             The mapping with ``baseline_score`` / ``best_score`` filled from the
             legacy fields when only those exist.
         """
+        if not isinstance(data, dict):
+            return data
         legacy = {"baseline_test_metric", "optimized_test_metric", "split_counts"}
-        if not isinstance(data, dict) or not legacy & data.keys():
+        # A unified run's split_counts is the current field, not the legacy
+        # DSPy SplitCounts; keep it.
+        split = data.get("split_counts")
+        if isinstance(split, UnifiedSplitCounts) or (isinstance(split, dict) and "selection_split" in split):
+            legacy.discard("split_counts")
+        if not legacy & data.keys():
             return data
         folded = {key: value for key, value in data.items() if key not in legacy}
         folded.setdefault("baseline_score", data.get("baseline_test_metric"))

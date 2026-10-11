@@ -3,6 +3,7 @@
 import { StorageUsageBar } from "@/shared/ui/progress-bar";
 import * as React from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { HardDrive, WarningCircle } from "@/shared/ui/icons";
 import {
   getStorageUsage,
@@ -13,6 +14,7 @@ import { formatStorageSize } from "@/shared/lib/formatters";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
+import { cn } from "@/shared/lib/utils";
 
 /**
  * Compact account-wide storage gauge for the sidebar footer: a thin bar plus an
@@ -28,6 +30,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/
  */
 export function StorageMeter({ collapsed = false }: { collapsed?: boolean }) {
   const [usage, setUsage] = React.useState<StorageUsageResponse | null>(null);
+  const active = usePathname().startsWith("/storage");
 
   React.useEffect(() => {
     let cancelled = false;
@@ -72,12 +75,21 @@ export function StorageMeter({ collapsed = false }: { collapsed?: boolean }) {
           <Link
             href="/storage"
             aria-label={usageLabel}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center px-2 py-2.5 transition-colors duration-150 hover:bg-sidebar-accent/40 lg:min-h-0 lg:min-w-0"
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2 py-2.5 transition-colors duration-150 lg:min-h-0 lg:min-w-0",
+              active ? "bg-sidebar-accent text-sidebar-foreground" : "hover:bg-sidebar-accent/40",
+            )}
           >
             {full ? (
-              <WarningCircle className="size-4 text-destructive" />
+              <WarningCircle className={cn("size-4", "text-destructive")} />
             ) : (
-              <HardDrive className="size-4 text-muted-foreground" />
+              <HardDrive
+                className={cn(
+                  "size-4",
+                  active ? "text-sidebar-foreground" : "text-muted-foreground",
+                )}
+              />
             )}
           </Link>
         </TooltipTrigger>
@@ -90,7 +102,11 @@ export function StorageMeter({ collapsed = false }: { collapsed?: boolean }) {
     <Link
       href="/storage"
       aria-label={msg("storage.page.title")}
-      className="block min-h-[44px] px-3 pt-3 pb-1 transition-colors duration-150 hover:bg-sidebar-accent/40 lg:min-h-0"
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "block min-h-[44px] rounded-lg px-3 pt-3 pb-1 transition-colors duration-150 lg:min-h-0",
+        active ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/40",
+      )}
     >
       <StorageUsageBar value={usagePct} over={usage.used_bytes > usage.quota_bytes} />
       <p className="mt-1.5 flex items-center gap-1 text-start text-[0.6875rem] text-muted-foreground tabular-nums">

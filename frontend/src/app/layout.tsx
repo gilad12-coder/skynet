@@ -15,14 +15,8 @@ import {
   ToastContainer,
 } from "@/shared/providers";
 import { SplashScreen } from "@/shared/layout/splash-screen";
-import { TutorialOverlay, TutorialProvider } from "@/features/tutorial";
 import { ExperienceProvider } from "@/features/experience";
-import {
-  UserPrefsProvider,
-  LiteModeProvider,
-  SettingsModalProvider,
-  SettingsModal,
-} from "@/features/settings";
+import { UserPrefsProvider, SettingsModalProvider, SettingsModal } from "@/features/settings";
 import { StorageQuotaModalHost } from "@/features/storage";
 import { PreflightNotifications } from "@/features/submit";
 import { BalanceProvider, ByokKeysProvider, InsufficientFundsModalHost } from "@/features/billing";
@@ -41,11 +35,13 @@ import { serializeLocale, setServerLocale } from "@/shared/lib/runtime-locale";
 import { setServerMessages, type UiCatalog } from "@/shared/lib/runtime-messages";
 import { buildActiveCatalog } from "@/shared/lib/messages.server";
 import { getSiteUrl } from "@/shared/lib/site-config";
+import { COLOR_THEME_INIT_SCRIPT } from "@/shared/lib/color-theme";
 import { auth } from "@/shared/lib/auth";
 import "@fontsource-variable/heebo/index.css";
-import "@fontsource-variable/geist/index.css";
+import "@fontsource-variable/onest/index.css";
+import "@fontsource-variable/bricolage-grotesque/opsz.css";
 import "@fontsource-variable/jetbrains-mono/index.css";
-// Script-matched faces for locales Geist/Heebo don't cover. Each ships
+// Script-matched faces for locales Onest/Heebo don't cover. Each ships
 // unicode-range subsets, so a font's glyphs download only when that script is
 // actually on screen — an English visitor never fetches the CJK/Arabic bytes.
 import "@fontsource-variable/noto-sans-arabic/index.css";
@@ -104,8 +100,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#FAF8F5" },
-    { media: "(prefers-color-scheme: dark)", color: "#0F0C0A" },
+    { media: "(prefers-color-scheme: light)", color: "#FCFCFB" },
+    { media: "(prefers-color-scheme: dark)", color: "#151515" },
   ],
 };
 
@@ -123,8 +119,8 @@ export async function generateMetadata(): Promise<Metadata> {
     icons: {
       // Versioned to evict browsers' sticky favicon caches, which survive
       // hard refreshes and kept serving the original robot-arm icon.
-      icon: "/favicon.svg?v=2",
-      apple: "/favicon.svg?v=2",
+      icon: "/favicon.svg?v=3",
+      apple: "/favicon.svg?v=3",
     },
     metadataBase: new URL(siteUrl),
     alternates: {
@@ -168,12 +164,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // <head> gets emitted twice (literal + React's resource hoist). URLs are the
   // stable public/ copies the globals.css overrides point at; crossOrigin is
   // required since fonts fetch in CORS mode. JetBrains Mono stays non-preloaded.
-  // Geist sits ahead of Heebo in --font-ui, so Heebo's Latin subset never paints
+  // Onest sits ahead of Heebo in --font-ui, so Heebo's Latin subset never paints
   // and its Hebrew subset only paints on Hebrew pages; preloading either
   // elsewhere wastes bandwidth and trips Chrome's unused-preload warning.
   const fontPreload = { as: "font", type: "font/woff2", crossOrigin: "anonymous" } as const;
   if (locale === "he") preload("/fonts/heebo-hebrew-wght-normal.woff2", fontPreload);
-  preload("/fonts/geist-latin-wght-normal.woff2", fontPreload);
+  preload("/fonts/onest-latin-wght-normal.woff2", fontPreload);
+  preload("/fonts/bricolage-grotesque-latin-opsz-normal.woff2", fontPreload);
   const runtimeEnv = getServerRuntimeEnv();
   // First-paint guess for the phone shell; the client re-derives it from the
   // viewport after mount (see DeviceClassProvider).
@@ -213,6 +210,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang={locale} dir={dirForLocale(locale)} translate="no" suppressHydrationWarning>
       <head>
         <meta name="google" content="notranslate" />
+        {/* First in <head>: sets the .dark class before anything paints, so a
+            dark-mode visitor never sees a light flash. */}
+        <script id="skynet-color-theme" dangerouslySetInnerHTML={{ __html: COLOR_THEME_INIT_SCRIPT }} />
         {/* Plain <script> tags, not next/script: `beforeInteractive` with inline
             children makes React 19 warn ("scripts inside components are never
             executed when rendering on the client"). These run straight from the
@@ -237,27 +237,22 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <BalanceProvider>
                 <ByokKeysProvider>
                   <UserPrefsProvider>
-                    <LiteModeProvider>
-                      <ThemeProvider>
-                        <TooltipProvider>
-                          <AppSkeletonTheme>
-                            <SplashScreen />
-                            <ExperienceProvider>
-                            <TutorialProvider>
-                              <SettingsModalProvider>
-                                <AppShell>{children}</AppShell>
-                                <SettingsModal />
-                                {/* Inside SettingsModalProvider: its CTA opens the
-                                    wallet settings tab now that /upgrade is gone. */}
-                                <InsufficientFundsModalHost />
-                              </SettingsModalProvider>
-                              <TutorialOverlay />
-                            </TutorialProvider>
-                            </ExperienceProvider>
-                          </AppSkeletonTheme>
-                        </TooltipProvider>
-                      </ThemeProvider>
-                    </LiteModeProvider>
+                    <ThemeProvider>
+                      <TooltipProvider>
+                        <AppSkeletonTheme>
+                          <SplashScreen />
+                          <ExperienceProvider>
+                            <SettingsModalProvider>
+                              <AppShell>{children}</AppShell>
+                              <SettingsModal />
+                              {/* Inside SettingsModalProvider: its CTA opens the
+                                wallet settings tab now that /upgrade is gone. */}
+                              <InsufficientFundsModalHost />
+                            </SettingsModalProvider>
+                          </ExperienceProvider>
+                        </AppSkeletonTheme>
+                      </TooltipProvider>
+                    </ThemeProvider>
                   </UserPrefsProvider>
                 </ByokKeysProvider>
               </BalanceProvider>

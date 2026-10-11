@@ -86,8 +86,8 @@ function ResultRow({
       onClick={onOpen}
       aria-label={formatMsg("explore.row.open_aria", { name: title })}
       data-active={active || undefined}
-      className={`group relative flex flex-col gap-2 rounded-lg px-3 py-4 transition-[background-color,transform] duration-150 ease-out cursor-pointer hover:bg-accent/30 focus-visible:outline-none focus-visible:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45 ${
-        active ? "bg-accent/40 ring-2 ring-inset ring-[#C8A882]/45" : ""
+      className={`group relative flex flex-col gap-2 rounded-lg px-3 py-4 transition-[background-color,transform] duration-150 ease-out cursor-pointer hover:bg-accent/30 focus-visible:outline-none focus-visible:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 ${
+        active ? "bg-accent/40 ring-2 ring-inset ring-primary/45" : ""
       }`}
     >
       <div className="flex items-baseline justify-between gap-4">
@@ -148,7 +148,7 @@ function Highlighted({ text, tokens }: { text: string; tokens: string[] }) {
         seg.match ? (
           <mark
             key={i}
-            className="bg-transparent font-semibold text-foreground underline decoration-[#C8A882] decoration-[1.5px] underline-offset-[3px]"
+            className="bg-transparent font-semibold text-foreground underline decoration-primary decoration-[1.5px] underline-offset-[3px]"
           >
             {seg.text}
           </mark>

@@ -22,16 +22,10 @@ export function normalizeLevel(value: unknown): ExperienceLevel {
 
 /** Every surface the level gates. */
 export type Surface =
-  // Program wizard
-  | "wizard.description"
-  | "wizard.optimization_type"
+  // Submission wizard
   | "wizard.split"
-  | "wizard.search_depth"
   | "wizard.optimizer_settings"
   | "wizard.model_params"
-  // Optimize Anything wizard
-  | "wizard.blackbox_strategy"
-  | "wizard.blackbox_background"
   | "wizard.shinka_settings"
   // Run page tabs
   | "run.tab.data"
@@ -50,14 +44,9 @@ export type Surface =
 
 /** Surfaces Guided takes off screen. Standard and Expert show everything. */
 const HIDDEN_IN_GUIDED: ReadonlySet<Surface> = new Set<Surface>([
-  "wizard.description",
-  "wizard.optimization_type",
   "wizard.split",
-  "wizard.search_depth",
   "wizard.optimizer_settings",
   "wizard.model_params",
-  "wizard.blackbox_strategy",
-  "wizard.blackbox_background",
   "wizard.shinka_settings",
   "run.tab.data",
   "run.tab.code",
@@ -73,10 +62,8 @@ const HIDDEN_IN_GUIDED: ReadonlySet<Surface> = new Set<Surface>([
 
 /** Disclosures (and defaults) Expert starts open; Standard starts them closed. */
 const OPEN_IN_EXPERT: ReadonlySet<Surface> = new Set<Surface>([
-  "wizard.optimization_type",
   "wizard.optimizer_settings",
   "wizard.model_params",
-  "wizard.blackbox_background",
   "wizard.shinka_settings",
   "logs.verbose",
 ]);

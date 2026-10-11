@@ -788,7 +788,7 @@ export function LoginView() {
         className="pointer-events-none absolute inset-0 z-[1]"
         style={{
           background:
-            "linear-gradient(90deg, rgba(250,248,245,0) 0%, rgba(250,248,245,0) 24%, rgba(250,248,245,1) 30%, rgba(250,248,245,1) 70%, rgba(250,248,245,0) 76%, rgba(250,248,245,0) 100%)",
+            "linear-gradient(90deg, transparent 0%, transparent 24%, var(--background) 30%, var(--background) 70%, transparent 76%, transparent 100%)",
         }}
       />
 
@@ -1219,7 +1219,7 @@ export function LoginView() {
                           aria-selected={authMode === tab}
                           onClick={() => switchMode(tab)}
                           className={cn(
-                            "relative flex-1 cursor-pointer rounded-md px-2 py-2 text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 sm:px-3",
+                            "relative flex-1 cursor-pointer rounded-md px-2 py-2 text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 sm:px-3",
                             authMode === tab
                               ? "text-foreground"
                               : "text-foreground/60 hover:text-foreground",
@@ -1231,7 +1231,7 @@ export function LoginView() {
                           {authMode === tab && (
                             <motion.div
                               layoutId="login-tab-active"
-                              className="absolute inset-0 rounded-md bg-background shadow-sm"
+                              className="absolute inset-0 rounded-md bg-background"
                               transition={
                                 prefersReduced
                                   ? { duration: 0 }

@@ -52,7 +52,6 @@ import { pickGoogleFiles } from "./google-picker";
 import { providerMeta } from "./providers";
 import { SearchInput } from "@/shared/ui/search-input";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
-import { TooltipButton } from "@/shared/ui/tooltip-button";
 
 /** Props for {@link ConnectorImportDialog}. */
 export interface ConnectorImportDialogProps {
@@ -443,18 +442,17 @@ export function ConnectorImportDialog({
         ) : selected === null ? (
           <div className="flex min-h-0 flex-1 flex-col px-5 pb-5 pt-4">
             <div className="mb-3 flex min-w-0 items-center gap-1.5">
-              <TooltipButton tooltip={msg("connector_import.up")}>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={goUp}
-                  disabled={path.length === 0}
-                  aria-label={msg("connector_import.up")}
-                  className="shrink-0 text-muted-foreground hover:text-foreground"
-                >
-                  <ArrowLeft className="size-4 rtl:-scale-x-100" />
-                </Button>
-              </TooltipButton>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={goUp}
+                disabled={path.length === 0}
+                autoTooltip={false}
+                aria-label={msg("connector_import.up")}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="size-4 rtl:-scale-x-100" />
+              </Button>
               <nav
                 aria-label={msg("connector_import.breadcrumb")}
                 className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden text-xs text-muted-foreground"
@@ -520,23 +518,20 @@ export function ConnectorImportDialog({
                 })}
               </nav>
               {locationUrl && (
-                <TooltipButton
-                  tooltip={formatMsg("connector_import.open_location", { provider: meta.name })}
+                <Button
+                  asChild
+                  variant="ghost"
+                  size="icon-sm"
+                  autoTooltip={false}
+                  aria-label={formatMsg("connector_import.open_location", {
+                    provider: meta.name,
+                  })}
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
                 >
-                  <Button
-                    asChild
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={formatMsg("connector_import.open_location", {
-                      provider: meta.name,
-                    })}
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                  >
-                    <a href={locationUrl} target="_blank" rel="noopener noreferrer">
-                      <ArrowSquareOut className="size-4" />
-                    </a>
-                  </Button>
-                </TooltipButton>
+                  <a href={locationUrl} target="_blank" rel="noopener noreferrer">
+                    <ArrowSquareOut className="size-4" />
+                  </a>
+                </Button>
               )}
             </div>
 

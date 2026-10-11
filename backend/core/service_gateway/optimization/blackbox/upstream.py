@@ -42,8 +42,9 @@ def upstream_task(task: Task, name: str) -> UpstreamTask:
         name: Artifact grouping name.
 
     Returns:
-        The equivalent upstream task; its cases go in as the train set alone
-        because upstream merges train and val into one pool.
+        The equivalent upstream task; only the train cases go in, as its
+        train set, because upstream merges train and val into one pool and
+        the validation split must stay out of that pool for selection.
     """
     return UpstreamTask(
         name=name,

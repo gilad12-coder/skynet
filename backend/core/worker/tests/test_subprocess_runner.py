@@ -31,7 +31,7 @@ from core.worker.subprocess_runner import (
     set_fork_service,
 )
 
-from .mocks import REAL_GRID_PAYLOAD, REAL_RUN_PAYLOAD, fake_dspy_service, fake_service_registry
+from .mocks import REAL_RUN_PAYLOAD, REAL_UNIFIED_PAYLOAD, fake_dspy_service, fake_service_registry
 
 
 def _make_queue() -> queue.Queue:
@@ -329,22 +329,35 @@ def test_run_service_in_subprocess_run_type_calls_service_run() -> None:
         run_service_in_subprocess(REAL_RUN_PAYLOAD, "art-5", q, "spawn")
 
     svc.run.assert_called_once()
-    svc.run_grid_search.assert_not_called()
 
 
-def test_run_service_in_subprocess_grid_search_type_calls_run_grid_search() -> None:
-    """A ``grid_search`` payload is dispatched to ``service.run_grid_search``."""
+def test_run_service_in_subprocess_unified_payload_calls_run_unified_optimization() -> None:
+    """A black-box payload marked ``unified_v1`` runs the unified service, never the legacy entry point."""
     q: queue.Queue[dict] = queue.Queue()
     svc = fake_dspy_service()
+    fake_result = MagicMock()
+    fake_result.model_dump.return_value = {"best_score": 0.9}
 
     with (
         patch("core.worker.subprocess_runner.DspyService", return_value=svc),
         patch("core.worker.subprocess_runner.ServiceRegistry", return_value=fake_service_registry()),
+        patch("core.worker.subprocess_runner.run_blackbox_optimization") as run_bb,
+        patch(
+            "core.worker.subprocess_runner.run_unified_optimization", autospec=True, return_value=fake_result
+        ) as run_unified,
     ):
-        run_service_in_subprocess(REAL_GRID_PAYLOAD, "art-6", q, "spawn")
+        run_service_in_subprocess({**REAL_UNIFIED_PAYLOAD, "_gepa_log_dir": "/tmp/u-run"}, "art-6", q, "spawn")
 
-    svc.run_grid_search.assert_called_once()
+    run_unified.assert_called_once()
+    payload_arg = run_unified.call_args.args[0]
+    assert isinstance(payload_arg, sr.UnifiedRunRequest)
+    assert payload_arg.optimizer.choice == "gepa"
+    assert run_unified.call_args.kwargs["artifact_id"] == "art-6"
+    assert run_unified.call_args.kwargs["gepa_log_dir_path"] == "/tmp/u-run"
+    run_bb.assert_not_called()
     svc.run.assert_not_called()
+    result_events = [e for e in _drain_queue(q) if e.get("type") == EVENT_RESULT]
+    assert result_events == [{"type": EVENT_RESULT, "result": {"best_score": 0.9}}]
 
 
 def test_run_service_in_subprocess_progress_callback_emits_progress_events() -> None:
@@ -434,7 +447,6 @@ def test_run_service_in_subprocess_blackbox_type_calls_run_blackbox_optimization
     assert run_bb.call_args.kwargs["gepa_log_dir_path"] == "/tmp/bb-run"
     assert callable(run_bb.call_args.kwargs["progress_callback"])
     svc.run.assert_not_called()
-    svc.run_grid_search.assert_not_called()
 
     result_events = [e for e in _drain_queue(q) if e.get("type") == EVENT_RESULT]
     assert result_events == [

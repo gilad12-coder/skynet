@@ -1,4 +1,4 @@
-"""Tests for the in-run email triggers in ``core.notifications.run_watcher``."""
+"""Tests for the in-run event triggers in ``core.notifications.run_watcher``."""
 
 from __future__ import annotations
 
@@ -10,20 +10,18 @@ import core.notifications.run_watcher as watcher_module
 from core.constants import (
     PROGRESS_BASELINE,
     PROGRESS_CANDIDATE,
-    PROGRESS_EVALUATION_STARTED,
-    PROGRESS_LANE_STARTED,
     PROGRESS_OPTIMIZER,
     TQDM_N_KEY,
     TQDM_TOTAL_KEY,
 )
+from core.notifications.catalog import BUDGET_NEAR, NEEDS_INPUT, NEW_BEST, STUCK
 from core.notifications.notifier import (
     notify_run_budget,
     notify_run_needs_input,
     notify_run_new_best,
-    notify_run_progress,
     notify_run_stuck,
 )
-from core.notifications.preferences import RunNotificationSettings
+from core.notifications.preferences import NotificationSettings, default_grid
 from core.notifications.run_watcher import RunNotificationWatcher
 
 _JOB = "run-1"
@@ -61,10 +59,10 @@ class _ClaimStore:
 
 
 class _Sent:
-    """Record dispatched emails instead of sending them."""
+    """Record dispatched events instead of emitting them."""
 
     def __init__(self) -> None:
-        """Start with no recorded emails."""
+        """Start with no recorded events."""
         self.calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
 
     def __call__(self, send: Any, *args: Any, **kwargs: Any) -> None:
@@ -82,14 +80,30 @@ class _Sent:
         return [call[0] for call in self.calls]
 
 
-def _watcher(store: _ClaimStore, sent: _Sent, *, clock: Any = lambda: 0.0, **settings: Any) -> RunNotificationWatcher:
-    """Build a watcher with the given cadence settings.
+def _settings(*, off: tuple[str, ...] = (), **overrides: Any) -> NotificationSettings:
+    """Build settings from the default grid with some events switched off everywhere.
+
+    Args:
+        off: Event types to switch off on every channel.
+        **overrides: ``NotificationSettings`` field overrides.
+
+    Returns:
+        The settings.
+    """
+    grid = default_grid()
+    for event in off:
+        grid[event] = dict.fromkeys(grid[event], False)
+    return NotificationSettings(grid=grid, **overrides)
+
+
+def _watcher(store: Any, sent: _Sent, *, off: tuple[str, ...] = (), **overrides: Any) -> RunNotificationWatcher:
+    """Build a watcher over the default grid.
 
     Args:
         store: Shared claim store.
         sent: Dispatch recorder.
-        clock: Wall-clock source for digest windows.
-        **settings: ``RunNotificationSettings`` overrides.
+        off: Event types switched off everywhere.
+        **overrides: ``NotificationSettings`` field overrides.
 
     Returns:
         The watcher under test.
@@ -98,16 +112,15 @@ def _watcher(store: _ClaimStore, sent: _Sent, *, clock: Any = lambda: 0.0, **set
         optimization_id=_JOB,
         username=_USER,
         job_store=store,
-        settings=RunNotificationSettings(**settings),
+        settings=_settings(off=off, **overrides),
         dispatch=sent,
-        clock=clock,
     )
 
 
-def test_done_cadence_sends_no_in_run_mail() -> None:
-    """The default cadence never sends milestone or progress mail."""
+def test_events_switched_off_everywhere_emit_nothing() -> None:
+    """An event with every grid cell off is never emitted."""
     sent = _Sent()
-    watcher = _watcher(_ClaimStore(), sent)
+    watcher = _watcher(_ClaimStore(), sent, off=(NEW_BEST, STUCK, BUDGET_NEAR, NEEDS_INPUT))
 
     watcher.observe_progress(PROGRESS_CANDIDATE, {"score": 0.1})
     watcher.observe_progress(PROGRESS_CANDIDATE, {"score": 0.9})
@@ -115,27 +128,27 @@ def test_done_cadence_sends_no_in_run_mail() -> None:
     watcher.notify_needs_input()
 
     assert sent.calls == []
+    assert watcher.spend_check_due() is False
 
 
-def test_for_run_skips_when_cadence_is_done_or_mail_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No watcher is built unless the owner's cadence sends in-run mail."""
-    monkeypatch.setattr(watcher_module, "run_notification_settings", lambda _u: RunNotificationSettings())
-    assert RunNotificationWatcher.for_run(_JOB, _USER, _ClaimStore()) is None
-
-    monkeypatch.setattr(watcher_module, "run_notification_settings", lambda _u: None)
-    assert RunNotificationWatcher.for_run(_JOB, _USER, _ClaimStore()) is None
-
-    monkeypatch.setattr(
-        watcher_module, "run_notification_settings", lambda _u: RunNotificationSettings(cadence="milestones")
-    )
+def test_for_run_skips_only_when_no_in_run_event_reaches_the_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A watcher is built unless every in-run event is off everywhere, or there is no owner."""
+    monkeypatch.setattr(watcher_module, "notification_settings", lambda _u: _settings())
     assert RunNotificationWatcher.for_run(_JOB, _USER, _ClaimStore()) is not None
     assert RunNotificationWatcher.for_run(_JOB, None, _ClaimStore()) is None
+
+    monkeypatch.setattr(
+        watcher_module,
+        "notification_settings",
+        lambda _u: _settings(off=(NEW_BEST, STUCK, BUDGET_NEAR, NEEDS_INPUT)),
+    )
+    assert RunNotificationWatcher.for_run(_JOB, _USER, _ClaimStore()) is None
 
 
 def test_new_best_fires_once_after_the_starting_score() -> None:
     """The first score is the baseline; the first improvement mails once, later ones don't."""
     store, sent = _ClaimStore(), _Sent()
-    watcher = _watcher(store, sent, cadence="milestones")
+    watcher = _watcher(store, sent)
 
     watcher.observe_progress(PROGRESS_CANDIDATE, {"score": 0.5})
     assert sent.calls == []
@@ -144,17 +157,17 @@ def test_new_best_fires_once_after_the_starting_score() -> None:
     watcher.observe_progress(PROGRESS_CANDIDATE, {"score": 0.7})
 
     assert sent.kinds() == [notify_run_new_best]
-    assert sent.calls[0][1] == (_JOB, _USER, 0.6)
+    assert sent.calls[0][1] == (_JOB, _USER, 0.6, 0.5)
 
 
 def test_new_best_is_not_resent_by_a_restarted_worker() -> None:
     """A fresh watcher for the same run (worker restart) respects the durable claim."""
     store, sent = _ClaimStore(), _Sent()
-    first = _watcher(store, sent, cadence="milestones")
+    first = _watcher(store, sent)
     first.observe_progress(PROGRESS_CANDIDATE, {"score": 0.5})
     first.observe_progress(PROGRESS_CANDIDATE, {"score": 0.6})
 
-    resumed = _watcher(store, sent, cadence="milestones")
+    resumed = _watcher(store, sent)
     resumed.observe_progress(PROGRESS_CANDIDATE, {"score": 0.6})
     resumed.observe_progress(PROGRESS_CANDIDATE, {"score": 0.8})
 
@@ -164,7 +177,7 @@ def test_new_best_is_not_resent_by_a_restarted_worker() -> None:
 def test_stuck_fires_once_when_no_improvement_over_the_fraction() -> None:
     """Stalling for ``stuck_fraction`` of the planned calls mails once."""
     sent = _Sent()
-    watcher = _watcher(_ClaimStore(), sent, cadence="milestones", stuck_fraction=0.25)
+    watcher = _watcher(_ClaimStore(), sent, stuck_fraction=0.25)
 
     watcher.observe_progress(PROGRESS_OPTIMIZER, {TQDM_TOTAL_KEY: 100, TQDM_N_KEY: 0})
     watcher.observe_progress(PROGRESS_CANDIDATE, {"score": 0.5, "discovered_at_evals": 0})
@@ -180,7 +193,7 @@ def test_stuck_fires_once_when_no_improvement_over_the_fraction() -> None:
 def test_stuck_resets_on_improvement() -> None:
     """An improvement restarts the stall window."""
     sent = _Sent()
-    watcher = _watcher(_ClaimStore(), sent, cadence="milestones", stuck_fraction=0.25)
+    watcher = _watcher(_ClaimStore(), sent, stuck_fraction=0.25)
 
     watcher.observe_progress(PROGRESS_OPTIMIZER, {TQDM_TOTAL_KEY: 100, TQDM_N_KEY: 0})
     watcher.observe_progress(PROGRESS_CANDIDATE, {"score": 0.5})
@@ -194,7 +207,7 @@ def test_stuck_resets_on_improvement() -> None:
 def test_budget_alert_fires_once_at_the_fraction() -> None:
     """Spend at the alert fraction of the limit mails once; uncapped runs never do."""
     sent = _Sent()
-    watcher = _watcher(_ClaimStore(), sent, cadence="milestones", budget_alert_fraction=0.8)
+    watcher = _watcher(_ClaimStore(), sent, budget_alert_fraction=0.8)
 
     watcher.observe_spend(500, None)
     watcher.observe_spend(79, 100)
@@ -209,7 +222,7 @@ def test_budget_alert_fires_once_at_the_fraction() -> None:
 def test_needs_input_fires_once() -> None:
     """A budget pause mails the owner once per run."""
     sent = _Sent()
-    watcher = _watcher(_ClaimStore(), sent, cadence="milestones")
+    watcher = _watcher(_ClaimStore(), sent)
 
     watcher.notify_needs_input()
     watcher.notify_needs_input()
@@ -217,78 +230,14 @@ def test_needs_input_fires_once() -> None:
     assert sent.kinds() == [notify_run_needs_input]
 
 
-def test_milestones_cadence_sends_no_stage_mail() -> None:
-    """Stage-change mail is only for the live cadence."""
+def test_needs_input_carries_spend_and_limit() -> None:
+    """The pause event passes what was spent and the limit it hit."""
     sent = _Sent()
-    watcher = _watcher(_ClaimStore(), sent, cadence="milestones")
+    watcher = _watcher(_ClaimStore(), sent)
 
-    watcher.observe_progress(PROGRESS_BASELINE, {})
-    watcher.observe_progress(PROGRESS_EVALUATION_STARTED, {})
+    watcher.notify_needs_input(120.0, 100)
 
-    assert sent.calls == []
-
-
-def test_live_per_stage_sends_one_mail_per_stage_change() -> None:
-    """Each distinct stage mails once; repeated optimizer steps don't re-trigger it."""
-    sent = _Sent()
-    watcher = _watcher(_ClaimStore(), sent, cadence="live", live_mode="per_stage")
-
-    watcher.observe_progress(PROGRESS_BASELINE, {})
-    watcher.observe_progress(PROGRESS_BASELINE, {})
-    watcher.observe_progress(PROGRESS_OPTIMIZER, {})
-    watcher.observe_progress(PROGRESS_OPTIMIZER, {})
-    watcher.observe_progress(PROGRESS_EVALUATION_STARTED, {})
-
-    stages = [call[1][2] for call in sent.calls if call[0] is notify_run_progress]
-    assert stages == ["baseline", "optimizing", "evaluating"]
-
-
-def test_live_per_stage_mails_each_auto_lane_once() -> None:
-    """Optimize Anything Auto lanes are separate stages carrying the engine name."""
-    sent = _Sent()
-    watcher = _watcher(_ClaimStore(), sent, cadence="live", live_mode="per_stage")
-
-    watcher.observe_progress(PROGRESS_LANE_STARTED, {"engine": "gepa", "phase": "explore"})
-    watcher.observe_progress(PROGRESS_OPTIMIZER, {})
-    watcher.observe_progress(PROGRESS_LANE_STARTED, {"engine": "best_of_n", "phase": "explore"})
-    watcher.observe_progress(PROGRESS_LANE_STARTED, {"engine": "gepa", "phase": "explore"})
-
-    details = [call[2]["detail"] for call in sent.calls]
-    assert details == ["gepa", "best_of_n"]
-
-
-def test_live_per_run_count_caps_progress_mail() -> None:
-    """``per_run_count`` stops after ``live_count`` progress emails."""
-    sent = _Sent()
-    watcher = _watcher(_ClaimStore(), sent, cadence="live", live_mode="per_run_count", live_count=2)
-
-    watcher.observe_progress(PROGRESS_BASELINE, {})
-    watcher.observe_progress(PROGRESS_OPTIMIZER, {})
-    watcher.observe_progress(PROGRESS_EVALUATION_STARTED, {})
-
-    assert [call[1][2] for call in sent.calls] == ["baseline", "optimizing"]
-
-
-def test_live_digest_sends_at_most_one_mail_per_window() -> None:
-    """Digest mode mails once per ``digest_minutes`` window, whatever the stage traffic."""
-    now = {"t": 0.0}
-    sent = _Sent()
-    watcher = _watcher(
-        _ClaimStore(), sent, clock=lambda: now["t"], cadence="live", live_mode="digest", digest_minutes=15
-    )
-
-    watcher.observe_progress(PROGRESS_BASELINE, {})
-    now["t"] = 60.0
-    watcher.observe_progress(PROGRESS_OPTIMIZER, {})
-    watcher.observe_progress(PROGRESS_EVALUATION_STARTED, {})
-    assert len(sent.calls) == 1
-    assert sent.calls[0][2]["digest"] is True
-
-    now["t"] = 15 * 60.0
-    watcher.observe_progress(PROGRESS_OPTIMIZER, {})
-
-    assert len(sent.calls) == 2
-    assert sent.calls[1][1][2] == "evaluating"
+    assert sent.calls[0][1] == (_JOB, _USER, 120.0, 100)
 
 
 def test_store_without_claim_support_sends_nothing() -> None:
@@ -298,7 +247,7 @@ def test_store_without_claim_support_sends_nothing() -> None:
         optimization_id=_JOB,
         username=_USER,
         job_store=object(),
-        settings=RunNotificationSettings(cadence="live"),
+        settings=_settings(),
         dispatch=sent,
     )
 
@@ -323,7 +272,7 @@ def test_observe_progress_never_raises() -> None:
         optimization_id=_JOB,
         username=_USER,
         job_store=_Broken(),
-        settings=RunNotificationSettings(cadence="live"),
+        settings=_settings(),
         dispatch=sent,
     )
 

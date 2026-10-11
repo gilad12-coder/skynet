@@ -93,6 +93,7 @@ import {
   type FolderDialogState,
 } from "./SidebarFolders";
 import { DEFAULT_RUN_VIEW, applyRunView, parseRunView, type RunView } from "../lib/run-view";
+import { ROW_MOTION, rowTransition } from "../lib/row-motion";
 
 const NAV_ITEMS = perLocale(() =>
   APP_PAGES.filter((page) => page.sidebar).map((page) => ({
@@ -609,7 +610,6 @@ export function Sidebar() {
         // bubbling up from descendant width animations (e.g. the storage bar).
         if (e.target === e.currentTarget && e.propertyName === "width") setSnapping(false);
       }}
-      data-tutorial="sidebar-full"
     >
       {/* Drag-to-resize grip on the rail's inline-end edge (desktop only — the
           mobile drawer isn't resizable). Also the collapse control: dragging it
@@ -628,7 +628,7 @@ export function Sidebar() {
       >
         <span
           aria-hidden="true"
-          className="absolute inset-y-0 end-0 w-px bg-transparent transition-colors duration-150 group-hover:bg-primary/30 group-active:bg-primary/50"
+          className="absolute inset-y-0 end-0 w-px bg-transparent transition-colors duration-150 group-hover:bg-primary-fill/30 group-active:bg-primary-fill/50"
         />
       </button>
       <div className="flex flex-col h-full">
@@ -636,7 +636,6 @@ export function Sidebar() {
           className={cn("flex flex-col gap-1 pb-3 pt-3", isCollapsed ? "px-2" : "px-3")}
           role="navigation"
           aria-label={msg("auto.features.sidebar.components.sidebar.literal.7")}
-          data-tutorial="sidebar-nav"
         >
           {NAV_ITEMS.map((item) => (
             <NavItem
@@ -654,7 +653,7 @@ export function Sidebar() {
               badge={
                 item.href === "/" && renderedTab === "mine" && activeCount > 0 ? activeCount : null
               }
-              tutorialId={item.href === "/datasets" ? "sidebar-data" : undefined}
+              setupAnchor={item.href === "/submit" ? "new-optimization" : undefined}
               resume={
                 item.href === "/submit"
                   ? { kind: "optimization", detailBase: "/optimizations" }
@@ -679,7 +678,7 @@ export function Sidebar() {
         >
           <div
             aria-hidden="true"
-            className="absolute top-1 bottom-1 w-[calc(50%-6px)] rounded-md bg-background shadow-sm transition-[inset-inline-start] duration-100 ease-out"
+            className="absolute top-1 bottom-1 w-[calc(50%-6px)] rounded-md bg-primary-fill transition-[inset-inline-start] duration-100 ease-out"
             style={{ insetInlineStart: tab === "mine" ? 4 : "calc(50% + 2px)" }}
           />
           {(["mine", "shared"] as const).map((key) => {
@@ -696,7 +695,9 @@ export function Sidebar() {
                     onClick={() => handleTabChange(key)}
                     className={cn(
                       "relative z-10 flex flex-1 cursor-pointer items-center justify-center rounded-md px-2 py-1.5 transition-colors duration-200",
-                      tab === key ? "text-foreground" : "text-foreground/60 hover:text-foreground",
+                      tab === key
+                        ? "text-primary-foreground"
+                        : "text-foreground/60 hover:text-foreground",
                     )}
                   >
                     <Icon className="size-3.5" aria-hidden="true" />
@@ -723,6 +724,7 @@ export function Sidebar() {
             from the same fetch — so hide rather than unmount. */}
         <div
           className={cn("flex-1 overflow-hidden flex flex-col min-h-0", isCollapsed && "hidden")}
+          data-setup="runs"
         >
           <div ref={listRef} className="flex-1 overflow-y-auto px-3 pt-1 pb-2 no-scrollbar">
             <AnimatePresence mode="wait" initial={false}>
@@ -747,17 +749,42 @@ export function Sidebar() {
                     />
                   </div>
                 )}
-                {groupedJobs.map((group) => (
-                  <div key={group.label} className="mb-2">
-                    <p className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60 px-2 py-1.5">
+                {/* One flat list, not a div per group, so a run keeps its
+                    element when a sort moves it under another heading. */}
+                <AnimatePresence initial={false}>
+                  {groupedJobs.flatMap((group, groupIdx) => [
+                    <motion.p
+                      key={`group:${group.label}`}
+                      layout="position"
+                      initial={ROW_MOTION.initial}
+                      animate={ROW_MOTION.animate}
+                      exit={ROW_MOTION.exit}
+                      transition={rowTransition(0)}
+                      className={cn(
+                        "flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60 px-2 py-1.5",
+                        groupIdx > 0 && "mt-2",
+                      )}
+                    >
                       <span>{group.label}</span>
                       <span className="tabular-nums text-muted-foreground/40 font-normal">
                         {group.jobs.length}
                       </span>
-                    </p>
-                    {group.jobs.map((job) => renderJob(job, renderedTab === "shared"))}
-                  </div>
-                ))}
+                    </motion.p>,
+                    ...group.jobs.map((job, idx) => (
+                      <motion.div
+                        key={job.optimization_id}
+                        layout="position"
+                        initial={ROW_MOTION.initial}
+                        animate={ROW_MOTION.animate}
+                        exit={ROW_MOTION.exit}
+                        transition={rowTransition(idx)}
+                      >
+                        {renderJob(job, renderedTab === "shared")}
+                      </motion.div>
+                    )),
+                  ])}
+                </AnimatePresence>
+                {groupedJobs.length > 0 && <div className="h-2" aria-hidden="true" />}
                 {loadedAll && groupedJobs.length === 0 && !showFolders && jobs.length > 0 && (
                   <p className="px-2 py-6 text-center text-[0.6875rem] text-muted-foreground/60">
                     {msg("sidebar.filter.no_match")}
@@ -769,11 +796,6 @@ export function Sidebar() {
                     iconWrap="tile"
                     title={msg(
                       renderedTab === "shared" ? "sidebar.shared.empty" : "sidebar.mine.empty",
-                    )}
-                    description={msg(
-                      renderedTab === "shared"
-                        ? "sidebar.shared.empty.hint"
-                        : "sidebar.mine.empty.hint",
                     )}
                     className="px-4 py-10"
                   />
@@ -796,7 +818,10 @@ export function Sidebar() {
 
         <div className="border-t border-sidebar-border/60">
           <StorageMeter collapsed={isCollapsed} />
-          <div className={cn("py-2", isCollapsed ? "flex justify-center px-2" : "px-2")}>
+          <div
+            className={cn("py-2", isCollapsed ? "flex justify-center px-2" : "px-2")}
+            data-setup="account"
+          >
             <AccountMenu collapsed={isCollapsed} />
           </div>
         </div>
@@ -865,7 +890,7 @@ function NavItem({
   badge,
   collapsed,
   tooltipSide,
-  tutorialId,
+  setupAnchor,
   resume,
 }: {
   href: string;
@@ -877,8 +902,8 @@ function NavItem({
   collapsed: boolean;
   /** Which side the collapsed tooltip opens toward (content-ward). */
   tooltipSide: "left" | "right";
-  /** ``data-tutorial`` anchor for entries the tutorial spotlights. */
-  tutorialId?: string;
+  /** ``data-setup`` anchor for the entry a first-login setup stop points at. */
+  setupAnchor?: string;
   resume?: { kind: "tagger" | "optimization"; detailBase: string };
 }) {
   const router = useRouter();
@@ -904,23 +929,30 @@ function NavItem({
           <Link
             href={href}
             onClick={onClick}
-            {...(tutorialId ? { "data-tutorial": tutorialId } : {})}
+            data-setup={setupAnchor}
             aria-label={label}
             aria-current={active ? "page" : undefined}
             className={cn(
               "group relative flex items-center justify-center rounded-lg p-2.5 transition-colors duration-200",
               active
-                ? "bg-primary/[0.08] text-primary ring-1 ring-primary/10"
+                ? "bg-primary-fill text-primary-foreground"
                 : "text-sidebar-foreground/60 hover:bg-sidebar-accent/40 hover:text-sidebar-foreground",
             )}
           >
             <Icon
               className={cn(
                 "size-5 shrink-0 transition-colors duration-200",
-                active ? "text-primary" : "group-hover:text-sidebar-foreground",
+                active ? "text-primary-foreground" : "group-hover:text-sidebar-foreground",
               )}
             />
-            {badge != null && <CountBadge overlay>{badge}</CountBadge>}
+            {badge != null && (
+              <CountBadge
+                overlay
+                className={cn(active && "bg-primary-foreground text-primary-fill")}
+              >
+                {badge}
+              </CountBadge>
+            )}
           </Link>
         </TooltipTrigger>
         <TooltipContent side={tooltipSide}>{label}</TooltipContent>
@@ -932,19 +964,18 @@ function NavItem({
     <Link
       href={href}
       onClick={onClick}
-      {...(tutorialId ? { "data-tutorial": tutorialId } : {})}
+      data-setup={setupAnchor}
       className={cn(
         "group relative flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 lg:min-h-0",
         active
-          ? "text-primary"
+          ? "text-primary-foreground"
           : "text-sidebar-foreground/60 hover:translate-x-[-2px] hover:bg-sidebar-accent/40 hover:text-sidebar-foreground",
       )}
     >
       {active && (
         <motion.div
           layoutId="sidebar-active"
-          className="absolute inset-0 rounded-lg bg-primary/[0.08] ring-1 ring-primary/10"
-          style={{ borderInlineStart: "3px solid var(--primary)" }}
+          className="absolute inset-0 rounded-lg bg-primary-fill"
           transition={{ type: "spring", stiffness: 350, damping: 28 }}
         />
       )}
@@ -952,12 +983,15 @@ function NavItem({
         <Icon
           className={cn(
             "size-4 shrink-0 transition-colors duration-200",
-            active ? "text-primary" : "group-hover:text-sidebar-foreground",
+            active ? "text-primary-foreground" : "group-hover:text-sidebar-foreground",
           )}
         />
         <span className="truncate flex-1">{label}</span>
         {badge != null && (
-          <CountPill active className="shrink-0">
+          <CountPill
+            active
+            className={cn("shrink-0", active && "bg-primary-foreground text-primary-fill")}
+          >
             {badge}
           </CountPill>
         )}
@@ -991,6 +1025,8 @@ function JobRow({
   const [expanded, setExpanded] = React.useState(isActive && activePair !== null);
   const renameRef = React.useRef<HTMLInputElement>(null);
   const isGridSearch = job.optimization_type === "grid_search" && (job.total_pairs ?? 0) > 0;
+  // Grid searches are retired: the backend refuses to clone, retry or resume one.
+  const canRerun = job.optimization_type !== "grid_search";
   const displayName =
     job.name ||
     [job.module_name, job.optimizer_name].filter(Boolean).join(" · ") ||
@@ -1017,10 +1053,7 @@ function JobRow({
 
   const handleClone = () => {
     setMenuOpen(false);
-    // No payload in the sidebar to read the authored recipe from; the job type
-    // still pins DSPy runs to Program and black-box ones to Anything.
-    const recipe = job.optimization_type === "blackbox" ? "anything" : "program";
-    router.push(`/submit?clone=${job.optimization_id}&recipe=${recipe}`);
+    router.push(`/submit?clone=${job.optimization_id}`);
   };
 
   const handleRetry = async () => {
@@ -1157,7 +1190,7 @@ function JobRow({
         className={cn(
           "flex min-h-[44px] items-center gap-1.5 rounded-lg px-2 py-2 text-[0.6875rem] transition-all duration-150 lg:min-h-0",
           isActive
-            ? "bg-primary/[0.07] text-foreground"
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
             : "text-muted-foreground hover:bg-sidebar-accent/30 hover:text-foreground",
         )}
       >
@@ -1173,7 +1206,12 @@ function JobRow({
           </span>
           {isGridSearch && (
             <span
-              className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-muted-foreground/60 bg-muted/40 px-1 py-0.5 rounded shrink-0"
+              className={cn(
+                "inline-flex items-center gap-0.5 text-[9px] font-semibold px-1 py-0.5 rounded shrink-0",
+                isActive
+                  ? "bg-muted text-muted-foreground"
+                  : "bg-muted/40 text-muted-foreground/60",
+              )}
               title={formatMsg("auto.features.sidebar.components.sidebar.template.2", {
                 p1: job.total_pairs ?? "?",
               })}
@@ -1182,7 +1220,9 @@ function JobRow({
               {job.total_pairs ?? "?"}
             </span>
           )}
-          {job.pinned && <PushPin className="size-2.5 text-muted-foreground/60 shrink-0" />}
+          {job.pinned && (
+            <PushPin className={cn("size-2.5 shrink-0", "text-muted-foreground/60")} />
+          )}
           <StatusDot status={job.status} />
         </Link>
         {isGridSearch && (
@@ -1195,7 +1235,12 @@ function JobRow({
               e.stopPropagation();
               setExpanded((o) => !o);
             }}
-            className="shrink-0 text-muted-foreground hover:text-foreground"
+            className={cn(
+              "shrink-0",
+              isActive
+                ? "text-muted-foreground hover:text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
             aria-label={
               expanded
                 ? msg("auto.features.sidebar.components.sidebar.literal.11")
@@ -1208,33 +1253,34 @@ function JobRow({
           </Button>
         )}
         <PopoverPrimitive.Root open={menuOpen} onOpenChange={setMenuOpen}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <PopoverPrimitive.Trigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                  className="shrink-0 text-muted-foreground hover:text-foreground"
-                  aria-label={formatMsg("auto.features.sidebar.components.sidebar.template.3", {
-                    p1: displayName,
-                  })}
-                >
-                  <DotsThree
-                    className={cn(
-                      "size-3.5 transition-colors duration-150 motion-reduce:transition-none",
-                      menuOpen && "text-foreground",
-                    )}
-                    aria-hidden="true"
-                  />
-                </Button>
-              </PopoverPrimitive.Trigger>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{msg("sidebar.row_menu")}</TooltipContent>
-          </Tooltip>
+          <PopoverPrimitive.Trigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
+              className={cn(
+                "shrink-0",
+                isActive
+                  ? "text-muted-foreground hover:text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              autoTooltip={false}
+              aria-label={formatMsg("auto.features.sidebar.components.sidebar.template.3", {
+                p1: displayName,
+              })}
+            >
+              <DotsThree
+                className={cn(
+                  "size-3.5 transition-colors duration-150 motion-reduce:transition-none",
+                  menuOpen && "text-foreground",
+                )}
+                aria-hidden="true"
+              />
+            </Button>
+          </PopoverPrimitive.Trigger>
           <PopoverPrimitive.Portal>
             <PopoverPrimitive.Content
               align="end"
@@ -1278,14 +1324,16 @@ function JobRow({
                 </PopoverPrimitive.Close>
               )}
 
-              <PopoverPrimitive.Close asChild>
-                <button type="button" onClick={handleClone} className={COMPACT_POPOVER_ITEM_CLASS}>
-                  <Copy className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
-                  <span className="flex-1 text-start">
-                    {msg("auto.features.sidebar.components.sidebar.9")}
-                  </span>
-                </button>
-              </PopoverPrimitive.Close>
+              {canRerun && (
+                <PopoverPrimitive.Close asChild>
+                  <button type="button" onClick={handleClone} className={COMPACT_POPOVER_ITEM_CLASS}>
+                    <Copy className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
+                    <span className="flex-1 text-start">
+                      {msg("auto.features.sidebar.components.sidebar.9")}
+                    </span>
+                  </button>
+                </PopoverPrimitive.Close>
+              )}
 
               {canEdit && (
                 <PopoverPrimitive.Close asChild>
@@ -1297,6 +1345,7 @@ function JobRow({
               )}
 
               {canEdit &&
+                canRerun &&
                 (job.status === "failed" ||
                   job.status === "cancelled" ||
                   job.status === "paused") &&
@@ -1441,7 +1490,7 @@ function JobRow({
                     className={cn(
                       "flex items-center gap-2 rounded-md px-2 py-1.5 text-[0.625rem] transition-all duration-150",
                       isPairActive
-                        ? "bg-primary/[0.07] text-foreground font-semibold"
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
                         : "text-muted-foreground/70 hover:bg-sidebar-accent/30 hover:text-foreground",
                     )}
                   >

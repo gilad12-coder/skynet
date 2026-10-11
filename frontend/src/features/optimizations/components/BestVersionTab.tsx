@@ -282,14 +282,14 @@ function ViewToggle({
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(o.value)}
             className={cn(
-              "relative inline-flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-0 lg:min-w-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]",
+              "relative inline-flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 lg:min-h-0 lg:min-w-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]",
               active ? "text-foreground" : "text-foreground/60 hover:text-foreground",
             )}
           >
             {active && (
               <motion.span
                 layoutId="blackbox-view-pill"
-                className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
+                className="absolute inset-0 rounded-md bg-background"
                 transition={PILL_TRANSITION}
                 aria-hidden="true"
               />
@@ -427,7 +427,7 @@ export function BestVersionTab({
   return (
     <FadeIn>
       <section
-        className="overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm"
+        className="overflow-hidden rounded-xl border border-border/60 bg-card"
         aria-label={title}
         aria-keyshortcuts="ArrowLeft ArrowRight Home End"
         onKeyDown={onKeyDown}
@@ -557,7 +557,7 @@ function PullRequestRow({ pullRequest }: { pullRequest: PullRequestDetail }) {
       href={pullRequest.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex min-h-11 items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm transition-colors hover:border-[#C8A882]"
+      className="flex min-h-11 items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm transition-colors hover:border-primary-fill"
     >
       <GitPullRequest className="size-4 shrink-0 text-primary" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate">

@@ -21,10 +21,6 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 class UserPreferencesUpdate(BaseModel):
     """Partial set of browser preferences the generalist may change."""
 
-    lite_mode: bool | None = Field(
-        default=None,
-        description="Use the lower-motion, lighter-weight interface.",
-    )
     wizard_code_assist: Literal["auto", "manual"] | None = Field(
         default=None,
         description="Whether the optimization wizard should draft code automatically.",

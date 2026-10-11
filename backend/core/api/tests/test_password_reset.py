@@ -68,8 +68,8 @@ def reset_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, list[dict
     monkeypatch.setattr(settings, "smtp_host", "smtp.test.local")
     sent: list[dict[str, str]] = []
 
-    def _capture(to: str, subject: str, body: str) -> None:
-        sent.append({"to": to, "subject": subject, "body": body})
+    def _capture(to: str, subject: str, body: str, *, html_body: str | None = None) -> None:
+        sent.append({"to": to, "subject": subject, "body": body, "html": html_body or ""})
 
     monkeypatch.setattr(accounts_module, "send_email", _capture)
     engine = create_engine(
@@ -139,6 +139,8 @@ def test_request_then_confirm_resets_password(
     assert requested.status_code == 200
     assert len(sent) == 1
     code = _last_code(sent)
+    assert sent[-1]["subject"] == "Your Skynet password-reset code"
+    assert code in sent[-1]["html"]
 
     confirmed = client.post(
         "/auth/password-reset/confirm",

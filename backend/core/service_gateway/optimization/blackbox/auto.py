@@ -184,7 +184,11 @@ class _LaneEngine:
         context = replace(self.ctx, run_dir=str(Path(self.ctx.run_dir) / lane_id), progress_callback=progress)
         server = EvalServer(upstream.evaluate, max_evals=upstream.budget.remaining or 0)
         local_task = Task(
-            task.seed_candidate, task.objective, task.background, [*(task.train_set or []), *(task.val_set or [])]
+            task.seed_candidate,
+            task.objective,
+            task.background,
+            list(task.train_set or []),
+            valset=list(task.val_set or []),
         )
         try:
             with dspy.context(**self.model_context):
@@ -342,7 +346,10 @@ def run_strategy(
     kwargs = {
         "seed_candidate": task.seed_candidate,
         "evaluator": server.evaluate,
+        # Upstream's dataset is the train split; the validation split rides
+        # along as its valset so each lane can select on it.
         "dataset": task.cases or None,
+        "valset": task.valset or None,
         "objective": task.objective,
         "background": task.background,
         "name": Path(ctx.run_dir).name,

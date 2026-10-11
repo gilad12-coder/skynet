@@ -15,7 +15,7 @@ from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from core.api import preflight_execution, protected_preview
+from core.api import preflight_execution
 from core.api.auth import AuthenticatedUser
 from core.api.preflight_execution import WizardPreflightRequest, run_preflight
 from core.billing import mcp_broker
@@ -376,40 +376,3 @@ def test_continue_uses_nonheldout_case_and_persists_actual_remote_result(
     assert bindings[0]["workflow"] == "anything"
     assert isinstance(bindings[0]["owner_id"], str)
     assert bindings[0]["owner_id"]
-
-
-@pytest.mark.parametrize("status", [200, 400])
-def test_legacy_preview_preserves_real_output_and_replays_without_external_retry(
-    gateway: ModelGateway, endpoint: _Endpoint, monkeypatch: pytest.MonkeyPatch, status: int
-) -> None:
-    """Use real shared-budget preview evidence while excluding external service fees."""
-    monkeypatch.setattr(protected_preview.settings, "openrouter_api_key", None)
-    bindings = []
-    monkeypatch.setattr(protected_preview, "bind_protected_sandbox", lambda *args, **kwargs: bindings.append(kwargs))
-    endpoint.status = status
-    endpoint.result = {"score": 0.75, "feedback": "actual"} if status == 200 else {"error": "actual rejected input"}
-    payload = {"scorer": _payload()["scorer"], "candidate": "explicit candidate", "case": {"question": "explicit case"}}
-    kwargs = {
-        "kind": "scorer",
-        "user": AuthenticatedUser("alice", "user", ()),
-        "job_store": SimpleNamespace(engine=gateway.runtime.service._engine),
-        "idempotency_key": "remote-preview",
-    }
-    result = protected_preview.run_protected_preview(payload, **kwargs)
-    replay = protected_preview.run_protected_preview(payload, **kwargs)
-    assert result["ok"] is (status == 200)
-    assert result["preview_status"] == ("succeeded" if status == 200 else "failed")
-    if status == 200:
-        assert result["score"] == 0.75
-        assert result["external_service_fees"] == "excluded_from_skynet_total"
-    else:
-        assert "HTTP 400" in result["error"]
-        assert "actual rejected input" in result["error"]
-    assert replay["preflight_id"] == result["preflight_id"]
-    assert result["cents_charged"] == 0
-    assert bindings == [{"workflow": "anything", "owner_id": result["preflight_id"]}]
-    assert len(endpoint.requests) == 1
-    assert json.loads(endpoint.requests[0].content) == {
-        "candidate": "explicit candidate",
-        "case": {"question": "explicit case"},
-    }

@@ -284,10 +284,7 @@ export function LogsTab({
   return (
     <div className="mt-4">
       <FadeIn>
-        <div
-          className="mb-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between"
-          data-tutorial="live-logs"
-        >
+        <div className="mb-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3 overflow-x-auto pb-0.5 no-scrollbar sm:overflow-visible sm:pb-0">
             <div className="shrink-0">
               <VerbosityControl active={activeVerbosity} onChange={setVerbosity} />
@@ -366,7 +363,7 @@ export function LogsTab({
                 <button
                   type="button"
                   onClick={jumpToNewest}
-                  className={`absolute start-1/2 z-10 inline-flex -translate-x-1/2 rtl:translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm transition-colors duration-150 hover:bg-muted ${newestAtTop ? "top-10" : "bottom-3"}`}
+                  className={`absolute start-1/2 z-10 inline-flex -translate-x-1/2 rtl:translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground transition-colors duration-150 hover:bg-muted ${newestAtTop ? "top-10" : "bottom-3"}`}
                 >
                   <ArrowDown
                     className={newestAtTop ? "size-3 rotate-180" : "size-3"}

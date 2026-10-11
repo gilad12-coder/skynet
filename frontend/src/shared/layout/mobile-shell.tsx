@@ -20,6 +20,7 @@ import {
   isGeneralistAgentEnabled,
 } from "@/features/agent-panel";
 import { IntakeHost } from "@/features/experience";
+import { NotificationBell } from "@/features/notifications";
 
 const HEADER_HEIGHT_PX = 53;
 const TABBAR_HEIGHT_PX = 56;
@@ -83,7 +84,10 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
         >
           SKYNET
         </Link>
-        <GlobalSearch />
+        <div className="flex items-center gap-1">
+          <GlobalSearch />
+          <NotificationBell />
+        </div>
       </header>
 
       <main
@@ -147,7 +151,7 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
     return (
       <WizardStateProvider>
         <JobsStreamProvider>{shell}</JobsStreamProvider>
-        <IntakeHost agentEnabled={false} />
+        <IntakeHost />
       </WizardStateProvider>
     );
   }
@@ -157,7 +161,7 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
       <GeneralistPanelProvider>
         <JobsStreamProvider>{shell}</JobsStreamProvider>
         <GeneralistPanel />
-        <IntakeHost agentEnabled />
+        <IntakeHost />
       </GeneralistPanelProvider>
     </WizardStateProvider>
   );

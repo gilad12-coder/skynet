@@ -111,16 +111,14 @@ function PendingRow({
           </button>
         )
       )}
-      <TooltipButton tooltip={removeLabel} side="top">
-        <button
-          type="button"
-          onClick={() => onRemove(item.id)}
-          aria-label={removeLabel}
-          className={iconButtonClass}
-        >
-          <Trash className="size-4" />
-        </button>
-      </TooltipButton>
+      <button
+        type="button"
+        onClick={() => onRemove(item.id)}
+        aria-label={removeLabel}
+        className={iconButtonClass}
+      >
+        <Trash className="size-4" />
+      </button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button type="button" aria-label={moreLabel} className={iconButtonClass}>
@@ -204,7 +202,7 @@ export function PendingMessages({
     <div
       aria-label={msg("agent.pending.list_label")}
       role="group"
-      className="mx-3 rounded-t-xl border border-b-0 border-[#DDD4C8] bg-muted/40 p-1"
+      className="mx-3 rounded-t-xl border border-b-0 border-border bg-muted/40 p-1"
     >
       <PendingSection items={steering} steering onReorder={onReorderSteering} rowProps={rowProps} />
       <PendingSection items={queued} steering={false} onReorder={onReorderQueued} rowProps={rowProps} />

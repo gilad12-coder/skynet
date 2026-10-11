@@ -1,8 +1,19 @@
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
 import { test } from "node:test";
 
 import type { ModelConfig } from "@/shared/types/api";
-import {
+
+const unifiedRunUrl = new URL("../../../shared/types/unified-run.ts", import.meta.url).href;
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === "@/shared/types/unified-run") return { shortCircuit: true, url: unifiedRunUrl };
+    return nextResolve(specifier, context);
+  },
+});
+
+const {
   DEFAULT_SHINKA_SETTINGS,
   MAX_EXTRA_OPTIMIZATION_MODELS,
   PARENT_SELECTION_FIELDS,
@@ -13,7 +24,8 @@ import {
   shinkaSettingsFrom,
   submittedExtraModels,
   submittedShinka,
-} from "./shinka-settings.ts";
+  takesExtraModels,
+} = await import("./shinka-settings.ts");
 
 const mixTotal = (s: typeof DEFAULT_SHINKA_SETTINGS) =>
   SHINKA_PATCH_KINDS.reduce((sum, kind) => sum + s[kind], 0);
@@ -106,42 +118,47 @@ test("out-of-range and invalid shares clamp", () => {
   assert.equal(patchPercent(0.6), 60);
 });
 
-test("a single ShinkaEvolve run always sends its settings", () => {
-  const sent = submittedShinka(DEFAULT_SHINKA_SETTINGS, "single", "shinka_evolve", false);
+test("a ShinkaEvolve run always sends its settings, the defaults when untouched", () => {
+  const sent = submittedShinka(DEFAULT_SHINKA_SETTINGS, "shinka_evolve", "code");
   assert.deepEqual(sent, DEFAULT_SHINKA_SETTINGS);
   assert.notEqual(sent, DEFAULT_SHINKA_SETTINGS);
+  assert.deepEqual(submittedShinka(null, "shinka_evolve", "prompt"), DEFAULT_SHINKA_SETTINGS);
 });
 
-test("the editor choice goes out with the settings, in single and Auto", () => {
+test("the editor choice goes out with the settings, for ShinkaEvolve and Auto", () => {
   const agent = { ...DEFAULT_SHINKA_SETTINGS, editor: "agent" as const };
-  assert.equal(submittedShinka(agent, "single", "shinka_evolve", false)?.editor, "agent");
-  assert.equal(submittedShinka(agent, "auto", null, true)?.editor, "agent");
+  assert.equal(submittedShinka(agent, "shinka_evolve", "code")?.editor, "agent");
+  assert.equal(submittedShinka(agent, "auto", "code")?.editor, "agent");
 });
 
-test("other single engines never send ShinkaEvolve settings", () => {
-  for (const engine of ["gepa", "meta_harness", "autosaddler", null] as const) {
-    assert.equal(submittedShinka(DEFAULT_SHINKA_SETTINGS, "single", engine, true), undefined);
+test("other optimizers never send ShinkaEvolve settings", () => {
+  for (const choice of ["gepa", "meta_harness", "autosaddler", "dspy_gepa"] as const) {
+    assert.equal(submittedShinka(DEFAULT_SHINKA_SETTINGS, choice, "code"), undefined);
   }
+  // Auto on a DSPy program is DSPy GEPA, which has no ShinkaEvolve lane.
+  assert.equal(submittedShinka(DEFAULT_SHINKA_SETTINGS, "auto", "dspy_program"), undefined);
 });
 
-test("Auto sends the settings only once the user opened the panel", () => {
-  assert.equal(submittedShinka(DEFAULT_SHINKA_SETTINGS, "auto", null, false), undefined);
+test("black-box Auto sends the settings only once the user edited them", () => {
+  assert.equal(submittedShinka(null, "auto", "prompt"), undefined);
   const tuned = { ...DEFAULT_SHINKA_SETTINGS, num_islands: 4 };
-  assert.deepEqual(submittedShinka(tuned, "auto", null, true), tuned);
+  assert.deepEqual(submittedShinka(tuned, "auto", "prompt"), tuned);
 });
 
-test("extra optimization models go out only for a single ShinkaEvolve run", () => {
+test("extra optimization models go out only for ShinkaEvolve", () => {
   const models = [model("a"), model("b")];
-  assert.deepEqual(submittedExtraModels(models, "single", "shinka_evolve"), models);
-  assert.equal(submittedExtraModels(models, "single", "gepa"), undefined);
-  assert.equal(submittedExtraModels(models, "auto", null), undefined);
+  assert.equal(takesExtraModels("shinka_evolve"), true);
+  assert.equal(takesExtraModels("auto"), false);
+  assert.deepEqual(submittedExtraModels(models, "shinka_evolve"), models);
+  assert.equal(submittedExtraModels(models, "gepa"), undefined);
+  assert.equal(submittedExtraModels(models, "auto"), undefined);
 });
 
 test("extra models drop blanks, cap at the backend limit, and omit an empty list", () => {
-  assert.equal(submittedExtraModels([], "single", "shinka_evolve"), undefined);
-  assert.equal(submittedExtraModels([model("  ")], "single", "shinka_evolve"), undefined);
+  assert.equal(submittedExtraModels([], "shinka_evolve"), undefined);
+  assert.equal(submittedExtraModels([model("  ")], "shinka_evolve"), undefined);
   const many = ["a", "", "b", "c", "d", "e"].map(model);
-  const sent = submittedExtraModels(many, "single", "shinka_evolve");
+  const sent = submittedExtraModels(many, "shinka_evolve");
   assert.equal(sent?.length, MAX_EXTRA_OPTIMIZATION_MODELS);
   assert.deepEqual(
     sent?.map((m) => m.name),

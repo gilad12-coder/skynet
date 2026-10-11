@@ -6,7 +6,6 @@ import { toast } from "react-toastify";
 import { Button } from "@/shared/ui/primitives/button";
 import { Dialog, DialogContent, DialogFooter } from "@/shared/ui/primitives/dialog";
 import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
-import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { deleteJob } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
@@ -35,17 +34,16 @@ export function DeleteJobDialog({
   };
   return (
     <>
-      <TooltipButton tooltip={msg("auto.features.optimizations.components.deletejobdialog.1")}>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-          onClick={() => setOpen(true)}
-          aria-label={msg("auto.features.optimizations.components.deletejobdialog.literal.1")}
-        >
-          <Trash className="size-4" />
-        </Button>
-      </TooltipButton>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        autoTooltip={false}
+        className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+        onClick={() => setOpen(true)}
+        aria-label={msg("auto.features.optimizations.components.deletejobdialog.literal.1")}
+      >
+        <Trash className="size-4" />
+      </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="w-[min(28rem,92vw)] max-w-[min(28rem,92vw)] sm:max-w-md">
           <DialogTitleRow

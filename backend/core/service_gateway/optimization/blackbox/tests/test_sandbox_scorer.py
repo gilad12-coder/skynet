@@ -83,7 +83,8 @@ class _RunnerSession(FakeSandboxSession):
         call_dir = command.split()[-1]
         payload = json.loads(self.files[f"{call_dir}/input.json"])
         self.payloads.append(payload)
-        answer = self._respond(payload)
+        # Like the real runner: the scorer source comes from the box's code file.
+        answer = self._respond({"code": self.files.get(sandbox_scorer_mod.runner.CODE_FILE, ""), **payload})
         if isinstance(answer, CommandResult):
             return answer
         self.files[f"{call_dir}/output.json"] = json.dumps(answer)
@@ -227,7 +228,9 @@ def test_sandbox_scorer_installs_the_runner_once_and_runs_one_call_per_directory
     assert box.timeouts == [7.5, 7.5]
     assert box.payloads[1]["candidate"] == "hello"
     assert box.payloads[1]["case"] == {"input": "x"}
-    assert box.payloads[1]["code"] == "def score(c): return 1"
+    assert "code" not in box.payloads[1]
+    assert box.files[sandbox_scorer_mod.runner.CODE_FILE] == "def score(c): return 1"
+    assert spec.private is True
     assert box.payloads[1]["gateway"] == {
         "url": "http://gw.example/v1",
         "model": "judge",

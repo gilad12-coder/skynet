@@ -564,7 +564,7 @@ function Calculation({
                 {numbered && (
                   <span
                     aria-hidden="true"
-                    className="inline-flex size-4.5 shrink-0 items-center justify-center rounded-full bg-[#C8A882]/15 text-[10px] font-semibold tabular-nums text-[#A8895E]"
+                    className="inline-flex size-4.5 shrink-0 items-center justify-center rounded-full bg-primary-fill text-[10px] font-semibold tabular-nums text-primary-foreground"
                   >
                     {index + 1}
                   </span>
@@ -600,7 +600,7 @@ function Calculation({
               <li key={principle} className="flex gap-2" dir="auto">
                 <span
                   aria-hidden="true"
-                  className="mt-[5px] size-1 shrink-0 rounded-full bg-[#C8A882]"
+                  className="mt-[5px] size-1 shrink-0 rounded-full bg-primary-fill"
                 />
                 <span>{principle}</span>
               </li>
@@ -699,7 +699,7 @@ function Scale({ points }: { points: ScalePoint[] }) {
           aria-current={point.active ? "true" : undefined}
           className={cn(
             "inline-flex items-baseline gap-1 text-[11px] leading-snug",
-            point.active ? "font-semibold text-[#3D2E22]" : "text-muted-foreground",
+            point.active ? "font-semibold text-primary" : "text-muted-foreground",
           )}
           dir="auto"
         >

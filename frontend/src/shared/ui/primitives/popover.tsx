@@ -47,7 +47,7 @@ function PopoverContent({
           "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
           "data-[state=closed]:[animation-duration:140ms] data-[state=closed]:[animation-timing-function:cubic-bezier(0.4,0,1,1)]",
           "motion-reduce:animate-none",
-          "rounded-xl border border-border/60 bg-background/95 backdrop-blur-xl shadow-lg",
+          "rounded-xl border border-border/60 bg-background/95 backdrop-blur-xl shadow-[var(--shadow-float)]",
           "outline-none",
           className,
         )}

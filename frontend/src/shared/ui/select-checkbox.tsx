@@ -9,7 +9,7 @@ import { cn } from "@/shared/lib/utils";
 export function checkboxBoxClass(state: boolean | "mixed") {
   return cn(
     "grid size-5 shrink-0 place-items-center rounded-md border transition-colors duration-150",
-    state ? "border-transparent bg-foreground text-background" : "border-border/70 bg-background",
+    state ? "border-transparent bg-primary-fill text-primary-foreground" : "border-border/70 bg-background",
   );
 }
 
@@ -60,7 +60,7 @@ export function SelectCheckbox({
         // The ::after grows the box to a 44px hit area without changing its look. It is
         // a centred 44px square, not ``-inset-3``: that inset is rem (the fluid root is
         // ~15px on iPad) and measured inside the border, which left only ~39px.
-        "relative cursor-pointer after:absolute after:left-1/2 after:top-1/2 after:-mt-[22px] after:-ml-[22px] after:size-[44px] after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 disabled:cursor-not-allowed disabled:opacity-50",
+        "relative cursor-pointer after:absolute after:left-1/2 after:top-1/2 after:-mt-[22px] after:-ml-[22px] after:size-[44px] after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-50",
         !state && "hover:border-foreground/40",
       )}
     >
@@ -87,7 +87,7 @@ export function CheckboxIndicator({
       aria-hidden="true"
       className={cn(
         checkboxBoxClass(state),
-        "peer-focus-visible:ring-2 peer-focus-visible:ring-[#C8A882]/45 peer-disabled:opacity-50",
+        "peer-focus-visible:ring-2 peer-focus-visible:ring-primary/45 peer-disabled:opacity-50",
         !state && "group-hover:border-foreground/40",
       )}
     >

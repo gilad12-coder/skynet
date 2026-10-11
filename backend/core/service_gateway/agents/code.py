@@ -16,12 +16,13 @@ Two distinct modes share this module:
   ``signature_replace`` (or ``metric_replace``) / ``tool_end`` around the
   call so the UI can render a tool-call card and swap the code atomically.
 
-A black-box authoring context (the "optimize anything" wizard) switches
-both modes to their black-box counterparts: the seed drafts the job's
-starting point and a python scorer (``score(candidate, case=None)``), and
-the chat agent gets ``edit_seed`` / ``edit_scorer``. Both ride the DSPy
-artifacts' events — ``signature_*`` for the starting point, ``metric_*``
-for the scorer — so the editor wiring is shared.
+A unified authoring context (the submission wizard's metric + code step)
+switches both modes to the workspace contract: the seed drafts the run code
+(``run(artifact, input)``, or ``build_program()`` for a DSPy program) and
+the metric in the exact shape the chosen optimizer needs, and the chat agent
+gets ``ask_user`` / ``set_brief`` / ``edit_run`` / ``edit_metric``. Both ride
+the DSPy artifacts' events — ``signature_*`` for the run code, ``metric_*``
+for the metric — so the editor wiring is shared.
 
 The agent runs on whatever LiteLLM-compatible model is configured via
 ``settings.code_agent_model`` (default: the model catalog's best-value
@@ -61,7 +62,6 @@ from .answer_options import normalize_options
 from .conduct import with_conduct
 from .constants import REASONING_FIELD
 from .parse_salvage import strip_adapter_debris
-from .repo_browser import RepoBrowser
 from .steering import SteerInbox, attach_steering, get_steer_store
 
 logger = logging.getLogger(__name__)
@@ -216,43 +216,119 @@ def _validate_metric_code(code: str) -> str:
     return ""
 
 
-# Mirrors ``blackbox.scorer._ENTRYPOINT_NAMES``: the runtime loader looks the
-# entrypoint up by these names before falling back to a lone function.
-_SCORER_ENTRYPOINTS = ("score", "metric")
+# Function name, minimum positional-capable parameters and maximum required
+# ones per metric shape; mirrors the harness's call sites (D3 of the
+# workspace contract): GEPA passes five arguments, the other DSPy optimizers
+# up to three, and the black-box harness passes ``expected`` only when declared.
+_METRIC_SIGNATURES: dict[str, tuple[str, int, int, str]] = {
+    "dspy_feedback": ("metric", 5, 5, "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None)"),
+    "dspy_scalar": ("metric", 2, 3, "def metric(gold, pred, trace=None)"),
+    "blackbox_side_info": ("score", 2, 3, "def score(input, output, expected=None)"),
+}
 
 
-def _validate_scorer_code(code: str) -> str:
-    """Statically check a black-box scorer snippet.
-
-    The runtime enforces the full contract (``score(candidate, case=None)``,
-    stdlib only, the ``llm`` helper imported from ``skynet``) inside a sandbox; here a
-    syntax error, a missing entrypoint or one that takes no arguments is
-    caught before the code lands in the editor — the guarantee the DSPy
-    artifacts get from their validators, without executing model-written
-    code in the API process.
+def _parse_functions(code: str, label: str) -> tuple[dict[str, ast.FunctionDef], str, set[str]]:
+    """Parse ``code`` and index its top-level functions and imported modules.
 
     Args:
-        code: Scorer source code.
+        code: Python source to inspect.
+        label: Artifact name prefixed to error messages (``"run"`` or ``"metric"``).
 
     Returns:
-        An empty string when the snippet parses and defines a usable
-        entrypoint, otherwise a short error message.
+        ``(functions, error, imported)`` — top-level functions by name, a short
+        error message (empty when the source parses) and the root names of
+        every imported module.
     """
     if not code.strip():
-        return "scorer error: the scorer is empty."
+        return {}, f"{label} error: the code is empty.", set()
     try:
         tree = ast.parse(code)
     except SyntaxError as exc:
-        return f"scorer error: {exc.msg} (line {exc.lineno})."
-    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
-    by_name = {fn.name: fn for fn in functions}
-    entrypoint = next((by_name[name] for name in _SCORER_ENTRYPOINTS if name in by_name), None)
-    if entrypoint is None and len(functions) == 1:
-        entrypoint = functions[0]
-    if entrypoint is None:
-        return "scorer error: define a function named 'score(candidate, case=None)'."
-    if not (entrypoint.args.posonlyargs or entrypoint.args.args or entrypoint.args.vararg):
-        return f"scorer error: '{entrypoint.name}' must accept the candidate as its first argument."
+        return {}, f"{label} error: {exc.msg} (line {exc.lineno}).", set()
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[0])
+    return functions, "", imported
+
+
+def _positional_capacity(fn: ast.FunctionDef) -> tuple[int, int, bool]:
+    """Count how many positional arguments ``fn`` accepts and requires.
+
+    Args:
+        fn: The parsed function definition.
+
+    Returns:
+        ``(accepted, required, variadic)``.
+    """
+    positional = [*fn.args.posonlyargs, *fn.args.args]
+    return len(positional), len(positional) - len(fn.args.defaults), fn.args.vararg is not None
+
+
+def _validate_run_code(code: str, artifact_kind: str) -> str:
+    """Statically check the wizard's run code against the workspace contract.
+
+    The sandboxed contract check executes it; here a syntax error or a
+    missing / mis-shaped entrypoint is caught before the code lands in the
+    editor, without executing model-written code in the API process.
+
+    Args:
+        code: Run-code source.
+        artifact_kind: The artifact kind; ``dspy_program`` needs
+            ``build_program()``, every other kind ``run(artifact, input)``.
+
+    Returns:
+        An empty string when the code fits the contract, otherwise a short error message.
+    """
+    functions, error, _ = _parse_functions(code, "run")
+    if error:
+        return error
+    if artifact_kind == "dspy_program":
+        fn = functions.get("build_program")
+        if fn is None:
+            return "run error: define def build_program() returning the dspy.Module."
+        required_kwonly = [d for d in fn.args.kw_defaults if d is None]
+        if _positional_capacity(fn)[1] > 0 or required_kwonly:
+            return "run error: build_program() must take no arguments."
+        return ""
+    fn = functions.get("run")
+    if fn is None:
+        return "run error: define def run(artifact, input)."
+    accepted, required, variadic = _positional_capacity(fn)
+    if (accepted < 2 and not variadic) or required > 2:
+        return "run error: run must take exactly (artifact, input)."
+    return ""
+
+
+def _validate_unified_metric_code(code: str, metric_shape: str, metric_has_model: bool) -> str:
+    """Statically check the wizard's metric against the shape its optimizer needs.
+
+    Args:
+        code: Metric source.
+        metric_shape: ``dspy_feedback``, ``dspy_scalar`` or ``blackbox_side_info``.
+        metric_has_model: Whether a metric model is attached; without one the
+            ``skynet`` helper does not exist in the metric's process.
+
+    Returns:
+        An empty string when the code fits the shape, otherwise a short error message.
+    """
+    functions, error, imported = _parse_functions(code, "metric")
+    if error:
+        return error
+    name, minimum, most_required, shape_text = _METRIC_SIGNATURES.get(
+        metric_shape, _METRIC_SIGNATURES["blackbox_side_info"]
+    )
+    fn = functions.get(name)
+    if fn is None:
+        return f"metric error: define {shape_text}."
+    accepted, required, variadic = _positional_capacity(fn)
+    if (accepted < minimum and not variadic) or required > most_required:
+        return f"metric error: the signature must be {shape_text}."
+    if "skynet" in imported and not metric_has_model:
+        return "metric error: no metric model is attached, so `from skynet import llm` is unavailable."
     return ""
 
 
@@ -831,7 +907,7 @@ class FixCodeArtifact(dspy.Signature):
     """Repair a code artifact that failed validation.
 
     You are given a Signature class, a metric function or a black-box
-    python scorer (``def score(candidate, case=None)``) that does NOT pass
+    wizard run code / metric that does NOT pass
     validation, together with the exact validator error. Return the
     corrected full source with the SAME intent — make the smallest change
     that resolves the error (e.g. delete a stray brace, fix an identifier,
@@ -840,7 +916,7 @@ class FixCodeArtifact(dspy.Signature):
     markdown fences, no commentary, no surrounding prose.
     """
 
-    artifact_kind: str = dspy.InputField(desc="'signature', 'metric' or 'scorer'.")
+    artifact_kind: str = dspy.InputField(desc="'signature', 'metric' or 'run'.")
     broken_code: str = dspy.InputField(desc="The current source that failed validation.")
     validation_error: str = dspy.InputField(desc="The validator's error message to resolve.")
     dataset_columns: list[str] = dspy.InputField(desc="Every column name in the dataset.")
@@ -1007,154 +1083,149 @@ class CodeAssistant(dspy.Signature):
         ),
     )
 
-_SCORER_CONTRACT = """The scorer is one python function, def score(candidate, case=None):
-- candidate (str) is the version under optimization: the full text of the starting point as the optimizer rewrote it.
-- case is one row of the case file as a dict keyed by the case columns; None when the job has no cases (still return a score).
-- Always return {"score": float, "feedback": str}: score higher is better, 0.0 to 1.0 by convention; feedback says WHY the version scored that, naming the expected value or the failed check. Feedback is required: a scorer that returns a bare number is rejected, because the optimizer learns from the feedback. When you measure several things, also return "scores": {"<name>": {"score": float, "feedback": str}, ...}, one entry per thing measured, each with its own feedback; the top-level score is then their (weighted) combination. A (score, "feedback") tuple is accepted too.
-- Standard library only (re, json, math, difflib, statistics, subprocess, tempfile, ...): no third-party imports and no network of your own. The scorer runs in a throwaway sandbox, so temp files and subprocesses are fine.
-- Never raise: catch failures and return {"score": 0.0, "feedback": "<the error>"}.
-- Read case columns by their exact names; never invent columns."""
 
-_SCORER_AGENT_CONTRACT = """The target is an AGENT: candidate is the instructions file a coding agent runs with, and the agent has ALREADY run on the case when the scorer is called, so case is the run record, not the raw case. case["case"] is the original case dict; case["output"] is the agent's answer (the answer file, else its final message; None when it produced nothing); case["exit_code"], case["timed_out"], case["error"] and case["transcript"] describe the run. Score case["output"] against case["case"]; never try to run the agent yourself."""
+_RUN_CONTRACT = """The run code is plain python that turns one case input into an output; the optimizer swaps in new versions of the artifact and the metric scores what run returns.
+- Define def run(artifact, input): artifact is the version under optimization (a str, or a dict of name -> text when the starting version is a mapping), exactly as the optimizer proposes it; input is one case input, a dict keyed by the input fields. Return the output: a str, or any JSON-serializable value the metric reads.
+- The task model comes from the skynet module: `from skynet import llm` (never define your own). llm(prompt, input=None, images=None) -> str; llm(artifact, input["<input field>"]) runs the artifact as the system message with that field as the user message and returns the reply; that is how a prompt is exercised. images= attaches PNG/JPEG bytes, file paths or data: URLs.
+- Per artifact kind: a prompt is exercised with llm(artifact, ...); code is python source to load with exec into a fresh dict namespace (or write to a temp file and run with subprocess and a timeout) and call on the input; text is used as written (return it, or apply it with llm when the objective is about what the text makes a model do).
+- dspy, gepa and the standard library are installed; nothing else. No network of your own; temp files and subprocesses are fine.
+- Let errors raise: the harness reports them to the user. Do not return a fake output on failure.
+- Read input fields by their exact names; never invent fields."""
 
-_SCORER_LLM_CONTRACT = """The helpers come from the skynet module: start the file with `from skynet import llm, Image` (the one import beyond the standard library) and never define your own. llm(prompt, input=None, images=None) -> str; llm(candidate, case["<input column>"]) runs the candidate as the system message with the case's input column as the user message and returns the reply; that is how a prompt is exercised. With a single argument, llm(rubric_text) asks the model a free-form question, e.g. to grade a reply against a rubric: parse the answer defensively (look for a number or a verdict word, default to 0.0). images= attaches PNG/JPEG bytes, file paths or data: URLs for a vision model to look at; Image(path=..., base64_data=..., media_type=...) wraps a render so it can go into side_info."""
+_PROGRAM_CONTRACT = """The artifact is a DSPy program, so the run code builds it instead of running it.
+- Define def build_program() taking no arguments and returning a dspy.Module. `import dspy` at the top; define the dspy.Signature classes and the module it uses.
+- The harness applies the version under optimization, a dict mapping each predictor name (as program.named_predictors() reports it) to its instruction text, configures the task model as the dspy LM and calls program(**input) with the input fields as keyword arguments. Never call dspy.configure, create a dspy.LM or set instructions yourself.
+- Name the predictors so they match the keys of the starting version; the module's forward takes exactly the input fields as keyword arguments and returns a dspy.Prediction with the output fields the metric reads.
+- dspy, gepa and the standard library are installed; nothing else."""
 
-_SCORER_NO_LLM_CONTRACT = """No model is attached to the scorer, so there is NO llm helper: never import skynet or call llm(). Score the candidate text itself with deterministic checks (structure, required content, length, regexes, numeric fields, similarity to the expected column)."""
+_METRIC_SHAPES = {
+    "dspy_feedback": """The metric feeds a DSPy GEPA optimizer, so it returns a score AND feedback text.
+- Define def metric(gold, pred, trace=None, pred_name=None, pred_trace=None) with all five parameters.
+- gold is a dspy.Example holding the case input fields and the expected output fields (read them as gold.<field>); pred is the dspy.Prediction the program returned (pred.<output field>).
+- Return dspy.Prediction(score=float, feedback=str): score higher is better, 0.0 to 1.0 by convention; feedback says WHY, naming the expected value or the failed check, because the optimizer learns from it. {"score": ..., "feedback": ...} or (score, "feedback") are accepted too.""",
+    "dspy_scalar": """The metric feeds a DSPy optimizer that reads only a number.
+- Define def metric(gold, pred, trace=None).
+- gold is a dspy.Example holding the case input fields and the expected output fields (read them as gold.<field>); pred is the dspy.Prediction the program returned (pred.<output field>).
+- Return a float (higher is better, 0.0 to 1.0 by convention) or a bool. No feedback is read.""",
+    "blackbox_side_info": """The metric feeds a black-box optimizer that reads a score and side info.
+- Define def score(input, output, expected=None).
+- input is the case input dict (keyed by the input fields), output is what run returned for it, expected is the case's expected output (the value of the expected field; None when the case has none). Declare expected only when you use it.
+- Return (score, side_info): score is a float, higher is better, 0.0 to 1.0 by convention; side_info is a dict with "feedback": str saying WHY the output scored that, naming the expected value or the failed check. When several things are measured, add "scores": {"<name>": float, ...}, one entry per thing; the top-level score is then their (weighted) combination.""",
+}
 
-_SCORER_PATTERNS = """Scorer shapes that work well; pick the one the objective calls for, or combine several into a weighted score. "The answer" below means llm(candidate, case["<input column>"]) when the candidate is a prompt and the llm helper exists, case["output"] for an agent target, and the candidate text itself otherwise.
-- Length / shape: deterministic checks on the text (word or character budget, required sections, forbidden phrases, regex structure), graded by distance from the target rather than pass/fail.
-- Exact match: 1.0 when the answer, stripped and case-normalized, equals the expected column.
-- Contains: the expected text, or each of several required phrases, appears in the answer; partial credit per phrase found.
-- Numeric tolerance: pull the last number out of the answer with a regex and accept it within a tolerance of the expected number; 0.0 with feedback when no number is found.
-- JSON field: json.loads the answer (strip code fences first) and compare one field to the expected column; 0.0 with the parse error in feedback.
-- Run program: when the candidate is code, write it to a temp file and run it with subprocess.run([sys.executable, path], capture_output=True, text=True, timeout=...); a non-zero exit or a timeout scores 0.0 with the stderr tail in feedback, otherwise read the score off stdout (the last number printed, or the pass ratio of test inputs you drive through it)."""
+_METRIC_COMMON = """- Never raise: catch failures and return the lowest score with the error in the feedback.
+- Standard library (and dspy for the DSPy shapes) only; no network of your own.
+- The metric's source is never shown to the optimizer: it learns only from the scores and feedback, so put everything a better version needs to know into the feedback."""
 
-_SCORER_MODEL_PATTERNS = """- LLM judge: put the input, the expected value and the answer into a rubric, ask llm(rubric) for a 0-10 number or a verdict word, normalize to 0.0-1.0 and default to 0.0 when the reply does not parse.
-- Vision judge: run the candidate program as above, collect the .png files it wrote, send them with llm(rubric, images=[...]) and parse a "SCORE: X/100" line; put the renders into side_info as Image(base64_data=..., media_type="image/png") so the optimizer's reflection model sees them too."""
+_METRIC_LLM = """A metric model is attached: `from skynet import llm` calls it. llm(prompt) -> str asks a free-form question, e.g. to grade the output against a rubric: parse the reply defensively (look for a number or a verdict word, default to the lowest score). Prefer deterministic checks where they suffice."""
+
+_METRIC_NO_LLM = """No metric model is attached, so the metric has NO llm helper: never import skynet or call llm(). Score with deterministic checks (exact match, contains, numeric tolerance, JSON fields, structure, length, similarity to the expected value)."""
 
 
-def _scorer_contract(target_kind: str, scorer_has_model: bool) -> str:
-    """Spell out the contract a black-box scorer must satisfy for this job.
+def _unified_contracts(unified: dict[str, Any]) -> tuple[str, str]:
+    """Spell out the exact run-code and metric contracts for a wizard setup.
 
     Args:
-        target_kind: ``"text"`` or ``"agent"`` — what a version is.
-        scorer_has_model: Whether the scorer step has a model, i.e. whether
-            ``skynet.llm`` reaches a model at run time.
+        unified: The wizard's :class:`~core.models.UnifiedAuthoringContext` as a dict.
 
     Returns:
-        The contract text handed to the scorer author and the chat agent,
-        closing with the scorer shapes this job can use.
+        ``(run_contract, metric_contract)`` texts handed to the authors and the chat agent.
     """
-    parts = [_SCORER_CONTRACT]
-    if target_kind == "agent":
-        parts.append(_SCORER_AGENT_CONTRACT)
-    parts.append(_SCORER_LLM_CONTRACT if scorer_has_model else _SCORER_NO_LLM_CONTRACT)
-    parts.append(_SCORER_PATTERNS + ("\n" + _SCORER_MODEL_PATTERNS if scorer_has_model else ""))
-    return "\n\n".join(parts)
+    kind = str(unified.get("task", {}).get("artifact", {}).get("kind", "prompt"))
+    run_contract = _PROGRAM_CONTRACT if kind == "dspy_program" else _RUN_CONTRACT
+    shape = str(unified.get("metric_shape", "blackbox_side_info"))
+    metric_contract = "\n\n".join(
+        [
+            _METRIC_SHAPES.get(shape, _METRIC_SHAPES["blackbox_side_info"]),
+            _METRIC_COMMON,
+            _METRIC_LLM if unified.get("metric_has_model") else _METRIC_NO_LLM,
+        ]
+    )
+    return run_contract, metric_contract
 
 
-class GenerateBlackboxSeed(dspy.Signature):
-    """Write the starting point for a black-box optimization job.
+class GenerateRunCode(dspy.Signature):
+    """Write the run code of an optimization job: how one case input becomes an output.
 
-    The user described an objective and picked a recipe. Write the first
-    version the optimizer will improve: not a placeholder but a real,
-    complete attempt that already reads as a strong answer to the
-    objective. What you write depends on ``recipe``:
-
-    * ``prompt`` — a system prompt. Each case's input column becomes the
-      user message, so the prompt must tell the model how to answer such
-      inputs: role, task, constraints, output format, edge cases.
-    * ``code`` — a complete program or function in the language the
-      objective and background imply (python when unclear), solving the
-      task the cases pose.
-    * ``anything`` — the text the objective asks for (a document, a
-      config, a policy, a template, ...), ready to use.
-
-    An ``agent`` target means the text is an instructions file a coding
-    agent runs with on each case: write it as such (goal, how to work,
-    what to produce and where).
-
-    Ground everything in the sample cases and honor every directive in
-    ``authoring_brief``. Output ONLY the artifact: no markdown fences, no
-    commentary, no title.
+    The optimizer improves an artifact (``artifact_kind``) toward
+    ``objective``; the run code is the fixed harness that exercises the
+    current version of that artifact on one case. Implement it under
+    ``run_contract`` — that contract is exact; follow it literally. Ground
+    it in the starting version and the sample cases: read the input fields
+    by their exact names and return what the metric needs to score.
+    Keep it short and direct. Output ONLY the python code: no markdown
+    fences, no commentary.
     """
 
-    objective: str = dspy.InputField(desc="What a better version achieves, in the user's words.")
-    background: str = dspy.InputField(desc="Free-form context from the user: domain, constraints, examples; may be empty.")
-    recipe: str = dspy.InputField(desc="'prompt' | 'code' | 'anything' — what kind of artifact to write.")
-    target_kind: str = dspy.InputField(
-        desc="'text' (the artifact is used as-is) or 'agent' (an instructions file a coding agent runs with).",
-    )
-    case_columns: list[str] = dspy.InputField(desc="Column names of the case file; empty when the job has no cases.")
-    sample_cases: str = dspy.InputField(desc="JSON array of up to 5 representative cases.")
-    authoring_brief: str = dspy.InputField(
-        desc="Directives confirmed in the interview, one per line; empty when no interview happened.",
-    )
+    objective: str = dspy.InputField(desc="What a better version of the artifact achieves.")
+    background: str = dspy.InputField(desc="Context, constraints and examples; may be empty.")
+    artifact_kind: str = dspy.InputField(desc="prompt | code | dspy_program | text.")
+    starting_version: str = dspy.InputField(desc="The artifact's starting version (JSON for a mapping).")
+    case_fields: list[str] = dspy.InputField(desc="Keys of every case input dict (the input fields).")
+    expected_field: str = dspy.InputField(desc="Column the expected output came from; empty when none.")
+    sample_cases: str = dspy.InputField(desc="JSON array of up to 5 cases, each {input, expected}.")
+    run_contract: str = dspy.InputField(desc="The exact contract the run code must satisfy; follow it literally.")
+    authoring_brief: str = dspy.InputField(desc="Directives the user confirmed, one per line; may be empty.")
 
-    seed_text: str = dspy.OutputField(desc="The complete starting point. No fences, no prose around it.")
+    run_code: str = dspy.OutputField(desc="Complete python source of the run code. No fences, no prose.")
 
 
-class GenerateBlackboxScorer(dspy.Signature):
-    """Write the python scorer for a black-box optimization job.
+class GenerateUnifiedMetric(dspy.Signature):
+    """Write the metric of an optimization job: how good one output is.
 
-    The optimizer proposes new versions of the starting point and keeps
-    the ones that score higher, so the scorer IS the objective: it must
-    reward exactly what the user described and nothing else. Read the
-    objective, the background and the sample cases, decide what a
-    measurably better version looks like, then implement it under
-    ``scorer_contract`` — that contract is exact; follow it literally.
-    Prefer graded scores over pass/fail so the optimizer sees progress,
-    and always explain the score in ``feedback``; when several things are
-    measured, return each as a named score with its own feedback. Use the case columns by
-    their exact names from ``case_columns``. Honor every directive in
-    ``authoring_brief``. Output ONLY the python code: no markdown fences,
-    no commentary.
+    The optimizer keeps the versions that score higher, so the metric IS
+    the objective: it must reward exactly what the user described and
+    nothing else. Read the objective, the background and the sample
+    cases, decide what a measurably better output looks like, then
+    implement it in the exact shape ``metric_contract`` states for
+    ``metric_shape`` — the function name, its parameters and its return
+    value are fixed by the optimizer the user picked. Prefer graded scores
+    over pass/fail so the optimizer sees progress. Read fields by their
+    exact names. Output ONLY the python code: no markdown fences, no
+    commentary.
     """
 
-    objective: str = dspy.InputField(desc="What a better version achieves, in the user's words.")
-    background: str = dspy.InputField(desc="Free-form context from the user; may be empty.")
-    recipe: str = dspy.InputField(desc="'prompt' | 'code' | 'anything' — what the candidate is.")
-    target_kind: str = dspy.InputField(desc="'text' or 'agent'; see scorer_contract for what the scorer receives.")
-    case_columns: list[str] = dspy.InputField(desc="Column names of the case file; empty when the job has no cases.")
-    sample_cases: str = dspy.InputField(desc="JSON array of up to 5 representative cases.")
-    scorer_contract: str = dspy.InputField(desc="The exact contract the scorer must satisfy; follow it literally.")
-    authoring_brief: str = dspy.InputField(
-        desc="Directives confirmed in the interview, one per line; empty when no interview happened.",
-    )
+    objective: str = dspy.InputField(desc="What a better version of the artifact achieves.")
+    background: str = dspy.InputField(desc="Context, constraints and examples; may be empty.")
+    artifact_kind: str = dspy.InputField(desc="prompt | code | dspy_program | text.")
+    case_fields: list[str] = dspy.InputField(desc="Keys of every case input dict (the input fields).")
+    expected_field: str = dspy.InputField(desc="Column the expected output came from; empty when none.")
+    sample_cases: str = dspy.InputField(desc="JSON array of up to 5 cases, each {input, expected}.")
+    metric_shape: str = dspy.InputField(desc="dspy_feedback | dspy_scalar | blackbox_side_info.")
+    metric_contract: str = dspy.InputField(desc="The exact shape the metric must have; follow it literally.")
+    authoring_brief: str = dspy.InputField(desc="Directives the user confirmed, one per line; may be empty.")
 
-    scorer_code: str = dspy.OutputField(
-        desc="Complete python source defining score(candidate, case=None). No fences, no prose.",
-    )
+    metric_code: str = dspy.OutputField(desc="Complete python source of the metric. No fences, no prose.")
 
 
-class GenerateBlackboxSeedMessage(dspy.Signature):
-    """Introduce the drafted starting point and scorer to the user.
+class GenerateUnifiedSeedMessage(dspy.Signature):
+    """Introduce the drafted run code and metric to the user.
 
-    Both were just written from the objective and the sample cases and are
-    now in the editors. In 2-4 sentences say what the starting point does
-    and what the scorer rewards (name the concrete checks and the case
-    columns it reads), then invite the user to edit either or ask for
-    changes. Plain prose in ``reply_language``; keep python identifiers
-    in English; no markdown, no code fences.
+    Both were just written from the task and the sample cases and are now
+    in the editors. In 2-4 sentences say how the run code exercises the
+    artifact and what the metric rewards (name the concrete checks and the
+    fields it reads), then invite the user to edit either or ask for
+    changes. Plain prose in ``reply_language``; keep python identifiers in
+    English; no markdown, no code fences.
     """
 
-    objective: str = dspy.InputField(desc="What a better version achieves, in the user's words.")
-    recipe: str = dspy.InputField(desc="'prompt' | 'code' | 'anything'.")
-    seed_text: str = dspy.InputField(desc="The drafted starting point.")
-    scorer_code: str = dspy.InputField(desc="The drafted scorer.")
+    objective: str = dspy.InputField(desc="What a better version of the artifact achieves.")
+    run_code: str = dspy.InputField(desc="The drafted run code.")
+    metric_code: str = dspy.InputField(desc="The drafted metric.")
     reply_language: str = dspy.InputField(desc="Language the message is written in.")
 
     assistant_message: str = dspy.OutputField(desc="2-4 sentences of plain prose.")
 
 
-class BlackboxAssistant(dspy.Signature):
-    __doc__ = with_conduct("""Chat assistant attached to a black-box job's starting-point + scorer editors.
+class UnifiedAssistant(dspy.Signature):
+    __doc__ = with_conduct("""Chat assistant attached to an optimization job's run-code + metric editors.
 
-    The user is setting up an optimization job: ``current_seed`` is the
-    version the optimizer starts from (a system prompt, a program or any
-    text — see ``recipe``; with an 'agent' target, a coding agent's
-    instructions file) and ``current_scorer`` is the python function that
-    scores every version the optimizer proposes.
+    The user is setting up an optimization run. The optimizer improves an
+    artifact (``artifact_kind``, starting from ``starting_version``) toward
+    ``objective``. ``current_run`` is the plain python harness that runs
+    one version of the artifact on one case input; ``current_metric`` is
+    the python function that scores what it returns. The optimizer never
+    sees the metric's source, only its scores and feedback.
 
     ## Your tools
 
@@ -1162,109 +1233,81 @@ class BlackboxAssistant(dspy.Signature):
       with clickable answers. Call ``finish`` right after it.
     * ``set_brief(objective, background)`` — writes what you learned into
       the job's Objective and Background fields.
-    * ``edit_seed(reason, new_text)`` — REWRITES the starting point.
-    * ``edit_scorer(reason, new_code)`` — REWRITES the scorer.
-    * ``list_repo_folder(path)`` / ``read_repo_file(path)`` — open the
-      repository in ``repo``; only when ``repo`` is not empty.
+    * ``edit_run(reason, new_code)`` — REWRITES the run code.
+    * ``edit_metric(reason, new_code)`` — REWRITES the metric.
     * ``finish`` — end the turn and answer in ``reply``.
 
-    ## Rule 0: You are the user's interviewer. Pull out what they know.
+    ## Rule 0: Pull out what the user knows about judging an output.
 
-    The optimization is only as good as what the user tells you, so keep
-    a back-and-forth going until you understand: what a better version
-    achieves, what must never change, how a version should be judged
-    (what counts as right, what is partly right, what is a failure, which
-    numbers or limits matter), the edge cases, and what has already been
-    tried. Ask ONE short, concrete question per turn, grounded in what you
-    already know, never one the context answers. Ask through ``ask_user``
-    whenever the question has a small set of likely answers: 2-4 options,
-    each a concrete, self-contained answer with a one-line description
-    (never "other" or "something else"; the user can always type), then
+    The optimization is only as good as the metric, so when the user's
+    intent is unclear, ask ONE short, concrete question per turn, grounded
+    in what you already know and never one the context answers: what
+    counts as right, partly right or wrong, which numbers or limits
+    matter, the edge cases. Ask through ``ask_user`` whenever a click can
+    settle it: 2-4 options, each a concrete, self-contained answer with a
+    one-line description (never "other"; the user can always type), then
     ``finish`` with ``reply`` holding the same question. An open question
-    goes straight into ``reply``. When ``objective`` is empty, your first
-    question is what they want to optimize and what a better version
-    achieves. Keep asking while answers add something; stop when the user
-    wants to move on or you have what you need, and say so in ``reply``.
-
-    ``focus`` says which step the user is on. On 'goal', you work on the
-    objective and background: after each answer that changes them, call
-    ``set_brief`` with the full updated text of whichever field changed
-    (an empty argument leaves that field as it is), written in the user's
-    terms. On 'scorer', you work on how versions are judged and on the
-    scorer itself.
-
-    When ``repo`` is set, the job optimizes that repository. Read before
-    you ask: open the README, the manifest, the entry point, the tests and
-    the editable files with ``read_repo_file`` (``list_repo_folder`` for a
-    collapsed folder), then ask about what the code does not tell you, and
-    name the files you read. Read only what you need; each read costs time.
+    goes straight into ``reply``. ``focus`` says which editor the user is
+    looking at ('run' or 'metric'). When an answer changes the goal, call
+    ``set_brief`` with the full updated text of the field that changed.
 
     ## Rule 1: Edit only on request. Never edit just to answer.
 
-    Call ``edit_seed`` or ``edit_scorer`` ONLY when the user's latest
+    Call ``edit_run`` or ``edit_metric`` ONLY when the user's latest
     message is a direct instruction to CHANGE, MODIFY, REPLACE, ADD,
-    REMOVE, FIX, or REWRITE that artifact.
+    REMOVE, FIX, or REWRITE that code, or answers a question you asked
+    about how to judge outputs. For questions, explanations, opinions and
+    small talk, answer in ``reply``. If the user says "don't change
+    anything" (or any variant), call ``finish`` and answer only.
 
-    For EVERYTHING ELSE — questions, explanations, "how does X work",
-    confirmations, clarifications, opinions, critique, small talk — answer
-    in ``reply`` (after any ``set_brief``, reads or ``ask_user`` the turn
-    needs). Never edit just to
-    "satisfy" a question. If the user says "don't change anything" (or
-    any variant), you MUST call ``finish`` and answer in ``reply`` only.
-
-    ## Rule 1a: Revert requests use ``initial_seed`` / ``initial_scorer``.
+    ## Rule 1a: Revert requests use ``initial_run`` / ``initial_metric``.
 
     If the user asks to REVERT, UNDO, RESTORE, or go back to the ORIGINAL
-    (any language), call the matching ``edit_*`` tool with the new text
-    set VERBATIM to ``initial_seed`` or ``initial_scorer`` — those fields
-    hold the actual pre-edit versions. NEVER guess the original from the
-    chat history, and NEVER claim "already reverted" without checking
-    whether ``current_*`` differs from ``initial_*``.
+    (any language), call the matching ``edit_*`` tool with the new code
+    set VERBATIM to ``initial_run`` or ``initial_metric``. NEVER guess the
+    original from the chat history.
 
-    ## Rule 2: Ground every reply in the actual artifacts.
+    ## Rule 2: Ground every reply in the actual code.
 
-    When explaining or answering, READ ``current_seed`` and
-    ``current_scorer`` line by line, then reference what you see: quote
-    the instruction or the check, name the case columns the scorer reads,
-    and state the concrete score values and feedback strings. Do NOT
-    answer abstractly and do NOT re-describe the overall system.
+    READ ``current_run`` and ``current_metric`` line by line and reference
+    what you see: the checks, the fields read, the score values and the
+    feedback strings. Do NOT answer abstractly.
 
-    ## Rule 3: A new scorer must satisfy ``scorer_contract`` literally.
+    ## Rule 3: New code satisfies its contract literally.
 
-    Keep ``def score(candidate, case=None)``, read case columns by their
-    exact names, return ``{"score": ..., "feedback": ...}`` (plus named
-    ``scores``, each with its own feedback, when several things are measured), and
-    call ``llm`` only when the contract says it exists. When
-    ``current_scorer_validation`` reports an error and the user asks for a
-    fix, fix exactly that error.
+    New run code follows ``run_contract``; a new metric has the exact
+    function name, parameters and return value ``metric_contract`` states
+    for ``metric_shape`` (the optimizer the user picked fixes that shape),
+    and calls ``llm`` only when the contract says it exists. When
+    ``current_validation`` reports an error and the user asks for a fix,
+    fix exactly that error.
 
     ## Reply format
 
     Written in ``reply_language``; mirror the user's language only if
-    their message is clearly in another language. Keep python
-    identifiers and product terms in English. Plain prose, no markdown,
-    no code fences. 2-5 sentences for explanations, 1-2 for edit
-    confirmations.
+    their message is clearly in another language. Keep python identifiers
+    and product terms in English. Plain prose, no markdown, no code
+    fences. 2-5 sentences for explanations, 1-2 for edit confirmations.
     """)
 
-    objective: str = dspy.InputField(desc="What a better version achieves, in the user's words; empty until known.")
-    background: str = dspy.InputField(desc="Free-form context from the user; may be empty.")
-    recipe: str = dspy.InputField(desc="'prompt' | 'code' | 'anything' — what the starting point is.")
-    target_kind: str = dspy.InputField(desc="'text' or 'agent' (a coding agent's instructions file).")
-    focus: str = dspy.InputField(desc="'goal' (objective and background) or 'scorer' — the step the user is on.")
-    repo: str = dspy.InputField(
-        desc="The repository the job optimizes and its compact tree; empty when the job is not a repository.",
+    objective: str = dspy.InputField(desc="What a better version of the artifact achieves.")
+    background: str = dspy.InputField(desc="Context, constraints and examples; may be empty.")
+    artifact_kind: str = dspy.InputField(desc="prompt | code | dspy_program | text.")
+    starting_version: str = dspy.InputField(desc="The artifact's starting version (JSON for a mapping).")
+    focus: str = dspy.InputField(desc="'run' or 'metric' — the editor the user is looking at.")
+    case_fields: list[str] = dspy.InputField(desc="Keys of every case input dict (the input fields).")
+    expected_field: str = dspy.InputField(desc="Column the expected output came from; empty when none.")
+    sample_cases: str = dspy.InputField(desc="JSON array of up to 5 cases, each {input, expected}.")
+    metric_shape: str = dspy.InputField(desc="dspy_feedback | dspy_scalar | blackbox_side_info.")
+    run_contract: str = dspy.InputField(desc="The exact contract any new run code must satisfy.")
+    metric_contract: str = dspy.InputField(desc="The exact shape any new metric must have.")
+    current_run: str = dspy.InputField(desc="The run code as currently shown in the editor.")
+    current_metric: str = dspy.InputField(desc="The metric as currently shown in the editor.")
+    current_validation: str = dspy.InputField(
+        desc="Latest check result for the run code and metric ('OK', an error, or empty when not run).",
     )
-    case_columns: list[str] = dspy.InputField(desc="Column names of the case file; empty when the job has no cases.")
-    sample_cases: str = dspy.InputField(desc="JSON array of up to 5 representative cases.")
-    scorer_contract: str = dspy.InputField(desc="The exact contract any new scorer must satisfy.")
-    current_seed: str = dspy.InputField(desc="The starting point as currently shown in the editor.")
-    current_scorer: str = dspy.InputField(desc="The scorer as currently shown in the editor.")
-    current_scorer_validation: str = dspy.InputField(
-        desc="Latest validation result for the current scorer ('OK', an error, or empty when not run).",
-    )
-    initial_seed: str = dspy.InputField(desc="The original starting point before any edits; used verbatim for reverts.")
-    initial_scorer: str = dspy.InputField(desc="The original scorer before any edits; used verbatim for reverts.")
+    initial_run: str = dspy.InputField(desc="The original run code before any edits; used verbatim for reverts.")
+    initial_metric: str = dspy.InputField(desc="The original metric before any edits; used verbatim for reverts.")
     chat_history: str = dspy.InputField(desc="Prior conversation turns as a JSON list of {role, content} objects.")
     reply_language: str = dspy.InputField(
         desc="Language for user-facing prose. Both ``reply`` and every tool ``reason`` are written in it.",
@@ -1273,8 +1316,8 @@ class BlackboxAssistant(dspy.Signature):
 
     reply: str = dspy.OutputField(
         desc=(
-            "Reply to the user, grounded in the literal current_seed / "
-            "current_scorer. Written in reply_language; plain prose, no "
+            "Reply to the user, grounded in the literal current_run / "
+            "current_metric. Written in reply_language; plain prose, no "
             "markdown, no code fences."
         ),
     )
@@ -2451,69 +2494,69 @@ class _CodeEditSession:
         )
 
 
-class _BlackboxEditSession:
-    """Per-turn state for the ReAct ``edit_seed`` / ``edit_scorer`` tools.
+class _UnifiedEditSession:
+    """Per-turn state for the wizard's ``edit_run`` / ``edit_metric`` tools.
 
-    The black-box twin of :class:`_CodeEditSession`: the starting point
-    rides the ``signature_*`` events and the scorer the ``metric_*`` events
-    so the editor wiring is shared with the DSPy artifacts. Same per-turn
-    guardrail (one successful edit per artifact) and the same thread-safe
-    emit callback; the scorer is checked with :func:`_validate_scorer_code`
-    before it is applied, the starting point only has to be non-empty.
+    The run code rides the ``signature_*`` events and the metric the
+    ``metric_*`` events so the editor wiring is shared with the DSPy
+    artifacts. Same per-turn guardrail as :class:`_CodeEditSession` (one
+    successful edit per artifact) and the same thread-safe emit callback;
+    each replacement is statically checked against its contract before it
+    is applied.
     """
 
-    def __init__(self, *, seed_text: str, scorer_code: str, emit: Callable[[dict], None]) -> None:
-        """Initialize the session with the starting artifacts and a thread-safe emitter.
+    def __init__(
+        self,
+        *,
+        run_code: str,
+        metric_code: str,
+        emit: Callable[[dict], None],
+        run_validator: Callable[[str], str],
+        metric_validator: Callable[[str], str],
+    ) -> None:
+        """Initialize the session with the editor contents and the contract checks.
 
         Args:
-            seed_text: The starting point as currently shown in the editor.
-            scorer_code: The scorer source as currently shown in the editor.
+            run_code: The run code as currently shown in the editor.
+            metric_code: The metric as currently shown in the editor.
             emit: Callback used to publish SSE events thread-safely.
+            run_validator: Returns an error message for run code that breaks
+                its contract, or an empty string.
+            metric_validator: Same for the metric.
         """
-        self._slots = {"seed": seed_text, "scorer": scorer_code}
-        self._successful_edits = {"seed": 0, "scorer": 0}
+        self._slots = {"run": run_code, "metric": metric_code}
+        self._validators = {"run": run_validator, "metric": metric_validator}
+        self._successful_edits = {"run": 0, "metric": 0}
         self._emit = emit
         self._asked = False
 
     @property
-    def seed_text(self) -> str:
-        """Return the live starting point (updated after each successful edit).
+    def run_code(self) -> str:
+        """Return the live run code (updated after each successful edit).
 
         Returns:
-            The current starting-point text.
+            The current run-code source.
         """
-        return self._slots["seed"]
+        return self._slots["run"]
 
     @property
-    def scorer_code(self) -> str:
-        """Return the live scorer source (updated after each successful edit).
+    def metric_code(self) -> str:
+        """Return the live metric source (updated after each successful edit).
 
         Returns:
-            The current scorer source.
+            The current metric source.
         """
-        return self._slots["scorer"]
+        return self._slots["metric"]
 
-    def _apply(
-        self,
-        *,
-        slot: str,
-        tool: str,
-        label: str,
-        reason: str,
-        new_text: str,
-        validator: Callable[[str], str] | None,
-        replace_event: str,
-    ) -> str:
+    def _apply(self, *, slot: str, tool: str, label: str, reason: str, new_code: str, replace_event: str) -> str:
         """Run the guard → strip → validate → publish pipeline for one tool call.
 
         Args:
-            slot: ``"seed"`` or ``"scorer"``.
+            slot: ``"run"`` or ``"metric"``.
             tool: Tool name stamped on the ``tool_start`` / ``tool_end`` events.
             label: Human name of the artifact for the observation strings.
             reason: The model's rationale for the edit.
-            new_text: The proposed replacement.
-            validator: Returns an error message for a rejected replacement,
-                or an empty string; ``None`` skips validation.
+            new_code: The proposed replacement.
             replace_event: SSE event carrying the accepted replacement.
 
         Returns:
@@ -2534,20 +2577,18 @@ class _BlackboxEditSession:
             )
         # Tool args can carry the same malformed trailing field marker the
         # seed path strips (see ``_CodeEditSession``).
-        new_text = strip_adapter_debris(new_text)
-        if new_text.strip() == self._slots[slot].strip():
+        new_code = strip_adapter_debris(new_code)
+        if new_code.strip() == self._slots[slot].strip():
             return _reject(f"Edit rejected — the new {label} is identical to the current one. Call finish.")
-        if not new_text.strip():
-            return _reject(f"Edit rejected — the new {label} is empty. Send the complete replacement.")
-        err = validator(new_text) if validator is not None else ""
+        err = self._validators[slot](new_code)
         if err:
             return _reject(
                 f"Edit rejected — the new {label} is invalid: {err} "
                 f"Fix the error and call {tool} again with the corrected full source."
             )
-        self._slots[slot] = new_text
+        self._slots[slot] = new_code
         self._successful_edits[slot] += 1
-        self._emit({"event": replace_event, "data": {"code": new_text}})
+        self._emit({"event": replace_event, "data": {"code": new_code}})
         self._emit({"event": "tool_end", "data": {"id": call_id, "tool": tool, "status": "ok"}})
         return (
             f"{label[0].upper()}{label[1:]} replaced. Do NOT edit the {label} again this turn — "
@@ -2602,70 +2643,70 @@ class _BlackboxEditSession:
         self._emit({"event": "tool_end", "data": {"id": call_id, "tool": "set_brief", "status": "ok"}})
         return f"Updated: {', '.join(fields)}."
 
-    def edit_seed(self, reason: str, new_text: str) -> str:
-        """Replace the starting point in the editor.
+    def edit_run(self, reason: str, new_code: str) -> str:
+        """Replace the run code in the editor.
 
-        Call ONLY when the user asks for a change to the starting point
-        (the prompt / code / text the optimizer starts from) and it has
-        NOT yet been edited this turn. For questions, explanations, or
-        after any successful edit, call ``finish`` and answer in ``reply``
-        instead.
+        Call ONLY when the user asks for a change to how the artifact is run
+        on a case and the run code has NOT yet been edited this turn. For
+        questions, explanations, or after any successful edit, call
+        ``finish`` and answer in ``reply`` instead.
+
+        The new code is checked against ``run_contract`` before it's applied.
+        If the check fails, the edit is rejected and the observation returns
+        the error so you can fix the code and try again.
 
         ``reason`` must be prose in the reply language — the
-        ``reply_language`` input (≤10 words). ``new_text`` is the COMPLETE
-        replacement, not a diff.
+        ``reply_language`` input (≤10 words). ``new_code`` is the COMPLETE
+        python source, not a diff.
 
         Args:
             reason: Short rationale for the edit, in the reply language.
-            new_text: Complete replacement starting point.
-
-        Returns:
-            An observation string the ReAct agent reads back: a confirmation
-            on success or a rejection message on policy failure.
-        """
-        return self._apply(
-            slot="seed",
-            tool="edit_seed",
-            label="starting point",
-            reason=reason,
-            new_text=new_text,
-            validator=None,
-            replace_event="signature_replace",
-        )
-
-    def edit_scorer(self, reason: str, new_code: str) -> str:
-        """Replace the scorer function in the editor.
-
-        Call ONLY when the user asks for a change to the scorer and it has
-        NOT yet been edited this turn. For questions, explanations, or
-        after any successful edit, call ``finish`` and answer in ``reply``
-        instead.
-
-        The new code is checked before it's applied. If the check fails,
-        the edit is rejected and the observation returns the error message
-        so you can fix the code and try again in the next iteration.
-
-        ``reason`` must be prose in the reply language — the
-        ``reply_language`` input (≤10 words). ``new_code`` must be the
-        COMPLETE python source and satisfy ``scorer_contract``:
-        ``def score(candidate, case=None)`` returning
-        ``{"score": ..., "feedback": ...}``, optionally with named ``scores``.
-
-        Args:
-            reason: Short rationale for the edit, in the reply language.
-            new_code: Complete replacement scorer source.
+            new_code: Complete replacement run code.
 
         Returns:
             An observation string the ReAct agent reads back: a confirmation
             on success or a rejection message on validation/policy failure.
         """
         return self._apply(
-            slot="scorer",
-            tool="edit_scorer",
-            label="scorer",
+            slot="run",
+            tool="edit_run",
+            label="run code",
             reason=reason,
-            new_text=new_code,
-            validator=_validate_scorer_code,
+            new_code=new_code,
+            replace_event="signature_replace",
+        )
+
+    def edit_metric(self, reason: str, new_code: str) -> str:
+        """Replace the metric in the editor.
+
+        Call ONLY when the user asks for a change to how outputs are scored
+        (or answers a question you asked about it) and the metric has NOT
+        yet been edited this turn. For questions, explanations, or after any
+        successful edit, call ``finish`` and answer in ``reply`` instead.
+
+        The new code is checked against ``metric_contract`` (the exact
+        function name and parameters for ``metric_shape``) before it's
+        applied. If the check fails, the edit is rejected and the
+        observation returns the error so you can fix the code and try again.
+
+        ``reason`` must be prose in the reply language — the
+        ``reply_language`` input (≤10 words). ``new_code`` is the COMPLETE
+        python source, not a diff.
+
+        Args:
+            reason: Short rationale for the edit, in the reply language.
+            new_code: Complete replacement metric source.
+
+        Returns:
+            An observation string the ReAct agent reads back: a confirmation
+            on success or a rejection message on validation/policy failure.
+        """
+        return self._apply(
+            slot="metric",
+            tool="edit_metric",
+            label="metric",
+            reason=reason,
+            new_code=new_code,
             replace_event="metric_replace",
         )
 
@@ -3463,151 +3504,179 @@ async def _run_workflow_agent(
     }
 
 
-def _blackbox_inputs(blackbox: dict[str, Any], case_columns: list[str], sample_cases_json: str) -> dict[str, Any]:
-    """Map the wizard's authoring context onto the black-box signatures' shared inputs.
+def _unified_inputs(unified: dict[str, Any]) -> dict[str, Any]:
+    """Map the wizard's authoring context onto the unified signatures' shared inputs.
 
     Args:
-        blackbox: ``recipe``, ``objective``, ``background``, ``target_kind``,
-            ``scorer_has_model`` as the wizard sent them.
-        case_columns: Column names of the case file; empty without cases.
-        sample_cases_json: JSON-encoded representative cases.
+        unified: The wizard's :class:`~core.models.UnifiedAuthoringContext` as a dict.
 
     Returns:
-        The input fields every black-box signature declares, plus
-        ``scorer_contract`` for the ones that take it.
+        Every input field the unified signatures declare (each signature
+        takes the subset it names; see :func:`_inputs_for`).
     """
-    target_kind = str(blackbox.get("target_kind", "text") or "text")
+    task = unified.get("task") or {}
+    artifact = task.get("artifact") or {}
+    version = artifact.get("starting_version", "")
+    run_contract, metric_contract = _unified_contracts(unified)
     return {
-        "objective": str(blackbox.get("objective", "")).strip(),
-        "background": str(blackbox.get("background", "") or "").strip(),
-        "recipe": str(blackbox.get("recipe", "anything")),
-        "target_kind": target_kind,
-        "case_columns": case_columns,
-        "sample_cases": sample_cases_json,
-        "scorer_contract": _scorer_contract(target_kind, bool(blackbox.get("scorer_has_model"))),
+        "objective": str(task.get("objective", "")).strip(),
+        "background": str(task.get("background", "") or "").strip(),
+        "artifact_kind": str(artifact.get("kind", "prompt")),
+        "starting_version": version if isinstance(version, str) else json.dumps(version, ensure_ascii=False),
+        "case_fields": [str(f) for f in unified.get("input_fields") or []],
+        "expected_field": str(unified.get("expected_field") or ""),
+        "sample_cases": json.dumps((unified.get("sample_cases") or [])[:5], ensure_ascii=False, default=str),
+        "metric_shape": str(unified.get("metric_shape", "blackbox_side_info")),
+        "run_contract": run_contract,
+        "metric_contract": metric_contract,
     }
 
 
-async def _run_blackbox_seed(
+def _inputs_for(signature: type[dspy.Signature], values: dict[str, Any]) -> dict[str, Any]:
+    """Pick the inputs ``signature`` declares out of ``values``.
+
+    Args:
+        signature: The DSPy signature about to be called.
+        values: A superset of its inputs.
+
+    Returns:
+        Only the keys ``signature`` declares as input fields.
+    """
+    return {name: values[name] for name in signature.input_fields if name in values}
+
+
+def _unified_validators(unified: dict[str, Any]) -> tuple[Callable[[str], str], Callable[[str], str]]:
+    """Bind the run-code and metric checks to the wizard's setup.
+
+    Args:
+        unified: The wizard's authoring context as a dict.
+
+    Returns:
+        ``(run_validator, metric_validator)``, each returning an error message or ``""``.
+    """
+    kind = str((unified.get("task") or {}).get("artifact", {}).get("kind", "prompt"))
+    return (
+        partial(_validate_run_code, artifact_kind=kind),
+        partial(
+            _validate_unified_metric_code,
+            metric_shape=str(unified.get("metric_shape", "blackbox_side_info")),
+            metric_has_model=bool(unified.get("metric_has_model")),
+        ),
+    )
+
+
+def _unified_column_roles(unified: dict[str, Any]) -> tuple[list[str], str]:
+    """Describe the case fields to the repair predictor in its column vocabulary.
+
+    Args:
+        unified: The wizard's authoring context as a dict.
+
+    Returns:
+        ``(columns, column_roles_json)`` — input fields as ``input`` and the
+        expected field, when any, as ``output``.
+    """
+    roles = {str(f): "input" for f in unified.get("input_fields") or []}
+    if unified.get("expected_field"):
+        roles[str(unified["expected_field"])] = "output"
+    return list(roles), json.dumps(roles, ensure_ascii=False)
+
+
+async def _run_unified_seed(
     *,
     lm: dspy.LM,
-    blackbox: dict[str, Any],
-    case_columns: list[str],
-    sample_cases_json: str,
+    unified: dict[str, Any],
     authoring_brief: str,
     reply_language: str,
     queue: asyncio.Queue[dict | None],
 ) -> dict[str, Any]:
-    """Run the black-box seed: starting point + scorer in parallel, then intro.
+    """Draft the wizard's run code and metric in parallel, then the intro message.
 
-    The starting point streams as ``signature_patch`` and the scorer as
-    ``metric_patch`` — the black-box editors sit on the same slots as the
+    The run code streams as ``signature_patch`` and the metric as
+    ``metric_patch`` — the wizard's editors sit on the same slots as the
     DSPy Signature / metric — and the finished pair is returned under
-    ``signature_code`` / ``metric_code`` for the same reason. The scorer
-    gets the static check + repair loop the DSPy artifacts get; the
-    starting point is prose or code in any language, so it is only
-    stripped of adapter debris.
+    ``signature_code`` / ``metric_code`` for the same reason. Both get the
+    static contract check + repair loop.
 
     Args:
         lm: The language model driving the seed predictors.
-        blackbox: The wizard's authoring context.
-        case_columns: Column names of the case file; empty without cases.
-        sample_cases_json: JSON-encoded representative cases.
-        authoring_brief: Interview directives both authors must honor; empty
-            when no interview happened.
+        unified: The wizard's authoring context as a dict.
+        authoring_brief: Directives both authors must honor; empty when none.
         reply_language: Language name the intro message is written in.
         queue: SSE event queue to push token events onto.
 
     Returns:
-        Mapping with keys ``signature_code`` (the starting point),
-        ``metric_code`` (the scorer), ``assistant_message``, the boolean
-        ``signature_valid`` / ``metric_valid`` flags, and an optional
-        ``validation_error`` string when the scorer could not be repaired
-        within the attempt budget.
+        Mapping with keys ``signature_code`` (the run code), ``metric_code``,
+        ``assistant_message``, the boolean ``signature_valid`` /
+        ``metric_valid`` flags, and an optional ``validation_error`` string
+        when either could not be repaired within the attempt budget.
     """
-    seed_predict = dspy.Predict(GenerateBlackboxSeed)
-    scorer_predict = dspy.Predict(GenerateBlackboxScorer)
-    seed_program = dspy.streamify(
-        seed_predict,
-        stream_listeners=[
-            dspy.streaming.StreamListener(signature_field_name="seed_text"),
-            ReasoningStreamListener(predict=seed_predict),
-        ],
-        async_streaming=True,
-    )
-    scorer_program = dspy.streamify(
-        scorer_predict,
-        stream_listeners=[
-            dspy.streaming.StreamListener(signature_field_name="scorer_code"),
-            ReasoningStreamListener(predict=scorer_predict),
-        ],
-        async_streaming=True,
-    )
-    msg_predict = dspy.Predict(GenerateBlackboxSeedMessage)
+    shared = {**_unified_inputs(unified), "authoring_brief": authoring_brief}
+    run_validator, metric_validator = _unified_validators(unified)
+    columns, roles_json = _unified_column_roles(unified)
+    lanes = {
+        "run": (GenerateRunCode, "run_code", "signature_patch", "signature", run_validator, "signature_replace"),
+        "metric": (GenerateUnifiedMetric, "metric_code", "metric_patch", "metric", metric_validator, "metric_replace"),
+    }
+    streamed: dict[str, Any] = {"run_code": "", "metric_code": ""}
+    msg_predict = dspy.Predict(GenerateUnifiedSeedMessage)
     msg_program = dspy.streamify(
         msg_predict,
         stream_listeners=[dspy.streaming.StreamListener(signature_field_name="assistant_message")],
         async_streaming=True,
     )
 
-    shared = _blackbox_inputs(blackbox, case_columns, sample_cases_json)
-    scorer_inputs = {**shared, "authoring_brief": authoring_brief}
-    seed_inputs = {k: v for k, v in scorer_inputs.items() if k != "scorer_contract"}
-    streamed: dict[str, Any] = {"seed_text": "", "scorer_code": ""}
-
     with dspy.context(lm=lm):
 
-        async def _seed_lane() -> str:
-            """Stream the starting point, then strip adapter debris."""
-            await _pump_seed_stream(
-                seed_program,
-                seed_inputs,
-                "seed_text",
-                "signature_patch",
-                queue=queue,
-                results=streamed,
-                reasoning_source="signature",
+        async def _lane(name: str) -> tuple[str, str]:
+            """Stream one artifact, then check/repair it against its contract."""
+            signature, field, event, source, validator, replace_event = lanes[name]
+            predict = dspy.Predict(signature)
+            program = dspy.streamify(
+                predict,
+                stream_listeners=[
+                    dspy.streaming.StreamListener(signature_field_name=field),
+                    ReasoningStreamListener(predict=predict),
+                ],
+                async_streaming=True,
             )
-            return strip_adapter_debris(streamed["seed_text"])
-
-        async def _scorer_lane() -> tuple[str, str]:
-            """Stream the scorer, then check/repair it immediately."""
             await _pump_seed_stream(
-                scorer_program,
-                scorer_inputs,
-                "scorer_code",
-                "metric_patch",
+                program,
+                _inputs_for(signature, shared),
+                field,
+                event,
                 queue=queue,
                 results=streamed,
-                reasoning_source="metric",
+                reasoning_source=source,
             )
             return await _validate_and_repair_artifact(
                 lm=lm,
-                artifact_kind="scorer",
-                code=streamed["scorer_code"],
-                validator=_validate_scorer_code,
-                dataset_columns=case_columns,
-                column_roles_json="{}",
+                artifact_kind=name,
+                code=streamed[field],
+                validator=validator,
+                dataset_columns=columns,
+                column_roles_json=roles_json,
                 queue=queue,
-                replace_event="metric_replace",
+                replace_event=replace_event,
             )
 
-        seed_text, (scorer_code, scorer_err) = await asyncio.gather(_seed_lane(), _scorer_lane())
+        (run_code, run_err), (metric_code, metric_err) = await asyncio.gather(_lane("run"), _lane("metric"))
         results: dict[str, Any] = {
-            "signature_code": seed_text,
-            "metric_code": scorer_code,
+            "signature_code": run_code,
+            "metric_code": metric_code,
             "assistant_message": "",
-            "signature_valid": bool(seed_text.strip()),
-            "metric_valid": not scorer_err,
+            "signature_valid": not run_err,
+            "metric_valid": not metric_err,
         }
-        if scorer_err:
-            results["validation_error"] = f"Scorer: {scorer_err}"
+        errors = [f"Run code: {run_err}"] if run_err else []
+        if metric_err:
+            errors.append(f"Metric: {metric_err}")
+        if errors:
+            results["validation_error"] = "\n".join(errors)
 
         async for chunk in msg_program(
             objective=shared["objective"],
-            recipe=shared["recipe"],
-            seed_text=seed_text,
-            scorer_code=scorer_code,
+            run_code=run_code,
+            metric_code=metric_code,
             reply_language=reply_language,
         ):
             if isinstance(chunk, dspy.streaming.StreamResponse):
@@ -3619,80 +3688,72 @@ async def _run_blackbox_seed(
     return results
 
 
-async def _run_blackbox_agent(
+async def _run_unified_agent(
     *,
     lm: dspy.LM,
-    blackbox: dict[str, Any],
-    case_columns: list[str],
-    sample_cases_json: str,
+    unified: dict[str, Any],
     user_message: str,
     chat_history_json: str,
-    prior_seed: str,
-    prior_scorer: str,
-    prior_scorer_validation: str,
-    initial_seed: str,
-    initial_scorer: str,
+    prior_run: str,
+    prior_metric: str,
+    prior_validation: str,
+    initial_run: str,
+    initial_metric: str,
     reply_language: str,
     queue: asyncio.Queue[dict | None],
-    repo_browser: RepoBrowser | None = None,
     steering: SteerInbox | None = None,
 ) -> dict[str, str]:
-    """Run a ReAct agent with ``edit_seed`` + ``edit_scorer`` tools.
+    """Run the wizard's ReAct agent with ``ask_user``/``set_brief``/``edit_run``/``edit_metric``.
 
-    The black-box twin of :func:`_run_agent`: tools are bound methods on a
-    :class:`_BlackboxEditSession` that emit ``tool_start`` /
-    ``signature_replace`` (starting point) or ``metric_replace`` (scorer) /
-    ``tool_end`` thread-safely, and the ``reply`` streams as
+    Tools are bound methods on a :class:`_UnifiedEditSession` that emit
+    ``tool_start`` / ``signature_replace`` (run code) or ``metric_replace``
+    (metric) / ``tool_end`` thread-safely, and the ``reply`` streams as
     ``message_patch`` tokens.
 
     Args:
         lm: Language model bound to the ReAct loop.
-        blackbox: The wizard's authoring context.
-        case_columns: Column names of the case file; empty without cases.
-        sample_cases_json: JSON-encoded representative cases.
+        unified: The wizard's authoring context as a dict.
         user_message: The user's latest message driving the turn.
         chat_history_json: JSON-encoded prior chat turns.
-        prior_seed: Starting point as currently shown in the editor.
-        prior_scorer: Scorer source as currently shown in the editor.
-        prior_scorer_validation: Latest dry-run / validator summary for the scorer.
-        initial_seed: Original starting point before any edits this conversation.
-        initial_scorer: Original scorer before any edits this conversation.
+        prior_run: Run code as currently shown in the editor.
+        prior_metric: Metric as currently shown in the editor.
+        prior_validation: Latest check summary for both artifacts.
+        initial_run: Original run code before any edits this conversation.
+        initial_metric: Original metric before any edits this conversation.
         reply_language: Language name for the reply and tool rationales.
         queue: SSE event queue receiving lifecycle and token events.
-        repo_browser: The repository a repository job optimizes, opened by
-            the browsing tools; ``None`` otherwise.
         steering: The turn's inbox for messages the user sends while it
             runs; ``None`` leaves the turn unsteerable.
 
     Returns:
-        Mapping with keys ``signature_code`` (the starting point),
-        ``metric_code`` (the scorer) and ``assistant_message`` reflecting
-        post-turn state.
+        Mapping with keys ``signature_code`` (the run code), ``metric_code``
+        and ``assistant_message`` reflecting post-turn state.
     """
     loop = asyncio.get_running_loop()
-    emit: Callable[[dict], None] = partial(_emit_to_code_queue, loop, queue)
-    session = _BlackboxEditSession(seed_text=prior_seed, scorer_code=prior_scorer, emit=emit)
-
-    tools: list[Callable[..., str]] = [session.ask_user, session.set_brief, session.edit_seed, session.edit_scorer]
-    if repo_browser is not None:
-        repo_browser.bind(emit)
-        tools += [repo_browser.list_repo_folder, repo_browser.read_repo_file]
+    run_validator, metric_validator = _unified_validators(unified)
+    session = _UnifiedEditSession(
+        run_code=prior_run,
+        metric_code=prior_metric,
+        emit=partial(_emit_to_code_queue, loop, queue),
+        run_validator=run_validator,
+        metric_validator=metric_validator,
+    )
+    tools: list[Callable[..., str]] = [session.ask_user, session.set_brief, session.edit_run, session.edit_metric]
     # Both artifacts edited with one validator-driven retry each, a brief and
-    # a question, plus a handful of repository reads before the reply.
-    react = ActingReActV2(BlackboxAssistant, tools=tools, max_iters=14 if repo_browser is not None else 8)
+    # a question, before the reply.
+    react = ActingReActV2(UnifiedAssistant, tools=tools, max_iters=8)
     attach_steering(react, steering)
     reply_stream = ReactReplyStream(react, "reply", lm)
     program = dspy.streamify(react, stream_listeners=reply_stream.listeners(), async_streaming=True)
 
-    inputs = {
-        **_blackbox_inputs(blackbox, case_columns, sample_cases_json),
-        "focus": "scorer" if blackbox.get("focus") == "scorer" else "goal",
-        "repo": repo_browser.summary() if repo_browser is not None else "",
-        "current_seed": prior_seed,
-        "current_scorer": prior_scorer,
-        "current_scorer_validation": prior_scorer_validation or "",
-        "initial_seed": initial_seed or prior_seed,
-        "initial_scorer": initial_scorer or prior_scorer,
+    values = {
+        **_unified_inputs(unified),
+        "focus": "metric" if unified.get("focus") == "metric" else "run",
+        "current_run": prior_run,
+        "current_metric": prior_metric,
+        "current_validation": prior_validation or "",
+        "initial_run": initial_run or prior_run,
+        "initial_metric": initial_metric or prior_metric,
         "chat_history": chat_history_json,
         "reply_language": reply_language,
         "user_message": user_message,
@@ -3701,12 +3762,10 @@ async def _run_blackbox_agent(
     reply_text = ""
     prediction: dspy.Prediction | None = None
     with dspy.context(lm=lm):
-        async for chunk in program(**inputs):
+        async for chunk in program(**_inputs_for(UnifiedAssistant, values)):
             if isinstance(chunk, dspy.streaming.StreamResponse):
                 if chunk.signature_field_name == REASONING_FIELD:
-                    await queue.put(
-                        {"event": "reasoning_patch", "data": {"chunk": chunk.chunk, "source": "agent"}}
-                    )
+                    await queue.put({"event": "reasoning_patch", "data": {"chunk": chunk.chunk, "source": "agent"}})
                 else:
                     delta = reply_stream.reply_delta(chunk)
                     if delta:
@@ -3720,8 +3779,8 @@ async def _run_blackbox_agent(
     _require_answer(prediction, reply_text)
 
     return {
-        "signature_code": session.seed_text,
-        "metric_code": session.scorer_code,
+        "signature_code": session.run_code,
+        "metric_code": session.metric_code,
         "assistant_message": reply_text,
     }
 
@@ -3748,8 +3807,7 @@ async def _run_code_agent_orchestration(
     prior_workflow: dict | None,
     initial_workflow: dict | None,
     reply_language: str,
-    blackbox: dict[str, Any] | None,
-    repo_browser: RepoBrowser | None = None,
+    unified: dict[str, Any] | None,
     steering: SteerInbox | None = None,
 ) -> None:
     """Run the seed or chat path and push the terminal envelope into ``queue``.
@@ -3758,7 +3816,7 @@ async def _run_code_agent_orchestration(
     no message and we need to generate the initial Signature + metric) and
     to :func:`_run_agent` otherwise; a non-None ``prior_workflow`` routes
     both modes to their graph-aware counterparts instead, and a non-None
-    ``blackbox`` to the black-box starting-point + scorer paths. Emits exactly one
+    ``unified`` to the wizard's run-code + metric paths. Emits exactly one
     terminal event (``done`` on success, ``error`` on failure) followed by
     the ``None`` sentinel that unblocks the outer consumer.
 
@@ -3782,43 +3840,35 @@ async def _run_code_agent_orchestration(
         initial_signature: Original signature source for revert support.
         initial_metric: Original metric source for revert support.
         reply_language: Language name for all user-facing agent text.
-        blackbox: The black-box wizard's authoring context; ``None`` for the
-            DSPy paths. Set, ``dataset_columns`` / ``sample_rows_json`` are
-            the case columns / sample cases and the ``prior_*`` /
-            ``initial_*`` signature and metric slots hold the starting
-            point and the scorer.
-        repo_browser: The repository a black-box repository job optimizes;
-            ``None`` otherwise (chat path only).
+        unified: The wizard's authoring context; ``None`` for the DSPy
+            paths. Set, the ``prior_*`` / ``initial_*`` signature and metric
+            slots hold the run code and the metric.
         steering: The turn's inbox for messages the user sends while it
             runs; ``None`` leaves the turn unsteerable.
     """
     try:
-        if blackbox is not None and is_seed:
-            results = await _run_blackbox_seed(
+        if unified is not None and is_seed:
+            results = await _run_unified_seed(
                 lm=lm,
-                blackbox=blackbox,
-                case_columns=dataset_columns,
-                sample_cases_json=sample_rows_json,
+                unified=unified,
                 authoring_brief=authoring_brief,
                 reply_language=reply_language,
                 queue=queue,
             )
-        elif blackbox is not None:
-            results = await _run_blackbox_agent(
+        elif unified is not None:
+            validation = "\n".join(v for v in (prior_signature_validation, prior_metric_validation) if v)
+            results = await _run_unified_agent(
                 lm=lm,
-                blackbox=blackbox,
-                case_columns=dataset_columns,
-                sample_cases_json=sample_rows_json,
+                unified=unified,
                 user_message=user_message,
                 chat_history_json=chat_history_json,
-                prior_seed=prior_signature,
-                prior_scorer=prior_metric,
-                prior_scorer_validation=prior_metric_validation,
-                initial_seed=initial_signature,
-                initial_scorer=initial_metric,
+                prior_run=prior_signature,
+                prior_metric=prior_metric,
+                prior_validation=validation,
+                initial_run=initial_signature,
+                initial_metric=initial_metric,
                 reply_language=reply_language,
                 queue=queue,
-                repo_browser=repo_browser,
                 steering=steering,
             )
         elif is_seed and prior_workflow is not None:
@@ -3909,8 +3959,7 @@ async def run_code_agent(
     model: str | None = None,
     reasoning_effort: str | None = None,
     usage_sink: list | None = None,
-    blackbox: dict[str, Any] | None = None,
-    repo_browser: RepoBrowser | None = None,
+    unified: dict[str, Any] | None = None,
     steer_owner: str | None = None,
     steer_key: str | None = None,
 ) -> AsyncGenerator[dict, None]:
@@ -3930,14 +3979,14 @@ async def run_code_agent(
     canvas re-renders atomically. The ``done`` payload then carries
     ``workflow`` + ``workflow_valid`` instead of ``signature_code``.
 
-    A non-None ``blackbox`` switches both modes to the black-box paths of
-    the "optimize anything" wizard: the seed drafts the starting point and
-    a python scorer, the chat agent gets ``edit_seed`` / ``edit_scorer``.
-    The starting point rides the signature events and slots
-    (``signature_patch`` / ``signature_replace`` / ``signature_code``) and
-    the scorer the metric ones, so the wizard's editors share one wire
-    contract; ``dataset_columns`` and ``sample_rows`` are then the case
-    columns and sample cases (both may be empty).
+    A non-None ``unified`` switches both modes to the submission wizard's
+    workspace paths: the seed drafts the run code and the metric in the
+    shape the chosen optimizer needs, the chat agent gets ``ask_user`` /
+    ``set_brief`` / ``edit_run`` / ``edit_metric``. The run code rides the
+    signature events and slots (``signature_patch`` / ``signature_replace``
+    / ``signature_code``) and the metric the metric ones, so the wizard's
+    editors share one wire contract; ``dataset_columns`` / ``sample_rows``
+    are unused (the context carries the input fields and sample cases).
 
     Events:
 
@@ -3981,11 +4030,8 @@ async def run_code_agent(
             ``None`` keeps the model's default.
         usage_sink: Optional list the built LM is appended to, so the caller
             can meter the turn's token usage on any exit path.
-        blackbox: The black-box wizard's authoring context (``recipe``,
-            ``objective``, ``background``, ``target_kind``,
-            ``scorer_has_model``, ``focus``); ``None`` runs the DSPy paths.
-        repo_browser: The repository a black-box repository job optimizes,
-            opened by the chat agent's browsing tools; ``None`` otherwise.
+        unified: The wizard's :class:`~core.models.UnifiedAuthoringContext`
+            as a dict; ``None`` runs the DSPy paths.
         steer_owner: Username whose mid-turn messages this turn reads.
         steer_key: Client-chosen key those messages are posted under; with
             ``steer_owner`` it makes a chat turn steerable.
@@ -4039,8 +4085,7 @@ async def run_code_agent(
             prior_workflow=prior_workflow,
             initial_workflow=initial_workflow,
             reply_language=_reply_language(locale),
-            blackbox=blackbox,
-            repo_browser=repo_browser,
+            unified=unified,
             steering=steering,
         )
     )

@@ -59,6 +59,7 @@ def test_parse_question_turn() -> None:
                     "source": "repo",
                     "models": ["gpt-4o-mini"],
                     "budget_usd": "$5",
+                    "privacy": "zdr",
                     "level": "guided",
                 }
             ),
@@ -68,9 +69,9 @@ def test_parse_question_turn() -> None:
     assert turn["message"] == "Who pays for the model calls?"
     assert turn["phase_done"] is False
     assert [o["label"] for o in turn["options"]] == ["Platform credits", "My own key"]
-    # The setup is settings only: a volunteered goal, source or model is dropped.
-    assert turn["profile_patch"] == {"budget_usd": 5.0, "level": "guided"}
-    assert turn["skip_phases"] == ["budget"]
+    # The setup is settings only: a volunteered goal, source, model or budget is dropped.
+    assert turn["profile_patch"] == {"privacy": "zdr", "level": "guided"}
+    assert turn["skip_phases"] == ["privacy"]
     assert turn["skip_rest"] is False
     assert set(turn) == {
         "message",
@@ -126,7 +127,6 @@ def test_validate_patch_coerces_enums_and_drops_invalid_keys() -> None:
             "byok_provider": "OpenAI",
             "budget_usd": -3,
             "privacy": "deny",
-            "email_cadence": "weekly",
             "trust": "auto-safe",
             "code_assist": "Auto",
             "split_mode": "manual",
@@ -146,7 +146,7 @@ def test_validate_patch_coerces_enums_and_drops_invalid_keys() -> None:
 
 
 def test_validate_patch_rejects_bad_providers_and_budgets() -> None:
-    """Unknown providers, booleans and absurd budgets never pass."""
+    """Unknown providers never pass, and a budget is not a setup setting."""
     patch = validate_profile_patch(
         {
             "byok_provider": "acme",
@@ -155,15 +155,8 @@ def test_validate_patch_rejects_bad_providers_and_budgets() -> None:
         provider_slugs=_SLUGS,
     )
     assert patch == {}
-    assert validate_profile_patch({"budget_usd": 1e9}, provider_slugs=_SLUGS) == {}
+    assert validate_profile_patch({"budget_usd": 20}, provider_slugs=_SLUGS) == {}
     assert validate_profile_patch("[]", provider_slugs=_SLUGS) == {}
-
-
-def test_budget_accepts_the_wizard_suggestion() -> None:
-    """'Use the default' on the budget is the wizard's per-run suggestion, which answers the phase."""
-    patch = validate_profile_patch({"budget_usd": " Suggest "}, provider_slugs=_SLUGS)
-    assert patch == {"budget_usd": "suggest"}
-    assert answered_phases(patch) == ["budget"]
 
 
 def test_platform_billing_drops_byok_provider() -> None:
@@ -179,22 +172,21 @@ def test_answered_phases() -> None:
     assert answered_phases(
         {
             "privacy": "zdr",
-            "email_cadence": "live",
             "trust": "ask",
             "level": "expert",
         }
-    ) == ["privacy", "emails", "trust"]
+    ) == ["privacy", "trust"]
 
 
 def test_every_agenda_phase_runs_on_the_model() -> None:
     """The model runs the whole agenda, which is settings only, and every phase has a brief."""
     assert LLM_PHASES == AGENDA
-    assert AGENDA == ("billing", "budget", "privacy", "emails", "trust")
+    assert AGENDA == ("billing", "privacy", "trust")
     assert set(_PHASE_BRIEFS) == set(AGENDA)
     # A default option appears only where the default is not already a concrete answer.
-    for phase in ("budget", "privacy", "trust"):
+    for phase in ("privacy", "trust"):
         assert "end the options with 'Use the default'" in _PHASE_BRIEFS[phase]
-    for phase in ("billing", "emails"):
+    for phase in ("billing",):
         assert "never" in _PHASE_BRIEFS[phase]
         assert "end the options with 'Use the default'" not in _PHASE_BRIEFS[phase]
 

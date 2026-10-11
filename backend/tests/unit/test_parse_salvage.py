@@ -3,11 +3,21 @@
 import dspy
 from dspy.utils.exceptions import AdapterParseError
 
-from core.service_gateway.agents.code_interview import CodeInterviewTurnSig
 from core.service_gateway.agents.parse_salvage import (
     find_adapter_parse_error,
     salvage_prediction,
 )
+
+
+class _InterviewTurnSig(dspy.Signature):
+    """One interview turn: a message, answer options, the brief so far, and whether it is done."""
+
+    history: str = dspy.InputField()
+    message: str = dspy.OutputField()
+    options_json: str = dspy.OutputField()
+    brief_json: str = dspy.OutputField()
+    done: str = dspy.OutputField()
+
 
 CHAT_FORMAT_RESPONSE = """[[ ## message ## ]]
 מעולה. איך צריך להיראות פורמט המספר?
@@ -26,7 +36,7 @@ def _parse_error(lm_response: str) -> AdapterParseError:
     """Build the error dspy raises when the JSON fallback cannot parse ``lm_response``."""
     return AdapterParseError(
         adapter_name="JSONAdapter",
-        signature=CodeInterviewTurnSig,
+        signature=_InterviewTurnSig,
         lm_response=lm_response,
     )
 

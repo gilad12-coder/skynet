@@ -87,7 +87,6 @@ function AnalyticsTabImpl({
     setRuntime,
     setDataset,
     hasFilters,
-    clearAll,
     key: filterKey,
   } = filters;
 
@@ -125,9 +124,9 @@ function AnalyticsTabImpl({
   if ((analyticsData?.filtered_total ?? 0) === 0) {
     if (hasFilters) {
       return (
-        <div data-tutorial="analytics-content" className="space-y-6">
+        <div className="space-y-6">
           {toolbar}
-          <AnalyticsEmpty variant="no-results" onClearFilters={clearAll} />
+          <AnalyticsEmpty variant="no-results" />
         </div>
       );
     }
@@ -139,7 +138,7 @@ function AnalyticsTabImpl({
   const noSuccessMessage = msg("dashboard.analytics.no_successful_runs");
 
   return (
-    <div data-tutorial="analytics-content" className="space-y-6">
+    <div className="space-y-6">
       {toolbar}
 
       {chartData.truncated && <InlineWarningRow message={msg("dashboard.analytics.truncated")} />}
@@ -155,10 +154,7 @@ function AnalyticsTabImpl({
           <StaggerContainer className="space-y-6" staggerDelay={0.03}>
             {kpis && (
               <StaggerItem>
-                <div
-                  data-tutorial="dashboard-stats"
-                  className="grid auto-rows-fr grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-5"
-                >
+                <div className="grid auto-rows-fr grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-5">
                   <KpiCard
                     label={labels[0]}
                     accent="default"
@@ -211,11 +207,7 @@ function AnalyticsTabImpl({
 
             <StaggerItem>
               <AnalyticsSection
-                title={
-                  <HelpTip text={tip("analytics.improvement_histogram")}>
-                    {msg("dashboard.analytics.section_distributions")}
-                  </HelpTip>
-                }
+                title={msg("dashboard.analytics.section_distributions")}
                 className="border-border/60"
               >
                 <div className="grid gap-6 md:grid-cols-2">
@@ -229,11 +221,7 @@ function AnalyticsTabImpl({
                     />
                   </div>
                   <div className="min-w-0">
-                    <PanelHeading>
-                      <HelpTip text={tip("analytics.runtime_histogram")}>
-                        {msg("auto.features.dashboard.components.analyticstab.26")}
-                      </HelpTip>
-                    </PanelHeading>
+                    <PanelHeading>{msg("auto.features.dashboard.components.analyticstab.26")}</PanelHeading>
                     <RangeHistogram
                       data={chartData.runtimeHistogram}
                       unitLabel={msg("dashboard.analytics.axis_minutes")}

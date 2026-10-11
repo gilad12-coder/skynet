@@ -111,9 +111,9 @@ export function QuestionChoices({
               className={cn(
                 "group flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-start",
                 "transition-colors duration-100 motion-reduce:transition-none",
-                pressed ? "border-primary bg-primary/5" : "border-border bg-background",
-                "cursor-pointer hover:border-primary/50 hover:bg-primary/5",
-                "focus-visible:border-primary/60 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
+                pressed ? "on-primary" : "border-border bg-background",
+                "cursor-pointer hover:border-primary-fill/50 hover:bg-primary-fill/5",
+                "focus-visible:border-primary-fill/60 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
                 "disabled:pointer-events-none disabled:opacity-50",
               )}
             >
@@ -122,10 +122,10 @@ export function QuestionChoices({
                 className={cn(
                   "mt-px flex size-5 shrink-0 items-center justify-center rounded-md text-[11px] font-medium tabular-nums",
                   pressed
-                    ? "border border-primary/40 bg-primary/10 text-primary"
+                    ? "border on-primary"
                     : "border border-border/70 bg-muted text-muted-foreground",
                   "transition-colors duration-100 motion-reduce:transition-none",
-                  "group-hover:border-primary/40 group-hover:bg-primary/10 group-hover:text-primary",
+                  "group-hover:border-primary-fill/40 group-hover:bg-primary-fill/10 group-hover:text-primary",
                 )}
               >
                 {index + 1}

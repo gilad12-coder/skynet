@@ -9,14 +9,14 @@ import { msg } from "@/shared/lib/messages";
 export function typeBadge(jobType: string) {
   if (jobType === "grid_search") {
     return (
-      <Badge variant="outline" className="border-primary/30 text-primary">
+      <Badge variant="outline" className="border-primary-fill/30 text-primary">
         {msg("auto.features.dashboard.lib.status.badges.1")}
       </Badge>
     );
   }
   if (jobType === "blackbox") {
     return (
-      <Badge variant="outline" className="border-[#C8A882]/45 text-[#3D2E22]">
+      <Badge variant="outline" className="border-primary-fill/45 text-primary">
         {msg("optimization.blackbox.badge")}
       </Badge>
     );

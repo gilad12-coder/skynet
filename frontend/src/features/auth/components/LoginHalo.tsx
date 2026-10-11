@@ -59,7 +59,7 @@ function HaloChip({
       >
         <motion.div
           dir={dir}
-          className="flex w-max max-w-[14rem] items-center rounded-xl border border-border/50 bg-card px-3 py-2 shadow-[0_8px_24px_-14px_rgba(28,22,18,0.28)]"
+          className="flex w-max max-w-[14rem] items-center rounded-xl border border-border/50 bg-card px-3 py-2 shadow-[var(--shadow-float)]"
           animate={
             reduce
               ? { rotate: card.rot }
@@ -87,9 +87,6 @@ function HaloChip({
                     delay: fdelay,
                   },
                 }
-          }
-          whileHover={
-            reduce ? undefined : { scale: 1.1, transition: { duration: 0.35, ease: EASE_OUT_EXPO } }
           }
         >
           <span className="truncate text-[0.72rem] font-medium text-foreground/85">{title}</span>

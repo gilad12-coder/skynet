@@ -203,3 +203,84 @@ def t(key: str, /, **params: Any) -> str:
         except (KeyError, IndexError, ValueError):
             return template
     return template
+
+
+@lru_cache(maxsize=64)
+def _overlay(locale: str) -> dict[str, Any]:
+    """Load one per-locale overlay catalog, or an empty mapping when absent.
+
+    Args:
+        locale: Locale tag matching an ``i18n/locales/<locale>.json`` file.
+
+    Returns:
+        The parsed overlay, or ``{}`` when no file exists for ``locale``.
+    """
+    if not re.fullmatch(r"[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*", locale):
+        return {}
+    for directory in (_PACKAGE_CATALOG.parent, _REPO_CATALOG.parent):
+        path = directory / f"{locale}.json"
+        if path.is_file():
+            return json.loads(path.read_text(encoding="utf-8"))
+    return {}
+
+
+def locale_chain(locale: str | None) -> list[str]:
+    """Return the lookup order for ``locale``, ending at the Hebrew base.
+
+    Mirrors the frontend registry: a regional tag falls back to its language,
+    every non-Hebrew locale then falls back to English, and Hebrew is last
+    because it is the only complete catalog.
+
+    Args:
+        locale: Requested locale tag (``"pt-BR"``, ``"en"``); ``None`` means
+            the Hebrew base.
+
+    Returns:
+        Distinct locale tags to try in order.
+    """
+    if not locale:
+        return ["he"]
+    language = locale.split("-", 1)[0]
+    chain: list[str] = []
+    for tag in (locale, language, "en", "he"):
+        if tag and tag not in chain:
+            chain.append(tag)
+        if tag == "he":
+            break
+    return chain
+
+
+def t_locale(locale: str | None, key: str, /, **params: Any) -> str:
+    """Look up and format a user-facing string in ``locale``.
+
+    Walks :func:`locale_chain` so a key a locale has not translated degrades to
+    English, then Hebrew, never to a blank. ``{term.x}`` placeholders resolve
+    through the same chain.
+
+    Args:
+        locale: Recipient locale tag; ``None`` renders the Hebrew base.
+        key: Catalog identifier for the message template.
+        **params: Optional placeholder values substituted via ``str.format``.
+
+    Returns:
+        The localized, formatted string (or ``key`` when no locale has it).
+    """
+    chain = locale_chain(locale)
+
+    def lookup(section: str, name: str) -> str | None:
+        """Return the first ``section``/``name`` value found along the chain."""
+        for tag in chain:
+            values = (_catalog() if tag == "he" else _overlay(tag)).get(section, {})
+            value = values.get(name) if isinstance(values, dict) else None
+            if isinstance(value, str):
+                return value
+        return None
+
+    template = lookup("messages", key) or key
+    template = TERM_PATTERN.sub(lambda match: lookup("terms", match.group(1)) or match.group(1), template)
+    if params:
+        try:
+            return template.format(**params)
+        except (KeyError, IndexError, ValueError):
+            return template
+    return template

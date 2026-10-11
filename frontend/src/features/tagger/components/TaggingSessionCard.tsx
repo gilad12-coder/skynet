@@ -212,7 +212,7 @@ export function TaggingSessionCard({
             value={progress}
             size="sm"
             tone={done ? "success" : "primary"}
-            fillClassName={done ? undefined : "bg-primary/70"}
+            fillClassName={done ? undefined : "bg-primary-fill/70"}
           />
         </div>
 
@@ -234,17 +234,16 @@ export function TaggingSessionCard({
               </Button>
             </TooltipButton>
             <span aria-hidden="true" className={LIST_ROW_ACTION_DIVIDER_CLASS} />
-            <TooltipButton tooltip={msg("datasets.action.delete")}>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => setDeleteOpen(true)}
-                aria-label={msg("datasets.action.delete")}
-              >
-                <Trash className="size-4" />
-              </Button>
-            </TooltipButton>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setDeleteOpen(true)}
+              autoTooltip={false}
+              aria-label={msg("datasets.action.delete")}
+            >
+              <Trash className="size-4" />
+            </Button>
           </div>
         )}
       </div>

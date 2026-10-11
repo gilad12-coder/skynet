@@ -66,9 +66,9 @@ export function CodeAuthoringCard({ agent }: CodeAuthoringCardProps) {
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-[#C8A882]/30 bg-[#FAF8F5] shadow-sm">
-      <div className="flex items-center gap-2 border-b border-[#3D2E22]/10 px-4 py-2.5 text-[0.8125rem] font-medium text-[#3D2E22]">
-        <Sparkle className="size-3.5 text-[#3D2E22]" aria-hidden="true" />
+    <div className="overflow-hidden rounded-2xl border border-primary-fill/30 bg-background">
+      <div className="flex items-center gap-2 border-b border-primary-fill/10 px-4 py-2.5 text-[0.8125rem] font-medium text-primary">
+        <Sparkle className="size-3.5 text-primary" aria-hidden="true" />
         {msg("auto.features.submit.components.steps.codestep.1")}
       </div>
 
@@ -143,7 +143,7 @@ function ArtifactBlock({
       <span
         className={cn(
           "text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground",
-          streaming && "text-[#3D2E22]",
+          streaming && "text-primary",
         )}
         dir={getActiveDir()}
       >

@@ -247,8 +247,8 @@ export function ModelConfigModal({
                       className={cn(
                         "group/recent flex shrink-0 items-center gap-1.5 rounded-md border ps-2 pe-1 py-1 text-[0.6875rem] font-mono transition-all",
                         isActive
-                          ? "border-primary/50 bg-primary/5 text-foreground"
-                          : "border-border/40 bg-muted/30 text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-muted/50",
+                          ? "on-primary"
+                          : "border-border/40 bg-muted/30 text-muted-foreground hover:border-primary-fill/40 hover:text-foreground hover:bg-muted/50",
                       )}
                     >
                       <button
@@ -337,7 +337,7 @@ export function ModelConfigModal({
                           openTo("providers");
                         }}
                         aria-label={msg("billing.mode.manage_keys")}
-                        className="size-8 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/60"
+                        className="size-8 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                       >
                         <Key className="size-4" aria-hidden="true" />
                       </button>

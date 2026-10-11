@@ -11,7 +11,7 @@ const panelClass = cn(
   "origin-(--radix-context-menu-content-transform-origin)",
   "animate-in fade-in-0 zoom-in-95",
   "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
-  "rounded-xl border border-border/60 bg-background/95 py-1.5 backdrop-blur-xl shadow-lg",
+  "rounded-xl border border-border/60 bg-background/95 py-1.5 backdrop-blur-xl shadow-[var(--shadow-float)]",
   "outline-none",
   "max-h-(--radix-context-menu-content-available-height) max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain",
 );

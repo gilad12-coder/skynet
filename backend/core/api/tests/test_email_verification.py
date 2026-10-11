@@ -68,7 +68,7 @@ def verify_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, list[dic
     monkeypatch.setattr(settings, "smtp_host", "smtp.test.local")
     sent: list[dict[str, str]] = []
 
-    def _capture(to: str, subject: str, body: str) -> None:
+    def _capture(to: str, subject: str, body: str, *, html_body: str | None = None) -> None:
         sent.append({"to": to, "subject": subject, "body": body})
 
     monkeypatch.setattr(accounts_module, "send_email", _capture)

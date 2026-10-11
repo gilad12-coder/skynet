@@ -1,4 +1,4 @@
-"""Authenticated email-notification preference endpoints. [INTERNAL]"""
+"""Authenticated notification-routing preference endpoints. [INTERNAL]"""
 
 from __future__ import annotations
 
@@ -9,73 +9,65 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from ...notifications.catalog import MAX_HOLD_MINUTES, MIN_HOLD_MINUTES
+from ...notifications.preferences import clean_held_channels, merge_grid, settings_from_row
 from ...storage.models import NotificationPreferenceModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
 
-CadenceValue = Literal["done", "milestones", "live"]
-LiveModeValue = Literal["per_stage", "per_run_count", "digest"]
+EventTypeValue = Literal[
+    "needs_input", "budget_near", "failed", "finished", "new_best", "stuck", "shared", "product_news"
+]
+ChannelValue = Literal["inbox", "email", "chrome", "slack"]
+HeldChannelValue = Literal["email", "chrome", "slack"]
 
 
 class NotificationPreferencesResponse(BaseModel):
-    job_updates_enabled: bool = Field(description="Email when the caller's optimization starts or finishes.")
-    sharing_updates_enabled: bool = Field(description="Email when an optimization is shared or access changes.")
-    cadence: CadenceValue = Field(
-        default="done",
-        description="Run email cadence: finished/failed only, plus milestones, or plus live progress.",
+    grid: dict[EventTypeValue, dict[ChannelValue, bool]] = Field(
+        description="Which channels each event type is routed to (event type -> channel -> on)."
     )
-    live_mode: LiveModeValue = Field(
-        default="per_stage",
-        description="How live progress mail is throttled: per stage change, capped per run, or a digest window.",
+    hold_minutes: int = Field(description="Minutes non-urgent events wait on the held channels.")
+    held_channels: list[HeldChannelValue] = Field(
+        description="Channels whose non-urgent sends wait the hold and are dropped if the inbox item was read."
     )
-    live_count: int = Field(default=3, description="Maximum progress emails per run in per_run_count mode.")
-    digest_minutes: int = Field(default=60, description="Minimum minutes between progress emails in digest mode.")
     stuck_fraction: float = Field(
         default=0.25,
-        description="Email once when the best score stalls for this fraction of the run's evaluation budget.",
+        description="Notify once when the best score stalls for this fraction of the run's evaluation budget.",
     )
     budget_alert_fraction: float = Field(
         default=0.8,
-        description="Email once when spend reaches this fraction of the run's spending limit.",
+        description="Notify once when spend reaches this fraction of the run's spending limit.",
     )
 
 
 class NotificationPreferencesUpdate(BaseModel):
-    job_updates_enabled: bool | None = Field(default=None)
-    sharing_updates_enabled: bool | None = Field(default=None)
-    cadence: CadenceValue | None = Field(default=None)
-    live_mode: LiveModeValue | None = Field(default=None)
-    live_count: int | None = Field(default=None, ge=1, le=20)
-    digest_minutes: int | None = Field(default=None, ge=15, le=1440)
+    grid: dict[EventTypeValue, dict[ChannelValue, bool]] | None = Field(
+        default=None, description="Grid cells to change; cells left out keep their current value."
+    )
+    hold_minutes: int | None = Field(default=None, ge=MIN_HOLD_MINUTES, le=MAX_HOLD_MINUTES)
+    held_channels: list[HeldChannelValue] | None = Field(default=None)
     stuck_fraction: float | None = Field(default=None, ge=0.05, le=1.0)
     budget_alert_fraction: float | None = Field(default=None, ge=0.1, le=1.0)
 
 
 def _response(row: NotificationPreferenceModel | None) -> NotificationPreferencesResponse:
-    """Render a stored row or the enabled-by-default preference set.
+    """Render a stored row, or the defaults for an identity without one.
 
     Args:
-        row: Stored preferences, or ``None`` for an identity without overrides.
+        row: Stored preferences, or ``None``.
 
     Returns:
-        API response with the effective category switches and cadence.
+        The effective preferences.
     """
-    if row is None:
-        return NotificationPreferencesResponse(
-            job_updates_enabled=True,
-            sharing_updates_enabled=True,
-        )
+    settings = settings_from_row(row)
     return NotificationPreferencesResponse(
-        job_updates_enabled=bool(row.job_updates_enabled),
-        sharing_updates_enabled=bool(row.sharing_updates_enabled),
-        cadence=row.cadence,
-        live_mode=row.live_mode,
-        live_count=row.live_count,
-        digest_minutes=row.digest_minutes,
-        stuck_fraction=row.stuck_fraction,
-        budget_alert_fraction=row.budget_alert_fraction,
+        grid=settings.grid,
+        hold_minutes=settings.hold_minutes,
+        held_channels=list(settings.held_channels),
+        stuck_fraction=settings.stuck_fraction,
+        budget_alert_fraction=settings.budget_alert_fraction,
     )
 
 
@@ -93,18 +85,18 @@ def create_notification_preferences_router(*, job_store) -> APIRouter:
     @router.get(
         "/account/notification-preferences",
         response_model=NotificationPreferencesResponse,
-        summary="Read the caller's optional email-notification preferences",
+        summary="Read the caller's notification routing",
     )
     def get_notification_preferences(
         user: AuthenticatedUserDep,
     ) -> NotificationPreferencesResponse:
-        """Return the caller's stored preferences or enabled defaults.
+        """Return the caller's stored routing or the defaults.
 
         Args:
             user: Authenticated caller whose preferences are requested.
 
         Returns:
-            Effective optional email preferences.
+            Effective notification preferences.
         """
         with Session(job_store.engine) as session:
             return _response(session.get(NotificationPreferenceModel, user.username))
@@ -112,13 +104,13 @@ def create_notification_preferences_router(*, job_store) -> APIRouter:
     @router.patch(
         "/account/notification-preferences",
         response_model=NotificationPreferencesResponse,
-        summary="Update the caller's optional email-notification preferences",
+        summary="Update the caller's notification routing",
     )
     def update_notification_preferences(
         body: NotificationPreferencesUpdate,
         user: AuthenticatedUserDep,
     ) -> NotificationPreferencesResponse:
-        """Persist the supplied category switches and cadence settings for the caller.
+        """Merge the supplied grid cells and hold settings into the caller's routing.
 
         Args:
             body: Partial set of preference changes.
@@ -132,9 +124,19 @@ def create_notification_preferences_router(*, job_store) -> APIRouter:
             if row is None:
                 row = NotificationPreferenceModel(username=user.username)
                 session.add(row)
-            updates = body.model_dump(exclude_none=True)
-            for field, value in updates.items():
-                setattr(row, field, value)
+            if body.grid is not None:
+                grid = merge_grid(row.channel_grid)
+                for event, cells in body.grid.items():
+                    grid[event].update(cells)
+                row.channel_grid = merge_grid(grid)
+            if body.hold_minutes is not None:
+                row.hold_minutes = body.hold_minutes
+            if body.held_channels is not None:
+                row.held_channels = list(clean_held_channels(body.held_channels))
+            if body.stuck_fraction is not None:
+                row.stuck_fraction = body.stuck_fraction
+            if body.budget_alert_fraction is not None:
+                row.budget_alert_fraction = body.budget_alert_fraction
             row.updated_at = datetime.now(UTC)
             session.commit()
             session.refresh(row)

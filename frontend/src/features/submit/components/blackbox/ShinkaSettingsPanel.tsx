@@ -10,9 +10,12 @@ import { Segmented } from "@/shared/ui/segmented";
 import { msg } from "@/shared/lib/messages";
 import { tip, type TooltipKey } from "@/shared/lib/tooltips";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
-import type { BlackboxShinkaEditor, BlackboxShinkaParentSelection } from "@/shared/types/api";
+import type {
+  BlackboxShinkaEditor,
+  BlackboxShinkaParentSelection,
+  BlackboxShinkaSettings,
+} from "@/shared/types/api";
 
-import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import {
   PARENT_SELECTION_FIELDS,
   SHINKA_LIMITS,
@@ -49,8 +52,25 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
  * step. Every control starts at the backend's default, so a closed panel and
  * an untouched open one submit the same run.
  */
-export function ShinkaSettingsPanel({ w }: { w: BlackboxWizardContext }) {
-  const { shinkaSettings: s, updateShinka, setShinkaSettings, shinkaOpen, setShinkaOpen } = w;
+export function ShinkaSettingsPanel({
+  settings: s,
+  onChange,
+  open,
+  onOpenChange,
+  maxToolCalls,
+  onMaxToolCallsChange,
+  label,
+}: {
+  settings: BlackboxShinkaSettings;
+  onChange: (next: BlackboxShinkaSettings) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  maxToolCalls: number | null | undefined;
+  onMaxToolCallsChange: (value: number | null | undefined) => void;
+  /** Overrides the disclosure title, e.g. with plainer guided copy. */
+  label?: string;
+}) {
+  const updateShinka = (patch: Partial<BlackboxShinkaSettings>) => onChange({ ...s, ...patch });
   const agentEditor = s.editor === "agent";
 
   const numberField = (field: ShinkaStepperField) => {
@@ -96,10 +116,10 @@ export function ShinkaSettingsPanel({ w }: { w: BlackboxWizardContext }) {
   return (
     <Disclosure
       id="bb-shinka-settings"
-      label={msg("submit.blackbox.shinka.title")}
+      label={label ?? msg("submit.blackbox.shinka.title")}
       tip={tip("submit.blackbox.shinka.title")}
-      open={shinkaOpen}
-      onOpenChange={setShinkaOpen}
+      open={open}
+      onOpenChange={onOpenChange}
     >
       <div className="space-y-6 pt-2 pb-1">
         <Group title={msg("submit.blackbox.shinka.group.editor")}>
@@ -119,7 +139,11 @@ export function ShinkaSettingsPanel({ w }: { w: BlackboxWizardContext }) {
           </Field>
           {agentEditor && (
             <div className="grid gap-4 sm:grid-cols-2">
-              <MaxToolCallsField w={w} id="bb-shinka-max-tool-calls" />
+              <MaxToolCallsField
+                value={maxToolCalls}
+                onChange={onMaxToolCallsChange}
+                id="bb-shinka-max-tool-calls"
+              />
             </div>
           )}
         </Group>
@@ -170,9 +194,7 @@ export function ShinkaSettingsPanel({ w }: { w: BlackboxWizardContext }) {
                       <NumberInput
                         id={id}
                         value={patchPercent(s[kind])}
-                        onChange={(value) =>
-                          setShinkaSettings((prev) => setPatchPercent(prev, kind, value))
-                        }
+                        onChange={(value) => onChange(setPatchPercent(s, kind, value))}
                         min={0}
                         max={100}
                         step={5}

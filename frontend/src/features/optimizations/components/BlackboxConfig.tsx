@@ -222,30 +222,28 @@ export function BlackboxConfigCard({
   const generalRows: ConfigRow[] = [];
   if (isPrivate != null) {
     generalRows.push({
-      label: <HelpTip text={tip("submit.privacy")}>{msg("submit.basics.privacy.label")}</HelpTip>,
+      label: msg("submit.basics.privacy.label"),
       value: isPrivate ? msg("submit.basics.privacy.private") : msg("submit.basics.privacy.public"),
       icon: isPrivate ? <Lock /> : <Globe />,
     });
   }
   if (tokenSource) {
     generalRows.push({
-      label: (
-        <HelpTip text={tip("config.billing_source")}>{msg("submit.budget.billing_source")}</HelpTip>
-      ),
+      label: msg("submit.budget.billing_source"),
       value: tokenSource === "byok" ? msg("billing.mode.byok") : msg("billing.mode.managed"),
       icon: tokenSource === "byok" ? <Key /> : <Wallet />,
     });
   }
   if (runtime) {
     generalRows.push({
-      label: <HelpTip text={tip("config.runtime")}>{msg("optimization.config.runtime")}</HelpTip>,
+      label: msg("optimization.config.runtime"),
       value: runtime === "vercel" ? msg("submit.runtime.vercel") : runtime,
       icon: <RocketLaunch />,
     });
   }
   if (hasCostCap) {
     generalRows.push({
-      label: <HelpTip text={tip("submit.budget")}>{msg("submit.budget.label")}</HelpTip>,
+      label: msg("submit.budget.label"),
       value:
         costCap != null ? formatCentsUsd(costCap, locale) : msg("submit.budget.uncapped_short"),
       icon: <Coins />,
@@ -303,11 +301,7 @@ export function BlackboxConfigCard({
   }
   if (budget.stop_at_score != null) {
     optimizationRows.push({
-      label: (
-        <HelpTip text={tip("blackbox.config.budget_stop")}>
-          {msg("optimization.blackbox.config.budget_stop_label")}
-        </HelpTip>
-      ),
+      label: msg("optimization.blackbox.config.budget_stop_label"),
       value: String(budget.stop_at_score),
       icon: <Target />,
     });
@@ -385,11 +379,7 @@ export function BlackboxConfigCard({
     const proposerInstall = command(proposer.install_command);
     if (proposerInstall) {
       optimizationRows.push({
-        label: (
-          <HelpTip text={tip("config.proposer_commands")}>
-            {msg("optimization.config.proposer_install")}
-          </HelpTip>
-        ),
+        label: msg("optimization.config.proposer_install"),
         value: proposerInstall,
         icon: <Terminal />,
       });
@@ -397,11 +387,7 @@ export function BlackboxConfigCard({
     const proposerRun = command(proposer.run_command);
     if (proposerRun) {
       optimizationRows.push({
-        label: (
-          <HelpTip text={tip("config.proposer_commands")}>
-            {msg("optimization.config.proposer_run")}
-          </HelpTip>
-        ),
+        label: msg("optimization.config.proposer_run"),
         value: proposerRun,
         icon: <Terminal />,
       });
@@ -453,7 +439,7 @@ export function BlackboxConfigCard({
     const value = command(target[key]);
     if (value) {
       targetRows.push({
-        label: <HelpTip text={tip("config.target_commands")}>{msg(labelKey)}</HelpTip>,
+        label: msg(labelKey),
         value,
         icon: <Terminal />,
       });
@@ -461,22 +447,14 @@ export function BlackboxConfigCard({
   }
   if (timeout) {
     targetRows.push({
-      label: (
-        <HelpTip text={tip("blackbox.config.scorer_timeout")}>
-          {msg("optimization.blackbox.config.scorer_timeout_label")}
-        </HelpTip>
-      ),
+      label: msg("optimization.blackbox.config.scorer_timeout_label"),
       value: timeout,
       icon: <Wrench />,
     });
   }
   if (install) {
     targetRows.push({
-      label: (
-        <HelpTip text={tip("blackbox.config.scorer_install")}>
-          {msg("optimization.blackbox.config.scorer_install_label")}
-        </HelpTip>
-      ),
+      label: msg("optimization.blackbox.config.scorer_install_label"),
       value: install,
       icon: <Wrench />,
     });
@@ -486,11 +464,7 @@ export function BlackboxConfigCard({
     : [];
   if (pinned.length > 0) {
     targetRows.push({
-      label: (
-        <HelpTip text={tip("config.scorer_packages")}>
-          {msg("optimization.config.scorer_packages")}
-        </HelpTip>
-      ),
+      label: msg("optimization.config.scorer_packages"),
       value: pinned.join(", "),
       icon: <Package />,
     });
@@ -541,10 +515,10 @@ export function BlackboxConfigCard({
                   <SlideHeroCard
                     index={0}
                     label={
-                      <HelpTip text={tip("submit.name")}>
+                      <>
                         {msg("auto.features.submit.components.steps.summarystep.3")}
                         {TERMS.optimization}
-                      </HelpTip>
+                      </>
                     }
                     value={name}
                     icon={<Tag />}
@@ -563,14 +537,7 @@ export function BlackboxConfigCard({
                 </div>
                 <MiniGrid rows={generalRows} />
                 {description && (
-                  <SlideNote
-                    label={
-                      <HelpTip text={tip("config.description")}>
-                        {msg("optimization.config.description")}
-                      </HelpTip>
-                    }
-                    text={description}
-                  />
+                  <SlideNote label={msg("optimization.config.description")} text={description} />
                 )}
               </div>
             )}

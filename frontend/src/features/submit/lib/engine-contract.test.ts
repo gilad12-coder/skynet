@@ -1,244 +1,71 @@
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
 import { test } from "node:test";
 
-import type { BlackboxEngineCatalogResponse, BlackboxEngineId } from "@/shared/types/api";
-import {
+const unifiedRunUrl = new URL("../../../shared/types/unified-run.ts", import.meta.url).href;
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === "@/shared/types/unified-run") return { shortCircuit: true, url: unifiedRunUrl };
+    return nextResolve(specifier, context);
+  },
+});
+
+const {
   AUTO_MIN_SCORER_RUNS,
   DEFAULT_PROPOSER,
   MAX_TOOL_CALLS_LIMITS,
-  engineSelectionIssue,
+  minScorerRuns,
   proposerKnobs,
   submittedProposer,
   submittedRunProposer,
   supportsIterationLimit,
   usesNativeProposer,
-} from "./engine-contract.ts";
-import { DEFAULT_SHINKA_SETTINGS } from "./shinka-settings.ts";
+} = await import("./engine-contract.ts");
+const { DEFAULT_SHINKA_SETTINGS } = await import("./shinka-settings.ts");
+const { BLACKBOX_OPTIMIZERS, DSPY_OPTIMIZERS } = await import(unifiedRunUrl);
 
-const catalog: BlackboxEngineCatalogResponse = {
-  target_kind: "text",
-  sandbox_available: true,
-  auto_engines: ["gepa", "autoresearch", "meta_harness", "autosaddler", "shinka_evolve"],
-  auto_available: true,
-  auto_unavailable_reason: null,
-  auto_checkpoint_recovery_supported: false,
-  auto_checkpoint_recovery_reason: "Auto recovery requires a new search.",
-  upstream_revision: "pinned",
-  run_recovery_eligibility:
-    "Recovery also requires a compatible saved checkpoint and enough funded headroom.",
-  proposer_runtimes: [
-    {
-      id: "vercel",
-      available: true,
-      unavailable_reason: null,
-      cost: {
-        billing_basis: "at_cost",
-        minimum_session_cents: "1",
-        maximum_session_cents: "12",
-        maximum_lifetime_seconds: 3600,
-        vcpus: 2,
-      },
-      checkpoint_restore_supported: true,
-      checkpoint_restore_reason: null,
-    },
-  ],
-  engines: (
-    [
-      "gepa",
-      "best_of_n",
-      "autoresearch",
-      "meta_harness",
-      "autosaddler",
-      "shinka_evolve",
-    ] as BlackboxEngineId[]
-  ).map((id) => ({
-    id,
-    label: id,
-    description: id,
-    available: true,
-    unavailable_reason: null,
-    supports_parts: id === "gepa" || id === "shinka_evolve",
-    requires_agent_target: false,
-    checkpoint_recovery_supported: id === "gepa",
-    checkpoint_recovery_reason: id === "gepa" ? null : `${id} cannot restore checkpoints.`,
-  })),
-};
-
-const selection = {
-  catalog,
-  mode: "auto" as const,
-  engine: null,
-  hasParts: false,
-};
-
-test("iteration limits apply only to a single version-capped engine", () => {
-  for (const engine of ["meta_harness", "autosaddler", "shinka_evolve"] as const) {
-    assert.equal(supportsIterationLimit("single", engine), true);
+test("iteration limits apply only to a version-capped engine", () => {
+  for (const choice of ["meta_harness", "autosaddler", "shinka_evolve"] as const) {
+    assert.equal(supportsIterationLimit(choice, "code"), true);
   }
-  for (const engine of ["gepa", "best_of_n", "autoresearch", null] as const) {
-    assert.equal(supportsIterationLimit("single", engine), false);
+  for (const choice of ["gepa", "best_of_n", "autoresearch", "auto"] as const) {
+    assert.equal(supportsIterationLimit(choice, "prompt"), false);
   }
-  assert.equal(supportsIterationLimit("auto", "meta_harness"), false);
-  assert.equal(supportsIterationLimit("auto", null), false);
-});
-
-test("Auto's minimum budget covers every listed lane plus the continuation", () => {
-  assert.equal(AUTO_MIN_SCORER_RUNS, catalog.auto_engines.length + 1);
-});
-
-test("Auto requires the complete server recipe even when its lanes are listed", () => {
-  assert.equal(engineSelectionIssue({ ...selection, mode: "auto" }), null);
-  assert.deepEqual(
-    engineSelectionIssue({
-      ...selection,
-      mode: "auto",
-      catalog: { ...catalog, auto_available: false, auto_unavailable_reason: "Missing CLI" },
-    }),
-    {
-      key: "submit.blackbox.run_disabled.auto_reason",
-      params: { reason: "Missing CLI" },
-    },
-  );
-  assert.equal(
-    engineSelectionIssue({ ...selection, mode: "auto", hasParts: true })?.key,
-    "submit.blackbox.validation.auto_parts",
-  );
-});
-
-test("missing or legacy capabilities cannot authorize an Auto run", () => {
-  assert.equal(
-    engineSelectionIssue({ ...selection, catalog: null })?.key,
-    "submit.blackbox.engines.checking",
-  );
-  const { auto_available: _omitted, ...legacyCatalog } = catalog;
-  assert.equal(
-    engineSelectionIssue({
-      ...selection,
-      catalog: legacyCatalog as BlackboxEngineCatalogResponse,
-    })?.key,
-    "submit.blackbox.run_disabled.no_engines",
-  );
-});
-
-test("native engines accept text evaluation in the managed sandbox without an agent target", () => {
-  for (const engine of ["meta_harness", "autoresearch", "autosaddler"] as const) {
-    assert.equal(engineSelectionIssue({ ...selection, mode: "single", engine }), null);
-    assert.equal(usesNativeProposer("single", engine), true);
+  for (const choice of DSPY_OPTIMIZERS) {
+    assert.equal(supportsIterationLimit(choice, "dspy_program"), false);
   }
-  assert.equal(usesNativeProposer("auto", null), true);
-  assert.equal(usesNativeProposer("single", "gepa"), false);
-  assert.equal(usesNativeProposer("single", "best_of_n"), false);
-  for (const engine of ["gepa", "best_of_n"] as const) {
-    assert.equal(usesNativeProposer("single", engine, true), true);
+  assert.equal(supportsIterationLimit("auto", "dspy_program"), false);
+});
+
+test("coding-agent proposers: black-box Auto and the agent engines, never DSPy", () => {
+  for (const choice of ["auto", "meta_harness", "autoresearch", "autosaddler"] as const) {
+    assert.equal(usesNativeProposer(choice, "code"), true);
   }
-});
-
-test("ShinkaEvolve calls its models directly, even on a repository", () => {
-  assert.equal(usesNativeProposer("single", "shinka_evolve"), false);
-  assert.equal(usesNativeProposer("single", "shinka_evolve", true), false);
-  const unavailable: BlackboxEngineCatalogResponse = {
-    ...catalog,
-    proposer_runtimes: [{ ...catalog.proposer_runtimes[0], available: false }],
-  };
-  assert.equal(
-    engineSelectionIssue({
-      ...selection,
-      catalog: unavailable,
-      mode: "single",
-      engine: "shinka_evolve",
-      repo: true,
-    }),
-    null,
-  );
-});
-
-test("managed sandbox availability gates native engines without disabling GEPA", () => {
-  const unavailable: BlackboxEngineCatalogResponse = {
-    ...catalog,
-    proposer_runtimes: [
-      {
-        ...catalog.proposer_runtimes[0],
-        available: false,
-        unavailable_reason: "Managed sandbox is unavailable",
-      },
-    ],
-  };
-  assert.deepEqual(engineSelectionIssue({ ...selection, catalog: unavailable }), {
-    key: "submit.blackbox.run_disabled.runtime_reason",
-    params: { reason: "Managed sandbox is unavailable" },
-  });
-  assert.equal(
-    engineSelectionIssue({ ...selection, catalog: unavailable, mode: "single", engine: "gepa" }),
-    null,
-  );
-  // On a repository every engine drives the coding agent in that sandbox.
-  for (const engine of ["gepa", "best_of_n"] as const) {
-    assert.equal(
-      engineSelectionIssue({
-        ...selection,
-        catalog: unavailable,
-        mode: "single",
-        engine,
-        repo: true,
-      })?.key,
-      "submit.blackbox.run_disabled.runtime_reason",
-    );
+  for (const choice of ["gepa", "best_of_n", "shinka_evolve"] as const) {
+    assert.equal(usesNativeProposer(choice, "code"), false);
   }
-});
-
-test("parts follow each single engine's capabilities", () => {
-  assert.equal(
-    engineSelectionIssue({ ...selection, mode: "single", engine: "gepa", hasParts: true }),
-    null,
-  );
-  assert.equal(
-    engineSelectionIssue({
-      ...selection,
-      mode: "single",
-      engine: "shinka_evolve",
-      hasParts: true,
-    }),
-    null,
-  );
-  assert.equal(
-    engineSelectionIssue({ ...selection, mode: "single", engine: "best_of_n", hasParts: true })
-      ?.key,
-    "submit.blackbox.validation.engine_parts",
-  );
-});
-
-test("every engine and Auto run without cases", () => {
-  assert.equal(engineSelectionIssue({ ...selection, mode: "auto", engine: null }), null);
-  for (const engine of [
-    "gepa",
-    "best_of_n",
-    "autoresearch",
-    "meta_harness",
-    "autosaddler",
-    "shinka_evolve",
-  ] as const) {
-    assert.equal(engineSelectionIssue({ ...selection, mode: "single", engine }), null);
+  for (const choice of DSPY_OPTIMIZERS) {
+    assert.equal(usesNativeProposer(choice, "dspy_program"), false);
   }
+  // Auto on a DSPy program resolves to DSPy GEPA, which calls its model directly.
+  assert.equal(usesNativeProposer("auto", "dspy_program"), false);
+});
+
+test("black-box Auto's minimum budget covers five lanes plus the continuation", () => {
+  assert.equal(AUTO_MIN_SCORER_RUNS, 6);
+  assert.equal(minScorerRuns("auto", "prompt"), AUTO_MIN_SCORER_RUNS);
+  assert.equal(minScorerRuns("auto", "dspy_program"), 1);
+  for (const choice of BLACKBOX_OPTIMIZERS) assert.equal(minScorerRuns(choice, "text"), 1);
 });
 
 test("proposer knobs follow the engine that reads them, and Auto exposes them all", () => {
-  assert.deepEqual(proposerKnobs("single", "meta_harness"), {
-    candidates: true,
-    ralph: false,
-  });
-  assert.deepEqual(proposerKnobs("single", "autoresearch"), {
-    candidates: false,
-    ralph: true,
-  });
-  assert.deepEqual(proposerKnobs("single", "autosaddler"), {
-    candidates: false,
-    ralph: false,
-  });
-  assert.deepEqual(proposerKnobs("single", "shinka_evolve"), {
-    candidates: false,
-    ralph: false,
-  });
-  assert.deepEqual(proposerKnobs("auto", null), { candidates: true, ralph: true });
+  assert.deepEqual(proposerKnobs("meta_harness", "code"), { candidates: true, ralph: false });
+  assert.deepEqual(proposerKnobs("autoresearch", "code"), { candidates: false, ralph: true });
+  assert.deepEqual(proposerKnobs("autosaddler", "code"), { candidates: false, ralph: false });
+  assert.deepEqual(proposerKnobs("shinka_evolve", "code"), { candidates: false, ralph: false });
+  assert.deepEqual(proposerKnobs("auto", "prompt"), { candidates: true, ralph: true });
+  assert.deepEqual(proposerKnobs("auto", "dspy_program"), { candidates: false, ralph: false });
 });
 
 test("submitted proposer resets every knob the form hides, and always runs research rounds", () => {
@@ -250,31 +77,24 @@ test("submitted proposer resets every knob the form hides, and always runs resea
     max_no_eval_seconds: 600,
   };
   const stall = DEFAULT_PROPOSER.max_no_eval_seconds;
-  assert.deepEqual(submittedProposer(tuned, "auto", null), {
+  assert.deepEqual(submittedProposer(tuned, "auto", "prompt"), {
     ...tuned,
     ralph: true,
     max_no_eval_seconds: stall,
   });
-  assert.deepEqual(submittedProposer(tuned, "single", "autosaddler"), {
+  assert.deepEqual(submittedProposer(tuned, "autosaddler", "code"), {
     ...tuned,
     max_candidates_per_iter: null,
     ralph: true,
     max_no_eval_seconds: null,
   });
-  assert.deepEqual(submittedProposer(tuned, "single", "meta_harness"), {
+  assert.deepEqual(submittedProposer(tuned, "meta_harness", "code"), {
     ...tuned,
     ralph: true,
     max_no_eval_seconds: null,
   });
-  assert.deepEqual(submittedProposer(tuned, "single", "autoresearch"), {
+  assert.deepEqual(submittedProposer(tuned, "autoresearch", "code"), {
     ...tuned,
-    ralph: true,
-    max_candidates_per_iter: null,
-    max_no_eval_seconds: stall,
-  });
-  assert.deepEqual(submittedProposer({ ...tuned, harness: "opencode" }, "single", "autoresearch"), {
-    ...tuned,
-    harness: "opencode",
     ralph: true,
     max_candidates_per_iter: null,
     max_no_eval_seconds: stall,
@@ -285,45 +105,40 @@ test("the tool-call cap defaults to 100 within the backend range and is always s
   assert.equal(DEFAULT_PROPOSER.max_tool_calls, 100);
   assert.ok(DEFAULT_PROPOSER.max_tool_calls! >= MAX_TOOL_CALLS_LIMITS.min);
   assert.ok(DEFAULT_PROPOSER.max_tool_calls! <= MAX_TOOL_CALLS_LIMITS.max);
-  for (const engine of ["meta_harness", "autoresearch", "autosaddler"] as const)
+  for (const choice of ["meta_harness", "autoresearch", "autosaddler"] as const)
     assert.equal(
-      submittedProposer({ ...DEFAULT_PROPOSER, max_tool_calls: 40 }, "single", engine)
-        .max_tool_calls,
+      submittedProposer({ ...DEFAULT_PROPOSER, max_tool_calls: 40 }, choice, "code").max_tool_calls,
       40,
     );
   assert.equal(
-    submittedProposer({ ...DEFAULT_PROPOSER, max_tool_calls: null }, "auto", null).max_tool_calls,
+    submittedProposer({ ...DEFAULT_PROPOSER, max_tool_calls: null }, "auto", "code").max_tool_calls,
     100,
   );
 });
 
-test("a single ShinkaEvolve run sends a proposer only for the agent editor's tool-call cap", () => {
+test("ShinkaEvolve sends a proposer only for the agent editor's tool-call cap", () => {
   const proposer = { ...DEFAULT_PROPOSER, harness: "opencode" as const, max_tool_calls: 250 };
   const shinka = { ...DEFAULT_SHINKA_SETTINGS };
-  const single = { proposer, mode: "single" as const, engine: "shinka_evolve" as const };
-  assert.equal(submittedRunProposer({ ...single, nativeProposer: false, shinka }), undefined);
-  assert.deepEqual(
-    submittedRunProposer({
-      ...single,
-      nativeProposer: false,
-      shinka: { ...shinka, editor: "agent" },
-    }),
-    { harness: DEFAULT_PROPOSER.harness, max_tool_calls: 250 },
-  );
-  // Another single engine without a coding agent never sends one.
+  const base = { proposer, choice: "shinka_evolve" as const, kind: "code" as const };
+  assert.equal(submittedRunProposer({ ...base, shinka }), undefined);
+  assert.equal(submittedRunProposer({ ...base, shinka: null }), undefined);
+  assert.deepEqual(submittedRunProposer({ ...base, shinka: { ...shinka, editor: "agent" } }), {
+    harness: DEFAULT_PROPOSER.harness,
+    max_tool_calls: 250,
+  });
+  // Optimizers without a coding agent never send one.
+  for (const choice of ["gepa", "best_of_n"] as const)
+    assert.equal(
+      submittedRunProposer({ ...base, choice, shinka: { ...shinka, editor: "agent" } }),
+      undefined,
+    );
   assert.equal(
-    submittedRunProposer({
-      proposer,
-      mode: "single",
-      engine: "gepa",
-      nativeProposer: false,
-      shinka: { ...shinka, editor: "agent" },
-    }),
+    submittedRunProposer({ proposer, choice: "auto", kind: "dspy_program", shinka: null }),
     undefined,
   );
   // A coding-agent proposer sends its own settings, cap included.
   assert.deepEqual(
-    submittedRunProposer({ proposer, mode: "auto", engine: null, nativeProposer: true, shinka }),
-    submittedProposer(proposer, "auto", null),
+    submittedRunProposer({ proposer, choice: "auto", kind: "prompt", shinka }),
+    submittedProposer(proposer, "auto", "prompt"),
   );
 });
