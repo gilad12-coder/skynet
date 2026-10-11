@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "Provavelmente indisponível com a definição «Sem retenção»",
   "submit.module.change": "Trocar módulo",
   "submit.module.picker_title": "Escolha um módulo",
+  "submit.nav.screen": "Tela {index} de {count}",
   "submit.nav.validating": "A validar…",
   "submit.react.auth_label": "Cabeçalho de autenticação (opcional)",
   "submit.react.mcp_checking": "A verificar ligação…",

@@ -2120,6 +2120,7 @@
   "submit.composition.single_desc": "Optimize a single module on its own.",
   "submit.composition.workflow_desc": "Wire several modules into one graph.",
   "submit.composition.back": "Back",
+  "submit.nav.screen": "Screen {index} of {count}",
   "submit.nav.validating": "Validating…",
   "submit.optimizer_settings.customized": "Customized",
   "submit.optimizer_settings.defaults": "Defaults",

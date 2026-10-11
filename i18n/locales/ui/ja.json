@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "「保持なし」のプライバシー設定では利用できない可能性があります",
   "submit.module.change": "モジュールを切り替え",
   "submit.module.picker_title": "モジュールを選択",
+  "submit.nav.screen": "画面 {index}/{count}",
   "submit.nav.validating": "検証中…",
   "submit.react.auth_label": "認証ヘッダー（任意）",
   "submit.react.mcp_checking": "接続を確認しています…",

@@ -2911,6 +2911,7 @@
   "submit.module.tagline.flex": "自行編寫並執行專屬嘅 Python 代碼",
   "submit.module.tagline.predict": "調用模型一次，獲取一個回覆",
   "submit.module.tagline.react": "循環調用工具直至得出答案",
+  "submit.nav.screen": "第 {index} 頁，共 {count} 頁",
   "submit.nav.validating": "驗證緊…",
   "submit.pxn.batch_hint": "每輪評估 {total} 個候選項目",
   "submit.pxn.parents": "待改進候選項目 (p)",

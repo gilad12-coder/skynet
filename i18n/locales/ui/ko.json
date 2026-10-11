@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "'보관 없음' 개인정보 설정에서는 사용할 수 없을 가능성이 높습니다",
   "submit.module.change": "모듈 전환",
   "submit.module.picker_title": "모듈 선택",
+  "submit.nav.screen": "화면 {index}/{count}",
   "submit.nav.validating": "검증 중…",
   "submit.react.auth_label": "Auth 헤더 (선택 사항)",
   "submit.react.mcp_checking": "연결 확인 중…",

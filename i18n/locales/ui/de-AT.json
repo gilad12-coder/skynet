@@ -24,5 +24,6 @@
   "submit.blackbox.roles.optimization.managed_hint": "Verwendet die Standard-Sampling-Einstellungen des Modells; die Abrechnung kann über Ihr Skynet-Guthaben oder Ihren OpenRouter-Schlüssel erfolgen.",
   "optimizations.grid.open_pair": "Paar {pair} öffnen",
   "optimizations.grid.empty.title": "Keine Paarergebnisse",
-  "optimizations.grid.empty.description": "Diese Rastersuche endete ohne Ergebnisse für ein Modellpaar, daher gibt es nichts zu vergleichen."
+  "optimizations.grid.empty.description": "Diese Rastersuche endete ohne Ergebnisse für ein Modellpaar, daher gibt es nichts zu vergleichen.",
+  "submit.nav.screen": "Ansicht {index} von {count}"
 }

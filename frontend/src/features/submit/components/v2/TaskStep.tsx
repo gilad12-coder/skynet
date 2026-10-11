@@ -25,6 +25,7 @@ import { useWizardV2 } from "../../hooks/use-unified-wizard";
 import type { TaskSlice } from "../../lib/wizard-v2";
 import { AuthoringShell } from "../steps/AuthoringShell";
 import { ArtifactConfirmCard, v2Msg } from "./ArtifactConfirmCard";
+import { WizardScreen } from "./WizardScreen";
 
 /** The i18n key of what keeps the task from being confirmed, or null. */
 function taskIssue(task: TaskSlice): string | null {
@@ -40,9 +41,10 @@ function taskIssue(task: TaskSlice): string | null {
 /**
  * Step 1, Task + Artifact: the interview in the side panel writes the
  * objective, background, artifact kind and starting version; the main pane
- * shows them editable, and "Looks right" confirms.
+ * shows them editable, and "Looks right" confirms. Screen 0 holds the
+ * objective and background, screen 1 the artifact.
  */
-export function TaskStep() {
+export function TaskStep({ page }: { page: number }) {
   const ctx = useWizardV2();
   const { state, patchTask, guided } = ctx;
   const task = state.task;
@@ -62,7 +64,10 @@ export function TaskStep() {
         <TaskInterviewPanel interview={interview} guided={guided} className="absolute inset-0" />
       }
     >
-      <div className="relative flex min-h-0 flex-1 flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6">
+      <WizardScreen
+        active={page === 0}
+        className="relative flex flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6"
+      >
         <TaskField
           id="v2-objective"
           label={t("submit.v2.task.objective_label")}
@@ -80,6 +85,8 @@ export function TaskStep() {
           onChange={(v) => interview.editField("background", v)}
           rows={4}
         />
+      </WizardScreen>
+      <WizardScreen active={page === 1} className="relative px-4 py-5 sm:px-6 sm:py-6">
         <ArtifactConfirmCard
           kind={task.artifactKind}
           onKindChange={(k) => interview.editField("artifactKind", k)}
@@ -92,7 +99,7 @@ export function TaskStep() {
           writing={interview.busy}
           guided={guided}
         />
-      </div>
+      </WizardScreen>
     </AuthoringShell>
   );
 }
@@ -184,7 +191,11 @@ function TaskInterviewPanel({
       </div>
 
       <AgentThread
-        scrollDeps={[interview.messages.length, interview.streamText, interview.thinking?.reasoning]}
+        scrollDeps={[
+          interview.messages.length,
+          interview.streamText,
+          interview.thinking?.reasoning,
+        ]}
         isEmpty={interview.messages.length === 0}
         emptyState={
           interview.error ? null : (
@@ -204,7 +215,9 @@ function TaskInterviewPanel({
       {(interview.error || unanswered) && (
         <div className="flex items-center justify-between gap-3 border-t border-border/40 px-4 py-2.5">
           <p role={interview.error ? "alert" : undefined} className="text-xs text-destructive">
-            {interview.error ? msg("submit.code.interview.error") : t("submit.v2.task.chat.stopped")}
+            {interview.error
+              ? msg("submit.code.interview.error")
+              : t("submit.v2.task.chat.stopped")}
           </p>
           <RetryIconButton label={msg("submit.code.interview.retry")} onClick={interview.retry} />
         </div>
@@ -218,7 +231,10 @@ function TaskInterviewPanel({
 
       {!interview.error && interview.options.length > 0 && !interview.busy && (
         <QuestionChoices
-          options={interview.options.map((o) => ({ label: o.label, description: o.description ?? "" }))}
+          options={interview.options.map((o) => ({
+            label: o.label,
+            description: o.description ?? "",
+          }))}
           onSelect={interview.send}
           hint={msg("submit.code.interview.choices_hint")}
           ariaLabel={msg("submit.code.interview.choices_label")}

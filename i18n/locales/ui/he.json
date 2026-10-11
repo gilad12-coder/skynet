@@ -2350,6 +2350,7 @@
   "submit.module.tagline.flex": "כותב ומריץ קוד Python משלו",
   "submit.module.tagline.predict": "קריאה אחת למודל, תשובה אחת",
   "submit.module.tagline.react": "קורא לכלים בלולאה עד לתשובה",
+  "submit.nav.screen": "מסך {index} מתוך {count}",
   "submit.nav.validating": "מאמת…",
   "submit.pxn.batch_hint": "{total} מועמדים נבדקים בכל סבב",
   "submit.pxn.parents": "מועמדים לשיפור (p)",

@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "Sıfır saklama gizlilik ayarınızda muhtemelen kullanılamaz",
   "submit.module.change": "Modül değiştir",
   "submit.module.picker_title": "Bir modül seçin",
+  "submit.nav.screen": "Ekran {index}/{count}",
   "submit.nav.validating": "Doğrulanıyor…",
   "submit.react.auth_label": "Auth başlığı (isteğe bağlı)",
   "submit.react.mcp_checking": "Bağlantı kontrol ediliyor…",

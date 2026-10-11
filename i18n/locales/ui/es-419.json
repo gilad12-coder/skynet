@@ -26,5 +26,6 @@
   "submit.blackbox.roles.optimization.managed_hint": "Usa la configuración de muestreo predeterminada del modelo; puedes pagar con tu saldo de Skynet o con tu clave de OpenRouter.",
   "optimizations.grid.open_pair": "Abrir el par {pair}",
   "optimizations.grid.empty.title": "No hay resultados de pares",
-  "optimizations.grid.empty.description": "Esta búsqueda en cuadrícula terminó sin resultados para ningún par de modelos, así que no hay nada que comparar."
+  "optimizations.grid.empty.description": "Esta búsqueda en cuadrícula terminó sin resultados para ningún par de modelos, así que no hay nada que comparar.",
+  "submit.nav.screen": "Pantalla {index} de {count}"
 }
