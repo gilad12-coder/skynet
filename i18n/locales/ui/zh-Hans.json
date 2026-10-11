@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "在你的零保留隐私设置下可能不可用",
   "submit.module.change": "切换模块",
   "submit.module.picker_title": "选择模块",
+  "submit.nav.screen": "第 {index} 页，共 {count} 页",
   "submit.nav.validating": "正在验证…",
   "submit.react.auth_label": "Auth 标头（可选）",
   "submit.react.mcp_checking": "正在检查连接…",

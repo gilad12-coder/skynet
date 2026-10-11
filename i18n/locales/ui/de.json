@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "Mit deiner Einstellung „Keine Speicherung“ wahrscheinlich nicht verfügbar",
   "submit.module.change": "Modul wechseln",
   "submit.module.picker_title": "Modul auswählen",
+  "submit.nav.screen": "Ansicht {index} von {count}",
   "submit.nav.validating": "Wird validiert…",
   "submit.react.auth_label": "Auth-Header (optional)",
   "submit.react.mcp_checking": "Verbindung wird geprüft…",

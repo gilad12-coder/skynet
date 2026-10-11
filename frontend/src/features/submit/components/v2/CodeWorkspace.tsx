@@ -8,12 +8,17 @@ import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { v2Msg } from "./ArtifactConfirmCard";
 
+// One editor per screen, so each takes most of the viewport; the editor
+// itself still caps at 60svh on short screens.
+const EDITOR_HEIGHT = "calc(100svh - 24rem)";
+
 function EditorBlock({
   id,
   title,
   hint,
   agent,
   artifact,
+  hidden,
   children,
 }: {
   id: string;
@@ -21,10 +26,11 @@ function EditorBlock({
   hint: string;
   agent: CodeAgentState | null;
   artifact: "signature" | "metric";
+  hidden: boolean;
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-2">
+    <div hidden={hidden} className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0 space-y-0.5">
           <h4 id={`${id}-label`} className="text-sm font-medium">
@@ -55,7 +61,9 @@ function EditorBlock({
 /**
  * The two editors of the unified workspace: the run code (how a candidate
  * produces an output) and the metric (how that output is scored). The agent's
- * version stepper and writing status show only while it is driving.
+ * version stepper and writing status show only while it is driving. The
+ * wizard shows one editor per screen; the other stays mounted (hidden) so its
+ * undo history survives the switch.
  */
 export function CodeWorkspace({
   runCode,
@@ -66,6 +74,7 @@ export function CodeWorkspace({
   metricHint,
   agent,
   guided,
+  show,
   children,
 }: {
   runCode: string;
@@ -77,7 +86,8 @@ export function CodeWorkspace({
   /** The agent, while auto mode drives the editors; null in manual mode. */
   agent: CodeAgentState | null;
   guided: boolean;
-  /** Rendered between the run and metric editors (the metric model row). */
+  show: "run" | "metric";
+  /** Rendered above the metric editor (the metric model row). */
   children?: ReactNode;
 }) {
   return (
@@ -88,11 +98,12 @@ export function CodeWorkspace({
         hint={runHint}
         agent={agent}
         artifact="signature"
+        hidden={show !== "run"}
       >
         <CodeEditor
           value={runCode}
           onChange={onRunCodeChange}
-          height="300px"
+          height={EDITOR_HEIGHT}
           streaming={agent?.signatureStatus === "writing"}
           flashLines={agent?.signatureFlashLines}
         />
@@ -104,6 +115,7 @@ export function CodeWorkspace({
         hint={metricHint}
         agent={agent}
         artifact="metric"
+        hidden={show !== "metric"}
       >
         {children}
         <div
@@ -121,7 +133,7 @@ export function CodeWorkspace({
           <CodeEditor
             value={metricCode}
             onChange={onMetricCodeChange}
-            height="300px"
+            height={EDITOR_HEIGHT}
             streaming={agent?.metricStatus === "writing"}
             flashLines={agent?.metricFlashLines}
           />

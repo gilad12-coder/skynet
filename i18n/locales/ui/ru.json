@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "Вероятно, недоступна при настройке «Без хранения»",
   "submit.module.change": "Сменить модуль",
   "submit.module.picker_title": "Выберите модуль",
+  "submit.nav.screen": "Экран {index} из {count}",
   "submit.nav.validating": "Проверка…",
   "submit.react.auth_label": "Заголовок авторизации (необязательно)",
   "submit.react.mcp_checking": "Проверка подключения…",

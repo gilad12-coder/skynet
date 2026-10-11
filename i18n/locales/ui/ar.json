@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "غالبًا غير متاح مع إعداد الخصوصية «بلا احتفاظ»",
   "submit.module.change": "تبديل الوحدة",
   "submit.module.picker_title": "اختيار وحدة",
+  "submit.nav.screen": "الشاشة {index} من {count}",
   "submit.nav.validating": "جارٍ التحقّق…",
   "submit.react.auth_label": "ترويسة المصادقة (اختياري)",
   "submit.react.mcp_checking": "جارٍ التحقق من الاتصال…",

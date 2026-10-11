@@ -27,5 +27,6 @@
   "submit.blackbox.roles.optimization.managed_hint": "Utilise les paramètres d'échantillonnage par défaut du modèle ; la facturation peut utiliser votre solde Skynet ou votre clé OpenRouter.",
   "optimizations.grid.open_pair": "Ouvrir la paire {pair}",
   "optimizations.grid.empty.title": "Aucun résultat de paire",
-  "optimizations.grid.empty.description": "Cette recherche par grille s'est terminée sans résultat pour aucune paire de modèles : il n'y a rien à comparer."
+  "optimizations.grid.empty.description": "Cette recherche par grille s'est terminée sans résultat pour aucune paire de modèles : il n'y a rien à comparer.",
+  "submit.nav.screen": "Écran {index} sur {count}"
 }

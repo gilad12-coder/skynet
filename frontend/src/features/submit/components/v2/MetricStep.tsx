@@ -21,6 +21,7 @@ import { v2Msg } from "./ArtifactConfirmCard";
 import { CodeWorkspace } from "./CodeWorkspace";
 import { ContractCheckPanel } from "./ContractCheckPanel";
 import { MetricModelRow } from "./MetricModelRow";
+import { WizardScreen } from "./WizardScreen";
 
 const NO_ROLES: Record<string, string> = {};
 const NO_KINDS: Record<string, "text" | "image"> = {};
@@ -40,9 +41,10 @@ function isAuthored(code: string, template: string | null): boolean {
 
 /**
  * Step 4: the run code and the metric, written by the agent in the side panel
- * or by hand, with the contract check that gates Run.
+ * or by hand, with the contract check that gates Run. Screens: run code,
+ * metric, then the check.
  */
-export function MetricStep() {
+export function MetricStep({ page }: { page: number }) {
   const ctx = useWizardV2();
   const { state, patchTask, patchWorkspace, metricShape, guided } = ctx;
   const { task, inputs, optimizer, workspace } = state;
@@ -169,7 +171,7 @@ export function MetricStep() {
   const setupIncomplete = authoringContext === null;
 
   return (
-    <div className="space-y-4">
+    <div className="h-full">
       <AuthoringShell
         value={codeAssistMode}
         onChange={setCodeAssistMode}
@@ -190,33 +192,38 @@ export function MetricStep() {
           />
         }
       >
-        <CodeWorkspace
-          runCode={workspace.runCode}
-          metricCode={workspace.metricCode}
-          onRunCodeChange={(code) => {
-            setRunCode(code);
-            setRunEdited(true);
-          }}
-          onMetricCodeChange={(code) => {
-            setMetricCode(code);
-            setMetricEdited(true);
-          }}
-          runHint={kind ? runHint(kind) : ""}
-          metricHint={metricShape ? shapeHint(metricShape) : ""}
-          agent={auto ? agent : null}
-          guided={guided}
-        >
-          {metricUsesModel && (
-            <MetricModelRow
-              mode={workspace.metricModelMode}
-              explicitModel={workspace.metricModel}
-              reflectionModel={optimizer.reflectionModel}
-              onChange={patchWorkspace}
-              guided={guided}
-            />
-          )}
-        </CodeWorkspace>
-        <ContractCheckPanel cc={contract} guided={guided} blockedReason={ctx.runBlockedReason} />
+        <WizardScreen active={page < 2}>
+          <CodeWorkspace
+            show={page === 1 ? "metric" : "run"}
+            runCode={workspace.runCode}
+            metricCode={workspace.metricCode}
+            onRunCodeChange={(code) => {
+              setRunCode(code);
+              setRunEdited(true);
+            }}
+            onMetricCodeChange={(code) => {
+              setMetricCode(code);
+              setMetricEdited(true);
+            }}
+            runHint={kind ? runHint(kind) : ""}
+            metricHint={metricShape ? shapeHint(metricShape) : ""}
+            agent={auto ? agent : null}
+            guided={guided}
+          >
+            {metricUsesModel && (
+              <MetricModelRow
+                mode={workspace.metricModelMode}
+                explicitModel={workspace.metricModel}
+                reflectionModel={optimizer.reflectionModel}
+                onChange={patchWorkspace}
+                guided={guided}
+              />
+            )}
+          </CodeWorkspace>
+        </WizardScreen>
+        <WizardScreen active={page === 2}>
+          <ContractCheckPanel cc={contract} guided={guided} blockedReason={ctx.runBlockedReason} />
+        </WizardScreen>
       </AuthoringShell>
     </div>
   );

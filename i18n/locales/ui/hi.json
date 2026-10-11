@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "आपकी शून्य-संग्रहण गोपनीयता सेटिंग में शायद उपलब्ध नहीं",
   "submit.module.change": "मॉड्यूल बदलें",
   "submit.module.picker_title": "एक मॉड्यूल चुनें",
+  "submit.nav.screen": "स्क्रीन {index} / {count}",
   "submit.nav.validating": "मान्य किया जा रहा है…",
   "submit.react.auth_label": "Auth हेडर (वैकल्पिक)",
   "submit.react.mcp_checking": "कनेक्शन जाँचा जा रहा है…",

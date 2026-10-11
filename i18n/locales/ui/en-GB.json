@@ -100,5 +100,6 @@
   "submit.blackbox.roles.optimization.managed_hint": "Uses the model's default sampling settings; billing can use your Skynet balance or your OpenRouter key.",
   "optimizations.grid.open_pair": "Open pair {pair}",
   "optimizations.grid.empty.title": "No pair results",
-  "optimizations.grid.empty.description": "This grid search ended without results for any model pair, so there is nothing to compare."
+  "optimizations.grid.empty.description": "This grid search ended without results for any model pair, so there is nothing to compare.",
+  "submit.nav.screen": "Screen {index} of {count}"
 }

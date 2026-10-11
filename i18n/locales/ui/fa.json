@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "احتمالاً با تنظیم حریم خصوصی «بدون نگهداری» در دسترس نیست",
   "submit.module.change": "تغییر ماژول",
   "submit.module.picker_title": "یک ماژول انتخاب کنید",
+  "submit.nav.screen": "صفحه {index} از {count}",
   "submit.nav.validating": "در حال اعتبارسنجی…",
   "submit.react.auth_label": "سرایند احراز هویت (اختیاری)",
   "submit.react.mcp_checking": "در حال بررسی اتصال…",

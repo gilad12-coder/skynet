@@ -22,5 +22,6 @@
   "submit.blackbox.roles.optimization.managed_hint": "Usa as definições de amostragem predefinidas do modelo; o pagamento pode usar o seu saldo Skynet ou a sua chave OpenRouter.",
   "optimizations.grid.open_pair": "Abrir o par {pair}",
   "optimizations.grid.empty.title": "Sem resultados de pares",
-  "optimizations.grid.empty.description": "Esta pesquisa em grelha terminou sem resultados para nenhum par de modelos, por isso não há nada para comparar."
+  "optimizations.grid.empty.description": "Esta pesquisa em grelha terminou sem resultados para nenhum par de modelos, por isso não há nada para comparar.",
+  "submit.nav.screen": "Ecrã {index} de {count}"
 }

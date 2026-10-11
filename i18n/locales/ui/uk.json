@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "Імовірно, недоступна з налаштуванням «Без зберігання»",
   "submit.module.change": "Змінити модуль",
   "submit.module.picker_title": "Виберіть модуль",
+  "submit.nav.screen": "Екран {index} з {count}",
   "submit.nav.validating": "Перевіряється…",
   "submit.react.auth_label": "Заголовок авторизації (необов’язково)",
   "submit.react.mcp_checking": "Перевірка з'єднання…",

@@ -3189,6 +3189,7 @@
   "submit.modelpicker.zdr_unavailable": "Probablement indisponible avec votre paramètre « Aucune conservation »",
   "submit.module.change": "Changer de module",
   "submit.module.picker_title": "Choisir un module",
+  "submit.nav.screen": "Écran {index} sur {count}",
   "submit.nav.validating": "Validation en cours…",
   "submit.react.auth_label": "En-tête d'authentification (facultatif)",
   "submit.react.mcp_checking": "Vérification de la connexion…",

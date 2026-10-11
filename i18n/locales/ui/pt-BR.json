@@ -148,6 +148,7 @@
   "storage.quota.loading": "Carregando…",
   "storage.type.staged_upload": "Arquivo temporário",
   "submit.dataset.file_error": "Erro ao carregar o arquivo",
+  "submit.nav.screen": "Tela {index} de {count}",
   "submit.nav.validating": "Validando…",
   "submit.validation.api_key_required": "Insira uma chave de API — não está definida no ambiente nem foi inserida manualmente",
   "submit.validation.dataset_required": "Carregue um arquivo de conjunto de dados",
