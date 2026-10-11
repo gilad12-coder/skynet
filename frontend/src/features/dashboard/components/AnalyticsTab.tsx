@@ -87,7 +87,6 @@ function AnalyticsTabImpl({
     setRuntime,
     setDataset,
     hasFilters,
-    clearAll,
     key: filterKey,
   } = filters;
 
@@ -127,7 +126,7 @@ function AnalyticsTabImpl({
       return (
         <div className="space-y-6">
           {toolbar}
-          <AnalyticsEmpty variant="no-results" onClearFilters={clearAll} />
+          <AnalyticsEmpty variant="no-results" />
         </div>
       );
     }
@@ -208,11 +207,7 @@ function AnalyticsTabImpl({
 
             <StaggerItem>
               <AnalyticsSection
-                title={
-                  <HelpTip text={tip("analytics.improvement_histogram")}>
-                    {msg("dashboard.analytics.section_distributions")}
-                  </HelpTip>
-                }
+                title={msg("dashboard.analytics.section_distributions")}
                 className="border-border/60"
               >
                 <div className="grid gap-6 md:grid-cols-2">
@@ -226,11 +221,7 @@ function AnalyticsTabImpl({
                     />
                   </div>
                   <div className="min-w-0">
-                    <PanelHeading>
-                      <HelpTip text={tip("analytics.runtime_histogram")}>
-                        {msg("auto.features.dashboard.components.analyticstab.26")}
-                      </HelpTip>
-                    </PanelHeading>
+                    <PanelHeading>{msg("auto.features.dashboard.components.analyticstab.26")}</PanelHeading>
                     <RangeHistogram
                       data={chartData.runtimeHistogram}
                       unitLabel={msg("dashboard.analytics.axis_minutes")}

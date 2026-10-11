@@ -191,7 +191,7 @@ export function ReactServeApi({ optimizationId }: ReactServeApiProps) {
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
-          <HelpTip text={tip("serve.section_run")}>{msg("optimizations.react.api_title")}</HelpTip>
+          {msg("optimizations.react.api_title")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -215,9 +215,7 @@ export function ReactServeApi({ optimizationId }: ReactServeApiProps) {
 
         <div className="space-y-2">
           <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
-            <HelpTip text={tip("serve.integration_code")}>
-              {msg("auto.app.optimizations.id.page.26")}
-            </HelpTip>
+            {msg("auto.app.optimizations.id.page.26")}
           </p>
           <CodeEditor
             value={snippet}

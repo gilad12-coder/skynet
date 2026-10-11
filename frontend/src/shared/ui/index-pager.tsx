@@ -3,7 +3,6 @@
 import { CaretLeft, CaretRight } from "@/shared/ui/icons";
 import { cn } from "@/shared/lib/utils";
 import { arrowPageStep } from "@/shared/lib/arrow-paging";
-import { TooltipButton } from "@/shared/ui/tooltip-button";
 
 interface IndexPagerProps {
   currentIndex: number;
@@ -46,31 +45,27 @@ export function IndexPager({
         if (step > 0 ? !atLast : !atFirst) onChange(currentIndex + step);
       }}
     >
-      <TooltipButton tooltip={prevLabel} side="top">
-        <button
-          type="button"
-          onClick={() => onChange(currentIndex - 1)}
-          disabled={atFirst}
-          className="inline-flex size-[44px] lg:size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-          aria-label={prevLabel}
-        >
-          <CaretLeft className="size-4" />
-        </button>
-      </TooltipButton>
+      <button
+        type="button"
+        onClick={() => onChange(currentIndex - 1)}
+        disabled={atFirst}
+        className="inline-flex size-[44px] lg:size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+        aria-label={prevLabel}
+      >
+        <CaretLeft className="size-4" />
+      </button>
       <span className="font-mono tabular-nums px-1.5 min-w-[2.25rem] text-center text-foreground/80 select-none">
         {currentIndex + 1}/{total}
       </span>
-      <TooltipButton tooltip={nextLabel} side="top">
-        <button
-          type="button"
-          onClick={() => onChange(currentIndex + 1)}
-          disabled={atLast}
-          className="inline-flex size-[44px] lg:size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-          aria-label={nextLabel}
-        >
-          <CaretRight className="size-4" />
-        </button>
-      </TooltipButton>
+      <button
+        type="button"
+        onClick={() => onChange(currentIndex + 1)}
+        disabled={atLast}
+        className="inline-flex size-[44px] lg:size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+        aria-label={nextLabel}
+      >
+        <CaretRight className="size-4" />
+      </button>
     </div>
   );
 }

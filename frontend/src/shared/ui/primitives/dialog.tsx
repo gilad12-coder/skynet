@@ -56,7 +56,7 @@ function DialogContent({
           // push the actions off-screen; a dialog with its own fixed header and
           // footer overrides the overflow and scrolls its middle instead.
           "max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain",
-          "fixed grid w-full max-w-[calc(100%-2rem)] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-[min(32rem,92vw)]",
+          "fixed grid w-full max-w-[calc(100%-2rem)] gap-4 rounded-lg border bg-background p-6 shadow-[var(--shadow-float)] duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-[min(32rem,92vw)]",
           className,
         )}
         style={{ zIndex: 50, top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}

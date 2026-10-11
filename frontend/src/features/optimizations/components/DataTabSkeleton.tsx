@@ -46,7 +46,7 @@ export function DataTabSkeleton({ optimizationId }: { optimizationId?: string })
         </div>
       </div>
 
-      <div className="rounded-2xl border border-[#E5DDD4] bg-gradient-to-l from-[#FAF8F5] to-[#F5F1EC] p-4 space-y-3">
+      <div className="rounded-2xl border border-border-subtle bg-muted/40 p-4 space-y-3">
         <div className="flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <Skeleton width={140} height={14} />

@@ -6,11 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { useSettingsModal, useUserPrefs } from "@/features/settings";
-import {
-  updateModelPrivacy,
-  updateNotificationPreferences,
-  type InterviewOption,
-} from "@/shared/lib/api";
+import { updateModelPrivacy, type InterviewOption } from "@/shared/lib/api";
 import { msg, type MessageKey } from "@/shared/lib/messages";
 import {
   FULL_TRANSLATION_LOCALES,
@@ -22,17 +18,14 @@ import { useLocale } from "@/shared/providers";
 import { cn } from "@/shared/lib/utils";
 import { QuestionChoices } from "@/shared/ui/agent";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
-import { ArrowRight, Compass, FadersHorizontal, Wrench, X } from "@/shared/ui/icons";
+import { ArrowRight, X } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
-import { Segmented } from "@/shared/ui/segmented";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { SubmitSplashOverlay, SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 import type { ModelDataPolicy } from "@/shared/types/api";
 
 import { EXPERIENCE_LEVELS, type ExperienceLevel } from "../lib/abstraction";
 import {
   buildExperiencePatch,
-  buildNotificationPatch,
   clearIntakeDraft,
   emptyDraft,
   languageChoices,
@@ -47,13 +40,17 @@ import {
   type IntakeLlmPhase,
   type IntakeTrustMode,
 } from "../lib/intake";
-import { SETUP_SETTING_EVENT, SETUP_STOPS, type SetupSettingDetail } from "../lib/setup-tour";
+import {
+  SETUP_SETTING_EVENT,
+  arrowStep,
+  resumeStopIndex,
+  setupStops,
+  type SetupSettingDetail,
+} from "../lib/setup-tour";
 import { useExperienceOptional } from "../providers/experience-provider";
 import { LEVEL_KEYS } from "./level-keys";
 import { SetupTour } from "./SetupTour";
 import { TOUCH_TAP_SQUARE } from "./touch";
-
-const LEVEL_ICONS = { guided: Compass, standard: FadersHorizontal, expert: Wrench } as const;
 
 const PRIVACY_OPTIONS: ReadonlyArray<{
   value: ModelDataPolicy;
@@ -76,16 +73,6 @@ const PRIVACY_OPTIONS: ReadonlyArray<{
     description: "settings.model_privacy.zdr.description",
   },
 ];
-
-const CADENCE_OPTIONS = [
-  ["done", "experience.notify.cadence.done", "experience.notify.cadence.done_tip"],
-  [
-    "milestones",
-    "experience.notify.cadence.milestones",
-    "experience.notify.cadence.milestones_tip",
-  ],
-  ["live", "experience.notify.cadence.live", "experience.notify.cadence.live_tip"],
-] as const satisfies ReadonlyArray<readonly [string, MessageKey, MessageKey]>;
 
 const TRUST_OPTIONS: ReadonlyArray<{
   value: IntakeTrustMode;
@@ -120,14 +107,15 @@ const TRUST_OPTIONS: ReadonlyArray<{
  */
 const APP_GLANCE_MS = 2000;
 const SPLASH_EASE: Transition["ease"] = [0.16, 1, 0.3, 1];
-const SPLASH_GROUND = "#F0EBE4";
+// A token, so the panel follows the light/dark theme.
+const SPLASH_GROUND = "var(--splash-ground)";
 const PANEL_S = 0.5;
 const WORDMARK_DELAY_S = 0.3;
 const WORDMARK_S = 0.4;
 /** The title follows the wordmark in; the entrance is fully in once it lands. */
 const TITLE_DELAY_S = WORDMARK_DELAY_S + WORDMARK_S - 0.1;
 const TITLE_IN_MS = (TITLE_DELAY_S + WORDMARK_S) * 1000;
-const TITLE_HOLD_MS = 2000;
+const TITLE_HOLD_MS = 1250;
 const STEP_S = 0.35;
 const REDUCED_S = 0.2;
 /*
@@ -224,26 +212,40 @@ function IntakeSurface() {
       ? resumeAfterLanguageSwitch(stored, resume, locale)
       : (stored ?? emptyDraft());
     // A setup already under way picks up where it was, without the entrance again.
+    // Back from a language switch, the panel shows once more so it can slide up off the tour.
     const stage: Stage = draft.answered.includes("language")
-      ? "tour"
+      ? resume
+        ? "language"
+        : "tour"
       : experience.rerunning
         ? "title"
         : "glance";
-    return { draft, stage };
+    // Back from a sign-in that left the page (Slack, a connector): the same stop.
+    const stopIndex = draft.answered.includes("language")
+      ? resumeStopIndex(setupStops(draft.answers.billing), draft.stop)
+      : 0;
+    return { draft, stage, stopIndex, resumed: !!resume };
   });
   const [draft, setDraft] = React.useState<IntakeDraft>(initial.draft);
   const [stage, setStage] = React.useState<Stage>(initial.stage);
-  const [stopIndex, setStopIndex] = React.useState(0);
+  const [stopIndex, setStopIndex] = React.useState(initial.stopIndex);
   const [finale, setFinale] = React.useState<Finale>("none");
+  /*
+   * The tour waits for the panel to finish sliding up: its dim and card sit
+   * above the panel, so showing them at once would cover the curtain.
+   */
+  const [curtainUp, setCurtainUp] = React.useState(initial.stage === "tour");
   /** The stop whose question was just answered; it moves on after the hold. */
   const [answeredStop, setAnsweredStop] = React.useState<number | null>(null);
   const { openGuided, setOpen: setSettingsOpen } = useSettingsModal();
 
   const { answers } = draft;
+  const stops = setupStops(answers.billing);
+  const stop = stops[Math.min(stopIndex, stops.length - 1)]!;
 
   React.useEffect(() => {
-    writeIntakeDraft(draft);
-  }, [draft]);
+    writeIntakeDraft({ ...draft, stop: stop.id });
+  }, [draft, stop.id]);
 
   React.useEffect(() => {
     if (stage !== "glance" && stage !== "title") return;
@@ -257,8 +259,7 @@ function IntakeSurface() {
 
   // A stop about a setting Settings holds opens it there, framed behind the
   // card; moving on, going back, skipping or finishing closes it again.
-  const settingsTab =
-    stage === "tour" && finale === "none" ? SETUP_STOPS[stopIndex]!.settings : undefined;
+  const settingsTab = stage === "tour" && finale === "none" ? stop.settings : undefined;
   React.useEffect(() => {
     if (!settingsTab) return;
     openGuided(settingsTab);
@@ -305,16 +306,9 @@ function IntakeSurface() {
       byok_provider: answers.billing === "byok" ? answers.byok_provider : null,
     };
     if (final.trust) setPref("agentTrustMode", final.trust);
-    await Promise.all([
-      final.privacy
-        ? updateModelPrivacy({ data_policy: final.privacy }).catch(() => undefined)
-        : undefined,
-      draft.answered.includes("emails")
-        ? updateNotificationPreferences(buildNotificationPatch(final.notifications)).catch(
-            () => undefined,
-          )
-        : undefined,
-    ]);
+    if (final.privacy) {
+      await updateModelPrivacy({ data_policy: final.privacy }).catch(() => undefined);
+    }
     return final;
   };
 
@@ -356,18 +350,18 @@ function IntakeSurface() {
     setLocale(next);
   };
 
-  const stop = SETUP_STOPS[stopIndex]!;
-
   const goNext = () => {
     setAnsweredStop(null);
-    if (stopIndex === SETUP_STOPS.length - 1) void finish();
+    if (stopIndex >= stops.length - 1) void finish();
     else setStopIndex(stopIndex + 1);
   };
 
   const goBack = () => {
     setAnsweredStop(null);
-    if (stopIndex === 0) setStage("language");
-    else setStopIndex(stopIndex - 1);
+    if (stopIndex === 0) {
+      setCurtainUp(false);
+      setStage("language");
+    } else setStopIndex(stopIndex - 1);
   };
 
   const advanceAfterAnswer = React.useEffectEvent(() => {
@@ -378,6 +372,26 @@ function IntakeSurface() {
     const timer = setTimeout(() => advanceAfterAnswer(), ANSWER_HOLD_MS);
     return () => clearTimeout(timer);
   }, [answeredStop]);
+
+  // Back from a language switch: the panel came back down already, now it lifts off the tour.
+  React.useEffect(() => {
+    if (initial.resumed) setStage("tour");
+  }, [initial.resumed]);
+
+  // The language screen reads left to right in English, so the right arrow continues.
+  const onLanguageArrow = React.useEffectEvent((event: KeyboardEvent) => {
+    if (arrowStep(event, false) !== 1) return;
+    event.preventDefault();
+    const picked =
+      draft.answered.includes("language") && isLocale(answers.language) ? answers.language : null;
+    chooseLanguage(picked ?? locale);
+  });
+  React.useEffect(() => {
+    if (stage !== "language") return;
+    const listener = (event: KeyboardEvent) => onLanguageArrow(event);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, [stage]);
   const keepCurrent: InterviewOption = {
     label: msg("experience.intake.chat.keep_current"),
     description: msg("experience.intake.chat.keep_current_description"),
@@ -386,30 +400,23 @@ function IntakeSurface() {
   const renderQuestion = () => {
     switch (stop.question) {
       case "level": {
-        const level = answers.level_chosen ? answers.level : null;
+        // Answer cards, not the Settings segmented control, whose descriptions
+        // hide in tooltips; the stop's card is wide, so they sit in a row.
+        const options = EXPERIENCE_LEVELS.map((value) => ({
+          label: msg(LEVEL_KEYS[value].label),
+          description: msg(LEVEL_KEYS[value].description),
+        }));
+        const chosen = answers.level_chosen ? EXPERIENCE_LEVELS.indexOf(answers.level) : -1;
         return (
-          <Segmented
-            value={level}
-            onChange={chooseLevel}
-            label={msg("experience.level.title")}
-            options={EXPERIENCE_LEVELS.map((value) => {
-              const LevelIcon = LEVEL_ICONS[value];
-              return {
-                value,
-                label: msg(LEVEL_KEYS[value].label),
-                tip: msg(LEVEL_KEYS[value].description),
-                icon: (
-                  <LevelIcon
-                    aria-hidden="true"
-                    weight={value === level ? "fill" : "bold"}
-                    className={cn(
-                      "size-3.5 shrink-0 transition-colors duration-200",
-                      value === level ? "text-primary" : "text-current",
-                    )}
-                  />
-                ),
-              };
-            })}
+          <Choices
+            options={options}
+            selected={chosen >= 0 ? options[chosen]!.label : []}
+            ariaLabel={msg("experience.level.title")}
+            className="sm:[&>div]:grid-cols-3"
+            onSelect={(_, index) => {
+              const level = EXPERIENCE_LEVELS[index];
+              if (level) chooseLevel(level);
+            }}
           />
         );
       }
@@ -467,25 +474,6 @@ function IntakeSurface() {
           />
         );
       }
-      case "emails": {
-        const options = CADENCE_OPTIONS.map(([, label, tip]) => ({
-          label: msg(label),
-          description: msg(tip),
-        }));
-        const current = CADENCE_OPTIONS.find(([value]) => value === answers.notifications.cadence);
-        return (
-          <Choices
-            options={options}
-            selected={draft.answered.includes("emails") && current ? msg(current[1]) : []}
-            ariaLabel={msg("experience.intake.emails.title")}
-            onSelect={(_, index) => {
-              const cadence = CADENCE_OPTIONS[index]![0];
-              answerStop("emails", { notifications: { ...answers.notifications, cadence } });
-              tellSettings({ cadence });
-            }}
-          />
-        );
-      }
       case "trust": {
         const options: InterviewOption[] = [
           ...TRUST_OPTIONS.map((o) => ({ label: msg(o.label), description: msg(o.description) })),
@@ -520,26 +508,6 @@ function IntakeSurface() {
 
   if (stage === "glance") return null;
 
-  if (stage === "tour") {
-    return (
-      <>
-        {finale === "none" && (
-          <SetupTour
-            stop={stop}
-            index={stopIndex}
-            total={SETUP_STOPS.length}
-            onSkip={skip}
-            onBack={goBack}
-            onNext={goNext}
-          >
-            {renderQuestion()}
-          </SetupTour>
-        )}
-        {splashOverlay}
-      </>
-    );
-  }
-
   const fade: Transition = { duration: REDUCED_S, ease: "easeOut" };
   const splash = (delay = 0, duration = WORDMARK_S): Transition =>
     reduceMotion ? fade : { duration, delay, ease: SPLASH_EASE };
@@ -562,129 +530,142 @@ function IntakeSurface() {
   const picked =
     draft.answered.includes("language") && isLocale(answers.language) ? answers.language : null;
 
-  const navTip = (label: string, button: React.ReactElement) => (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent dir="ltr">{label}</TooltipContent>
-    </Tooltip>
-  );
-
   return (
-    <DialogPrimitive.Root open modal>
-      <DialogPrimitive.Portal forceMount>
-        <DialogPrimitive.Content
-          asChild
-          forceMount
-          aria-describedby={undefined}
-          // Leaving is the Skip button only; a stray Escape never drops the answers.
-          onEscapeKeyDown={(e) => e.preventDefault()}
-          onInteractOutside={(e) => e.preventDefault()}
+    <>
+      {stage === "tour" && curtainUp && finale === "none" && (
+        <SetupTour
+          stop={stop}
+          index={stopIndex}
+          total={stops.length}
+          onSkip={skip}
+          onBack={goBack}
+          onNext={goNext}
         >
-          {/* The splash's panel: down from the top on the way in, back up on the way out. */}
-          <motion.div
-            className="fixed inset-0 isolate flex h-dvh flex-col overflow-hidden text-foreground outline-none"
-            dir="ltr"
-            lang="en"
-            style={{ zIndex: 50, backgroundColor: SPLASH_GROUND, fontFamily: ENGLISH_FONT }}
-            initial={reduceMotion ? { opacity: 0 } : { y: "-100%" }}
-            animate={reduceMotion ? { opacity: 1 } : { y: 0 }}
-            exit={reduceMotion ? { opacity: 0 } : { y: "-100%" }}
-            transition={reduceMotion ? fade : { duration: PANEL_S, ease: SPLASH_EASE }}
-          >
-            <DialogPrimitive.Title className="sr-only">
-              {en("experience.intake.entrance.title")}
-            </DialogPrimitive.Title>
-
-            <AnimatePresence mode="wait" initial={false}>
-              {stage === "title" ? (
+          {renderQuestion()}
+        </SetupTour>
+      )}
+      <AnimatePresence initial={!initial.resumed} onExitComplete={() => setCurtainUp(true)}>
+        {stage !== "tour" && (
+          <DialogPrimitive.Root key="setup-panel" open modal>
+            <DialogPrimitive.Portal forceMount>
+              <DialogPrimitive.Content
+                asChild
+                forceMount
+                aria-describedby={undefined}
+                // Leaving is the Skip button only; a stray Escape never drops the answers.
+                onEscapeKeyDown={(e) => e.preventDefault()}
+                onInteractOutside={(e) => e.preventDefault()}
+              >
+                {/* The splash's panel: down from the top on the way in, back up on the way out. */}
                 <motion.div
-                  key="title"
-                  className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[clamp(1.5rem,6dvh,3rem)] px-6 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
-                  exit={step.exit}
-                  transition={stepTransition}
+                  className="fixed inset-0 isolate flex h-dvh flex-col overflow-hidden text-foreground outline-none"
+                  dir="ltr"
+                  lang="en"
+                  style={{ zIndex: 50, backgroundColor: SPLASH_GROUND, fontFamily: ENGLISH_FONT }}
+                  initial={reduceMotion ? { opacity: 0 } : { y: "-100%" }}
+                  animate={reduceMotion ? { opacity: 1 } : { y: 0 }}
+                  exit={reduceMotion ? { opacity: 0 } : { y: "-100%" }}
+                  transition={reduceMotion ? fade : { duration: PANEL_S, ease: SPLASH_EASE }}
                 >
-                  <motion.div
-                    initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={splash(WORDMARK_DELAY_S)}
-                  >
-                    <AnimatedWordmark size={64} autoMorph={!reduceMotion} morphSpeed={120} />
-                  </motion.div>
-                  <motion.p
-                    aria-hidden
-                    className="max-w-[16ch] text-center [font-family:var(--font-display)] [font-optical-sizing:auto] text-[clamp(2.25rem,min(11vw,9dvh),4.5rem)] font-semibold leading-[1.05] tracking-tight text-balance"
-                    initial={step.initial}
-                    animate={step.animate}
-                    transition={splash(TITLE_DELAY_S)}
-                  >
+                  <DialogPrimitive.Title className="sr-only">
                     {en("experience.intake.entrance.title")}
-                  </motion.p>
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="language"
-                  className="flex min-h-0 flex-1 flex-col bg-background"
-                  {...step}
-                  transition={stepTransition}
-                >
-                  {/* The question and its buttons sit as one group in the optical
+                  </DialogPrimitive.Title>
+
+                  <AnimatePresence mode="wait" initial={false}>
+                    {stage === "title" ? (
+                      <motion.div
+                        key="title"
+                        // The bottom padding lifts the pair to the optical middle of the screen.
+                        className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[clamp(1rem,2.5dvh,1.5rem)] px-6 pt-[env(safe-area-inset-top)] pb-[calc(env(safe-area-inset-bottom)+6dvh)]"
+                        exit={step.exit}
+                        transition={stepTransition}
+                      >
+                        <motion.div
+                          // Fluid, so the wordmark narrows with a phone instead of overflowing it.
+                          className="w-[min(20.5rem,72vw)] [&_svg]:![color:var(--splash-ink)]"
+                          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={splash(WORDMARK_DELAY_S)}
+                        >
+                          <AnimatedWordmark fluid autoMorph={!reduceMotion} morphSpeed={120} />
+                        </motion.div>
+                        <motion.p
+                          aria-hidden
+                          className="whitespace-nowrap text-center [font-family:var(--font-display)] [font-optical-sizing:auto] text-[clamp(1rem,2.4vw,1.5rem)] font-medium leading-snug tracking-tight text-[color-mix(in_oklab,var(--splash-ink)_72%,transparent)]"
+                          initial={step.initial}
+                          animate={step.animate}
+                          transition={splash(TITLE_DELAY_S)}
+                        >
+                          {en("experience.intake.entrance.title")}
+                        </motion.p>
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key="language"
+                        className="flex min-h-0 flex-1 flex-col bg-background"
+                        {...step}
+                        transition={stepTransition}
+                      >
+                        {/* The question and its buttons sit as one group in the optical
                       middle of the screen; safe centering keeps the top in view
                       when a short screen has no room to spare. */}
-                  <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-6 px-5 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] [justify-content:safe_center] sm:gap-8 sm:px-7 [@media(max-height:700px)]:gap-4">
-                    <section className="flex min-h-0 flex-col gap-4 sm:gap-6 [@media(max-height:700px)]:gap-3">
-                      <div className="flex flex-col gap-1.5">
-                        <h2 className="text-xl font-semibold leading-snug tracking-tight text-balance sm:text-3xl [@media(max-height:700px)]:text-xl">
-                          {en("experience.intake.language.title")}
-                        </h2>
-                        <p className="text-sm leading-relaxed text-muted-foreground sm:text-base [@media(max-height:700px)]:text-sm">
-                          {en("experience.intake.language.hint")}
-                        </p>
-                      </div>
-                      <Choices
-                        options={languageOptions}
-                        selected={(picked && languageOptions[choices.indexOf(picked)]?.label) || []}
-                        ariaLabel={en("experience.intake.language.title")}
-                        // Seventeen languages fit as a three-column grid (two on a
-                        // phone, where each card shows only the language's own name).
-                        className="[&>div]:grid-cols-2 sm:[&>div]:grid-cols-3 sm:[&_button]:py-2.5 max-sm:[&_[dir=auto]+[dir=auto]]:hidden [@media(min-height:860px)]:sm:[&_button]:py-3 [@media(max-height:700px)]:[&_button]:py-1.5"
-                        onSelect={(_, index) => chooseLanguage(choices[index] ?? locale)}
-                      />
-                    </section>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {navTip(
-                        en("experience.intake.skip"),
-                        <Button
-                          variant="ghost"
-                          size="icon-lg"
-                          className={cn(
-                            TOUCH_TAP_SQUARE,
-                            "-ms-3 text-muted-foreground hover:text-foreground",
-                          )}
-                          aria-label={en("experience.intake.skip")}
-                          onClick={skip}
-                        >
-                          <X className="size-4" aria-hidden />
-                        </Button>,
-                      )}
-                      {navTip(
-                        en("experience.intake.next"),
-                        <Button
-                          size="icon-lg"
-                          className={cn(TOUCH_TAP_SQUARE, "ms-auto")}
-                          aria-label={en("experience.intake.next")}
-                          onClick={() => chooseLanguage(picked ?? locale)}
-                        >
-                          <ArrowRight className="size-4" aria-hidden />
-                        </Button>,
-                      )}
-                    </div>
-                  </div>
+                        <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-6 px-5 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] [justify-content:safe_center] sm:gap-8 sm:px-7 [@media(max-height:700px)]:gap-4">
+                          <section className="flex min-h-0 flex-col gap-4 sm:gap-6 [@media(max-height:700px)]:gap-3">
+                            <div className="flex flex-col gap-1.5">
+                              <h2 className="text-xl font-semibold leading-snug tracking-tight text-balance sm:text-3xl [@media(max-height:700px)]:text-xl">
+                                {en("experience.intake.language.title")}
+                              </h2>
+                              <p className="text-sm leading-relaxed text-muted-foreground sm:text-base [@media(max-height:700px)]:text-sm">
+                                {en("experience.intake.language.hint")}
+                              </p>
+                            </div>
+                            <Choices
+                              options={languageOptions}
+                              selected={
+                                (picked && languageOptions[choices.indexOf(picked)]?.label) || []
+                              }
+                              ariaLabel={en("experience.intake.language.title")}
+                              // Seventeen languages fit as a three-column grid (two on a
+                              // phone, where each card shows only the language's own name).
+                              className="[&>div]:grid-cols-2 sm:[&>div]:grid-cols-3 sm:[&_button]:py-2.5 max-sm:[&_[dir=auto]+[dir=auto]]:hidden [@media(min-height:860px)]:sm:[&_button]:py-3 [@media(max-height:700px)]:[&_button]:py-1.5"
+                              onSelect={(_, index) => chooseLanguage(choices[index] ?? locale)}
+                            />
+                          </section>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon-lg"
+                              className={cn(
+                                TOUCH_TAP_SQUARE,
+                                "-ms-3 text-muted-foreground hover:text-foreground",
+                              )}
+                              autoTooltip={false}
+                              aria-label={en("experience.intake.skip")}
+                              onClick={skip}
+                            >
+                              <X className="size-4" aria-hidden />
+                            </Button>
+                            <Button
+                              size="icon-lg"
+                              className={cn(TOUCH_TAP_SQUARE, "ms-auto")}
+                              autoTooltip={false}
+                              aria-label={en("experience.intake.next")}
+                              onClick={() => chooseLanguage(picked ?? locale)}
+                            >
+                              <ArrowRight className="size-4" aria-hidden />
+                            </Button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+              </DialogPrimitive.Content>
+            </DialogPrimitive.Portal>
+          </DialogPrimitive.Root>
+        )}
+      </AnimatePresence>
+      {splashOverlay}
+    </>
   );
 }

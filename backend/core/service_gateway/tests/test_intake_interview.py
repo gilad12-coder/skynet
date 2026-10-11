@@ -127,7 +127,6 @@ def test_validate_patch_coerces_enums_and_drops_invalid_keys() -> None:
             "byok_provider": "OpenAI",
             "budget_usd": -3,
             "privacy": "deny",
-            "email_cadence": "weekly",
             "trust": "auto-safe",
             "code_assist": "Auto",
             "split_mode": "manual",
@@ -173,22 +172,21 @@ def test_answered_phases() -> None:
     assert answered_phases(
         {
             "privacy": "zdr",
-            "email_cadence": "live",
             "trust": "ask",
             "level": "expert",
         }
-    ) == ["privacy", "emails", "trust"]
+    ) == ["privacy", "trust"]
 
 
 def test_every_agenda_phase_runs_on_the_model() -> None:
     """The model runs the whole agenda, which is settings only, and every phase has a brief."""
     assert LLM_PHASES == AGENDA
-    assert AGENDA == ("billing", "privacy", "emails", "trust")
+    assert AGENDA == ("billing", "privacy", "trust")
     assert set(_PHASE_BRIEFS) == set(AGENDA)
     # A default option appears only where the default is not already a concrete answer.
     for phase in ("privacy", "trust"):
         assert "end the options with 'Use the default'" in _PHASE_BRIEFS[phase]
-    for phase in ("billing", "emails"):
+    for phase in ("billing",):
         assert "never" in _PHASE_BRIEFS[phase]
         assert "end the options with 'Use the default'" not in _PHASE_BRIEFS[phase]
 

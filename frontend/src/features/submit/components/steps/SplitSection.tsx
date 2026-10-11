@@ -17,14 +17,17 @@ import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
-import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
+import type { SplitFractions } from "@/shared/types/api";
 import { SplitRecommendationCard, type SplitPlanControls } from "../SplitRecommendationCard";
 import { splitExampleCounts } from "../../lib/split-example-counts";
 import { GuidedChoiceLine, isVisible, useExperienceLevel } from "@/features/experience";
 import { useSettingsModal } from "@/features/settings";
 
-export type SplitControls = SplitPlanControls &
-  Pick<SubmitWizardContext, "split" | "updateSplit" | "splitSum">;
+export interface SplitControls extends SplitPlanControls {
+  split: SplitFractions;
+  updateSplit: (field: keyof SplitFractions, value: string) => void;
+  splitSum: number;
+}
 
 // The recommendation card carries the mode switch; the manual fractions
 // only appear once the user picks manual selection, each with the number
@@ -45,7 +48,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
 
   return (
     <Card
-      className="border-border/50 bg-card/80 backdrop-blur-xl shadow-lg"
+      className="border-border/50 bg-card/80 backdrop-blur-xl"
       data-tutorial="wizard-step-6"
     >
       <CardHeader className="px-4 sm:px-6">
@@ -81,22 +84,22 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
               <div className="space-y-3">
                 <div className="flex h-3 rounded-full overflow-hidden">
                   <div
-                    className="bg-[#3D2E22] transition-all"
+                    className="bg-primary-fill transition-all"
                     style={{ width: `${split.train * 100}%` }}
                   />
                   <div
-                    className="bg-[#C8A882] transition-all"
+                    className="bg-chart-3 transition-all"
                     style={{ width: `${split.val * 100}%` }}
                   />
                   <div
-                    className="bg-[#8C7A6B] transition-all"
+                    className="bg-muted-foreground transition-all"
                     style={{ width: `${split.test * 100}%` }}
                   />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-1">
                     <Label htmlFor="split-train" className="flex items-center gap-1.5 text-xs">
-                      <span className="inline-block w-2 h-2 rounded-full bg-[#3D2E22]" />
+                      <span className="inline-block w-2 h-2 rounded-full bg-primary-fill" />
                       <HelpTip text={tip("data.split.train")}>
                         {msg("submit.split.label_train")}
                       </HelpTip>
@@ -111,7 +114,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
                     />
                     {totalRows > 0 && (
                       <p
-                        className="text-xs tabular-nums text-[#8C7A6B]"
+                        className="text-xs tabular-nums text-muted-foreground"
                         aria-live="polite"
                         dir="auto"
                       >
@@ -121,7 +124,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="split-val" className="flex items-center gap-1.5 text-xs">
-                      <span className="inline-block w-2 h-2 rounded-full bg-[#C8A882]" />
+                      <span className="inline-block w-2 h-2 rounded-full bg-chart-3" />
                       <HelpTip text={tip("data.split.val")}>
                         {msg("submit.split.label_val")}
                       </HelpTip>
@@ -136,7 +139,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
                     />
                     {totalRows > 0 && (
                       <p
-                        className="text-xs tabular-nums text-[#8C7A6B]"
+                        className="text-xs tabular-nums text-muted-foreground"
                         aria-live="polite"
                         dir="auto"
                       >
@@ -146,7 +149,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="split-test" className="flex items-center gap-1.5 text-xs">
-                      <span className="inline-block w-2 h-2 rounded-full bg-[#8C7A6B]" />
+                      <span className="inline-block w-2 h-2 rounded-full bg-muted-foreground" />
                       <HelpTip text={tip("data.split.test")}>
                         {msg("submit.split.label_test")}
                       </HelpTip>
@@ -161,7 +164,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
                     />
                     {totalRows > 0 && (
                       <p
-                        className="text-xs tabular-nums text-[#8C7A6B]"
+                        className="text-xs tabular-nums text-muted-foreground"
                         aria-live="polite"
                         dir="auto"
                       >

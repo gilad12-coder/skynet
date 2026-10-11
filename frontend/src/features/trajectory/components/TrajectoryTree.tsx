@@ -28,29 +28,29 @@ import {
   CanvasControlGroup,
 } from "@/shared/ui/canvas-control-button";
 
-const EDGE_STROKE = "rgba(124, 99, 80, 0.42)";
-const EDGE_STROKE_MERGE = "rgba(124, 99, 80, 0.3)";
-const EDGE_STROKE_GHOST = "rgba(124, 99, 80, 0.28)";
-const NODE_CORE_FILL = "#fdfaf4";
-const NODE_CORE_STROKE = "rgba(28, 22, 18, 0.16)";
-const NODE_CORE_STROKE_HOVER = "rgba(28, 22, 18, 0.42)";
-const NODE_CORE_STROKE_SELECTED = "#1c1612";
-const DONUT_PASS_FILL = "#7C8B5A";
-const DONUT_FAIL_FILL = "#B26B4A";
+const EDGE_STROKE = "color-mix(in srgb, var(--muted-foreground) 42%, transparent)";
+const EDGE_STROKE_MERGE = "color-mix(in srgb, var(--muted-foreground) 30%, transparent)";
+const EDGE_STROKE_GHOST = "color-mix(in srgb, var(--muted-foreground) 28%, transparent)";
+const NODE_CORE_FILL = "var(--card)";
+const NODE_CORE_STROKE = "color-mix(in srgb, var(--foreground) 16%, transparent)";
+const NODE_CORE_STROKE_HOVER = "color-mix(in srgb, var(--foreground) 42%, transparent)";
+const NODE_CORE_STROKE_SELECTED = "var(--foreground)";
+const DONUT_PASS_FILL = "var(--tree-pass)";
+const DONUT_FAIL_FILL = "var(--tree-fail)";
 const DONUT_RING_THICKNESS = 8;
 // Track under the black-box score arc — same brown as the lineage edges.
-const SCORE_TRACK_STROKE = "rgba(124, 99, 80, 0.14)";
-const GHOST_FILL = "#E8E0D3";
-const GHOST_STROKE = "rgba(124, 99, 80, 0.5)";
-const GHOST_STROKE_HOVER = "rgba(124, 99, 80, 0.85)";
-const WINNER_INDICATOR = "#9C7A3F";
-const WINNER_HALO = "rgba(156, 122, 63, 0.18)";
-const WINNER_FILL = "#F8EBC8";
-const WINNER_BADGE_FILL = "#9C7A3F";
-const WINNER_BADGE_INK = "#FBF4DF";
+const SCORE_TRACK_STROKE = "color-mix(in srgb, var(--muted-foreground) 14%, transparent)";
+const GHOST_FILL = "var(--tree-ghost-fill)";
+const GHOST_STROKE = "color-mix(in srgb, var(--muted-foreground) 50%, transparent)";
+const GHOST_STROKE_HOVER = "color-mix(in srgb, var(--muted-foreground) 85%, transparent)";
+const WINNER_INDICATOR = "var(--tree-winner)";
+const WINNER_HALO = "var(--tree-winner-halo)";
+const WINNER_FILL = "var(--tree-winner-fill)";
+const WINNER_BADGE_FILL = "var(--tree-winner)";
+const WINNER_BADGE_INK = "var(--tree-winner-badge-ink)";
 // Painted behind score labels (paint-order: stroke) so they stay legible
 // where a lineage edge or grid line passes underneath.
-const LABEL_HALO = "rgba(250, 248, 245, 0.9)";
+const LABEL_HALO = "color-mix(in srgb, var(--background) 90%, transparent)";
 
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 6;
@@ -60,12 +60,11 @@ const ZOOM_BUTTON_OUT = 0.8;
 const DRAG_THRESHOLD_PX = 4;
 const FIT_PADDING_PX = 32;
 const CONTAINER_HEIGHT_PX = 560;
-// 44px grid step, oklch grid/axis colors, 48px padding from edges before the
-// axes start. Kept local rather than shared to avoid cross-feature coupling
-// for two tiny constants.
+// 44px grid step, 48px padding from edges before the axes start. Kept local
+// rather than shared to avoid cross-feature coupling for two tiny constants.
 const GRID_STEP = 44;
-const GRID_LINE_COLOR = "oklch(0.91 0.006 50)";
-const GRID_AXIS_COLOR = "oklch(0.94 0.005 50)";
+const GRID_LINE_COLOR = "var(--tree-grid)";
+const GRID_AXIS_COLOR = "var(--tree-grid-axis)";
 const AXIS_PADDING_PX = 48;
 // Direct color values — using `hsl(var(--muted))` is invalid because the
 // CSS variables hold hex colors, not h s l components, so the gradient gets
@@ -546,7 +545,7 @@ export function TrajectoryTree({
       className={
         isMaximized
           ? "fixed inset-0 z-50 w-screen h-dvh overflow-hidden border-0"
-          : "relative w-full overflow-hidden rounded-xl border border-[#DDD4C8]/60"
+          : "relative w-full overflow-hidden rounded-xl border border-border/60"
       }
       style={
         isMaximized
@@ -636,7 +635,7 @@ export function TrajectoryTree({
       <CanvasControlGroup
         data-trajectory-controls
         className={
-          isMaximized ? "absolute top-4 start-4 z-20 shadow-md" : "absolute top-3 end-3 z-20"
+          isMaximized ? "absolute top-4 start-4 z-20 shadow-[var(--shadow-float)]" : "absolute top-3 end-3 z-20"
         }
       >
         <CanvasControlButton
@@ -667,7 +666,7 @@ export function TrajectoryTree({
       </CanvasControlGroup>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
-        <div className="pointer-events-auto inline-flex flex-wrap items-center gap-x-1 gap-y-1 rounded-lg border border-[#DDD4C8]/70 bg-background/85 px-2 py-1 text-[11px] font-medium text-muted-foreground/90 backdrop-blur-sm">
+        <div className="pointer-events-auto inline-flex flex-wrap items-center gap-x-1 gap-y-1 rounded-lg border border-border/70 bg-background/85 px-2 py-1 text-[11px] font-medium text-muted-foreground/90 backdrop-blur-sm">
           {ringMode === "pass_fail" ? (
             <>
               <LegendToggle
@@ -753,7 +752,7 @@ export function TrajectoryTree({
             tree is portaled into a viewport-spanning overlay above. */}
         <div
           aria-hidden="true"
-          className="w-full rounded-xl border border-[#DDD4C8]/60 opacity-40"
+          className="w-full rounded-xl border border-border/60 opacity-40"
           style={{ height: CONTAINER_HEIGHT_PX, background: SURFACE_GRADIENT }}
         />
         {createPortal(treeBody, document.body)}
@@ -925,7 +924,7 @@ const TreeContent = memo(function TreeContent({
                 fontFamily="var(--font-mono, monospace)"
                 fontSize="10.5"
                 fontWeight={600}
-                fill="rgba(28, 22, 18, 0.6)"
+                fill="color-mix(in srgb, var(--foreground) 60%, transparent)"
                 stroke={LABEL_HALO}
                 strokeWidth={2.5}
                 strokeLinejoin="round"
@@ -1073,7 +1072,7 @@ const TreeContent = memo(function TreeContent({
                 fontFamily="var(--font-mono, monospace)"
                 fontSize="14"
                 fontWeight={700}
-                fill="#1c1612"
+                fill={winnerShown ? "var(--tree-winner-number)" : "var(--foreground)"}
                 pointerEvents="none"
               >
                 {displayCandidateId(node.candidate_id)}
@@ -1095,7 +1094,7 @@ const TreeContent = memo(function TreeContent({
                   fontFamily="var(--font-mono, monospace)"
                   fontSize="10.5"
                   fontWeight={600}
-                  fill="rgba(28, 22, 18, 0.72)"
+                  fill="color-mix(in srgb, var(--foreground) 72%, transparent)"
                   stroke={LABEL_HALO}
                   strokeWidth={2.5}
                   strokeLinejoin="round"

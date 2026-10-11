@@ -31,7 +31,7 @@ from .code import _build_agent_lm, _reply_language
 from .code_interview import _parse_json, relay_interview_turn
 from .conduct import with_conduct
 
-AGENDA = ("billing", "privacy", "emails", "trust")
+AGENDA = ("billing", "privacy", "trust")
 LLM_PHASES = AGENDA
 MAX_PHASE_QUESTIONS = 2
 MAX_REQUEST_TURNS = 8
@@ -40,7 +40,6 @@ INTAKE_MAX_TOKENS = 4000
 
 BILLING = ("platform", "byok")
 PRIVACY = ("allow", "no_training", "zdr")
-EMAIL_CADENCES = ("done", "milestones", "live")
 # Mirrors ``TrustMode`` in ``agents.generalist``; importing it would pull the
 # whole generalist agent into this module.
 TRUST_MODES = ("ask", "auto_safe", "yolo")
@@ -65,12 +64,6 @@ _PHASE_BRIEFS = {
         "retention: nothing is stored). It applies to every model call made for the "
         "user. The default keeps the account's current setting; end the options with "
         "'Use the default' naming it, and set no privacy key when they pick it."
-    ),
-    "emails": (
-        "Learn when Skynet should email the user about their runs: done (only when a "
-        "run finishes), milestones (at key points of a run) or live (as it goes). "
-        "Offer exactly those three, done first; never add 'Use the default': done is "
-        "the default."
     ),
     "trust": (
         "Learn how freely the assistant may change the wizard for the user: ask "
@@ -114,8 +107,8 @@ class IntakeInterviewTurnSig(dspy.Signature):
     In ``profile_patch_json`` extract every setting the user's own words
     settle so far, for ANY phase of the agenda, omitting keys you do not
     know: billing (platform | byok), byok_provider (one of
-    ``byok_providers``), privacy (allow | no_training | zdr), email_cadence (done | milestones |
-    live), trust (ask | auto_safe | yolo), level. Never ask the level and
+    ``byok_providers``), privacy (allow | no_training | zdr), trust (ask | auto_safe | yolo),
+    level. Never ask the level and
     set it only when the user's own words clearly show it: 'guided' when
     they say they are new to machine learning, 'expert' when they name
     optimizers, data splits, metrics, or DSPy/GEPA settings; otherwise omit
@@ -192,7 +185,6 @@ def validate_profile_patch(raw: Any, *, provider_slugs: Iterable[str]) -> dict[s
         "billing": lambda v: _enum(v, BILLING),
         "byok_provider": lambda v: v.strip().lower() if isinstance(v, str) and v.strip().lower() in slugs else None,
         "privacy": lambda v: _enum(v, PRIVACY, _PRIVACY_ALIASES),
-        "email_cadence": lambda v: _enum(v, EMAIL_CADENCES),
         "trust": lambda v: _enum(v, TRUST_MODES),
         "level": lambda v: _enum(v, LEVELS, _LEVEL_ALIASES),
     }
@@ -221,7 +213,6 @@ def answered_phases(patch: dict[str, Any]) -> list[str]:
     answered = {
         "billing": patch.get("billing") == "platform" or bool(patch.get("byok_provider")),
         "privacy": "privacy" in patch,
-        "emails": "email_cadence" in patch,
         "trust": "trust" in patch,
     }
     return [phase for phase in AGENDA if answered.get(phase)]

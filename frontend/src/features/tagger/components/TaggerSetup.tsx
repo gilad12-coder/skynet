@@ -383,7 +383,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
       </CardHeader>
       <CardContent className="space-y-3">
         {libraryName ? (
-          <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 text-center">
+          <div className="rounded-xl border on-primary p-4 text-center">
             <p className="font-medium text-foreground" dir="auto">
               {libraryName}
             </p>
@@ -407,7 +407,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
           onClick={() => setPickerOpen(true)}
           className={cn(
             "w-full justify-center gap-2",
-            libraryName && "border-primary/40 bg-primary/5 text-primary",
+            libraryName && "on-primary",
           )}
         >
           <Books className="size-4" />
@@ -452,7 +452,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
               }}
               className={cn(
                 "w-full justify-center gap-2",
-                synthetic && "border-primary/40 bg-primary/5 text-primary",
+                synthetic && "on-primary",
               )}
             >
               <Sparkle className="size-4" />
@@ -483,7 +483,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
                       className={cn(
                         "group flex min-h-[44px] w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all",
                         selected
-                          ? "bg-primary/10 border border-primary/40 text-primary font-medium"
+                          ? "border on-primary font-medium"
                           : "border border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                       )}
                     >
@@ -508,9 +508,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
     <Card key="task">
       <CardHeader>
         <CardTitle className="text-lg">
-          <HelpTip text={tip("tagger.mode")}>
-            {msg("auto.features.tagger.components.taggersetup.5")}
-          </HelpTip>
+          {msg("auto.features.tagger.components.taggersetup.5")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -523,8 +521,8 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
               onClick={() => setMode(opt.mode)}
               className={cn(
                 "flex min-w-0 flex-col items-center gap-2 rounded-xl border p-4 text-center transition-all cursor-pointer",
-                "hover:border-primary/40 hover:bg-primary/5",
-                mode === opt.mode ? "border-primary bg-primary/10 shadow-sm" : "border-border/50",
+                "hover:border-primary-fill/40 hover:bg-primary-fill/5",
+                mode === opt.mode ? "on-primary " : "border-border/50",
               )}
             >
               <opt.icon
@@ -556,9 +554,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
               className="space-y-2"
             >
               <p className="text-sm font-medium">
-                <HelpTip text={tip("tagger.binary_question")}>
-                  {msg("auto.features.tagger.components.taggersetup.6")}
-                </HelpTip>
+                {msg("auto.features.tagger.components.taggersetup.6")}
               </p>
               <Input
                 type="text"
@@ -580,9 +576,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
               className="space-y-2"
             >
               <p className="text-sm font-medium">
-                <HelpTip text={tip("tagger.multiclass_categories")}>
-                  {msg("auto.features.tagger.components.taggersetup.7")}
-                </HelpTip>
+                {msg("auto.features.tagger.components.taggersetup.7")}
               </p>
               <p className="text-xs text-muted-foreground">
                 {msg("auto.features.tagger.components.taggersetup.9")}
@@ -644,9 +638,9 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
                 onClick={() => setAssistMode(opt.mode)}
                 className={cn(
                   "flex min-w-0 flex-col gap-0.5 rounded-xl border p-3.5 text-start transition-all cursor-pointer",
-                  "hover:border-primary/40 hover:bg-primary/5",
+                  "hover:border-primary-fill/40 hover:bg-primary-fill/5",
                   "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border/50 disabled:hover:bg-transparent",
-                  selected ? "border-primary bg-primary/10 shadow-sm" : "border-border/50",
+                  selected ? "on-primary " : "border-border/50",
                 )}
               >
                 <span className="flex items-center gap-2">

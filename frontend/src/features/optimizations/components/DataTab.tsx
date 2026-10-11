@@ -40,17 +40,14 @@ type Split = "all" | "train" | "val" | "test";
 type ProgramType = "optimized" | "baseline";
 
 /**
- * Map a score (0–1) to a warm earth-tone color: terracotta → ochre → olive.
+ * Map a score (0–1) onto a single-hue ramp from muted ink to the theme accent.
  *
- * The hue range (35°→130°) is shifted off pure red/green so the scale sits in
- * the same family as the cream/coffee/taupe chrome (#3D2E22, #8C7A6B, #E5DDD4)
- * instead of clashing with it. Constant OKLCH lightness keeps text contrast
- * stable across the cream backgrounds.
+ * One hue keeps the table calm: strong scores read as accent, weak ones fade
+ * back, instead of a red → amber → green traffic light on every row.
  */
 function scoreColor(score: number): string {
-  const t = Math.max(0, Math.min(1, score));
-  const hue = 35 + t * 95;
-  return `oklch(0.5 0.13 ${hue.toFixed(1)})`;
+  const pct = Math.round(Math.max(0, Math.min(1, score)) * 100);
+  return `color-mix(in oklch, var(--primary) ${pct}%, var(--muted-foreground))`;
 }
 
 /**
@@ -305,10 +302,10 @@ export function DataTab({
       {/* Test evaluation bar — shows cached results */}
       {split === "test" && (
         <FadeIn delay={0.2}>
-          <div className="rounded-2xl border border-[#E5DDD4] bg-gradient-to-l from-[#FAF8F5] to-[#F5F1EC] p-4 space-y-3">
+          <div className="rounded-2xl border border-border-subtle bg-muted/40 p-4 space-y-3">
             <div className="flex items-center gap-3">
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-[#3D2E22]">
+                <div className="text-sm font-semibold text-foreground">
                   <HelpTip text={tip("code.predictions_table")}>
                     {msg("auto.features.optimizations.components.datatab.1")}
                   </HelpTip>
@@ -337,7 +334,7 @@ export function DataTab({
                 ]}
               />
               {testResultsLoading && (
-                <CircleNotch className="size-4 animate-spin text-[#8C7A6B] shrink-0" />
+                <CircleNotch className="size-4 animate-spin text-muted-foreground shrink-0" />
               )}
             </div>
           </div>
@@ -580,7 +577,7 @@ export function DataTab({
                                     />
                                   </div>
                                 ) : (
-                                  <span className="text-[0.625rem] text-[#E5DDD4] flex justify-center">
+                                  <span className="text-[0.625rem] text-border-subtle flex justify-center">
                                     —
                                   </span>
                                 )}

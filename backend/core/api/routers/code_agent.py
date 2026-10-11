@@ -2,8 +2,9 @@
 
 All endpoints are hidden from the public Scalar reference (none are in
 ``_SCALAR_PUBLIC_PATHS``). Used by the wizard UI to author DSPy code
-interactively — or, when a request carries ``blackbox``, a black-box job's
-starting point + python scorer — not part of the dev integration surface.
+interactively — or, when a request carries ``unified``, the submission
+wizard's run code + metric — and to run the wizard's task interview and
+inputs inference; not part of the dev integration surface.
 """
 
 from __future__ import annotations
@@ -19,14 +20,18 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
-from ...connectors import github
-from ...connectors.github_repo import RepoFetchError, github_token
+from ...models import (
+    InputsInferenceRequest,
+    InputsInferenceResponse,
+    TaskInterviewRequest,
+    UnifiedAuthoringContext,
+)
 from ...service_gateway.agents.code import run_code_agent
-from ...service_gateway.agents.code_interview import interview_turn_stream
+from ...service_gateway.agents.inputs_inference import infer_inputs
 from ...service_gateway.agents.intake_interview import MAX_REQUEST_TURNS, intake_turn_stream
 from ...service_gateway.agents.kickoff import fits_kickoff_budget, measured_bytes, oversized_kickoff
-from ...service_gateway.agents.repo_browser import KICKOFF_MESSAGE, RepoBrowser
 from ...service_gateway.agents.steering import STEER_KEY_MAX_CHARS, get_steer_store
+from ...service_gateway.agents.task_interview import task_interview_turn_stream
 from ...storage.models import UserModel
 from ..agent_turns import AgentTurnRegistry
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -49,85 +54,18 @@ class ChatTurn(BaseModel):
     content: str = Field(..., description="Message text.")
 
 
-# Authoring context of the black-box ("optimize anything") wizard. Set on a
-# request it switches the code agent and the interview to their black-box
-# modes: the agent drafts the starting point + a python scorer instead of a
-# DSPy Signature + metric, and the interview asks about the objective.
-class BlackboxAuthoringContext(BaseModel):
-    recipe: Literal["prompt", "code", "anything"] = Field(..., description="What is being optimized.")
-    # Blank while the interview is still asking for it: the interviewer reports
-    # what it captures, and the wizard withholds the agent until it has one.
-    objective: str = Field(
-        default="", description="What a better version achieves, in the user's words; blank until known."
-    )
-    background: str = Field(default="", description="Free-form context: domain, constraints, examples.")
-    target_kind: Literal["text", "agent"] = Field(
-        default="text",
-        description="'text' when versions are used as-is; 'agent' when they are a coding agent's instructions.",
-    )
-    scorer_has_model: bool = Field(
-        default=False,
-        description="Whether the scorer step has a model, so scorer code may call the injected llm() helper.",
-    )
-    focus: Literal["goal", "scorer"] = Field(
-        default="goal",
-        description="The wizard step the user is on: 'goal' (objective and background) or 'scorer'.",
-    )
-    repository: str = Field(
-        default="",
-        description="The GitHub repository a repository job optimizes, as owner/name; blank otherwise.",
-    )
-    branch: str = Field(default="", description="The repository's branch; blank for the default branch.")
-    editable_paths: list[str] = Field(
-        default_factory=list,
-        description="Paths inside the repository the optimizer may change.",
-    )
-
-
-def open_repo_browser(engine: Any, username: str, blackbox: BlackboxAuthoringContext | None) -> RepoBrowser | None:
-    """Open the repository a black-box job optimizes, for the agent's browsing tools.
-
-    A repository the caller cannot read (GitHub not connected, a missing
-    branch, a provider error) leaves the agent without the tools rather than
-    failing the turn: it can still interview the user.
-
-    Args:
-        engine: SQLAlchemy engine holding the connector vault.
-        username: The caller, whose GitHub connection is used.
-        blackbox: The request's black-box context, when any.
-
-    Returns:
-        The browser, or ``None`` when there is no repository or it cannot be read.
-    """
-    if blackbox is None or not blackbox.repository.strip() or engine is None:
-        return None
-    try:
-        token = github_token(engine, username)
-        tree = github.tree_entries(token, blackbox.repository, blackbox.branch)
-    except (RepoFetchError, DomainError) as exc:
-        logger.info("Agent cannot open %s: %s", blackbox.repository, exc)
-        return None
-    return RepoBrowser(
-        token=token,
-        repository=blackbox.repository,
-        branch=blackbox.branch,
-        editable_paths=blackbox.editable_paths,
-        entries=tree["entries"],
-        truncated=tree["truncated"],
-    )
-
-
-def gate_interactive_turn(job_store: Any, username: str, blackbox: BlackboxAuthoringContext | None) -> Any:
+def gate_interactive_turn(job_store: Any, username: str, free: bool) -> Any:
     """Admit a wizard turn and pick the store its usage is billed to.
 
-    The black-box wizard agent is free: its turns count against the daily
-    cap instead of the balance and are never charged. Every other turn keeps
-    the balance gate and the charge.
+    The submission wizard's agent turns (task interview, inputs inference,
+    unified code authoring) are free: they count against the daily cap
+    instead of the balance and are never charged. Every other turn keeps the
+    balance gate and the charge.
 
     Args:
         job_store: Job-store whose engine backs billing and the usage cap.
         username: Account starting the turn.
-        blackbox: The request's black-box context, when any.
+        free: True for a submission-wizard turn.
 
     Returns:
         The store to meter the turn against; ``None`` streams it unbilled.
@@ -136,7 +74,7 @@ def gate_interactive_turn(job_store: Any, username: str, blackbox: BlackboxAutho
         DomainError: 429 at the wizard agent's daily cap; 402 when a billed
             turn's account is below the minimum balance.
     """
-    if blackbox is not None:
+    if free:
         consume_wizard_agent_turn(getattr(job_store, "engine", None), username)
         return None
     enforce_llm_balance(job_store, username)
@@ -226,18 +164,18 @@ def _intake_low_effort(model: str | None, catalog_models: list[Any]) -> str | No
     return effective_reasoning_effort(model, "low")
 
 
-def _require_columns_or_blackbox(dataset_columns: list[str], blackbox: BlackboxAuthoringContext | None) -> None:
-    """Keep the DSPy contract strict: only a black-box request may omit the dataset.
+def _require_columns_or_unified(dataset_columns: list[str], unified: UnifiedAuthoringContext | None) -> None:
+    """Keep the DSPy contract strict: only a unified request may omit the dataset.
 
     Args:
         dataset_columns: The request's column list.
-        blackbox: The request's black-box context, when any.
+        unified: The request's unified authoring context, when any.
 
     Raises:
-        ValueError: When the columns are empty and no black-box context is set.
+        ValueError: When the columns are empty and no unified context is set.
     """
-    if not dataset_columns and blackbox is None:
-        raise ValueError("dataset_columns must not be empty unless blackbox is set.")
+    if not dataset_columns and unified is None:
+        raise ValueError("dataset_columns must not be empty unless unified is set.")
 
 
 class CodeAgentRequest(BaseModel):
@@ -252,7 +190,7 @@ class CodeAgentRequest(BaseModel):
 
     dataset_columns: list[str] = Field(
         ...,
-        description="All column names in the dataset; may be empty only with ``blackbox`` set.",
+        description="All column names in the dataset; may be empty only with ``unified`` set.",
     )
     column_roles: dict[str, str] = Field(..., description="Column → 'input'|'output'|'ignore'.")
     column_kinds: dict[str, str] = Field(
@@ -335,14 +273,14 @@ class CodeAgentRequest(BaseModel):
         default=None,
         description=("Explicit reasoning-effort level for the chosen model; absent keeps the model's default."),
     )
-    blackbox: BlackboxAuthoringContext | None = Field(
+    unified: UnifiedAuthoringContext | None = Field(
         default=None,
         description=(
-            "Black-box authoring context. Set, the agent drafts/edits the "
-            "job's starting point (``prior_signature`` slot) and python "
-            "scorer (``prior_metric`` slot) with ``edit_seed`` / "
-            "``edit_scorer``; ``dataset_columns`` then holds the case "
-            "columns and may be empty."
+            "Submission-wizard authoring context. Set, the agent drafts/edits "
+            "the run code (``prior_signature`` / ``initial_signature`` slots, "
+            "``signature_*`` events) and the metric in the shape the chosen "
+            "optimizer needs (``prior_metric`` / ``initial_metric`` slots, "
+            "``metric_*`` events); ``dataset_columns`` may then be empty."
         ),
     )
     steer_key: str | None = Field(
@@ -354,91 +292,15 @@ class CodeAgentRequest(BaseModel):
             "the agent at its next step, announced by a ``steer_applied`` event."
         ),
     )
-    kickoff: bool = Field(
-        default=False,
-        description=(
-            "Black-box only: the agent starts the conversation by itself. The "
-            "server supplies the (hidden) opening message in place of "
-            "``user_message`` and reads the repository's README and manifest "
-            "for the agent."
-        ),
-    )
 
     @model_validator(mode="after")
-    def _columns_or_blackbox(self) -> CodeAgentRequest:
-        """Reject an empty dataset unless the request is black-box.
+    def _columns_or_unified(self) -> CodeAgentRequest:
+        """Reject an empty dataset unless the request is unified.
 
         Returns:
             The validated request.
         """
-        _require_columns_or_blackbox(self.dataset_columns, self.blackbox)
-        return self
-
-
-class CodeInterviewRequest(BaseModel):
-    """Input for one streamed Signature & Metric interview turn.
-
-    Stateless like the tagger interview: the client owns the transcript and
-    re-sends it on every turn. The dataset context mirrors
-    :class:`CodeAgentRequest` (columns + roles + a small sample, never the
-    full dataset).
-    """
-
-    dataset_columns: list[str] = Field(
-        ...,
-        description="All column names in the dataset; may be empty only with ``blackbox`` set.",
-    )
-    column_roles: dict[str, str] = Field(..., description="Column → 'input'|'output'|'ignore'.")
-    column_kinds: dict[str, str] = Field(
-        default_factory=dict,
-        description="Input column → 'text'|'image'.",
-    )
-    sample_rows: list[dict] = Field(default_factory=list, description="Up to 5 sample rows.")
-    turns: list[ChatTurn] = Field(
-        default_factory=list,
-        max_length=40,
-        description="Prior {role, content} interview turns, oldest first.",
-    )
-    job_model: str = Field(
-        default="",
-        description="LiteLLM id of the model the optimized program will run on; empty when not chosen yet.",
-    )
-    locale: str | None = Field(
-        default=None,
-        description=(
-            "UI locale code of the client (e.g. 'he', 'en', 'fr-CA'). Sets "
-            "the interview's language; unknown or missing falls back to Hebrew."
-        ),
-    )
-    model: str | None = Field(
-        default=None,
-        description=(
-            "LiteLLM id of the catalog model conducting the interview (the "
-            "composer's model menu). Absent runs the catalog's best-value "
-            "default model."
-        ),
-    )
-    reasoning_effort: ReasoningEffort | None = Field(
-        default=None,
-        description=("Explicit reasoning-effort level for the chosen model; absent keeps the model's default."),
-    )
-    blackbox: BlackboxAuthoringContext | None = Field(
-        default=None,
-        description=(
-            "Black-box authoring context. Set, the interview is about the "
-            "objective, the starting point and the scorer; "
-            "``dataset_columns`` then holds the case columns and may be empty."
-        ),
-    )
-
-    @model_validator(mode="after")
-    def _columns_or_blackbox(self) -> CodeInterviewRequest:
-        """Reject an empty dataset unless the request is black-box.
-
-        Returns:
-            The validated request.
-        """
-        _require_columns_or_blackbox(self.dataset_columns, self.blackbox)
+        _require_columns_or_unified(self.dataset_columns, self.unified)
         return self
 
 
@@ -452,9 +314,7 @@ class IntakeTurn(BaseModel):
 class IntakeInterviewRequest(BaseModel):
     """Request body for ``POST /account/intake-interview``."""
 
-    phase: Literal["billing", "privacy", "emails", "trust"] = Field(
-        ..., description="The intake phase this turn runs."
-    )
+    phase: Literal["billing", "privacy", "emails", "trust"] = Field(..., description="The intake phase this turn runs.")
     turns: list[IntakeTurn] = Field(
         default_factory=list,
         max_length=MAX_REQUEST_TURNS,
@@ -628,9 +488,10 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
           (both modes; ``source`` separates the parallel seed authors:
           ``signature`` / ``metric`` / ``workflow`` / ``agent``)
         * ``tool_start`` — ``{"id", "tool", "reason"}`` (chat mode; the
-          black-box tools are ``edit_seed`` / ``edit_scorer``)
+          unified tools are ``ask_user`` / ``set_brief`` / ``edit_run`` /
+          ``edit_metric``)
         * ``signature_replace`` / ``metric_replace`` — ``{"code"}`` (in
-          black-box mode these carry the starting point / the scorer)
+          unified mode these carry the run code / the metric)
         * ``workflow_replace`` — ``{"workflow", "changed_node_id"}``
           (workflow mode: seed snapshot + one per graph tool op)
         * ``tool_end`` — ``{"id", "tool", "status"}``
@@ -639,9 +500,6 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
           "model", "served_model"}`` (workflow mode carries ``workflow`` +
           ``workflow_valid`` instead of ``signature_code``)
         * ``error`` — ``{"error": "<message>"}``
-        * ``kickoff_oversized`` — ``{"subject": "repo", "name"}`` (a kickoff
-          whose repository is over the opening budget: the whole turn, with
-          no model call; the client shows its fixed opening)
 
         The turn runs server-side independent of this connection: the stream
         opens with ``turn_started`` (``{"turn_id"}``), every event carries an
@@ -656,19 +514,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         Returns:
             A :class:`StreamingResponse` of Server-Sent Events.
         """
-        kickoff = req.kickoff and req.blackbox is not None
-        user_message = KICKOFF_MESSAGE if kickoff else req.user_message
-        repo_browser = (
-            await asyncio.to_thread(open_repo_browser, engine, current_user.username, req.blackbox)
-            if user_message.strip()
-            else None
+        billed_store = await asyncio.to_thread(
+            gate_interactive_turn, job_store, current_user.username, req.unified is not None
         )
-        # Decided before the gate: the fixed opening is neither billed nor capped.
-        if kickoff and repo_browser is not None and not repo_browser.opening_fits():
-            return await _turn_response(oversized_kickoff("repo", repo_browser.repository), current_user.username)
-        billed_store = await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, req.blackbox)
-        if kickoff and repo_browser is not None:
-            await asyncio.to_thread(repo_browser.preload_key_files)
         model = route_menu_model(req.model)
         usage_sink: list = []
         source = run_code_agent(
@@ -676,7 +524,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             column_roles=req.column_roles,
             column_kinds=req.column_kinds,
             sample_rows=req.sample_rows,
-            user_message=user_message,
+            user_message=req.user_message,
             chat_history=[t.model_dump() for t in req.chat_history],
             prior_signature=req.prior_signature,
             prior_metric=req.prior_metric,
@@ -691,8 +539,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             model=model,
             reasoning_effort=effective_reasoning_effort(model, req.reasoning_effort),
             usage_sink=usage_sink,
-            blackbox=req.blackbox.model_dump() if req.blackbox else None,
-            repo_browser=repo_browser,
+            unified=req.unified.model_dump() if req.unified else None,
             steer_owner=current_user.username,
             steer_key=req.steer_key,
         )
@@ -706,79 +553,103 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         return await _turn_response(metered, current_user.username)
 
     @router.post(
-        "/optimizations/code-interview",
-        summary="Stream one Signature & Metric interview turn",
+        "/optimizations/task-interview",
+        summary="Stream one task interview turn of the submission wizard",
     )
-    async def code_interview(req: CodeInterviewRequest, current_user: AuthenticatedUserDep) -> StreamingResponse:
-        """Stream one interview turn as SSE, mirroring the tagger interview.
+    async def task_interview(req: TaskInterviewRequest, current_user: AuthenticatedUserDep) -> StreamingResponse:
+        """Stream one step-1 task interview turn as SSE.
 
         Event types:
 
         * ``reasoning_patch`` — ``{"chunk": "<token>"}`` (provider thinking)
         * ``message_patch`` — ``{"chunk": "<token>"}`` (reply stream)
-        * ``message_end`` — ``{}`` (the reply is fully streamed; options and
-          brief are still generating)
-        * ``turn_hint`` — ``{"final": bool}`` (the streamed ``done`` field
-          settled; the client picks the matching placeholder)
+        * ``message_end`` — ``{}`` (the reply is fully streamed; the options
+          and the task draft are still generating)
+        * ``turn_hint`` — ``{"final": bool}`` (the draft is ready to confirm)
         * ``message_reset`` — ``{}`` (a failed attempt is being retried; the
           client drops any partial reply streamed so far)
-        * ``interview_done`` — ``{"message", "options", "brief", "done",
-          "objective", "model"}`` (terminal; ``options`` is a list of
-          ``{label, description}`` picks, ``brief`` is empty until ``done``,
-          ``objective`` is the objective a black-box interview captured over
-          a blank field, else "")
-        * ``error`` — ``{"error": "<message>"}``
+        * ``interview_done`` — a :class:`~core.models.TaskInterviewTurnResult`
+          (terminal)
+        * ``error`` — ``{"error": "<message>", "code": "<i18n key>"}``
         * ``kickoff_oversized`` — ``{"subject": "data", "name": ""}`` (an
-          opening turn whose sample is over the opening budget: the whole
-          turn, with no model call; the client shows its fixed opening)
+          opening turn whose draft and samples are over the opening budget:
+          the whole turn, with no model call)
 
-        Framed as a resumable turn exactly like ``ai-generate-code``.
+        Framed as a resumable turn exactly like ``ai-generate-code``. Free:
+        counted against the wizard agent's daily cap, never charged.
 
         Args:
-            req: Dataset (or black-box) context, the client-owned transcript,
-                and locale.
-            current_user: The authenticated caller (required; gates LLM spend).
+            req: The client-owned transcript and the current task draft.
+            current_user: The authenticated caller.
 
         Returns:
             A :class:`StreamingResponse` of Server-Sent Events.
         """
         if not req.turns and not fits_kickoff_budget(
-            measured_bytes(req.dataset_columns, req.sample_rows[:5], req.blackbox.model_dump() if req.blackbox else "")
+            measured_bytes(req.objective, req.background, req.starting_version or "", req.sample_cases)
         ):
             return await _turn_response(oversized_kickoff("data"), current_user.username)
-        billed_store = await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, req.blackbox)
+        billed_store = await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, True)
         model = await asyncio.to_thread(route_interview_model, req.model)
         usage_sink: list = []
 
         async def source() -> AsyncIterator[dict]:
             """Relay engine events, translating failures into an error event."""
             try:
-                async for event in interview_turn_stream(
-                    dataset_columns=req.dataset_columns,
-                    column_roles=req.column_roles,
-                    column_kinds=req.column_kinds,
-                    sample_rows=req.sample_rows[:5],
-                    job_model=req.job_model,
+                async for event in task_interview_turn_stream(
                     turns=[t.model_dump() for t in req.turns],
+                    objective=req.objective,
+                    background=req.background,
+                    artifact_kind=req.artifact_kind,
+                    starting_version=req.starting_version,
+                    sample_cases=req.sample_cases,
                     locale=req.locale,
                     model=model,
                     reasoning_effort=effective_reasoning_effort(model, req.reasoning_effort),
                     usage_sink=usage_sink,
-                    blackbox=req.blackbox.model_dump() if req.blackbox else None,
                 ):
                     yield event
             except Exception:
-                logger.exception("code interview stream failed")
-                yield {"event": "error", "data": {"code": "submit.code.interview.llm_failed"}}
+                logger.exception("task interview stream failed")
+                yield {
+                    "event": "error",
+                    "data": {"error": "submit.v2.task.interview_failed", "code": "submit.v2.task.interview_failed"},
+                }
 
         metered = stream_with_llm_metering(
             source(),
             job_store=billed_store,
             username=current_user.username,
-            description="Code interview",
+            description="Task interview",
             usage_sink=usage_sink,
         )
         return await _turn_response(metered, current_user.username)
+
+    @router.post(
+        "/optimizations/infer-inputs",
+        response_model=InputsInferenceResponse,
+        summary="Infer the submission wizard's inputs from the data",
+    )
+    async def infer_inputs_route(
+        req: InputsInferenceRequest, current_user: AuthenticatedUserDep
+    ) -> InputsInferenceResponse:
+        """Decide single input vs input/output pairs and pick the columns.
+
+        One non-streamed prediction; the held-out split and its size are
+        computed deterministically. Free: counted against the wizard agent's
+        daily cap, never charged.
+
+        Args:
+            req: The task from step 1 and a sample of the user's data.
+            current_user: The authenticated caller.
+
+        Returns:
+            The proposal the wizard's step 2 shows for confirmation.
+        """
+        # A free turn has no billed store, so there is no usage to meter.
+        await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, True)
+        model = await asyncio.to_thread(route_interview_model, req.model)
+        return await asyncio.to_thread(infer_inputs, req.model_copy(update={"model": model}))
 
     @router.post(
         "/account/intake-interview",
@@ -787,7 +658,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
     async def intake_interview(req: IntakeInterviewRequest, current_user: AuthenticatedUserDep) -> StreamingResponse:
         """Stream one turn of an intake phase as SSE.
 
-        Same events as ``/optimizations/code-interview`` (``reasoning_patch``,
+        Same events as ``/optimizations/task-interview`` (``reasoning_patch``,
         ``message_patch``, ``message_end``, ``turn_hint`` with ``final`` =
         phase done, ``message_reset``, ``error``), ending with
         ``interview_done`` — ``{"message", "options", "phase_done",

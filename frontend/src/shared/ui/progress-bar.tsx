@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { cn } from "@/shared/lib/utils";
 
 const TONE_CLASS = {
-  primary: "bg-primary",
+  primary: "bg-primary-fill",
   ai: "",
   success: "bg-[var(--success)]",
   danger: "bg-destructive",
@@ -74,8 +74,8 @@ export function StorageUsageBar({
 }: StorageUsageBarProps) {
   return (
     <ProgressBar
-      className={cn("bg-[#E5DDD4]", className)}
-      fillClassName={cn(over ? "bg-destructive" : "bg-[#3D2E22]/70", fillClassName)}
+      className={cn("bg-border-subtle", className)}
+      fillClassName={cn(over ? "bg-destructive" : "bg-primary-fill/70", fillClassName)}
       {...props}
     />
   );

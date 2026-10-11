@@ -122,9 +122,7 @@ export function RunPlayground({
 
             <div className="space-y-2">
               <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
-                <HelpTip text={tip("serve.integration_code")}>
-                  {msg("auto.app.optimizations.id.page.26")}
-                </HelpTip>
+                {msg("auto.app.optimizations.id.page.26")}
               </p>
               <ServeCodeSnippets
                 serveInfo={serveInfo}

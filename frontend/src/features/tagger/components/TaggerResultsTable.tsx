@@ -300,7 +300,7 @@ export function TaggerResultsTable({
                       className={cn(
                         "cursor-pointer transition-colors duration-150",
                         i === selected
-                          ? "bg-primary/[0.08] hover:bg-primary/[0.12]"
+                          ? "bg-primary-fill/[0.08] hover:bg-primary-fill/[0.12]"
                           : "hover:bg-muted/50",
                       )}
                     >

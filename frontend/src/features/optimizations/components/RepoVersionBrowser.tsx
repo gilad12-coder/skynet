@@ -452,9 +452,9 @@ function TreeRow({
       tabIndex={tabbable ? 0 : -1}
       onClick={onActivate}
       className={cn(
-        "relative flex min-h-8 cursor-pointer select-none items-center gap-1.5 rounded-md pe-2 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-7 any-pointer-coarse:min-h-11",
+        "relative flex min-h-8 cursor-pointer select-none items-center gap-1.5 rounded-md pe-2 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 lg:min-h-7 any-pointer-coarse:min-h-11",
         selected
-          ? "bg-primary/10 font-medium text-foreground before:absolute before:inset-y-1 before:start-0 before:w-0.5 before:rounded-full before:bg-primary"
+          ? "on-primary font-medium before:absolute before:inset-y-1 before:start-0 before:w-0.5 before:rounded-full before:bg-primary-fill"
           : "text-foreground/80 hover:bg-muted/70",
       )}
       style={{ paddingInlineStart: `${depth + 0.25}rem` }}
@@ -668,7 +668,7 @@ function SplitDiff({
                   ? formatMsg("optimization.blackbox.repo.browser.fold_aria", { from, to })
                   : undefined
               }
-              className="my-0.5 flex min-h-8 w-full cursor-pointer items-center gap-2 bg-muted/60 ps-4 pe-3 text-start font-sans text-[0.6875rem] text-foreground/70 transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45 lg:min-h-6"
+              className="my-0.5 flex min-h-8 w-full cursor-pointer items-center gap-2 bg-muted/60 ps-4 pe-3 text-start font-sans text-[0.6875rem] text-foreground/70 transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 lg:min-h-6"
             >
               <DotsThree className="size-3.5 shrink-0" aria-hidden="true" />
               <span dir="auto">
@@ -995,7 +995,7 @@ function TreeToggle({ open, onToggle }: { open: boolean; onToggle: () => void })
       aria-pressed={open}
       aria-label={label}
       title={label}
-      className={cn("rounded-full", open && "bg-primary/10 text-primary hover:bg-primary/15")}
+      className={cn("rounded-full", open && "bg-primary-fill/10 text-primary hover:bg-primary-fill/15")}
     >
       <Folders aria-hidden="true" />
     </Button>

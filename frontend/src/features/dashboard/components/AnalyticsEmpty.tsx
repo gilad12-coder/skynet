@@ -9,13 +9,11 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 
 interface AnalyticsEmptyProps {
   variant?: "no-data" | "no-results" | "loading-error";
-  onClearFilters?: () => void;
   onRetry?: () => void;
 }
 
 export function AnalyticsEmpty({
   variant = "no-data",
-  onClearFilters,
   onRetry,
 }: AnalyticsEmptyProps) {
   const configs: Record<
@@ -43,12 +41,6 @@ export function AnalyticsEmpty({
       description: formatMsg("auto.features.dashboard.components.analyticsempty.template.2", {
         p1: TERMS.optimizationPlural,
       }),
-      action: onClearFilters
-        ? {
-            label: msg("auto.features.dashboard.components.analyticsempty.1"),
-            onClick: onClearFilters,
-          }
-        : undefined,
     },
     "loading-error": {
       icon: WarningCircle,

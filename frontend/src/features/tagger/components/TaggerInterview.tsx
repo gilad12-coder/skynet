@@ -10,6 +10,7 @@ import {
   ArrowCounterClockwise,
   Binary,
   CaretRight,
+  ChatText,
   CircleNotch,
   CursorText,
   ListChecks,
@@ -199,7 +200,8 @@ export function TaggerInterview({
         <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0 gap-0">
           <div className="flex items-start justify-between gap-3 border-b border-border/40 px-4 py-3 shrink-0">
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-foreground">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <ChatText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 {msg("tagger.assist.interview.title")}
               </h3>
             </div>
@@ -331,7 +333,7 @@ function ContractPendingIndicator() {
       </div>
       <div aria-hidden className="flex h-1 overflow-hidden rounded-full bg-muted">
         <div
-          className="rounded-full bg-primary transition-[width] duration-200 ease-linear"
+          className="rounded-full bg-primary-fill transition-[width] duration-200 ease-linear"
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -606,9 +608,9 @@ function RubricCard({
                       onClick={() => switchMode(opt.mode)}
                       className={cn(
                         "flex items-start gap-3 rounded-xl border p-3.5 text-start transition-all cursor-pointer",
-                        "hover:border-primary/40 hover:bg-primary/5",
+                        "hover:border-primary-fill/40 hover:bg-primary-fill/5",
                         "focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
-                        selected ? "border-primary bg-primary/10 shadow-sm" : "border-border/50",
+                        selected ? "on-primary " : "border-border/50",
                       )}
                     >
                       <opt.icon
@@ -759,8 +761,8 @@ function RubricCard({
               // (some locales) clips inside the button instead of spilling
               // over the cards.
               "group relative flex w-full cursor-pointer flex-row items-center justify-center gap-3 overflow-hidden lg:w-[100px] lg:flex-col lg:gap-4",
-              "rounded-2xl bg-primary py-4 text-base font-semibold text-primary-foreground lg:py-8",
-              "transition-all duration-300 hover:scale-[1.01]",
+              "rounded-2xl bg-primary-fill py-4 text-base font-semibold text-primary-foreground lg:py-8",
+              "transition-all duration-300",
               "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60",
             )}
           >

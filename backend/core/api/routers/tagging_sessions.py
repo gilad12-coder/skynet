@@ -31,6 +31,7 @@ from ...models import (
     BulkDeleteByIdsSkipped,
 )
 from ...storage.models import TaggingSessionModel
+from ...storage.usage import json_byte_size
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..sharing_access import MEMBER_ROLES, ShareRole
@@ -39,6 +40,7 @@ from ..tagging_session_access import (
     require_role,
     resolve_effective_role,
 )
+from ._helpers import enforce_storage_quota
 
 logger = logging.getLogger(__name__)
 
@@ -386,7 +388,16 @@ def create_tagging_session_router(*, job_store) -> APIRouter:
 
         Returns:
             The created session as ``TaggingSessionDetail`` (carries the new id).
+
+        Raises:
+            DomainError: ``user.storage.quota_exceeded`` (409) when the session's
+                rows would push the caller past their storage budget.
         """
+        enforce_storage_quota(
+            job_store,
+            user.username,
+            incoming_bytes=json_byte_size(req.data) + json_byte_size(req.annotations),
+        )
         now = datetime.now(UTC)
         row = TaggingSessionModel(
             id=str(uuid4()),

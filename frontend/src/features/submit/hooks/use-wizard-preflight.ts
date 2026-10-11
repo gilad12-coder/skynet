@@ -23,11 +23,20 @@ import {
   type ValidationProgress,
   type ValidationStatus,
 } from "../lib/preflight-store";
-import { preflightIdentity, upgradeLegacyIdentity } from "../lib/validation-evidence";
+import {
+  preflightIdentity as legacyPreflightIdentity,
+  upgradeLegacyIdentity,
+} from "../lib/validation-evidence";
 import type { ToastApi } from "../lib/validation-toast";
 import { waitForPreflightUsage } from "../lib/wait-for-preflight-usage";
 
 export type { ValidationPhase, ValidationProgress };
+
+// The identity helper is still typed for the retired workflows; it only embeds
+// the workflow name in the identity, so "unified" passes through unchanged.
+function preflightIdentity(workflow: PreflightWorkflow, payload: object): string {
+  return legacyPreflightIdentity(workflow as Parameters<typeof legacyPreflightIdentity>[0], payload);
+}
 
 // One store for the page: a check keeps running while the user is elsewhere
 // in the app, and a wizard restored from the draft joins it where it is.
@@ -41,7 +50,7 @@ const store = new PreflightStore({
   settleUsage: waitForPreflightUsage,
 });
 
-const WORKFLOWS: PreflightWorkflow[] = ["anything", "dspy"];
+const WORKFLOWS: PreflightWorkflow[] = ["unified"];
 
 /** Notify when a check finishes, wherever in the app the user is. */
 export function usePreflightNotifications(): void {

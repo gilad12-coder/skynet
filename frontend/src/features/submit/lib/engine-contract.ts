@@ -1,30 +1,25 @@
 import type {
-  BlackboxEngineCatalogResponse,
-  BlackboxEngineId,
-  BlackboxHarness,
   BlackboxProposer,
   BlackboxShinkaSettings,
-  BlackboxStrategy,
 } from "@/shared/types/api";
-import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
+import {
+  resolveOptimizer,
+  type ArtifactKind,
+  type OptimizerChoice,
+} from "@/shared/types/unified-run";
 
 /**
- * Whether the run's proposer is a coding agent. Every other engine drives one
- * through a repository; ShinkaEvolve never does, since it calls its
- * optimization models directly and edits a repository as a bundle of files.
+ * Whether the run's proposer is a coding agent. Auto and the agent-driven
+ * engines drive one; DSPy optimizers, GEPA and Best-of-N call their
+ * optimization model directly, and ShinkaEvolve edits through its own editor.
  */
-export function usesNativeProposer(
-  mode: BlackboxStrategy["mode"],
-  engine: BlackboxEngineId | null,
-  repo = false,
-): boolean {
-  if (mode === "single" && engine === "shinka_evolve") return false;
+export function usesNativeProposer(choice: OptimizerChoice, kind: ArtifactKind): boolean {
+  const resolved = resolveOptimizer(choice, kind);
   return (
-    repo ||
-    mode !== "single" ||
-    engine === "meta_harness" ||
-    engine === "autoresearch" ||
-    engine === "autosaddler"
+    resolved === "auto" ||
+    resolved === "meta_harness" ||
+    resolved === "autoresearch" ||
+    resolved === "autosaddler"
   );
 }
 
@@ -45,25 +40,26 @@ export const DEFAULT_PROPOSER: BlackboxProposer = {
 /** The inclusive range the backend accepts for `max_tool_calls`. */
 export const MAX_TOOL_CALLS_LIMITS = { min: 1, max: 1_000 } as const;
 
-/** Which engine-specific proposer knobs the strategy exposes; Auto may run any engine. */
+/** Which engine-specific proposer knobs the choice exposes; black-box Auto may run any engine. */
 export function proposerKnobs(
-  mode: BlackboxStrategy["mode"],
-  engine: BlackboxEngineId | null,
+  choice: OptimizerChoice,
+  kind: ArtifactKind,
 ): { candidates: boolean; ralph: boolean } {
-  const auto = mode !== "single";
+  const resolved = resolveOptimizer(choice, kind);
+  const auto = resolved === "auto";
   return {
-    candidates: auto || engine === "meta_harness",
-    ralph: auto || engine === "autoresearch",
+    candidates: auto || resolved === "meta_harness",
+    ralph: auto || resolved === "autoresearch",
   };
 }
 
-/** The proposer block to submit: knobs the form hides for this strategy go back to their defaults. */
+/** The proposer block to submit: knobs the form hides for this choice go back to their defaults. */
 export function submittedProposer(
   proposer: BlackboxProposer,
-  mode: BlackboxStrategy["mode"],
-  engine: BlackboxEngineId | null,
+  choice: OptimizerChoice,
+  kind: ArtifactKind,
 ): BlackboxProposer {
-  const knobs = proposerKnobs(mode, engine);
+  const knobs = proposerKnobs(choice, kind);
   return {
     ...proposer,
     max_candidates_per_iter: knobs.candidates ? (proposer.max_candidates_per_iter ?? null) : null,
@@ -76,19 +72,19 @@ export function submittedProposer(
 
 /**
  * The run's whole proposer block. A coding-agent proposer sends its settings;
- * a single ShinkaEvolve run has none of its own, so it sends a block only for
- * the agent editor's tool-call cap, with the backend's default harness unused.
+ * ShinkaEvolve has none of its own, so it sends a block only for the agent
+ * editor's tool-call cap, with the backend's default harness unused. A null
+ * `shinka` means the panel was never touched, which is the single-call editor.
  */
 export function submittedRunProposer(input: {
   proposer: BlackboxProposer;
-  mode: BlackboxStrategy["mode"];
-  engine: BlackboxEngineId | null;
-  nativeProposer: boolean;
-  shinka: BlackboxShinkaSettings;
+  choice: OptimizerChoice;
+  kind: ArtifactKind;
+  shinka: BlackboxShinkaSettings | null;
 }): BlackboxProposer | undefined {
-  const { proposer, mode, engine, nativeProposer, shinka } = input;
-  if (nativeProposer) return submittedProposer(proposer, mode, engine);
-  if (mode !== "single" || engine !== "shinka_evolve" || shinka.editor !== "agent")
+  const { proposer, choice, kind, shinka } = input;
+  if (usesNativeProposer(choice, kind)) return submittedProposer(proposer, choice, kind);
+  if (resolveOptimizer(choice, kind) !== "shinka_evolve" || shinka?.editor !== "agent")
     return undefined;
   return {
     harness: DEFAULT_PROPOSER.harness,
@@ -96,70 +92,18 @@ export function submittedRunProposer(input: {
   };
 }
 
-export function supportsIterationLimit(
-  mode: BlackboxStrategy["mode"],
-  engine: BlackboxEngineId | null,
-): boolean {
+/** Whether the resolved engine honours `budget.max_iterations`. */
+export function supportsIterationLimit(choice: OptimizerChoice, kind: ArtifactKind): boolean {
+  const resolved = resolveOptimizer(choice, kind);
   return (
-    mode === "single" &&
-    (engine === "meta_harness" || engine === "autosaddler" || engine === "shinka_evolve")
+    resolved === "meta_harness" || resolved === "autosaddler" || resolved === "shinka_evolve"
   );
 }
 
-/** Auto explores with five engines and then continues the leader: one scorer run each at least. */
+/** Black-box Auto explores with five engines and then continues the leader: one scorer run each at least. */
 export const AUTO_MIN_SCORER_RUNS = 6;
 
-interface EngineIssue {
-  key: MessageKey;
-  params?: Record<string, string>;
-}
-
-/** Keep configuration available while blocking execution against incomplete capabilities. */
-export function engineSelectionIssue(input: {
-  catalog: BlackboxEngineCatalogResponse | null;
-  mode: BlackboxStrategy["mode"];
-  engine: BlackboxEngineId | null;
-  hasParts: boolean;
-  repo?: boolean;
-}): EngineIssue | null {
-  const { catalog, mode, engine, hasParts } = input;
-  if (!catalog) return { key: "submit.blackbox.engines.checking" };
-  if (mode === "single") {
-    const selected = catalog.engines.find((candidate) => candidate.id === engine);
-    if (!selected) return { key: "submit.blackbox.validation.engine_required" };
-    if (hasParts && !selected.supports_parts)
-      return { key: "submit.blackbox.validation.engine_parts" };
-    if (!selected.available) {
-      return selected.unavailable_reason?.trim()
-        ? {
-            key: "submit.blackbox.run_disabled.engine_reason",
-            params: { engine: selected.label, reason: selected.unavailable_reason },
-          }
-        : { key: "submit.blackbox.run_disabled.engine", params: { engine: selected.label } };
-    }
-  } else {
-    if (hasParts) return { key: "submit.blackbox.validation.auto_parts" };
-    // Auto is one upstream recipe. A list of visible engines never authorizes
-    // silently dropping an unavailable lane from that recipe.
-    if (catalog.auto_available !== true) {
-      return catalog.auto_unavailable_reason?.trim()
-        ? {
-            key: "submit.blackbox.run_disabled.auto_reason",
-            params: { reason: catalog.auto_unavailable_reason },
-          }
-        : { key: "submit.blackbox.run_disabled.no_engines" };
-    }
-  }
-  if (usesNativeProposer(mode, engine, input.repo)) {
-    const selectedRuntime = catalog.proposer_runtimes?.find((item) => item.id === "vercel");
-    if (!selectedRuntime?.available) {
-      return selectedRuntime?.unavailable_reason?.trim()
-        ? {
-            key: "submit.blackbox.run_disabled.runtime_reason",
-            params: { reason: selectedRuntime.unavailable_reason },
-          }
-        : { key: "submit.blackbox.run_disabled.runtime" };
-    }
-  }
-  return null;
+/** The smallest scorer-run budget the resolved optimizer can spend. */
+export function minScorerRuns(choice: OptimizerChoice, kind: ArtifactKind): number {
+  return resolveOptimizer(choice, kind) === "auto" ? AUTO_MIN_SCORER_RUNS : 1;
 }

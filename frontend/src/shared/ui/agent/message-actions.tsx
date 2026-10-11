@@ -130,12 +130,15 @@ export function MessageActions({
   return (
     <div className={cn("flex items-center gap-1 -ms-1.5", className)}>
       {text.length > 0 && (
-        <ActionButton
-          label={msg(copied ? "shared.agent.copied" : "shared.agent.copy")}
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          autoTooltip={false}
           onClick={() => void copy(text)}
+          aria-label={msg(copied ? "shared.agent.copied" : "shared.agent.copy")}
         >
           <CopyGlyph copied={copied} className="size-3.5" />
-        </ActionButton>
+        </Button>
       )}
       {onRegenerate && (
         <ActionButton label={msg("shared.agent.regenerate")} onClick={onRegenerate}>

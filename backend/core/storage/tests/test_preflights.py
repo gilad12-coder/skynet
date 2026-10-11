@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from core.billing.budgets import BudgetConflictError, BudgetFencedError
 from core.storage.models import Base, BillingCustomerModel
-from core.storage.preflights import PreflightClaim, PreflightStore, WizardPreflightModel
+from core.storage.preflights import PreflightClaim, PreflightStore, WizardPreflightModel, verification_fingerprint
 
 PAYLOAD = {"seed_candidate": "real seed", "scorer": {"kind": "python", "metric_code": "def score(c): return 1"}}
 SUCCESS = {
@@ -313,3 +313,31 @@ def test_stale_or_foreign_evidence_does_not_authorize_attachment(store: Prefligh
                 workflow="anything",
                 payload=payload,
             )
+
+
+def test_unified_evaluation_fingerprint_tracks_code_and_sample_count(store: PreflightStore) -> None:
+    """A unified contract check's evidence changes with its code and sample count, so a stale pass is never reused."""
+    base = {
+        "payload_kind": "unified_v1",
+        "task": {"objective": "o"},
+        "workspace": {"run_code": "a", "metric_code": "m"},
+        "name": "cosmetic",
+    }
+
+    def digest(payload: dict[str, Any]) -> str:
+        """Fingerprint a unified evaluation payload.
+
+        Args:
+            payload: Canonical unified inputs.
+
+        Returns:
+            The evidence fingerprint.
+        """
+        with Session(store.engine) as session:
+            return verification_fingerprint(
+                session, username="alice", workflow="unified", scope="evaluation", payload=payload
+            )
+
+    assert digest(base) == digest({**base, "name": "renamed"})
+    assert digest(base) != digest({**base, "workspace": {"run_code": "b", "metric_code": "m"}})
+    assert digest(base) != digest({**base, "contract_sample_count": 5})

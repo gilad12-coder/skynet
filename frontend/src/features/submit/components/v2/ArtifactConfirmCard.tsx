@@ -1,0 +1,225 @@
+"use client";
+
+import { Brain, Check, ChatText, Code, TextT } from "@/shared/ui/icons";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
+import { Button } from "@/shared/ui/primitives/button";
+import { Textarea } from "@/shared/ui/primitives/textarea";
+import { Segmented } from "@/shared/ui/segmented";
+import { PingDot } from "@/shared/ui/ping-dot";
+import { msg, type MessageKey } from "@/shared/lib/messages";
+import { getActiveMessages } from "@/shared/lib/runtime-messages";
+import { cn } from "@/shared/lib/utils";
+import type { ArtifactKind } from "@/shared/types/unified-run";
+
+import { detectLanguage, looksLikeCode } from "../../lib/seed-format";
+
+type MessageParams = Record<string, string | number>;
+
+/**
+ * A wizard v2 string, taking its plainer `<key>.guided` sibling for guided
+ * users when the catalog has one.
+ */
+export function v2Msg(key: string, guided: boolean, params?: MessageParams): string {
+  const guidedKey = `${key}.guided`;
+  const chosen = guided && getActiveMessages()[guidedKey as MessageKey] ? guidedKey : key;
+  return msg(chosen as MessageKey, params);
+}
+
+export const ARTIFACT_KINDS: readonly ArtifactKind[] = ["prompt", "code", "dspy_program", "text"];
+
+const KIND_ICONS: Record<ArtifactKind, React.ReactNode> = {
+  prompt: <ChatText className="size-3.5" aria-hidden="true" />,
+  code: <Code className="size-3.5" aria-hidden="true" />,
+  dspy_program: <Brain className="size-3.5" aria-hidden="true" />,
+  text: <TextT className="size-3.5" aria-hidden="true" />,
+};
+
+type StartingVersion = string | Record<string, string> | null;
+
+export interface ArtifactConfirmCardProps {
+  kind: ArtifactKind | null;
+  onKindChange: (kind: ArtifactKind) => void;
+  startingVersion: StartingVersion;
+  onStartingVersionChange: (value: string | Record<string, string>) => void;
+  rationale: string;
+  confirmed: boolean;
+  /** An i18n key naming what is missing, or null when the card can be confirmed. */
+  confirmIssue: string | null;
+  onConfirm: () => void;
+  /** The interview is mid-turn and may still rewrite the card. */
+  writing: boolean;
+  guided: boolean;
+}
+
+/**
+ * What the interview derived: the kind of artifact to optimize, picked with
+ * one click, and the starting version it will be optimized from. "Looks
+ * right" confirms both; editing afterwards keeps the confirmation and every
+ * later step.
+ */
+export function ArtifactConfirmCard({
+  kind,
+  onKindChange,
+  startingVersion,
+  onStartingVersionChange,
+  rationale,
+  confirmed,
+  confirmIssue,
+  onConfirm,
+  writing,
+  guided,
+}: ArtifactConfirmCardProps) {
+  const t = (key: string, params?: MessageParams) => v2Msg(key, guided, params);
+
+  return (
+    <section
+      aria-labelledby="v2-artifact-title"
+      className={cn(
+        "rounded-2xl border bg-background/70 transition-colors",
+        confirmed ? "border-primary-fill/50" : "border-border/60",
+      )}
+    >
+      <div className="flex flex-col gap-1 border-b border-border/40 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <h4 id="v2-artifact-title" className="text-sm font-semibold text-foreground">
+            {t("submit.v2.task.artifact.title")}
+          </h4>
+          {writing && <PingDot size="sm" tone="agent" />}
+        </div>
+        <p className="text-xs text-muted-foreground" dir="auto">
+          {rationale.trim() || t("submit.v2.task.artifact.desc")}
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-4 px-4 py-4">
+        <Segmented<ArtifactKind>
+          label={t("submit.v2.task.artifact.kind_label")}
+          value={kind}
+          onChange={onKindChange}
+          controls="v2-starting-version"
+          className="w-full"
+          options={ARTIFACT_KINDS.map((k) => ({
+            value: k,
+            label: t(`submit.v2.task.artifact.kind.${k}`),
+            tip: t(`submit.v2.task.artifact.kind.${k}.desc`),
+            icon: KIND_ICONS[k],
+          }))}
+        />
+
+        <div id="v2-starting-version" className="flex flex-col gap-2">
+          <span className="text-sm font-medium text-foreground">
+            {t("submit.v2.task.artifact.starting_label")}
+          </span>
+          <StartingVersionEditor
+            kind={kind}
+            value={startingVersion}
+            onChange={onStartingVersionChange}
+            streaming={writing}
+            guided={guided}
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-col items-stretch gap-2 border-t border-border/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <p
+          className={cn(
+            "text-xs",
+            confirmed ? "text-[#5A7247] dark:text-[#adc899]" : "text-muted-foreground",
+          )}
+          aria-live="polite"
+        >
+          {confirmed
+            ? t("submit.v2.task.artifact.confirmed")
+            : confirmIssue
+              ? t(confirmIssue)
+              : t("submit.v2.task.artifact.confirm_hint")}
+        </p>
+        <Button
+          type="button"
+          onClick={onConfirm}
+          disabled={confirmed || !!confirmIssue}
+          className="min-h-11 gap-2 lg:min-h-9"
+        >
+          <Check className="size-4" aria-hidden="true" />
+          {t("submit.v2.task.artifact.confirm")}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function StartingVersionEditor({
+  kind,
+  value,
+  onChange,
+  streaming,
+  guided,
+}: {
+  kind: ArtifactKind | null;
+  value: StartingVersion;
+  onChange: (value: string | Record<string, string>) => void;
+  streaming: boolean;
+  guided: boolean;
+}) {
+  const t = (key: string, params?: MessageParams) => v2Msg(key, guided, params);
+
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value);
+    return (
+      <div className="flex flex-col gap-3">
+        {kind === "dspy_program" && (
+          <p className="text-xs text-muted-foreground">
+            {t("submit.v2.task.artifact.predictors_hint")}
+          </p>
+        )}
+        {entries.map(([name, text]) => (
+          <div key={name} className="overflow-hidden rounded-xl border border-border bg-background">
+            <label
+              htmlFor={`v2-part-${name}`}
+              className="block truncate border-b border-border bg-muted/30 px-3 py-2 font-mono text-xs font-medium"
+              dir="ltr"
+              title={name}
+            >
+              {name}
+            </label>
+            <Textarea
+              id={`v2-part-${name}`}
+              value={text}
+              onChange={(e) => onChange({ ...value, [name]: e.target.value })}
+              rows={3}
+              dir="auto"
+              className="rounded-none border-0 bg-transparent shadow-none focus-visible:ring-inset"
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const text = value ?? "";
+  const isCode = kind === "code" || kind === "dspy_program" || looksLikeCode(text);
+  if (isCode) {
+    return (
+      <CodeEditor
+        value={text}
+        onChange={onChange}
+        height="320px"
+        language={detectLanguage(text) ?? "Python"}
+        label={t("submit.v2.task.artifact.starting_label")}
+        streaming={streaming}
+      />
+    );
+  }
+  return (
+    <Textarea
+      id="v2-starting-text"
+      aria-label={t("submit.v2.task.artifact.starting_label")}
+      value={text}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={t("submit.v2.task.artifact.starting_placeholder")}
+      rows={8}
+      dir="auto"
+      className="min-h-40 font-mono text-sm"
+    />
+  );
+}

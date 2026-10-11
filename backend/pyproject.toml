@@ -80,6 +80,9 @@ dependencies = [
     "pip==26.2.1",
     "pyarrow>=17",
     "pymysql>=1.1",
+    # Browser web push (VAPID) for the Chrome notification channel
+    # (core.notifications.channels.ChromeChannel).
+    "pywebpush>=2.0",
 ]
 
 [project.optional-dependencies]

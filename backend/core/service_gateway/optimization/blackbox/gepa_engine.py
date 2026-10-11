@@ -90,7 +90,7 @@ class GepaEngine:
         # GEPA hands the dataset rows back by identity and keys each candidate's
         # per-case scores by the case's index. Feedback carries that same index
         # so the tree drawer can pair the scorer's notes with a case's score cell.
-        example_ids = {id(example): str(index) for index, example in enumerate(task.cases)}
+        example_ids = {id(example): str(index) for index, example in enumerate([*task.cases, *task.valset])}
 
         def evaluator(candidate: Candidate, example: Any = None) -> tuple[float, dict[str, Any]]:
             """Route one GEPA evaluation through the budgeted server and report its feedback.
@@ -117,11 +117,12 @@ class GepaEngine:
             return score, gepa_side_info(side_info)
 
         kwargs: dict[str, Any] = {"seed_candidate": task.seed_candidate, "evaluator": evaluator, "config": config}
-        # Every case both drives reflection and ranks versions, so the winner
-        # is chosen on all of them; the service's final run re-scores it.
+        # Train cases drive reflection and the validation cases rank versions.
+        # Without a validation split GEPA ranks on the train cases; the test
+        # split never reaches GEPA, the service's final run scores it.
         if task.cases:
             kwargs["dataset"] = task.cases
-            kwargs["valset"] = task.cases
+            kwargs["valset"] = task.valset or task.cases
         if task.objective:
             kwargs["objective"] = task.objective
         if task.background:

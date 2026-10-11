@@ -45,7 +45,7 @@ function stageShapes(shape: RunShape | undefined): readonly StageShape[] {
 // exactly as many lines, each as wide, as the text it stands for.
 function TextBone({ text }: { text: string }) {
   return (
-    <span className="rounded-md bg-[#ebe4d8] box-decoration-clone text-transparent select-none">
+    <span className="rounded-md bg-[#ebe4d8] dark:bg-[#484135] box-decoration-clone text-transparent select-none">
       {text}
     </span>
   );
@@ -280,12 +280,12 @@ export function OptimizationDetailSkeleton({
           </Ghost>
         </div>
       )}
-      <div className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5">
+      <div className="rounded-xl border border-border/40 bg-card p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
           <div className="min-w-0 space-y-2 sm:flex-1">
             <div className="flex flex-col items-start gap-1.5">
               {/* StatusBadge's box: its text line, py-1 and a 1px border. */}
-              <span className="inline-flex w-[72px] rounded-full border border-transparent bg-[#ebe4d8] py-1 text-[0.8125rem] select-none">
+              <span className="inline-flex w-[72px] rounded-md border border-transparent bg-[#ebe4d8] dark:bg-[#484135] py-1 text-[0.8125rem] select-none">
                 &zwnj;
               </span>
               {shape && "name" in shape ? (
@@ -353,10 +353,10 @@ export function OptimizationDetailSkeleton({
       </div>
 
       {pair && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#C8A882]/30 bg-gradient-to-l from-[#FAF8F5] to-[#F5F1EC] p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary-fill/30 bg-muted/40 p-3">
           <div className="flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-3">
             <Skeleton width={64} height={14} />
-            <span aria-hidden="true" className="h-4 w-px bg-[#C8A882]/30" />
+            <span aria-hidden="true" className="h-4 w-px bg-primary-fill/30" />
             <Skeleton width={160} height={14} />
           </div>
           <div className="flex w-full items-center justify-end gap-1 sm:w-auto sm:shrink-0">

@@ -29,7 +29,6 @@ from core.models.blackbox import (
     BLACKBOX_ENGINE_BEST_OF_N,
     BLACKBOX_ENGINE_GEPA,
     BlackboxRunRequest,
-    ScorerDryRunRequest,
 )
 from core.models.results import ModelTokenUsage
 
@@ -44,8 +43,8 @@ from ..auto import LaneOutcome
 from ..harness import GatewayConfig
 from ..native_runtime import NativeOptions
 from ..protocol import Candidate, EngineContext, EvalServer, Result, Task, candidate_key
-from ..sandbox_scorer import ScorerGateway, ScorerProbeResult
-from ..service import dry_run_scorer, run_blackbox_optimization, validate_blackbox_payload
+from ..sandbox_scorer import ScorerGateway
+from ..service import run_blackbox_optimization, validate_blackbox_payload
 from .mocks import (
     AGENT_OUTPUT_SCORER_CODE,
     VOWEL_SCORER_CODE,
@@ -195,8 +194,12 @@ def test_run_scores_baseline_and_best_in_a_separate_final_run(fake_lm: FakeRefle
     assert response.optimizer_name == BLACKBOX_ENGINE_BEST_OF_N
     assert response.engine_used == BLACKBOX_ENGINE_BEST_OF_N
     assert response.strategy_mode == "single"
-    assert response.case_count == 10
-    assert response.final_scorer_runs == 20
+    assert response.split_counts is not None
+    assert (response.split_counts.train, response.split_counts.val, response.split_counts.test) == (7, 2, 1)
+    assert response.case_count == 1
+    assert response.final_scorer_runs == 2 * (2 + 1)
+    assert response.baseline_val_score == pytest.approx(3 / 11)
+    assert response.best_val_score == 1.0
     assert response.seed_candidate == "hello world"
     assert response.best_candidate == "aeiou"
     assert response.baseline_score == pytest.approx(3 / 11)
@@ -373,139 +376,6 @@ def test_protected_contract_validation_never_loads_authored_scorer(monkeypatch: 
 
     monkeypatch.setattr(service_mod, "validate_scorer_code", forbid)
     validate_blackbox_payload(_payload(scorer={"kind": "python", "metric_code": "x = 1"}), verify_scorer=False)
-
-
-def test_dry_run_scores_python_scorer_in_the_sandbox() -> None:
-    """A python dry run returns the score and side info from the sandboxed scorer."""
-    request = ScorerDryRunRequest(
-        scorer={"kind": "python", "metric_code": VOWEL_SCORER_CODE}, candidate="aeiou", case={"x": 1}
-    )
-
-    response = dry_run_scorer(request)
-
-    assert response.ok is True
-    assert response.score == 1.0
-    assert response.side_info == {"feedback": "5 vowel(s)", "vowels": 5}
-    assert response.error is None
-    assert response.elapsed_ms >= 0
-
-
-def test_dry_run_reports_scorer_exceptions_without_raising() -> None:
-    """A scorer that raises on the candidate is reported, not propagated."""
-    request = ScorerDryRunRequest(
-        scorer={"kind": "python", "metric_code": "def score(c, case=None): raise ValueError('bad candidate')"},
-        candidate="x",
-    )
-
-    response = dry_run_scorer(request)
-
-    assert response.ok is False
-    assert response.score is None
-    assert response.error == "ValueError: bad candidate"
-
-
-def test_dry_run_reports_unloadable_code() -> None:
-    """Load failures come back as ``ok=False`` with the sandbox's message."""
-    response = dry_run_scorer(ScorerDryRunRequest(scorer={"kind": "python", "metric_code": "def !!!"}, candidate="x"))
-
-    assert response.ok is False
-    assert "syntax error" in str(response.error)
-
-
-def test_dry_run_bounds_python_scorers_by_the_spec_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The dry run probes with the scorer's own ``timeout_seconds``, not a fixed default."""
-    seen: dict[str, Any] = {}
-
-    def fake_probe(**kwargs: Any) -> ScorerProbeResult:
-        """Capture scorer settings and return a successful probe.
-
-        Args:
-            **kwargs: Settings forwarded by the dry-run service.
-
-        Returns:
-            A deterministic successful scorer result.
-        """
-        seen.update(kwargs)
-        return ScorerProbeResult(score=1.0, side_info={}, error=None)
-
-    monkeypatch.setattr(service_mod, "probe_scorer", fake_probe)
-    request = ScorerDryRunRequest(
-        scorer={"kind": "python", "metric_code": VOWEL_SCORER_CODE, "timeout_seconds": 12.5}, candidate="x"
-    )
-
-    response = dry_run_scorer(request)
-
-    assert response.ok is True
-    assert seen["timeout_seconds"] == 12.5
-
-
-def test_dry_run_reports_a_scorer_that_outruns_its_timeout() -> None:
-    """A python scorer slower than its timeout is stopped and reported, not left hanging."""
-    request = ScorerDryRunRequest(
-        scorer={
-            "kind": "python",
-            "metric_code": "import time\ndef score(c, case=None):\n    time.sleep(30)\n    return 1.0\n",
-            "timeout_seconds": 1,
-        },
-        candidate="x",
-    )
-
-    response = dry_run_scorer(request)
-
-    assert response.ok is False
-    assert response.score is None
-    assert "exceeded the 1s" in str(response.error)
-
-
-def test_dry_run_calls_remote_scorer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A remote dry run makes one request through the remote adapter."""
-    calls: list[tuple[Any, Any]] = []
-
-    class _FakeRemote:
-        """Records construction and returns a fixed score."""
-
-        def __init__(self, url: str, *, secret: str | None, timeout_seconds: float) -> None:
-            """Record the endpoint settings."""
-            calls.append((url, (secret, timeout_seconds)))
-
-        def __call__(self, candidate: Any, case: Any = None) -> tuple[float, dict[str, Any]]:
-            """Return a fixed score."""
-            calls.append((candidate, case))
-            return 0.5, {"remote": True}
-
-    monkeypatch.setattr(service_mod, "RemoteScorer", _FakeRemote)
-    request = ScorerDryRunRequest(
-        scorer={"kind": "remote", "url": "https://scorer.example", "secret": "s", "timeout_seconds": 5},
-        candidate={"part": "v"},
-    )
-
-    response = dry_run_scorer(request)
-
-    assert response.ok is True
-    assert response.score == 0.5
-    assert response.side_info == {"remote": True}
-    assert calls == [("https://scorer.example", ("s", 5.0)), ({"part": "v"}, None)]
-
-
-def test_dry_run_reports_remote_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Remote adapter errors come back as ``ok=False``."""
-
-    class _Broken:
-        """Remote adapter whose call fails."""
-
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            """Accept any settings."""
-
-        def __call__(self, candidate: Any, case: Any = None) -> tuple[float, dict[str, Any]]:
-            """Fail like a dead endpoint."""
-            raise ServiceError("remote scorer request failed: refused")
-
-    monkeypatch.setattr(service_mod, "RemoteScorer", _Broken)
-
-    response = dry_run_scorer(ScorerDryRunRequest(scorer={"kind": "remote", "url": "https://x.example"}, candidate="x"))
-
-    assert response.ok is False
-    assert response.error == "remote scorer request failed: refused"
 
 
 _AGENT_TARGET = {
@@ -794,30 +664,6 @@ def test_gateway_prefixed_reflection_usage_merges_with_the_scorer_row(
     ]
 
 
-def test_dry_run_binds_the_scorer_model_and_returns_its_usage(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A dry run hands the scorer's model to the sandbox and reports what ``llm()`` consumed."""
-    seen: dict[str, Any] = {}
-
-    def fake_probe(**kwargs: Any) -> ScorerProbeResult:
-        """Capture the probe arguments and answer with usage."""
-        seen.update(kwargs)
-        return ScorerProbeResult(score=0.5, side_info={}, error=None, usage_by_model={"fake/judge": (12, 3)})
-
-    monkeypatch.setattr(service_mod, "probe_scorer", fake_probe)
-    request = ScorerDryRunRequest(
-        scorer={"kind": "python", "metric_code": _JUDGE_SCORER_CODE, "model": {"name": "fake/judge"}},
-        candidate="aeiou",
-        case={"target": "aeiou"},
-    )
-
-    response = dry_run_scorer(request)
-
-    assert seen["scorer_model"]["name"] == "fake/judge"
-    assert response.ok is True
-    assert response.score == 0.5
-    assert response.usage_by_model == [ModelTokenUsage(model="fake/judge", input_tokens=12, output_tokens=3)]
-
-
 def test_reflection_caller_hands_chat_messages_to_the_model() -> None:
     """Text prompts pass positionally, chat messages via ``messages=``, and every call is timed."""
     calls: list[tuple[Any, Any]] = []
@@ -1084,7 +930,7 @@ def test_run_versions_show_the_tree_score_as_their_headline(fake_lm: FakeReflect
 def test_final_run_rescores_both_versions_outside_the_budget(
     fake_lm: FakeReflectionLM, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The winner is picked from the run's scores, then both versions are scored afresh on every case.
+    """The winner is picked from the run's scores, then both versions are scored afresh on validation and test.
 
     Args:
         fake_lm: Metered model fake used by upstream Best-of-N.
@@ -1104,17 +950,22 @@ def test_final_run_rescores_both_versions_outside_the_budget(
     response = run_blackbox_optimization(_payload(), artifact_id="job-final", gepa_log_dir_path=str(tmp_path))
 
     calls = recorders[0].calls
+    splits = service_mod.legacy_case_splits(list(_CASES), 1)
+    held_out = len(splits.val) + len(splits.test)
     assert response.total_scorer_runs <= 12
-    assert response.final_scorer_runs == 2 * len(_CASES)
+    assert response.final_scorer_runs == 2 * held_out
     assert len(calls) == response.total_scorer_runs + response.final_scorer_runs
+    test_ids = {case["i"] for case in splits.test}
+    search_calls = calls[: response.total_scorer_runs]
+    assert all(case is None or case["i"] not in test_ids for _, case in search_calls)
     final_calls = calls[-response.final_scorer_runs :]
-    assert sorted(candidate for candidate, _ in final_calls) == ["aeiou"] * len(_CASES) + ["hello world"] * len(_CASES)
+    assert sorted(candidate for candidate, _ in final_calls) == ["aeiou"] * held_out + ["hello world"] * held_out
     assert response.baseline_score == pytest.approx(3 / 11)
     assert response.best_score == 1.0
-    assert response.case_count == len(_CASES)
+    assert response.case_count == len(splits.test)
     assert [(row.baseline_score, row.best_score) for row in response.case_results] == [
         (pytest.approx(3 / 11), 1.0)
-    ] * len(_CASES)
+    ] * len(splits.test)
     assert response.case_results[0].best_feedback == "5 vowel(s)"
 
 

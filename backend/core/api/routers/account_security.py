@@ -43,6 +43,7 @@ from webauthn.helpers.structs import (
 )
 
 from ...config import settings
+from ...notifications.email_render import render_account_email
 from ...storage.models import UserIdentityModel, UserModel, WebAuthnChallengeModel, WebAuthnCredentialModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..email_sender import email_configured, send_email
@@ -59,6 +60,7 @@ from ..two_factor import (
     verify_totp,
 )
 from .accounts import (
+    ACCOUNT_EMAIL_LOCALE,
     AccountInfo,
     OkResponse,
     _has_password,
@@ -703,12 +705,8 @@ def create_account_security_router(*, job_store) -> APIRouter:
             code = issue_email_code(session, email)
             session.commit()
         try:
-            send_email(
-                email,
-                "Your Skynet sign-in code",
-                f"Your Skynet sign-in code is {code}. It expires in 10 minutes.\n\n"
-                "If you didn't try to sign in, you can ignore this email.",
-            )
+            subject, html, text = render_account_email("sign_in", ACCOUNT_EMAIL_LOCALE, code)
+            send_email(email, subject, text, html_body=html)
         except (OSError, RuntimeError) as exc:
             raise DomainError("accounts.email_send_failed", status=502) from exc
         return OkResponse()

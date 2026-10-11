@@ -27,6 +27,10 @@ type LetterVariants = {
 type LetterDef = {
   offset: number;
   variants: LetterVariants;
+  /** Transform for the default path when it is drawn in another coordinate space. */
+  defaultTransform?: string;
+  /** Fill the alternate paths even-odd so nested outlines read as rings. */
+  evenOdd?: boolean;
 };
 
 // All letters are scaled within a 92-unit high viewBox.
@@ -123,6 +127,34 @@ const LETTERS: LetterDef[] = [
 ];
 
 const TOTAL_WIDTH = 475;
+
+// The hexagon brand mark (shared/ui/skynet-mark.tsx) as a morphing glyph. Its
+// default path stays in the mark's own unit space and is scaled so its
+// bounding box spans the full 92-unit letter height, 79.6 units wide.
+const MARK_WIDTH = 79.6;
+const MARK_GAP = 28;
+const MARK: LetterDef = {
+  offset: 0,
+  defaultTransform: "scale(141.47) translate(-0.2196 -0.1655)",
+  evenOdd: true,
+  variants: {
+    default:
+      "m0.5 0.1655-0.2804 0.1566v0.1209l0.2802-0.1524 0.175 0.1008q0.0025 0.0014 0.0025 0.0036v0.2028l-0.1595 0.0889-0.1607-0.0965q-0.0053-0.0032-0.0053-0.0071v-0.1116l-0.1322 0.0724v0.1133l0.2804 0.1586 0.2819-0.1587v-0.3339q0-1e-3 -9e-4 -0.0015z M0.4999 0.3925 0.5923 0.4466v0.1132l-0.0525 0.0295-0.1204-0.0678v-0.0842z",
+    glyph: [
+      { x: 28.5, y: 2.1, w: 22.6, h: 22.6 },
+      { x: 2, y: 68, w: 22.6, h: 22.6 },
+      { x: 55, y: 68, w: 22.6, h: 22.6 },
+    ],
+    serif:
+      "M39.8,0 L79.6,23 L79.6,69 L39.8,92 L0,69 L0,23 Z M39.8,4.1 L76,25.1 L76,66.9 L39.8,87.9 L3.6,66.9 L3.6,25.1 Z M39.8,25.3 L57.7,35.7 L57.7,56.3 L39.8,66.7 L21.9,56.3 L21.9,35.7 Z",
+    sans: "M39.8,0 L79.6,23 L79.6,69 L39.8,92 L0,69 L0,23 Z M39.8,10.1 L70.8,28 L70.8,64 L39.8,81.9 L8.8,64 L8.8,28 Z M39.8,34.5 L49.8,40.3 L49.8,51.7 L39.8,57.5 L29.8,51.7 L29.8,40.3 Z",
+  },
+};
+const MARK_SHIFT = MARK_WIDTH + MARK_GAP;
+const LETTERS_WITH_MARK: LetterDef[] = [
+  MARK,
+  ...LETTERS.map((letter) => ({ ...letter, offset: letter.offset + MARK_SHIFT })),
+];
 const VARIANT_NAMES = ["default", "glyph", "serif", "sans"] as const;
 type VariantName = (typeof VARIANT_NAMES)[number];
 
@@ -147,13 +179,14 @@ const TRANSITION = "opacity 300ms cubic-bezier(0.215, 0.610, 0.355, 1.000)";
 
 function VariantGroup({
   variant,
-  content,
+  letter,
   active,
 }: {
   variant: VariantName;
-  content: LetterVariants;
+  letter: LetterDef;
   active: boolean;
 }) {
+  const content = letter.variants;
   const opacity = active ? 1 : 0;
   const style = { opacity, transition: TRANSITION };
 
@@ -170,7 +203,14 @@ function VariantGroup({
   const d =
     variant === "default" ? content.default : variant === "serif" ? content.serif : content.sans;
 
-  return <path d={d} style={style} fillRule="nonzero" />;
+  return (
+    <path
+      d={d}
+      style={style}
+      fillRule={variant !== "default" && letter.evenOdd ? "evenodd" : "nonzero"}
+      transform={variant === "default" ? letter.defaultTransform : undefined}
+    />
+  );
 }
 
 export function AnimatedWordmark({
@@ -180,6 +220,7 @@ export function AnimatedWordmark({
   autoMorphDuration,
   morphSpeed = 250,
   fluid = false,
+  withMark = false,
 }: {
   size?: number;
   className?: string;
@@ -194,13 +235,20 @@ export function AnimatedWordmark({
   morphSpeed?: number;
   /** Fill the parent's width (height derives from the viewBox) instead of using `size`. */
   fluid?: boolean;
+  /** Lead with the hexagon brand mark, drawn at the letters' height and morphing with them. */
+  withMark?: boolean;
 }) {
+  const letters = withMark ? LETTERS_WITH_MARK : LETTERS;
+  const totalWidth = withMark ? TOTAL_WIDTH + MARK_SHIFT : TOTAL_WIDTH;
   const [activeVariants, setActiveVariants] = useState<VariantName[]>(() =>
-    LETTERS.map(() => "default"),
+    letters.map(() => "default"),
   );
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reducedMotionRef = useRef(false);
+  // True while autoMorph owns the animation; a timed autoMorph hands control
+  // back to hover once it settles.
+  const autoActiveRef = useRef(false);
 
   useEffect(() => {
     const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -217,7 +265,7 @@ export function AnimatedWordmark({
 
     intervalRef.current = setInterval(() => {
       const count = 2 + Math.floor(Math.random() * 2); // Picks 2 or 3 letters to change
-      const indices = pickRandom(LETTERS.length, count);
+      const indices = pickRandom(letters.length, count);
 
       setActiveVariants((prev) => {
         const next = [...prev];
@@ -227,29 +275,29 @@ export function AnimatedWordmark({
         return next;
       });
     }, morphSpeed);
-  }, [morphSpeed]);
+  }, [morphSpeed, letters.length]);
 
   const stopMorph = useCallback(() => {
     if (intervalRef.current != null) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-    setActiveVariants(LETTERS.map(() => "default"));
-  }, []);
+    setActiveVariants(letters.map(() => "default"));
+  }, [letters]);
 
   const handleMouseEnter = useCallback(() => {
-    // When autoMorph owns the lifecycle the wordmark is already morphing — hover
+    // While autoMorph owns the lifecycle the wordmark is already morphing — hover
     // must not spin up a second interval.
-    if (autoMorph) return;
+    if (autoActiveRef.current) return;
     if (!reducedMotionRef.current) startMorph();
-  }, [autoMorph, startMorph]);
+  }, [startMorph]);
 
   const handleMouseLeave = useCallback(() => {
     // Never reset a continuously-morphing wordmark on leave; it should keep
     // morphing regardless of hover.
-    if (autoMorph) return;
+    if (autoActiveRef.current) return;
     stopMorph();
-  }, [autoMorph, stopMorph]);
+  }, [stopMorph]);
 
   useEffect(() => {
     if (autoMorph && !reducedMotionRef.current) {
@@ -258,12 +306,17 @@ export function AnimatedWordmark({
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
+      autoActiveRef.current = true;
       startMorph();
       if (autoMorphDuration != null) {
-        stopTimeoutRef.current = setTimeout(stopMorph, autoMorphDuration);
+        stopTimeoutRef.current = setTimeout(() => {
+          autoActiveRef.current = false;
+          stopMorph();
+        }, autoMorphDuration);
       }
     }
     return () => {
+      autoActiveRef.current = false;
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -275,13 +328,13 @@ export function AnimatedWordmark({
     };
   }, [autoMorph, autoMorphDuration, startMorph, stopMorph]);
 
-  const aspectRatio = TOTAL_WIDTH / 92;
+  const aspectRatio = totalWidth / 92;
   const svgWidth = size * aspectRatio;
 
   return (
     <span
       dir="ltr"
-      className={`${fluid ? "flex w-full justify-center" : "inline-flex"} items-center select-none cursor-default ${className ?? ""}`}
+      className={`${fluid ? "flex w-full justify-center" : "inline-flex"} items-center text-primary select-none cursor-default ${className ?? ""}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       role="img"
@@ -291,19 +344,19 @@ export function AnimatedWordmark({
         className="overflow-visible transition-all duration-300 pointer-events-none"
         width={fluid ? undefined : svgWidth}
         height={fluid ? undefined : size}
-        viewBox={`0 0 ${TOTAL_WIDTH} 92`}
+        viewBox={`0 0 ${totalWidth} 92`}
         fill="currentColor"
         stroke="none"
         xmlns="http://www.w3.org/2000/svg"
         style={fluid ? { width: "100%", height: "auto", color: "var(--foreground)" } : { color: "var(--foreground)" }}
       >
-        {LETTERS.map((letter, li) => (
+        {letters.map((letter, li) => (
           <g key={li} transform={`translate(${letter.offset}, 0)`}>
             {VARIANT_NAMES.map((name) => (
               <VariantGroup
                 key={name}
                 variant={name}
-                content={letter.variants}
+                letter={letter}
                 active={activeVariants[li] === name}
               />
             ))}

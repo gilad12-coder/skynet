@@ -35,6 +35,7 @@ import { serializeLocale, setServerLocale } from "@/shared/lib/runtime-locale";
 import { setServerMessages, type UiCatalog } from "@/shared/lib/runtime-messages";
 import { buildActiveCatalog } from "@/shared/lib/messages.server";
 import { getSiteUrl } from "@/shared/lib/site-config";
+import { COLOR_THEME_INIT_SCRIPT } from "@/shared/lib/color-theme";
 import { auth } from "@/shared/lib/auth";
 import "@fontsource-variable/heebo/index.css";
 import "@fontsource-variable/onest/index.css";
@@ -99,8 +100,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#FAF8F5" },
-    { media: "(prefers-color-scheme: dark)", color: "#0F0C0A" },
+    { media: "(prefers-color-scheme: light)", color: "#FCFCFB" },
+    { media: "(prefers-color-scheme: dark)", color: "#151515" },
   ],
 };
 
@@ -118,8 +119,8 @@ export async function generateMetadata(): Promise<Metadata> {
     icons: {
       // Versioned to evict browsers' sticky favicon caches, which survive
       // hard refreshes and kept serving the original robot-arm icon.
-      icon: "/favicon.svg?v=2",
-      apple: "/favicon.svg?v=2",
+      icon: "/favicon.svg?v=3",
+      apple: "/favicon.svg?v=3",
     },
     metadataBase: new URL(siteUrl),
     alternates: {
@@ -209,6 +210,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang={locale} dir={dirForLocale(locale)} translate="no" suppressHydrationWarning>
       <head>
         <meta name="google" content="notranslate" />
+        {/* First in <head>: sets the .dark class before anything paints, so a
+            dark-mode visitor never sees a light flash. */}
+        <script id="skynet-color-theme" dangerouslySetInnerHTML={{ __html: COLOR_THEME_INIT_SCRIPT }} />
         {/* Plain <script> tags, not next/script: `beforeInteractive` with inline
             children makes React 19 warn ("scripts inside components are never
             executed when rendering on the client"). These run straight from the

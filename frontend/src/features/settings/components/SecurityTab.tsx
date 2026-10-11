@@ -310,20 +310,19 @@ export function SecurityTab() {
             : msg("settings.security.passkeys.unsupported")
         }
       >
-        <TooltipButton tooltip={msg("settings.security.passkeys.add")}>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            disabled={!passkeysSupported || busy}
-            onClick={() => {
-              setPasskeyName("");
-              setPasskeyOpen(true);
-            }}
-            aria-label={msg("settings.security.passkeys.add")}
-          >
-            <Plus className="size-3.5" aria-hidden="true" />
-          </Button>
-        </TooltipButton>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          disabled={!passkeysSupported || busy}
+          onClick={() => {
+            setPasskeyName("");
+            setPasskeyOpen(true);
+          }}
+          autoTooltip={false}
+          aria-label={msg("settings.security.passkeys.add")}
+        >
+          <Plus className="size-3.5" aria-hidden="true" />
+        </Button>
       </SettingsRow>
 
       {status.passkeys.length > 0 && (

@@ -91,8 +91,7 @@ const OPTIMIZATION_MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "bulk_delete_jobs_optimizations_bulk_delete_post",
   "cancel_job_optimizations",
   "bulk_cancel_jobs_optimizations_bulk_cancel_post",
-  "submit_job_run_post",
-  "submit_grid_search_grid_search_post",
+  "submit_unified_run_optimize_post",
   "rename_job_optimizations",
   "toggle_pin_job_optimizations",
   "clone_job_optimizations",
@@ -101,17 +100,12 @@ const OPTIMIZATION_MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "pause_job_optimizations",
   "resume_job_optimizations",
   "restart_job_optimizations",
-  "submit_blackbox_run_blackbox_run_post",
 ]);
 
 // Submit tools whose success consumes the staged dataset + readiness. After
 // one fires we drop the sticky wizard overlay so the next turn starts clean
 // rather than re-carrying the just-submitted run's dataset id and flags.
-const SUBMIT_TOOLS: ReadonlySet<string> = new Set([
-  "submit_job_run_post",
-  "submit_grid_search_grid_search_post",
-  "submit_blackbox_run_blackbox_run_post",
-]);
+const SUBMIT_TOOLS: ReadonlySet<string> = new Set(["submit_unified_run_optimize_post"]);
 
 // Cap on each prior tool result echoed back in chat history; the backend
 // bounds it again, this just keeps the request body small.

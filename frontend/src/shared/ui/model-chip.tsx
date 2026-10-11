@@ -68,7 +68,7 @@ export function MicroPill({
     <span
       className={cn(
         "inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-semibold",
-        tone === "primary" ? "bg-primary/10 text-primary" : "bg-muted/50 text-muted-foreground/80",
+        tone === "primary" ? "bg-primary-fill text-primary-foreground" : "bg-muted/50 text-muted-foreground/80",
         className,
       )}
       {...props}
@@ -94,7 +94,7 @@ function TokenSourcePill({ source }: { source: ModelConfig["token_source"] }) {
   const Icon = byok ? Key : Coins;
   const label = msg(byok ? "billing.mode.byok" : "billing.mode.managed");
   return (
-    <MicroPill title={label} dir="auto">
+    <MicroPill dir="auto">
       <Icon className="size-2.5" aria-hidden="true" />
       {label}
     </MicroPill>
@@ -211,8 +211,8 @@ export function ModelChip({
         "group relative flex items-center gap-2.5 rounded-lg border px-3 py-2 cursor-pointer",
         "transition-[border-color,box-shadow,background-color] duration-150",
         isEmpty
-          ? "border-dashed border-border/60 bg-muted/20 hover:border-primary/40 hover:bg-muted/40"
-          : "border-border/50 bg-card/80 hover:border-primary/40 hover:shadow-sm",
+          ? "border-dashed border-border/60 bg-muted/20 hover:border-primary-fill/40 hover:bg-muted/40"
+          : "border-border/50 bg-card/80 hover:border-primary-fill/40",
         className,
       )}
     >
@@ -266,21 +266,20 @@ export function ModelChip({
           </TooltipButton>
         )}
         {onRemove && !isEmpty && (
-          <TooltipButton tooltip={msg("shared.model_chip.remove")} side="top">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={msg("shared.model_chip.remove")}
-              onClick={(e) => {
-                e.stopPropagation();
-                onRemove();
-              }}
-              className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-            >
-              <Trash className="size-3.5" />
-            </Button>
-          </TooltipButton>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            autoTooltip={false}
+            aria-label={msg("shared.model_chip.remove")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          >
+            <Trash className="size-3.5" />
+          </Button>
         )}
       </div>
     </div>
@@ -306,7 +305,7 @@ export function AddModelButton({
       onClick={onClick}
       className={cn(
         "flex items-center gap-2 rounded-lg border border-dashed border-border/50 px-3 py-2",
-        "text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-muted/30",
+        "text-sm text-muted-foreground hover:border-primary-fill/40 hover:text-foreground hover:bg-muted/30",
         "transition-all duration-150 cursor-pointer",
         className,
       )}

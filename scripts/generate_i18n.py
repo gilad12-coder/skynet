@@ -521,6 +521,12 @@ def main(argv: list[str] | None = None) -> int:
     py_content = _render_py(catalog)
     py_catalog_content = CATALOG_PATH.read_text(encoding="utf-8")
     ui_ts_content = _render_ui_ts(_load_ui_catalogs())
+    # Overlays ride along in the package so localized emails render from a
+    # wheel or the backend-only Docker context, where the repo root is absent.
+    overlay_copies = [
+        (PY_CATALOG_OUT.parent / f"{locale}.json", (ROOT / "i18n" / "locales" / f"{locale}.json"))
+        for locale in sorted(overlays)
+    ]
 
     if args.check:
         return _check_drift(
@@ -529,6 +535,7 @@ def main(argv: list[str] | None = None) -> int:
                 (PY_OUT, py_content),
                 (PY_CATALOG_OUT, py_catalog_content),
                 (UI_TS_OUT, ui_ts_content),
+                *((out, src.read_text(encoding="utf-8")) for out, src in overlay_copies),
             ]
         )
 
@@ -537,6 +544,8 @@ def main(argv: list[str] | None = None) -> int:
     _write(UI_TS_OUT, ui_ts_content)
     PY_CATALOG_OUT.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(CATALOG_PATH, PY_CATALOG_OUT)
+    for out, src in overlay_copies:
+        shutil.copyfile(src, out)
     return 0
 
 

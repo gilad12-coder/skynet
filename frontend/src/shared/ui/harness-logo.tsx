@@ -55,7 +55,7 @@ function PiMark({ size }: { size: number }) {
     <span
       role="img"
       aria-label="Pi"
-      className="inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground"
+      className="inline-flex items-center justify-center rounded-full bg-primary-fill text-primary-foreground"
       style={{ width: size, height: size }}
     >
       <svg

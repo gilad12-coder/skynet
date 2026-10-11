@@ -220,21 +220,6 @@ def test_submission_rejects_stale_or_foreign_evidence(setup_client) -> None:
         store.require_current(**{**kwargs, "payload": {**payload, "seed_candidate": "Changed"}})
 
 
-def test_preflight_never_uses_held_out_case() -> None:
-    """Select from the actual submitted training split rather than the first raw row."""
-    rows = [{"id": index} for index in range(20)]
-    payload = {"cases": rows, "seed": 19, "shuffle": True, "split_fractions": {"train": 0.5, "val": 0.25, "test": 0.25}}
-    splits = wizard_preflight.split_examples(
-        rows,
-        wizard_preflight.SplitFractions.model_validate(payload["split_fractions"]),
-        shuffle=True,
-        seed=19,
-    )
-    chosen = wizard_preflight._sample(payload)
-    assert chosen in splits.train
-    assert chosen not in splits.test
-
-
 @pytest.mark.parametrize("key", ["_gepa_log_dir", "_budget_gateway_descriptor", "_skynet_tools_route", "_preflight"])
 def test_public_preflight_rejects_parent_runtime_controls(setup_client, key: str) -> None:
     """Reject forged filesystem and relay authority before claiming setup or spending funds."""
@@ -245,27 +230,6 @@ def test_public_preflight_rejects_parent_runtime_controls(setup_client, key: str
     assert "Runtime control fields" in response.text
     assert calls == []
     assert client.get(f"/execution-budgets/{budget['id']}").json()["setup_spent_cents"] == "0"
-
-
-def test_unavailable_default_runtime_defers_evaluation_to_optimization(
-    setup_client, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Let users reach the runtime picker without claiming a paid evaluator check occurred."""
-    client, _engine, calls = setup_client
-    budget = _budget(client)
-    monkeypatch.setattr(wizard_preflight, "protected_vercel_unavailable_reason", lambda *args: "Missing image")
-    response = client.post(
-        "/wizard/preflight",
-        json={**_request(budget), "scope": "evaluation", "workflow": "dspy", "payload": {}},
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert result["status"] == "pending"
-    assert result["may_advance"] is True
-    assert result["pending_reason"]["category"] == "later_stage_dependency"
-    assert result["checks"][0]["field"] == "execution_runtime"
-    assert result["budget"]["setup_spent_cents"] == "0"
-    assert calls == []
 
 
 def test_unresolved_paid_usage_blocks_stage_advancement(setup_client, monkeypatch: pytest.MonkeyPatch) -> None:

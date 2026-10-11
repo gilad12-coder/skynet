@@ -8,6 +8,7 @@ import { motion } from "framer-motion";
 import { List } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
+import { SkynetMark } from "@/shared/ui/skynet-mark";
 import { GlobalSearch } from "@/shared/layout/global-search";
 import { useLocale } from "@/shared/providers";
 import { dirForLocale } from "@/shared/lib/locale";
@@ -17,6 +18,7 @@ import { PageContainer } from "@/shared/layout/page-container";
 import { MobileShell } from "@/shared/layout/mobile-shell";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { BalanceChip } from "@/features/billing";
+import { NotificationBell } from "@/features/notifications";
 import {
   GeneralistPanel,
   GeneralistPanelProvider,
@@ -153,7 +155,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
       <div ref={progressRef} className="scroll-progress" aria-hidden="true" />
 
       <div className="ambient-bg" aria-hidden="true">
-        <div className="orb orb-1" />
         <div className="orb orb-2" />
         <div className="orb orb-3" />
         <div className="orb orb-4" />
@@ -163,21 +164,23 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="fixed inset-x-0 top-0 z-30 flex h-[var(--header-height)] items-center justify-between border-b border-border/40 bg-background/60 px-2 py-0 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.03)] backdrop-blur-2xl backdrop-saturate-[1.8] sm:px-4"
+        className="fixed inset-x-0 top-0 z-30 flex h-[var(--header-height)] items-center justify-between border-b border-border/40 bg-background/60 px-2 py-0 backdrop-blur-2xl backdrop-saturate-[1.8] sm:px-4"
         dir="ltr"
         style={{
           borderImage:
             "linear-gradient(to right, transparent, var(--border) 20%, var(--border) 80%, transparent) 1",
         }}
       >
-        <div className="flex items-center gap-1.5 cursor-default">
-          {/* The morphing wordmark anchors the header at sm+; below sm it collapses
-              to a plain SKYNET wordmark where the full SVG would crowd the row. */}
+        <div className="flex items-center gap-2 cursor-default">
+          {/* The morphing mark and wordmark anchor the header at sm+; below sm they
+              collapse to the static mark and a plain SKYNET wordmark where the
+              full SVG would crowd the row. */}
           <div className="hidden sm:block">
-            <AnimatedWordmark size={16} autoMorph autoMorphDuration={10000} morphSpeed={250} />
+            <AnimatedWordmark size={16} withMark autoMorph autoMorphDuration={10000} morphSpeed={250} />
           </div>
+          <SkynetMark className="sm:hidden size-2.5 shrink-0 text-foreground" aria-hidden="true" />
           <span
-            className="sm:hidden text-sm font-bold tracking-[0.14em] uppercase text-foreground cursor-default"
+            className="sm:hidden text-sm font-bold tracking-[0.14em] uppercase text-primary cursor-default"
             style={{ fontFamily: "var(--font-ui)" }}
           >
             SKYNET
@@ -193,6 +196,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
               never more than a glance away; the chip's own popover carries the
               breakdown and the wallet path. */}
           <BalanceChip />
+          <NotificationBell />
           <Button
             type="button"
             variant="ghost"

@@ -4,7 +4,13 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { INTAKE_LLM_PHASES } from "./intake.ts";
-import { MAX_SETUP_STOPS, SETUP_STOPS } from "./setup-tour.ts";
+import {
+  MAX_SETUP_STOPS,
+  SETUP_STOPS,
+  arrowStep,
+  resumeStopIndex,
+  setupStops,
+} from "./setup-tour.ts";
 
 const SRC = join(import.meta.dirname, "../../..");
 const CATALOG_DIR = join(SRC, "../../i18n/locales/ui");
@@ -43,24 +49,72 @@ test("every stop's anchor is on a real part of the app", () => {
   }
 });
 
-test("the privacy and email questions frame their real controls in Settings", () => {
+test("the privacy question frames its real control in Settings", () => {
   const tabs = readFileSync(join(SRC, "features/settings/lib/tabs.ts"), "utf8");
   const privacyTab = readFileSync(join(SRC, "features/settings/components/PrivacyTab.tsx"), "utf8");
-  for (const question of ["privacy", "emails"] as const) {
-    const stop = SETUP_STOPS.find((s) => s.question === question)!;
-    assert.equal(stop.settings, "privacy", `${question}: opens the wrong Settings tab`);
-    assert.ok(tabs.includes(`"${stop.settings}",`), `no Settings tab "${stop.settings}"`);
-    assert.ok(
-      privacyTab.includes(`data-setup="${stop.anchor}"`),
-      `${question}: anchor "${stop.anchor}" is not on the Settings control`,
-    );
+  const stop = SETUP_STOPS.find((s) => s.question === "privacy")!;
+  assert.equal(stop.settings, "privacy");
+  assert.ok(tabs.includes(`"${stop.settings}",`), `no Settings tab "${stop.settings}"`);
+  assert.ok(privacyTab.includes(`data-setup="${stop.anchor}"`));
+});
+
+// The stops where the user sets the real controls, and the file that tags each anchor.
+const HANDS_ON: Record<string, string> = {
+  providers: "features/billing/components/ByokKeysSection.tsx",
+  connectors: "features/connectors/components/ConnectorsTab.tsx",
+  notifications: "features/settings/components/NotificationsTab.tsx",
+  channels: "features/settings/components/NotificationsTab.tsx",
+};
+
+test("each hands-on stop opens its Settings tab on the real controls, with no question", () => {
+  const tabs = readFileSync(join(SRC, "features/settings/lib/tabs.ts"), "utf8");
+  for (const [id, file] of Object.entries(HANDS_ON)) {
+    const stop = SETUP_STOPS.find((s) => s.id === id)!;
+    assert.ok(stop, `no "${id}" stop`);
+    assert.equal(stop.question, undefined, `${id}: the user edits the real controls`);
+    assert.ok(tabs.includes(`"${stop.settings}",`), `${id}: no Settings tab "${stop.settings}"`);
+    assert.ok(readFileSync(join(SRC, file), "utf8").includes(`data-setup="${stop.anchor}"`));
   }
+  assert.ok(!SETUP_STOPS.some((s) => s.anchor === "email-updates"), "the old email stop is back");
+});
+
+test("the Settings tabs the setup opens are ones every user sees", () => {
+  const tabs = readFileSync(join(SRC, "features/settings/lib/tabs.ts"), "utf8");
+  for (const stop of SETUP_STOPS) {
+    if (!stop.settings) continue;
+    const entry = tabs.slice(tabs.indexOf(`  ${stop.settings}: {`)).split("},")[0]!;
+    assert.ok(!entry.includes("adminOnly"), `${stop.id}: Settings tab is admin-only`);
+  }
+});
+
+test("the Chrome and Slack connections sit inside the channels frame", () => {
+  const tab = readFileSync(join(SRC, "features/settings/components/NotificationsTab.tsx"), "utf8");
+  const frame = tab.slice(tab.indexOf('data-setup="notification-channels"'));
+  assert.ok(frame.indexOf("turnOnChrome") > 0, "no Chrome switch-on in the frame");
+  assert.ok(frame.indexOf("<SlackConnectionSection") > 0, "no Slack section in the frame");
 });
 
 test("only stops about a Settings control open Settings", () => {
   for (const stop of SETUP_STOPS) {
-    if (stop.settings) assert.ok(stop.question, `${stop.id}: opens Settings without a question`);
+    if (stop.settings) {
+      assert.ok(stop.question || stop.id in HANDS_ON, `${stop.id}: opens Settings`);
+    }
   }
+});
+
+test("the model key stop shows only after a bring-your-own-key answer", () => {
+  assert.ok(setupStops("byok").some((s) => s.id === "providers"));
+  assert.ok(!setupStops("platform").some((s) => s.id === "providers"));
+  assert.ok(setupStops("byok").length <= MAX_SETUP_STOPS);
+});
+
+test("a setup back from a sign-in picks up at the stop it left", () => {
+  const stops = setupStops("platform");
+  assert.equal(stops[resumeStopIndex(stops, "channels")]!.id, "channels");
+  assert.equal(stops[resumeStopIndex(stops, "connectors")]!.id, "connectors");
+  assert.equal(resumeStopIndex(stops, undefined), 0);
+  // The key stop is gone once the billing answer changed away from an own key.
+  assert.equal(resumeStopIndex(stops, "providers"), 0);
 });
 
 test("every stop's copy exists in the base and English catalogs", () => {
@@ -71,4 +125,24 @@ test("every stop's copy exists in the base and English catalogs", () => {
       assert.ok(catalog[stop.body], `${locale}: missing ${stop.body}`);
     }
   }
+});
+
+test("side arrows step the setup in the reading direction, unless a control owns them", () => {
+  const press = (key: string, extra: Partial<KeyboardEvent> = {}, owned = false) => ({
+    key,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    target: { closest: () => (owned ? {} : null) } as unknown as EventTarget,
+    ...extra,
+  });
+  assert.equal(arrowStep(press("ArrowRight"), false), 1);
+  assert.equal(arrowStep(press("ArrowLeft"), false), -1);
+  assert.equal(arrowStep(press("ArrowLeft"), true), 1);
+  assert.equal(arrowStep(press("ArrowRight"), true), -1);
+  assert.equal(arrowStep(press("ArrowDown"), false), 0);
+  assert.equal(arrowStep(press("ArrowRight", { metaKey: true }), false), 0);
+  assert.equal(arrowStep(press("ArrowRight", {}, true), false), 0);
+  assert.equal(arrowStep({ ...press("ArrowRight"), target: null }, false), 1);
 });

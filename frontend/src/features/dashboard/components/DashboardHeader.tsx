@@ -95,7 +95,7 @@ export function DashboardHeader({ stats }: DashboardHeaderProps) {
             {i > 0 && (
               <div
                 aria-hidden
-                className="my-4 hidden w-px shrink-0 bg-[#DDD4C8]/50 @min-[40rem]:block"
+                className="my-4 hidden w-px shrink-0 bg-border/50 @min-[40rem]:block"
               />
             )}
             <StatCell {...cell} />

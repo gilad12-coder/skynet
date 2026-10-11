@@ -215,24 +215,23 @@ export function DatasetUploadCard({
       <motion.div
         layout={!reduceMotion}
         className={cn(
-          "relative overflow-hidden rounded-2xl border bg-gradient-to-br from-[#FAF8F5] to-[#F5EFE6]",
-          "border-[#C8A882]/40",
-          "shadow-[0_4px_16px_rgba(61,46,34,0.06)]",
-          confirmed && "from-[#F4F0E8] to-[#EEE6D7] border-[#3D2E22]/30",
+          "relative overflow-hidden rounded-2xl border bg-card",
+          "border-primary-fill/40",
+          confirmed && "from-[#F4F0E8] dark:from-[#423b2f] to-[#EEE6D7] dark:to-[#464034] border-primary-fill/30",
         )}
       >
-        <div className="px-4 pt-3.5 pb-2.5 border-b border-[#C8A882]/25 bg-white/40">
+        <div className="px-4 pt-3.5 pb-2.5 border-b border-primary-fill/25 bg-white/40 dark:bg-white/5">
           <div className="flex items-start gap-2.5">
             <div
               className={cn(
                 "shrink-0 size-7 rounded-full inline-flex items-center justify-center",
-                confirmed ? "bg-[#3D2E22] text-[#FAF8F5]" : "bg-[#C8A882]/25 text-[#3D2E22]",
+                "bg-primary-fill text-primary-foreground",
               )}
             >
               {confirmed ? <Check className="size-3.5" /> : <UploadSimple className="size-3.5" />}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-[0.8125rem] font-semibold text-[#3D2E22] leading-tight">
+              <div className="text-[0.8125rem] font-semibold text-primary leading-tight">
                 {confirmed
                   ? msg("auto.features.agent.panel.components.datasetuploadcard.confirmed")
                   : msg("auto.features.agent.panel.components.datasetuploadcard.title")}
@@ -282,10 +281,10 @@ export function DatasetUploadCard({
                   "group w-full rounded-xl border-2 border-dashed",
                   "px-4 py-5 flex flex-col items-center justify-center gap-2",
                   "cursor-pointer transition-all duration-150 outline-none",
-                  "focus-visible:ring-2 focus-visible:ring-[#C8A882]/45",
+                  "focus-visible:ring-2 focus-visible:ring-primary/45",
                   dragOver
-                    ? "border-[#3D2E22] bg-[#C8A882]/15 scale-[1.01]"
-                    : "border-[#C8A882]/50 bg-white/50 hover:border-[#3D2E22]/60 hover:bg-white/80",
+                    ? "border-primary-fill bg-primary-fill/10 scale-[1.01]"
+                    : "border-primary-fill/50 bg-white/50 dark:bg-white/5 hover:border-primary-fill/60 hover:bg-white/80 dark:hover:bg-white/10",
                   "disabled:opacity-50 disabled:cursor-not-allowed",
                 )}
               >
@@ -293,14 +292,14 @@ export function DatasetUploadCard({
                   className={cn(
                     "size-9 rounded-full inline-flex items-center justify-center transition-colors",
                     dragOver
-                      ? "bg-[#3D2E22] text-[#FAF8F5]"
-                      : "bg-[#C8A882]/20 text-[#3D2E22] group-hover:bg-[#C8A882]/35",
+                      ? "bg-primary-fill text-primary-foreground"
+                      : "bg-primary-fill text-primary-foreground group-hover:bg-primary-hover",
                   )}
                 >
                   <UploadSimple className="size-4" />
                 </div>
                 <div className="text-center">
-                  <div className="text-[0.8125rem] font-medium text-[#3D2E22]">
+                  <div className="text-[0.8125rem] font-medium text-primary">
                     {msg("auto.features.agent.panel.components.datasetuploadcard.drop_label")}
                   </div>
                 </div>
@@ -313,7 +312,7 @@ export function DatasetUploadCard({
             <motion.div
               key="parsing"
               {...fade}
-              className="px-4 py-6 flex items-center justify-center gap-2 text-[0.75rem] text-[#6B5B4A]"
+              className="px-4 py-6 flex items-center justify-center gap-2 text-[0.75rem] text-[#6B5B4A] dark:text-[#cfbdaa]"
             >
               <CircleNotch className="size-3.5 animate-spin" />
               {msg("auto.features.agent.panel.components.datasetuploadcard.parsing")}
@@ -324,12 +323,12 @@ export function DatasetUploadCard({
             <motion.div key="parsed" {...fade} className="px-4 py-3 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <FileXls className="size-3.5 text-[#3D2E22] shrink-0" />
+                  <FileXls className="size-3.5 text-primary shrink-0" />
                   <div className="min-w-0">
-                    <div className="text-[0.75rem] font-medium text-[#3D2E22] truncate">
+                    <div className="text-[0.75rem] font-medium text-primary truncate">
                       {parsed.fileName}
                     </div>
-                    <div className="text-[0.6875rem] text-[#8A7866] tabular-nums leading-tight">
+                    <div className="text-[0.6875rem] text-[#8A7866] dark:text-[#cdbaa7] tabular-nums leading-tight">
                       {parsed.rowCount}{" "}
                       {msg("auto.features.agent.panel.components.datasetuploadcard.rows_suffix")} ·{" "}
                       {parsed.columns.length}{" "}
@@ -346,8 +345,8 @@ export function DatasetUploadCard({
                     )}
                     className={cn(
                       "shrink-0 inline-flex items-center gap-1 text-[0.6875rem]",
-                      "rounded-md px-1.5 py-1 text-[#6B5B4A] hover:text-[#3D2E22]",
-                      "hover:bg-white/70 transition-colors cursor-pointer",
+                      "rounded-md px-1.5 py-1 text-[#6B5B4A] dark:text-[#cfbdaa] hover:text-primary",
+                      "hover:bg-white/70 dark:hover:bg-white/10 transition-colors cursor-pointer",
                     )}
                   >
                     <ArrowClockwise className="size-3" />
@@ -357,7 +356,7 @@ export function DatasetUploadCard({
               </div>
 
               {!confirmed && (
-                <div className="text-[0.6875rem] text-[#8A7866]">
+                <div className="text-[0.6875rem] text-[#8A7866] dark:text-[#cdbaa7]">
                   {msg("auto.features.agent.panel.components.datasetuploadcard.role_legend")}
                 </div>
               )}
@@ -396,8 +395,8 @@ export function DatasetUploadCard({
               )}
 
               {confirmed && (
-                <div className="flex items-center gap-1.5 text-[0.6875rem] text-[#3D2E22]/80 bg-white/50 rounded-md px-2.5 py-1.5">
-                  <CheckCircle className="size-3 text-[#3D2E22]" />
+                <div className="flex items-center gap-1.5 text-[0.6875rem] text-primary/80 bg-white/50 dark:bg-white/5 rounded-md px-2.5 py-1.5">
+                  <CheckCircle className="size-3 text-primary" />
                   {formatMsg(
                     "auto.features.agent.panel.components.datasetuploadcard.confirmed",
                     {},
@@ -454,8 +453,8 @@ function ColumnRoleRow({
             className={cn(
               "shrink-0 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[0.625rem] font-medium transition-colors cursor-pointer",
               kind === "image"
-                ? "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
-                : "border-border/60 bg-muted/40 text-muted-foreground hover:border-primary/30 hover:text-foreground",
+                ? "border-primary-fill/40 bg-primary-fill text-primary-foreground hover:bg-primary-hover"
+                : "border-border/60 bg-muted/40 text-muted-foreground hover:border-primary-fill/30 hover:text-foreground",
               disabled && "cursor-not-allowed opacity-60",
             )}
             title={
@@ -475,7 +474,7 @@ function ColumnRoleRow({
       </div>
       <div className="relative inline-grid w-full shrink-0 grid-cols-3 gap-0.5 rounded-lg bg-muted p-0.5 sm:w-auto">
         <div
-          className="absolute top-0.5 bottom-0.5 rounded-md bg-stone-500/15 shadow-sm transition-[inset-inline-start] duration-100 ease-out"
+          className="absolute top-0.5 bottom-0.5 rounded-md bg-stone-500/15 transition-[inset-inline-start] duration-100 ease-out"
           style={{
             width: "calc((100% - 6px) / 3)",
             insetInlineStart: pillLeft,
@@ -489,8 +488,8 @@ function ColumnRoleRow({
             disabled={disabled}
             className={cn(
               "relative z-10 rounded-md px-2.5 py-1 text-[0.6875rem] font-medium text-center transition-colors duration-100 cursor-pointer",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45",
-              role === val ? "text-stone-600" : "text-muted-foreground hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
+              role === val ? "text-stone-600 dark:text-stone-300" : "text-muted-foreground hover:text-foreground",
               disabled && "cursor-not-allowed opacity-60",
             )}
           >

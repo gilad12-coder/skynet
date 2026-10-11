@@ -9,7 +9,7 @@ import { RetryIconButton } from "@/shared/ui/retry-icon-button";
 import { cn } from "@/shared/lib/utils";
 
 interface EmptyStateProps {
-  icon?: Icon;
+  icon?: Icon | React.ComponentType<{ className?: string }>;
   /**
    * How the icon is presented.
    * - "none" (default): plain icon at muted color, used for page-level empties.
@@ -134,12 +134,12 @@ export function EmptyState({
         <Icon className="size-12 text-muted-foreground/30" />
       )}
       {Icon && iconWrap === "tile" && (
-        <div className="size-12 rounded-2xl bg-[#3D2E22]/8 flex items-center justify-center">
-          <Icon className="size-5 text-[#3D2E22]/40" />
+        <div className="size-12 rounded-2xl on-primary flex items-center justify-center">
+          <Icon className="size-5 text-primary/40" />
         </div>
       )}
       {Icon && iconWrap === "circle" && (
-        <span className="inline-flex size-10 items-center justify-center rounded-full bg-[#3D2E22]/10 text-[#3D2E22]">
+        <span className="inline-flex size-10 items-center justify-center rounded-full bg-primary-fill text-primary-foreground">
           <Icon className="size-5" />
         </span>
       )}

@@ -8,27 +8,12 @@
  * coercion and the resumable draft can be tested without a browser.
  */
 
-import type {
-  AccountExperiencePatch,
-  NotificationCadence,
-  NotificationLiveMode,
-  NotificationPreferences,
-  InterviewOption,
-} from "@/shared/lib/api";
+import type { AccountExperiencePatch, InterviewOption } from "@/shared/lib/api";
 import type { ModelDataPolicy } from "@/shared/types/api";
 
 import type { ExperienceLevel } from "./abstraction";
 
 export type IntakeTrustMode = "ask" | "auto_safe" | "yolo";
-
-export interface IntakeNotifications {
-  cadence: NotificationCadence;
-  live_mode: NotificationLiveMode;
-  live_count: number;
-  digest_minutes: number;
-  stuck_fraction: number;
-  budget_alert_fraction: number;
-}
 
 export interface IntakeAnswers {
   /**
@@ -45,7 +30,6 @@ export interface IntakeAnswers {
   level_chosen: boolean;
   /** Spending limit in cents; null = the wizard's own default. */
   spending_limit_cents: number | null;
-  notifications: IntakeNotifications;
   /*
    * The settings below already have a value outside the setup. Null keeps
    * that value: only an answer the user gave is ever written back.
@@ -53,15 +37,6 @@ export interface IntakeAnswers {
   privacy: ModelDataPolicy | null;
   trust: IntakeTrustMode | null;
 }
-
-export const DEFAULT_NOTIFICATIONS: IntakeNotifications = {
-  cadence: "done",
-  live_mode: "per_stage",
-  live_count: 3,
-  digest_minutes: 60,
-  stuck_fraction: 0.25,
-  budget_alert_fraction: 0.8,
-};
 
 /*
  * A fresh setup leaves the spending limit to the wizard, which seeds it from
@@ -78,7 +53,6 @@ export function emptyIntake(): IntakeAnswers {
     level: "standard",
     level_chosen: false,
     spending_limit_cents: DEFAULT_SPENDING_LIMIT_CENTS,
-    notifications: { ...DEFAULT_NOTIFICATIONS },
     privacy: null,
     trust: null,
   };
@@ -99,24 +73,11 @@ function oneOf<T extends string>(values: readonly T[], value: unknown): T | null
   return values.find((v) => v === value) ?? null;
 }
 
-const CADENCES: readonly NotificationCadence[] = ["done", "milestones", "live"];
-const LIVE_MODES: readonly NotificationLiveMode[] = ["per_stage", "per_run_count", "digest"];
-
-function clamp(value: unknown, min: number, max: number, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.min(max, Math.max(min, value))
-    : fallback;
-}
-
 /** Read stored answers back, tolerating any shape an older build or the server returns. */
 export function parseIntakeAnswers(value: unknown): IntakeAnswers | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const base = emptyIntake();
-  const notes =
-    raw.notifications && typeof raw.notifications === "object"
-      ? (raw.notifications as Record<string, unknown>)
-      : {};
   const level = raw.level;
   return {
     language: localeCode(raw.language),
@@ -130,21 +91,6 @@ export function parseIntakeAnswers(value: unknown): IntakeAnswers | null {
         : typeof raw.spending_limit_cents === "number" && raw.spending_limit_cents > 0
           ? Math.round(raw.spending_limit_cents)
           : base.spending_limit_cents,
-    notifications: {
-      cadence: CADENCES.find((c) => c === notes.cadence) ?? DEFAULT_NOTIFICATIONS.cadence,
-      live_mode: LIVE_MODES.find((m) => m === notes.live_mode) ?? DEFAULT_NOTIFICATIONS.live_mode,
-      live_count: Math.round(clamp(notes.live_count, 1, 20, DEFAULT_NOTIFICATIONS.live_count)),
-      digest_minutes: Math.round(
-        clamp(notes.digest_minutes, 15, 1440, DEFAULT_NOTIFICATIONS.digest_minutes),
-      ),
-      stuck_fraction: clamp(notes.stuck_fraction, 0.05, 1, DEFAULT_NOTIFICATIONS.stuck_fraction),
-      budget_alert_fraction: clamp(
-        notes.budget_alert_fraction,
-        0.1,
-        1,
-        DEFAULT_NOTIFICATIONS.budget_alert_fraction,
-      ),
-    },
     privacy: oneOf(PRIVACY_POLICIES, raw.privacy),
     trust: oneOf(TRUST_MODES, raw.trust),
   };
@@ -159,40 +105,12 @@ export function buildExperiencePatch(answers: IntakeAnswers): AccountExperienceP
   };
 }
 
-/** Read the server's preferences into the editable shape; absent fields take the defaults. */
-export function notificationsFromPrefs(
-  prefs: Partial<NotificationPreferences> | null | undefined,
-): IntakeNotifications {
-  return (
-    parseIntakeAnswers({ notifications: prefs ?? {} })?.notifications ?? {
-      ...DEFAULT_NOTIFICATIONS,
-    }
-  );
-}
-
-/** The notification-preferences PATCH; Live's sub-settings only travel with Live. */
-export function buildNotificationPatch(
-  notifications: IntakeNotifications,
-): Partial<NotificationPreferences> {
-  const patch: Partial<NotificationPreferences> = {
-    cadence: notifications.cadence,
-    stuck_fraction: notifications.stuck_fraction,
-    budget_alert_fraction: notifications.budget_alert_fraction,
-  };
-  if (notifications.cadence === "live") {
-    patch.live_mode = notifications.live_mode;
-    if (notifications.live_mode === "per_run_count") patch.live_count = notifications.live_count;
-    if (notifications.live_mode === "digest") patch.digest_minutes = notifications.digest_minutes;
-  }
-  return patch;
-}
-
 /* ------------------------------------------------------------------------- */
 /* The interview agenda                                                       */
 /* ------------------------------------------------------------------------- */
 
 /** The interviewer's phases, in the order it runs them (the server's agenda). */
-export const INTAKE_LLM_PHASES = ["billing", "privacy", "emails", "trust"] as const;
+export const INTAKE_LLM_PHASES = ["billing", "privacy", "trust"] as const;
 
 export type IntakeLlmPhase = (typeof INTAKE_LLM_PHASES)[number];
 
@@ -240,13 +158,13 @@ export interface IntakeTurn {
   content: string;
 }
 
-/** Answers the interviewer may fill; `cadence` lands in the notifications. */
+/** Answers the interviewer may fill. */
 export type IntakeProfilePatch = Partial<
   Pick<
     IntakeAnswers,
     "billing" | "byok_provider" | "spending_limit_cents" | "privacy" | "trust" | "level"
   >
-> & { cadence?: NotificationCadence };
+>;
 
 function privacyPolicy(value: unknown): ModelDataPolicy | null {
   if (value === "no_training" || value === "no training") return "deny";
@@ -285,12 +203,6 @@ export function coerceProfilePatch(raw: unknown): {
     phases.push("privacy");
   }
 
-  const cadence = oneOf(CADENCES, r.email_cadence);
-  if (cadence) {
-    patch.cadence = cadence;
-    phases.push("emails");
-  }
-
   const trust = oneOf(TRUST_MODES, r.trust);
   if (trust) {
     patch.trust = trust;
@@ -315,10 +227,8 @@ export function applyProfilePatch(
   answers: IntakeAnswers,
   patch: IntakeProfilePatch,
 ): IntakeAnswers {
-  const { cadence, ...rest } = patch;
-  const next: IntakeAnswers = { ...answers, ...rest };
+  const next: IntakeAnswers = { ...answers, ...patch };
   if (patch.level !== undefined) next.level_chosen = true;
-  if (cadence) next.notifications = { ...answers.notifications, cadence };
   return next;
 }
 
@@ -343,7 +253,6 @@ export function profileSoFar(
   if (has("privacy") && answers.privacy) {
     profile.privacy = answers.privacy === "deny" ? "no_training" : answers.privacy;
   }
-  if (has("emails")) profile.email_cadence = answers.notifications.cadence;
   if (has("trust") && answers.trust) profile.trust = answers.trust;
   if (answers.level_chosen) profile.level = answers.level;
   return profile;
@@ -368,6 +277,11 @@ export interface IntakeDraft {
   turns: Record<IntakeLlmPhase, IntakeTurn[]>;
   options: Record<IntakeLlmPhase, InterviewOption[]>;
   fixed: boolean;
+  /**
+   * The tour stop the user is on, by id, so a sign-in that leaves the page
+   * (Add to Slack, a connector's OAuth) comes back to the same stop.
+   */
+  stop?: string;
 }
 
 function perPhase<T>(make: (phase: IntakeLlmPhase) => T): Record<IntakeLlmPhase, T> {
@@ -438,6 +352,7 @@ export function parseDraft(raw: string | null): IntakeDraft | null {
     turns: perPhase((phase) => parseTurns(turns[phase])),
     options: perPhase((phase) => parseOptions(options[phase])),
     fixed: d.fixed === true,
+    ...(typeof d.stop === "string" ? { stop: d.stop } : {}),
   };
 }
 

@@ -7,7 +7,7 @@ import { cn } from "@/shared/lib/utils";
 // and graph height; this module stays free of React Flow so the placeholder
 // ships without the lazy chunk.
 export const WORKFLOW_TOOLBAR_CLASS =
-  "flex flex-wrap items-center gap-1.5 border-b border-border/40 bg-[#FAF8F5] px-3 py-2";
+  "flex flex-wrap items-center gap-1.5 border-b border-border/40 bg-background px-3 py-2";
 export const WORKFLOW_CANVAS_HEIGHT_CLASS = "h-[480px]";
 
 // Toolbar buttons are h-7, but touch pointers (globals.css) and the wizard's
@@ -28,7 +28,7 @@ export function WorkflowCanvasSkeleton() {
           containerClassName={cn(TOOL_BONE_CLASS, "w-7 max-lg:w-[44px] any-pointer-coarse:w-[44px]")}
         />
       </div>
-      <div className={cn(WORKFLOW_CANVAS_HEIGHT_CLASS, "bg-[#FDFCFA]")} />
+      <div className={cn(WORKFLOW_CANVAS_HEIGHT_CLASS, "bg-[#FDFCFA] dark:bg-[#3c362a]")} />
     </div>
   );
 }

@@ -50,7 +50,7 @@ type TooltipRow = { label: string; value: string; color?: string };
 function TooltipCard({ title, rows }: { title: string; rows: TooltipRow[] }) {
   return (
     <div
-      className="rounded-xl border border-border/60 bg-background/95 p-3 text-sm shadow-lg backdrop-blur-sm"
+      className="rounded-xl border border-border/60 bg-background/95 p-3 text-sm shadow-[var(--shadow-float)] backdrop-blur-sm"
       dir={getActiveDir()}
     >
       <p className="mb-2 font-semibold text-foreground">{title}</p>
@@ -119,13 +119,13 @@ export function RangeHistogram({
         const row = payload?.[0]?.payload as HistogramBar | undefined;
         if (!active || !row) return null;
         const rows: TooltipRow[] = [
-          { label: runsLabel, value: String(row.count), color: "var(--color-chart-2)" },
+          { label: runsLabel, value: String(row.count), color: "var(--primary-fill)" },
         ];
         if (withAverage) {
           rows.push({
             label: avgLabel,
             value: formatPoints(row.avgImprovement),
-            color: "var(--color-chart-4)",
+            color: "var(--color-primary)",
           });
         }
         return <TooltipCard title={`${row.label} ${unitLabel}`} rows={rows} />;
@@ -180,7 +180,7 @@ export function RangeHistogram({
               yAxisId="count"
               dataKey="count"
               name={runsLabel}
-              fill="var(--color-chart-2)"
+              fill="var(--primary-fill)"
               radius={[4, 4, 0, 0]}
               maxBarSize={48}
               animationDuration={300}
@@ -192,9 +192,9 @@ export function RangeHistogram({
               type="monotone"
               dataKey="avgImprovement"
               name={avgLabel}
-              stroke="var(--color-chart-4)"
+              stroke="var(--color-primary)"
               strokeWidth={2}
-              dot={{ r: 3, strokeWidth: 0, fill: "var(--color-chart-4)" }}
+              dot={{ r: 3, strokeWidth: 0, fill: "var(--color-primary)" }}
               connectNulls={false}
               animationDuration={300}
             />
@@ -207,7 +207,7 @@ export function RangeHistogram({
               yAxisId="count"
               dataKey="count"
               name={runsLabel}
-              fill="var(--color-chart-2)"
+              fill="var(--primary-fill)"
               radius={[4, 4, 0, 0]}
               maxBarSize={48}
               animationDuration={300}

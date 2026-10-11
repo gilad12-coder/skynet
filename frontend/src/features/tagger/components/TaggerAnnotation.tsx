@@ -347,7 +347,7 @@ export function TaggerAnnotation({
               role="status"
               className="mb-2 flex items-center justify-center motion-safe:animate-in motion-safe:fade-in-0"
             >
-              <span className="flex items-center gap-1.5 rounded-full border border-primary/15 bg-primary/5 px-2.5 py-1 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5 rounded-md border on-primary px-2.5 py-1 text-xs">
                 <Sparkle
                   className="size-3 text-primary/60 motion-safe:animate-pulse"
                   aria-hidden="true"
@@ -367,7 +367,7 @@ export function TaggerAnnotation({
                   "flex-1 text-base font-medium rounded-xl gap-2 focus-visible:ring-0 focus-visible:border-transparent",
                   isBinaryYes(currentAnn) &&
                     "bg-[var(--success-dim)] hover:bg-[var(--success-dim)] border-[var(--success-border)] text-[var(--success)]",
-                  isBinaryYes(aiPick) && "border-primary/45 bg-primary/5",
+                  isBinaryYes(aiPick) && "border-primary-fill/45 bg-primary-fill/5",
                 )}
               >
                 <Kbd className="font-mono">
@@ -389,7 +389,7 @@ export function TaggerAnnotation({
                   "flex-1 text-base font-medium rounded-xl gap-2 focus-visible:ring-0 focus-visible:border-transparent",
                   isBinaryNo(currentAnn) &&
                     "bg-[var(--danger-dim)] hover:bg-[var(--danger-dim)] border-[var(--danger-border)] text-[var(--danger)]",
-                  isBinaryNo(aiPick) && "border-primary/45 bg-primary/5",
+                  isBinaryNo(aiPick) && "border-primary-fill/45 bg-primary-fill/5",
                 )}
               >
                 <Kbd className="font-mono">
@@ -425,8 +425,8 @@ export function TaggerAnnotation({
                       "flex-1 min-h-0 min-w-0 rounded-xl gap-2 whitespace-normal focus-visible:ring-0 focus-visible:border-transparent",
                       (config.categories?.length ?? 0) >= 7 ? "text-sm" : "text-base",
                       "font-medium",
-                      selected && "bg-primary/10 border-primary/40 text-primary",
-                      aiPickedCats.has(cat.id) && "border-primary/45 bg-primary/5",
+                      selected && "on-primary",
+                      aiPickedCats.has(cat.id) && "border-primary-fill/45 bg-primary-fill/5",
                     )}
                   >
                     {i < 9 && (
@@ -470,21 +470,15 @@ export function TaggerAnnotation({
           </Button>
 
           <div className="col-span-2 row-start-2 flex items-center justify-center gap-1 sm:col-auto sm:row-auto sm:gap-2">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => onGoTo(0)}
-                  aria-label={msg("auto.features.tagger.components.taggerannotation.9")}
-                >
-                  <SkipBack className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {msg("auto.features.tagger.components.taggerannotation.9")}
-              </TooltipContent>
-            </Tooltip>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => onGoTo(0)}
+              aria-label={msg("auto.features.tagger.components.taggerannotation.9")}
+              autoTooltip={false}
+            >
+              <SkipBack className="size-4" />
+            </Button>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -502,38 +496,26 @@ export function TaggerAnnotation({
               </TooltipContent>
             </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setShowShortcuts(true)}
+              aria-label={msg("auto.features.tagger.components.taggerannotation.11")}
+              autoTooltip={false}
+            >
+              <Keyboard className="size-4" />
+            </Button>
+            <PopoverPrimitive.Root>
+              <PopoverPrimitive.Trigger asChild>
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => setShowShortcuts(true)}
-                  aria-label={msg("auto.features.tagger.components.taggerannotation.11")}
+                  aria-label={msg("auto.features.tagger.components.taggerannotation.12")}
+                  autoTooltip={false}
                 >
-                  <Keyboard className="size-4" />
+                  <DownloadSimple className="size-4" />
                 </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {msg("auto.features.tagger.components.taggerannotation.11")}
-              </TooltipContent>
-            </Tooltip>
-            <PopoverPrimitive.Root>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <PopoverPrimitive.Trigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={msg("auto.features.tagger.components.taggerannotation.12")}
-                    >
-                      <DownloadSimple className="size-4" />
-                    </Button>
-                  </PopoverPrimitive.Trigger>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {msg("auto.features.tagger.components.taggerannotation.12")}
-                </TooltipContent>
-              </Tooltip>
+              </PopoverPrimitive.Trigger>
               <PopoverPrimitive.Portal>
                 <PopoverPrimitive.Content
                   side="bottom"
@@ -755,7 +737,7 @@ function Confetti() {
   const [pieces, setPieces] = useState<ConfettiPiece[]>([]);
 
   useEffect(() => {
-    const colors = ["#3d2e22", "#5c4d40", "#8c7a6b", "#a69585", "#ddd6cc"];
+    const colors = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
     const shapes = ["rounded-full", "rounded-sm", "rounded-sm"];
     setPieces(
       Array.from({ length: 50 }, (_, i) => ({

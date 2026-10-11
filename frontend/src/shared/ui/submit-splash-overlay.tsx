@@ -38,7 +38,7 @@ export function SubmitSplashOverlay({
       {show && (
         <motion.div
           className="fixed inset-0 z-[99999] flex items-center justify-center"
-          style={{ backgroundColor: "#F0EBE4" }}
+          style={{ backgroundColor: "var(--surface-3)" }}
           initial={{ y: "-100%" }}
           animate={{ y: 0 }}
           exit={

@@ -2,26 +2,20 @@
 
 Glues together signature/metric loading, dataset splitting, optimizer
 instantiation, baseline-vs-optimized evaluation, artifact persistence,
-and progress callbacks for both single-run and grid-search payloads.
+and progress callbacks for single-run payloads.
 The companion modules in this package handle the individual concerns;
 this file orchestrates them.
 """
 
-import functools
-import json
 import logging
-import threading
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import dspy
 from dspy.teleprompt.gepa.gepa_utils import DspyAdapter
 
-from ...billing.pricing import ModelUsage, combine_usages
 from ...config import settings as app_settings
 from ...constants import (
     DETAIL_BASELINE,
@@ -36,24 +30,15 @@ from ...constants import (
     META_OPTIMIZER_KWARGS,
     OPTIMIZER_NAME_GEPA,
     PROGRESS_BASELINE,
-    PROGRESS_CANDIDATE,
     PROGRESS_EVALUATION_STARTED,
-    PROGRESS_GRID_PAIR_COMPLETED,
-    PROGRESS_GRID_PAIR_FAILED,
-    PROGRESS_GRID_PAIR_STARTED,
-    PROGRESS_MINIBATCH,
     PROGRESS_OPTIMIZED,
-    PROGRESS_REJECTED,
     PROGRESS_SPLITS_READY,
 )
 from ...exceptions import ServiceError
 from ...models import (
     WORKFLOW_MODULE_NAME,
-    GridSearchRequest,
-    GridSearchResponse,
     LMActivity,
     LMStageStats,
-    PairResult,
     RunRequest,
     RunResponse,
     SplitCounts,
@@ -67,7 +52,6 @@ from ...registry import (
     resolve_module_factory,
     resolve_optimizer_factory,
 )
-from ...worker.log_handler import set_current_pair_index
 from ..language_models import (
     apply_model_reasoning_config,
     build_language_model,
@@ -88,7 +72,6 @@ from .data import (
     split_examples,
 )
 from .incumbent import completed_gepa_result
-from .llm_error import enrich_error_message
 from .logged_scores import aggregate_logged_metrics
 from .optimizers import (
     compile_program,
@@ -110,7 +93,6 @@ from .timing import (
 from .training_ground import run_react
 from .training_ground.run_react import _AUTO_BUDGETS, tool_severity
 from .trajectory import (
-    GRID_PAIR_RESULT_FILENAME,
     capture_proposal_prompts,
     emit_valset_event,
     gepa_log_dir,
@@ -144,22 +126,6 @@ def _usage_by_model_rows(*language_models: object) -> list[ModelTokenUsage]:
     if not usages:
         return []
     return [ModelTokenUsage(**asdict(usage)) for usage in usages]
-
-
-def _merge_usage_rows(rows: list[ModelTokenUsage]) -> list[ModelTokenUsage]:
-    """Fold per-model usage rows from several runs into one row per model.
-
-    Used to sum a grid search's pairs into a single per-model breakdown the
-    worker charges the whole grid from.
-
-    Args:
-        rows: Per-model usage rows across all pairs (models may repeat).
-
-    Returns:
-        One :class:`ModelTokenUsage` per distinct model, token counts summed.
-    """
-    merged = combine_usages(ModelUsage(**row.model_dump()) for row in rows)
-    return [ModelTokenUsage(**asdict(usage)) for usage in merged]
 
 
 def _resolve_max_metric_calls(optimizer_kwargs: dict[str, Any]) -> int:
@@ -199,7 +165,7 @@ def _require_metric_compatible_with_optimizer(optimizer_name: str, param_names: 
     used to slip through to a "successful" no-op run.
 
     Args:
-        optimizer_name: The optimizer key from the run/grid-search payload.
+        optimizer_name: The optimizer key from the run payload.
         param_names: Metric parameter names returned by ``validate_metric_code``.
 
     Raises:
@@ -317,406 +283,6 @@ def _build_lm_activity(
     return LMActivity(generation=generation, reflection=reflection)
 
 
-@dataclass
-class _GridPairContext:
-    """Shared state threaded through grid-search pair workers.
-
-    Groups every value a pair worker previously pulled from the
-    ``run_grid_search`` closure so the worker can live at module scope.
-    Counters are mutated through ``results_lock`` (never directly); pair
-    workers read the snapshot inside the lock so progress callbacks see a
-    consistent view.
-    """
-
-    total_pairs: int
-    module_factory: Any
-    module_kwargs: dict[str, Any]
-    payload: GridSearchRequest
-    optimizer_factory: Any
-    metric: Any
-    splits: Any
-    artifact_id: str | None
-    progress_callback: Callable[[str, dict[str, Any]], None] | None
-    # Per-pair token budget from the Max Cost Ceiling: the job-wide cap split
-    # evenly across pairs (pairs run concurrently with independent LM histories),
-    # so the grid's aggregate spend never exceeds the user's cap. 0 = no ceiling.
-    pair_max_cents: int = 0
-    # Worker-owned base dir for resumable grids; each pair writes its GEPA state
-    # and (on success) ``result.json`` under ``<base>/pair_<i>``. None = ephemeral.
-    gepa_log_dir_base: str | None = None
-    results_lock: threading.Lock = field(default_factory=threading.Lock)
-    completed: int = 0
-    failed: int = 0
-
-
-def _write_pair_result_json(pair_dir: str, result: PairResult) -> None:
-    """Atomically write a completed pair's result for the worker to persist.
-
-    The worker reads ``<pair_dir>/result.json`` to durably record finished pairs,
-    so a resumed grid skips them. Written via a temp file + ``os.replace`` so the
-    worker never sees a partial write.
-
-    Args:
-        pair_dir: The pair's worker-owned directory.
-        result: The completed :class:`PairResult` to serialize.
-    """
-    path = Path(pair_dir) / GRID_PAIR_RESULT_FILENAME
-    tmp = path.with_name(f"{path.name}.tmp")
-    tmp.write_text(json.dumps(result.model_dump(mode="json")), encoding="utf-8")
-    tmp.replace(path)
-
-
-def _tag_candidate_event(
-    callback: Callable[[str, dict[str, Any]], None],
-    pair_index: int,
-    event: str,
-    metrics: dict[str, Any],
-) -> None:
-    """Forward a progress event, stamping ``pair_index`` onto trajectory metrics.
-
-    Candidate and rejected-proposal events come out of the per-pair GEPA state
-    file unaware of which grid pair produced them; the frontend uses
-    ``pair_index`` to scope the trajectory tree to a single pair, so we
-    inject it here before forwarding. Other events pass through untouched.
-
-    Args:
-        callback: The downstream progress callback to forward into.
-        pair_index: Zero-based grid pair index to stamp onto trajectory metrics.
-        event: Event name as produced by ``TrajectoryWatcher``.
-        metrics: Event metrics dict from the watcher.
-    """
-    if event in (PROGRESS_CANDIDATE, PROGRESS_REJECTED, PROGRESS_MINIBATCH):
-        callback(event, {**metrics, "pair_index": pair_index})
-    else:
-        callback(event, metrics)
-
-
-def _run_grid_pair(
-    ctx: _GridPairContext,
-    i: int,
-    gen_cfg: Any,
-    ref_cfg: Any,
-) -> PairResult:
-    """Execute one (generation_model, reflection_model) pair and return its ``PairResult``.
-
-    Mirrors the per-pair flow of ``run_grid_search``: compiles the module,
-    evaluates baseline and optimized programs on the test split, persists
-    the better program, and emits progress events through
-    ``ctx.progress_callback``. On failure returns a ``PairResult`` carrying
-    the stringified exception rather than propagating — the caller treats
-    unsuccessful pairs as soft failures.
-
-    Args:
-        ctx: Shared grid-pair context with payload, factories, and counters.
-        i: Zero-based pair index for this worker.
-        gen_cfg: Generation-model config for this pair.
-        ref_cfg: Reflection-model config for this pair.
-
-    Returns:
-        The :class:`PairResult` for this pair (carrying an ``error`` string
-        when execution failed).
-    """
-    set_current_pair_index(i)
-    pair_label = f"{gen_cfg.name} + {ref_cfg.name}"
-    # On a resumable grid each pair gets its own dir under the worker-owned base,
-    # so the worker can restore its checkpoint (resume) and persist its result.
-    pair_dir = str(Path(ctx.gepa_log_dir_base) / f"pair_{i}") if ctx.gepa_log_dir_base else None
-    logger.info("Grid pair %d/%d: %s", i + 1, ctx.total_pairs, pair_label)
-    if ctx.progress_callback:
-        ctx.progress_callback(
-            PROGRESS_GRID_PAIR_STARTED,
-            {
-                "pair_index": i,
-                "total_pairs": ctx.total_pairs,
-                "generation_model": gen_cfg.name,
-                "reflection_model": ref_cfg.name,
-            },
-        )
-
-    pair_start = datetime.now(UTC)
-    baseline: float | None = None
-    baseline_test_results: list[dict] = []
-    try:
-        program = ctx.module_factory(**dict(ctx.module_kwargs))
-        # Caching stays ON here: forcing cache off across the GEPA
-        # training/eval region suppresses GEPA's recognized valset
-        # ``Evaluate`` / rollouts tqdm bar, which is the only bar the
-        # progress proxy emits from (regression from #23/#24). Per-stage
-        # activity tracking does not need cache-off — it works through the
-        # timing callbacks' stage state, independent of the LM cache.
-        language_model = build_language_model(gen_cfg)
-        reflection_lm = build_language_model(ref_cfg) if ref_cfg is not None else None
-        gen_timing = GenLMTimingCallback(language_model, pair_index=i)
-        refl_timing = ReflectionLMTimingCallback(reflection_lm, pair_index=i) if reflection_lm is not None else None
-        # Only the timing callbacks carry per-stage state (set_stage/_current_stage),
-        # so track_stage must be splatted with these alone. The cost-ceiling callback
-        # is a plain on_lm_end listener and would raise AttributeError inside track_stage.
-        timing_callbacks: list[Any] = [gen_timing]
-        if refl_timing is not None:
-            timing_callbacks.append(refl_timing)
-        callbacks: list[Any] = list(timing_callbacks)
-        # Hard-stop this pair at its share of the Max Cost Ceiling so the grid's
-        # concurrent pairs can't collectively overrun the user's job-wide cap.
-        if ctx.pair_max_cents > 0 and ctx.payload.execution_budget_id is None:
-            callbacks.append(CostCeilingCallback(ctx.pair_max_cents, language_model, reflection_lm))
-
-        with (
-            dspy.context(lm=language_model, callbacks=callbacks),
-            gepa_log_dir(ctx.payload.optimizer_name, pair_dir) as trajectory_log_dir,
-        ):
-            trajectory_callback: Callable[[str, dict[str, Any]], None] | None = (
-                functools.partial(_tag_candidate_event, ctx.progress_callback, i)
-                if ctx.progress_callback is not None
-                else None
-            )
-            training_metric = maybe_wrap_minibatch_recorder(
-                ctx.metric,
-                ctx.splits.val,
-                ctx.payload.optimizer_name,
-                trajectory_callback,
-                ctx.payload.module_name,
-            )
-            stop_state: dict[str, Any] = {}
-            optimizer = instantiate_optimizer(
-                ctx.optimizer_factory,
-                ctx.payload.optimizer_name,
-                ctx.payload.optimizer_kwargs,
-                training_metric,
-                ref_cfg,
-                reflection_lm=reflection_lm,
-                log_dir=trajectory_log_dir,
-                target_score=ctx.payload.target_score,
-                stop_state=stop_state,
-            )
-            if ctx.splits.test:
-                with track_stage(STAGE_BASELINE, *timing_callbacks):
-                    baseline, baseline_test_results = evaluate_on_test(
-                        program,
-                        ctx.splits.test,
-                        ctx.metric,
-                        collect_per_example=True,
-                    )
-                if ctx.progress_callback and baseline is not None:
-                    ctx.progress_callback(
-                        PROGRESS_BASELINE,
-                        {
-                            DETAIL_BASELINE: baseline,
-                            "pair_index": i,
-                        },
-                    )
-            with (
-                capture_tqdm(ctx.progress_callback),
-                track_stage(STAGE_TRAINING, *timing_callbacks),
-                capture_proposal_prompts(ctx.payload.optimizer_name),
-                trajectory_watch(trajectory_log_dir, trajectory_callback),
-            ):
-                compiled = compile_program(
-                    optimizer=optimizer,
-                    program=program,
-                    splits=ctx.splits,
-                    metric=ctx.metric,
-                    compile_kwargs=ctx.payload.compile_kwargs,
-                )
-
-            optimized = None
-            optimized_test_results: list[dict] = []
-            if ctx.splits.test:
-                if ctx.progress_callback:
-                    ctx.progress_callback(PROGRESS_EVALUATION_STARTED, {"pair_index": i})
-                with track_stage(STAGE_EVALUATION, *timing_callbacks):
-                    optimized, optimized_test_results = evaluate_on_test(
-                        compiled,
-                        ctx.splits.test,
-                        ctx.metric,
-                        collect_per_example=True,
-                    )
-                if ctx.progress_callback and optimized is not None:
-                    ctx.progress_callback(
-                        PROGRESS_OPTIMIZED,
-                        {
-                            DETAIL_OPTIMIZED: optimized,
-                            "pair_index": i,
-                        },
-                    )
-
-        best = compiled
-        if baseline is not None and optimized is not None and optimized < baseline:
-            logger.warning(
-                "Grid pair %d: optimized (%.4f) worse than baseline (%.4f) — keeping baseline",
-                i,
-                optimized,
-                baseline,
-            )
-            best = program
-            optimized = baseline
-
-        art_id = f"{ctx.artifact_id}_pair_{i}" if ctx.artifact_id else None
-        program_artifact = persist_program(best, art_id)
-
-        improvement = None
-        if baseline is not None and optimized is not None:
-            improvement = optimized - baseline
-
-        pair_runtime = (datetime.now(UTC) - pair_start).total_seconds()
-        pair_lm_calls = lm_call_count(language_model)
-        _, pair_avg_ms = gen_timing.summary()
-        pair_lm_activity = _build_lm_activity(gen_timing, refl_timing)
-        result = PairResult(
-            pair_index=i,
-            generation_model=gen_cfg.name,
-            reflection_model=ref_cfg.name,
-            generation_reasoning_effort=gen_cfg.extra.get("reasoning_effort"),
-            reflection_reasoning_effort=ref_cfg.extra.get("reasoning_effort"),
-            baseline_test_metric=baseline,
-            optimized_test_metric=optimized,
-            metric_improvement=improvement,
-            target_score=ctx.payload.target_score,
-            target_score_reached=(
-                bool(getattr(stop_state.get("target_score_stopper"), "reached", False))
-                if ctx.payload.target_score is not None
-                else None
-            ),
-            stop_reason=(
-                "target_score"
-                if bool(getattr(stop_state.get("target_score_stopper"), "reached", False))
-                else "metric_call_budget"
-            )
-            if ctx.payload.target_score is not None
-            else None,
-            runtime_seconds=round(pair_runtime, 2),
-            num_lm_calls=pair_lm_calls,
-            total_tokens=total_tokens_from_history(language_model, reflection_lm),
-            usage_by_model=_usage_by_model_rows(language_model, reflection_lm),
-            avg_response_time_ms=pair_avg_ms,
-            lm_activity=pair_lm_activity,
-            program_artifact=program_artifact,
-            baseline_test_results=baseline_test_results,
-            optimized_test_results=optimized_test_results,
-            baseline_logged_metrics=aggregate_logged_metrics(baseline_test_results),
-            optimized_logged_metrics=aggregate_logged_metrics(optimized_test_results),
-        )
-        with ctx.results_lock:
-            ctx.completed += 1
-        logger.info(
-            "Grid pair %d/%d completed: baseline=%.4f optimized=%.4f (%.1fs)",
-            i + 1,
-            ctx.total_pairs,
-            baseline if baseline is not None else float("nan"),
-            optimized if optimized is not None else float("nan"),
-            pair_runtime,
-        )
-        if ctx.progress_callback:
-            with ctx.results_lock:
-                c, f = ctx.completed, ctx.failed
-            ctx.progress_callback(
-                PROGRESS_GRID_PAIR_COMPLETED,
-                {
-                    "pair_index": i,
-                    "total_pairs": ctx.total_pairs,
-                    "generation_model": gen_cfg.name,
-                    "reflection_model": ref_cfg.name,
-                    "baseline_test_metric": baseline,
-                    "optimized_test_metric": optimized,
-                    "metric_improvement": improvement,
-                    "runtime_seconds": round(pair_runtime, 2),
-                    "completed_so_far": c,
-                    "failed_so_far": f,
-                },
-            )
-        # Record the finished pair so a resumed grid keeps it instead of re-running.
-        if pair_dir is not None:
-            _write_pair_result_json(pair_dir, result)
-        set_current_pair_index(None)
-        return result
-
-    except BudgetReached:
-        recovered = (
-            completed_gepa_result(pair_dir, seed=ctx.payload.seed)
-            if ctx.payload.optimizer_name.lower() == "gepa"
-            else None
-        )
-        artifact = None
-        evidence: dict[str, Any] = {
-            "candidate_origin": None,
-            "final_evaluation_completed": False,
-            "final_evaluation_reason": "budget_reached",
-        }
-        if recovered is not None:
-            incumbent = DspyAdapter(program, ctx.metric, {}).build_program(recovered.best_candidate)
-            artifact = persist_program(incumbent, f"{ctx.artifact_id}_pair_{i}" if ctx.artifact_id else None)
-            evidence.update(
-                selection_scope="validation" if ctx.splits.val else "training",
-                selection_score=recovered.val_aggregate_scores[recovered.best_idx],
-                candidate_origin="seed" if recovered.best_idx == 0 else "optimized",
-            )
-        elif baseline is not None:
-            artifact = persist_program(program, f"{ctx.artifact_id}_pair_{i}" if ctx.artifact_id else None)
-            evidence.update(
-                selection_scope="test",
-                selection_score=baseline,
-                candidate_origin="seed",
-            )
-        result = PairResult(
-            pair_index=i,
-            generation_model=gen_cfg.name,
-            reflection_model=ref_cfg.name,
-            stop_reason="budget_reached",
-            result_availability="evaluated" if recovered is not None or baseline is not None else "none",
-            terminal_evidence=evidence,
-            program_artifact=artifact,
-            baseline_test_metric=baseline,
-            baseline_test_results=baseline_test_results,
-            baseline_logged_metrics=aggregate_logged_metrics(baseline_test_results),
-            total_tokens=total_tokens_from_history(language_model, reflection_lm),
-            usage_by_model=_usage_by_model_rows(language_model, reflection_lm),
-        )
-        if pair_dir is not None:
-            _write_pair_result_json(pair_dir, result)
-        set_current_pair_index(None)
-        return result
-
-    except Exception as exc:
-        pair_runtime = (datetime.now(UTC) - pair_start).total_seconds()
-        # DSPy reports a generic "Execution cancelled" when an LM call fails;
-        # recover the real cause (billing, auth, rate limit) it only logged.
-        error_msg = enrich_error_message(str(exc))
-        result = PairResult(
-            pair_index=i,
-            generation_model=gen_cfg.name,
-            reflection_model=ref_cfg.name,
-            generation_reasoning_effort=gen_cfg.extra.get("reasoning_effort"),
-            reflection_reasoning_effort=ref_cfg.extra.get("reasoning_effort"),
-            error=error_msg,
-            runtime_seconds=round(pair_runtime, 2),
-        )
-        with ctx.results_lock:
-            ctx.failed += 1
-        logger.warning(
-            "Grid pair %d/%d failed (%s): %s",
-            i + 1,
-            ctx.total_pairs,
-            pair_label,
-            error_msg,
-        )
-        if ctx.progress_callback:
-            with ctx.results_lock:
-                c, f = ctx.completed, ctx.failed
-            ctx.progress_callback(
-                PROGRESS_GRID_PAIR_FAILED,
-                {
-                    "pair_index": i,
-                    "total_pairs": ctx.total_pairs,
-                    "generation_model": gen_cfg.name,
-                    "reflection_model": ref_cfg.name,
-                    "error": error_msg,
-                    "completed_so_far": c,
-                    "failed_so_far": f,
-                },
-            )
-        set_current_pair_index(None)
-        return result
-
-
 class DspyService:
     """High-level coordinator between FastAPI payloads and DSPy runtimes."""
 
@@ -746,9 +312,11 @@ class DspyService:
 
         Loads the signature, module, metric, and optimizer from the payload,
         splits the dataset, runs baseline evaluation, compiles the program, then
-        evaluates the optimized result.  If the optimized program scores lower than
-        the baseline on the test set, the baseline program is returned instead and
-        the reported optimized metric is swapped to the baseline value.
+        evaluates the optimized result.  The baseline and the compiled program
+        are compared on the validation split (the train split when there is no
+        validation split); if the compiled program scores lower there, the
+        baseline program is returned instead.  The test split only reports the
+        chosen program's score — it never takes part in the choice.
 
         Args:
             payload: The validated run request to execute.
@@ -925,6 +493,19 @@ class DspyService:
                             PROGRESS_BASELINE,
                             {DETAIL_BASELINE: baseline_test_metric},
                         )
+                # The regression guard compares on validation (train without
+                # one) so the test split stays an unbiased report of the winner.
+                selection_set = splits.val or splits.train
+                selection_scope = "validation" if splits.val else "training"
+                baseline_selection_metric = None
+                if selection_set:
+                    with track_stage(STAGE_BASELINE, *timing_callbacks):
+                        baseline_selection_metric = evaluate_on_test(
+                            program, selection_set, metric, collect_per_example=False
+                        )
+                    logger.info(
+                        "%s baseline %s metric: %s", payload.module_name, selection_scope, baseline_selection_metric
+                    )
                 # Fail fast on a structurally broken metric (e.g. wrong field
                 # names or isinstance(gold, dict) gating) before spending the
                 # optimizer budget grinding at 0%. A correct metric always
@@ -958,12 +539,12 @@ class DspyService:
                         if payload.optimizer_name.lower() == "gepa"
                         else None
                     )
-                    if recovered is None and baseline_test_metric is not None:
+                    if recovered is None and baseline_selection_metric is not None:
                         budget_stop = exc
                         compiled_program = program
                         exc.evidence.update(
-                            selection_scope="test",
-                            selection_score=baseline_test_metric,
+                            selection_scope=selection_scope,
+                            selection_score=baseline_selection_metric,
                             candidate_origin="seed",
                         )
                     elif recovered is None:
@@ -980,17 +561,41 @@ class DspyService:
 
                 optimized_test_metric = None
                 optimized_test_results: list[dict] = []
+                best_program = compiled_program
                 try:
-                    if splits.test and budget_stop is None:
-                        if progress_callback:
-                            progress_callback(PROGRESS_EVALUATION_STARTED, {})
+                    if budget_stop is None and progress_callback and (selection_set or splits.test):
+                        progress_callback(PROGRESS_EVALUATION_STARTED, {})
+                    if selection_set and budget_stop is None and compiled_program is not program:
                         with track_stage(STAGE_EVALUATION, *timing_callbacks):
-                            optimized_test_metric, optimized_test_results = evaluate_on_test(
-                                compiled_program,
-                                splits.test,
-                                metric,
-                                collect_per_example=True,
+                            optimized_selection_metric = evaluate_on_test(
+                                compiled_program, selection_set, metric, collect_per_example=False
                             )
+                        logger.info("Optimized %s metric: %s", selection_scope, optimized_selection_metric)
+                        if (
+                            baseline_selection_metric is not None
+                            and optimized_selection_metric is not None
+                            and optimized_selection_metric < baseline_selection_metric
+                        ):
+                            logger.warning(
+                                "Optimized program (%.4f) is worse than baseline (%.4f) on %s — "
+                                "returning baseline program",
+                                optimized_selection_metric,
+                                baseline_selection_metric,
+                                selection_scope,
+                            )
+                            best_program = program
+                    if splits.test and budget_stop is None:
+                        if best_program is program:
+                            optimized_test_metric = baseline_test_metric
+                            optimized_test_results = baseline_test_results
+                        else:
+                            with track_stage(STAGE_EVALUATION, *timing_callbacks):
+                                optimized_test_metric, optimized_test_results = evaluate_on_test(
+                                    best_program,
+                                    splits.test,
+                                    metric,
+                                    collect_per_example=True,
+                                )
                         logger.info("Optimized test metric: %s", optimized_test_metric)
                         if progress_callback and optimized_test_metric is not None:
                             progress_callback(
@@ -1001,21 +606,6 @@ class DspyService:
                 except BudgetReached as exc:
                     budget_stop = exc
                     exc.evidence.setdefault("candidate_origin", "optimized")
-
-                best_program = compiled_program
-                if (
-                    baseline_test_metric is not None
-                    and optimized_test_metric is not None
-                    and optimized_test_metric < baseline_test_metric
-                ):
-                    logger.warning(
-                        "Optimized program (%.4f) is worse than baseline (%.4f) — returning baseline program",
-                        optimized_test_metric,
-                        baseline_test_metric,
-                    )
-                    best_program = program
-                    # Swap so the "optimized" metric reflects what we're actually returning
-                    optimized_test_metric = baseline_test_metric
 
         program_artifact = persist_program(best_program, artifact_id)
         if program_artifact:
@@ -1037,6 +627,7 @@ class DspyService:
             META_COMPILE_KWARGS: payload.compile_kwargs,
             META_MODULE_KWARGS: payload.module_kwargs,
             META_MODEL_IDENTIFIER: payload.model_settings.normalized_identifier(),
+            "selection_scope": selection_scope,
         }
         if payload.target_score is not None:
             target_reached = bool(getattr(stop_state.get("target_score_stopper"), "reached", False))
@@ -1432,248 +1023,6 @@ class DspyService:
             tool_severities=tool_severities,
         )
         return artifact
-
-    def run_grid_search(
-        self,
-        payload: GridSearchRequest,
-        *,
-        artifact_id: str | None = None,
-        progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
-        gepa_log_dir_path: str | None = None,
-        completed_pairs: dict[int, dict[str, Any]] | None = None,
-        pair_index_base: int = 0,
-        total_pairs_override: int | None = None,
-    ) -> GridSearchResponse:
-        """Run one optimization per (generation_model, reflection_model) pair and return all results.
-
-        Pairs are executed concurrently (up to 4 threads).  Each pair follows the
-        same baseline-vs-optimized fallback logic as ``run()``.  Failed pairs are
-        recorded with their error message rather than aborting the whole search.
-
-        On resume, ``completed_pairs`` (``pair_index`` → stored ``PairResult``) are
-        kept as-is and skipped, and ``gepa_log_dir_path`` is the worker-owned base
-        dir whose ``pair_<i>`` subdirs seed each in-flight pair's GEPA checkpoint.
-
-        A distributed grid runs each pair in its own job child: the child holds
-        a single-pair payload but must report GLOBAL indices so its events and
-        checkpoints line up with the parent grid the user watches.
-        ``pair_index_base`` offsets every pair index (events, log tagging, pair
-        dirs, ``PairResult.pair_index``, resume keys) and ``total_pairs_override``
-        is the parent's real pair count for event display; both default to the
-        identity for the classic all-pairs-in-one-child path.
-
-        Args:
-            payload: The validated grid-search request to execute.
-            artifact_id: Optional identifier carried into per-pair artifacts.
-            progress_callback: Optional callback receiving ``(event, detail)`` updates.
-
-        Returns:
-            A populated :class:`GridSearchResponse` with per-pair results
-            and the best overall pair.
-        """
-        grid_start = datetime.now(UTC)
-        pairs = [(gen_cfg, ref_cfg) for gen_cfg in payload.generation_models for ref_cfg in payload.reflection_models]
-        total_pairs = len(pairs)
-        display_total = total_pairs_override if total_pairs_override is not None else total_pairs
-        logger.info(
-            "Starting grid search: %d pairs, module=%s optimizer=%s",
-            display_total,
-            payload.module_name,
-            payload.optimizer_name,
-        )
-
-        signature_cls = load_signature_from_code(payload.signature_code)
-        signature_inputs, signature_outputs = extract_signature_fields(signature_cls)
-        require_mapping_matches_signature(
-            payload.column_mapping,
-            signature_inputs,
-            signature_outputs,
-        )
-        module_factory, auto_signature = self._get_module_factory(payload.module_name)
-        module_kwargs = dict(payload.module_kwargs)
-        if auto_signature or "signature" not in module_kwargs:
-            module_kwargs["signature"] = signature_cls
-
-        metric = load_metric_from_code(payload.metric_code)
-        metric_identifier = getattr(metric, "__name__", "inline_metric")
-        optimizer_factory = self._get_optimizer_factory(payload.optimizer_name)
-
-        examples = rows_to_examples(
-            payload.dataset,
-            payload.column_mapping,
-            image_input_fields=image_input_field_names(signature_cls),
-        )
-        splits = split_examples(
-            examples,
-            payload.split_fractions,
-            shuffle=payload.shuffle,
-            seed=payload.seed or self.default_seed,
-        )
-        split_counts = SplitCounts(
-            train=len(splits.train),
-            val=len(splits.val),
-            test=len(splits.test),
-        )
-        # A distributed grid's children all compute identical splits (same
-        # payload + seed); only the child owning global pair 0 emits the
-        # splits/valset events so the parent's stream carries them once.
-        if progress_callback and pair_index_base == 0:
-            progress_callback(
-                PROGRESS_SPLITS_READY,
-                {
-                    DETAIL_TRAIN: split_counts.train,
-                    DETAIL_VAL: split_counts.val,
-                    DETAIL_TEST: split_counts.test,
-                    "total_pairs": display_total,
-                },
-            )
-            emit_valset_event(splits.val, progress_callback)
-
-        pair_results: list[PairResult] = [None] * total_pairs  # type: ignore[list-item]
-        completed = completed_pairs or {}
-        # Resume: keep already-finished pairs verbatim so they are neither re-run
-        # nor lost, and run only the rest. Stored keys are GLOBAL indices.
-        for idx, stored in completed.items():
-            local = idx - pair_index_base
-            if 0 <= local < total_pairs:
-                pair_results[local] = PairResult.model_validate(stored)
-        pending = [
-            (i, gen_cfg, ref_cfg)
-            for i, (gen_cfg, ref_cfg) in enumerate(pairs)
-            if (pair_index_base + i) not in completed
-        ]
-
-        # Split the job-wide cost ceiling (in cents) evenly across pairs so
-        # concurrent pairs can't collectively exceed the user's cap; 0 = no
-        # ceiling. Divided by the PARENT's pair count so a distributed child
-        # holding one pair still gets 1/Nth of the grid-wide cap.
-        pair_max_cents = (
-            payload.max_cost_cents // display_total if payload.max_cost_cents is not None and display_total > 0 else 0
-        )
-        # Events display the parent's real pair count; local mechanics (result
-        # slots, ceiling split) already use the child-local values above.
-        grid_ctx = _GridPairContext(
-            total_pairs=display_total,
-            module_factory=module_factory,
-            module_kwargs=module_kwargs,
-            payload=payload,
-            optimizer_factory=optimizer_factory,
-            metric=metric,
-            splits=splits,
-            artifact_id=artifact_id,
-            progress_callback=progress_callback,
-            pair_max_cents=pair_max_cents,
-            gepa_log_dir_base=gepa_log_dir_path,
-            completed=len(completed),
-        )
-        if completed:
-            logger.info(
-                "Grid resume: %d/%d pairs already complete, running %d",
-                len(completed),
-                total_pairs,
-                len(pending),
-            )
-
-        if pending:
-            max_workers = min(len(pending), app_settings.grid_pair_max_workers)
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Workers receive the GLOBAL index (events, log tags, pair dirs,
-                # PairResult.pair_index); the futures map keeps the local slot.
-                futures = {
-                    executor.submit(_run_grid_pair, grid_ctx, pair_index_base + i, gen_cfg, ref_cfg): i
-                    for i, gen_cfg, ref_cfg in pending
-                }
-                for future in as_completed(futures):
-                    idx = futures[future]
-                    pair_results[idx] = future.result()
-
-        successful = [p for p in pair_results if p.error is None and p.optimized_test_metric is not None]
-        best_pair = (
-            max(
-                successful,
-                key=lambda p: p.optimized_test_metric if p.optimized_test_metric is not None else float("-inf"),
-            )
-            if successful
-            else None
-        )
-
-        grid_runtime = (datetime.now(UTC) - grid_start).total_seconds()
-        completed_count = len([p for p in pair_results if p.error is None and p.stop_reason != "budget_reached"])
-        failed_count = len([p for p in pair_results if p.error is not None])
-        pair_token_counts = [p.total_tokens for p in pair_results if p.total_tokens is not None]
-        grid_total_tokens = sum(pair_token_counts) if pair_token_counts else None
-        grid_usage_by_model = _merge_usage_rows([row for p in pair_results for row in p.usage_by_model])
-
-        logger.info(
-            "Grid search finished: %d/%d completed, %d failed, best=%s (%.1fs total)",
-            completed_count,
-            total_pairs,
-            failed_count,
-            f"{best_pair.generation_model}+{best_pair.reflection_model}" if best_pair else "none",
-            grid_runtime,
-        )
-
-        response = GridSearchResponse(
-            module_name=payload.module_name,
-            optimizer_name=payload.optimizer_name,
-            metric_name=metric_identifier,
-            split_counts=split_counts,
-            total_pairs=total_pairs,
-            completed_pairs=completed_count,
-            failed_pairs=failed_count,
-            stopped_pairs=sum(p.stop_reason == "budget_reached" for p in pair_results),
-            pair_results=pair_results,
-            best_pair=best_pair,
-            runtime_seconds=round(grid_runtime, 2),
-            total_tokens=grid_total_tokens,
-            usage_by_model=grid_usage_by_model,
-        )
-        if response.stopped_pairs and not failed_count:
-            stop = BudgetReached()
-            stop.result = (
-                response
-                if any(p.result_availability == "evaluated" or p.program_artifact is not None for p in pair_results)
-                else None
-            )
-            stop.evidence.update(
-                final_evaluation_completed=False,
-                final_evaluation_reason="budget_reached",
-                candidate_origin=None,
-                stopped_pairs=response.stopped_pairs,
-                completed_pairs=completed_count,
-                pair_results=[p.model_dump(mode="json") for p in pair_results],
-            )
-            raise stop
-        return response
-
-    def validate_grid_search_payload(self, payload: GridSearchRequest) -> None:
-        """Validate a GridSearchRequest without executing any optimization.
-
-        User-authored signature and metric code is exec'd inside isolated
-        subprocesses via ``safe_exec`` — this runs in the API/worker-engine
-        process, so we cannot trust the exec to live here.
-
-        Args:
-            payload: The grid-search request to validate.
-
-        Raises:
-            ServiceError: When any field fails validation (mapping mismatch,
-                unknown module/optimizer, malformed kwargs, etc.).
-        """
-        intro = validate_signature_code(payload.signature_code)
-        require_mapping_matches_signature(payload.column_mapping, intro.input_fields, intro.output_fields)
-        require_mapping_columns_in_dataset(payload.column_mapping, payload.dataset)
-        metric_info = validate_metric_code(payload.metric_code)
-        _require_metric_compatible_with_optimizer(payload.optimizer_name, metric_info.param_names)
-        _validate_target_score(payload.target_score, payload.optimizer_name, payload.split_fractions.val)
-        self._get_module_factory(payload.module_name)
-        optimizer_factory = self._get_optimizer_factory(payload.optimizer_name)
-        validate_optimizer_signature(optimizer_factory, payload.optimizer_name)
-        validate_optimizer_kwargs(
-            optimizer_factory,
-            payload.optimizer_kwargs,
-            payload.optimizer_name,
-        )
 
     def validate_payload(self, payload: RunRequest) -> None:
         """Validate a RunRequest without executing any optimization.

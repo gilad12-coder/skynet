@@ -47,7 +47,7 @@ export interface SplitFractions {
 }
 
 // React (ReAct-agent) optimization configuration. Mirrors the backend
-// `ToolSource` model on `RunRequest`. React is a generic GEPA module that
+// `ToolSource` model on legacy DSPy run payloads. React is a generic GEPA module that
 // carries a live tool roster; it is otherwise identical to predict/cot, scored
 // by the same standard `metric_code`. Only sent when `module_name === "react"`.
 export interface ToolSource {
@@ -181,82 +181,6 @@ export interface RuntimeCostProfile {
   maximum_session_cents: string | null;
   maximum_lifetime_seconds: number | null;
   vcpus: number | null;
-}
-
-interface OptimizationRequestBase {
-  execution_budget_id?: string;
-  execution_budget_revision?: number;
-  preflight_id?: string;
-  preflight_fingerprint?: string;
-
-  execution_runtime?: ExecutionRuntime;
-  name?: string | null;
-  description?: string | null;
-  username: string;
-  module_name: string;
-  module_kwargs?: Record<string, unknown>;
-  // Required for every module except "workflow", whose per-node signatures
-  // live inside the workflow spec instead.
-  signature_code?: string;
-  // Workflow graph spec — required iff `module_name === "workflow"`.
-  workflow?: WorkflowSpec;
-  // Optional at the base level (grid-search shares this shape); the run path
-  // requires it, react included — react is scored by the same standard metric.
-  metric_code?: string;
-  optimizer_name: string;
-  optimizer_kwargs?: Record<string, unknown>;
-  compile_kwargs?: Record<string, unknown>;
-  // Optional because a submit can carry rows by reference instead: when
-  // `source_dataset_id` is set the server inlines the saved library rows and
-  // `dataset` is omitted. Exactly one of the two is sent.
-  dataset?: Array<Record<string, unknown>>;
-  dataset_filename?: string | null;
-  // Id of a saved library dataset to run by reference (consumer path); mutually
-  // exclusive with inline `dataset`.
-  source_dataset_id?: string | null;
-  column_mapping: ColumnMapping;
-  // Dataset columns in the order the user arranged them at submit time. An
-  // array (not object keys) so it survives JSONB storage and a clone can
-  // restore the original column order.
-  column_order?: string[];
-  split_fractions?: SplitFractions;
-  shuffle?: boolean;
-  seed?: number | null;
-  is_private?: boolean;
-  // How the run's tokens are billed: "managed" (the Skynet balance) or "byok" (the
-  // user's own key — not billed). Threaded from the wizard's token-source toggle
-  // so billing mode is enforced server-side, not advisory. Defaults to "managed".
-  token_source?: "managed" | "byok";
-  // User-set Max Cost Ceiling in cents [FG-1]. A DSPy job's token use isn't
-  // linear, so the wizard shows a projected bracket instead of a tight estimate
-  // and lets the user cap the run here; the backend hard-stops the job once spend
-  // exceeds the budget this cap buys. Omitted when no ceiling is set.
-  max_cost_cents?: number;
-  // Optional GEPA validation target, expressed as a percentage (0–100). The
-  // optimizer stops searching when its best validation candidate reaches it.
-  target_score?: number;
-  // Route managed model calls through the provider's Batch API: half price,
-  // but each round of calls can take minutes to hours. BYOK calls run normally.
-  economy_mode?: boolean;
-  // Projected cost bracket the wizard showed at submit [FG-1], persisted with
-  // the billing stamp so the estimate can be reconciled against the actual
-  // charge. Carries the chargeable bracket for the run's token source
-  // (managed: full per-model cost; byok: platform fee). Omitted when unestimated.
-  estimated_cents_low?: number;
-  estimated_cents_high?: number;
-}
-
-export interface RunRequest extends OptimizationRequestBase {
-  model_config: ModelConfig;
-  reflection_model_config?: ModelConfig;
-  task_model_config?: ModelConfig;
-  // React-agent tool roster — only populated when `module_name === "react"`.
-  tool_source?: ToolSource;
-}
-
-export interface GridSearchRequest extends OptimizationRequestBase {
-  generation_models: ModelConfig[];
-  reflection_models: ModelConfig[];
 }
 
 export interface OptimizationSubmissionResponse {
@@ -837,8 +761,14 @@ export interface BlackboxRunResult {
   case_count?: number;
   /** Fresh scorer runs spent on the final run, outside `max_scorer_runs`. */
   final_scorer_runs?: number;
-  /** Runs recorded before the final run existed. */
+  /** Runs recorded before the final run existed. Unified runs store a
+   *  `UnifiedSplitCounts` object here instead. */
   split_counts?: Record<string, number>;
+  /** Unified runs: selection scores on `split_counts.selection_split`. */
+  baseline_val_score?: number | null;
+  best_val_score?: number | null;
+  /** Unified runs: the optimizer Auto resolved to. */
+  optimizer_resolved?: string | null;
   baseline_test_metric?: number | null;
   optimized_test_metric?: number | null;
   seed_candidate?: BlackboxCandidate | null;
@@ -858,6 +788,8 @@ export interface BlackboxRunResult {
   lm_activity?: LMActivity | null;
   optimization_metadata: Record<string, unknown>;
   details: Record<string, unknown>;
+  /** Unified runs on a DSPy optimizer: the compiled program. */
+  program_artifact?: ProgramArtifact | null;
 }
 
 export interface RepositoryTreeEntry {
@@ -961,8 +893,6 @@ export interface OptimizationStatusResponse extends OptimizationSummaryResponse 
   result?: RunResult | null;
   grid_result?: GridSearchResult | null;
   blackbox_result?: BlackboxRunResult | null;
-  /** Grid pair indices with a saved checkpoint: a failed pair here offers Resume, one not here offers Restart. */
-  grid_resumable_pairs?: number[];
   /** Caller's share role when reached via a member grant; null for the owner's own view. */
   effective_role?: "viewer" | "editor" | "owner" | null;
 }

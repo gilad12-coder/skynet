@@ -14,9 +14,9 @@ export function RunAccessBanner({ tier, owner }: { tier: RunAccessTier; owner?: 
   return (
     <div
       role="status"
-      className="flex w-full flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-gradient-to-br from-muted/60 to-muted/25 px-4 py-2.5 shadow-sm"
+      className="flex w-full flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-muted/40 px-4 py-2.5"
     >
-      <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary/5 text-primary/80">
+      <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary-fill text-primary-foreground">
         {tier === "editor" ? (
           <PencilSimple className="size-4" aria-hidden="true" />
         ) : (
@@ -41,7 +41,7 @@ export function RunAccessBanner({ tier, owner }: { tier: RunAccessTier; owner?: 
           </span>
           <span
             aria-hidden="true"
-            className="grid size-4 shrink-0 place-items-center rounded-full bg-primary/10 text-[0.5625rem] font-semibold uppercase text-primary"
+            className="grid size-4 shrink-0 place-items-center rounded-full bg-primary-fill text-[0.5625rem] font-semibold uppercase text-primary-foreground"
           >
             {owner.trim().charAt(0)}
           </span>

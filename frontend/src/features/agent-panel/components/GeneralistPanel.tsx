@@ -6,7 +6,7 @@ import { useCompletionNotification } from "@/shared/hooks/use-completion-notific
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ClockCounterClockwise, SidebarSimple, Plus, Sparkle, MagicWand } from "@/shared/ui/icons";
+import { ClockCounterClockwise, SidebarSimple, Plus, MagicWand } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
@@ -17,6 +17,7 @@ import { AgentThread } from "@/shared/ui/agent/agent-thread";
 import { ChatErrorBanner } from "@/shared/ui/agent/chat-error-banner";
 import { ChatTranscript } from "@/shared/ui/agent/chat-transcript";
 import { Composer } from "@/shared/ui/agent/composer";
+import { SkynetMark } from "@/shared/ui/skynet-mark";
 import { ComposerModelMenu } from "@/shared/ui/agent/composer-model-menu";
 import type { AgentThinking, AgentToolCall } from "@/shared/ui/agent/types";
 import { EmptyState } from "@/shared/ui/empty-state";
@@ -62,10 +63,7 @@ const REQUEST_CODE_TOOL = "request_code_authoring";
 
 // Submit tools whose success should mirror the manual wizard submit button:
 // play the splash banner, then route to the new optimization's details.
-const SUBMIT_TOOLS: ReadonlySet<string> = new Set([
-  "submit_job_run_post",
-  "submit_grid_search_grid_search_post",
-]);
+const SUBMIT_TOOLS: ReadonlySet<string> = new Set(["submit_unified_run_optimize_post"]);
 
 /**
  * Pull the new optimization's id out of a submit tool result. The backend's
@@ -353,8 +351,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const codeAgent = useCodeAuthoringAgent({
     dataset: lastConfirmedDataset,
     armed: codeArmed,
-    moduleName:
-      typeof effectiveWizard.module_name === "string" ? effectiveWizard.module_name : undefined,
     optimizerName:
       typeof effectiveWizard.optimizer_name === "string"
         ? effectiveWizard.optimizer_name
@@ -422,7 +418,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       const sigVal = codeAgent.signatureValidation;
       if (!sigVal || sigVal.errors.length > 0) return;
       authoredCode = {
-        signature_code: codeAgent.signatureCode,
+        run_code: codeAgent.signatureCode,
         metric_code: codeAgent.metricCode,
       };
     }
@@ -460,7 +456,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       // very next turn's wizard_state carries ``staged_dataset_id``. The
       // submit wizard's own staging path only runs when its form is
       // mounted; without this call an agent-panel-only flow ends up
-      // calling ``submit_job_run_post`` with no dataset and 422s.
+      // calling ``submit_unified_run_optimize_post`` with no dataset and 422s.
       let stagedDatasetId: string | undefined;
       try {
         const staged = await stageDatasetForAgent({
@@ -481,12 +477,11 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
           dataset_ready: true,
           columns_configured: true,
           dataset_columns: confirmed.columns,
-          column_roles: confirmed.columnRoles,
           column_kinds: confirmed.columnKinds,
         },
       };
       // Persist before dispatch so the wizard can replay it after navigation;
-      // the listener in use-submit-wizard reads+clears this key on mount.
+      // the listener in use-unified-wizard reads+clears this key on mount.
       try {
         window.sessionStorage.setItem("wizard:staged-dataset", JSON.stringify(stagedDetail));
       } catch {
@@ -502,7 +497,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (stagedDatasetId && wizardCtx) {
         wizardCtx.setField("staged_dataset_id", stagedDatasetId, "user");
         wizardCtx.setField("dataset_columns", confirmed.columns, "user");
-        wizardCtx.setField("column_roles", confirmed.columnRoles, "user");
         wizardCtx.setField("dataset_ready", true, "user");
         wizardCtx.setField("columns_configured", true, "user");
       }
@@ -525,7 +519,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             dataset_ready: true,
             columns_configured: true,
             dataset_columns: confirmed.columns,
-            column_roles: confirmed.columnRoles,
           }
         : undefined;
       agent.send(note, wizardOverride);
@@ -543,7 +536,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (wizardCtx) {
         wizardCtx.setField("source_dataset_id", picked.sourceDatasetId, "user");
         wizardCtx.setField("dataset_columns", picked.columns, "user");
-        wizardCtx.setField("column_roles", picked.columnRoles, "user");
         wizardCtx.setField("dataset_ready", true, "user");
         wizardCtx.setField("columns_configured", true, "user");
       }
@@ -565,7 +557,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
         dataset_ready: true,
         columns_configured: true,
         dataset_columns: picked.columns,
-        column_roles: picked.columnRoles,
       };
       agent.send(note, wizardOverride);
     },
@@ -673,7 +664,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
 
   const emptyState = (
     <EmptyState
-      icon={Sparkle}
+      icon={SkynetMark}
       iconWrap="circle"
       variant="compact"
       title={msg("auto.features.agent.panel.components.generalistpanel.1")}
@@ -715,8 +706,8 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
               // Shadow falls from the panel toward the page content — rightward
               // when docked left (RTL), leftward when docked right (LTR).
               isRtl
-                ? "shadow-[8px_0_32px_rgba(61,46,34,0.06)]"
-                : "shadow-[-8px_0_32px_rgba(61,46,34,0.06)]",
+                ? "shadow-[8px_0_32px_rgba(0,0,0,0.06)]"
+                : "shadow-[-8px_0_32px_rgba(0,0,0,0.06)]",
             )}
             aria-label={msg("auto.features.agent.panel.components.generalistpanel.literal.1")}
           >
@@ -724,10 +715,9 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
               <div className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-2.5 shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <span
-                    className="inline-flex size-6 items-center justify-center rounded-full text-[#FAF8F5]"
-                    style={{ backgroundColor: hue }}
+                    className="inline-flex size-6 items-center justify-center rounded-full bg-primary-fill text-primary-foreground"
                   >
-                    <Sparkle className="size-3" aria-hidden="true" />
+                    <SkynetMark className="size-3.5" aria-hidden="true" />
                   </span>
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5 leading-tight">
@@ -886,10 +876,14 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
                           retryLabel={msg(
                             "auto.features.agent.panel.components.generalistpanel.error_retry",
                           )}
-                          onRetry={agent.retry}
+                          onRetry={
+                            agent.errorCode === I18N_KEY.BILLING_INSUFFICIENT_FUNDS
+                              ? undefined
+                              : agent.retry
+                          }
                           action={
                             agent.errorCode === I18N_KEY.BILLING_INSUFFICIENT_FUNDS ? (
-                              <Button size="sm" onClick={() => openSettingsTo("billing")}>
+                              <Button size="sm" className="h-7" onClick={() => openSettingsTo("billing")}>
                                 {msg("billing.action.add_funds")}
                               </Button>
                             ) : undefined
@@ -1010,7 +1004,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
               tabIndex={-1}
               className={cn(
                 "absolute top-0 start-0 h-full w-1 cursor-col-resize",
-                "hover:bg-[#C8A882]/40 active:bg-[#C8A882]/60 transition-colors",
+                "hover:bg-primary-fill/25 active:bg-primary-fill/40 transition-colors",
                 "max-lg:hidden",
               )}
             />
@@ -1028,7 +1022,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
               onOpen={openPanel}
               active={streaming || agent.backgroundBusyCount > 0}
               statusLabel={agent.statusLabel}
-              hue={hue}
               inline
             />,
             pillDock,
@@ -1038,7 +1031,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             onOpen={openPanel}
             active={streaming || agent.backgroundBusyCount > 0}
             statusLabel={agent.statusLabel}
-            hue={hue}
           />
         ))}
 

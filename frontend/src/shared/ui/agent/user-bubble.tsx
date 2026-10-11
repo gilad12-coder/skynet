@@ -14,9 +14,9 @@ import { Textarea } from "@/shared/ui/primitives/textarea";
 
 /** Pill button styles for the edit-and-resend row under a user message. */
 export const USER_BUBBLE_EDIT_CANCEL_CLASS =
-  "text-[0.75rem] font-medium text-foreground/80 hover:text-foreground bg-white border border-[#DDD4C8] hover:bg-muted px-3.5 py-1.5 rounded-full transition-all duration-150 cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3D2E22]/25 focus-visible:ring-offset-1";
+  "text-[0.75rem] font-medium text-foreground/80 hover:text-foreground bg-card border border-border hover:bg-muted px-3.5 py-1.5 rounded-full transition-all duration-150 cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-offset-1";
 export const USER_BUBBLE_EDIT_SEND_CLASS =
-  "text-[0.75rem] font-medium text-white bg-[#3D2E22] hover:bg-[#3D2E22]/90 px-4 py-1.5 rounded-full transition-all duration-150 cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3D2E22]/40 focus-visible:ring-offset-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100";
+  "text-[0.75rem] font-medium text-primary-foreground bg-primary-fill hover:bg-primary-hover px-4 py-1.5 rounded-full transition-all duration-150 cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100";
 
 interface UserBubbleProps {
   content: string;
@@ -28,7 +28,7 @@ export function UserBubble({ content, onEdit, editable = true }: UserBubbleProps
   return (
     <div className="flex justify-start group/user">
       <div
-        className="max-w-[80%] rounded-[22px] rounded-es-[4px] bg-[#3D2E22] text-[#FAF8F5] px-4 py-2.5 text-sm leading-[1.45] shadow-sm"
+        className="max-w-[80%] rounded-[22px] rounded-es-[4px] bg-primary-fill text-primary-foreground px-4 py-2.5 text-sm leading-[1.45]"
         dir="auto"
       >
         {content}

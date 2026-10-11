@@ -7,14 +7,14 @@ import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
-import { LAST_WIZARD_STAGE } from "../lib/wizard-steps";
-import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
+import { LAST_WIZARD_STAGE, WIZARD_STAGE } from "../lib/wizard-steps";
+import type { WizardV2Shell } from "../hooks/use-unified-wizard";
 
 type NavContext = Pick<
-  SubmitWizardContext,
-  "step" | "goPrev" | "handleNext" | "handleSubmit" | "submitting" | "advancing"
+  WizardV2Shell,
+  "state" | "goPrev" | "goNext" | "submit" | "submitting" | "advancing"
 > & {
-  // Why the run cannot start right now (an engine that cannot run here yet);
+  // Why the run cannot start right now (a failing or stale contract check);
   // the button stays visible so the reason stays visible with it.
   runDisabledReason?: string | null;
 };
@@ -37,7 +37,8 @@ export function SubmitNav({
   showSubmit,
 }: SubmitNavProps) {
   const reducedMotion = useReducedMotion();
-  const { step, goPrev, handleNext, handleSubmit, submitting, advancing } = w;
+  const { goPrev, goNext, submit, submitting, advancing } = w;
+  const step = WIZARD_STAGE[w.state.step];
   const runDisabledReason = w.runDisabledReason ?? null;
 
   // Back points toward the start, Next toward the end — the physical direction
@@ -61,7 +62,7 @@ export function SubmitNav({
           {msg("auto.features.submit.components.submitnav.1")}
         </Button>
         <Button
-          onClick={onNext ?? handleNext}
+          onClick={onNext ?? goNext}
           disabled={advancing}
           aria-busy={advancing || undefined}
           aria-live="polite"
@@ -87,7 +88,7 @@ export function SubmitNav({
   return (
     <motion.button
       type="button"
-      onClick={onSubmit ?? handleSubmit}
+      onClick={onSubmit ?? (() => void submit())}
       disabled={submitting || advancing || runDisabledReason !== null}
       aria-busy={submitting || advancing || undefined}
       aria-disabled={runDisabledReason !== null || undefined}
@@ -96,7 +97,7 @@ export function SubmitNav({
       data-telemetry="submit-run"
       animate={runDisabledReason || reducedMotion ? { scale: 1 } : { scale: [1, 1.01, 1] }}
       transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
-      className="group relative w-full rounded-2xl bg-primary text-primary-foreground font-semibold text-base pt-5 pb-7 cursor-pointer transition-all duration-300 hover:scale-[1.01] active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+      className="group relative w-full rounded-2xl bg-primary-fill text-primary-foreground font-semibold text-base pt-5 pb-7 cursor-pointer transition-all duration-300 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
     >
       {submitting || advancing ? (
         <span className="flex items-center justify-center gap-2">

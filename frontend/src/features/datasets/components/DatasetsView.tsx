@@ -34,7 +34,6 @@ import { cn } from "@/shared/lib/utils";
 import { ImportFromMenu } from "@/features/connectors";
 import { useDatasets } from "../hooks/use-datasets";
 import { DatasetCard } from "./DatasetCard";
-import { DatasetDetailDialog } from "./DatasetDetailDialog";
 import { DatasetRenameDialog } from "./DatasetRenameDialog";
 import { DatasetShareDialog } from "./DatasetShareDialog";
 import { DATASETS_LAYOUT_KEY, DatasetsSkeleton } from "./DatasetsSkeleton";
@@ -43,9 +42,9 @@ import { rememberLayout } from "@/shared/lib/layout-hint";
 /**
  * Top-level /datasets page: the personal dataset library. Lists owned and
  * shared-in datasets as searchable cards over a usage meter, with a drag-in /
- * click upload that parses CSV/JSON/XLSX and saves a new entry. Selecting a card
- * (or arriving with ``?open=<id>``) opens a read-only detail sheet with a row
- * preview and the reverse link to every optimization that used the dataset.
+ * click upload that parses CSV/JSON/XLSX and saves a new entry. Clicking a card
+ * (or arriving with ``?open=<id>``) opens that dataset's page, where it can be
+ * viewed, edited, exported, tagged and traced to the optimizations that used it.
  */
 export function DatasetsView() {
   const { datasets, loading, error, refetch } = useDatasets();
@@ -56,7 +55,14 @@ export function DatasetsView() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [search, setSearch] = React.useState("");
-  const [selected, setSelected] = React.useState<DatasetSummary | null>(null);
+  const openDataset = React.useCallback(
+    (dataset: DatasetSummary, replace = false) => {
+      const href = `/datasets/${dataset.id}/edit?name=${encodeURIComponent(dataset.name)}`;
+      if (replace) router.replace(href);
+      else router.push(href);
+    },
+    [router],
+  );
   const [dragging, setDragging] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
@@ -103,20 +109,19 @@ export function DatasetsView() {
     }
   };
 
-  // Honour ?open=<id> once the list has loaded: open that dataset's detail sheet
-  // (the navigable link from an optimization's source-dataset row). Guarded so
-  // it fires a single time, not again after the user closes the sheet. When the
-  // id resolves to nothing — the source dataset was deleted or unshared — say so
-  // rather than dead-ending silently on the click.
+  // Honour ?open=<id> once the list has loaded: go to that dataset's page (the
+  // navigable link from an optimization's source-dataset row). Guarded so it
+  // fires a single time. When the id resolves to nothing — the source dataset
+  // was deleted or unshared — say so rather than dead-ending silently.
   React.useEffect(() => {
     if (deepLinkedRef.current || loading || error) return;
     const openId = searchParams.get("open");
     if (!openId) return;
     deepLinkedRef.current = true;
     const match = datasets.find((d) => d.id === openId);
-    if (match) setSelected(match);
+    if (match) openDataset(match, true);
     else toast.info(msg("datasets.open.not_found"));
-  }, [datasets, loading, error, searchParams]);
+  }, [datasets, loading, error, searchParams, openDataset]);
 
   // Per-dataset actions only make sense with exactly one selected, as in the
   // dashboard jobs bar; selection is owner-only, so every one of them applies.
@@ -261,7 +266,7 @@ export function DatasetsView() {
         }}
         className={cn(
           "mt-5 rounded-xl border border-dashed transition-colors duration-150",
-          dragging ? "border-[#3D2E22]/50 bg-[#3D2E22]/[0.03]" : "border-transparent",
+          dragging ? "border-primary-fill/50 bg-primary-fill/[0.03]" : "border-transparent",
         )}
       >
         {error ? (
@@ -286,7 +291,7 @@ export function DatasetsView() {
         ) : (
           <div className="flex flex-col gap-2.5 p-0.5">
             {dragging && (
-              <p className="pointer-events-none py-2 text-center text-sm font-medium text-[#3D2E22]/70">
+              <p className="pointer-events-none py-2 text-center text-sm font-medium text-primary/70">
                 {msg("datasets.upload.drop")}
               </p>
             )}
@@ -294,7 +299,7 @@ export function DatasetsView() {
               <DatasetCard
                 key={dataset.id}
                 dataset={dataset}
-                onOpen={setSelected}
+                onOpen={openDataset}
                 onChanged={refetch}
                 selected={selectedIds.has(dataset.id)}
                 onToggleSelect={(shiftKey) => toggleSelected(dataset.id, shiftKey)}
@@ -388,8 +393,6 @@ export function DatasetsView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <DatasetDetailDialog dataset={selected} onClose={() => setSelected(null)} />
     </div>
   );
 }

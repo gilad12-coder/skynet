@@ -1,12 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  buildExperiencePatch,
-  buildNotificationPatch,
-  emptyIntake,
-  notificationsFromPrefs,
-  parseIntakeAnswers,
-} from "./intake.ts";
+import { buildExperiencePatch, emptyIntake, parseIntakeAnswers } from "./intake.ts";
 
 test("buildExperiencePatch finishes the setup with the chosen level and the answers", () => {
   const answers = { ...emptyIntake(), billing: "byok" as const, level: "expert" as const };
@@ -17,34 +11,7 @@ test("buildExperiencePatch finishes the setup with the chosen level and the answ
   assert.equal((patch.intake as Record<string, unknown>).version, 1);
 });
 
-test("buildNotificationPatch only sends Live's sub-settings with Live", () => {
-  const base = emptyIntake().notifications;
-  assert.deepEqual(buildNotificationPatch(base), {
-    cadence: "done",
-    stuck_fraction: 0.25,
-    budget_alert_fraction: 0.8,
-  });
-  assert.deepEqual(
-    buildNotificationPatch({ ...base, cadence: "live", live_mode: "per_run_count", live_count: 5 }),
-    {
-      cadence: "live",
-      stuck_fraction: 0.25,
-      budget_alert_fraction: 0.8,
-      live_mode: "per_run_count",
-      live_count: 5,
-    },
-  );
-  const digest = buildNotificationPatch({
-    ...base,
-    cadence: "live",
-    live_mode: "digest",
-    digest_minutes: 120,
-  });
-  assert.equal(digest.digest_minutes, 120);
-  assert.equal(digest.live_count, undefined);
-});
-
-test("parseIntakeAnswers round-trips stored answers and clamps out-of-range numbers", () => {
+test("parseIntakeAnswers round-trips stored answers and ignores a retired email cadence", () => {
   const stored = buildExperiencePatch({
     ...emptyIntake(),
     privacy: "zdr",
@@ -53,17 +20,10 @@ test("parseIntakeAnswers round-trips stored answers and clamps out-of-range numb
   const parsed = parseIntakeAnswers(stored);
   assert.equal(parsed?.privacy, "zdr");
   assert.equal(parsed?.spending_limit_cents, 500);
-  const clamped = parseIntakeAnswers({
-    notifications: { live_count: 99, stuck_fraction: 0, cadence: "hourly" },
-  });
-  assert.equal(clamped?.notifications.live_count, 20);
-  assert.equal(clamped?.notifications.stuck_fraction, 0.05);
-  assert.equal(clamped?.notifications.cadence, "done");
+  // A draft from before the notification inbox still parses; its cadence is dropped.
+  const older = parseIntakeAnswers({ notifications: { cadence: "live" }, privacy: "deny" });
+  assert.equal(older?.privacy, "deny");
+  assert.equal(older && "notifications" in older, false);
   assert.equal(parseIntakeAnswers(null), null);
   assert.equal(parseIntakeAnswers([1]), null);
-});
-
-test("notificationsFromPrefs fills server gaps with the defaults", () => {
-  assert.deepEqual(notificationsFromPrefs(null), emptyIntake().notifications);
-  assert.equal(notificationsFromPrefs({ cadence: "milestones" }).cadence, "milestones");
 });

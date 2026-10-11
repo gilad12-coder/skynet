@@ -33,7 +33,7 @@ export function GuidedChoiceLine({
             <button
               type="button"
               onClick={onShowMore}
-              className="relative rounded-sm font-medium text-foreground underline after:absolute after:-inset-3 after:content-[''] decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              className="relative rounded-sm font-medium text-foreground underline after:absolute after:-inset-3 after:content-[''] decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
             >
               {msg("experience.guided.change_level")}
             </button>

@@ -23,10 +23,9 @@ import type {
   reusableTerminalPreflight,
   StoredPreflightEvidence,
 } from "./preflight-outcome";
-import type { preflightIdentity } from "./validation-evidence";
 import type { waitForPreflightUsage } from "./wait-for-preflight-usage";
 
-export type PreflightWorkflow = "anything" | "dspy";
+export type PreflightWorkflow = "unified";
 
 export type ValidationPhase =
   | "budget"
@@ -94,7 +93,7 @@ export interface PreflightStoreDependencies {
   ): Promise<WizardPreflightResponse>;
   getBudget(id: string, signal: AbortSignal): Promise<ExecutionBudget>;
   translate(key: string): string;
-  identity: typeof preflightIdentity;
+  identity(workflow: PreflightWorkflow, payload: object): string;
   reusable: typeof reusableSuccessfulPreflight;
   reusableTerminal: typeof reusableTerminalPreflight;
   settleUsage: typeof waitForPreflightUsage;

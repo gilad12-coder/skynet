@@ -363,7 +363,7 @@ export function LogsTab({
                 <button
                   type="button"
                   onClick={jumpToNewest}
-                  className={`absolute start-1/2 z-10 inline-flex -translate-x-1/2 rtl:translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm transition-colors duration-150 hover:bg-muted ${newestAtTop ? "top-10" : "bottom-3"}`}
+                  className={`absolute start-1/2 z-10 inline-flex -translate-x-1/2 rtl:translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground transition-colors duration-150 hover:bg-muted ${newestAtTop ? "top-10" : "bottom-3"}`}
                 >
                   <ArrowDown
                     className={newestAtTop ? "size-3 rotate-180" : "size-3"}

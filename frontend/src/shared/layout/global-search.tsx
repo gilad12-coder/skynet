@@ -193,13 +193,13 @@ export function GlobalSearch() {
           id="global-search-dialog"
           showCloseButton={false}
           dir={dir}
-          className="max-w-[calc(100%-1.5rem)] gap-0 overflow-hidden rounded-2xl border border-border/75 bg-background p-0 shadow-[0_16px_48px_rgba(28,22,18,0.16)] sm:max-w-xl"
+          className="max-w-[calc(100%-1.5rem)] gap-0 overflow-hidden rounded-2xl border border-border/75 bg-background p-0 shadow-[var(--shadow-float)] sm:max-w-xl"
         >
           <DialogHeader className="sr-only">
             <DialogTitle>{msg("app.shell.search.title")}</DialogTitle>
             <DialogDescription>{msg("app.shell.search.description")}</DialogDescription>
           </DialogHeader>
-          <div className="group flex h-[58px] items-center gap-3 border-b border-border/60 px-4 focus-within:bg-white/50">
+          <div className="group flex h-[58px] items-center gap-3 border-b border-border/60 px-4 focus-within:bg-white/50 dark:focus-within:bg-white/5">
             <MagnifyingGlass
               className="size-5 shrink-0 text-primary/60 transition-colors group-focus-within:text-primary"
               aria-hidden="true"
@@ -260,7 +260,7 @@ export function GlobalSearch() {
                             className={cn(
                               "group/item flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-start outline-none transition-[background-color,color] duration-100",
                               selected
-                                ? "bg-primary/[0.09] text-foreground"
+                                ? "bg-primary-fill/[0.09] text-foreground"
                                 : "text-foreground/80 hover:bg-accent/55",
                             )}
                           >
@@ -268,7 +268,7 @@ export function GlobalSearch() {
                               className={cn(
                                 "flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors duration-100",
                                 selected
-                                  ? "bg-primary/[0.12] text-primary"
+                                  ? "bg-primary-fill/[0.12] text-primary"
                                   : "bg-muted/70 text-muted-foreground group-hover/item:text-primary",
                               )}
                             >

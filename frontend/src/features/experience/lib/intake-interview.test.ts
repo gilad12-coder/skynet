@@ -72,7 +72,7 @@ test("coerceProfilePatch keeps valid answers and drops anything unknown or out o
   assert.equal(patch.billing, "byok");
   assert.equal(patch.byok_provider, "openai");
   assert.equal(patch.privacy, "deny");
-  assert.equal(patch.cadence, undefined);
+  assert.equal("cadence" in patch, false);
   assert.equal(patch.trust, "yolo");
   assert.equal(patch.level, undefined);
   assert.deepEqual(phases, ["billing", "privacy", "trust"]);
@@ -86,7 +86,7 @@ test("coerceProfilePatch: a key without a provider leaves billing open; junk yie
 });
 
 test("the agenda is settings only: the language, then the account settings", () => {
-  assert.deepEqual(INTAKE_PHASES, ["language", "billing", "privacy", "emails", "trust"]);
+  assert.deepEqual(INTAKE_PHASES, ["language", "billing", "privacy", "trust"]);
   assert.equal(nextPhase([], null), "language");
   assert.equal(nextPhase(["language"], "language"), "billing");
   // Wraps back to an earlier open question before the closing line.
@@ -103,10 +103,9 @@ test("profileSoFar only reports what the user answered, in the interviewer's wor
     spending_limit_cents: null,
   };
   assert.deepEqual(profileSoFar(answers, []), {});
-  assert.deepEqual(profileSoFar(answers, ["language", "privacy", "emails"]), {
+  assert.deepEqual(profileSoFar(answers, ["language", "privacy"]), {
     language: "he",
     privacy: "no_training",
-    email_cadence: "done",
   });
 });
 

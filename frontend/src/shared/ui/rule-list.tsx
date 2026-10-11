@@ -106,7 +106,7 @@ export function RuleList({
                 className={cn(
                   RULE_MARKER_CLASS,
                   "mt-[7px] transition-colors duration-150",
-                  "group-focus-within/rule:bg-primary/12 group-focus-within/rule:text-primary",
+                  "group-focus-within/rule:bg-primary-fill/12 group-focus-within/rule:text-primary",
                 )}
               >
                 {idx + 1}
@@ -152,7 +152,7 @@ export function RuleList({
       >
         <span
           aria-hidden
-          className="flex size-5 shrink-0 items-center justify-center rounded-full border border-dashed border-border text-muted-foreground transition-colors duration-150 group-hover/add:border-primary/50 group-hover/add:text-primary"
+          className="flex size-5 shrink-0 items-center justify-center rounded-full border border-dashed border-border text-muted-foreground transition-colors duration-150 group-hover/add:border-primary-fill/50 group-hover/add:text-primary"
         >
           <Plus className="size-3" />
         </span>
@@ -207,7 +207,7 @@ const AutoGrowTextarea = React.forwardRef<
       className={cn(
         "min-w-0 flex-1 resize-none overflow-hidden rounded-lg bg-transparent px-2 py-1 text-base leading-relaxed text-foreground outline-none md:text-sm",
         "placeholder:text-muted-foreground/70 transition-[background-color,box-shadow] duration-150",
-        "hover:bg-muted/50 focus-visible:bg-background focus-visible:shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/40",
+        "hover:bg-muted/50 focus-visible:bg-background focus-visible:ring-[3px] focus-visible:ring-ring/40",
         className,
       )}
       {...props}

@@ -186,8 +186,8 @@ export function Composer({
       )}
       <div
         className={cn(
-          "rounded-2xl border border-[#DDD4C8] bg-muted/20 transition-colors",
-          "focus-within:border-[#C8A882]",
+          "rounded-2xl border border-border bg-muted/20 transition-colors",
+          "focus-within:border-primary-fill",
           inline && "flex min-h-[44px] items-end gap-1 p-1",
         )}
       >
@@ -306,6 +306,7 @@ export function Composer({
               <Button
                 type="submit"
                 size="icon"
+                autoTooltip={false}
                 className="shrink-0 rounded-full"
                 disabled={disabled || dictating || !hasDraft}
                 aria-label={sendAriaLabel}

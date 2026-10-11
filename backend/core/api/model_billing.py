@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 from ..constants import TOKEN_SOURCE_BYOK, TOKEN_SOURCE_MANAGED
-from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
+from ..models import BlackboxRunRequest, RunRequest, UnifiedRunRequest
 from ..models.common import ModelConfig
 from ..models.submissions import _OptimizationRequestBase
 from .errors import DomainError
 
 
-def request_model_configs(payload: _OptimizationRequestBase | BlackboxRunRequest) -> list[ModelConfig]:
+def request_model_configs(
+    payload: _OptimizationRequestBase | BlackboxRunRequest | UnifiedRunRequest,
+) -> list[ModelConfig]:
     """Return every executable model config carried by a submission.
 
     Args:
-        payload: Run, grid, or Anything request.
+        payload: Run, Anything, or unified request.
 
     Returns:
         Model configs in execution order.
@@ -39,18 +41,28 @@ def request_model_configs(payload: _OptimizationRequestBase | BlackboxRunRequest
             )
             if config is not None
         ]
-    if isinstance(payload, GridSearchRequest):
-        return [*payload.generation_models, *payload.reflection_models]
+    if isinstance(payload, UnifiedRunRequest):
+        models = payload.models
+        return [
+            config
+            for config in (
+                models.task_model,
+                models.reflection_model,
+                *models.extra_reflection_models,
+                models.metric_model,
+            )
+            if config is not None
+        ]
     return []
 
 
 def normalize_model_token_sources(
-    payload: _OptimizationRequestBase | BlackboxRunRequest,
+    payload: _OptimizationRequestBase | BlackboxRunRequest | UnifiedRunRequest,
 ) -> tuple[list[ModelConfig], dict[str, str]]:
     """Resolve legacy job-level sources into explicit per-model sources.
 
     Args:
-        payload: Run, grid, or Anything request to normalize in place.
+        payload: Run, Anything, or unified request to normalize in place.
 
     Returns:
         The model configs and their normalized model-to-source billing map.

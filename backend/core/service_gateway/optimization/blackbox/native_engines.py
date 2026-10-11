@@ -404,6 +404,29 @@ class ProposerOutcome:
         )
 
 
+# Variables a proposer never inherits. The raw provider key and nested-session
+# flag follow upstream; the scorer/metric names keep any path or key the
+# parent's scorer uses out of the agent's reach.
+_PROPOSER_ENV_DROP = frozenset({"CLAUDECODE", "ANTHROPIC_API_KEY"})
+_PROPOSER_ENV_DROP_PREFIXES = ("SKYNET_SCORER", "SKYNET_METRIC")
+
+
+def proposer_environment(environ: dict[str, str]) -> dict[str, str]:
+    """Copy the box environment for a proposer, without what it must not see.
+
+    Args:
+        environ: The runner's environment.
+
+    Returns:
+        The environment the proposer CLI runs with.
+    """
+    return {
+        name: value
+        for name, value in environ.items()
+        if name not in _PROPOSER_ENV_DROP and not name.startswith(_PROPOSER_ENV_DROP_PREFIXES)
+    }
+
+
 def run_proposer(
     prompt: str,
     *,
@@ -448,12 +471,7 @@ def run_proposer(
     if max_budget_usd is not None:
         cmd.extend(["--max-budget-usd", f"{max(0.0, max_budget_usd):.6f}"])
     cmd.append(prompt)
-    env = {**os.environ}
-    # Upstream: a nested CLI must not believe it is already inside another
-    # agent session, and the proposer must authenticate through the harness,
-    # not a raw provider key.
-    env.pop("CLAUDECODE", None)
-    env.pop("ANTHROPIC_API_KEY", None)
+    env = proposer_environment(dict(os.environ))
     log_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     killed = False

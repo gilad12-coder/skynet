@@ -21,7 +21,9 @@ export const config = {
     // read by the external uptime monitor, which never signs in. Every
     // ``public/`` entry (``fonts``, ``licenses``, the notices file) is excluded
     // too: signed-out pages load the bundled fonts, and a gated font request
-    // gets the /login HTML back instead of the woff2.
-    "/((?!login|terms|privacy|optimizations|api/auth|api/register|api/webauthn|api/2fa|api/password-reset|api/email-verify|api/version|_next/static|_next/image|fonts/|licenses/|THIRD_PARTY_NOTICES\\.txt|favicon\\.svg|notification-icon\\.png|robots\\.txt|sitemap\\.xml).*)",
+    // gets the /login HTML back instead of the woff2. ``sw.js`` (the web push
+    // service worker) is fetched by the browser itself on registration and
+    // update checks, and a /login redirect would fail its registration.
+    "/((?!login|terms|privacy|optimizations|api/auth|api/register|api/webauthn|api/2fa|api/password-reset|api/email-verify|api/version|_next/static|_next/image|fonts/|licenses/|THIRD_PARTY_NOTICES\\.txt|favicon\\.svg|favicon-dark\\.svg|notification-icon\\.png|sw\\.js|robots\\.txt|sitemap\\.xml).*)",
   ],
 };

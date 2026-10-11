@@ -94,7 +94,7 @@ function SectionDivider() {
   return (
     <div
       aria-hidden="true"
-      className="mx-4 h-px shrink-0 bg-[#DDD4C8]/50 lg:mx-0 lg:my-4 lg:h-auto lg:w-px"
+      className="mx-4 h-px shrink-0 bg-border/50 lg:mx-0 lg:my-4 lg:h-auto lg:w-px"
     />
   );
 }
@@ -142,7 +142,7 @@ function BalanceSectionSkeleton() {
 /** Loading band at the loaded geometry; the dashboard skeleton reuses it so the two never drift. */
 export function WorkspaceStripSkeleton() {
   return (
-    <div className="flex flex-col border-t border-[#DDD4C8]/50 first:border-t-0 lg:flex-row lg:items-stretch">
+    <div className="flex flex-col border-t border-border/50 first:border-t-0 lg:flex-row lg:items-stretch">
       {/* Most accounts have no labeling sessions, so this reserves the one-line
           EmptyHint; two session rows would leave 80px to collapse on load. */}
       <SectionSkeleton>
@@ -296,7 +296,7 @@ export function WorkspaceStrip() {
   }
 
   return (
-    <div className="flex flex-col border-t border-[#DDD4C8]/50 first:border-t-0 lg:flex-row lg:items-stretch">
+    <div className="flex flex-col border-t border-border/50 first:border-t-0 lg:flex-row lg:items-stretch">
       {sections.map((section, i) => (
         <Fragment key={section.key}>
           {i > 0 && <SectionDivider />}

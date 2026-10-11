@@ -2,15 +2,12 @@
 
 import { ProgressBar } from "@/shared/ui/progress-bar";
 import { memo, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
-  ArrowCounterClockwise,
   CaretLeft,
   CaretRight,
   CircleNotch,
   Crown,
   Gauge,
-  Play,
   Trash,
   Trophy,
   X,
@@ -35,12 +32,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives
 import { Button } from "@/shared/ui/primitives/button";
 import { Dialog, DialogContent, DialogFooter } from "@/shared/ui/primitives/dialog";
 import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
-import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { FadeIn, StaggerContainer, StaggerItem, TiltCard } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import type { OptimizationStatusResponse, PairResult } from "@/shared/types/api";
 import { formatPercent } from "@/shared/lib";
-import { deleteGridPair, resumeGridPair } from "@/shared/lib/api";
+import { deleteGridPair } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { tip } from "@/shared/lib/tooltips";
@@ -68,7 +64,6 @@ function GridOverviewImpl({
   const OpenIcon = getActiveDir() === "rtl" ? CaretLeft : CaretRight;
   const [pendingDelete, setPendingDelete] = useState<PairResult | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [rerunningPair, setRerunningPair] = useState<number | null>(null);
   const [pairFilter, setPairFilter] = useState<number | null>(null);
   const [hiddenPairSeries, setHiddenPairSeries] = useState<Set<string>>(new Set());
   const [hiddenCombinedSeries, setHiddenCombinedSeries] = useState<Set<string>>(new Set());
@@ -113,24 +108,6 @@ function GridOverviewImpl({
       toast.error(err instanceof Error ? err.message : msg("optimization.delete.failed"));
     } finally {
       setDeleting(false);
-    }
-  };
-  const router = useRouter();
-  const handlePairRerun = async (pairIndex: number, resume: boolean) => {
-    if (!resume) {
-      router.push(`/submit?clone=${job.optimization_id}&pair=${pairIndex}&recipe=program`);
-      return;
-    }
-    setRerunningPair(pairIndex);
-    try {
-      await resumeGridPair(job.optimization_id, pairIndex);
-      toast.success(msg("optimization.pair.resume.success"));
-      // The grid re-enters running in place — the parent's poll picks up the change.
-      window.dispatchEvent(new Event("optimizations-changed"));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("optimization.pair.resume.failed"));
-    } finally {
-      setRerunningPair(null);
     }
   };
   const gridResult = job.grid_result;
@@ -247,7 +224,7 @@ function GridOverviewImpl({
             onClick={qualityPair ? () => setPairFilter(qualityPair.pair_index) : undefined}
           >
             <div className="flex items-center justify-center gap-1.5 mb-1">
-              <Trophy className="size-3 text-[#C8A882]" />
+              <Trophy className="size-3 text-primary" />
               <p className="text-[0.625rem] text-muted-foreground">
                 {msg("auto.features.optimizations.components.gridoverview.7")}
               </p>
@@ -270,7 +247,7 @@ function GridOverviewImpl({
             onClick={speedPair ? () => setPairFilter(speedPair.pair_index) : undefined}
           >
             <div className="flex items-center justify-center gap-1.5 mb-1">
-              <Gauge className="size-3 text-[#3D2E22]" />
+              <Gauge className="size-3 text-primary" />
               <p className="text-[0.625rem] text-muted-foreground">
                 {msg("auto.features.optimizations.components.gridoverview.8")}
               </p>
@@ -297,9 +274,9 @@ function GridOverviewImpl({
         <FadeIn delay={0.1}>
           {pairFilter != null && (
             <div className="flex items-center gap-2 flex-wrap mb-3">
-              <span className="group inline-flex items-center gap-1.5 rounded-lg bg-[#3D2E22]/[0.06] border border-[#3D2E22]/10 pe-1 ps-2.5 py-1 transition-all duration-150 hover:bg-[#3D2E22]/[0.1] hover:border-[#3D2E22]/20">
+              <span className="group inline-flex items-center gap-1.5 rounded-lg border on-primary pe-1 ps-2.5 py-1 transition-all duration-150 hover:bg-primary-fill/[0.1] hover:border-primary-fill/20">
                 <span
-                  className="font-mono text-[0.6875rem] font-medium text-[#3D2E22]/80"
+                  className="font-mono text-[0.6875rem] font-medium text-primary/80"
                   dir="ltr"
                 >
                   {selectedPair ? pairLabel(selectedPair) : "—"}
@@ -383,7 +360,7 @@ function GridOverviewImpl({
                       {!hiddenScatterSeries.has("pareto") && (
                         <Scatter
                           data={paretoFiltered}
-                          fill="#3D2E22"
+                          fill="var(--color-chart-1)"
                           cursor="pointer"
                           onClick={handleBarClick}
                         />
@@ -396,7 +373,7 @@ function GridOverviewImpl({
                     {
                       key: "pareto",
                       label: msg("auto.features.optimizations.components.gridoverview.literal.5"),
-                      color: "#3D2E22",
+                      color: "var(--color-chart-1)",
                     },
                     {
                       key: "dominated",
@@ -446,9 +423,7 @@ function GridOverviewImpl({
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">
-                      <HelpTip text={tip("grid.score_comparison")}>
-                        {msg("auto.features.optimizations.components.gridoverview.10")}
-                      </HelpTip>
+                      {msg("auto.features.optimizations.components.gridoverview.10")}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
@@ -583,9 +558,7 @@ function GridOverviewImpl({
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">
-                      <HelpTip text={tip("grid.quality_speed_combined")}>
-                        {msg("auto.features.optimizations.components.gridoverview.11")}
-                      </HelpTip>
+                      {msg("auto.features.optimizations.components.gridoverview.11")}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
@@ -777,7 +750,7 @@ function GridOverviewImpl({
                             content={({ active, payload, label }) => {
                               if (!active || !payload?.length) return null;
                               return (
-                                <div className="rounded-xl border border-border/60 bg-background/95 backdrop-blur-sm p-3 shadow-lg">
+                                <div className="rounded-xl border border-border/60 bg-background/95 backdrop-blur-sm p-3 shadow-[var(--shadow-float)]">
                                   {label && (
                                     <p className="font-semibold mb-1.5 text-foreground text-xs">
                                       {label}
@@ -814,7 +787,7 @@ function GridOverviewImpl({
                             {pairRespTimeFiltered.map((entry, i) => (
                               <Cell
                                 key={i}
-                                fill={entry.isBest ? "#C8A882" : "var(--color-chart-4)"}
+                                fill={entry.isBest ? "var(--color-chart-1)" : "var(--color-chart-4)"}
                               />
                             ))}
                           </Bar>
@@ -836,18 +809,17 @@ function GridOverviewImpl({
           const isSpeed = scoring.speedWinner === pr.pair_index;
           const s = scoring.byIndex[pr.pair_index];
           const barRatio = s?.quality ?? 0;
-          // A failed pair offers Resume if it crashed mid-run (has a checkpoint),
-          // else Restart — one-to-one with a single run.
-          const pairResumable = job.grid_resumable_pairs?.includes(pr.pair_index) ?? false;
-          const rerunBusy = rerunningPair === pr.pair_index;
+          // A failed pair offers Resume only when it crashed mid-run (has a
+          // checkpoint); new grid searches are no longer submitted, so there is
+          // no restart-from-a-clone path.
           return (
             <div
               key={pr.pair_index}
-              className={`group relative rounded-xl border p-4 transition-colors duration-200 hover:shadow-sm ${
+              className={`group relative rounded-xl border p-4 transition-colors duration-200 ${
                 pr.error
-                  ? "border-[#B04030]/30 bg-[#B04030]/[0.02] hover:border-[#B04030]/50"
+                  ? "border-destructive/30 bg-destructive/[0.02] hover:border-destructive/50"
                   : isOverall
-                    ? "border-[#3D2E22]/40 bg-[#3D2E22]/[0.03] hover:border-[#3D2E22]/60"
+                    ? "on-primary"
                     : "border-border/50 bg-card/80 hover:border-border"
               }`}
             >
@@ -859,11 +831,11 @@ function GridOverviewImpl({
                 onClick={() => onPairSelect(pr.pair_index)}
                 aria-label={formatMsg("optimizations.grid.open_pair", { pair: pairLabel(pr) })}
                 title={pairLabel(pr)}
-                className="absolute inset-0 cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+                className="absolute inset-0 cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
               />
               <div className="pointer-events-none relative flex items-center gap-3">
-                {isOverall && <Crown className="size-4 text-[#C8A882] shrink-0" />}
-                {pr.error && <XCircle className="size-4 text-[#B04030] shrink-0" />}
+                {isOverall && <Crown className="size-4 text-primary shrink-0" />}
+                {pr.error && <XCircle className="size-4 text-destructive shrink-0" />}
 
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   <div className="flex items-center gap-1 min-w-0">
@@ -892,7 +864,7 @@ function GridOverviewImpl({
                         <Trophy className="size-2.5" />
                         {msg("auto.features.optimizations.components.gridoverview.15")}
                       </div>
-                      <div className={isQuality ? "font-bold text-[#3D2E22]" : "text-foreground"}>
+                      <div className={isQuality ? "font-bold text-primary" : "text-foreground"}>
                         {s ? `${Math.round(s.quality * 100)}%` : "—"}
                       </div>
                     </div>
@@ -901,7 +873,7 @@ function GridOverviewImpl({
                         <Gauge className="size-2.5" />
                         {msg("auto.features.optimizations.components.gridoverview.16")}
                       </div>
-                      <div className={isSpeed ? "font-bold text-[#3D2E22]" : "text-foreground"}>
+                      <div className={isSpeed ? "font-bold text-primary" : "text-foreground"}>
                         {pr.avg_response_time_ms != null
                           ? formatMsg("optimizations.grid.response_time_seconds", {
                               value: (pr.avg_response_time_ms / 1000).toFixed(1),
@@ -912,69 +884,26 @@ function GridOverviewImpl({
                   </div>
                 ) : (
                   <span
-                    className="text-[0.6875rem] text-[#B04030] truncate max-w-[280px]"
+                    className="text-[0.6875rem] text-destructive truncate max-w-[280px]"
                     title={pr.error}
                   >
                     {pr.error}
                   </span>
                 )}
 
-                {pr.error && (
-                  <TooltipButton
-                    tooltip={msg(
-                      pairResumable
-                        ? "optimization.pair.resume_tooltip"
-                        : "optimization.configure_new.tooltip",
-                    )}
-                  >
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      className="pointer-events-auto shrink-0 text-muted-foreground/50 hover:text-foreground"
-                      disabled={rerunBusy}
-                      aria-label={msg(
-                        pairResumable
-                          ? "optimization.pair.resume"
-                          : "optimization.configure_new.label",
-                      )}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void handlePairRerun(pr.pair_index, pairResumable);
-                      }}
-                    >
-                      {pairResumable ? (
-                        <Play
-                          className={`size-3.5${getActiveDir() === "rtl" ? " -scale-x-100" : ""}${
-                            rerunBusy ? " animate-spin" : ""
-                          }`}
-                        />
-                      ) : (
-                        <ArrowCounterClockwise
-                          className={`size-3.5${rerunBusy ? " animate-spin" : ""}`}
-                        />
-                      )}
-                    </Button>
-                  </TooltipButton>
-                )}
-
-                <TooltipButton
-                  tooltip={msg("auto.features.optimizations.components.gridoverview.18")}
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  autoTooltip={false}
+                  className="pointer-events-auto shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  aria-label={msg("auto.features.optimizations.components.gridoverview.literal.29")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPendingDelete(pr);
+                  }}
                 >
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="pointer-events-auto shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    aria-label={msg(
-                      "auto.features.optimizations.components.gridoverview.literal.29",
-                    )}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPendingDelete(pr);
-                    }}
-                  >
-                    <Trash className="size-3.5" />
-                  </Button>
-                </TooltipButton>
+                  <Trash className="size-3.5" />
+                </Button>
 
                 <OpenIcon className="size-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors shrink-0" />
               </div>
@@ -983,7 +912,7 @@ function GridOverviewImpl({
                 <ProgressBar
                   value={barRatio * 100}
                   size="sm"
-                  color={isOverall ? "#3D2E22" : "#C8A882"}
+                  color={isOverall ? "var(--color-chart-1)" : "var(--color-chart-3)"}
                   className="pointer-events-none relative mt-2.5"
                   fillClassName={isOverall ? "opacity-60" : "opacity-30"}
                 />

@@ -446,7 +446,7 @@ function NodeBody({
         <SheetHeader className="border-b border-border/40">
           <SheetTitle className="flex items-center gap-2">
             {view.kind === "rejected" ? (
-              <XCircle className="size-4 text-[#a85a3b]" aria-hidden="true" />
+              <XCircle className="size-4 text-[#a85a3b] dark:text-[#fba584]" aria-hidden="true" />
             ) : view.pending !== null ? (
               <PingDot tone="agent" />
             ) : null}
@@ -618,7 +618,7 @@ function EmptyHint({ text }: { text: string }) {
 const TONE_COLORS = {
   accepted: { text: "#4a5a23", bg: "rgba(124, 139, 90, 0.14)" },
   rejected: { text: "#6e2e16", bg: "rgba(178, 107, 74, 0.16)" },
-  muted: { text: "rgba(28, 22, 18, 0.62)", bg: "rgba(28, 22, 18, 0.05)" },
+  muted: { text: "color-mix(in srgb, var(--foreground) 62%, transparent)", bg: "color-mix(in srgb, var(--foreground) 5%, transparent)" },
 } as const;
 
 type Tone = keyof typeof TONE_COLORS;
@@ -750,8 +750,8 @@ function MinibatchEntryCard({
   );
 
   return (
-    <li className="overflow-hidden rounded-lg border border-[#DDD4C8]/60 bg-background/70 shadow-[0_1px_2px_rgba(28,22,18,0.02)]">
-      <div className="flex items-center justify-between gap-2 border-b border-border/30 bg-[#F8F4EF]/60 px-3 py-2">
+    <li className="overflow-hidden rounded-lg border border-border/60 bg-background/70">
+      <div className="flex items-center justify-between gap-2 border-b border-border/30 bg-muted/60 px-3 py-2">
         <div className="flex items-center gap-2 text-[11px]">
           {scorerFeedback ? null : <StatusChip passed={passed} />}
           {scorerFeedback ? (
@@ -799,7 +799,6 @@ function MinibatchEntryCard({
         ) : fallbackPrediction !== null && fallbackPrediction.length > 0 ? (
           <AgentTurnGroup
             label={msg("trajectory.pareto.cell.prediction_label")}
-            info={msg("trajectory.pareto.cell.prediction_label.explain")}
             entries={fallbackPrediction}
           />
         ) : null}
@@ -1425,7 +1424,7 @@ function FieldRow({ fieldName, value }: { fieldName?: string; value: string }) {
     const tools = parseStringArray(value);
     if (tools !== null) {
       return (
-        <div className="rounded border border-[#DDD4C8]/40 bg-background/80 px-1 py-1">
+        <div className="rounded border border-border/40 bg-background/80 px-1 py-1">
           <ToolsCarousel
             tools={tools}
             descriptions={toolDescriptions}
@@ -1437,7 +1436,7 @@ function FieldRow({ fieldName, value }: { fieldName?: string; value: string }) {
     }
   }
   return (
-    <div className="rounded border border-[#DDD4C8]/40 bg-background/80 px-2 py-1.5">
+    <div className="rounded border border-border/40 bg-background/80 px-2 py-1.5">
       {fieldName !== undefined ? (
         <div className="mb-0.5 text-[9px] font-mono text-muted-foreground/80" dir="ltr">
           {fieldName}
@@ -1599,20 +1598,18 @@ function AgentTurnConversation({ turn }: { turn: AgentTurnParts }) {
 
 function AgentTurnGroup({
   label,
-  info,
   entries,
 }: {
   label: string;
-  info?: string;
   entries: Array<[string, string]>;
 }) {
   const turn = useMemo(() => splitAgentTurn(entries), [entries]);
   if (!turnHasChat(turn)) {
-    return <ValsetFieldGroup label={label} info={info} entries={entries} />;
+    return <ValsetFieldGroup label={label} entries={entries} />;
   }
   return (
     <div className="space-y-1">
-      <SectionLabel label={label} info={info} />
+      <SectionLabel label={label} />
       <AgentTurnConversation turn={turn} />
     </div>
   );
@@ -1669,12 +1666,12 @@ function HistoryTurnRow({
 function AgentTurnMeta({ entries }: { entries: Array<[string, string]> }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="overflow-hidden rounded-md border border-[#DDD4C8]/40 bg-background/50">
+    <div className="overflow-hidden rounded-md border border-border/40 bg-background/50">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full cursor-pointer select-none items-center gap-2 px-2.5 py-1.5 text-start text-[10px] font-medium text-muted-foreground/80 transition-colors hover:bg-[#F8F4EF]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45"
+        className="flex w-full cursor-pointer select-none items-center gap-2 px-2.5 py-1.5 text-start text-[10px] font-medium text-muted-foreground/80 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
       >
         {msg("trajectory.pareto.cell.details_label")}
         <CaretRight
@@ -1721,7 +1718,7 @@ function FeedbackBlock({ body, scorer }: { body: string; scorer: boolean }) {
         </div>
       </HelpTip>
       <div
-        className="rounded border border-[#DDD4C8]/40 bg-background/80 px-2.5 py-2 text-[11px] leading-relaxed text-foreground/90 whitespace-pre-wrap"
+        className="rounded border border-border/40 bg-background/80 px-2.5 py-2 text-[11px] leading-relaxed text-foreground/90 whitespace-pre-wrap"
         dir="auto"
         style={{ wordBreak: "break-word" }}
       >
@@ -2336,7 +2333,7 @@ function ReactToolDetail({ tool }: { tool: ReactToolView | null }) {
           {tool.args.map(([arg, desc]) => (
             <li
               key={arg}
-              className="flex flex-col gap-1.5 rounded-md border border-[#DDD4C8]/45 bg-[#F8F4EF]/40 px-2.5 py-1.5"
+              className="flex flex-col gap-1.5 rounded-md border border-border/45 bg-muted/40 px-2.5 py-1.5"
               dir="ltr"
             >
               <FieldKey className="shrink-0 self-start">{arg}</FieldKey>
@@ -2586,13 +2583,13 @@ function ToolChangeChip({
         ? msg("trajectory.prompt.react.tool.removed")
         : msg("trajectory.prompt.react.tool.changed");
   const color =
-    status === "removed" ? "#6e2e16" : status === "added" ? "#3f4d1f" : "rgba(28, 22, 18, 0.7)";
+    status === "removed" ? "#6e2e16" : status === "added" ? "#3f4d1f" : "color-mix(in srgb, var(--foreground) 70%, transparent)";
   const background =
     status === "removed"
       ? PARETO_FAIL_BG
       : status === "added"
         ? PARETO_PASS_BG
-        : "rgba(28, 22, 18, 0.06)";
+        : "color-mix(in srgb, var(--foreground) 6%, transparent)";
   return (
     <span
       className="inline-flex shrink-0 items-center gap-1.5 rounded-sm px-1.5 py-[1px] text-[9px] font-semibold"
@@ -2929,7 +2926,7 @@ function DiffRowView({ row }: { row: DiffRow }) {
   const isAdded = row.kind === "added";
   const isRemoved = row.kind === "removed";
   const bg = isAdded ? PARETO_PASS_BG : isRemoved ? PARETO_FAIL_BG : "transparent";
-  const color = isAdded ? "#3f4d1f" : isRemoved ? "#6e2e16" : "rgba(28, 22, 18, 0.78)";
+  const color = isAdded ? "#3f4d1f" : isRemoved ? "#6e2e16" : "color-mix(in srgb, var(--foreground) 78%, transparent)";
   const prefix = isAdded ? "+" : isRemoved ? "−" : " ";
   const emphasis = isAdded ? "rgba(138, 154, 91, 0.55)" : "rgba(168, 90, 59, 0.5)";
   const shown =
@@ -3137,8 +3134,8 @@ function caseShade(
 
 // The dashed ring the climb draws around the version being scored, so an
 // unscored case reads as the same "still in the box" state.
-const PENDING_CASE_STROKE = "rgba(124, 99, 80, 0.6)";
-const PENDING_CASE_INK = "#7C6350";
+const PENDING_CASE_STROKE = "color-mix(in srgb, var(--muted-foreground) 60%, transparent)";
+const PENDING_CASE_INK = "var(--text-2)";
 
 function agentRunActionKey(run: AgentRunSummary): MessageKey {
   if (run.phase === AGENT_RUN_PHASE_FINAL) return "agent_run.open_final";
@@ -3167,7 +3164,7 @@ function CaseRunRow({
       <button
         type="button"
         onClick={() => onOpen(run)}
-        className="group flex min-h-[44px] w-full items-center gap-2.5 px-2.5 text-start transition-colors duration-[var(--duration-fast)] hover:bg-[#F8F4EF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3D2E22]/40 lg:min-h-9"
+        className="group flex min-h-[44px] w-full items-center gap-2.5 px-2.5 text-start transition-colors duration-[var(--duration-fast)] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 lg:min-h-9"
       >
         <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-foreground/85">
@@ -3283,7 +3280,7 @@ function BlackboxCasesGrid({
                 }
                 aria-current={active ? "true" : undefined}
                 className={cn(
-                  "relative rounded-sm font-mono text-[9px] tabular-nums leading-none transition-transform hover:scale-110 focus:scale-110 focus:outline-none",
+                  "relative rounded-sm font-mono text-[9px] tabular-nums leading-none transition-transform focus:scale-110 focus:outline-none",
                   running && "motion-safe:animate-pulse",
                 )}
                 style={{
@@ -3292,9 +3289,9 @@ function BlackboxCasesGrid({
                   background: shade === null ? "transparent" : shade.background,
                   color: shade === null ? PENDING_CASE_INK : shade.color,
                   border: shade === null ? `1px dashed ${PENDING_CASE_STROKE}` : undefined,
-                  outline: active ? "2px solid #1c1612" : "none",
+                  outline: active ? "2px solid var(--foreground)" : "none",
                   outlineOffset: active ? "1px" : undefined,
-                  boxShadow: active ? "inset 0 0 0 1px rgba(28, 22, 18, 0.45)" : undefined,
+                  boxShadow: active ? "inset 0 0 0 1px color-mix(in srgb, var(--foreground) 45%, transparent)" : undefined,
                 }}
               >
                 <span
@@ -3329,7 +3326,7 @@ function BlackboxCasesGrid({
         aria-label={msg("trajectory.blackbox.cases.carousel_aria")}
         tabIndex={0}
         onKeyDown={onKey}
-        className="relative overflow-hidden rounded-lg border border-[#DDD4C8]/60 bg-background/70 shadow-[0_1px_2px_rgba(28,22,18,0.02)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3D2E22]/40 focus-visible:ring-offset-1"
+        className="relative overflow-hidden rounded-lg border border-border/60 bg-background/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1"
       >
         <AnimatePresence custom={slide} mode="wait" initial={false}>
           <motion.article
@@ -3346,7 +3343,7 @@ function BlackboxCasesGrid({
             transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
             aria-label={formatMsg("trajectory.blackbox.cases.case_label", { id: index + 1 })}
           >
-            <header className="flex items-center justify-between gap-3 border-b border-border/30 bg-[#F8F4EF]/60 px-3 py-2">
+            <header className="flex items-center justify-between gap-3 border-b border-border/30 bg-muted/60 px-3 py-2">
               <span className="text-[12px] font-semibold text-foreground">
                 {formatMsg("trajectory.blackbox.cases.case_label", { id: index + 1 })}
               </span>
@@ -3579,15 +3576,15 @@ function ParetoGridSection({
                 score: ex.score.toFixed(2),
               })}
               aria-pressed={isPinned}
-              className="relative rounded-sm font-mono text-[9px] tabular-nums leading-none transition-transform hover:scale-110 focus:scale-110 focus:outline-none"
+              className="relative rounded-sm font-mono text-[9px] tabular-nums leading-none transition-transform focus:scale-110 focus:outline-none"
               style={{
                 width: 24,
                 height: 24,
                 background: ok ? PARETO_PASS : PARETO_FAIL,
                 color: ok ? "#2a3812" : "#4a1c0a",
-                outline: isPinned ? "2px solid #1c1612" : "none",
+                outline: isPinned ? "2px solid var(--foreground)" : "none",
                 outlineOffset: isPinned ? "1px" : undefined,
-                boxShadow: isPinned ? "inset 0 0 0 1px rgba(28, 22, 18, 0.45)" : undefined,
+                boxShadow: isPinned ? "inset 0 0 0 1px color-mix(in srgb, var(--foreground) 45%, transparent)" : undefined,
               }}
             >
               <span
@@ -3601,8 +3598,8 @@ function ParetoGridSection({
         })}
       </div>
       {focused !== null ? (
-        <div className="overflow-hidden rounded-lg border border-[#DDD4C8]/60 bg-background/70 shadow-[0_1px_2px_rgba(28,22,18,0.02)]">
-          <div className="flex items-center justify-between gap-2 border-b border-border/30 bg-[#F8F4EF]/60 px-3 py-2">
+        <div className="overflow-hidden rounded-lg border border-border/60 bg-background/70">
+          <div className="flex items-center justify-between gap-2 border-b border-border/30 bg-muted/60 px-3 py-2">
             <div className="flex items-center gap-2 text-[11px]">
               <StatusChip passed={focused.score > 0} />
               <span className="font-mono text-[10px] text-muted-foreground" dir="ltr">
@@ -3655,7 +3652,6 @@ function ValsetFieldGroups({
       {inputs.length > 0 ? (
         <ValsetFieldGroup
           label={msg("trajectory.pareto.cell.inputs_label")}
-          info={msg("trajectory.pareto.cell.inputs_label.explain")}
           entries={inputs}
         />
       ) : null}
@@ -3664,14 +3660,12 @@ function ValsetFieldGroups({
       ) : predictionEntries !== null && predictionEntries.length > 0 ? (
         <AgentTurnGroup
           label={msg("trajectory.pareto.cell.prediction_label")}
-          info={msg("trajectory.pareto.cell.prediction_label.explain")}
           entries={predictionEntries}
         />
       ) : null}
       {outputs.length > 0 ? (
         <AgentTurnGroup
           label={msg("trajectory.pareto.cell.outputs_label")}
-          info={msg("trajectory.pareto.cell.outputs_label.explain")}
           entries={outputs}
         />
       ) : null}
@@ -3684,9 +3678,8 @@ function PendingPredictionRow() {
     <div className="space-y-1">
       <SectionLabel
         label={msg("trajectory.pareto.cell.prediction_label")}
-        info={msg("trajectory.pareto.cell.prediction_label.explain")}
       />
-      <div className="rounded border border-dashed border-[#DDD4C8]/50 bg-background/60 px-2 py-1.5 text-[11px] italic text-muted-foreground">
+      <div className="rounded border border-dashed border-border/50 bg-background/60 px-2 py-1.5 text-[11px] italic text-muted-foreground">
         {msg("trajectory.pareto.cell.prediction_unavailable")}
       </div>
     </div>
@@ -3719,11 +3712,9 @@ function SectionLabel({
 
 function ValsetFieldGroup({
   label,
-  info,
   entries,
 }: {
   label: string;
-  info?: string;
   entries: Array<[string, string]>;
 }) {
   // Drop hidden provenance keys (wizard/state snapshots) and empty
@@ -3734,7 +3725,7 @@ function ValsetFieldGroup({
   );
   return (
     <div className="space-y-1">
-      <SectionLabel label={label} info={info} />
+      <SectionLabel label={label} />
       <div className="space-y-1">
         {visible.map(([key, value], idx) => (
           <FieldRow

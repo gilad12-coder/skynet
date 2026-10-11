@@ -1,4 +1,4 @@
-"""Tests for RunRequest, GridSearchRequest, and OptimizationSubmissionResponse models."""
+"""Tests for RunRequest and OptimizationSubmissionResponse models."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from core.models.common import OptimizationStatus
-from core.models.submissions import GridSearchRequest, OptimizationSubmissionResponse, RunRequest
+from core.models.submissions import OptimizationSubmissionResponse, RunRequest
 
 
 def _base_payload(**overrides: Any) -> dict[str, Any]:
@@ -170,62 +170,6 @@ def test_run_request_tool_source_defaults_none() -> None:
     req = RunRequest.model_validate(_base_payload())
 
     assert req.tool_source is None
-
-
-def _grid_base(**overrides: Any) -> dict[str, Any]:
-    """Build a minimal valid GridSearchRequest payload with optional overrides.
-
-    Args:
-        **overrides: Keys that replace defaults in the returned dict.
-
-    Returns:
-        Dict suitable for ``GridSearchRequest.model_validate``.
-    """
-    base = _base_payload()
-    base.pop("model_config")
-    base["generation_models"] = [{"name": "g"}]
-    base["reflection_models"] = [{"name": "r"}]
-    base.update(overrides)
-    return base
-
-
-def test_grid_search_accepts_both_model_lists() -> None:
-    """Verify GridSearchRequest validates with non-empty generation and reflection lists."""
-    req = GridSearchRequest.model_validate(_grid_base())
-
-    assert len(req.generation_models) == 1
-    assert len(req.reflection_models) == 1
-
-
-def test_grid_search_rejects_empty_generation_models() -> None:
-    """Verify GridSearchRequest rejects an empty generation_models list."""
-    with pytest.raises(ValidationError, match="generation model"):
-        GridSearchRequest.model_validate(_grid_base(generation_models=[]))
-
-
-def test_grid_search_rejects_empty_reflection_models() -> None:
-    """Verify GridSearchRequest rejects an empty reflection_models list."""
-    with pytest.raises(ValidationError, match="reflection model"):
-        GridSearchRequest.model_validate(_grid_base(reflection_models=[]))
-
-
-def test_grid_search_multiple_pairs_accepted() -> None:
-    """Verify GridSearchRequest accepts multiple generation and reflection model entries."""
-    req = GridSearchRequest.model_validate(
-        _grid_base(
-            generation_models=[{"name": "g1"}, {"name": "g2"}],
-            reflection_models=[{"name": "r1"}, {"name": "r2"}],
-        )
-    )
-
-    assert len(req.generation_models) == 2
-    assert len(req.reflection_models) == 2
-
-
-def test_grid_search_rejects_empty_dataset() -> None:
-    """Verify GridSearchRequest rejects an empty dataset list."""
-    with pytest.raises(ValidationError, match="at least one row"):
-        GridSearchRequest.model_validate(_grid_base(dataset=[]))
 
 
 def test_optimization_submission_response_defaults() -> None:

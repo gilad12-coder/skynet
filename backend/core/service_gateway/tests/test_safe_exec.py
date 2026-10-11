@@ -12,9 +12,11 @@ import pytest
 from core.exceptions import ServiceError
 from core.service_gateway import safe_exec
 from core.service_gateway.safe_exec import (
+    FunctionShape,
     MetricIntrospection,
     MetricProbeResult,
     SignatureIntrospection,
+    introspect_workspace_code,
     probe_metric_on_sample,
     validate_metric_code,
     validate_scorer_code,
@@ -294,3 +296,47 @@ class TestValidateScorerCode:
         code = "from skynet import llm, Image\n\ndef score(candidate, case=None):\n    return 1.0\n"
 
         assert validate_scorer_code(code) is None
+
+
+class TestIntrospectWorkspaceCode:
+    """Source-level description of unified workspace code, parsed in a child process."""
+
+    def test_reports_positional_arity(self) -> None:
+        """Defaults lower the required count; ``*args`` lifts the capacity."""
+        info = introspect_workspace_code(
+            "def run(artifact, input):\n    return 1\ndef metric(gold, pred, trace=None, *rest):\n    return 1\n"
+        )
+
+        assert info.syntax_error is None
+        assert info.functions["run"] == FunctionShape(capacity=2, required=2)
+        assert info.functions["metric"].required == 2
+        assert info.functions["metric"].capacity >= 5
+
+    def test_never_executes_the_code(self) -> None:
+        """A module-level crash or a missing import does not matter: nothing runs."""
+        info = introspect_workspace_code(
+            "import not_installed_anywhere\nraise SystemExit(3)\ndef run(a, i):\n    pass\n"
+        )
+
+        assert info.syntax_error is None
+        assert "run" in info.functions
+
+    def test_syntax_error_is_reported_as_data(self) -> None:
+        """Unparseable code comes back as ``"<Type>: <message>"``, not an exception."""
+        info = introspect_workspace_code("def !!!")
+
+        assert info.syntax_error is not None
+        assert info.syntax_error.startswith("SyntaxError: ")
+        assert info.functions == {}
+
+    def test_detects_llm_use(self) -> None:
+        """Both ``llm(...)`` and ``skynet.llm`` count as calling the model."""
+        assert introspect_workspace_code("from skynet import llm\ndef score(i, o):\n    return llm('x')\n").uses_llm
+        assert introspect_workspace_code("import skynet\ndef score(i, o):\n    return skynet.llm('x')\n").uses_llm
+        assert not introspect_workspace_code("def score(i, o):\n    return 1.0, {'feedback': ''}\n").uses_llm
+
+    def test_assigned_names_have_unknown_arity(self) -> None:
+        """A name bound by assignment has a signature only the sandbox can see."""
+        info = introspect_workspace_code("score = lambda i, o: (1.0, {'feedback': ''})\n")
+
+        assert info.functions["score"] == FunctionShape(capacity=None, required=None)

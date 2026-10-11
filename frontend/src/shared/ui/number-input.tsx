@@ -87,7 +87,7 @@ export function NumberInput({
   return (
     <div
       className={cn(
-        "flex items-center rounded-xl border border-input/90 bg-background/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.72),0_12px_26px_-24px_rgba(15,23,42,0.45)] backdrop-blur-sm overflow-hidden",
+        "flex items-center rounded-xl border border-input/90 bg-background/75 backdrop-blur-sm overflow-hidden",
         size === "sm" ? TOUCH_FIELD_SM : TOUCH_FIELD,
         disabled && "opacity-50 pointer-events-none",
         className,

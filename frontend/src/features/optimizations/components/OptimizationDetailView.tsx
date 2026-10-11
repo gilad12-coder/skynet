@@ -316,7 +316,7 @@ function FailureCopyButton({ text }: { text: string }) {
       text={text}
       ariaLabel={msg("shared.code_editor.copy")}
       copiedAriaLabel={msg("shared.code_editor.copied")}
-      className="-me-1 shrink-0 text-[#B04030]/70 hover:bg-[#B04030]/10 hover:text-[#B04030]"
+      className="-me-1 shrink-0 text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
     />
   );
 }
@@ -673,7 +673,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
   const handleRetry = () => {
     if (skipNetwork) return;
-    router.push(`/submit?clone=${id}${cloneQuery}`);
+    router.push(`/submit?clone=${id}`);
   };
 
   const handleResume = async () => {
@@ -968,21 +968,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     (payload?.payload?.metric_code as string) ?? blackboxScorer?.metric_code ?? null;
   const workflowSpec = (payload?.payload?.workflow as WorkflowSpec | undefined) ?? null;
 
-  // The clone link carries the recipe so the picker opens preselected on the
-  // source job's slide. Payloads older than the stored recipe field carry no
-  // prompt-vs-code signal, so legacy black-box jobs fall back to "anything" —
-  // the general recipe — matching the sidebar's clone link.
   const payloadRecipe = payload?.payload?.recipe as string | undefined;
-  const cloneRecipe =
-    job?.optimization_type !== "blackbox"
-      ? "program"
-      : payloadRecipe === "prompt" ||
-          payloadRecipe === "code" ||
-          payloadRecipe === "anything" ||
-          payloadRecipe === "repo"
-        ? payloadRecipe
-        : "anything";
-  const cloneQuery = `&recipe=${cloneRecipe}`;
 
   // Black-box runs announce each scored version as a candidate event rather
   // than a GEPA log line, so the chart reads the newest lane's candidates.
@@ -1102,6 +1088,9 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const effectiveRole = job.effective_role ?? null;
   const canEditRun = effectiveRole == null || effectiveRole === "editor";
   const canDeleteRun = effectiveRole == null;
+  // Grid searches are retired: their stored runs stay readable, but the backend
+  // refuses to clone, retry or resume one, so those actions are hidden.
+  const canRerun = job.optimization_type !== "grid_search";
   // Sharing is owner-only: members (even editors) can't invite, change roles,
   // or set general access. null = the owner's own run / admin / co-owner.
   // Never on the public /share/<token> route: there the job is seeded from
@@ -1181,7 +1170,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     <div className="space-y-6 pb-12">
       {sharedTier && <RunAccessBanner tier={sharedTier} owner={sharedByOwner} />}
       <FadeIn delay={0.1}>
-        <div className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5">
+        <div className="rounded-xl border border-border/40 bg-card p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
             <div className="space-y-2 min-w-0 sm:flex-1">
               <div className="flex flex-col items-start gap-1.5">
@@ -1208,7 +1197,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   ariaLabel={formatMsg("auto.app.optimizations.id.page.template.3", {
                     p1: TERMS.optimization,
                   })}
-                  title={msg("auto.app.optimizations.id.page.literal.1")}
                   onCopied={notifyCopied}
                 />
               </span>
@@ -1262,13 +1250,13 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             {!isShare && (
               <div className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:shrink-0 sm:flex-nowrap sm:gap-2">
                 {canManageShare && <ShareDialog optimizationId={job.optimization_id} />}
-                {!isPhone && (
+                {!isPhone && canRerun && (
                   <TooltipButton tooltip={msg("auto.app.optimizations.id.page.4")}>
                     <Button
                       variant="ghost"
                       size="icon-sm"
                       onClick={() =>
-                        router.push(`/submit?clone=${job.optimization_id}${cloneQuery}`)
+                        router.push(`/submit?clone=${job.optimization_id}`)
                       }
                       aria-label={msg("auto.app.optimizations.id.page.literal.4")}
                     >
@@ -1278,6 +1266,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 )}
                 {!isPhone &&
                   canEditRun &&
+                  canRerun &&
                   (job.status === "failed" ||
                     job.status === "cancelled" ||
                     job.status === "paused") &&
@@ -1345,7 +1334,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 )}
               </div>
             )}
-            {shareCanInteract && !isPhone && (
+            {shareCanInteract && !isPhone && canRerun && (
               <div className="flex w-full items-center justify-end gap-2 sm:w-auto sm:shrink-0">
                 <TooltipButton tooltip={msg("share.clone_tooltip")}>
                   <Button
@@ -1354,8 +1343,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                     onClick={() =>
                       router.push(
                         shareToken
-                          ? `/submit?clone=${job.optimization_id}&shareToken=${encodeURIComponent(shareToken)}${cloneQuery}`
-                          : `/submit?clone=${job.optimization_id}&public=1${cloneQuery}`,
+                          ? `/submit?clone=${job.optimization_id}&shareToken=${encodeURIComponent(shareToken)}`
+                          : `/submit?clone=${job.optimization_id}&public=1`,
                       )
                     }
                     aria-label={msg("share.clone")}
@@ -1390,11 +1379,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           onBack={() => router.push(`/optimizations/${id}`)}
           onPrev={() => router.push(`/optimizations/${id}?pair=${activePair.pair_index - 1}`)}
           onNext={() => router.push(`/optimizations/${id}?pair=${activePair.pair_index + 1}`)}
-          onClone={() =>
-            router.push(
-              `/submit?clone=${effectiveJob.optimization_id}&pair=${activePair.pair_index}${cloneQuery}`,
-            )
-          }
           onCancel={handleCancel}
           onDeleted={() => router.push(`/optimizations/${id}`)}
         />
@@ -1402,35 +1386,35 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
       {job.status === "failed" && !isPairContext && (job.message || (metrics.error as string)) && (
         <FadeIn delay={0.15}>
-          <div className="rounded-xl border border-[#B04030]/20 bg-gradient-to-br from-[#B04030]/[0.05] to-[#B04030]/[0.015] p-5 shadow-[0_1px_3px_rgba(176,64,48,0.07)]">
+          <div className="rounded-xl border border-destructive/20 bg-destructive/[0.04] p-5">
             <div className="flex items-center gap-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[#B04030]/10 text-[#B04030]">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
                 <XCircle className="size-5" />
               </span>
-              <p className="min-w-0 flex-1 text-sm font-semibold text-[#7A2A1E]">
+              <p className="min-w-0 flex-1 text-sm font-semibold text-[#7A2A1E] dark:text-[#ffb1a0]">
                 {msg("auto.app.optimizations.id.page.6")}
               </p>
             </div>
-            <div className="mt-3 rounded-lg border border-[#B04030]/15 bg-[#B04030]/[0.035] px-3.5 py-2.5">
+            <div className="mt-3 rounded-lg border border-destructive/15 bg-destructive/[0.035] px-3.5 py-2.5">
               <div className="flex items-start gap-2" dir="ltr">
                 <div className="min-w-0 flex-1">
                   <pre
-                    className="text-xs text-[#8A3326] whitespace-pre-wrap break-words font-mono leading-relaxed"
+                    className="text-xs text-[#8A3326] dark:text-[#ffa997] whitespace-pre-wrap break-words font-mono leading-relaxed"
                     dir="ltr"
                   >
                     {linkifyMessage(
                       job.message ?? "",
-                      "underline decoration-[#B04030]/40 underline-offset-2 hover:text-[#7A2A1E] transition-colors",
+                      "underline decoration-destructive/40 underline-offset-2 hover:text-[#7A2A1E] dark:hover:text-[#ffb1a0] transition-colors",
                     )}
                   </pre>
                   {typeof metrics.error === "string" && !job.message?.includes(metrics.error) && (
                     <pre
-                      className="text-xs text-[#8A3326] whitespace-pre-wrap break-words font-mono leading-relaxed mt-2 border-t border-[#B04030]/15 pt-2"
+                      className="text-xs text-[#8A3326] dark:text-[#ffa997] whitespace-pre-wrap break-words font-mono leading-relaxed mt-2 border-t border-destructive/15 pt-2"
                       dir="ltr"
                     >
                       {linkifyMessage(
                         String(metrics.error),
-                        "underline decoration-[#B04030]/40 underline-offset-2 hover:text-[#7A2A1E] transition-colors",
+                        "underline decoration-destructive/40 underline-offset-2 hover:text-[#7A2A1E] dark:hover:text-[#ffb1a0] transition-colors",
                       )}
                     </pre>
                   )}
@@ -1453,12 +1437,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
       {isPairContext && activePair.error && (
         <FadeIn delay={0.05}>
-          <div className="rounded-xl border border-[#B04030]/30 bg-[#B04030]/5 p-4">
-            <div className="text-sm font-medium text-[#B04030] mb-1">
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+            <div className="text-sm font-medium text-destructive mb-1">
               {msg("auto.features.optimizations.components.pairdetailview.3")}
             </div>
             <pre
-              className="text-xs font-mono text-[#B04030]/80 whitespace-pre-wrap break-words"
+              className="text-xs font-mono text-destructive/80 whitespace-pre-wrap break-words"
               dir="ltr"
             >
               {activePair.error}

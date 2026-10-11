@@ -98,8 +98,8 @@ export function NodeInspector({
       </div>
 
       {issues.length > 0 && (
-        <div className="border-b border-border/60 bg-[#FBF3EC] px-4 py-2">
-          <ul className="list-disc space-y-0.5 ps-4 text-[0.6875rem] leading-relaxed text-[#A3512B]">
+        <div className="border-b border-border/60 bg-[#FBF3EC] dark:bg-[#43382e] px-4 py-2">
+          <ul className="list-disc space-y-0.5 ps-4 text-[0.6875rem] leading-relaxed text-[#A3512B] dark:text-[#fea47d]">
             {issues.map((issue, i) => (
               <li key={i}>{issue}</li>
             ))}

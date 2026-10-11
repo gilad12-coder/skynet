@@ -172,8 +172,10 @@ def compile_program(
 ) -> Any:
     """Run optimizer.compile() with the derived trainset/valset.
 
-    Passes ``valset`` only when the optimizer's compile signature accepts it,
-    preventing TypeError on optimizers like BootstrapFewShot that do not.
+    Passes ``valset`` only when it is non-empty and the optimizer's compile
+    signature accepts it, preventing TypeError on optimizers like
+    BootstrapFewShot that do not. :func:`compile_selection_scope` names the
+    split the optimizer then selects on.
 
     Args:
         optimizer: An instantiated DSPy optimizer.
@@ -197,13 +199,37 @@ def compile_program(
     if COMPILE_TRAINSET_KEY not in kwargs:
         kwargs[COMPILE_TRAINSET_KEY] = splits.train
 
-    if splits.val and _compile_accepts_valset(optimizer):
-        kwargs.setdefault(COMPILE_VALSET_KEY, splits.val)
+    # An empty valset makes DSPy GEPA fall back to the trainset without
+    # saying so; drop it so the caller's recorded selection scope is honest.
+    if not kwargs.get(COMPILE_VALSET_KEY):
+        kwargs.pop(COMPILE_VALSET_KEY, None)
+        if splits.val and _compile_accepts_valset(optimizer):
+            kwargs[COMPILE_VALSET_KEY] = splits.val
+    logger.info("Optimizer selects on the %s split", compile_selection_scope(optimizer, splits, compile_kwargs))
 
     try:
         return optimizer.compile(program, **kwargs)
     except TypeError as exc:
         raise ServiceError(f"Optimizer.compile rejected the provided arguments; update compile_kwargs: {exc}") from exc
+
+
+def compile_selection_scope(optimizer: Any, splits: DatasetSplits, compile_kwargs: dict[str, Any] | None = None) -> str:
+    """Name the split :func:`compile_program` lets the optimizer select on.
+
+    Args:
+        optimizer: An instantiated DSPy optimizer.
+        splits: Train/val/test partitions.
+        compile_kwargs: User-supplied kwargs forwarded to ``optimizer.compile``.
+
+    Returns:
+        ``"validation"`` when a non-empty valset reaches ``compile``, otherwise
+        ``"training"``.
+    """
+    if (compile_kwargs or {}).get(COMPILE_VALSET_KEY):
+        return "validation"
+    if splits.val and _compile_accepts_valset(optimizer):
+        return "validation"
+    return "training"
 
 
 def _compile_accepts_valset(optimizer: Any) -> bool:

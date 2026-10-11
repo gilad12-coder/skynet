@@ -19,12 +19,9 @@ test("normalizeLevel maps unknown, null and missing values to standard", () => {
 test("Guided hides the advanced wizard surfaces; Standard and Expert show them", () => {
   for (const surface of [
     "wizard.split",
-    "wizard.search_depth",
     "wizard.optimizer_settings",
-    "wizard.optimization_type",
     "wizard.model_params",
-    "wizard.description",
-    "wizard.blackbox_strategy",
+    "wizard.shinka_settings",
   ] as const) {
     assert.equal(isVisible(surface, "guided"), false, surface);
     assert.equal(isVisible(surface, "standard"), true, surface);
@@ -35,10 +32,8 @@ test("Guided hides the advanced wizard surfaces; Standard and Expert show them",
 test("only Expert opens disclosures by default", () => {
   for (const surface of [
     "wizard.optimizer_settings",
-    "wizard.optimization_type",
     "wizard.model_params",
     "wizard.shinka_settings",
-    "wizard.blackbox_background",
     "logs.verbose",
   ] as const) {
     assert.equal(defaultOpen(surface, "expert"), true, surface);

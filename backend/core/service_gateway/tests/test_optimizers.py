@@ -20,6 +20,7 @@ from core.service_gateway.optimization.optimizers import (
     _compile_accepts_valset,
     _extract_factory_targets,
     compile_program,
+    compile_selection_scope,
     evaluate_on_test,
     instantiate_optimizer,
     optimizer_requires_metric,
@@ -194,6 +195,36 @@ def test_compile_program_does_not_inject_valset_when_optimizer_does_not_accept_i
     )
 
     assert "valset" not in received.get("extra", {})
+
+
+def test_compile_program_omits_empty_valset_so_gepa_cannot_silently_use_train() -> None:
+    """No ``valset`` reaches compile() when the validation split is empty."""
+    received: dict = {}
+
+    class _RecordingOpt:
+        def compile(self, program: Any, *, trainset: Any, **kwargs: Any) -> Any:
+            """Record every extra compilation argument."""
+            received.update(kwargs)
+            return program
+
+    optimizer = _RecordingOpt()
+    splits = _splits(train=[1, 2])
+    compile_program(optimizer=optimizer, program=object(), splits=splits, metric=None, compile_kwargs={"valset": []})
+
+    assert "valset" not in received
+    assert compile_selection_scope(optimizer, splits, {"valset": []}) == "training"
+
+
+def test_compile_selection_scope_is_validation_when_valset_reaches_compile() -> None:
+    """The recorded scope is validation exactly when a valset is passed."""
+
+    class _Opt:
+        def compile(self, program: Any, *, trainset: Any, valset: Any = None) -> Any:
+            """Accept a validation set."""
+            return program
+
+    assert compile_selection_scope(_Opt(), _splits(train=[1], val=[2])) == "validation"
+    assert compile_selection_scope(_Opt(), _splits(train=[1])) == "training"
 
 
 def test_compile_program_honours_pre_set_trainset_in_compile_kwargs() -> None:

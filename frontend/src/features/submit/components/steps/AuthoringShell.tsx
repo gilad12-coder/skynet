@@ -21,14 +21,14 @@ export function ArtifactStatusChip({ status }: { status: ArtifactStatus }) {
   }
   if (status === "writing") {
     return (
-      <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#3D2E22]">
+      <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-primary">
         {msg("auto.features.submit.components.steps.codestep.5")}
         <PingDot size="sm" tone="agent" />
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#5A7247]">
+    <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#5A7247] dark:text-[#adc899]">
       {msg("auto.features.submit.components.steps.codestep.6")}
       <Check className="size-3" />
     </span>
@@ -50,7 +50,7 @@ function ModeToggle({ value, onChange, disabledReason, start, module }: ModeTogg
   const autoDisabled = !!disabledReason && value !== "auto";
 
   return (
-    <div className="flex flex-col items-stretch gap-2.5 border-b border-border/40 bg-[#FAF8F5] px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+    <div className="flex flex-col items-stretch gap-2.5 border-b border-border/40 bg-background px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
       <div className="flex min-w-0 flex-col items-stretch gap-2.5 sm:flex-row sm:items-center sm:w-auto">
         {start}
         {module && (
@@ -58,7 +58,7 @@ function ModeToggle({ value, onChange, disabledReason, start, module }: ModeTogg
             type="button"
             onClick={module.onChangeModule}
             data-tutorial="module-selector"
-            className="group inline-flex min-h-[44px] w-full min-w-0 shrink-0 cursor-pointer items-center justify-between gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1 text-xs shadow-xs transition-colors hover:border-[#C8A882] sm:w-auto lg:min-h-0"
+            className="group inline-flex min-h-[44px] w-full min-w-0 shrink-0 cursor-pointer items-center justify-between gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1 text-xs transition-colors hover:border-primary-fill sm:w-auto lg:min-h-0"
           >
             <span className="font-semibold text-foreground">{module.label}</span>
             <span aria-hidden className="h-3 w-px bg-border/70" />
@@ -115,7 +115,7 @@ export function AuthoringShell({
   children,
 }: AuthoringShellProps) {
   return (
-    <div className="@container overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl shadow-lg">
+    <div className="@container overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl">
       <ModeToggle
         value={value}
         onChange={onChange}

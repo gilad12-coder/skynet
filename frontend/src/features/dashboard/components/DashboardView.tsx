@@ -191,8 +191,7 @@ export function DashboardView() {
 
   const handleCloneSelected = () => {
     if (!selectedJob) return;
-    const recipe = selectedJob.optimization_type === "blackbox" ? "anything" : "program";
-    router.push(`/submit?clone=${selectedJob.optimization_id}&recipe=${recipe}`);
+    router.push(`/submit?clone=${selectedJob.optimization_id}`);
   };
 
   const handleTogglePinSelected = async () => {
@@ -442,7 +441,7 @@ export function DashboardView() {
                       <motion.span
                         layoutId="dashboardTabPill"
                         transition={tabPillTransition}
-                        className="absolute inset-0 z-0 rounded-full bg-background shadow-sm"
+                        className="absolute inset-0 z-0 rounded-full bg-primary-fill"
                         aria-hidden="true"
                       />
                     )}
@@ -456,7 +455,7 @@ export function DashboardView() {
                       <motion.span
                         layoutId="dashboardTabPill"
                         transition={tabPillTransition}
-                        className="absolute inset-0 z-0 rounded-full bg-background shadow-sm"
+                        className="absolute inset-0 z-0 rounded-full bg-primary-fill"
                         aria-hidden="true"
                       />
                     )}
@@ -518,6 +517,7 @@ export function DashboardView() {
           canManageShare={canManageSelectedShare}
           canPause={pausableSelectedIds.length > 0}
           canResume={resumableSelectedIds.length > 0}
+          canClone={selectedJob?.optimization_type !== "grid_search"}
           canStop={activeSelectedIds.length > 0}
           canTogglePin={canEditSelection}
           selectedJobId={selectedJob?.optimization_id ?? null}

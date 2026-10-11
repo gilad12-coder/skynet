@@ -58,6 +58,19 @@ _EVALUATION_FIELDS = {
     "execution_runtime",
 }
 
+# A unified check scores the whole workspace contract, so its evaluation
+# evidence must change whenever the task, data, code, models, optimizer or
+# sample count change; the DSPy/Anything field names above miss all of them.
+_UNIFIED_EVALUATION_FIELDS = {
+    "task",
+    "data",
+    "workspace",
+    "models",
+    "optimizer",
+    "seed",
+    "contract_sample_count",
+}
+
 
 class WizardPreflightModel(Base):
     """Store the outcome of one account-owned, content-addressed setup attempt."""
@@ -116,12 +129,13 @@ def verification_fingerprint(
     Returns:
         Digest only; credential values and authored input are never persisted here.
     """
+    evaluation_fields = _UNIFIED_EVALUATION_FIELDS if workflow == "unified" else _EVALUATION_FIELDS
     inputs = {
         key: value
         for key, value in payload.items()
         if key not in _COSMETIC_FIELDS
         and not key.startswith("_")
-        and (scope != "evaluation" or key in _EVALUATION_FIELDS)
+        and (scope != "evaluation" or key in evaluation_fields)
     }
     connections = session.execute(
         select(BillingProviderKeyModel.id, BillingProviderKeyModel.updated_at, BillingProviderKeyModel.status)

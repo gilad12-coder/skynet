@@ -117,10 +117,10 @@ export function computeStageTimestamps(
 type StageState = "done" | "skipped" | "current" | "stopped" | "pending";
 
 const NODE_STYLES: Record<StageState, string> = {
-  done: "bg-primary text-primary-foreground",
+  done: "bg-primary-fill text-primary-foreground",
   skipped: "border-2 border-dashed border-border bg-background text-muted-foreground",
-  current: "bg-primary text-primary-foreground ring-4 ring-primary/15",
-  stopped: "bg-destructive text-white ring-4 ring-destructive/15",
+  current: "bg-primary-fill text-primary-foreground ring-4 ring-primary/15",
+  stopped: "bg-destructive text-white dark:text-primary-foreground ring-4 ring-destructive/15",
   pending: "border-2 border-border bg-background text-border",
 };
 
@@ -154,7 +154,7 @@ function ElapsedChip({ seconds, className }: { seconds: number; className?: stri
   return (
     <span
       className={cn(
-        "inline-flex h-4 items-center rounded-full border border-border/70 bg-background px-1.5 font-mono text-[0.625rem] leading-none tabular-nums text-foreground/80",
+        "inline-flex h-4 items-center rounded-md border border-border/70 bg-background px-1.5 font-mono text-[0.625rem] leading-none tabular-nums text-foreground/80",
         className,
       )}
       title={msg("pipeline.stage.elapsed")}
@@ -253,7 +253,7 @@ export function PipelineStages({
     return { ...s, i, state, ts, elapsed, dateChanged, statusText, label: sentenceCase(s.label) };
   });
 
-  const railColor = isFailed ? "bg-destructive/70" : "bg-primary";
+  const railColor = isFailed ? "bg-destructive/70" : "bg-primary-fill";
 
   const shape: StageShape[] = stages.map((s) => ({
     detail: !!s.detail,

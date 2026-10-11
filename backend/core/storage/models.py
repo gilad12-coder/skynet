@@ -26,6 +26,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     false,
+    true,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -245,25 +246,22 @@ class WizardAgentUsageModel(Base):
 
 
 class NotificationPreferenceModel(Base):
-    """Per-identity preferences for optional product notification emails.
+    """Per-identity routing of run notifications across the delivery channels.
 
     The row is separate from :class:`UserModel` because OAuth identities own
-    jobs and shares without a local password-account row. Missing rows preserve
-    the historical default: both notification categories are enabled.
+    jobs and shares without a local password-account row. A missing row, or a
+    NULL ``channel_grid``, means the default grid of
+    :mod:`core.notifications.events`.
     """
 
     __tablename__ = "notification_preferences"
 
     username: Mapped[str] = mapped_column(String(255), primary_key=True)
-    job_updates_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    sharing_updates_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    # Run-email cadence. ``done`` keeps the historical finished/failed-only
-    # mail; ``milestones`` adds new-best / stuck / budget / needs-input mail;
-    # ``live`` adds stage-change progress mail throttled by ``live_mode``.
-    cadence: Mapped[str] = mapped_column(String(16), nullable=False, default="done", server_default="done")
-    live_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="per_stage", server_default="per_stage")
-    live_count: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
-    digest_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60, server_default="60")
+    # ``{event_type: {channel: bool}}``; cells absent here take the default grid.
+    channel_grid: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
+    hold_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=10, server_default="10")
+    # Channels whose non-urgent sends wait ``hold_minutes``; NULL means email only.
+    held_channels: Mapped[list[str] | None] = mapped_column(JSON_STORE, nullable=True)
     stuck_fraction: Mapped[float] = mapped_column(Float, nullable=False, default=0.25, server_default="0.25")
     budget_alert_fraction: Mapped[float] = mapped_column(Float, nullable=False, default=0.8, server_default="0.8")
     updated_at: Mapped[datetime] = mapped_column(
@@ -271,6 +269,93 @@ class NotificationPreferenceModel(Base):
         nullable=False,
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class NotificationModel(Base):
+    """One notification event for one identity: an inbox item plus its channel deliveries.
+
+    Rows are kept forever. ``deliveries`` records each routed channel's state
+    (``held``, ``sent``, ``failed``, ``dropped`` or ``unavailable``) so a later
+    channel can be added without a schema change; ``hold_until`` is set while
+    any channel still waits and is what the hold sweeper scans.
+    """
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        Index("ix_notifications_username_created", "username", "created_at"),
+        UniqueConstraint("username", "dedupe_key", name="uq_notifications_username_dedupe"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    optimization_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    facts: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    link: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Makes a repeated emit of the same event (a resumed run, a news file seen
+    # twice) a no-op; NULL for events that may legitimately repeat.
+    dedupe_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    in_inbox: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deliveries: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    hold_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class PushSubscriptionModel(Base):
+    """One browser's Web Push subscription for one identity.
+
+    The endpoint is the push service URL the browser handed out; it is unique
+    per browser profile, so re-subscribing the same browser (even as another
+    identity) moves the row rather than duplicating it.
+    """
+
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    endpoint: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(255), nullable=False)
+    auth: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SlackConnectionModel(Base):
+    """One identity's install of the Skynet Slack app, where its Slack notifications go.
+
+    Keyed by ``username`` like :class:`PushSubscriptionModel`. The bot token is
+    Fernet-encrypted under ``BYOK_VAULT_KEY``. A ``broken`` row stays so the
+    settings tab can say why Slack stopped; sends skip it until the user
+    reconnects or picks a working destination.
+    """
+
+    __tablename__ = "slack_connections"
+
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    team_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    team_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    bot_user_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    slack_user_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    bot_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    # NULL sends a direct message to ``slack_user_id``.
+    channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    channel_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    dm_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="connected", server_default="connected")
+    broken_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
 
 

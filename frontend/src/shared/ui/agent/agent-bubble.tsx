@@ -70,7 +70,7 @@ export function AgentBubble({
     <div
       className={cn(
         "flex flex-col gap-1.5 px-2.5 py-2",
-        (hasThinking || (!toolCallsBeforeContent && hasText)) && "border-t border-[#3D2E22]/[0.08]",
+        (hasThinking || (!toolCallsBeforeContent && hasText)) && "border-t border-primary-fill/[0.08]",
       )}
     >
       {visibleToolCalls.map(({ call, isRetry }) => (
@@ -82,7 +82,7 @@ export function AgentBubble({
   return (
     <div
       className={cn(
-        "max-w-[88%] overflow-hidden rounded-[22px] rounded-ee-[4px] bg-muted/60 shadow-sm",
+        "max-w-[88%] overflow-hidden rounded-[22px] rounded-ee-[4px] bg-muted/60",
         className,
       )}
     >
@@ -93,7 +93,7 @@ export function AgentBubble({
           className={cn(
             "px-4 py-3 text-sm leading-relaxed text-foreground",
             (hasThinking || (toolCallsBeforeContent && hasTools)) &&
-              "border-t border-[#3D2E22]/[0.08]",
+              "border-t border-primary-fill/[0.08]",
           )}
         >
           <React.Suspense

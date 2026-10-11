@@ -619,7 +619,7 @@ export function AgentRunTranscript({ transcript, live }: { transcript: string; l
             text={transcript}
             ariaLabel={msg("agent_run.transcript.copy")}
             copiedAriaLabel={msg("agent_run.transcript.copied")}
-            title={msg("agent_run.transcript.copy")}
+            autoTooltip={false}
             className="text-muted-foreground"
           />
         ) : null}
@@ -661,7 +661,7 @@ export function AgentRunTranscript({ transcript, live }: { transcript: string; l
               type="button"
               onClick={jump}
               className={cn(
-                "pointer-events-auto inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-[10px] font-semibold text-foreground shadow-sm transition-colors duration-[var(--duration-fast)] hover:bg-accent",
+                "pointer-events-auto inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-[10px] font-semibold text-foreground transition-colors duration-[var(--duration-fast)] hover:bg-accent",
                 FOCUS_RING,
               )}
             >

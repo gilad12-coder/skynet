@@ -80,7 +80,6 @@ from .._helpers import (
     _program_cache,
     _protected_api_runtime,
     build_summary,
-    grid_resumable_pairs,
     is_pausable,
     is_resumable,
     load_job_for_user,
@@ -340,11 +339,6 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
             effective_role=effective_role,
             resumable=is_resumable(job_store, job_data),
             pausable=is_pausable(job_store, job_data),
-            grid_resumable_pairs=(
-                grid_resumable_pairs(job_store, optimization_id)
-                if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH
-                else []
-            ),
         )
 
         headers = {"ETag": etag}

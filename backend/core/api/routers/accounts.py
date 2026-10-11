@@ -25,6 +25,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from ...config import settings
+from ...notifications.email_render import render_account_email
 from ...storage.models import UserIdentityModel, UserModel
 from ..email_sender import email_configured, send_email
 from ..email_verification import (
@@ -47,6 +48,25 @@ logger = logging.getLogger(__name__)
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _USE_CASES = frozenset({"classification", "extraction", "rag_agents", "generation", "other"})
 _JOB_ROLES = frozenset({"engineer", "researcher", "pm", "other"})
+# Accounts store no language preference and these internal routes carry no
+# request locale, so code emails keep the English they were always sent in.
+ACCOUNT_EMAIL_LOCALE = "en"
+
+
+def _send_account_code(email: str, kind: str, code: str) -> None:
+    """Render an account code email and send it with its HTML and text parts.
+
+    Args:
+        email: Recipient address.
+        kind: ``verification``, ``password_reset`` or ``sign_in``.
+        code: The one-time code.
+
+    Raises:
+        OSError: When the SMTP relay is unreachable.
+        RuntimeError: When the relay rejects the message.
+    """
+    subject, html, text = render_account_email(kind, ACCOUNT_EMAIL_LOCALE, code)
+    send_email(email, subject, text, html_body=html)
 
 
 # Credentials supplied when creating a Skynet-native account.
@@ -356,12 +376,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
             # broken relay surfaces (the alert sink forwards warnings) instead of
             # silently stranding new sign-ups on the verification step.
             try:
-                send_email(
-                    email,
-                    "Confirm your Skynet email",
-                    f"Your Skynet confirmation code is {code}. It expires in 30 minutes.\n\n"
-                    "If you didn't create a Skynet account, you can ignore this email.",
-                )
+                _send_account_code(email, "verification", code)
             except (OSError, RuntimeError):
                 logger.warning("Failed to send verification email at registration", exc_info=True)
         return AccountInfo(email=email, name=name, role=_role_for(email))
@@ -613,12 +628,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
             code = issue_reset_code(session, email)
             session.commit()
         try:
-            send_email(
-                email,
-                "Your Skynet password-reset code",
-                f"Your Skynet password-reset code is {code}. It expires in 30 minutes.\n\n"
-                "If you didn't ask to reset your password, you can ignore this email.",
-            )
+            _send_account_code(email, "password_reset", code)
         except (OSError, RuntimeError) as exc:
             raise DomainError("accounts.email_send_failed", status=502) from exc
         return OkResponse()
@@ -704,12 +714,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
             code = issue_verification_code(session, email)
             session.commit()
         try:
-            send_email(
-                email,
-                "Confirm your Skynet email",
-                f"Your Skynet confirmation code is {code}. It expires in 30 minutes.\n\n"
-                "If you didn't create a Skynet account, you can ignore this email.",
-            )
+            _send_account_code(email, "verification", code)
         except (OSError, RuntimeError) as exc:
             raise DomainError("accounts.email_send_failed", status=502) from exc
         return OkResponse()

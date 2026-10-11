@@ -1,0 +1,43 @@
+{
+  "$schema": "../schema.json",
+  "locale": "pt-BR",
+  "terms": {
+    "cancellationReason": "Cancelado pelo usuário",
+    "pauseReason": "Em pausa pelo usuário",
+    "statusValidating": "validando"
+  },
+  "messages": {
+    "accounts.invalid_credentials": "Email ou senha incorretos.",
+    "accounts.weak_password": "A senha deve ter pelo menos 8 caracteres.",
+    "admin.invalid_username": "O nome de usuário não pode estar em branco.",
+    "quota.reached": "Você atingiu seu limite de {quota, plural, one {1 otimização} other {# otimizações}}. Exclua otimizações antigas para criar novas.",
+    "serve.chat_not_react": "O chat ao vivo só está disponível para otimizações de módulo ReAct.",
+    "serve.chat_requires_live_mcp": "O chat ao vivo requer uma fonte de ferramentas MCP ao vivo; esta execução usou um instantâneo do conjunto de dados.",
+    "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' não encontrado para este usuário — volte a carregar o conjunto de dados e tente novamente.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}",
+    "email.settings_link": "Configurações de notificações",
+    "email.event.needs_input.status": "Esperando você",
+    "email.event.needs_input.headline": "{title} está esperando sua resposta",
+    "email.event.needs_input.reason": "Você recebe emails quando uma execução precisa da sua resposta.",
+    "email.event.budget_near.reason": "Você recebe emails quando uma execução se aproxima do limite de gastos.",
+    "email.event.failed.reason": "Você recebe emails quando uma execução falha.",
+    "email.event.finished.reason": "Você recebe emails quando uma execução termina.",
+    "email.event.new_best.reason": "Você recebe emails quando uma execução encontra uma nova melhor pontuação.",
+    "email.event.stuck.reason": "Você recebe emails quando uma execução para de melhorar.",
+    "email.event.shared.status": "Compartilhada",
+    "email.event.shared.headline": "{title} foi compartilhada com você",
+    "email.event.shared.reason": "Você recebe emails quando alguém compartilha uma execução com você.",
+    "email.account.expires": "Ele expira em {minutes} minutos.",
+    "email.account.verification.subject": "Confirme seu email do Skynet",
+    "email.account.verification.intro": "Seu código de confirmação do Skynet é {code}.",
+    "email.account.verification.ignore": "Se você não criou uma conta Skynet, pode ignorar este email.",
+    "email.account.password_reset.subject": "Seu código de redefinição de senha do Skynet",
+    "email.account.password_reset.intro": "Seu código de redefinição de senha do Skynet é {code}.",
+    "email.account.password_reset.ignore": "Se você não pediu para redefinir sua senha, pode ignorar este email.",
+    "email.account.sign_in.subject": "Seu código de login do Skynet",
+    "email.account.sign_in.intro": "Seu código de login do Skynet é {code}.",
+    "email.account.sign_in.ignore": "Se você não tentou fazer login, pode ignorar este email."
+  }
+}

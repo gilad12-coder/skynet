@@ -346,7 +346,6 @@ function ListPane({
           icon={PaperPlaneTilt}
           iconWrap="tile"
           title={msg("explore.corpus.mine.empty")}
-          description={msg("explore.corpus.mine.empty.hint")}
           action={{ label: msg("explore.empty.cta"), href: "/submit", icon: Plus }}
           className="mt-3.5"
         />
@@ -357,7 +356,6 @@ function ListPane({
         <EmptyState
           variant="list"
           title={msg("explore.corpus.shared.empty")}
-          description={msg("explore.corpus.shared.empty.hint")}
           className="pt-4"
         />
       );

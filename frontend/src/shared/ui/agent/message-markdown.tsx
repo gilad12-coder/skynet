@@ -7,8 +7,15 @@ import remarkGfm from "remark-gfm";
 
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
-import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { CopyButton } from "@/shared/ui/copy-button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/primitives/table";
 
 interface RunCodeContextValue {
   onRunCode?: (code: string, language: string) => void;
@@ -39,29 +46,25 @@ function CodeBlock({ language, rawCode, children }: CodeBlockProps) {
   return (
     <div
       dir="ltr"
-      className="my-2 overflow-hidden rounded-xl bg-black/[0.06] text-left ring-1 ring-black/[0.04]"
+      className="my-2 overflow-hidden rounded-xl bg-black/[0.06] text-left ring-1 ring-black/[0.04] dark:bg-white/[0.06] dark:ring-white/[0.06]"
     >
-      <div className="flex items-center justify-between gap-2 border-b border-black/[0.06] px-3 py-1.5">
+      <div className="flex items-center justify-between gap-2 border-b border-black/[0.06] dark:border-white/[0.08] px-3 py-1.5">
         <span className="text-[10px] uppercase tracking-wider font-mono text-foreground/50">
           {langLabel}
         </span>
         <div className="flex items-center gap-0.5">
           {onRunCode && (
-            <TooltipButton tooltip={msg("shared.agent.run_code")} side="top">
-              <button
-                type="button"
-                onClick={() => onRunCode(rawCode, language)}
-                className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-foreground/50 hover:text-foreground/80 hover:bg-black/[0.04] transition-colors cursor-pointer"
-                aria-label={msg("shared.agent.run_code")}
-              >
-                <Play className="size-3" />
-                <span>{msg("shared.agent.run_code")}</span>
-              </button>
-            </TooltipButton>
+            <button
+              type="button"
+              onClick={() => onRunCode(rawCode, language)}
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-foreground/50 hover:text-foreground/80 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors cursor-pointer"
+              aria-label={msg("shared.agent.run_code")}
+            >
+              <Play className="size-3" />
+              <span>{msg("shared.agent.run_code")}</span>
+            </button>
           )}
-          <TooltipButton tooltip={msg("shared.agent.copy_code")} side="top">
-            <CopyButton text={rawCode} ariaLabel={msg("shared.agent.copy_code")} />
-          </TooltipButton>
+          <CopyButton text={rawCode} ariaLabel={msg("shared.agent.copy_code")} />
         </div>
       </div>
       <pre className="overflow-x-auto p-3">{children}</pre>
@@ -157,7 +160,7 @@ const COMPONENTS: Components = {
     return (
       <code
         dir="ltr"
-        className="inline-block rounded-md bg-black/[0.06] px-1.5 py-px font-mono text-[0.8125em] align-baseline"
+        className="inline-block rounded-md bg-black/[0.06] dark:bg-white/[0.08] px-1.5 py-px font-mono text-[0.8125em] align-baseline"
         {...rest}
       >
         {children}
@@ -181,26 +184,24 @@ const COMPONENTS: Components = {
   },
   hr: ({ ...rest }) => <hr className="my-3 border-current/15" {...rest} />,
   table: ({ children, ...rest }) => (
-    <div className="my-2 overflow-x-auto">
-      <table dir="auto" className="w-full border-collapse text-[0.8125rem]" {...rest}>
+    <div className="my-2 overflow-hidden rounded-lg border border-border/60">
+      <Table dir="auto" className="text-[0.8125rem]" {...rest}>
         {children}
-      </table>
+      </Table>
     </div>
   ),
-  thead: ({ children, ...rest }) => (
-    <thead className="border-b border-current/15" {...rest}>
-      {children}
-    </thead>
-  ),
+  thead: ({ children, ...rest }) => <TableHeader {...rest}>{children}</TableHeader>,
+  tbody: ({ children, ...rest }) => <TableBody {...rest}>{children}</TableBody>,
+  tr: ({ children, ...rest }) => <TableRow {...rest}>{children}</TableRow>,
   th: ({ children, ...rest }) => (
-    <th className="px-2 py-1 text-start font-semibold" {...rest}>
+    <TableHead className="h-auto py-1.5" {...rest}>
       {children}
-    </th>
+    </TableHead>
   ),
   td: ({ children, ...rest }) => (
-    <td className="px-2 py-1 border-t border-current/10" {...rest}>
+    <TableCell className="px-2 py-1.5 whitespace-normal break-words" {...rest}>
       {children}
-    </td>
+    </TableCell>
   ),
 };
 

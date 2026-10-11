@@ -75,6 +75,11 @@ logger = logging.getLogger(__name__)
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _LOG_PREFIX = "SKYNET_NATIVE_LOG "
 _UUID = re.compile(r"^[0-9a-f]{32}$")
+# The only task fields a native box may receive; Task.context, valset and the
+# test split stay with the parent so no proposer can read the metric.
+NATIVE_TASK_FIELDS = frozenset({"name", "seed_candidate", "objective", "background", "train_set"})
+# Error side info is cut to one line of this size before a proposer sees it.
+_ERROR_CHARS = 500
 NATIVE_ENGINES = frozenset(
     {"meta_harness", "autoresearch", "autosaddler", "shinka_evolve", "gepa_repo", "best_of_n_repo"}
 )
@@ -740,8 +745,8 @@ class _EvaluatorMailbox:
                         score, info = self.server.evaluate(candidate, request.get("example"))
                     if self.check_budget is not None:
                         self.check_budget()
-                    response = {"score": score, "info": info}
                     self._forward_feedback(request, score, info)
+                    response = {"score": score, "info": sanitize_side_info(info)}
                 except (Exception, BudgetReached) as exc:
                     self.error = exc
                     response = {"error": "The parent evaluator stopped this run."}
@@ -753,6 +758,81 @@ class _EvaluatorMailbox:
                 self.error = self.error or exc
                 self._responses[request_id] = json.dumps({"error": "The parent evaluator returned invalid feedback."})
         self.session.write_files({f"rpc/{request_id}.json": self._responses[request_id]})
+
+
+def _plain_case(case: Any) -> Any:
+    """Turn one train case into plain JSON data for the native box.
+
+    Args:
+        case: A task case: a dict, or a model such as ``UnifiedCase``.
+
+    Returns:
+        The case as JSON-plain data.
+    """
+    dump = getattr(case, "model_dump", None)
+    return dump(mode="json") if callable(dump) else case
+
+
+def native_task_payload(engine_id: str, task: Task) -> dict[str, Any]:
+    """Build the task document a native box receives, from the train cases only.
+
+    Args:
+        engine_id: The native engine, used as the task name.
+        task: The engine's task.
+
+    Returns:
+        Exactly the fields in ``NATIVE_TASK_FIELDS``.
+
+    Raises:
+        ServiceError: When the document would hold any other field.
+    """
+    document = {
+        "name": engine_id,
+        "seed_candidate": task.seed_candidate,
+        "objective": task.objective or "",
+        "background": task.background or "",
+        # The guest builds an upstream task, whose train and val sets
+        # form one pool; the cases go in once, as its train set.
+        "train_set": [_plain_case(case) for case in task.cases] or None,
+    }
+    if set(document) != NATIVE_TASK_FIELDS:
+        raise ServiceError("The native optimizer task carries fields it must not.")
+    return document
+
+
+def assert_metric_absent(serialized: str, task: Task) -> None:
+    """Refuse to ship a native document that carries the task's metric source.
+
+    Args:
+        serialized: The document as it would be written into the box.
+        task: The engine's task, whose private context holds the metric.
+
+    Raises:
+        ServiceError: When the metric source appears in the document.
+    """
+    metric = str((getattr(task, "context", None) or {}).get("metric_code") or "").strip()
+    # Documents are JSON, so the source appears with its newlines escaped.
+    if metric and (metric in serialized or json.dumps(metric)[1:-1] in serialized):
+        raise ServiceError("The native optimizer payload would expose the metric source.")
+
+
+def sanitize_side_info(info: Any) -> Any:
+    """Reduce an error result to one ``Type: message`` line before a proposer sees it.
+
+    Scorer errors can carry tracebacks or source lines from the metric; the
+    proposer must learn only that a version failed and why, in one line.
+
+    Args:
+        info: Side information the parent scorer returned.
+
+    Returns:
+        ``{"error": "<line>"}`` for an error result, else ``info`` unchanged.
+    """
+    if not isinstance(info, dict) or "error" not in info:
+        return info
+    lines = [line.strip() for line in str(info.get("error") or "").splitlines() if line.strip()]
+    kept = next((line for line in reversed(lines) if not line.startswith(("File ", "Traceback"))), "")
+    return {"error": kept[:_ERROR_CHARS] or "Evaluation failed."}
 
 
 def _label(value: Any) -> str | None:
@@ -994,15 +1074,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 "max_no_eval_seconds": proposer.max_no_eval_seconds,
                 "max_tool_calls": proposer.max_tool_calls,
             },
-            "task": {
-                "name": engine_id,
-                "seed_candidate": task.seed_candidate,
-                "objective": task.objective or "",
-                "background": task.background or "",
-                # The guest builds an upstream task, whose train and val sets
-                # form one pool; the cases go in once, as its train set.
-                "train_set": task.cases or None,
-            },
+            "task": native_task_payload(engine_id, task),
         }
         if shinka:
             payload["shinka"] = dict(options.shinka or {})
@@ -1035,10 +1107,12 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 "editable_paths": list(options.repo["editable_paths"]),
                 "readonly_paths": list(options.repo["readonly_paths"]),
             }
+        document_text = json.dumps(payload, default=side_info_json_default)
+        assert_metric_absent(document_text, task)
         session.write_files(
             {
                 **_runner_files(engine_id),
-                _INPUT_FILE: json.dumps(payload, default=side_info_json_default),
+                _INPUT_FILE: document_text,
                 **({} if source is None else {"native_source.tar.gz.b64": source}),
             }
         )
@@ -1088,7 +1162,9 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         if timeout <= 0:
             raise ServiceError("Native optimizer runtime expired while preparing dependencies.")
         payload["timeout_seconds"] = timeout
-        session.write_files({_INPUT_FILE: json.dumps(payload, default=side_info_json_default)})
+        document_text = json.dumps(payload, default=side_info_json_default)
+        assert_metric_absent(document_text, task)
+        session.write_files({_INPUT_FILE: document_text})
         session_env = getattr(session, "_env", None)
         mailbox.scrub = sandbox_log.Scrubber(
             [

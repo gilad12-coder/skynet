@@ -3,8 +3,6 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
-import { HelpTip } from "@/shared/ui/help-tip";
-import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import {
   CHART_TOOLTIP_CARD_CLASS,
@@ -145,9 +143,7 @@ export function GridLiveChart({ job }: { job: OptimizationStatusResponse }) {
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center justify-between gap-2">
-          <HelpTip text={tip("grid.score_comparison")}>
-            {msg("auto.features.optimizations.components.gridlivechart.1")}
-          </HelpTip>
+          {msg("auto.features.optimizations.components.gridlivechart.1")}
           {totalPairs != null && (
             <span className="text-[0.6875rem] font-normal text-muted-foreground tabular-nums">
               {pairs.length}/{totalPairs}

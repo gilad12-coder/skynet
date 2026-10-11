@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "react-toastify";
-import { CaretLeft, CaretRight, CircleNotch, Copy, Crown, Trash, XCircle } from "@/shared/ui/icons";
+import { CaretLeft, CaretRight, CircleNotch, Crown, Trash, XCircle } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Dialog, DialogContent, DialogFooter } from "@/shared/ui/primitives/dialog";
 import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
@@ -28,7 +28,6 @@ export interface PairSelectionStripProps {
   onBack: () => void;
   onPrev: () => void;
   onNext: () => void;
-  onClone: () => void;
   onCancel: () => void;
   onDeleted: () => void;
 }
@@ -44,7 +43,6 @@ export function PairSelectionStrip({
   onBack,
   onPrev,
   onNext,
-  onClone,
   onCancel,
   onDeleted,
 }: PairSelectionStripProps) {
@@ -71,7 +69,7 @@ export function PairSelectionStrip({
     <>
       <FadeIn>
         <div
-          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#C8A882]/30 bg-gradient-to-l from-[#FAF8F5] to-[#F5F1EC] p-3"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary-fill/30 bg-muted/40 p-3"
           onKeyDown={(event) => {
             const step = arrowPageStep(event, rtl);
             if (step === 0) return;
@@ -85,9 +83,9 @@ export function PairSelectionStrip({
               onClick={onBack}
               label={msg("auto.features.optimizations.components.pairdetailview.1")}
             />
-            <span aria-hidden="true" className="h-4 w-px bg-[#C8A882]/30" />
+            <span aria-hidden="true" className="h-4 w-px bg-primary-fill/30" />
             <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-              {isBest && <Crown className="size-3.5 text-[#C8A882]" />}
+              {isBest && <Crown className="size-3.5 text-primary" />}
               <span className="text-sm font-semibold text-foreground truncate">
                 {activePair.generation_model.split("/").pop()}
               </span>
@@ -100,16 +98,6 @@ export function PairSelectionStrip({
             </div>
           </div>
           <div className="flex w-full items-center justify-end gap-1 sm:w-auto sm:shrink-0">
-            <TooltipButton tooltip={msg("auto.app.optimizations.id.page.4")}>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={onClone}
-                aria-label={msg("auto.app.optimizations.id.page.literal.4")}
-              >
-                <Copy className="size-4" />
-              </Button>
-            </TooltipButton>
             {jobActive && (
               <TooltipButton tooltip={msg("auto.app.optimizations.id.page.5")}>
                 <Button
@@ -124,21 +112,18 @@ export function PairSelectionStrip({
               </TooltipButton>
             )}
             {jobTerminal && (
-              <TooltipButton
-                tooltip={msg("auto.features.optimizations.components.gridoverview.18")}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                autoTooltip={false}
+                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setDeleteOpen(true)}
+                aria-label={msg("auto.features.optimizations.components.gridoverview.literal.29")}
               >
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => setDeleteOpen(true)}
-                  aria-label={msg("auto.features.optimizations.components.gridoverview.literal.29")}
-                >
-                  <Trash className="size-4" />
-                </Button>
-              </TooltipButton>
+                <Trash className="size-4" />
+              </Button>
             )}
-            <span className="mx-1 h-5 w-px bg-[#C8A882]/30" />
+            <span className="mx-1 h-5 w-px bg-primary-fill/30" />
             <Button
               variant="outline"
               size="icon-sm"

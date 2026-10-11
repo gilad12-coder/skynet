@@ -52,7 +52,7 @@ export function PickerSlide({
             {label}
           </h4>
         </div>
-        <p className="text-sm font-medium text-[#5C4D40]">{tagline}</p>
+        <p className="text-sm font-medium text-[var(--text-2)]">{tagline}</p>
         {/* The measure keeps the copy readable at full width; the floor is the
             longest description's three lines, so the card holds one height as
             slides change instead of shifting the nav under the cursor. */}
@@ -112,7 +112,7 @@ export function BannerFrame({ children }: { children: ReactNode }) {
   return (
     // Sized only by container queries — mixing in a `sm:` height would leave
     // two utilities competing for `height` from different variant groups.
-    <div className="relative h-36 shrink-0 border-b border-border/50 bg-gradient-to-br from-[#F3EDE3] via-[#FAF8F5] to-[#EDE7DD] @xl:h-44 @3xl:h-auto @3xl:w-[45%] @3xl:border-b-0 @3xl:border-e">
+    <div className="relative h-36 shrink-0 border-b border-border/50 bg-muted/50 @xl:h-44 @3xl:h-auto @3xl:w-[45%] @3xl:border-b-0 @3xl:border-e">
       {/* The dot grid is CSS rather than an SVG pattern so it covers the whole
           banner — the schematic letterboxes inside the viewBox, a pattern fill
           would letterbox with it and leave bare bands at the sides. */}
@@ -120,7 +120,7 @@ export function BannerFrame({ children }: { children: ReactNode }) {
         aria-hidden
         className="absolute inset-0"
         style={{
-          backgroundImage: "radial-gradient(circle, rgba(61,46,34,0.07) 1px, transparent 1px)",
+          backgroundImage: "radial-gradient(circle, color-mix(in srgb, var(--foreground) 7%, transparent) 1px, transparent 1px)",
           backgroundSize: "12px 12px",
         }}
       />
@@ -156,9 +156,9 @@ export function GBox({
       width={w}
       height={h}
       rx={6}
-      fill={accent ? "#C8A882" : "#FAF8F5"}
-      fillOpacity={accent ? 0.45 : 0.9}
-      stroke="#3D2E22"
+      fill={accent ? "var(--primary)" : "var(--card)"}
+      fillOpacity={accent ? 0.3 : 0.9}
+      stroke="var(--foreground)"
       strokeOpacity={accent ? 0.4 : 0.22}
       strokeWidth={1.25}
     />
@@ -170,7 +170,7 @@ export function GWire({ d }: { d: string }) {
     <path
       d={d}
       fill="none"
-      stroke="#3D2E22"
+      stroke="var(--foreground)"
       strokeOpacity={0.3}
       strokeWidth={1.25}
       strokeLinecap="round"
@@ -180,7 +180,7 @@ export function GWire({ d }: { d: string }) {
 
 /** A bar standing in for a line of text or code inside a node. */
 export function GBar({ x, y, w }: { x: number; y: number; w: number }) {
-  return <rect x={x} y={y} width={w} height={2.5} rx={1.25} fill="#3D2E22" fillOpacity={0.3} />;
+  return <rect x={x} y={y} width={w} height={2.5} rx={1.25} fill="var(--foreground)" fillOpacity={0.3} />;
 }
 
 /** The arrowhead terminating a wire, tip at `(x, y)`. */
@@ -191,5 +191,5 @@ export function GArrow({ x, y, dir }: { x: number; y: number; dir: "up" | "down"
       : dir === "down"
         ? `${x},${y} ${x - 2.5},${y - 4.5} ${x + 2.5},${y - 4.5}`
         : `${x},${y} ${x - 4.5},${y - 2.5} ${x - 4.5},${y + 2.5}`;
-  return <polygon points={points} fill="#3D2E22" fillOpacity={0.35} />;
+  return <polygon points={points} fill="var(--foreground)" fillOpacity={0.35} />;
 }
