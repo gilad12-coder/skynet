@@ -258,7 +258,7 @@ def test_run_wraps_in_timeout_and_flags_timeouts() -> None:
 
 
 def test_run_caps_the_kill_timer_at_the_vercel_maximum() -> None:
-    """A command given a full five-hour box keeps its grace inside the timeout Vercel accepts."""
+    """A command given a full 24-hour box asks Vercel for no more than its five-hour kill timer."""
     box = _FakeBox(returncode=0)
     session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
 
@@ -266,7 +266,7 @@ def test_run_caps_the_kill_timer_at_the_vercel_maximum() -> None:
 
     wrapped = box.runs[0]["args"][1]
     assert wrapped.startswith(f"timeout --signal=KILL {VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS}s bash -lc")
-    assert box.runs[0]["kill_after"] == VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
+    assert box.runs[0]["kill_after"] == 18_000
 
 
 def test_run_without_timeout_has_no_kill_timer() -> None:
