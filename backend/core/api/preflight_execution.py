@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 from typing import Any, Literal
@@ -42,6 +43,7 @@ from ..worker.repo_staging import (
     is_repo_payload,
     stage_repository,
 )
+from ..worker.unified_aliases import alias_unified_model_roles, strip_unified_model_aliases
 from ..worker.vercel_dspy import run_vercel_dspy
 from .model_billing import normalize_model_token_sources
 from .preflight_progress import report_preflight_phase
@@ -348,8 +350,14 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
         return WizardPreflightResponse.model_validate({**claim.document, "budget": budget_response(snapshot)})
     try:
         with evidence.heartbeat(claim.document["id"], claim_token=claim.token):
+            source = request.payload
+            if request.workflow == "unified":
+                # Without the legacy aliases the metric model gets no metered
+                # route, and the guest falls back to a gateway only the backend has.
+                source = copy.deepcopy(source)
+                alias_unified_model_roles(source)
             parent_payload = resolve_execution_credentials(
-                request.payload,
+                source,
                 username=user.username,
                 binding_id=request.execution_budget_id,
                 vault=credential_vault,
@@ -454,6 +462,8 @@ def _perform_preflight(
             managed_key=settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else "",
             allow_private_tools=settings.discover_allow_private,
         )
+        if request.workflow == "unified":
+            strip_unified_model_aliases(protected)
         # The ledger keys the run's sandbox hold by this identity, and a settled
         # or released hold from an earlier run would block a new dispatch under
         # the same key, so every run of the row carries its own number.
