@@ -59,7 +59,7 @@ send one card: the backend changes that landed, staging smoke status, and a
 ### PR preview environments: keep them able to run an optimization
 
 The merger has to sign up and finish a real run in each `*-pr-<n>` Railway
-environment. Four things broke that once; keep them true:
+environment. Five things broke that once; keep them true:
 
 - **No watch paths on `staging` services.** PR environments copy `staging`,
   and Railway skips a service whose watch paths the PR doesn't touch. A skipped
@@ -77,6 +77,11 @@ environment. Four things broke that once; keep them true:
   route, and the run fails with "Scorer models need a gateway the sandboxes
   can reach". Any new payload shape must go through the same aliasing in both
   places.
+- **A sandbox command's kill timer stays at or under five hours.** A Vercel
+  box may live 24 hours, but a process kill timer above 18,000,000 ms is
+  rejected with `timeout should be <= 18000000`, and every run fails starting
+  its model proxy. `Sandbox.run` caps `kill_after` at
+  `_VERCEL_KILL_TIMER_CEILING_SECONDS`; never cap it at the box lifetime.
 - **Diagnose before labeling `needs-human`.** Check each service's latest
   deployment in the PR environment (`railway status --json`). A service with
   no deployment can be started with Railway's `serviceInstanceDeployV2`.
