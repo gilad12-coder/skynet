@@ -38,7 +38,7 @@ from ....billing.operation_pricing import json_fingerprint
 from ....billing.runtime import BudgetRuntime
 from ....billing.signals import BudgetReached
 from ....billing.vercel_usage import SANDBOX_NETWORK_BYTES_CAP, VercelUsageReservation
-from ....config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, Settings
+from ....config import Settings
 from ....exceptions import ServiceError
 from .sandbox_log import logged_command
 
@@ -73,6 +73,10 @@ _RENEWAL_JOIN_SECONDS = 30.0
 # the floor to the cap so quick commands return fast and long runs poll gently.
 _POLL_FLOOR_SECONDS = 1.0
 _POLL_CAP_SECONDS = 8.0
+# Vercel caps a process kill timer at 18,000,000 ms even though a box itself
+# may live 24 hours, so a longer timer fails the whole command with HTTP 400.
+_VERCEL_KILL_TIMER_CEILING_SECONDS = 18_000
+
 # Client-side last resort past ``kill_after`` before declaring the process lost.
 _POLL_DEADLINE_SLACK_SECONDS = 60.0
 # Where a command's wrapper records its exit code for the poll to find.
@@ -431,11 +435,9 @@ class VercelSandboxSession:
         if timeout_seconds is not None:
             seconds = max(1, math.ceil(timeout_seconds))
             inner = f"timeout --signal=KILL {seconds}s {inner}"
-            # Vercel refuses a kill timer past its five-hour session maximum,
-            # and a command given a box's whole lifetime at that ceiling would
-            # ask for the grace on top. The box ends there anyway, so the grace
-            # has nothing left to cover.
-            kill_after = min(seconds + KILL_GRACE_SECONDS, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS)
+            # No command outlives Vercel's five-hour kill-timer maximum, however
+            # long its box may live.
+            kill_after = min(seconds + KILL_GRACE_SECONDS, _VERCEL_KILL_TIMER_CEILING_SECONDS)
             deadline = time.monotonic() + kill_after + _POLL_DEADLINE_SLACK_SECONDS
         token = uuid.uuid4().hex
         sentinel = f"{_EXIT_FILE_PREFIX}{token}"
