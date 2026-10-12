@@ -1008,11 +1008,11 @@ export interface CatalogModel {
   // Artificial Analysis intelligence index (a new release may carry its
   // predecessor's); null when unrated.
   intelligence_index?: number | null;
-  // The model's Artificial Analysis page, only when a reliable source names it.
+  // The model's Artificial Analysis page, only once the backend has fetched it
+  // and confirmed it names this model; null otherwise (no link shown).
   artificial_analysis_url?: string | null;
-  // Live OpenRouter speed of the fastest healthy endpoint; null when unmeasured.
+  // Live OpenRouter output tokens/s of the fastest healthy endpoint; null when unmeasured.
   throughput_tps?: number | null;
-  latency_ms?: number | null;
   // At least one OpenRouter endpoint serves this model with zero data retention.
   zero_retention?: boolean;
 }

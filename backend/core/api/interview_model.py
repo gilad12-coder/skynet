@@ -18,8 +18,8 @@ fetched it keeps the last pick, and before the first one it falls back to the
 cheapest small candidate.
 
 The same refresh measures every OpenRouter model in the catalog, so the model
-picker's Fastest tab sorts on the throughput and latency of each model's
-fastest healthy endpoint.
+picker's Fastest tab sorts on the throughput of each model's fastest healthy
+endpoint.
 """
 
 from __future__ import annotations
@@ -281,14 +281,14 @@ def interview_model_id() -> str:
 
 
 def with_interview_default(catalog: ModelCatalogResponse) -> ModelCatalogResponse:
-    """Flag the model interviews run by default and attach each model's measured speed.
+    """Flag the model interviews run by default and attach each model's measured throughput.
 
     Args:
         catalog: A cached catalog, left unmodified.
 
     Returns:
         A copy whose ``is_interview_default`` marks the current pick and whose
-        ``throughput_tps`` / ``latency_ms`` carry the last measured speeds.
+        ``throughput_tps`` carries the last measured throughput.
     """
     pick = interview_model_id()
     with _lock:
@@ -299,10 +299,6 @@ def with_interview_default(catalog: ModelCatalogResponse) -> ModelCatalogRespons
         _kick_refresh()
     models = []
     for m in catalog.models:
-        throughput, latency = speeds.get(m.value, (None, None))
-        models.append(
-            m.model_copy(
-                update={"is_interview_default": m.value == pick, "throughput_tps": throughput, "latency_ms": latency}
-            )
-        )
+        throughput, _ = speeds.get(m.value, (None, None))
+        models.append(m.model_copy(update={"is_interview_default": m.value == pick, "throughput_tps": throughput}))
     return catalog.model_copy(update={"models": models})

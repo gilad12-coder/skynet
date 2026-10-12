@@ -155,8 +155,9 @@ class CatalogModel(BaseModel):
     artificial_analysis_url: str | None = Field(
         default=None,
         description=(
-            "The model's Artificial Analysis page, only when a reliable source names it; "
-            "None otherwise, and clients then show no link."
+            "The model's Artificial Analysis page, only once a fetch has confirmed the page "
+            "exists and its title names this model; None otherwise, and clients then show "
+            "no link."
         ),
     )
     throughput_tps: float | None = Field(
@@ -164,13 +165,6 @@ class CatalogModel(BaseModel):
         description=(
             "Median output tokens per second of the model's fastest healthy OpenRouter "
             "endpoint over the last 30 minutes, or None when OpenRouter reports none."
-        ),
-    )
-    latency_ms: float | None = Field(
-        default=None,
-        description=(
-            "Median milliseconds to the first token on that same endpoint over the "
-            "last 30 minutes, or None when OpenRouter reports none."
         ),
     )
     zero_retention: bool = Field(

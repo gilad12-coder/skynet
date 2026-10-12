@@ -36,7 +36,7 @@ function model(value: string, fields: Partial<CatalogModel> = {}): CatalogModel 
 
 const values = (models: CatalogModel[]) => models.map((m) => m.value);
 
-test("best value lists the score-price frontier by score per dollar, then the beaten, then the unrated", () => {
+test("best value lists the score-price frontier by score, then the beaten by score, then the unrated", () => {
   const groups = rankModels(
     [
       model("unrated"),
@@ -50,14 +50,14 @@ test("best value lists the score-price frontier by score per dollar, then the be
   assert.deepEqual(
     groups.map((g) => [g.kind, values(g.models)]),
     [
-      ["ranked", ["cheap-mid", "pricey-genius"]],
-      ["dominated", ["beaten", "unpriced"]],
+      ["ranked", ["pricey-genius", "cheap-mid"]],
+      ["dominated", ["unpriced", "beaten"]],
       ["unrated", ["unrated"]],
     ],
   );
 });
 
-test("best value puts a free rated model on the frontier first", () => {
+test("best value keeps a free rated model on the frontier, ordered by score", () => {
   const groups = rankModels(
     [
       model("cheap-mid", { intelligence_index: 50, input_cost_per_token: 1e-6 }),
@@ -69,7 +69,7 @@ test("best value puts a free rated model on the frontier first", () => {
   assert.deepEqual(
     groups.map((g) => [g.kind, values(g.models)]),
     [
-      ["ranked", ["free-high", "cheap-mid"]],
+      ["ranked", ["cheap-mid", "free-high"]],
       ["dominated", ["free-low"]],
     ],
   );
@@ -93,24 +93,51 @@ test("smartest sorts by intelligence index and puts the unrated last", () => {
   );
 });
 
-test("fastest sorts by time to a short reply and puts the unmeasured last", () => {
+test("fastest sorts by throughput and puts the unmeasured last", () => {
   const groups = rankModels(
     [
       model("unmeasured"),
-      // 300ms + 150 tokens at 50 tok/s = 3300ms
-      model("slow-stream", { throughput_tps: 50, latency_ms: 300 }),
-      // 1000ms + 150 tokens at 300 tok/s = 1500ms
-      model("slow-start", { throughput_tps: 300, latency_ms: 1000 }),
+      model("slow", { throughput_tps: 50 }),
+      model("fast", { throughput_tps: 300 }),
+      model("zero", { throughput_tps: 0 }),
     ],
     "fastest",
   );
   assert.deepEqual(
     groups.map((g) => [g.kind, values(g.models)]),
     [
-      ["ranked", ["slow-start", "slow-stream"]],
-      ["no_speed", ["unmeasured"]],
+      ["ranked", ["fast", "slow"]],
+      ["no_speed", ["unmeasured", "zero"]],
     ],
   );
+});
+
+test("ties break by score, then by name, never by catalog order", () => {
+  const groups = rankModels(
+    [
+      model("z-b", { display_name: "Zed", throughput_tps: 100, intelligence_index: 40 }),
+      model("a-low", { display_name: "Alpha", throughput_tps: 100, intelligence_index: 30 }),
+      model("m-tie", { display_name: "Beta", throughput_tps: 100, intelligence_index: 40 }),
+    ],
+    "fastest",
+  );
+  assert.deepEqual(values(groups[0].models), ["m-tie", "z-b", "a-low"]);
+});
+
+test("every tab ignores alphabetical and provider order", () => {
+  const models = [
+    model("anthropic/a", { intelligence_index: 30, input_cost_per_token: 1e-6, throughput_tps: 40 }),
+    model("google/b", { intelligence_index: 60, input_cost_per_token: 3e-6, throughput_tps: 200 }),
+    model("openai/c", { intelligence_index: 45, input_cost_per_token: 2e-6, throughput_tps: 90 }),
+  ];
+  assert.deepEqual(values(rankModels(models, "smartest")[0].models), ["google/b", "openai/c", "anthropic/a"]);
+  assert.deepEqual(values(rankModels(models, "best_value")[0].models), ["google/b", "openai/c", "anthropic/a"]);
+  assert.deepEqual(values(rankModels(models, "fastest")[0].models), ["google/b", "openai/c", "anthropic/a"]);
+});
+
+test("unrated models keep a stable name order", () => {
+  const groups = rankModels([model("b", { display_name: "Bravo" }), model("a", { display_name: "Alpha" })], "smartest");
+  assert.deepEqual(values(groups[0].models), ["a", "b"]);
 });
 
 test("empty groups are dropped", () => {

@@ -105,18 +105,8 @@ export interface RankedGroup {
   models: CatalogModel[];
 }
 
-// The short reply the interview default is timed on (backend
-// interview_model._REPLY_TOKENS), so Fastest agrees with that pick.
-const REPLY_TOKENS = 150;
-
-/** Milliseconds to the first token plus a short reply, or null when unmeasured. */
-export function replyMs(m: CatalogModel): number | null {
-  if (!m.throughput_tps || m.latency_ms == null) return null;
-  return m.latency_ms + (REPLY_TOKENS / m.throughput_tps) * 1000;
-}
-
 /** Benchmark points per input dollar (infinite when free), or null without both a score and a price. */
-export function scorePerDollar(m: CatalogModel): number | null {
+function scorePerDollar(m: CatalogModel): number | null {
   if (m.intelligence_index == null || m.input_cost_per_token == null) return null;
   if (m.input_cost_per_token === 0) return Number.POSITIVE_INFINITY;
   return m.intelligence_index / m.input_cost_per_token;
@@ -131,33 +121,41 @@ function dominates(a: CatalogModel, b: CatalogModel): boolean {
   return sa >= sb && pa <= pb && (sa > sb || pa < pb);
 }
 
-function byDesc(key: (m: CatalogModel) => number) {
-  // Two free models both score Infinity, and Infinity - Infinity is NaN.
-  return (a: CatalogModel, b: CatalogModel) => (key(a) === key(b) ? 0 : key(b) - key(a));
+const nameOf = (m: CatalogModel) => m.display_name || m.label || m.value;
+
+/** Sort by `key` descending, then intelligence index descending, then name. */
+function bestFirst(key: (m: CatalogModel) => number) {
+  return (a: CatalogModel, b: CatalogModel) =>
+    key(b) - key(a) ||
+    (b.intelligence_index ?? -1) - (a.intelligence_index ?? -1) ||
+    nameOf(a).localeCompare(nameOf(b));
 }
 
+const byScore = bestFirst((m) => m.intelligence_index ?? -1);
+
 /**
- * Order models for one picker tab. Best value lists the Pareto frontier of
- * score against input price by score per dollar, then the rated models the
- * frontier beats, then the unrated. Smartest sorts by intelligence index,
- * unrated last. Fastest sorts by time to a short reply, unmeasured last.
- * Empty groups are dropped; ties keep the catalog's order.
+ * Order models for one picker tab, the best by that tab's measure first.
+ * Best value lists the Pareto frontier of score against input price, then the
+ * rated models the frontier beats, then the unrated; each group by
+ * intelligence index. Smartest sorts by intelligence index, unrated last.
+ * Fastest sorts by output tokens per second, unmeasured last. Ties go to the
+ * higher score, then the name. Empty groups are dropped.
  */
 export function rankModels(models: CatalogModel[], ranking: ModelRanking): RankedGroup[] {
+  const unrated = models.filter((m) => m.intelligence_index == null).sort(byScore);
   let groups: RankedGroup[];
   if (ranking === "fastest") {
-    const timed = models.filter((m) => replyMs(m) !== null);
-    timed.sort((a, b) => (replyMs(a) ?? 0) - (replyMs(b) ?? 0));
     groups = [
-      { kind: "ranked", models: timed },
-      { kind: "no_speed", models: models.filter((m) => replyMs(m) === null) },
+      {
+        kind: "ranked",
+        models: models.filter((m) => !!m.throughput_tps).sort(bestFirst((m) => m.throughput_tps ?? 0)),
+      },
+      { kind: "no_speed", models: models.filter((m) => !m.throughput_tps).sort(byScore) },
     ];
   } else if (ranking === "smartest") {
-    const rated = models.filter((m) => m.intelligence_index != null);
-    rated.sort(byDesc((m) => m.intelligence_index ?? 0));
     groups = [
-      { kind: "ranked", models: rated },
-      { kind: "unrated", models: models.filter((m) => m.intelligence_index == null) },
+      { kind: "ranked", models: models.filter((m) => m.intelligence_index != null).sort(byScore) },
+      { kind: "unrated", models: unrated },
     ];
   } else {
     const priced = models.filter((m) => scorePerDollar(m) !== null);
@@ -165,12 +163,10 @@ export function rankModels(models: CatalogModel[], ranking: ModelRanking): Ranke
     const onFrontier = new Set(frontier);
     // A score without a price can't sit on the frontier, but it is still rated.
     const dominated = models.filter((m) => m.intelligence_index != null && !onFrontier.has(m));
-    frontier.sort(byDesc((m) => scorePerDollar(m) ?? 0));
-    dominated.sort(byDesc((m) => scorePerDollar(m) ?? -1));
     groups = [
-      { kind: "ranked", models: frontier },
-      { kind: "dominated", models: dominated },
-      { kind: "unrated", models: models.filter((m) => m.intelligence_index == null) },
+      { kind: "ranked", models: frontier.sort(byScore) },
+      { kind: "dominated", models: dominated.sort(byScore) },
+      { kind: "unrated", models: unrated },
     ];
   }
   return groups.filter((g) => g.models.length > 0);

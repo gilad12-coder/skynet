@@ -104,12 +104,9 @@ function ModelStats({ model }: { model: CatalogModel }) {
       title: msg("submit.modelpicker.stat.price_title"),
     });
   }
-  if (model.throughput_tps && model.latency_ms != null) {
+  if (model.throughput_tps) {
     stats.push({
-      text: msg("submit.modelpicker.stat.speed", {
-        tps: number(model.throughput_tps, 0),
-        latency: number(model.latency_ms / 1000, 2),
-      }),
+      text: msg("submit.modelpicker.stat.speed", { tps: number(model.throughput_tps, 0) }),
       title: msg("submit.modelpicker.stat.speed_title"),
     });
   }
@@ -429,11 +426,6 @@ export function ModelPicker({
                             <Eye className="size-2.5" />
                           </MicroPill>
                         )}
-                        {showRetention && m.zero_retention && (
-                          <MicroPill title={msg("submit.modelpicker.zdr_badge_title")}>
-                            {msg("submit.modelpicker.zdr_badge")}
-                          </MicroPill>
-                        )}
                         {showRetention && dataPolicy === "zdr" && m.zero_retention === false && (
                           <MicroPill
                             className="bg-[var(--warning-dim)] text-[var(--warning)]"
@@ -464,11 +456,15 @@ export function ModelPicker({
                       href={m.artificial_analysis_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      aria-label={msg("submit.modelpicker.aa_link")}
                       title={msg("submit.modelpicker.aa_link")}
-                      className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-muted-foreground hover:text-foreground lg:min-h-0 lg:min-w-0 lg:px-2"
+                      className="me-2 flex min-h-[44px] shrink-0 items-center gap-1 rounded-md border border-border/50 px-2 text-[0.6875rem] font-medium text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground lg:min-h-0 lg:py-0.5"
                     >
-                      <ArrowSquareOut className="size-3.5" aria-hidden="true" />
+                      <ArrowSquareOut className="size-3" aria-hidden="true" />
+                      {msg("submit.modelpicker.aa_link_label")}
+                      <span className="sr-only">
+                        {" "}
+                        ({m.display_name || m.label}, {msg("submit.modelpicker.aa_link")})
+                      </span>
                     </a>
                   )}
                 </div>
