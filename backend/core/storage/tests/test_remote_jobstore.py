@@ -1423,6 +1423,40 @@ def test_progress_eviction_structural_dropped_only_as_last_resort(
     assert "optimized_evaluated" in names
 
 
+@pytest.mark.parametrize("phase", ["explore", "continue"])
+def test_auto_run_progress_is_never_trimmed(store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch, phase: str) -> None:
+    """A run that recorded an Auto lane keeps every progress event past the cap.
+
+    Args:
+        store: In-memory job store.
+        monkeypatch: Patch fixture.
+        phase: Auto lane phase the run reported.
+    """
+    monkeypatch.setattr(remote_mod, "MAX_PROGRESS_EVENTS", 3)
+    monkeypatch.setattr(remote_mod, "PROGRESS_TRIM_SAMPLE_RATE", 1)
+
+    store.create_job("auto-run")
+    store.record_progress("auto-run", "lane_started", {"engine": "gepa", "phase": phase, "budget": 4})
+    for i in range(10):
+        store.record_progress("auto-run", "optimizer_progress", {"i": i})
+
+    assert store.get_progress_count("auto-run") == 11
+    assert store.get_progress_events("auto-run")[1]["metrics"] == {"i": 0}
+
+
+def test_single_engine_run_progress_keeps_the_cap(store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A single-engine run's lane marker does not lift the retention cap."""
+    monkeypatch.setattr(remote_mod, "MAX_PROGRESS_EVENTS", 3)
+    monkeypatch.setattr(remote_mod, "PROGRESS_TRIM_SAMPLE_RATE", 1)
+
+    store.create_job("single-run")
+    store.record_progress("single-run", "lane_started", {"engine": "gepa", "phase": "single", "budget": 4})
+    for i in range(10):
+        store.record_progress("single-run", "optimizer_progress", {"i": i})
+
+    assert store.get_progress_count("single-run") == 3
+
+
 def test_record_progress_does_not_lock_parent_job_row() -> None:
     """``record_progress`` does not use ``SELECT ... FOR UPDATE`` on jobs."""
     source = inspect.getsource(RemoteDBJobStore.record_progress)

@@ -30,6 +30,7 @@ from ..constants import (
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
     PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
     PAYLOAD_OVERVIEW_TOTAL_PAIRS,
+    PROGRESS_LANE_STARTED,
     STRUCTURAL_PROGRESS_EVENTS,
     TQDM_KEY_PREFIX,
 )
@@ -96,6 +97,8 @@ logger = logging.getLogger(__name__)
 MAX_PROGRESS_EVENTS = 5000
 ORPHANED_RUN_MESSAGE = "The run stopped because its worker went away. Resume, retry or clone it to continue."
 PROGRESS_TRIM_SAMPLE_RATE = 100
+# Auto's composition phases; a single-engine run's lane reports phase "single".
+AUTO_LANE_PHASES = frozenset({"explore", "continue"})
 _IMMUTABLE_JOB_COLUMNS = frozenset({"optimization_id", "notified_at", "notification_claims", "idempotency_key"})
 # The JSON columns whose serialized size dominates a job's storage footprint and
 # therefore make up ``jobs.stored_bytes``. ``latest_metrics`` / ``message`` are
@@ -2764,7 +2767,7 @@ class RemoteDBJobStore:
                 session.query(ProgressEventModel).filter(ProgressEventModel.optimization_id == optimization_id).count()
             )
             excess = event_count - self._progress_events_cap
-            if excess <= 0:
+            if excess <= 0 or self._is_auto_run(session, optimization_id):
                 return
 
             # One ordered DELETE replaces the prior count→select→top-up→delete
@@ -2787,6 +2790,33 @@ class RemoteDBJobStore:
             session.commit()
         finally:
             session.close()
+
+    @staticmethod
+    def _is_auto_run(session: Session, optimization_id: str) -> bool:
+        """Return whether a job ran Auto lanes, whose full timing is kept for engine analysis.
+
+        The lane-started markers decide it rather than the payload because legacy
+        and unified submissions store the strategy in different shapes, and the
+        markers are structural, so they outlive every other row a trim could drop.
+
+        Args:
+            session: Open database session.
+            optimization_id: ID of the job being trimmed.
+
+        Returns:
+            ``True`` once the job has recorded an explore or continue lane.
+        """
+        lane_metrics = (
+            session.query(ProgressEventModel.metrics)
+            .filter(
+                ProgressEventModel.optimization_id == optimization_id,
+                ProgressEventModel.event == PROGRESS_LANE_STARTED,
+            )
+            .all()
+        )
+        return any(
+            isinstance(metrics, dict) and metrics.get("phase") in AUTO_LANE_PHASES for (metrics,) in lane_metrics
+        )
 
     def get_progress_events(self, optimization_id: str, *, since: int = 0) -> list[ProgressEventRecord]:
         """Retrieve progress events for a job in chronological order.
