@@ -115,7 +115,7 @@ export function BudgetSection({ kind, choice }: { kind: ArtifactKind; choice: Op
       <TotalBudgetCard
         w={ctx}
         mode={aggregateTokenSource(models)}
-        preliminary={!reflectionModel?.name.trim() || !state.inputs.confirmed}
+        preliminary={!reflectionModel?.name.trim() || ctx.stepIssue("inputs") !== null}
       />
     </StepCard>
   );

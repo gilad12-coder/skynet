@@ -9,7 +9,6 @@ export type WizardPageId =
   | "brief"
   | "artifact"
   | "source"
-  | "confirm"
   | "plan"
   | "optimizer"
   | "models"
@@ -37,7 +36,7 @@ export function stepPages(step: WizardStepId, state: WizardV2State): readonly Wi
     case "task":
       return ["brief", "artifact"];
     case "inputs":
-      return state.inputs.cases.length > 0 ? ["source", "confirm"] : ["source"];
+      return ["source"];
     case "optimizer":
       return optimizerPages(state);
     case "metric":

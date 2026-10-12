@@ -62,7 +62,6 @@ export interface InputsSlice {
   split: SplitFractions;
   shuffle: boolean;
   rationale: string;
-  confirmed: boolean;
 }
 
 export interface OptimizerSlice {
@@ -140,7 +139,6 @@ export function initialWizardV2State(
       split: { ...DEFAULT_UNIFIED_SPLIT },
       shuffle: true,
       rationale: "",
-      confirmed: false,
     },
     optimizer: {
       choice: "auto",

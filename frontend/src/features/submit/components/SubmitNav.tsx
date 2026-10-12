@@ -25,6 +25,8 @@ interface SubmitNavProps {
   onNext?: () => void;
   onSubmit?: () => void;
   backDisabled?: boolean;
+  /** Keeps Continue closed, e.g. while the step's answers are invalid. */
+  nextDisabled?: boolean;
   showSubmit?: boolean;
   /** Where the user is among the current step's screens; shown as dots. */
   screen?: { index: number; count: number };
@@ -56,6 +58,7 @@ export function SubmitNav({
   onNext,
   onSubmit,
   backDisabled,
+  nextDisabled,
   showSubmit,
   screen,
 }: SubmitNavProps) {
@@ -91,7 +94,7 @@ export function SubmitNav({
         {screen && <ScreenDots index={screen.index} count={screen.count} />}
         <Button
           onClick={onNext ?? goNext}
-          disabled={advancing}
+          disabled={advancing || nextDisabled}
           aria-busy={advancing || undefined}
           aria-live="polite"
           className="min-h-[44px] lg:min-h-0 min-w-0 flex-1 justify-center gap-2 whitespace-normal sm:min-w-[88px] sm:flex-none sm:whitespace-nowrap"

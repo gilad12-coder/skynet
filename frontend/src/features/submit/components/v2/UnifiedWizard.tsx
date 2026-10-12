@@ -22,7 +22,7 @@ import { TaskStep } from "./TaskStep";
 
 const STEP_VIEWS: Record<WizardStepId, (page: number) => ReactNode> = {
   task: (page) => <TaskStep page={page} />,
-  inputs: (page) => <InputsStep page={page} />,
+  inputs: () => <InputsStep />,
   optimizer: (page) => <OptimizerStep page={page} />,
   metric: (page) => <MetricStep page={page} />,
 };
@@ -155,6 +155,7 @@ function UnifiedWizardFrame() {
           onBack={back}
           onNext={forward}
           backDisabled={position === 0 && page === 0}
+          nextDisabled={current === "inputs" && w.stepIssue("inputs") !== null}
           showSubmit={lastScreen}
           screen={{ index: page, count: pageCount }}
         />

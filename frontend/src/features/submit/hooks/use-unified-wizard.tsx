@@ -146,15 +146,13 @@ function computeStepIssue(
     case "inputs": {
       const caseCount =
         inputs.cases.length > 0 ? inputs.cases.length : inputs.stagedDatasetId ? inputs.rowCount : 0;
-      const issue = inputsIssue({
+      return inputsIssue({
         mode: inputs.mode,
         caseCount,
         inputFields: inputs.inputFields,
         expectedField: inputs.expectedField,
         split: inputs.split,
       });
-      if (issue) return issue;
-      return inputs.confirmed ? null : "submit.v2.inputs.confirm_hint";
     }
     case "optimizer": {
       const kind = task.artifactKind;
@@ -215,7 +213,6 @@ function inputsFromRows(
     expectedField: null,
     cases: pairs ? rowsToCases(rows, columns, null) : rows[0] ? [singleInputCase(rows[0])] : [],
     rationale: "",
-    confirmed: false,
   };
 }
 

@@ -171,6 +171,12 @@ test("Guided shows the Optimizer step when its defaults can't run or the user is
   assert.deepEqual(wizardSteps({ ...readyState("guided"), step: "optimizer" }, false), WIZARD_V2_STEPS);
 });
 
+test("Inputs is one screen, before and after data arrives", () => {
+  const empty = initialWizardV2State("standard");
+  assert.deepEqual(stepPages("inputs", empty), ["source"]);
+  assert.deepEqual(stepPages("inputs", readyState("expert")), ["source"]);
+});
+
 test("Optimizer screens: Standard sees one plan screen, Expert and a blocked Guided the three", () => {
   assert.deepEqual(stepPages("optimizer", readyState("standard")), ["plan"]);
   assert.deepEqual(stepPages("optimizer", readyState("expert")), ["optimizer", "models", "budget"]);

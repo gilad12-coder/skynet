@@ -4,6 +4,7 @@
  * hold out for the final score.
  */
 import type { SplitFractions } from "@/shared/types/api";
+import type { ColumnRole } from "@/shared/ui/column-role-row";
 import {
   MIN_PAIRS_FOR_HELD_OUT,
   type DataMode,
@@ -83,6 +84,63 @@ export function defaultInputFields(columns: readonly string[], expectedField: st
   return columns.filter((c) => c !== expectedField);
 }
 
+/** Each column's role as the inputs slice reads it. */
+export function columnRoles(
+  columns: readonly string[],
+  inputFields: readonly string[],
+  expectedField: string | null,
+): Record<string, ColumnRole> {
+  const roles: Record<string, ColumnRole> = {};
+  for (const column of columns) {
+    roles[column] =
+      column === expectedField ? "output" : inputFields.includes(column) ? "input" : "ignore";
+  }
+  return roles;
+}
+
+/** The roles with one column changed; a new Output turns the previous one to Ignore. */
+export function withColumnRole(
+  roles: Readonly<Record<string, ColumnRole>>,
+  column: string,
+  role: ColumnRole,
+): Record<string, ColumnRole> {
+  const next: Record<string, ColumnRole> = {};
+  for (const [name, current] of Object.entries(roles)) {
+    next[name] = role === "output" && current === "output" ? "ignore" : current;
+  }
+  next[column] = role;
+  return next;
+}
+
+/**
+ * Read a table through its column roles. An Output column makes input/output
+ * pairs over every row; without one the table is one input, taken from the
+ * first row's input columns.
+ */
+export function inputsFromRoles(
+  columns: readonly string[],
+  roles: Readonly<Record<string, ColumnRole>>,
+  rows: readonly Row[],
+): { mode: DataMode; inputFields: string[]; expectedField: string | null; cases: UnifiedCase[] } {
+  const inputFields = columns.filter((c) => roles[c] === "input");
+  const expectedField = columns.find((c) => roles[c] === "output") ?? null;
+  if (expectedField) {
+    return {
+      mode: "pairs",
+      inputFields,
+      expectedField,
+      cases: rowsToCases(rows, inputFields, expectedField),
+    };
+  }
+  const first = rows[0];
+  return {
+    mode: "single",
+    inputFields,
+    expectedField: null,
+    cases: first ? rowsToCases([first], inputFields, null) : [],
+  };
+}
+
 /**
  * How the server will split the cases (`unified/split.py`): single mode scores
  * its one case everywhere, and pairs below MIN_PAIRS_FOR_HELD_OUT keep no test
@@ -119,15 +177,13 @@ export interface InputsCheck {
   split: SplitFractions;
 }
 
-/**
- * The i18n key of what keeps the Inputs step from being confirmed, or null
- * when it can be.
- */
+/** The i18n key of what keeps the Inputs step from being done, or null when it is. */
 export function inputsIssue(s: InputsCheck): string | null {
   if (s.caseCount === 0) return "submit.v2.inputs.issue.no_data";
   if (s.mode === null) return "submit.v2.inputs.issue.no_mode";
   if (s.mode === "single") {
-    return s.caseCount === 1 ? null : "submit.v2.inputs.issue.single_needs_one";
+    if (s.caseCount !== 1) return "submit.v2.inputs.issue.single_needs_one";
+    return s.inputFields.length > 0 ? null : "submit.v2.inputs.issue.no_input_fields";
   }
   if (s.caseCount < 2) return "submit.v2.inputs.issue.pairs_need_two";
   if (s.inputFields.filter((f) => f !== s.expectedField).length === 0) {
