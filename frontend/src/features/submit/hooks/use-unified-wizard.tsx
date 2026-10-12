@@ -57,6 +57,7 @@ import { inputsIssue, rowsToCases, singleInputCase, type Row } from "../lib/inpu
 import { prepareModelConfig } from "../lib/model-config";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import { metricUsesModel } from "../lib/scorer-dependencies";
+import { canEnterStep, canMoveForward } from "../lib/wizard-steps";
 import {
   WIZARD_V2_STEPS,
   contractSnapshot,
@@ -297,13 +298,13 @@ export function WizardV2Provider({
   useEffect(() => dispatch({ type: "level", level, optimizerBlocked }), [level]);
 
   const canEnter = useCallback(
-    (step: WizardStepId) => {
-      if (!steps.includes(step)) return false;
-      if (stepIndex(step) <= stepIndex(state.furthestStep)) return true;
-      return (
-        steps.indexOf(step) === steps.indexOf(state.step) + 1 && stepIssue(state.step) === null
-      );
-    },
+    (step: WizardStepId) =>
+      canEnterStep(step, {
+        steps,
+        current: state.step,
+        furthest: state.furthestStep,
+        issueOf: stepIssue,
+      }),
     [steps, state.furthestStep, state.step, stepIssue],
   );
 
@@ -321,13 +322,14 @@ export function WizardV2Provider({
   const goNext = useCallback(() => {
     const next = steps[steps.indexOf(state.step) + 1];
     if (!next) return;
-    const issue = stepIssue(state.step);
-    if (issue && stepIndex(next) > stepIndex(state.furthestStep)) {
-      toast.error(v2Text(issue, guided));
+    if (!canEnter(next)) {
+      const inputsBlock = stepIssue("inputs");
+      const issue = canMoveForward(state.step, inputsBlock) ? stepIssue(state.step) : inputsBlock;
+      if (issue) toast.error(v2Text(issue, guided));
       return;
     }
     goTo(next);
-  }, [steps, state.step, state.furthestStep, stepIssue, goTo, guided]);
+  }, [steps, state.step, stepIssue, canEnter, goTo, guided]);
   const goPrev = useCallback(() => {
     const prev = steps[steps.indexOf(state.step) - 1];
     if (prev) goTo(prev);

@@ -25,6 +25,7 @@ const {
   columnRoles,
   defaultInputFields,
   heldOutCounts,
+  inferredRoles,
   inputsFromRoles,
   inputsIssue,
   parseTypedInput,
@@ -182,4 +183,38 @@ test("one input with no input columns is not done", () => {
     inputsIssue({ mode: "single", caseCount: 1, inputFields: [], expectedField: null, split }),
     "submit.v2.inputs.issue.no_input_fields",
   );
+});
+
+test("a pairs reading with no expected field keeps pairs, the last column the Output", () => {
+  const columns = ["q", "ctx", "a"];
+  const roles = inferredRoles(columns, { mode: "pairs", input_fields: ["q"], expected_field: null });
+  assert.deepEqual(roles, { q: "input", ctx: "ignore", a: "output" });
+  const rows = [
+    { q: "1", ctx: "x", a: "2" },
+    { q: "3", ctx: "y", a: "4" },
+  ];
+  assert.equal(inputsFromRoles(columns, roles, rows).mode, "pairs");
+  const unknown = inferredRoles(columns, { mode: "pairs", input_fields: [], expected_field: "gone" });
+  assert.deepEqual(unknown, { q: "input", ctx: "input", a: "output" });
+});
+
+test("the inferred expected field is the Output; a single reading has none", () => {
+  assert.deepEqual(
+    inferredRoles(["q", "a", "n"], { mode: "pairs", input_fields: ["q"], expected_field: "a" }),
+    { q: "input", a: "output", n: "ignore" },
+  );
+  assert.deepEqual(
+    inferredRoles(["q", "a"], { mode: "single", input_fields: ["q"], expected_field: null }),
+    { q: "input", a: "ignore" },
+  );
+});
+
+test("the user setting every column to Input or Ignore still means one input", () => {
+  const columns = ["q", "a"];
+  const roles = withColumnRole(
+    inferredRoles(columns, { mode: "pairs", input_fields: ["q"], expected_field: null }),
+    "a",
+    "ignore",
+  );
+  assert.equal(inputsFromRoles(columns, roles, [{ q: "1", a: "2" }, { q: "3", a: "4" }]).mode, "single");
 });

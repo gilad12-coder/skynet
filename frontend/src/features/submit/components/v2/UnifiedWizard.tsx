@@ -11,7 +11,7 @@ import { ExecutionBudgetProvider } from "../../hooks/use-execution-budget";
 import { WizardV2Provider, useWizardV2Shell, v2Text } from "../../hooks/use-unified-wizard";
 import { stepPages } from "../../lib/wizard-pages";
 import { WIZARD_V2_STEPS, type WizardStepId } from "../../lib/wizard-v2";
-import { WIZARD_STAGE } from "../../lib/wizard-steps";
+import { WIZARD_STAGE, canMoveForward } from "../../lib/wizard-steps";
 import { SubmitNav } from "../SubmitNav";
 import { SubmitSplash } from "../SubmitSplash";
 import { SubmitStepper } from "../SubmitStepper";
@@ -71,8 +71,10 @@ function UnifiedWizardFrame() {
   const page = Math.min(pages[current], pageCount - 1);
   const lastScreen = position === steps.length - 1 && page === pageCount - 1;
   const { goNext, goPrev, advancing, submitting } = w;
+  const forwardOpen = canMoveForward(current, w.stepIssue("inputs"));
 
   const forward = useCallback(() => {
+    if (!forwardOpen) return;
     if (page < pageCount - 1) {
       setPages((p) => ({ ...p, [current]: page + 1 }));
       return;
@@ -80,7 +82,7 @@ function UnifiedWizardFrame() {
     const next = steps[position + 1];
     if (next) setPages((p) => ({ ...p, [next]: 0 }));
     goNext();
-  }, [page, pageCount, current, steps, position, goNext]);
+  }, [forwardOpen, page, pageCount, current, steps, position, goNext]);
 
   const back = useCallback(() => {
     if (page > 0) {
@@ -155,7 +157,7 @@ function UnifiedWizardFrame() {
           onBack={back}
           onNext={forward}
           backDisabled={position === 0 && page === 0}
-          nextDisabled={current === "inputs" && w.stepIssue("inputs") !== null}
+          nextDisabled={!forwardOpen}
           showSubmit={lastScreen}
           screen={{ index: page, count: pageCount }}
         />

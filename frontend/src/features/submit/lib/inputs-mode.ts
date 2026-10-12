@@ -98,6 +98,28 @@ export function columnRoles(
   return roles;
 }
 
+/**
+ * The roles a table starts with from the backend's reading: its input fields
+ * are Inputs, its expected field the Output, the rest ignored. A reading that
+ * keeps pairs without a usable expected field takes the last column as the
+ * Output (the upload card's `defaultRoleFor` rule) rather than collapsing to
+ * one input; only the user's own picks turn a table into one input.
+ */
+export function inferredRoles(
+  columns: readonly string[],
+  inferred: { mode: DataMode; input_fields: readonly string[]; expected_field?: string | null },
+): Record<string, ColumnRole> {
+  const named =
+    inferred.expected_field && columns.includes(inferred.expected_field)
+      ? inferred.expected_field
+      : null;
+  const expectedField =
+    named ?? (inferred.mode === "pairs" && columns.length > 1 ? columns[columns.length - 1]! : null);
+  const picked = inferred.input_fields.filter((f) => columns.includes(f) && f !== expectedField);
+  const inputFields = picked.length ? picked : defaultInputFields(columns, expectedField);
+  return columnRoles(columns, inputFields, expectedField);
+}
+
 /** The roles with one column changed; a new Output turns the previous one to Ignore. */
 export function withColumnRole(
   roles: Readonly<Record<string, ColumnRole>>,

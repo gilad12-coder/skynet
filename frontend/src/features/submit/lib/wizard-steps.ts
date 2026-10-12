@@ -26,3 +26,37 @@ export const WIZARD_STAGE: Readonly<Record<WizardStageId, number>> = {
 export function isWizardStageId(value: unknown): value is WizardStageId {
   return typeof value === "string" && (WIZARD_STAGE_ORDER as readonly string[]).includes(value);
 }
+
+/**
+ * Whether forward moves (Next, the arrow keys, the stepper) may leave
+ * `current`. Nothing past Inputs opens while Inputs has an issue, from
+ * Inputs or from any later page; going back is always allowed.
+ */
+export function canMoveForward(current: WizardStageId, inputsIssue: string | null): boolean {
+  return inputsIssue === null || WIZARD_STAGE[current] < WIZARD_STAGE.inputs;
+}
+
+/**
+ * Whether the user may enter `target`. Earlier steps open freely; nothing
+ * past Inputs opens while Inputs has an issue; steps already reached open
+ * otherwise, and past the furthest step only the next one opens, once the
+ * current step is done.
+ */
+export function canEnterStep(
+  target: WizardStageId,
+  nav: {
+    steps: readonly WizardStageId[];
+    current: WizardStageId;
+    furthest: WizardStageId;
+    issueOf: (step: WizardStageId) => string | null;
+  },
+): boolean {
+  if (!nav.steps.includes(target)) return false;
+  if (WIZARD_STAGE[target] <= WIZARD_STAGE[nav.current]) return true;
+  if (WIZARD_STAGE[target] > WIZARD_STAGE.inputs && nav.issueOf("inputs") !== null) return false;
+  if (WIZARD_STAGE[target] <= WIZARD_STAGE[nav.furthest]) return true;
+  return (
+    nav.steps.indexOf(target) === nav.steps.indexOf(nav.current) + 1 &&
+    nav.issueOf(nav.current) === null
+  );
+}

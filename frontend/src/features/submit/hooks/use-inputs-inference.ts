@@ -14,7 +14,7 @@ import { defaultRoleFor, type ColumnRole } from "@/shared/ui/column-role-row";
 import {
   casesToRows,
   columnRoles,
-  defaultInputFields,
+  inferredRoles,
   heldOutCounts,
   inputsFromRoles,
   parseTypedInput,
@@ -123,20 +123,8 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
             rationale: res.rationale,
           });
         } else {
-          const expectedField =
-            res.expected_field && data.columns.includes(res.expected_field)
-              ? res.expected_field
-              : null;
-          const picked = res.input_fields.filter(
-            (f: string) => data.columns.includes(f) && f !== expectedField,
-          );
-          const inputFields = picked.length ? picked : defaultInputFields(data.columns, expectedField);
           patchInputs({
-            ...inputsFromRoles(
-              data.columns,
-              columnRoles(data.columns, inputFields, expectedField),
-              data.rows,
-            ),
+            ...inputsFromRoles(data.columns, inferredRoles(data.columns, res), data.rows),
             split: res.suggested_split,
             rationale: res.rationale,
           });
