@@ -6,7 +6,6 @@ import type { ValidateCodeResponse } from "@/shared/types/api";
 import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unified-run";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
 import { useContractCheck } from "../../hooks/use-contract-check";
-import { runHint, shapeHint } from "../../lib/code-hints";
 import { metricUsesModel as metricCallsModel } from "../../lib/scorer-dependencies";
 import { AuthoringShell } from "../steps/AuthoringShell";
 import { CodeAgentPanel } from "../steps/CodeAgentPanel";
@@ -162,8 +161,6 @@ export function MetricStep() {
               setMetricCode(code);
               setMetricEdited(true);
             }}
-            runHint={kind ? runHint(kind) : ""}
-            metricHint={metricShape ? shapeHint(metricShape) : ""}
             agent={agent}
             guided={guided}
           >

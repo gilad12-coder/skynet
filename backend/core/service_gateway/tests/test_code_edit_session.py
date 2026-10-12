@@ -283,12 +283,15 @@ def test_run_contract_follows_the_artifact_kind() -> None:
     assert "def run(artifact, input)" in prompt
 
 
-def test_run_contract_names_what_the_agent_writes() -> None:
-    """A DSPy program asks for a signature plus a metric; every other kind for run code plus a metric."""
+def test_run_contract_is_one_contract_for_every_artifact() -> None:
+    """Every artifact, a DSPy program included, gets run code plus a metric under one contract."""
     program, _ = _unified_contracts(_unified(task={"objective": "x", "artifact": {"kind": "dspy_program"}}))
     prompt, _ = _unified_contracts(_unified())
-    assert program.startswith("You write exactly two things")
-    assert "the signature and the metric" in program
-    assert "the run code and the metric" in prompt
-    assert "validity check" in program
-    assert "validity check" in prompt
+    deliverables = prompt.split("\n\n", 1)[0]
+    assert program.startswith(deliverables)
+    assert "the run code and the metric" in deliverables
+    assert "validity check" in deliverables
+    assert "signature and the metric" not in program
+    for contract in (program, prompt):
+        assert "The run code is plain python that turns one case input into an output" in contract
+        assert "- Entry point: " in contract
