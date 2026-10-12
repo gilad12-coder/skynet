@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +13,7 @@ from gepa.oa.config import OptimizeAnythingConfig
 from gepa.oa.engine import Result as UpstreamResult
 from gepa.oa.ensemble import optimize_best_of
 
+from core.billing.usage_tags import current_tags
 from core.exceptions import ServiceError
 from core.models.blackbox import BlackboxStrategy
 
@@ -337,3 +341,98 @@ def test_auto_fails_when_every_lane_fails(tmp_path: Path, monkeypatch: pytest.Mo
             make_ctx(str(tmp_path)),
             caps=CAPS,
         )
+
+
+class BilledFixtureEngine(FixtureEngine):
+    """Bill model calls on the lane's own thread and on a worker pool, like real engines."""
+
+    def __init__(self, name: str, ledger: list[tuple[dict[str, str], float]], lock: threading.Lock) -> None:
+        """Share one billing ledger across every lane.
+
+        Args:
+            name: Engine identifier.
+            ledger: Recorded ``(tags, cost)`` per billed call.
+            lock: Guards the ledger across lane threads.
+        """
+        super().__init__(name)
+        self.ledger, self.lock = ledger, lock
+
+    def bill(self, cost: float) -> None:
+        """Record one billed call under the tags the gateway would read.
+
+        Args:
+            cost: Call cost in USD.
+        """
+        with self.lock:
+            self.ledger.append((current_tags(), cost))
+
+    def run(self, task: Any, server: Any, ctx: EngineContext | None = None) -> Any:
+        """Bill a reflection call in-thread and a mutation call from a child thread pool.
+
+        Args:
+            task: Task with the scheduler's chosen seed.
+            server: Platform evaluation allowance.
+            ctx: Platform context.
+
+        Returns:
+            The fixture engine result.
+        """
+        self.bill(0.25)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            pool.submit(self.bill, 0.5).result()
+        return super().run(task, server, ctx)
+
+
+def test_auto_tags_every_billed_call_with_its_lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every billed call inside an Auto lane carries ``lane=<phase>-<engine>``, including worker threads.
+
+    Args:
+        tmp_path: Artifact directory.
+        monkeypatch: Patch fixture.
+    """
+    ledger: list[tuple[dict[str, str], float]] = []
+    lock = threading.Lock()
+    monkeypatch.setattr(auto, "get_engine", lambda name, caps: BilledFixtureEngine(name, ledger, lock))
+
+    def billed_score(candidate: str, example: Any = None) -> tuple[float, dict[str, Any]]:
+        """Bill the scorer's model call, then score as the plain fixture does.
+
+        Args:
+            candidate: Candidate containing the engine identifier.
+            example: Ignored dataset example.
+
+        Returns:
+            Deterministic score and empty feedback.
+        """
+        with lock:
+            ledger.append((current_tags(), 0.125))
+        return score(candidate, example)
+
+    server = EvalServer(billed_score, max_evals=2 * (len(AUTO_ENGINES) + 1))
+    auto.run_strategy(BlackboxStrategy(), Task("seed"), server, make_ctx(str(tmp_path)), caps=CAPS)
+
+    expected = {auto.lane_tag("explore", name) for name in AUTO_ENGINES} | {auto.lane_tag("continue", "gepa")}
+    assert {tags.get("lane") for tags, _ in ledger} == expected
+    by_lane: dict[str, float] = defaultdict(float)
+    for tags, cost in ledger:
+        by_lane[tags["lane"]] += cost
+    assert sum(by_lane.values()) == pytest.approx(sum(cost for _, cost in ledger))
+    assert all(by_lane[lane] > 0 for lane in expected)
+    assert current_tags() == {}
+
+
+def test_single_engine_calls_carry_no_lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A single-engine run is not an Auto lane, so its calls stay untagged by lane.
+
+    Args:
+        tmp_path: Artifact directory.
+        monkeypatch: Patch fixture.
+    """
+    ledger: list[tuple[dict[str, str], float]] = []
+    monkeypatch.setattr(auto, "get_engine", lambda name, caps: BilledFixtureEngine(name, ledger, threading.Lock()))
+    server = EvalServer(score, max_evals=3)
+    auto.run_strategy(
+        BlackboxStrategy(mode="single", engine="gepa"), Task("seed"), server, make_ctx(str(tmp_path)), caps=CAPS
+    )
+    assert ledger
+    assert all("lane" not in tags for tags, _ in ledger)
