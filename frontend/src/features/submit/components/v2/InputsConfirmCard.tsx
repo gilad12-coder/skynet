@@ -226,15 +226,9 @@ export function InputsConfirmCard({
       </div>
 
       <div className="flex flex-col items-stretch gap-2 border-t border-border/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <p
-          className={cn(
-            "text-xs",
-            inputs.confirmed ? "text-[#5A7247] dark:text-[#adc899]" : "text-muted-foreground",
-          )}
-          aria-live="polite"
-        >
+        <p className="text-xs text-muted-foreground" aria-live="polite">
           {inputs.confirmed
-            ? t("submit.v2.inputs.confirmed")
+            ? null
             : issue
               ? t(issue)
               : t("submit.v2.inputs.confirm_hint")}

@@ -139,8 +139,7 @@ type Finale = "none" | "splash" | "out";
 const ENGLISH_ENTRY: Partial<Record<MessageKey, string>> = {
   "experience.intake.entrance.title": "New to Skynet? Let's get you set up.",
   "experience.intake.language.title": "Which language should Skynet speak?",
-  "experience.intake.language.hint":
-    "The app and the assistant both switch to it. You can change it any time in Settings.",
+  "experience.intake.language.hint": "The app and the assistant both switch to it.",
   "experience.intake.skip": "Skip setup",
   "experience.intake.next": "Continue",
 };
