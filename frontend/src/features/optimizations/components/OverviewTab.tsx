@@ -121,6 +121,7 @@ function OverviewTabImpl({
   onPairSelect,
   onPairDeleted,
   payload,
+  resultCard,
 }: {
   job: OptimizationStatusResponse;
   isActive: boolean;
@@ -132,6 +133,8 @@ function OverviewTabImpl({
   // The submitted payload: a black-box run's recipe and cases tell the
   // candidate tree what a candidate is and whether per-case scores exist.
   payload?: OptimizationPayloadResponse | null;
+  // Standard level leads a finished run's Overview with its result card.
+  resultCard?: ReactNode;
 }) {
   const metrics = job.latest_metrics ?? {};
   const isPairContext = activePair != null;
@@ -315,6 +318,8 @@ function OverviewTabImpl({
 
   return (
     <>
+      {resultCard}
+
       {renderRunBlocks && job.status !== "stopped" && job.recovery?.state !== "recovering" && (
         <FadeIn>
           <p className="text-sm text-muted-foreground">
