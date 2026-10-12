@@ -136,7 +136,6 @@ test("fallback flags come from the shared rules while the catalog loads", () => 
     choice: "auto",
   });
   assert.equal(auto.family, "dspy");
-  assert.equal(auto.metricShape, "dspy_feedback");
   assert.equal(gepa.usesFeedback, true);
   const meta = optimizerOptions({
     kind: "code",

@@ -2,7 +2,7 @@
 
 import { PingDot } from "@/shared/ui/ping-dot";
 import * as React from "react";
-import { Check, Repeat } from "@/shared/ui/icons";
+import { Check } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { HelpTip } from "@/shared/ui/help-tip";
@@ -35,41 +35,15 @@ export function ArtifactStatusChip({ status }: { status: ArtifactStatus }) {
   );
 }
 
-interface ModeToggleProps {
+function ModeToggle({
+  value,
+  onChange,
+}: {
   value: "auto" | "manual";
   onChange: (mode: "auto" | "manual") => void;
-  disabledReason?: string;
-  // Leading slot of the header band: the wizard's recipe chip, so the recipe
-  // and the step it opens read as one card.
-  start?: React.ReactNode;
-  // Chip showing the chosen module with a click-to-switch affordance.
-  module?: { label: string; onChangeModule: () => void } | null;
-}
-
-function ModeToggle({ value, onChange, disabledReason, start, module }: ModeToggleProps) {
-  const autoDisabled = !!disabledReason && value !== "auto";
-
+}) {
   return (
-    <div className="flex flex-col items-stretch gap-2.5 border-b border-border/40 bg-background px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-      <div className="flex min-w-0 flex-col items-stretch gap-2.5 sm:flex-row sm:items-center sm:w-auto">
-        {start}
-        {module && (
-          <button
-            type="button"
-            onClick={module.onChangeModule}
-            data-tutorial="module-selector"
-            className="group inline-flex min-h-[44px] w-full min-w-0 shrink-0 cursor-pointer items-center justify-between gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1 text-xs transition-colors hover:border-primary-fill sm:w-auto lg:min-h-0"
-          >
-            <span className="font-semibold text-foreground">{module.label}</span>
-            <span aria-hidden className="h-3 w-px bg-border/70" />
-            <span className="flex items-center gap-1 font-medium text-muted-foreground transition-colors group-hover:text-foreground">
-              {msg("submit.module.change")}
-              <Repeat className="size-3" />
-            </span>
-          </button>
-        )}
-      </div>
-
+    <div className="flex items-center justify-end border-b border-border/40 bg-background px-4 py-2.5">
       <Segmented<"auto" | "manual">
         size="sm"
         className="w-full sm:w-auto"
@@ -77,12 +51,7 @@ function ModeToggle({ value, onChange, disabledReason, start, module }: ModeTogg
         value={value}
         onChange={onChange}
         options={[
-          {
-            value: "auto",
-            label: msg("auto.features.submit.components.steps.codestep.7"),
-            disabled: autoDisabled,
-            title: autoDisabled ? disabledReason : undefined,
-          },
+          { value: "auto", label: msg("auto.features.submit.components.steps.codestep.7") },
           { value: "manual", label: msg("auto.features.submit.components.steps.codestep.8") },
         ]}
       />
@@ -90,7 +59,11 @@ function ModeToggle({ value, onChange, disabledReason, start, module }: ModeTogg
   );
 }
 
-export interface AuthoringShellProps extends ModeToggleProps {
+export interface AuthoringShellProps {
+  // Without onChange the agent pane always shows and there is no toggle: the
+  // agent writes, the user edits beside it.
+  value?: "auto" | "manual";
+  onChange?: (mode: "auto" | "manual") => void;
   // The agent chat or interview, shown in the start pane while in auto mode.
   sidePanel: React.ReactNode;
   title: React.ReactNode;
@@ -99,16 +72,13 @@ export interface AuthoringShellProps extends ModeToggleProps {
   children: React.ReactNode;
 }
 
-// The two-pane authoring surface shared by the DSPy and black-box wizards:
-// a mode toggle header, the agent pane on the start side in auto mode, and
+// The two-pane authoring surface of the wizard's Task and Metric steps:
+// an optional mode toggle header, the agent pane on the start side in auto mode, and
 // the editors on the end side. Callers pad their own body so a canvas can
 // bleed to the edges while form fields keep the card gutter.
 export function AuthoringShell({
-  value,
+  value = "auto",
   onChange,
-  disabledReason,
-  start,
-  module,
   sidePanel,
   title,
   description,
@@ -116,13 +86,9 @@ export function AuthoringShell({
 }: AuthoringShellProps) {
   return (
     <div className="@container flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl">
-      <ModeToggle
-        value={value}
-        onChange={onChange}
-        disabledReason={disabledReason}
-        start={start}
-        module={module}
-      />
+      {onChange && (
+        <ModeToggle value={value} onChange={onChange} />
+      )}
       {/* The agent pane grows with the card instead of sitting at a fixed
           width, keeping a floor that fits a question and its choices; the
           editors stay the wider side. The card fills the wizard's screen, so

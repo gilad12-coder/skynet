@@ -1084,6 +1084,10 @@ class CodeAssistant(dspy.Signature):
     )
 
 
+_RUN_DELIVERABLES = """You write exactly two things, and the user can edit either: the run code and the metric. Before Run, the validity check confirms they and the data agree: run(artifact, input) must exist, the metric must have the exact shape the metric contract states, and run must take the starting version and each sample case input to an output the metric scores without an error. Write both so that check passes."""
+
+_PROGRAM_DELIVERABLES = """You write exactly two things, and the user can edit either: the signature and the metric. The signature is the dspy.Signature classes and the module that build_program() returns; the metric scores what that module predicts. Before Run, the validity check confirms they and the data agree: build_program() must exist, the module must run on each sample case's input fields, and the metric must have the exact shape the metric contract states and score the prediction against the case without an error. Write both so that check passes."""
+
 _RUN_CONTRACT = """The run code is plain python that turns one case input into an output; the optimizer swaps in new versions of the artifact and the metric scores what run returns.
 - Define def run(artifact, input): artifact is the version under optimization (a str, or a dict of name -> text when the starting version is a mapping), exactly as the optimizer proposes it; input is one case input, a dict keyed by the input fields. Return the output: a str, or any JSON-serializable value the metric reads.
 - The task model comes from the skynet module: `from skynet import llm` (never define your own). llm(prompt, input=None, images=None) -> str; llm(artifact, input["<input field>"]) runs the artifact as the system message with that field as the user message and returns the reply; that is how a prompt is exercised. images= attaches PNG/JPEG bytes, file paths or data: URLs.
@@ -1096,6 +1100,7 @@ _PROGRAM_CONTRACT = """The artifact is a DSPy program, so the run code builds it
 - Define def build_program() taking no arguments and returning a dspy.Module. `import dspy` at the top; define the dspy.Signature classes and the module it uses.
 - The harness applies the version under optimization, a dict mapping each predictor name (as program.named_predictors() reports it) to its instruction text, configures the task model as the dspy LM and calls program(**input) with the input fields as keyword arguments. Never call dspy.configure, create a dspy.LM or set instructions yourself.
 - Name the predictors so they match the keys of the starting version; the module's forward takes exactly the input fields as keyword arguments and returns a dspy.Prediction with the output fields the metric reads.
+- Name the signature's input fields exactly as the case input fields. gold holds the case's expected fields under their own names (a single expected value is gold.expected), so name the output fields so the metric can compare pred.<field> with the matching gold field.
 - dspy, gepa and the standard library are installed; nothing else."""
 
 _METRIC_SHAPES = {
@@ -1129,10 +1134,16 @@ def _unified_contracts(unified: dict[str, Any]) -> tuple[str, str]:
         unified: The wizard's :class:`~core.models.UnifiedAuthoringContext` as a dict.
 
     Returns:
-        ``(run_contract, metric_contract)`` texts handed to the authors and the chat agent.
+        ``(run_contract, metric_contract)`` texts handed to the authors and the
+        chat agent. The run contract opens with what the agent must write: a
+        signature plus a metric for a DSPy program, run code plus a metric
+        for anything else.
     """
     kind = str(unified.get("task", {}).get("artifact", {}).get("kind", "prompt"))
-    run_contract = _PROGRAM_CONTRACT if kind == "dspy_program" else _RUN_CONTRACT
+    if kind == "dspy_program":
+        run_contract = f"{_PROGRAM_DELIVERABLES}\n\n{_PROGRAM_CONTRACT}"
+    else:
+        run_contract = f"{_RUN_DELIVERABLES}\n\n{_RUN_CONTRACT}"
     shape = str(unified.get("metric_shape", "blackbox_side_info"))
     metric_contract = "\n\n".join(
         [
@@ -1149,8 +1160,11 @@ class GenerateRunCode(dspy.Signature):
 
     The optimizer improves an artifact (``artifact_kind``) toward
     ``objective``; the run code is the fixed harness that exercises the
-    current version of that artifact on one case. Implement it under
-    ``run_contract`` — that contract is exact; follow it literally. Ground
+    current version of that artifact on one case. For a DSPy program it is
+    the signature: the dspy.Signature classes and the module
+    ``build_program()`` returns. Implement it under ``run_contract`` — that
+    contract is exact, and the validity check holds the code to it before
+    the run starts; follow it literally. Ground
     it in the starting version and the sample cases: read the input fields
     by their exact names and return what the metric needs to score.
     Keep it short and direct. Output ONLY the python code: no markdown
@@ -1223,9 +1237,20 @@ class UnifiedAssistant(dspy.Signature):
     The user is setting up an optimization run. The optimizer improves an
     artifact (``artifact_kind``, starting from ``starting_version``) toward
     ``objective``. ``current_run`` is the plain python harness that runs
-    one version of the artifact on one case input; ``current_metric`` is
-    the python function that scores what it returns. The optimizer never
-    sees the metric's source, only its scores and feedback.
+    one version of the artifact on one case input (for a DSPy program, the
+    signature: the dspy.Signature classes and the module
+    ``build_program()`` returns); ``current_metric`` is the python function
+    that scores what it returns. The optimizer never sees the metric's
+    source, only its scores and feedback.
+
+    ## What you own
+
+    Both pieces are yours to write: the first draft comes from you, and
+    after that you change them when the user asks; the user can also edit
+    either directly. For a DSPy program that is a signature plus a metric;
+    for any other artifact, run code plus a metric. ``run_contract`` opens with exactly what to write.
+    Before Run, a validity check confirms the code, the metric and the
+    data agree; everything you write must pass it.
 
     ## Your tools
 

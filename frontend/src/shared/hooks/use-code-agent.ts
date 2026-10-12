@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
-import { toast } from "react-toastify";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { streamCodeAgent, type AgentQuestion, type CodeAgentToolName } from "@/shared/lib/api";
@@ -161,14 +160,11 @@ export interface CodeAgentState {
   midTurn: MidTurnQueue;
   editAndResend: (messageIndex: number, content: string) => void;
   retry: () => void;
-  fallbackToManual: () => void;
   stop: () => void;
   reset: () => void;
 }
 
 export interface UseCodeAgentArgs {
-  codeAssistMode: "auto" | "manual";
-  setCodeAssistMode: (m: "auto" | "manual") => void;
   // Plain string roles (input/output/ignore); this hook only reads the
   // "input"/"output" roles.
   columnRoles: Record<string, string>;
@@ -220,8 +216,6 @@ const DAILY_LIMIT_CODE = "wizard_agent.daily_limit_reached";
 
 export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   const {
-    codeAssistMode,
-    setCodeAssistMode,
     columnRoles,
     columnKinds,
     parsedDataset,
@@ -990,13 +984,6 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     [metricVersions, setMetricCode, setMetricManuallyEdited],
   );
 
-  const fallbackToManual = React.useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setCodeAssistMode("manual");
-    toast.info(msg("auto.features.submit.hooks.use.code.agent.literal.9"));
-  }, [setCodeAssistMode]);
-
   const stop = React.useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -1081,7 +1068,6 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   // if either artifact has been manually authored (including clone-pre-fill,
   // which marks both flags true) — a fresh dataset upload clears the flags.
   React.useEffect(() => {
-    if (codeAssistMode !== "auto") return;
     if (!seedEnabled) return;
     if (autoRanRef.current) return;
     if (!hasRequiredContext) return;
@@ -1094,7 +1080,6 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     autoFixAttemptsRef.current = 0;
     runAgent("", []);
   }, [
-    codeAssistMode,
     seedEnabled,
     hasRequiredContext,
     signatureManuallyEdited,
@@ -1105,13 +1090,6 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     runAgent,
     sessionKey,
   ]);
-
-  // If the user switches to manual mid-stream, abort and reset.
-  React.useEffect(() => {
-    if (codeAssistMode === "auto") return;
-    abortRef.current?.abort();
-    abortRef.current = null;
-  }, [codeAssistMode]);
 
   return {
     status,
@@ -1139,7 +1117,6 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     midTurn,
     editAndResend,
     retry,
-    fallbackToManual,
     stop,
     reset,
   };

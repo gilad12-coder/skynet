@@ -1279,8 +1279,13 @@ Rules:
        right unless the user names one; ``optimizer_catalog`` lists what
        fits the artifact and data mode), ``reflection_model_config``
        (always needed) and ``model_config`` (the task model).
-    5. Code — ``request_code_authoring`` becomes available ONLY after
-       the run is named AND the task is set. If you want to author code
+    5. Code — ``request_code_authoring`` has the coding agent write the
+       code the run needs: a signature plus a metric for a
+       ``dspy_program``, run code plus a metric for any other artifact.
+       Never write either yourself; the user edits them in the wizard,
+       and the validity check confirms they fit the data before Run. The
+       tool becomes available ONLY after the run is named AND the task
+       is set. If you want to author code
        and the tool is NOT in your list this turn, the cause is a missing
        ``job_name`` or task field — set it first, then it unlocks next
        turn.

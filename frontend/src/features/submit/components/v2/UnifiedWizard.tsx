@@ -24,7 +24,7 @@ const STEP_VIEWS: Record<WizardStepId, (page: number) => ReactNode> = {
   task: (page) => <TaskStep page={page} />,
   inputs: () => <InputsStep />,
   optimizer: (page) => <OptimizerStep page={page} />,
-  metric: (page) => <MetricStep page={page} />,
+  metric: () => <MetricStep />,
 };
 
 const FIRST_PAGES: Record<WizardStepId, number> = { task: 0, inputs: 0, optimizer: 0, metric: 0 };

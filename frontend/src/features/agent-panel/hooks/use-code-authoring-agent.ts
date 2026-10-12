@@ -56,8 +56,6 @@ export interface UseCodeAuthoringAgentArgs {
   reasoningEffort?: string | null;
 }
 
-const NOOP = () => {};
-
 /** Build the validator's column mapping from the panel's role assignments. */
 function rolesToColumnMapping(
   columnRoles: Record<string, "input" | "output" | "ignore">,
@@ -202,8 +200,6 @@ export function useCodeAuthoringAgent(
   );
 
   const agent = useCodeAgent({
-    codeAssistMode: "auto",
-    setCodeAssistMode: NOOP,
     columnRoles,
     columnKinds,
     parsedDataset,

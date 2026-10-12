@@ -6,14 +6,7 @@ import type { ValidateCodeResponse } from "@/shared/types/api";
 import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unified-run";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
 import { useContractCheck } from "../../hooks/use-contract-check";
-import {
-  runHint,
-  seedWorkspace,
-  shapeHint,
-  starterMetricCode,
-  starterRunCode,
-  type TemplateFields,
-} from "../../lib/metric-templates";
+import { runHint, shapeHint } from "../../lib/code-hints";
 import { metricUsesModel as metricCallsModel } from "../../lib/scorer-dependencies";
 import { AuthoringShell } from "../steps/AuthoringShell";
 import { CodeAgentPanel } from "../steps/CodeAgentPanel";
@@ -21,7 +14,6 @@ import { v2Msg } from "./ArtifactConfirmCard";
 import { CodeWorkspace } from "./CodeWorkspace";
 import { ContractCheckPanel } from "./ContractCheckPanel";
 import { MetricModelRow } from "./MetricModelRow";
-import { WizardScreen } from "./WizardScreen";
 
 const NO_ROLES: Record<string, string> = {};
 const NO_KINDS: Record<string, "text" | "image"> = {};
@@ -32,50 +24,22 @@ const noop = () => {};
 const noValidation = async (): Promise<ValidateCodeResponse | null> => null;
 
 /**
- * True when the slot holds code someone wrote, as opposed to nothing or the
- * untouched template. The agent may replace a template, never authored code.
+ * Step 4, one screen: the coding agent writes the run code and the metric in
+ * the side panel, the user can edit either, and the validity check below the
+ * editors confirms the code and the data agree before Run.
  */
-function isAuthored(code: string, template: string | null): boolean {
-  return code.trim().length > 0 && code !== template;
-}
-
-/**
- * Step 4: the run code and the metric, written by the agent in the side panel
- * or by hand, with the contract check that gates Run. Screens: run code,
- * metric, then the check.
- */
-export function MetricStep({ page }: { page: number }) {
+export function MetricStep() {
   const ctx = useWizardV2();
   const { state, patchTask, patchWorkspace, metricShape, guided } = ctx;
   const { task, inputs, optimizer, workspace } = state;
   const kind = task.artifactKind;
   const t = (key: string) => v2Msg(key, guided);
 
-  const fields = React.useMemo<TemplateFields>(
-    () => ({ inputFields: inputs.inputFields, expectedField: inputs.expectedField }),
-    [inputs.inputFields, inputs.expectedField],
-  );
-
-  // Templates fill empty slots only. Code that no longer fits a changed
-  // artifact kind or metric shape is kept; the contract check shows why.
-  React.useEffect(() => {
-    const patch = seedWorkspace(
-      { runCode: workspace.runCode, metricCode: workspace.metricCode },
-      kind,
-      metricShape,
-      fields,
-    );
-    if (patch) patchWorkspace(patch);
-    // Only a new kind or shape (or entering the step) seeds; clearing an
-    // editor by hand must not refill it on the next keystroke.
-  }, [kind, metricShape]);
-
-  const [codeAssistMode, setCodeAssistMode] = React.useState<"auto" | "manual">("auto");
-  const [runEdited, setRunEdited] = React.useState(() =>
-    isAuthored(workspace.runCode, kind ? starterRunCode(kind, fields) : null),
-  );
-  const [metricEdited, setMetricEdited] = React.useState(() =>
-    isAuthored(workspace.metricCode, metricShape ? starterMetricCode(metricShape, fields) : null),
+  // Code already in a slot (a cloned run, or the user's own) is never
+  // overwritten by the agent's first draft.
+  const [runEdited, setRunEdited] = React.useState(() => workspace.runCode.trim().length > 0);
+  const [metricEdited, setMetricEdited] = React.useState(
+    () => workspace.metricCode.trim().length > 0,
   );
   const [agentModel, setAgentModel] = React.useState<string | null>(null);
   const [agentEffort, setAgentEffort] = React.useState<string | null>(null);
@@ -139,8 +103,6 @@ export function MetricStep({ page }: { page: number }) {
   );
 
   const agent = useCodeAgent({
-    codeAssistMode,
-    setCodeAssistMode,
     columnRoles: NO_ROLES,
     columnKinds: NO_KINDS,
     parsedDataset: null,
@@ -167,15 +129,11 @@ export function MetricStep({ page }: { page: number }) {
   });
 
   const contract = useContractCheck(ctx);
-  const auto = codeAssistMode === "auto";
   const setupIncomplete = authoringContext === null;
 
   return (
     <div className="h-full">
       <AuthoringShell
-        value={codeAssistMode}
-        onChange={setCodeAssistMode}
-        disabledReason={setupIncomplete ? t("submit.v2.metric.agent.needs_setup") : undefined}
         title={t("submit.v2.metric.title")}
         description={t("submit.v2.metric.desc")}
         sidePanel={
@@ -192,9 +150,8 @@ export function MetricStep({ page }: { page: number }) {
           />
         }
       >
-        <WizardScreen active={page < 2}>
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <CodeWorkspace
-            show={page === 1 ? "metric" : "run"}
             runCode={workspace.runCode}
             metricCode={workspace.metricCode}
             onRunCodeChange={(code) => {
@@ -207,7 +164,7 @@ export function MetricStep({ page }: { page: number }) {
             }}
             runHint={kind ? runHint(kind) : ""}
             metricHint={metricShape ? shapeHint(metricShape) : ""}
-            agent={auto ? agent : null}
+            agent={agent}
             guided={guided}
           >
             {metricUsesModel && (
@@ -220,10 +177,8 @@ export function MetricStep({ page }: { page: number }) {
               />
             )}
           </CodeWorkspace>
-        </WizardScreen>
-        <WizardScreen active={page === 2}>
           <ContractCheckPanel cc={contract} guided={guided} blockedReason={ctx.runBlockedReason} />
-        </WizardScreen>
+        </div>
       </AuthoringShell>
     </div>
   );

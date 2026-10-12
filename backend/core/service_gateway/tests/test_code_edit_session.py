@@ -281,3 +281,14 @@ def test_run_contract_follows_the_artifact_kind() -> None:
     prompt, _ = _unified_contracts(_unified())
     assert "build_program" in program
     assert "def run(artifact, input)" in prompt
+
+
+def test_run_contract_names_what_the_agent_writes() -> None:
+    """A DSPy program asks for a signature plus a metric; every other kind for run code plus a metric."""
+    program, _ = _unified_contracts(_unified(task={"objective": "x", "artifact": {"kind": "dspy_program"}}))
+    prompt, _ = _unified_contracts(_unified())
+    assert program.startswith("You write exactly two things")
+    assert "the signature and the metric" in program
+    assert "the run code and the metric" in prompt
+    assert "validity check" in program
+    assert "validity check" in prompt

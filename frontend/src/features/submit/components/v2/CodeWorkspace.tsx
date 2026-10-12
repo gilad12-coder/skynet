@@ -1,69 +1,26 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
+import { Segmented } from "@/shared/ui/segmented";
 import type { CodeAgentState } from "@/shared/hooks/use-code-agent";
 import { withScorerImports } from "../../lib/scorer-dependencies";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { v2Msg } from "./ArtifactConfirmCard";
 
-// One editor per screen, so each takes most of the viewport; the editor
-// itself still caps at 60svh on short screens.
-const EDITOR_HEIGHT = "calc(100svh - 24rem)";
+type Editor = "run" | "metric";
 
-function EditorBlock({
-  id,
-  title,
-  hint,
-  agent,
-  artifact,
-  hidden,
-  children,
-}: {
-  id: string;
-  title: string;
-  hint: string;
-  agent: CodeAgentState | null;
-  artifact: "signature" | "metric";
-  hidden: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <div hidden={hidden} className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0 space-y-0.5">
-          <h4 id={`${id}-label`} className="text-sm font-medium">
-            {title}
-          </h4>
-          <code
-            dir="ltr"
-            className="block truncate font-mono text-[0.6875rem] text-muted-foreground"
-            title={hint}
-          >
-            {hint}
-          </code>
-        </div>
-        {agent && (
-          <div className="flex items-center gap-2">
-            <VersionStepper agent={agent} artifact={artifact} />
-            <ArtifactStatusChip
-              status={artifact === "signature" ? agent.signatureStatus : agent.metricStatus}
-            />
-          </div>
-        )}
-      </div>
-      {children}
-    </div>
-  );
-}
+// The editors share the screen with the validity check below them; the
+// editor itself still caps at 60svh on tall screens.
+const EDITOR_HEIGHT = "calc(100svh - 30rem)";
+const PANEL_ID = "v2-code-editor";
 
 /**
- * The two editors of the unified workspace: the run code (how a candidate
- * produces an output) and the metric (how that output is scored). The agent's
- * version stepper and writing status show only while it is driving. The
- * wizard shows one editor per screen; the other stays mounted (hidden) so its
- * undo history survives the switch.
+ * The run code (how a candidate produces an output) and the metric (how that
+ * output is scored), one editor at a time behind a switch. The agent writes
+ * both; the user can edit either. Both editors stay mounted so each keeps its
+ * undo history across the switch.
  */
 export function CodeWorkspace({
   runCode,
@@ -74,7 +31,6 @@ export function CodeWorkspace({
   metricHint,
   agent,
   guided,
-  show,
   children,
 }: {
   runCode: string;
@@ -83,62 +39,77 @@ export function CodeWorkspace({
   onMetricCodeChange: (code: string) => void;
   runHint: string;
   metricHint: string;
-  /** The agent, while auto mode drives the editors; null in manual mode. */
-  agent: CodeAgentState | null;
+  agent: CodeAgentState;
   guided: boolean;
-  show: "run" | "metric";
   /** Rendered above the metric editor (the metric model row). */
   children?: ReactNode;
 }) {
-  return (
-    <div className="space-y-5 px-4 py-4 sm:px-6">
-      <EditorBlock
-        id="v2-run-code"
-        title={v2Msg("submit.v2.metric.run_label", guided)}
-        hint={runHint}
-        agent={agent}
-        artifact="signature"
-        hidden={show !== "run"}
-      >
-        <CodeEditor
-          value={runCode}
-          onChange={onRunCodeChange}
-          height={EDITOR_HEIGHT}
-          streaming={agent?.signatureStatus === "writing"}
-          flashLines={agent?.signatureFlashLines}
-        />
-      </EditorBlock>
+  const [show, setShow] = useState<Editor>("run");
+  const artifact = show === "run" ? "signature" : "metric";
+  const status = show === "run" ? agent.signatureStatus : agent.metricStatus;
+  const runLabel = v2Msg("submit.v2.metric.run_label", guided);
+  const metricLabel = v2Msg("submit.v2.metric.metric_label", guided);
 
-      <EditorBlock
-        id="v2-metric-code"
-        title={v2Msg("submit.v2.metric.metric_label", guided)}
-        hint={metricHint}
-        agent={agent}
-        artifact="metric"
-        hidden={show !== "metric"}
+  return (
+    <div className="space-y-2 px-4 py-4 sm:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Segmented<Editor>
+          size="sm"
+          value={show}
+          onChange={setShow}
+          controls={PANEL_ID}
+          options={[
+            { value: "run", label: runLabel },
+            { value: "metric", label: metricLabel },
+          ]}
+        />
+        <div className="flex items-center gap-2">
+          <VersionStepper agent={agent} artifact={artifact} />
+          <ArtifactStatusChip status={status} />
+        </div>
+      </div>
+      <code
+        dir="ltr"
+        className="block truncate font-mono text-[0.6875rem] text-muted-foreground"
+        title={show === "run" ? runHint : metricHint}
       >
-        {children}
-        <div
-          tabIndex={-1}
-          className="outline-none"
-          onBlur={(event) => {
-            // The sandbox still injects `llm` for old scorers; making the
-            // import explicit keeps the code honest about what it calls.
-            if (!event.currentTarget.contains(event.relatedTarget)) {
-              const code = withScorerImports(metricCode);
-              if (code !== metricCode) onMetricCodeChange(code);
-            }
-          }}
-        >
+        {show === "run" ? runHint : metricHint}
+      </code>
+
+      <div id={PANEL_ID} className="space-y-2">
+        <div hidden={show !== "run"} aria-label={runLabel}>
           <CodeEditor
-            value={metricCode}
-            onChange={onMetricCodeChange}
+            value={runCode}
+            onChange={onRunCodeChange}
             height={EDITOR_HEIGHT}
-            streaming={agent?.metricStatus === "writing"}
-            flashLines={agent?.metricFlashLines}
+            streaming={agent.signatureStatus === "writing"}
+            flashLines={agent.signatureFlashLines}
           />
         </div>
-      </EditorBlock>
+        <div hidden={show !== "metric"} aria-label={metricLabel} className="space-y-2">
+          {children}
+          <div
+            tabIndex={-1}
+            className="outline-none"
+            onBlur={(event) => {
+              // The sandbox still injects `llm` for old scorers; making the
+              // import explicit keeps the code honest about what it calls.
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                const code = withScorerImports(metricCode);
+                if (code !== metricCode) onMetricCodeChange(code);
+              }
+            }}
+          >
+            <CodeEditor
+              value={metricCode}
+              onChange={onMetricCodeChange}
+              height={EDITOR_HEIGHT}
+              streaming={agent.metricStatus === "writing"}
+              flashLines={agent.metricFlashLines}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
