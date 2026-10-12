@@ -17,6 +17,7 @@ from gepa.oa.ensemble import optimize_best_of
 from gepa.oa.eval_server import EvalServer as UpstreamEvalServer
 from gepa.oa.task import Task as UpstreamTask
 
+from ....billing.usage_tags import usage_scope
 from ....constants import PROGRESS_LANE_COMPLETED, PROGRESS_LANE_HANDOFF, PROGRESS_LANE_STARTED
 from ....exceptions import ServiceError
 from ....models.blackbox import BlackboxStrategy
@@ -39,6 +40,19 @@ class LaneOutcome:
     error: str | None = None
     best_candidate: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def lane_tag(phase: str, engine: str) -> str:
+    """Name the Auto lane a billed call belongs to.
+
+    Args:
+        phase: Composition phase, ``explore`` or ``continue``.
+        engine: Engine running in the lane.
+
+    Returns:
+        The ``lane`` usage tag value, ``<phase>-<engine>``.
+    """
+    return f"{phase}-{engine}"
 
 
 def _completed_lane_incumbent(lanes: list[LaneOutcome], server: EvalServer, interrupted: Any = None) -> Result | None:
@@ -191,7 +205,7 @@ class _LaneEngine:
             valset=list(task.val_set or []),
         )
         try:
-            with dspy.context(**self.model_context):
+            with dspy.context(**self.model_context), usage_scope(lane=lane_tag(self.phase, self.name)):
                 result = get_engine(self.name, self.caps).run(local_task, server, _admit_context(context))
             lane.best_candidate, lane.best_score = result.best_candidate, result.best_score
             lane.metadata = result.metadata
@@ -416,9 +430,12 @@ def run_strategy(
             PROGRESS_LANE_STARTED, {"engine": "gepa", "phase": "continue", "budget": continuation_server.remaining}
         )
     try:
-        continued = get_engine("gepa", caps).run(
-            replace(task, seed_candidate=winner.best_candidate), continuation_server, _admit_context(continuation_ctx)
-        )
+        with usage_scope(lane=lane_tag("continue", "gepa")):
+            continued = get_engine("gepa", caps).run(
+                replace(task, seed_candidate=winner.best_candidate),
+                continuation_server,
+                _admit_context(continuation_ctx),
+            )
     except BudgetReached as exc:
         if not isinstance(exc.result, Result):
             exc.result = local_result(winner, server)
