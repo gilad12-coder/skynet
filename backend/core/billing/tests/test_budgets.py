@@ -30,6 +30,7 @@ from core.billing.operation_pricing import OperationCharge, OperationQuote
 from core.billing.pricing import ModelUsage
 from core.billing.runtime import BudgetRuntime, generation_operation_key
 from core.billing.service import StripeBillingService, committed_spend_cents, legacy_job_committed_cents
+from core.config import settings
 from core.storage.models import (
     Base,
     BillingCustomerModel,
@@ -757,3 +758,21 @@ def test_sandbox_coverage_grows_only_through_admission(engine: Engine) -> None:
         service.settle(box.id, "alice", evidence_key="stop-over", actual_cents=21, actual_wallet_cents=21, evidence={})
     service.settle(box.id, "alice", evidence_key="stop", actual_cents=18, actual_wallet_cents=18, evidence={})
     assert service.get(budget.id, "alice").reserved_cents == 5
+
+
+@pytest.mark.parametrize(("environment_name", "funded"), [("staging", False), ("skynet-pr-662", True)])
+def test_new_account_without_wallet_row_funds_budget_only_in_preview(
+    engine: Engine, monkeypatch: pytest.MonkeyPatch, environment_name: str, funded: bool
+) -> None:
+    """A brand-new account's preview grant funds a budget; elsewhere it still has no funded wallet."""
+    monkeypatch.setattr(settings, "preview_grant_cents", 1000)
+    monkeypatch.setattr(settings, "railway_environment_name", environment_name)
+    service = BudgetService(engine=engine)
+    if not funded:
+        with pytest.raises(BudgetInsufficientError):
+            service.create("carol", 100, idempotency_key="first")
+        return
+    budget = service.create("carol", 100, idempotency_key="first")
+    assert budget.total_cents == 100
+    with Session(engine) as session:
+        assert session.get(BillingCustomerModel, "carol").grant_remaining == 1000
