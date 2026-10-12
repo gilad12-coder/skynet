@@ -3,17 +3,21 @@
 import { Warning } from "@/shared/ui/icons";
 
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
+import { stepPages } from "../../lib/wizard-pages";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { BudgetSection } from "./BudgetSection";
 import { ModelsSection } from "./ModelsSection";
 import { OptimizerPicker } from "./OptimizerPicker";
+import { OptimizerSummary } from "./OptimizerSummary";
 import { WizardScreen } from "./WizardScreen";
 
 /**
  * Step 3, Optimizer: which optimizer runs (Auto unless the user picks
- * another), the models it uses and what it may spend. The three sections
- * come in that order, one screen each, since the models and the budget both
- * follow from the chosen optimizer.
+ * another), the models it uses and what it may spend. Expert gets the three
+ * sections in that order, one screen each, since the models and the budget
+ * both follow from the chosen optimizer; Guided and Standard get one summary
+ * of the preset choices instead. Every screen stays mounted so the budget's
+ * starting limit is set even when only the summary shows.
  */
 export function OptimizerStep({ page }: { page: number }) {
   const { state, guided } = useWizardV2();
@@ -21,6 +25,8 @@ export function OptimizerStep({ page }: { page: number }) {
   const kind = state.task.artifactKind;
   const mode = state.inputs.mode;
   const choice = state.optimizer.choice;
+  const pages = stepPages("optimizer", state);
+  const shown = pages[Math.min(page, pages.length - 1)];
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6">
@@ -28,18 +34,26 @@ export function OptimizerStep({ page }: { page: number }) {
         <h3 className="text-base font-semibold text-foreground">
           {t("submit.v2.optimizer.title")}
         </h3>
-        <p className="text-sm text-muted-foreground">{t("submit.v2.optimizer.desc")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t(shown === "summary" ? "submit.v2.optimizer.summary.desc" : "submit.v2.optimizer.desc")}
+        </p>
       </header>
 
       {kind && mode ? (
         <>
-          <WizardScreen active={page === 0}>
+          <WizardScreen active={shown === "summary"}>
+            <OptimizerSummary
+              choice={choice}
+              canChange={state.level === "standard" && !state.optimizer.expanded}
+            />
+          </WizardScreen>
+          <WizardScreen active={shown === "optimizer"}>
             <OptimizerPicker kind={kind} mode={mode} />
           </WizardScreen>
-          <WizardScreen active={page === 1}>
+          <WizardScreen active={shown === "models"}>
             <ModelsSection kind={kind} choice={choice} />
           </WizardScreen>
-          <WizardScreen active={page === 2}>
+          <WizardScreen active={shown === "budget"}>
             <BudgetSection kind={kind} choice={choice} />
           </WizardScreen>
         </>

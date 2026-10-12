@@ -12,6 +12,7 @@ import type {
   ModelConfig,
   SplitFractions,
 } from "@/shared/types/api";
+import type { ExperienceLevel } from "@/features/experience";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
 import {
   resolveOptimizer,
@@ -73,6 +74,11 @@ export interface OptimizerSlice {
   budgetUncapped: boolean;
   proposer: BlackboxProposer;
   shinka: BlackboxShinkaSettings | null;
+  /**
+   * The full engine, models and budget screens show at a summary level:
+   * Standard pressed Change, or the step opened without the models it needs.
+   */
+  expanded: boolean;
 }
 
 export interface WorkspaceSlice {
@@ -97,6 +103,8 @@ export interface MetaSlice {
 export interface WizardV2State {
   step: WizardStepId;
   furthestStep: WizardStepId;
+  /** The user's experience level; it decides how the Optimizer step is laid out. */
+  level: ExperienceLevel;
   task: TaskSlice;
   inputs: InputsSlice;
   optimizer: OptimizerSlice;
@@ -104,10 +112,13 @@ export interface WizardV2State {
   meta: MetaSlice;
 }
 
-export function initialWizardV2State(): WizardV2State {
+// The default level mirrors DEFAULT_LEVEL; this module stays free of runtime
+// imports so its tests load without the app's path aliases.
+export function initialWizardV2State(level: ExperienceLevel = "guided"): WizardV2State {
   return {
     step: "task",
     furthestStep: "task",
+    level,
     task: {
       objective: "",
       background: "",
@@ -150,6 +161,7 @@ export function initialWizardV2State(): WizardV2State {
         max_tool_calls: 100,
       },
       shinka: null,
+      expanded: false,
     },
     workspace: {
       runCode: "",
@@ -168,6 +180,50 @@ export function initialWizardV2State(): WizardV2State {
       tokenSource: "managed",
       economyMode: false,
     },
+  };
+}
+
+const hasModel = (config: ModelConfig | null): boolean => Boolean(config?.name.trim());
+
+/** Whether the models the chosen artifact needs to run are set. */
+export function optimizerModelsReady(s: WizardV2State): boolean {
+  if (s.task.artifactKind === "dspy_program" && !hasModel(s.optimizer.taskModel)) return false;
+  return hasModel(s.optimizer.reflectionModel);
+}
+
+/**
+ * The state after moving to `step`. Entering the Optimizer step without the
+ * models it needs (no catalog default) expands it, so every level reaches the
+ * models screen instead of a summary it can't leave.
+ */
+export function enterStep(
+  s: WizardV2State,
+  step: WizardStepId,
+  furthest: WizardStepId,
+): WizardV2State {
+  const expand = step === "optimizer" && !s.optimizer.expanded && !optimizerModelsReady(s);
+  return {
+    ...s,
+    step,
+    furthestStep: furthest,
+    ...(expand && { optimizer: { ...s.optimizer, expanded: true } }),
+  };
+}
+
+/**
+ * The task and reflection models a new wizard starts with: the catalog's
+ * default model for both. Returns null once either model holds anything, so a
+ * user's pick, a cloned run or an agent-set model is never overwritten.
+ */
+export function presetModels(
+  optimizer: Pick<OptimizerSlice, "taskModel" | "reflectionModel">,
+  defaultModel: string | null | undefined,
+): Pick<OptimizerSlice, "taskModel" | "reflectionModel"> | null {
+  if (!defaultModel || optimizer.taskModel !== null || optimizer.reflectionModel !== null)
+    return null;
+  return {
+    taskModel: { name: defaultModel, token_source: "managed" },
+    reflectionModel: { name: defaultModel, token_source: "managed" },
   };
 }
 

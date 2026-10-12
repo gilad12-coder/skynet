@@ -17,7 +17,7 @@ import { toast } from "react-toastify";
 
 import { useWizardStateOptional } from "@/features/agent-panel";
 import { formatBudgetUsd, usePricingTerms } from "@/features/billing";
-import { useExperienceLevel } from "@/features/experience";
+import { useExperienceLevel, type ExperienceLevel } from "@/features/experience";
 import { offerRunDoneNotifications } from "@/features/notifications";
 import {
   getJob,
@@ -58,7 +58,9 @@ import { metricUsesModel } from "../lib/scorer-dependencies";
 import {
   WIZARD_V2_STEPS,
   contractSnapshot,
+  enterStep,
   initialWizardV2State,
+  presetModels,
   resolvedMetricModel,
   type InputsSlice,
   type MetaSlice,
@@ -86,7 +88,8 @@ type SliceName = "task" | "inputs" | "optimizer" | "workspace" | "meta";
 
 type Action =
   | { type: "patch"; slice: SliceName; patch: object }
-  | { type: "go"; step: WizardStepId };
+  | { type: "go"; step: WizardStepId }
+  | { type: "level"; level: ExperienceLevel };
 
 const stepIndex = (step: WizardStepId) => WIZARD_V2_STEPS.indexOf(step);
 
@@ -97,7 +100,10 @@ function reducer(state: WizardV2State, action: Action): WizardV2State {
     const furthest =
       stepIndex(action.step) > stepIndex(state.furthestStep) ? action.step : state.furthestStep;
     if (action.step === state.step && furthest === state.furthestStep) return state;
-    return { ...state, step: action.step, furthestStep: furthest };
+    return enterStep(state, action.step, furthest);
+  }
+  if (action.type === "level") {
+    return action.level === state.level ? state : { ...state, level: action.level };
   }
   return { ...state, [action.slice]: { ...state[action.slice], ...action.patch } };
 }
@@ -221,15 +227,17 @@ export function WizardV2Provider({
   folderId?: string | null;
   children: ReactNode;
 }) {
+  const level = useExperienceLevel();
   const [state, dispatch] = useReducer(reducer, undefined, () => {
-    const initial = initialWizardV2State();
+    const initial = initialWizardV2State(level);
     return { ...initial, meta: { ...initial.meta, folderId } };
   });
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();
-  const guided = useExperienceLevel() === "guided";
+  const guided = level === "guided";
   const modelCatalog = useModelCatalog();
+  useEffect(() => dispatch({ type: "level", level }), [level]);
   const pricing = usePricingTerms();
   const budget = useExecutionBudget();
   const budgetSession = budget.session;
@@ -549,6 +557,21 @@ export function WizardV2Provider({
     },
     [],
   );
+
+  // The catalog's default model presets the task and reflection models once.
+  // A cloned run brings its own models, and anything set before the catalog
+  // arrives (an agent write, a user pick) blocks the preset for good.
+  const presetDone = useRef(searchParams.has("clone"));
+  useEffect(() => {
+    if (presetDone.current || !modelCatalog) return;
+    presetDone.current = true;
+    const preset = presetModels(
+      state.optimizer,
+      modelCatalog.models.find((model) => model.is_default)?.value,
+    );
+    if (preset) patchOptimizer(preset);
+    // Runs once, when the catalog first arrives; the models are read from that render.
+  }, [modelCatalog]);
 
   // `?clone=` hydrates every slice it can from the source run's stored,
   // server-scrubbed payload; nothing is confirmed, so the user reviews each step.
