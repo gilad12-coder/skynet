@@ -167,6 +167,21 @@ class CatalogModel(BaseModel):
             "endpoint over the last 30 minutes, or None when OpenRouter reports none."
         ),
     )
+    ttft_ms: float | None = Field(
+        default=None,
+        description=(
+            "Median milliseconds to the first token on that same endpoint over the "
+            "last 30 minutes, or None when OpenRouter reports none."
+        ),
+    )
+    latency_ms: float | None = Field(
+        default=None,
+        description=(
+            "Estimated milliseconds to a complete 150-token reply on that same endpoint: "
+            "the median time to the first token plus 150 tokens at the median output "
+            "speed. None when either median is missing."
+        ),
+    )
     zero_retention: bool = Field(
         default=False,
         description=(

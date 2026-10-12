@@ -1013,6 +1013,10 @@ export interface CatalogModel {
   artificial_analysis_url?: string | null;
   // Live OpenRouter output tokens/s of the fastest healthy endpoint; null when unmeasured.
   throughput_tps?: number | null;
+  // Median ms to the first token on that endpoint; null when unmeasured.
+  ttft_ms?: number | null;
+  // Estimated ms to a complete 150-token reply on that endpoint; null when unmeasured.
+  latency_ms?: number | null;
   // At least one OpenRouter endpoint serves this model with zero data retention.
   zero_retention?: boolean;
 }

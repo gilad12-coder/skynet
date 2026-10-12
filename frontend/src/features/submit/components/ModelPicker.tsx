@@ -2,7 +2,7 @@
 
 import { MicroPill } from "@/shared/ui/model-chip";
 import * as React from "react";
-import { ArrowSquareOut, Check, CaretDown, Eye, MagnifyingGlass, Warning } from "@/shared/ui/icons";
+import { ArrowSquareOut, Check, CaretDown, Eye, Gauge, MagnifyingGlass, ShieldCheck, Warning } from "@/shared/ui/icons";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
@@ -18,6 +18,8 @@ import {
   type RankedGroup,
 } from "@/shared/lib/model-catalog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
+import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { modelProviderSlug } from "@/shared/lib/model-provider";
 import { litellmProviderForByok } from "@/features/billing";
@@ -86,6 +88,61 @@ const GROUP_LABEL_KEYS: Partial<Record<RankedGroup["kind"], MessageKey>> = {
 
 const number = (value: number, digits: number) =>
   value.toLocaleString(undefined, { maximumFractionDigits: digits });
+
+/**
+ * An icon button beside a picker row that shows `children` in a tooltip on
+ * hover, keyboard focus or tap (Radix tooltips ignore taps, so a click toggles
+ * it too).
+ */
+function RowIconTip({
+  label,
+  icon,
+  children,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          onClick={(e) => {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }}
+          className="flex min-h-[44px] w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-0 lg:size-6"
+        >
+          {icon}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 leading-relaxed" dir={getActiveDir()}>
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+const seconds = (ms: number | null | undefined) =>
+  ms ? msg("submit.modelpicker.speed.seconds", { s: number(ms / 1000, 2) }) : msg("submit.modelpicker.speed.unknown");
+
+/** Labeled time to first token, short-reply latency and output speed for one row. */
+function SpeedTip({ model }: { model: CatalogModel }) {
+  const tps = model.throughput_tps
+    ? msg("submit.modelpicker.stat.speed", { tps: number(model.throughput_tps, 0) })
+    : msg("submit.modelpicker.speed.unknown");
+  return (
+    <RowIconTip label={msg("submit.modelpicker.speed_label")} icon={<Gauge className="size-3.5" aria-hidden="true" />}>
+      <span className="block">{msg("submit.modelpicker.speed.ttft", { value: seconds(model.ttft_ms) })}</span>
+      <span className="block">{msg("submit.modelpicker.speed.latency", { value: seconds(model.latency_ms) })}</span>
+      <span className="block">{msg("submit.modelpicker.speed.throughput", { value: tps })}</span>
+      <span className="mt-1 block opacity-70">{msg("submit.modelpicker.speed.source")}</span>
+    </RowIconTip>
+  );
+}
 
 /** Score, input price and speed for one row; a stat the catalog lacks is left out. */
 function ModelStats({ model }: { model: CatalogModel }) {
@@ -451,6 +508,15 @@ export function ModelPicker({
                       )}
                     />
                   </button>
+                  {m.zero_retention && (
+                    <RowIconTip
+                      label={msg("submit.modelpicker.zdr_tip")}
+                      icon={<ShieldCheck className="size-3.5" aria-hidden="true" />}
+                    >
+                      {msg("submit.modelpicker.zdr_tip")}
+                    </RowIconTip>
+                  )}
+                  {!!(m.throughput_tps || m.ttft_ms || m.latency_ms) && <SpeedTip model={m} />}
                   {m.artificial_analysis_url && (
                     <a
                       href={m.artificial_analysis_url}

@@ -139,13 +139,13 @@ def test_with_interview_default_flags_one_model(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_with_interview_default_attaches_measured_speeds(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Measured models carry their throughput; unmeasured ones carry None."""
+    """Measured models carry throughput, first-token time and short-reply time; unmeasured ones carry None."""
     monkeypatch.setattr(interview_model, "interview_model_id", lambda: "openrouter/a")
     monkeypatch.setattr(interview_model, "_speeds", {"openrouter/a": (120.0, 450.0)})
     catalog = ModelCatalogResponse(models=[_model("openrouter/a", 1.0), _model("openrouter/b", 1.0)], providers=[])
     a, b = interview_model.with_interview_default(catalog).models
-    assert a.throughput_tps == 120.0
-    assert b.throughput_tps is None
+    assert (a.throughput_tps, a.ttft_ms, a.latency_ms) == (120.0, 450.0, 450.0 + 150 / 120.0 * 1000)
+    assert (b.throughput_tps, b.ttft_ms, b.latency_ms) == (None, None, None)
 
 
 def test_refresh_keeps_the_last_speed_of_a_model_whose_fetch_failed(monkeypatch: pytest.MonkeyPatch) -> None:
