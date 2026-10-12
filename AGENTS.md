@@ -59,7 +59,7 @@ send one card: the backend changes that landed, staging smoke status, and a
 ### PR preview environments: keep them able to run an optimization
 
 The merger has to sign up and finish a real run in each `*-pr-<n>` Railway
-environment. Three things broke that once; keep them true:
+environment. Four things broke that once; keep them true:
 
 - **No watch paths on `staging` services.** PR environments copy `staging`,
   and Railway skips a service whose watch paths the PR doesn't touch. A skipped
@@ -70,6 +70,13 @@ environment. Three things broke that once; keep them true:
   environment, sign-up is auto-verified and a new account gets
   `PREVIEW_GRANT_CENTS` (set on `staging` `backend` and `worker`, 1000 = $10)
   that can fund a budget. Production and `staging` keep a 0 grant.
+- **The setup check routes the same models as the run.** An Auto run's
+  payload names its models under `models.*`. `run_preflight` must alias them
+  (`core/worker/unified_aliases.py`) before `ModelGateway.protect_payload`,
+  exactly like the worker does. Otherwise the metric model gets no metered
+  route, and the run fails with "Scorer models need a gateway the sandboxes
+  can reach". Any new payload shape must go through the same aliasing in both
+  places.
 - **Diagnose before labeling `needs-human`.** Check each service's latest
   deployment in the PR environment (`railway status --json`). A service with
   no deployment can be started with Railway's `serviceInstanceDeployV2`.
