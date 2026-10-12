@@ -2,7 +2,7 @@
 
 import { MicroPill } from "@/shared/ui/model-chip";
 import * as React from "react";
-import { Check, CaretDown, Eye, MagnifyingGlass, Warning } from "@/shared/ui/icons";
+import { ArrowSquareOut, Check, CaretDown, Eye, MagnifyingGlass, Warning } from "@/shared/ui/icons";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
@@ -13,6 +13,9 @@ import {
   cachedCatalog,
   getByokModelCatalog,
   cachedByokCatalog,
+  rankModels,
+  type ModelRanking,
+  type RankedGroup,
 } from "@/shared/lib/model-catalog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
@@ -65,6 +68,62 @@ const PURPOSE_LABEL_KEYS: Record<ModelPurpose, MessageKey> = {
   multilingual: "submit.modelpicker.purpose.multilingual",
   onprem: "submit.modelpicker.purpose.onprem",
 };
+
+const RANKINGS: ModelRanking[] = ["best_value", "smartest", "fastest"];
+
+const RANKING_LABEL_KEYS: Record<ModelRanking, MessageKey> = {
+  best_value: "submit.modelpicker.tab.best_value",
+  smartest: "submit.modelpicker.tab.smartest",
+  fastest: "submit.modelpicker.tab.fastest",
+};
+
+// The leading ranked group needs no header; the tab already names its order.
+const GROUP_LABEL_KEYS: Partial<Record<RankedGroup["kind"], MessageKey>> = {
+  dominated: "submit.modelpicker.group.dominated",
+  unrated: "submit.modelpicker.group.unrated",
+  no_speed: "submit.modelpicker.group.no_speed",
+};
+
+const number = (value: number, digits: number) =>
+  value.toLocaleString(undefined, { maximumFractionDigits: digits });
+
+/** Score, input price and speed for one row; a stat the catalog lacks is left out. */
+function ModelStats({ model }: { model: CatalogModel }) {
+  const stats: Array<{ text: string; title: string }> = [];
+  if (model.intelligence_index != null) {
+    stats.push({
+      text: msg("submit.modelpicker.stat.score", { score: number(model.intelligence_index, 1) }),
+      title: msg("submit.modelpicker.stat.score_title"),
+    });
+  }
+  if (model.input_cost_per_token) {
+    stats.push({
+      text: msg("submit.modelpicker.stat.price", {
+        price: number(model.input_cost_per_token * 1e6, 2),
+      }),
+      title: msg("submit.modelpicker.stat.price_title"),
+    });
+  }
+  if (model.throughput_tps && model.latency_ms != null) {
+    stats.push({
+      text: msg("submit.modelpicker.stat.speed", {
+        tps: number(model.throughput_tps, 0),
+        latency: number(model.latency_ms / 1000, 2),
+      }),
+      title: msg("submit.modelpicker.stat.speed_title"),
+    });
+  }
+  if (stats.length === 0) return null;
+  return (
+    <span className="flex flex-wrap gap-x-2 text-[0.6875rem] text-muted-foreground">
+      {stats.map((s) => (
+        <span key={s.title} title={s.title}>
+          {s.text}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 /** Searchable combobox for managed or account-scoped BYOK model IDs. */
 export function ModelPicker({
@@ -184,29 +243,18 @@ export function ModelPicker({
     );
   }, [allModels, purpose, query]);
 
-  // Group by provider *and* data center: a provider that fans out across
-  // several endpoints (e.g. a public API plus an on-prem gateway) gets one
-  // section per data center so the user can see which endpoint a model
-  // resolves through. The NUL byte can't appear in a slug/DC label.
-  const grouped = React.useMemo(() => {
-    const groups = new Map<string, CatalogModel[]>();
-    for (const m of filtered) {
-      const key = `${m.provider}\u0000${m.data_center ?? ""}`;
-      const arr = groups.get(key) ?? [];
-      arr.push(m);
-      groups.set(key, arr);
-    }
-    return groups;
-  }, [filtered]);
+  const [ranking, setRanking] = React.useState<ModelRanking>("best_value");
+  const groups = React.useMemo(() => rankModels(filtered, ranking), [filtered, ranking]);
 
+  // A provider can fan out across data centers (a public API plus an on-prem
+  // gateway), so each row names the endpoint it resolves through.
   const providerLabel = React.useCallback(
-    (groupKey: string): string => {
-      const [slug = "", dataCenter = ""] = groupKey.split("\u0000");
-      const base = activeCatalog?.providers.find((p) => p.slug === slug)?.label ?? slug;
-      if (!dataCenter) return base;
+    (m: CatalogModel): string => {
+      const base = activeCatalog?.providers.find((p) => p.slug === m.provider)?.label ?? m.provider;
+      if (!m.data_center) return base;
       return formatMsg("auto.features.submit.components.modelpicker.template.2", {
         p1: base,
-        p2: dataCenter,
+        p2: m.data_center,
       });
     },
     [activeCatalog],
@@ -314,60 +362,111 @@ export function ModelPicker({
           </div>
         )}
 
+        <div
+          role="tablist"
+          aria-label={msg("submit.modelpicker.tabs.aria")}
+          className="flex shrink-0 gap-1 border-b border-border/50 px-3 py-2"
+        >
+          {RANKINGS.map((r) => (
+            <button
+              key={r}
+              type="button"
+              role="tab"
+              aria-selected={ranking === r}
+              onClick={() => setRanking(r)}
+              className={cn(
+                "min-h-[44px] flex-1 cursor-pointer rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 lg:min-h-0",
+                ranking === r
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {msg(RANKING_LABEL_KEYS[r])}
+            </button>
+          ))}
+        </div>
+
         <div className="max-h-60 min-h-0 flex-1 overflow-y-auto py-1">
           {filtered.length === 0 && (
             <div className="px-3 py-8 text-center text-xs text-muted-foreground">
               {msg("auto.features.submit.components.modelpicker.3")}
             </div>
           )}
-          {Array.from(grouped.entries()).map(([provider, items]) => (
-            <div key={provider} className="py-1">
-              <div
-                className="px-3 py-1 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60 text-start"
-                dir="ltr"
-              >
-                {providerLabel(provider)}
-              </div>
-              {items.map((m) => (
-                <button
-                  key={`${m.provider}:${m.value}`}
-                  type="button"
-                  onClick={() => commit(m)}
+          {groups.map((group) => (
+            <div key={group.kind} className="py-1">
+              {GROUP_LABEL_KEYS[group.kind] && (
+                <div className="px-3 py-1 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60 text-start">
+                  {msg(GROUP_LABEL_KEYS[group.kind]!)}
+                </div>
+              )}
+              {group.models.map((m) => (
+                <div
+                  key={`${m.provider}:${m.data_center ?? ""}:${m.value}`}
                   className={cn(
-                    "flex min-h-[44px] w-full items-center gap-2 px-3 py-1.5 text-start text-sm transition-colors hover:bg-accent/70 lg:min-h-0",
+                    "flex items-center transition-colors hover:bg-accent/70",
                     isSelected(m) && "bg-accent/50",
-                    !m.available && "opacity-60",
                   )}
-                  role="option"
-                  aria-selected={isSelected(m)}
                 >
-                  <span className="flex min-w-0 flex-1 items-center gap-1.5" dir="ltr">
-                    <span className="truncate text-[0.8125rem]">{m.display_name || m.label}</span>
-                    {m.supports_vision && (
-                      <MicroPill tone="primary" title={msg("shared.model_chip.vision_badge")}>
-                        <Eye className="size-2.5" />
-                      </MicroPill>
+                  <button
+                    type="button"
+                    onClick={() => commit(m)}
+                    title={providerLabel(m)}
+                    className={cn(
+                      "flex min-h-[44px] min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-start text-sm lg:min-h-0",
+                      !m.available && "opacity-60",
                     )}
-                    {showRetention && m.zero_retention && (
-                      <MicroPill title={msg("submit.modelpicker.zdr_badge_title")}>
-                        {msg("submit.modelpicker.zdr_badge")}
-                      </MicroPill>
-                    )}
-                    {showRetention && dataPolicy === "zdr" && m.zero_retention === false && (
-                      <MicroPill
-                        className="bg-[var(--warning-dim)] text-[var(--warning)]"
-                        title={msg("submit.modelpicker.zdr_unavailable")}
-                        aria-label={msg("submit.modelpicker.zdr_unavailable")}
-                        role="img"
-                      >
-                        <Warning className="size-2.5" aria-hidden="true" />
-                      </MicroPill>
-                    )}
-                  </span>
-                  <Check
-                    className={cn("size-3.5 shrink-0", isSelected(m) ? "opacity-100" : "opacity-0")}
-                  />
-                </button>
+                    role="option"
+                    aria-selected={isSelected(m)}
+                  >
+                    <ProviderLogo slug={modelProviderSlug(m.value)} size={14} />
+                    <span className="flex min-w-0 flex-1 flex-col" dir="ltr">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-[0.8125rem]">
+                          {m.display_name || m.label}
+                        </span>
+                        {m.supports_vision && (
+                          <MicroPill tone="primary" title={msg("shared.model_chip.vision_badge")}>
+                            <Eye className="size-2.5" />
+                          </MicroPill>
+                        )}
+                        {showRetention && m.zero_retention && (
+                          <MicroPill title={msg("submit.modelpicker.zdr_badge_title")}>
+                            {msg("submit.modelpicker.zdr_badge")}
+                          </MicroPill>
+                        )}
+                        {showRetention && dataPolicy === "zdr" && m.zero_retention === false && (
+                          <MicroPill
+                            className="bg-[var(--warning-dim)] text-[var(--warning)]"
+                            title={msg("submit.modelpicker.zdr_unavailable")}
+                            aria-label={msg("submit.modelpicker.zdr_unavailable")}
+                            role="img"
+                          >
+                            <Warning className="size-2.5" aria-hidden="true" />
+                          </MicroPill>
+                        )}
+                      </span>
+                      <ModelStats model={m} />
+                    </span>
+                    <Check
+                      className={cn(
+                        "size-3.5 shrink-0",
+                        isSelected(m) ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                  </button>
+                  {m.artificial_analysis_url && (
+                    <a
+                      href={m.artificial_analysis_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={msg("submit.modelpicker.aa_link")}
+                      title={msg("submit.modelpicker.aa_link")}
+                      className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-muted-foreground hover:text-foreground lg:min-h-0 lg:min-w-0 lg:px-2"
+                    >
+                      <ArrowSquareOut className="size-3.5" aria-hidden="true" />
+                    </a>
+                  )}
+                </div>
               ))}
             </div>
           ))}

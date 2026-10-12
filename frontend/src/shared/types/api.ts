@@ -992,6 +992,9 @@ export interface CatalogModel {
   // The fast, cheap model every agent interview runs when the user picks
   // nothing; at most one model carries it.
   is_interview_default?: boolean;
+  // The featured default thinker with the highest intelligence index; the
+  // reflection model's Automatic runs it. At most one model carries it.
+  is_strongest?: boolean;
   // OpenRouter's human name without the vendor prefix ("Claude Haiku 5.5");
   // null for models OpenRouter does not list.
   display_name?: string | null;
@@ -1002,6 +1005,14 @@ export interface CatalogModel {
   // the estimate falls back to a default rate rather than treating it as free.
   input_cost_per_token?: number | null;
   output_cost_per_token?: number | null;
+  // Artificial Analysis intelligence index (a new release may carry its
+  // predecessor's); null when unrated.
+  intelligence_index?: number | null;
+  // The model's Artificial Analysis page, only when a reliable source names it.
+  artificial_analysis_url?: string | null;
+  // Live OpenRouter speed of the fastest healthy endpoint; null when unmeasured.
+  throughput_tps?: number | null;
+  latency_ms?: number | null;
   // At least one OpenRouter endpoint serves this model with zero data retention.
   zero_retention?: boolean;
 }

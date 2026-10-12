@@ -592,6 +592,7 @@ export function WizardV2Provider({
         reflectionModel: readPref("optimizerReflectionModel"),
       },
       modelCatalog.models.find((model) => model.is_default)?.value,
+      modelCatalog.models.find((model) => model.is_strongest)?.value,
     );
     if (preset) patchOptimizer(preset);
     // Runs once, when the catalog first arrives; the models are read from that render.

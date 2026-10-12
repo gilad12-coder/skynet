@@ -4073,5 +4073,20 @@
   "experience.setup.channels.title": "Оновлення в Chrome і Slack",
   "experience.setup.channels.body": "Підключіть місця, куди мають надходити оновлення. Обидва необов'язкові. Slack відкриє свою сторінку й поверне вас сюди.",
   "experience.setup.start.title": "Почніть першу оптимізацію",
-  "experience.setup.start.body": "Кожна нова оптимізація починається тут. Продовжте, і ми відкриємо її для вас."
+  "experience.setup.start.body": "Кожна нова оптимізація починається тут. Продовжте, і ми відкриємо її для вас.",
+  "settings.optimization.model.automatic_strongest": "Автоматично (зараз найсильніша: {model})",
+  "submit.modelpicker.aa_link": "Відкрити на Artificial Analysis",
+  "submit.modelpicker.group.dominated": "Інші моделі з оцінкою",
+  "submit.modelpicker.group.no_speed": "Немає даних про швидкість",
+  "submit.modelpicker.group.unrated": "Без оцінки",
+  "submit.modelpicker.stat.price": "${price} за 1M вводу",
+  "submit.modelpicker.stat.price_title": "Ціна вводу за мільйон токенів",
+  "submit.modelpicker.stat.score": "Оцінка {score}",
+  "submit.modelpicker.stat.score_title": "Індекс інтелекту Artificial Analysis",
+  "submit.modelpicker.stat.speed": "{tps} ток/с · {latency} с",
+  "submit.modelpicker.stat.speed_title": "Поточна швидкість в OpenRouter: вихідні токени за секунду й час до першого токена",
+  "submit.modelpicker.tab.best_value": "Найкраща ціна",
+  "submit.modelpicker.tab.fastest": "Найшвидші",
+  "submit.modelpicker.tab.smartest": "Найрозумніші",
+  "submit.modelpicker.tabs.aria": "Сортування моделей"
 }

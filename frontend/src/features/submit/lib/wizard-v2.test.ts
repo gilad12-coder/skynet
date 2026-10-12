@@ -127,6 +127,17 @@ test("an Automatic model resolves to whatever the catalog default is when the wi
   assert.equal(later?.reflectionModel?.name, "anthropic/claude-new");
 });
 
+test("reflection Automatic runs the strongest model while the task model stays on best value", () => {
+  const fresh = initialWizardV2State().optimizer;
+  const preset = presetModels(fresh, noDefaults, "openai/gpt-value", "anthropic/claude-strong");
+  assert.equal(preset?.taskModel?.name, "openai/gpt-value");
+  assert.equal(preset?.reflectionModel?.name, "anthropic/claude-strong");
+  assert.equal(
+    presetModels(fresh, noDefaults, "openai/gpt-value", null)?.reflectionModel?.name,
+    "openai/gpt-value",
+  );
+});
+
 test("the preset never overwrites a model someone already set, and needs some default", () => {
   const empty = initialWizardV2State().optimizer;
   const picked = { name: "anthropic/claude-x", token_source: "managed" as const };

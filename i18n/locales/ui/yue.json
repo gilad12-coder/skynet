@@ -4073,5 +4073,20 @@
   "experience.setup.channels.title": "喺 Chrome 同 Slack 收更新",
   "experience.setup.channels.body": "連接你想收更新嘅地方。兩樣都唔係必須。Slack 會開自己嘅頁面，然後帶你返嚟呢度。",
   "experience.setup.start.title": "開始你嘅第一個優化",
-  "experience.setup.start.body": "每個新優化都由呢度開始。繼續，我哋就幫你開一個。"
+  "experience.setup.start.body": "每個新優化都由呢度開始。繼續，我哋就幫你開一個。",
+  "settings.optimization.model.automatic_strongest": "自動（而家最強：{model}）",
+  "submit.modelpicker.aa_link": "喺 Artificial Analysis 睇",
+  "submit.modelpicker.group.dominated": "其他有評分嘅模型",
+  "submit.modelpicker.group.no_speed": "冇速度數據",
+  "submit.modelpicker.group.unrated": "未評分",
+  "submit.modelpicker.stat.price": "每 1M 輸入 ${price}",
+  "submit.modelpicker.stat.price_title": "每一百萬個 token 嘅輸入價錢",
+  "submit.modelpicker.stat.score": "分數 {score}",
+  "submit.modelpicker.stat.score_title": "Artificial Analysis 智能指數",
+  "submit.modelpicker.stat.speed": "{tps} token/秒 · {latency} 秒",
+  "submit.modelpicker.stat.speed_title": "OpenRouter 即時速度：每秒輸出 token 數同出第一個 token 嘅時間",
+  "submit.modelpicker.tab.best_value": "最抵",
+  "submit.modelpicker.tab.fastest": "最快",
+  "submit.modelpicker.tab.smartest": "最聰明",
+  "submit.modelpicker.tabs.aria": "排序模型"
 }

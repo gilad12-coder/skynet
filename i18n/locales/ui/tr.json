@@ -4073,5 +4073,20 @@
   "experience.setup.channels.title": "Chrome ve Slack'te güncelleme alın",
   "experience.setup.channels.body": "Güncellemelerin ulaşmasını istediğiniz yerleri bağlayın. İkisi de isteğe bağlıdır. Slack kendi sayfasını açar ve sizi buraya geri getirir.",
   "experience.setup.start.title": "İlk optimizasyonunuzu başlatın",
-  "experience.setup.start.body": "Her yeni optimizasyon burada başlar. Devam edin, sizin için bir tane açalım."
+  "experience.setup.start.body": "Her yeni optimizasyon burada başlar. Devam edin, sizin için bir tane açalım.",
+  "settings.optimization.model.automatic_strongest": "Otomatik (şu an en güçlü: {model})",
+  "submit.modelpicker.aa_link": "Artificial Analysis'te görüntüle",
+  "submit.modelpicker.group.dominated": "Diğer puanlı modeller",
+  "submit.modelpicker.group.no_speed": "Hız verisi yok",
+  "submit.modelpicker.group.unrated": "Puansız",
+  "submit.modelpicker.stat.price": "1M girdi başına ${price}",
+  "submit.modelpicker.stat.price_title": "Milyon token başına girdi fiyatı",
+  "submit.modelpicker.stat.score": "Puan {score}",
+  "submit.modelpicker.stat.score_title": "Artificial Analysis zekâ endeksi",
+  "submit.modelpicker.stat.speed": "{tps} token/sn · {latency} sn",
+  "submit.modelpicker.stat.speed_title": "OpenRouter'daki canlı hız: saniye başına çıktı token'ı ve ilk token'a kadar geçen süre",
+  "submit.modelpicker.tab.best_value": "En iyi fiyat/performans",
+  "submit.modelpicker.tab.fastest": "En hızlı",
+  "submit.modelpicker.tab.smartest": "En akıllı",
+  "submit.modelpicker.tabs.aria": "Modelleri sırala"
 }

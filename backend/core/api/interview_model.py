@@ -16,6 +16,10 @@ with no list of labs or models written in:
 The pick refreshes in the background every 30 minutes. When the stats can't be
 fetched it keeps the last pick, and before the first one it falls back to the
 cheapest small candidate.
+
+The same refresh measures every OpenRouter model in the catalog, so the model
+picker's Fastest tab sorts on the throughput and latency of each model's
+fastest healthy endpoint.
 """
 
 from __future__ import annotations
@@ -45,10 +49,13 @@ _REPLY_TOKENS = 150
 # stall interviews more than its speed saves.
 _MIN_UPTIME_PERCENT = 99.0
 _FETCH_TIMEOUT_SECONDS = 6
+_FETCH_WORKERS = 16
 
 _lock = Lock()
 _pick: str | None = None
 _picked_at: float = 0.0
+_speeds: dict[str, tuple[float, float]] = {}
+_measured_at: float = 0.0
 _refresh_in_flight = False
 
 
@@ -89,6 +96,44 @@ def small_candidates(catalog: ModelCatalogResponse) -> list[CatalogModel]:
     return sorted((m for m in featured if _price(m) <= median), key=_price)
 
 
+def _short_reply_ms(speed: tuple[float, float]) -> float:
+    """Return the time a short reply takes at one endpoint's speed.
+
+    Args:
+        speed: ``(tokens per second, milliseconds to the first token)``.
+
+    Returns:
+        Milliseconds to the first token plus :data:`_REPLY_TOKENS`.
+    """
+    tokens_per_second, first_token_ms = speed
+    return first_token_ms + _REPLY_TOKENS / tokens_per_second * 1000
+
+
+def endpoint_speed(endpoints: list[dict]) -> tuple[float, float] | None:
+    """Return the speed of the healthy endpoint that answers a short reply first.
+
+    Args:
+        endpoints: OpenRouter's ``data.endpoints`` list for one model.
+
+    Returns:
+        ``(median tokens per second, median milliseconds to the first token)``
+        over the last 30 minutes, or ``None`` when no endpoint has stats and
+        enough uptime.
+    """
+    best: tuple[float, float] | None = None
+    for endpoint in endpoints:
+        latency = endpoint.get("latency_last_30m") or {}
+        throughput = endpoint.get("throughput_last_30m") or {}
+        uptime = endpoint.get("uptime_last_1d")
+        first_token, tokens_per_second = latency.get("p50"), throughput.get("p50")
+        if not first_token or not tokens_per_second or uptime is None or uptime < _MIN_UPTIME_PERCENT:
+            continue
+        speed = (float(tokens_per_second), float(first_token))
+        if best is None or _short_reply_ms(speed) < _short_reply_ms(best):
+            best = speed
+    return best
+
+
 def reply_ms(endpoints: list[dict]) -> float | None:
     """Return the fastest healthy endpoint's time to a short reply.
 
@@ -99,17 +144,8 @@ def reply_ms(endpoints: list[dict]) -> float | None:
         Milliseconds to the first token plus :data:`_REPLY_TOKENS` at median
         throughput, or ``None`` when no endpoint has stats and enough uptime.
     """
-    best: float | None = None
-    for endpoint in endpoints:
-        latency = endpoint.get("latency_last_30m") or {}
-        throughput = endpoint.get("throughput_last_30m") or {}
-        uptime = endpoint.get("uptime_last_1d")
-        first_token, tokens_per_second = latency.get("p50"), throughput.get("p50")
-        if not first_token or not tokens_per_second or uptime is None or uptime < _MIN_UPTIME_PERCENT:
-            continue
-        total = float(first_token) + _REPLY_TOKENS / float(tokens_per_second) * 1000
-        best = total if best is None else min(best, total)
-    return best
+    speed = endpoint_speed(endpoints)
+    return _short_reply_ms(speed) if speed else None
 
 
 def choose(candidates: list[CatalogModel], times: dict[str, float]) -> str | None:
@@ -165,37 +201,42 @@ def _fetch_endpoints(model_value: str, api_key: str) -> list[dict] | None:
     return endpoints if isinstance(endpoints, list) else None
 
 
-def _measure(candidates: list[CatalogModel]) -> dict[str, float]:
-    """Measure each candidate's reply time from OpenRouter's endpoint stats.
+def _measure(models: list[CatalogModel]) -> dict[str, tuple[float, float]]:
+    """Measure each model's speed from OpenRouter's endpoint stats.
 
     Args:
-        candidates: Output of :func:`small_candidates`.
+        models: OpenRouter catalog entries.
 
     Returns:
-        Reply milliseconds by catalog id, for the candidates with stats.
+        :func:`endpoint_speed` by catalog id, for the models with stats.
     """
     api_key = os.getenv("OPENROUTER_API_KEY", "")
-    if not api_key or not candidates:
+    if not api_key or not models:
         return {}
-    with ThreadPoolExecutor(max_workers=min(8, len(candidates))) as pool:
-        listings = list(pool.map(lambda m: _fetch_endpoints(m.value, api_key), candidates))
-    times: dict[str, float] = {}
-    for model, endpoints in zip(candidates, listings, strict=True):
-        ms = reply_ms(endpoints or [])
-        if ms is not None:
-            times[model.value] = ms
-    return times
+    with ThreadPoolExecutor(max_workers=min(_FETCH_WORKERS, len(models))) as pool:
+        listings = list(pool.map(lambda m: _fetch_endpoints(m.value, api_key), models))
+    speeds: dict[str, tuple[float, float]] = {}
+    for model, endpoints in zip(models, listings, strict=True):
+        speed = endpoint_speed(endpoints or [])
+        if speed is not None:
+            speeds[model.value] = speed
+    return speeds
 
 
 def _refresh() -> None:
     """Recompute the pick and store it; never raises."""
-    global _pick, _picked_at, _refresh_in_flight
+    global _pick, _picked_at, _measured_at, _refresh_in_flight
     try:
         catalog = catalog_snapshot()
         if catalog is not None:
+            speeds = _measure([m for m in catalog.models if m.value.startswith(_OPENROUTER_PREFIX)])
             candidates = small_candidates(catalog)
-            winner = choose(candidates, _measure(candidates))
+            winner = choose(candidates, {value: _short_reply_ms(speed) for value, speed in speeds.items()})
             with _lock:
+                _measured_at = time.monotonic()
+                if speeds:
+                    _speeds.clear()
+                    _speeds.update(speeds)
                 if winner:
                     _pick = winner
                     _picked_at = time.monotonic()
@@ -241,15 +282,28 @@ def interview_model_id() -> str:
 
 
 def with_interview_default(catalog: ModelCatalogResponse) -> ModelCatalogResponse:
-    """Flag the model interviews run by default.
+    """Flag the model interviews run by default and attach each model's measured speed.
 
     Args:
         catalog: A cached catalog, left unmodified.
 
     Returns:
-        A copy whose ``is_interview_default`` marks the current pick.
+        A copy whose ``is_interview_default`` marks the current pick and whose
+        ``throughput_tps`` / ``latency_ms`` carry the last measured speeds.
     """
     pick = interview_model_id()
-    return catalog.model_copy(
-        update={"models": [m.model_copy(update={"is_interview_default": m.value == pick}) for m in catalog.models]}
-    )
+    with _lock:
+        speeds, stale = dict(_speeds), time.monotonic() - _measured_at >= _STATS_TTL_SECONDS
+    # A pinned INTERVIEW_AGENT_MODEL skips the pick's own refresh, yet the
+    # picker's speeds still need one.
+    if stale:
+        _kick_refresh()
+    models = []
+    for m in catalog.models:
+        throughput, latency = speeds.get(m.value, (None, None))
+        models.append(
+            m.model_copy(
+                update={"is_interview_default": m.value == pick, "throughput_tps": throughput, "latency_ms": latency}
+            )
+        )
+    return catalog.model_copy(update={"models": models})

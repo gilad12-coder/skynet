@@ -4073,5 +4073,20 @@
   "experience.setup.channels.title": "Chrome और Slack में अपडेट पाएँ",
   "experience.setup.channels.body": "वे जगहें जोड़ें जहाँ आप अपडेट पाना चाहते हैं। दोनों ज़रूरी नहीं हैं। Slack अपना पेज खोलता है और आपको यहीं वापस लाता है।",
   "experience.setup.start.title": "अपना पहला ऑप्टिमाइज़ेशन शुरू करें",
-  "experience.setup.start.body": "हर नया ऑप्टिमाइज़ेशन यहीं से शुरू होता है। आगे बढ़ें, हम आपके लिए एक खोल देंगे।"
+  "experience.setup.start.body": "हर नया ऑप्टिमाइज़ेशन यहीं से शुरू होता है। आगे बढ़ें, हम आपके लिए एक खोल देंगे।",
+  "settings.optimization.model.automatic_strongest": "स्वचालित (अभी सबसे मज़बूत: {model})",
+  "submit.modelpicker.aa_link": "Artificial Analysis पर देखें",
+  "submit.modelpicker.group.dominated": "अन्य रेटेड मॉडल",
+  "submit.modelpicker.group.no_speed": "गति का कोई डेटा नहीं",
+  "submit.modelpicker.group.unrated": "बिना रेटिंग",
+  "submit.modelpicker.stat.price": "${price}/1M इनपुट",
+  "submit.modelpicker.stat.price_title": "प्रति दस लाख टोकन इनपुट मूल्य",
+  "submit.modelpicker.stat.score": "स्कोर {score}",
+  "submit.modelpicker.stat.score_title": "Artificial Analysis इंटेलिजेंस इंडेक्स",
+  "submit.modelpicker.stat.speed": "{tps} टोकन/से · {latency} से",
+  "submit.modelpicker.stat.speed_title": "OpenRouter पर लाइव गति: प्रति सेकंड आउटपुट टोकन और पहले टोकन तक का समय",
+  "submit.modelpicker.tab.best_value": "सबसे किफ़ायती",
+  "submit.modelpicker.tab.fastest": "सबसे तेज़",
+  "submit.modelpicker.tab.smartest": "सबसे समझदार",
+  "submit.modelpicker.tabs.aria": "मॉडल क्रमबद्ध करें"
 }

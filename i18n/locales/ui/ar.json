@@ -4073,5 +4073,20 @@
   "experience.setup.channels.title": "استلم التحديثات في Chrome وSlack",
   "experience.setup.channels.body": "اربط الأماكن التي تريد أن تصلك التحديثات فيها. كلاهما اختياري. يفتح Slack صفحته الخاصة ثم يعيدك إلى هنا.",
   "experience.setup.start.title": "ابدأ أول عملية تحسين لك",
-  "experience.setup.start.body": "من هنا تبدأ كل عملية تحسين جديدة. تابع وسنفتح لك واحدة."
+  "experience.setup.start.body": "من هنا تبدأ كل عملية تحسين جديدة. تابع وسنفتح لك واحدة.",
+  "settings.optimization.model.automatic_strongest": "تلقائي (الأقوى حاليًا: {model})",
+  "submit.modelpicker.aa_link": "عرض على Artificial Analysis",
+  "submit.modelpicker.group.dominated": "نماذج مُقيّمة أخرى",
+  "submit.modelpicker.group.no_speed": "لا توجد بيانات سرعة",
+  "submit.modelpicker.group.unrated": "غير مُقيّم",
+  "submit.modelpicker.stat.price": "${price} لكل 1M إدخال",
+  "submit.modelpicker.stat.price_title": "سعر الإدخال لكل مليون رمز",
+  "submit.modelpicker.stat.score": "النتيجة {score}",
+  "submit.modelpicker.stat.score_title": "مؤشر الذكاء من Artificial Analysis",
+  "submit.modelpicker.stat.speed": "{tps} رمز/ث · {latency} ث",
+  "submit.modelpicker.stat.speed_title": "السرعة الحية على OpenRouter: رموز الإخراج في الثانية والوقت حتى أول رمز",
+  "submit.modelpicker.tab.best_value": "الأفضل قيمة",
+  "submit.modelpicker.tab.fastest": "الأسرع",
+  "submit.modelpicker.tab.smartest": "الأذكى",
+  "submit.modelpicker.tabs.aria": "ترتيب النماذج"
 }

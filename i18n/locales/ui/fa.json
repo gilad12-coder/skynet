@@ -4073,5 +4073,20 @@
   "experience.setup.channels.title": "به‌روزرسانی‌ها را در Chrome و Slack بگیرید",
   "experience.setup.channels.body": "جاهایی را که می‌خواهید به‌روزرسانی‌ها به آن‌ها برسد وصل کنید. هر دو اختیاری‌اند. Slack صفحهٔ خودش را باز می‌کند و شما را به اینجا برمی‌گرداند.",
   "experience.setup.start.title": "اولین بهینه‌سازی خود را شروع کنید",
-  "experience.setup.start.body": "هر بهینه‌سازی جدید از اینجا شروع می‌شود. ادامه دهید تا یکی برایتان باز کنیم."
+  "experience.setup.start.body": "هر بهینه‌سازی جدید از اینجا شروع می‌شود. ادامه دهید تا یکی برایتان باز کنیم.",
+  "settings.optimization.model.automatic_strongest": "خودکار (قوی‌ترین در حال حاضر: {model})",
+  "submit.modelpicker.aa_link": "مشاهده در Artificial Analysis",
+  "submit.modelpicker.group.dominated": "سایر مدل‌های رتبه‌بندی‌شده",
+  "submit.modelpicker.group.no_speed": "داده‌ای از سرعت نیست",
+  "submit.modelpicker.group.unrated": "بدون رتبه",
+  "submit.modelpicker.stat.price": "${price} برای 1M ورودی",
+  "submit.modelpicker.stat.price_title": "قیمت ورودی برای هر میلیون توکن",
+  "submit.modelpicker.stat.score": "امتیاز {score}",
+  "submit.modelpicker.stat.score_title": "شاخص هوش Artificial Analysis",
+  "submit.modelpicker.stat.speed": "{tps} توکن/ث · {latency} ث",
+  "submit.modelpicker.stat.speed_title": "سرعت زنده در OpenRouter: توکن‌های خروجی در ثانیه و زمان تا اولین توکن",
+  "submit.modelpicker.tab.best_value": "بهترین ارزش",
+  "submit.modelpicker.tab.fastest": "سریع‌ترین",
+  "submit.modelpicker.tab.smartest": "باهوش‌ترین",
+  "submit.modelpicker.tabs.aria": "مرتب‌سازی مدل‌ها"
 }

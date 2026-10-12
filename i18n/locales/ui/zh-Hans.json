@@ -4073,5 +4073,20 @@
   "experience.setup.channels.title": "在 Chrome 和 Slack 接收更新",
   "experience.setup.channels.body": "连接你想接收更新的地方。两者都是可选的。Slack 会打开它自己的页面，然后把你带回这里。",
   "experience.setup.start.title": "开始你的第一个优化",
-  "experience.setup.start.body": "每个新的优化都从这里开始。继续，我们会为你打开一个。"
+  "experience.setup.start.body": "每个新的优化都从这里开始。继续，我们会为你打开一个。",
+  "settings.optimization.model.automatic_strongest": "自动（当前最强：{model}）",
+  "submit.modelpicker.aa_link": "在 Artificial Analysis 上查看",
+  "submit.modelpicker.group.dominated": "其他已评分模型",
+  "submit.modelpicker.group.no_speed": "无速度数据",
+  "submit.modelpicker.group.unrated": "未评分",
+  "submit.modelpicker.stat.price": "每 1M 输入 ${price}",
+  "submit.modelpicker.stat.price_title": "每百万 token 的输入价格",
+  "submit.modelpicker.stat.score": "得分 {score}",
+  "submit.modelpicker.stat.score_title": "Artificial Analysis 智能指数",
+  "submit.modelpicker.stat.speed": "{tps} token/秒 · {latency} 秒",
+  "submit.modelpicker.stat.speed_title": "OpenRouter 实时速度：每秒输出 token 数和首个 token 的延迟",
+  "submit.modelpicker.tab.best_value": "最具性价比",
+  "submit.modelpicker.tab.fastest": "最快",
+  "submit.modelpicker.tab.smartest": "最聪明",
+  "submit.modelpicker.tabs.aria": "模型排序"
 }

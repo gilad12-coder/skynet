@@ -1,4 +1,4 @@
-import type { ModelCatalogResponse } from "@/shared/types/api";
+import type { CatalogModel, ModelCatalogResponse } from "@/shared/types/api";
 import { getByokModels } from "@/shared/lib/api";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 
@@ -95,4 +95,81 @@ export function invalidateByokModelCatalog(): void {
 /** Synchronously inspect the cached BYOK catalog (null before its first fetch resolves). */
 export function cachedByokCatalog(): ModelCatalogResponse | null {
   return _byokCache;
+}
+
+export type ModelRanking = "best_value" | "smartest" | "fastest";
+
+/** One section of a picker tab; `kind` picks the section's header. */
+export interface RankedGroup {
+  kind: "ranked" | "dominated" | "unrated" | "no_speed";
+  models: CatalogModel[];
+}
+
+// The short reply the interview default is timed on (backend
+// interview_model._REPLY_TOKENS), so Fastest agrees with that pick.
+const REPLY_TOKENS = 150;
+
+/** Milliseconds to the first token plus a short reply, or null when unmeasured. */
+export function replyMs(m: CatalogModel): number | null {
+  if (!m.throughput_tps || m.latency_ms == null) return null;
+  return m.latency_ms + (REPLY_TOKENS / m.throughput_tps) * 1000;
+}
+
+/** Benchmark points per input dollar, or null without both a score and a price. */
+export function scorePerDollar(m: CatalogModel): number | null {
+  if (m.intelligence_index == null || !m.input_cost_per_token) return null;
+  return m.intelligence_index / m.input_cost_per_token;
+}
+
+/** Whether `a` scores at least as high for at most the price, and is strictly better on one. */
+function dominates(a: CatalogModel, b: CatalogModel): boolean {
+  const sa = a.intelligence_index ?? 0;
+  const sb = b.intelligence_index ?? 0;
+  const pa = a.input_cost_per_token ?? 0;
+  const pb = b.input_cost_per_token ?? 0;
+  return sa >= sb && pa <= pb && (sa > sb || pa < pb);
+}
+
+function byDesc(key: (m: CatalogModel) => number) {
+  return (a: CatalogModel, b: CatalogModel) => key(b) - key(a);
+}
+
+/**
+ * Order models for one picker tab. Best value lists the Pareto frontier of
+ * score against input price by score per dollar, then the rated models the
+ * frontier beats, then the unrated. Smartest sorts by intelligence index,
+ * unrated last. Fastest sorts by time to a short reply, unmeasured last.
+ * Empty groups are dropped; ties keep the catalog's order.
+ */
+export function rankModels(models: CatalogModel[], ranking: ModelRanking): RankedGroup[] {
+  let groups: RankedGroup[];
+  if (ranking === "fastest") {
+    const timed = models.filter((m) => replyMs(m) !== null);
+    timed.sort((a, b) => (replyMs(a) ?? 0) - (replyMs(b) ?? 0));
+    groups = [
+      { kind: "ranked", models: timed },
+      { kind: "no_speed", models: models.filter((m) => replyMs(m) === null) },
+    ];
+  } else if (ranking === "smartest") {
+    const rated = models.filter((m) => m.intelligence_index != null);
+    rated.sort(byDesc((m) => m.intelligence_index ?? 0));
+    groups = [
+      { kind: "ranked", models: rated },
+      { kind: "unrated", models: models.filter((m) => m.intelligence_index == null) },
+    ];
+  } else {
+    const priced = models.filter((m) => scorePerDollar(m) !== null);
+    const frontier = priced.filter((m) => !priced.some((other) => dominates(other, m)));
+    const onFrontier = new Set(frontier);
+    // A score without a price can't sit on the frontier, but it is still rated.
+    const dominated = models.filter((m) => m.intelligence_index != null && !onFrontier.has(m));
+    frontier.sort(byDesc((m) => scorePerDollar(m) ?? 0));
+    dominated.sort(byDesc((m) => scorePerDollar(m) ?? -1));
+    groups = [
+      { kind: "ranked", models: frontier },
+      { kind: "dominated", models: dominated },
+      { kind: "unrated", models: models.filter((m) => m.intelligence_index == null) },
+    ];
+  }
+  return groups.filter((g) => g.models.length > 0);
 }

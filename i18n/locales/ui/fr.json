@@ -4073,5 +4073,20 @@
   "experience.setup.channels.title": "Recevez les mises à jour dans Chrome et Slack",
   "experience.setup.channels.body": "Connectez les endroits où vous voulez recevoir les mises à jour. Les deux sont facultatifs. Slack ouvre sa propre page puis vous ramène ici.",
   "experience.setup.start.title": "Lancez votre première optimisation",
-  "experience.setup.start.body": "Chaque nouvelle optimisation commence ici. Continuez et nous en ouvrirons une pour vous."
+  "experience.setup.start.body": "Chaque nouvelle optimisation commence ici. Continuez et nous en ouvrirons une pour vous.",
+  "settings.optimization.model.automatic_strongest": "Automatique (le plus puissant actuellement : {model})",
+  "submit.modelpicker.aa_link": "Voir sur Artificial Analysis",
+  "submit.modelpicker.group.dominated": "Autres modèles notés",
+  "submit.modelpicker.group.no_speed": "Aucune donnée de vitesse",
+  "submit.modelpicker.group.unrated": "Non noté",
+  "submit.modelpicker.stat.price": "${price}/1M en entrée",
+  "submit.modelpicker.stat.price_title": "Prix d’entrée par million de tokens",
+  "submit.modelpicker.stat.score": "Score {score}",
+  "submit.modelpicker.stat.score_title": "Indice d’intelligence d’Artificial Analysis",
+  "submit.modelpicker.stat.speed": "{tps} tok/s · {latency} s",
+  "submit.modelpicker.stat.speed_title": "Vitesse en direct sur OpenRouter : tokens de sortie par seconde et délai avant le premier token",
+  "submit.modelpicker.tab.best_value": "Meilleur rapport qualité-prix",
+  "submit.modelpicker.tab.fastest": "Le plus rapide",
+  "submit.modelpicker.tab.smartest": "Le plus intelligent",
+  "submit.modelpicker.tabs.aria": "Trier les modèles"
 }
