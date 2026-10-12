@@ -7,6 +7,7 @@ validates environment variables at startup and provides typed access.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from functools import cached_property, lru_cache
 from pathlib import Path
@@ -112,6 +113,18 @@ class Settings(BaseSettings):
         default="http://localhost:3000",
         alias="APP_PUBLIC_URL",
         description="Public origin of the web app, used to build Stripe Checkout success/cancel return URLs.",
+    )
+    railway_environment_name: str = Field(
+        default="",
+        alias="RAILWAY_ENVIRONMENT_NAME",
+        description="Set by Railway. A name ending in -pr-<number> marks a PR preview environment.",
+    )
+    preview_grant_cents: int = Field(
+        default=0,
+        ge=0,
+        alias="PREVIEW_GRANT_CENTS",
+        description="One-time credit each new account gets in a PR preview environment, so automated "
+        "checks can pay for a run there. Ignored outside preview environments.",
     )
     smtp_host: str | None = Field(
         default=None,
@@ -1307,6 +1320,11 @@ class Settings(BaseSettings):
     def admin_groups_set(self) -> frozenset[str]:
         """Return admin IdP groups as a lowercase frozenset."""
         return _csv_lower_set(self.admin_groups)
+
+    @property
+    def is_preview_environment(self) -> bool:
+        """Return whether this deployment is a Railway PR preview environment."""
+        return re.search(r"-pr-\d+$", self.railway_environment_name) is not None
 
     @property
     def is_stripe_configured(self) -> bool:

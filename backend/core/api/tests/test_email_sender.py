@@ -91,3 +91,16 @@ def test_send_email_composes_plain_and_html_alternatives(monkeypatch: pytest.Mon
     assert smtp.message["Subject"] == "Run complete"
     assert smtp.message.get_body(preferencelist=("plain",)).get_content().strip() == "Run complete"
     assert smtp.message.get_body(preferencelist=("html",)).get_content().strip() == "<p>Run complete</p>"
+
+
+@pytest.mark.parametrize(
+    ("environment_name", "expected"),
+    [("staging", True), ("production", True), ("", True), ("skynet-pr-664", False)],
+)
+def test_email_configured_is_off_in_preview_environments(
+    monkeypatch: pytest.MonkeyPatch, environment_name: str, expected: bool
+) -> None:
+    """An SMTP host counts as configured everywhere except a PR preview environment."""
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "railway_environment_name", environment_name)
+    assert email_sender_module.email_configured() is expected
