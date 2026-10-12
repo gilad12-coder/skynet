@@ -115,6 +115,18 @@ test("the Settings default models win over the catalog default, role by role", (
   );
 });
 
+test("an Automatic model resolves to whatever the catalog default is when the wizard opens", () => {
+  const fresh = initialWizardV2State().optimizer;
+  const automatic = { taskModel: null, reflectionModel: { name: "" } };
+  assert.deepEqual(presetModels(fresh, automatic, "openai/gpt-old")?.taskModel, {
+    name: "openai/gpt-old",
+    token_source: "managed",
+  });
+  const later = presetModels(fresh, automatic, "anthropic/claude-new");
+  assert.equal(later?.taskModel?.name, "anthropic/claude-new");
+  assert.equal(later?.reflectionModel?.name, "anthropic/claude-new");
+});
+
 test("the preset never overwrites a model someone already set, and needs some default", () => {
   const empty = initialWizardV2State().optimizer;
   const picked = { name: "anthropic/claude-x", token_source: "managed" as const };
@@ -178,6 +190,26 @@ test("switching to Guided on the Optimizer step moves on to the next step", () =
   assert.equal(withLevel(onOptimizer, "guided", true).step, "optimizer");
   assert.equal(withLevel(onOptimizer, "expert", false).step, "optimizer");
   assert.equal(withLevel(onOptimizer, "standard", false), onOptimizer);
+});
+
+test("switching level keeps every answer and re-lays out the current step", () => {
+  const onOptimizer = {
+    ...readyState("standard"),
+    step: "optimizer" as const,
+    optimizer: { ...readyState("standard").optimizer, choice: "gepa" as const },
+  };
+  const expert = withLevel(onOptimizer, "expert", false);
+  assert.equal(expert.step, "optimizer");
+  assert.deepEqual({ ...expert, level: "standard" }, onOptimizer);
+  assert.deepEqual(stepPages("optimizer", onOptimizer), ["plan"]);
+  assert.deepEqual(stepPages("optimizer", expert), ["optimizer", "models", "budget"]);
+
+  const onMetric = { ...readyState("guided"), step: "metric" as const };
+  const standard = withLevel(onMetric, "standard", false);
+  assert.equal(standard.step, "metric");
+  assert.deepEqual(wizardSteps(onMetric, false), withoutOptimizer);
+  assert.deepEqual(wizardSteps(standard, false), WIZARD_V2_STEPS);
+  assert.deepEqual({ ...standard, level: "guided" }, onMetric);
 });
 
 test("a DSPy program without a task model counts as missing models", () => {

@@ -6,15 +6,17 @@ import { ModelConfigModal, optimizerLabel, useRecentModelConfigs } from "@/featu
 import { cn } from "@/shared/lib/utils";
 import { msg } from "@/shared/lib/messages";
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
+import { modelDisplayName } from "@/shared/lib/model-provider";
 import type { CatalogModel, ModelConfig } from "@/shared/types/api";
 import {
   BLACKBOX_OPTIMIZERS,
   DSPY_OPTIMIZERS,
   type OptimizerChoice,
 } from "@/shared/types/unified-run";
-import { Cpu, Sparkle, Target } from "@/shared/ui/icons";
+import { ArrowCounterClockwise, Cpu, Sparkle, Target } from "@/shared/ui/icons";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { NumberInput } from "@/shared/ui/number-input";
+import { Button } from "@/shared/ui/primitives/button";
 import {
   Select,
   SelectContent,
@@ -58,16 +60,37 @@ export function OptimizationDefaults() {
     };
   }, [catalogModels]);
 
+  // An unpinned model is stored empty and resolved to the catalog default
+  // each time a wizard opens, so a new default reaches everyone who never
+  // pinned one.
+  const bestNow = catalogModels?.find((model) => model.is_default);
+  const automaticLabel = bestNow
+    ? msg("settings.optimization.model.automatic_now", {
+        model: modelDisplayName(bestNow.value, catalogModels ?? undefined),
+      })
+    : msg("settings.optimization.model.automatic");
+
   const modelRow = (role: ModelRole, label: string, description: string) => (
     <SettingsRow icon={Cpu} label={label} description={description}>
-      <ModelChip
-        config={prefs[role]}
-        emptyLabel={msg("settings.optimization.model.placeholder")}
-        defaultFlag="is_default"
-        catalogModels={catalogModels ?? undefined}
-        onClick={() => setEditing(role)}
-        onRemove={prefs[role].name ? () => setPref(role, { name: "" }) : undefined}
-      />
+      <div className="flex min-w-0 items-center gap-1">
+        <ModelChip
+          config={prefs[role]}
+          emptyLabel={automaticLabel}
+          catalogModels={catalogModels ?? undefined}
+          onClick={() => setEditing(role)}
+        />
+        {prefs[role].name ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={msg("settings.optimization.model.reset")}
+            title={msg("settings.optimization.model.reset")}
+            onClick={() => setPref(role, { name: "" })}
+          >
+            <ArrowCounterClockwise aria-hidden="true" />
+          </Button>
+        ) : null}
+      </div>
     </SettingsRow>
   );
   const editingLabel =

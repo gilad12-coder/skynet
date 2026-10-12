@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 
+import { ExperienceLevelSwitch } from "@/features/experience";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 import { slideVariants } from "../../constants";
@@ -115,8 +116,13 @@ function UnifiedWizardFrame() {
         WIDE_STEPS.has(current) ? "max-w-6xl" : "max-w-3xl"
       }`}
     >
-      <div className="shrink-0">
-        <SubmitStepper w={w} locked={w.advancing} />
+      {/* Switching level keeps every answer: the wizard re-lays out around the
+          current step and moves on only if that step drops out. */}
+      <div className="flex shrink-0 items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <SubmitStepper w={w} locked={w.advancing} />
+        </div>
+        <ExperienceLevelSwitch size="sm" iconOnly />
       </div>
 
       <div
