@@ -56,6 +56,24 @@ approves that specific PR in chat or on GitHub.
 send one card: the backend changes that landed, staging smoke status, and a
 60s video tour of the core flow on staging. Promote only on "promote".
 
+### PR preview environments: keep them able to run an optimization
+
+The merger has to sign up and finish a real run in each `*-pr-<n>` Railway
+environment. Three things broke that once; keep them true:
+
+- **No watch paths on `staging` services.** PR environments copy `staging`,
+  and Railway skips a service whose watch paths the PR doesn't touch. A skipped
+  `litellm` (or its `Postgres-ZPeG` database) means every model call fails with
+  `Litellm_proxyException - Connection error`. Never add watch paths to
+  `litellm`, `backend` or `frontend` on `staging`.
+- **Preview accounts work without email and with credit.** In a `*-pr-<n>`
+  environment, sign-up is auto-verified and a new account gets
+  `PREVIEW_GRANT_CENTS` (set on `staging` `backend` and `worker`, 1000 = $10)
+  that can fund a budget. Production and `staging` keep a 0 grant.
+- **Diagnose before labeling `needs-human`.** Check each service's latest
+  deployment in the PR environment (`railway status --json`). A service with
+  no deployment can be started with Railway's `serviceInstanceDeployV2`.
+
 ## Product and runtime model
 
 - **DSPy** is the structured program/prompt optimization path.
