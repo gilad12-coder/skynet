@@ -96,6 +96,16 @@ def purchase_fee_cents(cents: int) -> int:
 # Grants seeded while this was non-zero were cleared by migration c4f1a7d9e2b5.
 FREE_GRANT_CENTS = 0
 
+
+def free_grant_cents() -> int:
+    """Return the one-time allowance a new account gets in this deployment.
+
+    Only a PR preview environment grants credit, so automated checks there can
+    pay for a run; everywhere else it is :data:`FREE_GRANT_CENTS`.
+    """
+    return settings.preview_grant_cents if settings.is_preview_environment else FREE_GRANT_CENTS
+
+
 # Prefix on the placeholder ``stripe_customer_id`` of a billing row created by a
 # local debit for an account that never reached Stripe. ``get_or_create_customer``
 # treats such a row as having no real Stripe customer yet and provisions one.
@@ -577,7 +587,7 @@ class StripeBillingService:
         """Seed the one-time free grant if unseeded; return the remaining cents.
 
         Seeds an unseeded row (NULL ``grant_remaining`` — a new account) to the
-        one-time :data:`FREE_GRANT_CENTS`. The grant is lifetime — once seeded
+        one-time :func:`free_grant_cents`. The grant is lifetime — once seeded
         it only ever draws down; there is no renewal. Mutates ``customer`` in
         place; the caller commits. A missing row (``None``) reads a full free
         grant without persisting — the row is created on the first real mutation
@@ -591,11 +601,11 @@ class StripeBillingService:
             Cents remaining in the account's grant.
         """
         if customer is None:
-            return FREE_GRANT_CENTS
+            return free_grant_cents()
         if customer.grant_remaining is None:
-            customer.grant_remaining = FREE_GRANT_CENTS
+            customer.grant_remaining = free_grant_cents()
             customer.updated_at = now
-            return FREE_GRANT_CENTS
+            return int(customer.grant_remaining)
         return int(customer.grant_remaining)
 
     def _stripe(self) -> Any:
@@ -1150,7 +1160,7 @@ class StripeBillingService:
             return WalletSnapshot(
                 paid_balance_cents=customer.balance_cents if customer else 0,
                 free_grant_remaining=grant_remaining,
-                free_grant_total=FREE_GRANT_CENTS,
+                free_grant_total=free_grant_cents(),
                 usage=usage,
                 plan=_plan_snapshot(customer),
             )

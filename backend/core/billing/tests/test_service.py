@@ -158,6 +158,19 @@ def test_wallet_seeds_grant_column_on_first_read(engine: object) -> None:
     assert customer.grant_remaining == FREE_GRANT_CENTS
 
 
+@pytest.mark.parametrize(("environment_name", "expected"), [("staging", 0), ("skynet-pr-662", 1000)])
+def test_new_account_grant_only_in_preview_environments(
+    engine: object, monkeypatch: pytest.MonkeyPatch, environment_name: str, expected: int
+) -> None:
+    """A new account is seeded with ``PREVIEW_GRANT_CENTS`` only in a PR preview environment."""
+    monkeypatch.setattr(settings, "preview_grant_cents", 1000)
+    monkeypatch.setattr(settings, "railway_environment_name", environment_name)
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    assert service.spendable_cents("u@x.com") == expected
+    assert service.get_wallet("u@x.com").free_grant_total == expected
+
+
 def test_debit_run_draws_from_legacy_grant_first(engine: object) -> None:
     """A run debit decrements a remaining legacy grant before touching the paid balance."""
     with Session(engine) as session:
