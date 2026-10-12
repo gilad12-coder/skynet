@@ -211,8 +211,6 @@
   "submit.v2.stage.metric": "معیار و اجرا",
   "submit.v2.stage.optimizer": "بهینه‌ساز",
   "submit.v2.stage.task": "کار",
-  "submit.v2.task.artifact.confirm": "خوب به نظر می‌رسد",
-  "submit.v2.task.artifact.confirm_hint": "نوع و نسخهٔ شروع را بررسی کنید، سپس تأیید کنید.",
   "submit.v2.task.artifact.desc": "نوع آرتیفکت و نسخه‌ای که بهینه‌ساز از آن شروع می‌کند.",
   "submit.v2.task.artifact.kind.code": "کد",
   "submit.v2.task.artifact.kind.code.desc": "برنامه‌ای که کد منبعش بازنویسی می‌شود.",

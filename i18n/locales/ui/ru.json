@@ -211,8 +211,6 @@
   "submit.v2.stage.metric": "Метрика и запуск",
   "submit.v2.stage.optimizer": "Оптимизатор",
   "submit.v2.stage.task": "Задача",
-  "submit.v2.task.artifact.confirm": "Всё верно",
-  "submit.v2.task.artifact.confirm_hint": "Проверьте тип и исходную версию, затем подтвердите.",
   "submit.v2.task.artifact.desc": "Тип артефакта и версия, с которой начинает оптимизатор.",
   "submit.v2.task.artifact.kind.code": "Код",
   "submit.v2.task.artifact.kind.code.desc": "Программа, исходный код которой переписывается.",

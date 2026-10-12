@@ -3873,8 +3873,6 @@
   "submit.v2.task.artifact.starting_label.guided": "Where we start from",
   "submit.v2.task.artifact.starting_placeholder": "Paste the current version, or let the assistant draft one",
   "submit.v2.task.artifact.predictors_hint": "One instruction per predictor in the program.",
-  "submit.v2.task.artifact.confirm": "Looks right",
-  "submit.v2.task.artifact.confirm_hint": "Check the type and starting version, then confirm.",
   "submit.v2.task.issue.objective": "Add an objective first.",
   "submit.v2.task.issue.kind": "Pick an artifact type.",
   "submit.v2.task.issue.starting": "Add a starting version.",

@@ -45,7 +45,6 @@ export interface TaskSlice {
   artifactKind: ArtifactKind | null;
   startingVersion: string | Record<string, string> | null;
   artifactRationale: string;
-  confirmed: boolean;
   transcript: UnifiedChatTurn[];
 }
 
@@ -123,7 +122,6 @@ export function initialWizardV2State(
       artifactKind: null,
       startingVersion: null,
       artifactRationale: "",
-      confirmed: false,
       transcript: [],
     },
     inputs: {
@@ -180,6 +178,20 @@ export function initialWizardV2State(
 }
 
 const hasModel = (config: ModelConfig | null): boolean => Boolean(config?.name.trim());
+
+/**
+ * The i18n key of what the task step still lacks, or null when Continue may
+ * move on. There is no separate confirm: Continue is the confirmation.
+ */
+export function taskIssue(task: TaskSlice): string | null {
+  if (!task.objective.trim()) return "submit.v2.task.issue.objective";
+  if (!task.artifactKind) return "submit.v2.task.issue.kind";
+  const v = task.startingVersion;
+  const empty =
+    v === null ||
+    (typeof v === "string" ? !v.trim() : Object.values(v).every((part) => !part.trim()));
+  return empty ? "submit.v2.task.issue.starting" : null;
+}
 
 /** Whether the models the chosen artifact needs to run are set. */
 export function optimizerModelsReady(s: WizardV2State): boolean {

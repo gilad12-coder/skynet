@@ -3873,8 +3873,6 @@
   "submit.v2.task.artifact.starting_label.guided": "מאיפה מתחילים",
   "submit.v2.task.artifact.starting_placeholder": "הדביקו את הגרסה הנוכחית, או תנו לעוזר לנסח אחת",
   "submit.v2.task.artifact.predictors_hint": "הוראה אחת לכל predictor בתוכנית.",
-  "submit.v2.task.artifact.confirm": "נראה נכון",
-  "submit.v2.task.artifact.confirm_hint": "בדקו את הסוג ואת גרסת ההתחלה, ואז אשרו.",
   "submit.v2.task.issue.objective": "קודם הוסיפו מטרה.",
   "submit.v2.task.issue.kind": "בחרו סוג תוצר.",
   "submit.v2.task.issue.starting": "הוסיפו גרסת התחלה.",

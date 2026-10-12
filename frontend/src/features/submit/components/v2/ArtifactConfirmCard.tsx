@@ -1,8 +1,7 @@
 "use client";
 
-import { Brain, Check, ChatText, Code, TextT } from "@/shared/ui/icons";
+import { Brain, ChatText, Code, TextT } from "@/shared/ui/icons";
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
-import { Button } from "@/shared/ui/primitives/button";
 import { Textarea } from "@/shared/ui/primitives/textarea";
 import { Segmented } from "@/shared/ui/segmented";
 import { PingDot } from "@/shared/ui/ping-dot";
@@ -42,10 +41,8 @@ export interface ArtifactConfirmCardProps {
   startingVersion: StartingVersion;
   onStartingVersionChange: (value: string | Record<string, string>) => void;
   rationale: string;
-  confirmed: boolean;
-  /** An i18n key naming what is missing, or null when the card can be confirmed. */
-  confirmIssue: string | null;
-  onConfirm: () => void;
+  /** An i18n key naming what is missing, or null when the card is complete. */
+  issue: string | null;
   /** The interview is mid-turn and may still rewrite the card. */
   writing: boolean;
   guided: boolean;
@@ -53,9 +50,8 @@ export interface ArtifactConfirmCardProps {
 
 /**
  * What the interview derived: the kind of artifact to optimize, picked with
- * one click, and the starting version it will be optimized from. "Looks
- * right" confirms both; editing afterwards keeps the confirmation and every
- * later step.
+ * one click, and the starting version it will be optimized from. There is no
+ * confirm button: Continue moves on once nothing is missing.
  */
 export function ArtifactConfirmCard({
   kind,
@@ -63,9 +59,7 @@ export function ArtifactConfirmCard({
   startingVersion,
   onStartingVersionChange,
   rationale,
-  confirmed,
-  confirmIssue,
-  onConfirm,
+  issue,
   writing,
   guided,
 }: ArtifactConfirmCardProps) {
@@ -74,10 +68,7 @@ export function ArtifactConfirmCard({
   return (
     <section
       aria-labelledby="v2-artifact-title"
-      className={cn(
-        "rounded-2xl border bg-background/70 transition-colors",
-        confirmed ? "border-primary-fill/50" : "border-border/60",
-      )}
+      className="rounded-2xl border border-border/60 bg-background/70"
     >
       <div className="flex flex-col gap-1 border-b border-border/40 px-4 py-3">
         <div className="flex items-center gap-2">
@@ -120,24 +111,15 @@ export function ArtifactConfirmCard({
         </div>
       </div>
 
-      <div className="flex flex-col items-stretch gap-2 border-t border-border/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs text-muted-foreground" aria-live="polite">
-          {confirmed
-            ? null
-            : confirmIssue
-              ? t(confirmIssue)
-              : t("submit.v2.task.artifact.confirm_hint")}
-        </p>
-        <Button
-          type="button"
-          onClick={onConfirm}
-          disabled={confirmed || !!confirmIssue}
-          className="min-h-11 gap-2 lg:min-h-9"
-        >
-          <Check className="size-4" aria-hidden="true" />
-          {t("submit.v2.task.artifact.confirm")}
-        </Button>
-      </div>
+      <p
+        className={cn(
+          "px-4 text-xs text-muted-foreground",
+          issue && "border-t border-border/40 py-3",
+        )}
+        aria-live="polite"
+      >
+        {issue ? t(issue) : null}
+      </p>
     </section>
   );
 }

@@ -211,8 +211,6 @@
   "submit.v2.stage.metric": "메트릭 및 실행",
   "submit.v2.stage.optimizer": "옵티마이저",
   "submit.v2.stage.task": "작업",
-  "submit.v2.task.artifact.confirm": "좋습니다",
-  "submit.v2.task.artifact.confirm_hint": "유형과 시작 버전을 확인한 뒤 확정하세요.",
   "submit.v2.task.artifact.desc": "아티팩트의 유형과 옵티마이저가 시작할 버전입니다.",
   "submit.v2.task.artifact.kind.code": "코드",
   "submit.v2.task.artifact.kind.code.desc": "소스 코드가 다시 작성되는 프로그램.",

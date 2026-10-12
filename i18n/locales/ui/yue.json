@@ -211,8 +211,6 @@
   "submit.v2.stage.metric": "指標同執行",
   "submit.v2.stage.optimizer": "優化器",
   "submit.v2.stage.task": "任務",
-  "submit.v2.task.artifact.confirm": "冇問題",
-  "submit.v2.task.artifact.confirm_hint": "檢查類型同起始版本，然後確認。",
   "submit.v2.task.artifact.desc": "成品嘅類型，同優化器開始嘅版本。",
   "submit.v2.task.artifact.kind.code": "程式碼",
   "submit.v2.task.artifact.kind.code.desc": "原始碼會被重寫嘅程式。",

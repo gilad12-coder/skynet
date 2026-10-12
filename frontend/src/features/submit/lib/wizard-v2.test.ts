@@ -22,6 +22,7 @@ const {
   optimizerModelsReady,
   presetEngine,
   presetModels,
+  taskIssue,
   wizardSteps,
   withContractBudget,
   withLevel,
@@ -231,4 +232,21 @@ test("a DSPy program without a task model counts as missing models", () => {
 
 test("before the task and inputs exist the Optimizer step has one placeholder screen", () => {
   assert.deepEqual(stepPages("optimizer", initialWizardV2State("expert")), ["optimizer"]);
+});
+
+test("the task step clears once nothing is missing, with no separate confirm", () => {
+  const empty = initialWizardV2State().task;
+  assert.equal("confirmed" in empty, false);
+  assert.equal(taskIssue(empty), "submit.v2.task.issue.objective");
+  const withObjective = { ...empty, objective: "Summarize tickets" };
+  assert.equal(taskIssue(withObjective), "submit.v2.task.issue.kind");
+  const withKind = { ...withObjective, artifactKind: "prompt" as const };
+  assert.equal(taskIssue(withKind), "submit.v2.task.issue.starting");
+  assert.equal(taskIssue({ ...withKind, startingVersion: "   " }), "submit.v2.task.issue.starting");
+  assert.equal(
+    taskIssue({ ...withKind, startingVersion: { a: " ", b: "" } }),
+    "submit.v2.task.issue.starting",
+  );
+  assert.equal(taskIssue({ ...withKind, startingVersion: "Summarize:" }), null);
+  assert.equal(taskIssue({ ...withKind, startingVersion: { a: "", b: "Do it." } }), null);
 });

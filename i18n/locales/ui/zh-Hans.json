@@ -211,8 +211,6 @@
   "submit.v2.stage.metric": "指标和运行",
   "submit.v2.stage.optimizer": "优化器",
   "submit.v2.stage.task": "任务",
-  "submit.v2.task.artifact.confirm": "看起来没问题",
-  "submit.v2.task.artifact.confirm_hint": "检查类型和起始版本，然后确认。",
   "submit.v2.task.artifact.desc": "工件的类型，以及优化器的起始版本。",
   "submit.v2.task.artifact.kind.code": "代码",
   "submit.v2.task.artifact.kind.code.desc": "源代码会被重写的程序。",

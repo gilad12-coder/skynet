@@ -211,8 +211,6 @@
   "submit.v2.stage.metric": "Metrik ve çalıştırma",
   "submit.v2.stage.optimizer": "Optimize edici",
   "submit.v2.stage.task": "Görev",
-  "submit.v2.task.artifact.confirm": "Doğru görünüyor",
-  "submit.v2.task.artifact.confirm_hint": "Türü ve başlangıç sürümünü kontrol edin, ardından onaylayın.",
   "submit.v2.task.artifact.desc": "Yapıtın türü ve optimize edicinin başlayacağı sürüm.",
   "submit.v2.task.artifact.kind.code": "Kod",
   "submit.v2.task.artifact.kind.code.desc": "Kaynak kodu yeniden yazılan bir program.",

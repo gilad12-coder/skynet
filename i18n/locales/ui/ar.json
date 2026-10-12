@@ -211,8 +211,6 @@
   "submit.v2.stage.metric": "المقياس والتشغيل",
   "submit.v2.stage.optimizer": "المُحسِّن",
   "submit.v2.stage.task": "المهمة",
-  "submit.v2.task.artifact.confirm": "يبدو جيدًا",
-  "submit.v2.task.artifact.confirm_hint": "راجع النوع ونسخة البداية، ثم أكّد.",
   "submit.v2.task.artifact.desc": "نوع العنصر، والنسخة التي يبدأ منها المُحسِّن.",
   "submit.v2.task.artifact.kind.code": "كود",
   "submit.v2.task.artifact.kind.code.desc": "برنامج يُعاد كتابة كوده المصدري.",

@@ -34,7 +34,7 @@ export interface TaskInterviewState {
   /** Pickable answers for the current question; empty for an open question. */
   options: InterviewOption[];
   error: boolean;
-  /** The interviewer has what it needs; the artifact card is ready to confirm. */
+  /** The interviewer has what it needs; the artifact card is complete. */
   done: boolean;
   model: string | null;
   setModel: (model: string | null) => void;

@@ -211,8 +211,6 @@
   "submit.v2.stage.metric": "Métrica y ejecución",
   "submit.v2.stage.optimizer": "Optimizador",
   "submit.v2.stage.task": "Tarea",
-  "submit.v2.task.artifact.confirm": "Está bien",
-  "submit.v2.task.artifact.confirm_hint": "Revisa el tipo y la versión inicial y luego confirma.",
   "submit.v2.task.artifact.desc": "El tipo de artefacto y la versión desde la que empieza el optimizador.",
   "submit.v2.task.artifact.kind.code": "Código",
   "submit.v2.task.artifact.kind.code.desc": "Un programa cuyo código fuente se reescribe.",

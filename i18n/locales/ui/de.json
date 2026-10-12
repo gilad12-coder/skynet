@@ -211,8 +211,6 @@
   "submit.v2.stage.metric": "Metrik & Ausführung",
   "submit.v2.stage.optimizer": "Optimierer",
   "submit.v2.stage.task": "Aufgabe",
-  "submit.v2.task.artifact.confirm": "Sieht gut aus",
-  "submit.v2.task.artifact.confirm_hint": "Prüfen Sie Typ und Ausgangsversion und bestätigen Sie dann.",
   "submit.v2.task.artifact.desc": "Die Art des Artefakts und die Version, mit der der Optimierer beginnt.",
   "submit.v2.task.artifact.kind.code": "Code",
   "submit.v2.task.artifact.kind.code.desc": "Ein Programm, dessen Quellcode umgeschrieben wird.",

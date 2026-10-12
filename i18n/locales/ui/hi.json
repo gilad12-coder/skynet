@@ -211,8 +211,6 @@
   "submit.v2.stage.metric": "मेट्रिक और रन",
   "submit.v2.stage.optimizer": "ऑप्टिमाइज़र",
   "submit.v2.stage.task": "टास्क",
-  "submit.v2.task.artifact.confirm": "ठीक लग रहा है",
-  "submit.v2.task.artifact.confirm_hint": "प्रकार और शुरुआती संस्करण जाँचें, फिर पुष्टि करें।",
   "submit.v2.task.artifact.desc": "आर्टिफ़ैक्ट का प्रकार, और वह संस्करण जिससे ऑप्टिमाइज़र शुरू करता है।",
   "submit.v2.task.artifact.kind.code": "कोड",
   "submit.v2.task.artifact.kind.code.desc": "एक प्रोग्राम जिसका सोर्स कोड दोबारा लिखा जाता है।",

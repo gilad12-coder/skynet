@@ -211,8 +211,6 @@
   "submit.v2.stage.metric": "メトリクスと実行",
   "submit.v2.stage.optimizer": "オプティマイザー",
   "submit.v2.stage.task": "タスク",
-  "submit.v2.task.artifact.confirm": "問題ありません",
-  "submit.v2.task.artifact.confirm_hint": "種類と開始バージョンを確認してから、確定してください。",
   "submit.v2.task.artifact.desc": "アーティファクトの種類と、オプティマイザーが開始するバージョンです。",
   "submit.v2.task.artifact.kind.code": "コード",
   "submit.v2.task.artifact.kind.code.desc": "ソースコードが書き直されるプログラム。",
