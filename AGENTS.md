@@ -3,6 +3,59 @@
 > Full-stack optimization platform for prompts, programs, agents, workflows,
 > datasets, and other user-supplied artifacts.
 
+## Feature gate: challenge every feature (MANDATORY)
+
+Before building any new feature, screen, setting, option or integration,
+challenge it. Do not start coding until it passes. Skynet has **no customer
+requests** yet, so a feature must clearly serve one of these two buckets:
+
+- **Business**: it makes Skynet more money or improves the business model
+  (activation, conversion, retention, paid usage, lower cost to serve).
+  Name the number it should move.
+- **Surprise and delight**: it surprises users enough that they would show
+  it to someone. Name the surprise.
+
+If the user asks for something that fits neither, push back directly, e.g.
+"Why are we building this? Which number does it move, or what's the
+surprise?" Then:
+
+1. Ask what happens if we never build it. "Nothing much" means don't.
+2. Ask whether it is the current bottleneck, or a distraction from it.
+3. Ask whether it improves the core product or only covers for a weak spot
+   (tours, nags, settings that patch bad defaults).
+4. If it passes, build the smallest version that solves the problem: delete
+   requirements that have no clear owner and reason before simplifying,
+   and don't abstract, configure or automate before the manual version works.
+
+Push hard once, then respect the user's decision and build it. Small fixes,
+bug fixes and refactors the user asked for skip the gate. For a full pass,
+run `/scope`.
+
+## Merge policy (MANDATORY)
+
+Feature PRs target `staging`, never `main`. Every PR gets its own Railway PR
+environment, a full copy of staging with an empty database.
+
+**Backend PRs** (no file under `frontend/`) merge themselves into `staging`
+only when **all** of these gates pass:
+
+1. Agent code review is clean.
+2. Tests and the Linear issue's acceptance checks pass in the PR environment.
+3. The diff touches only the files in the issue's `## Files` list.
+4. Up to date: the branch is rebased on the latest `staging`, then tests pass again.
+5. After the merge, the staging smoke test passes. If it fails, revert that
+   PR's single squash commit right away and reopen its issue with the failure.
+
+**UI PRs** (anything touching `frontend/`, including mixed PRs) wait for the
+user. Attach a proof card: one line naming the decision and the Linear issue,
+a 15–30s video of a browser agent walking the acceptance criteria in the PR
+environment, the review verdict, and the diff size. Merge only after the user
+approves that specific PR in chat or on GitHub.
+
+**`staging` → `main`** needs the user's approval every time. Each morning,
+send one card: the backend changes that landed, staging smoke status, and a
+60s video tour of the core flow on staging. Promote only on "promote".
+
 ## Product and runtime model
 
 - **DSPy** is the structured program/prompt optimization path.
