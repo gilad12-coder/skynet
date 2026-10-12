@@ -945,11 +945,15 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     </div>
   );
 
+  // A surface that hides the agent (the wizard) owns its own entry point, so a
+  // panel left open on another page must not reappear over it.
+  const showAside = open && !panelDock && !pillHidden;
+
   return (
     <>
       {panelDock && createPortal(chatBody, panelDock)}
       <AnimatePresence>
-        {open && !panelDock && isNarrow && (
+        {showAside && isNarrow && (
           <motion.div
             key="generalist-backdrop"
             initial={{ opacity: 0 }}
@@ -961,7 +965,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             className="fixed inset-0 z-40 bg-black/50"
           />
         )}
-        {open && !panelDock && (
+        {showAside && (
           <motion.aside
             key="generalist-panel"
             dir={dir}

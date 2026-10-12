@@ -23,7 +23,7 @@ interface PanelState {
   panelDock: HTMLElement | null;
   /** Dock the chat into ``el``; returns the undo for the caller's unmount. */
   registerPanelDock: (el: HTMLElement) => () => void;
-  /** True while a surface that brings its own agent hides the launcher. */
+  /** True while a surface that brings its own agent hides the launcher and side panel. */
   pillHidden: boolean;
   /** Hide the minimized pill; returns the undo for the caller's unmount. */
   hidePill: () => () => void;
