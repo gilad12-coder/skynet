@@ -36,7 +36,7 @@ from .budget_amounts import (
     cent_units,
     cents_from_units,
 )
-from .service import StripeBillingService, account_committed_cents
+from .service import LOCAL_CUSTOMER_PREFIX, StripeBillingService, account_committed_cents, free_grant_cents
 
 _ACTIVE_STATES = ("reserved", "dispatched", "pending")
 _DISPATCHED_STATES = ("dispatched", "pending")
@@ -269,6 +269,16 @@ class BudgetService:
             Locked wallet with its legacy grant resolved.
         """
         wallet = session.get(BillingCustomerModel, username, with_for_update=True)
+        if wallet is None and free_grant_cents() > 0:
+            # A new account's grant is only shown until a mutation creates its
+            # row; create that row here so the grant can also fund a budget.
+            session.add(
+                BillingCustomerModel(
+                    username=username, stripe_customer_id=f"{LOCAL_CUSTOMER_PREFIX}{username}", balance_cents=0
+                )
+            )
+            session.flush()
+            wallet = session.get(BillingCustomerModel, username, with_for_update=True)
         if wallet is None:
             raise BudgetInsufficientError("The account has no funded wallet.")
         StripeBillingService(engine=self._engine)._resolve_grant(wallet, datetime.now(UTC))
