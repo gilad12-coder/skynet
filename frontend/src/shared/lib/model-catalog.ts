@@ -115,9 +115,10 @@ export function replyMs(m: CatalogModel): number | null {
   return m.latency_ms + (REPLY_TOKENS / m.throughput_tps) * 1000;
 }
 
-/** Benchmark points per input dollar, or null without both a score and a price. */
+/** Benchmark points per input dollar (infinite when free), or null without both a score and a price. */
 export function scorePerDollar(m: CatalogModel): number | null {
-  if (m.intelligence_index == null || !m.input_cost_per_token) return null;
+  if (m.intelligence_index == null || m.input_cost_per_token == null) return null;
+  if (m.input_cost_per_token === 0) return Number.POSITIVE_INFINITY;
   return m.intelligence_index / m.input_cost_per_token;
 }
 
@@ -131,7 +132,8 @@ function dominates(a: CatalogModel, b: CatalogModel): boolean {
 }
 
 function byDesc(key: (m: CatalogModel) => number) {
-  return (a: CatalogModel, b: CatalogModel) => key(b) - key(a);
+  // Two free models both score Infinity, and Infinity - Infinity is NaN.
+  return (a: CatalogModel, b: CatalogModel) => (key(a) === key(b) ? 0 : key(b) - key(a));
 }
 
 /**

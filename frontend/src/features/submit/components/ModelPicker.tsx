@@ -445,6 +445,11 @@ export function ModelPicker({
                           </MicroPill>
                         )}
                       </span>
+                      {m.data_center && (
+                        <span className="truncate text-[0.6875rem] text-muted-foreground">
+                          {providerLabel(m)}
+                        </span>
+                      )}
                       <ModelStats model={m} />
                     </span>
                     <Check

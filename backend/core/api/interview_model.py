@@ -234,9 +234,8 @@ def _refresh() -> None:
             winner = choose(candidates, {value: _short_reply_ms(speed) for value, speed in speeds.items()})
             with _lock:
                 _measured_at = time.monotonic()
-                if speeds:
-                    _speeds.clear()
-                    _speeds.update(speeds)
+                # Merge so a model whose fetch failed this round keeps its last speed.
+                _speeds.update(speeds)
                 if winner:
                     _pick = winner
                     _picked_at = time.monotonic()

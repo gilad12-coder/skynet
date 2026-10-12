@@ -146,3 +146,15 @@ def test_with_interview_default_attaches_measured_speeds(monkeypatch: pytest.Mon
     a, b = interview_model.with_interview_default(catalog).models
     assert (a.throughput_tps, a.latency_ms) == (120.0, 450.0)
     assert (b.throughput_tps, b.latency_ms) == (None, None)
+
+
+def test_refresh_keeps_the_last_speed_of_a_model_whose_fetch_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A partial refresh updates the measured models and leaves the rest as they were."""
+    catalog = ModelCatalogResponse(models=[_model("openrouter/a", 1.0), _model("openrouter/b", 1.0)], providers=[])
+    monkeypatch.setattr(interview_model, "catalog_snapshot", lambda: catalog)
+    monkeypatch.setattr(interview_model, "_measure", lambda models: {"openrouter/a": (200.0, 300.0)})
+    monkeypatch.setattr(interview_model, "_speeds", {"openrouter/a": (100.0, 500.0), "openrouter/b": (80.0, 600.0)})
+    for name, value in (("_pick", None), ("_picked_at", 0.0), ("_measured_at", 0.0)):
+        monkeypatch.setattr(interview_model, name, value)
+    interview_model._refresh()
+    assert interview_model._speeds == {"openrouter/a": (200.0, 300.0), "openrouter/b": (80.0, 600.0)}

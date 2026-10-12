@@ -57,6 +57,24 @@ test("best value lists the score-price frontier by score per dollar, then the be
   );
 });
 
+test("best value puts a free rated model on the frontier first", () => {
+  const groups = rankModels(
+    [
+      model("cheap-mid", { intelligence_index: 50, input_cost_per_token: 1e-6 }),
+      model("free-low", { intelligence_index: 20, input_cost_per_token: 0 }),
+      model("free-high", { intelligence_index: 30, input_cost_per_token: 0 }),
+    ],
+    "best_value",
+  );
+  assert.deepEqual(
+    groups.map((g) => [g.kind, values(g.models)]),
+    [
+      ["ranked", ["free-high", "cheap-mid"]],
+      ["dominated", ["free-low"]],
+    ],
+  );
+});
+
 test("smartest sorts by intelligence index and puts the unrated last", () => {
   const groups = rankModels(
     [
