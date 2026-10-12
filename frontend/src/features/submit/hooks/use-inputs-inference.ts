@@ -8,15 +8,18 @@ import { msg } from "@/shared/lib/messages";
 import { parseDatasetFile } from "@/shared/lib/parse-dataset";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import type { DatasetSummary } from "@/shared/lib/api";
-import type { DataMode, InputsInferenceResponse } from "@/shared/types/unified-run";
+import type { InputsInferenceResponse } from "@/shared/types/unified-run";
+import { defaultRoleFor, type ColumnRole } from "@/shared/ui/column-role-row";
 
 import {
   casesToRows,
-  defaultInputFields,
+  columnRoles,
+  inferredRoles,
   heldOutCounts,
+  inputsFromRoles,
   parseTypedInput,
-  rowsToCases,
   singleInputCase,
+  withColumnRole,
   type HeldOutCounts,
   type Row,
 } from "../lib/inputs-mode";
@@ -56,9 +59,9 @@ export interface InputsInferenceState {
   handlePickDataset: (dataset: DatasetSummary) => Promise<void>;
   applyTypedInput: (text: string) => void;
   reinfer: () => void;
-  setMode: (mode: DataMode) => void;
-  toggleInputField: (field: string) => void;
-  setExpectedField: (field: string | null) => void;
+  /** Each table column's Input / Output / Ignore role. */
+  roles: Record<string, ColumnRole>;
+  setColumnRole: (column: string, role: ColumnRole) => void;
   clear: () => void;
 }
 
@@ -66,8 +69,7 @@ export interface InputsInferenceState {
  * Step 2's data flow: loads a table (upload, library or connector import) or
  * a typed input, asks the backend how it should be read (one input or
  * input/output pairs), and keeps the cases in the inputs slice in step with
- * the user's mode and column picks. Loading new data unconfirms the step;
- * re-picking columns does not.
+ * the column roles the user picks.
  */
 export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
   const { state, patchInputs } = ctx;
@@ -111,7 +113,7 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
         );
         if (controller.signal.aborted) return;
         setInference(res);
-        if (res.mode === "single") {
+        if (res.mode === "single" && data.label === null) {
           const input = res.single_input ?? data.rows[0] ?? {};
           patchInputs({
             mode: "single",
@@ -121,19 +123,8 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
             rationale: res.rationale,
           });
         } else {
-          const expectedField =
-            res.expected_field && data.columns.includes(res.expected_field)
-              ? res.expected_field
-              : null;
-          const picked = res.input_fields.filter(
-            (f: string) => data.columns.includes(f) && f !== expectedField,
-          );
-          const inputFields = picked.length ? picked : defaultInputFields(data.columns, expectedField);
           patchInputs({
-            mode: "pairs",
-            cases: rowsToCases(data.rows, inputFields, expectedField),
-            inputFields,
-            expectedField,
+            ...inputsFromRoles(data.columns, inferredRoles(data.columns, res), data.rows),
             split: res.suggested_split,
             rationale: res.rationale,
           });
@@ -152,8 +143,9 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
   );
 
   // A fresh source replaces the cases outright; inference then refines how
-  // they are read. Until it answers, a table reads as pairs over every column
-  // and a typed input as a single case, so the step is never empty.
+  // they are read. Until it answers, a table takes the classic default roles
+  // (the last column the output) and a typed input is a single case, so the
+  // step is never empty.
   const load = React.useCallback(
     (data: LoadedData) => {
       const isTable = data.label !== null;
@@ -168,16 +160,14 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
         columns,
         sampleRows: data.rows.slice(0, SAMPLE_ROWS),
         rowCount: data.rows.length,
-        confirmed: false,
         rationale: "",
       };
-      if (isTable && data.rows.length > 1) {
-        Object.assign(slice, {
-          mode: "pairs",
-          inputFields: columns,
-          expectedField: null,
-          cases: rowsToCases(data.rows, columns, null),
+      if (isTable) {
+        const roles: Record<string, ColumnRole> = {};
+        columns.forEach((c, idx) => {
+          roles[c] = defaultRoleFor(idx, columns.length);
         });
+        Object.assign(slice, inputsFromRoles(columns, roles, data.rows));
       } else {
         Object.assign(slice, {
           mode: "single",
@@ -252,59 +242,16 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
     void infer({ rows, columns: inputs.columns, label: inputs.datasetLabel, note });
   }, [infer, rows, inputs.columns, inputs.datasetLabel, note]);
 
-  const setMode = React.useCallback(
-    (mode: DataMode) => {
-      if (mode === inputs.mode) return;
-      if (mode === "single") {
-        const first = rows[0] ?? {};
-        const fields = inputs.inputFields.length ? inputs.inputFields : Object.keys(first);
-        const input = inference?.single_input ?? rowsToCases([first], fields, null)[0]!.input;
-        patchInputs({
-          mode,
-          cases: [singleInputCase(input)],
-          inputFields: Object.keys(input),
-          expectedField: null,
-        });
-        return;
-      }
-      const columns = inputs.columns.length ? inputs.columns : Object.keys(rows[0] ?? {});
-      const inputFields = inputs.inputFields.filter((f) => columns.includes(f));
-      const fields = inputFields.length ? inputFields : columns;
-      patchInputs({
-        mode,
-        inputFields: fields,
-        cases: rowsToCases(rows, fields, inputs.expectedField),
-      });
-    },
-    [inputs.mode, inputs.inputFields, inputs.columns, inputs.expectedField, rows, inference, patchInputs],
+  const roles = React.useMemo(
+    () => columnRoles(inputs.columns, inputs.inputFields, inputs.expectedField),
+    [inputs.columns, inputs.inputFields, inputs.expectedField],
   );
 
-  const toggleInputField = React.useCallback(
-    (field: string) => {
-      const on = inputs.inputFields.includes(field);
-      const inputFields = on
-        ? inputs.inputFields.filter((f) => f !== field)
-        : inputs.columns.filter((c) => c === field || inputs.inputFields.includes(c));
-      const expectedField = !on && field === inputs.expectedField ? null : inputs.expectedField;
-      patchInputs({
-        inputFields,
-        expectedField,
-        cases: rowsToCases(rows, inputFields, expectedField),
-      });
+  const setColumnRole = React.useCallback(
+    (column: string, role: ColumnRole) => {
+      patchInputs(inputsFromRoles(inputs.columns, withColumnRole(roles, column, role), rows));
     },
-    [inputs.inputFields, inputs.columns, inputs.expectedField, rows, patchInputs],
-  );
-
-  const setExpectedField = React.useCallback(
-    (field: string | null) => {
-      const inputFields = inputs.inputFields.filter((f) => f !== field);
-      patchInputs({
-        expectedField: field,
-        inputFields,
-        cases: rowsToCases(rows, inputFields, field),
-      });
-    },
-    [inputs.inputFields, rows, patchInputs],
+    [inputs.columns, roles, rows, patchInputs],
   );
 
   const clear = React.useCallback(() => {
@@ -327,7 +274,6 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
       inputFields: [],
       expectedField: null,
       rationale: "",
-      confirmed: false,
     });
   }, [patchInputs]);
 
@@ -349,9 +295,8 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
     handlePickDataset,
     applyTypedInput,
     reinfer,
-    setMode,
-    toggleInputField,
-    setExpectedField,
+    roles,
+    setColumnRole,
     clear,
   };
 }

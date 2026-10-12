@@ -9,7 +9,7 @@ export type WizardPageId =
   | "brief"
   | "artifact"
   | "source"
-  | "confirm"
+  | "plan"
   | "optimizer"
   | "models"
   | "budget"
@@ -17,17 +17,28 @@ export type WizardPageId =
   | "metric"
   | "check";
 
+const OPTIMIZER_SCREENS: readonly WizardPageId[] = ["optimizer", "models", "budget"];
+
+/**
+ * Standard picks the engine and the budget on one screen, with the models
+ * taken from the defaults; Expert walks the engine, models and budget screens.
+ * Guided skips the step, and when it must show it (the defaults can't run) it
+ * gets Expert's screens so every choice is in reach.
+ */
+function optimizerPages(state: WizardV2State): readonly WizardPageId[] {
+  if (!state.task.artifactKind || !state.inputs.mode) return ["optimizer"];
+  return state.level === "standard" ? ["plan"] : OPTIMIZER_SCREENS;
+}
+
 /** The screens of one step, in order. Screens that need earlier answers appear once they exist. */
 export function stepPages(step: WizardStepId, state: WizardV2State): readonly WizardPageId[] {
   switch (step) {
     case "task":
       return ["brief", "artifact"];
     case "inputs":
-      return state.inputs.cases.length > 0 ? ["source", "confirm"] : ["source"];
+      return ["source"];
     case "optimizer":
-      return state.task.artifactKind && state.inputs.mode
-        ? ["optimizer", "models", "budget"]
-        : ["optimizer"];
+      return optimizerPages(state);
     case "metric":
       return ["run", "metric", "check"];
   }

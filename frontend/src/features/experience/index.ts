@@ -16,5 +16,5 @@ export {
   useExperienceOptional,
 } from "./providers/experience-provider";
 export { IntakeHost } from "./components/IntakeHost";
-export { ExperienceLevelControl } from "./components/ExperienceLevelControl";
+export { ExperienceLevelControl, ExperienceLevelSwitch } from "./components/ExperienceLevelControl";
 export { GuidedChoiceLine } from "./components/GuidedChoiceLine";

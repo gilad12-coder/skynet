@@ -1,4 +1,5 @@
 import type { ModelConfig } from "@/shared/types/api";
+import type { OptimizerChoice } from "@/shared/types/unified-run";
 
 type CodeAssistDefault = "auto" | "manual";
 type SplitModeDefault = "auto" | "manual";
@@ -22,6 +23,13 @@ export interface UserPrefs {
   // Seed for the assist model in new tagging sessions; empty name = the
   // server's default tagging model.
   taggerAssistModel: ModelConfig;
+  // Seeds for the Optimizer step of a new optimization. The engine applies
+  // only when it fits the task (else Auto); an empty model name means the
+  // catalog's default model; null runs means the wizard's own default.
+  optimizerEngine: OptimizerChoice;
+  optimizerTaskModel: ModelConfig;
+  optimizerReflectionModel: ModelConfig;
+  optimizerMaxRuns: number | null;
 }
 
 export type AgentPreferencePatch = Partial<
@@ -80,6 +88,10 @@ export const PREF_KEYS: Record<keyof UserPrefs, string> = {
   composerEffort: "skynet.prefs.composer.effort",
   dictationEnabled: "skynet.prefs.composer.dictation",
   taggerAssistModel: "skynet.prefs.tagger.assist-model",
+  optimizerEngine: "skynet.prefs.optimizer.engine",
+  optimizerTaskModel: "skynet.prefs.optimizer.task-model",
+  optimizerReflectionModel: "skynet.prefs.optimizer.reflection-model",
+  optimizerMaxRuns: "skynet.prefs.optimizer.max-runs",
 };
 
 export const DEFAULT_PREFS: UserPrefs = {
@@ -93,6 +105,10 @@ export const DEFAULT_PREFS: UserPrefs = {
   composerEffort: null,
   dictationEnabled: true,
   taggerAssistModel: { name: "" },
+  optimizerEngine: "auto",
+  optimizerTaskModel: { name: "" },
+  optimizerReflectionModel: { name: "" },
+  optimizerMaxRuns: null,
 };
 
 // `skynet.prefs.advanced-mode` and `skynet.prefs.expand-advanced` belonged to

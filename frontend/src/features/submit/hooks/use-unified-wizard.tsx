@@ -17,8 +17,9 @@ import { toast } from "react-toastify";
 
 import { useWizardStateOptional } from "@/features/agent-panel";
 import { formatBudgetUsd, usePricingTerms } from "@/features/billing";
-import { useExperienceLevel } from "@/features/experience";
+import { useExperienceLevel, type ExperienceLevel } from "@/features/experience";
 import { offerRunDoneNotifications } from "@/features/notifications";
+import { readPref } from "@/features/settings";
 import {
   getJob,
   getOptimizationPayload,
@@ -38,6 +39,7 @@ import {
   optimizersFor,
   resolveOptimizer,
   type OptimizerCatalogResponse,
+  type OptimizerChoice,
   type UnifiedRunRequest,
 } from "@/shared/types/unified-run";
 import type { WizardPreflightResponse } from "@/shared/types/wizard-preflight";
@@ -55,10 +57,13 @@ import { inputsIssue, rowsToCases, singleInputCase, type Row } from "../lib/inpu
 import { prepareModelConfig } from "../lib/model-config";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import { metricUsesModel } from "../lib/scorer-dependencies";
+import { canEnterStep, canMoveForward } from "../lib/wizard-steps";
 import {
   WIZARD_V2_STEPS,
   contractSnapshot,
   initialWizardV2State,
+  presetEngine,
+  presetModels,
   resolvedMetricModel,
   type InputsSlice,
   type MetaSlice,
@@ -68,6 +73,8 @@ import {
   type WizardV2Context,
   type WizardV2State,
   type WorkspaceSlice,
+  wizardSteps,
+  withLevel,
 } from "../lib/wizard-v2";
 import { useExecutionBudget } from "./use-execution-budget";
 import { useModelCatalog } from "./use-submit-wizard-data";
@@ -86,7 +93,8 @@ type SliceName = "task" | "inputs" | "optimizer" | "workspace" | "meta";
 
 type Action =
   | { type: "patch"; slice: SliceName; patch: object }
-  | { type: "go"; step: WizardStepId };
+  | { type: "go"; step: WizardStepId }
+  | { type: "level"; level: ExperienceLevel; optimizerBlocked: boolean };
 
 const stepIndex = (step: WizardStepId) => WIZARD_V2_STEPS.indexOf(step);
 
@@ -99,6 +107,7 @@ function reducer(state: WizardV2State, action: Action): WizardV2State {
     if (action.step === state.step && furthest === state.furthestStep) return state;
     return { ...state, step: action.step, furthestStep: furthest };
   }
+  if (action.type === "level") return withLevel(state, action.level, action.optimizerBlocked);
   return { ...state, [action.slice]: { ...state[action.slice], ...action.patch } };
 }
 
@@ -138,15 +147,13 @@ function computeStepIssue(
     case "inputs": {
       const caseCount =
         inputs.cases.length > 0 ? inputs.cases.length : inputs.stagedDatasetId ? inputs.rowCount : 0;
-      const issue = inputsIssue({
+      return inputsIssue({
         mode: inputs.mode,
         caseCount,
         inputFields: inputs.inputFields,
         expectedField: inputs.expectedField,
         split: inputs.split,
       });
-      if (issue) return issue;
-      return inputs.confirmed ? null : "submit.v2.inputs.confirm_hint";
     }
     case "optimizer": {
       const kind = task.artifactKind;
@@ -207,7 +214,6 @@ function inputsFromRows(
     expectedField: null,
     cases: pairs ? rowsToCases(rows, columns, null) : rows[0] ? [singleInputCase(rows[0])] : [],
     rationale: "",
-    confirmed: false,
   };
 }
 
@@ -221,14 +227,15 @@ export function WizardV2Provider({
   folderId?: string | null;
   children: ReactNode;
 }) {
+  const level = useExperienceLevel();
   const [state, dispatch] = useReducer(reducer, undefined, () => {
-    const initial = initialWizardV2State();
+    const initial = initialWizardV2State(level, readPref("optimizerMaxRuns"));
     return { ...initial, meta: { ...initial.meta, folderId } };
   });
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();
-  const guided = useExperienceLevel() === "guided";
+  const guided = level === "guided";
   const modelCatalog = useModelCatalog();
   const pricing = usePricingTerms();
   const budget = useExecutionBudget();
@@ -282,13 +289,23 @@ export function WizardV2Provider({
     [state, optimizerCatalog],
   );
 
+  // The Optimizer step is blocked only once it has a setup to judge; before
+  // that, Guided's flow must not flash the step in and out.
+  const optimizerBlocked =
+    Boolean(kind && mode) && computeStepIssue(state, "optimizer", optimizerCatalog) !== null;
+  const steps = useMemo(() => wizardSteps(state, optimizerBlocked), [state, optimizerBlocked]);
+  // Reads the blocked flag of the render the level changed in.
+  useEffect(() => dispatch({ type: "level", level, optimizerBlocked }), [level]);
+
   const canEnter = useCallback(
-    (step: WizardStepId) => {
-      const target = stepIndex(step);
-      if (target <= stepIndex(state.furthestStep)) return true;
-      return target === stepIndex(state.step) + 1 && stepIssue(state.step) === null;
-    },
-    [state.furthestStep, state.step, stepIssue],
+    (step: WizardStepId) =>
+      canEnterStep(step, {
+        steps,
+        current: state.step,
+        furthest: state.furthestStep,
+        issueOf: stepIssue,
+      }),
+    [steps, state.furthestStep, state.step, stepIssue],
   );
 
   const [submitPhase, setSubmitPhase] = useState<SubmitPhase>("idle");
@@ -303,19 +320,20 @@ export function WizardV2Provider({
     [busy, canEnter],
   );
   const goNext = useCallback(() => {
-    const next = WIZARD_V2_STEPS[stepIndex(state.step) + 1];
+    const next = steps[steps.indexOf(state.step) + 1];
     if (!next) return;
-    const issue = stepIssue(state.step);
-    if (issue && stepIndex(next) > stepIndex(state.furthestStep)) {
-      toast.error(v2Text(issue, guided));
+    if (!canEnter(next)) {
+      const inputsBlock = stepIssue("inputs");
+      const issue = canMoveForward(state.step, inputsBlock) ? stepIssue(state.step) : inputsBlock;
+      if (issue) toast.error(v2Text(issue, guided));
       return;
     }
     goTo(next);
-  }, [state.step, state.furthestStep, stepIssue, goTo, guided]);
+  }, [steps, state.step, stepIssue, canEnter, goTo, guided]);
   const goPrev = useCallback(() => {
-    const prev = WIZARD_V2_STEPS[stepIndex(state.step) - 1];
+    const prev = steps[steps.indexOf(state.step) - 1];
     if (prev) goTo(prev);
-  }, [state.step, goTo]);
+  }, [steps, state.step, goTo]);
 
   const resolvedOptimizer = kind ? resolveOptimizer(state.optimizer.choice, kind) : null;
   const metricShape = kind ? metricShapeFor(state.optimizer.choice, kind) : null;
@@ -353,6 +371,15 @@ export function WizardV2Provider({
   ].filter(hasModel);
   const tokenSource = aggregateTokenSource(submittedModels);
   const chargeable = costBracket ? chargeableBracket(costBracket, tokenSource) : null;
+  // What the run would cost with another engine, everything else unchanged.
+  const estimateFor = (choice: OptimizerChoice) => {
+    const bracket = projectUnifiedCostBracket(
+      { ...state, optimizer: { ...state.optimizer, choice } },
+      optimizerCatalog,
+      { models: modelCatalog?.models ?? null, pricing },
+    );
+    return bracket ? chargeableBracket(bracket, tokenSource) : null;
+  };
   const suggestedCeiling = chargeable ? defaultCeilingForBracket(chargeable) : null;
 
   // The spending limit lives on the server budget, like the slice mirror the
@@ -550,6 +577,37 @@ export function WizardV2Provider({
     [],
   );
 
+  // The Settings defaults (else the catalog's default model) preset the task
+  // and reflection models once. A cloned run brings its own models, and
+  // anything set before the catalog arrives (an agent write, a user pick)
+  // blocks the preset for good.
+  const presetDone = useRef(searchParams.has("clone"));
+  useEffect(() => {
+    if (presetDone.current || !modelCatalog) return;
+    presetDone.current = true;
+    const preset = presetModels(
+      state.optimizer,
+      {
+        taskModel: readPref("optimizerTaskModel"),
+        reflectionModel: readPref("optimizerReflectionModel"),
+      },
+      modelCatalog.models.find((model) => model.is_default)?.value,
+    );
+    if (preset) patchOptimizer(preset);
+    // Runs once, when the catalog first arrives; the models are read from that render.
+  }, [modelCatalog]);
+
+  // The Settings default engine applies once the task and inputs say which
+  // engines fit; a cloned run or an engine set earlier keeps its choice.
+  const enginePresetDone = useRef(searchParams.has("clone"));
+  useEffect(() => {
+    if (enginePresetDone.current || !kind || !mode) return;
+    enginePresetDone.current = true;
+    const engine = presetEngine(state.optimizer.choice, readPref("optimizerEngine"), kind, mode);
+    if (engine) patchOptimizer({ choice: engine });
+    // Runs once, when the setup first exists; the choice is read from that render.
+  }, [kind, mode]);
+
   // `?clone=` hydrates every slice it can from the source run's stored,
   // server-scrubbed payload; nothing is confirmed, so the user reviews each step.
   const cloneRan = useRef(false);
@@ -742,6 +800,7 @@ export function WizardV2Provider({
     goTo,
     goNext,
     goPrev,
+    steps,
     canEnter,
     stepIssue,
     patchTask,
@@ -763,6 +822,7 @@ export function WizardV2Provider({
     submit,
     submitting: submitPhase !== "idle",
     costBracket,
+    estimateFor,
     suggestedCeiling,
     maxCostCents,
     setMaxCostCents,

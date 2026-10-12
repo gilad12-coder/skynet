@@ -26,13 +26,58 @@ export function levelLabel(level: ExperienceLevel): string {
 }
 
 /**
- * Settings' Guided / Standard / Expert picker and "Run the setup again" —
- * the only place the level changes.
+ * The Guided / Standard / Expert picker. Settings shows it with labels; the
+ * submission wizard shows a compact one in its header. Both write the same
+ * saved level.
+ */
+export function ExperienceLevelSwitch({
+  size = "default",
+  iconOnly = false,
+}: {
+  size?: "default" | "sm";
+  iconOnly?: boolean;
+}) {
+  const experience = useExperienceOptional();
+  if (!experience) return null;
+  const { level, loaded, setLevel } = experience;
+  return (
+    <Segmented
+      value={level}
+      onChange={(next) => void setLevel(next)}
+      label={msg("experience.level.title")}
+      size={size}
+      iconOnly={iconOnly}
+      segmentClassName="transition-[color,transform] duration-150 ease-out active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100"
+      options={EXPERIENCE_LEVELS.map((value) => {
+        const LevelIcon = LEVEL_ICONS[value];
+        return {
+          value,
+          label: msg(LEVEL_KEYS[value].label),
+          tip: msg(LEVEL_KEYS[value].description),
+          disabled: !loaded,
+          icon: (
+            <LevelIcon
+              aria-hidden="true"
+              weight={value === level ? "fill" : "bold"}
+              className={cn(
+                "size-3.5 shrink-0 transition-colors duration-200",
+                value === level ? "text-primary" : "text-current",
+              )}
+            />
+          ),
+        };
+      })}
+    />
+  );
+}
+
+/**
+ * Settings' Guided / Standard / Expert picker and "Run the setup again".
  */
 export function ExperienceLevelControl({ onRerun }: { onRerun?: () => void }) {
   const experience = useExperienceOptional();
   if (!experience) return null;
-  const { level, loaded, setLevel, rerunIntake } = experience;
+  const { loaded, rerunIntake } = experience;
 
   return (
     <>
@@ -47,31 +92,7 @@ export function ExperienceLevelControl({ onRerun }: { onRerun?: () => void }) {
               {msg("experience.level.subtitle")}
             </span>
           </div>
-          <Segmented
-            value={level}
-            onChange={(next) => void setLevel(next)}
-            label={msg("experience.level.title")}
-            segmentClassName="transition-[color,transform] duration-150 ease-out active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100"
-            options={EXPERIENCE_LEVELS.map((value) => {
-              const LevelIcon = LEVEL_ICONS[value];
-              return {
-                value,
-                label: msg(LEVEL_KEYS[value].label),
-                tip: msg(LEVEL_KEYS[value].description),
-                disabled: !loaded,
-                icon: (
-                  <LevelIcon
-                    aria-hidden="true"
-                    weight={value === level ? "fill" : "bold"}
-                    className={cn(
-                      "size-3.5 shrink-0 transition-colors duration-200",
-                      value === level ? "text-primary" : "text-current",
-                    )}
-                  />
-                ),
-              };
-            })}
-          />
+          <ExperienceLevelSwitch />
         </div>
       </div>
 
