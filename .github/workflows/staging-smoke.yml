@@ -96,6 +96,8 @@ jobs:
         with:
           ref: staging
           fetch-depth: 50
+          # The staging ruleset lets only this deploy key push past its gates.
+          ssh-key: ${{ secrets.STAGING_PUSH_KEY }}
 
       - name: Find the PR behind the failing commit
         id: pr

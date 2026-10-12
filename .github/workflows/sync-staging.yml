@@ -25,6 +25,8 @@ jobs:
         with:
           ref: staging
           fetch-depth: 0
+          # The staging ruleset lets only this deploy key push past its gates.
+          ssh-key: ${{ secrets.STAGING_PUSH_KEY }}
       - name: Merge main into staging
         run: |
           git config user.name "github-actions[bot]"
