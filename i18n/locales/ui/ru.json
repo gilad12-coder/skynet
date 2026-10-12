@@ -2420,8 +2420,6 @@
   "auto.features.submit.hooks.use.code.agent.literal.8": "Ошибка",
   "auto.features.submit.hooks.use.code.agent.template.1": "Изучи мой {p1} и напиши подходящую к нему сигнатуру и метрику.",
   "auto.features.submit.hooks.use.code.agent.template.2": "Агент читает {p1}…",
-  "auto.features.submit.hooks.use.code.agent.template.3": "Проверка обнаружила ошибки в написанном коде. Исправь сигнатуру и метрику так, чтобы они проходили проверку, сохраняя при этом поля, сопоставленные со столбцами твоего {p1}.",
-  "auto.features.submit.hooks.use.code.agent.template.4": "Проверка обнаружила ошибки в сигнатуре. Исправь её так, чтобы она проходила проверку, сохраняя при этом поля, сопоставленные со столбцами твоего {p1}.",
   "auto.features.submit.hooks.use.code.agent.template.5": "Проверка обнаружила ошибки в метрике. Исправь её так, чтобы она проходила проверку.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "Загружено {p1} строк из {p2}",
   "auto.features.tagger.components.taggerannotation.10": "Перейти к неразмеченному тексту",

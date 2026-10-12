@@ -2420,8 +2420,6 @@
   "auto.features.submit.hooks.use.code.agent.literal.8": "エラー",
   "auto.features.submit.hooks.use.code.agent.template.1": "私の{p1}を確認し、それに合うシグネチャとメトリックを記述してください。",
   "auto.features.submit.hooks.use.code.agent.template.2": "エージェントが{p1}を読み込んでいます…",
-  "auto.features.submit.hooks.use.code.agent.template.3": "検証により、記述されたコードにエラーが見つかりました。あなたの{p1}の列にマッピングされたフィールドを維持しつつ、シグネチャとメトリックを修正して検証に合格させてください。",
-  "auto.features.submit.hooks.use.code.agent.template.4": "検証により、シグネチャにエラーが見つかりました。あなたの{p1}の列にマッピングされたフィールドを維持しつつ、修正して検証に合格させてください。",
   "auto.features.submit.hooks.use.code.agent.template.5": "検証により、メトリックにエラーが見つかりました。修正して検証に合格させてください。",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "{p2}から{p1}行を読み込みました",
   "auto.features.tagger.components.taggerannotation.10": "未タグのテキストへ移動",

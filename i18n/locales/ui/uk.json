@@ -2420,8 +2420,6 @@
   "auto.features.submit.hooks.use.code.agent.literal.8": "Помилка",
   "auto.features.submit.hooks.use.code.agent.template.1": "Перегляньте мій {p1} і напишіть Сигнатуру та метрику, що йому відповідають.",
   "auto.features.submit.hooks.use.code.agent.template.2": "Агент читає {p1}…",
-  "auto.features.submit.hooks.use.code.agent.template.3": "Перевірка виявила помилки в написаному коді. Виправте Сигнатуру та метрику так, щоб вони пройшли перевірку, зберігаючи поля, зіставлені зі стовпцями вашого {p1}.",
-  "auto.features.submit.hooks.use.code.agent.template.4": "Перевірка виявила помилки в Сигнатурі. Виправте її так, щоб вона пройшла перевірку, зберігаючи поля, зіставлені зі стовпцями вашого {p1}.",
   "auto.features.submit.hooks.use.code.agent.template.5": "Перевірка виявила помилки в метриці. Виправте її так, щоб вона пройшла перевірку.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "Завантажено {p1} рядків з {p2}",
   "auto.features.tagger.components.taggerannotation.10": "Перейти до непозначеного тексту",

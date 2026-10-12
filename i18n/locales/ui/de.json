@@ -2420,8 +2420,6 @@
   "auto.features.submit.hooks.use.code.agent.literal.8": "Fehler",
   "auto.features.submit.hooks.use.code.agent.template.1": "Prüfe {p1} und schreibe eine Signatur und eine Metrik, die dazu passen.",
   "auto.features.submit.hooks.use.code.agent.template.2": "Der Agent liest {p1}…",
-  "auto.features.submit.hooks.use.code.agent.template.3": "Die Validierung hat Fehler im geschriebenen Code gefunden. Korrigiere die Signatur und die Metrik, damit sie die Validierung bestehen, und halte dabei die Felder den Spalten deines {p1} zugeordnet.",
-  "auto.features.submit.hooks.use.code.agent.template.4": "Die Validierung hat Fehler in der Signatur gefunden. Korrigiere sie, damit sie die Validierung besteht, und halte dabei die Felder den Spalten deines {p1} zugeordnet.",
   "auto.features.submit.hooks.use.code.agent.template.5": "Die Validierung hat Fehler in der Metrik gefunden. Korrigiere sie, damit sie die Validierung besteht.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "{p1} Zeilen aus {p2} geladen",
   "auto.features.tagger.components.taggerannotation.10": "Zum ungetaggten Text springen",

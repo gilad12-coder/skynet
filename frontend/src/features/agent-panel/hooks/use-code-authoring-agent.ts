@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { validateCode } from "@/shared/lib/api";
+import { staticContractCheck, validateCode } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
 import { useCodeAgent, type CodeAgentState } from "@/shared/hooks/use-code-agent";
 import { autoLayoutSpec, defaultWorkflowSpec } from "@/features/submit/workflow/model";
@@ -11,6 +11,12 @@ import type { ValidationResult } from "@/shared/ui/code-editor";
 import type { ColumnMapping, ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
 
 import type { ConfirmedDataset } from "../components/DatasetUploadCard";
+import { contractValidations, panelAuthoringContext, panelContractSpec } from "../lib/code-authoring";
+import type { WizardState } from "../lib/types";
+
+// The run code and the metric are checked together by the validity check,
+// once the agent settles; there is no per-editor validation outside a workflow.
+const noValidation = async (): Promise<ValidationResult | null> => null;
 
 /**
  * The code agent's state plus the artifact fields the panel mirror renders and
@@ -22,6 +28,11 @@ export interface CodeAuthoringAgentState extends CodeAgentState {
   metricCode: string;
   signatureValidation: ValidateCodeResponse | null;
   metricValidation: ValidateCodeResponse | null;
+  /**
+   * True once the validity check passed for exactly the current run code and
+   * metric; the handoff waits on it. Always false in workflow mode.
+   */
+  contractOk: boolean;
   /** True when the run targets the multi-module ``workflow`` module. */
   isWorkflow: boolean;
   /** The authored graph the inline canvas renders; null until seeded. */
@@ -43,9 +54,14 @@ export interface UseCodeAuthoringAgentArgs {
    * not the moment a dataset is attached.
    */
   armed: boolean;
-  /** DSPy module the run targets; only steers the seed's expected shape. */
+  /**
+   * The panel's wizard state: the task, data mode and optimizer the agent
+   * writes run code plus a metric for.
+   */
+  wizard: WizardState;
+  /** ``workflow`` authors a graph on the canvas instead of run code. */
   moduleName?: string;
-  /** Optimizer name, forwarded to validation for optimizer-specific checks. */
+  /** Optimizer name, forwarded to the workflow metric's validation. */
   optimizerName?: string;
   /**
    * Catalog model id + effort the code author runs on. The panel forwards the
@@ -72,23 +88,24 @@ function rolesToColumnMapping(
 /**
  * Host the canonical wizard code agent (``useCodeAgent``) at the generalist
  * panel level so the panel's authoring card mirrors exactly what the code agent
- * does — same streaming, same thinking timer, same validation + auto-fix.
+ * does: the same streaming, thinking timer and authoring contract.
  *
- * This is glue around the shared hook, not a second engine: it owns the
- * code/validation state the hook writes into, adapts the panel's
- * ``ConfirmedDataset`` to the wizard's ``ParsedDataset``, and runs the same
- * ``validateCode`` checks the wizard runs.
+ * This is glue around the shared hook, not a second engine: it owns the code
+ * and validation state the hook writes into, hands the agent the same unified
+ * authoring context the wizard's Metric step does (run code plus a metric),
+ * and runs the same static validity check once the agent settles.
  *
  * Args:
- *   args: Dataset, the ``armed`` gate, and optional module/optimizer context.
+ *   args: Dataset, the ``armed`` gate, the panel's wizard state, and the
+ *     optional workflow module.
  *
  * Returns:
- *   The code agent state plus the surfaced signature/metric code + validation.
+ *   The code agent state plus the surfaced run code, metric and validation.
  */
 export function useCodeAuthoringAgent(
   args: UseCodeAuthoringAgentArgs,
 ): CodeAuthoringAgentState {
-  const { dataset, armed, moduleName = "predict", optimizerName, model, reasoningEffort } = args;
+  const { dataset, armed, wizard, moduleName = "", optimizerName, model, reasoningEffort } = args;
 
   const [signatureCode, setSignatureCode] = React.useState("");
   const [metricCode, setMetricCode] = React.useState("");
@@ -102,7 +119,19 @@ export function useCodeAuthoringAgent(
   const columnRoles = React.useMemo(() => dataset?.columnRoles ?? {}, [dataset]);
   const columnKinds = React.useMemo(() => dataset?.columnKinds ?? {}, [dataset]);
 
-  const isWorkflow = (moduleName ?? "predict").toLowerCase() === "workflow";
+  const isWorkflow = moduleName.toLowerCase() === "workflow";
+  // What the last passing validity check saw: the context and both codes.
+  const [passedKey, setPassedKey] = React.useState<string | null>(null);
+
+  // A workflow run hands off a graph, never run code, so it keeps the
+  // graph-aware seed and no unified context. The panel rebuilds its wizard
+  // snapshot every render, so the context is keyed by content: a new object
+  // with the same fields must not re-run the validity check.
+  const contextKey = JSON.stringify(isWorkflow ? null : panelAuthoringContext(wizard, dataset));
+  const authoringContext = React.useMemo(
+    () => JSON.parse(contextKey) as ReturnType<typeof panelAuthoringContext>,
+    [contextKey],
+  );
 
   // Graph state mirrors the submit wizard's canvas ownership: the spec is the
   // single source of truth, `workflowRevision` bumps only on external replaces
@@ -154,28 +183,26 @@ export function useCodeAuthoringAgent(
     return { columns: dataset.columns, rows: dataset.rows, rowCount: dataset.rowCount };
   }, [armed, dataset]);
 
-  // Validation runners read live dataset/code via a ref so their identity stays
-  // stable for ``useCodeAgent`` (which captures them once) while still seeing
-  // the current sample row, roles, and edited code.
-  const ctxRef = React.useRef({ dataset, columnRoles, optimizerName, signatureCode, metricCode });
+  // The workflow metric's runner reads live dataset/code via a ref so its
+  // identity stays stable for ``useCodeAgent`` (which captures it once) while
+  // still seeing the current sample row, roles, and edited code.
+  const ctxRef = React.useRef({ dataset, columnRoles, optimizerName, metricCode });
   React.useEffect(() => {
-    ctxRef.current = { dataset, columnRoles, optimizerName, signatureCode, metricCode };
+    ctxRef.current = { dataset, columnRoles, optimizerName, metricCode };
   });
 
-  const runValidation = React.useCallback(
-    async (kind: "signature" | "metric", code: string): Promise<ValidationResult | null> => {
+  const runWorkflowMetricValidation = React.useCallback(
+    async (overrideCode?: string): Promise<ValidationResult | null> => {
       const { dataset: ds, columnRoles: roles, optimizerName: opt } = ctxRef.current;
       if (!ds || ds.rows.length === 0) return null;
       try {
         const result = (await validateCode({
-          signature_code: kind === "signature" ? code : undefined,
-          metric_code: kind === "metric" ? code : undefined,
+          metric_code: overrideCode ?? ctxRef.current.metricCode,
           column_mapping: rolesToColumnMapping(roles),
           sample_row: ds.rows[0] as Record<string, unknown>,
           optimizer_name: opt,
         })) as ValidateCodeResponse;
-        if (kind === "signature") setSignatureValidation(result);
-        else setMetricValidation(result);
+        setMetricValidation(result);
         return result;
       } catch (err) {
         return {
@@ -186,17 +213,6 @@ export function useCodeAuthoringAgent(
       }
     },
     [],
-  );
-
-  const runSignatureValidation = React.useCallback(
-    (overrideCode?: string) =>
-      runValidation("signature", overrideCode ?? ctxRef.current.signatureCode),
-    [runValidation],
-  );
-  const runMetricValidation = React.useCallback(
-    (overrideCode?: string) =>
-      runValidation("metric", overrideCode ?? ctxRef.current.metricCode),
-    [runValidation],
   );
 
   const agent = useCodeAgent({
@@ -216,8 +232,10 @@ export function useCodeAuthoringAgent(
     setMetricValidation,
     signatureValidation,
     metricValidation,
-    runSignatureValidation,
-    runMetricValidation,
+    runSignatureValidation: noValidation,
+    runMetricValidation: isWorkflow ? runWorkflowMetricValidation : noValidation,
+    seedEnabled: armed && (isWorkflow || authoringContext !== null),
+    unified: authoringContext,
     model,
     reasoningEffort,
     isWorkflow,
@@ -225,6 +243,37 @@ export function useCodeAuthoringAgent(
     workflowTouched,
     applyAgentWorkflow,
   });
+
+  const checkKey = `${contextKey}\u0000${signatureCode}\u0000${metricCode}`;
+
+  // Once the agent settles, the static validity check (the same one the
+  // wizard runs before Run) decides whether the code fits the contract; its
+  // failures land on the editor they belong to.
+  React.useEffect(() => {
+    if (!authoringContext || agent.status !== "done") return;
+    if (!signatureCode.trim() || !metricCode.trim()) return;
+    const controller = new AbortController();
+    staticContractCheck(
+      { spec: panelContractSpec(authoringContext, signatureCode, metricCode), sample_count: 1 },
+      controller.signal,
+    )
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        const { run, metric } = contractValidations(result);
+        setSignatureValidation(run);
+        setMetricValidation(metric);
+        setPassedKey(result.ok ? checkKey : null);
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setSignatureValidation({
+          valid: false,
+          errors: [err instanceof Error ? err.message : msg("agent.validation.failed")],
+          warnings: [],
+        });
+      });
+    return () => controller.abort();
+  }, [authoringContext, agent.status, signatureCode, metricCode, checkKey]);
 
   // ``useCodeAgent.reset`` clears its own state but not the caller-owned code
   // (the wizard clears that separately); wrap it so a fresh conversation drops
@@ -235,6 +284,7 @@ export function useCodeAuthoringAgent(
     setMetricCode("");
     setSignatureValidation(null);
     setMetricValidation(null);
+    setPassedKey(null);
     setSignatureManuallyEdited(false);
     setMetricManuallyEdited(false);
     setWorkflowSpec(null);
@@ -250,6 +300,7 @@ export function useCodeAuthoringAgent(
     metricCode,
     signatureValidation,
     metricValidation,
+    contractOk: authoringContext !== null && passedKey === checkKey,
     isWorkflow,
     workflowSpec,
     workflowRevision,

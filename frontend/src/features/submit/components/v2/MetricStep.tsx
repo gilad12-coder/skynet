@@ -29,7 +29,7 @@ const noValidation = async (): Promise<ValidateCodeResponse | null> => null;
  */
 export function MetricStep() {
   const ctx = useWizardV2();
-  const { state, patchTask, patchWorkspace, metricShape, guided } = ctx;
+  const { state, patchTask, patchWorkspace, metricShape, guided, optimizerCatalog } = ctx;
   const { task, inputs, optimizer, workspace } = state;
   const kind = task.artifactKind;
   const t = (key: string) => v2Msg(key, guided);
@@ -44,6 +44,12 @@ export function MetricStep() {
   const [agentEffort, setAgentEffort] = React.useState<string | null>(null);
 
   const metricUsesModel = metricCallsModel(state);
+  const catalog =
+    optimizerCatalog?.artifact_kind === kind && optimizerCatalog.data_mode === inputs.mode
+      ? optimizerCatalog
+      : null;
+  const metricSignature =
+    catalog?.options.find((option) => option.id === optimizer.choice)?.metric_signature ?? null;
 
   const authoringContext = React.useMemo<UnifiedAuthoringContext | null>(() => {
     if (!kind || !inputs.mode || !metricShape) return null;
@@ -153,6 +159,8 @@ export function MetricStep() {
           <CodeWorkspace
             runCode={workspace.runCode}
             metricCode={workspace.metricCode}
+            runEntry={catalog?.run_entry ?? null}
+            metricSignature={metricSignature}
             onRunCodeChange={(code) => {
               setRunCode(code);
               setRunEdited(true);

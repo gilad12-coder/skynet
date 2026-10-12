@@ -2420,8 +2420,6 @@
   "auto.features.submit.hooks.use.code.agent.literal.8": "错误",
   "auto.features.submit.hooks.use.code.agent.template.1": "审阅我的 {p1}，并编写与之匹配的签名和指标。",
   "auto.features.submit.hooks.use.code.agent.template.2": "智能体正在读取 {p1}……",
-  "auto.features.submit.hooks.use.code.agent.template.3": "验证发现所编写的代码中存在错误。请修复签名和指标使其通过验证，同时保持字段与你的 {p1} 各列的映射关系。",
-  "auto.features.submit.hooks.use.code.agent.template.4": "验证发现签名中存在错误。请修复使其通过验证，同时保持字段与你的 {p1} 各列的映射关系。",
   "auto.features.submit.hooks.use.code.agent.template.5": "验证发现指标中存在错误。请修复使其通过验证。",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "已从 {p2} 加载 {p1} 行",
   "auto.features.tagger.components.taggerannotation.10": "转到未标注的文本",

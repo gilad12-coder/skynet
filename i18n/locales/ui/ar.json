@@ -2420,8 +2420,6 @@
   "auto.features.submit.hooks.use.code.agent.literal.8": "خطأ",
   "auto.features.submit.hooks.use.code.agent.template.1": "راجع {p1} واكتب توقيعًا ومقياسًا يناسبانه.",
   "auto.features.submit.hooks.use.code.agent.template.2": "الوكيل يقرأ {p1}…",
-  "auto.features.submit.hooks.use.code.agent.template.3": "وجد التحقّق أخطاء في الكود المكتوب. أصلِح التوقيع والمقياس كي يجتازا التحقّق، مع إبقاء الحقول مُعيَّنة لأعمدة {p1}.",
-  "auto.features.submit.hooks.use.code.agent.template.4": "وجد التحقّق أخطاءً في التوقيع. أصلِحه كي يجتاز التحقّق، مع الإبقاء على الحقول معيّنة إلى أعمدة {p1} الخاصة بك.",
   "auto.features.submit.hooks.use.code.agent.template.5": "اكتشف التحقّق أخطاءً في المقياس. أصلِحه ليجتاز التحقّق.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "تم تحميل {p1} صف من {p2}",
   "auto.features.tagger.components.taggerannotation.10": "الانتقال إلى النص غير الموسوم",

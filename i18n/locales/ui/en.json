@@ -1031,8 +1031,6 @@
   "auto.features.submit.hooks.use.code.agent.literal.8": "Error",
   "auto.features.submit.hooks.use.code.agent.template.1": "Review my {p1} and write a Signature and metric that fit it.",
   "auto.features.submit.hooks.use.code.agent.template.2": "The agent is reading the {p1}…",
-  "auto.features.submit.hooks.use.code.agent.template.3": "Validation found errors in the code that was written. Fix the Signature and the metric so they pass validation, while keeping the fields mapped to the columns of your {p1}.",
-  "auto.features.submit.hooks.use.code.agent.template.4": "Validation found errors in the Signature. Fix it so it passes validation, while keeping the fields mapped to the columns of your {p1}.",
   "auto.features.submit.hooks.use.code.agent.template.5": "Validation found errors in the metric. Fix it so it passes validation.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "Loaded {p1} rows from {p2}",
   "auto.features.tagger.components.taggerannotation.10": "Go to untagged text",

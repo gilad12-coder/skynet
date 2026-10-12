@@ -25,7 +25,7 @@ type AgentToolStatus = "running" | "done" | "error";
 // Unified runs drive the same two editor slots under their own tool names:
 // the signature slot holds run code, the metric slot the metric.
 function isSeedTool(tool: AgentToolName): boolean {
-  return tool === "edit_signature" || tool === "edit_seed";
+  return tool === "edit_signature" || tool === "edit_run" || tool === "edit_seed";
 }
 
 function isScorerTool(tool: AgentToolName): boolean {
@@ -855,21 +855,12 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             if (controller.signal.aborted) return;
             if (autoFixAttemptsRef.current >= MAX_AUTO_FIX) return;
             autoFixAttemptsRef.current += 1;
-            // Name only the artifact(s) that actually failed so the retry
-            // message (the chat bubble the user reads) points at the real
-            // problem instead of blaming both. The per-artifact validation
-            // summaries in the request body already carry the concrete errors.
-            const fixKey =
-              signatureHasError && metricHasError
-                ? "auto.features.submit.hooks.use.code.agent.template.3"
-                : metricHasError
-                  ? "auto.features.submit.hooks.use.code.agent.template.5"
-                  : "auto.features.submit.hooks.use.code.agent.template.4";
+            // Outside the unified contract only the workflow canvas authors,
+            // and there the graph is checked on the canvas: only the metric
+            // can fail validation. The request body carries the concrete errors.
             const fixMessage = unified
               ? unifiedMsg("submit.v2.metric.agent.fix")
-              : formatMsg(fixKey, {
-                  p1: TERMS.dataset,
-                });
+              : msg("auto.features.submit.hooks.use.code.agent.template.5");
             queueMicrotask(() => {
               runAgentRef.current?.(fixMessage, messagesRef.current);
             });

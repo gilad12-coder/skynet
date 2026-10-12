@@ -10,6 +10,8 @@ static run-code / metric contract checks are covered the same way.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from core.service_gateway.agents import code as code_module
@@ -227,7 +229,8 @@ def test_validate_run_code(code: str, kind: str, fragment: str) -> None:
         ),
         ("def metric(gold, pred, trace=None):\n    return 1\n", "dspy_feedback", False, "pred_trace"),
         ("def metric(gold, pred, trace=None):\n    return 1\n", "dspy_scalar", False, ""),
-        ("def metric(gold, pred):\n    return True\n", "dspy_scalar", False, ""),
+        # The validity check calls a scalar DSPy metric with trace, so two parameters fail it.
+        ("def metric(gold, pred):\n    return True\n", "dspy_scalar", False, "trace=None"),
         ("def score(input, output, expected=None):\n    return 1, {}\n", "dspy_scalar", False, "def metric"),
         ("def score(input, output):\n    return 1, {}\n", "blackbox_side_info", False, ""),
         ("def score(input):\n    return 1, {}\n", "blackbox_side_info", False, "score(input, output"),
@@ -295,3 +298,32 @@ def test_run_contract_is_one_contract_for_every_artifact() -> None:
     for contract in (program, prompt):
         assert "The run code is plain python that turns one case input into an output" in contract
         assert "- Entry point: " in contract
+
+
+def test_a_seed_without_the_authoring_context_fails(monkeypatch) -> None:
+    """There is no Signature seed: a first draft needs the unified context or a workflow."""
+    monkeypatch.setattr(code_module, "_build_agent_lm", lambda *_a: object())
+    monkeypatch.setattr(code_module, "served_model_from", lambda _lm: "test-model")
+
+    async def collect() -> list[dict]:
+        """Drain the agent's event stream for a seed request with no authoring context.
+
+        Returns:
+            Every event the agent emitted.
+        """
+        return [
+            event
+            async for event in code_module.run_code_agent(
+                dataset_columns=["q", "a"],
+                column_roles={"q": "input", "a": "output"},
+                sample_rows=[],
+                user_message="",
+                prior_signature="",
+                prior_metric="",
+                model="test-model",
+            )
+        ]
+
+    events = asyncio.run(collect())
+    assert [e["event"] for e in events] == ["error"]
+    assert "authoring context" in events[0]["data"]["error"]

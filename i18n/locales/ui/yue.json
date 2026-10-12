@@ -1893,8 +1893,6 @@
   "auto.features.submit.hooks.use.code.agent.literal.8": "錯誤",
   "auto.features.submit.hooks.use.code.agent.template.1": "檢視我嘅 {p1}，並編寫適合佢嘅 Signature 同指標。",
   "auto.features.submit.hooks.use.code.agent.template.2": "Agent 讀取緊 {p1}…",
-  "auto.features.submit.hooks.use.code.agent.template.3": "驗證時發現編寫嘅程式碼有錯誤。請修正 Signature 同 metric 令佢哋通過驗證，同時保持欄位對應到你嘅 {p1} 欄位。",
-  "auto.features.submit.hooks.use.code.agent.template.4": "驗證發現 Signature 有錯誤。請修正以通過驗證，同時保持欄位對應至你 {p1} 嘅欄位。",
   "auto.features.submit.hooks.use.code.agent.template.5": "驗證時發現指標有錯。請修正等佢可以通過驗證。",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "已由 {p2} 載入 {p1} 列",
   "auto.features.tagger.components.taggerannotation.10": "前往未標籤文字",

@@ -2420,8 +2420,6 @@
   "auto.features.submit.hooks.use.code.agent.literal.8": "오류",
   "auto.features.submit.hooks.use.code.agent.template.1": "내 {p1}을(를) 검토하고 그에 맞는 시그니처와 메트릭을 작성하세요.",
   "auto.features.submit.hooks.use.code.agent.template.2": "에이전트가 {p1}을(를) 읽는 중…",
-  "auto.features.submit.hooks.use.code.agent.template.3": "검증에서 작성된 코드에 오류가 발견되었습니다. 시그니처와 메트릭이 검증을 통과하도록 수정하되, 필드를 {p1}의 열에 매핑된 상태로 유지하세요.",
-  "auto.features.submit.hooks.use.code.agent.template.4": "검증에서 시그니처에 오류가 발견되었습니다. 검증을 통과하도록 수정하되, 필드를 {p1}의 열에 매핑된 상태로 유지하세요.",
   "auto.features.submit.hooks.use.code.agent.template.5": "검증에서 메트릭에 오류가 발견되었습니다. 검증을 통과하도록 수정하세요.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "{p2}에서 {p1}개 행을 불러왔습니다",
   "auto.features.tagger.components.taggerannotation.10": "태그되지 않은 텍스트로 이동",

@@ -2420,8 +2420,6 @@
   "auto.features.submit.hooks.use.code.agent.literal.8": "Error",
   "auto.features.submit.hooks.use.code.agent.template.1": "Revisa mi {p1} y escribe una Firma y una métrica que se ajusten a él.",
   "auto.features.submit.hooks.use.code.agent.template.2": "El agente está leyendo el {p1}…",
-  "auto.features.submit.hooks.use.code.agent.template.3": "La validación encontró errores en el código que se escribió. Corrige la Firma y la métrica para que pasen la validación, manteniendo los campos asignados a las columnas de tu {p1}.",
-  "auto.features.submit.hooks.use.code.agent.template.4": "La validación encontró errores en la Firma. Corrígela para que pase la validación, manteniendo los campos asignados a las columnas de tu {p1}.",
   "auto.features.submit.hooks.use.code.agent.template.5": "La validación encontró errores en la métrica. Corrígela para que pase la validación.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "Se cargaron {p1} filas desde {p2}",
   "auto.features.tagger.components.taggerannotation.10": "Ir al texto sin etiquetar",

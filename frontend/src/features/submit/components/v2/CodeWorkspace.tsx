@@ -11,6 +11,17 @@ import { v2Msg } from "./ArtifactConfirmCard";
 // Both editors and the validity check share one screen.
 const EDITOR_HEIGHT = "max(14rem, calc(50svh - 14rem))";
 
+// What a person writing the code by hand must define, straight from the
+// contract the coding agent writes under; nothing when the catalog is unknown.
+function ContractHint({ text }: { text: string | null | undefined }) {
+  if (!text) return null;
+  return (
+    <p dir="ltr" className="font-mono text-xs text-muted-foreground">
+      {text}
+    </p>
+  );
+}
+
 function EditorBlock({
   id,
   title,
@@ -54,6 +65,8 @@ export function CodeWorkspace({
   onMetricCodeChange,
   agent,
   guided,
+  runEntry,
+  metricSignature,
   children,
 }: {
   runCode: string;
@@ -62,6 +75,10 @@ export function CodeWorkspace({
   onMetricCodeChange: (code: string) => void;
   agent: CodeAgentState;
   guided: boolean;
+  /** The run code's entry point for the artifact kind, from the optimizer catalog. */
+  runEntry?: string | null;
+  /** The metric's signature for the chosen optimizer, from the optimizer catalog. */
+  metricSignature?: string | null;
   /** Rendered above the metric editor (the metric model row). */
   children?: ReactNode;
 }) {
@@ -80,6 +97,7 @@ export function CodeWorkspace({
           streaming={agent.signatureStatus === "writing"}
           flashLines={agent.signatureFlashLines}
         />
+        <ContractHint text={runEntry} />
       </EditorBlock>
 
       <EditorBlock
@@ -109,6 +127,7 @@ export function CodeWorkspace({
             flashLines={agent.metricFlashLines}
           />
         </div>
+        <ContractHint text={metricSignature} />
       </EditorBlock>
     </div>
   );

@@ -1,28 +1,26 @@
 """DSPy-powered code agent for the submit wizard.
 
-Two distinct modes share this module:
+Every program is authored under one contract: the agent writes run code
+(entry point ``run(artifact, input)``, or ``build_program()`` when a DSPy
+optimizer needs the module) plus a metric in the exact shape the chosen
+optimizer needs, and the validity check holds both to it before Run. The
+unified authoring context carries that contract, so both modes take it:
 
-* **Seed** (``user_message`` is empty): a single non-agentic pass that writes
-  the initial ``class MySignature`` and ``def metric`` in parallel. The
-  tokens are streamed so the editor fills in live while the user sets up
-  the rest of the wizard. A short English intro message is composed at the
-  end from the finished code.
+* **Seed** (``user_message`` is empty): a non-agentic pass that drafts the
+  run code and the metric in parallel, streamed so the editors fill in
+  live, then a short intro composed from the finished code.
 
 * **Chat** (``user_message`` is set): a :class:`dspy.ReActV2` agent with
-  two tools — ``edit_signature`` and ``edit_metric``. Simple questions
-  don't touch the editor; the model answers in the ``reply`` field via
-  the internal ``submit`` tool and no user-facing tool fires. When a
-  user-facing tool does fire, the backend emits ``tool_start`` /
+  ``ask_user`` / ``set_brief`` / ``edit_run`` / ``edit_metric``. When a
+  user-facing tool fires, the backend emits ``tool_start`` /
   ``signature_replace`` (or ``metric_replace``) / ``tool_end`` around the
   call so the UI can render a tool-call card and swap the code atomically.
 
-A unified authoring context (the submission wizard's metric + code step)
-switches both modes to the workspace contract, one for every artifact: the
-seed drafts the run code (entry point ``run(artifact, input)``, or
-``build_program()`` when a DSPy optimizer needs the module) and the metric
-in the exact shape the chosen optimizer needs, and the chat agent gets ``ask_user`` / ``set_brief`` / ``edit_run`` / ``edit_metric``. Both ride
-the DSPy artifacts' events — ``signature_*`` for the run code, ``metric_*``
-for the metric — so the editor wiring is shared.
+The run code rides the ``signature_*`` events and the metric the
+``metric_*`` ones, so the editor wiring is shared. A workflow graph on the
+canvas (``prior_workflow``) switches both modes to graph-aware paths
+instead. The DSPy Signature chat agent (``edit_signature`` /
+``edit_metric``) still serves the MCP ``edit_code`` tool; it never seeds.
 
 The agent runs on whatever LiteLLM-compatible model is configured via
 ``settings.code_agent_model`` (default: the model catalog's best-value
@@ -49,6 +47,7 @@ from ...api.model_catalog import agent_model_id
 from ...config import settings
 from ...exceptions import ServiceError
 from ...models import ModelConfig, WorkflowSpec
+from ...models.unified import METRIC_SIGNATURES, run_entry_for
 from ..language_models import (
     apply_model_reasoning_config,
     apply_reasoning_effort,
@@ -217,13 +216,12 @@ def _validate_metric_code(code: str) -> str:
 
 
 # Function name, minimum positional-capable parameters and maximum required
-# ones per metric shape; mirrors the harness's call sites (D3 of the
-# workspace contract): GEPA passes five arguments, the other DSPy optimizers
-# up to three, and the black-box harness passes ``expected`` only when declared.
+# ones per metric shape. These match the validity check's ``_METRIC_SLOTS``
+# (contract.py): a draft this accepts must not fail the check before Run.
 _METRIC_SIGNATURES: dict[str, tuple[str, int, int, str]] = {
-    "dspy_feedback": ("metric", 5, 5, "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None)"),
-    "dspy_scalar": ("metric", 2, 3, "def metric(gold, pred, trace=None)"),
-    "blackbox_side_info": ("score", 2, 3, "def score(input, output, expected=None)"),
+    "dspy_feedback": ("metric", 5, 5, METRIC_SIGNATURES["dspy_feedback"]),
+    "dspy_scalar": ("metric", 3, 3, METRIC_SIGNATURES["dspy_scalar"]),
+    "blackbox_side_info": ("score", 2, 2, METRIC_SIGNATURES["blackbox_side_info"]),
 }
 
 
@@ -393,136 +391,6 @@ def _parse_workflow_json(text: str) -> tuple[dict | None, str]:
     if not isinstance(parsed, dict):
         return None, "workflow JSON must be a single object with 'nodes' and 'edges'."
     return parsed, ""
-
-
-class GenerateSignatureCode(dspy.Signature):
-    """Write a dspy.Signature class that teaches the downstream LLM what to do.
-
-    Every part of the code you emit becomes part of the runtime prompt:
-    * the class docstring becomes the TASK INSTRUCTION,
-    * ``desc=`` on each InputField becomes the hint for that input,
-    * ``desc=`` on each OutputField becomes the hint for the answer —
-      the single most impactful field for output quality.
-
-    Write rich, specific text everywhere. A generic signature produces a
-    generic prompt and weak accuracy out of the box; a concrete,
-    sample-grounded signature gives the LLM everything it needs.
-
-    ## Docstring (3–6 sentences)
-
-    Describe (a) the concrete task, (b) what each input represents,
-    (c) what a high-quality answer looks like, and (d) any implicit
-    constraint visible in the sample rows (length, vocabulary,
-    formatting, units). Reference the kind of values present in the
-    samples — e.g. "reviews are 1–3 sentences in English", "answers
-    are always a single integer with no units". Avoid generic phrasing
-    like "answer the question"; say what KIND of answer is expected.
-    The docstring should be specific enough that a new developer
-    reading ONLY the class could reproduce the task.
-
-    ## Field descriptions (``desc=``)
-
-    For every InputField: one concrete sentence on semantic meaning +
-    any format hint grounded in the samples
-    (e.g. ``desc="A product review in English, 1–3 sentences long, may
-    contain emoji."``). Do not just repeat the field name.
-
-    For every OutputField: spell out format, length, valid values, and
-    any constraint the LLM must obey
-    (e.g. ``desc="One of: positive, negative, neutral. Lowercase, no
-    punctuation, no surrounding quotes."``). Be prescriptive — this
-    string is the main lever on answer quality.
-
-    ## Types inferred from the sample rows
-
-    Read the actual values in ``sample_rows`` for each role-mapped
-    column and pick the narrowest type that fits EVERY sample you see —
-    do not guess from the column name. Import from ``typing`` as needed:
-    * small finite vocabulary in outputs → ``Literal["a", "b", "c"]``
-      (enumerate ONLY the distinct values present in the samples — do
-      not invent extra members)
-    * integer-only values → ``int``
-    * numeric with decimals → ``float``
-    * "yes"/"no" or "true"/"false" → ``bool``
-    * obvious multi-value (commas, newlines, pipes) → ``list[str]``
-    * cells that are JSON objects or arrays of objects — nested,
-      structured blobs like a ``{"role": ..., "content": ...}`` chat
-      turn list or a wizard/state snapshot — → ``str``, NOT
-      ``dict``/``list``. The runtime delivers these fields as
-      JSON-encoded strings, so a ``dict``/``list`` annotation triggers a
-      predict-time type mismatch on every call. Keep the field ``str``
-      and say "JSON-encoded ..." in its ``desc=``.
-    * everything else → ``str``.
-
-    Types constrain the parser and reduce failures — prefer them over
-    ``str`` whenever the samples support it. If the samples are mixed or
-    ambiguous, fall back to ``str`` rather than over-constraining.
-
-    ## Image inputs (``dspy.Image``)
-
-    ``column_kinds`` flags the detected modality of every input column.
-    For any input column whose kind is ``"image"`` you MUST type the
-    InputField as ``dspy.Image`` — never ``str`` — and write the
-    ``desc=`` to describe what the image depicts (the model sees the
-    image directly, the desc tells it how to interpret it). Image
-    columns hold URLs or base64 data URIs at the row level; the runtime
-    wraps them into ``dspy.Image`` instances before the model is called.
-
-    ## Hard rules
-
-    * EXACTLY one InputField per column marked ``input`` and EXACTLY
-      one OutputField per column marked ``output`` — no more, no fewer.
-    * Field identifiers MUST match the dataset column names verbatim.
-    * Image input columns (``column_kinds[name] == "image"``) MUST be
-      typed ``dspy.Image``; text input columns follow the type rules
-      above.
-    * Do NOT invent auxiliary fields (``rationale``, ``explanation``,
-      ``confidence``, ``reasoning``, ...). Modules that wrap the
-      signature at runtime (``dspy.ChainOfThought``, ``dspy.ReAct``,
-      ...) add their own reasoning fields automatically; any extra
-      OutputField will fail validation because it has no matching
-      dataset column.
-    * Self-contained, importable at module scope. The allowed imports
-      are ``dspy`` and ``typing`` (for ``Literal``) — nothing else. No
-      markdown fences, no prose outside the class body.
-    """
-
-    dataset_columns: list[str] = dspy.InputField(desc="Every column name in the dataset.")
-    column_roles: str = dspy.InputField(
-        desc="JSON object mapping column name → 'input' | 'output' | 'ignore'.",
-    )
-    column_kinds: str = dspy.InputField(
-        desc=(
-            "JSON object mapping input-column name → 'text' | 'image'. "
-            "Image columns MUST be typed ``dspy.Image`` in the generated "
-            "InputField; text columns follow the standard type rules."
-        ),
-    )
-    sample_rows: str = dspy.InputField(
-        desc=(
-            "JSON array of up to 5 representative rows — read them "
-            "carefully to infer types, vocabulary, formatting, and "
-            "length for your docstring and field descs. Image cells "
-            "appear as URLs or base64 data URIs."
-        ),
-    )
-    authoring_brief: str = dspy.InputField(
-        desc=(
-            "Directives distilled from an interview with the dataset owner. "
-            "Every directive MUST be honored in the docstring and field "
-            "descs; empty when no interview happened."
-        ),
-    )
-
-    signature_code: str = dspy.OutputField(
-        desc=(
-            "Complete ``class MySignature(dspy.Signature):`` Python code. "
-            "Include a 3–6 sentence task docstring grounded in the "
-            "samples, typed InputField / OutputField for every role-mapped "
-            "column (matching names), and a specific ``desc=`` on every "
-            "field. No markdown fences, no surrounding prose."
-        ),
-    )
 
 
 class GenerateMetricCode(dspy.Signature):
@@ -736,42 +604,6 @@ def _reply_language(locale: str | None) -> str:
     """
     primary = (locale or "").split("-", 1)[0].strip().lower()
     return _LOCALE_LANGUAGE_NAMES.get(primary, "Hebrew")
-
-
-class GenerateSeedMessage(dspy.Signature):
-    """Write a short chat reply describing what was generated.
-
-    Respond in one or two short, friendly sentences — written in the
-    language named by ``reply_language`` — explaining what the Signature
-    and Metric actually do, grounded in the code just produced. No code,
-    no markdown. Addressed to a non-technical user. Keep the terms
-    ``Signature`` and ``Metric`` in English (they are product terms);
-    everything else must be in the reply language.
-    """
-
-    dataset_columns: list[str] = dspy.InputField(desc="Every column name in the dataset.")
-    column_roles: str = dspy.InputField(
-        desc="JSON object mapping column name → 'input' | 'output' | 'ignore'.",
-    )
-    column_kinds: str = dspy.InputField(
-        desc="JSON object mapping input-column name → 'text' | 'image'.",
-    )
-    sample_rows: str = dspy.InputField(
-        desc="JSON array of up to 5 representative rows from the dataset.",
-    )
-    signature_code: str = dspy.InputField(desc="The Signature code just produced.")
-    metric_code: str = dspy.InputField(desc="The metric code just produced.")
-    reply_language: str = dspy.InputField(
-        desc="Language to write the reply in (the product UI language).",
-    )
-
-    assistant_message: str = dspy.OutputField(
-        desc=(
-            "One or two short sentences for the user, written in "
-            "reply_language. No code, no markdown; only the product terms "
-            "``Signature`` and ``Metric`` stay in English."
-        ),
-    )
 
 
 _WORKFLOW_JSON_SCHEMA_DOC = """
@@ -1092,29 +924,29 @@ _RUN_CONTRACT = """The run code is plain python that turns one case input into a
 - Let errors raise: the harness reports them to the user. Do not return a fake output on failure.
 - Read input fields by their exact names; never invent fields."""
 
-_RUN_ENTRY = """define def run(artifact, input): artifact is the version under optimization (a str, or a dict of name -> text when the starting version is a mapping), exactly as the optimizer proposes it; input is one case input, a dict keyed by the input fields. Return the output: a str, or any JSON-serializable value the metric reads.
+_RUN_ENTRY = f"define {run_entry_for('prompt')}: " + """artifact is the version under optimization (a str, or a dict of name -> text when the starting version is a mapping), exactly as the optimizer proposes it; input is one case input, a dict keyed by the input fields. Return the output: a str, or any JSON-serializable value the metric reads.
 - The task model comes from the skynet module: `from skynet import llm` (never define your own). llm(prompt, input=None, images=None) -> str; llm(artifact, input["<input field>"]) runs the artifact as the system message with that field as the user message and returns the reply; that is how a prompt is exercised. images= attaches PNG/JPEG bytes, file paths or data: URLs.
 - Per artifact kind: a prompt is exercised with llm(artifact, ...); code is python source to load with exec into a fresh dict namespace (or write to a temp file and run with subprocess and a timeout) and call on the input; text is used as written (return it, or apply it with llm when the objective is about what the text makes a model do)."""
 
 # A DSPy optimizer tunes the module's predictors itself, so the engine needs
 # the module rather than a call; build_program() is that run code's entry
 # point, not a separate deliverable.
-_DSPY_ENTRY = """the artifact is a DSPy program, and the DSPy optimizer tunes its predictors itself, so the run code hands over the module instead of calling it: define def build_program() taking no arguments and returning a dspy.Module. `import dspy` at the top; define the dspy.Signature classes and the module it uses inside the run code.
+_DSPY_ENTRY = """the artifact is a DSPy program, and the DSPy optimizer tunes its predictors itself, so the run code hands over the module instead of calling it: define """ + run_entry_for("dspy_program") + """ taking no arguments and returning a dspy.Module. `import dspy` at the top; define the dspy.Signature classes and the module it uses inside the run code.
 - The harness applies the version under optimization, a dict mapping each predictor name (as program.named_predictors() reports it) to its instruction text, configures the task model as the dspy LM and calls program(**input) with the input fields as keyword arguments; the output is the dspy.Prediction it returns. Never call dspy.configure, create a dspy.LM or set instructions yourself.
 - Name the predictors so they match the keys of the starting version; the module's forward takes exactly the input fields as keyword arguments and returns a dspy.Prediction with the output fields the metric reads.
 - Name the signature's input fields exactly as the case input fields. gold holds the case's expected fields under their own names (a single expected value is gold.expected), so name the output fields so the metric can compare pred.<field> with the matching gold field."""
 
 _METRIC_SHAPES = {
     "dspy_feedback": """The metric feeds a DSPy GEPA optimizer, so it returns a score AND feedback text.
-- Define def metric(gold, pred, trace=None, pred_name=None, pred_trace=None) with all five parameters.
+- Define """ + METRIC_SIGNATURES["dspy_feedback"] + """ with all five parameters.
 - gold is a dspy.Example holding the case input fields and the expected output fields (read them as gold.<field>); pred is the dspy.Prediction the program returned (pred.<output field>).
 - Return dspy.Prediction(score=float, feedback=str): score higher is better, 0.0 to 1.0 by convention; feedback says WHY, naming the expected value or the failed check, because the optimizer learns from it. {"score": ..., "feedback": ...} or (score, "feedback") are accepted too.""",
     "dspy_scalar": """The metric feeds a DSPy optimizer that reads only a number.
-- Define def metric(gold, pred, trace=None).
+- Define """ + METRIC_SIGNATURES["dspy_scalar"] + """.
 - gold is a dspy.Example holding the case input fields and the expected output fields (read them as gold.<field>); pred is the dspy.Prediction the program returned (pred.<output field>).
 - Return a float (higher is better, 0.0 to 1.0 by convention) or a bool. No feedback is read.""",
     "blackbox_side_info": """The metric feeds a black-box optimizer that reads a score and side info.
-- Define def score(input, output, expected=None).
+- Define """ + METRIC_SIGNATURES["blackbox_side_info"] + """.
 - input is the case input dict (keyed by the input fields), output is what run returned for it, expected is the case's expected output (the value of the expected field; None when the case has none). Declare expected only when you use it.
 - Return (score, side_info): score is a float, higher is better, 0.0 to 1.0 by convention; side_info is a dict with "feedback": str saying WHY the output scored that, naming the expected value or the failed check. When several things are measured, add "scores": {"<name>": float, ...}, one entry per thing; the top-level score is then their (weighted) combination.""",
 }
@@ -1160,13 +992,12 @@ class GenerateRunCode(dspy.Signature):
     The optimizer improves an artifact (``artifact_kind``) toward
     ``objective``; the run code is the fixed harness that exercises the
     current version of that artifact on one case, the same for every
-    artifact kind. Implement it under ``run_contract`` — that
-    contract is exact, and the validity check holds the code to it before
-    the run starts; follow it literally. Ground
-    it in the starting version and the sample cases: read the input fields
-    by their exact names and return what the metric needs to score.
-    Keep it short and direct. Output ONLY the python code: no markdown
-    fences, no commentary.
+    artifact kind. Implement it under ``run_contract``: that contract is
+    exact, and the validity check holds the code to it before the run
+    starts, so follow it literally. Ground it in the starting version and
+    the sample cases: read the input fields by their exact names and
+    return what the metric needs to score. Keep it short and direct.
+    Output ONLY the python code: no markdown fences, no commentary.
     """
 
     objective: str = dspy.InputField(desc="What a better version of the artifact achieves.")
@@ -2119,164 +1950,6 @@ async def _validate_and_repair_artifact(
         queue.put_nowait({"event": replace_event, "data": {"code": code}})
         error = await asyncio.to_thread(validator, code)
     return code, error
-
-
-async def _run_seed(
-    *,
-    lm: dspy.LM,
-    dataset_columns: list[str],
-    column_roles_json: str,
-    column_kinds_json: str,
-    sample_rows_json: str,
-    authoring_brief: str,
-    reply_language: str,
-    queue: asyncio.Queue[dict | None],
-) -> dict[str, Any]:
-    """Run the non-agentic seed: Signature + metric in parallel, then intro.
-
-    Signature and metric tokens are streamed as ``signature_patch`` /
-    ``metric_patch`` events so the editor fills in live. After both are
-    complete, an intro message is generated from the finished code (which
-    gives the message model real context to talk about) and returned as
-    ``assistant_message`` on the final ``done`` payload.
-
-    Args:
-        lm: The language model to drive the seed predictors.
-        dataset_columns: All dataset column names.
-        column_roles_json: JSON string mapping column → role.
-        column_kinds_json: JSON string mapping input column → kind (text/image).
-        sample_rows_json: JSON-encoded list of representative sample rows.
-        authoring_brief: Interview directives both authors must honor; empty
-            when no interview happened.
-        reply_language: Language name the intro message is written in.
-        queue: SSE event queue to push token events onto.
-
-    Returns:
-        Mapping with keys ``signature_code``, ``metric_code`` (both
-        validated and repaired when needed), ``assistant_message``, the
-        boolean ``signature_valid`` / ``metric_valid`` flags, and an
-        optional ``validation_error`` string when an artifact could not be
-        repaired within the attempt budget.
-    """
-    sig_predict = dspy.Predict(GenerateSignatureCode)
-    met_predict = dspy.Predict(GenerateMetricCode)
-    sig_program = dspy.streamify(
-        sig_predict,
-        stream_listeners=[
-            dspy.streaming.StreamListener(signature_field_name="signature_code"),
-            ReasoningStreamListener(predict=sig_predict),
-        ],
-        async_streaming=True,
-    )
-    met_program = dspy.streamify(
-        met_predict,
-        stream_listeners=[
-            dspy.streaming.StreamListener(signature_field_name="metric_code"),
-            ReasoningStreamListener(predict=met_predict),
-        ],
-        async_streaming=True,
-    )
-
-    shared_inputs = {
-        "dataset_columns": dataset_columns,
-        "column_roles": column_roles_json,
-        "column_kinds": column_kinds_json,
-        "sample_rows": sample_rows_json,
-        "authoring_brief": authoring_brief,
-    }
-    results: dict[str, Any] = {"signature_code": "", "metric_code": "", "assistant_message": ""}
-
-    msg_predict = dspy.Predict(GenerateSeedMessage)
-    msg_program = dspy.streamify(
-        msg_predict,
-        stream_listeners=[
-            dspy.streaming.StreamListener(signature_field_name="assistant_message"),
-        ],
-        async_streaming=True,
-    )
-
-    with dspy.context(lm=lm):
-        # Two independent lanes: each artifact validates (and repairs) the
-        # moment its OWN stream finishes, so the usually-faster signature's
-        # multi-second subprocess validation overlaps the metric's remaining
-        # stream instead of waiting for it. The seed predictors stream raw,
-        # unvalidated code — without this pass a stray brace or bad
-        # identifier surfaces only as a 400 at submit.
-        async def _signature_lane() -> tuple[str, str]:
-            """Stream the signature, then validate/repair it immediately."""
-            await _pump_seed_stream(
-                sig_program,
-                shared_inputs,
-                "signature_code",
-                "signature_patch",
-                queue=queue,
-                results=results,
-                reasoning_source="signature",
-            )
-            return await _validate_and_repair_artifact(
-                lm=lm,
-                artifact_kind="signature",
-                code=results["signature_code"],
-                validator=_validate_signature_code,
-                dataset_columns=dataset_columns,
-                column_roles_json=column_roles_json,
-                queue=queue,
-                replace_event="signature_replace",
-            )
-
-        async def _metric_lane() -> tuple[str, str]:
-            """Stream the metric, then validate/repair it immediately."""
-            await _pump_seed_stream(
-                met_program,
-                shared_inputs,
-                "metric_code",
-                "metric_patch",
-                queue=queue,
-                results=results,
-                reasoning_source="metric",
-            )
-            return await _validate_and_repair_artifact(
-                lm=lm,
-                artifact_kind="metric",
-                code=results["metric_code"],
-                validator=_validate_metric_code,
-                dataset_columns=dataset_columns,
-                column_roles_json=column_roles_json,
-                queue=queue,
-                replace_event="metric_replace",
-            )
-
-        (sig_code, sig_err), (met_code, met_err) = await asyncio.gather(
-            _signature_lane(), _metric_lane()
-        )
-        results["signature_code"] = sig_code
-        results["metric_code"] = met_code
-        results["signature_valid"] = not sig_err
-        results["metric_valid"] = not met_err
-        if sig_err or met_err:
-            parts = []
-            if sig_err:
-                parts.append(f"Signature: {sig_err}")
-            if met_err:
-                parts.append(f"Metric: {met_err}")
-            results["validation_error"] = " | ".join(parts)
-
-        async for chunk in msg_program(
-            dataset_columns=dataset_columns,
-            column_roles=column_roles_json,
-            column_kinds=column_kinds_json,
-            sample_rows=sample_rows_json,
-            signature_code=results["signature_code"],
-            metric_code=results["metric_code"],
-            reply_language=reply_language,
-        ):
-            if isinstance(chunk, dspy.streaming.StreamResponse):
-                if chunk.signature_field_name == "assistant_message":
-                    await queue.put({"event": "message_patch", "data": {"chunk": chunk.chunk}})
-            elif isinstance(chunk, dspy.Prediction):
-                results["assistant_message"] = getattr(chunk, "assistant_message", "") or ""
-
-    return results
 
 
 def _emit_to_code_queue(
@@ -3834,13 +3507,13 @@ async def _run_code_agent_orchestration(
 ) -> None:
     """Run the seed or chat path and push the terminal envelope into ``queue``.
 
-    Dispatches to :func:`_run_seed` when ``is_seed`` is true (the user sent
-    no message and we need to generate the initial Signature + metric) and
-    to :func:`_run_agent` otherwise; a non-None ``prior_workflow`` routes
-    both modes to their graph-aware counterparts instead, and a non-None
-    ``unified`` to the wizard's run-code + metric paths. Emits exactly one
-    terminal event (``done`` on success, ``error`` on failure) followed by
-    the ``None`` sentinel that unblocks the outer consumer.
+    A non-None ``unified`` runs the run-code + metric seed or chat path and
+    a non-None ``prior_workflow`` the graph-aware ones. Without either, a
+    chat turn runs the DSPy Signature agent (:func:`_run_agent`, kept for
+    the MCP ``edit_code`` tool) and a seed fails: there is no Signature
+    seed, every first draft goes through the one run-code contract. Emits
+    exactly one terminal event (``done`` on success, ``error`` on failure)
+    followed by the ``None`` sentinel that unblocks the outer consumer.
 
     Args:
         is_seed: True to run the seed path; False to run the chat agent.
@@ -3920,16 +3593,7 @@ async def _run_code_agent_orchestration(
                 steering=steering,
             )
         elif is_seed:
-            results = await _run_seed(
-                lm=lm,
-                dataset_columns=dataset_columns,
-                column_roles_json=column_roles_json,
-                column_kinds_json=column_kinds_json,
-                sample_rows_json=sample_rows_json,
-                authoring_brief=authoring_brief,
-                reply_language=reply_language,
-                queue=queue,
-            )
+            raise ValueError("A first draft needs the authoring context (unified) or a workflow graph.")
         else:
             results = await _run_agent(
                 lm=lm,
@@ -3987,10 +3651,10 @@ async def run_code_agent(
 ) -> AsyncGenerator[dict, None]:
     """Stream code-agent events to the UI.
 
-    When ``user_message`` is empty → seed path (parallel Signature + metric
-    generation). When set → chat path (ReAct with two tools). Both paths
-    share the same ``done`` / ``error`` envelope and the same
-    ``reasoning_patch`` event for reasoning-capable providers.
+    When ``user_message`` is empty → seed path (parallel run code + metric
+    drafts, which needs ``unified`` or ``prior_workflow``). When set → chat
+    path (ReAct). Both paths share the same ``done`` / ``error`` envelope
+    and the same ``reasoning_patch`` event for reasoning-capable providers.
 
     A non-None ``prior_workflow`` switches both modes to their graph-aware
     counterparts: the seed drafts a full workflow graph (emitted as one

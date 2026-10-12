@@ -285,7 +285,8 @@ function ToolCallCard({
   unified?: boolean;
 }) {
   const codeCall = call as AgentToolCall;
-  const isSignature = codeCall.tool === "edit_signature" || codeCall.tool === "edit_seed";
+  const isSignature =
+    codeCall.tool === "edit_signature" || codeCall.tool === "edit_run" || codeCall.tool === "edit_seed";
   const isMetric = codeCall.tool === "edit_metric" || codeCall.tool === "edit_scorer";
   const Icon = isSignature
     ? FileCode

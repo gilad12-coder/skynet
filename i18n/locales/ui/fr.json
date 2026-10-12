@@ -2420,8 +2420,6 @@
   "auto.features.submit.hooks.use.code.agent.literal.8": "Erreur",
   "auto.features.submit.hooks.use.code.agent.template.1": "Examine mon {p1} et écris une Signature et une métrique qui lui correspondent.",
   "auto.features.submit.hooks.use.code.agent.template.2": "L'agent lit le {p1}…",
-  "auto.features.submit.hooks.use.code.agent.template.3": "La validation a détecté des erreurs dans le code écrit. Corrige la Signature et la métrique pour qu'elles passent la validation, tout en conservant les champs mappés aux colonnes de ton {p1}.",
-  "auto.features.submit.hooks.use.code.agent.template.4": "La validation a détecté des erreurs dans la Signature. Corrige-la pour qu'elle passe la validation, tout en conservant les champs mappés aux colonnes de ton {p1}.",
   "auto.features.submit.hooks.use.code.agent.template.5": "La validation a détecté des erreurs dans la métrique. Corrige-la pour qu'elle passe la validation.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "{p1} lignes chargées depuis {p2}",
   "auto.features.tagger.components.taggerannotation.10": "Aller au texte non étiqueté",

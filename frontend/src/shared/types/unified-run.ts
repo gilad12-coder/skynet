@@ -166,6 +166,8 @@ export interface OptimizerOption {
   id: OptimizerChoice;
   family: OptimizerFamily;
   metric_shape: MetricShape;
+  /** The metric's exact signature for this optimizer, as the coding agent is told. */
+  metric_signature: string;
   available: boolean;
   unavailable_reason?: string | null;
   needs_reflection_model: boolean;
@@ -177,6 +179,8 @@ export interface OptimizerOption {
 export interface OptimizerCatalogResponse {
   artifact_kind: ArtifactKind;
   data_mode: DataMode;
+  /** The entry point the run code defines for this artifact kind. */
+  run_entry: string;
   default: OptimizerChoice;
   options: OptimizerOption[];
   auto_resolves_to: string[];

@@ -3392,6 +3392,7 @@ export interface CodeAgentRequest {
 
 export type CodeAgentToolName =
   | "edit_signature"
+  | "edit_run"
   | "edit_metric"
   | "edit_seed"
   | "edit_scorer"
@@ -3406,6 +3407,7 @@ export type CodeAgentToolName =
 
 const CODE_AGENT_TOOLS = new Set<CodeAgentToolName>([
   "edit_signature",
+  "edit_run",
   "edit_metric",
   "edit_seed",
   "edit_scorer",
