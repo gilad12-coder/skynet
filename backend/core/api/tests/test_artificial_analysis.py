@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import time
+import urllib.error
 from unittest.mock import patch
 
 import pytest
 
 from .. import artificial_analysis as aa
 from ..model_catalog import CatalogModel, ModelCatalogResponse
+
+# conftest stubs ``_fetch_head`` offline per test; keep the real one for error handling.
+_REAL_FETCH_HEAD = aa._fetch_head
 
 _PAGE = (
     "<html><head><title>{title} - Intelligence, Performance &amp; Price Analysis | Artificial Analysis</title>"
@@ -135,3 +139,26 @@ def test_refresh_caches_failures_briefly() -> None:
     assert url is None
     assert expires - time.monotonic() <= aa._ERROR_TTL_SECONDS
     assert aa._refresh_in_flight is False
+
+
+@pytest.mark.parametrize("code", [403, 429, 503])
+def test_refresh_caches_http_errors_other_than_404_briefly(code: int) -> None:
+    """A rate limit, bot challenge or server error is retried within the hour, not a day.
+
+    Args:
+        code: HTTP status the page answers with.
+    """
+    model = _model("openrouter/anthropic/claude-opus-4.5")
+
+    def _raise(request: object, timeout: float) -> None:
+        """Fail the request like an HTTP error response would."""
+        raise urllib.error.HTTPError(aa._BASE_URL, code, "error", {}, None)
+
+    with (
+        patch.object(aa, "_fetch_head", _REAL_FETCH_HEAD),
+        patch.object(aa.urllib.request, "urlopen", side_effect=_raise),
+    ):
+        aa._refresh([model])
+    url, expires = aa._links[model.value]
+    assert url is None
+    assert expires - time.monotonic() <= aa._ERROR_TTL_SECONDS

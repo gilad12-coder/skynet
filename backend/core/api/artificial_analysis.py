@@ -132,17 +132,21 @@ def _fetch_head(url: str) -> tuple[int, str, str]:
         url: Page URL.
 
     Returns:
-        ``(status, final url after redirects, first bytes as text)``; a 404 or
-        other HTTP error returns its status with empty text.
+        ``(status, final url after redirects, first bytes as text)``; a 404
+        returns its status with empty text.
 
     Raises:
-        OSError: On network failures and timeouts.
+        OSError: On network failures, timeouts and any HTTP error but a 404.
     """
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
             return response.status, response.geturl(), response.read(_HEAD_BYTES).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
+        # Only a 404 proves the page is missing; a rate limit, bot challenge or
+        # 5xx must take the short error TTL instead of hiding the link a day.
+        if exc.code != 404:
+            raise
         return exc.code, url, ""
 
 

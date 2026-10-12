@@ -104,15 +104,22 @@ function RowIconTip({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
+  // Touch has no hover, so a tap toggles; a mouse click must not close the
+  // tooltip its hover just opened.
+  const pointerType = React.useRef("");
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger asChild>
         <button
           type="button"
           aria-label={label}
+          onPointerDown={(e) => {
+            pointerType.current = e.pointerType;
+          }}
           onClick={(e) => {
             e.preventDefault();
-            setOpen((v) => !v);
+            if (pointerType.current === "touch") setOpen((v) => !v);
+            else setOpen(true);
           }}
           className="flex min-h-[44px] w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-0 lg:size-6"
         >
@@ -510,7 +517,7 @@ export function ModelPicker({
                   </button>
                   {m.zero_retention && (
                     <RowIconTip
-                      label={msg("submit.modelpicker.zdr_tip")}
+                      label={msg("settings.model_privacy.zdr.label")}
                       icon={<ShieldCheck className="size-3.5" aria-hidden="true" />}
                     >
                       {msg("submit.modelpicker.zdr_tip")}
