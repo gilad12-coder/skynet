@@ -59,17 +59,35 @@ send one card: the backend changes that landed, staging smoke status, and a
 ### PR preview environments: keep them able to run an optimization
 
 The merger has to sign up and finish a real run in each `*-pr-<n>` Railway
-environment. Three things broke that once; keep them true:
+environment. Six things broke that once; keep them true:
 
 - **No watch paths on `staging` services.** PR environments copy `staging`,
   and Railway skips a service whose watch paths the PR doesn't touch. A skipped
   `litellm` (or its `Postgres-ZPeG` database) means every model call fails with
   `Litellm_proxyException - Connection error`. Never add watch paths to
   `litellm`, `backend` or `frontend` on `staging`.
+- **The proxy knows the backend's key.** A PR environment gets a fresh
+  `litellm` database, so the virtual key in `LITELLM_PROXY_API_KEY` is unknown
+  there and every managed call (the assistant included) fails with
+  `Invalid proxy server token`. `deploy/litellm/start.py` registers
+  `LITELLM_SEED_KEY` at boot; on `staging` it must stay a reference to
+  `${{backend.LITELLM_PROXY_API_KEY}}`.
 - **Preview accounts work without email and with credit.** In a `*-pr-<n>`
   environment, sign-up is auto-verified and a new account gets
   `PREVIEW_GRANT_CENTS` (set on `staging` `backend` and `worker`, 1000 = $10)
   that can fund a budget. Production and `staging` keep a 0 grant.
+- **The setup check routes the same models as the run.** An Auto run's
+  payload names its models under `models.*`. `run_preflight` must alias them
+  (`core/worker/unified_aliases.py`) before `ModelGateway.protect_payload`,
+  exactly like the worker does. Otherwise the metric model gets no metered
+  route, and the run fails with "Scorer models need a gateway the sandboxes
+  can reach". Any new payload shape must go through the same aliasing in both
+  places.
+- **A sandbox command's kill timer stays at or under five hours.** A Vercel
+  box may live 24 hours, but a process kill timer above 18,000,000 ms is
+  rejected with `timeout should be <= 18000000`, and every run fails starting
+  its model proxy. `Sandbox.run` caps `kill_after` at
+  `_VERCEL_KILL_TIMER_CEILING_SECONDS`; never cap it at the box lifetime.
 - **Diagnose before labeling `needs-human`.** Check each service's latest
   deployment in the PR environment (`railway status --json`). A service with
   no deployment can be started with Railway's `serviceInstanceDeployV2`.
