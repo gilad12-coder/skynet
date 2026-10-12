@@ -102,7 +102,8 @@ interface GeneralistPanelProps {
  * Mounted once in the app shell so the thread survives route changes.
  */
 export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
-  const { open, setOpen, width, setWidth, pillDock, pillHidden } = useGeneralistPanelState();
+  const { open, setOpen, width, setWidth, pillDock, panelDock, pillHidden } =
+    useGeneralistPanelState();
   const { mode: trustMode, next: cycleTrust } = useTrustMode();
   const { updatePrefs } = useUserPrefs();
   const reduceMotion = useReducedMotion();
@@ -206,7 +207,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     [updatePrefs, wizardCtx, startSubmitSplash],
   );
 
-  const store = useConversationStore({ enabled: open });
+  const store = useConversationStore({ enabled: open || panelDock !== null });
 
   const handleConversationMeta = React.useCallback(
     (id: string, title: string, ctx: SessionEventContext) => {
@@ -671,10 +672,284 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     />
   );
 
+  const chatBody = (
+    <div dir={dir} className="relative flex min-w-0 flex-1 flex-col">
+      <div className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-2.5 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="inline-flex size-6 items-center justify-center rounded-full bg-primary-fill text-primary-foreground">
+            <SkynetMark className="size-3.5" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 leading-tight">
+              <span className="text-[0.8125rem] font-medium">
+                {msg("auto.features.agent.panel.components.generalistpanel.3")}
+              </span>
+              <Popover>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-muted-foreground hover:text-foreground"
+                        aria-label={msg(
+                          "auto.features.agent.panel.components.generalistpanel.literal.2",
+                        )}
+                      >
+                        <MagicWand className="size-3.5" />
+                      </Button>
+                    </PopoverTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {msg("auto.features.agent.panel.components.generalistpanel.4")}
+                  </TooltipContent>
+                </Tooltip>
+                <PopoverContent side="bottom" align="center" sideOffset={8} className="p-0">
+                  <ToolsCarousel />
+                </PopoverContent>
+              </Popover>
+            </div>
+            {agent.statusLabel && (
+              <div className="text-[0.6875rem] text-muted-foreground truncate">
+                {agent.statusLabel}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setDrawerOpen(true)}
+                className="relative text-muted-foreground hover:text-foreground"
+                aria-label={msg(
+                  "auto.features.agent.panel.components.generalistpanel.history_button",
+                )}
+              >
+                <ClockCounterClockwise className="size-3.5" />
+                {agent.backgroundBusyCount > 0 && (
+                  <CountBadge overlay aria-hidden="true">
+                    {agent.backgroundBusyCount}
+                  </CountBadge>
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {msg("auto.features.agent.panel.components.generalistpanel.history_button")}
+              {agent.backgroundBusyCount > 0 && (
+                <>
+                  {" · "}
+                  {formatMsg("agent.parallel.background_count", {
+                    p1: agent.backgroundBusyCount,
+                  })}
+                </>
+              )}
+            </TooltipContent>
+          </Tooltip>
+          {agent.messages.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={handleNewConversation}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label={msg(
+                    "auto.features.agent.panel.components.generalistpanel.new_conversation",
+                  )}
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {msg("auto.features.agent.panel.components.generalistpanel.new_conversation")}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {/* Docked, the host (the wizard's Manual mode) hides the chat. */}
+          {!panelDock && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={closePanel}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label={msg("auto.features.agent.panel.components.generalistpanel.literal.4")}
+                >
+                  {/* Icon points toward the edge the panel collapses to:
+                      right when docked right (LTR), left when docked left (RTL). */}
+                  {isRtl ? (
+                    <SidebarSimple className="size-3.5" />
+                  ) : (
+                    <SidebarSimple className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {msg("auto.features.agent.panel.components.generalistpanel.6")}
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+
+      <AgentThread
+        className="overscroll-contain"
+        isEmpty={agent.messages.length === 0}
+        emptyState={emptyState}
+        scrollDeps={[
+          agent.messages.length,
+          agent.messages[agent.messages.length - 1]?.content,
+          agent.messages[agent.messages.length - 1]?.toolCalls?.length,
+          agent.reasoning,
+          agent.statusLabel,
+          agent.pendingApproval?.id ?? "",
+        ]}
+      >
+        <ChatTranscript
+          messages={agent.messages}
+          streaming={streaming}
+          editAndResend={agent.editAndResend}
+          thinking={thinking}
+          renderToolCall={renderToolCall}
+          onRunCode={handleRunCode}
+          animatePairs
+          trailing={() => (
+            <>
+              {agent.pendingApproval && (
+                <ApprovalCard payload={agent.pendingApproval} onResolve={agent.confirmApproval} />
+              )}
+              {agent.error && (
+                <ChatErrorBanner
+                  message={agent.error}
+                  retryLabel={msg(
+                    "auto.features.agent.panel.components.generalistpanel.error_retry",
+                  )}
+                  onRetry={
+                    agent.errorCode === I18N_KEY.BILLING_INSUFFICIENT_FUNDS
+                      ? undefined
+                      : agent.retry
+                  }
+                  action={
+                    agent.errorCode === I18N_KEY.BILLING_INSUFFICIENT_FUNDS ? (
+                      <Button size="sm" className="h-7" onClick={() => openSettingsTo("billing")}>
+                        {msg("billing.action.add_funds")}
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              )}
+            </>
+          )}
+        />
+      </AgentThread>
+
+      <Composer
+        value={draft}
+        onChange={setDraft}
+        onSubmit={handleSubmit}
+        onStop={agent.stop}
+        placeholder={msg("auto.features.agent.panel.components.generalistpanel.literal.5")}
+        streaming={activeBusy}
+        midTurn={agent.midTurn}
+        disabled={codeAuthoringActive}
+        modelMenu={
+          <ComposerModelMenu
+            value={agent.model}
+            onChange={agent.setModel}
+            effort={agent.reasoningEffort}
+            onEffortChange={agent.setReasoningEffort}
+          />
+        }
+        leadingControls={
+          <>
+            <input
+              ref={attachInputRef}
+              type="file"
+              accept={DATASET_FILE_ACCEPT}
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) {
+                  setAttachFile(file);
+                  setAttachOpen(true);
+                }
+              }}
+            />
+            <Popover
+              open={attachOpen}
+              onOpenChange={(open) => {
+                setAttachOpen(open);
+                if (!open) setAttachFile(null);
+              }}
+            >
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={codeAuthoringActive}
+                      aria-label={msg("agent.composer.attach")}
+                      onClick={(e) => {
+                        // Skip the popover toggle — go straight to the
+                        // OS file picker; the popover opens on pick.
+                        e.preventDefault();
+                        attachInputRef.current?.click();
+                      }}
+                      className={cn(
+                        "inline-flex size-9 items-center justify-center rounded-full",
+                        "text-muted-foreground transition-colors cursor-pointer",
+                        "hover:bg-accent/60 hover:text-foreground",
+                        "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
+                        "disabled:pointer-events-none disabled:opacity-50",
+                      )}
+                    >
+                      <Plus className="size-4" />
+                    </button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="top">{msg("agent.composer.attach")}</TooltipContent>
+              </Tooltip>
+              <PopoverContent
+                side="top"
+                align="start"
+                sideOffset={8}
+                className="w-96 max-w-[calc(100vw-2rem)] p-3"
+              >
+                <DatasetUploadCard
+                  initialFile={attachFile}
+                  onConfirm={(confirmed) => {
+                    setAttachOpen(false);
+                    setAttachFile(null);
+                    void handleDatasetConfirm(`user-attach-${confirmed.fileName}`, confirmed);
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
+            <TrustToggle mode={trustMode} onCycle={cycleTrust} plain />
+          </>
+        }
+        sendAriaLabel={msg("auto.features.agent.panel.components.generalistpanel.literal.6")}
+        stopAriaLabel={msg("auto.features.agent.panel.components.generalistpanel.literal.7")}
+      />
+
+      <PresenceStrip active={streaming} hue={hue} />
+    </div>
+  );
+
   return (
     <>
+      {panelDock && createPortal(chatBody, panelDock)}
       <AnimatePresence>
-        {open && isNarrow && (
+        {open && !panelDock && isNarrow && (
           <motion.div
             key="generalist-backdrop"
             initial={{ opacity: 0 }}
@@ -686,7 +961,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             className="fixed inset-0 z-40 bg-black/50"
           />
         )}
-        {open && (
+        {open && !panelDock && (
           <motion.aside
             key="generalist-panel"
             dir={dir}
@@ -711,289 +986,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             )}
             aria-label={msg("auto.features.agent.panel.components.generalistpanel.literal.1")}
           >
-            <div dir={dir} className="relative flex min-w-0 flex-1 flex-col">
-              <div className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-2.5 shrink-0">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span
-                    className="inline-flex size-6 items-center justify-center rounded-full bg-primary-fill text-primary-foreground"
-                  >
-                    <SkynetMark className="size-3.5" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 leading-tight">
-                      <span className="text-[0.8125rem] font-medium">
-                        {msg("auto.features.agent.panel.components.generalistpanel.3")}
-                      </span>
-                      <Popover>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <PopoverTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                className="text-muted-foreground hover:text-foreground"
-                                aria-label={msg(
-                                  "auto.features.agent.panel.components.generalistpanel.literal.2",
-                                )}
-                              >
-                                <MagicWand className="size-3.5" />
-                              </Button>
-                            </PopoverTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            {msg("auto.features.agent.panel.components.generalistpanel.4")}
-                          </TooltipContent>
-                        </Tooltip>
-                        <PopoverContent side="bottom" align="center" sideOffset={8} className="p-0">
-                          <ToolsCarousel />
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                    {agent.statusLabel && (
-                      <div className="text-[0.6875rem] text-muted-foreground truncate">
-                        {agent.statusLabel}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => setDrawerOpen(true)}
-                        className="relative text-muted-foreground hover:text-foreground"
-                        aria-label={msg(
-                          "auto.features.agent.panel.components.generalistpanel.history_button",
-                        )}
-                      >
-                        <ClockCounterClockwise className="size-3.5" />
-                        {agent.backgroundBusyCount > 0 && (
-                          <CountBadge overlay aria-hidden="true">
-                            {agent.backgroundBusyCount}
-                          </CountBadge>
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      {msg("auto.features.agent.panel.components.generalistpanel.history_button")}
-                      {agent.backgroundBusyCount > 0 && (
-                        <>
-                          {" · "}
-                          {formatMsg("agent.parallel.background_count", {
-                            p1: agent.backgroundBusyCount,
-                          })}
-                        </>
-                      )}
-                    </TooltipContent>
-                  </Tooltip>
-                  {agent.messages.length > 0 && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={handleNewConversation}
-                          className="text-muted-foreground hover:text-foreground"
-                          aria-label={msg(
-                            "auto.features.agent.panel.components.generalistpanel.new_conversation",
-                          )}
-                        >
-                          <Plus className="size-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        {msg(
-                          "auto.features.agent.panel.components.generalistpanel.new_conversation",
-                        )}
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={closePanel}
-                        className="text-muted-foreground hover:text-foreground"
-                        aria-label={msg(
-                          "auto.features.agent.panel.components.generalistpanel.literal.4",
-                        )}
-                      >
-                        {/* Icon points toward the edge the panel collapses to:
-                            right when docked right (LTR), left when docked left (RTL). */}
-                        {isRtl ? (
-                          <SidebarSimple className="size-3.5" />
-                        ) : (
-                          <SidebarSimple className="size-3.5" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      {msg("auto.features.agent.panel.components.generalistpanel.6")}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
-
-              <AgentThread
-                className="overscroll-contain"
-                isEmpty={agent.messages.length === 0}
-                emptyState={emptyState}
-                scrollDeps={[
-                  agent.messages.length,
-                  agent.messages[agent.messages.length - 1]?.content,
-                  agent.messages[agent.messages.length - 1]?.toolCalls?.length,
-                  agent.reasoning,
-                  agent.statusLabel,
-                  agent.pendingApproval?.id ?? "",
-                ]}
-              >
-                <ChatTranscript
-                  messages={agent.messages}
-                  streaming={streaming}
-                  editAndResend={agent.editAndResend}
-                  thinking={thinking}
-                  renderToolCall={renderToolCall}
-                  onRunCode={handleRunCode}
-                  animatePairs
-                  trailing={() => (
-                    <>
-                      {agent.pendingApproval && (
-                        <ApprovalCard
-                          payload={agent.pendingApproval}
-                          onResolve={agent.confirmApproval}
-                        />
-                      )}
-                      {agent.error && (
-                        <ChatErrorBanner
-                          message={agent.error}
-                          retryLabel={msg(
-                            "auto.features.agent.panel.components.generalistpanel.error_retry",
-                          )}
-                          onRetry={
-                            agent.errorCode === I18N_KEY.BILLING_INSUFFICIENT_FUNDS
-                              ? undefined
-                              : agent.retry
-                          }
-                          action={
-                            agent.errorCode === I18N_KEY.BILLING_INSUFFICIENT_FUNDS ? (
-                              <Button size="sm" className="h-7" onClick={() => openSettingsTo("billing")}>
-                                {msg("billing.action.add_funds")}
-                              </Button>
-                            ) : undefined
-                          }
-                        />
-                      )}
-                    </>
-                  )}
-                />
-              </AgentThread>
-
-              <Composer
-                value={draft}
-                onChange={setDraft}
-                onSubmit={handleSubmit}
-                onStop={agent.stop}
-                placeholder={msg("auto.features.agent.panel.components.generalistpanel.literal.5")}
-                streaming={activeBusy}
-                midTurn={agent.midTurn}
-                disabled={codeAuthoringActive}
-                modelMenu={
-                  <ComposerModelMenu
-                    value={agent.model}
-                    onChange={agent.setModel}
-                    effort={agent.reasoningEffort}
-                    onEffortChange={agent.setReasoningEffort}
-                  />
-                }
-                leadingControls={
-                  <>
-                    <input
-                      ref={attachInputRef}
-                      type="file"
-                      accept={DATASET_FILE_ACCEPT}
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        e.target.value = "";
-                        if (file) {
-                          setAttachFile(file);
-                          setAttachOpen(true);
-                        }
-                      }}
-                    />
-                    <Popover
-                      open={attachOpen}
-                      onOpenChange={(open) => {
-                        setAttachOpen(open);
-                        if (!open) setAttachFile(null);
-                      }}
-                    >
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <PopoverTrigger asChild>
-                            <button
-                              type="button"
-                              disabled={codeAuthoringActive}
-                              aria-label={msg("agent.composer.attach")}
-                              onClick={(e) => {
-                                // Skip the popover toggle — go straight to the
-                                // OS file picker; the popover opens on pick.
-                                e.preventDefault();
-                                attachInputRef.current?.click();
-                              }}
-                              className={cn(
-                                "inline-flex size-9 items-center justify-center rounded-full",
-                                "text-muted-foreground transition-colors cursor-pointer",
-                                "hover:bg-accent/60 hover:text-foreground",
-                                "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
-                                "disabled:pointer-events-none disabled:opacity-50",
-                              )}
-                            >
-                              <Plus className="size-4" />
-                            </button>
-                          </PopoverTrigger>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">{msg("agent.composer.attach")}</TooltipContent>
-                      </Tooltip>
-                      <PopoverContent
-                        side="top"
-                        align="start"
-                        sideOffset={8}
-                        className="w-96 max-w-[calc(100vw-2rem)] p-3"
-                      >
-                        <DatasetUploadCard
-                          initialFile={attachFile}
-                          onConfirm={(confirmed) => {
-                            setAttachOpen(false);
-                            setAttachFile(null);
-                            void handleDatasetConfirm(
-                              `user-attach-${confirmed.fileName}`,
-                              confirmed,
-                            );
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <TrustToggle mode={trustMode} onCycle={cycleTrust} plain />
-                  </>
-                }
-                sendAriaLabel={msg(
-                  "auto.features.agent.panel.components.generalistpanel.literal.6",
-                )}
-                stopAriaLabel={msg(
-                  "auto.features.agent.panel.components.generalistpanel.literal.7",
-                )}
-              />
-
-              <PresenceStrip active={streaming} hue={hue} />
-            </div>
+            {chatBody}
 
             {/* Resize handle on the inline-start edge — the side that faces the
                 page content, so dragging it grows/shrinks the panel. */}
@@ -1016,6 +1009,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
           (the tagger footers), so the launcher never floats over that
           surface's bottom controls. A surface with its own agent hides it. */}
       {!open &&
+        !panelDock &&
         !pillHidden &&
         (pillDock ? (
           createPortal(

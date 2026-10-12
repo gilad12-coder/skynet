@@ -1,4 +1,5 @@
 export { GeneralistPanel } from "./components/GeneralistPanel.lazy";
+export { AgentPanelDock } from "./components/AgentPanelDock";
 export { AgentPillDock } from "./components/AgentPillDock";
 export { ApprovalCard } from "./components/ApprovalCard";
 export { ToolCallRow } from "./components/ToolCallRow";
