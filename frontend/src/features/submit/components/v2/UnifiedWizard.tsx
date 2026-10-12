@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 
+import { useHideAgentPill } from "@/features/agent-panel";
 import { ExperienceLevelSwitch } from "@/features/experience";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
@@ -42,6 +43,9 @@ function arrowsBelongElsewhere(target: EventTarget | null): boolean {
 const WIDE_STEPS = new Set<WizardStepId>(["task", "metric"]);
 
 function UnifiedWizardFrame() {
+  // The steps' Auto/Manual switch is the wizard's way to the agent, so the
+  // app-wide launcher would be a second, redundant button by Continue.
+  useHideAgentPill();
   const w = useWizardV2Shell();
   const current = w.state.step;
   const index = WIZARD_STAGE[current];

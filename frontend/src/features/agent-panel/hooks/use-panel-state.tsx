@@ -19,6 +19,10 @@ interface PanelState {
   pillDock: HTMLElement | null;
   /** Dock the pill into ``el``; returns the undo for the caller's unmount. */
   registerPillDock: (el: HTMLElement) => () => void;
+  /** True while a surface that brings its own agent hides the launcher. */
+  pillHidden: boolean;
+  /** Hide the minimized pill; returns the undo for the caller's unmount. */
+  hidePill: () => () => void;
 }
 
 const PanelContext = React.createContext<PanelState | null>(null);
@@ -91,9 +95,28 @@ export function GeneralistPanelProvider({ children }: { children: React.ReactNod
     return () => setPillDock((prev) => (prev === el ? null : prev));
   }, []);
 
+  // A count, not a flag, so one surface unmounting can't unhide the pill
+  // while another that also hides it is still mounted.
+  const [pillHiders, setPillHiders] = React.useState(0);
+  const hidePill = React.useCallback(() => {
+    setPillHiders((n) => n + 1);
+    return () => setPillHiders((n) => n - 1);
+  }, []);
+  const pillHidden = pillHiders > 0;
+
   const value = React.useMemo<PanelState>(
-    () => ({ open, setOpen, toggle, width, setWidth, pillDock, registerPillDock }),
-    [open, setOpen, toggle, width, setWidth, pillDock, registerPillDock],
+    () => ({
+      open,
+      setOpen,
+      toggle,
+      width,
+      setWidth,
+      pillDock,
+      registerPillDock,
+      pillHidden,
+      hidePill,
+    }),
+    [open, setOpen, toggle, width, setWidth, pillDock, registerPillDock, pillHidden, hidePill],
   );
 
   return <PanelContext.Provider value={value}>{children}</PanelContext.Provider>;
@@ -114,4 +137,15 @@ export function useGeneralistPanelState(): PanelState {
  */
 export function useGeneralistPanelStateOptional(): PanelState | null {
   return React.useContext(PanelContext);
+}
+
+/**
+ * Hides the agent launcher pill while the caller is mounted, for surfaces
+ * that carry their own agent (the submit wizard's Auto mode) so the app-wide
+ * launcher would only be a second door to the same help. A no-op when the
+ * agent feature is disabled.
+ */
+export function useHideAgentPill(): void {
+  const hide = useGeneralistPanelStateOptional()?.hidePill;
+  React.useEffect(() => hide?.(), [hide]);
 }

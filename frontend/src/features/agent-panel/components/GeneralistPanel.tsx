@@ -102,7 +102,7 @@ interface GeneralistPanelProps {
  * Mounted once in the app shell so the thread survives route changes.
  */
 export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
-  const { open, setOpen, width, setWidth, pillDock } = useGeneralistPanelState();
+  const { open, setOpen, width, setWidth, pillDock, pillHidden } = useGeneralistPanelState();
   const { mode: trustMode, next: cycleTrust } = useTrustMode();
   const { updatePrefs } = useUserPrefs();
   const reduceMotion = useReducedMotion();
@@ -1014,8 +1014,9 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
 
       {/* A registered dock re-homes the pill into a surface's own chrome
           (the tagger footers), so the launcher never floats over that
-          surface's bottom controls. */}
+          surface's bottom controls. A surface with its own agent hides it. */}
       {!open &&
+        !pillHidden &&
         (pillDock ? (
           createPortal(
             <MinimizedPill

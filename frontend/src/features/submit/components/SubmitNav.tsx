@@ -3,7 +3,6 @@
 import { CaretLeft, CaretRight, CaretDown, CircleNotch } from "@/shared/ui/icons";
 import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/shared/ui/primitives/button";
-import { AgentPillDock } from "@/features/agent-panel";
 import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
@@ -93,10 +92,7 @@ export function SubmitNav({
       <div className="flex items-stretch justify-between gap-3">
         {backButton}
         {screen && <ScreenDots index={screen.index} count={screen.count} />}
-        {/* The floating agent pill sat on top of Continue at 1280x800;
-            docking it in this row keeps both reachable. */}
         <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:flex-none">
-          <AgentPillDock />
           <Button
             onClick={onNext ?? goNext}
             disabled={advancing || nextDisabled}
@@ -128,7 +124,6 @@ export function SubmitNav({
   return (
     <div className="flex items-stretch gap-3">
       {backButton}
-      <AgentPillDock className="self-center" />
       <motion.button
         type="button"
         onClick={onSubmit ?? (() => void submit())}
