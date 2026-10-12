@@ -13,11 +13,12 @@ import contextlib
 import contextvars
 import json
 import re
+import threading
 from collections.abc import Iterator, Mapping
 from typing import Any
 
 USAGE_TAGS_HEADER = "x-skynet-usage-tags"
-TAG_KEYS = ("stage", "pair", "candidate", "case", "caller", "kind")
+TAG_KEYS = ("stage", "pair", "candidate", "case", "caller", "kind", "lane")
 # ``caller`` values: which optimizer drove an optimization-route call.
 CALLER_PROPOSER = "proposer"
 CALLER_REFLECTION = "reflection"
@@ -26,6 +27,10 @@ KIND_MUTATION = "mutation"
 KIND_META_NOTES = "meta_notes"
 KIND_NOVELTY_JUDGE = "novelty_judge"
 KIND_EMBEDDING = "embedding"
+# ``lane`` names the Auto lane (``<phase>-<engine>``) a call ran in. Unlike the
+# other keys it follows the call into threads started inside the lane, because
+# engines score and reflect on their own pools where the lane's context is gone.
+LANE_KEY = "lane"
 _MAX_VALUE_CHARS = 64
 _MAX_HEADER_CHARS = 512
 _VALUE = re.compile(r"[A-Za-z0-9_.:@/+ -]+")
@@ -115,7 +120,7 @@ def usage_scope(**tags: Any) -> Iterator[None]:
     Scopes nest: an inner one keeps the outer's tags and overrides those it sets.
 
     Args:
-        **tags: ``stage``, ``pair``, ``candidate``, ``case``, ``caller`` or ``kind``; ``None`` keeps the outer value.
+        **tags: ``stage``, ``pair``, ``candidate``, ``case``, ``caller``, ``kind`` or ``lane``; ``None`` keeps the outer value.
 
     Yields:
         Nothing; the scope ends when the block does.
@@ -171,3 +176,32 @@ def with_tags_header(headers: Mapping[str, str] | None, tags: Mapping[str, Any])
     if encoded:
         result[USAGE_TAGS_HEADER] = encoded
     return result
+
+
+_thread_start = threading.Thread.start
+
+
+def _start_in_lane(self: threading.Thread) -> None:
+    """Start a thread that keeps the starting context's ``lane`` tag.
+
+    Python 3.11 threads begin with an empty context, so without this every
+    call an engine makes from its own worker threads would lose its lane. Only
+    ``lane`` crosses over: the other keys keep their per-context behavior.
+
+    Args:
+        self: The thread being started.
+    """
+    lane = (_scope.get() or {}).get(LANE_KEY)
+    if lane is not None:
+        target_run = self.run
+
+        def run_in_lane() -> None:
+            """Run the thread's body with the starting context's lane."""
+            _scope.set({LANE_KEY: lane})
+            target_run()
+
+        self.run = run_in_lane  # type: ignore[method-assign]
+    _thread_start(self)
+
+
+threading.Thread.start = _start_in_lane  # type: ignore[method-assign]
