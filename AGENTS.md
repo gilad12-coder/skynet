@@ -59,13 +59,19 @@ send one card: the backend changes that landed, staging smoke status, and a
 ### PR preview environments: keep them able to run an optimization
 
 The merger has to sign up and finish a real run in each `*-pr-<n>` Railway
-environment. Five things broke that once; keep them true:
+environment. Six things broke that once; keep them true:
 
 - **No watch paths on `staging` services.** PR environments copy `staging`,
   and Railway skips a service whose watch paths the PR doesn't touch. A skipped
   `litellm` (or its `Postgres-ZPeG` database) means every model call fails with
   `Litellm_proxyException - Connection error`. Never add watch paths to
   `litellm`, `backend` or `frontend` on `staging`.
+- **The proxy knows the backend's key.** A PR environment gets a fresh
+  `litellm` database, so the virtual key in `LITELLM_PROXY_API_KEY` is unknown
+  there and every managed call (the assistant included) fails with
+  `Invalid proxy server token`. `deploy/litellm/start.py` registers
+  `LITELLM_SEED_KEY` at boot; on `staging` it must stay a reference to
+  `${{backend.LITELLM_PROXY_API_KEY}}`.
 - **Preview accounts work without email and with credit.** In a `*-pr-<n>`
   environment, sign-up is auto-verified and a new account gets
   `PREVIEW_GRANT_CENTS` (set on `staging` `backend` and `worker`, 1000 = $10)
