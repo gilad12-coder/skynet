@@ -6,7 +6,6 @@ import {
   WIZARD_STAGE,
   WIZARD_STAGE_ORDER,
   isWizardStageId,
-  stageAt,
 } from "./wizard-steps.ts";
 
 test("the four steps run Task → Inputs → Optimizer → Metric", () => {
@@ -17,15 +16,7 @@ test("the four steps run Task → Inputs → Optimizer → Metric", () => {
 test("step positions round-trip through the order", () => {
   for (const [id, index] of Object.entries(WIZARD_STAGE)) {
     assert.equal(WIZARD_STAGE_ORDER[index], id);
-    assert.equal(stageAt(index), id);
   }
-});
-
-test("stageAt clamps positions outside the flow", () => {
-  assert.equal(stageAt(-1), "task");
-  assert.equal(stageAt(99), "metric");
-  assert.equal(stageAt(Number.NaN), "task");
-  assert.equal(stageAt(1.7), "inputs");
 });
 
 test("isWizardStageId accepts step ids only", () => {

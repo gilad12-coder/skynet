@@ -15,6 +15,7 @@ import type {
 import type { ExperienceLevel } from "@/features/experience";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
 import {
+  optimizersFor,
   resolveOptimizer,
   type ArtifactKind,
   type ContractCheckResponse,
@@ -74,11 +75,6 @@ export interface OptimizerSlice {
   budgetUncapped: boolean;
   proposer: BlackboxProposer;
   shinka: BlackboxShinkaSettings | null;
-  /**
-   * The full engine, models and budget screens show at a summary level:
-   * Standard pressed Change, or the step opened without the models it needs.
-   */
-  expanded: boolean;
 }
 
 export interface WorkspaceSlice {
@@ -103,7 +99,7 @@ export interface MetaSlice {
 export interface WizardV2State {
   step: WizardStepId;
   furthestStep: WizardStepId;
-  /** The user's experience level; it decides how the Optimizer step is laid out. */
+  /** The user's experience level; it decides which steps show and how the Optimizer step looks. */
   level: ExperienceLevel;
   task: TaskSlice;
   inputs: InputsSlice;
@@ -114,7 +110,10 @@ export interface WizardV2State {
 
 // The default level mirrors DEFAULT_LEVEL; this module stays free of runtime
 // imports so its tests load without the app's path aliases.
-export function initialWizardV2State(level: ExperienceLevel = "guided"): WizardV2State {
+export function initialWizardV2State(
+  level: ExperienceLevel = "guided",
+  maxScorerRuns: number | null = null,
+): WizardV2State {
   return {
     step: "task",
     furthestStep: "task",
@@ -149,7 +148,7 @@ export function initialWizardV2State(level: ExperienceLevel = "guided"): WizardV
       reflectionModel: null,
       extraReflectionModels: [],
       // Mirrors the backend BlackboxBudget defaults.
-      budget: { max_scorer_runs: 200, max_iterations: null, stop_at_score: null },
+      budget: { max_scorer_runs: maxScorerRuns ?? 200, max_iterations: null, stop_at_score: null },
       maxCostCents: null,
       budgetUncapped: false,
       // Same defaults as the legacy wizard's DEFAULT_PROPOSER.
@@ -161,7 +160,6 @@ export function initialWizardV2State(level: ExperienceLevel = "guided"): WizardV
         max_tool_calls: 100,
       },
       shinka: null,
-      expanded: false,
     },
     workspace: {
       runCode: "",
@@ -192,39 +190,71 @@ export function optimizerModelsReady(s: WizardV2State): boolean {
 }
 
 /**
- * The state after moving to `step`. Entering the Optimizer step without the
- * models it needs (no catalog default) expands it, so every level reaches the
- * models screen instead of a summary it can't leave.
+ * The steps the wizard walks. Guided skips the Optimizer step and runs on the
+ * defaults, unless they can't run (`optimizerBlocked`: no default model, or a
+ * choice that doesn't fit the task) or the user is on it, so nothing blocks
+ * the run out of sight.
  */
-export function enterStep(
-  s: WizardV2State,
-  step: WizardStepId,
-  furthest: WizardStepId,
-): WizardV2State {
-  const expand = step === "optimizer" && !s.optimizer.expanded && !optimizerModelsReady(s);
-  return {
-    ...s,
-    step,
-    furthestStep: furthest,
-    ...(expand && { optimizer: { ...s.optimizer, expanded: true } }),
-  };
+export function wizardSteps(s: WizardV2State, optimizerBlocked: boolean): readonly WizardStepId[] {
+  if (s.level !== "guided" || optimizerBlocked || s.step === "optimizer") return WIZARD_V2_STEPS;
+  return WIZARD_V2_STEPS.filter((step) => step !== "optimizer");
 }
 
 /**
- * The task and reflection models a new wizard starts with: the catalog's
- * default model for both. Returns null once either model holds anything, so a
- * user's pick, a cloned run or an agent-set model is never overwritten.
+ * The state after switching to `level`. Everything entered stays; when the
+ * current step leaves the flow, the wizard moves on to the next step.
+ */
+export function withLevel(
+  s: WizardV2State,
+  level: ExperienceLevel,
+  optimizerBlocked: boolean,
+): WizardV2State {
+  if (level === s.level) return s;
+  const next = { ...s, level };
+  // Laid out as if the user stood elsewhere, so the current step can drop out.
+  const steps = wizardSteps({ ...next, step: "task" }, optimizerBlocked);
+  if (steps.includes(s.step)) return next;
+  const order = WIZARD_V2_STEPS.indexOf(s.step);
+  const step = steps.find((id) => WIZARD_V2_STEPS.indexOf(id) > order) ?? s.step;
+  const furthest =
+    WIZARD_V2_STEPS.indexOf(step) > WIZARD_V2_STEPS.indexOf(s.furthestStep) ? step : s.furthestStep;
+  return { ...next, step, furthestStep: furthest };
+}
+
+/**
+ * The task and reflection models a new wizard starts with: each role's
+ * default from Settings, else the catalog's default model. Returns null once
+ * either model holds anything, so a user's pick, a cloned run or an agent-set
+ * model is never overwritten.
  */
 export function presetModels(
   optimizer: Pick<OptimizerSlice, "taskModel" | "reflectionModel">,
-  defaultModel: string | null | undefined,
+  defaults: { taskModel: ModelConfig | null; reflectionModel: ModelConfig | null },
+  catalogDefault: string | null | undefined,
 ): Pick<OptimizerSlice, "taskModel" | "reflectionModel"> | null {
-  if (!defaultModel || optimizer.taskModel !== null || optimizer.reflectionModel !== null)
-    return null;
-  return {
-    taskModel: { name: defaultModel, token_source: "managed" },
-    reflectionModel: { name: defaultModel, token_source: "managed" },
+  if (optimizer.taskModel !== null || optimizer.reflectionModel !== null) return null;
+  const pick = (pref: ModelConfig | null): ModelConfig | null => {
+    if (pref && hasModel(pref)) return pref;
+    return catalogDefault ? { name: catalogDefault, token_source: "managed" } : null;
   };
+  const taskModel = pick(defaults.taskModel);
+  const reflectionModel = pick(defaults.reflectionModel);
+  return taskModel || reflectionModel ? { taskModel, reflectionModel } : null;
+}
+
+/**
+ * The engine a new wizard switches to once its task and inputs are known: the
+ * Settings default, when it fits them. Null when it doesn't, when the default
+ * is Auto, or when the choice already moved off Auto.
+ */
+export function presetEngine(
+  choice: OptimizerChoice,
+  engine: OptimizerChoice,
+  kind: ArtifactKind,
+  mode: DataMode,
+): OptimizerChoice | null {
+  if (choice !== "auto" || engine === "auto") return null;
+  return optimizersFor(kind, mode).includes(engine) ? engine : null;
 }
 
 /** The metric model the run will use: the reflection model unless one was picked explicitly. */
@@ -299,6 +329,8 @@ export interface WizardV2Context {
   goTo(step: WizardStepId): void;
   goNext(): void;
   goPrev(): void;
+  /** The steps this wizard walks, in order; Guided leaves the Optimizer step out. */
+  steps: readonly WizardStepId[];
   canEnter(step: WizardStepId): boolean;
   /** An i18n key describing what blocks the step; never auto-resets anything. */
   stepIssue(step: WizardStepId): string | null;
@@ -322,6 +354,8 @@ export interface WizardV2Context {
   submitting: boolean;
   // TotalBudgetCard BudgetContext fields.
   costBracket: CostBracket | null;
+  /** The charged estimate with another engine picked, everything else unchanged. */
+  estimateFor(choice: OptimizerChoice): { lowCents: number; highCents: number } | null;
   suggestedCeiling: number | null;
   maxCostCents: number | null;
   setMaxCostCents(v: number | null): void;

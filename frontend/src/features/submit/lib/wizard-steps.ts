@@ -26,11 +26,3 @@ export const WIZARD_STAGE: Readonly<Record<WizardStageId, number>> = {
 export function isWizardStageId(value: unknown): value is WizardStageId {
   return typeof value === "string" && (WIZARD_STAGE_ORDER as readonly string[]).includes(value);
 }
-
-/** Step at a numeric position; out-of-range positions clamp to the nearest end. */
-export function stageAt(index: number): WizardStageId {
-  const clamped = Number.isFinite(index)
-    ? Math.min(Math.max(Math.trunc(index), 0), LAST_WIZARD_STAGE)
-    : 0;
-  return WIZARD_STAGE_ORDER[clamped] ?? "task";
-}

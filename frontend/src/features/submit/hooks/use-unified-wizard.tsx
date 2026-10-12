@@ -19,6 +19,7 @@ import { useWizardStateOptional } from "@/features/agent-panel";
 import { formatBudgetUsd, usePricingTerms } from "@/features/billing";
 import { useExperienceLevel, type ExperienceLevel } from "@/features/experience";
 import { offerRunDoneNotifications } from "@/features/notifications";
+import { readPref } from "@/features/settings";
 import {
   getJob,
   getOptimizationPayload,
@@ -38,6 +39,7 @@ import {
   optimizersFor,
   resolveOptimizer,
   type OptimizerCatalogResponse,
+  type OptimizerChoice,
   type UnifiedRunRequest,
 } from "@/shared/types/unified-run";
 import type { WizardPreflightResponse } from "@/shared/types/wizard-preflight";
@@ -58,8 +60,8 @@ import { metricUsesModel } from "../lib/scorer-dependencies";
 import {
   WIZARD_V2_STEPS,
   contractSnapshot,
-  enterStep,
   initialWizardV2State,
+  presetEngine,
   presetModels,
   resolvedMetricModel,
   type InputsSlice,
@@ -70,6 +72,8 @@ import {
   type WizardV2Context,
   type WizardV2State,
   type WorkspaceSlice,
+  wizardSteps,
+  withLevel,
 } from "../lib/wizard-v2";
 import { useExecutionBudget } from "./use-execution-budget";
 import { useModelCatalog } from "./use-submit-wizard-data";
@@ -89,7 +93,7 @@ type SliceName = "task" | "inputs" | "optimizer" | "workspace" | "meta";
 type Action =
   | { type: "patch"; slice: SliceName; patch: object }
   | { type: "go"; step: WizardStepId }
-  | { type: "level"; level: ExperienceLevel };
+  | { type: "level"; level: ExperienceLevel; optimizerBlocked: boolean };
 
 const stepIndex = (step: WizardStepId) => WIZARD_V2_STEPS.indexOf(step);
 
@@ -100,11 +104,9 @@ function reducer(state: WizardV2State, action: Action): WizardV2State {
     const furthest =
       stepIndex(action.step) > stepIndex(state.furthestStep) ? action.step : state.furthestStep;
     if (action.step === state.step && furthest === state.furthestStep) return state;
-    return enterStep(state, action.step, furthest);
+    return { ...state, step: action.step, furthestStep: furthest };
   }
-  if (action.type === "level") {
-    return action.level === state.level ? state : { ...state, level: action.level };
-  }
+  if (action.type === "level") return withLevel(state, action.level, action.optimizerBlocked);
   return { ...state, [action.slice]: { ...state[action.slice], ...action.patch } };
 }
 
@@ -229,7 +231,7 @@ export function WizardV2Provider({
 }) {
   const level = useExperienceLevel();
   const [state, dispatch] = useReducer(reducer, undefined, () => {
-    const initial = initialWizardV2State(level);
+    const initial = initialWizardV2State(level, readPref("optimizerMaxRuns"));
     return { ...initial, meta: { ...initial.meta, folderId } };
   });
   const router = useRouter();
@@ -237,7 +239,6 @@ export function WizardV2Provider({
   const { data: session } = useSession();
   const guided = level === "guided";
   const modelCatalog = useModelCatalog();
-  useEffect(() => dispatch({ type: "level", level }), [level]);
   const pricing = usePricingTerms();
   const budget = useExecutionBudget();
   const budgetSession = budget.session;
@@ -290,13 +291,23 @@ export function WizardV2Provider({
     [state, optimizerCatalog],
   );
 
+  // The Optimizer step is blocked only once it has a setup to judge; before
+  // that, Guided's flow must not flash the step in and out.
+  const optimizerBlocked =
+    Boolean(kind && mode) && computeStepIssue(state, "optimizer", optimizerCatalog) !== null;
+  const steps = useMemo(() => wizardSteps(state, optimizerBlocked), [state, optimizerBlocked]);
+  // Reads the blocked flag of the render the level changed in.
+  useEffect(() => dispatch({ type: "level", level, optimizerBlocked }), [level]);
+
   const canEnter = useCallback(
     (step: WizardStepId) => {
-      const target = stepIndex(step);
-      if (target <= stepIndex(state.furthestStep)) return true;
-      return target === stepIndex(state.step) + 1 && stepIssue(state.step) === null;
+      if (!steps.includes(step)) return false;
+      if (stepIndex(step) <= stepIndex(state.furthestStep)) return true;
+      return (
+        steps.indexOf(step) === steps.indexOf(state.step) + 1 && stepIssue(state.step) === null
+      );
     },
-    [state.furthestStep, state.step, stepIssue],
+    [steps, state.furthestStep, state.step, stepIssue],
   );
 
   const [submitPhase, setSubmitPhase] = useState<SubmitPhase>("idle");
@@ -311,7 +322,7 @@ export function WizardV2Provider({
     [busy, canEnter],
   );
   const goNext = useCallback(() => {
-    const next = WIZARD_V2_STEPS[stepIndex(state.step) + 1];
+    const next = steps[steps.indexOf(state.step) + 1];
     if (!next) return;
     const issue = stepIssue(state.step);
     if (issue && stepIndex(next) > stepIndex(state.furthestStep)) {
@@ -319,11 +330,11 @@ export function WizardV2Provider({
       return;
     }
     goTo(next);
-  }, [state.step, state.furthestStep, stepIssue, goTo, guided]);
+  }, [steps, state.step, state.furthestStep, stepIssue, goTo, guided]);
   const goPrev = useCallback(() => {
-    const prev = WIZARD_V2_STEPS[stepIndex(state.step) - 1];
+    const prev = steps[steps.indexOf(state.step) - 1];
     if (prev) goTo(prev);
-  }, [state.step, goTo]);
+  }, [steps, state.step, goTo]);
 
   const resolvedOptimizer = kind ? resolveOptimizer(state.optimizer.choice, kind) : null;
   const metricShape = kind ? metricShapeFor(state.optimizer.choice, kind) : null;
@@ -361,6 +372,15 @@ export function WizardV2Provider({
   ].filter(hasModel);
   const tokenSource = aggregateTokenSource(submittedModels);
   const chargeable = costBracket ? chargeableBracket(costBracket, tokenSource) : null;
+  // What the run would cost with another engine, everything else unchanged.
+  const estimateFor = (choice: OptimizerChoice) => {
+    const bracket = projectUnifiedCostBracket(
+      { ...state, optimizer: { ...state.optimizer, choice } },
+      optimizerCatalog,
+      { models: modelCatalog?.models ?? null, pricing },
+    );
+    return bracket ? chargeableBracket(bracket, tokenSource) : null;
+  };
   const suggestedCeiling = chargeable ? defaultCeilingForBracket(chargeable) : null;
 
   // The spending limit lives on the server budget, like the slice mirror the
@@ -558,20 +578,36 @@ export function WizardV2Provider({
     [],
   );
 
-  // The catalog's default model presets the task and reflection models once.
-  // A cloned run brings its own models, and anything set before the catalog
-  // arrives (an agent write, a user pick) blocks the preset for good.
+  // The Settings defaults (else the catalog's default model) preset the task
+  // and reflection models once. A cloned run brings its own models, and
+  // anything set before the catalog arrives (an agent write, a user pick)
+  // blocks the preset for good.
   const presetDone = useRef(searchParams.has("clone"));
   useEffect(() => {
     if (presetDone.current || !modelCatalog) return;
     presetDone.current = true;
     const preset = presetModels(
       state.optimizer,
+      {
+        taskModel: readPref("optimizerTaskModel"),
+        reflectionModel: readPref("optimizerReflectionModel"),
+      },
       modelCatalog.models.find((model) => model.is_default)?.value,
     );
     if (preset) patchOptimizer(preset);
     // Runs once, when the catalog first arrives; the models are read from that render.
   }, [modelCatalog]);
+
+  // The Settings default engine applies once the task and inputs say which
+  // engines fit; a cloned run or an engine set earlier keeps its choice.
+  const enginePresetDone = useRef(searchParams.has("clone"));
+  useEffect(() => {
+    if (enginePresetDone.current || !kind || !mode) return;
+    enginePresetDone.current = true;
+    const engine = presetEngine(state.optimizer.choice, readPref("optimizerEngine"), kind, mode);
+    if (engine) patchOptimizer({ choice: engine });
+    // Runs once, when the setup first exists; the choice is read from that render.
+  }, [kind, mode]);
 
   // `?clone=` hydrates every slice it can from the source run's stored,
   // server-scrubbed payload; nothing is confirmed, so the user reviews each step.
@@ -765,6 +801,7 @@ export function WizardV2Provider({
     goTo,
     goNext,
     goPrev,
+    steps,
     canEnter,
     stepIssue,
     patchTask,
@@ -786,6 +823,7 @@ export function WizardV2Provider({
     submit,
     submitting: submitPhase !== "idle",
     costBracket,
+    estimateFor,
     suggestedCeiling,
     maxCostCents,
     setMaxCostCents,

@@ -15,8 +15,17 @@ registerHooks({
   },
 });
 
-const { contractSnapshot, enterStep, initialWizardV2State, presetModels, withContractBudget } =
-  await import("./wizard-v2.ts");
+const {
+  WIZARD_V2_STEPS,
+  contractSnapshot,
+  initialWizardV2State,
+  optimizerModelsReady,
+  presetEngine,
+  presetModels,
+  wizardSteps,
+  withContractBudget,
+  withLevel,
+} = await import("./wizard-v2.ts");
 const { stepPages } = await import("./wizard-pages.ts");
 
 function checkedState() {
@@ -70,30 +79,57 @@ test("the sandboxed check's spec carries the execution budget id and revision", 
   assert.equal(spec.execution_budget_id, undefined);
 });
 
-test("a new wizard starts at Guided with the full Optimizer screens collapsed", () => {
+test("a new wizard starts at Guided on Auto, with the Settings scorer runs or 200", () => {
   const state = initialWizardV2State();
   assert.equal(state.level, "guided");
-  assert.equal(state.optimizer.expanded, false);
   assert.equal(state.optimizer.choice, "auto");
   assert.equal(state.optimizer.budget.max_scorer_runs, 200);
   assert.equal(initialWizardV2State("expert").level, "expert");
+  assert.equal(initialWizardV2State("standard", 50).optimizer.budget.max_scorer_runs, 50);
 });
 
-test("the catalog default presets the task and reflection models of a new wizard", () => {
-  const preset = presetModels(initialWizardV2State().optimizer, "openai/gpt-default");
+const noDefaults = { taskModel: null, reflectionModel: null };
+
+test("without Settings defaults the catalog default presets both models", () => {
+  const preset = presetModels(initialWizardV2State().optimizer, noDefaults, "openai/gpt-default");
   assert.deepEqual(preset, {
     taskModel: { name: "openai/gpt-default", token_source: "managed" },
     reflectionModel: { name: "openai/gpt-default", token_source: "managed" },
   });
 });
 
-test("the preset never overwrites a model someone already set, and needs a catalog default", () => {
+test("the Settings default models win over the catalog default, role by role", () => {
+  const mine = { name: "anthropic/claude-x", token_source: "managed" as const };
+  const preset = presetModels(
+    initialWizardV2State().optimizer,
+    { taskModel: mine, reflectionModel: { name: "" } },
+    "openai/gpt-default",
+  );
+  assert.deepEqual(preset, {
+    taskModel: mine,
+    reflectionModel: { name: "openai/gpt-default", token_source: "managed" },
+  });
+  assert.deepEqual(
+    presetModels(initialWizardV2State().optimizer, { taskModel: mine, reflectionModel: mine }, null),
+    { taskModel: mine, reflectionModel: mine },
+  );
+});
+
+test("the preset never overwrites a model someone already set, and needs some default", () => {
   const empty = initialWizardV2State().optimizer;
   const picked = { name: "anthropic/claude-x", token_source: "managed" as const };
-  assert.equal(presetModels({ ...empty, reflectionModel: picked }, "openai/gpt-default"), null);
-  assert.equal(presetModels({ ...empty, taskModel: picked }, "openai/gpt-default"), null);
-  assert.equal(presetModels(empty, null), null);
-  assert.equal(presetModels(empty, undefined), null);
+  const prefs = { taskModel: picked, reflectionModel: picked };
+  assert.equal(presetModels({ ...empty, reflectionModel: picked }, prefs, "openai/gpt-default"), null);
+  assert.equal(presetModels({ ...empty, taskModel: picked }, noDefaults, "openai/gpt-default"), null);
+  assert.equal(presetModels(empty, noDefaults, null), null);
+  assert.equal(presetModels(empty, noDefaults, undefined), null);
+});
+
+test("the Settings default engine applies only from Auto and only when it fits the task", () => {
+  assert.equal(presetEngine("auto", "gepa", "prompt", "pairs"), "gepa");
+  assert.equal(presetEngine("auto", "dspy_gepa", "prompt", "pairs"), null);
+  assert.equal(presetEngine("best_of_n", "gepa", "prompt", "pairs"), null);
+  assert.equal(presetEngine("auto", "auto", "prompt", "pairs"), null);
 });
 
 function readyState(level: "guided" | "standard" | "expert", withModels = true) {
@@ -110,27 +146,38 @@ function readyState(level: "guided" | "standard" | "expert", withModels = true) 
   };
 }
 
-test("Optimizer screens: Guided and Standard see one summary, Expert the three full screens", () => {
-  assert.deepEqual(stepPages("optimizer", readyState("guided")), ["summary"]);
-  assert.deepEqual(stepPages("optimizer", readyState("standard")), ["summary"]);
+const withoutOptimizer = WIZARD_V2_STEPS.filter((step) => step !== "optimizer");
+
+test("Guided skips the Optimizer step; Standard and Expert walk it", () => {
+  assert.deepEqual(wizardSteps(readyState("guided"), false), withoutOptimizer);
+  assert.deepEqual(wizardSteps(readyState("standard"), false), WIZARD_V2_STEPS);
+  assert.deepEqual(wizardSteps(readyState("expert"), false), WIZARD_V2_STEPS);
+});
+
+test("Guided shows the Optimizer step when its defaults can't run or the user is on it", () => {
+  assert.deepEqual(wizardSteps(readyState("guided"), true), WIZARD_V2_STEPS);
+  assert.deepEqual(wizardSteps({ ...readyState("guided"), step: "optimizer" }, false), WIZARD_V2_STEPS);
+});
+
+test("Optimizer screens: Standard sees one plan screen, Expert and a blocked Guided the three", () => {
+  assert.deepEqual(stepPages("optimizer", readyState("standard")), ["plan"]);
   assert.deepEqual(stepPages("optimizer", readyState("expert")), ["optimizer", "models", "budget"]);
+  assert.deepEqual(stepPages("optimizer", readyState("guided", false)), [
+    "optimizer",
+    "models",
+    "budget",
+  ]);
 });
 
-test("Standard's Change opens the full screens and ends on the summary", () => {
-  const changed = readyState("standard");
-  changed.optimizer = { ...changed.optimizer, expanded: true };
-  assert.deepEqual(stepPages("optimizer", changed), ["optimizer", "models", "budget", "summary"]);
-});
-
-test("entering the Optimizer step without models opens the models screen at every level", () => {
-  for (const level of ["guided", "standard", "expert"] as const) {
-    const entered = enterStep(readyState(level, false), "optimizer", "optimizer");
-    assert.equal(entered.step, "optimizer");
-    assert.ok(stepPages("optimizer", entered).includes("models"), level);
-  }
-  const ready = enterStep(readyState("guided"), "optimizer", "optimizer");
-  assert.equal(ready.optimizer.expanded, false);
-  assert.deepEqual(stepPages("optimizer", ready), ["summary"]);
+test("switching to Guided on the Optimizer step moves on to the next step", () => {
+  const onOptimizer = { ...readyState("standard"), step: "optimizer" as const };
+  const guided = withLevel(onOptimizer, "guided", false);
+  assert.equal(guided.level, "guided");
+  assert.equal(guided.step, "metric");
+  assert.equal(guided.furthestStep, "metric");
+  assert.equal(withLevel(onOptimizer, "guided", true).step, "optimizer");
+  assert.equal(withLevel(onOptimizer, "expert", false).step, "optimizer");
+  assert.equal(withLevel(onOptimizer, "standard", false), onOptimizer);
 });
 
 test("a DSPy program without a task model counts as missing models", () => {
@@ -140,7 +187,8 @@ test("a DSPy program without a task model counts as missing models", () => {
     task: { ...state.task, artifactKind: "dspy_program" as const },
     optimizer: { ...state.optimizer, taskModel: null },
   };
-  assert.equal(enterStep(dspy, "optimizer", "optimizer").optimizer.expanded, true);
+  assert.equal(optimizerModelsReady(dspy), false);
+  assert.equal(optimizerModelsReady(readyState("guided")), true);
 });
 
 test("before the task and inputs exist the Optimizer step has one placeholder screen", () => {

@@ -110,6 +110,7 @@ import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { NotificationsTab } from "./NotificationsTab";
 import { PrivacyTab } from "./PrivacyTab";
 import { ColorThemeControl } from "./ColorThemeControl";
+import { OptimizationDefaults } from "./OptimizationDefaults";
 import { PackageRegistrySetting } from "./PackageRegistrySetting";
 import { SecurityTab } from "./SecurityTab";
 import { SETTINGS_TABS, visibleSettingsTabs, type SettingsTab } from "../lib/tabs";
@@ -156,6 +157,7 @@ function WizardTab() {
         </Select>
       </SettingsRow>
       <PackageRegistrySetting />
+      <OptimizationDefaults />
     </div>
   );
 }
