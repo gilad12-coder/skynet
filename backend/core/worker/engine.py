@@ -117,21 +117,12 @@ from .repo_staging import (
 )
 from .subprocess_runner import run_service_in_subprocess, set_fork_service
 from .tagging_job import TaggingAutotagPayload, run_autotag_job
+from .unified_aliases import alias_unified_model_roles, strip_unified_model_aliases
 from .vercel_dspy import run_vercel_dspy
 
 logger = logging.getLogger(__name__)
 
 GRID_SEARCH_RETIRED_MESSAGE = "Grid search is no longer supported. Submit this optimization again as a single run."
-
-# The BYOK and protected-route seams only walk the legacy top-level model
-# keys; a unified payload nests its models under ``models``, so the worker
-# exposes those same dict objects under the legacy keys (mutated in place by
-# the seams) and drops the aliases before the payload crosses into the guest.
-_UNIFIED_MODEL_ALIASES: tuple[tuple[str, str], ...] = (
-    ("task_model", "task_model_config"),
-    ("reflection_model", "reflection_model_config"),
-)
-_UNIFIED_ALIAS_KEYS = ("task_model_config", "reflection_model_config", "extra_reflection_model_configs", "scorer")
 
 
 def _gepa_state_base(base: Path, payload: dict[str, Any]) -> Path:
@@ -148,35 +139,6 @@ def _gepa_state_base(base: Path, payload: dict[str, Any]) -> Path:
         The directory holding the state file.
     """
     return base / "gepa" if "strategy" in payload or is_unified_payload(payload) else base
-
-
-def _alias_unified_model_roles(payload_dict: dict[str, Any]) -> None:
-    """Expose a unified payload's nested model configs under the legacy role keys.
-
-    Args:
-        payload_dict: The raw unified payload, mutated in place.
-    """
-    models = payload_dict.get("models")
-    if not isinstance(models, dict):
-        return
-    for nested_key, legacy_key in _UNIFIED_MODEL_ALIASES:
-        if isinstance(models.get(nested_key), dict):
-            payload_dict[legacy_key] = models[nested_key]
-    extras = models.get("extra_reflection_models")
-    if isinstance(extras, list):
-        payload_dict["extra_reflection_model_configs"] = extras
-    if isinstance(models.get("metric_model"), dict):
-        payload_dict["scorer"] = {"kind": "python", "model": models["metric_model"]}
-
-
-def _strip_unified_model_aliases(payload_dict: dict[str, Any]) -> None:
-    """Drop the legacy role aliases added by :func:`_alias_unified_model_roles`.
-
-    Args:
-        payload_dict: The raw unified payload, mutated in place.
-    """
-    for key in _UNIFIED_ALIAS_KEYS:
-        payload_dict.pop(key, None)
 
 
 # Optional per-row pricing evidence written by newer workers; older results lack it.
@@ -840,7 +802,7 @@ class BackgroundWorker:
                 token_source = overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE) or TOKEN_SOURCE_MANAGED
                 byok_engine = getattr(self._job_store, "engine", None)
                 if is_unified:
-                    _alias_unified_model_roles(payload_dict)
+                    alias_unified_model_roles(payload_dict)
                 if byok_engine is not None and payload_uses_token_source(
                     payload_dict,
                     TOKEN_SOURCE_BYOK,
@@ -947,7 +909,7 @@ class BackgroundWorker:
                                 self._record_setup_command(optimization_id, inferred_setup)
                             bind_repo_scorer(payload_dict, staged_repository, budget_gateway, owner_id=optimization_id)
                 if is_unified:
-                    _strip_unified_model_aliases(payload_dict)
+                    strip_unified_model_aliases(payload_dict)
                 if has_exposed_execution_credentials(
                     payload_dict,
                     allow_parent_model_routes=budget_gateway is not None,
