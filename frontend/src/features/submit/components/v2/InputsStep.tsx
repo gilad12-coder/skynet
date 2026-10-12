@@ -18,21 +18,21 @@ import { cn } from "@/shared/lib/utils";
 import { useInputsInference } from "../../hooks/use-inputs-inference";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
 import { v2Msg } from "./ArtifactConfirmCard";
-import { InputsConfirmCard } from "./InputsConfirmCard";
+import { InputsColumnsCard } from "./InputsColumnsCard";
 import { WizardScreen } from "./WizardScreen";
 
 type MessageParams = Record<string, string | number>;
 
 /**
  * Step 2, Inputs: bring a table (upload, library or connector import) or
- * type one input; the backend infers whether it is one input or
- * input/output pairs, and the confirm card settles it with clicks. The chat
- * for this step is the app's generalist panel. Screen 0 brings the data,
- * screen 1 (once there is data) confirms how it maps.
+ * type one input on one screen. Once a table is loaded, each column gets an
+ * Input / Output / Ignore role (preselected from the backend's inference)
+ * and the split sits right below. The step is done once the roles are valid.
+ * The chat for this step is the app's generalist panel.
  */
-export function InputsStep({ page }: { page: number }) {
+export function InputsStep() {
   const ctx = useWizardV2();
-  const { state, patchInputs, guided } = ctx;
+  const { state, patchInputs, guided, stepIssue } = ctx;
   const inputs = state.inputs;
   const inference = useInputsInference(ctx);
   const t = (key: string, params?: MessageParams) => v2Msg(key, guided, params);
@@ -49,7 +49,7 @@ export function InputsStep({ page }: { page: number }) {
         <p className="text-sm text-muted-foreground">{t("submit.v2.inputs.desc")}</p>
       </header>
 
-      <WizardScreen active={page === 0}>
+      <WizardScreen active className="flex flex-col gap-4">
         <section
           aria-labelledby="v2-inputs-source-title"
           className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-background/70 px-4 py-4"
@@ -157,18 +157,17 @@ export function InputsStep({ page }: { page: number }) {
             </Button>
           </div>
         </section>
-      </WizardScreen>
 
-      {hasData && (
-        <WizardScreen active={page === 1}>
-          <InputsConfirmCard
+        {hasData && (
+          <InputsColumnsCard
             inputs={inputs}
             inference={inference}
             patchInputs={patchInputs}
+            issue={stepIssue("inputs")}
             guided={guided}
           />
-        </WizardScreen>
-      )}
+        )}
+      </WizardScreen>
 
       <DatasetPickerDialog
         open={inference.libraryOpen}

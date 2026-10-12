@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 
+import { ExperienceLevelSwitch } from "@/features/experience";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 import { slideVariants } from "../../constants";
@@ -10,7 +11,7 @@ import { ExecutionBudgetProvider } from "../../hooks/use-execution-budget";
 import { WizardV2Provider, useWizardV2Shell, v2Text } from "../../hooks/use-unified-wizard";
 import { stepPages } from "../../lib/wizard-pages";
 import { WIZARD_V2_STEPS, type WizardStepId } from "../../lib/wizard-v2";
-import { WIZARD_STAGE } from "../../lib/wizard-steps";
+import { WIZARD_STAGE, canMoveForward } from "../../lib/wizard-steps";
 import { SubmitNav } from "../SubmitNav";
 import { SubmitSplash } from "../SubmitSplash";
 import { SubmitStepper } from "../SubmitStepper";
@@ -21,7 +22,7 @@ import { TaskStep } from "./TaskStep";
 
 const STEP_VIEWS: Record<WizardStepId, (page: number) => ReactNode> = {
   task: (page) => <TaskStep page={page} />,
-  inputs: (page) => <InputsStep page={page} />,
+  inputs: () => <InputsStep />,
   optimizer: (page) => <OptimizerStep page={page} />,
   metric: (page) => <MetricStep page={page} />,
 };
@@ -44,6 +45,8 @@ function UnifiedWizardFrame() {
   const w = useWizardV2Shell();
   const current = w.state.step;
   const index = WIZARD_STAGE[current];
+  const { steps } = w;
+  const position = steps.indexOf(current);
   // The slide direction follows the last move: forward slides one way, back the other.
   const [shownIndex, setShownIndex] = useState(index);
   const [direction, setDirection] = useState(1);
@@ -55,35 +58,42 @@ function UnifiedWizardFrame() {
   // drops the metric step's agent chat or the code editors' undo history.
   const [visited, setVisited] = useState<ReadonlySet<WizardStepId>>(() => new Set([current]));
   if (!visited.has(current)) setVisited(new Set([...visited, current]));
+  // A step the flow skips (Guided's Optimizer) still mounts, hidden, once the
+  // user is past it: its budget screen sets the run's starting spending limit.
+  const mounted = (step: WizardStepId) =>
+    visited.has(step) ||
+    (!steps.includes(step) && WIZARD_STAGE[step] < WIZARD_STAGE[w.state.furthestStep]);
   const runDisabledReason = w.runBlockedReason ? v2Text(w.runBlockedReason, w.guided) : null;
 
   // Each step is a run of screens; the arrows walk them, then cross steps.
   const [pages, setPages] = useState(FIRST_PAGES);
   const pageCount = stepPages(current, w.state).length;
   const page = Math.min(pages[current], pageCount - 1);
-  const lastScreen = index === WIZARD_V2_STEPS.length - 1 && page === pageCount - 1;
+  const lastScreen = position === steps.length - 1 && page === pageCount - 1;
   const { goNext, goPrev, advancing, submitting } = w;
+  const forwardOpen = canMoveForward(current, w.stepIssue("inputs"));
 
   const forward = useCallback(() => {
+    if (!forwardOpen) return;
     if (page < pageCount - 1) {
       setPages((p) => ({ ...p, [current]: page + 1 }));
       return;
     }
-    const next = WIZARD_V2_STEPS[index + 1];
+    const next = steps[position + 1];
     if (next) setPages((p) => ({ ...p, [next]: 0 }));
     goNext();
-  }, [page, pageCount, current, index, goNext]);
+  }, [forwardOpen, page, pageCount, current, steps, position, goNext]);
 
   const back = useCallback(() => {
     if (page > 0) {
       setPages((p) => ({ ...p, [current]: page - 1 }));
       return;
     }
-    const prev = WIZARD_V2_STEPS[index - 1];
+    const prev = steps[position - 1];
     if (!prev) return;
     setPages((p) => ({ ...p, [prev]: stepPages(prev, w.state).length - 1 }));
     goPrev();
-  }, [page, current, index, goPrev, w.state]);
+  }, [page, current, steps, position, goPrev, w.state]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -108,15 +118,20 @@ function UnifiedWizardFrame() {
         WIDE_STEPS.has(current) ? "max-w-6xl" : "max-w-3xl"
       }`}
     >
-      <div className="shrink-0">
-        <SubmitStepper w={w} locked={w.advancing} />
+      {/* Switching level keeps every answer: the wizard re-lays out around the
+          current step and moves on only if that step drops out. */}
+      <div className="flex shrink-0 items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <SubmitStepper w={w} locked={w.advancing} />
+        </div>
+        <ExperienceLevelSwitch size="sm" iconOnly />
       </div>
 
       <div
         className="relative min-h-0 flex-1 overflow-hidden pt-[10px]"
         data-tutorial="submit-wizard"
       >
-        {WIZARD_V2_STEPS.filter((step) => visited.has(step)).map((step) => {
+        {WIZARD_V2_STEPS.filter(mounted).map((step) => {
           const active = step === current;
           return (
             <motion.div
@@ -141,7 +156,8 @@ function UnifiedWizardFrame() {
           w={{ ...w, runDisabledReason }}
           onBack={back}
           onNext={forward}
-          backDisabled={index === 0 && page === 0}
+          backDisabled={position === 0 && page === 0}
+          nextDisabled={!forwardOpen}
           showSubmit={lastScreen}
           screen={{ index: page, count: pageCount }}
         />

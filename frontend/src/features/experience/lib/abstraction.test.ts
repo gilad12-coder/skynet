@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_LEVEL,
   defaultOpen,
   detailTabGate,
   isVisible,
@@ -8,12 +9,14 @@ import {
   normalizeLevel,
 } from "./abstraction.ts";
 
-test("normalizeLevel maps unknown, null and missing values to standard", () => {
+test("normalizeLevel maps unknown, null and missing values to guided and keeps a chosen level", () => {
+  assert.equal(DEFAULT_LEVEL, "guided");
   assert.equal(normalizeLevel("guided"), "guided");
+  assert.equal(normalizeLevel("standard"), "standard");
   assert.equal(normalizeLevel("expert"), "expert");
-  assert.equal(normalizeLevel(null), "standard");
-  assert.equal(normalizeLevel(undefined), "standard");
-  assert.equal(normalizeLevel("beginner"), "standard");
+  assert.equal(normalizeLevel(null), "guided");
+  assert.equal(normalizeLevel(undefined), "guided");
+  assert.equal(normalizeLevel("beginner"), "guided");
 });
 
 test("Guided hides the advanced wizard surfaces; Standard and Expert show them", () => {

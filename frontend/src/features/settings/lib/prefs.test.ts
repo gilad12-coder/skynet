@@ -43,3 +43,10 @@ test("the retired expand-advanced pref is gone: no key, no default, agent patche
 test("readPref falls back to the default outside the browser", () => {
   assert.equal(readPref("taggerAssist"), true);
 });
+
+test("new optimizations default to Auto, the catalog's models and the wizard's own budget", () => {
+  assert.equal(readPref("optimizerEngine"), "auto");
+  assert.deepEqual(readPref("optimizerTaskModel"), { name: "" });
+  assert.deepEqual(readPref("optimizerReflectionModel"), { name: "" });
+  assert.equal(readPref("optimizerMaxRuns"), null);
+});
