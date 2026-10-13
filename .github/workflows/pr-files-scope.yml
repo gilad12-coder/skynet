@@ -64,11 +64,15 @@ jobs:
           )
 
           def exempt(path):
-              # fnmatch's * already crosses "/", so "**/" also has to match zero dirs.
-              return any(
-                  fnmatch.fnmatch(path, pat) or fnmatch.fnmatch(path, pat.replace("**/", "", 1))
-                  for pat in EXEMPT
-              )
+              # fnmatch's * already crosses "/", so each "**/" also has to match zero
+              # dirs; try every combination so i18n/locales/he.json matches too.
+              def variants(pat):
+                  head, sep, tail = pat.partition("**/")
+                  if not sep:
+                      return [pat]
+                  return [head + prefix + rest for rest in variants(tail) for prefix in ("**/", "")]
+
+              return any(fnmatch.fnmatch(path, v) for pat in EXEMPT for v in variants(pat))
 
           def summary(text):
               with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
