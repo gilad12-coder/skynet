@@ -21,7 +21,6 @@ from ....models.blackbox import BLACKBOX_STRATEGY_AUTO, BlackboxRunResponse, Bla
 from ....models.unified import (
     DSPY_OPTIMIZER_NAMES,
     UnifiedRunRequest,
-    metric_shape_for,
     optimizer_family,
     resolve_optimizer,
 )
@@ -91,7 +90,6 @@ def unified_job_spec(
         "artifact_kind": payload.task.artifact.kind,
         "run_code": payload.workspace.run_code,
         "metric_code": payload.workspace.metric_code,
-        "metric_shape": metric_shape_for(payload.optimizer.choice, payload.task.artifact.kind),
         "input_fields": list(payload.data.input_fields),
         "expected_field": payload.data.expected_field,
         "models": {

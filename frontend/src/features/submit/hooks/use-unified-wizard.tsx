@@ -36,7 +36,6 @@ import { getActiveMessages } from "@/shared/lib/runtime-messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import type { ModelConfig } from "@/shared/types/api";
 import {
-  metricShapeFor,
   optimizersFor,
   resolveOptimizer,
   type OptimizerCatalogResponse,
@@ -279,7 +278,6 @@ export function WizardV2Provider({
   }, [steps, state.step, goTo]);
 
   const resolvedOptimizer = kind ? resolveOptimizer(state.optimizer.choice, kind) : null;
-  const metricShape = kind ? metricShapeFor(state.optimizer.choice, kind) : null;
   const snapshot = contractSnapshot(state);
   const contractStale = state.workspace.lastCheckSnapshot !== snapshot;
 
@@ -750,7 +748,6 @@ export function WizardV2Provider({
     patchOptimizer,
     patchWorkspace,
     patchMeta,
-    metricShape,
     resolvedOptimizer,
     optimizerCatalog:
       optimizerCatalog && optimizerCatalog.artifact_kind === kind && optimizerCatalog.data_mode === mode

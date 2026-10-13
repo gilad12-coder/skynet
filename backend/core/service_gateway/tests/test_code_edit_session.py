@@ -115,7 +115,6 @@ def _unified(**overrides: object) -> dict:
         "input_fields": ["ticket"],
         "expected_field": "label",
         "optimizer": "auto",
-        "metric_shape": "blackbox_side_info",
         "metric_has_model": False,
     }
     return {**base, **overrides}
@@ -195,23 +194,22 @@ def test_unified_ask_user_and_set_brief_emit_events(u_session: _UnifiedEditSessi
 
 
 @pytest.mark.parametrize(
-    ("code", "kind", "fragment"),
+    ("code", "fragment"),
     [
-        ("def run(artifact, input):\n    return 1\n", "prompt", ""),
-        ("def run(artifact, input, extra=None):\n    return 1\n", "code", ""),
-        ("def run(*args):\n    return 1\n", "text", ""),
-        ("def run(input):\n    return 1\n", "prompt", "(artifact, input)"),
-        ("def go(artifact, input):\n    return 1\n", "prompt", "def run"),
-        ("def build_program():\n    return None\n", "dspy_program", ""),
-        ("def build_program(lm):\n    return None\n", "dspy_program", "no arguments"),
-        ("def run(artifact, input):\n    return 1\n", "dspy_program", "build_program"),
-        ("def run(artifact, input:\n    return 1\n", "prompt", "line 1"),
-        ("  \n", "prompt", "empty"),
+        ("def run(artifact, input):\n    return 1\n", ""),
+        ("def run(artifact, input, extra=None):\n    return 1\n", ""),
+        ("def run(*args):\n    return 1\n", ""),
+        ("import dspy\nprogram = dspy.Predict('q -> a')\ndef run(artifact, input):\n    return program(**input)\n", ""),
+        ("def run(input):\n    return 1\n", "(artifact, input)"),
+        ("def go(artifact, input):\n    return 1\n", "def run"),
+        ("def build_program():\n    return None\n", "def run(artifact, input)"),
+        ("def run(artifact, input:\n    return 1\n", "line 1"),
+        ("  \n", "empty"),
     ],
 )
-def test_validate_run_code(code: str, kind: str, fragment: str) -> None:
-    """The run check follows the artifact kind's entrypoint and names what is wrong."""
-    err = _validate_run_code(code, kind)
+def test_validate_run_code(code: str, fragment: str) -> None:
+    """The run check holds every artifact kind, a DSPy program included, to run(artifact, input)."""
+    err = _validate_run_code(code)
     if fragment:
         assert fragment in err
     else:
@@ -219,56 +217,44 @@ def test_validate_run_code(code: str, kind: str, fragment: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("code", "shape", "has_model", "fragment"),
+    ("code", "has_model", "fragment"),
     [
-        (
-            "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None):\n    return 1\n",
-            "dspy_feedback",
-            False,
-            "",
-        ),
-        ("def metric(gold, pred, trace=None):\n    return 1\n", "dspy_feedback", False, "pred_trace"),
-        ("def metric(gold, pred, trace=None):\n    return 1\n", "dspy_scalar", False, ""),
-        # The validity check calls a scalar DSPy metric with trace, so two parameters fail it.
-        ("def metric(gold, pred):\n    return True\n", "dspy_scalar", False, "trace=None"),
-        ("def score(input, output, expected=None):\n    return 1, {}\n", "dspy_scalar", False, "def metric"),
-        ("def score(input, output):\n    return 1, {}\n", "blackbox_side_info", False, ""),
-        ("def score(input):\n    return 1, {}\n", "blackbox_side_info", False, "score(input, output"),
+        ("def score(input, output, expected=None):\n    return 1, {}\n", False, ""),
+        ("def score(input, output):\n    return 1, {}\n", False, ""),
+        ("def score(input):\n    return 1, {}\n", False, "score(input, output"),
+        ("def score(input, output, expected):\n    return 1, {}\n", False, "score(input, output"),
+        # The retired DSPy shapes are no longer accepted for any optimizer.
+        ("def metric(gold, pred, trace=None, pred_name=None, pred_trace=None):\n    return 1\n", False, "def score"),
+        ("def metric(gold, pred, trace=None):\n    return 1\n", False, "def score"),
         (
             "from skynet import llm\n\ndef score(input, output, expected=None):\n    return 1, {}\n",
-            "blackbox_side_info",
             False,
             "no metric model",
         ),
-        (
-            "from skynet import llm\n\ndef score(input, output, expected=None):\n    return 1, {}\n",
-            "blackbox_side_info",
-            True,
-            "",
-        ),
+        ("from skynet import llm\n\ndef score(input, output, expected=None):\n    return 1, {}\n", True, ""),
     ],
 )
-def test_validate_unified_metric_code(code: str, shape: str, has_model: bool, fragment: str) -> None:
-    """The metric check enforces the optimizer's exact shape and the metric model."""
-    err = _validate_unified_metric_code(code, shape, has_model)
+def test_validate_unified_metric_code(code: str, has_model: bool, fragment: str) -> None:
+    """The metric check enforces score(input, output, expected=None) and the metric model."""
+    err = _validate_unified_metric_code(code, has_model)
     if fragment:
         assert fragment in err
     else:
         assert err == ""
 
 
-@pytest.mark.parametrize(
-    ("shape", "needle"),
-    [
-        ("dspy_feedback", "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None)"),
-        ("dspy_scalar", "def metric(gold, pred, trace=None)"),
-        ("blackbox_side_info", "def score(input, output, expected=None)"),
-    ],
-)
-def test_metric_contract_states_the_exact_shape(shape: str, needle: str) -> None:
-    """The authoring prompt names the exact function the chosen optimizer calls."""
-    _, metric_contract = _unified_contracts(_unified(metric_shape=shape))
-    assert needle in metric_contract
+@pytest.mark.parametrize("optimizer", ["auto", "dspy_gepa", "dspy_miprov2", "dspy_bootstrap_fewshot", "gepa"])
+def test_metric_contract_is_the_same_for_every_optimizer(optimizer: str) -> None:
+    """The authoring prompt names score(input, output, expected=None) whichever optimizer was picked.
+
+    Args:
+        optimizer: The optimizer the user picked.
+    """
+    _, metric_contract = _unified_contracts(_unified(optimizer=optimizer))
+    _, baseline = _unified_contracts(_unified())
+    assert "def score(input, output, expected=None)" in metric_contract
+    assert "def metric(gold, pred" not in metric_contract
+    assert metric_contract == baseline
 
 
 @pytest.mark.parametrize("has_model", [True, False])
@@ -278,12 +264,13 @@ def test_metric_contract_offers_llm_only_with_a_model(has_model: bool) -> None:
     assert ("`from skynet import llm` calls it" in metric_contract) is has_model
 
 
-def test_run_contract_follows_the_artifact_kind() -> None:
-    """A DSPy program gets the build_program contract; every other kind gets run()."""
+def test_run_contract_is_identical_for_every_artifact_kind() -> None:
+    """A DSPy program gets the same run(artifact, input) contract as every other kind."""
     program, _ = _unified_contracts(_unified(task={"objective": "x", "artifact": {"kind": "dspy_program"}}))
     prompt, _ = _unified_contracts(_unified())
-    assert "build_program" in program
-    assert "def run(artifact, input)" in prompt
+    assert program == prompt
+    assert "- Entry point: define def run(artifact, input)" in prompt
+    assert "build_program" not in prompt
 
 
 def test_run_contract_is_one_contract_for_every_artifact() -> None:

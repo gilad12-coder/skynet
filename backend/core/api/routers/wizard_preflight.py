@@ -27,7 +27,6 @@ from ...models.unified import (
     ContractCheckRequest,
     ContractCheckResponse,
     UnifiedRunRequest,
-    metric_shape_for,
     resolve_optimizer,
 )
 from ...service_gateway.optimization.unified.contract import (
@@ -196,7 +195,6 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
         return ContractCheckResponse(
             ok=False,
             optimizer_resolved=resolve_optimizer(spec.optimizer.choice, spec.task.artifact.kind),
-            metric_shape=metric_shape_for(spec.optimizer.choice, spec.task.artifact.kind),
             uses_llm=static.uses_llm,
             checks=[
                 *static.checks,

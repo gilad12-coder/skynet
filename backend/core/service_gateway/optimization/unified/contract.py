@@ -1,10 +1,13 @@
-"""The unified workspace contract: does the code fit the optimizer the user chose?
+"""The unified workspace contract: does the code fit the one contract every optimizer runs?
 
-The resolved optimizer fixes the metric's shape (:func:`metric_shape_for`).
-The static check reads the source in a subprocess, never executing it in
-the API process: the run code must define ``run(artifact, input)`` (or
-``build_program()`` for a DSPy program), the metric entrypoint's arity must
-fit the shape, and a metric that calls ``llm`` needs a metric model.
+Every artifact kind and every optimizer share one shape: the run code
+defines ``run(artifact, input)`` and the metric defines ``score(input,
+output, expected=None)`` returning ``(score, side_info)``. The static check
+reads the source in a subprocess, never executing it in the API process: both
+entry points must exist with a fitting arity, and a metric that calls
+``llm`` needs a metric model. Code written for the retired per-optimizer
+shapes (``build_program()``, ``metric(gold, pred, ...)``) fails with a detail
+asking to regenerate it.
 The sandboxed check then runs the starting version through the code and the
 metric on a few training/validation cases (never test) and reports the
 user's exact error, user-code frames only, when anything does not fit.
@@ -18,39 +21,36 @@ from typing import Any
 
 from ....i18n import t
 from ....models.unified import (
+    METRIC_SIGNATURE,
+    RUN_ENTRY,
     ContractCheckItem,
     ContractCheckResponse,
     ContractSample,
-    MetricShape,
     UnifiedRunRequest,
-    metric_shape_for,
     resolve_optimizer,
 )
 from ...safe_exec import FunctionShape, WorkspaceCodeIntrospection, introspect_workspace_code
 from ..blackbox.harness import GatewayConfig
 from ..blackbox.sandbox import SandboxRuntime
-from ..blackbox.workspace_harness import DETAIL_MAX_CHARS
+from ..blackbox.workspace_harness import DETAIL_MAX_CHARS, METRIC_ENTRY_NAME, RUN_ENTRY_NAME
 from ..blackbox.workspace_scorer import WorkspaceProbe, build_workspace_scorer
 from .split import contract_samples, split_cases, split_seed
 
 PREVIEW_CHARS = 500
-# Positional slots each shape's caller fills, and at least how many the metric must accept.
-_METRIC_SLOTS: dict[str, tuple[str, int, int]] = {
-    "dspy_feedback": ("metric", 5, 5),
-    "dspy_scalar": ("metric", 3, 3),
-    # ``expected`` is optional: the harness passes it only when the function accepts it.
-    "blackbox_side_info": ("score", 2, 2),
-}
-_SIGNATURE_KEYS: dict[str, str] = {
-    "dspy_feedback": "contract.metric_signature.dspy_feedback",
-    "dspy_scalar": "contract.metric_signature.dspy_scalar",
-    "blackbox_side_info": "contract.metric_signature.blackbox",
-}
-_SHAPE_KEYS: dict[str, str] = {
-    "dspy_feedback": "contract.shape.dspy_feedback",
-    "dspy_scalar": "contract.shape.dspy_scalar",
-    "blackbox_side_info": "contract.shape.blackbox",
-}
+SIGNATURE_KEY = "contract.metric_signature.blackbox"
+SHAPE_KEY = "contract.shape.blackbox"
+# The retired per-optimizer entry points; code that defines one instead of the
+# current entry point was written before the contract was unified.
+LEGACY_RUN_ENTRY = "build_program"
+LEGACY_METRIC_ENTRY = "metric"
+REGENERATE_RUN = (
+    f"NameError: {RUN_ENTRY_NAME} is not defined. build_program() is the retired DSPy entry point: "
+    f"regenerate the run code so it defines {RUN_ENTRY} and calls the module-level dspy.Module inside it."
+)
+REGENERATE_METRIC = (
+    f"NameError: {METRIC_ENTRY_NAME} is not defined. metric(gold, pred, ...) is the retired DSPy metric: "
+    f"regenerate the metric so it defines {METRIC_SIGNATURE} returning (score, side_info)."
+)
 
 
 def contract_fingerprint(payload: UnifiedRunRequest) -> str:
@@ -144,46 +144,45 @@ def _fits(shape: FunctionShape | None, slots: int, at_least: int) -> bool:
     return shape.capacity >= at_least and shape.required <= slots
 
 
-def _run_item(kind: str, code: WorkspaceCodeIntrospection) -> ContractCheckItem:
-    """Check the run code defines the entrypoint its artifact kind needs.
+def _run_item(code: WorkspaceCodeIntrospection) -> ContractCheckItem:
+    """Check the run code defines ``run(artifact, input)``.
 
     Args:
-        kind: The artifact kind.
         code: The run code's introspection.
 
     Returns:
         The ``workspace.run_signature`` item.
     """
-    if kind == "dspy_program":
-        ok = code.syntax_error is None and _fits(code.functions.get("build_program"), 0, 0)
-        return _item("workspace.run_signature", ok, "contract.build_program_missing", detail=code.syntax_error)
-    ok = code.syntax_error is None and _fits(code.functions.get("run"), 2, 2)
-    return _item("workspace.run_signature", ok, "contract.run_missing", detail=code.syntax_error)
+    detail = code.syntax_error
+    if detail is None and RUN_ENTRY_NAME not in code.functions and LEGACY_RUN_ENTRY in code.functions:
+        detail = REGENERATE_RUN
+    ok = code.syntax_error is None and _fits(code.functions.get(RUN_ENTRY_NAME), 2, 2)
+    return _item("workspace.run_signature", ok, "contract.run_missing", detail=detail)
 
 
-def _metric_items(
-    payload: UnifiedRunRequest, shape: MetricShape, code: WorkspaceCodeIntrospection
-) -> list[ContractCheckItem]:
-    """Check the metric entrypoint fits the shape and has a model if it calls one.
+def _metric_items(payload: UnifiedRunRequest, code: WorkspaceCodeIntrospection) -> list[ContractCheckItem]:
+    """Check ``score`` fits ``(input, output, expected=None)`` and has a model if it calls one.
 
     Args:
         payload: The unified run.
-        shape: The resolved optimizer's metric shape.
         code: The metric code's introspection.
 
     Returns:
         The ``metric.signature`` and ``metric.model`` items.
     """
-    name, slots, at_least = _METRIC_SLOTS[shape]
-    function = code.functions.get(name)
+    function = code.functions.get(METRIC_ENTRY_NAME)
     if code.syntax_error is not None:
         signature = _item("metric.signature", False, "contract.metric_missing", detail=code.syntax_error)
     elif function is None:
-        signature = _item(
-            "metric.signature", False, "contract.metric_missing", detail=f"NameError: {name} is not defined"
+        detail = (
+            REGENERATE_METRIC
+            if LEGACY_METRIC_ENTRY in code.functions
+            else f"NameError: {METRIC_ENTRY_NAME} is not defined"
         )
+        signature = _item("metric.signature", False, "contract.metric_missing", detail=detail)
     else:
-        signature = _item("metric.signature", _fits(function, slots, at_least), _SIGNATURE_KEYS[shape])
+        # ``expected`` is optional: the harness passes it only when the function accepts it.
+        signature = _item("metric.signature", _fits(function, 2, 2), SIGNATURE_KEY)
     model = _item(
         "metric.model",
         not code.uses_llm or payload.models.metric_model is not None,
@@ -202,10 +201,9 @@ def _static_items(payload: UnifiedRunRequest) -> tuple[list[ContractCheckItem], 
         The run signature, metric signature and metric model items, and
         whether the metric code calls ``llm``.
     """
-    shape = metric_shape_for(payload.optimizer.choice, payload.task.artifact.kind)
     run_code = introspect_workspace_code(payload.workspace.run_code)
     metric_code = introspect_workspace_code(payload.workspace.metric_code)
-    items = [_run_item(payload.task.artifact.kind, run_code), *_metric_items(payload, shape, metric_code)]
+    items = [_run_item(run_code), *_metric_items(payload, metric_code)]
     return items, metric_code.uses_llm
 
 
@@ -230,7 +228,6 @@ def _response(
     return ContractCheckResponse(
         ok=bool(checks) and all(check.status == "passed" for check in checks),
         optimizer_resolved=resolve_optimizer(payload.optimizer.choice, payload.task.artifact.kind),
-        metric_shape=metric_shape_for(payload.optimizer.choice, payload.task.artifact.kind),
         uses_llm=uses_llm,
         checks=checks,
         samples=samples,
@@ -256,21 +253,19 @@ def _recover_error(message: str, code: str, number: int) -> str | None:
     return None
 
 
-def _sample_code(item: ContractCheckItem, shape: MetricShape) -> tuple[str, dict[str, str | int]]:
+def _sample_code(item: ContractCheckItem) -> tuple[str, dict[str, str | int]]:
     """Work out the message code of a sample item the guest sent without one.
 
     Args:
         item: A sample item lacking ``message_code``.
-        shape: The metric shape the samples were held to.
 
     Returns:
         ``(message_code, message_params)``.
     """
     if item.status == "passed":
         return "contract.passed", {}
-    shape_key = _SHAPE_KEYS[shape]
-    if item.status == "skipped" or (item.key == "metric.shape" and item.message == t(shape_key)):
-        return shape_key, {}
+    if item.status == "skipped" or (item.key == "metric.shape" and item.message == t(SHAPE_KEY)):
+        return SHAPE_KEY, {}
     number = (item.sample_index or 0) + 1
     code = "contract.run_error" if item.key == "workspace.run" else "contract.metric_error"
     error = _recover_error(item.message, code, number)
@@ -300,7 +295,7 @@ def with_message_codes(response: ContractCheckResponse, static: ContractCheckRes
         if item.sample_index is None:
             continue
         if item.message_code is None:
-            code, params = _sample_code(item, response.metric_shape)
+            code, params = _sample_code(item)
             item = item.model_copy(update={"message_code": code, "message_params": params})
         samples.append(item)
     return response.model_copy(update={"checks": [*static.checks, *samples]})
@@ -313,11 +308,14 @@ def validate_unified_payload(payload: UnifiedRunRequest) -> None:
         payload: The unified run.
 
     Raises:
-        ValueError: With the first failing check's localized message.
+        ValueError: With the first failing check's localized message, plus the
+            regenerate hint when the code was written for a retired shape.
     """
     checks, _ = _static_items(payload)
     for check in checks:
         if check.status == "failed":
+            if check.detail in (REGENERATE_RUN, REGENERATE_METRIC):
+                raise ValueError(f"{check.message} {check.detail}")
             raise ValueError(check.message)
 
 
@@ -347,12 +345,11 @@ def _preview(value: Any) -> str:
     return text[:PREVIEW_CHARS]
 
 
-def _sample_items(index: int, shape: MetricShape, probe: WorkspaceProbe) -> list[ContractCheckItem]:
+def _sample_items(index: int, probe: WorkspaceProbe) -> list[ContractCheckItem]:
     """Turn one sample's outcome into its run and metric items.
 
     Args:
         index: The sample's position, from 0.
-        shape: The metric shape it was held to.
         probe: The sample's outcome.
 
     Returns:
@@ -374,14 +371,14 @@ def _sample_items(index: int, shape: MetricShape, probe: WorkspaceProbe) -> list
             ContractCheckItem(
                 key="metric.shape",
                 status="skipped",
-                message=t(_SHAPE_KEYS[shape]),
-                message_code=_SHAPE_KEYS[shape],
+                message=t(SHAPE_KEY),
+                message_code=SHAPE_KEY,
                 sample_index=index,
             ),
         ]
     run = _item("workspace.run", True, "contract.run_error", sample_index=index)
     if probe.stage == "shape":
-        return [run, _item("metric.shape", False, _SHAPE_KEYS[shape], detail=detail, sample_index=index)]
+        return [run, _item("metric.shape", False, SHAPE_KEY, detail=detail, sample_index=index)]
     if probe.error is not None or probe.score is None:
         return [
             run,
@@ -395,7 +392,7 @@ def _sample_items(index: int, shape: MetricShape, probe: WorkspaceProbe) -> list
                 error=probe.error or "ValueError: no score",
             ),
         ]
-    return [run, _item("metric.shape", True, _SHAPE_KEYS[shape], sample_index=index)]
+    return [run, _item("metric.shape", True, SHAPE_KEY, sample_index=index)]
 
 
 def run_contract_check(
@@ -443,7 +440,6 @@ def run_contract_check(
         shuffle=payload.data.shuffle,
         seed=split_seed(payload),
     )
-    shape = metric_shape_for(payload.optimizer.choice, payload.task.artifact.kind)
     scorer = build_workspace_scorer(
         payload,
         gateway,
@@ -457,7 +453,7 @@ def run_contract_check(
     try:
         for index, case in enumerate(contract_samples(splits, sample_count)):
             probe = scorer.run(payload.task.artifact.starting_version, case)
-            checks.extend(_sample_items(index, shape, probe))
+            checks.extend(_sample_items(index, probe))
             feedback = probe.side_info.get("feedback")
             samples.append(
                 ContractSample(

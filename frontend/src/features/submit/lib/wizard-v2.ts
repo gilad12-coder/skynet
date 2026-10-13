@@ -20,7 +20,6 @@ import {
   type ArtifactKind,
   type ContractCheckResponse,
   type DataMode,
-  type MetricShape,
   type OptimizerCatalogResponse,
   type OptimizerChoice,
   type TaskInterviewTurnResult,
@@ -378,7 +377,6 @@ export interface WizardV2Context {
   patchOptimizer(p: Partial<OptimizerSlice>): void;
   patchWorkspace(p: Partial<WorkspaceSlice>): void;
   patchMeta(p: Partial<MetaSlice>): void;
-  metricShape: MetricShape | null;
   resolvedOptimizer: string | null;
   optimizerCatalog: OptimizerCatalogResponse | null;
   optimizerCatalogLoading: boolean;

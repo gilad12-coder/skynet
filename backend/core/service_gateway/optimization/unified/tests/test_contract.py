@@ -19,11 +19,24 @@ from ..contract import contract_fingerprint, run_contract_check, static_contract
 
 RUN_CODE = "def run(artifact, input):\n    return artifact + ':' + input['q']\n"
 BLACKBOX_METRIC = "def score(input, output, expected=None):\n    return float(output == expected), {'feedback': 'ok'}\n"
-FEEDBACK_METRIC = (
+# The retired per-optimizer shapes, as saved runs from before the unified contract hold them.
+LEGACY_FEEDBACK_METRIC = (
     "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None):\n"
     "    return {'score': 1.0, 'feedback': 'fine'}\n"
 )
-BUILD_PROGRAM = "import dspy\ndef build_program():\n    return dspy.Predict('q -> a')\n"
+LEGACY_BUILD_PROGRAM = "import dspy\ndef build_program():\n    return dspy.Predict('q -> a')\n"
+# A DSPy program under the one contract: run calls the module-level module. It
+# returns the module's instruction so the sampled check needs no model.
+DSPY_RUN_CODE = (
+    "import dspy\n"
+    "program = dspy.Predict('q -> answer')\n"
+    "def run(artifact, input):\n"
+    "    return dspy.Prediction(answer=program.signature.instructions + ':' + input['q'])\n"
+)
+DSPY_METRIC = (
+    "def score(input, output, expected=None):\n"
+    "    return float(output.answer == expected), {'feedback': output.answer}\n"
+)
 
 
 def _payload(
@@ -75,7 +88,6 @@ def test_static_check_passes_a_matching_blackbox_workspace() -> None:
     response = static_contract_check(_payload())
 
     assert response.ok
-    assert response.metric_shape == "blackbox_side_info"
     assert response.samples == []
     assert _statuses(response) == {
         "workspace.run_signature": "passed",
@@ -94,20 +106,64 @@ def test_missing_run_fails_the_run_signature() -> None:
         validate_unified_payload(_payload(run_code="x = 1\n"))
 
 
-def test_gepa_needs_the_five_slot_feedback_metric() -> None:
-    """Auto on a DSPy program resolves to GEPA, whose metric takes five arguments."""
-    narrow = "def metric(gold, pred, trace=None):\n    return 1.0\n"
-    failing = static_contract_check(
-        _payload(kind="dspy_program", optimizer="auto", run_code=BUILD_PROGRAM, metric_code=narrow)
-    )
-    passing = static_contract_check(
-        _payload(kind="dspy_program", optimizer="auto", run_code=BUILD_PROGRAM, metric_code=FEEDBACK_METRIC)
+@pytest.mark.parametrize(
+    ("kind", "optimizer", "run_code", "metric_code"),
+    [
+        ("dspy_program", "auto", DSPY_RUN_CODE, DSPY_METRIC),
+        ("dspy_program", "dspy_gepa", DSPY_RUN_CODE, DSPY_METRIC),
+        ("dspy_program", "dspy_miprov2", DSPY_RUN_CODE, DSPY_METRIC),
+        ("dspy_program", "dspy_bootstrap_fewshot", DSPY_RUN_CODE, DSPY_METRIC),
+        ("prompt", "gepa", RUN_CODE, BLACKBOX_METRIC),
+        ("prompt", "best_of_n", RUN_CODE, BLACKBOX_METRIC),
+    ],
+)
+def test_every_optimizer_checks_the_same_contract(kind: str, optimizer: str, run_code: str, metric_code: str) -> None:
+    """run(artifact, input) plus score(input, output, expected=None) passes for every kind and optimizer.
+
+    Args:
+        kind: The artifact kind.
+        optimizer: The optimizer the user picked.
+        run_code: Run code written to the one contract.
+        metric_code: Metric written to the one contract.
+    """
+    response = static_contract_check(
+        _payload(kind=kind, optimizer=optimizer, run_code=run_code, metric_code=metric_code)
     )
 
-    assert failing.optimizer_resolved == "dspy_gepa"
-    assert failing.metric_shape == "dspy_feedback"
-    assert _statuses(failing)["metric.signature"] == "failed"
-    assert passing.ok
+    assert response.ok, response.checks
+    validate_unified_payload(_payload(kind=kind, optimizer=optimizer, run_code=run_code, metric_code=metric_code))
+
+
+def test_retired_shapes_ask_to_regenerate_the_code() -> None:
+    """Code saved under build_program() / metric(gold, pred, ...) fails with a regenerate hint."""
+    payload = _payload(
+        kind="dspy_program", optimizer="dspy_gepa", run_code=LEGACY_BUILD_PROGRAM, metric_code=LEGACY_FEEDBACK_METRIC
+    )
+    response = static_contract_check(payload)
+
+    details = {check.key: check.detail or "" for check in response.checks}
+    assert not response.ok
+    assert _statuses(response)["workspace.run_signature"] == "failed"
+    assert _statuses(response)["metric.signature"] == "failed"
+    assert "regenerate the run code" in details["workspace.run_signature"]
+    assert "regenerate the metric" in details["metric.signature"]
+    with pytest.raises(ValueError, match="regenerate the run code"):
+        validate_unified_payload(payload)
+
+
+def test_sampled_check_runs_a_dspy_program_through_run(tmp_path: Any) -> None:
+    """In a local box the DSPy program's run applies the candidate to its module and score reads the output.
+
+    Args:
+        tmp_path: Unused; keeps the box's working files out of the repo.
+    """
+    del tmp_path
+    response = _check(
+        _payload(kind="dspy_program", optimizer="dspy_gepa", run_code=DSPY_RUN_CODE, metric_code=DSPY_METRIC)
+    )
+
+    assert response.ok, [check.detail for check in response.checks if check.status != "passed"]
+    assert [sample.score for sample in response.samples] == [1.0, 1.0]
 
 
 def test_blackbox_score_with_one_argument_fails_the_signature() -> None:
