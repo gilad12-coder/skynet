@@ -4,20 +4,33 @@ import type { ComponentType } from "react";
 
 import {
   ArrowsClockwise,
-  Books,
+  Crosshair,
   Cube,
+  DiceFive,
   GitBranch,
-  ListChecks,
   MagicWand,
+  PushPin,
   Robot,
-  Shuffle,
   SquaresFour,
+  TreeStructure,
   Wrench,
 } from "@/shared/ui/icons";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { msg } from "@/shared/lib/messages";
 
-import { BannerFrame, GArrow, GBar, GBox, GWire } from "../steps/PickerSlide";
+import {
+  BannerFrame,
+  GArrow,
+  GBar,
+  GBox,
+  GChart,
+  GDot,
+  GFrame,
+  GMark,
+  GNote,
+  GPlay,
+  GWire,
+} from "../steps/PickerSlide";
 
 /** What a card shows about one optimizer: a black-box engine, a DSPy optimizer or Auto. */
 export interface EngineSlideInfo {
@@ -89,274 +102,436 @@ interface EngineVisual {
 }
 
 // Each banner is the engine's search loop in the wizard's schematic grammar:
-// plain boxes are versions, the accented one is the proposer or the winner.
+// plain boxes are versions, the accented one is the proposer or the winner,
+// dashed wires carry feedback rather than candidates.
 
-function GepaBanner() {
-  return (
-    <BannerFrame>
-      <GBox x={22} y={33} w={34} h={22} />
-      <GBar x={30} y={40} w={18} />
-      <GBar x={30} y={46} w={12} />
-      <GWire d="M56 44 H80 C92 44 92 22 104 22" />
-      <GWire d="M56 44 H104" />
-      <GWire d="M56 44 H80 C92 44 92 66 104 66" />
-      <GBox x={104} y={11} w={34} h={22} />
-      <GBar x={112} y={18} w={18} />
-      <GBox x={104} y={33} w={34} h={22} />
-      <GBar x={112} y={40} w={18} />
-      <GBox x={104} y={55} w={34} h={22} />
-      <GBar x={112} y={62} w={18} />
-      <GWire d="M138 22 H162 C174 22 174 44 186 44" />
-      <GWire d="M138 66 H162 C174 66 174 44 186 44" />
-      <GArrow x={190} y={44} dir="right" />
-      <GBox x={190} y={31} w={34} h={26} accent />
-      <GBar x={198} y={39} w={18} />
-      <GBar x={198} y={45} w={12} />
-    </BannerFrame>
-  );
-}
-
-function BestOfNBanner() {
-  return (
-    <BannerFrame>
-      <GBox x={22} y={33} w={34} h={22} accent />
-      <GBar x={30} y={40} w={18} />
-      <GBar x={30} y={46} w={12} />
-      <GWire d="M56 44 H76 C88 44 88 16 100 16" />
-      <GWire d="M56 44 H76 C88 44 88 35 100 35" />
-      <GWire d="M56 44 H76 C88 44 88 54 100 54" />
-      <GWire d="M56 44 H76 C88 44 88 73 100 73" />
-      <GBox x={100} y={8} w={34} h={16} />
-      <GBar x={108} y={15} w={18} />
-      <GBox x={100} y={27} w={34} h={16} />
-      <GBar x={108} y={34} w={18} />
-      <GBox x={100} y={46} w={34} h={16} />
-      <GBar x={108} y={53} w={18} />
-      <GBox x={100} y={65} w={34} h={16} />
-      <GBar x={108} y={72} w={18} />
-      <GWire d="M134 35 H164 C176 35 176 44 188 44" />
-      <GArrow x={192} y={44} dir="right" />
-      <GBox x={192} y={33} w={30} h={22} accent />
-      <GBar x={199} y={40} w={16} />
-      <GBar x={199} y={46} w={10} />
-    </BannerFrame>
-  );
-}
-
-function AutoResearchBanner() {
-  return (
-    <BannerFrame>
-      <GBox x={30} y={26} w={52} h={32} accent />
-      <GBar x={40} y={34} w={30} />
-      <GBar x={40} y={40} w={22} />
-      <GBar x={40} y={46} w={26} />
-      <GWire d="M82 42 H116 V20 H146" />
-      <GArrow x={150} y={20} dir="right" />
-      <GWire d="M116 42 H146" />
-      <GArrow x={150} y={42} dir="right" />
-      <GWire d="M116 42 V64 H146" />
-      <GArrow x={150} y={64} dir="right" />
-      <GBox x={150} y={13} w={60} h={14} />
-      <GBar x={158} y={19} w={34} />
-      <GBox x={150} y={35} w={60} h={14} accent />
-      <GBar x={158} y={41} w={42} />
-      <GBox x={150} y={57} w={60} h={14} />
-      <GBar x={158} y={63} w={26} />
-      <GWire d="M180 71 V80 H56 V62" />
-      <GArrow x={56} y={58} dir="up" />
-    </BannerFrame>
-  );
-}
-
-function MetaHarnessBanner() {
-  return (
-    <BannerFrame>
-      <GBox x={22} y={30} w={44} h={28} accent />
-      <GBar x={30} y={38} w={26} />
-      <GBar x={30} y={44} w={18} />
-      <GBar x={30} y={50} w={22} />
-      <GWire d="M66 44 H90 C102 44 102 22 114 22" />
-      <GWire d="M66 44 H114" />
-      <GWire d="M66 44 H90 C102 44 102 66 114 66" />
-      <GBox x={114} y={13} w={30} h={18} />
-      <GBar x={121} y={21} w={16} />
-      <GBox x={114} y={35} w={30} h={18} />
-      <GBar x={121} y={43} w={16} />
-      <GBox x={114} y={57} w={30} h={18} />
-      <GBar x={121} y={65} w={16} />
-      <GWire d="M144 22 H166 C178 22 178 44 190 44" />
-      <GWire d="M144 44 H190" />
-      <GWire d="M144 66 H166 C178 66 178 44 190 44" />
-      <GArrow x={194} y={44} dir="right" />
-      <GBox x={194} y={33} w={28} h={22} />
-      <GBar x={201} y={40} w={14} />
-      <GBar x={201} y={46} w={10} />
-      <GWire d="M208 55 V76 H44 V62" />
-      <GArrow x={44} y={58} dir="up" />
-    </BannerFrame>
-  );
-}
-
-function AutoSaddlerBanner() {
-  return (
-    <BannerFrame>
-      <GBox x={22} y={33} w={34} h={22} />
-      <GBar x={30} y={40} w={18} />
-      <GBar x={30} y={46} w={12} />
-      <GWire d="M56 44 H76" />
-      <GArrow x={80} y={44} dir="right" />
-      <GBox x={80} y={29} w={44} h={30} accent />
-      <GBar x={90} y={37} w={24} />
-      <GBar x={90} y={43} w={18} />
-      <GBar x={90} y={49} w={22} />
-      <GWire d="M124 44 H144" />
-      <GArrow x={148} y={44} dir="right" />
-      <GBox x={148} y={33} w={34} h={22} />
-      <GBar x={156} y={40} w={18} />
-      <GBar x={156} y={46} w={12} />
-      <GWire d="M182 44 H202" />
-      <GArrow x={206} y={44} dir="right" />
-      <GBox x={206} y={33} w={20} h={22} />
-      <GBar x={211} y={40} w={10} />
-      <GBar x={211} y={46} w={7} />
-      <GWire d="M165 55 V72 H102 V63" />
-      <GArrow x={102} y={59} dir="up" />
-    </BannerFrame>
-  );
-}
-
-// Two islands evolve apart through the shared model pool, and the dashed
-// return path is migration between them.
-function ShinkaEvolveBanner() {
-  return (
-    <BannerFrame>
-      <GBox x={22} y={15} w={34} h={20} />
-      <GBar x={30} y={23} w={18} />
-      <GBox x={22} y={53} w={34} h={20} />
-      <GBar x={30} y={61} w={14} />
-      <GWire d="M56 25 H76 C86 25 86 44 96 44" />
-      <GWire d="M56 63 H76 C86 63 86 44 96 44" />
-      <GArrow x={100} y={44} dir="right" />
-      <GBox x={100} y={29} w={40} h={30} accent />
-      <GBar x={109} y={37} w={22} />
-      <GBar x={109} y={43} w={16} />
-      <GBar x={109} y={49} w={20} />
-      <GWire d="M140 44 H150 C160 44 160 25 180 25" />
-      <GWire d="M140 44 H150 C160 44 160 63 180 63" />
-      <GArrow x={184} y={25} dir="right" />
-      <GArrow x={184} y={63} dir="right" />
-      <GBox x={184} y={15} w={34} h={20} />
-      <GBar x={192} y={23} w={18} />
-      <GBox x={184} y={53} w={34} h={20} />
-      <GBar x={192} y={61} w={12} />
-      <GWire d="M201 73 V82 H39 V78" />
-      <GArrow x={39} y={73} dir="up" />
-    </BannerFrame>
-  );
-}
-
-// Auto runs a short trial of several optimizers side by side and then
-// continues the leader, so the banner forks into lanes that converge.
+// Auto races a short trial of several engines in parallel lanes, then hands
+// the leader's best version on and keeps running only that engine.
 function AutoBanner() {
   return (
     <BannerFrame>
-      <GBox x={22} y={33} w={30} h={22} />
-      <GBar x={29} y={40} w={16} />
-      <GBar x={29} y={46} w={10} />
-      <GWire d="M52 44 H70 C80 44 80 18 90 18" />
-      <GWire d="M52 44 H90" />
-      <GWire d="M52 44 H70 C80 44 80 70 90 70" />
-      <GBar x={94} y={17} w={40} />
-      <GBar x={94} y={43} w={58} />
-      <GBar x={94} y={69} w={28} />
-      <GWire d="M156 44 H176" />
-      <GArrow x={180} y={44} dir="right" />
-      <GBox x={180} y={31} w={42} h={26} accent />
-      <GBar x={188} y={39} w={26} />
-      <GBar x={188} y={45} w={18} />
+      <GBox x={12} y={33} w={28} h={22} />
+      <GBar x={18} y={40} w={16} />
+      <GBar x={18} y={46} w={10} />
+      <GWire d="M40 44 H50 C58 44 58 18 66 18" />
+      <GWire d="M40 44 H66" />
+      <GWire d="M40 44 H50 C58 44 58 70 66 70" />
+      <GWire d="M114 18 H150" dashed />
+      <GWire d="M100 70 H150" dashed />
+      <rect x={66} y={15} width={44} height={6} rx={3} fill="var(--foreground)" fillOpacity={0.22} />
+      <rect x={66} y={41} width={78} height={6} rx={3} fill="var(--primary)" fillOpacity={0.6} />
+      <rect x={66} y={67} width={30} height={6} rx={3} fill="var(--foreground)" fillOpacity={0.22} />
+      <GDot cx={110} cy={18} r={3} />
+      <GDot cx={144} cy={44} r={3.5} accent />
+      <GDot cx={96} cy={70} r={3} />
+      <GWire d="M156 8 V80" dashed />
+      <GWire d="M148 44 H178" />
+      <GArrow x={182} y={44} dir="right" />
+      <GBox x={182} y={30} w={44} h={28} accent />
+      <GBar x={190} y={38} w={28} />
+      <GBar x={190} y={44} w={20} />
+      <GBar x={190} y={50} w={24} />
     </BannerFrame>
   );
 }
 
-// DSPy GEPA: the program's predictors are rewritten from reflective feedback,
-// several candidates per round, and the Pareto front feeds the next round.
+// GEPA reads a version's feedback, reflects it into mutated children, and
+// keeps a Pareto front: for every example, the version that scores best on it.
+function GepaBanner() {
+  return (
+    <BannerFrame>
+      <GBox x={10} y={33} w={30} h={22} />
+      <GBar x={16} y={40} w={18} />
+      <GBar x={16} y={46} w={12} />
+      <GWire d="M25 33 V20 H46" dashed />
+      <GNote x={46} y={9} w={30} h={20} />
+      <GBar x={51} y={15} w={16} />
+      <GBar x={51} y={21} w={20} />
+      <GWire d="M76 19 H86 C92 19 92 34 96 34" dashed />
+      <GWire d="M40 44 H92" />
+      <GArrow x={96} y={44} dir="right" />
+      <GBox x={96} y={30} w={30} h={28} accent />
+      <GBar x={103} y={38} w={16} />
+      <GBar x={103} y={44} w={11} />
+      <GBar x={103} y={50} w={14} />
+      <GWire d="M126 44 H132 C138 44 138 18 144 18" />
+      <GWire d="M126 44 H144" />
+      <GWire d="M126 44 H132 C138 44 138 70 144 70" />
+      <GBox x={144} y={10} w={26} h={16} />
+      <GBar x={149} y={15} w={14} accent />
+      <GBar x={149} y={20} w={10} />
+      <GBox x={144} y={36} w={26} h={16} />
+      <GBar x={149} y={41} w={10} />
+      <GBar x={149} y={46} w={14} accent />
+      <GBox x={144} y={62} w={26} h={16} />
+      <GBar x={149} y={67} w={12} accent />
+      <GBar x={149} y={72} w={8} />
+      <GFrame x={178} y={8} w={52} h={72} />
+      {[0, 1, 2].map((row) =>
+        [0, 1, 2, 3].map((col) => (
+          <GDot
+            key={`${row}-${col}`}
+            cx={188 + col * 11}
+            cy={18 + row * 26}
+            r={3}
+            accent={[1, 0, 2, 0][col] === row}
+          />
+        )),
+      )}
+    </BannerFrame>
+  );
+}
+
+// DSPy GEPA runs the same reflect-and-mutate loop per predictor: one node of
+// the program graph is rewritten, and each child is the whole program with
+// that one predictor changed.
 function DspyGepaBanner() {
   return (
     <BannerFrame>
-      <GBox x={22} y={22} w={40} h={44} />
-      <GBar x={30} y={30} w={24} />
-      <GBar x={30} y={41} w={18} />
-      <GBar x={30} y={52} w={22} />
-      <GWire d="M62 44 H84" />
-      <GArrow x={88} y={44} dir="right" />
-      <GBox x={88} y={30} w={40} h={28} accent />
-      <GBar x={96} y={38} w={24} />
-      <GBar x={96} y={44} w={16} />
-      <GWire d="M128 44 H146 C156 44 156 24 166 24" />
-      <GWire d="M128 44 H146 C156 44 156 64 166 64" />
-      <GBox x={166} y={14} w={44} h={20} />
-      <GBar x={174} y={22} w={26} />
-      <GBox x={166} y={54} w={44} h={20} />
-      <GBar x={174} y={62} w={20} />
-      <GWire d="M188 74 V82 H42 V70" />
-      <GArrow x={42} y={66} dir="up" />
+      <GWire d="M24 44 C30 44 30 22 38 22" />
+      <GWire d="M24 44 C30 44 30 66 38 66" />
+      <GWire d="M54 22 C60 22 60 44 64 44" />
+      <GWire d="M54 66 C60 66 60 44 64 44" />
+      <GDot cx={18} cy={44} r={5} />
+      <GBox x={38} y={15} w={16} h={14} accent />
+      <GDot cx={46} cy={66} r={5} />
+      <GDot cx={69} cy={44} r={5} />
+      <GWire d="M46 15 V8 H80" dashed />
+      <GNote x={80} y={2} w={24} h={14} />
+      <GBar x={84} y={7} w={14} />
+      <GWire d="M92 16 V28" dashed />
+      <GWire d="M74 44 H86" />
+      <GArrow x={90} y={44} dir="right" />
+      <GBox x={90} y={30} w={28} h={28} accent />
+      <GBar x={96} y={38} w={16} />
+      <GBar x={96} y={44} w={11} />
+      <GBar x={96} y={50} w={14} />
+      <GWire d="M118 44 H124 C130 44 130 18 136 18" />
+      <GWire d="M118 44 H136" />
+      <GWire d="M118 44 H124 C130 44 130 70 136 70" />
+      {[18, 44, 70].map((cy) => (
+        <g key={cy}>
+          <GBox x={136} y={cy - 9} w={34} h={18} />
+          <GDot cx={143} cy={cy} r={2.5} />
+          <GDot cx={153} cy={cy} r={2.5} accent />
+          <GDot cx={163} cy={cy} r={2.5} />
+        </g>
+      ))}
+      <GFrame x={178} y={8} w={52} h={72} />
+      {[0, 1, 2].map((row) =>
+        [0, 1, 2, 3].map((col) => (
+          <GDot
+            key={`${row}-${col}`}
+            cx={188 + col * 11}
+            cy={18 + row * 26}
+            r={3}
+            accent={[2, 0, 1, 0][col] === row}
+          />
+        )),
+      )}
     </BannerFrame>
   );
 }
 
-// MIPROv2 proposes instruction and demo candidates per predictor, then a
-// search picks the best combination.
+// MIPROv2 proposes instruction candidates and example sets, then a Bayesian
+// search samples combinations of the two and keeps the best-scoring pair.
 function DspyMiproBanner() {
   return (
     <BannerFrame>
-      <GBox x={22} y={14} w={44} h={18} />
-      <GBar x={30} y={21} w={26} />
-      <GBox x={22} y={35} w={44} h={18} />
-      <GBar x={30} y={42} w={20} />
-      <GBox x={22} y={56} w={44} h={18} />
-      <GBar x={30} y={63} w={24} />
-      <GWire d="M66 23 H84 C96 23 96 44 108 44" />
-      <GWire d="M66 44 H108" />
-      <GWire d="M66 65 H84 C96 65 96 44 108 44" />
-      <GArrow x={112} y={44} dir="right" />
-      <GBox x={112} y={28} w={48} h={32} accent />
-      <GBar x={121} y={36} w={30} />
-      <GBar x={121} y={42} w={22} />
-      <GBar x={121} y={48} w={26} />
-      <GWire d="M160 44 H184" />
-      <GArrow x={188} y={44} dir="right" />
-      <GBox x={188} y={33} w={34} h={22} />
-      <GBar x={196} y={40} w={18} />
-      <GBar x={196} y={46} w={12} />
+      {[12, 36, 60].map((y) => (
+        <g key={y}>
+          <GBox x={10} y={y} w={30} h={16} />
+          <GBar x={15} y={y + 5} w={20} />
+          <GBar x={15} y={y + 10} w={13} />
+        </g>
+      ))}
+      {[12, 36, 60].map((y) => (
+        <g key={y}>
+          <GBox x={48} y={y} w={30} h={16} />
+          <GDot cx={56} cy={y + 8} r={2.5} />
+          <GDot cx={63} cy={y + 8} r={2.5} />
+          <GDot cx={70} cy={y + 8} r={2.5} />
+        </g>
+      ))}
+      <GWire d="M78 44 H90" />
+      <GArrow x={94} y={44} dir="right" />
+      <GFrame x={96} y={8} w={72} h={72} />
+      {[0, 1, 2].map((row) =>
+        [0, 1, 2].map((col) => (
+          <GDot
+            key={`${row}-${col}`}
+            cx={110 + col * 22}
+            cy={20 + row * 24}
+            r={4}
+            accent={row === 0 && col === 2}
+            dim={!((row === 2 && col === 0) || (row === 1 && col === 1) || (row === 0 && col === 2))}
+          />
+        )),
+      )}
+      <GWire d="M114 64 L128 48 M136 40 L150 24" dashed />
+      <GWire d="M168 20 H178 C186 20 186 44 192 44" />
+      <GArrow x={196} y={44} dir="right" />
+      <GBox x={196} y={28} w={32} h={32} accent />
+      <GBar x={202} y={36} w={20} />
+      <GBar x={202} y={42} w={14} />
+      <GDot cx={205} cy={51} r={2.5} />
+      <GDot cx={212} cy={51} r={2.5} />
+      <GDot cx={219} cy={51} r={2.5} />
     </BannerFrame>
   );
 }
 
-// Bootstrap few-shot runs the program on training cases and keeps the traces
-// that score well as demonstrations in the prompt.
+// Bootstrap few-shot runs the program on training cases, keeps the traces the
+// metric passes, and pins those into the prompt as worked examples.
 function DspyBootstrapBanner() {
+  const traces = [
+    { y: 8, ok: true },
+    { y: 28, ok: false },
+    { y: 48, ok: true },
+    { y: 68, ok: false },
+  ];
   return (
     <BannerFrame>
-      <GBox x={22} y={33} w={34} h={22} />
-      <GBar x={30} y={40} w={18} />
-      <GBar x={30} y={46} w={12} />
-      <GWire d="M56 44 H78" />
-      <GArrow x={82} y={44} dir="right" />
-      <GBox x={82} y={12} w={36} h={14} />
-      <GBar x={89} y={18} w={22} />
-      <GBox x={82} y={30} w={36} h={14} accent />
-      <GBar x={89} y={36} w={22} />
-      <GBox x={82} y={48} w={36} h={14} />
-      <GBar x={89} y={54} w={18} />
-      <GBox x={82} y={66} w={36} h={14} accent />
-      <GBar x={89} y={72} w={20} />
-      <GWire d="M118 37 H150 C160 37 160 44 170 44" />
-      <GWire d="M118 73 H150 C160 73 160 44 170 44" />
-      <GArrow x={174} y={44} dir="right" />
-      <GBox x={174} y={26} w={48} h={36} accent />
-      <GBar x={182} y={34} w={30} />
-      <GBar x={182} y={41} w={22} />
-      <GBar x={182} y={48} w={26} />
+      <GBox x={10} y={31} w={30} h={26} />
+      <GPlay x={25} y={44} />
+      <GWire d="M40 44 H46 C52 44 52 14 58 14" />
+      <GWire d="M40 44 H46 C52 44 52 34 58 34" />
+      <GWire d="M40 44 H46 C52 44 52 54 58 54" />
+      <GWire d="M40 44 H46 C52 44 52 74 58 74" />
+      {traces.map(({ y, ok }) => (
+        <g key={y}>
+          <GBox x={58} y={y} w={46} h={12} />
+          <GBar x={63} y={y + 5} w={ok ? 30 : 24} />
+          <GMark x={112} y={y + 6} ok={ok} />
+        </g>
+      ))}
+      <GWire d="M118 14 H134 C142 14 142 38 150 38" />
+      <GWire d="M118 54 H134 C142 54 142 60 150 60" />
+      <GArrow x={154} y={38} dir="right" />
+      <GArrow x={154} y={60} dir="right" />
+      <GBox x={154} y={12} w={72} h={64} />
+      <GBar x={161} y={20} w={40} />
+      <GBar x={161} y={26} w={28} />
+      <GBox x={160} y={32} w={60} h={13} accent />
+      <GBar x={165} y={37} w={30} />
+      <GBox x={160} y={54} w={60} h={13} accent />
+      <GBar x={165} y={59} w={30} />
+    </BannerFrame>
+  );
+}
+
+// Best-of-N draws N independent samples of the same prompt; none sees another,
+// and the scorer keeps the single best one.
+function BestOfNBanner() {
+  const samples = [
+    { x: 54, score: 9 },
+    { x: 80, score: 13 },
+    { x: 106, score: 6 },
+    { x: 132, score: 17 },
+    { x: 158, score: 11 },
+  ];
+  const picked = 3;
+  return (
+    <BannerFrame>
+      <GBox x={8} y={33} w={30} h={22} />
+      <GBar x={14} y={40} w={18} />
+      <GBar x={14} y={46} w={12} />
+      <GWire d="M38 44 H44 V10 H168" />
+      {samples.map(({ x, score }, i) => (
+        <g key={x}>
+          <GWire d={`M${x + 10} 10 V18`} />
+          <GBox x={x} y={18} w={20} h={32} accent={i === picked} />
+          <GBar x={x + 4} y={25} w={12} />
+          <GBar x={x + 4} y={31} w={9} />
+          <GBar x={x + 4} y={37} w={11} />
+          <rect
+            x={x + 3}
+            y={74 - score}
+            width={14}
+            height={score}
+            rx={1.5}
+            fill={i === picked ? "var(--primary)" : "var(--foreground)"}
+            fillOpacity={i === picked ? 0.75 : 0.2}
+          />
+        </g>
+      ))}
+      <GWire d="M50 76 H182" />
+      <GWire d="M142 76 V83 H205 V62" />
+      <GArrow x={205} y={58} dir="up" />
+      <GBox x={190} y={28} w={30} h={30} accent />
+      <GBar x={196} y={36} w={18} />
+      <GBar x={196} y={42} w={12} />
+      <GMark x={205} y={50} ok />
+    </BannerFrame>
+  );
+}
+
+// AutoResearch is an agent in a loop: hypothesize, edit the code, run it,
+// read the results, and go again, writing every step into its notebook.
+function AutoResearchBanner() {
+  return (
+    <BannerFrame>
+      <GWire d="M80 22 C104 22 116 30 116 40" />
+      <GArrow x={116} y={44} dir="down" />
+      <GWire d="M116 50 C116 62 104 68 92 68" />
+      <GArrow x={88} y={68} dir="left" />
+      <GWire d="M68 68 C46 68 34 60 34 50" />
+      <GArrow x={34} y={46} dir="up" />
+      <GWire d="M34 38 C34 28 46 22 56 22" />
+      <GArrow x={60} y={22} dir="right" />
+      <GNote x={60} y={12} w={24} h={20} />
+      <GBar x={64} y={18} w={12} />
+      <GBar x={64} y={24} w={15} />
+      <GBox x={102} y={36} w={30} h={18} />
+      <GBar x={107} y={41} w={12} />
+      <GBar x={111} y={47} w={14} accent />
+      <GBox x={66} y={58} w={24} h={20} />
+      <GPlay x={78} y={68} />
+      <GBox x={18} y={36} w={30} h={18} />
+      <GChart x={23} y={51} heights={[5, 8, 6, 11]} accentLast />
+      <GBox x={62} y={37} w={26} h={16} accent />
+      <GDot cx={70} cy={45} r={2.5} />
+      <GDot cx={80} cy={45} r={2.5} />
+      <GWire d="M132 45 H162" dashed />
+      <GArrow x={166} y={45} dir="right" />
+      <GNote x={166} y={8} w={58} h={72} />
+      {[16, 24, 32, 40, 48, 56, 64, 72].map((y, i) => (
+        <GBar key={y} x={173} y={y} w={[38, 30, 42, 26, 36, 40, 22, 32][i] ?? 30} accent={i === 7} />
+      ))}
+    </BannerFrame>
+  );
+}
+
+// Meta-Harness leaves the model alone and has an agent rewrite the code around
+// it: the tools it may call, its retry policy, and the glue between them.
+function MetaHarnessBanner() {
+  return (
+    <BannerFrame>
+      <GBox x={8} y={30} w={30} h={28} accent />
+      <GDot cx={17} cy={41} r={2.5} />
+      <GDot cx={29} cy={41} r={2.5} />
+      <GBar x={15} y={49} w={16} />
+      <GWire d="M38 44 H56" />
+      <GArrow x={60} y={44} dir="right" />
+      <GFrame x={62} y={6} w={166} h={76} />
+      <GBox x={70} y={14} w={44} h={60} />
+      <GBar x={76} y={22} w={28} />
+      <GBar x={80} y={29} w={24} accent />
+      <GBar x={80} y={36} w={18} />
+      <GBar x={76} y={43} w={30} />
+      <GBar x={80} y={50} w={22} accent />
+      <GBar x={80} y={57} w={16} />
+      <GBar x={76} y={64} w={24} />
+      <GWire d="M114 44 H138" />
+      <GBox x={138} y={32} w={36} h={24} />
+      <GBar x={145} y={41} w={22} />
+      <GBar x={145} y={47} w={14} />
+      <GWire d="M174 38 H184 C190 38 190 22 196 22" />
+      <GBox x={196} y={13} w={26} h={18} />
+      <path
+        d="M205 26 L213 18 M211 17 a3 3 0 1 0 3 3"
+        fill="none"
+        stroke="var(--foreground)"
+        strokeOpacity={0.4}
+        strokeWidth={1.25}
+        strokeLinecap="round"
+      />
+      <GWire d="M174 50 H184 C190 50 190 64 196 64" />
+      <path
+        d="M216 64 a7 7 0 1 1 -2 -5"
+        fill="none"
+        stroke="var(--primary)"
+        strokeOpacity={0.8}
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <GArrow x={215} y={57} dir="up" />
+    </BannerFrame>
+  );
+}
+
+// AutoSaddler circles one candidate through critique, patch and re-score; the
+// score trail on the right climbs with every lap.
+function AutoSaddlerBanner() {
+  return (
+    <BannerFrame>
+      <GBox x={8} y={34} w={26} h={20} />
+      <GBar x={13} y={41} w={16} />
+      <GBar x={13} y={46} w={10} />
+      <GWire d="M34 44 H56" />
+      <GArrow x={60} y={44} dir="right" />
+      <path
+        d="M100 9 A35 35 0 1 1 99.9 9"
+        fill="none"
+        stroke="var(--foreground)"
+        strokeOpacity={0.22}
+        strokeWidth={1.25}
+        strokeDasharray="3 3"
+      />
+      <GArrow x={133} y={56} dir="down" />
+      <GArrow x={67} y={56} dir="up" />
+      <GArrow x={100} y={79} dir="left" />
+      <GBox x={84} y={33} w={32} h={22} accent />
+      <GBar x={90} y={40} w={20} />
+      <GBar x={90} y={46} w={14} />
+      <GNote x={88} y={0} w={24} h={16} />
+      <GBar x={92} y={5} w={14} />
+      <GBar x={92} y={10} w={10} />
+      <GBox x={124} y={58} w={24} h={16} />
+      <GBar x={129} y={63} w={14} accent />
+      <GBar x={129} y={68} w={9} />
+      <GBox x={52} y={58} w={24} h={16} />
+      <GChart x={57} y={71} heights={[4, 7, 10]} accentLast />
+      <GWire d="M150 44 H164" dashed />
+      <GArrow x={168} y={44} dir="right" />
+      <GChart x={174} y={74} heights={[10, 18, 24, 32, 40, 48]} accentLast />
+      <GWire d="M172 76 H212" />
+    </BannerFrame>
+  );
+}
+
+// ShinkaEvolve keeps islands of candidates; each generation an LLM mutates
+// the survivors, selection drops the weak ones, and islands swap migrants.
+function ShinkaEvolveBanner() {
+  const gens = [12, 82, 152];
+  const islands = [8, 48];
+  // Per generation, per island: the members selection drops.
+  const dropped: number[][][] = [
+    [[1], [2]],
+    [[0], [1]],
+    [[], []],
+  ];
+  return (
+    <BannerFrame>
+      {gens.map((gx, g) =>
+        islands.map((iy, i) => (
+          <g key={`${g}-${i}`}>
+            <GFrame x={gx} y={iy} w={44} h={32} />
+            {[0, 1, 2].map((k) => (
+              <GDot
+                key={k}
+                cx={gx + 10 + k * 12}
+                cy={iy + 16 + (k === 1 ? -5 : 4)}
+                accent={g === 2 && i === 0 && k === 1}
+                dim={dropped[g]?.[i]?.includes(k) ?? false}
+              />
+            ))}
+          </g>
+        )),
+      )}
+      {[56, 126].map((x) => (
+        <g key={x}>
+          <GWire d={`M${x} 24 H${x + 6} C${x + 10} 24 ${x + 10} 36 ${x + 13} 38`} />
+          <GWire d={`M${x} 64 H${x + 6} C${x + 10} 64 ${x + 10} 52 ${x + 13} 50`} />
+          <GBox x={x + 6} y={36} w={14} h={16} accent />
+          <GBar x={x + 9} y={43} w={8} />
+          <GWire d={`M${x + 20} 40 C${x + 23} 38 ${x + 22} 24 ${x + 26} 24`} />
+          <GWire d={`M${x + 20} 48 C${x + 23} 50 ${x + 22} 64 ${x + 26} 64`} />
+        </g>
+      ))}
+      <GWire d="M174 40 V48" dashed />
+      <GWire d="M196 24 H210 C218 24 218 44 224 44" />
+      <GArrow x={228} y={44} dir="right" />
     </BannerFrame>
   );
 }
@@ -380,11 +555,11 @@ const GENERIC_VISUAL: EngineVisual = { Banner: GenericBanner, icon: Cube };
 
 const ENGINE_VISUALS: Record<string, EngineVisual> = {
   auto: { Banner: AutoBanner, icon: MagicWand },
-  dspy_gepa: { Banner: DspyGepaBanner, icon: GitBranch },
-  dspy_miprov2: { Banner: DspyMiproBanner, icon: ListChecks },
-  dspy_bootstrap_fewshot: { Banner: DspyBootstrapBanner, icon: Books },
+  dspy_gepa: { Banner: DspyGepaBanner, icon: TreeStructure },
+  dspy_miprov2: { Banner: DspyMiproBanner, icon: Crosshair },
+  dspy_bootstrap_fewshot: { Banner: DspyBootstrapBanner, icon: PushPin },
   gepa: { Banner: GepaBanner, icon: GitBranch },
-  best_of_n: { Banner: BestOfNBanner, icon: Shuffle },
+  best_of_n: { Banner: BestOfNBanner, icon: DiceFive },
   autoresearch: { Banner: AutoResearchBanner, icon: Robot },
   meta_harness: { Banner: MetaHarnessBanner, icon: Wrench },
   autosaddler: { Banner: AutoSaddlerBanner, icon: ArrowsClockwise },
