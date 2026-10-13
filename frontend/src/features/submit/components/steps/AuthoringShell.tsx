@@ -93,7 +93,8 @@ function ModeToggle({ value, onChange, disabledReason, start, module }: ModeTogg
 export interface AuthoringShellProps extends ModeToggleProps {
   // The agent chat or interview, shown in the start pane while in auto mode.
   sidePanel: React.ReactNode;
-  title: React.ReactNode;
+  // Steps that head their own body (Inputs, Optimizer) leave this out.
+  title?: React.ReactNode;
   // Guidance for the step; hovering the title shows it.
   description?: string;
   children: React.ReactNode;
@@ -147,11 +148,13 @@ export function AuthoringShell({
           </div>
         )}
         <div className="flex min-h-0 min-w-0 flex-col self-stretch">
-          <div className="shrink-0 border-b border-border/30 px-4 py-3 sm:px-6">
-            <h3 className="inline-flex text-lg font-semibold tracking-tight text-foreground">
-              {description ? <HelpTip text={description}>{title}</HelpTip> : title}
-            </h3>
-          </div>
+          {title && (
+            <div className="shrink-0 border-b border-border/30 px-4 py-3 sm:px-6">
+              <h3 className="inline-flex text-lg font-semibold tracking-tight text-foreground">
+                {description ? <HelpTip text={description}>{title}</HelpTip> : title}
+              </h3>
+            </div>
+          )}
           {children}
         </div>
       </div>

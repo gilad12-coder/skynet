@@ -65,6 +65,7 @@ import {
   presetEngine,
   presetModels,
   resolvedMetricModel,
+  taskIssue,
   type InputsSlice,
   type MetaSlice,
   type OptimizerSlice,
@@ -114,13 +115,6 @@ function reducer(state: WizardV2State, action: Action): WizardV2State {
 const hasModel = (config: ModelConfig | null | undefined): config is ModelConfig =>
   Boolean(config?.name.trim());
 
-function startingVersionEmpty(version: TaskSlice["startingVersion"]): boolean {
-  if (version === null) return true;
-  if (typeof version === "string") return !version.trim();
-  const parts = Object.values(version);
-  return parts.length === 0 || parts.every((part) => !part.trim());
-}
-
 /** The catalog entry for the current choice, when the catalog matches the setup. */
 function catalogOption(state: WizardV2State, catalog: OptimizerCatalogResponse | null) {
   if (
@@ -140,10 +134,7 @@ function computeStepIssue(
   const { task, inputs, optimizer, workspace } = state;
   switch (step) {
     case "task":
-      if (!task.objective.trim()) return "submit.v2.task.issue.objective";
-      if (!task.artifactKind) return "submit.v2.task.issue.kind";
-      if (startingVersionEmpty(task.startingVersion)) return "submit.v2.task.issue.starting";
-      return task.confirmed ? null : "submit.v2.task.artifact.confirm_hint";
+      return taskIssue(task);
     case "inputs": {
       const caseCount =
         inputs.cases.length > 0 ? inputs.cases.length : inputs.stagedDatasetId ? inputs.rowCount : 0;
@@ -610,7 +601,7 @@ export function WizardV2Provider({
   }, [kind, mode]);
 
   // `?clone=` hydrates every slice it can from the source run's stored,
-  // server-scrubbed payload; nothing is confirmed, so the user reviews each step.
+  // server-scrubbed payload; the user still walks it forward one step at a time.
   const cloneRan = useRef(false);
   useEffect(() => {
     const cloneId = searchParams.get("clone");

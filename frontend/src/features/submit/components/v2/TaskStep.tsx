@@ -22,31 +22,20 @@ import { cn } from "@/shared/lib/utils";
 
 import { useTaskInterview, type TaskInterviewState } from "../../hooks/use-task-interview";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
-import type { TaskSlice } from "../../lib/wizard-v2";
+import { taskIssue } from "../../lib/wizard-v2";
 import { AuthoringShell } from "../steps/AuthoringShell";
 import { ArtifactConfirmCard, v2Msg } from "./ArtifactConfirmCard";
 import { WizardScreen } from "./WizardScreen";
 
-/** The i18n key of what keeps the task from being confirmed, or null. */
-function taskIssue(task: TaskSlice): string | null {
-  if (!task.objective.trim()) return "submit.v2.task.issue.objective";
-  if (!task.artifactKind) return "submit.v2.task.issue.kind";
-  const v = task.startingVersion;
-  const empty =
-    v === null ||
-    (typeof v === "string" ? !v.trim() : Object.values(v).every((part) => !part.trim()));
-  return empty ? "submit.v2.task.issue.starting" : null;
-}
-
 /**
  * Step 1, Task + Artifact: the interview in the side panel writes the
  * objective, background, artifact kind and starting version; the main pane
- * shows them editable, and "Looks right" confirms. Screen 0 holds the
+ * shows them editable, and Continue moves on. Screen 0 holds the
  * objective and background, screen 1 the artifact.
  */
 export function TaskStep({ page }: { page: number }) {
   const ctx = useWizardV2();
-  const { state, patchTask, guided } = ctx;
+  const { state, guided } = ctx;
   const task = state.task;
   const t = (key: string) => v2Msg(key, guided);
 
@@ -93,9 +82,7 @@ export function TaskStep({ page }: { page: number }) {
           startingVersion={task.startingVersion}
           onStartingVersionChange={(v) => interview.editField("startingVersion", v)}
           rationale={task.artifactRationale}
-          confirmed={task.confirmed}
-          confirmIssue={taskIssue(task)}
-          onConfirm={() => patchTask({ confirmed: true })}
+          issue={taskIssue(task)}
           writing={interview.busy}
           guided={guided}
         />

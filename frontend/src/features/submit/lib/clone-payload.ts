@@ -235,8 +235,8 @@ function cloneLegacyDspy(payload: ClonePayload): Omit<CloneSlices, "meta"> {
 }
 
 /**
- * The wizard slices a stored run fills. Nothing is marked confirmed: a cloned
- * setup is reviewed step by step and its contract checked again before Run.
+ * The wizard slices a stored run fills. A cloned setup is still walked step
+ * by step and its contract checked again before Run.
  */
 export function cloneToSlices(
   optimizationType: string,
