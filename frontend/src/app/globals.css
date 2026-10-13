@@ -192,7 +192,7 @@
   --code-accent: #8a4a2f;
   --code-type: #8a6a12;
   --code-number: #a85a1c;
-  --code-text: #131313;
+  --code-text: #1c1612;
   --code-string: #3f7a3a;
   --code-comment: #88898d;
   --code-punct: #78797c;
@@ -203,40 +203,40 @@
   --duration-base: 160ms;
   --ease-snappy: cubic-bezier(0.2, 0.8, 0.2, 1);
 
-  --background: #fcfcfc;
-  --foreground: #131313;
+  --background: #fcfaf7;
+  --foreground: #1c1612;
   --card: #ffffff;
-  --card-foreground: #131313;
+  --card-foreground: #1c1612;
   --popover: #ffffff;
-  --popover-foreground: #131313;
-  --primary: #7a1f3d;
+  --popover-foreground: #1c1612;
+  --primary: #b4521f;
   --primary-foreground: #ffffff;
-  --primary-hover: #5e1730;
-  --primary-fill: #7a1f3d;
-  --secondary: #f0f0f1;
-  --secondary-foreground: #131313;
-  --muted: #f0f0f1;
-  --muted-foreground: #78797c;
-  --accent: #ebebec;
-  --accent-foreground: #131313;
-  --accent-muted: rgba(122, 31, 61, 0.05);
+  --primary-hover: #8f4318;
+  --primary-fill: #b4521f;
+  --secondary: #f3eee8;
+  --secondary-foreground: #1c1612;
+  --muted: #f3eee8;
+  --muted-foreground: #706356;
+  --accent: #ede6dd;
+  --accent-foreground: #1c1612;
+  --accent-muted: rgba(180, 82, 31, 0.05);
   --destructive: #d03b3b;
-  --border: #e3e3e5;
-  --input: #d5d6d8;
-  --ring: #7a1f3d;
+  --border: #e6ded4;
+  --input: #d8cdc0;
+  --ring: #b4521f;
 
-  --bg: #f3f3f4;
+  --bg: #f5f0ea;
   --surface-1: #ffffff;
-  --surface-2: #f8f8f9;
-  --surface-3: #f0f0f1;
+  --surface-2: #faf7f3;
+  --surface-3: #f3eee8;
   --splash-ground: var(--surface-3);
   --splash-ink: var(--foreground);
-  --border-subtle: #e9e9eb;
-  --text-1: #131313;
-  --text-2: #515256;
-  --text-3: #78797c;
-  --blue: #7a1f3d;
-  --blue-light: rgba(122, 31, 61, 0.1);
+  --border-subtle: #ece5dc;
+  --text-1: #1c1612;
+  --text-2: #574a3f;
+  --text-3: #706356;
+  --blue: #b4521f;
+  --blue-light: rgba(180, 82, 31, 0.1);
 
   --danger: #c4413a;
   --danger-dim: rgba(196, 65, 58, 0.1);
@@ -257,59 +257,59 @@
   --shadow-inset: none;
   --shadow-float: 0 8px 24px -6px rgba(19, 19, 19, 0.14), 0 2px 6px -2px rgba(19, 19, 19, 0.08);
 
-  /* Run-status palette (Light): success is teal, failed red, running the wine accent; the
-     wine-tinted pending and paused sit apart by lightness. */
+  /* Run-status palette (Light): success is teal, failed red, running the hoatzin's blue face
+     so it never reads as failure; crest-tinted pending and paused sit apart by lightness. */
   --status-success: var(--success);
-  --status-running: var(--primary);
+  --status-running: #3f6faa;
   --status-failed: var(--danger);
-  --status-pending: #ecd3dc;
-  --status-paused: #9a5c70;
-  --status-cancelled: #a4a5aa;
+  --status-pending: #f1dccb;
+  --status-paused: #a0694a;
+  --status-cancelled: #a89a8c;
   --tree-pass: var(--primary);
   --tree-fail: var(--muted-foreground);
   --tree-winner: #9c7a3f;
   --tree-winner-halo: rgba(156, 122, 63, 0.18);
   --tree-winner-fill: #f8ebc8;
-  --tree-winner-number: #131313;
+  --tree-winner-number: #1c1612;
   --tree-winner-badge-ink: #ffffff;
-  --tree-ghost-fill: #e4e4e7;
+  --tree-ghost-fill: #e8e1d8;
   --tree-grid: oklch(0.91 0.006 50);
   --tree-grid-axis: oklch(0.94 0.005 50);
   --trust-ask: #3d6db0;
   --trust-auto-safe: #2e7d4f;
   --trust-yolo: #c03a3a;
 
-  --chart-1: #7a1f3d;
-  --chart-2: #a8476a;
-  --chart-3: #d595ab;
-  --chart-4: #a9d0c1;
-  --chart-5: #d6e9e1;
+  --chart-1: #b4521f;
+  --chart-2: #cf7a3a;
+  --chart-3: #ddb27c;
+  --chart-4: #6aa5dc;
+  --chart-5: #c9def2;
 
-  --gradient-progress: linear-gradient(90deg, #7a1f3d, #a8476a, #d595ab);
+  --gradient-progress: linear-gradient(90deg, #8f4318, #b4521f, #cf7a3a);
 
-  --sidebar: #f3f3f4;
-  --sidebar-foreground: #131313;
-  --sidebar-primary: #7a1f3d;
+  --sidebar: #f5f0ea;
+  --sidebar-foreground: #1c1612;
+  --sidebar-primary: #b4521f;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #ebebec;
-  --sidebar-accent-foreground: #131313;
-  --sidebar-border: #e3e3e5;
-  --sidebar-ring: #7a1f3d;
+  --sidebar-accent: #ede6dd;
+  --sidebar-accent-foreground: #1c1612;
+  --sidebar-border: #e6ded4;
+  --sidebar-ring: #b4521f;
 
-  --skeleton-base: #ebebec;
-  --skeleton-highlight: #f6f6f7;
-  --scrollbar-thumb: rgba(19, 19, 19, 0.18);
-  --scrollbar-thumb-hover: rgba(19, 19, 19, 0.32);
+  --skeleton-base: #ede6dd;
+  --skeleton-highlight: #f6f2ed;
+  --scrollbar-thumb: rgba(28, 22, 18, 0.18);
+  --scrollbar-thumb-hover: rgba(28, 22, 18, 0.32);
   /* Hover/glow tints and the dim behind overlays. */
-  --gold-tint: rgba(122, 31, 61, 0.1);
-  --spotlight-dim: rgba(19, 19, 19, 0.56);
+  --gold-tint: rgba(180, 82, 31, 0.1);
+  --spotlight-dim: rgba(28, 22, 18, 0.56);
 }
 
 /* ════════════════════════════════════════════
    DARK MODE
-   Neutral greys: page #242426, cards a step up,
-   borders #414145. Soft off-white text, grey muted
-   text, wine accent (deep #7a1f3d fills, #e07c98
+   Bronze-brown: page #221d19, cards a step up,
+   borders #483d34. Warm off-white text, taupe muted
+   text, rufous accent (deep #b4521f fills, #e0935a
    text). Every text pair clears WCAG AA.
    ════════════════════════════════════════════ */
 .dark {
@@ -320,49 +320,49 @@
   --code-accent: #e8b48f;
   --code-type: #dcbc72;
   --code-number: #e6a86e;
-  --code-text: #f0f0f1;
+  --code-text: #f3ede6;
   --code-string: #a9c48d;
   --code-comment: #8b8c92;
   --code-punct: #a0a1a6;
   --code-function: #8fb8de;
 
-  --background: #242426;
-  --foreground: #f0f0f1;
-  --card: #2e2e31;
-  --card-foreground: #f0f0f1;
-  --popover: #333336;
-  --popover-foreground: #f0f0f1;
-  --primary: #e07c98;
+  --background: #221d19;
+  --foreground: #f3ede6;
+  --card: #2c2621;
+  --card-foreground: #f3ede6;
+  --popover: #312a24;
+  --popover-foreground: #f3ede6;
+  --primary: #e0935a;
   --primary-foreground: #ffffff;
-  /* Solid surfaces (buttons, bars, dots) keep the deep Light wine with white on top and
-     brighten on hover; --primary is a lifted rose because it also colours text on dark. */
-  --primary-hover: #8f2a4b;
-  --primary-fill: #7a1f3d;
-  --secondary: #38383b;
-  --secondary-foreground: #f0f0f1;
-  --muted: #38383b;
-  --muted-foreground: #a0a1a6;
-  --accent: #3e3e42;
-  --accent-foreground: #f0f0f1;
-  --accent-muted: rgba(224, 124, 152, 0.06);
+  /* Solid surfaces (buttons, bars, dots) keep the deep Light rufous with white on top and
+     brighten on hover; --primary is a lifted amber because it also colours text on dark. */
+  --primary-hover: #c9622a;
+  --primary-fill: #b4521f;
+  --secondary: #382f28;
+  --secondary-foreground: #f3ede6;
+  --muted: #382f28;
+  --muted-foreground: #a89a8c;
+  --accent: #3e342c;
+  --accent-foreground: #f3ede6;
+  --accent-muted: rgba(224, 147, 90, 0.06);
   --destructive: #e66767;
-  --border: #414145;
-  --input: #4a4a4f;
-  --ring: #e07c98;
+  --border: #483d34;
+  --input: #54483d;
+  --ring: #e0935a;
 
-  --bg: #1e1e20;
-  --surface-1: #2e2e31;
-  --surface-2: #29292c;
-  --surface-3: #38383b;
+  --bg: #1c1814;
+  --surface-1: #2c2621;
+  --surface-2: #27211d;
+  --surface-3: #382f28;
   /* The setup splash sits on the page's near-black with pure white type, for full contrast. */
   --splash-ground: var(--background);
   --splash-ink: #ffffff;
-  --border-subtle: #363639;
-  --text-1: #f0f0f1;
-  --text-2: #c2c3c8;
-  --text-3: #94959b;
-  --blue: #e07c98;
-  --blue-light: rgba(224, 124, 152, 0.14);
+  --border-subtle: #3a312a;
+  --text-1: #f3ede6;
+  --text-2: #cdbfb1;
+  --text-3: #a0917f;
+  --blue: #e0935a;
+  --blue-light: rgba(224, 147, 90, 0.14);
 
   --danger: #ef8a6a;
   --danger-dim: rgba(239, 138, 106, 0.15);
@@ -376,14 +376,14 @@
 
   --shadow-float: 0 10px 28px -6px rgba(0, 0, 0, 0.6), 0 2px 8px -2px rgba(0, 0, 0, 0.45);
 
-  /* Run-status palette (Dark): success is teal, failed red, running the wine accent; the
-     wine-tinted pending and paused sit apart by lightness. */
+  /* Run-status palette (Dark): success is teal, failed red, running the hoatzin's blue face
+     so it never reads as failure; crest-tinted pending and paused sit apart by lightness. */
   --status-success: var(--success);
-  --status-running: var(--primary);
+  --status-running: #82b8e6;
   --status-failed: var(--danger);
-  --status-pending: #5a3a45;
-  --status-paused: #b07d8c;
-  --status-cancelled: #6c6d72;
+  --status-pending: #5a3e2c;
+  --status-paused: #c08a66;
+  --status-cancelled: #75695e;
   --tree-pass: var(--primary);
   --tree-fail: var(--muted-foreground);
   --tree-winner: #d9a441;
@@ -391,35 +391,35 @@
   --tree-winner-fill: #8a6212;
   --tree-winner-number: #ffffff;
   --tree-winner-badge-ink: #2a1f08;
-  --tree-ghost-fill: #38383b;
+  --tree-ghost-fill: #382f28;
   --tree-grid: rgba(255, 255, 255, 0.07);
   --tree-grid-axis: rgba(255, 255, 255, 0.045);
   --trust-ask: #7ba3dd;
   --trust-auto-safe: #7fbf8e;
   --trust-yolo: #e8706a;
 
-  --chart-1: #e07c98;
-  --chart-2: #f0aabd;
-  --chart-3: #b5b8be;
-  --chart-4: #c3e6d8;
-  --chart-5: #7c8088;
+  --chart-1: #e0935a;
+  --chart-2: #f0b98a;
+  --chart-3: #ddb27c;
+  --chart-4: #82b8e6;
+  --chart-5: #8a7d70;
 
-  --gradient-progress: linear-gradient(90deg, #7a1f3d, #e07c98, #f0aabd);
+  --gradient-progress: linear-gradient(90deg, #b4521f, #e0935a, #f0b98a);
 
-  --sidebar: #1e1e20;
-  --sidebar-foreground: #f0f0f1;
-  --sidebar-primary: #e07c98;
+  --sidebar: #1c1814;
+  --sidebar-foreground: #f3ede6;
+  --sidebar-primary: #e0935a;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #38383b;
-  --sidebar-accent-foreground: #f0f0f1;
-  --sidebar-border: #414145;
-  --sidebar-ring: #e07c98;
+  --sidebar-accent: #382f28;
+  --sidebar-accent-foreground: #f3ede6;
+  --sidebar-border: #483d34;
+  --sidebar-ring: #e0935a;
 
-  --skeleton-base: #333336;
-  --skeleton-highlight: #3e3e42;
+  --skeleton-base: #312a24;
+  --skeleton-highlight: #3e342c;
   --scrollbar-thumb: rgba(255, 255, 255, 0.16);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
-  --gold-tint: rgba(224, 124, 152, 0.14);
+  --gold-tint: rgba(224, 147, 90, 0.14);
   /* The page is already near-black, so the tour's dim goes deeper still to
      read as a dim. */
   --spotlight-dim: rgba(0, 0, 0, 0.62);

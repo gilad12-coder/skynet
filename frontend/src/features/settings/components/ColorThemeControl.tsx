@@ -23,7 +23,7 @@ type Palette = {
   line: string;
   muted: string;
   text: string;
-  wine: string;
+  brand: string;
   link: string;
   ok: string;
   bad: string;
@@ -31,26 +31,26 @@ type Palette = {
 
 const SCREENS: Record<"light" | "dark", Palette> = {
   light: {
-    page: "#fcfcfc",
-    side: "#f3f3f4",
+    page: "#fcfaf7",
+    side: "#f5f0ea",
     card: "#ffffff",
-    line: "#e6e6e8",
-    muted: "#d3d4d7",
-    text: "#3a3a3d",
-    wine: "#7a1f3d",
-    link: "#7a1f3d",
+    line: "#e6ded4",
+    muted: "#d8cdc0",
+    text: "#3d342c",
+    brand: "#b4521f",
+    link: "#b4521f",
     ok: "#2f7565",
     bad: "#c4413a",
   },
   dark: {
-    page: "#1f1f21",
-    side: "#19191b",
-    card: "#29292c",
-    line: "#38383c",
-    muted: "#4b4b50",
-    text: "#d9d9dc",
-    wine: "#7a1f3d",
-    link: "#e07c98",
+    page: "#221d19",
+    side: "#1c1814",
+    card: "#2c2621",
+    line: "#483d34",
+    muted: "#54483d",
+    text: "#e6dccf",
+    brand: "#b4521f",
+    link: "#e0935a",
     ok: "#6cc0a8",
     bad: "#ef8a6a",
   },
@@ -75,7 +75,7 @@ function Screen({ palette: p }: { palette: Palette }) {
       <rect x={x} y={y} width={17} height={h} fill={p.side} />
       <rect x={x + 17} y={y} width={0.4} height={h} fill={p.line} />
       <rect x={x + 3} y={y + 3.5} width={9} height={1.8} rx={0.9} fill={p.link} />
-      <rect x={x + 3} y={y + 8} width={11} height={3.2} rx={1.6} fill={p.wine} />
+      <rect x={x + 3} y={y + 8} width={11} height={3.2} rx={1.6} fill={p.brand} />
       {[14.5, 18.5, 22.5, 26.5].map((dy, i) => (
         <rect
           key={dy}
@@ -97,7 +97,7 @@ function Screen({ palette: p }: { palette: Palette }) {
         return (
           <g key={i}>
             {i > 0 && <rect x={sx} y={y + 6.5} width={0.4} height={7} fill={p.line} />}
-            <circle cx={sx + 3.2} cy={y + 7.6} r={0.7} fill={[p.wine, p.ok, p.bad][i]} />
+            <circle cx={sx + 3.2} cy={y + 7.6} r={0.7} fill={[p.brand, p.ok, p.bad][i]} />
             <rect x={sx + 4.6} y={y + 7.1} width={statW * 0.4} height={1} rx={0.5} fill={p.muted} />
             <rect
               x={sx + 2.5}
@@ -113,7 +113,7 @@ function Screen({ palette: p }: { palette: Palette }) {
       })}
 
       <rect x={main.x} y={y + 19.5} width={21} height={4} rx={2} fill={p.side} />
-      <rect x={main.x + 0.5} y={y + 20} width={10} height={3} rx={1.5} fill={p.wine} />
+      <rect x={main.x + 0.5} y={y + 20} width={10} height={3} rx={1.5} fill={p.brand} />
       <rect x={main.x + 13} y={y + 21} width={6} height={1} rx={0.5} fill={p.muted} />
 
       <rect x={main.x} y={y + 26} width={main.w} height={h - 29} rx={1.6} {...panel} />

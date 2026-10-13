@@ -35,7 +35,7 @@ export function SplashScreen() {
           : undefined
       }
     >
-      <AnimatedWordmark size={64} autoMorph />
+      <AnimatedWordmark size={64} withMark autoMorph />
     </div>
   );
 }
