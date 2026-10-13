@@ -166,6 +166,7 @@
     "admin.forbidden": "Bu işlem için yönetici ayrıcalıkları gereklidir.",
     "admin.invalid_username": "Kullanıcı adı boş olamaz.",
     "admin.quota_save_failed": "Kota geçersiz kılma kaydedilemedi.",
+    "admin.user_not_found": "'{email}' için hesap bulunamadı.",
     "agent.approval.unknown_call_id": "Verilen call_id için bekleyen bir onay yok.",
     "agent.status.tool_end": "Araç tamamlandı.",
     "agent.status.tool_start": "Aracı, aracı çağırıyor…",

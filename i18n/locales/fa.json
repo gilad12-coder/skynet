@@ -166,6 +166,7 @@
     "admin.forbidden": "برای این عملیات به دسترسی مدیر نیاز است.",
     "admin.invalid_username": "نام کاربری نباید خالی باشد.",
     "admin.quota_save_failed": "ذخیره‌سازی بازنویسی سهمیه ناموفق بود.",
+    "admin.user_not_found": "حسابی برای '{email}' پیدا نشد.",
     "agent.approval.unknown_call_id": "هیچ تأییدیه‌ی در انتظاری برای call_id داده‌شده وجود ندارد.",
     "agent.status.tool_end": "ابزار به پایان رسید.",
     "agent.status.tool_start": "عامل در حال فراخوانی ابزار…",
