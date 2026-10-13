@@ -68,6 +68,7 @@
     "contract.metric_error": "فشل المقياس على النموذج {index}: {error}",
     "contract.metric_missing": "لا يعرّف كود المقياس الدالة التي يستدعيها هذا المُحسِّن.",
     "contract.metric_model_missing": "اختر نموذجًا للمقياس، لأن مقياسك يستدعي نموذجًا.",
+    "contract.runner_outdated": "مُشغِّل الشيفرة الخاص بالفحص أقدم من هذا العقد وما زال يتوقع العقد السابق، لذا يحتاج إلى إعادة بناء. لا تحتاج شيفرتك إلى أي تغيير.",
     "contract.metric_signature.blackbox": "يحتاج هذا المُحسِّن إلى score(input, output, expected=None).",
     "contract.passed": "الكود يطابق ما يحتاجه المُحسِّن.",
     "contract.run_error": "فشل كود التشغيل على النموذج {index}: {error}",

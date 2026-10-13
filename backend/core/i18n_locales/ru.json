@@ -68,6 +68,7 @@
     "contract.metric_error": "Метрика завершилась с ошибкой на примере {index}: {error}",
     "contract.metric_missing": "Код метрики не определяет функцию, которую вызывает этот оптимизатор.",
     "contract.metric_model_missing": "Метрика вызывает модель, поэтому выберите модель метрики.",
+    "contract.runner_outdated": "Среда запуска кода для проверки старше этого контракта и всё ещё ожидает прежний, поэтому её нужно пересобрать. Ваш код менять не нужно.",
     "contract.metric_signature.blackbox": "Этому оптимизатору нужна score(input, output, expected=None).",
     "contract.passed": "Код соответствует тому, что нужно оптимизатору.",
     "contract.run_error": "Код запуска завершился с ошибкой на примере {index}: {error}",

@@ -68,6 +68,7 @@
     "contract.metric_error": "Metrik {index}. örnekte başarısız oldu: {error}",
     "contract.metric_missing": "Metrik kodu, bu optimize edicinin çağırdığı fonksiyonu tanımlamıyor.",
     "contract.metric_model_missing": "Metrik bir model çağırıyor, bu yüzden bir metrik modeli seçin.",
+    "contract.runner_outdated": "Kontrolün kod çalıştırıcısı bu sözleşmeden eski ve hâlâ önceki sözleşmeyi bekliyor, bu yüzden yeniden derlenmesi gerekiyor. Kodunuzda değişiklik gerekmiyor.",
     "contract.metric_signature.blackbox": "Bu optimize edici score(input, output, expected=None) gerektirir.",
     "contract.passed": "Kod, optimize edicinin ihtiyaç duyduğu şeyle uyumlu.",
     "contract.run_error": "Çalıştırma kodu {index}. örnekte başarısız oldu: {error}",

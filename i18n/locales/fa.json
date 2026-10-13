@@ -68,6 +68,7 @@
     "contract.metric_error": "معیار روی نمونهٔ {index} شکست خورد: {error}",
     "contract.metric_missing": "کد معیار تابعی را که این بهینه‌ساز صدا می‌زند تعریف نکرده است.",
     "contract.metric_model_missing": "یک مدل معیار انتخاب کنید، چون معیار شما یک مدل را صدا می‌زند.",
+    "contract.runner_outdated": "اجراکنندهٔ کد این بررسی از این قرارداد قدیمی‌تر است و هنوز قرارداد قبلی را انتظار دارد، پس باید دوباره ساخته شود. کد شما نیازی به تغییر ندارد.",
     "contract.metric_signature.blackbox": "این بهینه‌ساز به score(input, output, expected=None) نیاز دارد.",
     "contract.passed": "کد با نیازهای بهینه‌ساز مطابقت دارد.",
     "contract.run_error": "کد اجرا روی نمونهٔ {index} شکست خورد: {error}",

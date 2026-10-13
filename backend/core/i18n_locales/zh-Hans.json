@@ -68,6 +68,7 @@
     "contract.metric_error": "指标在示例 {index} 上失败：{error}",
     "contract.metric_missing": "指标代码没有定义此优化器调用的函数。",
     "contract.metric_model_missing": "你的指标会调用模型，请选择指标模型。",
+    "contract.runner_outdated": "检查所用的代码运行器早于此合约，仍在期待旧合约，因此需要重新构建。你的代码无需修改。",
     "contract.metric_signature.blackbox": "此优化器需要 score(input, output, expected=None)。",
     "contract.passed": "代码符合优化器的要求。",
     "contract.run_error": "运行代码在示例 {index} 上失败：{error}",

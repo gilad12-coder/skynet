@@ -68,6 +68,7 @@
     "contract.metric_error": "指標喺示例 {index} 出錯：{error}",
     "contract.metric_missing": "指標程式碼冇定義呢個優化器會呼叫嘅函數。",
     "contract.metric_model_missing": "你嘅指標會呼叫模型，請揀一個指標模型。",
+    "contract.runner_outdated": "檢查用嘅程式執行器比呢份合約舊，仲係預期舊合約，所以要重新建置。你嘅程式碼唔使改。",
     "contract.metric_signature.blackbox": "呢個優化器需要 score(input, output, expected=None)。",
     "contract.passed": "程式碼符合優化器嘅要求。",
     "contract.run_error": "執行程式碼喺示例 {index} 出錯：{error}",

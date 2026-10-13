@@ -68,6 +68,7 @@
     "contract.metric_error": "サンプル {index} でメトリクスが失敗しました: {error}",
     "contract.metric_missing": "メトリクスのコードに、このオプティマイザーが呼び出す関数が定義されていません。",
     "contract.metric_model_missing": "メトリクスがモデルを呼び出すため、メトリクスのモデルを選んでください。",
+    "contract.runner_outdated": "チェックのコードランナーがこの契約より古く、まだ以前の契約を前提としているため、再ビルドが必要です。あなたのコードを変更する必要はありません。",
     "contract.metric_signature.blackbox": "このオプティマイザーには score(input, output, expected=None) が必要です。",
     "contract.passed": "コードはオプティマイザーの要件を満たしています。",
     "contract.run_error": "サンプル {index} で実行コードが失敗しました: {error}",

@@ -68,6 +68,7 @@
     "contract.metric_error": "La métrica falló en la muestra {index}: {error}",
     "contract.metric_missing": "El código de la métrica no define la función que llama este optimizador.",
     "contract.metric_model_missing": "La métrica llama a un modelo, así que elige un modelo para la métrica.",
+    "contract.runner_outdated": "El ejecutor de código de la comprobación es anterior a este contrato y todavía espera el antiguo, así que hay que reconstruirlo. Tu código no necesita cambios.",
     "contract.metric_signature.blackbox": "Este optimizador necesita score(input, output, expected=None).",
     "contract.passed": "El código cumple lo que necesita el optimizador.",
     "contract.run_error": "El código de ejecución falló en la muestra {index}: {error}",

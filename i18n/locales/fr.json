@@ -68,6 +68,7 @@
     "contract.metric_error": "La métrique a échoué sur l'exemple {index} : {error}",
     "contract.metric_missing": "Le code de la métrique ne définit pas la fonction qu'appelle cet optimiseur.",
     "contract.metric_model_missing": "La métrique appelle un modèle : choisissez donc un modèle pour la métrique.",
+    "contract.runner_outdated": "L'exécuteur de code de la vérification est plus ancien que ce contrat et attend encore l'ancien : il doit être reconstruit. Votre code n'a pas besoin d'être modifié.",
     "contract.metric_signature.blackbox": "Cet optimiseur a besoin de score(input, output, expected=None).",
     "contract.passed": "Le code correspond à ce dont l'optimiseur a besoin.",
     "contract.run_error": "Le code d'exécution a échoué sur l'exemple {index} : {error}",

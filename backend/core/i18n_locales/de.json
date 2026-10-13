@@ -68,6 +68,7 @@
     "contract.metric_error": "Die Metrik ist bei Beispiel {index} fehlgeschlagen: {error}",
     "contract.metric_missing": "Der Metrikcode definiert nicht die Funktion, die dieser Optimierer aufruft.",
     "contract.metric_model_missing": "Die Metrik ruft ein Modell auf, wählen Sie daher ein Metrikmodell.",
+    "contract.runner_outdated": "Der Code-Runner der Prüfung ist älter als dieser Vertrag und erwartet noch den alten, daher muss er neu gebaut werden. Dein Code muss nicht geändert werden.",
     "contract.metric_signature.blackbox": "Dieser Optimierer braucht score(input, output, expected=None).",
     "contract.passed": "Der Code entspricht dem, was der Optimierer braucht.",
     "contract.run_error": "Der Ausführungscode ist bei Beispiel {index} fehlgeschlagen: {error}",
