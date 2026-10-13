@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
+from ...config import settings
 from ...storage.models import UserModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 
@@ -35,6 +36,19 @@ def normalize_experience_level(value: str | None) -> str | None:
     cleaned = (value or "").strip()
     cleaned = _LEGACY_EXPERIENCE_LEVELS.get(cleaned, cleaned)
     return cleaned if cleaned in EXPERIENCE_LEVELS else None
+
+
+def new_account_intake_completed_at() -> datetime | None:
+    """Return the intake completion stamp a newly created account starts with.
+
+    A PR preview environment is driven by agents verifying a change, so its
+    accounts start with the setup done and land straight in the app; Settings
+    can still rerun the setup there. Everywhere else a new account sees it.
+
+    Returns:
+        The current time in a PR preview environment, otherwise ``None``.
+    """
+    return datetime.now(UTC) if settings.is_preview_environment else None
 
 
 class ExperienceProfileResponse(BaseModel):
