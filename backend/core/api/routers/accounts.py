@@ -41,7 +41,7 @@ from ..password_reset import issue_reset_code, reset_code_on_cooldown, verify_re
 from ..passwords import hash_password, verify_password
 from ..rate_limit import enforce_account_rate
 from ..two_factor import enforce_second_factor
-from .experience import normalize_experience_level
+from .experience import new_account_intake_completed_at, normalize_experience_level
 
 logger = logging.getLogger(__name__)
 
@@ -366,6 +366,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
                     use_case=_coerce_choice(body.use_case, _USE_CASES),
                     experience_level=normalize_experience_level(body.experience_level),
                     job_role=_coerce_choice(body.job_role, _JOB_ROLES),
+                    intake_completed_at=new_account_intake_completed_at(),
                 )
             )
             code = None if verified else issue_verification_code(session, email)
@@ -511,6 +512,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
                     password_hash="",
                     created_at=now,
                     email_verified=True,
+                    intake_completed_at=new_account_intake_completed_at(),
                 )
                 session.add(row)
             if not linked and body.provider and body.provider_account_id:
