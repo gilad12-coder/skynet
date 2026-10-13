@@ -645,6 +645,12 @@ def test_process_job_records_run_completed_milestone(
         "optimizer": "gepa",
         "model": "openai/gpt-4o-mini",
         "token_source": "managed",
+        "baseline": 0.5,
+        "optimized": 0.7,
+        "lift": pytest.approx(0.2),
+        "held_out": False,
+        "held_out_rows": None,
+        "from_sample": False,
     }
 
 
