@@ -54,6 +54,8 @@ export interface WizardState {
   max_cost_cents?: number | null;
   run_code?: string;
   metric_code?: string;
+  /** The wizard screen on view; the agent may edit only the fields on it. */
+  wizard_screen?: string;
 }
 
 export interface ToolStartPayload {

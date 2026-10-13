@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 
-import { useHideAgentPill } from "@/features/agent-panel";
+import { useHideAgentPill, useWizardStateOptional } from "@/features/agent-panel";
 import { ExperienceLevelSwitch } from "@/features/experience";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
@@ -95,6 +95,15 @@ function UnifiedWizardFrame() {
     setPages((p) => ({ ...p, [prev]: stepPages(prev, w.state).length - 1 }));
     goPrev();
   }, [page, current, steps, position, goPrev, w.state]);
+
+  // The agent edits only the screen on view, so it is told which one that
+  // is; unmounting the wizard clears it and leaves the agent unscoped.
+  const setWizardScreen = useWizardStateOptional()?.setWizardScreen;
+  const visibleScreen = stepPages(current, w.state)[page] ?? "";
+  useEffect(() => {
+    setWizardScreen?.(visibleScreen);
+  }, [visibleScreen, setWizardScreen]);
+  useEffect(() => () => setWizardScreen?.(null), [setWizardScreen]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
