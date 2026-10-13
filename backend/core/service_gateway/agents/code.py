@@ -955,7 +955,7 @@ _METRIC_SHAPES = {
 - Define """
     + METRIC_SIGNATURES["blackbox_side_info"]
     + """.
-- input is the case input dict (keyed by the input fields), output is what run returned for it, expected is the case's expected output (the value of the expected field; None when the case has none). Declare expected only when you use it.
+- input is the case input dict (keyed by the input fields), output is what run returned for it, expected is the case's expected output as a dict keyed by the expected field (read expected["<field>"]; None when the case has none). Declare expected only when you use it.
 - Return (score, side_info): score is a float, higher is better, 0.0 to 1.0 by convention; side_info is a dict with "feedback": str saying WHY the output scored that, naming the expected value or the failed check. When several things are measured, add "scores": {"<name>": float, ...}, one entry per thing; the top-level score is then their (weighted) combination.""",
 }
 

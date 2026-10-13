@@ -35,10 +35,12 @@ function sampleCases(
   expectedField: string | null,
 ): Array<Record<string, unknown>> {
   if (!dataset) return [];
-  return dataset.rows.slice(0, SAMPLE_CASE_LIMIT).map((row) => ({
-    input: Object.fromEntries(inputFields.map((field) => [field, row[field]])),
-    expected: expectedField ? (row[expectedField] ?? null) : null,
-  }));
+  // Keyed by the expected field, as the wizard's cases and the run's harness
+  // pass it, so the metric the agent writes reads the shape it is scored with.
+  return dataset.rows.slice(0, SAMPLE_CASE_LIMIT).map((row) => {
+    const input = Object.fromEntries(inputFields.map((field) => [field, row[field]]));
+    return expectedField ? { input, expected: { [expectedField]: row[expectedField] ?? null } } : { input };
+  });
 }
 
 /**

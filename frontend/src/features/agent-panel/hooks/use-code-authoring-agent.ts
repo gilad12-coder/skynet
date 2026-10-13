@@ -17,6 +17,10 @@ import type { WizardState } from "../lib/types";
 // The run code and the metric are checked together by the validity check,
 // once the agent settles; there is no per-editor validation outside a workflow.
 const noValidation = async (): Promise<ValidationResult | null> => null;
+// The panel's card is read-only and the generalist cannot write code, so a
+// failed check is handed back to the coding agent, as the wizard's auto-fix
+// does; bounded so a contract the agent cannot meet does not loop.
+const MAX_CONTRACT_FIXES = 2;
 
 /**
  * The code agent's state plus the artifact fields the panel mirror renders and
@@ -122,6 +126,8 @@ export function useCodeAuthoringAgent(
   const isWorkflow = moduleName.toLowerCase() === "workflow";
   // What the last passing validity check saw: the context and both codes.
   const [passedKey, setPassedKey] = React.useState<string | null>(null);
+  const [fixKey, setFixKey] = React.useState<string | null>(null);
+  const fixAttemptsRef = React.useRef(0);
 
   // A workflow run hands off a graph, never run code, so it keeps the
   // graph-aware seed and no unified context. The panel rebuilds its wizard
@@ -263,6 +269,10 @@ export function useCodeAuthoringAgent(
         setSignatureValidation(run);
         setMetricValidation(metric);
         setPassedKey(result.ok ? checkKey : null);
+        if (!result.ok && fixAttemptsRef.current < MAX_CONTRACT_FIXES) {
+          fixAttemptsRef.current += 1;
+          setFixKey(checkKey);
+        }
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
@@ -275,6 +285,15 @@ export function useCodeAuthoringAgent(
     return () => controller.abort();
   }, [authoringContext, agent.status, signatureCode, metricCode, checkKey]);
 
+  // Sent from its own effect, after the render that stored the failures, so
+  // the fix turn carries them to the agent as its prior validations.
+  const agentSend = agent.send;
+  React.useEffect(() => {
+    if (!fixKey || agent.status !== "done") return;
+    setFixKey(null);
+    agentSend(msg("submit.v2.metric.agent.fix"));
+  }, [fixKey, agent.status, agentSend]);
+
   // ``useCodeAgent.reset`` clears its own state but not the caller-owned code
   // (the wizard clears that separately); wrap it so a fresh conversation drops
   // the previous run's artifacts too.
@@ -285,6 +304,8 @@ export function useCodeAuthoringAgent(
     setSignatureValidation(null);
     setMetricValidation(null);
     setPassedKey(null);
+    setFixKey(null);
+    fixAttemptsRef.current = 0;
     setSignatureManuallyEdited(false);
     setMetricManuallyEdited(false);
     setWorkflowSpec(null);
