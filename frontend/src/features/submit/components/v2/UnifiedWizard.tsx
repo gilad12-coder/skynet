@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 
-import { useHideAgentPill } from "@/features/agent-panel";
-import { ExperienceLevelSwitch } from "@/features/experience";
+import { useHideAgentPill, useWizardStateOptional } from "@/features/agent-panel";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 import { slideVariants } from "../../constants";
@@ -96,6 +95,15 @@ function UnifiedWizardFrame() {
     goPrev();
   }, [page, current, steps, position, goPrev, w.state]);
 
+  // The agent edits only the screen on view, so it is told which one that
+  // is; unmounting the wizard clears it and leaves the agent unscoped.
+  const setWizardScreen = useWizardStateOptional()?.setWizardScreen;
+  const visibleScreen = stepPages(current, w.state)[page] ?? "";
+  useEffect(() => {
+    setWizardScreen?.(visibleScreen);
+  }, [visibleScreen, setWizardScreen]);
+  useEffect(() => () => setWizardScreen?.(null), [setWizardScreen]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -118,13 +126,8 @@ function UnifiedWizardFrame() {
       // Every step can hold its agent beside the form, so the frame stays wide.
       className="mx-auto flex h-[calc(100dvh-var(--header-height)-3rem)] w-full min-w-0 max-w-6xl flex-col gap-4 md:-mt-4 md:gap-5"
     >
-      {/* Switching level keeps every answer: the wizard re-lays out around the
-          current step and moves on only if that step drops out. */}
-      <div className="flex shrink-0 items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <SubmitStepper w={w} locked={w.advancing} />
-        </div>
-        <ExperienceLevelSwitch size="sm" iconOnly />
+      <div className="shrink-0">
+        <SubmitStepper w={w} locked={w.advancing} />
       </div>
 
       <div
