@@ -82,9 +82,19 @@ export function computeStepIssue(
   }
 }
 
+// The reason sits under the Run button, so it stays one line however long
+// the item's error is; the full traceback lives in the check panel.
+const REASON_MAX_CHARS = 120;
+
+function oneLine(text: string): string {
+  const line = text.split("\n").find((part) => part.trim())?.trim() ?? "";
+  return line.length > REASON_MAX_CHARS ? `${line.slice(0, REASON_MAX_CHARS - 1)}…` : line;
+}
+
 /**
  * Why Run is blocked, or null when it may run. A failed validity check reports
- * its first failing item's exact text, so the person sees what to fix.
+ * its first failing item's localized message on one line, so the person sees
+ * what to fix.
  * `message` renders a check item in the active locale (injected so this stays
  * pure); while `agentWriting`, missing code reads as being written, not as a
  * job left to the person.
@@ -106,7 +116,7 @@ export function runBlockedReason(
       return "submit.v2.metric.agent.writing_metric";
     if (issue === "submit.v2.metric.check.failed") {
       const failed = state.workspace.lastCheck?.checks.find((item) => item.status === "failed");
-      return failed ? (failed.detail ?? message(failed)) : issue;
+      return failed ? oneLine(message(failed)) || issue : issue;
     }
     return issue;
   }

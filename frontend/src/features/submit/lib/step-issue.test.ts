@@ -94,7 +94,7 @@ for (const level of ["guided", "standard", "expert"] as const) {
 
     const failed = readyState(level, checkResult(false));
     assert.equal(computeStepIssue(failed, "metric", null), "submit.v2.metric.check.failed");
-    assert.equal(runBlockedReason(failed, null), "Define score(inputs, output).");
+    assert.equal(runBlockedReason(failed, null), "metric missing");
 
     const passed = readyState(level, checkResult(true));
     const stale = {
@@ -126,15 +126,41 @@ test("missing code reads as being written while the agent writes it", () => {
 test("a failed check renders its item through the injected message", () => {
   const failed = readyState("standard", checkResult(false));
   const item = failed.workspace.lastCheck!.checks.find((check) => check.status === "failed")!;
-  const withoutDetail = {
+  assert.equal(
+    runBlockedReason(failed, null, { message: (check) => `en:${check.key}` }),
+    `en:${item.key}`,
+  );
+});
+
+test("a failed run never puts its traceback under the Run button", () => {
+  const failed = readyState("standard", checkResult(false));
+  const traceback =
+    "Traceback (user code):\n  File \"<run_code>\", line 10, in run\nKeyError: 'product'";
+  const crashed = {
     ...failed,
     workspace: {
       ...failed.workspace,
-      lastCheck: { ...failed.workspace.lastCheck!, checks: [{ ...item, detail: null }] },
+      lastCheck: {
+        ...failed.workspace.lastCheck!,
+        checks: [
+          {
+            key: "workspace.run",
+            status: "failed",
+            message: "קוד הריצה נכשל בדוגמה 1: KeyError: 'product'",
+            message_code: "contract.run_error",
+            message_params: { index: 1, error: `KeyError: 'product'\n${traceback}` },
+            detail: traceback,
+          },
+        ],
+      },
     },
-  };
-  assert.equal(
-    runBlockedReason(withoutDetail, null, { message: (check) => `en:${check.key}` }),
-    `en:${item.key}`,
-  );
+  } as typeof failed;
+  const reason = runBlockedReason(crashed, null, {
+    message: (check) =>
+      `The run code failed on sample ${check.message_params?.index}: ${check.message_params?.error}`,
+  });
+  assert.equal(reason, "The run code failed on sample 1: KeyError: 'product'");
+
+  const long = runBlockedReason(crashed, null, { message: () => "x".repeat(500) });
+  assert.ok(long !== null && long.length <= 120 && !long.includes("\n"));
 });

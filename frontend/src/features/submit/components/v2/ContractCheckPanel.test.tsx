@@ -83,4 +83,47 @@ void describe("ContractCheckPanel", () => {
     assert.match(html, /a review/);
     assert.doesNotMatch(html, HEBREW);
   });
+
+  void it("renders every passing row and each sample's run failure in English", () => {
+    setClientLocale("en");
+    const error = "KeyError: 'product'";
+    const statics = ["workspace.run_signature", "metric.signature", "metric.model"].map((key) =>
+      item({ key: key as ContractCheckItem["key"] }),
+    );
+    const samples = [0, 1, 2].flatMap((index) => [
+      item({
+        key: "workspace.run",
+        status: "failed",
+        message: `${HEBREW_WORD} ${index + 1}: ${error}`,
+        message_code: "contract.run_error",
+        message_params: { index: index + 1, error },
+        sample_index: index,
+        detail: `Traceback (user code):\n${error}`,
+      }),
+      item({
+        key: "metric.shape",
+        status: "skipped",
+        message: HEBREW_WORD,
+        message_code: "contract.shape.blackbox",
+        sample_index: index,
+      }),
+    ]);
+    const result = {
+      ok: false,
+      optimizer_resolved: "best_of_n",
+      metric_shape: "blackbox_side_info",
+      checks: [...statics, ...samples],
+      samples: [0, 1, 2].map((index) => ({ index, input_preview: `{"review": "r${index}"}` })),
+    } as unknown as ContractCheckResponse;
+
+    const html = renderToStaticMarkup(
+      <ContractCheckPanel cc={state(result)} guided={false} blockedReason={null} />,
+    );
+
+    assert.equal(html.match(/The code matches what the optimizer needs\./g)?.length, 3);
+    for (const n of [1, 2, 3]) {
+      assert.match(html, new RegExp(`The run code failed on sample ${n}: KeyError: &#x27;product&#x27;`));
+    }
+    assert.doesNotMatch(html, HEBREW);
+  });
 });

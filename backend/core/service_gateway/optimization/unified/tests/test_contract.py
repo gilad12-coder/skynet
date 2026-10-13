@@ -256,3 +256,21 @@ def test_a_multi_column_csv_gives_the_agent_and_the_check_the_same_input_fields(
 
     assert seen["case_fields"] == agent_fields == input_fields
     assert [check.status for check in response.checks if check.key == "workspace.run"] == ["passed"] * 3
+
+
+@pytest.mark.parametrize(
+    ("run_code", "metric_code"),
+    [
+        (RUN_CODE, BLACKBOX_METRIC),
+        ("def run(artifact, input):\n    return input['missing']\n", BLACKBOX_METRIC),
+        (RUN_CODE, "def score(input, output, expected=None):\n    return 1.0\n"),
+        (RUN_CODE, "def score(input, output, expected=None):\n    raise ValueError('bad')\n"),
+    ],
+)
+def test_every_item_and_sample_result_carries_a_message_code(run_code: str, metric_code: str) -> None:
+    """Passing, failing and skipped items alike render from their code in the client's locale."""
+    response = _check(_payload(run_code=run_code, metric_code=metric_code), sample_count=2)
+
+    assert response.samples
+    assert all(check.message_code for check in response.checks)
+    assert {check.sample_index for check in response.checks if check.sample_index is not None} == {0, 1}
