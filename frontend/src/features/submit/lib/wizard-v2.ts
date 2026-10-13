@@ -23,6 +23,7 @@ import {
   type MetricShape,
   type OptimizerCatalogResponse,
   type OptimizerChoice,
+  type TaskInterviewTurnResult,
   type UnifiedCase,
   type UnifiedChatTurn,
   type UnifiedRunRequest,
@@ -45,7 +46,6 @@ export interface TaskSlice {
   artifactKind: ArtifactKind | null;
   startingVersion: string | Record<string, string> | null;
   artifactRationale: string;
-  confirmed: boolean;
   transcript: UnifiedChatTurn[];
 }
 
@@ -123,7 +123,6 @@ export function initialWizardV2State(
       artifactKind: null,
       startingVersion: null,
       artifactRationale: "",
-      confirmed: false,
       transcript: [],
     },
     inputs: {
@@ -180,6 +179,43 @@ export function initialWizardV2State(
 }
 
 const hasModel = (config: ModelConfig | null): boolean => Boolean(config?.name.trim());
+
+/**
+ * The i18n key of what the task step still lacks, or null when Continue may
+ * move on. There is no separate confirm: Continue is the confirmation.
+ */
+export function taskIssue(task: TaskSlice): string | null {
+  if (!task.objective.trim()) return "submit.v2.task.issue.objective";
+  if (!task.artifactKind) return "submit.v2.task.issue.kind";
+  const v = task.startingVersion;
+  const empty =
+    v === null ||
+    (typeof v === "string" ? !v.trim() : Object.values(v).every((part) => !part.trim()));
+  return empty ? "submit.v2.task.issue.starting" : null;
+}
+
+/**
+ * The task fields an interview turn may write: only what it actually filled,
+ * and nothing the user has edited by hand since. The rationale explains the
+ * artifact kind, so it is kept only from a turn that names the kind the card
+ * shows; an early turn otherwise fills it with "not yet known" filler.
+ */
+export function taskInterviewPatch(
+  result: TaskInterviewTurnResult,
+  dirty: ReadonlySet<keyof TaskSlice>,
+): Partial<TaskSlice> {
+  const patch: Partial<TaskSlice> = {};
+  if (result.objective.trim() && !dirty.has("objective")) patch.objective = result.objective;
+  if (result.background.trim() && !dirty.has("background")) patch.background = result.background;
+  if (result.artifact_kind && !dirty.has("artifactKind")) {
+    patch.artifactKind = result.artifact_kind;
+    if (result.artifact_rationale.trim()) patch.artifactRationale = result.artifact_rationale;
+  }
+  if (result.starting_version != null && !dirty.has("startingVersion")) {
+    patch.startingVersion = result.starting_version;
+  }
+  return patch;
+}
 
 /** Whether the models the chosen artifact needs to run are set. */
 export function optimizerModelsReady(s: WizardV2State): boolean {
