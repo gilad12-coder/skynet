@@ -6,7 +6,9 @@ import asyncio
 from typing import Any
 
 import dspy
+import litellm
 import pytest
+from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
 
 from core.service_gateway.agents import code
 
@@ -135,3 +137,107 @@ async def test_seed_stream_forwards_reasoning_and_code_tokens_live() -> None:
         {"event": "metric_patch", "data": {"chunk": "(): ..."}},
     ]
     assert results["metric_code"] == "def metric(): ..."
+
+
+def _provider_chunk(*, content: str | None = None, reasoning: str | None = None) -> ModelResponseStream:
+    """Build one raw provider stream chunk, as LiteLLM hands it to DSPy.
+
+    Args:
+        content: Answer text carried by the chunk.
+        reasoning: Reasoning text carried by the chunk.
+
+    Returns:
+        The stream chunk.
+    """
+    delta = Delta(content=content)
+    if reasoning:
+        delta.reasoning_content = reasoning
+    return ModelResponseStream(choices=[StreamingChoices(delta=delta, index=0)], model="fake")
+
+
+_RUN_CODE = "def run(artifact, input):\n    return input['review']"
+_METRIC_CODE = "def score(output, expected):\n    return 1.0"
+
+
+async def _fake_acompletion(**request: Any) -> Any:
+    """Answer each seed predictor like a provider that sends short answers whole.
+
+    The run code arrives in a single content chunk after its reasoning, which
+    is how the preview provider delivered it; the metric and the intro
+    message arrive a few characters at a time.
+
+    Args:
+        **request: The LiteLLM request DSPy built.
+
+    Returns:
+        An async generator of provider chunks.
+    """
+    prompt = str(request.get("messages"))
+    if "Introduce the drafted" in prompt:
+        field, text = "assistant_message", "Here it is."
+    elif "metric_code" in prompt.split("Your output fields are")[-1][:300]:
+        field, text = "metric_code", _METRIC_CODE
+    else:
+        field, text = "run_code", _RUN_CODE
+    body = f"[[ ## {field} ## ]]\n{text}\n\n[[ ## completed ## ]]"
+    step = len(body) if field == "run_code" else 4
+
+    async def stream() -> Any:
+        """Yield reasoning, then the answer.
+
+        Yields:
+            Provider chunks.
+        """
+        yield _provider_chunk(reasoning="thinking ")
+        for start in range(0, len(body), step):
+            yield _provider_chunk(content=body[start : start + step])
+
+    return stream()
+
+
+async def test_run_code_reaches_the_editor_when_the_provider_sends_it_whole(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Through the real DSPy stream listeners, the run code is published before its lane ends.
+
+    DSPy's listener drops a field that arrives in one chunk, so on the preview
+    the run editor stayed empty until the whole turn ended.
+    """
+
+    async def validate(*, code: str, **_kwargs: Any) -> tuple[str, str]:
+        """Accept the code as written.
+
+        Args:
+            code: The streamed code.
+            **_kwargs: Unused.
+
+        Returns:
+            The code and no error.
+        """
+        return code, ""
+
+    monkeypatch.setattr(litellm, "acompletion", _fake_acompletion)
+    monkeypatch.setattr(code, "_validate_and_repair_artifact", validate)
+    unified = {
+        "task": {"objective": "o", "artifact": {"kind": "prompt", "starting_version": "x"}},
+        "input_fields": ["review"],
+        "metric_shape": "blackbox_side_info",
+    }
+    queue: asyncio.Queue[dict | None] = asyncio.Queue()
+    results = await code._run_unified_seed(
+        lm=dspy.LM("openai/fake", cache=False),
+        unified=unified,
+        authoring_brief="",
+        reply_language="English",
+        queue=queue,
+    )
+
+    events = [queue.get_nowait() for _ in range(queue.qsize())]
+    names = [e["event"] for e in events]
+    run_text = "".join(e["data"]["chunk"] for e in events if e["event"] == "signature_patch")
+    metric_text = "".join(e["data"]["chunk"] for e in events if e["event"] == "metric_patch")
+    assert run_text.strip() == _RUN_CODE
+    assert metric_text.strip() == _METRIC_CODE
+    run_done = events.index({"event": "artifact_done", "data": {"source": "signature"}})
+    assert "signature_patch" in names[:run_done]
+    assert results["signature_code"].strip() == _RUN_CODE

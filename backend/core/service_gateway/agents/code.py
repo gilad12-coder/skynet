@@ -1855,6 +1855,12 @@ async def _pump_seed_stream(
             results[field] = getattr(chunk, field, "") or ""
     if not results[field] and streamed:
         results[field] = "".join(streamed)
+    # DSPy's StreamListener yields nothing for a field that arrives whole in
+    # one provider chunk (its "cache hit" shortcut), which some providers do
+    # for short answers after a long think. Without this the editor stays
+    # empty until the whole turn ends.
+    if results[field] and not streamed:
+        await queue.put({"event": event_name, "data": {"chunk": results[field]}})
 
 
 def _run_code_fixer(
