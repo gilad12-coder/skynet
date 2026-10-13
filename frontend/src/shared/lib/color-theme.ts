@@ -55,7 +55,7 @@ export function applyResolvedColorTheme(resolved: ResolvedColorTheme): void {
   root.style.colorScheme = resolved === "dark" ? "dark" : "light";
   // The tab icon follows the painted theme, not the OS, so a Dark choice on a
   // light OS still gets the dark tile.
-  const href = resolved === "dark" ? "/favicon-dark.svg?v=4" : "/favicon.svg?v=4";
+  const href = resolved === "dark" ? "/favicon-dark.svg?v=8" : "/favicon.svg?v=8";
   document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]').forEach((link) => {
     if (link.getAttribute("href") !== href) link.href = href;
   });
