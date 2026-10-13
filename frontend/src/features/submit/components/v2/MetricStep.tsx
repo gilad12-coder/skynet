@@ -6,6 +6,7 @@ import type { ValidateCodeResponse } from "@/shared/types/api";
 import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unified-run";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
 import { useContractCheck } from "../../hooks/use-contract-check";
+import { authoringCases } from "../../lib/inputs-mode";
 import { metricUsesModel as metricCallsModel } from "../../lib/scorer-dependencies";
 import { AuthoringShell } from "../steps/AuthoringShell";
 import { CodeAgentPanel } from "../steps/CodeAgentPanel";
@@ -32,7 +33,8 @@ const noValidation = async (): Promise<ValidateCodeResponse | null> => null;
  */
 export function MetricStep({ page }: { page: number }) {
   const ctx = useWizardV2();
-  const { state, patchTask, patchWorkspace, metricShape, guided, optimizerCatalog } = ctx;
+  const { state, patchTask, patchWorkspace, metricShape, guided, optimizerCatalog, inputsInferring } =
+    ctx;
   const { task, inputs, optimizer, workspace } = state;
   const kind = task.artifactKind;
   const t = (key: string) => v2Msg(key, guided);
@@ -56,12 +58,15 @@ export function MetricStep({ page }: { page: number }) {
 
   const authoringContext = React.useMemo<UnifiedAuthoringContext | null>(() => {
     if (!kind || !inputs.mode || !metricShape) return null;
-    const samples =
-      inputs.cases.length > 0
-        ? inputs.cases
-            .slice(0, SAMPLE_CASE_LIMIT)
-            .map((c: UnifiedCase) => ({ input: c.input, expected: c.expected ?? null }))
-        : inputs.sampleRows.slice(0, SAMPLE_CASE_LIMIT);
+    const samples = authoringCases(
+      {
+        cases: inputs.cases,
+        sampleRows: inputs.sampleRows,
+        inputFields: inputs.inputFields,
+        expectedField: inputs.expectedField,
+      },
+      SAMPLE_CASE_LIMIT,
+    ).map((c: UnifiedCase) => ({ input: c.input, expected: c.expected ?? null }));
     return {
       task: {
         objective: task.objective,
@@ -129,7 +134,10 @@ export function MetricStep({ page }: { page: number }) {
     metricValidation: null,
     runSignatureValidation: noValidation,
     runMetricValidation: noValidation,
-    seedEnabled: authoringContext !== null,
+    // Inference re-roles the columns when it answers, and the Inputs step
+    // stays mounted while it does, so a seed started earlier would write
+    // against input fields the contract check and the run no longer pass.
+    seedEnabled: authoringContext !== null && !inputsInferring,
     unified: authoringContext,
     onBrief,
     model: agentModel,

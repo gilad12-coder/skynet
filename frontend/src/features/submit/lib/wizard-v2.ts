@@ -388,6 +388,10 @@ export interface WizardV2Context {
   runBlockedReason: string | null;
   /** The Metric step's coding agent reports whether it is writing the code. */
   setAgentWriting(writing: boolean): void;
+  /** Whether the Inputs step's inference is still deciding the column roles. */
+  inputsInferring: boolean;
+  /** The Inputs step reports whether its inference is in flight. */
+  setInputsInferring(inferring: boolean): void;
   buildPayload(): UnifiedRunRequest | null;
   /** The wizard's execution budget, created on first use; the sandboxed check bills to it. */
   ensureBudget(): Promise<ExecutionBudget>;

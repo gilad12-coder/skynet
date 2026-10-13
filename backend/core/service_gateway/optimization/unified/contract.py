@@ -238,6 +238,74 @@ def _response(
     )
 
 
+def _recover_error(message: str, code: str, number: int) -> str | None:
+    """Read the ``{error}`` placeholder back out of a Hebrew-base message.
+
+    Args:
+        message: The rendered Hebrew-base message.
+        code: The i18n key the message may have been rendered from.
+        number: The sample's 1-based index.
+
+    Returns:
+        The error text, or ``None`` when ``message`` was not rendered from ``code``.
+    """
+    marker = "\x00"
+    prefix, _, suffix = t(code, index=number, error=marker).partition(marker)
+    if message.startswith(prefix) and message.endswith(suffix) and len(message) >= len(prefix) + len(suffix):
+        return message[len(prefix) : len(message) - len(suffix)]
+    return None
+
+
+def _sample_code(item: ContractCheckItem, shape: MetricShape) -> tuple[str, dict[str, str | int]]:
+    """Work out the message code of a sample item the guest sent without one.
+
+    Args:
+        item: A sample item lacking ``message_code``.
+        shape: The metric shape the samples were held to.
+
+    Returns:
+        ``(message_code, message_params)``.
+    """
+    if item.status == "passed":
+        return "contract.passed", {}
+    shape_key = _SHAPE_KEYS[shape]
+    if item.status == "skipped" or (item.key == "metric.shape" and item.message == t(shape_key)):
+        return shape_key, {}
+    number = (item.sample_index or 0) + 1
+    code = "contract.run_error" if item.key == "workspace.run" else "contract.metric_error"
+    error = _recover_error(item.message, code, number)
+    if error is None:
+        lines = [line for line in (item.detail or item.message).splitlines() if line.strip()]
+        error = lines[-1].strip() if lines else ""
+    return code, {"index": number, "error": error}
+
+
+def with_message_codes(response: ContractCheckResponse, static: ContractCheckResponse) -> ContractCheckResponse:
+    """Give every item of a sandboxed check the message code the client renders.
+
+    The sandboxed check runs inside the pinned sandbox image, whose backend
+    can predate ``message_code``; its items then carry only the Hebrew base
+    text, which an English UI would show as is. The static items are
+    replaced by the host's own, and sample items get their code back.
+
+    Args:
+        response: The contract check as the sandbox returned it.
+        static: The host's static check of the same spec.
+
+    Returns:
+        The response with every item carrying ``message_code``.
+    """
+    samples = []
+    for item in response.checks:
+        if item.sample_index is None:
+            continue
+        if item.message_code is None:
+            code, params = _sample_code(item, response.metric_shape)
+            item = item.model_copy(update={"message_code": code, "message_params": params})
+        samples.append(item)
+    return response.model_copy(update={"checks": [*static.checks, *samples]})
+
+
 def validate_unified_payload(payload: UnifiedRunRequest) -> None:
     """Reject a unified run whose code cannot fit its optimizer, without running it.
 

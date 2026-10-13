@@ -1855,6 +1855,12 @@ async def _pump_seed_stream(
             results[field] = getattr(chunk, field, "") or ""
     if not results[field] and streamed:
         results[field] = "".join(streamed)
+    # DSPy's StreamListener yields nothing for a field that arrives whole in
+    # one provider chunk (its "cache hit" shortcut), which some providers do
+    # for short answers after a long think. Without this the editor stays
+    # empty until the whole turn ends.
+    if results[field] and not streamed:
+        await queue.put({"event": event_name, "data": {"chunk": results[field]}})
 
 
 def _run_code_fixer(
@@ -3232,18 +3238,43 @@ def _unified_inputs(unified: dict[str, Any]) -> dict[str, Any]:
     artifact = task.get("artifact") or {}
     version = artifact.get("starting_version", "")
     run_contract, metric_contract = _unified_contracts(unified)
+    case_fields = [str(f) for f in unified.get("input_fields") or []]
     return {
         "objective": str(task.get("objective", "")).strip(),
         "background": str(task.get("background", "") or "").strip(),
         "artifact_kind": str(artifact.get("kind", "prompt")),
         "starting_version": version if isinstance(version, str) else json.dumps(version, ensure_ascii=False),
-        "case_fields": [str(f) for f in unified.get("input_fields") or []],
+        "case_fields": case_fields,
         "expected_field": str(unified.get("expected_field") or ""),
-        "sample_cases": json.dumps((unified.get("sample_cases") or [])[:5], ensure_ascii=False, default=str),
+        "sample_cases": json.dumps(
+            [_project_case(case, case_fields) for case in (unified.get("sample_cases") or [])[:5]],
+            ensure_ascii=False,
+            default=str,
+        ),
         "metric_shape": str(unified.get("metric_shape", "blackbox_side_info")),
         "run_contract": run_contract,
         "metric_contract": metric_contract,
     }
+
+
+def _project_case(case: Any, case_fields: list[str]) -> Any:
+    """Keep only the declared input fields of one sample case's ``input``.
+
+    The run hands ``run`` exactly the declared fields, so a sample carrying
+    other columns would teach the agent to read keys the contract check and
+    the optimization never pass.
+
+    Args:
+        case: One ``{"input": {...}, "expected": ...}`` sample case.
+        case_fields: The declared input field names.
+
+    Returns:
+        The case with its ``input`` narrowed to ``case_fields``, or the case
+        unchanged when it has no input dict or no fields are declared.
+    """
+    if not case_fields or not isinstance(case, dict) or not isinstance(case.get("input"), dict):
+        return case
+    return {**case, "input": {k: v for k, v in case["input"].items() if k in case_fields}}
 
 
 def _inputs_for(signature: type[dspy.Signature], values: dict[str, Any]) -> dict[str, Any]:

@@ -30,7 +30,11 @@ from ...models.unified import (
     metric_shape_for,
     resolve_optimizer,
 )
-from ...service_gateway.optimization.unified.contract import contract_fingerprint, static_contract_check
+from ...service_gateway.optimization.unified.contract import (
+    contract_fingerprint,
+    static_contract_check,
+    with_message_codes,
+)
 from ...storage.preflights import setup_seed
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..preflight_execution import WizardPreflightRequest, WizardPreflightResponse, run_preflight
@@ -186,7 +190,7 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
         )
         contract = (result.workflow_result or {}).get("contract")
         if isinstance(contract, dict):
-            return ContractCheckResponse.model_validate(contract)
+            return with_message_codes(ContractCheckResponse.model_validate(contract), static)
         failure = next((check for check in result.checks if check.status != "succeeded"), None)
         error = failure.message if failure is not None and failure.message else result.status
         return ContractCheckResponse(
