@@ -144,7 +144,9 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const wizardCtx = useWizardStateOptional();
   const effectiveWizard: WizardState = (() => {
     const base = wizardCtx?.state ?? {};
-    return wizardState ? { ...base, ...wizardState } : base;
+    const merged = wizardState ? { ...base, ...wizardState } : base;
+    const screen = wizardCtx?.wizardScreen;
+    return screen == null ? merged : { ...merged, wizard_screen: screen };
   })();
 
   // Agent-submit splash: a successful submit tool plays the same full-screen

@@ -294,7 +294,7 @@ function DashboardBody({ data, compact }: { data: AdminDashboardResponse; compac
     },
   ];
   // The compact view sits in the narrow settings panel, where side-by-side panels get cramped.
-  const splitClass = compact ? "grid gap-4" : "grid gap-6 lg:grid-cols-2";
+  const splitClass = compact ? "grid gap-4" : "grid gap-6 2xl:grid-cols-2";
 
   return (
     <StaggerContainer className={compact ? "space-y-3" : "space-y-6"} staggerDelay={0.03}>
