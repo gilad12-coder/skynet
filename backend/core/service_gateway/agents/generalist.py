@@ -1273,6 +1273,70 @@ def validate_wizard_screen(tool_name: str, kwargs: dict[str, Any], state: Wizard
     )
 
 
+def screen_snapshot(state: WizardState) -> dict[str, Any]:
+    """Cut the wizard snapshot down to the screen the user is viewing.
+
+    Args:
+        state: The turn-start wizard snapshot.
+
+    Returns:
+        The values on the visible screen plus ``wizard_screen``, or the whole
+        snapshot when the wizard is not on screen.
+    """
+    if "wizard_screen" not in state:
+        return dict(state)
+    screen = state.get("wizard_screen") or ""
+    keep = _SCREEN_FIELDS.get(screen, frozenset()) | {"wizard_screen"}
+    return {key: value for key, value in state.items() if key in keep}
+
+
+def screen_tools(allowed: set[str], state: WizardState) -> set[str]:
+    """Drop the wizard-writing tools whose screen is not the one on view.
+
+    Args:
+        allowed: Tool names ``tools_for`` exposes for this snapshot.
+        state: The turn-start wizard snapshot.
+
+    Returns:
+        ``allowed`` without the ``_SCREEN_TOOLS`` that write another screen;
+        unchanged when the wizard is not on screen.
+    """
+    if "wizard_screen" not in state:
+        return allowed
+    screen = state.get("wizard_screen") or ""
+    return {name for name in allowed if screen in _SCREEN_TOOLS.get(name, frozenset({screen}))}
+
+
+def scope_wizard_tool(tool: dspy.Tool, state: WizardState) -> dspy.Tool:
+    """Narrow ``update_wizard_state`` to the fields on the screen on view.
+
+    The screenless fields stay: the wizard has no name field, and the step
+    order needs ``job_name`` before any Brief field can land.
+
+    Args:
+        tool: An MCP tool about to be offered to the agent.
+        state: The turn-start wizard snapshot.
+
+    Returns:
+        ``tool``, with its arguments and description narrowed in place when it
+        is ``update_wizard_state`` and the wizard is on screen.
+    """
+    if tool.name != "update_wizard_state" or "wizard_screen" not in state:
+        return tool
+    screen = state.get("wizard_screen") or ""
+    visible = _SCREEN_FIELDS.get(screen, frozenset())
+    keep = visible | _SCREENLESS_FIELDS
+    tool.args = {key: value for key, value in tool.args.items() if key in keep}
+    tool.arg_types = {key: value for key, value in (tool.arg_types or {}).items() if key in keep}
+    tool.arg_desc = {key: value for key, value in (tool.arg_desc or {}).items() if key in keep}
+    fields = ", ".join(sorted(visible)) or "none of the wizard's fields"
+    tool.desc = (
+        f"{tool.desc or ''}\n\nThe user is on the {screen or 'none'!r} screen: set only {fields} "
+        f"(plus {', '.join(sorted(_SCREENLESS_FIELDS))}, which show on no screen)."
+    ).strip()
+    return tool
+
+
 # The agent's instructions: the turn protocol (tools, then one ``submit``) as
 # well as the product rules. :class:`GeneralistSig` carries them as its
 # docstring; the constant exists so tests can assert on the text directly.
@@ -1318,20 +1382,24 @@ Reply language — hard rule:
 
 The wizard screen on view:
 * ``wizard_state.wizard_screen`` names the wizard screen the user is
-  looking at, and each turn you may change only the fields on it (plus
-  ``job_name``, ``job_description`` and ``is_private``, which show on no
-  screen). Screens: ``brief`` (task_objective, task_background),
-  ``artifact`` (artifact_kind, starting_version), ``source`` (data_mode,
-  staged_dataset_id, split_fractions, shuffle, seed), ``plan``
-  (optimizer_choice, model_config, reflection_model_config,
-  spending_limit_usd), ``optimizer`` (optimizer_choice), ``models``
-  (model_config, reflection_model_config), ``budget``
-  (spending_limit_usd) and ``metric`` (``request_code_authoring``);
-  ``check`` and ``overview`` hold nothing to edit. A write outside the
-  screen on view is refused with a "Not on screen" error. Fill what the
-  visible screen holds in one call, then tell the user what the next
-  screen will hold once they move on with the wizard's arrows. Without
-  ``wizard_screen`` the wizard is not on view and any field may be set.
+  looking at. You then see only that screen's values and its tools, and
+  each turn you edit only the fields on it. Screens: ``brief``
+  (task_objective, task_background), ``artifact`` (artifact_kind,
+  starting_version), ``source`` (data_mode, staged_dataset_id,
+  split_fractions, shuffle, seed), ``plan`` (optimizer_choice,
+  model_config, reflection_model_config, spending_limit_usd),
+  ``optimizer`` (optimizer_choice), ``models`` (model_config,
+  reflection_model_config), ``budget`` (spending_limit_usd) and
+  ``metric`` (``request_code_authoring``); ``check`` and ``overview``
+  hold nothing to edit. When the user asks for something on another
+  screen, change nothing for it: name that screen and ask them to move
+  there with the wizard's arrows. A write outside the screen on view is
+  refused with a "Not on screen" error.
+* ``job_name``, ``job_description`` and ``is_private`` show on no screen.
+  Set them only when the user asks for them this turn, or when an "Out of
+  order" error says the run needs a name first.
+* Without ``wizard_screen`` the wizard is not on view: you see the whole
+  snapshot and any field may be set.
 
 Rules:
 * Prefer calling tools over explaining. One tool call per turn is ideal.
@@ -1781,7 +1849,7 @@ async def _drive_generalist_agent(
     """
     async with _mcp_session(mcp_url, auth_header=auth_header) as session:
         listing = await session.list_tools()
-        allowed_names = tools_for(wizard_state)
+        allowed_names = screen_tools(tools_for(wizard_state), wizard_state)
         staged_id = wizard_state.get("staged_dataset_id") or None
         # The MCP session is bound to THIS loop. ``streamify`` dispatches
         # tool calls from a worker thread (asyncify), so the wrapper has
@@ -1792,7 +1860,7 @@ async def _drive_generalist_agent(
         authoring_flag = _TurnAuthoringFlag()
         dspy_tools = [
             _wrap_tool_with_approval(
-                dspy.Tool.from_mcp_tool(session, spec),
+                scope_wizard_tool(dspy.Tool.from_mcp_tool(session, spec), wizard_state),
                 trust_mode=trust_mode,
                 registry=registry,
                 emit=emit,
@@ -1845,7 +1913,7 @@ async def _drive_generalist_agent(
         )
 
         inputs = {
-            "wizard_state": json.dumps(wizard_state, ensure_ascii=False),
+            "wizard_state": json.dumps(screen_snapshot(wizard_state), ensure_ascii=False),
             "reply_language": reply_language,
             "user_message": user_message,
             "history": _history_from_chat(chat_history),

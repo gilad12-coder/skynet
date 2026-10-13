@@ -24,6 +24,9 @@ from core.service_gateway.agents.generalist import (
     _TurnAuthoringFlag,
     _wrap_tool_with_approval,
     approval_key,
+    scope_wizard_tool,
+    screen_snapshot,
+    screen_tools,
     tools_for,
     validate_wizard_patch_order,
     validate_wizard_screen,
@@ -246,6 +249,118 @@ def test_system_prompt_names_the_screen_rule() -> None:
     """The instructions tell the agent to edit only the screen on view."""
     prompt = GENERALIST_SYSTEM_PROMPT or ""
     assert "``wizard_state.wizard_screen`` names the wizard screen" in prompt
+
+
+_FULL_SNAPSHOT: dict[str, Any] = {
+    "job_name": "Tickets",
+    "job_description": "d",
+    "is_private": False,
+    "task_objective": "Classify tickets",
+    "task_background": "b",
+    "artifact_kind": "prompt",
+    "starting_version": "v1",
+    "data_mode": "pairs",
+    "dataset_ready": True,
+    "input_fields": ["text"],
+    "optimizer_choice": "auto",
+    "model_config": {"name": "openai/gpt-4o"},
+    "model_configured": True,
+    "max_cost_cents": 500,
+    "spending_limit_usd": 5,
+    "run_code": "def run(): ...",
+    "metric_code": "def metric(): ...",
+}
+
+
+@pytest.mark.parametrize(
+    ("screen", "expected"),
+    [
+        ("brief", {"task_objective", "task_background"}),
+        ("artifact", {"artifact_kind", "starting_version"}),
+        ("source", {"data_mode"}),
+        ("plan", {"optimizer_choice", "model_config", "spending_limit_usd"}),
+        ("models", {"model_config"}),
+        ("budget", {"spending_limit_usd"}),
+        ("metric", set()),
+        ("check", set()),
+    ],
+)
+def test_screen_snapshot_keeps_only_the_screen_on_view(screen: str, expected: set[str]) -> None:
+    """The prompt snapshot holds the visible screen's values and the screen id."""
+    trimmed = screen_snapshot(cast(WizardState, {**_FULL_SNAPSHOT, "wizard_screen": screen}))
+    assert set(trimmed) == expected | {"wizard_screen"}
+    assert trimmed["wizard_screen"] == screen
+
+
+def test_screen_snapshot_is_whole_without_a_screen() -> None:
+    """Outside the wizard the agent still sees every value."""
+    assert screen_snapshot(cast(WizardState, _FULL_SNAPSHOT)) == _FULL_SNAPSHOT
+
+
+@pytest.mark.parametrize(("screen", "has_code_tool"), [("metric", True), ("brief", False), ("budget", False)])
+def test_screen_tools_drop_other_screens_writers(screen: str, has_code_tool: bool) -> None:
+    """``request_code_authoring`` is offered only on the metric screen."""
+    allowed = {"update_wizard_state", "request_code_authoring", "list_jobs"}
+    kept = screen_tools(allowed, WizardState(wizard_screen=screen))
+    assert ("request_code_authoring" in kept) is has_code_tool
+    assert {"update_wizard_state", "list_jobs"} <= kept
+
+
+def test_screen_tools_unchanged_without_a_screen() -> None:
+    """With no ``wizard_screen`` every tool ``tools_for`` allows stays."""
+    allowed = {"update_wizard_state", "request_code_authoring"}
+    assert screen_tools(allowed, WizardState()) == allowed
+
+
+def _wizard_tool() -> dspy.Tool:
+    """Build an ``update_wizard_state`` stand-in with a field per screen.
+
+    Returns:
+        A ``dspy.Tool`` whose arguments span several wizard screens.
+    """
+
+    def update_wizard_state(
+        job_name: str = "",
+        job_description: str = "",
+        is_private: bool = False,
+        task_objective: str = "",
+        artifact_kind: str = "",
+        optimizer_choice: str = "",
+        spending_limit_usd: float = 0.0,
+    ) -> str:
+        """Patch the wizard."""
+        return "ok"
+
+    return dspy.Tool(update_wizard_state)
+
+
+def test_scope_wizard_tool_names_only_current_screen_fields() -> None:
+    """On the budget screen the tool takes the budget plus the screenless fields."""
+    tool = scope_wizard_tool(_wizard_tool(), WizardState(wizard_screen="budget"))
+    assert set(tool.args) == {"spending_limit_usd", "job_name", "job_description", "is_private"}
+    assert "set only spending_limit_usd" in tool.desc
+    assert "optimizer_choice" not in tool.desc
+
+
+def test_scope_wizard_tool_unchanged_without_a_screen() -> None:
+    """Outside the wizard the tool keeps every argument."""
+    tool = scope_wizard_tool(_wizard_tool(), WizardState())
+    assert "optimizer_choice" in tool.args
+    assert "artifact_kind" in tool.args
+
+
+def test_scope_wizard_tool_ignores_other_tools() -> None:
+    """Only ``update_wizard_state`` is narrowed."""
+    other = _make_fake_tool("list_jobs")
+    before = dict(other.args)
+    assert scope_wizard_tool(other, WizardState(wizard_screen="brief")).args == before
+
+
+def test_system_prompt_keeps_screenless_fields_to_explicit_asks() -> None:
+    """The instructions keep name/description/privacy edits to explicit asks."""
+    prompt = GENERALIST_SYSTEM_PROMPT or ""
+    assert "Set them only when the user asks for them this turn" in prompt
+    assert "name that screen and ask them to move" in prompt
 
 
 def test_order_ignores_unmapped_fields() -> None:
