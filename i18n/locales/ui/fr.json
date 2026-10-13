@@ -1676,6 +1676,7 @@
   "auto.features.agent.panel.components.generalistpanel.4": "Ce que je peux faire",
   "auto.features.agent.panel.components.generalistpanel.6": "Cliquez pour réduire",
   "auto.features.agent.panel.components.generalistpanel.code_ready_note": "La Signature et la métrique ont été rédigées et validées. Vous pouvez passer à l'étape du modèle et lancer l'optimisation.",
+  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "Je suis maintenant sur cet écran. De quoi avons-nous besoin ici ?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "Jeu de données `{p1}` joint ({p2} lignes).\n\nMappage des colonnes :\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "Réessayer",
   "auto.features.agent.panel.components.generalistpanel.history_button": "Conversations passées",

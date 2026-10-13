@@ -10,7 +10,9 @@ import {
   type OptimizerChoice,
 } from "@/shared/types/unified-run";
 
-import type { WizardState } from "../lib/types";
+import type { ScreenNav, ScreenNavigator } from "../lib/screen-agent";
+import { runScreenNav } from "../lib/screen-agent";
+import type { ScreenNote, WizardState } from "../lib/types";
 
 type WizardKey = keyof WizardState;
 type WriteSource = "user" | "agent";
@@ -42,6 +44,13 @@ interface WizardStateContextValue {
    */
   wizardScreen: string | null;
   setWizardScreen: (screen: string | null) => void;
+  /** What the Continue button refuses on the screen on view; null when it is open. */
+  screenIssue: string | null;
+  setScreenIssue: (issue: string | null) => void;
+  /** The wizard frame registers its own Continue / Back handlers here. */
+  setScreenNavigator: (navigator: ScreenNavigator | null) => void;
+  /** Move the wizard as a screen agent asked, through the frame's handlers. */
+  navigateScreen: (nav: ScreenNav) => void;
 }
 
 const Ctx = React.createContext<WizardStateContextValue | null>(null);
@@ -58,6 +67,16 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
   const [pulseKeys, setPulseKeys] = React.useState<readonly string[]>([]);
   const agentWrittenRef = React.useRef<Set<string>>(new Set());
   const [wizardScreen, setWizardScreen] = React.useState<string | null>(null);
+  const [screenIssue, setScreenIssue] = React.useState<string | null>(null);
+  // A ref, not state: the frame re-registers on every render that changes its
+  // handlers, and the agent reads it only when a move arrives.
+  const navigatorRef = React.useRef<ScreenNavigator | null>(null);
+  const setScreenNavigator = React.useCallback((navigator: ScreenNavigator | null) => {
+    navigatorRef.current = navigator;
+  }, []);
+  const navigateScreen = React.useCallback((nav: ScreenNav) => {
+    runScreenNav(nav, navigatorRef.current);
+  }, []);
 
   const setField = React.useCallback<WizardStateContextValue["setField"]>(
     (key, value, source = "user") => {
@@ -159,6 +178,10 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       reset,
       wizardScreen,
       setWizardScreen,
+      screenIssue,
+      setScreenIssue,
+      setScreenNavigator,
+      navigateScreen,
     }),
     [
       state,
@@ -170,6 +193,9 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       clearField,
       reset,
       wizardScreen,
+      screenIssue,
+      setScreenNavigator,
+      navigateScreen,
     ],
   );
 
@@ -200,6 +226,16 @@ function parseStartingVersion(value: unknown): string | Record<string, string> |
   return entries.every(([, part]) => typeof part === "string")
     ? (Object.fromEntries(entries) as Record<string, string>)
     : null;
+}
+
+/** Notes screen agents left for later screens; anything malformed drops the list. */
+function parseScreenNotes(value: unknown): ScreenNote[] | null {
+  if (!Array.isArray(value)) return null;
+  const notes = value.filter(
+    (entry): entry is ScreenNote =>
+      isRecord(entry) && typeof entry.screen === "string" && typeof entry.note === "string",
+  );
+  return notes.length === value.length ? notes : null;
 }
 
 /**
@@ -235,6 +271,8 @@ export function extractWizardPatch(result: unknown): Partial<WizardState> {
     if (typeof wrap[key] === "string" && wrap[key]) patch[key] = wrap[key] as string;
   }
   if (isStringList(wrap.dataset_columns)) patch.dataset_columns = wrap.dataset_columns;
+  const notes = parseScreenNotes(wrap.screen_notes);
+  if (notes) patch.screen_notes = notes;
   if (isStringList(wrap.input_fields)) patch.input_fields = wrap.input_fields;
 
   const kind = ARTIFACT_KINDS.find((k) => k === wrap.artifact_kind);

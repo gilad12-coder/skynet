@@ -1134,6 +1134,7 @@
   "auto.features.agent.panel.components.generalistpanel.4": "我可以幫你做咩",
   "auto.features.agent.panel.components.generalistpanel.6": "撳一下收埋",
   "auto.features.agent.panel.components.generalistpanel.code_ready_note": "Signature 同 Metric 已經寫好並通過驗證。你可以前往模型步驟並開始最佳化。",
+  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "我而家喺呢個畫面。呢度需要做啲乜？",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "已附加資料集 `{p1}`（{p2} 行）。\n\n欄位對應：\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "再試一次",
   "auto.features.agent.panel.components.generalistpanel.history_button": "過往對話",

@@ -18,6 +18,7 @@ from core.service_gateway.agents import generalist as generalist_module
 from core.service_gateway.agents.code import _agent_error_payload, _SubmitArgExtractor
 from core.service_gateway.agents.generalist import (
     GENERALIST_SYSTEM_PROMPT,
+    SCREEN_FOCUS,
     ApprovalRegistry,
     WizardState,
     _needs_approval,
@@ -25,6 +26,8 @@ from core.service_gateway.agents.generalist import (
     _wrap_tool_with_approval,
     approval_key,
     scope_wizard_tool,
+    screen_nav_tools,
+    screen_signature,
     screen_snapshot,
     screen_tools,
     tools_for,
@@ -266,7 +269,6 @@ _FULL_SNAPSHOT: dict[str, Any] = {
     "model_config": {"name": "openai/gpt-4o"},
     "model_configured": True,
     "max_cost_cents": 500,
-    "spending_limit_usd": 5,
     "run_code": "def run(): ...",
     "metric_code": "def metric(): ...",
 }
@@ -276,20 +278,39 @@ _FULL_SNAPSHOT: dict[str, Any] = {
     ("screen", "expected"),
     [
         ("brief", {"task_objective", "task_background"}),
-        ("artifact", {"artifact_kind", "starting_version"}),
-        ("source", {"data_mode"}),
-        ("plan", {"optimizer_choice", "model_config", "spending_limit_usd"}),
-        ("models", {"model_config"}),
-        ("budget", {"spending_limit_usd"}),
-        ("metric", set()),
-        ("check", set()),
+        ("artifact", {"artifact_kind", "starting_version", "task_objective"}),
+        ("source", {"data_mode", "dataset_ready", "input_fields", "task_objective", "artifact_kind"}),
+        (
+            "plan",
+            {
+                "optimizer_choice",
+                "model_config",
+                "model_configured",
+                "max_cost_cents",
+                "task_objective",
+                "artifact_kind",
+                "data_mode",
+            },
+        ),
+        ("optimizer", {"optimizer_choice", "artifact_kind", "data_mode"}),
+        ("models", {"model_config", "model_configured", "optimizer_choice"}),
+        ("budget", {"max_cost_cents", "optimizer_choice", "model_config"}),
+        ("metric", {"run_code", "metric_code", "task_objective", "artifact_kind", "starting_version", "input_fields"}),
+        ("check", {"run_code", "metric_code", "input_fields"}),
     ],
 )
-def test_screen_snapshot_keeps_only_the_screen_on_view(screen: str, expected: set[str]) -> None:
-    """The prompt snapshot holds the visible screen's values and the screen id."""
+def test_screen_snapshot_keeps_screen_fields_and_read_only_extras(screen: str, expected: set[str]) -> None:
+    """A screen sees its own fields plus the values it depends on, nothing else."""
     trimmed = screen_snapshot(cast(WizardState, {**_FULL_SNAPSHOT, "wizard_screen": screen}))
     assert set(trimmed) == expected | {"wizard_screen"}
     assert trimmed["wizard_screen"] == screen
+
+
+def test_models_screen_sees_the_optimizer_read_only() -> None:
+    """The models screen shows the optimizer but cannot write it."""
+    state = cast(WizardState, {**_FULL_SNAPSHOT, "wizard_screen": "models"})
+    assert screen_snapshot(state)["optimizer_choice"] == "auto"
+    assert validate_wizard_screen("update_wizard_state", {"optimizer_choice": "gepa"}, state) is not None
 
 
 def test_screen_snapshot_is_whole_without_a_screen() -> None:
@@ -297,19 +318,160 @@ def test_screen_snapshot_is_whole_without_a_screen() -> None:
     assert screen_snapshot(cast(WizardState, _FULL_SNAPSHOT)) == _FULL_SNAPSHOT
 
 
-@pytest.mark.parametrize(("screen", "has_code_tool"), [("metric", True), ("brief", False), ("budget", False)])
-def test_screen_tools_drop_other_screens_writers(screen: str, has_code_tool: bool) -> None:
-    """``request_code_authoring`` is offered only on the metric screen."""
-    allowed = {"update_wizard_state", "request_code_authoring", "list_jobs"}
-    kept = screen_tools(allowed, WizardState(wizard_screen=screen))
-    assert ("request_code_authoring" in kept) is has_code_tool
-    assert {"update_wizard_state", "list_jobs"} <= kept
+def test_screen_snapshot_shows_notes_only_from_earlier_screens() -> None:
+    """A note reaches the screens after the one it was left on, not that one or earlier."""
+    notes = [{"screen": "brief", "note": "keep it cheap"}, {"screen": "budget", "note": "cap at $5"}]
+    state = {**_FULL_SNAPSHOT, "screen_notes": notes}
+    assert (
+        screen_snapshot(cast(WizardState, {**state, "wizard_screen": "brief"})).get("notes_from_earlier_screens")
+        is None
+    )
+    budget = screen_snapshot(cast(WizardState, {**state, "wizard_screen": "budget"}))
+    assert budget["notes_from_earlier_screens"] == ["brief: keep it cheap"]
+    overview = screen_snapshot(cast(WizardState, {**state, "wizard_screen": "overview"}))
+    assert overview["notes_from_earlier_screens"] == ["brief: keep it cheap", "budget: cap at $5"]
+    assert "screen_notes" not in budget
+
+
+def test_screen_snapshot_caps_client_notes() -> None:
+    """Notes from the client are capped in count and length."""
+    notes = [{"screen": "brief", "note": f"{i} " + "x" * 400} for i in range(15)]
+    state = cast(WizardState, {"wizard_screen": "budget", "screen_notes": notes})
+    shown = screen_snapshot(state)["notes_from_earlier_screens"]
+    assert len(shown) == 10
+    assert shown[0].startswith("brief: 5 ")
+    assert all(len(line) <= len("brief: ") + 200 for line in shown)
+
+
+def test_screen_snapshot_names_what_blocks_continue() -> None:
+    """The Continue button's refusal reaches the agent."""
+    state = cast(WizardState, {"wizard_screen": "brief", "screen_issue": "Describe the task first"})
+    assert screen_snapshot(state)["continue_blocked_by"] == "Describe the task first"
+
+
+@pytest.mark.parametrize(
+    ("screen", "kept"),
+    [
+        ("brief", {"update_wizard_state"}),
+        ("metric", {"request_code_authoring"}),
+        ("budget", {"update_wizard_state", "get_wallet_for_agent"}),
+        ("overview", {_SUBMIT, "get_wallet_for_agent"}),
+    ],
+)
+def test_screen_tools_keep_only_the_screens_own_tools(screen: str, kept: set[str]) -> None:
+    """A screen agent gets that screen's tools only; other screens' tools are gone."""
+    allowed = {"update_wizard_state", "request_code_authoring", "get_wallet_for_agent", "list_jobs", _SUBMIT}
+    assert screen_tools(allowed, WizardState(wizard_screen=screen)) == kept
 
 
 def test_screen_tools_unchanged_without_a_screen() -> None:
     """With no ``wizard_screen`` every tool ``tools_for`` allows stays."""
-    allowed = {"update_wizard_state", "request_code_authoring"}
+    allowed = {"update_wizard_state", "request_code_authoring", "list_jobs"}
     assert screen_tools(allowed, WizardState()) == allowed
+
+
+def _nav_tools(state: dict[str, Any], turn: _TurnAuthoringFlag | None = None) -> dict[str, dspy.Tool]:
+    """Build the screen agent's local tools, keyed by name.
+
+    Args:
+        state: The wizard snapshot.
+        turn: The turn flag; a fresh one when omitted.
+
+    Returns:
+        The tools by name.
+    """
+    tools = screen_nav_tools(cast(WizardState, state), turn or _TurnAuthoringFlag())
+    return {tool.name: tool for tool in tools}
+
+
+@pytest.mark.asyncio
+async def test_remember_for_later_appends_a_capped_note() -> None:
+    """A note lands in the wizard state with its screen, clipped and capped."""
+    old = [{"screen": "brief", "note": str(i)} for i in range(10)]
+    tools = _nav_tools({"wizard_screen": "artifact", "screen_notes": old})
+    result = await tools["remember_for_later"].acall(note="keep   it\ncheap " + "x" * 300)
+    notes = result["wizard_state"]["screen_notes"]
+    assert len(notes) == 10
+    assert notes[0] == {"screen": "brief", "note": "1"}
+    assert notes[-1]["screen"] == "artifact"
+    assert notes[-1]["note"].startswith("keep it cheap ")
+    assert len(notes[-1]["note"]) == 200
+
+
+@pytest.mark.asyncio
+async def test_remember_for_later_refuses_an_empty_note() -> None:
+    """An empty note writes nothing."""
+    result = await _nav_tools({"wizard_screen": "brief"})["remember_for_later"].acall(note="  ")
+    assert isinstance(result, str)
+
+
+@pytest.mark.asyncio
+async def test_continue_refused_while_the_screen_fails_validation() -> None:
+    """Continue on an empty brief returns the errors, not a move."""
+    result = await _nav_tools({"wizard_screen": "brief"})["continue_to_next_screen"].acall()
+    assert isinstance(result, str)
+    assert "task_objective" in result
+
+
+@pytest.mark.asyncio
+async def test_continue_refused_while_the_wizard_blocks_continue() -> None:
+    """The wizard's own Continue check refuses the move too."""
+    state = {**_READY, "wizard_screen": "brief", "screen_issue": "Name the run"}
+    result = await _nav_tools(state)["continue_to_next_screen"].acall()
+    assert isinstance(result, str)
+    assert "Name the run" in result
+
+
+@pytest.mark.asyncio
+async def test_continue_judges_this_turns_writes() -> None:
+    """A field written earlier this turn counts toward the screen being done."""
+    turn = _TurnAuthoringFlag()
+    turn.wizard_patch["task_objective"] = "Sort tickets"
+    result = await _nav_tools({"wizard_screen": "brief", "screen_issue": "stale"}, turn)[
+        "continue_to_next_screen"
+    ].acall()
+    assert result["screen_nav"] == {"action": "continue", "from": "brief"}
+
+
+@pytest.mark.asyncio
+async def test_continue_moves_on_and_saves_its_note() -> None:
+    """A done screen moves on, and the optional note is kept like ``remember_for_later``."""
+    state = {**_READY, "wizard_screen": "brief"}
+    result = await _nav_tools(state)["continue_to_next_screen"].acall(note="keep it cheap")
+    assert result["screen_nav"] == {"action": "continue", "from": "brief"}
+    assert result["wizard_state"]["screen_notes"] == [{"screen": "brief", "note": "keep it cheap"}]
+
+
+@pytest.mark.asyncio
+async def test_continue_never_leaves_the_overview() -> None:
+    """The last screen submits instead."""
+    result = await _nav_tools({**_READY, "wizard_screen": "overview"})["continue_to_next_screen"].acall()
+    assert isinstance(result, str)
+
+
+@pytest.mark.asyncio
+async def test_go_back_only_to_an_earlier_screen() -> None:
+    """Going back names an earlier screen and carries the request."""
+    tools = _nav_tools({"wizard_screen": "budget"})
+    result = await tools["go_back_to_screen"].acall(screen_id="brief", request="Make it about refunds")
+    assert result["screen_nav"] == {
+        "action": "back",
+        "from": "budget",
+        "screen": "brief",
+        "request": "Make it about refunds",
+    }
+    assert isinstance(await tools["go_back_to_screen"].acall(screen_id="metric", request="x"), str)
+    assert isinstance(await tools["go_back_to_screen"].acall(screen_id="brief", request=" "), str)
+
+
+@pytest.mark.parametrize("screen", list(SCREEN_FOCUS))
+def test_screen_signature_is_short_and_names_the_screen(screen: str) -> None:
+    """Each screen agent gets its own short instructions, not the full prompt."""
+    instructions = screen_signature(screen).instructions
+    assert f"the ``{screen}`` screen" in instructions
+    assert SCREEN_FOCUS[screen] in instructions
+    assert "remember_for_later" in instructions
+    assert len(instructions) < len(GENERALIST_SYSTEM_PROMPT or "")
 
 
 def _wizard_tool() -> dspy.Tool:
@@ -356,11 +518,11 @@ def test_scope_wizard_tool_ignores_other_tools() -> None:
     assert scope_wizard_tool(other, WizardState(wizard_screen="brief")).args == before
 
 
-def test_system_prompt_keeps_screenless_fields_to_explicit_asks() -> None:
-    """The instructions keep name/description/privacy edits to explicit asks."""
-    prompt = GENERALIST_SYSTEM_PROMPT or ""
-    assert "Set them only when the user asks for them this turn" in prompt
-    assert "name that screen and ask them to move" in prompt
+def test_screen_prompt_keeps_screenless_fields_to_explicit_asks() -> None:
+    """Screen agents set name, description and privacy only when asked."""
+    instructions = screen_signature("brief").instructions
+    assert "Set them only when the user asks for them this turn" in instructions
+    assert "go_back_to_screen" in instructions
 
 
 def test_order_ignores_unmapped_fields() -> None:
