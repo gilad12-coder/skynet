@@ -7,6 +7,7 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { streamCodeAgent, type AgentQuestion, type CodeAgentToolName } from "@/shared/lib/api";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
+import { liveLanesLast } from "@/shared/hooks/reasoning-order";
 import { TERMS } from "@/shared/lib/terms";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
@@ -107,11 +108,11 @@ function reasoningSourceLabel(source: string): string {
   return source;
 }
 
-function composeReasoning(sections: ReasoningSections): string {
+function composeReasoning(sections: ReasoningSections, live: ReadonlySet<string>): string {
   const first = sections.order[0];
   if (first === undefined) return "";
   if (sections.order.length === 1) return sections.bufs[first] ?? "";
-  return sections.order
+  return liveLanesLast(sections.order, live)
     .map((key) => `[${reasoningSourceLabel(key)}]\n${sections.bufs[key] ?? ""}`)
     .join("\n\n");
 }
@@ -520,6 +521,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       const markReasoningDone = (source?: string) => {
         if (source === undefined) reasoningLanesRef.current.clear();
         else reasoningLanesRef.current.delete(source);
+        const recomposed = composeReasoning(reasoningSectionsRef.current, reasoningLanesRef.current);
+        if (recomposed !== reasoningBufRef.current) {
+          reasoningBufRef.current = recomposed;
+          setReasoning(recomposed);
+        }
         if (reasoningLanesRef.current.size > 0) return;
         if (reasoningBufRef.current && !reasoningEndedRef.current) {
           reasoningEndedRef.current = true;
@@ -606,7 +612,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               }
             }
             sections.bufs[source] += chunk;
-            reasoningBufRef.current = composeReasoning(sections);
+            reasoningBufRef.current = composeReasoning(sections, reasoningLanesRef.current);
             setReasoning(reasoningBufRef.current);
           },
           onSignaturePatch: (chunk) => {
