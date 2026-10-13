@@ -29,10 +29,12 @@ export const HOATZIN_LOCKUP_VIEWBOX = "48 12 400 432";
 // The wordmark lockup aligns the letters' centre line to this point.
 const EYE = { cx: 306.9, cy: 285.2 };
 
-const FACE = "M341.6 243A70 70 0 1 0 341.6 333Z";
-// Outer arc (centre 345,340, like the S's top), a flat cut a third of its radius (the S's
-// terminal), then a concave arc back to the face (the S's counter).
-const BILL = "M341.6 243A97.1 97.1 0 0 1 441.8 346.8H408.8A80 80 0 0 0 341.6 333";
+// The face circle is closed by the bill base, a chord between its points at -30° and +30°.
+const FACE = "M348.6 253A70 70 0 1 0 348.6 323Z";
+// Outer arc (r 74, centre 348.3,327, like the S's top) to a tip 4° below its centre, a flat
+// cut a third of that radius (the S's terminal), then a concave r 60 arc back to the face
+// (the S's counter). The bill reaches about 64 units past the face, with its tip just below the gape.
+const BILL = "M348.6 253A74 74 0 0 1 422.1 332.2H396.9A60 60 0 0 0 348.6 323";
 const NECK = "M222.2 311.9Q200 410 190 524M298.3 357.2Q277.6 415.1 268 524";
 const NECK_BANDS = "M219.4 418L269.6 406M214.3 454L262.6 442M209.9 490L257.3 478";
 
