@@ -179,8 +179,30 @@ def test_a_guest_holding_an_older_contract_never_reads_as_all_passed() -> None:
     assert not response.ok
     failed = [check for check in response.checks if check.status == "failed"]
     assert [check.key for check in failed] == ["workspace.run"]
-    assert failed[0].message_code == "submit.unified.contract_failed"
-    assert "build_program is not defined" in failed[0].message_params["error"]
+    assert failed[0].message_code == "contract.runner_outdated"
+    assert "build_program is not defined" in (failed[0].detail or "")
+
+
+def test_an_older_guest_message_never_reaches_the_client_text() -> None:
+    """The guest's base-language message lands in detail only; the item's message comes from its code."""
+    payload = _payload(kind="dspy_program", optimizer="dspy_gepa", run_code=DSPY_RUN_CODE, metric_code=DSPY_METRIC)
+    static = static_contract_check(payload)
+    guest_text = "קוד הריצה חייב להגדיר build_program() שמחזירה dspy.Module."
+    guest = static.model_copy(
+        update={
+            "ok": False,
+            "checks": [
+                static.checks[0].model_copy(update={"status": "failed", "message": guest_text, "detail": None}),
+                *static.checks[1:],
+            ],
+        }
+    )
+
+    failed = [check for check in with_message_codes(guest, static).checks if check.status == "failed"]
+
+    assert failed[0].message_params == {}
+    assert guest_text not in failed[0].message
+    assert guest_text in (failed[0].detail or "")
 
 
 def test_sampled_check_runs_a_dspy_program_through_run(tmp_path: Any) -> None:

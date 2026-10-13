@@ -94,6 +94,7 @@ class I18nKey(StrEnum):
     CONTRACT_PASSED = 'contract.passed'
     CONTRACT_RUN_ERROR = 'contract.run_error'
     CONTRACT_RUN_MISSING = 'contract.run_missing'
+    CONTRACT_RUNNER_OUTDATED = 'contract.runner_outdated'
     CONTRACT_SHAPE_BLACKBOX = 'contract.shape.blackbox'
     DATASET_COLUMN_ROLES_INVALID = 'dataset.column_roles_invalid'
     DATASET_COLUMN_ROLES_NEED_INPUT = 'dataset.column_roles_need_input'
