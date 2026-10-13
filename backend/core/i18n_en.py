@@ -63,6 +63,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "billing.unknown_pack": "Unknown top-up pack '{pack_id}'.",
     "billing.webhook_invalid": "Stripe webhook signature verification failed.",
     "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "code_agent.seed_lane_timeout": "The model thought for too long without writing the code, so the draft was stopped. Try again, or pick a faster model or a lower reasoning effort.",
     "code_agent.upstream_failed": "Code agent failed: {error}",
     "dataset.column_roles_invalid": "Invalid role values (must be 'input', 'output', or 'ignore'): {bad}",
     "dataset.column_roles_need_input": "At least one column must have role 'input'.",

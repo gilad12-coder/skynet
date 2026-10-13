@@ -21,11 +21,11 @@ import { MetricStep } from "./MetricStep";
 import { OptimizerStep } from "./OptimizerStep";
 import { TaskStep } from "./TaskStep";
 
-const STEP_VIEWS: Record<WizardStepId, (page: number) => ReactNode> = {
+const STEP_VIEWS: Record<WizardStepId, (page: number, back: () => void) => ReactNode> = {
   task: (page) => <TaskStep page={page} />,
   inputs: () => <InputsStep />,
   optimizer: (page) => <OptimizerStep page={page} />,
-  metric: (page) => <MetricStep page={page} />,
+  metric: (page, back) => <MetricStep page={page} onBack={back} />,
 };
 
 const FIRST_PAGES: Record<WizardStepId, number> = { task: 0, inputs: 0, optimizer: 0, metric: 0 };
@@ -145,7 +145,7 @@ function UnifiedWizardFrame() {
               animate={active ? "center" : "enter"}
               transition={{ duration: active ? 0.1 : 0 }}
             >
-              {STEP_VIEWS[step](Math.min(pages[step], stepPages(step, w.state).length - 1))}
+              {STEP_VIEWS[step](Math.min(pages[step], stepPages(step, w.state).length - 1), back)}
             </motion.div>
           );
         })}

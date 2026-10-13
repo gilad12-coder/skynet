@@ -999,6 +999,9 @@ export interface CatalogModel {
   // null for models OpenRouter does not list.
   display_name?: string | null;
   supports_vision: boolean;
+  // Best-value rank of the model's lab: 0 top labs (Anthropic, OpenAI,
+  // Google), 1 others, 2 Chinese labs. Absent reads as 1.
+  lab_tier?: number;
   available: boolean;
   max_input_tokens?: number | null;
   // Provider per-token costs (USD) from LiteLLM; null/absent when unpriced, so

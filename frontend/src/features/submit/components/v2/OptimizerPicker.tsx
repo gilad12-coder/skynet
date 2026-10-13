@@ -83,13 +83,6 @@ export function OptimizerPicker({
     optimizerCatalog?.artifact_kind === kind && optimizerCatalog.data_mode === mode
       ? optimizerCatalog
       : null;
-  const autoLanes =
-    choice === "auto" && catalog && catalog.auto_resolves_to.length > 0
-      ? catalog.auto_resolves_to
-          .map((id) => (id in OPTIMIZER_NAMES ? OPTIMIZER_NAMES[id as keyof typeof OPTIMIZER_NAMES] : id))
-          .join(", ")
-      : null;
-  const selected = options[selectedIndex];
   // Roving tabindex: the checked card takes the Tab stop, else the first.
   const focusIndex = selectedIndex >= 0 ? selectedIndex : 0;
   const groupRef = useRef<HTMLDivElement>(null);
@@ -203,21 +196,6 @@ export function OptimizerPicker({
               : (issue.reason ?? t("submit.v2.optimizer.issue.unavailable"))}
           </span>
         </p>
-      )}
-
-      {!issue && selected && (
-        <dl className="space-y-1 text-xs text-muted-foreground">
-          {autoLanes && (
-            <div className="flex flex-wrap gap-x-1">
-              <dt>{t("submit.v2.optimizer.auto_lanes")}</dt>
-              <dd dir="ltr">{autoLanes}</dd>
-            </div>
-          )}
-          <div className="flex flex-wrap gap-x-1">
-            <dt>{t("submit.v2.optimizer.metric_shape.label")}</dt>
-            <dd>{t(`submit.v2.optimizer.metric_shape.${selected.metricShape}`)}</dd>
-          </div>
-        </dl>
       )}
     </StepCard>
   );

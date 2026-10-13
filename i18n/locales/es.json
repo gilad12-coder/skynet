@@ -283,6 +283,7 @@
     "submission.staged_dataset_not_found": "No se encontró staged_dataset_id '{staged_dataset_id}' para este usuario; vuelve a subir el conjunto de datos e inténtalo de nuevo.",
     "submission.validation_failed": "La validación de la carga útil falló. Comprueba el optimizador, el módulo y la asignación de columnas.",
     "submission.vision_required": "El conjunto de datos contiene columnas de imagen ({fields}), pero el modelo seleccionado ('{model}') no admite entradas de imagen. Elige un modelo compatible con visión.",
+    "code_agent.seed_lane_timeout": "El modelo pensó demasiado tiempo sin escribir el código, así que se detuvo el borrador. Inténtalo de nuevo o elige un modelo más rápido o un nivel de razonamiento más bajo.",
     "submit.no_models_available": "No hay modelos disponibles en el catálogo; configura primero la clave de API de un proveedor.",
     "user.storage.quota_exceeded": "Se superó la cuota de almacenamiento (se usan {used_mb}MB de {quota_mb}MB). Libera espacio e inténtalo de nuevo.",
     "wizard.code_via_authoring_only": "{field} no se puede establecer a través de update_wizard_state. El código de firma y de métrica solo se crea mediante request_code_authoring, que valida el resultado antes de que llegue al asistente.",

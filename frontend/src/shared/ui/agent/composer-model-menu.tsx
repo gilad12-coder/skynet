@@ -4,7 +4,7 @@ import * as React from "react";
 import { Check, CaretDown, CaretRight } from "@/shared/ui/icons";
 
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
-import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
+import { effortLabel, effortsFor, unpickedEffort } from "@/shared/lib/model-efforts";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
@@ -150,11 +150,7 @@ export function ComposerModelMenu({
   const current = available.find((m) => m.value === effective);
   const canThink = !!current?.supports_thinking;
   const efforts = effortsFor(effective, available);
-  // An off-by-default thinker runs "Default" with no reasoning at all, so it
-  // has no default level to name.
-  const defaultEffort = current?.reasoning_default_enabled
-    ? (current.default_reasoning_effort ?? null)
-    : null;
+  const defaultEffort = unpickedEffort(current);
 
   const pick = (model: string | null) => {
     onChange(model);

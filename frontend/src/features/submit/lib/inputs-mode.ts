@@ -44,6 +44,25 @@ export function rowsToCases(
   });
 }
 
+/**
+ * The cases the coding agent writes the run code against. They are the run's
+ * own cases, or for a staged table its sample rows read through the same
+ * roles, so the agent sees exactly the input fields the contract check and
+ * the optimization will hand `run`.
+ */
+export function authoringCases(
+  inputs: {
+    cases: readonly UnifiedCase[];
+    sampleRows: readonly Row[];
+    inputFields: readonly string[];
+    expectedField: string | null;
+  },
+  limit: number,
+): UnifiedCase[] {
+  if (inputs.cases.length > 0) return inputs.cases.slice(0, limit);
+  return rowsToCases(inputs.sampleRows.slice(0, limit), inputs.inputFields, inputs.expectedField);
+}
+
 /** The table rows a set of cases came from, as far as the cases still carry them. */
 export function casesToRows(cases: readonly UnifiedCase[]): Row[] {
   return cases.map((c) => {

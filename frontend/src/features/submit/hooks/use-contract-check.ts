@@ -4,6 +4,7 @@ import * as React from "react";
 import { msg, type MessageKey } from "@/shared/lib/messages";
 import { runContractCheck, staticContractCheck } from "@/shared/lib/api";
 import type { ContractCheckResponse } from "@/shared/types/unified-run";
+import type { ContractCheckTiming } from "../lib/contract-validation";
 import { contractSnapshot, withContractBudget, type WizardV2Context } from "../lib/wizard-v2";
 
 // Typing pauses this long before the static (no-sandbox) check runs.
@@ -20,9 +21,12 @@ export interface ContractCheckState {
   checking: boolean;
   /** Transport or auth failure of the sandboxed check, not a contract failure. */
   error: string | null;
+  /** When the latest sandboxed check started and reached each step, for the check screen. */
+  timing: ContractCheckTiming | null;
   /** False while the setup cannot build a payload yet. */
   canCheck: boolean;
-  check: () => Promise<void>;
+  /** Runs the sandboxed check; resolves to its result, or null when it did not finish. */
+  check: () => Promise<ContractCheckResponse | null>;
 }
 
 function errorText(error: unknown): string {
@@ -48,6 +52,7 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
   const [staticPending, setStaticPending] = React.useState(false);
   const [checking, setChecking] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [timing, setTiming] = React.useState<ContractCheckTiming | null>(null);
   const checkAbortRef = React.useRef<AbortController | null>(null);
 
   const canCheck = buildPayload() !== null;
@@ -84,7 +89,7 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
 
   const check = React.useCallback(async () => {
     const spec = buildRef.current();
-    if (!spec) return;
+    if (!spec) return null;
     checkAbortRef.current?.abort();
     const controller = new AbortController();
     checkAbortRef.current = controller;
@@ -93,21 +98,26 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
     const checkedSnapshot = snapshot;
     setChecking(true);
     setError(null);
+    setTiming({ startedAt: Date.now() });
     try {
       const budget = await ensureBudget();
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return null;
+      setTiming((current) => current && { ...current, requestAt: Date.now() });
       const result = await runContractCheck(
         { spec: withContractBudget(spec, budget), sample_count: SANDBOX_SAMPLE_COUNT },
         controller.signal,
       );
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return null;
       patchWorkspace({ lastCheck: result, lastCheckSnapshot: checkedSnapshot });
+      return result;
     } catch (err) {
       if (!isAbort(err) && !controller.signal.aborted) setError(errorText(err));
+      return null;
     } finally {
       if (checkAbortRef.current === controller) {
         checkAbortRef.current = null;
         setChecking(false);
+        setTiming((current) => current && { ...current, finishedAt: Date.now() });
       }
     }
   }, [snapshot, ensureBudget, patchWorkspace]);
@@ -119,6 +129,7 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
     stale: contractStale,
     checking,
     error,
+    timing,
     canCheck,
     check,
   };

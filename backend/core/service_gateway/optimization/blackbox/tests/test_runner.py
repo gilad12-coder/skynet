@@ -269,7 +269,16 @@ def test_gateway_client_sends_images_and_raw_messages_without_a_key() -> None:
     first, second = gateway.requests
     assert first["authorization"] is None
     assert first["body"]["messages"][0]["content"][1]["image_url"]["url"] == PNG_DATA_URL
-    assert second["body"] == {"model": "m", "messages": raw}
+    assert second["body"] == {"model": "m", "messages": raw, "max_tokens": runner.DEFAULT_MAX_TOKENS}
+
+
+def test_gateway_client_always_caps_the_output() -> None:
+    """Without a configured cap ``llm()`` still sends one, since the budget relay refuses an uncapped call."""
+    with FakeGateway() as gateway:
+        GatewayClient(gateway.url, "m")("p")
+
+    [request] = gateway.requests
+    assert request["body"]["max_tokens"] == runner.DEFAULT_MAX_TOKENS > 0
 
 
 def test_gateway_client_retries_transient_statuses_and_gives_up_on_others(monkeypatch: pytest.MonkeyPatch) -> None:

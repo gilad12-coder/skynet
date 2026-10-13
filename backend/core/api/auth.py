@@ -224,8 +224,13 @@ def get_authenticated_user(
     table) for programmatic API access, or the short-lived HS256 session JWT
     the frontend mints for the web app. The PAT prefix selects the path.
 
+    A PAT call is stamped ``request.state.auth_channel = "api_token"`` so
+    downstream telemetry can tell a production integration from the web app
+    without trusting anything the caller sends in the body.
+
     Args:
-        request: Incoming request (used to reach the store for PAT lookup).
+        request: Incoming request (used to reach the store for PAT lookup and
+            to carry the auth channel).
         authorization: HTTP Authorization header.
 
     Returns:
@@ -239,6 +244,7 @@ def get_authenticated_user(
     token = authorization.removeprefix("Bearer ").strip()
     if is_api_token(token):
         user = _authenticate_api_token(request, token)
+        request.state.auth_channel = "api_token"
     else:
         if settings.backend_auth_secret is None:
             raise DomainError("auth.not_configured", status=500)

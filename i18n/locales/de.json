@@ -283,6 +283,7 @@
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' für diesen Benutzer nicht gefunden — laden Sie den Datensatz erneut hoch und versuchen Sie es noch einmal.",
     "submission.validation_failed": "Die Validierung der Nutzlast ist fehlgeschlagen. Überprüfen Sie den Optimierer, das Modul und die Spaltenzuordnung.",
     "submission.vision_required": "Der Datensatz enthält Bildspalten ({fields}), aber das ausgewählte Modell ('{model}') unterstützt keine Bildeingaben. Wählen Sie ein bildfähiges Modell.",
+    "code_agent.seed_lane_timeout": "Das Modell hat zu lange nachgedacht, ohne den Code zu schreiben, daher wurde der Entwurf gestoppt. Versuchen Sie es erneut oder wählen Sie ein schnelleres Modell oder einen niedrigeren Denkaufwand.",
     "submit.no_models_available": "Keine Modelle im Katalog verfügbar — konfigurieren Sie zuerst einen Anbieter-API-Schlüssel.",
     "user.storage.quota_exceeded": "Speicherkontingent überschritten ({used_mb}MB von {quota_mb}MB belegt). Geben Sie Speicherplatz frei und versuchen Sie es erneut.",
     "wizard.code_via_authoring_only": "{field} kann nicht über update_wizard_state festgelegt werden. Signatur- und Metrik-Code werden ausschließlich über request_code_authoring verfasst, das das Ergebnis validiert, bevor es den Assistenten erreicht.",

@@ -89,6 +89,12 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
 
   React.useEffect(() => () => abortRef.current?.abort(), []);
 
+  const { setInputsInferring } = ctx;
+  React.useEffect(() => {
+    setInputsInferring(inferring);
+  }, [inferring, setInputsInferring]);
+  React.useEffect(() => () => setInputsInferring(false), [setInputsInferring]);
+
   const infer = React.useCallback(
     async (data: LoadedData) => {
       abortRef.current?.abort();

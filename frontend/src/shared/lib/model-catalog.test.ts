@@ -57,6 +57,25 @@ test("best value lists the score-price frontier by score, then the beaten by sco
   );
 });
 
+test("best value lists top labs first and Chinese labs last within each group", () => {
+  const groups = rankModels(
+    [
+      model("glm-flash", { intelligence_index: 42, input_cost_per_token: 0.03e-6, lab_tier: 2 }),
+      model("grok", { intelligence_index: 46, input_cost_per_token: 2e-6, lab_tier: 1 }),
+      model("haiku", { intelligence_index: 43, input_cost_per_token: 0.1e-6, lab_tier: 0 }),
+      model("sol", { intelligence_index: 52, input_cost_per_token: 2e-6, lab_tier: 0 }),
+    ],
+    "best_value",
+  );
+  assert.deepEqual(
+    groups.map((g) => [g.kind, values(g.models)]),
+    [
+      ["ranked", ["sol", "haiku", "glm-flash"]],
+      ["dominated", ["grok"]],
+    ],
+  );
+});
+
 test("best value keeps a free rated model on the frontier, ordered by score", () => {
   const groups = rankModels(
     [

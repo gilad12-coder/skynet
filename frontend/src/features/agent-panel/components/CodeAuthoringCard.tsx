@@ -7,7 +7,6 @@ import { Sparkle } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
-import { TERMS } from "@/shared/lib/terms";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { LazyCodeEditor } from "@/shared/ui/lazy-code-editor";
 import { ActivityBreadcrumb } from "@/shared/ui/agent/activity-breadcrumb";
@@ -36,7 +35,7 @@ interface CodeAuthoringCardProps {
  * Inline mirror of the wizard's code agent, shown in the generalist chat when
  * the agent calls ``request_code_authoring``. It renders the lifted code-agent
  * state with the same shared pieces the wizard uses — the thinking timer, the
- * reading→signature→metric breadcrumb, and the streaming Signature + Metric
+ * reading→run code→metric breadcrumb, and the streaming run code + metric
  * editors — so it reflects exactly what the code agent is doing. It drives
  * nothing itself: the panel hosts the agent and writes the result into the
  * shared wizard state on completion.
@@ -104,7 +103,7 @@ export function CodeAuthoringCard({ agent }: CodeAuthoringCardProps) {
           )
         ) : (
           <ArtifactBlock
-            label={TERMS.signature}
+            label={msg("submit.v2.metric.run_label")}
             code={agent.signatureCode}
             streaming={agent.signatureStatus === "writing"}
             validationResult={agent.signatureValidation}
@@ -112,7 +111,7 @@ export function CodeAuthoringCard({ agent }: CodeAuthoringCardProps) {
           />
         )}
         <ArtifactBlock
-          label={TERMS.metric}
+          label={msg("submit.v2.metric.metric_label")}
           code={agent.metricCode}
           streaming={agent.metricStatus === "writing"}
           validationResult={agent.metricValidation}

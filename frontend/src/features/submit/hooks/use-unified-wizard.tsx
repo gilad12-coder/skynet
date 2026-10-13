@@ -29,6 +29,7 @@ import {
   isStorageQuotaError,
   submitUnifiedRun,
 } from "@/shared/lib/api";
+import { contractCheckMessage } from "@/shared/lib/i18n";
 import { msg, type MessageKey } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { getActiveMessages } from "@/shared/lib/runtime-messages";
@@ -43,6 +44,7 @@ import {
   type UnifiedRunRequest,
 } from "@/shared/types/unified-run";
 import type { WizardPreflightResponse } from "@/shared/types/wizard-preflight";
+import type { ColumnRole } from "@/shared/ui/column-role-row";
 
 import { emptyModelConfig } from "../constants";
 import { cloneToSlices } from "../lib/clone-payload";
@@ -53,10 +55,11 @@ import {
   projectUnifiedCostBracket,
 } from "../lib/cost-bracket";
 import { fileNewRun } from "../lib/file-new-run";
-import { inputsIssue, rowsToCases, singleInputCase, type Row } from "../lib/inputs-mode";
+import { inputsFromRoles, rowsToCases, singleInputCase, type Row } from "../lib/inputs-mode";
 import { prepareModelConfig } from "../lib/model-config";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import { metricUsesModel } from "../lib/scorer-dependencies";
+import { computeStepIssue, hasModel, runBlockedReason as blockedReason } from "../lib/step-issue";
 import { canEnterStep, canMoveForward } from "../lib/wizard-steps";
 import {
   WIZARD_V2_STEPS,
@@ -65,7 +68,6 @@ import {
   presetEngine,
   presetModels,
   resolvedMetricModel,
-  taskIssue,
   type InputsSlice,
   type MetaSlice,
   type OptimizerSlice,
@@ -112,67 +114,6 @@ function reducer(state: WizardV2State, action: Action): WizardV2State {
   return { ...state, [action.slice]: { ...state[action.slice], ...action.patch } };
 }
 
-const hasModel = (config: ModelConfig | null | undefined): config is ModelConfig =>
-  Boolean(config?.name.trim());
-
-/** The catalog entry for the current choice, when the catalog matches the setup. */
-function catalogOption(state: WizardV2State, catalog: OptimizerCatalogResponse | null) {
-  if (
-    !catalog ||
-    catalog.artifact_kind !== state.task.artifactKind ||
-    catalog.data_mode !== state.inputs.mode
-  )
-    return undefined;
-  return catalog.options.find((option) => option.id === state.optimizer.choice) ?? null;
-}
-
-function computeStepIssue(
-  state: WizardV2State,
-  step: WizardStepId,
-  catalog: OptimizerCatalogResponse | null,
-): string | null {
-  const { task, inputs, optimizer, workspace } = state;
-  switch (step) {
-    case "task":
-      return taskIssue(task);
-    case "inputs": {
-      const caseCount =
-        inputs.cases.length > 0 ? inputs.cases.length : inputs.stagedDatasetId ? inputs.rowCount : 0;
-      return inputsIssue({
-        mode: inputs.mode,
-        caseCount,
-        inputFields: inputs.inputFields,
-        expectedField: inputs.expectedField,
-        split: inputs.split,
-      });
-    }
-    case "optimizer": {
-      const kind = task.artifactKind;
-      if (!kind || !inputs.mode) return "submit.v2.optimizer.needs_setup";
-      if (!optimizersFor(kind, inputs.mode).includes(optimizer.choice))
-        return "submit.v2.optimizer.issue.choice";
-      const option = catalogOption(state, catalog);
-      if (option === null) return "submit.v2.optimizer.issue.choice";
-      if (option && !option.available) return "submit.v2.optimizer.issue.unavailable";
-      if (kind === "dspy_program" && !hasModel(optimizer.taskModel))
-        return "submit.v2.optimizer.models.task.required";
-      if (!hasModel(optimizer.reflectionModel))
-        return "submit.v2.optimizer.models.reflection.required";
-      return null;
-    }
-    case "metric": {
-      if (!workspace.runCode.trim()) return "submit.v2.metric.issue.run_code";
-      if (!workspace.metricCode.trim()) return "submit.v2.metric.issue.metric_code";
-      if (metricUsesModel(state) && !hasModel(resolvedMetricModel(state)))
-        return "submit.v2.metric.model.required";
-      if (!workspace.lastCheck) return "submit.v2.metric.check.needed";
-      if (workspace.lastCheckSnapshot !== contractSnapshot(state))
-        return "submit.v2.metric.check.stale";
-      return workspace.lastCheck.ok ? null : "submit.v2.metric.check.failed";
-    }
-  }
-}
-
 /** A wizard string, or exact contract text passed through untouched. */
 export function v2Text(keyOrText: string, guided: boolean): string {
   const messages = getActiveMessages() as Record<string, string | undefined>;
@@ -186,25 +127,36 @@ const STAGED_HANDOFF_KEY = "wizard:staged-dataset";
 const STAGED_HANDOFF_EVENT = "wizard:dataset-staged";
 const SAMPLE_ROWS = 5;
 
-/** Inputs for a table handed over from elsewhere: every column an input until inference refines it. */
+/**
+ * Inputs for a table handed over from elsewhere. Roles the user confirmed in
+ * the agent panel decide the inputs and the Output; without an Output every
+ * column is an input until inference refines it.
+ */
 function inputsFromRows(
   rows: Row[],
   columns: string[],
   label: string | null,
   stagedId: string | null,
+  roles: Record<string, ColumnRole> | null,
 ): Partial<InputsSlice> {
-  const pairs = rows.length > 1;
-  return {
+  const table = {
     datasetLabel: label,
     stagedDatasetId: stagedId,
     columns,
     sampleRows: rows.slice(0, SAMPLE_ROWS),
     rowCount: rows.length,
+    rationale: "",
+  };
+  if (roles && columns.some((c) => roles[c] === "output")) {
+    return { ...table, ...inputsFromRoles(columns, roles, rows) };
+  }
+  const pairs = rows.length > 1;
+  return {
+    ...table,
     mode: pairs ? "pairs" : "single",
     inputFields: columns,
     expectedField: null,
     cases: pairs ? rowsToCases(rows, columns, null) : rows[0] ? [singleInputCase(rows[0])] : [],
-    rationale: "",
   };
 }
 
@@ -331,18 +283,12 @@ export function WizardV2Provider({
   const snapshot = contractSnapshot(state);
   const contractStale = state.workspace.lastCheckSnapshot !== snapshot;
 
-  const runBlockedReason = useMemo(() => {
-    for (const step of WIZARD_V2_STEPS) {
-      const issue = computeStepIssue(state, step, optimizerCatalog);
-      if (!issue) continue;
-      if (issue === "submit.v2.metric.check.failed") {
-        const failed = state.workspace.lastCheck?.checks.find((item) => item.status === "failed");
-        return failed ? (failed.detail ?? failed.message) : issue;
-      }
-      return issue;
-    }
-    return null;
-  }, [state, optimizerCatalog]);
+  const [agentWriting, setAgentWriting] = useState(false);
+  const [inputsInferring, setInputsInferring] = useState(false);
+  const runBlockedReason = useMemo(
+    () => blockedReason(state, optimizerCatalog, { message: contractCheckMessage, agentWriting }),
+    [state, optimizerCatalog, agentWriting],
+  );
 
   const costBracket = useMemo(
     () =>
@@ -640,7 +586,11 @@ export function WizardV2Provider({
           : Object.keys(rows[0] ?? {});
       const label = typeof d.dataset_filename === "string" ? d.dataset_filename : "dataset.json";
       const stagedId = typeof d.staged_dataset_id === "string" ? d.staged_dataset_id : null;
-      patchInputs(inputsFromRows(rows, columns, label, stagedId));
+      const roles =
+        ws.column_roles && typeof ws.column_roles === "object"
+          ? (ws.column_roles as Record<string, ColumnRole>)
+          : null;
+      patchInputs(inputsFromRows(rows, columns, label, stagedId, roles));
     };
     try {
       const raw = window.sessionStorage.getItem(STAGED_HANDOFF_KEY);
@@ -748,7 +698,7 @@ export function WizardV2Provider({
             .then((res) => {
               if (!mountedRef.current || res.rows.length === 0) return;
               const columns = res.columns.length > 0 ? res.columns : Object.keys(res.rows[0] ?? {});
-              patchInputs(inputsFromRows(res.rows, columns, "dataset.json", stagedId));
+              patchInputs(inputsFromRows(res.rows, columns, "dataset.json", stagedId, null));
             })
             .catch(() => {
               /* best effort: a failed fetch leaves the wizard's own inputs */
@@ -809,6 +759,9 @@ export function WizardV2Provider({
     optimizerCatalogLoading,
     contractStale,
     runBlockedReason,
+    setAgentWriting,
+    inputsInferring,
+    setInputsInferring,
     buildPayload,
     ensureBudget,
     submit,
