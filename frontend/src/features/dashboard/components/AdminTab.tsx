@@ -311,7 +311,7 @@ function DashboardBody({ data }: { data: AdminDashboardResponse }) {
 
       <StaggerItem>
         <AnalyticsSection title={msg("dashboard.admin.section.runs")} className="border-border/60">
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 2xl:grid-cols-2">
             <div className="min-w-0">
               <PanelIntro
                 title={msg("dashboard.admin.chart.runs")}
@@ -366,7 +366,7 @@ function DashboardBody({ data }: { data: AdminDashboardResponse }) {
 
       <StaggerItem>
         <AnalyticsSection title={msg("dashboard.admin.section.usage")} className="border-border/60">
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 2xl:grid-cols-2">
             <div className="min-w-0">
               <PanelIntro
                 title={msg("dashboard.admin.section.programs")}
