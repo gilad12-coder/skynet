@@ -57,6 +57,9 @@ ARG SENTRY_ORG
 ARG SENTRY_PROJECT
 ARG SENTRY_AUTH_TOKEN
 ARG RAILWAY_GIT_COMMIT_SHA
+# next.config.ts skips the source-map upload when this names a `*-pr-<n>`
+# preview environment.
+ARG RAILWAY_ENVIRONMENT_NAME
 # The footer's AGPL source link points at this commit (legal-config.ts).
 ENV NEXT_PUBLIC_SOURCE_COMMIT=$RAILWAY_GIT_COMMIT_SHA
 RUN --mount=type=cache,id=s/8ebabb79-21cd-4026-b57b-7abc5e1d612c-/app/.next/cache,target=/app/.next/cache \
