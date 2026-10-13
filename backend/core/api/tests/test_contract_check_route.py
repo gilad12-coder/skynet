@@ -14,6 +14,7 @@ from core.api.auth import AuthenticatedUser, get_authenticated_user
 from core.api.routers import wizard_preflight
 from core.billing.budgets import BudgetInsufficientError
 from core.i18n import t
+from core.worker.failure_events import failure_event
 
 RUN_CODE = "def run(artifact, input):\n    return artifact\n"
 METRIC_CODE = "def score(input, output, expected=None):\n    return 1.0, {'feedback': 'ok'}\n"
@@ -223,8 +224,19 @@ def test_sandbox_route_tells_a_spent_budget_from_a_code_mismatch(
     assert run["message"] == t(code, error=SPENT)
 
 
-def test_preflight_reports_a_reservation_over_the_limit_as_a_budget_check(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A model call reserving more than the check's limit fails the ``budget`` check, not ``setup``."""
+@pytest.mark.parametrize(
+    ("error", "key"),
+    [(BudgetInsufficientError(SPENT), "budget"), (RuntimeError(SPENT), "setup")],
+)
+def test_preflight_reports_a_reservation_over_the_limit_as_a_budget_check(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, key: str
+) -> None:
+    """A runtime stopped by the check's limit fails the ``budget`` check; any other failure stays ``setup``.
+
+    The sandbox supervisor reports every failure as an error event, so this
+    drives the real ``_verify_anything`` through that event rather than
+    raising past it.
+    """
 
     class _Gateway:
         """Stand in for the model gateway without any paid transport."""
@@ -239,14 +251,14 @@ def test_preflight_reports_a_reservation_over_the_limit_as_a_budget_check(monkey
         def close(self) -> None:
             """Nothing to settle."""
 
-    def spend(gateway: Any, payload: Any, *, scope: str, identity: str) -> dict[str, Any]:
-        """Fail the way the ledger does when one call's hold exceeds the limit."""
-        raise BudgetInsufficientError(SPENT)
+    def dispatch(payload: Any, artifact_id: str, events: Any, start_method: str) -> None:
+        """Report the failure the way ``run_vercel_dspy`` does: as an error event."""
+        events.put(failure_event(error))
 
     monkeypatch.setattr(preflight_execution, "ModelGateway", _Gateway)
     monkeypatch.setattr(preflight_execution, "bind_protected_sandbox", lambda *args, **kwargs: {})
     monkeypatch.setattr(preflight_execution, "payload_uses_token_source", lambda *args, **kwargs: False)
-    monkeypatch.setattr(preflight_execution, "_verify_anything", spend)
+    monkeypatch.setattr(preflight_execution, "run_vercel_dspy", dispatch)
     request = preflight_execution.WizardPreflightRequest(
         scope="evaluation",
         workflow="anything",
@@ -266,4 +278,4 @@ def test_preflight_reports_a_reservation_over_the_limit_as_a_budget_check(monkey
     )
 
     assert status == "failed"
-    assert result["checks"] == [{"key": preflight_execution.BUDGET_CHECK_KEY, "status": "failed", "message": SPENT}]
+    assert result["checks"] == [{"key": key, "status": "failed", "message": SPENT}]

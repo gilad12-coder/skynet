@@ -227,9 +227,7 @@ def _verify_anything(gateway: ModelGateway, payload: dict[str, Any], *, scope: s
         "_preflight": {"scope": scope, "identity": identity},
     }
     run_vercel_dspy(protected, f"preflight-{identity}", events, "spawn")
-    if events.error or events.result is None:
-        raise ValueError(events.error or "The runtime did not return setup evidence.")
-    result = events.result
+    result = events.evidence()
     optimizer_ready = any(check.get("key") == "optimizer" for check in result["checks"])
     if scope == "execution" and optimizer_ready:
         public = {key: value for key, value in payload.items() if not key.startswith("_")}
@@ -271,9 +269,7 @@ def _verify_unified(gateway: ModelGateway, payload: dict[str, Any], *, scope: st
         "_preflight": {"scope": scope, "identity": identity},
     }
     run_vercel_dspy(protected, f"preflight-{identity}", events, "spawn")
-    if events.error or events.result is None:
-        raise ValueError(events.error or "The runtime did not return setup evidence.")
-    result = events.result
+    result = events.evidence()
     optimizer_ready = any(check.get("key") == "optimizer" for check in result["checks"])
     if scope == "execution" and optimizer_ready:
         public = {key: value for key, value in payload.items() if not key.startswith("_")}
@@ -292,6 +288,7 @@ class _Events:
         """Initialize a setup-only event collector."""
         self.result: dict[str, Any] | None = None
         self.error: str | None = None
+        self.error_type: str | None = None
 
     def put(self, event: dict[str, Any]) -> None:
         """Preserve a real result or error without interpreting optimizer logs as checks."""
@@ -301,6 +298,26 @@ class _Events:
             self.result = event["result"]
         elif event.get("type") == "error":
             self.error = str(event.get("error") or "Setup execution failed.")
+            self.error_type = event.get("error_type")
+
+    def evidence(self) -> dict[str, Any]:
+        """Return the runtime's setup evidence, or raise the failure it reported.
+
+        Returns:
+            The guest's terminal preflight result.
+
+        Raises:
+            BudgetInsufficientError: When the spending limit stopped the runtime.
+            ValueError: For any other runtime failure, or when no result came back.
+        """
+        # ``run_vercel_dspy`` turns every exception into an error event, so the
+        # budget stop has to be rebuilt from its type name to reach the
+        # ``budget`` check instead of the generic ``setup`` one.
+        if self.error_type == BudgetInsufficientError.__name__:
+            raise BudgetInsufficientError(self.error or "The spending limit cannot cover setup.")
+        if self.error or self.result is None:
+            raise ValueError(self.error or "The runtime did not return setup evidence.")
+        return self.result
 
 
 def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) -> WizardPreflightResponse:
