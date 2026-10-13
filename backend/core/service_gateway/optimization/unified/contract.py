@@ -281,7 +281,10 @@ def with_message_codes(response: ContractCheckResponse, static: ContractCheckRes
     The sandboxed check runs inside the pinned sandbox image, whose backend
     can predate ``message_code``; its items then carry only the Hebrew base
     text, which an English UI would show as is. The static items are
-    replaced by the host's own, and sample items get their code back.
+    replaced by the host's own, and sample items get their code back. A
+    static item the guest failed although the host passed it means the image
+    holds an older contract; it stays in the response as a failed
+    ``workspace.run`` item, so a failed check never shows only passed items.
 
     Args:
         response: The contract check as the sandbox returned it.
@@ -293,6 +296,9 @@ def with_message_codes(response: ContractCheckResponse, static: ContractCheckRes
     samples = []
     for item in response.checks:
         if item.sample_index is None:
+            if item.status == "failed" and static.ok:
+                error = f"{item.key}: {item.detail or item.message}"
+                samples.append(_item("workspace.run", False, "submit.unified.contract_failed", error=error))
             continue
         if item.message_code is None:
             code, params = _sample_code(item)

@@ -15,7 +15,13 @@ from core.service_gateway.agents.code import _unified_inputs
 from ...blackbox.harness import GatewayConfig
 from ...blackbox.sandbox import LocalSubprocessRuntime
 from ...blackbox.tests.mocks import FakeGateway
-from ..contract import contract_fingerprint, run_contract_check, static_contract_check, validate_unified_payload
+from ..contract import (
+    contract_fingerprint,
+    run_contract_check,
+    static_contract_check,
+    validate_unified_payload,
+    with_message_codes,
+)
 
 RUN_CODE = "def run(artifact, input):\n    return artifact + ':' + input['q']\n"
 BLACKBOX_METRIC = "def score(input, output, expected=None):\n    return float(output == expected), {'feedback': 'ok'}\n"
@@ -149,6 +155,32 @@ def test_retired_shapes_ask_to_regenerate_the_code() -> None:
     assert "regenerate the metric" in details["metric.signature"]
     with pytest.raises(ValueError, match="regenerate the run code"):
         validate_unified_payload(payload)
+
+
+def test_a_guest_holding_an_older_contract_never_reads_as_all_passed() -> None:
+    """A static item the sandbox failed but the host passed stays visible as a failed run item."""
+    payload = _payload(kind="dspy_program", optimizer="dspy_gepa", run_code=DSPY_RUN_CODE, metric_code=DSPY_METRIC)
+    static = static_contract_check(payload)
+    guest = static.model_copy(
+        update={
+            "ok": False,
+            "checks": [
+                static.checks[0].model_copy(
+                    update={"status": "failed", "detail": "NameError: build_program is not defined"}
+                ),
+                *static.checks[1:],
+            ],
+        }
+    )
+
+    response = with_message_codes(guest, static)
+
+    assert static.ok
+    assert not response.ok
+    failed = [check for check in response.checks if check.status == "failed"]
+    assert [check.key for check in failed] == ["workspace.run"]
+    assert failed[0].message_code == "submit.unified.contract_failed"
+    assert "build_program is not defined" in failed[0].message_params["error"]
 
 
 def test_sampled_check_runs_a_dspy_program_through_run(tmp_path: Any) -> None:
