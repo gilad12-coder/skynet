@@ -180,6 +180,8 @@ function SentryPanel({ state }: { state: LoadState<AdminSentryIssuesResponse> })
           key: "title",
           label: msg("dashboard.admin.col.error"),
           width: 320,
+          // Sentry titles are English; without ltr an RTL page moves their trailing period to the front.
+          dir: "ltr",
           className: "max-w-[24rem] truncate",
           render: (row) =>
             row.permalink ? (
