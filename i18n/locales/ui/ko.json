@@ -2848,7 +2848,6 @@
   "dashboard.admin.sentry.unavailable": "Sentry에 연결할 수 없습니다",
   "dashboard.admin.sentry.unavailable_description": "토큰 권한과 조직 이름을 확인한 다음 새로고침하세요.",
   "dashboard.admin.sentry_help": "Sentry에 보고된 미해결 오류를 빈도순으로 보여줍니다. 클릭하면 Sentry에서 열립니다.",
-  "dashboard.admin.tab": "관리자",
   "settings.admin.activity.activated": "이번 주 48시간 이내 개선",
   "settings.admin.activity.activated_detail": "이번 주 가입 {signups}명 중",
   "settings.admin.activity.activated_help": "48시간 이내 개선: 가입 후 48시간 이내의 첫 실행에서 20개 이상의 홀드아웃 예시에 대해 프로그램을 2점 이상 개선한 신규 사용자.",

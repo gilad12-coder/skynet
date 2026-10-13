@@ -2848,7 +2848,6 @@
   "dashboard.admin.sentry.unavailable": "تعذّر الوصول إلى Sentry",
   "dashboard.admin.sentry.unavailable_description": "تحققوا من صلاحيات الرمز المميز واسم المؤسسة، ثم أعيدوا التحميل.",
   "dashboard.admin.sentry_help": "الأخطاء المفتوحة المبلَّغ عنها إلى Sentry، الأكثر تكرارًا أولًا. انقروا على أحدها لفتحه في Sentry.",
-  "dashboard.admin.tab": "المشرف",
   "settings.admin.activity.activated": "تحسّنوا خلال 48 ساعة هذا الأسبوع",
   "settings.admin.activity.activated_detail": "من أصل {signups} تسجيلًا هذا الأسبوع",
   "settings.admin.activity.activated_help": "تحسّن خلال 48 ساعة: مستخدم جديد حسّن أول تشغيل له، خلال 48 ساعة من التسجيل، برنامجه بما لا يقل عن نقطتين على 20+ مثالًا محجوزة للتقييم.",

@@ -2848,7 +2848,6 @@
   "dashboard.admin.sentry.unavailable": "Impossible de joindre Sentry",
   "dashboard.admin.sentry.unavailable_description": "Vérifiez les autorisations du jeton et le nom de l'organisation, puis rechargez.",
   "dashboard.admin.sentry_help": "Erreurs ouvertes signalées à Sentry, les plus fréquentes d'abord. Cliquez sur l'une d'elles pour l'ouvrir dans Sentry.",
-  "dashboard.admin.tab": "Admin",
   "settings.admin.activity.activated": "Améliorés en 48 h cette semaine",
   "settings.admin.activity.activated_detail": "sur {signups} inscriptions cette semaine",
   "settings.admin.activity.activated_help": "Amélioré en 48 h : un nouvel utilisateur dont la première exécution, dans les 48 heures suivant l'inscription, a amélioré son programme d'au moins 2 points sur 20+ exemples réservés.",

@@ -2848,7 +2848,6 @@
   "dashboard.admin.sentry.unavailable": "Sentry に接続できませんでした",
   "dashboard.admin.sentry.unavailable_description": "トークンの権限と組織名を確認してから、再読み込みしてください。",
   "dashboard.admin.sentry_help": "Sentry に報告された未解決のエラーを、頻度の高い順に表示します。クリックすると Sentry で開きます。",
-  "dashboard.admin.tab": "管理",
   "settings.admin.activity.activated": "今週の48時間以内に改善",
   "settings.admin.activity.activated_detail": "今週の新規登録 {signups}件のうち",
   "settings.admin.activity.activated_help": "48時間以内に改善:登録から48時間以内の最初の実行で、20件以上のホールドアウト例に対してプログラムを2ポイント以上改善した新規ユーザー。",

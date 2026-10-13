@@ -1736,7 +1736,6 @@
   "settings.admin.activity.empty_description": "הנתונים יופיעו כאן אחרי שאנשים יירשמו.",
   "settings.admin.activity.load_failed": "לא הצלחנו לטעון את המדדים",
   "settings.admin.activity.retry": "לנסות שוב",
-  "dashboard.admin.tab": "ניהול",
   "dashboard.admin.range_label": "טווח זמן",
   "dashboard.admin.range_days": "{days} ימים",
   "dashboard.admin.load_failed": "לא הצלחנו לטעון את לוח הניהול",

@@ -2848,7 +2848,6 @@
   "dashboard.admin.sentry.unavailable": "Impossibile raggiungere Sentry",
   "dashboard.admin.sentry.unavailable_description": "Controlla i permessi del token e il nome dell'organizzazione, poi ricarica.",
   "dashboard.admin.sentry_help": "Errori aperti segnalati a Sentry, dal più frequente. Fai clic su uno per aprirlo in Sentry.",
-  "dashboard.admin.tab": "Admin",
   "settings.admin.activity.activated": "Migliorati entro 48 h questa settimana",
   "settings.admin.activity.activated_detail": "su {signups} registrazioni questa settimana",
   "settings.admin.activity.activated_help": "Migliorato entro 48 h: un nuovo utente la cui prima esecuzione, entro 48 ore dall'iscrizione, ha migliorato il suo programma di almeno 2 punti su 20+ esempi di controllo.",

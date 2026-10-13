@@ -2848,7 +2848,6 @@
   "dashboard.admin.sentry.unavailable": "无法连接 Sentry",
   "dashboard.admin.sentry.unavailable_description": "请检查令牌权限和组织名称，然后重新加载。",
   "dashboard.admin.sentry_help": "上报到 Sentry 的未解决错误，按频率从高到低排列。点击即可在 Sentry 中打开。",
-  "dashboard.admin.tab": "管理",
   "settings.admin.activity.activated": "本周 48 小时内改进",
   "settings.admin.activity.activated_detail": "本周 {signups} 个注册中",
   "settings.admin.activity.activated_help": "48 小时内改进:新用户在注册后 48 小时内的首次运行中,在 20+ 个留出样本上将程序提升至少 2 分。",

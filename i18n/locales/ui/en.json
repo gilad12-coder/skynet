@@ -1637,7 +1637,6 @@
   "settings.admin.activity.empty_description": "Numbers appear here once people sign up.",
   "settings.admin.activity.load_failed": "Couldn't load the metrics",
   "settings.admin.activity.retry": "Try again",
-  "dashboard.admin.tab": "Admin",
   "dashboard.admin.range_label": "Time range",
   "dashboard.admin.range_days": "{days} days",
   "dashboard.admin.load_failed": "Couldn't load the admin dashboard",

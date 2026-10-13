@@ -65,6 +65,23 @@ void describe("AdminMetricsView", () => {
     assert.equal(/lift/i.test(html), false);
   });
 
+  void it("drops the explanatory lines in the compact view but keeps both tables", () => {
+    const render = (compact: boolean) =>
+      renderToStaticMarkup(
+        <TooltipProvider>
+          <AdminMetricsView state={{ kind: "ready", data: seeded() }} compact={compact} />
+        </TooltipProvider>,
+      );
+    const full = render(false);
+    const compact = render(true);
+    assert.equal(
+      full.split("text-muted-foreground").length > compact.split("text-muted-foreground").length,
+      true,
+    );
+    assert.equal(compact.split('<p class="text-[0.6875rem] text-muted-foreground"').length, 1);
+    assert.deepEqual(bodyRows(compact), [8, 8]);
+  });
+
   void it("renders nothing for a non-admin (403)", () => {
     const state = stateFromError(new ApiError("Forbidden", { status: 403 }));
     assert.deepEqual(state, { kind: "forbidden" });

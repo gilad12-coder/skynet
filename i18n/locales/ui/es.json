@@ -2848,7 +2848,6 @@
   "dashboard.admin.sentry.unavailable": "No se pudo conectar con Sentry",
   "dashboard.admin.sentry.unavailable_description": "Revisen los permisos del token y el nombre de la organización, y vuelvan a cargar.",
   "dashboard.admin.sentry_help": "Errores abiertos reportados a Sentry, los más frecuentes primero. Hagan clic en uno para abrirlo en Sentry.",
-  "dashboard.admin.tab": "Admin",
   "settings.admin.activity.activated": "Mejoraron en 48 h esta semana",
   "settings.admin.activity.activated_detail": "de {signups} registros esta semana",
   "settings.admin.activity.activated_help": "Mejora en 48 h: un usuario nuevo cuya primera ejecución, dentro de las 48 horas posteriores al registro, mejoró su programa al menos 2 puntos en 20+ ejemplos reservados.",

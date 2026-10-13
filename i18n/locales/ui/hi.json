@@ -2848,7 +2848,6 @@
   "dashboard.admin.sentry.unavailable": "Sentry तक नहीं पहुँच सके",
   "dashboard.admin.sentry.unavailable_description": "टोकन की अनुमतियाँ और संगठन का नाम जाँचें, फिर रीलोड करें।",
   "dashboard.admin.sentry_help": "Sentry को रिपोर्ट की गई खुली त्रुटियाँ, सबसे ज़्यादा बार होने वाली पहले। किसी एक पर क्लिक करके उसे Sentry में खोलें।",
-  "dashboard.admin.tab": "एडमिन",
   "settings.admin.activity.activated": "इस सप्ताह 48 घंटे में सुधार",
   "settings.admin.activity.activated_detail": "इस सप्ताह के {signups} साइनअप में से",
   "settings.admin.activity.activated_help": "48 घंटे में सुधार: ऐसा नया उपयोगकर्ता जिसने साइनअप के 48 घंटे के भीतर अपने पहले रन में, 20+ होल्ड-आउट उदाहरणों पर, अपने प्रोग्राम को कम से कम 2 अंक बेहतर बनाया।",

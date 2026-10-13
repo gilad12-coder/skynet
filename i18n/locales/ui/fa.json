@@ -2848,7 +2848,6 @@
   "dashboard.admin.sentry.unavailable": "دسترسی به Sentry ممکن نشد",
   "dashboard.admin.sentry.unavailable_description": "مجوزهای توکن و نام سازمان را بررسی و صفحه را دوباره بارگذاری کنید.",
   "dashboard.admin.sentry_help": "خطاهای باز که به Sentry گزارش شده‌اند، پرتکرارترین‌ها اول. برای باز کردن در Sentry روی یکی کلیک کنید.",
-  "dashboard.admin.tab": "مدیریت",
   "settings.admin.activity.activated": "بهبود در 48 ساعت در این هفته",
   "settings.admin.activity.activated_detail": "از {signups} ثبت‌نام این هفته",
   "settings.admin.activity.activated_help": "بهبود در 48 ساعت: کاربر جدیدی که اولین اجرای او، طی 48 ساعت پس از ثبت‌نام، برنامه‌اش را دست‌کم 2 امتیاز روی 20+ نمونهٔ کنارگذاشته بهبود داده است.",

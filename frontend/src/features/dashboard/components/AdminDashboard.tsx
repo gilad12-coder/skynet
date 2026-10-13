@@ -92,14 +92,28 @@ function Defined({ label, help }: { label: string; help: string }) {
   );
 }
 
-/** A panel heading with a one-line definition under it. */
-function PanelIntro({ title, help }: { title: string; help: string }) {
+/** A panel heading with a one-line definition under it; compact moves the definition to hover. */
+function PanelIntro({ title, help, compact }: { title: string; help: string; compact: boolean }) {
+  if (compact) {
+    return (
+      <div className="mb-2">
+        <HelpTip text={help}>
+          <PanelHeading className="mb-0">{title}</PanelHeading>
+        </HelpTip>
+      </div>
+    );
+  }
   return (
     <div className="mb-3">
       <PanelHeading className="mb-1">{title}</PanelHeading>
       <p className="text-xs text-muted-foreground">{help}</p>
     </div>
   );
+}
+
+/** Chart height in px: small charts in the compact view, full size otherwise. */
+function chartHeight(compact: boolean): number {
+  return compact ? 140 : 220;
 }
 
 function growthLines(): readonly DailySeries[] {
@@ -209,7 +223,7 @@ function SentryPanel({ state }: { state: LoadState<AdminSentryIssuesResponse> })
 }
 
 /** The dashboard body for a loaded window. */
-function DashboardBody({ data }: { data: AdminDashboardResponse }) {
+function DashboardBody({ data, compact }: { data: AdminDashboardResponse; compact: boolean }) {
   const { totals } = data;
   const rate = successRate(totals);
   const growth = useMemo(() => growthSeries(data.daily, formatDay), [data.daily]);
@@ -279,11 +293,19 @@ function DashboardBody({ data }: { data: AdminDashboardResponse }) {
       accent: totals.serve_errors > 0 ? "danger" : "default",
     },
   ];
+  // The compact view sits in the narrow settings panel, where side-by-side panels get cramped.
+  const splitClass = compact ? "grid gap-4" : "grid gap-6 lg:grid-cols-2";
 
   return (
-    <StaggerContainer className="space-y-6" staggerDelay={0.03}>
+    <StaggerContainer className={compact ? "space-y-3" : "space-y-6"} staggerDelay={0.03}>
       <StaggerItem>
-        <div className="grid auto-rows-fr grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+        <div
+          className={
+            compact
+              ? "grid auto-rows-fr grid-cols-3 gap-2"
+              : "grid auto-rows-fr grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4"
+          }
+        >
           {kpis.map((kpi) => (
             <KpiCard
               key={kpi.label}
@@ -291,6 +313,7 @@ function DashboardBody({ data }: { data: AdminDashboardResponse }) {
               value={kpi.value}
               detail={kpi.detail}
               accent={kpi.accent}
+              compact={compact}
             />
           ))}
         </div>
@@ -300,29 +323,37 @@ function DashboardBody({ data }: { data: AdminDashboardResponse }) {
         <AnalyticsSection
           title={msg("dashboard.admin.section.growth")}
           className="border-border/60"
+          compact={compact}
         >
           <DailyLines
             data={growth}
             series={growthLines()}
             yLabel={msg("dashboard.admin.chart.users")}
+            height={chartHeight(compact)}
           />
         </AnalyticsSection>
       </StaggerItem>
 
       <StaggerItem>
-        <AnalyticsSection title={msg("dashboard.admin.section.runs")} className="border-border/60">
-          <div className="grid gap-6 lg:grid-cols-2">
+        <AnalyticsSection
+          title={msg("dashboard.admin.section.runs")}
+          className="border-border/60"
+          compact={compact}
+        >
+          <div className={splitClass}>
             <div className="min-w-0">
               <PanelIntro
                 title={msg("dashboard.admin.chart.runs")}
                 help={msg("dashboard.admin.kpi.runs_help")}
+                compact={compact}
               />
-              <StackedTimeline data={runs} granularity="day" />
+              <StackedTimeline data={runs} granularity="day" height={chartHeight(compact)} />
             </div>
             <div className="min-w-0">
               <PanelIntro
                 title={msg("dashboard.admin.section.failures")}
                 help={msg("dashboard.admin.failures_help")}
+                compact={compact}
               />
               <SortableTable
                 rows={failures}
@@ -365,12 +396,17 @@ function DashboardBody({ data }: { data: AdminDashboardResponse }) {
       </StaggerItem>
 
       <StaggerItem>
-        <AnalyticsSection title={msg("dashboard.admin.section.usage")} className="border-border/60">
-          <div className="grid gap-6 lg:grid-cols-2">
+        <AnalyticsSection
+          title={msg("dashboard.admin.section.usage")}
+          className="border-border/60"
+          compact={compact}
+        >
+          <div className={splitClass}>
             <div className="min-w-0">
               <PanelIntro
                 title={msg("dashboard.admin.section.programs")}
                 help={msg("dashboard.admin.kpi.serve_help")}
+                compact={compact}
               />
               <SortableTable
                 rows={programs}
@@ -420,6 +456,7 @@ function DashboardBody({ data }: { data: AdminDashboardResponse }) {
               <PanelIntro
                 title={msg("dashboard.admin.section.events")}
                 help={msg("dashboard.admin.events_help")}
+                compact={compact}
               />
               <SortableTable
                 rows={events}
@@ -460,9 +497,16 @@ function DashboardBody({ data }: { data: AdminDashboardResponse }) {
 /**
  * Admin-only dashboard: signups, activation, active users, runs and why they
  * fail, money, served programs, product events and Sentry errors. A 403 from
- * the backend hides it, so a stale admin flag never shows a broken tab.
+ * the backend hides it, so a stale admin flag never shows a broken panel.
+ * `compact` draws the same sections smaller, with definitions on hover only.
  */
-export function AdminTab({ active }: { active: boolean }) {
+export function AdminDashboard({
+  active,
+  compact = false,
+}: {
+  active: boolean;
+  compact?: boolean;
+}) {
   const [days, setDays] = useState<AdminRange>(30);
   const [dashboard, setDashboard] = useState<LoadState<AdminDashboardResponse>>({
     kind: "loading",
@@ -498,7 +542,7 @@ export function AdminTab({ active }: { active: boolean }) {
   if (dashboard.kind === "forbidden") return null;
 
   return (
-    <div className="space-y-6">
+    <div className={compact ? "space-y-3" : "space-y-6"}>
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Segmented
           size="sm"
@@ -512,7 +556,7 @@ export function AdminTab({ active }: { active: boolean }) {
         />
       </div>
 
-      {dashboard.kind === "loading" && <LoadingState className="py-12" />}
+      {dashboard.kind === "loading" && <LoadingState className={compact ? "py-6" : "py-12"} />}
       {dashboard.kind === "error" && (
         <InlineErrorRow
           message={msg("dashboard.admin.load_failed")}
@@ -524,12 +568,17 @@ export function AdminTab({ active }: { active: boolean }) {
           }
         />
       )}
-      {dashboard.kind === "ready" && <DashboardBody data={dashboard.data} />}
+      {dashboard.kind === "ready" && <DashboardBody data={dashboard.data} compact={compact} />}
 
-      <AnalyticsSection title={msg("dashboard.admin.section.errors")} className="border-border/60">
+      <AnalyticsSection
+        title={msg("dashboard.admin.section.errors")}
+        className="border-border/60"
+        compact={compact}
+      >
         <PanelIntro
           title={msg("dashboard.admin.sentry.title")}
           help={msg("dashboard.admin.sentry_help")}
+          compact={compact}
         />
         <SentryPanel state={sentry} />
       </AnalyticsSection>

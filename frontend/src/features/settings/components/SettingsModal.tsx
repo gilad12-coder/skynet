@@ -52,6 +52,7 @@ import { CopyButton } from "@/shared/ui/copy-button";
 import { ExpandToggleButton } from "@/shared/ui/expand-toggle-button";
 import { WalletTab, UsageTab, ByokKeysSection } from "@/features/billing";
 import { ConnectorsTab } from "@/features/connectors";
+import { AdminDashboard } from "@/features/dashboard";
 import { ExperienceLevelControl } from "@/features/experience";
 import { Input } from "@/shared/ui/primitives/input";
 import { NumberInput } from "@/shared/ui/number-input";
@@ -593,7 +594,8 @@ function UsageMeter({ used, budget }: { used: number; budget: number }) {
   );
 }
 
-function AdminTab() {
+/** Admin tab: the admin dashboard, compact until the modal is expanded, then storage budgets. */
+function AdminTab({ expanded }: { expanded: boolean }) {
   const { data: session } = useSession();
   const isRtl = getActiveDir() === "rtl";
   const [overrides, setOverrides] = React.useState<StorageQuotaOverride[]>([]);
@@ -750,7 +752,8 @@ function AdminTab() {
         <InlineErrorRow message={msg("settings.admin.storage.auth_missing")} />
       )}
 
-      <AdminMetricsCard enabled={Boolean(session?.backendAccessToken)} />
+      <AdminDashboard active={Boolean(session?.backendAccessToken)} compact={!expanded} />
+      <AdminMetricsCard enabled={Boolean(session?.backendAccessToken)} compact={!expanded} />
 
       <SettingsRow
         icon={HardDrive}
@@ -1468,7 +1471,7 @@ export function SettingsModal() {
               </TabsContent>
               {isAdmin && (
                 <TabsContent value="admin">
-                  <AdminTab />
+                  <AdminTab expanded={expanded} />
                 </TabsContent>
               )}
               <TabsContent value="about">

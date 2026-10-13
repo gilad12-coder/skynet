@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion, useReducedMotion } from "framer-motion";
 import { toast } from "react-toastify";
-import { ChartBar, ShieldCheck, Table } from "@/shared/ui/icons";
+import { ChartBar, Table } from "@/shared/ui/icons";
 import { DashboardSkeleton } from "./DashboardSkeleton";
 import { Card } from "@/shared/ui/primitives/card";
 import {
@@ -41,7 +41,6 @@ import { BulkActionBar } from "./BulkActionBar";
 import { DeleteDialogs } from "./DeleteDialogs";
 import { JobsTab } from "./JobsTab";
 import { AnalyticsTab } from "./AnalyticsTab";
-import { AdminTab } from "./AdminTab";
 import { isVisible, useExperienceLevel } from "@/features/experience";
 
 function getJobField(job: OptimizationSummaryResponse, key: string): unknown {
@@ -79,10 +78,10 @@ export function DashboardView() {
   const showAnalytics =
     isVisible("dashboard.analytics", useExperienceLevel()) || urlTab === "analytics";
   useEffect(() => {
-    if (urlTab === "jobs" || urlTab === "analytics" || (urlTab === "admin" && isAdmin)) {
+    if (urlTab === "jobs" || urlTab === "analytics") {
       setActiveTab(urlTab);
     }
-  }, [urlTab, isAdmin]);
+  }, [urlTab]);
   // Mirror the active tab back into ?tab= so reload / share-link / back-button
   // round-trip the user to the same tab they were on.
   const handleTabChange = useCallback(
@@ -435,7 +434,7 @@ export function DashboardView() {
         <FadeIn delay={0.2}>
           {mounted && (
             <Tabs value={activeTab} onValueChange={handleTabChange} data-setup="dashboard">
-              {(showAnalytics || isAdmin) && (
+              {showAnalytics && (
                 <TabsList className={SLIDING_PILL_TABS_LIST_CLASS}>
                   <TabsTrigger value="jobs" className={SLIDING_PILL_TABS_TRIGGER_CLASS}>
                     {activeTab === "jobs" && (
@@ -465,22 +464,6 @@ export function DashboardView() {
                       {msg("auto.features.dashboard.components.dashboardview.1")}
                     </span>
                   </TabsTrigger>
-                  {isAdmin && (
-                    <TabsTrigger value="admin" className={SLIDING_PILL_TABS_TRIGGER_CLASS}>
-                      {activeTab === "admin" && (
-                        <motion.span
-                          layoutId="dashboardTabPill"
-                          transition={tabPillTransition}
-                          className="absolute inset-0 z-0 rounded-full bg-primary-fill"
-                          aria-hidden="true"
-                        />
-                      )}
-                      <span className="relative z-10 inline-flex items-center gap-1.5">
-                        <ShieldCheck className="size-3.5" />
-                        {msg("dashboard.admin.tab")}
-                      </span>
-                    </TabsTrigger>
-                  )}
                 </TabsList>
               )}
 
@@ -525,12 +508,6 @@ export function DashboardView() {
                   onOpenJob={(id) => router.push(`/optimizations/${id}`)}
                 />
               </TabsContent>
-
-              {isAdmin && (
-                <TabsContent value="admin">
-                  <AdminTab active={activeTab === "admin"} />
-                </TabsContent>
-              )}
             </Tabs>
           )}
         </FadeIn>

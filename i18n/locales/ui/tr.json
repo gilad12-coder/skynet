@@ -2848,7 +2848,6 @@
   "dashboard.admin.sentry.unavailable": "Sentry'ye ulaşılamadı",
   "dashboard.admin.sentry.unavailable_description": "Token izinlerini ve organizasyon adını kontrol edin, sonra sayfayı yeniden yükleyin.",
   "dashboard.admin.sentry_help": "Sentry'ye bildirilen açık hatalar, en sık olanlar başta. Sentry'de açmak için birine tıklayın.",
-  "dashboard.admin.tab": "Yönetici",
   "settings.admin.activity.activated": "Bu hafta 48 sa içinde iyileştirenler",
   "settings.admin.activity.activated_detail": "bu haftaki {signups} kayıttan",
   "settings.admin.activity.activated_help": "48 sa içinde iyileştirdi: kayıttan sonraki 48 saat içindeki ilk çalıştırmasında, 20+ ayrılmış örnekte programını en az 2 puan iyileştiren yeni kullanıcı.",

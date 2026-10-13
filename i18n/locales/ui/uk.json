@@ -2848,7 +2848,6 @@
   "dashboard.admin.sentry.unavailable": "Не вдалося зв'язатися із Sentry",
   "dashboard.admin.sentry.unavailable_description": "Перевірте дозволи токена й назву організації, потім перезавантажте сторінку.",
   "dashboard.admin.sentry_help": "Відкриті помилки, про які повідомлено в Sentry, спершу найчастіші. Натисніть, щоб відкрити в Sentry.",
-  "dashboard.admin.tab": "Адмін",
   "settings.admin.activity.activated": "Покращили за 48 год цього тижня",
   "settings.admin.activity.activated_detail": "із {signups} реєстрацій цього тижня",
   "settings.admin.activity.activated_help": "Покращення за 48 год: новий користувач, чий перший запуск протягом 48 годин після реєстрації покращив його програму щонайменше на 2 бали на 20+ відкладених прикладах.",
