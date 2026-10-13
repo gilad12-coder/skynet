@@ -3,16 +3,17 @@
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 
-import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
+import { EvolutionMorph } from "@/shared/ui/evolution-morph";
 
 /**
  * Hold (ms) the splash stays up before routing to the new optimization.
- * Mirrors the manual wizard submit so the agent-driven submit feels identical.
+ * Mirrors the manual wizard submit so the agent-driven submit feels identical, and is
+ * long enough for the evolution morph to land on the human (EVOLUTION_DURATION_MS).
  */
-export const SUBMIT_SPLASH_HOLD_MS = 1500;
+export const SUBMIT_SPLASH_HOLD_MS = 2200;
 
 /**
- * Full-screen submit splash: the animated wordmark over the warm canvas that
+ * Full-screen submit splash: the fish-to-human evolution morph over the warm canvas that
  * plays while an optimization submission settles and the app routes to the new
  * job. Shared by the manual wizard submit (``SubmitSplash``) and the
  * agent-panel auto-submit so both paths render the identical banner.
@@ -55,7 +56,7 @@ export function SubmitSplashOverlay({
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.3, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
           >
-            <AnimatedWordmark size={64} withMark autoMorph morphSpeed={120} />
+            <EvolutionMorph />
           </motion.div>
         </motion.div>
       )}
