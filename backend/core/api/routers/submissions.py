@@ -87,6 +87,7 @@ from ...models import (
 from ...models.blackbox import BLACKBOX_ITERATION_LIMIT_ENGINES, BLACKBOX_MODULE_NAME, BLACKBOX_TARGET_TEXT
 from ...models.common import ModelConfig, OptimizationType
 from ...models.submissions import _OptimizationRequestBase
+from ...models.unified import METRIC_SIGNATURES, run_entry_for
 from ...service_gateway.optimization.blackbox.registry import ENGINES
 from ...service_gateway.optimization.blackbox.service import engine_catalog
 from ...service_gateway.optimization.unified.contract import validate_unified_payload
@@ -750,6 +751,7 @@ def _optimizer_option(
         id=option_id,
         family=optimizer_family(option_id),
         metric_shape=metric_shape_for(option_id, artifact_kind),
+        metric_signature=METRIC_SIGNATURES[metric_shape_for(option_id, artifact_kind)],
         available=available,
         unavailable_reason=None if available else reason,
         needs_reflection_model=resolved not in _DSPY_WITHOUT_REFLECTION,
@@ -926,6 +928,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         return OptimizerCatalogResponse(
             artifact_kind=artifact_kind,
             data_mode=data_mode,
+            run_entry=run_entry_for(artifact_kind),
             options=options,
             auto_resolves_to=auto_resolves_to,
             sandbox_available=catalog.sandbox_available,

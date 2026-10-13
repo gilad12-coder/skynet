@@ -282,6 +282,7 @@
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' introuvable pour cet utilisateur — téléversez à nouveau le jeu de données et réessayez.",
     "submission.validation_failed": "Échec de la validation de la charge utile. Vérifiez l'optimiseur, le module et le mappage de colonnes.",
     "submission.vision_required": "Le jeu de données contient des colonnes d'images ({fields}) mais le modèle sélectionné ('{model}') ne prend pas en charge les entrées d'images. Choisissez un modèle compatible avec la vision.",
+    "code_agent.seed_lane_timeout": "Le modèle a réfléchi trop longtemps sans écrire le code, le brouillon a donc été arrêté. Réessayez, ou choisissez un modèle plus rapide ou un niveau de réflexion plus bas.",
     "submit.no_models_available": "Aucun modèle disponible dans le catalogue — configurez d'abord une clé API de fournisseur.",
     "user.storage.quota_exceeded": "Quota de stockage dépassé ({used_mb} Mo sur {quota_mb} Mo utilisés). Libérez de l'espace et réessayez.",
     "wizard.code_via_authoring_only": "{field} ne peut pas être défini via update_wizard_state. Le code de Signature et de métrique est rédigé uniquement via request_code_authoring, qui valide le résultat avant qu'il n'atteigne l'assistant.",

@@ -154,15 +154,6 @@ export function CodeAgentPanel({
                   detail={agent.error}
                   retryLabel={msg("shared.agent.turn_failed_retry")}
                   onRetry={agent.retry}
-                  action={
-                    <button
-                      type="button"
-                      onClick={agent.fallbackToManual}
-                      className="-ms-2 min-h-[44px] cursor-pointer rounded px-2 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:min-h-0"
-                    >
-                      {msg("auto.features.submit.components.steps.codeagentpanel.3")}
-                    </button>
-                  }
                 />
               )}
             </>
@@ -294,7 +285,8 @@ function ToolCallCard({
   unified?: boolean;
 }) {
   const codeCall = call as AgentToolCall;
-  const isSignature = codeCall.tool === "edit_signature" || codeCall.tool === "edit_seed";
+  const isSignature =
+    codeCall.tool === "edit_signature" || codeCall.tool === "edit_run" || codeCall.tool === "edit_seed";
   const isMetric = codeCall.tool === "edit_metric" || codeCall.tool === "edit_scorer";
   const Icon = isSignature
     ? FileCode

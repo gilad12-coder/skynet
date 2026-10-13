@@ -100,7 +100,7 @@ def _item(
     sample_index: int | None = None,
     **params: Any,
 ) -> ContractCheckItem:
-    """Build one check item, its message localized.
+    """Build one check item, carrying its message code for the client's locale.
 
     Args:
         key: The contract check key.
@@ -113,10 +113,14 @@ def _item(
     Returns:
         The item; a passing item carries the shared passed message.
     """
+    code = "contract.passed" if passed else message_key
+    code_params = {} if passed else params
     return ContractCheckItem(
         key=key,  # type: ignore[arg-type]
         status="passed" if passed else "failed",
-        message=t("contract.passed") if passed else t(message_key, **params),
+        message=t(code, **code_params),
+        message_code=code,
+        message_params=code_params,
         sample_index=sample_index,
         detail=None if passed or detail is None else detail[-DETAIL_MAX_CHARS:],
     )
@@ -234,6 +238,74 @@ def _response(
     )
 
 
+def _recover_error(message: str, code: str, number: int) -> str | None:
+    """Read the ``{error}`` placeholder back out of a Hebrew-base message.
+
+    Args:
+        message: The rendered Hebrew-base message.
+        code: The i18n key the message may have been rendered from.
+        number: The sample's 1-based index.
+
+    Returns:
+        The error text, or ``None`` when ``message`` was not rendered from ``code``.
+    """
+    marker = "\x00"
+    prefix, _, suffix = t(code, index=number, error=marker).partition(marker)
+    if message.startswith(prefix) and message.endswith(suffix) and len(message) >= len(prefix) + len(suffix):
+        return message[len(prefix) : len(message) - len(suffix)]
+    return None
+
+
+def _sample_code(item: ContractCheckItem, shape: MetricShape) -> tuple[str, dict[str, str | int]]:
+    """Work out the message code of a sample item the guest sent without one.
+
+    Args:
+        item: A sample item lacking ``message_code``.
+        shape: The metric shape the samples were held to.
+
+    Returns:
+        ``(message_code, message_params)``.
+    """
+    if item.status == "passed":
+        return "contract.passed", {}
+    shape_key = _SHAPE_KEYS[shape]
+    if item.status == "skipped" or (item.key == "metric.shape" and item.message == t(shape_key)):
+        return shape_key, {}
+    number = (item.sample_index or 0) + 1
+    code = "contract.run_error" if item.key == "workspace.run" else "contract.metric_error"
+    error = _recover_error(item.message, code, number)
+    if error is None:
+        lines = [line for line in (item.detail or item.message).splitlines() if line.strip()]
+        error = lines[-1].strip() if lines else ""
+    return code, {"index": number, "error": error}
+
+
+def with_message_codes(response: ContractCheckResponse, static: ContractCheckResponse) -> ContractCheckResponse:
+    """Give every item of a sandboxed check the message code the client renders.
+
+    The sandboxed check runs inside the pinned sandbox image, whose backend
+    can predate ``message_code``; its items then carry only the Hebrew base
+    text, which an English UI would show as is. The static items are
+    replaced by the host's own, and sample items get their code back.
+
+    Args:
+        response: The contract check as the sandbox returned it.
+        static: The host's static check of the same spec.
+
+    Returns:
+        The response with every item carrying ``message_code``.
+    """
+    samples = []
+    for item in response.checks:
+        if item.sample_index is None:
+            continue
+        if item.message_code is None:
+            code, params = _sample_code(item, response.metric_shape)
+            item = item.model_copy(update={"message_code": code, "message_params": params})
+        samples.append(item)
+    return response.model_copy(update={"checks": [*static.checks, *samples]})
+
+
 def validate_unified_payload(payload: UnifiedRunRequest) -> None:
     """Reject a unified run whose code cannot fit its optimizer, without running it.
 
@@ -299,7 +371,13 @@ def _sample_items(index: int, shape: MetricShape, probe: WorkspaceProbe) -> list
                 index=number,
                 error=probe.error,
             ),
-            ContractCheckItem(key="metric.shape", status="skipped", message=t(_SHAPE_KEYS[shape]), sample_index=index),
+            ContractCheckItem(
+                key="metric.shape",
+                status="skipped",
+                message=t(_SHAPE_KEYS[shape]),
+                message_code=_SHAPE_KEYS[shape],
+                sample_index=index,
+            ),
         ]
     run = _item("workspace.run", True, "contract.run_error", sample_index=index)
     if probe.stage == "shape":

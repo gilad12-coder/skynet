@@ -149,6 +149,31 @@ def metric_shape_for(choice: OptimizerChoice, artifact_kind: ArtifactKind) -> Me
     return "blackbox_side_info"
 
 
+# The coding agent's contract, its validators and the editors' hints all read
+# these, so what the agent is told and what a person writing by hand is shown
+# never drift apart.
+METRIC_SIGNATURES: dict[str, str] = {
+    "dspy_feedback": "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None)",
+    "dspy_scalar": "def metric(gold, pred, trace=None)",
+    "blackbox_side_info": "def score(input, output, expected=None)",
+}
+
+
+def run_entry_for(artifact_kind: ArtifactKind) -> str:
+    """Name the entry point the run code must define for an artifact kind.
+
+    Args:
+        artifact_kind: What is being optimized.
+
+    Returns:
+        ``def build_program()`` for a DSPy program (the DSPy optimizer needs
+        the module itself), otherwise ``def run(artifact, input)``.
+    """
+    if artifact_kind == ARTIFACT_KIND_DSPY_PROGRAM:
+        return "def build_program()"
+    return "def run(artifact, input)"
+
+
 # One case. ``expected`` is a dict keyed by output field names when a DSPy
 # metric reads it as ``gold``.
 class UnifiedCase(BaseModel):
@@ -295,6 +320,7 @@ class OptimizerOption(BaseModel):
     id: OptimizerChoice
     family: OptimizerFamily
     metric_shape: MetricShape
+    metric_signature: str
     available: bool
     unavailable_reason: str | None = None
     needs_reflection_model: bool
@@ -305,9 +331,11 @@ class OptimizerOption(BaseModel):
 
 # ``GET /optimizers``. ``auto_resolves_to`` lists what Auto runs: DSPy GEPA
 # for a DSPy program, otherwise the engines the Auto strategy explores.
+# ``run_entry`` is the entry point the run code defines for this artifact kind.
 class OptimizerCatalogResponse(BaseModel):
     artifact_kind: ArtifactKind
     data_mode: DataMode
+    run_entry: str
     default: OptimizerChoice = "auto"
     options: list[OptimizerOption]
     auto_resolves_to: list[str]
@@ -324,12 +352,16 @@ ContractCheckKey = Literal[
 ]
 
 
-# ``message`` is localized for the user; ``detail`` is the exact error text,
-# trimmed to frames from the user's own code.
+# ``message`` is the Hebrew-base rendering; ``message_code`` and
+# ``message_params`` are the i18n code and placeholders the client renders in
+# its own locale, since the check can run in a worker with no request locale.
+# ``detail`` is the exact error text, trimmed to frames from the user's own code.
 class ContractCheckItem(BaseModel):
     key: ContractCheckKey
     status: Literal["passed", "failed", "pending", "skipped"]
     message: str
+    message_code: str | None = None
+    message_params: dict[str, str | int] = Field(default_factory=dict)
     sample_index: int | None = None
     detail: str | None = Field(default=None, max_length=4000)
 

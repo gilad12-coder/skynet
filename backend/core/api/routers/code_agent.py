@@ -147,8 +147,8 @@ def _intake_catalog() -> tuple[list[Any], list[str]]:
     return list(catalog.models), sorted(slugs)
 
 
-def _intake_low_effort(model: str | None, catalog_models: list[Any]) -> str | None:
-    """Pick the low reasoning effort for the intake model, when it takes one.
+def _low_effort(model: str | None, catalog_models: list[Any]) -> str | None:
+    """Pick the low reasoning effort for a turn's model, when it takes one.
 
     Args:
         model: The model the turn runs on.
@@ -487,6 +487,8 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         * ``reasoning_patch`` — ``{"chunk": "<token>", "source": "<stream>"}``
           (both modes; ``source`` separates the parallel seed authors:
           ``signature`` / ``metric`` / ``workflow`` / ``agent``)
+        * ``artifact_done`` — ``{"source": "signature" | "metric"}`` (unified
+          seed: one parallel author finished, check and repair included)
         * ``tool_start`` — ``{"id", "tool", "reason"}`` (chat mode; the
           unified tools are ``ask_user`` / ``set_brief`` / ``edit_run`` /
           ``edit_metric``)
@@ -518,6 +520,13 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             gate_interactive_turn, job_store, current_user.username, req.unified is not None
         )
         model = route_menu_model(req.model)
+        effort = effective_reasoning_effort(model, req.reasoning_effort)
+        if req.unified is not None and not req.user_message.strip() and not req.reasoning_effort:
+            # The wizard's seed lanes write two short functions; at the catalog
+            # default effort a reasoning model can deliberate for minutes over
+            # edge cases before writing a line, so an unpicked effort runs low.
+            catalog_models, _ = await asyncio.to_thread(_intake_catalog)
+            effort = _low_effort(model, catalog_models)
         usage_sink: list = []
         source = run_code_agent(
             dataset_columns=req.dataset_columns,
@@ -537,7 +546,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             interview_brief=req.interview_brief,
             locale=req.locale,
             model=model,
-            reasoning_effort=effective_reasoning_effort(model, req.reasoning_effort),
+            reasoning_effort=effort,
             usage_sink=usage_sink,
             unified=req.unified.model_dump() if req.unified else None,
             steer_owner=current_user.username,
@@ -682,7 +691,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         if req.reasoning_effort and not platform_paid:
             effort = effective_reasoning_effort(model, req.reasoning_effort)
         else:
-            effort = _intake_low_effort(model, catalog_models)
+            effort = _low_effort(model, catalog_models)
         usage_sink: list = []
 
         async def source() -> AsyncIterator[dict]:

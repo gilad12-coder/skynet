@@ -21,6 +21,7 @@ registerHooks({
 });
 
 const {
+  authoringCases,
   casesToRows,
   columnRoles,
   defaultInputFields,
@@ -217,4 +218,25 @@ test("the user setting every column to Input or Ignore still means one input", (
     "ignore",
   );
   assert.equal(inputsFromRoles(columns, roles, [{ q: "1", a: "2" }, { q: "3", a: "4" }]).mode, "single");
+});
+
+test("a four-column CSV gives the agent the same input fields the contract check sends", () => {
+  const csv = "review,product,rating,sentiment\nGreat sound,Headphones,5,positive\nBroke in a week,Kettle,1,negative";
+  const [header, ...lines] = csv.split("\n");
+  const columns = header.split(",");
+  const rows = lines.map((line) => Object.fromEntries(line.split(",").map((v, i) => [columns[i], v])));
+  const roles = { review: "input", product: "ignore", rating: "ignore", sentiment: "output" };
+  const run = inputsFromRoles(columns, roles, rows);
+
+  const fromCases = authoringCases({ ...run, sampleRows: rows }, 5);
+  const fromStaged = authoringCases({ ...run, cases: [], sampleRows: rows }, 5);
+
+  for (const seen of [fromCases, fromStaged]) {
+    assert.deepEqual(
+      seen.map((c: { input: Record<string, unknown> }) => Object.keys(c.input)),
+      run.cases.map((c: { input: Record<string, unknown> }) => Object.keys(c.input)),
+    );
+    assert.deepEqual(Object.keys(seen[0].input), ["review"]);
+    assert.deepEqual(seen[0].expected, { sentiment: "positive" });
+  }
 });

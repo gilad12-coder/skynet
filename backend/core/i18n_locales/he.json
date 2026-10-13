@@ -172,6 +172,7 @@
     "submission.module_resolve_failed": "טעינת ה{term.module} נכשלה: {error}",
     "submission.staged_dataset_not_found": "הדאטאסט השמור ({staged_dataset_id}) לא נמצא או שייך למשתמש אחר.",
     "submission.vision_required": "ה{term.dataset} מכיל עמודות תמונה ({fields}) אך ה{term.model} שנבחר ('{model}') אינו תומך בקלט תמונות. בחר/י {term.model} עם תמיכה ב־vision.",
+    "code_agent.seed_lane_timeout": "המודל חשב זמן רב מדי בלי לכתוב את הקוד, ולכן הטיוטה נעצרה. נסו שוב, או בחרו מודל מהיר יותר או רמת חשיבה נמוכה יותר.",
     "code_agent.upstream_failed": "שגיאה בסוכן הקוד: {error}",
     "health.workers_dead": "תהליכי הרקע לא פועלים.",
     "health.workers_stuck": "תהליכי הרקע תקועים כבר {seconds} שניות.",

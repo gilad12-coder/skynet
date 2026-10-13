@@ -13,9 +13,9 @@ export type WizardPageId =
   | "optimizer"
   | "models"
   | "budget"
-  | "run"
   | "metric"
-  | "check";
+  | "check"
+  | "overview";
 
 const OPTIMIZER_SCREENS: readonly WizardPageId[] = ["optimizer", "models", "budget"];
 
@@ -40,6 +40,8 @@ export function stepPages(step: WizardStepId, state: WizardV2State): readonly Wi
     case "optimizer":
       return optimizerPages(state);
     case "metric":
-      return ["run", "metric", "check"];
+      // The sandbox check closes the setup on a screen of its own, and Run
+      // sits on the overview after it, away from the code editors.
+      return ["metric", "check", "overview"];
   }
 }
