@@ -166,6 +166,7 @@
     "admin.forbidden": "Для цієї операції потрібні права адміністратора.",
     "admin.invalid_username": "Ім'я користувача не може бути порожнім.",
     "admin.quota_save_failed": "Не вдалося зберегти перевизначення квоти.",
+    "admin.user_not_found": "Обліковий запис для '{email}' не знайдено.",
     "agent.approval.unknown_call_id": "Немає очікуваного підтвердження для вказаного call_id.",
     "agent.status.tool_end": "Інструмент завершив роботу.",
     "agent.status.tool_start": "Агент викликає інструмент…",

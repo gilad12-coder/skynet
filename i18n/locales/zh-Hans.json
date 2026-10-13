@@ -166,6 +166,7 @@
     "admin.forbidden": "此操作需要管理员权限。",
     "admin.invalid_username": "用户名不能为空。",
     "admin.quota_save_failed": "保存配额覆盖设置失败。",
+    "admin.user_not_found": "未找到 '{email}' 的账户。",
     "agent.approval.unknown_call_id": "没有与该 call_id 对应的待审批项。",
     "agent.status.tool_end": "工具已完成。",
     "agent.status.tool_start": "智能体正在调用工具…",

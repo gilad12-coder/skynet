@@ -297,6 +297,7 @@
     "wizard.split_fractions_sum": "split_fractions 嘅總和必須為 1.0，目前為 {total}",
     "workflow.validation_failed": "工作流程驗證失敗：{error}",
     "admin.quota_save_failed": "儲存配額覆寫失敗。",
+    "admin.user_not_found": "搵唔到 '{email}' 嘅帳戶。",
     "grid_search.no_best_program_artifact": "勝出嘅組合冇程式產物。",
     "grid_search.pair_no_artifact": "喺位置 {pair_index} 嘅組合冇程式產物。",
     "notifier.email.footer": "呢個係嚟自 Skynet 嘅自動傳送訊息。",

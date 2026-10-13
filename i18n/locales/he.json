@@ -92,6 +92,7 @@
     "admin.forbidden": "רק מנהלים יכולים לבצע את הפעולה הזו.",
     "admin.invalid_username": "הזן/הזיני שם משתמש.",
     "admin.quota_save_failed": "לא ניתן לשמור את מגבלת המשתמש.",
+    "admin.user_not_found": "לא נמצא חשבון עבור '{email}'.",
     "analytics.other_bucket": "אחר",
     "auth.invalid_token": "תוקף ההתחברות פג או שהאסימון לא תקין.",
     "auth.missing_token": "התחבר/י כדי לבצע את הפעולה הזו.",

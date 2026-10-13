@@ -166,6 +166,7 @@
     "admin.forbidden": "Se requieren privilegios de administrador para esta operación.",
     "admin.invalid_username": "El nombre de usuario no puede estar en blanco.",
     "admin.quota_save_failed": "No se pudo guardar la anulación de la cuota.",
+    "admin.user_not_found": "No se encontró ninguna cuenta para '{email}'.",
     "agent.approval.unknown_call_id": "No hay ninguna aprobación pendiente para el call_id indicado.",
     "agent.status.tool_end": "Herramienta finalizada.",
     "agent.status.tool_start": "El agente está invocando la herramienta…",

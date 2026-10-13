@@ -166,6 +166,7 @@
     "admin.forbidden": "São necessários privilégios de administrador para esta operação.",
     "admin.invalid_username": "O nome de utilizador não pode estar em branco.",
     "admin.quota_save_failed": "Não foi possível guardar a substituição de quota.",
+    "admin.user_not_found": "Não foi encontrada nenhuma conta para '{email}'.",
     "agent.approval.unknown_call_id": "Não há nenhuma aprovação pendente para o call_id indicado.",
     "agent.status.tool_end": "Ferramenta concluída.",
     "agent.status.tool_start": "O agente está a invocar a ferramenta…",

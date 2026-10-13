@@ -40,6 +40,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "admin.forbidden": "Admin privileges are required for this operation.",
     "admin.invalid_username": "Username must not be blank.",
     "admin.quota_save_failed": "Failed to save quota override.",
+    "admin.user_not_found": "No account found for '{email}'.",
     "analytics.other_bucket": "Other",
     "auth.invalid_token": "Authentication token is invalid or expired.",
     "auth.missing_token": "Authentication token is required.",

@@ -166,6 +166,7 @@
     "admin.forbidden": "Für diesen Vorgang sind Administratorrechte erforderlich.",
     "admin.invalid_username": "Der Benutzername darf nicht leer sein.",
     "admin.quota_save_failed": "Das Speichern der Kontingentüberschreibung ist fehlgeschlagen.",
+    "admin.user_not_found": "Kein Konto für '{email}' gefunden.",
     "agent.approval.unknown_call_id": "Keine ausstehende Genehmigung für die angegebene call_id.",
     "agent.status.tool_end": "Werkzeug abgeschlossen.",
     "agent.status.tool_start": "Agent ruft Werkzeug auf…",
