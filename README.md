@@ -16,7 +16,7 @@ Skynet turns "I have a dataset and a task" into an optimized, deployable LLM pro
 - **Agents** — a generalist assistant (Cmd/Ctrl+J) that operates the whole wizard through tools with configurable trust modes, and a code agent that authors signatures, metrics, and multi-step workflow graphs on a visual canvas.
 - **Serving** — every successful run yields a program artifact: inspect the evolved instructions and demos, run inference against it, or export a runnable program.
 - **24 locales, RTL-first** — Hebrew is the base language; Arabic and Persian are first-class; the rest overlay with graceful fallback.
-- **Simple pricing** — a prepaid dollar balance; usage is metered at raw provider cost times a 1.50 markup (payment-processing fees, a small infra share, and margin). Bring your own API key and runs are charged only the small platform fee. A "no lift, no charge" guarantee refunds runs that don't beat their baseline. Without Stripe keys, billing is simply off.
+- **Simple pricing** — a prepaid dollar balance; usage is metered at raw provider cost times a 1.15 markup (payment-processing fees, a small infra share, and margin). Bring your own API key and runs are charged only the small platform fee. Without Stripe keys, billing is simply off.
 
 ## Quick Start (local)
 
