@@ -892,15 +892,17 @@ def test_best_value_prefers_a_top_lab_over_a_cheaper_chinese_lab() -> None:
     assert winner[0] == "acme/mid-1"
 
 
-def test_best_value_default_on_the_current_listing_is_the_cheapest_top_lab_thinker() -> None:
-    """On today's featured models the default leaves GLM 5.3 Flash for a top lab.
+def test_best_value_default_on_the_current_listing_is_claude_haiku() -> None:
+    """On today's featured models the default leaves GLM 5.3 Flash for Claude Haiku 5.5.
 
-    Claude Haiku 5.5 has the best score per dollar among top labs, but it does
-    not reason by default, and Auto sends no effort, so GPT-6 Luna wins.
+    Haiku only thinks on request, but it can reason, and an unpicked effort
+    sends it low (see ``default_effort_for``), so it qualifies and wins the
+    top labs on score per dollar.
     """
     thinks = {"reasoning": {"default_enabled": True}}
+    opt_in = {"reasoning": {"supported_efforts": ["low", "medium", "high"]}}
     listing = {
-        "anthropic/claude-haiku-5.5": _listed(_NOW, score=43.4, pricing={"prompt": "0.0000001"}),
+        "anthropic/claude-haiku-5.5": _listed(_NOW, score=43.4, pricing={"prompt": "0.0000001"}, **opt_in),
         "anthropic/claude-sonnet-5.5": _listed(_NOW, score=56.0, pricing={"prompt": "0.000002"}, **thinks),
         "openai/gpt-6-luna": _listed(_NOW, score=38.1, pricing={"prompt": "0.0000001"}, **thinks),
         "openai/gpt-6.1-sol": _listed(_NOW, score=51.8, pricing={"prompt": "0.000002"}, **thinks),
@@ -910,11 +912,11 @@ def test_best_value_default_on_the_current_listing_is_the_cheapest_top_lab_think
     }
     winner = mc._best_value_probe_id(listing, set(listing))
     assert winner is not None
-    assert winner[0] == "openai/gpt-6-luna"
+    assert winner[0] == "anthropic/claude-haiku-5.5"
 
 
 def test_best_value_default_is_none_without_default_thinkers() -> None:
-    """No featured model reasons by default, so no default is flagged."""
+    """No featured model can reason, so no default is flagged."""
     listing = {"acme/ultra-2": _listed(_NOW, score=60)}
     assert mc._best_value_probe_id(listing, mc._featured_probe_ids(listing)) is None
 

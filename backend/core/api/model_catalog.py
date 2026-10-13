@@ -1004,9 +1004,10 @@ def lab_tier(model_id: str) -> int:
 def _best_value_probe_id(deployed: dict[str, dict], featured: set[str]) -> tuple[str, tuple[int, float]] | None:
     """Pick the featured model of the best-ranked lab with the best benchmark score per input dollar.
 
-    Only models that reason without being asked qualify: Auto sends no
-    effort, and a non-thinker would answer hard turns off the cuff. The lab
-    tier (see :func:`lab_tier`) ranks first, score per dollar second.
+    Only models that can reason qualify: a non-thinker would answer hard
+    turns off the cuff. An opt-in thinker still thinks under Auto, because
+    :func:`default_effort_for` sends it a low effort. The lab tier (see
+    :func:`lab_tier`) ranks first, score per dollar second.
 
     Args:
         deployed: Probe index of ``vendor/model`` id to raw item.
@@ -1014,13 +1015,14 @@ def _best_value_probe_id(deployed: dict[str, dict], featured: set[str]) -> tuple
 
     Returns:
         ``(probe id, (negated lab tier, score per dollar))`` of the winner,
-        so larger ranks better, or ``None`` when no featured model thinks by
-        default with a benchmark and a price.
+        so larger ranks better, or ``None`` when no featured model can reason
+        with a benchmark and a price.
     """
     best: tuple[str, tuple[int, float]] | None = None
     for probe_id in sorted(featured):
         item = deployed.get(probe_id)
-        if not item or not _probe_item_reasoning(item).get("reasoning_default_enabled"):
+        reasoning = _probe_item_reasoning(item) if item else {}
+        if not reasoning.get("reasoning_default_enabled") and not reasoning.get("reasoning_efforts"):
             continue
         score = _probe_item_intelligence(item)
         price = _probe_item_cost(item, "prompt")
@@ -1619,6 +1621,48 @@ def catalog_snapshot() -> ModelCatalogResponse | None:
         The cached catalog, or ``None`` before the boot prewarm lands.
     """
     return _cached_response
+
+
+def unpicked_effort(entry: CatalogModel) -> str | None:
+    """Return the effort to send a catalog model when the caller picked none.
+
+    An unset effort sends OpenRouter no ``reasoning`` param, so an opt-in
+    thinker (Claude, Gemini) would answer without thinking at all. Such a
+    model gets the lowest effort from ``low`` up on its ladder; a model
+    that thinks by default gets its catalog default.
+
+    Args:
+        entry: The model's catalog row.
+
+    Returns:
+        The catalog default effort when the model thinks by default, its
+        low effort when it only thinks on request, else ``None`` (no
+        reasoning control).
+    """
+    if entry.reasoning_default_enabled:
+        return entry.default_reasoning_effort
+    floor = REASONING_EFFORTS.index("low")
+    return next((e for e in entry.reasoning_efforts or [] if REASONING_EFFORTS.index(e) >= floor), None)
+
+
+def default_effort_for(model: str | None) -> str | None:
+    """Return the effort to send ``model`` when the caller picked none.
+
+    Reads only the built catalog, so an LM build never blocks on a cold
+    catalog build. See :func:`unpicked_effort` for the policy.
+
+    Args:
+        model: Catalog model id (``CatalogModel.value``), or ``None``.
+
+    Returns:
+        :func:`unpicked_effort` of the model's catalog row, or ``None`` for
+        an unknown model or before the catalog is built.
+    """
+    snapshot = _cached_response
+    if not model or snapshot is None:
+        return None
+    entry = next((m for m in snapshot.models if m.value == model), None)
+    return unpicked_effort(entry) if entry is not None else None
 
 
 def agent_model_id(configured: str = "") -> str:

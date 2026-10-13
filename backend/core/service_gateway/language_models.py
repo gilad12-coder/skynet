@@ -16,6 +16,7 @@ import dspy
 import httpx
 import litellm
 
+from ..api.model_catalog import default_effort_for
 from ..billing.model_gateway import ROUTE_KEY, raise_gateway_stop
 from ..billing.pricing import ModelUsage
 from ..billing.runtime import UsagePendingError
@@ -562,6 +563,12 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
     if config.max_tokens is not None:
         lm_kwargs["max_tokens"] = config.max_tokens
     lm_kwargs.update(config.extra)
+    if not lm_kwargs.get("reasoning_effort"):
+        # Auto and the optimizer roles send no effort, which leaves an
+        # opt-in thinker (Claude Haiku, the best-value default) not thinking.
+        effort = default_effort_for(model_name)
+        if effort:
+            lm_kwargs["reasoning_effort"] = effort
     budget_route = lm_kwargs.pop(ROUTE_KEY, None)
     _apply_managed_gateway(lm_kwargs)
     _translate_gateway_reasoning(lm_kwargs)

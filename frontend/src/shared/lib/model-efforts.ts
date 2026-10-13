@@ -29,6 +29,24 @@ export function effortsFor(
   return DEFAULT_EFFORTS;
 }
 
+const EFFORT_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+interface UnpickedEffortSource {
+  reasoning_efforts?: string[] | null;
+  default_reasoning_effort?: string | null;
+  reasoning_default_enabled?: boolean | null;
+}
+
+/** The effort the backend sends a model when none is picked (mirrors
+ * ``unpicked_effort``): the catalog default for a default-on thinker, the
+ * lowest level from "low" up for an opt-in thinker, else null. */
+export function unpickedEffort(model: UnpickedEffortSource | null | undefined): string | null {
+  if (!model) return null;
+  if (model.reasoning_default_enabled) return model.default_reasoning_effort ?? null;
+  const floor = EFFORT_ORDER.indexOf("low");
+  return (model.reasoning_efforts ?? []).find((e) => EFFORT_ORDER.indexOf(e) >= floor) ?? null;
+}
+
 /** Localized display label for a reasoning-effort level. */
 export function effortLabel(level: string): string {
   switch (level) {

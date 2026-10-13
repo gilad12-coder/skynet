@@ -15,7 +15,7 @@ import { Separator } from "@/shared/ui/primitives/separator";
 import { ModelPicker, modelSupportsThinking } from "./ModelPicker";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { modelDisplayName, modelProviderSlug } from "@/shared/lib/model-provider";
-import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
+import { effortLabel, effortsFor, unpickedEffort } from "@/shared/lib/model-efforts";
 import { NumberInput } from "@/shared/ui/number-input";
 import { Segmented } from "@/shared/ui/segmented";
 import { Disclosure } from "./Disclosure";
@@ -164,9 +164,10 @@ export function ModelConfigModal({
   // catalog knows it, else medium, else the middle of the ladder. A model
   // with no ladder takes any level as "on", and medium is OpenRouter's own.
   const defaultEffort = (model: string, ladder: readonly string[]) => {
-    const providerDefault = detectionModels?.find(
-      (m) => m.value === model,
-    )?.default_reasoning_effort;
+    const hit = detectionModels?.find((m) => m.value === model);
+    const unpicked = unpickedEffort(hit);
+    if (unpicked && ladder.includes(unpicked)) return unpicked;
+    const providerDefault = hit?.default_reasoning_effort;
     if (providerDefault && ladder.includes(providerDefault)) return providerDefault;
     return ladder.includes("medium")
       ? "medium"
@@ -175,7 +176,12 @@ export function ModelConfigModal({
   const thinkingInfo = (model: string) => {
     const hit = detectionModels?.find((m) => m.value === model);
     const mandatory = !!hit?.reasoning_mandatory;
-    return { mandatory, defaultOn: mandatory || !!hit?.reasoning_default_enabled };
+    // The backend sends an opt-in thinker low effort when none is stored,
+    // so it is on by default too, and turning it off stores "none".
+    return {
+      mandatory,
+      defaultOn: mandatory || !!hit?.reasoning_default_enabled || unpickedEffort(hit) !== null,
+    };
   };
   const { mandatory: thinkingMandatory, defaultOn: thinkingDefaultOn } = thinkingInfo(draft.name);
   const canThink = modelSupportsThinking(draft.name, detectionModels);

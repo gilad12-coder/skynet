@@ -19,6 +19,7 @@ from .model_catalog import (
     get_catalog_cached,
     is_removed_model,
     require_known_model,
+    unpicked_effort,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,8 +83,8 @@ def effective_reasoning_effort(model: str | None, requested: str | None) -> str 
 
     Returns:
         The requested effort, snapped onto the model's ladder when the
-        catalog knows one; otherwise the model's catalog default effort when
-        it thinks by default, else ``None``.
+        catalog knows one; otherwise :func:`unpicked_effort` of the model
+        (its default effort, or low for an opt-in thinker).
     """
     if not model:
         return requested
@@ -96,9 +97,7 @@ def effective_reasoning_effort(model: str | None, requested: str | None) -> str 
         return requested
     if requested:
         return _nearest_effort(requested, entry.reasoning_efforts)
-    if not entry.reasoning_default_enabled:
-        return None
-    return entry.default_reasoning_effort
+    return unpicked_effort(entry)
 
 
 def _nearest_effort(requested: str, ladder: list[str] | None) -> str:
