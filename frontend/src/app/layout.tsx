@@ -119,8 +119,8 @@ export async function generateMetadata(): Promise<Metadata> {
     icons: {
       // Versioned to evict browsers' sticky favicon caches, which survive
       // hard refreshes and kept serving the original robot-arm icon.
-      icon: "/favicon.svg?v=6",
-      apple: "/favicon.svg?v=6",
+      icon: "/favicon.svg?v=7",
+      apple: "/favicon.svg?v=7",
     },
     metadataBase: new URL(siteUrl),
     alternates: {
