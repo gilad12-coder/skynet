@@ -45,6 +45,7 @@ import {
 } from "@/shared/types/unified-run";
 import type { WizardPreflightResponse } from "@/shared/types/wizard-preflight";
 import type { ColumnRole } from "@/shared/ui/column-role-row";
+import { SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 
 import { emptyModelConfig } from "../constants";
 import { cloneToSlices } from "../lib/clone-payload";
@@ -495,7 +496,7 @@ export function WizardV2Provider({
         setSubmitPhase("done");
         router.push(jobUrl);
         offerRunDoneNotifications();
-      }, 1500);
+      }, SUBMIT_SPLASH_HOLD_MS);
     } catch (err) {
       // The storage 409 and the balance 402 each open their own shared modal.
       if (!isStorageQuotaError(err) && !isInsufficientFundsError(err)) {
