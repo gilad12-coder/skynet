@@ -166,6 +166,7 @@
     "admin.forbidden": "この操作には管理者権限が必要です。",
     "admin.invalid_username": "ユーザー名を空にすることはできません。",
     "admin.quota_save_failed": "クォータの上書き保存に失敗しました。",
+    "admin.user_not_found": "'{email}' のアカウントが見つかりません。",
     "agent.approval.unknown_call_id": "指定された call_id に対する保留中の承認はありません。",
     "agent.status.tool_end": "ツールが完了しました。",
     "agent.status.tool_start": "エージェントがツールを呼び出しています…",
