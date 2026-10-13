@@ -620,6 +620,38 @@ export function deleteStorageQuotaOverride(username: string) {
   });
 }
 
+export interface NorthStarFirstLiftsWeek {
+  /** Monday (UTC, `YYYY-MM-DD`) that starts the signup week. */
+  signup_week: string;
+  signups: number;
+  /** Signups that got a lifted run within 48 hours. */
+  first_lifts: number;
+}
+
+export interface NorthStarLiftedUsersWeek {
+  week: string;
+  new_lifted: number;
+  returning_lifted: number;
+}
+
+export interface NorthStarInUseWeek {
+  week: string;
+  users_in_use: number;
+}
+
+/** Every series holds exactly `weeks` rows, newest first, zero-filled. */
+export interface NorthStarMetricsResponse {
+  weeks: number;
+  first_lifts: NorthStarFirstLiftsWeek[];
+  lifted_users: NorthStarLiftedUsersWeek[];
+  lifted_in_use: NorthStarInUseWeek[];
+}
+
+/** Admin-only; non-admins get a 403. */
+export function getNorthStarMetrics(weeks = 8) {
+  return request<NorthStarMetricsResponse>(`/telemetry/metrics/north-star?weeks=${weeks}`);
+}
+
 export interface ApiTokenInfo {
   last4: string;
   created_at: string;

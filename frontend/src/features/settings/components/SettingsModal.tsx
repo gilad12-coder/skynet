@@ -107,6 +107,7 @@ import {
 import { useUserPrefs } from "../hooks/use-user-prefs";
 import { useSettingsModal } from "../hooks/use-settings-modal";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
+import { AdminMetricsCard } from "./AdminMetricsCard";
 import { NotificationsTab } from "./NotificationsTab";
 import { PrivacyTab } from "./PrivacyTab";
 import { ColorThemeControl } from "./ColorThemeControl";
@@ -748,6 +749,8 @@ function AdminTab() {
       {!session?.backendAccessToken && (
         <InlineErrorRow message={msg("settings.admin.storage.auth_missing")} />
       )}
+
+      <AdminMetricsCard enabled={Boolean(session?.backendAccessToken)} />
 
       <SettingsRow
         icon={HardDrive}
