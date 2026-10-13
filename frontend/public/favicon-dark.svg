@@ -4,7 +4,7 @@
        its neck runs off the tile's bottom edge and is clipped to the rounded tile. -->
   <defs><clipPath id="t"><rect width="96" height="96" rx="20"/></clipPath></defs>
   <rect width="96" height="96" rx="20" fill="#221d19"/>
-  <svg clip-path="url(#t)" width="96" height="96" viewBox="-2 12 500 500">
+  <g clip-path="url(#t)"><svg width="96" height="96" viewBox="-2 12 500 500">
   <g>
     <path fill="#4a3b2c" d="M355.8 254.1C346.9 227.4 315.8 211.9 280.2 211.9C238 211.9 204.6 231.9 191.3 265.2C184.6 283 182.4 303 182.4 323C175.7 356.4 180.2 387.5 180.2 416.4C180.2 446.7 173 477.1 166.8 512L268.2 512C274.3 476 285.1 443.7 295.8 418.6C309.1 391.9 338 371.9 355.8 351.9Z"/>
     <path fill="#ddb27c" d="M355.8 351.9C338 371.9 309.1 391.9 295.8 418.6C285.1 443.7 274.3 476 268.2 512L221.9 512C228 487.4 235.3 462.5 240.2 436.4C246.9 403.1 251.3 371.9 246.9 343C271.3 351.9 315.8 358.6 355.8 351.9Z"/>
@@ -79,6 +79,6 @@
     <path fill="#35343b" d="M372.5 282.5Q378.3 290.7 388.1 288Q382.2 279.8 372.5 282.5Z"/>
   </g>
 
-  </svg>
+  </svg></g>
   <rect x="1" y="1" width="94" height="94" rx="19" fill="none" stroke="#483d34" stroke-width="2"/>
 </svg>
