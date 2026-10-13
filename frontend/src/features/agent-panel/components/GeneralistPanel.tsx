@@ -477,6 +477,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
           columns_configured: true,
           dataset_columns: confirmed.columns,
           column_kinds: confirmed.columnKinds,
+          column_roles: confirmed.columnRoles,
         },
       };
       // Persist before dispatch so the wizard can replay it after navigation;

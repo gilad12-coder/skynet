@@ -44,6 +44,7 @@ import {
   type UnifiedRunRequest,
 } from "@/shared/types/unified-run";
 import type { WizardPreflightResponse } from "@/shared/types/wizard-preflight";
+import type { ColumnRole } from "@/shared/ui/column-role-row";
 
 import { emptyModelConfig } from "../constants";
 import { cloneToSlices } from "../lib/clone-payload";
@@ -54,7 +55,7 @@ import {
   projectUnifiedCostBracket,
 } from "../lib/cost-bracket";
 import { fileNewRun } from "../lib/file-new-run";
-import { rowsToCases, singleInputCase, type Row } from "../lib/inputs-mode";
+import { inputsFromRoles, rowsToCases, singleInputCase, type Row } from "../lib/inputs-mode";
 import { prepareModelConfig } from "../lib/model-config";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import { metricUsesModel } from "../lib/scorer-dependencies";
@@ -126,25 +127,36 @@ const STAGED_HANDOFF_KEY = "wizard:staged-dataset";
 const STAGED_HANDOFF_EVENT = "wizard:dataset-staged";
 const SAMPLE_ROWS = 5;
 
-/** Inputs for a table handed over from elsewhere: every column an input until inference refines it. */
+/**
+ * Inputs for a table handed over from elsewhere. Roles the user confirmed in
+ * the agent panel decide the inputs and the Output; without an Output every
+ * column is an input until inference refines it.
+ */
 function inputsFromRows(
   rows: Row[],
   columns: string[],
   label: string | null,
   stagedId: string | null,
+  roles: Record<string, ColumnRole> | null,
 ): Partial<InputsSlice> {
-  const pairs = rows.length > 1;
-  return {
+  const table = {
     datasetLabel: label,
     stagedDatasetId: stagedId,
     columns,
     sampleRows: rows.slice(0, SAMPLE_ROWS),
     rowCount: rows.length,
+    rationale: "",
+  };
+  if (roles && columns.some((c) => roles[c] === "output")) {
+    return { ...table, ...inputsFromRoles(columns, roles, rows) };
+  }
+  const pairs = rows.length > 1;
+  return {
+    ...table,
     mode: pairs ? "pairs" : "single",
     inputFields: columns,
     expectedField: null,
     cases: pairs ? rowsToCases(rows, columns, null) : rows[0] ? [singleInputCase(rows[0])] : [],
-    rationale: "",
   };
 }
 
@@ -573,7 +585,11 @@ export function WizardV2Provider({
           : Object.keys(rows[0] ?? {});
       const label = typeof d.dataset_filename === "string" ? d.dataset_filename : "dataset.json";
       const stagedId = typeof d.staged_dataset_id === "string" ? d.staged_dataset_id : null;
-      patchInputs(inputsFromRows(rows, columns, label, stagedId));
+      const roles =
+        ws.column_roles && typeof ws.column_roles === "object"
+          ? (ws.column_roles as Record<string, ColumnRole>)
+          : null;
+      patchInputs(inputsFromRows(rows, columns, label, stagedId, roles));
     };
     try {
       const raw = window.sessionStorage.getItem(STAGED_HANDOFF_KEY);
@@ -681,7 +697,7 @@ export function WizardV2Provider({
             .then((res) => {
               if (!mountedRef.current || res.rows.length === 0) return;
               const columns = res.columns.length > 0 ? res.columns : Object.keys(res.rows[0] ?? {});
-              patchInputs(inputsFromRows(res.rows, columns, "dataset.json", stagedId));
+              patchInputs(inputsFromRows(res.rows, columns, "dataset.json", stagedId, null));
             })
             .catch(() => {
               /* best effort: a failed fetch leaves the wizard's own inputs */
