@@ -2,50 +2,29 @@
 
 import * as React from "react";
 
+import { SortableTable } from "@/shared/ui/sortable-table";
 import { ApiError, getNorthStarMetrics, type NorthStarMetricsResponse } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { EmptyState } from "@/shared/ui/empty-state";
+import { HelpTip } from "@/shared/ui/help-tip";
 import { TrendUp } from "@/shared/ui/icons";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import { LoadingState } from "@/shared/ui/loading-state";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
-
-/** Signup weeks shown in the table. */
-export const METRIC_WEEKS = 8;
-
-export interface NorthStarRow {
-  week: string;
-  signups: number;
-  firstLifts: number;
-  newLifted: number;
-  returningLifted: number;
-  inUse: number;
-}
+import {
+  METRIC_WEEKS,
+  activityWeekRows,
+  signupWeekRows,
+  type ActivityWeekRow,
+  type SignupWeekRow,
+} from "../lib/admin-metrics";
 
 export type AdminMetricsState =
   | { kind: "loading" }
   | { kind: "forbidden" }
   | { kind: "error" }
   | { kind: "ready"; data: NorthStarMetricsResponse };
-
-/**
- * Join the three series into one row per week, newest first. The backend
- * zero-fills every series to the same weeks, but the join goes by week so a
- * shorter series never shifts numbers into the wrong row.
- */
-export function northStarRows(data: NorthStarMetricsResponse): NorthStarRow[] {
-  const lifted = new Map(data.lifted_users.map((row) => [row.week, row]));
-  const inUse = new Map(data.lifted_in_use.map((row) => [row.week, row.users_in_use]));
-  return data.first_lifts.slice(0, METRIC_WEEKS).map((row) => ({
-    week: row.signup_week,
-    signups: row.signups,
-    firstLifts: row.first_lifts,
-    newLifted: lifted.get(row.signup_week)?.new_lifted ?? 0,
-    returningLifted: lifted.get(row.signup_week)?.returning_lifted ?? 0,
-    inUse: inUse.get(row.signup_week) ?? 0,
-  }));
-}
 
 /** A 403 means the viewer isn't an admin, so the card hides instead of erroring. */
 export function stateFromError(err: unknown): AdminMetricsState {
@@ -67,14 +46,39 @@ function formatCount(value: number): string {
   return new Intl.NumberFormat(getActiveIntlLocale()).format(value);
 }
 
-const COLUMNS = [
-  ["week", "settings.admin.metrics.col.week"],
-  ["signups", "settings.admin.metrics.col.signups"],
-  ["firstLifts", "settings.admin.metrics.col.first_lifts"],
-  ["newLifted", "settings.admin.metrics.col.new_lifted"],
-  ["returningLifted", "settings.admin.metrics.col.returning_lifted"],
-  ["inUse", "settings.admin.metrics.col.in_use"],
-] as const;
+/** One headline figure. Both share this shape so they line up row for row. */
+function Headline({
+  label,
+  help,
+  value,
+  detail,
+  testId,
+}: {
+  label: string;
+  help: string;
+  value: number;
+  detail: string;
+  testId: string;
+}) {
+  return (
+    <div data-testid={testId} className="min-w-0 space-y-1">
+      <HelpTip text={help}>
+        <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      </HelpTip>
+      <p className="text-2xl font-semibold leading-none tabular-nums">{formatCount(value)}</p>
+      <p className="text-xs text-muted-foreground">{detail}</p>
+    </div>
+  );
+}
+
+function TableIntro({ title, help }: { title: string; help: string }) {
+  return (
+    <div className="mb-2">
+      <p className="text-xs font-medium">{title}</p>
+      <p className="text-[0.6875rem] text-muted-foreground">{help}</p>
+    </div>
+  );
+}
 
 /** Presentational card body for a given load state; `null` when the viewer isn't an admin. */
 export function AdminMetricsView({
@@ -85,23 +89,27 @@ export function AdminMetricsView({
   onRetry?: () => void;
 }) {
   if (state.kind === "forbidden") return null;
-  const rows = state.kind === "ready" ? northStarRows(state.data) : [];
-  const latest = rows[0];
-  const hasSignups = rows.some((row) => row.signups > 0);
+  const signups = state.kind === "ready" ? signupWeekRows(state.data) : [];
+  const activity = state.kind === "ready" ? activityWeekRows(state.data) : [];
+  const latestSignups = signups[0];
+  const latestActivity = activity[0];
+  const hasSignups = signups.some((row) => row.signups > 0);
 
   return (
     <section
       aria-labelledby="admin-metrics-title"
-      className="space-y-3 rounded-lg border border-border/60 p-4"
+      className="space-y-4 rounded-lg border border-border/60 p-4"
     >
       <header className="flex items-start gap-3">
         <TrendUp className="size-4 mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        {/* Not an <h3>: the unlayered global h3 rule outranks Tailwind's layered
+            text-sm, which blew this title up to display size. */}
         <div className="min-w-0">
-          <h3 id="admin-metrics-title" className="text-sm font-medium">
-            {msg("settings.admin.metrics.title")}
-          </h3>
+          <p id="admin-metrics-title" role="heading" aria-level={3} className="text-sm font-medium">
+            {msg("settings.admin.activity.title")}
+          </p>
           <p className="text-xs text-muted-foreground">
-            {msg("settings.admin.metrics.description")}
+            {msg("settings.admin.activity.description")}
           </p>
         </div>
       </header>
@@ -110,10 +118,10 @@ export function AdminMetricsView({
 
       {state.kind === "error" && (
         <InlineErrorRow
-          message={msg("settings.admin.metrics.load_failed")}
+          message={msg("settings.admin.activity.load_failed")}
           action={
             onRetry ? (
-              <RetryIconButton label={msg("settings.admin.metrics.retry")} onClick={onRetry} />
+              <RetryIconButton label={msg("settings.admin.activity.retry")} onClick={onRetry} />
             ) : undefined
           }
         />
@@ -123,58 +131,110 @@ export function AdminMetricsView({
         <EmptyState
           variant="compact"
           icon={TrendUp}
-          title={msg("settings.admin.metrics.empty")}
-          description={msg("settings.admin.metrics.empty_description")}
+          title={msg("settings.admin.activity.empty")}
+          description={msg("settings.admin.activity.empty_description")}
         />
       )}
 
-      {state.kind === "ready" && hasSignups && latest && (
+      {state.kind === "ready" && hasSignups && latestSignups && (
         <>
-          <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
-            <div data-testid="admin-metrics-headline">
-              <p className="text-2xl font-semibold tabular-nums">
-                {formatCount(latest.firstLifts)}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {msg("settings.admin.metrics.headline_detail", {
-                  signups: formatCount(latest.signups),
-                })}
-              </p>
-            </div>
-            <div>
-              <p className="text-2xl font-semibold tabular-nums">{formatCount(latest.inUse)}</p>
-              <p className="text-xs text-muted-foreground">
-                {msg("settings.admin.metrics.in_use")}
-              </p>
-              <p className="text-[0.6875rem] text-muted-foreground/80">
-                {msg("settings.admin.metrics.in_use_detail")}
-              </p>
-            </div>
+          <div className="grid grid-cols-2 items-start gap-4">
+            <Headline
+              testId="admin-metrics-activated"
+              label={msg("settings.admin.activity.activated")}
+              help={msg("settings.admin.activity.activated_help")}
+              value={latestSignups.activated}
+              detail={msg("settings.admin.activity.activated_detail", {
+                signups: formatCount(latestSignups.signups),
+              })}
+            />
+            <Headline
+              testId="admin-metrics-in-use"
+              label={msg("settings.admin.activity.in_use")}
+              help={msg("settings.admin.activity.in_use_help")}
+              value={latestActivity?.in_use ?? 0}
+              detail={msg("settings.admin.activity.in_use_detail")}
+            />
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border/60 text-muted-foreground">
-                  {COLUMNS.map(([key, label]) => (
-                    <th key={key} scope="col" className="px-2 py-1.5 text-start font-medium">
-                      {msg(label)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.week} className="border-b border-border/30 last:border-b-0">
-                    {COLUMNS.map(([key]) => (
-                      <td key={key} className="px-2 py-1.5 text-start tabular-nums">
-                        {key === "week" ? formatWeek(row.week) : formatCount(row[key])}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div>
+            <TableIntro
+              title={msg("settings.admin.activity.by_signup")}
+              help={msg("settings.admin.activity.by_signup_help")}
+            />
+            <SortableTable<SignupWeekRow>
+              rows={signups}
+              rowKey={(row) => row.id}
+              exportName="activation-by-signup-week"
+              initialSort="week"
+              initialDir="desc"
+              columns={[
+                {
+                  key: "week",
+                  label: msg("settings.admin.activity.col.signup_week"),
+                  width: 110,
+                  render: (row) => formatWeek(row.week),
+                },
+                {
+                  key: "signups",
+                  label: msg("settings.admin.activity.col.signups"),
+                  width: 90,
+                  render: (row) => formatCount(row.signups),
+                },
+                {
+                  key: "activated",
+                  label: msg("settings.admin.activity.col.activated"),
+                  width: 120,
+                  render: (row) => formatCount(row.activated),
+                },
+                {
+                  key: "rate",
+                  label: msg("settings.admin.activity.col.rate"),
+                  width: 110,
+                  render: (row) => (row.rate == null ? "—" : `${row.rate}%`),
+                },
+              ]}
+            />
+          </div>
+
+          <div>
+            <TableIntro
+              title={msg("settings.admin.activity.by_activity")}
+              help={msg("settings.admin.activity.by_activity_help")}
+            />
+            <SortableTable<ActivityWeekRow>
+              rows={activity}
+              rowKey={(row) => row.id}
+              exportName="usage-by-activity-week"
+              initialSort="week"
+              initialDir="desc"
+              columns={[
+                {
+                  key: "week",
+                  label: msg("settings.admin.activity.col.week"),
+                  width: 110,
+                  render: (row) => formatWeek(row.week),
+                },
+                {
+                  key: "first_improved",
+                  label: msg("settings.admin.activity.col.first_improved"),
+                  width: 130,
+                  render: (row) => formatCount(row.first_improved),
+                },
+                {
+                  key: "improved_again",
+                  label: msg("settings.admin.activity.col.improved_again"),
+                  width: 120,
+                  render: (row) => formatCount(row.improved_again),
+                },
+                {
+                  key: "in_use",
+                  label: msg("settings.admin.activity.col.in_use"),
+                  width: 120,
+                  render: (row) => formatCount(row.in_use),
+                },
+              ]}
+            />
           </div>
         </>
       )}
@@ -182,7 +242,7 @@ export function AdminMetricsView({
   );
 }
 
-/** Admin-tab card: First Lifts per week, new/returning lifted users and lifted-in-use. */
+/** Admin-tab card: weekly activation by signup week, and improved runs and programs in use by activity week. */
 export function AdminMetricsCard({ enabled = true }: { enabled?: boolean }) {
   const [state, setState] = React.useState<AdminMetricsState>({ kind: "loading" });
 

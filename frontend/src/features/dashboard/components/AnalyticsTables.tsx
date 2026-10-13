@@ -3,9 +3,7 @@
 import { ProgressBar } from "@/shared/ui/progress-bar";
 import { useMemo } from "react";
 import { useTableSort } from "@/shared/hooks/use-table-sort";
-import type { ReactNode } from "react";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHeader,
@@ -13,15 +11,8 @@ import {
   TableRow,
 } from "@/shared/ui/primitives/table";
 import type { TableCollapse } from "@/shared/ui/primitives/table";
-import {
-  ColumnHeader,
-  ResetColumnsButton,
-  ResetFiltersButton,
-  useColumnFilters,
-  useColumnResize,
-} from "@/shared/ui/excel-filter";
-import type { SortDir } from "@/shared/ui/excel-filter";
-import { ExportTableMenu } from "@/shared/ui/export-table-menu";
+import { ColumnHeader, useColumnFilters, useColumnResize } from "@/shared/ui/excel-filter";
+import { EmptyRow, TableFrame, Toolbar, sortRows } from "@/shared/ui/sortable-table";
 import { formatElapsed, modelDisplayName } from "@/shared/lib";
 import type { DashboardAnalyticsJob } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
@@ -30,10 +21,6 @@ import { TERMS } from "@/shared/lib/terms";
 import { cn } from "@/shared/lib/utils";
 import type { OptimizerRow } from "../lib/transform-chart-data";
 
-// Same density overrides as the optimizations table (JobsTab) so the two
-// dashboards read as one table family.
-const TABLE_CLASS =
-  "no-copy-underline [&_thead_th]:ps-1 [&_thead_th]:pe-2 [&_thead_th]:py-2 [&_thead_th]:text-[0.6875rem] [&_thead_th_button]:px-1 [&_thead_svg]:size-2.5 [&_tbody_td]:px-1.5";
 const ROW_CLASS =
   "group cursor-pointer border-border/30 transition-colors duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:bg-muted/50";
 
@@ -52,61 +39,6 @@ function pointsClass(value: number | null | undefined): string {
 function improvementPoints(delta: number | null | undefined): number | null {
   if (delta == null) return null;
   return Math.abs(delta) <= 1 ? delta * 100 : delta;
-}
-
-function compare(a: unknown, b: unknown): number {
-  if (a == null && b == null) return 0;
-  if (a == null) return 1;
-  if (b == null) return -1;
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(a).localeCompare(String(b));
-}
-
-function sortRows<T>(rows: T[], key: keyof T, dir: SortDir): T[] {
-  const sign = dir === "asc" ? 1 : -1;
-  return [...rows].sort((a, b) => sign * compare(a[key], b[key]));
-}
-
-function Toolbar({
-  count,
-  filters,
-  resize,
-  exportData,
-}: {
-  count: number;
-  filters: { activeCount: number; clearAll: () => void };
-  resize: ReturnType<typeof useColumnResize>;
-  exportData: () => { columns: string[]; rows: Array<Record<string, unknown>>; filename: string };
-}) {
-  return (
-    <div className="mb-3 flex min-h-[44px] items-center gap-2 max-lg:[&_button]:size-[44px] lg:min-h-0">
-      <span className="text-xs text-muted-foreground tabular-nums">
-        {count}
-        {msg("auto.features.dashboard.components.jobstab.3")}
-      </span>
-      <ResetFiltersButton filters={filters} />
-      <ResetColumnsButton resize={resize} />
-      {count > 0 && <ExportTableMenu iconOnly className="ms-auto" getData={exportData} />}
-    </div>
-  );
-}
-
-function TableFrame({ children }: { children: ReactNode }) {
-  return (
-    <div className="overflow-x-auto rounded-2xl border border-border/40 bg-card/60">
-      <Table className={TABLE_CLASS}>{children}</Table>
-    </div>
-  );
-}
-
-function EmptyRow({ colSpan }: { colSpan: number }) {
-  return (
-    <TableRow>
-      <TableCell colSpan={colSpan} className="py-6 text-center text-sm text-muted-foreground">
-        {msg("auto.shared.charts.chart.utils.literal.1")}
-      </TableCell>
-    </TableRow>
-  );
 }
 
 type OptimizerKey = keyof OptimizerRow;

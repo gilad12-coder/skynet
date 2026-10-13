@@ -6,6 +6,7 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -334,6 +335,98 @@ export function StackedTimeline({
           ))}
         </BarChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+export interface DailySeries {
+  key: string;
+  label: string;
+  color: string;
+}
+
+/**
+ * Daily counts as one line per series (signups, activations, active users),
+ * on the same axes and tooltip as the other analytics charts. A legend row
+ * above the plot names each line, since lines carry no labels of their own.
+ */
+export function DailyLines({
+  data,
+  series,
+  yLabel,
+}: {
+  data: ReadonlyArray<{ label: string; [key: string]: string | number }>;
+  series: readonly DailySeries[];
+  yLabel: string;
+}) {
+  if (data.length === 0) return <ChartEmptyState />;
+  const dateLabel = msg("dashboard.analytics.col_date");
+
+  return (
+    <div className="min-w-0 space-y-2">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[0.6875rem] text-muted-foreground">
+        {series.map((s) => (
+          <span key={s.key} className="inline-flex items-center gap-1.5">
+            <span className="size-2 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
+            {s.label}
+          </span>
+        ))}
+      </div>
+      <div className="h-[220px] min-w-0" dir="ltr">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ left: 4, right: 8, top: 10, bottom: 20 }}>
+            <CartesianGrid vertical={false} strokeDasharray="3 3" className={GRID_CLASS} />
+            <XAxis
+              dataKey="label"
+              tickLine={AXIS_LINE}
+              axisLine={AXIS_LINE}
+              tick={AXIS_TICK}
+              minTickGap={28}
+              interval="preserveStartEnd"
+              className="fill-muted-foreground"
+              label={axisTitle(dateLabel, "insideBottom")}
+            />
+            <YAxis
+              tickLine={AXIS_LINE}
+              axisLine={AXIS_LINE}
+              tick={AXIS_TICK}
+              allowDecimals={false}
+              width={44}
+              className="fill-muted-foreground"
+              label={axisTitle(yLabel, "insideLeft")}
+            />
+            <Tooltip
+              cursor={{ stroke: "var(--border)" }}
+              content={({ active, payload }) => {
+                const point = payload?.[0]?.payload as { label: string; [key: string]: string | number } | undefined;
+                if (!active || !point) return null;
+                return (
+                  <TooltipCard
+                    title={point.label}
+                    rows={series.map((s) => ({
+                      label: s.label,
+                      value: String(point[s.key]),
+                      color: s.color,
+                    }))}
+                  />
+                );
+              }}
+            />
+            {series.map((s) => (
+              <Line
+                key={s.key}
+                type="monotone"
+                dataKey={s.key}
+                name={s.label}
+                stroke={s.color}
+                strokeWidth={2}
+                dot={false}
+                animationDuration={300}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }

@@ -8,10 +8,11 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ApiError, type NorthStarMetricsResponse } from "@/shared/lib/api";
+import { TooltipProvider } from "@/shared/ui/primitives/tooltip";
 
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
-const { AdminMetricsView, northStarRows, stateFromError } = await import("./AdminMetricsCard");
+const { AdminMetricsView, stateFromError } = await import("./AdminMetricsCard");
 
 function mondays(count: number): string[] {
   const newest = Date.UTC(2026, 9, 12);
@@ -35,21 +36,33 @@ function seeded(overrides: Partial<NorthStarMetricsResponse> = {}): NorthStarMet
   };
 }
 
-function rowCount(html: string): number {
-  const body = html.split("<tbody>")[1]?.split("</tbody>")[0] ?? "";
-  return body.split("<tr").length - 1;
+function bodyRows(html: string): number[] {
+  return html
+    .split("<tbody")
+    .slice(1)
+    .map((part) => (part.split("</tbody>")[0] ?? "").split("<tr").length - 1);
 }
 
 void describe("AdminMetricsView", () => {
-  void it("shows the latest week's First Lifts as the headline and 8 rows", () => {
+  void it("lines up two labelled headlines and splits signup and activity weeks", () => {
     const html = renderToStaticMarkup(
-      <AdminMetricsView state={{ kind: "ready", data: seeded() }} />,
+      <TooltipProvider>
+        <AdminMetricsView state={{ kind: "ready", data: seeded() }} />
+      </TooltipProvider>,
     );
-    const headline = html.split('data-testid="admin-metrics-headline"')[1] ?? "";
-    assert.match(headline, /^>[^]*?>7<\/p>/);
-    assert.match(headline, /20/);
-    assert.equal(rowCount(html), 8);
-    assert.equal(html.split("<th ").length - 1, 6);
+    const activated = html.split('data-testid="admin-metrics-activated"')[1] ?? "";
+    assert.match(
+      activated,
+      /settings\.admin\.activity\.activated|Activated this week|הופעלו השבוע/,
+    );
+    assert.match(activated, />7<\/p>/);
+    assert.match(activated, /20/);
+    const inUse = html.split('data-testid="admin-metrics-in-use"')[1] ?? "";
+    assert.match(inUse, />11<\/p>/);
+    assert.deepEqual(bodyRows(html), [8, 8]);
+    assert.equal(html.includes("<h3"), false);
+    assert.match(html, /role="heading"/);
+    assert.equal(/lift/i.test(html), false);
   });
 
   void it("renders nothing for a non-admin (403)", () => {
@@ -70,7 +83,7 @@ void describe("AdminMetricsView", () => {
     data.first_lifts = data.first_lifts.map((row) => ({ ...row, signups: 0, first_lifts: 0 }));
     const html = renderToStaticMarkup(<AdminMetricsView state={{ kind: "ready", data }} />);
     assert.equal(html.includes("<table"), false);
-    assert.match(html, /settings\.admin\.metrics\.empty|No signups yet|אין נרשמים עדיין/);
+    assert.match(html, /settings\.admin\.activity\.empty|No signups yet|אין נרשמים עדיין/);
   });
 
   void it("shows a loader while loading", () => {
@@ -78,24 +91,5 @@ void describe("AdminMetricsView", () => {
       renderToStaticMarkup(<AdminMetricsView state={{ kind: "loading" }} />),
       /role="status"/,
     );
-  });
-});
-
-void describe("northStarRows", () => {
-  void it("joins the series by week, not by position", () => {
-    const data = seeded();
-    data.lifted_users = [...data.lifted_users].reverse();
-    data.lifted_in_use = data.lifted_in_use.slice(1);
-    const rows = northStarRows(data);
-    assert.equal(rows.length, 8);
-    assert.deepEqual(rows[0], {
-      week: "2026-10-12",
-      signups: 20,
-      firstLifts: 7,
-      newLifted: 3,
-      returningLifted: 2,
-      inUse: 0,
-    });
-    assert.equal(rows[1]?.inUse, 12);
   });
 });

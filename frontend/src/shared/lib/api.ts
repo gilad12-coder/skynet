@@ -652,6 +652,90 @@ export function getNorthStarMetrics(weeks = 8) {
   return request<NorthStarMetricsResponse>(`/telemetry/metrics/north-star?weeks=${weeks}`);
 }
 
+export interface AdminDashboardTotals {
+  signups: number;
+  activated: number;
+  active_users: number;
+  runs_started: number;
+  runs_succeeded: number;
+  runs_failed: number;
+  revenue_cents: number;
+  usage_cents: number;
+  serve_calls: number;
+  serve_errors: number;
+}
+
+export interface AdminDashboardDay {
+  /** UTC calendar day, `YYYY-MM-DD`. */
+  day: string;
+  signups: number;
+  activated: number;
+  active_users: number;
+  runs_succeeded: number;
+  runs_failed: number;
+  runs_other: number;
+}
+
+export interface AdminFailureReason {
+  stage: string;
+  error_class: string | null;
+  count: number;
+}
+
+export interface AdminTopProgram {
+  optimization_id: string;
+  name: string | null;
+  owner: string | null;
+  calls: number;
+  errors: number;
+}
+
+export interface AdminEventCount {
+  name: string;
+  count: number;
+  users: number;
+}
+
+/** `daily` holds one row per day of the window, oldest first, zero-filled. */
+export interface AdminDashboardResponse {
+  days: number;
+  totals: AdminDashboardTotals;
+  daily: AdminDashboardDay[];
+  failure_reasons: AdminFailureReason[];
+  top_programs: AdminTopProgram[];
+  top_events: AdminEventCount[];
+}
+
+/** Admin-only; non-admins get a 403. */
+export function getAdminDashboard(days = 30) {
+  return request<AdminDashboardResponse>(`/admin/dashboard?days=${days}`);
+}
+
+export interface AdminSentryIssue {
+  id: string;
+  short_id: string | null;
+  title: string;
+  culprit: string | null;
+  level: string | null;
+  project: string | null;
+  count: number;
+  users: number;
+  last_seen: string | null;
+  permalink: string | null;
+}
+
+/** `configured` is false without a Sentry token; `available` is false when Sentry could not be read. */
+export interface AdminSentryIssuesResponse {
+  configured: boolean;
+  available: boolean;
+  issues: AdminSentryIssue[];
+}
+
+/** Admin-only; non-admins get a 403. */
+export function getAdminSentryIssues() {
+  return request<AdminSentryIssuesResponse>("/admin/sentry/issues");
+}
+
 export interface ApiTokenInfo {
   last4: string;
   created_at: string;
