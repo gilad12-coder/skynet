@@ -257,22 +257,27 @@ export function withLevel(
 
 /**
  * The task and reflection models a new wizard starts with: each role's
- * default from Settings, else the catalog's default model. Returns null once
- * either model holds anything, so a user's pick, a cloned run or an agent-set
- * model is never overwritten.
+ * default from Settings, else the catalog's pick: the best-value default for
+ * the task model, the strongest model (else that default) for reflection.
+ * Returns null once either model holds anything, so a user's pick, a cloned
+ * run or an agent-set model is never overwritten.
  */
 export function presetModels(
   optimizer: Pick<OptimizerSlice, "taskModel" | "reflectionModel">,
   defaults: { taskModel: ModelConfig | null; reflectionModel: ModelConfig | null },
   catalogDefault: string | null | undefined,
+  catalogStrongest?: string | null,
 ): Pick<OptimizerSlice, "taskModel" | "reflectionModel"> | null {
   if (optimizer.taskModel !== null || optimizer.reflectionModel !== null) return null;
-  const pick = (pref: ModelConfig | null): ModelConfig | null => {
+  const pick = (
+    pref: ModelConfig | null,
+    automatic: string | null | undefined,
+  ): ModelConfig | null => {
     if (pref && hasModel(pref)) return pref;
-    return catalogDefault ? { name: catalogDefault, token_source: "managed" } : null;
+    return automatic ? { name: automatic, token_source: "managed" } : null;
   };
-  const taskModel = pick(defaults.taskModel);
-  const reflectionModel = pick(defaults.reflectionModel);
+  const taskModel = pick(defaults.taskModel, catalogDefault);
+  const reflectionModel = pick(defaults.reflectionModel, catalogStrongest || catalogDefault);
   return taskModel || reflectionModel ? { taskModel, reflectionModel } : null;
 }
 

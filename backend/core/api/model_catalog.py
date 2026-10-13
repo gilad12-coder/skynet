@@ -110,6 +110,14 @@ class CatalogModel(BaseModel):
             "latency and throughput. At most one per catalog."
         ),
     )
+    is_strongest: bool = Field(
+        default=False,
+        description=(
+            "The featured model that thinks by default with the highest Artificial "
+            "Analysis intelligence index; the reflection model's Automatic setting "
+            "runs it. At most one per catalog."
+        ),
+    )
     display_name: str | None = Field(
         default=None,
         description=(
@@ -135,6 +143,44 @@ class CatalogModel(BaseModel):
     output_cost_per_token: float | None = Field(
         default=None,
         description="Provider output (completion) cost per token in USD, or None when unpriced.",
+    )
+    intelligence_index: float | None = Field(
+        default=None,
+        description=(
+            "Artificial Analysis intelligence index from OpenRouter's listing. A new "
+            "release OpenRouter has not benchmarked yet carries its line's previous "
+            "score. None when the model is unrated."
+        ),
+    )
+    artificial_analysis_url: str | None = Field(
+        default=None,
+        description=(
+            "The model's Artificial Analysis page, only once a fetch has confirmed the page "
+            "exists and its title names this model; None otherwise, and clients then show "
+            "no link."
+        ),
+    )
+    throughput_tps: float | None = Field(
+        default=None,
+        description=(
+            "Median output tokens per second of the model's fastest healthy OpenRouter "
+            "endpoint over the last 30 minutes, or None when OpenRouter reports none."
+        ),
+    )
+    ttft_ms: float | None = Field(
+        default=None,
+        description=(
+            "Median milliseconds to the first token on that same endpoint over the "
+            "last 30 minutes, or None when OpenRouter reports none."
+        ),
+    )
+    latency_ms: float | None = Field(
+        default=None,
+        description=(
+            "Estimated milliseconds to a complete 150-token reply on that same endpoint: "
+            "the median time to the first token plus 150 tokens at the median output "
+            "speed. None when either median is missing."
+        ),
     )
     zero_retention: bool = Field(
         default=False,
@@ -929,6 +975,57 @@ def _best_value_probe_id(deployed: dict[str, dict], featured: set[str]) -> tuple
     return best
 
 
+def _intelligence_by_probe_id(deployed: dict[str, dict]) -> dict[str, float]:
+    """Map each scored model of a listing to its intelligence index.
+
+    A model's own benchmark wins; a line's newest release OpenRouter has not
+    benchmarked yet carries its predecessor's score (see :func:`_scored_lines`).
+
+    Args:
+        deployed: Probe index of ``vendor/model`` id to raw item.
+
+    Returns:
+        ``{probe id: index}`` for every model with an own or inherited score.
+    """
+    scores = {
+        probe_id: score for probe_id, item in deployed.items() if (score := _probe_item_intelligence(item)) is not None
+    }
+    for items in _practical_candidates(deployed).values():
+        for model_id, _item, score in _scored_lines(items).values():
+            if score is not None:
+                scores.setdefault(model_id, score)
+    return scores
+
+
+def _strongest_probe_id(deployed: dict[str, dict], featured: set[str]) -> tuple[str, float] | None:
+    """Pick the featured model with the highest intelligence index that thinks by default.
+
+    Reflection Automatic runs this model: reflection turns are few and decide
+    what the optimizer tries next, so strength beats price there. A new
+    release that inherits its predecessor's score qualifies on release day;
+    a tie goes to the newer release.
+
+    Args:
+        deployed: Probe index of ``vendor/model`` id to raw item.
+        featured: Probe ids already chosen by :func:`_featured_probe_ids`.
+
+    Returns:
+        ``(probe id, index)`` of the winner, or ``None`` when no featured
+        model thinks by default with a score.
+    """
+    scores = _intelligence_by_probe_id(deployed)
+    best: tuple[str, float, int] | None = None
+    for probe_id in sorted(featured):
+        item = deployed.get(probe_id)
+        score = scores.get(probe_id)
+        if not item or score is None or not _probe_item_reasoning(item).get("reasoning_default_enabled"):
+            continue
+        created = item.get("created") if isinstance(item.get("created"), int) else 0
+        if best is None or (score, created) > (best[1], best[2]):
+            best = (probe_id, score, created)
+    return (best[0], best[1]) if best else None
+
+
 def _dominates(a: tuple[str, dict, float], b: tuple[str, dict, float]) -> bool:
     """Report whether model ``a`` makes ``b`` redundant: as good or better and no pricier, strictly on one.
 
@@ -1378,8 +1475,10 @@ def get_catalog() -> ModelCatalogResponse:
     featured_values: set[str] = set()
     practical_by_dc: dict[tuple[str, str | None], set[str]] = {}
     best_value: tuple[str, float] | None = None
+    strongest: tuple[str, float] | None = None
     display_names: dict[str, str] = {}
     scores: dict[str, float] = {}
+    indexes: dict[str, float] = {}
     for (probe_slug, dc_label), deployed in deployed_by_dc.items():
         if not deployed:
             continue
@@ -1387,6 +1486,8 @@ def get_catalog() -> ModelCatalogResponse:
             name = _probe_item_display_name(item)
             if name:
                 display_names[_probe_prefixed_id(probe_slug, probe_id)] = name
+        for probe_id, index in _intelligence_by_probe_id(deployed).items():
+            indexes[_probe_prefixed_id(probe_slug, probe_id)] = index
         practical_ids = _practical_probe_ids(deployed)
         if practical_ids is not None:
             practical_by_dc[(probe_slug, dc_label)] = {
@@ -1401,7 +1502,11 @@ def get_catalog() -> ModelCatalogResponse:
         winner = _best_value_probe_id(deployed, featured_ids)
         if winner and (best_value is None or winner[1] > best_value[1]):
             best_value = (_probe_prefixed_id(probe_slug, winner[0]), winner[1])
+        strong = _strongest_probe_id(deployed, featured_ids)
+        if strong and (strongest is None or strong[1] > strongest[1]):
+            strongest = (_probe_prefixed_id(probe_slug, strong[0]), strong[1])
     default_value = best_value[0] if best_value else None
+    strongest_value = strongest[0] if strongest else None
 
     def _practical(m: CatalogModel) -> bool:
         allowed = practical_by_dc.get((m.provider, m.data_center))
@@ -1415,7 +1520,16 @@ def get_catalog() -> ModelCatalogResponse:
         m.model_copy(
             update={
                 "display_name": display_names.get(m.value),
-                **({"featured": True, "is_default": m.value == default_value} if m.value in featured_values else {}),
+                "intelligence_index": indexes.get(m.value),
+                **(
+                    {
+                        "featured": True,
+                        "is_default": m.value == default_value,
+                        "is_strongest": m.value == strongest_value,
+                    }
+                    if m.value in featured_values
+                    else {}
+                ),
             }
         )
         for m in models
