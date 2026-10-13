@@ -650,8 +650,10 @@ class _ApprovalGatedTool:
                     }
                 )
                 return denial
-            if self._tool_name == "update_wizard_state":
-                order_error = validate_wizard_patch_order(kwargs, self._wizard_state)
+            if self._tool_name == "update_wizard_state" or self._tool_name in _SCREEN_TOOLS:
+                order_error = validate_wizard_screen(self._tool_name, kwargs, self._wizard_state)
+                if order_error is None and self._tool_name == "update_wizard_state":
+                    order_error = validate_wizard_patch_order(kwargs, self._wizard_state)
                 if order_error:
                     self._emit(
                         {
@@ -930,6 +932,9 @@ class WizardState(TypedDict, total=False):
     max_cost_cents: int | None
     run_code: str
     metric_code: str
+    # The wizard screen on view (see ``_SCREEN_FIELDS``). Absent when the
+    # wizard is not on screen, which leaves the agent unscoped.
+    wizard_screen: str
 
 
 _ALWAYS_TOOLS = frozenset(
@@ -1206,6 +1211,68 @@ def validate_wizard_patch_order(patch: dict[str, Any], state: WizardState) -> st
     )
 
 
+# The ``update_wizard_state`` fields each wizard screen shows. While the
+# wizard is on view the agent edits only the screen the user is looking at,
+# so nothing changes out of sight. Mirrors the frontend's ``wizard-pages``.
+_SCREEN_FIELDS: dict[str, frozenset[str]] = {
+    "brief": frozenset({"task_objective", "task_background"}),
+    "artifact": frozenset({"artifact_kind", "starting_version"}),
+    "source": frozenset({"data_mode", "staged_dataset_id", "split_fractions", "shuffle", "seed"}),
+    "plan": frozenset({"optimizer_choice", "model_config", "reflection_model_config", "spending_limit_usd"}),
+    "optimizer": frozenset({"optimizer_choice"}),
+    "models": frozenset({"model_config", "reflection_model_config"}),
+    "budget": frozenset({"spending_limit_usd"}),
+    "metric": frozenset(),
+    "check": frozenset(),
+    "overview": frozenset(),
+}
+# The run's name, description and privacy show on no screen, and naming the
+# run gates every later step, so they stay editable from any screen.
+_SCREENLESS_FIELDS = frozenset({"job_name", "job_description", "is_private"})
+# Tools that write a wizard field themselves, and the screens that show it.
+_SCREEN_TOOLS: dict[str, frozenset[str]] = {
+    "request_code_authoring": frozenset({"metric"}),
+}
+
+
+def validate_wizard_screen(tool_name: str, kwargs: dict[str, Any], state: WizardState) -> str | None:
+    """Reject a wizard write that lands outside the screen the user is viewing.
+
+    Args:
+        tool_name: The tool being called: ``update_wizard_state`` or one of
+            ``_SCREEN_TOOLS``.
+        kwargs: The call's keyword arguments.
+        state: The turn-start wizard snapshot.
+
+    Returns:
+        ``None`` when the write stays on the visible screen, or when the
+        wizard is not on screen at all; otherwise a one-line English error
+        the ReAct loop reads as the tool's observation.
+    """
+    if "wizard_screen" not in state:
+        return None
+    screen = state.get("wizard_screen") or ""
+    if tool_name in _SCREEN_TOOLS:
+        targets = _SCREEN_TOOLS[tool_name]
+        if screen in targets:
+            return None
+        return (
+            f"Not on screen: ``{tool_name}`` writes the {' / '.join(sorted(targets))} screen, but the user is "
+            f"viewing {screen or 'no editable screen'!r}. Ask them to move to that screen "
+            "with the wizard's arrows, then call it on a later turn."
+        )
+    visible = _SCREEN_FIELDS.get(screen, frozenset())
+    outside = sorted(field for field in kwargs if field not in visible | _SCREENLESS_FIELDS)
+    if not outside:
+        return None
+    return (
+        f"Not on screen: {', '.join(outside)} are not on the screen the user is viewing "
+        f"({screen or 'none'!r}). This turn you may set only "
+        f"{', '.join(sorted(visible) + sorted(_SCREENLESS_FIELDS))}. Leave the rest and tell the user "
+        "what you will set once they move to that screen."
+    )
+
+
 # The agent's instructions: the turn protocol (tools, then one ``submit``) as
 # well as the product rules. :class:`GeneralistSig` carries them as its
 # docstring; the constant exists so tests can assert on the text directly.
@@ -1248,6 +1315,23 @@ Reply language — hard rule:
   result or an earlier turn NEVER changes that. Product terms
   (Signature, Metric, optimizer names) stay in English inside the
   localized prose.
+
+The wizard screen on view:
+* ``wizard_state.wizard_screen`` names the wizard screen the user is
+  looking at, and each turn you may change only the fields on it (plus
+  ``job_name``, ``job_description`` and ``is_private``, which show on no
+  screen). Screens: ``brief`` (task_objective, task_background),
+  ``artifact`` (artifact_kind, starting_version), ``source`` (data_mode,
+  staged_dataset_id, split_fractions, shuffle, seed), ``plan``
+  (optimizer_choice, model_config, reflection_model_config,
+  spending_limit_usd), ``optimizer`` (optimizer_choice), ``models``
+  (model_config, reflection_model_config), ``budget``
+  (spending_limit_usd) and ``metric`` (``request_code_authoring``);
+  ``check`` and ``overview`` hold nothing to edit. A write outside the
+  screen on view is refused with a "Not on screen" error. Fill what the
+  visible screen holds in one call, then tell the user what the next
+  screen will hold once they move on with the wizard's arrows. Without
+  ``wizard_screen`` the wizard is not on view and any field may be set.
 
 Rules:
 * Prefer calling tools over explaining. One tool call per turn is ideal.

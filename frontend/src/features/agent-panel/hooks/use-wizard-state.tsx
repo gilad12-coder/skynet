@@ -35,6 +35,13 @@ interface WizardStateContextValue {
    * inheriting the just-submitted run's dataset, code, and readiness flags.
    */
   reset: () => void;
+  /**
+   * The wizard screen on view, which bounds what the agent may edit in a
+   * turn. Null when the wizard is not mounted, which leaves the agent
+   * unscoped.
+   */
+  wizardScreen: string | null;
+  setWizardScreen: (screen: string | null) => void;
 }
 
 const Ctx = React.createContext<WizardStateContextValue | null>(null);
@@ -50,6 +57,7 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
   const [pulseTick, setPulseTick] = React.useState(0);
   const [pulseKeys, setPulseKeys] = React.useState<readonly string[]>([]);
   const agentWrittenRef = React.useRef<Set<string>>(new Set());
+  const [wizardScreen, setWizardScreen] = React.useState<string | null>(null);
 
   const setField = React.useCallback<WizardStateContextValue["setField"]>(
     (key, value, source = "user") => {
@@ -149,8 +157,20 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       applyAgentPatch,
       clearField,
       reset,
+      wizardScreen,
+      setWizardScreen,
     }),
-    [state, overriddenFields, pulseTick, pulseKeys, setField, applyAgentPatch, clearField, reset],
+    [
+      state,
+      overriddenFields,
+      pulseTick,
+      pulseKeys,
+      setField,
+      applyAgentPatch,
+      clearField,
+      reset,
+      wizardScreen,
+    ],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -223,7 +243,10 @@ export function extractWizardPatch(result: unknown): Partial<WizardState> {
   if (startingVersion !== null) patch.starting_version = startingVersion;
   const mode = DATA_MODES.find((m) => m === wrap.data_mode);
   if (mode) patch.data_mode = mode;
-  if (typeof wrap.optimizer_choice === "string" && OPTIMIZER_CHOICES.includes(wrap.optimizer_choice))
+  if (
+    typeof wrap.optimizer_choice === "string" &&
+    OPTIMIZER_CHOICES.includes(wrap.optimizer_choice)
+  )
     patch.optimizer_choice = wrap.optimizer_choice as OptimizerChoice;
 
   if (isRecord(wrap.workflow) && Array.isArray(wrap.workflow.nodes)) {

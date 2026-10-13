@@ -26,6 +26,7 @@ from core.service_gateway.agents.generalist import (
     approval_key,
     tools_for,
     validate_wizard_patch_order,
+    validate_wizard_screen,
 )
 from core.storage.models import Base
 
@@ -155,6 +156,96 @@ def test_order_allows_optimizer_after_inputs() -> None:
     """With name, task and inputs settled, the optimizer and models are in order."""
     patch = {"optimizer_choice": "gepa", "reflection_model_config": {"name": "openai/gpt-4o"}}
     assert validate_wizard_patch_order(patch, cast(WizardState, _READY)) is None
+
+
+def test_screen_allows_any_field_when_wizard_not_on_view() -> None:
+    """Without ``wizard_screen`` the wizard is off screen and nothing is scoped."""
+    assert validate_wizard_screen("update_wizard_state", {"optimizer_choice": "auto"}, WizardState()) is None
+
+
+def test_screen_allows_visible_and_screenless_fields() -> None:
+    """The brief screen takes its own fields plus the run's name and description."""
+    patch = {"job_name": "My run", "job_description": "d", "task_objective": "x", "task_background": "b"}
+    assert validate_wizard_screen("update_wizard_state", patch, WizardState(wizard_screen="brief")) is None
+
+
+def test_screen_rejects_fields_off_the_visible_screen() -> None:
+    """A field from another screen is refused and named in the error."""
+    patch = {"task_objective": "x", "artifact_kind": "prompt", "data_mode": "pairs"}
+    err = validate_wizard_screen("update_wizard_state", patch, WizardState(wizard_screen="brief"))
+    assert err is not None
+    assert "artifact_kind" in err
+    assert "data_mode" in err
+    assert "task_objective" in err.split("may set only", 1)[1]
+
+
+def test_screen_plan_takes_engine_models_and_budget() -> None:
+    """Standard's one plan screen holds the engine, the models and the budget."""
+    patch = {
+        "optimizer_choice": "auto",
+        "model_config": {"name": "openai/gpt-4o"},
+        "reflection_model_config": {"name": "openai/gpt-4o"},
+        "spending_limit_usd": 5.0,
+    }
+    assert validate_wizard_screen("update_wizard_state", patch, WizardState(wizard_screen="plan")) is None
+    err = validate_wizard_screen("update_wizard_state", patch, WizardState(wizard_screen="optimizer"))
+    assert err is not None
+    assert "spending_limit_usd" in err
+
+
+def test_screen_allows_only_screenless_fields_on_a_screen_without_fields() -> None:
+    """The check and overview screens hold no field, so only the name may change."""
+    state = WizardState(wizard_screen="check")
+    assert validate_wizard_screen("update_wizard_state", {"job_name": "n"}, state) is None
+    assert validate_wizard_screen("update_wizard_state", {"seed": 1}, state) is not None
+
+
+def test_screen_gates_code_authoring_to_the_metric_screen() -> None:
+    """Run and metric code are written only while the metric screen is on view."""
+    assert validate_wizard_screen("request_code_authoring", {"goal": ""}, WizardState(wizard_screen="metric")) is None
+    err = validate_wizard_screen("request_code_authoring", {"goal": ""}, WizardState(wizard_screen="budget"))
+    assert err is not None
+    assert "metric" in err
+
+
+@pytest.mark.asyncio
+async def test_wrap_refuses_off_screen_patch_without_calling_tool() -> None:
+    """The wrapper turns an off-screen patch into an error observation."""
+    events: list[dict] = []
+    tool = _wrap_tool_with_approval(
+        _make_fake_tool("update_wizard_state", return_value="should not run"),
+        trust_mode="yolo",
+        registry=ApprovalRegistry(),
+        emit=events.append,
+        outer_loop=asyncio.get_running_loop(),
+        wizard_state=cast(WizardState, {**_READY, "wizard_screen": "brief"}),
+    )
+    result = await tool.func._async_body(optimizer_choice="auto")
+    assert result.startswith("Not on screen")
+    end = next(e for e in events if e["event"] == "tool_end")
+    assert end["data"]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_wrap_refuses_code_authoring_off_the_metric_screen() -> None:
+    """``request_code_authoring`` never runs while another screen is on view."""
+    events: list[dict] = []
+    tool = _wrap_tool_with_approval(
+        _make_fake_tool("request_code_authoring", return_value="should not run"),
+        trust_mode="yolo",
+        registry=ApprovalRegistry(),
+        emit=events.append,
+        outer_loop=asyncio.get_running_loop(),
+        wizard_state=cast(WizardState, {**_READY, "wizard_screen": "source"}),
+    )
+    result = await tool.func._async_body(goal="")
+    assert result.startswith("Not on screen")
+
+
+def test_system_prompt_names_the_screen_rule() -> None:
+    """The instructions tell the agent to edit only the screen on view."""
+    prompt = GENERALIST_SYSTEM_PROMPT or ""
+    assert "``wizard_state.wizard_screen`` names the wizard screen" in prompt
 
 
 def test_order_ignores_unmapped_fields() -> None:
