@@ -534,6 +534,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       // finished turn's whole-reply `assistant_message` would repeat.
       let replyBeforeSteer: string | null = null;
       let metricLaneDone = false;
+      let runLaneDone = false;
 
       void streamCodeAgent(
         {
@@ -643,6 +644,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             if (controller.signal.aborted) return;
             markReasoningDone(source);
             if (source === "signature") {
+              runLaneDone = true;
               setSignatureStatus("done");
               if (!metricLaneDone) {
                 setStatusLabel(unifiedMsg("submit.v2.metric.agent.writing_metric"));
@@ -650,6 +652,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             } else if (source === "metric") {
               metricLaneDone = true;
               setMetricStatus("done");
+              if (!runLaneDone) {
+                setStatusLabel(unifiedMsg("submit.v2.metric.agent.writing_run"));
+              }
             }
           },
           onMessagePatch: (chunk) => {
