@@ -38,7 +38,6 @@ test("a unified run clones every slice it stored", () => {
   assert.equal(slices.meta.isPrivate, true);
   assert.equal(slices.task.artifactKind, "prompt");
   assert.equal(slices.task.startingVersion, "Summarize:");
-  assert.equal(slices.task.confirmed, undefined);
   assert.equal(slices.inputs.mode, "pairs");
   assert.equal(slices.inputs.cases?.length, 2);
   assert.deepEqual(slices.inputs.inputFields, ["ticket"]);

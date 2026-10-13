@@ -90,6 +90,13 @@ def test_reply_ms_takes_the_fastest_healthy_endpoint() -> None:
     assert interview_model.reply_ms([]) is None
 
 
+def test_endpoint_speed_reports_the_fastest_healthy_endpoint() -> None:
+    """The speed comes from the endpoint that finishes a short reply first, not the highest throughput."""
+    endpoints = [_endpoint(5000, 400), _endpoint(500, 150), _endpoint(100, 150, uptime=90.0)]
+    assert interview_model.endpoint_speed(endpoints) == (150.0, 500.0)
+    assert interview_model.endpoint_speed([]) is None
+
+
 def test_choose_picks_the_fastest_frontier_model(scores: dict[str, float]) -> None:
     """A dominated model drops out; the fastest survivor wins."""
     fast = _model("openrouter/fast", 1.0)
@@ -129,3 +136,25 @@ def test_with_interview_default_flags_one_model(monkeypatch: pytest.MonkeyPatch)
     flagged = interview_model.with_interview_default(catalog)
     assert [m.is_interview_default for m in flagged.models] == [False, True]
     assert not any(m.is_interview_default for m in catalog.models)
+
+
+def test_with_interview_default_attaches_measured_speeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Measured models carry throughput, first-token time and short-reply time; unmeasured ones carry None."""
+    monkeypatch.setattr(interview_model, "interview_model_id", lambda: "openrouter/a")
+    monkeypatch.setattr(interview_model, "_speeds", {"openrouter/a": (120.0, 450.0)})
+    catalog = ModelCatalogResponse(models=[_model("openrouter/a", 1.0), _model("openrouter/b", 1.0)], providers=[])
+    a, b = interview_model.with_interview_default(catalog).models
+    assert (a.throughput_tps, a.ttft_ms, a.latency_ms) == (120.0, 450.0, 450.0 + 150 / 120.0 * 1000)
+    assert (b.throughput_tps, b.ttft_ms, b.latency_ms) == (None, None, None)
+
+
+def test_refresh_keeps_the_last_speed_of_a_model_whose_fetch_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A partial refresh updates the measured models and leaves the rest as they were."""
+    catalog = ModelCatalogResponse(models=[_model("openrouter/a", 1.0), _model("openrouter/b", 1.0)], providers=[])
+    monkeypatch.setattr(interview_model, "catalog_snapshot", lambda: catalog)
+    monkeypatch.setattr(interview_model, "_measure", lambda models: {"openrouter/a": (200.0, 300.0)})
+    monkeypatch.setattr(interview_model, "_speeds", {"openrouter/a": (100.0, 500.0), "openrouter/b": (80.0, 600.0)})
+    for name, value in (("_pick", None), ("_picked_at", 0.0), ("_measured_at", 0.0)):
+        monkeypatch.setattr(interview_model, name, value)
+    interview_model._refresh()
+    assert interview_model._speeds == {"openrouter/a": (200.0, 300.0), "openrouter/b": (80.0, 600.0)}

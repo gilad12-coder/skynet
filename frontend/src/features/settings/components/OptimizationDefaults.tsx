@@ -69,13 +69,21 @@ export function OptimizationDefaults() {
         model: modelDisplayName(bestNow.value, catalogModels ?? undefined),
       })
     : msg("settings.optimization.model.automatic");
+  const strongestNow = catalogModels?.find((model) => model.is_strongest);
+  const reflectionAutomaticLabel = strongestNow
+    ? msg("settings.optimization.model.automatic_strongest", {
+        model: modelDisplayName(strongestNow.value, catalogModels ?? undefined),
+      })
+    : automaticLabel;
 
   const modelRow = (role: ModelRole, label: string, description: string) => (
     <SettingsRow icon={Cpu} label={label} description={description}>
       <div className="flex min-w-0 items-center gap-1">
         <ModelChip
           config={prefs[role]}
-          emptyLabel={automaticLabel}
+          emptyLabel={
+            role === "optimizerReflectionModel" ? reflectionAutomaticLabel : automaticLabel
+          }
           catalogModels={catalogModels ?? undefined}
           onClick={() => setEditing(role)}
         />

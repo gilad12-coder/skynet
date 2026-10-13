@@ -22,6 +22,8 @@ const {
   optimizerModelsReady,
   presetEngine,
   presetModels,
+  taskInterviewPatch,
+  taskIssue,
   wizardSteps,
   withContractBudget,
   withLevel,
@@ -125,6 +127,17 @@ test("an Automatic model resolves to whatever the catalog default is when the wi
   const later = presetModels(fresh, automatic, "anthropic/claude-new");
   assert.equal(later?.taskModel?.name, "anthropic/claude-new");
   assert.equal(later?.reflectionModel?.name, "anthropic/claude-new");
+});
+
+test("reflection Automatic runs the strongest model while the task model stays on best value", () => {
+  const fresh = initialWizardV2State().optimizer;
+  const preset = presetModels(fresh, noDefaults, "openai/gpt-value", "anthropic/claude-strong");
+  assert.equal(preset?.taskModel?.name, "openai/gpt-value");
+  assert.equal(preset?.reflectionModel?.name, "anthropic/claude-strong");
+  assert.equal(
+    presetModels(fresh, noDefaults, "openai/gpt-value", null)?.reflectionModel?.name,
+    "openai/gpt-value",
+  );
 });
 
 test("the preset never overwrites a model someone already set, and needs some default", () => {
@@ -231,4 +244,48 @@ test("a DSPy program without a task model counts as missing models", () => {
 
 test("before the task and inputs exist the Optimizer step has one placeholder screen", () => {
   assert.deepEqual(stepPages("optimizer", initialWizardV2State("expert")), ["optimizer"]);
+});
+
+test("the task step clears once nothing is missing, with no separate confirm", () => {
+  const empty = initialWizardV2State().task;
+  assert.equal("confirmed" in empty, false);
+  assert.equal(taskIssue(empty), "submit.v2.task.issue.objective");
+  const withObjective = { ...empty, objective: "Summarize tickets" };
+  assert.equal(taskIssue(withObjective), "submit.v2.task.issue.kind");
+  const withKind = { ...withObjective, artifactKind: "prompt" as const };
+  assert.equal(taskIssue(withKind), "submit.v2.task.issue.starting");
+  assert.equal(taskIssue({ ...withKind, startingVersion: "   " }), "submit.v2.task.issue.starting");
+  assert.equal(
+    taskIssue({ ...withKind, startingVersion: { a: " ", b: "" } }),
+    "submit.v2.task.issue.starting",
+  );
+  assert.equal(taskIssue({ ...withKind, startingVersion: "Summarize:" }), null);
+  assert.equal(taskIssue({ ...withKind, startingVersion: { a: "", b: "Do it." } }), null);
+});
+
+test("taskInterviewPatch keeps a rationale only from a turn that names the artifact kind", () => {
+  const turn = {
+    message: "",
+    options: [],
+    done: false,
+    objective: "Route tickets",
+    background: "",
+    artifact_rationale: "The artifact kind is not yet known, so no rationale can be given.",
+  };
+  const early = taskInterviewPatch(turn, new Set());
+  assert.equal(early.objective, "Route tickets");
+  assert.equal("artifactRationale" in early, false);
+
+  const named = taskInterviewPatch(
+    { ...turn, artifact_kind: "prompt", artifact_rationale: "You already have a prompt to tune." },
+    new Set(),
+  );
+  assert.equal(named.artifactKind, "prompt");
+  assert.equal(named.artifactRationale, "You already have a prompt to tune.");
+
+  const handPicked = taskInterviewPatch(
+    { ...turn, artifact_kind: "prompt", artifact_rationale: "You already have a prompt to tune." },
+    new Set(["objective", "artifactKind"]),
+  );
+  assert.deepEqual(handPicked, {});
 });

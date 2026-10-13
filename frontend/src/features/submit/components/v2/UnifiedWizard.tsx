@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 
+import { useHideAgentPill } from "@/features/agent-panel";
 import { ExperienceLevelSwitch } from "@/features/experience";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
@@ -38,10 +39,10 @@ function arrowsBelongElsewhere(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(ARROW_OWNERS) !== null;
 }
 
-// The task and metric steps hold a chat or a code workspace beside the form.
-const WIDE_STEPS = new Set<WizardStepId>(["task", "metric"]);
-
 function UnifiedWizardFrame() {
+  // Each step's Auto/Manual switch is the wizard's way to its agent, so the
+  // app-wide launcher would be a second, redundant button by Continue.
+  useHideAgentPill();
   const w = useWizardV2Shell();
   const current = w.state.step;
   const index = WIZARD_STAGE[current];
@@ -114,9 +115,8 @@ function UnifiedWizardFrame() {
 
   return (
     <div
-      className={`mx-auto flex h-[calc(100dvh-var(--header-height)-3rem)] w-full min-w-0 flex-col gap-4 transition-[max-width] duration-300 md:-mt-4 md:gap-5 ${
-        WIDE_STEPS.has(current) ? "max-w-6xl" : "max-w-3xl"
-      }`}
+      // Every step can hold its agent beside the form, so the frame stays wide.
+      className="mx-auto flex h-[calc(100dvh-var(--header-height)-3rem)] w-full min-w-0 max-w-6xl flex-col gap-4 md:-mt-4 md:gap-5"
     >
       {/* Switching level keeps every answer: the wizard re-lays out around the
           current step and moves on only if that step drops out. */}

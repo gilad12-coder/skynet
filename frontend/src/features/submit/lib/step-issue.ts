@@ -11,20 +11,13 @@ import {
   WIZARD_V2_STEPS,
   contractSnapshot,
   resolvedMetricModel,
-  type TaskSlice,
+  taskIssue,
   type WizardStepId,
   type WizardV2State,
 } from "./wizard-v2";
 
 export const hasModel = (config: ModelConfig | null | undefined): config is ModelConfig =>
   Boolean(config?.name.trim());
-
-function startingVersionEmpty(version: TaskSlice["startingVersion"]): boolean {
-  if (version === null) return true;
-  if (typeof version === "string") return !version.trim();
-  const parts = Object.values(version);
-  return parts.length === 0 || parts.every((part) => !part.trim());
-}
 
 /** The catalog entry for the current choice, when the catalog matches the setup. */
 function catalogOption(state: WizardV2State, catalog: OptimizerCatalogResponse | null) {
@@ -46,10 +39,7 @@ export function computeStepIssue(
   const { task, inputs, optimizer, workspace } = state;
   switch (step) {
     case "task":
-      if (!task.objective.trim()) return "submit.v2.task.issue.objective";
-      if (!task.artifactKind) return "submit.v2.task.issue.kind";
-      if (startingVersionEmpty(task.startingVersion)) return "submit.v2.task.issue.starting";
-      return task.confirmed ? null : "submit.v2.task.artifact.confirm_hint";
+      return taskIssue(task);
     case "inputs": {
       const caseCount =
         inputs.cases.length > 0 ? inputs.cases.length : inputs.stagedDatasetId ? inputs.rowCount : 0;

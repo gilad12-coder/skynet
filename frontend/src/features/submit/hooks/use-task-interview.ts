@@ -16,7 +16,7 @@ import type {
 } from "@/shared/types/unified-run";
 import type { AgentMessage, AgentThinking } from "@/shared/ui/agent";
 
-import type { TaskSlice, WizardV2Context } from "../lib/wizard-v2";
+import { taskInterviewPatch, type TaskSlice, type WizardV2Context } from "../lib/wizard-v2";
 
 /** Task fields the interview writes and the user may take over by editing. */
 export type TaskInterviewField = "objective" | "background" | "artifactKind" | "startingVersion";
@@ -34,7 +34,7 @@ export interface TaskInterviewState {
   /** Pickable answers for the current question; empty for an open question. */
   options: InterviewOption[];
   error: boolean;
-  /** The interviewer has what it needs; the artifact card is ready to confirm. */
+  /** The interviewer has what it needs; the artifact card is complete. */
   done: boolean;
   model: string | null;
   setModel: (model: string | null) => void;
@@ -50,25 +50,6 @@ export interface TaskInterviewState {
   /** Write a field by hand; the interview never overwrites it afterwards. */
   editField: <K extends TaskInterviewField>(field: K, value: TaskSlice[K]) => void;
   isDirty: (field: TaskInterviewField) => boolean;
-}
-
-/**
- * The fields a turn result may write: only what it actually filled, and
- * nothing the user has edited by hand since.
- */
-function resultPatch(
-  result: TaskInterviewTurnResult,
-  dirty: ReadonlySet<TaskInterviewField>,
-): Partial<TaskSlice> {
-  const patch: Partial<TaskSlice> = {};
-  if (result.objective.trim() && !dirty.has("objective")) patch.objective = result.objective;
-  if (result.background.trim() && !dirty.has("background")) patch.background = result.background;
-  if (result.artifact_kind && !dirty.has("artifactKind")) patch.artifactKind = result.artifact_kind;
-  if (result.starting_version != null && !dirty.has("startingVersion")) {
-    patch.startingVersion = result.starting_version;
-  }
-  if (result.artifact_rationale.trim()) patch.artifactRationale = result.artifact_rationale;
-  return patch;
 }
 
 /**
@@ -178,7 +159,7 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
               ...next,
               { role: "assistant", content: result.message },
             ];
-            patchTask({ ...resultPatch(result, dirtyRef.current), transcript });
+            patchTask({ ...taskInterviewPatch(result, dirtyRef.current), transcript });
             setServed((prev) => ({
               ...prev,
               [transcript.length - 1]: {
@@ -252,7 +233,12 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
   const editField = React.useCallback(
     <K extends TaskInterviewField>(field: K, value: TaskSlice[K]) => {
       setDirty((prev) => (prev.has(field) ? prev : new Set(prev).add(field)));
-      patchTask({ [field]: value } as Partial<TaskSlice>);
+      // A hand-picked kind outdates the interview's reason for its own pick.
+      patchTask(
+        (field === "artifactKind"
+          ? { artifactKind: value, artifactRationale: "" }
+          : { [field]: value }) as Partial<TaskSlice>,
+      );
     },
     [patchTask],
   );

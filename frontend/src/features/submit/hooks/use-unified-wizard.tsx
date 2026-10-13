@@ -514,6 +514,7 @@ export function WizardV2Provider({
         reflectionModel: readPref("optimizerReflectionModel"),
       },
       modelCatalog.models.find((model) => model.is_default)?.value,
+      modelCatalog.models.find((model) => model.is_strongest)?.value,
     );
     if (preset) patchOptimizer(preset);
     // Runs once, when the catalog first arrives; the models are read from that render.
@@ -531,7 +532,7 @@ export function WizardV2Provider({
   }, [kind, mode]);
 
   // `?clone=` hydrates every slice it can from the source run's stored,
-  // server-scrubbed payload; nothing is confirmed, so the user reviews each step.
+  // server-scrubbed payload; the user still walks it forward one step at a time.
   const cloneRan = useRef(false);
   useEffect(() => {
     const cloneId = searchParams.get("clone");

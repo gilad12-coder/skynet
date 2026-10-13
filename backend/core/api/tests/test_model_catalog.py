@@ -864,6 +864,60 @@ def test_best_value_default_is_none_without_default_thinkers() -> None:
     assert mc._best_value_probe_id(listing, mc._featured_probe_ids(listing)) is None
 
 
+def test_strongest_is_the_highest_index_default_thinker() -> None:
+    """Strongest skips featured models that do not think by default, however high they score."""
+    thinks = {"reasoning": {"default_enabled": True}}
+    listing = {
+        "acme/ultra-2": _listed(_NOW, score=60, pricing={"prompt": "0.000004"}, **thinks),
+        "acme/flash-3": _listed(_NOW, score=45, pricing={"prompt": "0.0000003"}, **thinks),
+        "beta/genius-1": _listed(_NOW, score=70),
+    }
+    featured = mc._featured_probe_ids(listing)
+    assert "beta/genius-1" in featured
+    assert mc._strongest_probe_id(listing, featured) == ("acme/ultra-2", 60)
+
+
+def test_strongest_new_release_inherits_its_predecessors_score() -> None:
+    """An unbenchmarked new release carries its line's score and takes strongest on release day."""
+    thinks = {"reasoning": {"default_enabled": True}}
+    listing = {
+        "acme/ultra-2": _listed(_NOW - 30 * _DAY, score=60, **thinks),
+        "acme/ultra-3": _listed(_NOW, **thinks),
+        "beta/mid-2": _listed(_NOW, score=55, **thinks),
+    }
+    featured = mc._featured_probe_ids(listing)
+    assert mc._intelligence_by_probe_id(listing)["acme/ultra-3"] == 60
+    assert mc._strongest_probe_id(listing, featured) == ("acme/ultra-3", 60)
+
+
+def test_strongest_is_none_without_default_thinkers() -> None:
+    """No featured model reasons by default, so nothing is strongest."""
+    listing = {"acme/ultra-2": _listed(_NOW, score=60)}
+    assert mc._strongest_probe_id(listing, mc._featured_probe_ids(listing)) is None
+
+
+def test_get_catalog_flags_one_strongest_and_carries_indexes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exactly one model is strongest, and an inherited score reaches the catalog entry."""
+    monkeypatch.setattr(litellm, "model_cost", {})
+    monkeypatch.setattr(litellm, "get_valid_models", list)
+    thinks = {"reasoning": {"default_enabled": True}}
+    probe = {
+        ("openrouter", None): {
+            "acme/ultra-2": _listed(_NOW - 30 * _DAY, score=60, **thinks),
+            "acme/ultra-3": _listed(_NOW, **thinks),
+            "beta/mid-2": _listed(_NOW, score=55, pricing={"prompt": "0.0000002"}, **thinks),
+        }
+    }
+    monkeypatch.setattr(mc, "_probe_all_providers", lambda: probe)
+
+    by_value = {m.value: m for m in get_catalog().models}
+    assert [v for v, m in by_value.items() if m.is_strongest] == ["openrouter/acme/ultra-3"]
+    assert by_value["openrouter/acme/ultra-3"].intelligence_index == 60
+    assert by_value["openrouter/beta/mid-2"].intelligence_index == 55
+    assert by_value["openrouter/beta/mid-2"].is_default is True
+    assert all(m.artificial_analysis_url is None for m in by_value.values())
+
+
 def test_practical_keeps_benchmarked_models_and_newest_of_each_line() -> None:
     """Benchmarked models and a line's unbenchmarked newest release stay; the tail drops."""
     listing = {

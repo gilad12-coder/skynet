@@ -23,6 +23,7 @@ import {
   type MetricShape,
   type OptimizerCatalogResponse,
   type OptimizerChoice,
+  type TaskInterviewTurnResult,
   type UnifiedCase,
   type UnifiedChatTurn,
   type UnifiedRunRequest,
@@ -45,7 +46,6 @@ export interface TaskSlice {
   artifactKind: ArtifactKind | null;
   startingVersion: string | Record<string, string> | null;
   artifactRationale: string;
-  confirmed: boolean;
   transcript: UnifiedChatTurn[];
 }
 
@@ -123,7 +123,6 @@ export function initialWizardV2State(
       artifactKind: null,
       startingVersion: null,
       artifactRationale: "",
-      confirmed: false,
       transcript: [],
     },
     inputs: {
@@ -181,6 +180,43 @@ export function initialWizardV2State(
 
 const hasModel = (config: ModelConfig | null): boolean => Boolean(config?.name.trim());
 
+/**
+ * The i18n key of what the task step still lacks, or null when Continue may
+ * move on. There is no separate confirm: Continue is the confirmation.
+ */
+export function taskIssue(task: TaskSlice): string | null {
+  if (!task.objective.trim()) return "submit.v2.task.issue.objective";
+  if (!task.artifactKind) return "submit.v2.task.issue.kind";
+  const v = task.startingVersion;
+  const empty =
+    v === null ||
+    (typeof v === "string" ? !v.trim() : Object.values(v).every((part) => !part.trim()));
+  return empty ? "submit.v2.task.issue.starting" : null;
+}
+
+/**
+ * The task fields an interview turn may write: only what it actually filled,
+ * and nothing the user has edited by hand since. The rationale explains the
+ * artifact kind, so it is kept only from a turn that names the kind the card
+ * shows; an early turn otherwise fills it with "not yet known" filler.
+ */
+export function taskInterviewPatch(
+  result: TaskInterviewTurnResult,
+  dirty: ReadonlySet<keyof TaskSlice>,
+): Partial<TaskSlice> {
+  const patch: Partial<TaskSlice> = {};
+  if (result.objective.trim() && !dirty.has("objective")) patch.objective = result.objective;
+  if (result.background.trim() && !dirty.has("background")) patch.background = result.background;
+  if (result.artifact_kind && !dirty.has("artifactKind")) {
+    patch.artifactKind = result.artifact_kind;
+    if (result.artifact_rationale.trim()) patch.artifactRationale = result.artifact_rationale;
+  }
+  if (result.starting_version != null && !dirty.has("startingVersion")) {
+    patch.startingVersion = result.starting_version;
+  }
+  return patch;
+}
+
 /** Whether the models the chosen artifact needs to run are set. */
 export function optimizerModelsReady(s: WizardV2State): boolean {
   if (s.task.artifactKind === "dspy_program" && !hasModel(s.optimizer.taskModel)) return false;
@@ -221,22 +257,27 @@ export function withLevel(
 
 /**
  * The task and reflection models a new wizard starts with: each role's
- * default from Settings, else the catalog's default model. Returns null once
- * either model holds anything, so a user's pick, a cloned run or an agent-set
- * model is never overwritten.
+ * default from Settings, else the catalog's pick: the best-value default for
+ * the task model, the strongest model (else that default) for reflection.
+ * Returns null once either model holds anything, so a user's pick, a cloned
+ * run or an agent-set model is never overwritten.
  */
 export function presetModels(
   optimizer: Pick<OptimizerSlice, "taskModel" | "reflectionModel">,
   defaults: { taskModel: ModelConfig | null; reflectionModel: ModelConfig | null },
   catalogDefault: string | null | undefined,
+  catalogStrongest?: string | null,
 ): Pick<OptimizerSlice, "taskModel" | "reflectionModel"> | null {
   if (optimizer.taskModel !== null || optimizer.reflectionModel !== null) return null;
-  const pick = (pref: ModelConfig | null): ModelConfig | null => {
+  const pick = (
+    pref: ModelConfig | null,
+    automatic: string | null | undefined,
+  ): ModelConfig | null => {
     if (pref && hasModel(pref)) return pref;
-    return catalogDefault ? { name: catalogDefault, token_source: "managed" } : null;
+    return automatic ? { name: automatic, token_source: "managed" } : null;
   };
-  const taskModel = pick(defaults.taskModel);
-  const reflectionModel = pick(defaults.reflectionModel);
+  const taskModel = pick(defaults.taskModel, catalogDefault);
+  const reflectionModel = pick(defaults.reflectionModel, catalogStrongest || catalogDefault);
   return taskModel || reflectionModel ? { taskModel, reflectionModel } : null;
 }
 

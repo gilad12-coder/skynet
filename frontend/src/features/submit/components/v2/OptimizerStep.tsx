@@ -10,6 +10,7 @@ import { stepPages } from "../../lib/wizard-pages";
 import { optimizerModelsReady } from "../../lib/wizard-v2";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { BudgetSection } from "./BudgetSection";
+import { GeneralistAgentShell } from "./GeneralistAgentShell";
 import { ModelsSection } from "./ModelsSection";
 import { OptimizerPicker } from "./OptimizerPicker";
 import { WizardScreen } from "./WizardScreen";
@@ -37,54 +38,56 @@ export function OptimizerStep({ page }: { page: number }) {
   if (!askModels && kind && mode && !optimizerModelsReady(state)) setAskModels(true);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6">
-      <header className="flex shrink-0 flex-col gap-1">
-        <h3 className="text-base font-semibold text-foreground">
-          {t("submit.v2.optimizer.title")}
-        </h3>
-        <p className="text-sm text-muted-foreground">
-          {t(shown === "plan" ? "submit.v2.optimizer.plan.desc" : "submit.v2.optimizer.desc")}
-          {shown === "plan" && (
-            <>
-              {" "}
-              <button
-                type="button"
-                onClick={() => openTo("wizard")}
-                className="rounded-sm font-medium text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
-              >
-                {t("submit.v2.optimizer.plan.settings")}
-              </button>
-            </>
-          )}
-        </p>
-      </header>
+    <GeneralistAgentShell active={state.step === "optimizer"}>
+      <div className="flex min-h-0 flex-1 flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6">
+        <header className="flex shrink-0 flex-col gap-1">
+          <h3 className="text-base font-semibold text-foreground">
+            {t("submit.v2.optimizer.title")}
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            {t(shown === "plan" ? "submit.v2.optimizer.plan.desc" : "submit.v2.optimizer.desc")}
+            {shown === "plan" && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  onClick={() => openTo("wizard")}
+                  className="rounded-sm font-medium text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+                >
+                  {t("submit.v2.optimizer.plan.settings")}
+                </button>
+              </>
+            )}
+          </p>
+        </header>
 
-      {kind && mode ? (
-        shown === "plan" ? (
-          <WizardScreen active className="flex flex-col gap-5">
-            <OptimizerPicker kind={kind} mode={mode} plain />
-            {askModels && <ModelsSection kind={kind} choice={choice} />}
-            <BudgetSection kind={kind} choice={choice} />
-          </WizardScreen>
-        ) : (
-          <>
-            <WizardScreen active={shown === "optimizer"}>
-              <OptimizerPicker kind={kind} mode={mode} />
-            </WizardScreen>
-            <WizardScreen active={shown === "models"}>
-              <ModelsSection kind={kind} choice={choice} />
-            </WizardScreen>
-            <WizardScreen active={shown === "budget"}>
+        {kind && mode ? (
+          shown === "plan" ? (
+            <WizardScreen active className="flex flex-col gap-5">
+              <OptimizerPicker kind={kind} mode={mode} plain />
+              {askModels && <ModelsSection kind={kind} choice={choice} />}
               <BudgetSection kind={kind} choice={choice} />
             </WizardScreen>
-          </>
-        )
-      ) : (
-        <p className="flex items-start gap-2 text-sm text-muted-foreground" role="status">
-          <Warning className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <span>{t("submit.v2.optimizer.needs_setup")}</span>
-        </p>
-      )}
-    </div>
+          ) : (
+            <>
+              <WizardScreen active={shown === "optimizer"}>
+                <OptimizerPicker kind={kind} mode={mode} />
+              </WizardScreen>
+              <WizardScreen active={shown === "models"}>
+                <ModelsSection kind={kind} choice={choice} />
+              </WizardScreen>
+              <WizardScreen active={shown === "budget"}>
+                <BudgetSection kind={kind} choice={choice} />
+              </WizardScreen>
+            </>
+          )
+        ) : (
+          <p className="flex items-start gap-2 text-sm text-muted-foreground" role="status">
+            <Warning className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span>{t("submit.v2.optimizer.needs_setup")}</span>
+          </p>
+        )}
+      </div>
+    </GeneralistAgentShell>
   );
 }
