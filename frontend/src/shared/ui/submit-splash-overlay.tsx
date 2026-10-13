@@ -55,7 +55,7 @@ export function SubmitSplashOverlay({
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.3, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
           >
-            <AnimatedWordmark size={64} autoMorph morphSpeed={120} />
+            <AnimatedWordmark size={64} withMark autoMorph morphSpeed={120} />
           </motion.div>
         </motion.div>
       )}

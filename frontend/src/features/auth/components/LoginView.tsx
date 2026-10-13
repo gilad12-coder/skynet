@@ -108,7 +108,7 @@ function oauthReturnUrl(): string {
 function LoginHeader() {
   return (
     <div className="w-[min(90vw,520px)]">
-      <AnimatedWordmark fluid autoMorph autoMorphDuration={10000} morphSpeed={250} />
+      <AnimatedWordmark fluid withMark autoMorph autoMorphDuration={10000} morphSpeed={250} />
     </div>
   );
 }
