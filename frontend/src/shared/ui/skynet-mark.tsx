@@ -12,6 +12,9 @@ type Shape = { fill: string; d: string } | { fill: string; cx: number; cy: numbe
 // Square crop of the 512-unit source drawing, centred on the bird.
 export const HOATZIN_VIEWBOX = "-2 12 500 500";
 
+// Tight crop for the wordmark lockup: crest tips to mid-neck, no side padding.
+export const HOATZIN_LOCKUP_VIEWBOX = "48 12 400 432";
+
 // Paint order matters: head and throat, crest, blue face, eye, then the bill over the face.
 const SHAPES: readonly Shape[] = [
   { fill: "#4a3b2c", d: "M355.8 254.1C346.9 227.4 315.8 211.9 280.2 211.9C238 211.9 204.6 231.9 191.3 265.2C184.6 283 182.4 303 182.4 323C175.7 356.4 180.2 387.5 180.2 416.4C180.2 446.7 173 477.1 166.8 512L268.2 512C274.3 476 285.1 443.7 295.8 418.6C309.1 391.9 338 371.9 355.8 351.9Z" },

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { HOATZIN_VIEWBOX, HoatzinShapes } from "@/shared/ui/skynet-mark";
+import { HOATZIN_LOCKUP_VIEWBOX, HoatzinShapes } from "@/shared/ui/skynet-mark";
 
 /**
  * Animated "SKYNET" wordmark with morphing SVG letters.
@@ -126,11 +126,14 @@ const LETTERS: LetterDef[] = [
 
 const TOTAL_WIDTH = 475;
 
-// The hoatzin brand mark (shared/ui/skynet-mark.tsx) leads the letters as a square at
-// their full 92-unit height. It stays still while the letters morph.
-const MARK_SIZE = 92;
-const MARK_GAP = 24;
-const MARK_SHIFT = MARK_SIZE + MARK_GAP;
+// The hoatzin brand mark (shared/ui/skynet-mark.tsx) leads the letters, taller than them:
+// the cropped neck ends on the baseline (y=90), the eye sits on the letters' centre line
+// (y=46) and the crest rises above the cap height. It stays still while the letters morph.
+const MARK_TOP = -30;
+const MARK_HEIGHT = 120;
+const MARK_WIDTH = 111;
+const MARK_GAP = 22;
+const MARK_SHIFT = MARK_WIDTH + MARK_GAP;
 const VARIANT_NAMES = ["default", "glyph", "serif", "sans"] as const;
 type VariantName = (typeof VARIANT_NAMES)[number];
 
@@ -296,8 +299,11 @@ export function AnimatedWordmark({
     };
   }, [autoMorph, autoMorphDuration, startMorph, stopMorph]);
 
-  const aspectRatio = totalWidth / 92;
-  const svgWidth = size * aspectRatio;
+  // `size` stays the letters' height; with the mark the box grows upward to hold the crest.
+  const top = withMark ? MARK_TOP : 0;
+  const boxHeight = 92 - top;
+  const svgHeight = (size * boxHeight) / 92;
+  const svgWidth = (svgHeight * totalWidth) / boxHeight;
 
   return (
     <span
@@ -311,15 +317,15 @@ export function AnimatedWordmark({
       <svg
         className="overflow-visible transition-all duration-300 pointer-events-none"
         width={fluid ? undefined : svgWidth}
-        height={fluid ? undefined : size}
-        viewBox={`0 0 ${totalWidth} 92`}
+        height={fluid ? undefined : svgHeight}
+        viewBox={`0 ${top} ${totalWidth} ${boxHeight}`}
         fill="currentColor"
         stroke="none"
         xmlns="http://www.w3.org/2000/svg"
         style={fluid ? { width: "100%", height: "auto", color: "var(--foreground)" } : { color: "var(--foreground)" }}
       >
         {withMark && (
-          <svg width={MARK_SIZE} height={MARK_SIZE} viewBox={HOATZIN_VIEWBOX}>
+          <svg y={MARK_TOP} width={MARK_WIDTH} height={MARK_HEIGHT} viewBox={HOATZIN_LOCKUP_VIEWBOX}>
             <HoatzinShapes />
           </svg>
         )}
