@@ -208,6 +208,8 @@ def sentry_settings(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
     monkeypatch.setattr(settings, "sentry_api_token", SecretStr("token"))
     monkeypatch.setattr(settings, "sentry_org", "skynet")
     monkeypatch.setattr(settings, "sentry_dsn", None)
+    monkeypatch.setattr(settings, "sentry_project", None)
+    monkeypatch.setattr(settings, "sentry_base_url", None)
     return monkeypatch
 
 
@@ -300,6 +302,25 @@ def test_sentry_issues_trims_issue_fields(sentry_settings: pytest.MonkeyPatch) -
     assert issue["last_seen"].startswith("2026-10-12T08:00:00")
     assert calls[0]["url"] == "https://sentry.io/api/0/organizations/skynet/issues/"
     assert calls[0]["headers"] == {"Authorization": "Bearer token"}
+    assert calls[0]["params"]["query"] == "is:unresolved"
+
+
+def test_sentry_issues_honor_project_and_base_url(sentry_settings: pytest.MonkeyPatch) -> None:
+    """SENTRY_PROJECT narrows the query and SENTRY_BASE_URL overrides the DSN-derived origin."""
+    calls: list[dict[str, Any]] = []
+
+    def _get(url: str, **kwargs: Any) -> _Response:
+        """Record the call and return no issues."""
+        calls.append({"url": url, **kwargs})
+        return _Response(200, [])
+
+    sentry_settings.setattr(settings, "sentry_project", "skynet")
+    sentry_settings.setattr(settings, "sentry_base_url", "https://us.sentry.io/")
+    sentry_settings.setattr(sentry_issues.requests, "get", _get)
+    client, _ = _client(_ADMIN)
+    assert client.get("/admin/sentry/issues").json() == {"configured": True, "available": True, "issues": []}
+    assert calls[0]["url"] == "https://us.sentry.io/api/0/organizations/skynet/issues/"
+    assert calls[0]["params"]["query"] == "is:unresolved project:skynet"
 
 
 @pytest.mark.parametrize(

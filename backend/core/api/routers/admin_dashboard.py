@@ -439,9 +439,14 @@ def create_admin_dashboard_router(*, job_store) -> APIRouter:
         if not token or not settings.sentry_org:
             return AdminSentryIssuesResponse(configured=False, available=False, issues=[])
         dsn = settings.sentry_dsn.get_secret_value() if settings.sentry_dsn else None
+        base_url = (settings.sentry_base_url or "").rstrip("/") or sentry_api_base(dsn)
         try:
             raw = fetch_unresolved_issues(
-                token=token, org=settings.sentry_org, base_url=sentry_api_base(dsn), limit=SENTRY_ISSUE_LIMIT
+                token=token,
+                org=settings.sentry_org,
+                base_url=base_url,
+                limit=SENTRY_ISSUE_LIMIT,
+                project=settings.sentry_project,
             )
         except SentryUnavailableError:
             return AdminSentryIssuesResponse(configured=True, available=False, issues=[])

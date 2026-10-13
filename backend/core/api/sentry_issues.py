@@ -2,7 +2,8 @@
 
 The dashboard lists the organization's unresolved issues across every project
 (backend, worker and frontend all report to the same organization). It needs
-``SENTRY_API_TOKEN`` and ``SENTRY_ORG``; without them the dashboard shows an
+``SENTRY_API_TOKEN`` and ``SENTRY_ORG`` (``SENTRY_PROJECT`` narrows it to one
+project, ``SENTRY_BASE_URL`` pins the API region); without them the dashboard shows an
 empty state instead of calling Sentry.
 """
 
@@ -42,14 +43,17 @@ def sentry_api_base(dsn: str | None) -> str:
     return _EU_API if host.endswith(".de.sentry.io") else _US_API
 
 
-def fetch_unresolved_issues(*, token: str, org: str, base_url: str, limit: int) -> list[dict[str, Any]]:
+def fetch_unresolved_issues(
+    *, token: str, org: str, base_url: str, limit: int, project: str | None = None
+) -> list[dict[str, Any]]:
     """Return the organization's most frequent unresolved issues of the last 14 days.
 
     Args:
         token: Sentry auth token with ``event:read``.
         org: Organization slug.
-        base_url: API origin from :func:`sentry_api_base`.
+        base_url: API origin, without a trailing slash.
         limit: Maximum number of issues.
+        project: Project slug to narrow to, or ``None`` for every project.
 
     Returns:
         The raw issue objects, most frequent first.
@@ -58,10 +62,11 @@ def fetch_unresolved_issues(*, token: str, org: str, base_url: str, limit: int) 
         SentryUnavailableError: On a network error, a non-2xx reply or a body
             that is not a list.
     """
+    query = f"is:unresolved project:{project}" if project else "is:unresolved"
     try:
         response = requests.get(
             f"{base_url}/api/0/organizations/{org}/issues/",
-            params={"query": "is:unresolved", "statsPeriod": SENTRY_STATS_PERIOD, "sort": "freq", "limit": limit},
+            params={"query": query, "statsPeriod": SENTRY_STATS_PERIOD, "sort": "freq", "limit": limit},
             headers={"Authorization": f"Bearer {token}"},
             timeout=SENTRY_TIMEOUT_SECONDS,
         )
