@@ -76,6 +76,12 @@ environment. Six things broke that once; keep them true:
   environment, sign-up is auto-verified and a new account gets
   `PREVIEW_GRANT_CENTS` (set on `staging` `backend` and `worker`, 1000 = $10)
   that can fund a budget. Production and `staging` keep a 0 grant.
+- **Preview accounts skip the setup intake.** In a `*-pr-<n>` environment a
+  new account (password or OAuth sign-up) starts with the intake marked done
+  and default answers, so it lands straight in the app
+  (`new_account_intake_completed_at` in `core/api/routers/experience.py`).
+  To check a PR that changes the intake, open Settings → Account → Setup
+  questions → "Run the setup again". Production and `staging` keep the intake.
 - **The setup check routes the same models as the run.** An Auto run's
   payload names its models under `models.*`. `run_preflight` must alias them
   (`core/worker/unified_aliases.py`) before `ModelGateway.protect_payload`,

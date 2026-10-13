@@ -166,6 +166,28 @@ def test_register_maps_experience_vocabularies(accounts_client: TestClient, sent
         assert row.experience_level == stored
 
 
+@pytest.mark.parametrize(
+    ("environment_name", "skipped"), [("staging", False), ("production", False), ("skynet-pr-662", True)]
+)
+@pytest.mark.parametrize("route", ["/auth/register", "/auth/oauth/provision"])
+def test_new_account_skips_intake_only_in_preview_environments(
+    accounts_client: TestClient, monkeypatch: pytest.MonkeyPatch, route: str, environment_name: str, skipped: bool
+) -> None:
+    """A new account starts with the setup intake done only in a PR preview environment."""
+    monkeypatch.setattr(settings, "railway_environment_name", environment_name)
+    created = accounts_client.post(
+        route,
+        json={"email": "ivy@example.com", "password": "longenough1", "name": "Ivy"},
+        headers=_AUTH_HEADER,
+    )
+    assert created.status_code in {200, 201}
+    with Session(accounts_client.app.state.job_store.engine) as session:
+        row = session.get(UserModel, "ivy@example.com")
+        assert row is not None
+        assert (row.intake_completed_at is not None) is skipped
+        assert row.intake_profile is None
+
+
 def test_register_rejects_duplicate_email(accounts_client: TestClient) -> None:
     """Re-registering an existing email is a 409, regardless of casing."""
     body = {"email": "bob@example.com", "password": "longenough1", "name": "Bob"}
