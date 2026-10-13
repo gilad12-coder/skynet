@@ -1240,6 +1240,10 @@ _SCREEN_FIELDS: dict[str, frozenset[str]] = {
 # The run's name, description and privacy show on no screen, and naming the
 # run gates every later step, so they stay editable from any screen.
 _SCREENLESS_FIELDS = frozenset({"job_name", "job_description", "is_private"})
+# ``update_wizard_state`` refuses these on every screen with its own pointer to
+# ``request_code_authoring``; a "Not on screen" error would send the agent
+# looking for a screen where they are writable, and none exists.
+_SCREEN_EXEMPT_FIELDS = frozenset({"run_code", "metric_code"})
 # Tools that write a wizard field themselves, and the screens that show it.
 _SCREEN_TOOLS: dict[str, frozenset[str]] = {
     "request_code_authoring": frozenset({"metric"}),
@@ -1273,7 +1277,8 @@ def validate_wizard_screen(tool_name: str, kwargs: dict[str, Any], state: Wizard
             "with the wizard's arrows, then call it on a later turn."
         )
     visible = _SCREEN_FIELDS.get(screen, frozenset())
-    outside = sorted(field for field in kwargs if field not in visible | _SCREENLESS_FIELDS)
+    allowed = visible | _SCREENLESS_FIELDS | _SCREEN_EXEMPT_FIELDS
+    outside = sorted(field for field in kwargs if field not in allowed)
     if not outside:
         return None
     return (

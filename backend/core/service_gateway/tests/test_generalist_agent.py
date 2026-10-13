@@ -206,6 +206,12 @@ def test_screen_allows_only_screenless_fields_on_a_screen_without_fields() -> No
     assert validate_wizard_screen("update_wizard_state", {"seed": 1}, state) is not None
 
 
+def test_screen_leaves_code_fields_to_the_tool_refusal() -> None:
+    """Run and metric code are not screen-scoped; ``update_wizard_state`` refuses them itself."""
+    state = WizardState(wizard_screen="metric")
+    assert validate_wizard_screen("update_wizard_state", {"run_code": "x", "metric_code": "y"}, state) is None
+
+
 def test_screen_gates_code_authoring_to_the_metric_screen() -> None:
     """Run and metric code are written only while the metric screen is on view."""
     assert validate_wizard_screen("request_code_authoring", {"goal": ""}, WizardState(wizard_screen="metric")) is None
