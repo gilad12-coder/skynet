@@ -235,7 +235,7 @@ def test_sandbox_scorer_installs_the_runner_once_and_runs_one_call_per_directory
         "url": "http://gw.example/v1",
         "model": "judge",
         "temperature": None,
-        "max_tokens": None,
+        "max_tokens": sandbox_scorer_mod.runner.DEFAULT_MAX_TOKENS,
         "reasoning_effort": None,
         "timeout_seconds": 9.0,
     }
@@ -472,6 +472,13 @@ def test_scorer_gateway_for_managed_models_uses_the_shared_gateway(monkeypatch: 
         "reasoning_effort": "high",
         "timeout_seconds": 33.0,
     }
+
+
+def test_runner_payload_always_caps_the_output() -> None:
+    """A gateway with no configured cap still hands the box one, since older images only send what they get."""
+    gateway = ScorerGateway(url="http://gw/v1", model="m", api_key=None, billing_model="m")
+
+    assert gateway.runner_payload()["max_tokens"] == sandbox_scorer_mod.runner.DEFAULT_MAX_TOKENS
 
 
 def test_scorer_gateway_for_managed_models_needs_a_gateway(monkeypatch: pytest.MonkeyPatch) -> None:

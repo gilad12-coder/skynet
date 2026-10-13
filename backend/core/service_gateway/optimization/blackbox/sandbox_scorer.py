@@ -95,7 +95,10 @@ class ScorerGateway:
             "url": self.url,
             "model": self.model,
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            # The budget relay refuses an uncapped call. The box runs its image's
+            # own runner, and images built before ``llm()`` defaulted its cap only
+            # send one they are given, so the parent always gives one.
+            "max_tokens": runner.DEFAULT_MAX_TOKENS if self.max_tokens is None else self.max_tokens,
             "reasoning_effort": self.reasoning_effort,
             "timeout_seconds": self.timeout_seconds,
         }
