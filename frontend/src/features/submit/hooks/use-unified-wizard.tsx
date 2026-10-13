@@ -272,6 +272,7 @@ export function WizardV2Provider({
   const contractStale = state.workspace.lastCheckSnapshot !== snapshot;
 
   const [agentWriting, setAgentWriting] = useState(false);
+  const [inputsInferring, setInputsInferring] = useState(false);
   const runBlockedReason = useMemo(
     () => blockedReason(state, optimizerCatalog, { message: contractCheckMessage, agentWriting }),
     [state, optimizerCatalog, agentWriting],
@@ -743,6 +744,8 @@ export function WizardV2Provider({
     contractStale,
     runBlockedReason,
     setAgentWriting,
+    inputsInferring,
+    setInputsInferring,
     buildPayload,
     ensureBudget,
     submit,
