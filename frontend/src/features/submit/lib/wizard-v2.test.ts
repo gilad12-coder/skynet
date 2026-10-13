@@ -22,6 +22,7 @@ const {
   optimizerModelsReady,
   presetEngine,
   presetModels,
+  taskInterviewPatch,
   taskIssue,
   wizardSteps,
   withContractBudget,
@@ -249,4 +250,31 @@ test("the task step clears once nothing is missing, with no separate confirm", (
   );
   assert.equal(taskIssue({ ...withKind, startingVersion: "Summarize:" }), null);
   assert.equal(taskIssue({ ...withKind, startingVersion: { a: "", b: "Do it." } }), null);
+});
+
+test("taskInterviewPatch keeps a rationale only from a turn that names the artifact kind", () => {
+  const turn = {
+    message: "",
+    options: [],
+    done: false,
+    objective: "Route tickets",
+    background: "",
+    artifact_rationale: "The artifact kind is not yet known, so no rationale can be given.",
+  };
+  const early = taskInterviewPatch(turn, new Set());
+  assert.equal(early.objective, "Route tickets");
+  assert.equal("artifactRationale" in early, false);
+
+  const named = taskInterviewPatch(
+    { ...turn, artifact_kind: "prompt", artifact_rationale: "You already have a prompt to tune." },
+    new Set(),
+  );
+  assert.equal(named.artifactKind, "prompt");
+  assert.equal(named.artifactRationale, "You already have a prompt to tune.");
+
+  const handPicked = taskInterviewPatch(
+    { ...turn, artifact_kind: "prompt", artifact_rationale: "You already have a prompt to tune." },
+    new Set(["objective", "artifactKind"]),
+  );
+  assert.deepEqual(handPicked, {});
 });
