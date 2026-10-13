@@ -133,11 +133,14 @@ function bestFirst(key: (m: CatalogModel) => number) {
 
 const byScore = bestFirst((m) => m.intelligence_index ?? -1);
 
+/** Top labs first and Chinese labs last (the backend's `lab_tier`), then by score. */
+const byLabThenScore = (a: CatalogModel, b: CatalogModel) => (a.lab_tier ?? 1) - (b.lab_tier ?? 1) || byScore(a, b);
+
 /**
  * Order models for one picker tab, the best by that tab's measure first.
  * Best value lists the Pareto frontier of score against input price, then the
- * rated models the frontier beats, then the unrated; each group by
- * intelligence index. Smartest sorts by intelligence index, unrated last.
+ * rated models the frontier beats, then the unrated; each group by lab tier
+ * (top labs first, Chinese labs last), then intelligence index. Smartest sorts by intelligence index, unrated last.
  * Fastest sorts by output tokens per second, unmeasured last. Ties go to the
  * higher score, then the name. Empty groups are dropped.
  */
@@ -164,8 +167,8 @@ export function rankModels(models: CatalogModel[], ranking: ModelRanking): Ranke
     // A score without a price can't sit on the frontier, but it is still rated.
     const dominated = models.filter((m) => m.intelligence_index != null && !onFrontier.has(m));
     groups = [
-      { kind: "ranked", models: frontier.sort(byScore) },
-      { kind: "dominated", models: dominated.sort(byScore) },
+      { kind: "ranked", models: frontier.sort(byLabThenScore) },
+      { kind: "dominated", models: dominated.sort(byLabThenScore) },
       { kind: "unrated", models: unrated },
     ];
   }

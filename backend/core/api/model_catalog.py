@@ -129,6 +129,14 @@ class CatalogModel(BaseModel):
         default=False,
         description="Model accepts image inputs (required when the dataset has a dspy.Image column).",
     )
+    lab_tier: int = Field(
+        default=1,
+        description=(
+            "Rank of the model's lab in best-value orderings, read from its vendor: "
+            "0 for the top labs (Anthropic, OpenAI, Google), 2 for Chinese labs, 1 otherwise. "
+            "Best value sorts on it first and on score per dollar second."
+        ),
+    )
     available: bool = Field(default=False, description="True if backend has an API key for this model.")
     max_input_tokens: int | None = Field(default=None, description="Context window size.")
     input_cost_per_token: float | None = Field(
@@ -511,6 +519,38 @@ _FEATURED_SCORE_RATIO = 0.6
 _FEATURED_PER_LAB = 3
 # The full menus offer a lab's releases from the last two years.
 _PRACTICAL_WINDOW_SECONDS = 2 * 365 * 24 * 3600
+
+# Best value ranks by lab before score per dollar, keyed by OpenRouter vendor
+# slug or LiteLLM provider prefix. Unlisted vendors sit in the middle tier.
+_TOP_LAB_TIER = 0
+_DEFAULT_LAB_TIER = 1
+_LAB_TIERS: dict[str, int] = {
+    **dict.fromkeys(("anthropic", "openai", "google", "gemini", "vertex_ai"), _TOP_LAB_TIER),
+    **dict.fromkeys(
+        (
+            "z-ai",
+            "zai",
+            "zhipuai",
+            "deepseek",
+            "qwen",
+            "dashscope",
+            "alibaba",
+            "moonshotai",
+            "moonshot",
+            "minimax",
+            "bytedance",
+            "bytedance-seed",
+            "volcengine",
+            "xiaomi",
+            "stepfun",
+            "tencent",
+            "meituan",
+            "inclusionai",
+            "baidu",
+        ),
+        2,
+    ),
+}
 
 # Real OpenRouter models the last catalog build left out as impractical. Menus
 # never offer them, but a session or saved pick made before they dropped out
@@ -946,32 +986,51 @@ def _featured_probe_ids(deployed: dict[str, dict]) -> set[str]:
     return featured
 
 
-def _best_value_probe_id(deployed: dict[str, dict], featured: set[str]) -> tuple[str, float] | None:
-    """Pick the featured model with the best benchmark score per input dollar.
+def lab_tier(model_id: str) -> int:
+    """Rank a model's lab for best-value orderings: top labs first, Chinese labs last.
 
-    Only models that reason without being asked qualify: Auto sends no
-    effort, and a non-thinker would answer hard turns off the cuff.
+    Args:
+        model_id: A catalog value (``openrouter/vendor/model``,
+            ``provider/model``) or an OpenRouter probe id (``vendor/model``).
+
+    Returns:
+        0 for Anthropic, OpenAI and Google, 2 for Chinese labs, 1 otherwise.
+    """
+    parts = model_id.split("/")
+    vendor = parts[1] if parts[0] == "openrouter" and len(parts) > 2 else parts[0]
+    return _LAB_TIERS.get(vendor.lstrip("~").lower(), _DEFAULT_LAB_TIER)
+
+
+def _best_value_probe_id(deployed: dict[str, dict], featured: set[str]) -> tuple[str, tuple[int, float]] | None:
+    """Pick the featured model of the best-ranked lab with the best benchmark score per input dollar.
+
+    Only models that can reason qualify: a non-thinker would answer hard
+    turns off the cuff. An opt-in thinker still thinks under Auto, because
+    :func:`default_effort_for` sends it a low effort. The lab tier (see
+    :func:`lab_tier`) ranks first, score per dollar second.
 
     Args:
         deployed: Probe index of ``vendor/model`` id to raw item.
         featured: Probe ids already chosen by :func:`_featured_probe_ids`.
 
     Returns:
-        ``(probe id, score per dollar)`` of the winner, or ``None`` when no
-        featured model thinks by default with a benchmark and a price.
+        ``(probe id, (negated lab tier, score per dollar))`` of the winner,
+        so larger ranks better, or ``None`` when no featured model can reason
+        with a benchmark and a price.
     """
-    best: tuple[str, float] | None = None
+    best: tuple[str, tuple[int, float]] | None = None
     for probe_id in sorted(featured):
         item = deployed.get(probe_id)
-        if not item or not _probe_item_reasoning(item).get("reasoning_default_enabled"):
+        reasoning = _probe_item_reasoning(item) if item else {}
+        if not reasoning.get("reasoning_default_enabled") and not reasoning.get("reasoning_efforts"):
             continue
         score = _probe_item_intelligence(item)
         price = _probe_item_cost(item, "prompt")
         if score is None or not price:
             continue
-        value = score / price
-        if best is None or value > best[1]:
-            best = (probe_id, value)
+        rank = (-lab_tier(probe_id), score / price)
+        if best is None or rank > best[1]:
+            best = (probe_id, rank)
     return best
 
 
@@ -1474,7 +1533,7 @@ def get_catalog() -> ModelCatalogResponse:
     global _hidden_model_values, _featured_scores
     featured_values: set[str] = set()
     practical_by_dc: dict[tuple[str, str | None], set[str]] = {}
-    best_value: tuple[str, float] | None = None
+    best_value: tuple[str, tuple[int, float]] | None = None
     strongest: tuple[str, float] | None = None
     display_names: dict[str, str] = {}
     scores: dict[str, float] = {}
@@ -1521,6 +1580,7 @@ def get_catalog() -> ModelCatalogResponse:
             update={
                 "display_name": display_names.get(m.value),
                 "intelligence_index": indexes.get(m.value),
+                "lab_tier": lab_tier(m.value),
                 **(
                     {
                         "featured": True,
@@ -1561,6 +1621,48 @@ def catalog_snapshot() -> ModelCatalogResponse | None:
         The cached catalog, or ``None`` before the boot prewarm lands.
     """
     return _cached_response
+
+
+def unpicked_effort(entry: CatalogModel) -> str | None:
+    """Return the effort to send a catalog model when the caller picked none.
+
+    An unset effort sends OpenRouter no ``reasoning`` param, so an opt-in
+    thinker (Claude, Gemini) would answer without thinking at all. Such a
+    model gets the lowest effort from ``low`` up on its ladder; a model
+    that thinks by default gets its catalog default.
+
+    Args:
+        entry: The model's catalog row.
+
+    Returns:
+        The catalog default effort when the model thinks by default, its
+        low effort when it only thinks on request, else ``None`` (no
+        reasoning control).
+    """
+    if entry.reasoning_default_enabled:
+        return entry.default_reasoning_effort
+    floor = REASONING_EFFORTS.index("low")
+    return next((e for e in entry.reasoning_efforts or [] if REASONING_EFFORTS.index(e) >= floor), None)
+
+
+def default_effort_for(model: str | None) -> str | None:
+    """Return the effort to send ``model`` when the caller picked none.
+
+    Reads only the built catalog, so an LM build never blocks on a cold
+    catalog build. See :func:`unpicked_effort` for the policy.
+
+    Args:
+        model: Catalog model id (``CatalogModel.value``), or ``None``.
+
+    Returns:
+        :func:`unpicked_effort` of the model's catalog row, or ``None`` for
+        an unknown model or before the catalog is built.
+    """
+    snapshot = _cached_response
+    if not model or snapshot is None:
+        return None
+    entry = next((m for m in snapshot.models if m.value == model), None)
+    return unpicked_effort(entry) if entry is not None else None
 
 
 def agent_model_id(configured: str = "") -> str:

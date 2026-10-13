@@ -1,28 +1,26 @@
 """DSPy-powered code agent for the submit wizard.
 
-Two distinct modes share this module:
+Every program is authored under one contract: the agent writes run code
+(entry point ``run(artifact, input)``, or ``build_program()`` when a DSPy
+optimizer needs the module) plus a metric in the exact shape the chosen
+optimizer needs, and the validity check holds both to it before Run. The
+unified authoring context carries that contract, so both modes take it:
 
-* **Seed** (``user_message`` is empty): a single non-agentic pass that writes
-  the initial ``class MySignature`` and ``def metric`` in parallel. The
-  tokens are streamed so the editor fills in live while the user sets up
-  the rest of the wizard. A short English intro message is composed at the
-  end from the finished code.
+* **Seed** (``user_message`` is empty): a non-agentic pass that drafts the
+  run code and the metric in parallel, streamed so the editors fill in
+  live, then a short intro composed from the finished code.
 
 * **Chat** (``user_message`` is set): a :class:`dspy.ReActV2` agent with
-  two tools — ``edit_signature`` and ``edit_metric``. Simple questions
-  don't touch the editor; the model answers in the ``reply`` field via
-  the internal ``submit`` tool and no user-facing tool fires. When a
-  user-facing tool does fire, the backend emits ``tool_start`` /
+  ``ask_user`` / ``set_brief`` / ``edit_run`` / ``edit_metric``. When a
+  user-facing tool fires, the backend emits ``tool_start`` /
   ``signature_replace`` (or ``metric_replace``) / ``tool_end`` around the
   call so the UI can render a tool-call card and swap the code atomically.
 
-A unified authoring context (the submission wizard's metric + code step)
-switches both modes to the workspace contract: the seed drafts the run code
-(``run(artifact, input)``, or ``build_program()`` for a DSPy program) and
-the metric in the exact shape the chosen optimizer needs, and the chat agent
-gets ``ask_user`` / ``set_brief`` / ``edit_run`` / ``edit_metric``. Both ride
-the DSPy artifacts' events — ``signature_*`` for the run code, ``metric_*``
-for the metric — so the editor wiring is shared.
+The run code rides the ``signature_*`` events and the metric the
+``metric_*`` ones, so the editor wiring is shared. A workflow graph on the
+canvas (``prior_workflow``) switches both modes to graph-aware paths
+instead. The DSPy Signature chat agent (``edit_signature`` /
+``edit_metric``) still serves the MCP ``edit_code`` tool; it never seeds.
 
 The agent runs on whatever LiteLLM-compatible model is configured via
 ``settings.code_agent_model`` (default: the model catalog's best-value
@@ -48,7 +46,9 @@ from pydantic import ValidationError
 from ...api.model_catalog import agent_model_id
 from ...config import settings
 from ...exceptions import ServiceError
+from ...i18n import t_locale
 from ...models import ModelConfig, WorkflowSpec
+from ...models.unified import METRIC_SIGNATURES, run_entry_for
 from ..language_models import (
     apply_model_reasoning_config,
     apply_reasoning_effort,
@@ -70,8 +70,21 @@ logger = logging.getLogger(__name__)
 _ANSWERED_TERMINATIONS = frozenset({"submit", "forced_submit"})
 
 
+# A seed lane's provider stream keeps sending reasoning, so the per-request
+# read timeout never fires: a model that deliberates without end (a metric lane
+# on GLM 5.3 Flash thought 460 s and never wrote code) would hold the turn open
+# forever. Each lane gets a wall-clock deadline and a tighter completion budget
+# than the chat agent, which rewrites whole artifacts and needs the headroom.
+SEED_LANE_TIMEOUT_SECONDS = 120.0
+SEED_MAX_TOKENS = 16000
+
+
 class AgentStoppedError(RuntimeError):
     """The agent loop ended without calling ``submit`` and without a reply."""
+
+
+class SeedLaneTimeoutError(RuntimeError):
+    """A seed lane ran past its deadline without finishing its artifact."""
 
 
 def _require_answer(prediction: dspy.Prediction | None, reply_text: str) -> None:
@@ -122,7 +135,7 @@ def _format_agent_error(exc: BaseException) -> str:
     name = type(leaf).__name__
     if not text:
         return name or "code agent failed"
-    if isinstance(leaf, AgentStoppedError):
+    if isinstance(leaf, (AgentStoppedError, SeedLaneTimeoutError)):
         return text
     if "Cannot connect to host" in text or "nodename nor servname" in text:
         return "Can't reach the model provider. Check your network and try again."
@@ -174,9 +187,7 @@ def _agent_error_payload(exc: BaseException) -> dict[str, str]:
             break
         if isinstance(leaf, BaseExceptionGroup):
             stack.extend(leaf.exceptions)
-        stack.extend(
-            linked for linked in (leaf.__cause__, leaf.__context__) if linked is not None
-        )
+        stack.extend(linked for linked in (leaf.__cause__, leaf.__context__) if linked is not None)
     return payload
 
 
@@ -217,13 +228,12 @@ def _validate_metric_code(code: str) -> str:
 
 
 # Function name, minimum positional-capable parameters and maximum required
-# ones per metric shape; mirrors the harness's call sites (D3 of the
-# workspace contract): GEPA passes five arguments, the other DSPy optimizers
-# up to three, and the black-box harness passes ``expected`` only when declared.
+# ones per metric shape. These match the validity check's ``_METRIC_SLOTS``
+# (contract.py): a draft this accepts must not fail the check before Run.
 _METRIC_SIGNATURES: dict[str, tuple[str, int, int, str]] = {
-    "dspy_feedback": ("metric", 5, 5, "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None)"),
-    "dspy_scalar": ("metric", 2, 3, "def metric(gold, pred, trace=None)"),
-    "blackbox_side_info": ("score", 2, 3, "def score(input, output, expected=None)"),
+    "dspy_feedback": ("metric", 5, 5, METRIC_SIGNATURES["dspy_feedback"]),
+    "dspy_scalar": ("metric", 3, 3, METRIC_SIGNATURES["dspy_scalar"]),
+    "blackbox_side_info": ("score", 2, 2, METRIC_SIGNATURES["blackbox_side_info"]),
 }
 
 
@@ -393,136 +403,6 @@ def _parse_workflow_json(text: str) -> tuple[dict | None, str]:
     if not isinstance(parsed, dict):
         return None, "workflow JSON must be a single object with 'nodes' and 'edges'."
     return parsed, ""
-
-
-class GenerateSignatureCode(dspy.Signature):
-    """Write a dspy.Signature class that teaches the downstream LLM what to do.
-
-    Every part of the code you emit becomes part of the runtime prompt:
-    * the class docstring becomes the TASK INSTRUCTION,
-    * ``desc=`` on each InputField becomes the hint for that input,
-    * ``desc=`` on each OutputField becomes the hint for the answer —
-      the single most impactful field for output quality.
-
-    Write rich, specific text everywhere. A generic signature produces a
-    generic prompt and weak accuracy out of the box; a concrete,
-    sample-grounded signature gives the LLM everything it needs.
-
-    ## Docstring (3–6 sentences)
-
-    Describe (a) the concrete task, (b) what each input represents,
-    (c) what a high-quality answer looks like, and (d) any implicit
-    constraint visible in the sample rows (length, vocabulary,
-    formatting, units). Reference the kind of values present in the
-    samples — e.g. "reviews are 1–3 sentences in English", "answers
-    are always a single integer with no units". Avoid generic phrasing
-    like "answer the question"; say what KIND of answer is expected.
-    The docstring should be specific enough that a new developer
-    reading ONLY the class could reproduce the task.
-
-    ## Field descriptions (``desc=``)
-
-    For every InputField: one concrete sentence on semantic meaning +
-    any format hint grounded in the samples
-    (e.g. ``desc="A product review in English, 1–3 sentences long, may
-    contain emoji."``). Do not just repeat the field name.
-
-    For every OutputField: spell out format, length, valid values, and
-    any constraint the LLM must obey
-    (e.g. ``desc="One of: positive, negative, neutral. Lowercase, no
-    punctuation, no surrounding quotes."``). Be prescriptive — this
-    string is the main lever on answer quality.
-
-    ## Types inferred from the sample rows
-
-    Read the actual values in ``sample_rows`` for each role-mapped
-    column and pick the narrowest type that fits EVERY sample you see —
-    do not guess from the column name. Import from ``typing`` as needed:
-    * small finite vocabulary in outputs → ``Literal["a", "b", "c"]``
-      (enumerate ONLY the distinct values present in the samples — do
-      not invent extra members)
-    * integer-only values → ``int``
-    * numeric with decimals → ``float``
-    * "yes"/"no" or "true"/"false" → ``bool``
-    * obvious multi-value (commas, newlines, pipes) → ``list[str]``
-    * cells that are JSON objects or arrays of objects — nested,
-      structured blobs like a ``{"role": ..., "content": ...}`` chat
-      turn list or a wizard/state snapshot — → ``str``, NOT
-      ``dict``/``list``. The runtime delivers these fields as
-      JSON-encoded strings, so a ``dict``/``list`` annotation triggers a
-      predict-time type mismatch on every call. Keep the field ``str``
-      and say "JSON-encoded ..." in its ``desc=``.
-    * everything else → ``str``.
-
-    Types constrain the parser and reduce failures — prefer them over
-    ``str`` whenever the samples support it. If the samples are mixed or
-    ambiguous, fall back to ``str`` rather than over-constraining.
-
-    ## Image inputs (``dspy.Image``)
-
-    ``column_kinds`` flags the detected modality of every input column.
-    For any input column whose kind is ``"image"`` you MUST type the
-    InputField as ``dspy.Image`` — never ``str`` — and write the
-    ``desc=`` to describe what the image depicts (the model sees the
-    image directly, the desc tells it how to interpret it). Image
-    columns hold URLs or base64 data URIs at the row level; the runtime
-    wraps them into ``dspy.Image`` instances before the model is called.
-
-    ## Hard rules
-
-    * EXACTLY one InputField per column marked ``input`` and EXACTLY
-      one OutputField per column marked ``output`` — no more, no fewer.
-    * Field identifiers MUST match the dataset column names verbatim.
-    * Image input columns (``column_kinds[name] == "image"``) MUST be
-      typed ``dspy.Image``; text input columns follow the type rules
-      above.
-    * Do NOT invent auxiliary fields (``rationale``, ``explanation``,
-      ``confidence``, ``reasoning``, ...). Modules that wrap the
-      signature at runtime (``dspy.ChainOfThought``, ``dspy.ReAct``,
-      ...) add their own reasoning fields automatically; any extra
-      OutputField will fail validation because it has no matching
-      dataset column.
-    * Self-contained, importable at module scope. The allowed imports
-      are ``dspy`` and ``typing`` (for ``Literal``) — nothing else. No
-      markdown fences, no prose outside the class body.
-    """
-
-    dataset_columns: list[str] = dspy.InputField(desc="Every column name in the dataset.")
-    column_roles: str = dspy.InputField(
-        desc="JSON object mapping column name → 'input' | 'output' | 'ignore'.",
-    )
-    column_kinds: str = dspy.InputField(
-        desc=(
-            "JSON object mapping input-column name → 'text' | 'image'. "
-            "Image columns MUST be typed ``dspy.Image`` in the generated "
-            "InputField; text columns follow the standard type rules."
-        ),
-    )
-    sample_rows: str = dspy.InputField(
-        desc=(
-            "JSON array of up to 5 representative rows — read them "
-            "carefully to infer types, vocabulary, formatting, and "
-            "length for your docstring and field descs. Image cells "
-            "appear as URLs or base64 data URIs."
-        ),
-    )
-    authoring_brief: str = dspy.InputField(
-        desc=(
-            "Directives distilled from an interview with the dataset owner. "
-            "Every directive MUST be honored in the docstring and field "
-            "descs; empty when no interview happened."
-        ),
-    )
-
-    signature_code: str = dspy.OutputField(
-        desc=(
-            "Complete ``class MySignature(dspy.Signature):`` Python code. "
-            "Include a 3–6 sentence task docstring grounded in the "
-            "samples, typed InputField / OutputField for every role-mapped "
-            "column (matching names), and a specific ``desc=`` on every "
-            "field. No markdown fences, no surrounding prose."
-        ),
-    )
 
 
 class GenerateMetricCode(dspy.Signature):
@@ -738,42 +618,6 @@ def _reply_language(locale: str | None) -> str:
     return _LOCALE_LANGUAGE_NAMES.get(primary, "Hebrew")
 
 
-class GenerateSeedMessage(dspy.Signature):
-    """Write a short chat reply describing what was generated.
-
-    Respond in one or two short, friendly sentences — written in the
-    language named by ``reply_language`` — explaining what the Signature
-    and Metric actually do, grounded in the code just produced. No code,
-    no markdown. Addressed to a non-technical user. Keep the terms
-    ``Signature`` and ``Metric`` in English (they are product terms);
-    everything else must be in the reply language.
-    """
-
-    dataset_columns: list[str] = dspy.InputField(desc="Every column name in the dataset.")
-    column_roles: str = dspy.InputField(
-        desc="JSON object mapping column name → 'input' | 'output' | 'ignore'.",
-    )
-    column_kinds: str = dspy.InputField(
-        desc="JSON object mapping input-column name → 'text' | 'image'.",
-    )
-    sample_rows: str = dspy.InputField(
-        desc="JSON array of up to 5 representative rows from the dataset.",
-    )
-    signature_code: str = dspy.InputField(desc="The Signature code just produced.")
-    metric_code: str = dspy.InputField(desc="The metric code just produced.")
-    reply_language: str = dspy.InputField(
-        desc="Language to write the reply in (the product UI language).",
-    )
-
-    assistant_message: str = dspy.OutputField(
-        desc=(
-            "One or two short sentences for the user, written in "
-            "reply_language. No code, no markdown; only the product terms "
-            "``Signature`` and ``Metric`` stay in English."
-        ),
-    )
-
-
 _WORKFLOW_JSON_SCHEMA_DOC = """
     The workflow JSON has this exact shape:
 
@@ -925,10 +769,7 @@ class FixCodeArtifact(dspy.Signature):
     )
 
     fixed_code: str = dspy.OutputField(
-        desc=(
-            "The corrected full source for the artifact. No markdown fences, "
-            "no prose — just the Python code."
-        ),
+        desc=("The corrected full source for the artifact. No markdown fences, no prose — just the Python code."),
     )
 
 
@@ -1084,32 +925,51 @@ class CodeAssistant(dspy.Signature):
     )
 
 
-_RUN_CONTRACT = """The run code is plain python that turns one case input into an output; the optimizer swaps in new versions of the artifact and the metric scores what run returns.
-- Define def run(artifact, input): artifact is the version under optimization (a str, or a dict of name -> text when the starting version is a mapping), exactly as the optimizer proposes it; input is one case input, a dict keyed by the input fields. Return the output: a str, or any JSON-serializable value the metric reads.
-- The task model comes from the skynet module: `from skynet import llm` (never define your own). llm(prompt, input=None, images=None) -> str; llm(artifact, input["<input field>"]) runs the artifact as the system message with that field as the user message and returns the reply; that is how a prompt is exercised. images= attaches PNG/JPEG bytes, file paths or data: URLs.
-- Per artifact kind: a prompt is exercised with llm(artifact, ...); code is python source to load with exec into a fresh dict namespace (or write to a temp file and run with subprocess and a timeout) and call on the input; text is used as written (return it, or apply it with llm when the objective is about what the text makes a model do).
+_DELIVERABLES = """You write exactly two things, and the user can edit either: the run code and the metric. This holds for every artifact, a DSPy program included. The run code turns one case input into an output; the metric scores that output. Before Run, the validity check confirms they and the data agree: the run code's entry point must exist, it must take the starting version and each sample case input to an output, and the metric must have the exact shape the metric contract states and score that output without an error. Write both so that check passes."""
+
+_RUN_CONTRACT = """The run code is plain python that turns one case input into an output; the optimizer swaps in new versions of the artifact and the metric scores the output.
+- Entry point: {entry}
 - dspy, gepa and the standard library are installed; nothing else. No network of your own; temp files and subprocesses are fine.
 - Let errors raise: the harness reports them to the user. Do not return a fake output on failure.
 - Read input fields by their exact names; never invent fields."""
 
-_PROGRAM_CONTRACT = """The artifact is a DSPy program, so the run code builds it instead of running it.
-- Define def build_program() taking no arguments and returning a dspy.Module. `import dspy` at the top; define the dspy.Signature classes and the module it uses.
-- The harness applies the version under optimization, a dict mapping each predictor name (as program.named_predictors() reports it) to its instruction text, configures the task model as the dspy LM and calls program(**input) with the input fields as keyword arguments. Never call dspy.configure, create a dspy.LM or set instructions yourself.
+_RUN_ENTRY = (
+    f"define {run_entry_for('prompt')}: "
+    """artifact is the version under optimization (a str, or a dict of name -> text when the starting version is a mapping), exactly as the optimizer proposes it; input is one case input, a dict keyed by the input fields. Return the output: a str, or any JSON-serializable value the metric reads.
+- The task model comes from the skynet module: `from skynet import llm` (never define your own). llm(prompt, input=None, images=None) -> str; llm(artifact, input["<input field>"]) runs the artifact as the system message with that field as the user message and returns the reply; that is how a prompt is exercised. llm() caps the reply length itself (the task model's max tokens, or a default), so never pass a token limit. images= attaches PNG/JPEG bytes, file paths or data: URLs.
+- Per artifact kind: a prompt is exercised with llm(artifact, ...); code is python source to load with exec into a fresh dict namespace (or write to a temp file and run with subprocess and a timeout) and call on the input; text is used as written (return it, or apply it with llm when the objective is about what the text makes a model do)."""
+)
+
+# A DSPy optimizer tunes the module's predictors itself, so the engine needs
+# the module rather than a call; build_program() is that run code's entry
+# point, not a separate deliverable.
+_DSPY_ENTRY = (
+    """the artifact is a DSPy program, and the DSPy optimizer tunes its predictors itself, so the run code hands over the module instead of calling it: define """
+    + run_entry_for("dspy_program")
+    + """ taking no arguments and returning a dspy.Module. `import dspy` at the top; define the dspy.Signature classes and the module it uses inside the run code.
+- The harness applies the version under optimization, a dict mapping each predictor name (as program.named_predictors() reports it) to its instruction text, configures the task model as the dspy LM and calls program(**input) with the input fields as keyword arguments; the output is the dspy.Prediction it returns. Never call dspy.configure, create a dspy.LM or set instructions yourself.
 - Name the predictors so they match the keys of the starting version; the module's forward takes exactly the input fields as keyword arguments and returns a dspy.Prediction with the output fields the metric reads.
-- dspy, gepa and the standard library are installed; nothing else."""
+- Name the signature's input fields exactly as the case input fields. gold holds the case's expected fields under their own names (a single expected value is gold.expected), so name the output fields so the metric can compare pred.<field> with the matching gold field."""
+)
 
 _METRIC_SHAPES = {
     "dspy_feedback": """The metric feeds a DSPy GEPA optimizer, so it returns a score AND feedback text.
-- Define def metric(gold, pred, trace=None, pred_name=None, pred_trace=None) with all five parameters.
+- Define """
+    + METRIC_SIGNATURES["dspy_feedback"]
+    + """ with all five parameters.
 - gold is a dspy.Example holding the case input fields and the expected output fields (read them as gold.<field>); pred is the dspy.Prediction the program returned (pred.<output field>).
 - Return dspy.Prediction(score=float, feedback=str): score higher is better, 0.0 to 1.0 by convention; feedback says WHY, naming the expected value or the failed check, because the optimizer learns from it. {"score": ..., "feedback": ...} or (score, "feedback") are accepted too.""",
     "dspy_scalar": """The metric feeds a DSPy optimizer that reads only a number.
-- Define def metric(gold, pred, trace=None).
+- Define """
+    + METRIC_SIGNATURES["dspy_scalar"]
+    + """.
 - gold is a dspy.Example holding the case input fields and the expected output fields (read them as gold.<field>); pred is the dspy.Prediction the program returned (pred.<output field>).
 - Return a float (higher is better, 0.0 to 1.0 by convention) or a bool. No feedback is read.""",
     "blackbox_side_info": """The metric feeds a black-box optimizer that reads a score and side info.
-- Define def score(input, output, expected=None).
-- input is the case input dict (keyed by the input fields), output is what run returned for it, expected is the case's expected output (the value of the expected field; None when the case has none). Declare expected only when you use it.
+- Define """
+    + METRIC_SIGNATURES["blackbox_side_info"]
+    + """.
+- input is the case input dict (keyed by the input fields), output is what run returned for it, expected is the case's expected output as a dict keyed by the expected field (read expected["<field>"]; None when the case has none). Declare expected only when you use it.
 - Return (score, side_info): score is a float, higher is better, 0.0 to 1.0 by convention; side_info is a dict with "feedback": str saying WHY the output scored that, naming the expected value or the failed check. When several things are measured, add "scores": {"<name>": float, ...}, one entry per thing; the top-level score is then their (weighted) combination.""",
 }
 
@@ -1129,10 +989,14 @@ def _unified_contracts(unified: dict[str, Any]) -> tuple[str, str]:
         unified: The wizard's :class:`~core.models.UnifiedAuthoringContext` as a dict.
 
     Returns:
-        ``(run_contract, metric_contract)`` texts handed to the authors and the chat agent.
+        ``(run_contract, metric_contract)`` texts handed to the authors and the
+        chat agent. Every artifact gets the same contract: run code plus a
+        metric. Only the run code's entry point follows the artifact kind,
+        because a DSPy optimizer needs the module itself.
     """
     kind = str(unified.get("task", {}).get("artifact", {}).get("kind", "prompt"))
-    run_contract = _PROGRAM_CONTRACT if kind == "dspy_program" else _RUN_CONTRACT
+    entry = _DSPY_ENTRY if kind == "dspy_program" else _RUN_ENTRY
+    run_contract = f"{_DELIVERABLES}\n\n{_RUN_CONTRACT.format(entry=entry)}"
     shape = str(unified.get("metric_shape", "blackbox_side_info"))
     metric_contract = "\n\n".join(
         [
@@ -1149,12 +1013,13 @@ class GenerateRunCode(dspy.Signature):
 
     The optimizer improves an artifact (``artifact_kind``) toward
     ``objective``; the run code is the fixed harness that exercises the
-    current version of that artifact on one case. Implement it under
-    ``run_contract`` — that contract is exact; follow it literally. Ground
-    it in the starting version and the sample cases: read the input fields
-    by their exact names and return what the metric needs to score.
-    Keep it short and direct. Output ONLY the python code: no markdown
-    fences, no commentary.
+    current version of that artifact on one case, the same for every
+    artifact kind. Implement it under ``run_contract``: that contract is
+    exact, and the validity check holds the code to it before the run
+    starts, so follow it literally. Ground it in the starting version and
+    the sample cases: read the input fields by their exact names and
+    return what the metric needs to score. Keep it short and direct.
+    Output ONLY the python code: no markdown fences, no commentary.
     """
 
     objective: str = dspy.InputField(desc="What a better version of the artifact achieves.")
@@ -1179,10 +1044,14 @@ class GenerateUnifiedMetric(dspy.Signature):
     cases, decide what a measurably better output looks like, then
     implement it in the exact shape ``metric_contract`` states for
     ``metric_shape`` — the function name, its parameters and its return
-    value are fixed by the optimizer the user picked. Prefer graded scores
-    over pass/fail so the optimizer sees progress. Read fields by their
-    exact names. Output ONLY the python code: no markdown fences, no
-    commentary.
+    value are fixed by the optimizer the user picked. Keep it short and
+    simple, and decide quickly: when the expected value is a label or a
+    short answer, normalize both sides (strip, lowercase) and score an
+    exact match, or the expected label appearing in the output; do not
+    try to parse every phrasing or anticipate every edge case, the user
+    refines the metric afterwards. Use graded scores only where the
+    objective is graded by nature. Read fields by their exact names.
+    Output ONLY the python code: no markdown fences, no commentary.
     """
 
     objective: str = dspy.InputField(desc="What a better version of the artifact achieves.")
@@ -1226,6 +1095,16 @@ class UnifiedAssistant(dspy.Signature):
     one version of the artifact on one case input; ``current_metric`` is
     the python function that scores what it returns. The optimizer never
     sees the metric's source, only its scores and feedback.
+
+    ## What you own
+
+    Both pieces are yours to write: the first draft comes from you, and
+    after that you change them when the user asks; the user can also edit
+    either directly. Every artifact, a DSPy program included, gets run
+    code plus a metric under one contract; ``run_contract`` opens with
+    exactly what to write.
+    Before Run, a validity check confirms the code, the metric and the
+    data agree; everything you write must pass it.
 
     ## Your tools
 
@@ -1994,6 +1873,12 @@ async def _pump_seed_stream(
             results[field] = getattr(chunk, field, "") or ""
     if not results[field] and streamed:
         results[field] = "".join(streamed)
+    # DSPy's StreamListener yields nothing for a field that arrives whole in
+    # one provider chunk (its "cache hit" shortcut), which some providers do
+    # for short answers after a long think. Without this the editor stays
+    # empty until the whole turn ends.
+    if results[field] and not streamed:
+        await queue.put({"event": event_name, "data": {"chunk": results[field]}})
 
 
 def _run_code_fixer(
@@ -2097,164 +1982,6 @@ async def _validate_and_repair_artifact(
         queue.put_nowait({"event": replace_event, "data": {"code": code}})
         error = await asyncio.to_thread(validator, code)
     return code, error
-
-
-async def _run_seed(
-    *,
-    lm: dspy.LM,
-    dataset_columns: list[str],
-    column_roles_json: str,
-    column_kinds_json: str,
-    sample_rows_json: str,
-    authoring_brief: str,
-    reply_language: str,
-    queue: asyncio.Queue[dict | None],
-) -> dict[str, Any]:
-    """Run the non-agentic seed: Signature + metric in parallel, then intro.
-
-    Signature and metric tokens are streamed as ``signature_patch`` /
-    ``metric_patch`` events so the editor fills in live. After both are
-    complete, an intro message is generated from the finished code (which
-    gives the message model real context to talk about) and returned as
-    ``assistant_message`` on the final ``done`` payload.
-
-    Args:
-        lm: The language model to drive the seed predictors.
-        dataset_columns: All dataset column names.
-        column_roles_json: JSON string mapping column → role.
-        column_kinds_json: JSON string mapping input column → kind (text/image).
-        sample_rows_json: JSON-encoded list of representative sample rows.
-        authoring_brief: Interview directives both authors must honor; empty
-            when no interview happened.
-        reply_language: Language name the intro message is written in.
-        queue: SSE event queue to push token events onto.
-
-    Returns:
-        Mapping with keys ``signature_code``, ``metric_code`` (both
-        validated and repaired when needed), ``assistant_message``, the
-        boolean ``signature_valid`` / ``metric_valid`` flags, and an
-        optional ``validation_error`` string when an artifact could not be
-        repaired within the attempt budget.
-    """
-    sig_predict = dspy.Predict(GenerateSignatureCode)
-    met_predict = dspy.Predict(GenerateMetricCode)
-    sig_program = dspy.streamify(
-        sig_predict,
-        stream_listeners=[
-            dspy.streaming.StreamListener(signature_field_name="signature_code"),
-            ReasoningStreamListener(predict=sig_predict),
-        ],
-        async_streaming=True,
-    )
-    met_program = dspy.streamify(
-        met_predict,
-        stream_listeners=[
-            dspy.streaming.StreamListener(signature_field_name="metric_code"),
-            ReasoningStreamListener(predict=met_predict),
-        ],
-        async_streaming=True,
-    )
-
-    shared_inputs = {
-        "dataset_columns": dataset_columns,
-        "column_roles": column_roles_json,
-        "column_kinds": column_kinds_json,
-        "sample_rows": sample_rows_json,
-        "authoring_brief": authoring_brief,
-    }
-    results: dict[str, Any] = {"signature_code": "", "metric_code": "", "assistant_message": ""}
-
-    msg_predict = dspy.Predict(GenerateSeedMessage)
-    msg_program = dspy.streamify(
-        msg_predict,
-        stream_listeners=[
-            dspy.streaming.StreamListener(signature_field_name="assistant_message"),
-        ],
-        async_streaming=True,
-    )
-
-    with dspy.context(lm=lm):
-        # Two independent lanes: each artifact validates (and repairs) the
-        # moment its OWN stream finishes, so the usually-faster signature's
-        # multi-second subprocess validation overlaps the metric's remaining
-        # stream instead of waiting for it. The seed predictors stream raw,
-        # unvalidated code — without this pass a stray brace or bad
-        # identifier surfaces only as a 400 at submit.
-        async def _signature_lane() -> tuple[str, str]:
-            """Stream the signature, then validate/repair it immediately."""
-            await _pump_seed_stream(
-                sig_program,
-                shared_inputs,
-                "signature_code",
-                "signature_patch",
-                queue=queue,
-                results=results,
-                reasoning_source="signature",
-            )
-            return await _validate_and_repair_artifact(
-                lm=lm,
-                artifact_kind="signature",
-                code=results["signature_code"],
-                validator=_validate_signature_code,
-                dataset_columns=dataset_columns,
-                column_roles_json=column_roles_json,
-                queue=queue,
-                replace_event="signature_replace",
-            )
-
-        async def _metric_lane() -> tuple[str, str]:
-            """Stream the metric, then validate/repair it immediately."""
-            await _pump_seed_stream(
-                met_program,
-                shared_inputs,
-                "metric_code",
-                "metric_patch",
-                queue=queue,
-                results=results,
-                reasoning_source="metric",
-            )
-            return await _validate_and_repair_artifact(
-                lm=lm,
-                artifact_kind="metric",
-                code=results["metric_code"],
-                validator=_validate_metric_code,
-                dataset_columns=dataset_columns,
-                column_roles_json=column_roles_json,
-                queue=queue,
-                replace_event="metric_replace",
-            )
-
-        (sig_code, sig_err), (met_code, met_err) = await asyncio.gather(
-            _signature_lane(), _metric_lane()
-        )
-        results["signature_code"] = sig_code
-        results["metric_code"] = met_code
-        results["signature_valid"] = not sig_err
-        results["metric_valid"] = not met_err
-        if sig_err or met_err:
-            parts = []
-            if sig_err:
-                parts.append(f"Signature: {sig_err}")
-            if met_err:
-                parts.append(f"Metric: {met_err}")
-            results["validation_error"] = " | ".join(parts)
-
-        async for chunk in msg_program(
-            dataset_columns=dataset_columns,
-            column_roles=column_roles_json,
-            column_kinds=column_kinds_json,
-            sample_rows=sample_rows_json,
-            signature_code=results["signature_code"],
-            metric_code=results["metric_code"],
-            reply_language=reply_language,
-        ):
-            if isinstance(chunk, dspy.streaming.StreamResponse):
-                if chunk.signature_field_name == "assistant_message":
-                    await queue.put({"event": "message_patch", "data": {"chunk": chunk.chunk}})
-            elif isinstance(chunk, dspy.Prediction):
-                results["assistant_message"] = getattr(chunk, "assistant_message", "") or ""
-
-    return results
 
 
 def _emit_to_code_queue(
@@ -2850,7 +2577,9 @@ class _WorkflowEditSession:
         try:
             node = json.loads(_strip_json_fences(node_json))
         except (json.JSONDecodeError, ValueError) as exc:
-            return self._tool_result(call_id, "add_node", ok=False, message=f"Edit rejected — node_json does not parse: {exc}")
+            return self._tool_result(
+                call_id, "add_node", ok=False, message=f"Edit rejected — node_json does not parse: {exc}"
+            )
         if not isinstance(node, dict) or node.get("kind") not in ("signature", "transform"):
             return self._tool_result(
                 call_id,
@@ -2861,7 +2590,10 @@ class _WorkflowEditSession:
         node_id = str(node.get("id", ""))
         if not node_id or self._node(node_id) is not None:
             return self._tool_result(
-                call_id, "add_node", ok=False, message=f"Edit rejected — node id '{node_id}' is missing or already taken."
+                call_id,
+                "add_node",
+                ok=False,
+                message=f"Edit rejected — node id '{node_id}' is missing or already taken.",
             )
         if node["kind"] == "signature":
             err = _validate_signature_code(str(node.get("signature_code", "")))
@@ -2900,7 +2632,9 @@ class _WorkflowEditSession:
             return self._tool_result(call_id, "update_node", ok=False, message=rejection)
         existing = self._node(node_id)
         if existing is None:
-            return self._tool_result(call_id, "update_node", ok=False, message=f"Edit rejected — no node with id '{node_id}'.")
+            return self._tool_result(
+                call_id, "update_node", ok=False, message=f"Edit rejected — no node with id '{node_id}'."
+            )
         try:
             node = json.loads(_strip_json_fences(node_json))
         except (json.JSONDecodeError, ValueError) as exc:
@@ -2947,7 +2681,9 @@ class _WorkflowEditSession:
             return self._tool_result(call_id, "remove_node", ok=False, message=rejection)
         node = self._node(node_id)
         if node is None:
-            return self._tool_result(call_id, "remove_node", ok=False, message=f"Edit rejected — no node with id '{node_id}'.")
+            return self._tool_result(
+                call_id, "remove_node", ok=False, message=f"Edit rejected — no node with id '{node_id}'."
+            )
         if node.get("kind") in ("input", "output"):
             return self._tool_result(
                 call_id, "remove_node", ok=False, message="Edit rejected — the input/output anchors cannot be removed."
@@ -2985,7 +2721,9 @@ class _WorkflowEditSession:
         if rejection:
             return self._tool_result(call_id, "connect", ok=False, message=rejection)
         if self._node(source) is None or self._node(target) is None:
-            return self._tool_result(call_id, "connect", ok=False, message="Edit rejected — unknown source or target node id.")
+            return self._tool_result(
+                call_id, "connect", ok=False, message="Edit rejected — unknown source or target node id."
+            )
         if source == target:
             return self._tool_result(call_id, "connect", ok=False, message="Edit rejected — a node cannot feed itself.")
         for e in self._workflow["edges"]:
@@ -3007,7 +2745,9 @@ class _WorkflowEditSession:
         while stack:
             cur = stack.pop()
             if cur == source:
-                return self._tool_result(call_id, "connect", ok=False, message="Edit rejected — that edge would close a cycle.")
+                return self._tool_result(
+                    call_id, "connect", ok=False, message="Edit rejected — that edge would close a cycle."
+                )
             if cur in seen:
                 continue
             seen.add(cur)
@@ -3328,9 +3068,7 @@ async def _run_workflow_seed(
 
             if spec_dict is not None:
                 results["workflow"] = spec_dict
-                await queue.put(
-                    {"event": "workflow_replace", "data": {"workflow": spec_dict, "changed_node_id": None}}
-                )
+                await queue.put({"event": "workflow_replace", "data": {"workflow": spec_dict, "changed_node_id": None}})
             results["workflow_valid"] = not error
             return error
 
@@ -3518,18 +3256,43 @@ def _unified_inputs(unified: dict[str, Any]) -> dict[str, Any]:
     artifact = task.get("artifact") or {}
     version = artifact.get("starting_version", "")
     run_contract, metric_contract = _unified_contracts(unified)
+    case_fields = [str(f) for f in unified.get("input_fields") or []]
     return {
         "objective": str(task.get("objective", "")).strip(),
         "background": str(task.get("background", "") or "").strip(),
         "artifact_kind": str(artifact.get("kind", "prompt")),
         "starting_version": version if isinstance(version, str) else json.dumps(version, ensure_ascii=False),
-        "case_fields": [str(f) for f in unified.get("input_fields") or []],
+        "case_fields": case_fields,
         "expected_field": str(unified.get("expected_field") or ""),
-        "sample_cases": json.dumps((unified.get("sample_cases") or [])[:5], ensure_ascii=False, default=str),
+        "sample_cases": json.dumps(
+            [_project_case(case, case_fields) for case in (unified.get("sample_cases") or [])[:5]],
+            ensure_ascii=False,
+            default=str,
+        ),
         "metric_shape": str(unified.get("metric_shape", "blackbox_side_info")),
         "run_contract": run_contract,
         "metric_contract": metric_contract,
     }
+
+
+def _project_case(case: Any, case_fields: list[str]) -> Any:
+    """Keep only the declared input fields of one sample case's ``input``.
+
+    The run hands ``run`` exactly the declared fields, so a sample carrying
+    other columns would teach the agent to read keys the contract check and
+    the optimization never pass.
+
+    Args:
+        case: One ``{"input": {...}, "expected": ...}`` sample case.
+        case_fields: The declared input field names.
+
+    Returns:
+        The case with its ``input`` narrowed to ``case_fields``, or the case
+        unchanged when it has no input dict or no fields are declared.
+    """
+    if not case_fields or not isinstance(case, dict) or not isinstance(case.get("input"), dict):
+        return case
+    return {**case, "input": {k: v for k, v in case["input"].items() if k in case_fields}}
 
 
 def _inputs_for(signature: type[dspy.Signature], values: dict[str, Any]) -> dict[str, Any]:
@@ -3588,6 +3351,7 @@ async def _run_unified_seed(
     authoring_brief: str,
     reply_language: str,
     queue: asyncio.Queue[dict | None],
+    locale: str | None = None,
 ) -> dict[str, Any]:
     """Draft the wizard's run code and metric in parallel, then the intro message.
 
@@ -3595,7 +3359,8 @@ async def _run_unified_seed(
     ``metric_patch`` — the wizard's editors sit on the same slots as the
     DSPy Signature / metric — and the finished pair is returned under
     ``signature_code`` / ``metric_code`` for the same reason. Both get the
-    static contract check + repair loop.
+    static contract check + repair loop, and each lane then emits
+    ``artifact_done`` with its ``source`` (``signature`` / ``metric``).
 
     Args:
         lm: The language model driving the seed predictors.
@@ -3603,12 +3368,17 @@ async def _run_unified_seed(
         authoring_brief: Directives both authors must honor; empty when none.
         reply_language: Language name the intro message is written in.
         queue: SSE event queue to push token events onto.
+        locale: UI locale the timeout error is written in; ``None`` is Hebrew.
 
     Returns:
         Mapping with keys ``signature_code`` (the run code), ``metric_code``,
         ``assistant_message``, the boolean ``signature_valid`` /
         ``metric_valid`` flags, and an optional ``validation_error`` string
         when either could not be repaired within the attempt budget.
+
+    Raises:
+        SeedLaneTimeoutError: When a lane runs past
+            ``SEED_LANE_TIMEOUT_SECONDS``; the other lane is cancelled.
     """
     shared = {**_unified_inputs(unified), "authoring_brief": authoring_brief}
     run_validator, metric_validator = _unified_validators(unified)
@@ -3628,6 +3398,15 @@ async def _run_unified_seed(
     with dspy.context(lm=lm):
 
         async def _lane(name: str) -> tuple[str, str]:
+            """Run one lane under its deadline."""
+            try:
+                async with asyncio.timeout(SEED_LANE_TIMEOUT_SECONDS):
+                    return await _draft(name)
+            except TimeoutError:
+                logger.warning("unified seed %s lane passed its %ss deadline", name, SEED_LANE_TIMEOUT_SECONDS)
+                raise SeedLaneTimeoutError(t_locale(locale, "code_agent.seed_lane_timeout")) from None
+
+        async def _draft(name: str) -> tuple[str, str]:
             """Stream one artifact, then check/repair it against its contract."""
             signature, field, event, source, validator, replace_event = lanes[name]
             predict = dspy.Predict(signature)
@@ -3648,7 +3427,7 @@ async def _run_unified_seed(
                 results=streamed,
                 reasoning_source=source,
             )
-            return await _validate_and_repair_artifact(
+            checked = await _validate_and_repair_artifact(
                 lm=lm,
                 artifact_kind=name,
                 code=streamed[field],
@@ -3658,8 +3437,19 @@ async def _run_unified_seed(
                 queue=queue,
                 replace_event=replace_event,
             )
+            # The lanes run in parallel and can finish minutes apart, so each
+            # reports its own end rather than the UI guessing from the other's tokens.
+            await queue.put({"event": "artifact_done", "data": {"source": source}})
+            return checked
 
-        (run_code, run_err), (metric_code, metric_err) = await asyncio.gather(_lane("run"), _lane("metric"))
+        try:
+            async with asyncio.TaskGroup() as lanes_group:
+                run_task = lanes_group.create_task(_lane("run"))
+                metric_task = lanes_group.create_task(_lane("metric"))
+        except BaseExceptionGroup as group:
+            raise group.exceptions[0] from None
+        run_code, run_err = run_task.result()
+        metric_code, metric_err = metric_task.result()
         results: dict[str, Any] = {
             "signature_code": run_code,
             "metric_code": metric_code,
@@ -3809,16 +3599,17 @@ async def _run_code_agent_orchestration(
     reply_language: str,
     unified: dict[str, Any] | None,
     steering: SteerInbox | None = None,
+    locale: str | None = None,
 ) -> None:
     """Run the seed or chat path and push the terminal envelope into ``queue``.
 
-    Dispatches to :func:`_run_seed` when ``is_seed`` is true (the user sent
-    no message and we need to generate the initial Signature + metric) and
-    to :func:`_run_agent` otherwise; a non-None ``prior_workflow`` routes
-    both modes to their graph-aware counterparts instead, and a non-None
-    ``unified`` to the wizard's run-code + metric paths. Emits exactly one
-    terminal event (``done`` on success, ``error`` on failure) followed by
-    the ``None`` sentinel that unblocks the outer consumer.
+    A non-None ``unified`` runs the run-code + metric seed or chat path and
+    a non-None ``prior_workflow`` the graph-aware ones. Without either, a
+    chat turn runs the DSPy Signature agent (:func:`_run_agent`, kept for
+    the MCP ``edit_code`` tool) and a seed fails: there is no Signature
+    seed, every first draft goes through the one run-code contract. Emits
+    exactly one terminal event (``done`` on success, ``error`` on failure)
+    followed by the ``None`` sentinel that unblocks the outer consumer.
 
     Args:
         is_seed: True to run the seed path; False to run the chat agent.
@@ -3845,6 +3636,7 @@ async def _run_code_agent_orchestration(
             slots hold the run code and the metric.
         steering: The turn's inbox for messages the user sends while it
             runs; ``None`` leaves the turn unsteerable.
+        locale: UI locale of the client, for errors the engine words itself.
     """
     try:
         if unified is not None and is_seed:
@@ -3854,6 +3646,7 @@ async def _run_code_agent_orchestration(
                 authoring_brief=authoring_brief,
                 reply_language=reply_language,
                 queue=queue,
+                locale=locale,
             )
         elif unified is not None:
             validation = "\n".join(v for v in (prior_signature_validation, prior_metric_validation) if v)
@@ -3898,16 +3691,7 @@ async def _run_code_agent_orchestration(
                 steering=steering,
             )
         elif is_seed:
-            results = await _run_seed(
-                lm=lm,
-                dataset_columns=dataset_columns,
-                column_roles_json=column_roles_json,
-                column_kinds_json=column_kinds_json,
-                sample_rows_json=sample_rows_json,
-                authoring_brief=authoring_brief,
-                reply_language=reply_language,
-                queue=queue,
-            )
+            raise ValueError("A first draft needs the authoring context (unified) or a workflow graph.")
         else:
             results = await _run_agent(
                 lm=lm,
@@ -3965,10 +3749,10 @@ async def run_code_agent(
 ) -> AsyncGenerator[dict, None]:
     """Stream code-agent events to the UI.
 
-    When ``user_message`` is empty → seed path (parallel Signature + metric
-    generation). When set → chat path (ReAct with two tools). Both paths
-    share the same ``done`` / ``error`` envelope and the same
-    ``reasoning_patch`` event for reasoning-capable providers.
+    When ``user_message`` is empty → seed path (parallel run code + metric
+    drafts, which needs ``unified`` or ``prior_workflow``). When set → chat
+    path (ReAct). Both paths share the same ``done`` / ``error`` envelope
+    and the same ``reasoning_patch`` event for reasoning-capable providers.
 
     A non-None ``prior_workflow`` switches both modes to their graph-aware
     counterparts: the seed drafts a full workflow graph (emitted as one
@@ -4039,7 +3823,8 @@ async def run_code_agent(
     Yields:
         SSE event dicts of shape ``{"event": str, "data": dict}``.
     """
-    lm = _build_agent_lm(model, reasoning_effort)
+    is_seed = not user_message.strip()
+    lm = _build_agent_lm(model, reasoning_effort, SEED_MAX_TOKENS if is_seed and unified is not None else 32000)
     model_name = model or agent_model_id(settings.code_agent_model)
     if usage_sink is not None:
         usage_sink.append(lm)
@@ -4048,7 +3833,6 @@ async def run_code_agent(
     sample_rows_json = json.dumps(sample_rows[:5], ensure_ascii=False, default=str)
     chat_history_json = json.dumps(chat_history or [], ensure_ascii=False)
     authoring_brief = "\n".join(f"- {d.strip()}" for d in (interview_brief or []) if d.strip())
-    is_seed = not user_message.strip()
 
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
     steering = (
@@ -4087,6 +3871,7 @@ async def run_code_agent(
             reply_language=_reply_language(locale),
             unified=unified,
             steering=steering,
+            locale=locale,
         )
     )
     try:

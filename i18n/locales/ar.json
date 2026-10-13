@@ -282,6 +282,7 @@
     "submission.staged_dataset_not_found": "لم يُعثر على staged_dataset_id '{staged_dataset_id}' لهذا المستخدم — أعِد رفع مجموعة البيانات وحاول مجددًا.",
     "submission.validation_failed": "فشل التحقّق من الحمولة. تحقّق من المُحسِّن والوحدة وتعيين الأعمدة.",
     "submission.vision_required": "تحتوي مجموعة البيانات على أعمدة صور ({fields}) لكن النموذج المحدّد ('{model}') لا يدعم إدخالات الصور. اختر نموذجًا يدعم الرؤية.",
+    "code_agent.seed_lane_timeout": "فكّر النموذج لفترة طويلة جدًا دون أن يكتب الشيفرة، لذا أُوقفت المسودة. حاول مرة أخرى، أو اختر نموذجًا أسرع أو مستوى تفكير أقل.",
     "submit.no_models_available": "لا تتوفّر أي نماذج في الكتالوج — هيّئ مفتاح API لمزوّد أولاً.",
     "user.storage.quota_exceeded": "تم تجاوز حصة التخزين (استُخدم {used_mb} ميغابايت من {quota_mb} ميغابايت). حرّر مساحة وحاول مجددًا.",
     "wizard.code_via_authoring_only": "لا يمكن تعيين {field} عبر update_wizard_state. يُكتب كود التوقيع والمقياس فقط عبر request_code_authoring، الذي يتحقّق من النتيجة قبل وصولها إلى المعالج.",

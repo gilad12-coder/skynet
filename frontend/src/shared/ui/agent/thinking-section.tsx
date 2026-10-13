@@ -41,6 +41,15 @@ export function ThinkingSection({ thinking }: { thinking: AgentThinking }) {
     setOpen(false);
   }, [reasoning, shouldReduceMotion]);
 
+  // A stream that resumes reasoning after the block auto-collapsed (a
+  // parallel lane still thinking) reopens it, so the live text stays visible.
+  React.useEffect(() => {
+    if (isThinking && autoCollapsedRef.current) {
+      autoCollapsedRef.current = false;
+      setOpen(true);
+    }
+  }, [isThinking]);
+
   React.useEffect(() => {
     if (hasFinished && !autoCollapsedRef.current) {
       autoCollapsedRef.current = true;

@@ -1279,8 +1279,12 @@ Rules:
        right unless the user names one; ``optimizer_catalog`` lists what
        fits the artifact and data mode), ``reflection_model_config``
        (always needed) and ``model_config`` (the task model).
-    5. Code — ``request_code_authoring`` becomes available ONLY after
-       the run is named AND the task is set. If you want to author code
+    5. Code — ``request_code_authoring`` has the coding agent write the
+       code the run needs: run code plus a metric, the same for every
+       artifact, a ``dspy_program`` included. Never write either yourself; the user edits them in the wizard,
+       and the validity check confirms they fit the data before Run. The
+       tool becomes available ONLY after the run is named AND the task
+       is set. If you want to author code
        and the tool is NOT in your list this turn, the cause is a missing
        ``job_name`` or task field — set it first, then it unlocks next
        turn.
@@ -1337,11 +1341,10 @@ never claim, suggest, or pass any others):
   artifact). ``optimizer_catalog`` says which are available right now.
   There is no grid search and no model sweep: one run uses one task model
   and one reflection model.
-* Workspace code: every run is plain Python. The run code defines
-  ``run(artifact, input) -> output`` (or ``build_program()`` returning a
-  ``dspy.Module`` for a ``dspy_program`` artifact); the metric's shape
-  depends on the optimizer. Both are written by ``request_code_authoring``
-  — never by you.
+* Workspace code: every run is plain Python, run code plus a metric,
+  under one contract for every artifact (a ``dspy_program``'s run code
+  builds its dspy module); the metric's shape depends on the optimizer.
+  Both are written by ``request_code_authoring`` — never by you.
 * The optimizer never sees the metric code; it learns only from scores
   and feedback. Do not paste the metric into the objective or background.
 

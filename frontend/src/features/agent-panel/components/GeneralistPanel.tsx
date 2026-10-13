@@ -352,6 +352,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const codeAgent = useCodeAuthoringAgent({
     dataset: lastConfirmedDataset,
     armed: codeArmed,
+    wizard: effectiveWizard,
     optimizerName:
       typeof effectiveWizard.optimizer_name === "string"
         ? effectiveWizard.optimizer_name
@@ -390,10 +391,10 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     codeAgentReset();
   }, [agent.conversationId, codeAgentReset]);
 
-  // Auto-orchestrate: once authoring settles with valid code, write it into the
-  // shared wizard state and nudge the generalist to proceed — no manual "the
-  // code is ready". On validation failure we don't hand off; the card surfaces
-  // the error (mirroring the code agent) and the user steers via chat.
+  // Auto-orchestrate: once authoring settles with code that passes the validity
+  // check, write it into the shared wizard state and nudge the generalist to
+  // proceed — no manual "the code is ready". On a failed check we don't hand
+  // off; the card surfaces the failures and the user steers via chat.
   const applyAgentPatch = wizardCtx?.applyAgentPatch;
   const agentSend = agent.send;
   React.useEffect(() => {
@@ -401,23 +402,20 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     if (!codeArmed) return;
     if (agent.status === "streaming") return;
     if (codeAgent.status !== "done") return;
-    // The metric is required for every module; validate it first.
     if (!codeAgent.metricCode.trim()) return;
-    const metVal = codeAgent.metricValidation;
-    if (!metVal || metVal.errors.length > 0) return;
-    // The authored program differs by module: a workflow run carries the graph
-    // (validated authoritatively by the backend on submit — the canvas already
-    // surfaces graph issues), a single-module run carries the Signature.
+    // A workflow run carries the graph (validated authoritatively by the
+    // backend on submit; the canvas already surfaces graph issues); every
+    // other run carries run code plus a metric under the one contract.
     let authoredCode: Partial<WizardState>;
     if (codeAgent.isWorkflow) {
+      const metVal = codeAgent.metricValidation;
+      if (!metVal || metVal.errors.length > 0) return;
       const spec = codeAgent.workflowSpec;
       // Require a real step between the input/output anchors before handing off.
       if (!spec || spec.nodes.length < 3) return;
       authoredCode = { workflow: spec, metric_code: codeAgent.metricCode };
     } else {
-      if (!codeAgent.signatureCode.trim()) return;
-      const sigVal = codeAgent.signatureValidation;
-      if (!sigVal || sigVal.errors.length > 0) return;
+      if (!codeAgent.contractOk) return;
       authoredCode = {
         run_code: codeAgent.signatureCode,
         metric_code: codeAgent.metricCode,
@@ -445,7 +443,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     codeAgent.workflowSpec,
     codeAgent.signatureCode,
     codeAgent.metricCode,
-    codeAgent.signatureValidation,
+    codeAgent.contractOk,
     codeAgent.metricValidation,
   ]);
 
@@ -479,6 +477,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
           columns_configured: true,
           dataset_columns: confirmed.columns,
           column_kinds: confirmed.columnKinds,
+          column_roles: confirmed.columnRoles,
         },
       };
       // Persist before dispatch so the wizard can replay it after navigation;

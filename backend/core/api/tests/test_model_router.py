@@ -107,7 +107,7 @@ def _effort_catalog() -> ModelCatalogResponse:
     ("model", "requested", "expected"),
     [
         ("deepseek/flash", None, "high"),
-        ("deepseek/pro", None, None),
+        ("deepseek/pro", None, "low"),
         ("deepseek/flash", "max", "max"),
         ("deepseek/flash", "medium", "high"),
         ("deepseek/flash", "minimal", "low"),
@@ -119,7 +119,7 @@ def _effort_catalog() -> ModelCatalogResponse:
 def test_effective_reasoning_effort(
     monkeypatch: pytest.MonkeyPatch, model: str | None, requested: str | None, expected: str | None
 ) -> None:
-    """Default resolves to the catalog default; explicit picks snap onto the model's ladder."""
+    """Default resolves to the catalog default, or low for an opt-in thinker; picks snap onto the ladder."""
     monkeypatch.setattr(mr, "get_catalog_cached", _effort_catalog)
     assert effective_reasoning_effort(model, requested) == expected
 

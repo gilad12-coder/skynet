@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from core.api.auth import AuthenticatedUser, get_authenticated_user
 from core.api.routers import wizard_preflight
+from core.i18n import t
 
 RUN_CODE = "def run(artifact, input):\n    return artifact\n"
 METRIC_CODE = "def score(input, output, expected=None):\n    return 1.0, {'feedback': 'ok'}\n"
@@ -136,3 +137,60 @@ def test_static_route_reports_whether_the_metric_calls_llm(calls: list[Any]) -> 
 
     assert plain.json()["uses_llm"] is False
     assert judged.json()["uses_llm"] is True
+
+
+def test_sandbox_route_gives_an_older_images_items_their_message_codes(
+    calls: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pinned sandbox image can predate ``message_code``; the client still gets a code on every item.
+
+    Without it, an English UI rendered the Hebrew base text of each item.
+    """
+    error = "KeyError: 'product'"
+    traceback = f'Traceback (user code):\n  File "<run_code>", line 10, in run\n{error}'
+    legacy_checks: list[dict[str, Any]] = [
+        {"key": key, "status": "passed", "message": t("contract.passed")}
+        for key in ("workspace.run_signature", "metric.signature", "metric.model")
+    ]
+    for index in range(3):
+        legacy_checks += [
+            {
+                "key": "workspace.run",
+                "status": "failed",
+                "message": t("contract.run_error", index=index + 1, error=error),
+                "sample_index": index,
+                "detail": traceback,
+            },
+            {
+                "key": "metric.shape",
+                "status": "skipped",
+                "message": t("contract.shape.blackbox"),
+                "sample_index": index,
+            },
+        ]
+    legacy = {
+        "ok": False,
+        "optimizer_resolved": "best_of_n",
+        "metric_shape": "blackbox_side_info",
+        "checks": legacy_checks,
+        "samples": [{"index": i, "input_preview": "{}"} for i in range(3)],
+        "fingerprint": "f",
+    }
+    monkeypatch.setattr(
+        wizard_preflight,
+        "run_preflight",
+        lambda request, user, store: SimpleNamespace(status="failed", checks=[], workflow_result={"contract": legacy}),
+    )
+    with _client() as client:
+        body = client.post("/optimizations/contract-check", json={"spec": _spec()}).json()
+
+    assert body["ok"] is False
+    assert all(item["message_code"] for item in body["checks"])
+    runs = [item for item in body["checks"] if item["key"] == "workspace.run"]
+    assert [(item["message_code"], item["message_params"]) for item in runs] == [
+        ("contract.run_error", {"index": i + 1, "error": error}) for i in range(3)
+    ]
+    assert {item["message_code"] for item in body["checks"] if item["key"] == "metric.shape"} == {
+        "contract.shape.blackbox"
+    }
+    assert {item["message_code"] for item in body["checks"] if item["sample_index"] is None} == {"contract.passed"}

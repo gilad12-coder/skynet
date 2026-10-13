@@ -4,14 +4,12 @@
  * guided filtering and the choice-issue rules are testable without React.
  */
 import {
-  metricShapeFor,
   optimizerFamily,
   optimizersFor,
   resolveOptimizer,
   usesFeedback,
   type ArtifactKind,
   type DataMode,
-  type MetricShape,
   type OptimizerCatalogResponse,
   type OptimizerChoice,
   type OptimizerFamily,
@@ -21,7 +19,6 @@ import { supportsIterationLimit, usesNativeProposer } from "./engine-contract";
 export interface OptimizerOptionView {
   id: OptimizerChoice;
   family: OptimizerFamily;
-  metricShape: MetricShape;
   /** False only when the catalog says so; an option is assumed runnable while it loads. */
   available: boolean;
   unavailableReason: string | null;
@@ -64,7 +61,6 @@ export function optimizerOptions(input: {
     return {
       id,
       family: entry?.family ?? optimizerFamily(resolved),
-      metricShape: entry?.metric_shape ?? metricShapeFor(id, kind),
       available: entry ? entry.available : catalog == null,
       unavailableReason: entry && !entry.available ? (entry.unavailable_reason?.trim() || null) : null,
       checking: catalog == null,
