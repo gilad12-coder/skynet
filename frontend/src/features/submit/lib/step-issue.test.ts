@@ -81,9 +81,9 @@ function readyState(level: Level, check: ContractCheckResponse | null) {
   };
 }
 
-test("the Metric step is one screen", () => {
+test("the Metric step is the code screen, then the overview that holds Run", () => {
   for (const level of ["guided", "standard", "expert"] as const) {
-    assert.deepEqual(stepPages("metric", readyState(level, null)), ["metric"]);
+    assert.deepEqual(stepPages("metric", readyState(level, null)), ["metric", "overview"]);
   }
 });
 

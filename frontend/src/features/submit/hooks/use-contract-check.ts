@@ -22,7 +22,8 @@ export interface ContractCheckState {
   error: string | null;
   /** False while the setup cannot build a payload yet. */
   canCheck: boolean;
-  check: () => Promise<void>;
+  /** Runs the sandboxed check; resolves to its result, or null when it did not finish. */
+  check: () => Promise<ContractCheckResponse | null>;
 }
 
 function errorText(error: unknown): string {
@@ -84,7 +85,7 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
 
   const check = React.useCallback(async () => {
     const spec = buildRef.current();
-    if (!spec) return;
+    if (!spec) return null;
     checkAbortRef.current?.abort();
     const controller = new AbortController();
     checkAbortRef.current = controller;
@@ -95,15 +96,17 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
     setError(null);
     try {
       const budget = await ensureBudget();
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return null;
       const result = await runContractCheck(
         { spec: withContractBudget(spec, budget), sample_count: SANDBOX_SAMPLE_COUNT },
         controller.signal,
       );
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return null;
       patchWorkspace({ lastCheck: result, lastCheckSnapshot: checkedSnapshot });
+      return result;
     } catch (err) {
       if (!isAbort(err) && !controller.signal.aborted) setError(errorText(err));
+      return null;
     } finally {
       if (checkAbortRef.current === controller) {
         checkAbortRef.current = null;

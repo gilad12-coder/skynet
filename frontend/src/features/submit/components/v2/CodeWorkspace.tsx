@@ -1,12 +1,15 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import type { CodeAgentState } from "@/shared/hooks/use-code-agent";
+import type { ContractCheckResponse } from "@/shared/types/unified-run";
+import { contractConsole, type ContractEditor } from "../../lib/contract-console";
 import { withScorerImports } from "../../lib/scorer-dependencies";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { v2Msg } from "./ArtifactConfirmCard";
+import { contractConsoleLine } from "./ContractCheckPanel";
 
 // Both editors and the validity check share one screen.
 const EDITOR_HEIGHT = "max(14rem, calc(50svh - 14rem))";
@@ -67,6 +70,8 @@ export function CodeWorkspace({
   guided,
   runEntry,
   metricSignature,
+  checkResult,
+  onCheck,
   children,
 }: {
   runCode: string;
@@ -79,9 +84,31 @@ export function CodeWorkspace({
   runEntry?: string | null;
   /** The metric's signature for the chosen optimizer, from the optimizer catalog. */
   metricSignature?: string | null;
+  /** The last sandboxed contract check; each editor's console shows its own failures. */
+  checkResult: ContractCheckResponse | null;
+  /** Runs the contract check from either editor's Run button. */
+  onCheck: () => Promise<ContractCheckResponse | null>;
   /** Rendered above the metric editor (the metric model row). */
   children?: ReactNode;
 }) {
+  const consoleFor = useCallback(
+    (result: ContractCheckResponse | null, editor: ContractEditor) =>
+      contractConsole(result, editor, (item) => contractConsoleLine(item, guided)),
+    [guided],
+  );
+  const runConsole = useMemo(() => consoleFor(checkResult, "run"), [consoleFor, checkResult]);
+  const metricConsole = useMemo(() => consoleFor(checkResult, "metric"), [consoleFor, checkResult]);
+  const runCheck = useCallback(
+    async () => consoleFor(await onCheck(), "run"),
+    [consoleFor, onCheck],
+  );
+  const runMetricCheck = useCallback(
+    async () => consoleFor(await onCheck(), "metric"),
+    [consoleFor, onCheck],
+  );
+  const runLabel = v2Msg("submit.v2.metric.check.run", guided);
+  const runningLabel = v2Msg("submit.v2.metric.check.running", guided);
+
   return (
     <div className="space-y-5 px-4 py-4 sm:px-6">
       <EditorBlock
@@ -94,6 +121,10 @@ export function CodeWorkspace({
           value={runCode}
           onChange={onRunCodeChange}
           height={EDITOR_HEIGHT}
+          onRun={runCheck}
+          runLabel={runLabel}
+          runningLabel={runningLabel}
+          validationResult={runConsole}
           streaming={agent.signatureStatus === "writing"}
           flashLines={agent.signatureFlashLines}
         />
@@ -123,6 +154,10 @@ export function CodeWorkspace({
             value={metricCode}
             onChange={onMetricCodeChange}
             height={EDITOR_HEIGHT}
+            onRun={runMetricCheck}
+            runLabel={runLabel}
+            runningLabel={runningLabel}
+            validationResult={metricConsole}
             streaming={agent.metricStatus === "writing"}
             flashLines={agent.metricFlashLines}
           />

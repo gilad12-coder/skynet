@@ -13,6 +13,8 @@ import { v2Msg } from "./ArtifactConfirmCard";
 import { CodeWorkspace } from "./CodeWorkspace";
 import { ContractCheckPanel } from "./ContractCheckPanel";
 import { MetricModelRow } from "./MetricModelRow";
+import { RunOverview } from "./RunOverview";
+import { WizardScreen } from "./WizardScreen";
 
 const NO_ROLES: Record<string, string> = {};
 const NO_KINDS: Record<string, "text" | "image"> = {};
@@ -23,11 +25,12 @@ const noop = () => {};
 const noValidation = async (): Promise<ValidateCodeResponse | null> => null;
 
 /**
- * Step 4, one screen: the coding agent writes the run code and the metric in
- * the side panel, the user can edit either, and the validity check below the
- * editors confirms the code and the data agree before Run.
+ * Step 4, two screens. First the code: the coding agent writes the run code
+ * and the metric in the side panel, the user can edit either, and the
+ * contract check below the editors runs both on a few samples. Then the
+ * overview, which holds Run, so the run button never covers the editors.
  */
-export function MetricStep() {
+export function MetricStep({ page }: { page: number }) {
   const ctx = useWizardV2();
   const { state, patchTask, patchWorkspace, metricShape, guided, optimizerCatalog } = ctx;
   const { task, inputs, optimizer, workspace } = state;
@@ -144,54 +147,65 @@ export function MetricStep() {
   const setupIncomplete = authoringContext === null;
 
   return (
-    <div className="h-full">
-      <AuthoringShell
-        title={t("submit.v2.metric.title")}
-        description={t("submit.v2.metric.desc")}
-        sidePanel={
-          <CodeAgentPanel
-            agent={agent}
-            unified
-            disabled={setupIncomplete}
-            disabledReason={setupIncomplete ? t("submit.v2.metric.agent.needs_setup") : undefined}
-            className="absolute inset-0"
-            model={agentModel}
-            onModelChange={setAgentModel}
-            reasoningEffort={agentEffort}
-            onReasoningEffortChange={setAgentEffort}
-          />
-        }
-      >
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <CodeWorkspace
-            runCode={workspace.runCode}
-            metricCode={workspace.metricCode}
-            runEntry={catalog?.run_entry ?? null}
-            metricSignature={metricSignature}
-            onRunCodeChange={(code) => {
-              setRunCode(code);
-              setRunEdited(true);
-            }}
-            onMetricCodeChange={(code) => {
-              setMetricCode(code);
-              setMetricEdited(true);
-            }}
-            agent={agent}
-            guided={guided}
-          >
-            {metricUsesModel && (
-              <MetricModelRow
-                mode={workspace.metricModelMode}
-                explicitModel={workspace.metricModel}
-                reflectionModel={optimizer.reflectionModel}
-                onChange={patchWorkspace}
-                guided={guided}
-              />
-            )}
-          </CodeWorkspace>
-          <ContractCheckPanel cc={contract} guided={guided} blockedReason={ctx.runBlockedReason} />
-        </div>
-      </AuthoringShell>
+    <div className="flex h-full min-h-0 flex-col">
+      <WizardScreen active={page === 0} className="flex flex-col overflow-hidden">
+        <AuthoringShell
+          title={t("submit.v2.metric.title")}
+          description={t("submit.v2.metric.desc")}
+          sidePanel={
+            <CodeAgentPanel
+              agent={agent}
+              unified
+              disabled={setupIncomplete}
+              disabledReason={setupIncomplete ? t("submit.v2.metric.agent.needs_setup") : undefined}
+              className="absolute inset-0"
+              model={agentModel}
+              onModelChange={setAgentModel}
+              reasoningEffort={agentEffort}
+              onReasoningEffortChange={setAgentEffort}
+            />
+          }
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <CodeWorkspace
+              runCode={workspace.runCode}
+              metricCode={workspace.metricCode}
+              runEntry={catalog?.run_entry ?? null}
+              metricSignature={metricSignature}
+              onRunCodeChange={(code) => {
+                setRunCode(code);
+                setRunEdited(true);
+              }}
+              onMetricCodeChange={(code) => {
+                setMetricCode(code);
+                setMetricEdited(true);
+              }}
+              agent={agent}
+              guided={guided}
+              checkResult={contract.lastCheck}
+              onCheck={contract.check}
+            >
+              {metricUsesModel && (
+                <MetricModelRow
+                  mode={workspace.metricModelMode}
+                  explicitModel={workspace.metricModel}
+                  reflectionModel={optimizer.reflectionModel}
+                  onChange={patchWorkspace}
+                  guided={guided}
+                />
+              )}
+            </CodeWorkspace>
+            <ContractCheckPanel
+              cc={contract}
+              guided={guided}
+              blockedReason={ctx.runBlockedReason}
+            />
+          </div>
+        </AuthoringShell>
+      </WizardScreen>
+      <WizardScreen active={page === 1} className="flex flex-col overflow-hidden">
+        <RunOverview state={state} cc={contract} guided={guided} />
+      </WizardScreen>
     </div>
   );
 }

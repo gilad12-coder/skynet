@@ -14,13 +14,15 @@ import { Button } from "@/shared/ui/primitives/button";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import { formatElapsedMs, formatScore } from "@/shared/lib/formatters";
 import { contractCheckMessage } from "@/shared/lib/i18n";
+import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
-import type {
-  ContractCheckItem,
-  ContractCheckResponse,
-  ContractSample,
-} from "@/shared/types/unified-run";
+import type { ContractCheckItem, ContractCheckResponse } from "@/shared/types/unified-run";
 import type { ContractCheckState } from "../../hooks/use-contract-check";
+import {
+  contractSampleRows,
+  contractStaticChecks,
+  type ContractSampleRow,
+} from "../../lib/contract-console";
 import { v2Msg } from "./ArtifactConfirmCard";
 
 const STATUS_ICON: Record<ContractCheckItem["status"], ReactNode> = {
@@ -65,52 +67,91 @@ function CheckRow({ item, guided }: { item: ContractCheckItem; guided: boolean }
   );
 }
 
-function SampleCard({ sample, guided }: { sample: ContractSample; guided: boolean }) {
+function ResultStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <dt className="text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="font-mono text-xs font-semibold tabular-nums text-foreground" dir="ltr">
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+/** One sample's run, laid out like the sandbox test result: score, time, input, output, errors. */
+function SampleRow({ row, guided }: { row: ContractSampleRow; guided: boolean }) {
+  const { sample, failures } = row;
   const label = (key: string) => (
-    <dt className="text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
+    <p className="text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
       {v2Msg(key, guided)}
-    </dt>
+    </p>
   );
   return (
     <li className="space-y-2 rounded-md border border-border/40 bg-background/70 p-2.5">
-      <div className="flex items-baseline justify-between gap-3 text-xs">
-        <span className="font-medium">
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1">
+        <span className="flex items-center gap-1.5 text-xs font-medium">
+          {STATUS_ICON[failures.length > 0 ? "failed" : "passed"]}
           {v2Msg("submit.v2.metric.check.sample_title", guided, { index: sample.index + 1 })}
         </span>
-        <span className="flex items-baseline gap-3 font-mono tabular-nums" dir="ltr">
+        <dl className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+          <ResultStat
+            label={msg("submit.blackbox.scorer.result_score")}
+            value={formatScore(sample.score)}
+          />
           {sample.duration_ms != null && (
-            <span className="text-muted-foreground">{formatElapsedMs(sample.duration_ms)}</span>
+            <ResultStat
+              label={msg("submit.blackbox.scorer.result_time")}
+              value={formatElapsedMs(sample.duration_ms)}
+            />
           )}
-          <span className="font-semibold text-primary">{formatScore(sample.score)}</span>
-        </span>
+        </dl>
       </div>
-      <dl className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-2 sm:grid-cols-2">
         <div className="min-w-0 space-y-0.5">
           {label("submit.v2.metric.check.sample_input")}
-          <dd className="line-clamp-4 break-words font-mono text-[0.6875rem]" dir="auto">
+          <p className="line-clamp-4 break-words font-mono text-[0.6875rem]" dir="auto">
             {sample.input_preview}
-          </dd>
+          </p>
         </div>
         <div className="min-w-0 space-y-0.5">
           {label("submit.v2.metric.check.sample_output")}
-          <dd className="line-clamp-4 break-words font-mono text-[0.6875rem]" dir="auto">
+          <p className="line-clamp-4 break-words font-mono text-[0.6875rem]" dir="auto">
             {sample.output_preview ?? "—"}
-          </dd>
+          </p>
         </div>
-        {sample.feedback_preview && (
-          <div className="min-w-0 space-y-0.5 sm:col-span-2">
-            {label("submit.v2.metric.check.sample_feedback")}
-            <dd
-              className="whitespace-pre-wrap break-words text-[0.6875rem] text-foreground/90"
-              dir="auto"
-            >
-              {sample.feedback_preview}
-            </dd>
-          </div>
-        )}
-      </dl>
+      </div>
+      {sample.feedback_preview && (
+        <div className="min-w-0 space-y-0.5">
+          {label("submit.v2.metric.check.sample_feedback")}
+          <p
+            className="whitespace-pre-wrap break-words text-[0.6875rem] text-foreground/90"
+            dir="auto"
+          >
+            {sample.feedback_preview}
+          </p>
+        </div>
+      )}
+      {failures.length > 0 && (
+        <ul className="space-y-2">
+          {failures.map((item) => (
+            <CheckRow key={item.key} item={item} guided={guided} />
+          ))}
+        </ul>
+      )}
     </li>
   );
+}
+
+/** One failed check as a line in an editor's console. */
+export function contractConsoleLine(item: ContractCheckItem, guided: boolean): string {
+  const where =
+    item.sample_index != null
+      ? `${v2Msg("submit.v2.metric.check.sample_title", guided, { index: item.sample_index + 1 })}: `
+      : "";
+  const head = `${where}${contractCheckMessage(item)}`;
+  return item.detail ? `${head}\n${item.detail}` : head;
 }
 
 function failedStatic(result: ContractCheckResponse | null): ContractCheckItem[] {
@@ -135,6 +176,7 @@ export function ContractCheckPanel({
   const last = cc.lastCheck;
   const staticFailures = failedStatic(cc.staticResult);
   const passed = !!last?.ok && !cc.stale;
+  const sampleRows = contractSampleRows(last);
 
   return (
     <section
@@ -222,18 +264,18 @@ export function ContractCheckPanel({
             {t(last.ok ? "submit.v2.metric.check.passed" : "submit.v2.metric.check.failed")}
           </p>
           <ul className="space-y-2.5">
-            {last.checks.map((item, i) => (
-              <CheckRow key={`${item.key}-${item.sample_index ?? i}`} item={item} guided={guided} />
+            {contractStaticChecks(last).map((item) => (
+              <CheckRow key={item.key} item={item} guided={guided} />
             ))}
           </ul>
-          {last.samples.length > 0 && (
+          {sampleRows.length > 0 && (
             <div className="space-y-1.5">
               <p className="text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
                 {t("submit.v2.metric.check.samples")}
               </p>
               <ul className="space-y-2">
-                {last.samples.map((sample) => (
-                  <SampleCard key={sample.index} sample={sample} guided={guided} />
+                {sampleRows.map((row) => (
+                  <SampleRow key={row.sample.index} row={row} guided={guided} />
                 ))}
               </ul>
             </div>

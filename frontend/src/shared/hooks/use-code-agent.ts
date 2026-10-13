@@ -441,7 +441,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       reasoningBufRef.current = "";
       reasoningSectionsRef.current = { order: [], bufs: {} };
       reasoningEndedRef.current = false;
-      reasoningLanesRef.current = new Set();
+      // The unified seed's metric lane can reason for minutes before its
+      // first token arrives, so both lanes count as thinking from the start.
+      reasoningLanesRef.current = new Set(!isChat && unified ? ["signature", "metric"] : []);
       pendingValidationsRef.current = [];
       setQuestion(null);
 
@@ -457,8 +459,12 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
                 p1: TERMS.dataset,
               }),
       );
-      setSignatureStatus(isChat ? "idle" : "waiting");
-      setMetricStatus(isChat ? "idle" : "waiting");
+      // The unified seed starts both authors at once, so each is being
+      // worked on from the first moment, whether or not its model streams
+      // its reasoning.
+      const seedStatus: ArtifactStatus = isChat ? "idle" : unified ? "writing" : "waiting";
+      setSignatureStatus(seedStatus);
+      setMetricStatus(seedStatus);
       setReasoning("");
       setReasoningStartedAt(Date.now());
       setReasoningEndedAt(null);
@@ -635,6 +641,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           },
           onArtifactDone: (source) => {
             if (controller.signal.aborted) return;
+            markReasoningDone(source);
             if (source === "signature") {
               setSignatureStatus("done");
               if (!metricLaneDone) {

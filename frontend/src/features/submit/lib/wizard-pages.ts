@@ -13,7 +13,8 @@ export type WizardPageId =
   | "optimizer"
   | "models"
   | "budget"
-  | "metric";
+  | "metric"
+  | "overview";
 
 const OPTIMIZER_SCREENS: readonly WizardPageId[] = ["optimizer", "models", "budget"];
 
@@ -38,6 +39,7 @@ export function stepPages(step: WizardStepId, state: WizardV2State): readonly Wi
     case "optimizer":
       return optimizerPages(state);
     case "metric":
-      return ["metric"];
+      // Run sits on the overview, away from the code editors.
+      return ["metric", "overview"];
   }
 }
