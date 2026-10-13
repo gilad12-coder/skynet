@@ -13,10 +13,11 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ...config import settings
@@ -172,6 +173,23 @@ def _parse_time(value: Any) -> datetime | None:
         return None
 
 
+def _safe_link(value: Any) -> str | None:
+    """Keep a Sentry permalink only when it is an ``https`` URL.
+
+    The dashboard renders it as an ``href``; anything else (``javascript:``,
+    relative paths) is dropped rather than trusted.
+
+    Args:
+        value: Raw permalink value.
+
+    Returns:
+        The URL, or ``None``.
+    """
+    if isinstance(value, str) and urlsplit(value).scheme == "https":
+        return value
+    return None
+
+
 def to_sentry_issue(raw: dict[str, Any]) -> AdminSentryIssue:
     """Trim a raw Sentry issue object to the dashboard's fields.
 
@@ -192,7 +210,7 @@ def to_sentry_issue(raw: dict[str, Any]) -> AdminSentryIssue:
         count=_int(raw.get("count")),
         users=_int(raw.get("userCount")),
         last_seen=_parse_time(raw.get("lastSeen")),
-        permalink=raw.get("permalink"),
+        permalink=_safe_link(raw.get("permalink")),
     )
 
 
@@ -335,7 +353,10 @@ def read_dashboard(session: Session, *, days: int, now: datetime) -> AdminDashbo
             func.count(TelemetryEventModel.id),
             func.count(func.distinct(TelemetryEventModel.username)),
         )
-        .where(TelemetryEventModel.received_at >= cutoff)
+        .where(
+            TelemetryEventModel.received_at >= cutoff,
+            or_(TelemetryEventModel.username.is_(None), TelemetryEventModel.username.not_in(internal)),
+        )
         .group_by(TelemetryEventModel.event_name)
         .order_by(func.count(TelemetryEventModel.id).desc())
         .limit(TOP_LIMIT)

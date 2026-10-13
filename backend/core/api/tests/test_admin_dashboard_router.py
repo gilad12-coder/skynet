@@ -185,7 +185,7 @@ def test_dashboard_aggregates_and_excludes_internal_accounts() -> None:
         {"optimization_id": "j1", "name": "Triage", "owner": "new@x.io", "calls": 2, "errors": 1}
     ]
     events = {row["name"]: row for row in body["top_events"]}
-    assert events["page_view"] == {"name": "page_view", "count": 3, "users": 2}
+    assert events["page_view"] == {"name": "page_view", "count": 2, "users": 1}
 
 
 def test_dashboard_rejects_out_of_range_window() -> None:
@@ -286,7 +286,8 @@ def test_sentry_issues_trims_issue_fields(sentry_settings: pytest.MonkeyPatch) -
                     "userCount": 3,
                     "lastSeen": "2026-10-12T08:00:00Z",
                     "permalink": "https://sentry.io/issues/42/",
-                }
+                },
+                {"id": "43", "title": "XSS", "permalink": "javascript:alert(1)"},
             ],
         )
 
@@ -300,6 +301,8 @@ def test_sentry_issues_trims_issue_fields(sentry_settings: pytest.MonkeyPatch) -
     assert issue["project"] == "backend"
     assert (issue["count"], issue["users"]) == (17, 3)
     assert issue["last_seen"].startswith("2026-10-12T08:00:00")
+    assert issue["permalink"] == "https://sentry.io/issues/42/"
+    assert body["issues"][1]["permalink"] is None
     assert calls[0]["url"] == "https://sentry.io/api/0/organizations/skynet/issues/"
     assert calls[0]["headers"] == {"Authorization": "Bearer token"}
     assert calls[0]["params"]["query"] == "is:unresolved"
