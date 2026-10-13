@@ -77,6 +77,7 @@
     "inputs.too_few_pairs_for_held_out": "少過 {minimum} 對嘅時候唔會留起任何資料，所以最終分數係喺優化器睇過嘅同一批資料對上量度。",
     "optimization.grid_search_retired": "網格搜尋已經唔可以再開始、繼續或者複製。你仍然可以睇呢次運行；請改為由精靈開始一個新嘅優化。",
     "submit.unified.contract_failed": "程式碼唔符合優化器嘅要求：{error}",
+    "submit.unified.contract_budget": "支出上限太低，唔夠喺樣本上面行程式碼：{error} 請調高上限再檢查一次。",
     "submit.unified.optimizer_not_allowed": "優化器「{optimizer}」唔啱呢個設定。請由以下選項揀一個：{allowed}。",
     "submit.unified.pairs_need_cases": "用輸入/輸出對嘅運行最少需要兩對資料或者一個已上載嘅資料集。",
     "submit.unified.single_needs_one_case": "單一輸入嘅運行只需要一個輸入。",

@@ -77,6 +77,7 @@
     "inputs.too_few_pairs_for_held_out": "Avec moins de {minimum} paires, rien n'est réservé : le score final est donc mesuré sur les mêmes paires que celles vues par l'optimiseur.",
     "optimization.grid_search_retired": "Les recherches en grille ne peuvent plus être lancées, reprises ni clonées. Cette exécution reste consultable ; lancez plutôt une nouvelle optimisation depuis l'assistant.",
     "submit.unified.contract_failed": "Le code ne correspond pas à ce dont l'optimiseur a besoin : {error}",
+    "submit.unified.contract_budget": "La limite de dépenses est trop basse pour exécuter le code sur des exemples : {error} Augmentez la limite et relancez la vérification.",
     "submit.unified.optimizer_not_allowed": "L'optimiseur « {optimizer} » ne convient pas à cette configuration. Choisissez l'un de ceux-ci : {allowed}.",
     "submit.unified.pairs_need_cases": "Une exécution sur des paires entrée/sortie nécessite au moins deux paires ou un jeu de données importé.",
     "submit.unified.single_needs_one_case": "Une exécution à entrée unique nécessite exactement une entrée.",

@@ -10,7 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from ..billing import ProviderKeyVault, payload_uses_token_source
-from ..billing.budgets import BudgetConflictError, BudgetError, BudgetService
+from ..billing.budgets import BudgetConflictError, BudgetError, BudgetInsufficientError, BudgetService
 from ..billing.model_dispatch import ModelHTTPResult
 from ..billing.model_gateway import ModelGateway
 from ..billing.protected_credentials import (
@@ -119,6 +119,9 @@ def _canonical_execution_payload(request: WizardPreflightRequest, username: str)
         typed = UnifiedRunRequest.model_validate(payload)
     normalize_model_token_sources(typed)
     return typed.model_dump(mode="json", by_alias=True)
+
+
+BUDGET_CHECK_KEY = "budget"
 
 
 def _check(key: str, status: str, message: str | None = None, field: str | None = None) -> dict[str, Any]:
@@ -499,6 +502,8 @@ def _perform_preflight(
                 "Previous provider or sandbox usage is awaiting final confirmation.",
             ),
         )
+    except BudgetInsufficientError as error:
+        result = {"checks": [_check(BUDGET_CHECK_KEY, "failed", str(error))]}
     except Exception as error:
         result = {"checks": [_check("setup", "failed", str(error))]}
     finally:

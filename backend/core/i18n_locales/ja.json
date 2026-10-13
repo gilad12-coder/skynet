@@ -77,6 +77,7 @@
     "inputs.too_few_pairs_for_held_out": "ペアが {minimum} 未満の場合は何も取り置かないため、最終スコアはオプティマイザーが見たのと同じペアで測定されます。",
     "optimization.grid_search_retired": "グリッドサーチは開始、再開、複製ができなくなりました。この実行は引き続き閲覧できます。代わりにウィザードから新しい最適化を開始してください。",
     "submit.unified.contract_failed": "コードがオプティマイザーの要件を満たしていません: {error}",
+    "submit.unified.contract_budget": "サンプルでコードを実行するには支出上限が低すぎます: {error} 上限を引き上げてから再度確認してください。",
     "submit.unified.optimizer_not_allowed": "オプティマイザー「{optimizer}」はこの設定に合いません。次のいずれかを選んでください: {allowed}。",
     "submit.unified.pairs_need_cases": "入力と出力のペアでの実行には、2 つ以上のペアかアップロードしたデータセットが必要です。",
     "submit.unified.single_needs_one_case": "単一入力での実行には、入力がちょうど 1 つ必要です。",

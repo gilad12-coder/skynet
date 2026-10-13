@@ -77,6 +77,7 @@
     "inputs.too_few_pairs_for_held_out": "{minimum} çiftten az olduğunda hiçbir şey ayrılmaz, bu yüzden nihai puan optimize edicinin gördüğü aynı çiftlerde ölçülür.",
     "optimization.grid_search_retired": "Izgara aramaları artık başlatılamaz, sürdürülemez veya kopyalanamaz. Bu çalıştırma okunabilir kalır; bunun yerine sihirbazdan yeni bir optimizasyon başlatın.",
     "submit.unified.contract_failed": "Kod, optimize edicinin ihtiyaç duyduğu şeyle uyumlu değil: {error}",
+    "submit.unified.contract_budget": "Harcama limiti, kodu örnekler üzerinde çalıştırmak için çok düşük: {error} Limiti yükseltip tekrar kontrol edin.",
     "submit.unified.optimizer_not_allowed": "'{optimizer}' optimize edicisi bu kuruluma uymuyor. Şunlardan birini seçin: {allowed}.",
     "submit.unified.pairs_need_cases": "Girdi/çıktı çiftleriyle bir çalıştırma için en az iki çift veya yüklenmiş bir veri kümesi gerekir.",
     "submit.unified.single_needs_one_case": "Tek girdili bir çalıştırma için tam olarak bir girdi gerekir.",

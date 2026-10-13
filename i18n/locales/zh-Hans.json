@@ -77,6 +77,7 @@
     "inputs.too_few_pairs_for_held_out": "少于 {minimum} 对时不会留出任何数据，因此最终分数是在优化器看过的同一批数据对上测得的。",
     "optimization.grid_search_retired": "网格搜索已无法开始、恢复或克隆。你仍可查看此运行；请改为从向导开始新的优化。",
     "submit.unified.contract_failed": "代码不符合优化器的要求：{error}",
+    "submit.unified.contract_budget": "支出上限太低，无法在样本上运行代码：{error} 请提高上限后重新检查。",
     "submit.unified.optimizer_not_allowed": "优化器“{optimizer}”不适合此设置。请从以下选项中选择：{allowed}。",
     "submit.unified.pairs_need_cases": "使用输入/输出对的运行至少需要两个数据对或一个已上传的数据集。",
     "submit.unified.single_needs_one_case": "单一输入的运行只需要一个输入。",

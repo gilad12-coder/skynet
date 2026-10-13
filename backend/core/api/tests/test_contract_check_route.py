@@ -9,8 +9,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.api import preflight_execution
 from core.api.auth import AuthenticatedUser, get_authenticated_user
 from core.api.routers import wizard_preflight
+from core.billing.budgets import BudgetInsufficientError
 from core.i18n import t
 
 RUN_CODE = "def run(artifact, input):\n    return artifact\n"
@@ -194,3 +196,74 @@ def test_sandbox_route_gives_an_older_images_items_their_message_codes(
         "contract.shape.blackbox"
     }
     assert {item["message_code"] for item in body["checks"] if item["sample_index"] is None} == {"contract.passed"}
+
+
+SPENT = "The next operation needs up to 135 cents, but only 53 of the 53-cent limit remain."
+
+
+@pytest.mark.parametrize(
+    ("key", "code"),
+    [("budget", "submit.unified.contract_budget"), ("setup", "submit.unified.contract_failed")],
+)
+def test_sandbox_route_tells_a_spent_budget_from_a_code_mismatch(
+    monkeypatch: pytest.MonkeyPatch, calls: list[Any], key: str, code: str
+) -> None:
+    """A check stopped by the spending limit says so, instead of blaming the code."""
+    failed = SimpleNamespace(key=key, status="failed", message=SPENT)
+    monkeypatch.setattr(
+        wizard_preflight,
+        "run_preflight",
+        lambda request, user, store: SimpleNamespace(status="failed", checks=[failed], workflow_result=None),
+    )
+    with _client() as client:
+        body = client.post("/optimizations/contract-check", json={"spec": _spec()}).json()
+
+    [run] = [item for item in body["checks"] if item["key"] == "workspace.run"]
+    assert (run["message_code"], run["message_params"]) == (code, {"error": SPENT})
+    assert run["message"] == t(code, error=SPENT)
+
+
+def test_preflight_reports_a_reservation_over_the_limit_as_a_budget_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model call reserving more than the check's limit fails the ``budget`` check, not ``setup``."""
+
+    class _Gateway:
+        """Stand in for the model gateway without any paid transport."""
+
+        def __init__(self, runtime: Any) -> None:
+            """Ignore the budget runtime."""
+
+        def protect_payload(self, payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+            """Hand the payload back unchanged."""
+            return payload
+
+        def close(self) -> None:
+            """Nothing to settle."""
+
+    def spend(gateway: Any, payload: Any, *, scope: str, identity: str) -> dict[str, Any]:
+        """Fail the way the ledger does when one call's hold exceeds the limit."""
+        raise BudgetInsufficientError(SPENT)
+
+    monkeypatch.setattr(preflight_execution, "ModelGateway", _Gateway)
+    monkeypatch.setattr(preflight_execution, "bind_protected_sandbox", lambda *args, **kwargs: {})
+    monkeypatch.setattr(preflight_execution, "payload_uses_token_source", lambda *args, **kwargs: False)
+    monkeypatch.setattr(preflight_execution, "_verify_anything", spend)
+    request = preflight_execution.WizardPreflightRequest(
+        scope="evaluation",
+        workflow="anything",
+        payload={"scorer": {"kind": "python", "metric_code": "def metric(candidate, case):\n    return 1.0\n"}},
+        execution_budget_id="draft",
+        execution_budget_revision=1,
+    )
+
+    status, result = preflight_execution._perform_preflight(
+        request,
+        SimpleNamespace(username="alice"),
+        object(),
+        SimpleNamespace(id="budget", generation=1),
+        {"id": "setup"},
+        attempt=1,
+        engine=object(),
+    )
+
+    assert status == "failed"
+    assert result["checks"] == [{"key": preflight_execution.BUDGET_CHECK_KEY, "status": "failed", "message": SPENT}]

@@ -77,6 +77,7 @@
     "inputs.too_few_pairs_for_held_out": "Con meno di {minimum} coppie non viene tenuto da parte nulla, quindi il punteggio finale è misurato sulle stesse coppie viste dall'ottimizzatore.",
     "optimization.grid_search_retired": "Le ricerche a griglia non possono più essere avviate, riprese o clonate. Questa esecuzione resta consultabile; avvia invece una nuova ottimizzazione dalla procedura guidata.",
     "submit.unified.contract_failed": "Il codice non corrisponde a ciò che serve all'ottimizzatore: {error}",
+    "submit.unified.contract_budget": "Il limite di spesa è troppo basso per eseguire il codice sugli esempi: {error} Alza il limite e ricontrolla.",
     "submit.unified.optimizer_not_allowed": "L'ottimizzatore '{optimizer}' non è adatto a questa configurazione. Scegline uno tra: {allowed}.",
     "submit.unified.pairs_need_cases": "Un'esecuzione su coppie input/output richiede almeno due coppie o un dataset caricato.",
     "submit.unified.single_needs_one_case": "Un'esecuzione a input singolo richiede esattamente un input.",

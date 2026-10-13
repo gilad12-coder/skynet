@@ -358,6 +358,7 @@
     "submit.unified.single_needs_one_case": "A single-input run needs exactly one input.",
     "submit.unified.pairs_need_cases": "A run on input/output pairs needs at least two pairs or an uploaded dataset.",
     "submit.unified.contract_failed": "The code does not match what the optimizer needs: {error}",
+    "submit.unified.contract_budget": "The spending limit is too low to run the code on samples: {error} Raise the limit and check again.",
     "contract.run_missing": "The run code must define run(artifact, input).",
     "contract.metric_missing": "The metric code does not define the function this optimizer calls.",
     "contract.metric_signature.blackbox": "This optimizer needs score(input, output, expected=None).",

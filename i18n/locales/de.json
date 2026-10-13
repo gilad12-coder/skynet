@@ -77,6 +77,7 @@
     "inputs.too_few_pairs_for_held_out": "Bei weniger als {minimum} Paaren wird nichts zurückgehalten, daher wird die Endbewertung an denselben Paaren gemessen, die der Optimierer gesehen hat.",
     "optimization.grid_search_retired": "Rastersuchen können nicht mehr gestartet, fortgesetzt oder geklont werden. Dieser Lauf bleibt lesbar; starten Sie stattdessen eine neue Optimierung im Assistenten.",
     "submit.unified.contract_failed": "Der Code entspricht nicht dem, was der Optimierer braucht: {error}",
+    "submit.unified.contract_budget": "Das Ausgabenlimit ist zu niedrig, um den Code an Beispielen auszuführen: {error} Erhöhe das Limit und prüfe erneut.",
     "submit.unified.optimizer_not_allowed": "Der Optimierer „{optimizer}“ passt nicht zu dieser Einrichtung. Wählen Sie einen von: {allowed}.",
     "submit.unified.pairs_need_cases": "Ein Lauf mit Eingabe-/Ausgabe-Paaren braucht mindestens zwei Paare oder einen hochgeladenen Datensatz.",
     "submit.unified.single_needs_one_case": "Ein Lauf mit einer einzelnen Eingabe braucht genau eine Eingabe.",

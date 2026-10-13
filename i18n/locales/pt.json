@@ -77,6 +77,7 @@
     "inputs.too_few_pairs_for_held_out": "Com menos de {minimum} pares nada é reservado, por isso a pontuação final é medida nos mesmos pares que o otimizador viu.",
     "optimization.grid_search_retired": "As pesquisas em grelha já não podem ser iniciadas, retomadas nem clonadas. Esta execução continua disponível para consulta; em vez disso, inicie uma nova otimização a partir do assistente.",
     "submit.unified.contract_failed": "O código não corresponde ao que o otimizador precisa: {error}",
+    "submit.unified.contract_budget": "O limite de gastos é baixo demais para executar o código nos exemplos: {error} Aumente o limite e verifique novamente.",
     "submit.unified.optimizer_not_allowed": "O otimizador '{optimizer}' não é adequado a esta configuração. Escolha um destes: {allowed}.",
     "submit.unified.pairs_need_cases": "Uma execução com pares de entrada/saída precisa de pelo menos dois pares ou de um conjunto de dados carregado.",
     "submit.unified.single_needs_one_case": "Uma execução de entrada única precisa de exatamente uma entrada.",

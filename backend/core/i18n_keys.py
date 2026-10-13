@@ -285,6 +285,7 @@ class I18nKey(StrEnum):
     SUBMISSION_VALIDATION_FAILED = 'submission.validation_failed'
     SUBMISSION_VISION_REQUIRED = 'submission.vision_required'
     SUBMIT_NO_MODELS_AVAILABLE = 'submit.no_models_available'
+    SUBMIT_UNIFIED_CONTRACT_BUDGET = 'submit.unified.contract_budget'
     SUBMIT_UNIFIED_CONTRACT_FAILED = 'submit.unified.contract_failed'
     SUBMIT_UNIFIED_OPTIMIZER_NOT_ALLOWED = 'submit.unified.optimizer_not_allowed'
     SUBMIT_UNIFIED_PAIRS_NEED_CASES = 'submit.unified.pairs_need_cases'

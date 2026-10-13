@@ -77,6 +77,7 @@
     "inputs.too_few_pairs_for_held_out": "مع أقل من {minimum} أزواج لا يُحجز شيء، لذا تُقاس الدرجة النهائية على الأزواج نفسها التي رآها المُحسِّن.",
     "optimization.grid_search_retired": "لم يعد بالإمكان بدء بحث الشبكة أو استئنافه أو نسخه. لا يزال بإمكانك عرض هذا التشغيل؛ ابدأ تحسينًا جديدًا من المعالج بدلًا من ذلك.",
     "submit.unified.contract_failed": "الكود لا يطابق ما يحتاجه المُحسِّن: {error}",
+    "submit.unified.contract_budget": "حد الإنفاق منخفض جدًا لتشغيل الكود على العينات: {error} ارفع الحد وتحقق مرة أخرى.",
     "submit.unified.optimizer_not_allowed": "المُحسِّن '{optimizer}' لا يناسب هذا الإعداد. اختر واحدًا من: {allowed}.",
     "submit.unified.pairs_need_cases": "يحتاج تشغيل بأزواج إدخال/إخراج إلى زوجين على الأقل أو إلى مجموعة بيانات مرفوعة.",
     "submit.unified.single_needs_one_case": "يحتاج تشغيل بمُدخل واحد إلى مُدخل واحد بالضبط.",

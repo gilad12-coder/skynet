@@ -296,6 +296,52 @@ test("the runtime start hold is one full-lifetime session, and only when billed 
   );
 });
 
+test("the low end covers the box hold plus one call's context-window reservation", () => {
+  // A small run's usage estimate can sit far below what one call reserves:
+  // the gateway bounds each call's input by the model's whole context window.
+  const wide = { ...model("wide", 0.00000125, 0.00001), max_input_tokens: 400_000 };
+  const usageOnly = projectCostBracket({
+    ...base,
+    modelRoles: [{ role: "task", model: cheap, tokenSource: "managed", tokenShare: 1 }],
+  });
+  const managed = projectCostBracket({
+    ...base,
+    modelRoles: [{ role: "task", model: wide, tokenSource: "managed", tokenShare: 1 }],
+  });
+  const withBox = projectCostBracket({
+    ...base,
+    modelRoles: [{ role: "task", model: wide, tokenSource: "managed", tokenShare: 1 }],
+    runtime: runtimeCostProjection(
+      {
+        billing_basis: "at_cost",
+        minimum_session_cents: "0.1",
+        maximum_session_cents: "52.4",
+        maximum_lifetime_seconds: 600,
+        vcpus: 2,
+      },
+      1,
+    ),
+  });
+  const byok = projectCostBracket({
+    ...base,
+    modelRoles: [{ role: "task", model: wide, tokenSource: "byok", tokenShare: 1 }],
+  });
+  const economy = projectCostBracket({
+    ...base,
+    economyMode: true,
+    modelRoles: [{ role: "task", model: wide, tokenSource: "managed", tokenShare: 1 }],
+  });
+
+  // (400k x 1.05 x $1.25/M + 4000 x 1.05 x $10/M) x 1.15 markup = 65.2 cents.
+  assert.equal(managed.modelCallHoldCents, 66);
+  assert.equal(managed.lowCents, 66);
+  assert.equal(chargeableBracket(managed, "managed").lowCents, 66);
+  assert.equal(chargeableBracket(withBox, "managed").lowCents, 53 + 66);
+  assert.equal(chargeableBracket(byok, "byok").lowCents, 3);
+  assert.equal(economy.modelCallHoldCents, 66);
+  assert.equal(usageOnly.modelCallHoldCents, 0);
+});
+
 test("the ceiling trace shows the working behind the default cap", () => {
   const small = projectCostBracket({
     ...base,

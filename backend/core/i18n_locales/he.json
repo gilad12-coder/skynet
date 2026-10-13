@@ -358,6 +358,7 @@
     "submit.unified.single_needs_one_case": "ריצה עם קלט יחיד צריכה בדיוק קלט אחד.",
     "submit.unified.pairs_need_cases": "ריצה על זוגות קלט/פלט צריכה לפחות שני זוגות או דאטאסט שהועלה.",
     "submit.unified.contract_failed": "הקוד לא תואם את מה שהאופטימייזר צריך: {error}",
+    "submit.unified.contract_budget": "מגבלת ההוצאה נמוכה מדי להרצת הקוד על דוגמאות: {error} הגדילו את המגבלה ובדקו שוב.",
     "contract.run_missing": "קוד הריצה חייב להגדיר run(artifact, input).",
     "contract.metric_missing": "קוד פונקציית המדידה לא מגדיר את הפונקציה שהאופטימייזר הזה קורא לה.",
     "contract.metric_signature.blackbox": "האופטימייזר הזה צריך score(input, output, expected=None).",
