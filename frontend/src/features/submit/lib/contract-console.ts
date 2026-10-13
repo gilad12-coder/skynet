@@ -1,12 +1,8 @@
 /**
- * Splits a contract check's results between the two editors and the sample
- * rows, so each failure shows next to the code or the sample it is about.
+ * Splits a contract check's results between the two editors, so each failure
+ * shows next to the code it is about.
  */
-import type {
-  ContractCheckItem,
-  ContractCheckResponse,
-  ContractSample,
-} from "@/shared/types/unified-run";
+import type { ContractCheckItem, ContractCheckResponse } from "@/shared/types/unified-run";
 
 export type ContractEditor = "run" | "metric";
 
@@ -38,26 +34,4 @@ export function contractConsole(
     .filter((item) => item.status === "failed" && checkEditor(item) === editor)
     .map(line);
   return { valid: errors.length === 0, errors, warnings: [] };
-}
-
-export interface ContractSampleRow {
-  sample: ContractSample;
-  /** The failed checks on this sample, shown inline in its row. */
-  failures: ContractCheckItem[];
-}
-
-/** Each scored sample with its failed checks. */
-export function contractSampleRows(result: ContractCheckResponse | null): ContractSampleRow[] {
-  if (!result) return [];
-  return result.samples.map((sample) => ({
-    sample,
-    failures: result.checks.filter(
-      (item) => item.status === "failed" && item.sample_index === sample.index,
-    ),
-  }));
-}
-
-/** The checks about the code as a whole, before any sample ran. */
-export function contractStaticChecks(result: ContractCheckResponse | null): ContractCheckItem[] {
-  return result?.checks.filter((item) => item.sample_index == null) ?? [];
 }

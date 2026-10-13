@@ -12,7 +12,7 @@ import { AuthoringShell } from "../steps/AuthoringShell";
 import { CodeAgentPanel } from "../steps/CodeAgentPanel";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { CodeWorkspace } from "./CodeWorkspace";
-import { ContractCheckPanel } from "./ContractCheckPanel";
+import { ContractCheckScreen } from "./ContractCheckScreen";
 import { MetricModelRow } from "./MetricModelRow";
 import { RunOverview } from "./RunOverview";
 import { WizardScreen } from "./WizardScreen";
@@ -26,12 +26,12 @@ const noop = () => {};
 const noValidation = async (): Promise<ValidateCodeResponse | null> => null;
 
 /**
- * Step 4, two screens. First the code: the coding agent writes the run code
- * and the metric in the side panel, the user can edit either, and the
- * contract check below the editors runs both on a few samples. Then the
- * overview, which holds Run, so the run button never covers the editors.
+ * Step 4, three screens. First the code: the coding agent writes the run code
+ * and the metric in the side panel, and the user can edit either. Then the
+ * sandbox check, which runs both on a few samples. Then the overview, which
+ * holds Run, so the run button never covers the editors.
  */
-export function MetricStep({ page }: { page: number }) {
+export function MetricStep({ page, onBack }: { page: number; onBack: () => void }) {
   const ctx = useWizardV2();
   const { state, patchTask, patchWorkspace, metricShape, guided, optimizerCatalog, inputsInferring } =
     ctx;
@@ -153,6 +153,13 @@ export function MetricStep({ page }: { page: number }) {
 
   const contract = useContractCheck(ctx);
   const setupIncomplete = authoringContext === null;
+  // Until a fresh sandboxed check exists, the editors' consoles show what the
+  // static check spotted while typing.
+  const staticFailed = contract.staticResult?.checks.some((item) => item.status === "failed");
+  const consoleResult =
+    staticFailed && (!contract.lastCheck || contract.stale)
+      ? contract.staticResult
+      : contract.lastCheck;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -190,7 +197,7 @@ export function MetricStep({ page }: { page: number }) {
               }}
               agent={agent}
               guided={guided}
-              checkResult={contract.lastCheck}
+              checkResult={consoleResult}
               onCheck={contract.check}
             >
               {metricUsesModel && (
@@ -203,15 +210,13 @@ export function MetricStep({ page }: { page: number }) {
                 />
               )}
             </CodeWorkspace>
-            <ContractCheckPanel
-              cc={contract}
-              guided={guided}
-              blockedReason={ctx.runBlockedReason}
-            />
           </div>
         </AuthoringShell>
       </WizardScreen>
-      <WizardScreen active={page === 1} className="flex flex-col overflow-hidden">
+      <WizardScreen active={page === 1}>
+        <ContractCheckScreen cc={contract} guided={guided} active={page === 1} onBack={onBack} />
+      </WizardScreen>
+      <WizardScreen active={page === 2} className="flex flex-col overflow-hidden">
         <RunOverview state={state} cc={contract} guided={guided} />
       </WizardScreen>
     </div>

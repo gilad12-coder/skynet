@@ -81,9 +81,12 @@ function readyState(level: Level, check: ContractCheckResponse | null) {
   };
 }
 
-test("the Metric step is the code screen, then the overview that holds Run", () => {
+test("the Metric step is the code screen, the sandbox check, then the overview that holds Run", () => {
   for (const level of ["guided", "standard", "expert"] as const) {
-    assert.deepEqual(stepPages("metric", readyState(level, null)), ["metric", "overview"]);
+    const pages = stepPages("metric", readyState(level, null));
+    assert.deepEqual(pages, ["metric", "check", "overview"]);
+    // The check closes the setup: it sits right before the overview and Run.
+    assert.equal(pages.indexOf("check"), pages.indexOf("overview") - 1);
   }
 });
 

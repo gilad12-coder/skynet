@@ -21,31 +21,33 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 function CheckStatus({ cc, guided }: { cc: ContractCheckState; guided: boolean }) {
   const last = cc.lastCheck;
-  const [key, tone, icon] = !last
-    ? (["submit.v2.metric.check.needed", "muted", null] as const)
-    : cc.stale
-      ? ([
-          "submit.v2.metric.check.stale",
-          "warn",
-          <Warning key="i" className="size-4 shrink-0" aria-hidden />,
-        ] as const)
-      : last.ok
+  const [key, tone, icon] = cc.checking
+    ? (["submit.v2.metric.check.running", "muted", null] as const)
+    : !last
+      ? (["submit.v2.metric.check.needed", "muted", null] as const)
+      : cc.stale
         ? ([
-            "submit.v2.metric.check.passed",
-            "ok",
-            <CheckCircle key="i" className="size-4 shrink-0" aria-hidden />,
+            "submit.v2.metric.check.stale",
+            "warn",
+            <Warning key="i" className="size-4 shrink-0" aria-hidden />,
           ] as const)
-        : ([
-            "submit.v2.metric.check.failed",
-            "bad",
-            <XCircle key="i" className="size-4 shrink-0" aria-hidden />,
-          ] as const);
+        : last.ok
+          ? ([
+              "submit.v2.metric.check.passed",
+              "ok",
+              <CheckCircle key="i" className="size-4 shrink-0" aria-hidden />,
+            ] as const)
+          : ([
+              "submit.v2.metric.check.failed",
+              "bad",
+              <XCircle key="i" className="size-4 shrink-0" aria-hidden />,
+            ] as const);
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 font-medium",
-        tone === "ok" && "text-[#5A7247] dark:text-[#adc899]",
-        tone === "warn" && "text-amber-700 dark:text-amber-400",
+        tone === "ok" && "text-[var(--success)]",
+        tone === "warn" && "text-[var(--warning)]",
         tone === "bad" && "text-destructive",
         tone === "muted" && "text-muted-foreground",
       )}

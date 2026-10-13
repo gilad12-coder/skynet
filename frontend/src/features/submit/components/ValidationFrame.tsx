@@ -63,6 +63,12 @@ const checkKeys: Record<string, MessageKey> = {
   "scorer.readiness": "submit.validation.check.scorer.readiness",
   "target.readiness": "submit.validation.check.target.readiness",
   "metric.contract": "submit.validation.check.metric.contract" as MessageKey,
+  // The unified contract check's items, run on the same screen.
+  "workspace.run_signature": "submit.v2.metric.check.key.workspace.run_signature",
+  "metric.signature": "submit.v2.metric.check.key.metric.signature",
+  "metric.model": "submit.v2.metric.check.key.metric.model",
+  "workspace.run": "submit.v2.metric.check.key.workspace.run",
+  "metric.shape": "submit.v2.metric.check.key.metric.shape",
 };
 
 const roleKeys: Record<string, MessageKey> = {
@@ -203,11 +209,14 @@ export function ValidationFrame({
   state,
   onBack,
   settled = false,
+  plan: planOverride,
 }: {
   state: ValidationProgress;
   onBack?: () => void;
   /** A finished check kept on the stage it ran from: it neither leaves by itself nor offers a way back. */
   settled?: boolean;
+  /** The steps this check walks, when it is not a preflight of `state.workflow`. */
+  plan?: readonly ValidationPhase[];
 }) {
   const [now, setNow] = useState(() => Date.now());
   const running = state.status === "running";
@@ -258,7 +267,7 @@ export function ValidationFrame({
     checksByRow.set(row, [...(checksByRow.get(row) ?? []), check]);
   }
   const brokenRow = failedPhase ? rowFor(failedPhase) : -1;
-  const plan = PLAN[state.workflow][state.scope];
+  const plan = planOverride ?? PLAN[state.workflow][state.scope];
   const reached = plan.indexOf(current);
   const upcoming = running && reached >= 0 ? plan.slice(reached + 1) : [];
 
@@ -418,10 +427,16 @@ export function ValidationPlan({
   workflow,
   scope,
   stale,
+  plan,
+  description,
 }: {
   workflow: PreflightWorkflow;
   scope: PreflightScope;
   stale: boolean;
+  /** The steps this check walks, when it is not a preflight of `workflow`. */
+  plan?: readonly ValidationPhase[];
+  /** Replaces the idle line, e.g. when the check cannot run yet. */
+  description?: string;
 }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl">
@@ -439,12 +454,12 @@ export function ValidationPlan({
             )}
           </h2>
           <p className="max-w-prose text-[15px] leading-relaxed text-muted-foreground" dir="auto">
-            {msg(stale ? "submit.preflight.stale" : "submit.preflight.idle")}
+            {description ?? msg(stale ? "submit.preflight.stale" : "submit.preflight.idle")}
           </p>
         </div>
       </div>
       <ol className="divide-y divide-border/60 border-t border-border/60">
-        {PLAN[workflow][scope].map((key, index) => (
+        {(plan ?? PLAN[workflow][scope]).map((key, index) => (
           <UpcomingRow key={key} number={index + 1} phase={key} />
         ))}
       </ol>
@@ -598,7 +613,8 @@ function PhaseRow({
               <ul className="space-y-2">
                 {checks.map((check, index) => (
                   <motion.li
-                    key={check.key}
+                    // A contract check repeats a key once per sample.
+                    key={`${check.key}-${index}`}
                     className="flex items-start gap-2.5 text-sm"
                     initial={reduce ? false : { opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
