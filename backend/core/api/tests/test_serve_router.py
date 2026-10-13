@@ -33,12 +33,13 @@ from ...storage.models import (
     BillingCustomerModel,
     WalletLedgerModel,
 )
+from ..auth import AuthenticatedUser, get_authenticated_user
 
 # noinspection PyProtectedMember
 from ..routers import _helpers
 from ..routers import serve as serve_module
 from ..routers.serve import _coerce_sample_value, _collect_sample, create_serve_router
-from .conftest import bypass_auth
+from .conftest import TEST_USER, bypass_auth
 from .mocks import (
     _BaseFakeJobStore,
     make_artifact,
@@ -1149,3 +1150,190 @@ def test_collect_sample_reads_fields_directly_and_via_mapping() -> None:
     assert _collect_sample(row, ["question"]) == {"question": "Q1"}
     assert _collect_sample(row, ["q"], {"raw_col": "q"}) == {"q": "mapped"}
     assert _collect_sample(row, ["missing"]) == {}
+
+
+@pytest.fixture
+def serve_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Capture every ``serve_inference`` write instead of hitting the database.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        A list that gains one ``{username, name, properties}`` dict per write.
+    """
+    events: list[dict[str, Any]] = []
+
+    def _record(_engine: Any, *, username: str | None, name: str, properties: dict[str, Any] | None = None) -> None:
+        """Store one telemetry write.
+
+        Args:
+            _engine: Ignored telemetry engine.
+            username: Caller identity.
+            name: Event name.
+            properties: Event properties.
+        """
+        events.append({"username": username, "name": name, "properties": dict(properties or {})})
+
+    monkeypatch.setattr(serve_module, "record_server_event", _record)
+    return events
+
+
+def _api_token_auth(app: FastAPI) -> None:
+    """Authenticate as ``TEST_USER`` the way the PAT path does, stamp included.
+
+    Args:
+        app: App whose auth dependency is overridden.
+    """
+
+    def _pat_user(request: Request) -> AuthenticatedUser:
+        """Return the test user and stamp the PAT channel.
+
+        Args:
+            request: Incoming request.
+
+        Returns:
+            The fixed test user.
+        """
+        request.state.auth_channel = "api_token"
+        return TEST_USER
+
+    app.dependency_overrides[get_authenticated_user] = _pat_user
+
+
+def test_serve_records_one_ui_event_with_structural_properties_only(
+    serve_client: TestClient, serve_store: _FakeJobStore, serve_events: list[dict[str, Any]]
+) -> None:
+    """A session-JWT serve call writes one ``ui`` row keyed to the job, with no inputs or outputs."""
+    _seed_run_job(serve_store, "ok")
+
+    with _PATCH_LM, _PATCH_DSPY_CTX:
+        resp = serve_client.post("/serve/ok", json={"inputs": {"question": "hello"}})
+
+    assert resp.status_code == 200
+    assert serve_events == [
+        {
+            "username": TEST_USER.username,
+            "name": "serve_inference",
+            "properties": {"optimization_id": "ok", "channel": "ui", "route": "serve", "status": "ok"},
+        }
+    ]
+
+
+def test_serve_records_api_token_channel_for_pat_caller(
+    serve_store: _FakeJobStore, serve_events: list[dict[str, Any]]
+) -> None:
+    """A PAT-authenticated serve call records ``channel=api_token``."""
+    _seed_run_job(serve_store, "ok")
+    app = FastAPI()
+    app.include_router(create_serve_router(job_store=serve_store))
+    _api_token_auth(app)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    with _PATCH_LM, _PATCH_DSPY_CTX:
+        resp = client.post("/serve/ok", json={"inputs": {"question": "hello"}})
+
+    assert resp.status_code == 200
+    assert [event["properties"]["channel"] for event in serve_events] == ["api_token"]
+
+
+def test_serve_records_error_when_inference_raises(
+    serve_client: TestClient, serve_store: _FakeJobStore, serve_events: list[dict[str, Any]]
+) -> None:
+    """A failed inference still writes exactly one row, with ``status=error``."""
+    _seed_run_job(serve_store, "boom")
+    # noinspection PyProtectedMember
+    _helpers._program_cache["boom"] = MagicMock(side_effect=RuntimeError("provider down"))
+
+    with _PATCH_LM, _PATCH_DSPY_CTX:
+        resp = serve_client.post("/serve/boom", json={"inputs": {"question": "hello"}})
+
+    assert resp.status_code == 500
+    assert len(serve_events) == 1
+    assert serve_events[0]["properties"]["status"] == "error"
+    assert serve_events[0]["properties"]["optimization_id"] == "boom"
+
+
+def test_serve_response_survives_telemetry_failure(
+    serve_client: TestClient, serve_store: _FakeJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A telemetry write that raises leaves the serve response unchanged."""
+    _seed_run_job(serve_store, "ok")
+    monkeypatch.setattr(serve_module, "record_server_event", MagicMock(side_effect=RuntimeError("db down")))
+
+    with _PATCH_LM, _PATCH_DSPY_CTX:
+        resp = serve_client.post("/serve/ok", json={"inputs": {"question": "hello"}})
+
+    assert resp.status_code == 200
+    assert "answer" in resp.json()["outputs"]
+
+
+def test_serve_stream_records_one_event_when_the_stream_ends(
+    stream_client: TestClient, serve_events: list[dict[str, Any]]
+) -> None:
+    """A streamed serve call writes one ``serve_stream`` row after the stream completes."""
+    with _PATCH_LM, _PATCH_DSPY_CTX, patch("dspy.streamify", side_effect=RuntimeError("not streamable")):
+        resp = stream_client.post("/serve/stream_job/stream", json={"inputs": {"question": "hi"}})
+
+    assert resp.status_code == 200
+    assert "event: final" in resp.text
+    assert [event["properties"] for event in serve_events] == [
+        {"optimization_id": "stream_job", "channel": "ui", "route": "serve_stream", "status": "ok"}
+    ]
+
+
+def test_serve_stream_records_error_when_inference_fails(
+    stream_client: TestClient, serve_events: list[dict[str, Any]]
+) -> None:
+    """A stream that ends in an ``error`` event records ``status=error`` once."""
+    # noinspection PyProtectedMember
+    _helpers._program_cache["stream_job"] = MagicMock(side_effect=RuntimeError("provider down"))
+
+    with _PATCH_LM, _PATCH_DSPY_CTX, patch("dspy.streamify", side_effect=RuntimeError("not streamable")):
+        resp = stream_client.post("/serve/stream_job/stream", json={"inputs": {"question": "hi"}})
+
+    assert "event: error" in resp.text
+    assert [event["properties"]["status"] for event in serve_events] == ["error"]
+
+
+def test_serve_pair_routes_record_pair_index(grid_client: TestClient, serve_events: list[dict[str, Any]]) -> None:
+    """Pair and pair-stream calls each write one row carrying the pair index."""
+    with _PATCH_LM, _PATCH_DSPY_CTX, patch("dspy.streamify", side_effect=RuntimeError("not streamable")):
+        assert grid_client.post("/serve/grid1/pair/0", json={"inputs": {"question": "hi"}}).status_code == 200
+        assert grid_client.post("/serve/grid1/pair/0/stream", json={"inputs": {"question": "hi"}}).status_code == 200
+
+    assert [event["properties"] for event in serve_events] == [
+        {"optimization_id": "grid1", "channel": "ui", "route": "pair", "pair_index": 0, "status": "ok"},
+        {"optimization_id": "grid1", "channel": "ui", "route": "pair_stream", "pair_index": 0, "status": "ok"},
+    ]
+
+
+def test_serve_chat_records_one_event(serve_client: TestClient, serve_events: list[dict[str, Any]]) -> None:
+    """A streamed chat turn writes one ``chat`` row."""
+    overlay = SimpleNamespace(tool_source={"kind": "live_mcp", "mcp_url": "http://mcp.local"})
+    with (
+        patch(
+            "core.api.routers.serve.load_react_chat_inputs",
+            return_value=(object, "{}", overlay, {"model_name": "openai/gpt-4o-mini"}),
+        ),
+        patch("core.api.routers.serve.build_language_model", return_value=MagicMock()),
+        patch("core.api.routers.serve.run_react_chat", side_effect=lambda **_kw: _fake_react_chat_stream()),
+    ):
+        resp = serve_client.post("/serve/anything/chat", json={"user_message": "hi", "trust_mode": "ask"})
+
+    assert resp.status_code == 200
+    assert [event["properties"] for event in serve_events] == [
+        {"optimization_id": "anything", "channel": "ui", "route": "chat", "status": "ok"}
+    ]
+
+
+def test_serve_info_and_request_form_record_nothing(
+    serve_client: TestClient, serve_store: _FakeJobStore, serve_events: list[dict[str, Any]]
+) -> None:
+    """Schema reads and request-form echoes are not inference and write no row."""
+    _seed_run_job(serve_store, "ok")
+
+    assert serve_client.get("/serve/ok/info").status_code == 200
+    assert serve_client.post("/serve/ok/request-form", json={}).status_code == 200
+
+    assert serve_events == []
