@@ -8,6 +8,7 @@ rather than bypassed.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -19,7 +20,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from ...config import settings
-from ...storage.models import UserModel
+from ...storage.models import UserIdentityModel, UserModel
 from ..errors import DomainError
 from ..password_policy import validate_password
 from ..passwords import hash_password, verify_password
@@ -72,10 +73,9 @@ def accounts_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     # email confirmation; the email-configured path is covered in
     # test_email_verification.py. Pinned so an ambient .env value can't flip it.
     monkeypatch.setattr(settings, "smtp_host", None)
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     UserModel.__table__.create(engine)
+    UserIdentityModel.__table__.create(engine)
     store = _Store(engine)
     app = FastAPI()
     app.state.job_store = store
@@ -138,6 +138,54 @@ def test_register_persists_profile_fields(accounts_client: TestClient) -> None:
         assert row.use_case == "extraction"
         assert row.experience_level == "expert"
         assert row.job_role is None
+
+
+@pytest.mark.parametrize(
+    ("sent", "stored"),
+    [
+        ("new", "guided"),
+        ("familiar", "standard"),
+        ("expert", "expert"),
+        ("guided", "guided"),
+        ("standard", "standard"),
+        ("wizard", None),
+    ],
+)
+def test_register_maps_experience_vocabularies(accounts_client: TestClient, sent: str, stored: str | None) -> None:
+    """Both the legacy sign-up and the abstraction-level vocabularies store the new values."""
+    email = f"level-{sent}@example.com"
+    created = accounts_client.post(
+        "/auth/register",
+        json={"email": email, "password": "longenough1", "experience_level": sent},
+        headers=_AUTH_HEADER,
+    )
+    assert created.status_code == 201
+    with Session(accounts_client.app.state.job_store.engine) as session:
+        row = session.get(UserModel, email)
+        assert row is not None
+        assert row.experience_level == stored
+
+
+@pytest.mark.parametrize(
+    ("environment_name", "skipped"), [("staging", False), ("production", False), ("skynet-pr-662", True)]
+)
+@pytest.mark.parametrize("route", ["/auth/register", "/auth/oauth/provision"])
+def test_new_account_skips_intake_only_in_preview_environments(
+    accounts_client: TestClient, monkeypatch: pytest.MonkeyPatch, route: str, environment_name: str, skipped: bool
+) -> None:
+    """A new account starts with the setup intake done only in a PR preview environment."""
+    monkeypatch.setattr(settings, "railway_environment_name", environment_name)
+    created = accounts_client.post(
+        route,
+        json={"email": "ivy@example.com", "password": "longenough1", "name": "Ivy"},
+        headers=_AUTH_HEADER,
+    )
+    assert created.status_code in {200, 201}
+    with Session(accounts_client.app.state.job_store.engine) as session:
+        row = session.get(UserModel, "ivy@example.com")
+        assert row is not None
+        assert (row.intake_completed_at is not None) is skipped
+        assert row.intake_profile is None
 
 
 def test_register_rejects_duplicate_email(accounts_client: TestClient) -> None:
@@ -383,7 +431,43 @@ def test_oauth_provision_requires_secret_and_valid_email(accounts_client: TestCl
     """Provisioning is gated by the internal secret and rejects a malformed email."""
     no_secret = accounts_client.post("/auth/oauth/provision", json={"email": "ivy@example.com"})
     assert no_secret.status_code == 403
-    bad_email = accounts_client.post(
-        "/auth/oauth/provision", json={"email": "not-an-email"}, headers=_AUTH_HEADER
-    )
+    bad_email = accounts_client.post("/auth/oauth/provision", json={"email": "not-an-email"}, headers=_AUTH_HEADER)
     assert bad_email.status_code == 422
+
+
+def test_oauth_provision_links_by_another_verified_email(accounts_client: TestClient) -> None:
+    """A provider identity with no account under its main email joins one under another."""
+    accounts_client.post("/auth/oauth/provision", json={"email": "jo@gmail.com", "name": "Jo"}, headers=_AUTH_HEADER)
+    linked = accounts_client.post(
+        "/auth/oauth/provision",
+        json={"email": "jo@work.edu", "name": "Jo", "other_emails": ["x@nowhere.com", "JO@gmail.com"]},
+        headers=_AUTH_HEADER,
+    )
+    assert linked.status_code == 200
+    assert linked.json()["email"] == "jo@gmail.com"
+    assert linked.json()["first_login"] is False
+    with Session(accounts_client.app.state.job_store.engine) as session:
+        assert session.get(UserModel, "jo@work.edu") is None
+
+
+def test_oauth_provision_drops_an_unconfirmed_password(accounts_client: TestClient) -> None:
+    """A password set on an address nobody confirmed stops working once a provider proves it."""
+    engine = accounts_client.app.state.job_store.engine
+    with Session(engine) as session:
+        session.add(
+            UserModel(
+                email="kim@example.com",
+                name="Kim",
+                password_hash=hash_password("attackerpass1"),
+                created_at=datetime.now(UTC),
+                email_verified=False,
+            )
+        )
+        session.commit()
+    provisioned = accounts_client.post("/auth/oauth/provision", json={"email": "kim@example.com"}, headers=_AUTH_HEADER)
+    assert provisioned.status_code == 200
+    with Session(engine) as session:
+        row = session.get(UserModel, "kim@example.com")
+        assert row is not None
+        assert row.password_hash == ""
+        assert bool(row.email_verified)

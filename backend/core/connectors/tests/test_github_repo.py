@@ -5,11 +5,12 @@ from __future__ import annotations
 import base64
 import subprocess
 import tarfile
+import zipfile
 from pathlib import Path
 
 import pytest
 
-from ..github_repo import GITHUB_HOST, RepoFetchError, fetch_snapshot, git_auth_env
+from ..github_repo import GITHUB_HOST, RepoFetchError, fetch_snapshot, git_auth_env, patched_repo_zip
 
 _GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
 
@@ -87,3 +88,25 @@ def test_auth_is_a_scoped_header_in_the_environment() -> None:
     assert base64.b64decode(header).decode() == "x-access-token:ghp_supersecret"
     assert environment["GIT_TERMINAL_PROMPT"] == "0"
     assert "GIT_CONFIG_COUNT" not in git_auth_env(None)
+
+
+def test_patched_zip_holds_the_whole_tree_with_the_patch_applied(tmp_path: Path) -> None:
+    """Apply the version's patch to the pinned commit and zip every file under the repository's name."""
+    app, pinned = _repository(tmp_path / "app", {"src/app.py": "x = 1\n", "README.md": "hi\n"})
+    patch = "--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"
+
+    archive = patched_repo_zip("acme/app", pinned, patch, None, tmp_path / "work", remote=f"file://{app}")
+
+    with zipfile.ZipFile(archive) as packed:
+        assert sorted(packed.namelist()) == ["app/README.md", "app/src/app.py"]
+        assert packed.read("app/src/app.py") == b"x = 2\n"
+    assert not (tmp_path / "work" / "checkout").exists()
+
+
+def test_patched_zip_refuses_a_patch_that_does_not_apply(tmp_path: Path) -> None:
+    """Raise rather than zip a tree the version never produced."""
+    app, pinned = _repository(tmp_path / "app", {"src/app.py": "x = 1\n"})
+    patch = "--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-y = 9\n+x = 2\n"
+
+    with pytest.raises(RepoFetchError):
+        patched_repo_zip("acme/app", pinned, patch, None, tmp_path / "work", remote=f"file://{app}")

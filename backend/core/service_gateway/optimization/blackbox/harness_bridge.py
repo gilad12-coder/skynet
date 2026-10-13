@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -37,20 +37,12 @@ KEY_ENV = "SKYNET_API_KEY"
 # The serialized launch travels through the sandbox input file, so the gateway
 # key is replaced by this token and only restored from the process environment.
 KEY_TOKEN = "__SKYNET_API_KEY__"
-# Set in the guest when Claude Code talks to Anthropic directly on the run
-# owner's key, which Vercel's egress proxy adds; the box itself never sees it.
-DIRECT_ANTHROPIC_ENV = "SKYNET_CLAUDE_DIRECT"
-ANTHROPIC_HOST = "api.anthropic.com"
-# Only makes the CLI send an x-api-key header for the edge to replace.
-ANTHROPIC_KEY_PLACEHOLDER = "sk-ant-skynet-edge-injected"
-# Where Vercel's egress proxy leaves its CA when a network policy rewrites headers.
-PROXY_CA_PATH = "/usr/local/share/ca-certificates/vercel-proxy-ca.crt"
 SHIM_DIR = ".local/skynet-bin"
 SESSIONS_DIR = ".skynet-bridge"
 _SLUG_RE = re.compile(r"[^A-Za-z0-9-]")
 _USAGE_KEYS = ("input_tokens", "output_tokens")
-# The instruction file every harness reads on start; Claude Code has its own
-# and reads the skills the upstream engines drop under ``.claude`` natively.
+# The instruction file every harness reads on start, pointing it at the skills
+# the upstream engines drop under ``.claude``.
 _POINTER_NOTE = (
     "# Workspace notes\n\n"
     "Project instructions and skills for this task, if any, live under `.claude/` in this directory: read "
@@ -61,24 +53,6 @@ _RESUME_NOTE = (
     "\n\n---\n\nA previous session already worked on this task in this directory. Its files and progress are "
     "still here; continue from the current workspace state.\n\n"
 )
-
-
-def use_direct_anthropic(env: MutableMapping[str, str]) -> None:
-    """Point Claude Code at Anthropic itself when this run holds its owner's key.
-
-    The model mailbox points every Anthropic client at the parent for the whole
-    command, so the runner overrides that here before Claude starts.
-
-    Args:
-        env: The environment Claude will inherit, changed in place.
-    """
-    if env.get(DIRECT_ANTHROPIC_ENV) != "1":
-        return
-    env["ANTHROPIC_BASE_URL"] = f"https://{ANTHROPIC_HOST}"
-    env["ANTHROPIC_API_KEY"] = ANTHROPIC_KEY_PLACEHOLDER
-    env.pop("ANTHROPIC_AUTH_TOKEN", None)
-    if Path(PROXY_CA_PATH).is_file():
-        env["NODE_EXTRA_CA_CERTS"] = PROXY_CA_PATH
 
 
 def _json_lines(stdout: str) -> Iterator[dict[str, Any]]:
@@ -211,27 +185,37 @@ def parse_opencode_output(stdout: str) -> tuple[str | None, Usage]:
     return text, usage
 
 
-def parse_claude_output(stdout: str) -> tuple[str | None, Usage]:
-    """Read the result and usage from ``claude -p --output-format json``.
+# Codex items that are the agent acting rather than talking or thinking; each
+# is announced on ``item.started`` and settled on ``item.completed``.
+_CODEX_TOOL_ITEMS = frozenset({"command_execution", "file_change", "mcp_tool_call", "web_search"})
+
+
+def tool_call_ids(output_format: str, event: dict[str, Any]) -> list[str]:
+    """Name the tool calls one streamed harness event starts.
 
     Args:
-        stdout: Captured harness output.
+        output_format: One of the ``PARSERS`` keys.
+        event: One parsed JSON event from the harness stdout.
 
     Returns:
-        The result text (``None`` when absent) and the usage total.
+        One identifier per tool call the event announces; an empty identifier
+        stands for a call the event does not name. Formats that stream no tool
+        events (``plain``) never yield any.
     """
-    candidates = [stdout.strip(), *reversed(stdout.strip().splitlines())]
-    for raw in candidates:
-        try:
-            payload = json.loads(raw)
-        except ValueError:
-            continue
-        if isinstance(payload, dict) and "result" in payload:
-            used = payload.get("usage") or {}
-            result = payload.get("result")
-            text = str(result).strip() if result else None
-            return (text or None), _usage(used.get("input_tokens"), used.get("output_tokens"))
-    return None, {}
+    kind = event.get("type")
+    if output_format == "pi":
+        return [str(event.get("toolCallId") or "")] if kind == "tool_execution_start" else []
+    if output_format == "codex":
+        item = event.get("item") or {}
+        if kind in ("item.started", "item.completed") and item.get("type") in _CODEX_TOOL_ITEMS:
+            # A file change may only ever be reported as completed, so both
+            # events count and the item id keeps a started call from counting twice.
+            return [str(item.get("id") or "")]
+        return []
+    if output_format == "opencode":
+        part = event.get("part") or {}
+        return [str(part.get("callID") or part.get("id") or "")] if kind == "tool_use" else []
+    return []
 
 
 PARSERS = {
@@ -239,7 +223,6 @@ PARSERS = {
     "pi": parse_pi_output,
     "codex": parse_codex_output,
     "opencode": parse_opencode_output,
-    "claude": parse_claude_output,
 }
 
 
@@ -278,6 +261,24 @@ def contained_path(root: Path, relative_path: str) -> Path:
     return target
 
 
+def workspace_files(proposer: dict[str, Any]) -> list[str]:
+    """List the files :func:`run_session` writes into the agent's workspace.
+
+    Args:
+        proposer: Serialized harness launch.
+
+    Returns:
+        Workspace-relative paths; empty without a proposer.
+    """
+    if not proposer:
+        return []
+    paths = [str(path) for path in (proposer.get("files") or {})]
+    instructions = proposer.get("instructions_file")
+    if instructions and instructions != "CLAUDE.md":
+        paths.append(str(instructions))
+    return paths
+
+
 def cost_usd(usage: Usage, price: dict[str, float] | None) -> float:
     """Price a usage record with the per-token rates the parent supplied.
 
@@ -308,30 +309,73 @@ class SessionOutcome:
     duration_seconds: float
     timed_out: bool = False
     budget_exceeded: bool = False
+    tool_calls: int = 0
+    tool_cap_reached: bool = False
+
+    @property
+    def failed(self) -> bool:
+        """Tell whether the session ended in an error rather than a finish or a tool-cap stop.
+
+        Returns:
+            True for a timeout, or a non-zero exit the tool cap did not cause.
+        """
+        return self.timed_out or (self.returncode != 0 and not self.tool_cap_reached)
 
 
 @dataclass
 class _Monitor:
-    """Stream the harness output, stopping it once the session budget is spent."""
+    """Stream the harness output, stopping it once the session budget or tool-call cap is spent."""
 
     process: subprocess.Popen[str]
     output_format: str
     price: dict[str, float] | None
     max_cost_usd: float | None
+    max_tool_calls: int | None = None
     chunks: list[str] = field(default_factory=list)
     budget_exceeded: bool = False
+    tool_calls: int = 0
+    tool_cap_reached: bool = False
+    _seen_calls: set[str] = field(default_factory=set)
+
+    @property
+    def stopped(self) -> bool:
+        """Tell whether the monitor itself stopped the harness.
+
+        Returns:
+            True once the budget or the tool-call cap was exceeded.
+        """
+        return self.budget_exceeded or self.tool_cap_reached
 
     def pump(self) -> None:
-        """Read stdout to completion, re-pricing whenever a usage event may have arrived."""
+        """Read stdout to completion, re-pricing and counting tool calls as events arrive."""
         assert self.process.stdout is not None
         for line in self.process.stdout:
             self.chunks.append(line)
+            if self.max_tool_calls is not None:
+                self._count_tool_calls(line)
             if self.max_cost_usd is None or not self.price or "usage" not in line:
                 continue
             _, usage = parse_output(self.output_format, "".join(self.chunks))
             if cost_usd(usage, self.price) > self.max_cost_usd:
                 self.budget_exceeded = True
                 _stop_group(self.process, signal.SIGTERM)
+
+    def _count_tool_calls(self, line: str) -> None:
+        """Count the tool calls one output line starts and stop the harness past the cap.
+
+        Args:
+            line: One line of harness stdout.
+        """
+        for event in _json_lines(line):
+            for call_id in tool_call_ids(self.output_format, event):
+                if call_id and call_id in self._seen_calls:
+                    continue
+                if call_id:
+                    self._seen_calls.add(call_id)
+                self.tool_calls += 1
+        if self.max_tool_calls is not None and self.tool_calls > self.max_tool_calls and not self.tool_cap_reached:
+            self.tool_cap_reached = True
+            _stop_group(self.process, signal.SIGTERM)
 
 
 def _stop_group(process: subprocess.Popen[str], signum: int) -> None:
@@ -356,12 +400,15 @@ def run_session(
     max_cost_usd: float | None = None,
     timeout_seconds: float | None = None,
     extra_env: dict[str, str] | None = None,
+    api_key: str | None = None,
 ) -> SessionOutcome:
     """Run one proposer session through the configured harness.
 
     Args:
         proposer: Serialized launch: ``run_command``, ``files``, ``env``,
-            ``output_format``, ``instructions_file`` and optional ``price``.
+            ``output_format``, ``instructions_file`` and optional ``price``
+            and ``max_tool_calls`` (stop the harness once it starts more
+            tool calls than this; its workspace edits so far stand).
         workspace: Directory the agent works in (the upstream work dir).
         prompt: Task prompt for this session.
         model: Model identifier the harness should route to.
@@ -369,13 +416,16 @@ def run_session(
         max_cost_usd: Stop the harness once its priced usage exceeds this.
         timeout_seconds: Kill the harness after this many seconds.
         extra_env: Environment overrides layered on top of the launch env.
+        api_key: Route key substituted for the launch's key token; defaults
+            to the proposer key in ``SKYNET_API_KEY``.
 
     Returns:
         The parsed answer, raw transcript, usage and exit status.
     """
     workspace.mkdir(parents=True, exist_ok=True)
     session_dir.mkdir(parents=True, exist_ok=True)
-    api_key = os.environ.get(KEY_ENV, "")
+    if api_key is None:
+        api_key = os.environ.get(KEY_ENV, "")
     for relative_path, content in (proposer.get("files") or {}).items():
         target = contained_path(workspace, relative_path)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -404,13 +454,21 @@ def run_session(
             [shell, "-c", proposer["run_command"].replace(KEY_TOKEN, api_key)],
             cwd=workspace,
             env=env,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=stderr,
             text=True,
             errors="replace",
             start_new_session=True,
         )
-        monitor = _Monitor(process, proposer.get("output_format", "plain"), proposer.get("price"), max_cost_usd)
+        max_tool_calls = proposer.get("max_tool_calls")
+        monitor = _Monitor(
+            process,
+            proposer.get("output_format", "plain"),
+            proposer.get("price"),
+            max_cost_usd,
+            int(max_tool_calls) if max_tool_calls else None,
+        )
         reader = threading.Thread(target=monitor.pump, daemon=True)
         reader.start()
         timed_out = False
@@ -423,7 +481,7 @@ def run_session(
         # A child forked while the first signal landed can outlive the shell and
         # keep the pipe open, so keep sweeping the group until the reader sees EOF.
         deadline = time.monotonic() + 5.0
-        while (timed_out or monitor.budget_exceeded) and reader.is_alive() and time.monotonic() < deadline:
+        while (timed_out or monitor.stopped) and reader.is_alive() and time.monotonic() < deadline:
             _stop_group(process, signal.SIGKILL)
             reader.join(timeout=0.2)
         reader.join(timeout=30)
@@ -440,6 +498,8 @@ def run_session(
         duration_seconds=time.monotonic() - started,
         timed_out=timed_out,
         budget_exceeded=monitor.budget_exceeded,
+        tool_calls=monitor.tool_calls,
+        tool_cap_reached=monitor.tool_cap_reached,
     )
 
 
@@ -484,6 +544,54 @@ def record_transcript(session_id: str, workspace: Path, model: str, usage: Usage
         handle.write(json.dumps(entry) + "\n")
 
 
+def _event_error(event: dict[str, Any]) -> str | None:
+    """Return the message of a harness event that reports an error, if it is one.
+
+    Args:
+        event: One parsed JSON event from the harness stdout.
+
+    Returns:
+        The error message, or ``None`` for ordinary events.
+    """
+    kind = str(event.get("type", "")).lower()
+    if "error" not in kind and "fail" not in kind and not event.get("is_error"):
+        return None
+    error = event.get("error")
+    message = (
+        event.get("message") or (error.get("message") if isinstance(error, dict) else error) or event.get("result")
+    )
+    return str(message or json.dumps(event))[:500]
+
+
+def failure_detail(outcome: SessionOutcome, limit: int = 2000) -> str:
+    """Summarize why a harness session failed, from both of its output streams.
+
+    JSON harnesses such as Codex report the real error as an event on stdout and
+    only a banner on stderr, so stderr alone would hide the cause.
+
+    Args:
+        outcome: Parsed session outcome.
+        limit: Maximum length of the summary.
+
+    Returns:
+        The stderr tail followed by any error events or plain lines from stdout.
+    """
+    parts = []
+    stderr = outcome.stderr.strip()
+    if stderr:
+        parts.append(stderr[-limit:])
+    errors: list[str] = []
+    for event in _json_lines(outcome.stdout):
+        message = _event_error(event)
+        if message and (not errors or errors[-1] != message):
+            errors.append(message)
+    plain = [line for line in outcome.stdout.splitlines() if line.strip() and not line.lstrip().startswith("{")]
+    stdout_lines = errors[-10:] or plain[-20:]
+    if stdout_lines:
+        parts.append("stdout: " + "\n".join(stdout_lines))
+    return "\n".join(parts)[-limit:]
+
+
 def result_document(session_id: str, model: str, outcome: SessionOutcome) -> dict[str, Any]:
     """Shape a session outcome like ``claude --print --output-format json``.
 
@@ -495,17 +603,26 @@ def result_document(session_id: str, model: str, outcome: SessionOutcome) -> dic
     Returns:
         The result document the upstream engines parse.
     """
-    is_error = outcome.returncode != 0 or outcome.timed_out or outcome.text is None
+    # A tool-cap stop ends the session early on purpose: its workspace edits
+    # are the answer, so it reports success even without a final message.
+    is_error = outcome.failed or (outcome.text is None and not outcome.tool_cap_reached)
     input_tokens = outcome.usage.get("input_tokens", 0)
     output_tokens = outcome.usage.get("output_tokens", 0)
-    detail = (outcome.stderr or outcome.stdout).strip()[-2000:]
+    if outcome.text is not None:
+        result = outcome.text
+    elif outcome.tool_cap_reached:
+        result = (
+            f"Stopped at the session's tool-call cap ({outcome.tool_calls} started); the workspace holds its edits."
+        )
+    else:
+        result = f"Harness exited with {outcome.returncode}: {failure_detail(outcome)}"
     return {
         "type": "result",
         "subtype": "success" if not is_error else "error_during_execution",
         "is_error": is_error,
         "duration_ms": int(outcome.duration_seconds * 1000),
         "num_turns": 1,
-        "result": outcome.text if outcome.text is not None else f"Harness exited with {outcome.returncode}: {detail}",
+        "result": result,
         "session_id": session_id,
         "total_cost_usd": outcome.cost_usd,
         "usage": {
@@ -625,8 +742,14 @@ def main(argv: list[str]) -> int:
         timeout_seconds=proposer.get("timeout_seconds"),
     )
     record_transcript(session_id, workspace, model, outcome.usage)
-    print(json.dumps(result_document(session_id, model, outcome)))
+    document = result_document(session_id, model, outcome)
+    if document["is_error"]:
+        # The result text can be the agent's last chat message, which hides why the harness failed.
+        print(failure_detail(outcome) or f"harness exited {outcome.returncode}", file=sys.stderr, flush=True)
+    print(json.dumps(document))
     sys.stdout.flush()
+    if outcome.tool_cap_reached and not outcome.timed_out:
+        return 0
     return outcome.returncode if outcome.returncode is not None else 1
 
 

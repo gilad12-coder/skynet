@@ -26,8 +26,8 @@ import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 
 import { centsToBudgetText, parseBudgetInput } from "@/shared/lib/budget-input";
-import { chargeableBracket } from "../lib/cost-bracket";
-import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
+import { chargeableBracket, type CostBracket } from "../lib/cost-bracket";
+import type { WizardV2Context } from "../lib/wizard-v2";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
 import { Disclosure } from "./Disclosure";
 import { Figure, buildEstimateSections, type CalcSection } from "./EstimateBreakdown";
@@ -55,7 +55,7 @@ import { StepCard } from "./blackbox/shared";
  * is its header alone, as the estimate and the ledger describe a limit.
  */
 type BudgetContext = Pick<
-  SubmitWizardContext,
+  WizardV2Context,
   | "costBracket"
   | "suggestedCeiling"
   | "maxCostCents"
@@ -86,6 +86,12 @@ function sumDecimals(a: string, b: string): string {
 
 const isZero = (amount: string) => !/[1-9]/.test(amount);
 
+/** A budget context whose estimate exists: the card's arithmetic needs both figures. */
+type ReadyBudgetContext = Omit<BudgetContext, "costBracket" | "suggestedCeiling"> & {
+  costBracket: CostBracket;
+  suggestedCeiling: number;
+};
+
 export function TotalBudgetCard({
   w,
   mode,
@@ -95,6 +101,36 @@ export function TotalBudgetCard({
   mode: TokenSourceMode;
   /** The estimate still waits on inputs from later steps (cases, models). */
   preliminary?: boolean;
+}) {
+  const { costBracket, suggestedCeiling } = w;
+  // No estimate before the setup names an artifact; the card says so instead of guessing.
+  if (costBracket == null || suggestedCeiling == null) {
+    return (
+      <StepCard
+        title={msg("submit.budget.label")}
+        description={msg("submit.budget.estimate_preliminary_note")}
+      >
+        {null}
+      </StepCard>
+    );
+  }
+  return (
+    <ReadyBudgetCard
+      w={{ ...w, costBracket, suggestedCeiling }}
+      mode={mode}
+      preliminary={preliminary}
+    />
+  );
+}
+
+function ReadyBudgetCard({
+  w,
+  mode,
+  preliminary,
+}: {
+  w: ReadyBudgetContext;
+  mode: TokenSourceMode;
+  preliminary: boolean;
 }) {
   const {
     costBracket,
@@ -116,6 +152,7 @@ export function TotalBudgetCard({
   const runtimeIncluded = bracket.runtimeBillingBasis === "included_in_model_markup";
   const mixedBilling = costBracket.managedModelHighCents > 0 && costBracket.byokModelHighCents > 0;
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [limitEdited, setLimitEdited] = useState(maxCostCents != null);
 
   // The field is typed in dollars; the wizard state stays in cents. The field
   // owns its text so the user can clear it or leave a typo visible with its
@@ -146,11 +183,19 @@ export function TotalBudgetCard({
   const nudge = (direction: 1 | -1) => {
     const base = parsed.kind === "value" ? parsed.value : suggestedCeiling;
     const next = Math.max(1, base + direction * BUDGET_STEP_CENTS);
+    setLimitEdited(true);
     setMaxCostCents(next);
     setText(centsToBudgetText(next, locale));
   };
   const atFloor = parsed.kind === "value" && parsed.value <= 1;
   const minimum = minimumTotalCents == null ? null : Math.ceil(minimumTotalCents);
+  // Until the user edits it, an unset limit follows the estimate's low end,
+  // never below a minimum the server reports; a restored limit is kept as is.
+  const startingLimit = Math.max(1, Math.ceil(bracket.lowCents), minimum ?? 0);
+  useEffect(() => {
+    if (limitEdited || budgetUncapped || maxCostCents === startingLimit) return;
+    setMaxCostCents(startingLimit);
+  }, [limitEdited, startingLimit, maxCostCents, budgetUncapped, setMaxCostCents]);
   const minimumMessage =
     minimum == null
       ? null
@@ -297,7 +342,7 @@ export function TotalBudgetCard({
           </Label>
           <div
             className={cn(
-              "overflow-hidden rounded-xl border bg-background/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.72),0_12px_26px_-24px_rgba(15,23,42,0.45)] backdrop-blur-sm transition-[border-color,box-shadow] focus-within:ring-[3px]",
+              "overflow-hidden rounded-xl border bg-background/75 backdrop-blur-sm transition-[border-color,box-shadow] focus-within:ring-[3px]",
               fieldError
                 ? "border-destructive focus-within:border-destructive focus-within:ring-destructive/20"
                 : "border-input/90 focus-within:border-ring focus-within:ring-ring/50",
@@ -321,6 +366,7 @@ export function TotalBudgetCard({
                 aria-describedby={cn(fieldMessage && "totalBudgetMessage", "totalBudgetUnit")}
                 value={text}
                 onChange={(e) => {
+                  setLimitEdited(true);
                   setText(e.target.value);
                   const next = parseBudgetInput(e.target.value, locale);
                   setMaxCostCents(next.kind === "value" ? next.value : null);
@@ -341,10 +387,10 @@ export function TotalBudgetCard({
                 <Plus className="size-3" />
               </button>
             </div>
-            <div className="border-t border-border/40 bg-[#FAF8F5] px-3.5 py-3">
+            <div className="border-t border-border/40 bg-background px-3.5 py-3">
               <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3D2E22]">
-                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
+                <span className="flex items-center gap-2 text-[13px] font-semibold text-primary">
+                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-fill text-primary-foreground">
                     <Gauge className="h-3 w-3" aria-hidden="true" />
                   </span>
                   {estimateLabel}
@@ -355,7 +401,7 @@ export function TotalBudgetCard({
                   sections={estimateSections}
                   intro={estimateIntro}
                   principles={estimatePrinciples}
-                  className="self-start text-[13px] text-[#3D2E22] sm:self-auto sm:text-end"
+                  className="self-start text-[13px] text-primary sm:self-auto sm:text-end"
                 />
               </div>
               <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">

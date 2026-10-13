@@ -41,6 +41,15 @@ export function ThinkingSection({ thinking }: { thinking: AgentThinking }) {
     setOpen(false);
   }, [reasoning, shouldReduceMotion]);
 
+  // A stream that resumes reasoning after the block auto-collapsed (a
+  // parallel lane still thinking) reopens it, so the live text stays visible.
+  React.useEffect(() => {
+    if (isThinking && autoCollapsedRef.current) {
+      autoCollapsedRef.current = false;
+      setOpen(true);
+    }
+  }, [isThinking]);
+
   React.useEffect(() => {
     if (hasFinished && !autoCollapsedRef.current) {
       autoCollapsedRef.current = true;
@@ -98,7 +107,7 @@ export function ThinkingSection({ thinking }: { thinking: AgentThinking }) {
       <button
         type="button"
         onClick={() => (open ? beginCollapse() : setOpen(true))}
-        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-start hover:bg-[#3D2E22]/[0.035] transition-colors cursor-pointer"
+        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-start hover:bg-primary-fill/[0.035] transition-colors cursor-pointer"
         aria-expanded={open}
       >
         <ThinkingIndicator active={isThinking} reduce={Boolean(shouldReduceMotion)} />
@@ -107,7 +116,7 @@ export function ThinkingSection({ thinking }: { thinking: AgentThinking }) {
             className={cn(
               "text-xs font-medium",
               isThinking
-                ? "text-[#3D2E22] animate-pulse motion-reduce:animate-none"
+                ? "text-primary animate-pulse motion-reduce:animate-none"
                 : "text-foreground/70",
             )}
           >
@@ -150,7 +159,7 @@ export function ThinkingSection({ thinking }: { thinking: AgentThinking }) {
               ref={scrollRef}
               onScroll={handleScroll}
               dir="ltr"
-              className="max-h-44 overflow-y-auto border-t border-[#3D2E22]/[0.08] px-4 py-3 text-[0.6875rem] leading-[1.65] text-[#5C4D40]/80 font-mono whitespace-pre-wrap break-words"
+              className="max-h-44 overflow-y-auto border-t border-primary-fill/[0.08] px-4 py-3 text-[0.6875rem] leading-[1.65] text-[var(--text-2)]/80 font-mono whitespace-pre-wrap break-words"
             >
               {reasoning}
             </div>
@@ -166,8 +175,8 @@ function ThinkingIndicator({ active, reduce }: { active: boolean; reduce: boolea
     return <EmberGlyph reduce={reduce} />;
   }
   return (
-    <span className="inline-flex size-4 items-center justify-center rounded-full bg-[#3D2E22]/15 shrink-0">
-      <Check className="size-2.5 text-[#3D2E22]" />
+    <span className="inline-flex size-4 items-center justify-center rounded-full on-primary shrink-0">
+      <Check className="size-2.5 text-primary" />
     </span>
   );
 }

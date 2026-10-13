@@ -39,7 +39,7 @@ export function StepCard({
   );
   return (
     <Card
-      className="border-border/50 bg-card/80 backdrop-blur-xl shadow-lg"
+      className="border-border/50 bg-card/80 backdrop-blur-xl"
       data-tutorial={tutorial}
     >
       <CardHeader className="px-4 sm:px-6">

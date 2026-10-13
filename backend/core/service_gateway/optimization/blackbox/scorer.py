@@ -49,20 +49,18 @@ class JobScorer(Protocol):
 
 
 def normalize_score(raw: Any) -> tuple[float, SideInfo]:
-    """Coerce a scorer's return value into ``(score, side_info)``.
+    """Coerce a scorer's return value into ``(score, side_info)``, feedback required.
 
-    Accepted shapes: a number; ``(number, side_info)``; a mapping with a
-    ``score`` key (remaining keys become side info); an object with a
-    numeric ``score`` attribute.
+    See :func:`runner.normalize_score` for the accepted shapes.
 
     Args:
         raw: Whatever the scorer returned.
 
     Returns:
-        The float score and a side-info mapping (empty when none was given).
+        The float score and side info carrying ``feedback`` and any named ``scores``.
 
     Raises:
-        ServiceError: When the value has none of the accepted shapes.
+        ServiceError: When the value has none of the accepted shapes or lacks feedback.
     """
     try:
         return runner.normalize_score(raw)

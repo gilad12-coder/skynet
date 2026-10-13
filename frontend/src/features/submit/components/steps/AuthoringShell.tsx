@@ -2,7 +2,7 @@
 
 import { PingDot } from "@/shared/ui/ping-dot";
 import * as React from "react";
-import { Check, Repeat } from "@/shared/ui/icons";
+import { Check } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { HelpTip } from "@/shared/ui/help-tip";
@@ -21,55 +21,29 @@ export function ArtifactStatusChip({ status }: { status: ArtifactStatus }) {
   }
   if (status === "writing") {
     return (
-      <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#3D2E22]">
+      <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-primary">
         {msg("auto.features.submit.components.steps.codestep.5")}
         <PingDot size="sm" tone="agent" />
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#5A7247]">
+    <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#5A7247] dark:text-[#adc899]">
       {msg("auto.features.submit.components.steps.codestep.6")}
       <Check className="size-3" />
     </span>
   );
 }
 
-interface ModeToggleProps {
+function ModeToggle({
+  value,
+  onChange,
+}: {
   value: "auto" | "manual";
   onChange: (mode: "auto" | "manual") => void;
-  disabledReason?: string;
-  // Leading slot of the header band: the wizard's recipe chip, so the recipe
-  // and the step it opens read as one card.
-  start?: React.ReactNode;
-  // Chip showing the chosen module with a click-to-switch affordance.
-  module?: { label: string; onChangeModule: () => void } | null;
-}
-
-function ModeToggle({ value, onChange, disabledReason, start, module }: ModeToggleProps) {
-  const autoDisabled = !!disabledReason && value !== "auto";
-
+}) {
   return (
-    <div className="flex flex-col items-stretch gap-2.5 border-b border-border/40 bg-[#FAF8F5] px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-      <div className="flex min-w-0 flex-col items-stretch gap-2.5 sm:flex-row sm:items-center sm:w-auto">
-        {start}
-        {module && (
-          <button
-            type="button"
-            onClick={module.onChangeModule}
-            data-tutorial="module-selector"
-            className="group inline-flex min-h-[44px] w-full min-w-0 shrink-0 cursor-pointer items-center justify-between gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1 text-xs shadow-xs transition-colors hover:border-[#C8A882] sm:w-auto lg:min-h-0"
-          >
-            <span className="font-semibold text-foreground">{module.label}</span>
-            <span aria-hidden className="h-3 w-px bg-border/70" />
-            <span className="flex items-center gap-1 font-medium text-muted-foreground transition-colors group-hover:text-foreground">
-              {msg("submit.module.change")}
-              <Repeat className="size-3" />
-            </span>
-          </button>
-        )}
-      </div>
-
+    <div className="flex items-center justify-end border-b border-border/40 bg-background px-4 py-2.5">
       <Segmented<"auto" | "manual">
         size="sm"
         className="w-full sm:w-auto"
@@ -77,12 +51,7 @@ function ModeToggle({ value, onChange, disabledReason, start, module }: ModeTogg
         value={value}
         onChange={onChange}
         options={[
-          {
-            value: "auto",
-            label: msg("auto.features.submit.components.steps.codestep.7"),
-            disabled: autoDisabled,
-            title: autoDisabled ? disabledReason : undefined,
-          },
+          { value: "auto", label: msg("auto.features.submit.components.steps.codestep.7") },
           { value: "manual", label: msg("auto.features.submit.components.steps.codestep.8") },
         ]}
       />
@@ -90,62 +59,68 @@ function ModeToggle({ value, onChange, disabledReason, start, module }: ModeTogg
   );
 }
 
-export interface AuthoringShellProps extends ModeToggleProps {
+export interface AuthoringShellProps {
+  // Without onChange the agent pane always shows and there is no toggle: the
+  // agent writes, the user edits beside it.
+  value?: "auto" | "manual";
+  onChange?: (mode: "auto" | "manual") => void;
   // The agent chat or interview, shown in the start pane while in auto mode.
   sidePanel: React.ReactNode;
-  title: React.ReactNode;
+  // Steps that head their own body (Inputs, Optimizer) leave this out.
+  title?: React.ReactNode;
   // Guidance for the step; hovering the title shows it.
   description?: string;
   children: React.ReactNode;
 }
 
-// The two-pane authoring surface shared by the DSPy and black-box wizards:
-// a mode toggle header, the agent pane on the start side in auto mode, and
+// The two-pane authoring surface of the wizard's Task and Metric steps:
+// an optional mode toggle header, the agent pane on the start side in auto mode, and
 // the editors on the end side. Callers pad their own body so a canvas can
 // bleed to the edges while form fields keep the card gutter.
 export function AuthoringShell({
-  value,
+  value = "auto",
   onChange,
-  disabledReason,
-  start,
-  module,
   sidePanel,
   title,
   description,
   children,
 }: AuthoringShellProps) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl shadow-lg">
-      <ModeToggle
-        value={value}
-        onChange={onChange}
-        disabledReason={disabledReason}
-        start={start}
-        module={module}
-      />
+    <div className="@container flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl">
+      {onChange && (
+        <ModeToggle value={value} onChange={onChange} />
+      )}
       {/* The agent pane grows with the card instead of sitting at a fixed
           width, keeping a floor that fits a question and its choices; the
-          editors stay the wider side. On desktop the pane also sets the
-          card's height: it reaches the nav (22rem is the stepper, header
-          band, nav and page paddings around it) but never drops under
-          56rem, so a conversation and a long brief both have room. */}
+          editors stay the wider side. The card fills the wizard's screen, so
+          once split both panes take its full height and scroll inside
+          themselves. The split keys off the card's own width, not the
+          viewport: beside the sidebar a 1024px iPad portrait leaves the card
+          ~640px, too narrow for touch targets in both panes, so it stacks
+          there (and the stack scrolls within the card) and splits from 48rem
+          up. A desktop window of the same width leaves the same card, so a
+          fine pointer splits from 36rem. */}
       <div
         className={cn(
-          "grid grid-cols-1",
-          value === "auto" && "lg:grid-cols-[minmax(20rem,5fr)_minmax(0,6fr)]",
+          "grid min-h-0 flex-1 grid-cols-1 overflow-y-auto",
+          value !== "auto" && "grid-rows-[minmax(0,1fr)]",
+          value === "auto" &&
+            "@3xl:grid-cols-[minmax(20rem,5fr)_minmax(0,6fr)] @3xl:grid-rows-[minmax(0,1fr)] @3xl:overflow-hidden pointer-fine:@min-[36rem]:grid-cols-[minmax(20rem,5fr)_minmax(0,6fr)] pointer-fine:@min-[36rem]:grid-rows-[minmax(0,1fr)] pointer-fine:@min-[36rem]:overflow-hidden",
         )}
       >
         {value === "auto" && (
-          <div className="relative h-[70svh] min-h-[30rem] max-h-[700px] self-stretch overflow-hidden border-b border-border/40 lg:h-auto lg:min-h-[max(56rem,calc(100svh-22rem))] lg:max-h-none lg:border-b-0 lg:border-e">
+          <div className="relative h-[70svh] min-h-[30rem] max-h-[700px] self-stretch overflow-hidden border-b border-border/40 @3xl:h-auto @3xl:min-h-0 @3xl:max-h-none @3xl:border-b-0 @3xl:border-e pointer-fine:@min-[36rem]:h-auto pointer-fine:@min-[36rem]:min-h-0 pointer-fine:@min-[36rem]:max-h-none pointer-fine:@min-[36rem]:border-b-0 pointer-fine:@min-[36rem]:border-e">
             {sidePanel}
           </div>
         )}
-        <div className="flex min-w-0 flex-col self-stretch">
-          <div className="shrink-0 border-b border-border/30 px-4 py-3 sm:px-6">
-            <h3 className="inline-flex text-lg font-semibold tracking-tight text-foreground">
-              {description ? <HelpTip text={description}>{title}</HelpTip> : title}
-            </h3>
-          </div>
+        <div className="flex min-h-0 min-w-0 flex-col self-stretch">
+          {title && (
+            <div className="shrink-0 border-b border-border/30 px-4 py-3 sm:px-6">
+              <h3 className="inline-flex text-lg font-semibold tracking-tight text-foreground">
+                {description ? <HelpTip text={description}>{title}</HelpTip> : title}
+              </h3>
+            </div>
+          )}
           {children}
         </div>
       </div>

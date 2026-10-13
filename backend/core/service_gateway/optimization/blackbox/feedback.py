@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 
 # Scorers that follow the documented contract put their prose under this key.
 FEEDBACK_KEY = "feedback"
+# Named scores, ``{name: {"score", "feedback"}}``, live under this key.
+SCORES_KEY = "scores"
+# GEPA reads ``scores`` as plain numbers for its objective frontier, so the
+# named scores' feedback travels to its reflection under this key instead.
+SCORE_FEEDBACK_KEY = "Feedback per score"
 # Part name a text-only version travels under in candidate events; the
 # frontend keys renders and diffs off it (BLACKBOX_STR_CANDIDATE_KEY).
 STR_CANDIDATE_KEY = "current_candidate"
@@ -138,11 +143,66 @@ def scorer_feedback_text(side_info: SideInfo) -> str:
     feedback = notes.pop(FEEDBACK_KEY, None)
     if feedback is not None:
         lines.append(feedback if isinstance(feedback, str) else _dump(feedback))
+    lines.extend(named_score_lines(notes.pop(SCORES_KEY, None)))
     for key, value in notes.items():
         if value is None or (isinstance(value, (list, dict)) and not value):
             continue
         lines.append(f"{key}: {value if isinstance(value, str) else _dump(value)}")
     return "\n".join(line for line in lines if line.strip())[:MINIBATCH_FEEDBACK_CHAR_CAP]
+
+
+def named_scores(side_info: SideInfo) -> dict[str, dict[str, Any]]:
+    """Read the named scores a scorer returned, tolerating older plain-number shapes.
+
+    Args:
+        side_info: What the scorer returned next to the score.
+
+    Returns:
+        ``{name: {"score": float, "feedback": str}}``; empty when there are none.
+    """
+    raw = side_info.get(SCORES_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    named: dict[str, dict[str, Any]] = {}
+    for name, entry in raw.items():
+        if isinstance(entry, dict) and isinstance(entry.get("score"), int | float):
+            named[str(name)] = {"score": float(entry["score"]), "feedback": str(entry.get("feedback") or "")}
+        elif isinstance(entry, int | float) and not isinstance(entry, bool):
+            named[str(name)] = {"score": float(entry), "feedback": ""}
+    return named
+
+
+def named_score_lines(raw: Any) -> list[str]:
+    """Render named scores as one ``name: score — feedback`` line each.
+
+    Args:
+        raw: A side info's ``scores`` value.
+
+    Returns:
+        One line per named score, in the scorer's order.
+    """
+    return [
+        f"{name}: {entry['score']:.4g}" + (f" — {entry['feedback']}" if entry["feedback"] else "")
+        for name, entry in named_scores({SCORES_KEY: raw}).items()
+    ]
+
+
+def gepa_side_info(side_info: SideInfo) -> SideInfo:
+    """Shape side info for GEPA: numeric named scores for its frontier, their feedback for its reflection.
+
+    Args:
+        side_info: What the scorer returned next to the score.
+
+    Returns:
+        A copy whose ``scores`` maps each name to its number, with each
+        named score's feedback under :data:`SCORE_FEEDBACK_KEY`.
+    """
+    named = named_scores(side_info)
+    if not named:
+        return side_info
+    shaped = {**side_info, SCORES_KEY: {name: entry["score"] for name, entry in named.items()}}
+    shaped[SCORE_FEEDBACK_KEY] = {name: entry["feedback"] for name, entry in named.items() if entry["feedback"]}
+    return shaped
 
 
 def _dump(value: Any) -> str:
@@ -164,6 +224,7 @@ def emit_scorer_feedback(
     score: float,
     side_info: SideInfo,
     iteration: int | None = None,
+    candidate_id: str | None = None,
 ) -> None:
     """Forward one scorer call as a mini-batch feedback event, if it said anything.
 
@@ -180,6 +241,8 @@ def emit_scorer_feedback(
         iteration: The version the call scores. Engines that score from
             worker threads pass it explicitly; unset, it is read from the
             proposal-iteration context GEPA maintains on the calling thread.
+        candidate_id: The version the call scores, for engines that have no
+            proposal iterations and so tie a note to its version by id.
     """
     if progress_callback is None:
         return
@@ -200,6 +263,7 @@ def emit_scorer_feedback(
                 "iteration": iteration,
                 "images": images,
                 "images_dropped": images_dropped,
+                **({"candidate_id": candidate_id} if candidate_id is not None else {}),
             },
         )
     except Exception:

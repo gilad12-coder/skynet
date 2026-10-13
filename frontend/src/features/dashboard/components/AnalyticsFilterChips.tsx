@@ -195,9 +195,9 @@ function FilterChip({
   truncate?: boolean;
 }) {
   return (
-    <span className="group inline-flex items-center gap-1.5 rounded-lg border border-[#3D2E22]/10 bg-[#3D2E22]/[0.06] pe-1 ps-2.5 py-1 transition-all duration-150 hover:border-[#3D2E22]/20 hover:bg-[#3D2E22]/[0.1]">
+    <span className="group inline-flex items-center gap-1.5 rounded-lg border on-primary pe-1 ps-2.5 py-1 transition-all duration-150 hover:border-primary-fill/20 hover:bg-primary-fill/[0.1]">
       <span
-        className={`text-[0.6875rem] font-medium text-[#3D2E22]/80 ${truncate ? "font-mono truncate max-w-[140px]" : ""}`}
+        className={`text-[0.6875rem] font-medium text-primary/80 ${truncate ? "font-mono truncate max-w-[140px]" : ""}`}
         dir={dir}
         title={title}
       >

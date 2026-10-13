@@ -1,30 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getModelCatalog, cachedCatalog } from "@/shared/lib/model-catalog";
-import { profileDataset } from "@/shared/lib/api";
-import type {
-  ColumnMapping,
-  DatasetProfile,
-  ModelCatalogResponse,
-  ModelConfig,
-  SplitFractions,
-  SplitPlan,
-  BlackboxEngineId,
-} from "@/shared/types/api";
-import type { ParsedDataset } from "@/shared/lib/parse-dataset";
+import type { ModelCatalogResponse, ModelConfig } from "@/shared/types/api";
 import { MAX_RECENT, RECENT_KEY } from "../constants";
-import type { ColumnRole } from "../constants";
-
-export function buildColumnMapping(columnRoles: Record<string, ColumnRole>): ColumnMapping {
-  const inputs: Record<string, string> = {};
-  const outputs: Record<string, string> = {};
-  Object.entries(columnRoles).forEach(([col, role]) => {
-    if (role === "input") inputs[col] = col;
-    else if (role === "output") outputs[col] = col;
-  });
-  return { inputs, outputs };
-}
 
 export function useRecentModelConfigs() {
   // Initial state must be empty: this hook is client-only but Next.js still
@@ -112,97 +91,4 @@ export function useModelCatalog() {
   }, [catalog]);
 
   return catalog;
-}
-
-export function useDatasetProfiling({
-  parsedDataset,
-  columnRoles,
-  splitModeRef,
-  setDatasetProfile,
-  setSplitPlan,
-  setProfileLoading,
-  setSplit,
-  setShuffle,
-  setSeed,
-  engine = null,
-}: {
-  parsedDataset: ParsedDataset | null;
-  columnRoles: Record<string, ColumnRole>;
-  splitModeRef: MutableRefObject<"auto" | "manual">;
-  setDatasetProfile?: (profile: DatasetProfile | null) => void;
-  setSplitPlan: (plan: SplitPlan | null) => void;
-  setProfileLoading: (loading: boolean) => void;
-  setSplit: (split: SplitFractions) => void;
-  setShuffle: (shuffle: boolean) => void;
-  setSeed: (seed: number | undefined) => void;
-  // Black-box engine the split will feed; the planner sizes the sets for it.
-  engine?: BlackboxEngineId | null;
-}) {
-  // A new dataset resets the shuffle/seed to the plan's; a re-profile of the same
-  // dataset (engine or column change) only refreshes the fractions, so the user's
-  // shuffle choice survives.
-  const profiledDatasetRef = useRef<ParsedDataset | null>(null);
-  // The wizard reads only the input columns' kinds and a plan sized by row
-  // count, so outputs never reach the request. Re-posting every column on each
-  // role click serialized megabytes on the main thread; an output-only change
-  // now sends nothing and an input change sends just the input columns.
-  const inputsKey = JSON.stringify(
-    Object.entries(buildColumnMapping(columnRoles).inputs).sort(([a], [b]) =>
-      a < b ? -1 : a > b ? 1 : 0,
-    ),
-  );
-  useEffect(() => {
-    if (!parsedDataset || parsedDataset.rowCount === 0) return;
-    const inputs = Object.fromEntries(JSON.parse(inputsKey) as Array<[string, string]>);
-    const columns = Object.values(inputs);
-    if (columns.length === 0) return;
-
-    let cancelled = false;
-    const handle = setTimeout(() => {
-      setProfileLoading(true);
-      profileDataset({
-        dataset: parsedDataset.rows.map((row) =>
-          Object.fromEntries(columns.map((column) => [column, row[column]])),
-        ),
-        column_mapping: { inputs, outputs: {} },
-        engine,
-      })
-        .then((response) => {
-          if (cancelled) return;
-          const datasetChanged = profiledDatasetRef.current !== parsedDataset;
-          profiledDatasetRef.current = parsedDataset;
-          setDatasetProfile?.(response.profile);
-          setSplitPlan(response.plan);
-          if (splitModeRef.current === "auto") {
-            setSplit(response.plan.fractions);
-            if (datasetChanged) {
-              setShuffle(response.plan.shuffle);
-              setSeed(response.plan.seed);
-            }
-          }
-        })
-        .catch(() => {
-          /* non-blocking: manual controls still work */
-        })
-        .finally(() => {
-          if (!cancelled) setProfileLoading(false);
-        });
-    }, 400);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(handle);
-    };
-  }, [
-    inputsKey,
-    engine,
-    parsedDataset,
-    setDatasetProfile,
-    setProfileLoading,
-    setSeed,
-    setShuffle,
-    setSplit,
-    setSplitPlan,
-    splitModeRef,
-  ]);
 }

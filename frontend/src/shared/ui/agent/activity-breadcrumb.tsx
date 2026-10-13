@@ -66,7 +66,7 @@ export function ActivityBreadcrumb({
     >
       <div className="absolute top-[9px] start-[9px] end-[9px] h-px bg-border/70" />
       <div
-        className="absolute top-[9px] start-[9px] h-px bg-[#3D2E22]/55 transition-[width] duration-500 ease-out"
+        className="absolute top-[9px] start-[9px] h-px bg-primary-fill/55 transition-[width] duration-500 ease-out"
         style={{ width: `calc(${fillPct}% - 18px)` }}
         aria-hidden
       />
@@ -77,8 +77,8 @@ export function ActivityBreadcrumb({
             className={cn(
               "whitespace-nowrap text-[0.625rem] leading-none tracking-wide transition-colors duration-200",
               step.state === "pending" && "text-muted-foreground/45",
-              step.state === "active" && "text-[#3D2E22] font-semibold",
-              step.state === "done" && "text-[#3D2E22]/75",
+              step.state === "active" && "text-primary font-semibold",
+              step.state === "done" && "text-primary/75",
             )}
           >
             {step.label}
@@ -92,21 +92,21 @@ export function ActivityBreadcrumb({
 function StepNode({ state }: { state: StepState }) {
   if (state === "done") {
     return (
-      <span className="inline-flex size-[18px] items-center justify-center rounded-full bg-[#3D2E22] text-white transition-colors">
+      <span className="inline-flex size-[18px] items-center justify-center rounded-full bg-primary-fill text-primary-foreground transition-colors">
         <Check className="size-2.5" />
       </span>
     );
   }
   if (state === "active") {
     return (
-      <span className="inline-flex size-[18px] items-center justify-center rounded-full bg-[#3D2E22] text-white shadow-[0_0_0_3px_rgba(61,46,34,0.12)] transition-colors motion-reduce:shadow-none">
+      <span className="inline-flex size-[18px] items-center justify-center rounded-full bg-primary-fill text-primary-foreground shadow-[0_0_0_3px_var(--gold-tint)] transition-colors motion-reduce:shadow-none">
         <CircleNotch className="size-2.5 animate-spin motion-reduce:animate-none" />
       </span>
     );
   }
   return (
-    <span className="inline-flex size-[18px] items-center justify-center rounded-full bg-[#E5DDD4] transition-colors">
-      <span className="size-1 rounded-full bg-[#8C7A6B]/70" />
+    <span className="inline-flex size-[18px] items-center justify-center rounded-full bg-border-subtle transition-colors">
+      <span className="size-1 rounded-full bg-muted-foreground/70" />
     </span>
   );
 }

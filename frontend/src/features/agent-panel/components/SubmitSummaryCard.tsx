@@ -74,16 +74,16 @@ export function SubmitSummaryCard({ call, className }: SubmitSummaryCardProps) {
   return (
     <div
       className={cn(
-        "rounded-2xl border border-[#5E7A5E]/25 bg-[#F0F4EC] shadow-sm overflow-hidden",
+        "rounded-2xl border border-[#5E7A5E]/25 bg-[#F0F4EC] dark:bg-[#383e31] overflow-hidden",
         className,
       )}
     >
       <div className="flex items-start gap-2.5 px-4 py-3 border-b border-[#5E7A5E]/15">
-        <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-[#5E7A5E]/20 text-[#3E5240]">
+        <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-[#5E7A5E]/20 text-[#3E5240] dark:text-[#bbd3bd]">
           <CheckCircle className="size-3.5" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[0.8125rem] font-medium leading-tight text-[#2F3E32]">
+          <div className="text-[0.8125rem] font-medium leading-tight text-[#2F3E32] dark:text-[#cadccd]">
             {formatMsg("auto.features.agent.panel.components.submitsummarycard.template.1", {
               p1: TERMS.optimization,
             })}
@@ -97,11 +97,11 @@ export function SubmitSummaryCard({ call, className }: SubmitSummaryCardProps) {
           href={`/optimizations/${jobId}`}
           className={cn(
             "flex items-center justify-between gap-2 px-4 py-2.5",
-            "text-[0.75rem] text-[#3D2E22] hover:bg-[#DFE7D9]/50 transition-colors",
+            "text-[0.75rem] text-primary hover:bg-[#DFE7D9]/50 dark:hover:bg-[#3e4539]/50 transition-colors",
           )}
         >
           <span className="font-mono truncate text-muted-foreground">{jobId}</span>
-          <span className="inline-flex items-center gap-1 text-[#3D2E22] shrink-0">
+          <span className="inline-flex items-center gap-1 text-primary shrink-0">
             {msg("auto.features.agent.panel.components.submitsummarycard.1")}
             <ArrowUpRight className="size-3" aria-hidden="true" />
           </span>

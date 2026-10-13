@@ -87,10 +87,10 @@ export function ExportTableMenu({
 
   return (
     <PopoverPrimitive.Root>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverPrimitive.Trigger asChild>
-            {iconOnly ? (
+      {iconOnly ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverPrimitive.Trigger asChild>
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -100,22 +100,24 @@ export function ExportTableMenu({
               >
                 <DownloadSimple className="size-[1.05rem] text-primary" aria-hidden="true" />
               </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={disabled}
-                aria-label={msg("export.table.aria")}
-                className={cn("gap-1.5", className)}
-              >
-                <DownloadSimple className="size-[1.05rem] text-primary" aria-hidden="true" />
-                {msg("export.table.button")}
-              </Button>
-            )}
-          </PopoverPrimitive.Trigger>
-        </TooltipTrigger>
-        <TooltipContent>{msg("export.table.aria")}</TooltipContent>
-      </Tooltip>
+            </PopoverPrimitive.Trigger>
+          </TooltipTrigger>
+          <TooltipContent>{msg("export.table.aria")}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <PopoverPrimitive.Trigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={disabled}
+            aria-label={msg("export.table.aria")}
+            className={cn("gap-1.5", className)}
+          >
+            <DownloadSimple className="size-[1.05rem] text-primary" aria-hidden="true" />
+            {msg("export.table.button")}
+          </Button>
+        </PopoverPrimitive.Trigger>
+      )}
       <PopoverPrimitive.Portal>
         <PopoverPrimitive.Content
           align={align}

@@ -37,6 +37,35 @@ _BYTES_PER_GB = Decimal(1_000_000_000)
 # Vercel cannot cap a box's transfer, so this is the most a networked box is
 # funded for; a box that moves more stays pending for manual reconciliation.
 SANDBOX_NETWORK_BYTES_CAP = 2_000_000_000
+# The only hosts a repository's setup may reach, and only from the parent's
+# scorer box before any version runs in it. Beyond the named registries:
+# index.crates.io is cargo's default sparse index, sum.golang.org is the
+# checksum database ``go`` verifies modules against, registry.yarnpkg.com is
+# where Yarn 1 lockfiles point, and codeload/objects/release-assets serve the
+# tarballs a ``git+https`` dependency or a GitHub release download redirects to.
+# fonts.googleapis.com and fonts.gstatic.com serve the fonts ``next/font/google``
+# downloads during ``next build``, which fails the build when they're unreachable.
+PACKAGE_REGISTRY_HOSTS = tuple(
+    sorted(
+        {
+            "codeload.github.com",
+            "crates.io",
+            "files.pythonhosted.org",
+            "fonts.googleapis.com",
+            "fonts.gstatic.com",
+            "github.com",
+            "index.crates.io",
+            "objects.githubusercontent.com",
+            "proxy.golang.org",
+            "pypi.org",
+            "registry.npmjs.org",
+            "registry.yarnpkg.com",
+            "release-assets.githubusercontent.com",
+            "static.crates.io",
+            "sum.golang.org",
+        }
+    )
+)
 _MS_PER_HOUR = Decimal(3_600_000)
 _IMMUTABLE_IMAGE = re.compile(r".+@sha256:[0-9a-f]{64}\Z")
 _SESSION_FIELDS = (
@@ -336,6 +365,7 @@ class VercelUsageReservation:
             operation_key: Stable logical identity for creation replay protection.
         """
         self.runtime = runtime
+        self.request = dict(request)
         self.vcpus = request["vcpus"]
         self.lifetime_ms = request["lifetime_ms"]
         self.quote = quote_vercel_sandbox(request)
@@ -356,7 +386,7 @@ class VercelUsageReservation:
         """
         path = response.request.url.path
         is_create = path == "/api/v3/sandboxes" and response.request.method == "POST"
-        is_session = re.fullmatch(r"/api/v2/sandboxes/sessions/[^/]+(?:/stop)?", path) is not None
+        is_session = re.fullmatch(r"/api/v2/sandboxes/sessions/[^/]+(?:/stop|/extend-timeout)?", path) is not None
         if response.request.url.host != "vercel.com" or not response.is_success or not (is_create or is_session):
             return
         try:
@@ -398,6 +428,50 @@ class VercelUsageReservation:
             or math.ceil(timeout.total_seconds() * 1000) > self.lifetime_ms
         ):
             raise UsagePendingError("Vercel did not confirm the admitted CPU, memory, region, and lifetime limits.")
+
+    def extend(self, lifetime_ms: int, *, deadline: float) -> None:
+        """Fund the session up to ``lifetime_ms`` before Vercel is asked to keep it alive that long.
+
+        The coverage grows to the quote for the whole extended lifetime, so
+        the slices add up to exactly what one up-front quote would hold.
+
+        Args:
+            lifetime_ms: The session's total lifetime once extended.
+            deadline: ``time.monotonic()`` instant after which waiting for in-flight work stops.
+
+        Raises:
+            UnpricedOperationError: When the extended lifetime cannot be bounded.
+            UsagePendingError: When covered work did not settle before ``deadline``.
+            BudgetReached: When the budget cannot pay for the extension.
+        """
+        if lifetime_ms <= self.lifetime_ms:
+            raise ValueError("An extension must lengthen the funded lifetime.")
+        quote = quote_vercel_sandbox({**self.request, "lifetime_ms": lifetime_ms})
+        self.runtime.extend(
+            self.operation.id,
+            quote,
+            evidence_key=f"vercel-extend:{lifetime_ms}",
+            evidence={"provider": "vercel", "lifetime_ms": lifetime_ms, "request": quote.request_fingerprint},
+            deadline=deadline,
+        )
+        self.lifetime_ms = lifetime_ms
+
+    def confirm_extended(self, session: Any) -> None:
+        """Verify Vercel kept the session within its funded lifetime.
+
+        Args:
+            session: The session handle Vercel returned from the extension.
+
+        Raises:
+            UsagePendingError: When the returned limit is missing or exceeds the funded lifetime.
+        """
+        timeout = session.execution_time_limit
+        if (
+            session.id != self.session_id
+            or timeout is None
+            or math.ceil(timeout.total_seconds() * 1000) > self.lifetime_ms
+        ):
+            raise UsagePendingError("Vercel extended the session beyond its funded lifetime.")
 
     def pending(self) -> None:
         """Retain covered funding when creation, shutdown, or billing evidence is uncertain."""

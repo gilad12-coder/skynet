@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { registerTutorialHook } from "@/features/tutorial";
 
 interface SettingsModalContextValue {
   open: boolean;
@@ -16,21 +15,30 @@ interface SettingsModalContextValue {
   targetFocus: string | null;
   /** Consume the pending focus once the tab has acted on it. */
   clearFocus: () => void;
+  /**
+   * Open on a tab for the first-login setup, which frames one of its settings
+   * from its own card: the modal then neither dims the page nor traps focus,
+   * and only closing it from the setup dismisses it.
+   */
+  openGuided: (tab: string) => void;
+  /** True while the setup holds the modal open. */
+  guided: boolean;
 }
 
 const SettingsModalContext = React.createContext<SettingsModalContextValue | null>(null);
 
 export function SettingsModalProvider({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpenState] = React.useState(false);
   const [targetTab, setTargetTab] = React.useState<string | null>(null);
   const [targetFocus, setTargetFocus] = React.useState<string | null>(null);
+  const [guided, setGuided] = React.useState(false);
 
   React.useEffect(() => {
     const url = new URL(window.location.href);
     const requestedTab = url.searchParams.get("settings");
     if (!requestedTab) return;
     setTargetTab(requestedTab);
-    setOpen(true);
+    setOpenState(true);
     url.searchParams.delete("settings");
     window.history.replaceState(
       window.history.state,
@@ -42,24 +50,40 @@ export function SettingsModalProvider({ children }: { children: React.ReactNode 
   const openTo = React.useCallback((tab: string, focus?: string) => {
     setTargetTab(tab);
     setTargetFocus(focus ?? null);
-    setOpen(true);
+    setGuided(false);
+    setOpenState(true);
   }, []);
 
-  React.useEffect(
-    () =>
-      registerTutorialHook("setSettingsTab", (tab) => {
-        if (tab === null) setOpen(false);
-        else openTo(tab);
-      }),
-    [openTo],
-  );
+  const openGuided = React.useCallback((tab: string) => {
+    setTargetTab(tab);
+    setTargetFocus(null);
+    setGuided(true);
+    setOpenState(true);
+  }, []);
+
+  // Guided mode outlives the close so the modal leaves the way it came; any
+  // other open is a normal one.
+  const setOpen = React.useCallback((next: boolean) => {
+    if (next) setGuided(false);
+    setOpenState(next);
+  }, []);
 
   const clearTarget = React.useCallback(() => setTargetTab(null), []);
   const clearFocus = React.useCallback(() => setTargetFocus(null), []);
 
   const value = React.useMemo(
-    () => ({ open, setOpen, targetTab, openTo, clearTarget, targetFocus, clearFocus }),
-    [open, targetTab, openTo, clearTarget, targetFocus, clearFocus],
+    () => ({
+      open,
+      setOpen,
+      targetTab,
+      openTo,
+      clearTarget,
+      targetFocus,
+      clearFocus,
+      openGuided,
+      guided,
+    }),
+    [open, setOpen, targetTab, openTo, clearTarget, targetFocus, clearFocus, openGuided, guided],
   );
   return <SettingsModalContext.Provider value={value}>{children}</SettingsModalContext.Provider>;
 }

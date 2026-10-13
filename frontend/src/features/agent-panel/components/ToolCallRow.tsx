@@ -120,7 +120,7 @@ export function ToolCallRow({
           className={cn(
             "text-[0.8125rem] font-medium leading-tight truncate shrink-0",
             isError
-              ? "text-[#7A1E13]"
+              ? "text-[#7A1E13] dark:text-[#ffb2a0]"
               : call.status === "running"
                 ? "text-foreground"
                 : "text-foreground/80",
@@ -254,7 +254,7 @@ function StatusGlyph({
     return (
       <span
         className={cn(
-          "inline-flex size-4 items-center justify-center rounded-full bg-[#9B2C1F]/15 text-[#9B2C1F] shrink-0",
+          "inline-flex size-4 items-center justify-center rounded-full bg-[#9B2C1F]/15 text-[#9B2C1F] dark:text-[#ffa595] shrink-0",
           retryRing,
         )}
         aria-label={msg("auto.features.agent.panel.components.toolcallrow.literal.7")}
@@ -266,7 +266,7 @@ function StatusGlyph({
   return (
     <span
       className={cn(
-        "inline-flex size-4 items-center justify-center rounded-full bg-[#3D2E22]/15 text-[#3D2E22] shrink-0",
+        "inline-flex size-4 items-center justify-center rounded-full bg-primary-fill text-primary-foreground shrink-0",
         retryRing,
       )}
       aria-label={msg("auto.features.agent.panel.components.toolcallrow.literal.8")}
@@ -299,7 +299,7 @@ function ResultBody({ result, isError }: { result: unknown; isError: boolean }) 
           className={cn(
             "whitespace-pre-wrap break-words font-mono text-[0.6875rem]/[1.55] max-h-52 overflow-y-auto rounded-md border p-2 pe-9",
             isError
-              ? "border-[#9B2C1F]/20 bg-[#FCEFEB]/60 text-[#7A1E13]"
+              ? "border-[#9B2C1F]/20 dark:border-[#ec7764]/20 bg-[#FCEFEB]/60 dark:bg-[#463833]/60 text-[#7A1E13] dark:text-[#ffb2a0]"
               : "border-border/40 bg-background/70 text-foreground/90",
           )}
         >

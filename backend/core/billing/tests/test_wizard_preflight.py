@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterator
 from decimal import Decimal
 from pathlib import Path
@@ -22,6 +23,7 @@ from core.api.model_billing import normalize_model_token_sources
 from core.api.routers import wizard_preflight as preflight_router
 from core.api.routers.execution_budgets import create_execution_budgets_router
 from core.billing.budgets import BudgetConflictError
+from core.billing.model_gateway import ROUTE_KEY
 from core.billing.operation_pricing import ChargePolicy, operation_quote
 from core.billing.protected_credentials import (
     ProtectedCredentialVault,
@@ -220,21 +222,6 @@ def test_submission_rejects_stale_or_foreign_evidence(setup_client) -> None:
         store.require_current(**{**kwargs, "payload": {**payload, "seed_candidate": "Changed"}})
 
 
-def test_preflight_never_uses_held_out_case() -> None:
-    """Select from the actual submitted training split rather than the first raw row."""
-    rows = [{"id": index} for index in range(20)]
-    payload = {"cases": rows, "seed": 19, "shuffle": True, "split_fractions": {"train": 0.5, "val": 0.25, "test": 0.25}}
-    splits = wizard_preflight.split_examples(
-        rows,
-        wizard_preflight.SplitFractions.model_validate(payload["split_fractions"]),
-        shuffle=True,
-        seed=19,
-    )
-    chosen = wizard_preflight._sample(payload)
-    assert chosen in splits.train
-    assert chosen not in splits.test
-
-
 @pytest.mark.parametrize("key", ["_gepa_log_dir", "_budget_gateway_descriptor", "_skynet_tools_route", "_preflight"])
 def test_public_preflight_rejects_parent_runtime_controls(setup_client, key: str) -> None:
     """Reject forged filesystem and relay authority before claiming setup or spending funds."""
@@ -245,27 +232,6 @@ def test_public_preflight_rejects_parent_runtime_controls(setup_client, key: str
     assert "Runtime control fields" in response.text
     assert calls == []
     assert client.get(f"/execution-budgets/{budget['id']}").json()["setup_spent_cents"] == "0"
-
-
-def test_unavailable_default_runtime_defers_evaluation_to_optimization(
-    setup_client, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Let users reach the runtime picker without claiming a paid evaluator check occurred."""
-    client, _engine, calls = setup_client
-    budget = _budget(client)
-    monkeypatch.setattr(wizard_preflight, "protected_vercel_unavailable_reason", lambda *args: "Missing image")
-    response = client.post(
-        "/wizard/preflight",
-        json={**_request(budget), "scope": "evaluation", "workflow": "dspy", "payload": {}},
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert result["status"] == "pending"
-    assert result["may_advance"] is True
-    assert result["pending_reason"]["category"] == "later_stage_dependency"
-    assert result["checks"][0]["field"] == "execution_runtime"
-    assert result["budget"]["setup_spent_cents"] == "0"
-    assert calls == []
 
 
 def test_unresolved_paid_usage_blocks_stage_advancement(setup_client, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -294,3 +260,52 @@ def test_unresolved_paid_usage_blocks_stage_advancement(setup_client, monkeypatc
     assert result["may_advance"] is False
     assert result["pending_reason"]["category"] == "usage_reconciliation"
     assert any(check["key"] == "usage" and check["status"] == "pending" for check in result["checks"])
+
+
+def test_unified_metric_model_gets_a_metered_route(setup_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Route a unified run's metric model like the worker does, then hand the guest no legacy aliases."""
+    client, _engine, _calls = setup_client
+    seen: list[dict] = []
+
+    class _RoutingGateway(_Gateway):
+        """Stamp a route on the legacy scorer key only, as the real seam does."""
+
+        def protect_payload(self, payload: dict, **kwargs) -> dict:
+            """Mark the model reachable through the legacy ``scorer`` key."""
+            result = copy.deepcopy(payload)
+            scorer = result.get("scorer")
+            if isinstance(scorer, dict) and isinstance(scorer.get("model"), dict):
+                scorer["model"].setdefault("extra", {})[ROUTE_KEY] = {"url": "http://parent", "token": "t"}
+            return result
+
+    def verify(gateway, payload, **kwargs) -> dict:
+        """Record what the guest would receive."""
+        seen.append(payload)
+        return {"checks": [{"key": "metric.contract", "status": "succeeded"}]}
+
+    monkeypatch.setattr(wizard_preflight, "ModelGateway", _RoutingGateway)
+    monkeypatch.setattr(wizard_preflight, "_verify_unified", verify)
+    budget = _budget(client)
+    payload = {
+        "task": {"objective": "Answer in one word.", "artifact": {"kind": "prompt", "starting_version": "Answer: "}},
+        "data": {
+            "mode": "pairs",
+            "cases": [{"input": {"question": f"Q{index}?"}, "expected": "A"} for index in range(10)],
+            "input_fields": ["question"],
+        },
+        "optimizer": {"choice": "gepa"},
+        "models": {
+            "reflection_model": {"name": "fixture/text"},
+            "task_model": {"name": "fixture/task"},
+            "metric_model": {"name": "fixture/judge"},
+        },
+        "workspace": {
+            "run_code": "def run(artifact, input):\n    return artifact + input['question']\n",
+            "metric_code": "def score(input, output, expected=None):\n    return float(llm(output) == expected), {}\n",
+        },
+        "max_cost_cents": 20,
+    }
+    response = client.post("/wizard/preflight", json={**_request(budget, payload), "workflow": "unified"})
+    assert response.status_code == 200, response.text
+    assert ROUTE_KEY in seen[0]["models"]["metric_model"]["extra"]
+    assert not {"scorer", "task_model_config", "reflection_model_config"} & seen[0].keys()

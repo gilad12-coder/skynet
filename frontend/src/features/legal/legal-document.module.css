@@ -1,9 +1,9 @@
 .title {
-  color: #faf8f5 !important;
+  color: var(--primary-foreground) !important;
   background: none !important;
   background-clip: border-box !important;
   -webkit-background-clip: border-box !important;
-  -webkit-text-fill-color: #faf8f5 !important;
+  -webkit-text-fill-color: var(--primary-foreground) !important;
 }
 
 @media print {

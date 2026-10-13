@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from ..runner import (
     accepts_case,
     image_content_part,
     load_scorer_from_code,
+    log,
     normalize_score,
     run_call,
     scorer_messages,
@@ -29,28 +31,37 @@ from .mocks import FakeGateway
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
 PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(PNG_BYTES).decode("ascii")
 _LLM_SCORER = (
-    "def score(candidate, case=None):\n    return float(llm(candidate, case['input'])), {'asked': candidate}\n"
+    "def score(candidate, case=None):\n"
+    "    return float(llm(candidate, case['input'])), {'asked': candidate, 'feedback': 'judged'}\n"
 )
 _SYSTEM_PYTHON = Path("/usr/bin/python3")
 _INTERPRETERS = [sys.executable] + ([str(_SYSTEM_PYTHON)] if _SYSTEM_PYTHON.is_file() else [])
 
 
 class _WithScore:
-    """Object exposing a numeric ``score`` attribute."""
+    """Object exposing a numeric ``score`` and a ``feedback`` attribute."""
 
     score = 0.25
+    feedback = "attr"
 
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        (0.5, (0.5, {})),
-        (1, (1.0, {})),
-        (True, (1.0, {})),
         ((0.5, {"feedback": "ok"}), (0.5, {"feedback": "ok"})),
         ([0.5, "just text"], (0.5, {"feedback": "just text"})),
-        ({"score": 0.75, "note": "n"}, (0.75, {"note": "n"})),
-        (_WithScore(), (0.25, {})),
+        ({"score": 0.75, "feedback": "f", "note": "n"}, (0.75, {"feedback": "f", "note": "n"})),
+        (
+            {"score": 1, "feedback": "f", "scores": {"a": {"score": 1, "feedback": "x"}, "b": (0, "y")}},
+            (
+                1.0,
+                {
+                    "feedback": "f",
+                    "scores": {"a": {"score": 1.0, "feedback": "x"}, "b": {"score": 0.0, "feedback": "y"}},
+                },
+            ),
+        ),
+        (_WithScore(), (0.25, {"feedback": "attr"})),
     ],
 )
 def test_normalize_score_accepts_documented_shapes(raw: Any, expected: tuple[float, dict[str, Any]]) -> None:
@@ -63,14 +74,30 @@ def test_normalize_score_accepts_documented_shapes(raw: Any, expected: tuple[flo
     assert normalize_score(raw) == expected
 
 
-@pytest.mark.parametrize("raw", ["0.5", None, {"feedback": "no score"}, (0.5, {}, "extra")])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "0.5",
+        None,
+        {"feedback": "no score"},
+        (0.5, {}, "extra"),
+        0.5,
+        True,
+        (0.5, {}),
+        (0.5, "  "),
+        {"score": 0.75, "note": "n"},
+        {"score": 1, "feedback": "f", "scores": {"a": 1.0}},
+        {"score": 1, "feedback": "f", "scores": {"a": {"score": 1}}},
+        {"score": 1, "feedback": "f", "scores": [1]},
+    ],
+)
 def test_normalize_score_rejects_other_shapes(raw: Any) -> None:
-    """Anything else is a scorer contract violation.
+    """Anything else, including any score without feedback, is a scorer contract violation.
 
     Args:
         raw: An unsupported return value.
     """
-    with pytest.raises(ScorerError, match="scorer must return"):
+    with pytest.raises(ScorerError, match="must return feedback"):
         normalize_score(raw)
 
 
@@ -242,7 +269,16 @@ def test_gateway_client_sends_images_and_raw_messages_without_a_key() -> None:
     first, second = gateway.requests
     assert first["authorization"] is None
     assert first["body"]["messages"][0]["content"][1]["image_url"]["url"] == PNG_DATA_URL
-    assert second["body"] == {"model": "m", "messages": raw}
+    assert second["body"] == {"model": "m", "messages": raw, "max_tokens": runner.DEFAULT_MAX_TOKENS}
+
+
+def test_gateway_client_always_caps_the_output() -> None:
+    """Without a configured cap ``llm()`` still sends one, since the budget relay refuses an uncapped call."""
+    with FakeGateway() as gateway:
+        GatewayClient(gateway.url, "m")("p")
+
+    [request] = gateway.requests
+    assert request["body"]["max_tokens"] == runner.DEFAULT_MAX_TOKENS > 0
 
 
 def test_gateway_client_retries_transient_statuses_and_gives_up_on_others(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -278,14 +314,16 @@ def test_run_call_scores_and_serializes_side_info() -> None:
     """The output carries the score, JSON-plain side info (images as data URLs) and an empty usage list."""
     code = (
         "def score(candidate, case):\n"
-        "    return len(candidate) / 10, {'length': len(candidate), 'render': Image(base64_data='aGk='), 'odd': {1}}\n"
+        "    return len(candidate) / 10, {\n"
+        "        'feedback': 'f', 'length': len(candidate), 'render': Image(base64_data='aGk='), 'odd': {1}\n"
+        "    }\n"
     )
 
     result = run_call({"code": code, "candidate": "hello", "case": {"x": 1}, "gateway": None})
 
     assert result == {
         "score": 0.5,
-        "side_info": {"length": 5, "render": "data:image/png;base64,aGk=", "odd": "{1}"},
+        "side_info": {"feedback": "f", "length": 5, "render": "data:image/png;base64,aGk=", "odd": "{1}"},
         "error": None,
         "usage": [],
     }
@@ -296,9 +334,9 @@ def test_run_call_passes_case_only_when_the_function_takes_one() -> None:
     scores = [
         run_call({"code": code, "candidate": "abc", "case": {"weight": 2}})["score"]
         for code in (
-            "def score(candidate): return len(candidate)",
-            "def score(candidate, case): return case['weight'] * len(candidate)",
-            "def score(*args): return len(args)",
+            "def score(candidate): return len(candidate), 'f'",
+            "def score(candidate, case): return case['weight'] * len(candidate), 'f'",
+            "def score(*args): return len(args), 'f'",
         )
     ]
 
@@ -310,7 +348,8 @@ def test_run_call_passes_case_only_when_the_function_takes_one() -> None:
     [
         ("def score(c, case=None): raise ValueError('bad candidate')", "ValueError: bad candidate"),
         ("def score(c, case=None): raise SystemExit(3)", "SystemExit: 3"),
-        ("def score(c, case=None): return 'nope'", "scorer must return"),
+        ("def score(c, case=None): return 'nope'", "must return feedback"),
+        ("def score(c, case=None): return 0.5", "must return feedback"),
         ("def !!!", "scorer code has a syntax error"),
         (_LLM_SCORER, "This scorer calls llm() but no model was chosen in the Scorer step."),
     ],
@@ -352,7 +391,7 @@ def test_run_call_binds_llm_to_the_gateway_with_the_key_from_the_environment(
 
     assert result == {
         "score": 0.75,
-        "side_info": {"asked": "judge"},
+        "side_info": {"asked": "judge", "feedback": "judged"},
         "error": None,
         "usage": [{"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4}],
     }
@@ -398,7 +437,7 @@ def test_main_runs_the_file_contract_end_to_end(tmp_path: Path, interpreter: str
     call_dir = tmp_path / "calls" / "000001"
     call_dir.mkdir(parents=True)
     payload = {
-        "code": "def score(candidate, case=None):\n    return 0.5, {'render': Image(base64_data='aGk=')}\n",
+        "code": "def score(candidate, case=None):\n    return 0.5, {'feedback': 'f', 'render': Image(base64_data='aGk=')}\n",
         "candidate": "x",
         "case": None,
         "gateway": None,
@@ -418,7 +457,7 @@ def test_main_runs_the_file_contract_end_to_end(tmp_path: Path, interpreter: str
     assert completed.returncode == 0, completed.stderr
     assert json.loads((call_dir / runner.OUTPUT_FILE).read_text(encoding="utf-8")) == {
         "score": 0.5,
-        "side_info": {"render": "data:image/png;base64,aGk="},
+        "side_info": {"feedback": "f", "render": "data:image/png;base64,aGk="},
         "error": None,
         "usage": [],
     }
@@ -430,3 +469,37 @@ def test_main_wants_exactly_one_argument(capsys: pytest.CaptureFixture[str]) -> 
     assert runner.main([]) == 2
     assert runner.main(["a", "b"]) == 2
     assert "usage:" in capsys.readouterr().err
+
+
+def test_log_writes_one_framed_event_to_the_real_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fields of any type travel as strict JSON; a redirected sys.stderr does not swallow it."""
+    real, redirected = io.StringIO(), io.StringIO()
+    monkeypatch.setattr(sys, "__stderr__", real)
+    monkeypatch.setattr(sys, "stderr", redirected)
+    log("judge.retry", "retrying", level="warning", attempt=2, ratio=float("nan"), path=Path("/x"))
+    assert redirected.getvalue() == ""
+    line = real.getvalue()
+    assert line.startswith(runner.EVENT_PREFIX)
+    assert line.endswith("\n")
+    assert json.loads(line[len(runner.EVENT_PREFIX) :]) == {
+        "level": "WARNING",
+        "logger": "scorer",
+        "message": "retrying",
+        "event": "judge.retry",
+        "fields": {"attempt": 2, "ratio": "nan", "path": "/x"},
+    }
+
+
+@pytest.mark.parametrize(("event", "level"), [("", "INFO"), ("  ", "INFO"), ("ok", "CRITICAL"), ("ok", "loud")])
+def test_log_rejects_a_missing_name_or_an_unknown_level(event: str, level: str) -> None:
+    """A scorer learns about a bad call at once, not from a silent log."""
+    with pytest.raises(ValueError):
+        log(event, level=level)
+
+
+def test_scorer_code_imports_log_from_skynet() -> None:
+    """``from skynet import log`` works in the box and in validation alike."""
+    fn = load_scorer_from_code(
+        "from skynet import log\ndef score(c, case=None):\n    return 1.0, 'ok'\n", helpers={"log": log}
+    )
+    assert fn("x") == (1.0, "ok")

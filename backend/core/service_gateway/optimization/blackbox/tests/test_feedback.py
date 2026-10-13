@@ -28,6 +28,19 @@ def test_feedback_string_leads_and_other_keys_follow() -> None:
     assert text == 'tight\nscore_parts: {"a": 1}\nframes: ["note"]'
 
 
+def test_named_scores_render_one_line_each_with_their_feedback() -> None:
+    """Every named score reaches the reflection text as ``name: score — feedback`` after the overall feedback."""
+    side_info = {
+        "feedback": "overall",
+        "scores": {"accuracy": {"score": 0.5, "feedback": "half wrong"}, "tone": {"score": 1, "feedback": "warm"}},
+    }
+
+    assert scorer_feedback_text(side_info) == "overall\naccuracy: 0.5 — half wrong\ntone: 1 — warm"
+    shaped = feedback.gepa_side_info(side_info)
+    assert shaped["scores"] == {"accuracy": 0.5, "tone": 1.0}
+    assert shaped[feedback.SCORE_FEEDBACK_KEY] == {"accuracy": "half wrong", "tone": "warm"}
+
+
 def test_images_and_empty_values_are_dropped() -> None:
     """Inline renders, ``None`` and empty containers never reach the feedback text."""
     side_info = {"render": PNG, "frames": [PNG, PNG], "feedback": "ok", "missing": None, "extra": {}}
@@ -115,6 +128,18 @@ def test_emit_carries_renders_whole_next_to_the_text() -> None:
     assert event[1]["feedback"] == ""
     assert event[1]["images"] == [{"key": "render_1", "src": PNG}, {"key": "frames[0]", "src": PNG}]
     assert event[1]["images_dropped"] == 0
+
+
+def test_emit_tags_the_version_only_when_named() -> None:
+    """Engines without proposal iterations tie a note to its version; others leave the field out."""
+    sink: list[tuple[str, dict]] = []
+    emit = lambda e, m: sink.append((e, m))  # noqa: E731
+
+    emit_scorer_feedback(emit, example_id="?", score=0.9, side_info={"feedback": "ok"}, candidate_id="3")
+    emit_scorer_feedback(emit, example_id="?", score=0.9, side_info={"feedback": "ok"})
+
+    assert sink[0][1]["candidate_id"] == "3"
+    assert "candidate_id" not in sink[1][1]
 
 
 def test_renders_past_the_byte_budget_are_counted_not_cut(monkeypatch) -> None:

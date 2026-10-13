@@ -22,6 +22,7 @@ type BulkActionBarProps = {
   canManageShare: boolean;
   canPause: boolean;
   canResume: boolean;
+  canClone: boolean;
   canStop: boolean;
   canTogglePin: boolean;
   selectedJobId: string | null;
@@ -75,6 +76,7 @@ export function BulkActionBar({
   canManageShare,
   canPause,
   canResume,
+  canClone,
   canStop,
   canTogglePin,
   selectedJobId,
@@ -105,9 +107,8 @@ export function BulkActionBar({
             mass: 0.8,
           }}
           className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50"
-          data-tutorial="bulk-action-bar"
         >
-          <div className="flex max-w-[92vw] flex-wrap items-center justify-center gap-1 rounded-full border border-border/60 bg-background/95 backdrop-blur-xl px-3 py-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
+          <div className="flex max-w-[92vw] flex-wrap items-center justify-center gap-1 rounded-full border border-border/60 bg-background/95 backdrop-blur-xl px-3 py-1.5 shadow-[var(--shadow-float)]">
             <span className="min-w-0 px-1 text-sm tabular-nums text-foreground">
               {selectedCount === 1 ? (
                 <>
@@ -123,20 +124,14 @@ export function BulkActionBar({
               )}
             </span>
             <div aria-hidden="true" className="mx-1 h-5 w-px bg-border/70" />
-            <TooltipButton
-              tooltip={msg("auto.features.dashboard.components.bulkactionbar.4")}
-              side="top"
-              delayDuration={150}
+            <button
+              type="button"
+              onClick={onClear}
+              className="close-button [--close-btn-size:32px] [--close-btn-radius:9999px] [--close-btn-icon:16px]"
+              aria-label={msg("auto.features.dashboard.components.bulkactionbar.literal.1")}
             >
-              <button
-                type="button"
-                onClick={onClear}
-                className="close-button [--close-btn-size:32px] [--close-btn-radius:9999px] [--close-btn-icon:16px]"
-                aria-label={msg("auto.features.dashboard.components.bulkactionbar.literal.1")}
-              >
-                <X />
-              </button>
-            </TooltipButton>
+              <X />
+            </button>
             {selectedJobId && (
               <>
                 {canManageShare && (
@@ -153,9 +148,11 @@ export function BulkActionBar({
                     />
                   </>
                 )}
-                <SelectionAction label={msg("share.clone_tooltip")} onClick={onClone}>
-                  <Copy className="size-4" />
-                </SelectionAction>
+                {canClone && (
+                  <SelectionAction label={msg("share.clone_tooltip")} onClick={onClone}>
+                    <Copy className="size-4" />
+                  </SelectionAction>
+                )}
               </>
             )}
             {canTogglePin && (

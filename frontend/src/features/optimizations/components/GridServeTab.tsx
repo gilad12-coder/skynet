@@ -29,6 +29,7 @@ import type { OptimizationStatusResponse, PairResult, ServeInfoResponse } from "
 import { CopyButton } from "@/shared/ui/copy-button";
 import { ServeChat } from "./ServeChat";
 import { ServeCodeSnippets } from "./ServeCodeSnippets";
+import { GridEmptyState } from "./grid-overview-helpers";
 import { computePairScores } from "../lib/pair-scores";
 
 function shortEffort(value: string | null | undefined): string | null {
@@ -148,7 +149,7 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
     };
   }, []);
 
-  if (!job.grid_result) return null;
+  if (!job.grid_result || job.grid_result.pair_results.length === 0) return <GridEmptyState />;
 
   const readInputs = () => {
     const vals: Record<string, string> = {};
@@ -287,15 +288,15 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
                   onClick={() => setSelectedPair(p.pair_index)}
                   className={cn(
                     "group relative rounded-lg border p-3 text-start transition-all duration-200",
-                    "hover:shadow-sm",
+                    "",
                     isSelected
-                      ? "border-[#3D2E22]/60 bg-[#3D2E22]/[0.06] ring-1 ring-[#3D2E22]/30"
+                      ? "on-primary"
                       : "border-border/60 bg-background/40 hover:border-border",
                   )}
                   aria-pressed={isSelected}
                 >
                   <div className="flex items-center gap-1.5 mb-1.5">
-                    {isOverall && <Crown className="size-3 text-[#C8A882] shrink-0" />}
+                    {isOverall && <Crown className="size-3 text-primary shrink-0" />}
                     <span
                       className="font-mono text-[0.6875rem] truncate flex-1"
                       dir="ltr"
@@ -305,11 +306,11 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground">
-                    <span className={cn("flex items-center gap-1", isQuality && "text-[#3D2E22]")}>
+                    <span className={cn("flex items-center gap-1", isQuality && "text-primary")}>
                       <Trophy className="size-2.5" />
                       {s ? `${Math.round(s.quality * 100)}%` : "—"}
                     </span>
-                    <span className={cn("flex items-center gap-1", isSpeed && "text-[#3D2E22]")}>
+                    <span className={cn("flex items-center gap-1", isSpeed && "text-primary")}>
                       <Gauge className="size-2.5" />
                       {p.avg_response_time_ms != null
                         ? `${(p.avg_response_time_ms / 1000).toFixed(1)}s`
@@ -318,7 +319,7 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
                     <span
                       className={cn(
                         "flex items-center gap-1 ms-auto font-semibold",
-                        isOverall && "text-[#3D2E22]",
+                        isOverall && "text-primary",
                       )}
                     >
                       {msg("auto.features.optimizations.components.gridservetab.5")}
@@ -381,9 +382,7 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
             <CardContent className="space-y-4">
               <div className="space-y-1.5">
                 <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
-                  <HelpTip text={tip("serve.api_url_pair")}>
-                    {msg("auto.features.optimizations.components.gridservetab.8")}
-                  </HelpTip>
+                  {msg("auto.features.optimizations.components.gridservetab.8")}
                 </p>
                 <div className="group relative rounded-lg bg-muted/40 p-2.5 pe-10" dir="ltr">
                   <code className="text-xs font-mono break-all">
@@ -402,9 +401,7 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
 
               <div className="space-y-2">
                 <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
-                  <HelpTip text={tip("serve.integration_code")}>
-                    {msg("auto.features.optimizations.components.gridservetab.10")}
-                  </HelpTip>
+                  {msg("auto.features.optimizations.components.gridservetab.10")}
                 </p>
                 <ServeCodeSnippets
                   serveInfo={serveInfo}

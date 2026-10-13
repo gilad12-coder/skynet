@@ -16,6 +16,7 @@ export type OptimizationModelFamily =
   | "meta_harness"
   | "autoresearch"
   | "autosaddler"
+  | "shinka_evolve"
   | "auto";
 
 /**
@@ -95,6 +96,7 @@ export function optimizationModelFamily(
     if (engine === "meta_harness") return "meta_harness";
     if (engine === "autoresearch") return "autoresearch";
     if (engine === "autosaddler") return "autosaddler";
+    if (engine === "shinka_evolve") return "shinka_evolve";
     if (engine === "best_of_n") return "best_of_n";
   }
   return "gepa";
@@ -108,4 +110,5 @@ export const OPTIMIZATION_MODEL_DESCRIPTION: Readonly<Record<OptimizationModelFa
     meta_harness: "submit.blackbox.roles.optimization.desc.meta_harness",
     autoresearch: "submit.blackbox.roles.optimization.desc.autoresearch",
     autosaddler: "submit.blackbox.roles.optimization.desc.autosaddler",
+    shinka_evolve: "submit.blackbox.roles.optimization.desc.shinka_evolve",
   };

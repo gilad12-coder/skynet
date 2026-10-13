@@ -19,7 +19,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import random
-from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
@@ -30,7 +29,6 @@ from pydantic import AliasChoices, BaseModel, Field, ValidationError
 
 from ....billing import ProviderKeyVault, resolve_byok_model_config
 from ....billing.budget_amounts import MAX_CENTS
-from ....billing.budgets import BudgetService
 from ....config import settings
 from ....constants import (
     OPTIMIZATION_TYPE_BLACKBOX,
@@ -82,7 +80,6 @@ from .._helpers import (
     _program_cache,
     _protected_api_runtime,
     build_summary,
-    grid_resumable_pairs,
     is_pausable,
     is_resumable,
     load_job_for_user,
@@ -91,7 +88,7 @@ from .._helpers import (
     stable_seed,
 )
 from ..constants import TERMINAL_STATUSES
-from ._local import remap_test_indices
+from ._local import execution_budget_view, remap_test_indices
 from ._program_export import build_program_export_zip
 
 logger = logging.getLogger(__name__)
@@ -105,7 +102,7 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 _RESPONSE_SCHEMA_VERSION = "v6"
 
 
-def _delta_offset(raw: str | None, count: int, cap: int) -> int:
+def _delta_offset(raw: str | None, count: int, cap: int | None) -> int:
     """Resolve a client stream cursor to a safe slice offset.
 
     Position cursors are exact only while a stream is append-only, which holds
@@ -118,7 +115,7 @@ def _delta_offset(raw: str | None, count: int, cap: int) -> int:
     Args:
         raw: The raw ``since_*`` query-param value, or ``None`` when absent.
         count: Current number of rows in the stream.
-        cap: Per-job retention cap for the stream.
+        cap: Per-job retention cap for the stream; ``None`` for a stream that never evicts.
 
     Returns:
         The parsed cursor when it is a valid position into an append-only
@@ -136,7 +133,7 @@ def _delta_offset(raw: str | None, count: int, cap: int) -> int:
         # A non-integer cursor is a client bug, not an eviction edge — reject it
         # loudly instead of silently re-sending the whole stream every tick.
         raise HTTPException(status_code=422, detail="optimization.invalid_cursor") from exc
-    if since <= 0 or since > count or count >= cap:
+    if since <= 0 or since > count or (cap is not None and count >= cap):
         return 0
     return since
 
@@ -262,7 +259,7 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
         progress_offset = _delta_offset(
             request.query_params.get("since_progress"), progress_count, settings.progress_events_per_job_cap
         )
-        logs_offset = _delta_offset(request.query_params.get("since_log"), log_count, settings.log_entries_per_job_cap)
+        logs_offset = _delta_offset(request.query_params.get("since_log"), log_count, None)
         progress_events = job_store.get_progress_events(optimization_id, since=progress_offset)
         logs = job_store.get_logs(optimization_id, offset=logs_offset)
 
@@ -311,13 +308,7 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
         )
 
         logger.debug("Returning status for optimization_id=%s state=%s", optimization_id, status)
-        execution_budget = (job_data.get("terminal_evidence") or {}).get("execution_budget")
-        if job_data.get("execution_budget_id") is not None and getattr(job_store, "engine", None) is not None:
-            execution_budget = asdict(
-                BudgetService(engine=job_store.engine).get(job_data["execution_budget_id"], job_data["username"])
-            )
-            execution_budget.pop("username", None)
-            execution_budget.pop("account_available_cents", None)
+        execution_budget = execution_budget_view(job_store, job_data)
         response_data = OptimizationStatusResponse(
             optimization_id=optimization_id,
             status=status,
@@ -348,11 +339,6 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
             effective_role=effective_role,
             resumable=is_resumable(job_store, job_data),
             pausable=is_pausable(job_store, job_data),
-            grid_resumable_pairs=(
-                grid_resumable_pairs(job_store, optimization_id)
-                if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH
-                else []
-            ),
         )
 
         headers = {"ETag": etag}

@@ -68,8 +68,8 @@ def reset_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, list[dict
     monkeypatch.setattr(settings, "smtp_host", "smtp.test.local")
     sent: list[dict[str, str]] = []
 
-    def _capture(to: str, subject: str, body: str) -> None:
-        sent.append({"to": to, "subject": subject, "body": body})
+    def _capture(to: str, subject: str, body: str, *, html_body: str | None = None) -> None:
+        sent.append({"to": to, "subject": subject, "body": body, "html": html_body or ""})
 
     monkeypatch.setattr(accounts_module, "send_email", _capture)
     engine = create_engine(
@@ -139,6 +139,8 @@ def test_request_then_confirm_resets_password(
     assert requested.status_code == 200
     assert len(sent) == 1
     code = _last_code(sent)
+    assert sent[-1]["subject"] == "Your Skynet password-reset code"
+    assert code in sent[-1]["html"]
 
     confirmed = client.post(
         "/auth/password-reset/confirm",
@@ -165,15 +167,16 @@ def test_request_then_confirm_resets_password(
     )
 
 
-def test_request_unknown_email_is_ok_and_silent(
+def test_request_unknown_email_is_404_and_silent(
     reset_client: tuple[TestClient, list[dict[str, str]]],
 ) -> None:
-    """An unknown address gets the same 200 but no email is sent."""
+    """An unknown address is refused with ``accounts.not_found`` and no email is sent."""
     client, sent = reset_client
     res = client.post(
         "/auth/password-reset/request", json={"email": "ghost@example.com"}, headers=_AUTH_HEADER
     )
-    assert res.status_code == 200
+    assert res.status_code == 404
+    assert res.json()["detail"] == t_en("accounts.not_found")
     assert sent == []
 
 

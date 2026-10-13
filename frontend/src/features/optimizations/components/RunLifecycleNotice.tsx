@@ -12,29 +12,13 @@ import { TERMS } from "@/shared/lib/terms";
 import { formatBlackboxScore, formatPercent } from "@/shared/lib/formatters";
 import { centsToUsd, formatBudgetUsd, usdToCents } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import {
-  budgetResultKind,
-  isBudgetPause,
-  isBudgetStop,
-  recoveryDisplayState,
-  recoveryEpisode,
-  type RecoveryDisplayState,
-} from "../lib/run-lifecycle";
+import { budgetResultKind, isBudgetPause, isBudgetStop } from "../lib/run-lifecycle";
 import { Label } from "@/shared/ui/primitives/label";
 
 const RESULT_COPY = {
   evaluated: "optimization.budget_reached.saved",
   seed: "optimization.budget_reached.seed_saved",
   none: "optimization.budget_reached.no_result",
-} as const;
-
-const RECOVERY_COPY = {
-  recovering: ["optimization.recovery.running_title", "optimization.recovery.running_body"],
-  recovered: ["optimization.recovery.recovered_title", "optimization.recovery.recovered_body"],
-  unavailable: [
-    "optimization.recovery.unavailable_title",
-    "optimization.recovery.unavailable_body",
-  ],
 } as const;
 
 // A projection pause suggests the measured projection plus a margin so one
@@ -51,7 +35,7 @@ interface RunLifecycleNoticeProps {
   onBudgetChanged?: () => void;
 }
 
-/** Keep durable stop/recovery evidence visible after its transition toast closes. */
+/** Keep durable budget stop/pause evidence visible after its transition toast closes. */
 export function RunLifecycleNotice({
   job,
   canEdit = false,
@@ -67,17 +51,11 @@ export function RunLifecycleNotice({
     accountEmpty ? "optimization.account_empty.title" : "optimization.budget_reached.title",
   );
   const projection = budgetPause ? (job.terminal_evidence?.budget_projection ?? null) : null;
-  const recovery = job.recovery;
-  const recoveryState = recoveryDisplayState(recovery);
-  const episode = recoveryEpisode(job);
   const previous = useRef<{
     runId: string;
     budgetStop: boolean;
     budgetPause: boolean;
-    episode: string | null;
-    recoveryState?: RecoveryDisplayState;
   } | null>(null);
-  const liveToast = useRef<string | null>(null);
   const resultCopy = msg(RESULT_COPY[budgetResultKind(job)]);
   const [requestedLimit, setRequestedLimit] = useState<number | null>(null);
   const [raising, setRaising] = useState(false);
@@ -86,88 +64,21 @@ export function RunLifecycleNotice({
   useEffect(() => {
     const before = previous.current;
     const sameRun = before?.runId === job.optimization_id;
-    const toastId = episode ? `run-recovery:${episode}` : null;
-    if (budgetStop) {
-      if (liveToast.current) {
-        toast.update(liveToast.current, {
-          render: `${stopTitle}. ${resultCopy}`,
-          type: "info",
-          isLoading: false,
-          autoClose: 6000,
-        });
-        liveToast.current = null;
-      } else if (sameRun && !before.budgetStop) {
-        toast.info(`${stopTitle}. ${resultCopy}`, {
-          toastId: `run-budget:${job.optimization_id}`,
-        });
-      }
-    } else if (budgetPause) {
-      if (liveToast.current) {
-        toast.dismiss(liveToast.current);
-        liveToast.current = null;
-      }
-      if (sameRun && !before.budgetPause) {
-        toast.info(msg("optimization.budget_projected.title"), {
-          toastId: `run-budget-pause:${job.optimization_id}`,
-        });
-      }
-    } else if (recovery && toastId) {
-      const changed =
-        !sameRun || before?.episode !== episode || before?.recoveryState !== recoveryState;
-      const [titleKey, bodyKey] = RECOVERY_COPY[recoveryState];
-      const text = `${msg(titleKey)}. ${msg(bodyKey)}`;
-      if (changed && recoveryState === "recovering") {
-        if (liveToast.current && liveToast.current !== toastId) toast.dismiss(liveToast.current);
-        toast.loading(text, { toastId });
-        liveToast.current = toastId;
-      } else if (changed && liveToast.current === toastId) {
-        toast.update(toastId, {
-          render: text,
-          type: recoveryState === "recovered" ? "success" : "info",
-          isLoading: false,
-          autoClose: 6000,
-        });
-        liveToast.current = null;
-      }
-    } else if (liveToast.current) {
-      toast.dismiss(liveToast.current);
-      liveToast.current = null;
+    if (budgetStop && sameRun && !before.budgetStop) {
+      toast.info(`${stopTitle}. ${resultCopy}`, {
+        toastId: `run-budget:${job.optimization_id}`,
+      });
+    } else if (budgetPause && sameRun && !before.budgetPause) {
+      toast.info(msg("optimization.budget_projected.title"), {
+        toastId: `run-budget-pause:${job.optimization_id}`,
+      });
     }
-    previous.current = {
-      runId: job.optimization_id,
-      budgetStop,
-      budgetPause,
-      episode,
-      recoveryState: recovery ? recoveryState : undefined,
-    };
-  }, [
-    job.optimization_id,
-    budgetStop,
-    budgetPause,
-    episode,
-    recovery,
-    recoveryState,
-    resultCopy,
-    stopTitle,
-  ]);
+    previous.current = { runId: job.optimization_id, budgetStop, budgetPause };
+  }, [job.optimization_id, budgetStop, budgetPause, resultCopy, stopTitle]);
 
-  useEffect(
-    () => () => {
-      if (liveToast.current) toast.dismiss(liveToast.current);
-    },
-    [],
-  );
-
-  // The plain budget recap now lives in its own tab; only actionable lifecycle
-  // states (stop, pause, recovery) keep an inline notice, with their recap.
-  if (!budgetStop && !budgetPause && !recovery) return null;
-  // An unavailable recovery attempt has nothing to act on, so its notice — and
-  // the budget recap that rode with it — is dropped; live runs and budget
-  // stops/pauses still surface on their own.
-  if (!budgetStop && !budgetPause && recovery && recoveryState === "unavailable") return null;
-  const [titleKey, bodyKey] = recovery ? RECOVERY_COPY[recoveryState] : RECOVERY_COPY.unavailable;
-  const budgetHalt = budgetStop || budgetPause;
-  const recovering = !budgetHalt && recoveryState === "recovering";
+  // The budget breakdown lives in the Budget tab, and recovery runs without a
+  // notice; only a budget stop or pause needs one, to raise the limit.
+  if (!budgetStop && !budgetPause) return null;
   const evidence = job.terminal_evidence;
   const scope = evidence?.selection_scope;
   const scopeLabel =
@@ -207,8 +118,7 @@ export function RunLifecycleNotice({
   );
   const requested = Math.max(minimumLimit, requestedLimit ?? suggestedLimit);
   const settling = (budget?.pending_operations ?? 0) > 0;
-  const canContinue =
-    budgetHalt && canEdit && job.resumable === true && budget != null && !budget.uncapped;
+  const canContinue = canEdit && job.resumable === true && budget != null && !budget.uncapped;
 
   const handleRaise = async () => {
     if (!budget || raising) return;
@@ -229,45 +139,28 @@ export function RunLifecycleNotice({
 
   return (
     <section
-      className="space-y-2 rounded-xl border border-[#C8A882]/45 bg-[#C8A882]/10 p-4"
+      className="space-y-2 rounded-xl border on-primary p-4"
       role="status"
     >
       <div className="flex items-start gap-2">
-        {recovering ? (
-          <CircleNotch
-            className="mt-0.5 size-4 shrink-0 animate-spin motion-reduce:animate-none"
-            aria-hidden="true"
-          />
-        ) : (
-          <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        )}
+        <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
         <div className="min-w-0 space-y-1">
           <p className="text-sm font-semibold">
-            {budgetStop
-              ? stopTitle
-              : budgetPause
-                ? msg("optimization.budget_projected.title")
-                : recovery
-                  ? msg(titleKey)
-                  : msg("submit.budget.label")}
+            {budgetStop ? stopTitle : msg("optimization.budget_projected.title")}
           </p>
-          {(budgetHalt || recovery) && (
-            <p className="text-sm text-muted-foreground" dir="auto">
-              {budgetStop
-                ? resultCopy
-                : budgetPause
-                  ? projection
-                    ? formatMsg("optimization.budget_projected.body", {
-                        done: projection.done_calls,
-                        planned: projection.planned_calls,
-                        spent: amount(projection.spent_cents),
-                        projected: amount(projection.projected_cents),
-                        limit: amount(projection.limit_cents),
-                      })
-                    : msg("optimization.budget_reached.raise_hint")
-                  : msg(bodyKey)}
-            </p>
-          )}
+          <p className="text-sm text-muted-foreground" dir="auto">
+            {budgetStop
+              ? resultCopy
+              : projection
+                ? formatMsg("optimization.budget_projected.body", {
+                    done: projection.done_calls,
+                    planned: projection.planned_calls,
+                    spent: amount(projection.spent_cents),
+                    projected: amount(projection.projected_cents),
+                    limit: amount(projection.limit_cents),
+                  })
+                : msg("optimization.budget_reached.raise_hint")}
+          </p>
           {budgetStop && job.result_availability === "evaluated" && scope && scoreLabel && (
             <p className="text-xs text-muted-foreground" dir="auto">
               {formatMsg("optimization.budget_reached.selection_score", {
@@ -293,43 +186,8 @@ export function RunLifecycleNotice({
               {msg("optimization.budget_reached.raise_hint")}
             </p>
           )}
-          {!budgetHalt && recovery?.reason && (
-            <p className="break-words text-xs text-muted-foreground" dir="auto">
-              {recovery.reason}
-            </p>
-          )}
         </div>
       </div>
-      {budget && (
-        <div className="space-y-2 border-t border-border/40 pt-3">
-          <dl className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-5">
-            {(
-              [
-                [
-                  "submit.budget.label",
-                  budget.uncapped
-                    ? msg("submit.budget.uncapped_short")
-                    : String(budget.total_cents),
-                ],
-                ["submit.budget.setup_spent", budget.setup_spent_cents],
-                ["submit.budget.run_spent", budget.run_spent_cents],
-                ["submit.budget.reserved", budget.reserved_cents],
-                ["submit.budget.available", budget.available_cents],
-              ] as const
-            ).map(([key, value]) => (
-              <div key={key} className="min-w-0 space-y-1">
-                <dt className="text-muted-foreground">{msg(key)}</dt>
-                <dd className="break-all font-medium tabular-nums" dir="auto">
-                  {key === "submit.budget.label" && budget.uncapped ? value : amount(value)}
-                </dd>
-              </div>
-            ))}
-          </dl>
-          {(settling || (budget.blocked_reason && !budgetHalt)) && (
-            <p className="text-xs text-muted-foreground">{msg("budget.pending")}</p>
-          )}
-        </div>
-      )}
       {canContinue && budget && (
         <form
           className="flex flex-wrap items-end gap-3 border-t border-border/40 pt-3"

@@ -1,0 +1,609 @@
+"use client";
+
+import * as React from "react";
+import { useSession } from "next-auth/react";
+import { toast } from "react-toastify";
+
+import {
+  CHANNEL_ICONS,
+  CHANNEL_KEYS,
+  CHANNELS,
+  EVENT_ICONS,
+  EVENT_KEYS,
+  EVENT_TYPES,
+  HELD_CHANNELS,
+  cellEditable,
+  cellExists,
+  channelLive,
+  chromeCellAction,
+  currentPushSubscription,
+  pushPermission,
+  slackCellAction,
+  slackConfigured,
+  slackReturnParam,
+  subscribePush,
+  toastPushResult,
+} from "@/features/notifications";
+import {
+  getNotificationPreferences,
+  getSlackConnection,
+  startSlackOAuth,
+  updateNotificationPreferences,
+  type SlackConnection,
+  type NotificationChannel,
+  type NotificationEventType,
+  type NotificationHeldChannel,
+  type NotificationPreferences,
+  type NotificationPreferencesPatch,
+} from "@/shared/lib/api";
+import { msg, type MessageKey } from "@/shared/lib/messages";
+import { cn } from "@/shared/lib/utils";
+import {
+  BellRinging,
+  CaretDown,
+  Check,
+  CircleNotch,
+  Clock,
+  GridFour,
+  ListChecks,
+} from "@/shared/ui/icons";
+import { InlineErrorRow } from "@/shared/ui/inline-error-row";
+import { InlineWarningRow } from "@/shared/ui/inline-warning-row";
+import { NumberInput } from "@/shared/ui/number-input";
+import { RetryIconButton } from "@/shared/ui/retry-icon-button";
+import { SettingsRow } from "@/shared/ui/settings-row";
+import { Skeleton } from "@/shared/ui/skeleton";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
+import { Button } from "@/shared/ui/primitives/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/shared/ui/primitives/dropdown-menu";
+import { Switch } from "@/shared/ui/primitives/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/primitives/table";
+
+import { SlackConnectionSection } from "./SlackConnectionSection";
+
+const MIN_HOLD = 0;
+const MAX_HOLD = 1440;
+// Typing "15" passes through "1"; only the settled value is saved.
+const HOLD_SAVE_DELAY_MS = 600;
+
+/** Why a cell can't be flipped, or null when it can. */
+function lockedReason(
+  event: NotificationEventType,
+  channel: NotificationChannel,
+  slackReady: boolean,
+): MessageKey | null {
+  if (cellEditable(event, channel, slackReady)) return null;
+  if (event === "product_news") return "notifications.channel.inbox_always";
+  return "notifications.slack.unavailable";
+}
+
+/**
+ * A disabled control swallows pointer events, so its tooltip hangs on a
+ * focusable wrapper instead.
+ */
+function Tip({ tip, children }: { tip: React.ReactNode; children: React.ReactElement }) {
+  return (
+    <TooltipButton tooltip={tip} side="top">
+      <span
+        tabIndex={0}
+        className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+      >
+        {children}
+      </span>
+    </TooltipButton>
+  );
+}
+
+function EventHeader({ event }: { event: NotificationEventType }) {
+  const EventIcon = EVENT_ICONS[event];
+  const keys = EVENT_KEYS[event];
+  return (
+    <Tip tip={msg(keys.tip)}>
+      <span className="inline-flex min-w-0 items-center gap-2 text-sm text-foreground">
+        <EventIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="min-w-0 text-pretty break-words">{msg(keys.label)}</span>
+      </span>
+    </Tip>
+  );
+}
+
+function ChannelHeader({
+  channel,
+  slackReady,
+}: {
+  channel: NotificationChannel;
+  slackReady: boolean;
+}) {
+  const ChannelIcon = CHANNEL_ICONS[channel];
+  const live = channelLive(channel, slackReady);
+  return (
+    <Tip tip={live ? msg(CHANNEL_KEYS[channel]) : msg("notifications.slack.unavailable")}>
+      <ChannelIcon
+        className={cn("size-4", live ? "text-muted-foreground" : "text-muted-foreground/45")}
+        aria-label={msg(CHANNEL_KEYS[channel])}
+      />
+    </Tip>
+  );
+}
+
+interface CellProps {
+  event: NotificationEventType;
+  channel: NotificationChannel;
+  checked: boolean;
+  disabled: boolean;
+  slackReady: boolean;
+  onChange: (on: boolean) => void;
+}
+
+/** One grid cell as a switch: the desktop table. */
+function SwitchCell({ event, channel, checked, disabled, slackReady, onChange }: CellProps) {
+  if (!cellExists(event, channel)) return null;
+  const locked = lockedReason(event, channel, slackReady);
+  const label = `${msg(EVENT_KEYS[event].label)}: ${msg(CHANNEL_KEYS[channel])}`;
+  const control = (
+    <Switch
+      checked={checked}
+      disabled={disabled || locked !== null}
+      onCheckedChange={onChange}
+      aria-label={label}
+    />
+  );
+  return locked ? <Tip tip={msg(locked)}>{control}</Tip> : control;
+}
+
+/** One grid cell as an icon toggle: the phone row. */
+function IconCell({ event, channel, checked, disabled, slackReady, onChange }: CellProps) {
+  const ChannelIcon = CHANNEL_ICONS[channel];
+  if (!cellExists(event, channel)) return <span className="size-11" aria-hidden="true" />;
+  const locked = lockedReason(event, channel, slackReady);
+  const label = `${msg(EVENT_KEYS[event].label)}: ${msg(CHANNEL_KEYS[channel])}`;
+  const control = (
+    <button
+      type="button"
+      aria-pressed={checked}
+      aria-label={label}
+      disabled={disabled || locked !== null}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "flex size-11 items-center justify-center rounded-lg border transition-colors cursor-pointer",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
+        "disabled:cursor-not-allowed disabled:opacity-45",
+        checked ? "on-primary" : "border-border/60 text-muted-foreground",
+      )}
+    >
+      <ChannelIcon className="size-4" weight={checked ? "fill" : "bold"} aria-hidden="true" />
+    </button>
+  );
+  return locked ? <Tip tip={msg(locked)}>{control}</Tip> : control;
+}
+
+/**
+ * Notification routing: a grid of update kinds by the places they reach the
+ * user, the Chrome and Slack connections those places need, and how long
+ * non-urgent updates wait and on which channels. Every change saves at once.
+ */
+export function NotificationsTab() {
+  const { data: session } = useSession();
+  const signedOut = !session?.user;
+  const [prefs, setPrefs] = React.useState<NotificationPreferences | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [loadError, setLoadError] = React.useState(false);
+  const [hold, setHold] = React.useState<number | "">("");
+  const holdTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Whether this browser holds a push subscription; Chrome cells need one to deliver here.
+  const [pushSubscribed, setPushSubscribed] = React.useState(false);
+  const [chromeBlocked, setChromeBlocked] = React.useState(false);
+  const [subscribing, setSubscribing] = React.useState(false);
+  const [slack, setSlack] = React.useState<SlackConnection | null>(null);
+  const [slackConnecting, setSlackConnecting] = React.useState(false);
+
+  React.useEffect(() => {
+    let alive = true;
+    setChromeBlocked(pushPermission() === "denied");
+    void currentPushSubscription()
+      .then((subscription) => {
+        if (alive) setPushSubscribed(subscription !== null);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const load = React.useCallback(async () => {
+    if (signedOut) return;
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const next = await getNotificationPreferences();
+      setPrefs(next);
+      setHold(next.hold_minutes);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [signedOut]);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  // A failed status read leaves the Slack column off rather than erroring the tab.
+  React.useEffect(() => {
+    if (signedOut) return;
+    let alive = true;
+    void getSlackConnection()
+      .then((next) => {
+        if (alive) setSlack(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [signedOut]);
+
+  // The Slack OAuth callback lands back here with ?slack=connected|error; say so once.
+  React.useEffect(() => {
+    const result = slackReturnParam(window.location.search);
+    if (!result) return;
+    if (result === "connected") toast.success(msg("notifications.slack.connected"));
+    else toast.error(msg("notifications.slack.connect_error"));
+    const url = new URL(window.location.href);
+    url.searchParams.delete("slack");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, []);
+
+  const connectSlack = React.useCallback(async () => {
+    setSlackConnecting(true);
+    try {
+      const { authorize_url } = await startSlackOAuth();
+      window.location.assign(authorize_url);
+    } catch (err) {
+      setSlackConnecting(false);
+      toast.error(err instanceof Error ? err.message : msg("notifications.slack.connect_error"));
+    }
+  }, []);
+
+  React.useEffect(
+    () => () => {
+      if (holdTimer.current) clearTimeout(holdTimer.current);
+    },
+    [],
+  );
+
+  // The change shows at once; a failed save puts back what the server holds.
+  const save = React.useCallback(
+    async (patch: NotificationPreferencesPatch, optimistic: NotificationPreferences) => {
+      const before = prefs;
+      setPrefs(optimistic);
+      try {
+        const saved = await updateNotificationPreferences(patch);
+        setPrefs(saved);
+        toast.success(msg("settings.notifications.prefs_saved"));
+      } catch {
+        setPrefs(before);
+        if (before) setHold(before.hold_minutes);
+        toast.error(msg("settings.notifications.prefs_save_error"));
+      }
+    },
+    [prefs],
+  );
+
+  const writeCell = (event: NotificationEventType, channel: NotificationChannel, on: boolean) => {
+    if (!prefs) return;
+    const grid = { ...prefs.grid, [event]: { ...prefs.grid[event], [channel]: on } };
+    void save({ grid: { [event]: { [channel]: on } } }, { ...prefs, grid });
+  };
+
+  // Turning a Chrome cell on in a browser that can't receive pushes yet asks for
+  // permission first (this click is the user gesture Chrome requires).
+  const setCell = async (
+    event: NotificationEventType,
+    channel: NotificationChannel,
+    on: boolean,
+  ) => {
+    // The cell is saved before leaving for Slack, so it is on once the install returns.
+    if (channel === "slack" && slackCellAction(slack, on) === "connect") {
+      writeCell(event, channel, on);
+      return void connectSlack();
+    }
+    if (channel !== "chrome" || !on) return writeCell(event, channel, on);
+    const action = chromeCellAction(pushPermission(), pushSubscribed);
+    if (action === "blocked") return setChromeBlocked(true);
+    if (action === "unsupported") return toastPushResult("unsupported");
+    if (action === "subscribe") {
+      setSubscribing(true);
+      const result = await subscribePush();
+      setSubscribing(false);
+      if (result === "denied") return setChromeBlocked(true);
+      if (result !== "subscribed") return toastPushResult(result);
+      setPushSubscribed(true);
+    }
+    writeCell(event, channel, on);
+  };
+
+  // The Chrome row's own switch-on: this browser only, the grid says which updates it gets.
+  const turnOnChrome = async () => {
+    setSubscribing(true);
+    const result = await subscribePush();
+    setSubscribing(false);
+    if (result === "denied") setChromeBlocked(true);
+    if (result === "subscribed") setPushSubscribed(true);
+    toastPushResult(result);
+  };
+
+  const setHoldMinutes = (minutes: number) => {
+    setHold(minutes);
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = setTimeout(() => {
+      if (!prefs || minutes === prefs.hold_minutes) return;
+      void save({ hold_minutes: minutes }, { ...prefs, hold_minutes: minutes });
+    }, HOLD_SAVE_DELAY_MS);
+  };
+
+  const toggleHeld = (channel: NotificationHeldChannel) => {
+    if (!prefs) return;
+    const held = prefs.held_channels.includes(channel)
+      ? prefs.held_channels.filter((c) => c !== channel)
+      : HELD_CHANNELS.filter((c) => c === channel || prefs.held_channels.includes(c));
+    void save({ held_channels: held }, { ...prefs, held_channels: held });
+  };
+
+  const disabled = signedOut || prefs === null;
+  const slackReady = slackConfigured(slack);
+  const cellProps = (event: NotificationEventType, channel: NotificationChannel): CellProps => ({
+    event,
+    channel,
+    checked: prefs?.grid[event]?.[channel] ?? false,
+    disabled:
+      disabled || (channel === "chrome" && subscribing) || (channel === "slack" && slackConnecting),
+    slackReady,
+    onChange: (on) => void setCell(event, channel, on),
+  });
+
+  const permission = pushPermission();
+  const chromeState: MessageKey | null =
+    permission === "unsupported"
+      ? "notifications.push.unsupported"
+      : permission === "denied"
+        ? "settings.notifications.chrome.blocked"
+        : pushSubscribed
+          ? "settings.notifications.chrome.on"
+          : null;
+
+  const heldSummary =
+    prefs && prefs.held_channels.length > 0
+      ? prefs.held_channels.map((c) => msg(CHANNEL_KEYS[c])).join(", ")
+      : msg("settings.notifications.hold.none");
+
+  return (
+    <div className="space-y-4">
+      {loadError && (
+        <InlineErrorRow
+          message={msg("settings.notifications.prefs_load_error")}
+          className="items-center py-2"
+          action={
+            <RetryIconButton
+              label={msg("settings.notifications.retry")}
+              loading={loading}
+              onClick={() => void load()}
+            />
+          }
+        />
+      )}
+
+      <section data-setup="notification-grid" className="space-y-2">
+        <div className="flex flex-col gap-0.5">
+          <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <GridFour className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            {msg("settings.notifications.grid.label")}
+          </span>
+          <span className="text-xs text-muted-foreground/80">
+            {msg("settings.notifications.grid.description")}
+          </span>
+        </div>
+
+        {prefs === null && !loadError ? (
+          <div className="space-y-2" aria-busy="true">
+            {EVENT_TYPES.map((event) => (
+              <Skeleton key={event} height={28} borderRadius={8} />
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="hidden sm:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>
+                      <span className="sr-only">{msg("settings.notifications.grid.label")}</span>
+                    </TableHead>
+                    {CHANNELS.map((channel) => (
+                      <TableHead key={channel} className="w-16">
+                        <div className="flex justify-center">
+                          <ChannelHeader channel={channel} slackReady={slackReady} />
+                        </div>
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {EVENT_TYPES.map((event) => (
+                    <TableRow key={event}>
+                      <TableHead
+                        scope="row"
+                        className="h-auto py-2.5 font-normal whitespace-normal text-foreground"
+                      >
+                        <EventHeader event={event} />
+                      </TableHead>
+                      {CHANNELS.map((channel) => (
+                        <TableCell key={channel}>
+                          <div className="flex justify-center">
+                            <SwitchCell {...cellProps(event, channel)} />
+                          </div>
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <ul className="flex flex-col sm:hidden">
+              {EVENT_TYPES.map((event) => (
+                <li
+                  key={event}
+                  className="flex flex-col gap-2 border-b border-border/30 py-2.5 last:border-b-0"
+                >
+                  <EventHeader event={event} />
+                  <div className="flex gap-2">
+                    {CHANNELS.map((channel) => (
+                      <IconCell key={channel} {...cellProps(event, channel)} />
+                    ))}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {chromeBlocked && (
+          <InlineWarningRow
+            message={msg("notifications.push.blocked")}
+            onDismiss={() => setChromeBlocked(false)}
+          />
+        )}
+      </section>
+
+      <section data-setup="notification-channels" className="border-t border-border/40 pt-2">
+        <SettingsRow
+          icon={CHANNEL_ICONS.chrome}
+          label={msg(CHANNEL_KEYS.chrome)}
+          description={msg("settings.notifications.chrome.description")}
+        >
+          {chromeState ? (
+            <span className="text-xs text-muted-foreground">{msg(chromeState)}</span>
+          ) : (
+            <TooltipButton tooltip={msg("settings.notifications.chrome.turn_on")} side="top">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={() => void turnOnChrome()}
+                disabled={signedOut || subscribing}
+                aria-label={msg("settings.notifications.chrome.turn_on")}
+              >
+                {subscribing ? (
+                  <CircleNotch
+                    className="animate-spin motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <BellRinging className="size-4" aria-hidden="true" />
+                )}
+              </Button>
+            </TooltipButton>
+          )}
+        </SettingsRow>
+        {slack?.configured && (
+          <SlackConnectionSection
+            connection={slack}
+            onConnect={() => void connectSlack()}
+            connecting={slackConnecting}
+            onChange={setSlack}
+          />
+        )}
+      </section>
+
+      <section className="border-t border-border/40 pt-2">
+        <SettingsRow
+          icon={Clock}
+          label={msg("settings.notifications.hold.label")}
+          description={msg("settings.notifications.hold.description")}
+        >
+          <label htmlFor="notification-hold-minutes" className="sr-only">
+            {msg("settings.notifications.hold.minutes")}
+          </label>
+          <span className="inline-flex items-center gap-1.5">
+            <NumberInput
+              id="notification-hold-minutes"
+              value={hold}
+              min={MIN_HOLD}
+              max={MAX_HOLD}
+              size="sm"
+              className="w-28"
+              disabled={disabled}
+              onChange={setHoldMinutes}
+            />
+            <span aria-hidden="true" className="text-sm text-muted-foreground">
+              {msg("settings.notifications.hold.unit")}
+            </span>
+          </span>
+        </SettingsRow>
+        <SettingsRow
+          icon={ListChecks}
+          label={msg("settings.notifications.hold.channels")}
+          description={msg("settings.notifications.hold.channels_description")}
+        >
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={disabled}
+                aria-label={msg("settings.notifications.hold.channels")}
+                className="h-auto min-h-8 min-w-32 justify-between gap-2 whitespace-normal py-1.5 text-start"
+              >
+                <span className="min-w-0 break-words">{heldSummary}</span>
+                <CaretDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-44">
+              {HELD_CHANNELS.map((channel) => {
+                const ChannelIcon = CHANNEL_ICONS[channel];
+                const on = prefs?.held_channels.includes(channel) ?? false;
+                return (
+                  <DropdownMenuItem
+                    key={channel}
+                    role="menuitemcheckbox"
+                    aria-checked={on}
+                    // Picking several channels is the point; keep the menu open.
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      toggleHeld(channel);
+                    }}
+                  >
+                    <ChannelIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+                    <span className="flex-1">{msg(CHANNEL_KEYS[channel])}</span>
+                    <Check
+                      className={cn("size-4 text-primary", on ? "opacity-100" : "opacity-0")}
+                      aria-hidden="true"
+                    />
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SettingsRow>
+      </section>
+    </div>
+  );
+}

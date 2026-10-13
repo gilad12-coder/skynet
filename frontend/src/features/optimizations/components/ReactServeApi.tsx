@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import dynamic from "next/dynamic";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import { Separator } from "@/shared/ui/primitives/separator";
-import { Skeleton } from "@/shared/ui/skeleton";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { msg } from "@/shared/lib/messages";
@@ -13,12 +11,8 @@ import { tip } from "@/shared/lib/tooltips";
 
 import { CopyButton } from "@/shared/ui/copy-button";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import { LangPicker } from "./ui-primitives";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={180} borderRadius={8} />,
-});
 
 export interface ReactServeApiProps {
   optimizationId: string;
@@ -197,7 +191,7 @@ export function ReactServeApi({ optimizationId }: ReactServeApiProps) {
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
-          <HelpTip text={tip("serve.section_run")}>{msg("optimizations.react.api_title")}</HelpTip>
+          {msg("optimizations.react.api_title")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -221,9 +215,7 @@ export function ReactServeApi({ optimizationId }: ReactServeApiProps) {
 
         <div className="space-y-2">
           <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
-            <HelpTip text={tip("serve.integration_code")}>
-              {msg("auto.app.optimizations.id.page.26")}
-            </HelpTip>
+            {msg("auto.app.optimizations.id.page.26")}
           </p>
           <CodeEditor
             value={snippet}

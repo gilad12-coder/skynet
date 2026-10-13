@@ -136,7 +136,7 @@ export function TaggerAssistRail({
           <span className="text-xs text-muted-foreground">
             {msg("tagger.assist.rail.agreement")}
           </span>
-          <span className="text-sm font-semibold tabular-nums" style={{ color: "#a68b6b" }}>
+          <span className="text-sm font-semibold tabular-nums" style={{ color: "var(--primary)" }}>
             {agreement === null ? "—" : `${Math.round(agreement * 100)}%`}
           </span>
         </div>
@@ -171,7 +171,7 @@ export function TaggerAssistRail({
               max={Math.max(1, openRound.rowIds.length)}
               size="sm"
               className="mt-1.5"
-              fillClassName="bg-primary/40"
+              fillClassName="bg-primary-fill/40"
             />
           </div>
         )}

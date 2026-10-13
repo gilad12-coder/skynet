@@ -11,11 +11,5 @@ export const metadata: Metadata = {
 };
 
 export default function TermsPage() {
-  return (
-    <LegalDocument
-      document={TERMS_OF_SERVICE}
-      kind="terms"
-      related={{ label: "Privacy Policy", href: LEGAL_LINKS.privacy }}
-    />
-  );
+  return <LegalDocument document={TERMS_OF_SERVICE} kind="terms" />;
 }

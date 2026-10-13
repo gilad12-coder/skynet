@@ -6,6 +6,7 @@ declare module "next-auth" {
     role?: string;
     groups?: string[];
     firstLogin?: boolean;
+    otherEmails?: string[];
   }
   interface Session {
     backendAccessToken?: string;

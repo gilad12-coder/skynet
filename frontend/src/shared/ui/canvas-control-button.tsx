@@ -6,14 +6,14 @@ import { cn } from "@/shared/lib/utils";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 
 const CANVAS_FOCUS_RING =
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45";
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45";
 
 /** The bordered strip that holds a canvas's zoom and view controls. */
 export function CanvasControlGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "flex items-center overflow-hidden rounded-lg border border-border/60 bg-background/95 shadow-sm backdrop-blur",
+        "flex items-center overflow-hidden rounded-lg border border-border/60 bg-background/95 backdrop-blur",
         className,
       )}
       {...props}

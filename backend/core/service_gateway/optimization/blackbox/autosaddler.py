@@ -1,7 +1,7 @@
 """AutoSaddler engine: run the pinned upstream loop inside the managed sandbox.
 
 Skynet does not reimplement AutoSaddler. The upstream ``microsoft/AutoSaddler``
-v2 engine, run store, policies and Claude provider run unchanged in an isolated
+v2 engine, run store and policies run unchanged in an isolated
 sandbox; Skynet contributes only a scenario plugin (evaluator, evidence builder
 and prompt pack in ``autosaddler_runner.py`` and ``autosaddler_plugin/``) and
 scores every candidate through the parent-owned evaluator budget.

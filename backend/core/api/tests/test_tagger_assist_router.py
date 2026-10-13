@@ -92,7 +92,6 @@ class _MemStore(RemoteDBJobStore):
         self._session_factory = sessionmaker(bind=self._engine)
         self._code_version = "test"
         self._max_progress_events = 100
-        self._max_log_entries = 100
         self._progress_counter_lock = threading.Lock()
 
 
@@ -343,8 +342,9 @@ def test_interview_stream_tolerates_turn_bookkeeping_fields(monkeypatch) -> None
     ]
 
 
-def test_interview_stream_auto_runs_catalog_default(monkeypatch) -> None:
+def test_interview_stream_auto_runs_interview_default(monkeypatch) -> None:
     """No chosen model runs the catalog default with no router extras."""
+    monkeypatch.setattr(model_router, "interview_model_id", lambda: "openrouter/anthropic/claude-sonnet-5")
     seen: dict = {}
 
     async def fake_stream(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
@@ -366,6 +366,27 @@ def test_interview_stream_auto_runs_catalog_default(monkeypatch) -> None:
     )
     assert resp.status_code == 200
     assert seen["model"] == "openrouter/anthropic/claude-sonnet-5"
+
+
+def test_interview_stream_opening_over_budget_posts_the_fixed_opening(monkeypatch) -> None:
+    """Sampled rows over the opening budget stream the fixed opening, never the model."""
+
+    async def must_not_run(*_args, **_kwargs):
+        """Fail the test if the engine is reached."""
+        raise AssertionError("the model must not run")
+        yield {}
+
+    monkeypatch.setattr(tagging, "interview_turn_stream", must_not_run)
+    client, _ = _client(_ALICE)
+    resp = client.post(
+        "/tagging-sessions",
+        json={**_SESSION_BODY, "data": [{"id": i, "text": "x" * 20_000} for i in range(8)]},
+    )
+    session_id = resp.json()["id"]
+    resp = client.post(f"/tagging-sessions/{session_id}/assist/interview/stream", json={"turns": []})
+    assert resp.status_code == 200
+    assert "event: kickoff_oversized" in resp.text
+    assert '"subject": "data"' in resp.text
 
 
 def test_predict_excludes_requested_rows_from_examples(monkeypatch) -> None:

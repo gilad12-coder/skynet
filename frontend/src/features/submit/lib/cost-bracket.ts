@@ -27,6 +27,12 @@ import {
   type PricingTerms,
   type TokenSourceMode,
 } from "@/features/billing";
+// Type-only on purpose: the node test runner loads this module without the
+// app's alias map, so the few unified rules it needs are restated below and
+// pinned to the shared ones by cost-bracket.test.ts.
+import type { OptimizerCatalogResponse, OptimizerChoice } from "@/shared/types/unified-run";
+import { metricUsesModel } from "./scorer-dependencies";
+import type { WizardV2State } from "./wizard-v2";
 
 /** GEPA metric-call budgets by `auto` tier — mirrors the backend `_AUTO_BUDGETS`. */
 export const AUTO_METRIC_CALLS: Record<string, number> = {
@@ -507,4 +513,139 @@ function roundToNiceCap(cents: number): number {
   if (cents <= 0) return 1;
   const step = niceCapStep(cents);
   return Math.ceil(cents / step) * step;
+}
+
+/** Options the unified projection needs beyond the wizard state. */
+export interface UnifiedCostBracketOptions {
+  /** The model catalog, for per-model prices; models price at defaults without it. */
+  models?: readonly CatalogModel[] | null;
+  runtime?: RuntimeCostProjection | null;
+  pricing?: Pick<PricingTerms, "usageMarkup" | "byokFeeFraction">;
+}
+
+/** Mirrors `MIN_PAIRS_FOR_HELD_OUT`: fewer pairs than this get no test split. */
+const UNIFIED_MIN_PAIRS_FOR_HELD_OUT = 5;
+
+/** Mirrors `resolveOptimizer`: Auto on a DSPy program is DSPy GEPA. */
+export function unifiedResolvedOptimizer(
+  choice: OptimizerChoice,
+  kind: NonNullable<WizardV2State["task"]["artifactKind"]>,
+): string {
+  if (choice === "auto") return kind === "dspy_program" ? "dspy_gepa" : "auto";
+  return choice;
+}
+
+/** Mirrors `usesNativeProposer`: the optimizers whose proposer is a coding agent. */
+function unifiedNativeProposer(resolved: string): boolean {
+  return (
+    resolved === "auto" ||
+    resolved === "meta_harness" ||
+    resolved === "autoresearch" ||
+    resolved === "autosaddler"
+  );
+}
+
+/**
+ * Cases the final re-score runs on: everything outside train, since the
+ * backend reports on test and selects on validation. Mirrors split.py
+ * closely enough for an estimate; the exact split happens server side.
+ */
+function finalScoredCases(state: WizardV2State): number {
+  const { inputs } = state;
+  if (inputs.mode !== "pairs") return 1;
+  const total = inputs.cases.length > 0 ? inputs.cases.length : inputs.rowCount;
+  if (total <= 0) return 0;
+  if (total < UNIFIED_MIN_PAIRS_FOR_HELD_OUT) return Math.max(1, Math.round(total * inputs.split.val));
+  const held = Math.round(total * (inputs.split.val + inputs.split.test));
+  return Math.max(1, Math.min(total, held));
+}
+
+/**
+ * The cost bracket for a unified (wizard v2) run, or null until the task's
+ * artifact kind is known. Black-box families count the search budget plus the
+ * final held-out re-score; DSPy optimizers reuse the DSPy projection with the
+ * scorer-run budget as their metric-call budget. `catalog` is the optimizer
+ * catalog: when it matches the setup, its native-proposer flag decides
+ * whether economy pricing applies.
+ */
+export function projectUnifiedCostBracket(
+  state: WizardV2State,
+  catalog: OptimizerCatalogResponse | null,
+  options: UnifiedCostBracketOptions = {},
+): CostBracket | null {
+  const kind = state.task.artifactKind;
+  if (!kind) return null;
+  const { optimizer, inputs, workspace, meta } = state;
+  const resolved = unifiedResolvedOptimizer(optimizer.choice, kind);
+  const findModel = (config: ModelConfig | null): CatalogModel | null =>
+    config?.name.trim()
+      ? (options.models?.find((candidate) => candidate.value === config.name) ?? null)
+      : null;
+  const roleFor = (
+    role: ProjectedModelRole["role"],
+    config: ModelConfig | null,
+    tokenShare: number,
+  ): ProjectedModelRole[] =>
+    config?.name.trim()
+      ? [{ role, model: findModel(config), tokenSource: config.token_source ?? "managed", tokenShare }]
+      : [];
+  const metricModel = !metricUsesModel(state)
+    ? null
+    : workspace.metricModelMode === "inherit"
+      ? optimizer.reflectionModel
+      : workspace.metricModel;
+  const scorerRuns = Math.max(0, optimizer.budget.max_scorer_runs ?? 0);
+  const datasetRows = inputs.cases.length > 0 ? inputs.cases.length : inputs.rowCount;
+  const pricing = options.pricing;
+
+  if (resolved.startsWith("dspy_")) {
+    return projectCostBracket({
+      autoLevel: "",
+      maxFullEvals: "",
+      maxMetricCalls: String(scorerRuns),
+      datasetRows,
+      modelRoles: [
+        ...roleFor(
+          "task",
+          optimizer.taskModel,
+          optimizer.reflectionModel ? 1 - REFLECTION_TOKEN_SHARE : 1,
+        ),
+        ...roleFor("optimization", optimizer.reflectionModel, REFLECTION_TOKEN_SHARE),
+        ...roleFor("judge", metricModel, 1),
+      ],
+      runtime: options.runtime,
+      pricing,
+      economyMode: meta.economyMode,
+    });
+  }
+
+  const option =
+    catalog && catalog.artifact_kind === kind && catalog.data_mode === inputs.mode
+      ? catalog.options.find((candidate) => candidate.id === optimizer.choice)
+      : undefined;
+  const nativeProposer = option?.native_proposer ?? unifiedNativeProposer(resolved);
+  // ShinkaEvolve samples each mutation from the pool, so the pool shares one budget.
+  const optimizationPool = [
+    optimizer.reflectionModel,
+    ...(optimizer.choice === "shinka_evolve" ? optimizer.extraReflectionModels : []),
+  ].filter((model): model is ModelConfig => Boolean(model?.name.trim()));
+  return projectCostBracket({
+    autoLevel: "",
+    maxFullEvals: "",
+    // The final run re-scores the starting version and the winner outside the
+    // search budget, once per held-out case each (blackboxFinalScorerRuns).
+    maxMetricCalls: String(scorerRuns + 2 * Math.max(1, finalScoredCases(state))),
+    datasetRows,
+    modelRoles: [
+      ...optimizationPool.flatMap((model) =>
+        roleFor("optimization", model, 1 / optimizationPool.length),
+      ),
+      ...roleFor("task", optimizer.taskModel, 1),
+      ...roleFor("judge", metricModel, 1),
+    ],
+    runtime: options.runtime,
+    pricing,
+    // Coding-agent proposers stream their calls, which never batch.
+    economyMode: meta.economyMode && !nativeProposer,
+  });
 }

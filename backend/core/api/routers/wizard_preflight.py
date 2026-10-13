@@ -1,4 +1,10 @@
-"""Validate wizard inputs before sharing the same paid setup path as API submissions."""
+"""Validate wizard inputs before sharing the same paid setup path as API submissions.
+
+Also serves the unified workspace contract check: a static one that reads
+the code without running it, and a sandboxed one that runs the starting
+version through the code and metric on a few non-held-out samples under
+the same budget, evidence and protected sandbox as a setup check.
+"""
 
 from __future__ import annotations
 
@@ -12,24 +18,38 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
-from ...models import BlackboxRunRequest, GridSearchRequest, RunRequest
+from ...i18n import t
+from ...models import BlackboxRunRequest
+from ...models.unified import (
+    ContractCheckItem,
+    ContractCheckRequest,
+    ContractCheckResponse,
+    UnifiedRunRequest,
+    metric_shape_for,
+    resolve_optimizer,
+)
+from ...service_gateway.optimization.unified.contract import (
+    contract_fingerprint,
+    static_contract_check,
+    with_message_codes,
+)
 from ...storage.preflights import setup_seed
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..preflight_execution import WizardPreflightRequest, WizardPreflightResponse, run_preflight
 from ..preflight_progress import progress_observer
 from ..rate_limit import enforce_submission_rate
-from .submissions import _expand_catalog_grid_payload, _materialize_library_dataset, _materialize_staged_dataset
+from .submissions import _default_unified_seed, _materialize_unified_cases
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
 
 def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
     """Build paid Continue validation using the same ledger as the eventual run."""
-    router = APIRouter(prefix="/wizard")
+    router = APIRouter()
 
-    @router.post("/preflight", response_model=WizardPreflightResponse, response_model_exclude_none=True)
+    @router.post("/wizard/preflight", response_model=WizardPreflightResponse, response_model_exclude_none=True)
     def preflight(request: WizardPreflightRequest, user: AuthenticatedUserDep) -> WizardPreflightResponse:
         """Validate the current wizard stage once and return durable budget-aware evidence.
 
@@ -45,27 +65,23 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
         payload["username"] = user.username
         payload["execution_budget_id"] = request.execution_budget_id
         payload["execution_budget_revision"] = request.execution_budget_revision
-        if payload.get("seed") is None:
+        # A unified run is seeded from its task, not its budget, so the
+        # evidence fingerprint matches what POST /optimize later recomputes.
+        if payload.get("seed") is None and request.workflow != "unified":
             payload["seed"] = setup_seed(request.execution_budget_id)
-        if request.scope == "execution":
-            model = (
-                BlackboxRunRequest
-                if request.workflow == "anything"
-                else (GridSearchRequest if "generation_models" in payload else RunRequest)
-            )
+        if request.scope == "execution" or request.workflow == "unified":
+            model: type[BaseModel] = BlackboxRunRequest if request.workflow == "anything" else UnifiedRunRequest
             try:
                 typed = model.model_validate(payload)
             except ValidationError as error:
                 raise RequestValidationError(error.errors()) from error
-            if isinstance(typed, GridSearchRequest):
-                _expand_catalog_grid_payload(typed)
-            if request.workflow == "dspy":
-                _materialize_staged_dataset(typed, job_store=job_store, username=user.username)
-                _materialize_library_dataset(typed, job_store=job_store, user=user)
+            if isinstance(typed, UnifiedRunRequest):
+                _materialize_unified_cases(typed, job_store=job_store, username=user.username)
+                _default_unified_seed(typed)
             payload = typed.model_dump(mode="json", by_alias=True)
         return run_preflight(request.model_copy(update={"payload": payload}), user, job_store)
 
-    @router.post("/preflight/stream", include_in_schema=False)
+    @router.post("/wizard/preflight/stream", include_in_schema=False)
     def stream_preflight(request: WizardPreflightRequest, user: AuthenticatedUserDep) -> StreamingResponse:
         """Stream actual setup phases followed by the existing authoritative result.
 
@@ -118,6 +134,82 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
 
         return StreamingResponse(
             stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        )
+
+    @router.post("/optimizations/contract-check/static", response_model=ContractCheckResponse)
+    def contract_check_static(request: ContractCheckRequest, user: AuthenticatedUserDep) -> ContractCheckResponse:
+        """Check the workspace code's signatures and metric model without running it.
+
+        Args:
+            request: The unified spec to check.
+            user: Authenticated caller.
+
+        Returns:
+            The static checks; ``samples`` is always empty.
+        """
+        enforce_submission_rate(user.username)
+        return static_contract_check(request.spec)
+
+    @router.post("/optimizations/contract-check", response_model=ContractCheckResponse)
+    def contract_check(request: ContractCheckRequest, user: AuthenticatedUserDep) -> ContractCheckResponse:
+        """Run the starting version through the code and metric on a few samples, in the sandbox.
+
+        The check runs as an evaluation-scope setup check under the spec's
+        execution budget, so it is billed, deduplicated and sandboxed exactly
+        like ``/wizard/preflight``. A contract mismatch is a 200 with
+        ``ok=false``; only auth, billing and quota failures are 4xx.
+
+        Args:
+            request: The unified spec and how many samples to score.
+            user: Authenticated owner whose budget pays for the check.
+
+        Returns:
+            Every check item and the scored samples.
+
+        Raises:
+            HTTPException: 402 when the spec names no execution budget, or the
+                budget errors ``run_preflight`` raises.
+        """
+        enforce_submission_rate(user.username)
+        spec = request.spec
+        static = static_contract_check(spec)
+        if not static.ok:
+            return static
+        if spec.execution_budget_id is None or spec.execution_budget_revision is None:
+            raise HTTPException(status_code=402, detail="Choose a spending budget before running the contract check.")
+        result = preflight(
+            WizardPreflightRequest(
+                scope="evaluation",
+                workflow="unified",
+                payload=spec.model_dump(mode="json", exclude_none=True),
+                execution_budget_id=spec.execution_budget_id,
+                execution_budget_revision=spec.execution_budget_revision,
+                contract_sample_count=request.sample_count,
+            ),
+            user,
+        )
+        contract = (result.workflow_result or {}).get("contract")
+        if isinstance(contract, dict):
+            return with_message_codes(ContractCheckResponse.model_validate(contract), static)
+        failure = next((check for check in result.checks if check.status != "succeeded"), None)
+        error = failure.message if failure is not None and failure.message else result.status
+        return ContractCheckResponse(
+            ok=False,
+            optimizer_resolved=resolve_optimizer(spec.optimizer.choice, spec.task.artifact.kind),
+            metric_shape=metric_shape_for(spec.optimizer.choice, spec.task.artifact.kind),
+            uses_llm=static.uses_llm,
+            checks=[
+                *static.checks,
+                ContractCheckItem(
+                    key="workspace.run",
+                    status="pending" if result.status == "pending" else "failed",
+                    message=t("submit.unified.contract_failed", error=error),
+                    message_code="submit.unified.contract_failed",
+                    message_params={"error": error},
+                    detail=(failure.message or "")[-4000:] if failure is not None and failure.message else None,
+                ),
+            ],
+            fingerprint=contract_fingerprint(spec),
         )
 
     return router

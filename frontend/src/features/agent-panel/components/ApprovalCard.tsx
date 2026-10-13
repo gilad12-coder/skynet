@@ -33,26 +33,26 @@ const SEVERITY_STYLES: Record<
   }
 > = {
   destructive: {
-    border: "border-[#9B2C1F]/30",
-    bg: "bg-[#FCEFEB]",
-    headerBorder: "border-[#9B2C1F]/20",
+    border: "border-[#9B2C1F]/30 dark:border-[#ec7764]/30",
+    bg: "bg-[#FCEFEB] dark:bg-[#463833]",
+    headerBorder: "border-[#9B2C1F]/20 dark:border-[#ec7764]/20",
     iconBg: "bg-[#9B2C1F]/15",
-    iconText: "text-[#9B2C1F]",
-    titleText: "text-[#7A1E13]",
-    descText: "text-[#7A1E13]/80",
-    footerBg: "bg-[#F7DED5]/50",
-    footerBorder: "border-[#9B2C1F]/15",
+    iconText: "text-[#9B2C1F] dark:text-[#ffa595]",
+    titleText: "text-[#7A1E13] dark:text-[#ffb2a0]",
+    descText: "text-[#7A1E13]/80 dark:text-[#ffb2a0]/80",
+    footerBg: "bg-[#F7DED5]/50 dark:bg-[#513d36]/50",
+    footerBorder: "border-[#9B2C1F]/15 dark:border-[#ec7764]/15",
     confirmVariant: "destructive",
   },
   warning: {
     border: "border-[#A85A1A]/25",
-    bg: "bg-[#FBF3E7]",
+    bg: "bg-[#FBF3E7] dark:bg-[#41392e]",
     headerBorder: "border-[#A85A1A]/15",
     iconBg: "bg-[#A85A1A]/15",
-    iconText: "text-[#A85A1A]",
-    titleText: "text-[#7A3E12]",
-    descText: "text-[#7A3E12]/80",
-    footerBg: "bg-[#F5EAD6]/40",
+    iconText: "text-[#A85A1A] dark:text-[#faa871]",
+    titleText: "text-[#7A3E12] dark:text-[#fdb68c]",
+    descText: "text-[#7A3E12]/80 dark:text-[#fdb68c]/80",
+    footerBg: "bg-[#F5EAD6]/40 dark:bg-[#463d2d]/40",
     footerBorder: "border-[#A85A1A]/10",
     confirmVariant: "default",
   },
@@ -98,7 +98,7 @@ export function ApprovalCard({ payload, onResolve, className }: ApprovalCardProp
   return (
     <div
       className={cn(
-        "rounded-2xl border shadow-sm overflow-hidden",
+        "rounded-2xl border overflow-hidden",
         styles.border,
         styles.bg,
         className,

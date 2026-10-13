@@ -5,6 +5,7 @@ Provides RemoteDBJobStore for persisting job state to a PostgreSQL database.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections import defaultdict
@@ -18,16 +19,10 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, defer, sessionmaker
 
-from ..billing.budgets import BudgetInFlightError, BudgetInsufficientError
+from .. import run_log
+from ..billing.budgets import BudgetService
 from ..billing.plans import has_pro_entitlement
-from ..billing.recovery_admission import (
-    RecoveryAdmissionError,
-    headroom_price_snapshot,
-    runtime_bound,
-    validate_recovery_plan,
-    validate_recovery_runtime,
-)
-from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, settings
+from ..config import settings
 from ..constants import (
     OPTIMIZATION_TYPE_TAGGING,
     PAYLOAD_OVERVIEW_DATASET_ROWS,
@@ -35,13 +30,15 @@ from ..constants import (
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
     PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
     PAYLOAD_OVERVIEW_TOTAL_PAIRS,
+    PROGRESS_LANE_STARTED,
     STRUCTURAL_PROGRESS_EVENTS,
     TQDM_KEY_PREFIX,
 )
-from ..worker.checkpoint_compat import CheckpointCompatibilityError, checkpoint_incumbent, validate_checkpoint
+from ..worker.checkpoint_compat import CheckpointCompatibilityError, validate_checkpoint
 from .agent_run_store import PostgresAgentRunStore
 from .base import JobRecord, LogEntryRecord, ProgressEventRecord
 from .checkpoint_store import GepaCheckpoint, PostgresCheckpointBlobStore, PostgresGridPairResultStore
+from .log_quota import LogQuotaGate
 from .migrate import stamp_if_unadopted, upgrade_if_adopted
 from .models import (
     EMBEDDING_DIM,
@@ -75,87 +72,65 @@ from .usage import (
 )
 
 
-def _current_recovery_runtime(payload: dict[str, Any], optimization_type: str | None) -> dict[str, Any]:
-    """Build the current bounded outer-runtime evidence for recovery admission.
-
-    Args:
-        payload: Persisted request used to recognize legacy Anything jobs.
-        optimization_type: Stored dispatch family for legacy/default selection.
-
-    Returns:
-        Fresh Vercel resource and price evidence.
-    """
-    try:
-        is_blackbox = optimization_type == "blackbox" or "strategy" in payload
-        workflow = "anything" if is_blackbox else "dspy"
-        image = settings.vercel_sandbox_image if workflow == "anything" else settings.dspy_sandbox_image
-        return runtime_bound(
-            "vercel",
-            {
-                "image": image,
-                "lifetime_seconds": min(
-                    settings.vercel_sandbox_max_lifetime_seconds, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
-                ),
-            },
-        )
-    except (TypeError, ValueError) as error:
-        if isinstance(error, RecoveryAdmissionError):
-            raise
-        raise RecoveryAdmissionError(
-            "The current sandbox runtime cannot provide a bounded recovery profile."
-        ) from error
-
-
-def _mark_recovery_budget_stop(job: JobModel, manifest: dict[str, Any], checkpoint_revision: Any) -> None:
-    """Preserve safe evaluated checkpoint evidence when recovery cannot be funded.
+def _mark_resume_budget_stop(job: JobModel) -> None:
+    """Stop a resume that the remaining authorized budget cannot fund.
 
     Args:
         job: Locked run row to terminate.
-        manifest: Verified checkpoint manifest from the interrupted execution.
-        checkpoint_revision: Checkpoint digest shown in recovery evidence.
     """
-    message = "The remaining authorized budget cannot cover checkpoint recovery."
-    incumbent = checkpoint_incumbent(manifest)
-    evidence: dict[str, Any] = {
+    job.status = "stopped"
+    job.stop_reason = "budget_reached"
+    job.result_availability = "none"
+    job.terminal_evidence = {
+        **(job.terminal_evidence or {}),
         "candidate_origin": None,
         "final_evaluation_completed": False,
         "final_evaluation_reason": "budget_reached",
     }
-    if incumbent is not None:
-        evidence.update(
-            candidate_origin=incumbent["candidate_origin"],
-            selection_scope=incumbent["selection_scope"],
-            selection_score=incumbent["selection_score"],
-            incumbent=incumbent,
-        )
-    job.status = "stopped"
-    job.stop_reason = "budget_reached"
-    job.result_availability = "evaluated" if incumbent is not None else "none"
-    job.terminal_evidence = {**(job.terminal_evidence or {}), **evidence}
     job.completed_at = datetime.now(UTC)
-    job.message = message
-    job.recovery = {
-        "state": "unavailable",
-        "phase": "admission",
-        "reason": message,
-        "checkpoint_revision": checkpoint_revision,
-    }
+    job.message = "The remaining authorized budget cannot cover resuming this run."
+    job.recovery = None
 
 
 logger = logging.getLogger(__name__)
 
 MAX_PROGRESS_EVENTS = 5000
-MAX_LOG_ENTRIES = 5000
+ORPHANED_RUN_MESSAGE = "The run stopped because its worker went away. Resume, retry or clone it to continue."
 PROGRESS_TRIM_SAMPLE_RATE = 100
-# Same sampled-retention idea as progress events: counting rows on every log
-# line doubles the round trips of the worker's hottest write path, and the cap
-# is a soft limit — drifting a batch above it between trims is harmless.
-LOG_TRIM_SAMPLE_RATE = 100
-_IMMUTABLE_JOB_COLUMNS = frozenset({"optimization_id", "notified_at", "idempotency_key"})
+# Auto's composition phases; a single-engine run's lane reports phase "single".
+AUTO_LANE_PHASES = frozenset({"explore", "continue"})
+_IMMUTABLE_JOB_COLUMNS = frozenset({"optimization_id", "notified_at", "notification_claims", "idempotency_key"})
 # The JSON columns whose serialized size dominates a job's storage footprint and
 # therefore make up ``jobs.stored_bytes``. ``latest_metrics`` / ``message`` are
 # tiny and intentionally excluded to keep the recompute read narrow.
 _STORED_BYTES_JSON_COLUMNS = ("payload", "result", "payload_overview")
+
+
+def _log_record(log: LogEntryModel) -> LogEntryRecord:
+    """Shape one ``job_logs`` row as the record the API and the live stream serve.
+
+    Args:
+        log: The stored row.
+
+    Returns:
+        The row's fields, with a pre-structured row's missing source read as ``host``.
+    """
+    return cast(
+        LogEntryRecord,
+        {
+            "id": log.id,
+            "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+            "level": log.level,
+            "logger": log.logger,
+            "message": log.message,
+            "pair_index": log.pair_index,
+            "source": log.source or "host",
+            "event": log.event,
+            "fields": log.fields,
+            "candidate": log.candidate,
+            "case": log.case_id,
+        },
+    )
 
 
 def _build_connect_args(db_url: str) -> dict[str, Any]:
@@ -269,6 +244,8 @@ def _result_summary_columns() -> tuple[Any, ...]:
         best_pair["runtime_seconds"].as_string(),
         best_pair["generation_model"].as_string(),
         best_pair["reflection_model"].as_string(),
+        result["baseline_score"].as_string(),
+        result["best_score"].as_string(),
     )
 
 
@@ -299,6 +276,8 @@ def _assemble_result_summary(values: Any) -> dict[str, Any] | None:
         bp_runtime,
         bp_generation,
         bp_reflection,
+        r_baseline_score,
+        r_best_score,
     ) = values
     if result_null:
         return None
@@ -308,6 +287,8 @@ def _assemble_result_summary(values: Any) -> dict[str, Any] | None:
         ("runtime_seconds", _json_float(r_runtime)),
         ("completed_pairs", _json_int(r_completed)),
         ("failed_pairs", _json_int(r_failed)),
+        ("baseline_score", _json_float(r_baseline_score)),
+        ("best_score", _json_float(r_best_score)),
     )
     result: dict[str, Any] = {key: value for key, value in result_pairs if value is not None}
     best_pair_pairs = (
@@ -417,10 +398,12 @@ class RemoteDBJobStore:
         # available, else explore search uses ILIKE substring matching.
         self.bm25_search_enabled = False
         self._max_progress_events = settings.progress_events_per_job_cap
-        self._max_log_entries = settings.log_entries_per_job_cap
         self._code_version = settings.code_version
         self._progress_event_counters: defaultdict[str, int] = defaultdict(int)
         self._progress_counter_lock = threading.Lock()
+        self._log_quota = LogQuotaGate(
+            lambda username: self.compute_user_storage(username).total, self.get_effective_user_storage_quota
+        )
         # Force every connection's session timezone to UTC so TZ-aware writes
         # into TIMESTAMPTZ columns round-trip without offset rotation, and any
         # naive value that slipped into legacy rows is interpreted as UTC.
@@ -482,11 +465,6 @@ class RemoteDBJobStore:
     def _progress_events_cap(self) -> int:
         """Return the per-job progress-event retention cap."""
         return getattr(self, "_max_progress_events", MAX_PROGRESS_EVENTS)
-
-    @property
-    def _log_entries_cap(self) -> int:
-        """Return the per-job log-entry retention cap."""
-        return getattr(self, "_max_log_entries", MAX_LOG_ENTRIES)
 
     @property
     def _current_code_version(self) -> str:
@@ -649,6 +627,7 @@ class RemoteDBJobStore:
                 "terminal_evidence": job.terminal_evidence,
                 "recovery": job.recovery,
                 "code_version": job.code_version,
+                "sandbox_image": job.sandbox_image,
                 "stored_bytes": job.stored_bytes or 0,
                 "accumulated_runtime_seconds": job.accumulated_runtime_seconds or 0.0,
                 "parent_optimization_id": job.parent_optimization_id,
@@ -793,6 +772,59 @@ class RemoteDBJobStore:
             )
             session.commit()
             return rows > 0
+        finally:
+            session.close()
+
+    def claim_job_notification(
+        self,
+        optimization_id: str,
+        claim: str,
+        *,
+        cap_prefix: str | None = None,
+        cap: int | None = None,
+    ) -> bool:
+        """Atomically claim the right to send one in-run email for a job.
+
+        The in-run counterpart of :meth:`claim_completion_notification`: each
+        email kind (``new_best``, ``stage:baseline``, ``digest:<window>`` ...)
+        is recorded on the job row under a row lock, so a resumed run, an
+        orphan-recovered run or parallel grid pairs all writing to one parent
+        send it once. ``cap_prefix``/``cap`` bound how many claims sharing a
+        prefix a run may hold (the per-run progress-email cap).
+
+        Args:
+            optimization_id: Job the email is about.
+            claim: Stable identifier of the email kind for this run.
+            cap_prefix: Prefix of the claims counted against ``cap``.
+            cap: Maximum number of claims starting with ``cap_prefix``.
+
+        Returns:
+            ``True`` when the caller won the claim and should send the email,
+            ``False`` when it was already claimed, the cap is reached, or the
+            job is missing.
+        """
+        session = self._get_session()
+        try:
+            job = (
+                session.query(JobModel)
+                .filter(JobModel.optimization_id == optimization_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if job is None:
+                return False
+            claims = list(job.notification_claims or [])
+            if claim in claims:
+                return False
+            if (
+                cap_prefix is not None
+                and cap is not None
+                and sum(1 for existing in claims if existing.startswith(cap_prefix)) >= cap
+            ):
+                return False
+            job.notification_claims = [*claims, claim]  # type: ignore[assignment]
+            session.commit()
+            return True
         finally:
             session.close()
 
@@ -964,7 +996,7 @@ class RemoteDBJobStore:
     def get_job_status_fields(self, optimization_id: str) -> JobRecord:
         """Retrieve only the live-polling fields for a job.
 
-        Selects ``status`` / ``message`` / ``latest_metrics`` directly so the
+        Selects the status columns plus the budget id and owner directly so the
         per-job SSE loop can poll every few seconds without re-reading the
         ``payload`` JSONB that :meth:`get_job` materializes.
 
@@ -989,6 +1021,8 @@ class RemoteDBJobStore:
                     JobModel.terminal_evidence,
                     JobModel.stop_reason,
                     JobModel.result_availability,
+                    JobModel.execution_budget_id,
+                    JobModel.username,
                 )
                 .filter(JobModel.optimization_id == optimization_id)
                 .first()
@@ -1005,6 +1039,8 @@ class RemoteDBJobStore:
                     "terminal_evidence": row[4],
                     "stop_reason": row[5],
                     "result_availability": row[6],
+                    "execution_budget_id": row[7],
+                    "username": row[8],
                 },
             )
         finally:
@@ -1048,12 +1084,32 @@ class RemoteDBJobStore:
                 BlackboxAgentRunModel.optimization_id == optimization_id
             ).delete()
             session.query(RunFolderItemModel).filter(RunFolderItemModel.optimization_id == optimization_id).delete()
+            self._close_deleted_job_budgets(session, [optimization_id])
             self._delete_grid_pair_children(session, optimization_id)
             session.query(JobModel).filter(JobModel.optimization_id == optimization_id).delete()
             session.commit()
         finally:
             session.close()
         self._evict_job_counters([optimization_id])
+
+    def _close_deleted_job_budgets(self, session: Session, optimization_ids: list[str]) -> None:
+        """Close the execution budgets of jobs (and their grid pairs) about to be deleted.
+
+        Budgets and ledger rows are financial history with no foreign key to
+        ``jobs``, so they are kept; this releases unstarted holds and drops the
+        link that would otherwise point at a deleted job.
+
+        Args:
+            session: The open delete session the caller commits.
+            optimization_ids: Root job ids being deleted.
+        """
+        child_ids = [
+            row[0]
+            for row in session.query(JobModel.optimization_id)
+            .filter(JobModel.parent_optimization_id.in_(optimization_ids))
+            .all()
+        ]
+        BudgetService(engine=self._engine).close_for_deleted_jobs([*optimization_ids, *child_ids], session=session)
 
     @staticmethod
     def _delete_grid_pair_children(session: Session, parent_optimization_id: str) -> None:
@@ -1176,6 +1232,7 @@ class RemoteDBJobStore:
             session.query(RunFolderItemModel).filter(RunFolderItemModel.optimization_id.in_(optimization_ids)).delete(
                 synchronize_session=False
             )
+            self._close_deleted_job_budgets(session, optimization_ids)
             for parent_id in optimization_ids:
                 self._delete_grid_pair_children(session, parent_id)
             deleted = (
@@ -1529,11 +1586,19 @@ class RemoteDBJobStore:
             if job.get("execution_budget_id") is None:
                 return False
             checkpoints = self._checkpoints.list_for_optimization(optimization_id)
-            if not checkpoints or job.get("code_version") != self._current_code_version:
+            if not checkpoints:
+                return False
+            # A run pinned to a sandbox image resumes on any worker version: its
+            # optimizer, code included, lives in that image, not in the worker.
+            if job.get("sandbox_image") is None and job.get("code_version") != self._current_code_version:
                 return False
             for checkpoint in checkpoints:
                 validate_checkpoint(
-                    checkpoint.data, checkpoint.manifest, job.get("payload") or {}, job.get("code_version")
+                    checkpoint.data,
+                    checkpoint.manifest,
+                    job.get("payload") or {},
+                    job.get("code_version"),
+                    sandbox_image=job.get("sandbox_image"),
                 )
             return True
         except (KeyError, CheckpointCompatibilityError):
@@ -1555,7 +1620,6 @@ class RemoteDBJobStore:
         optimization_id: str,
         *,
         bump_attempts: bool = True,
-        automatic: bool = False,
         expected_generation: int | None = None,
         budget_service: Any = None,
         pair_index_to_resume: int | None = None,
@@ -1563,12 +1627,10 @@ class RemoteDBJobStore:
         """Re-queue a terminal job in place so a worker resumes it from its checkpoint.
 
         Flips the existing row back to ``pending`` — same id, payload, seed and
-        budget — and clears the prior claim/lease, mirroring
-        :meth:`recover_orphaned_jobs`. A whole-job resume increments ``attempts``
-        so it shares the ``job_max_attempts`` cap with pod-failure recovery; a
-        targeted per-pair grid re-run passes ``bump_attempts=False`` so retrying
-        individual pairs is not bounded by that cap. The caller owns the
-        resumability preconditions.
+        budget — and clears the prior claim/lease. A whole-job resume increments
+        ``attempts`` against the ``job_max_attempts`` cap; a targeted per-pair grid
+        re-run passes ``bump_attempts=False`` so retrying individual pairs is not
+        bounded by that cap. The caller owns the resumability preconditions.
 
         The finished leg's wall-clock duration is folded into
         ``accumulated_runtime_seconds`` before ``started_at``/``completed_at`` are
@@ -1578,7 +1640,6 @@ class RemoteDBJobStore:
         Args:
             optimization_id: The job to resume.
             bump_attempts: Whether to count this re-queue against the attempt cap.
-            automatic: Whether interruption recovery, rather than an explicit user action, requested resume.
             expected_generation: Fenced publication generation observed by the caller.
             budget_service: Authoritative funding and dispatch fence for a protected job.
             pair_index_to_resume: Explicit pair whose stored result is cleared atomically for recovery.
@@ -1596,27 +1657,26 @@ class RemoteDBJobStore:
             )
             if job is None:
                 return None
-            expected_statuses = (
-                {"running", "validating"} if automatic else {"failed", "cancelled", "paused", "success", "stopped"}
-            )
-            if job.status not in expected_statuses or (
+            if job.status not in {"failed", "cancelled", "paused", "success", "stopped"} or (
                 expected_generation is not None and job.execution_generation != expected_generation
             ):
                 return None
-            if automatic and job.stop_reason == "budget_reached":
-                return None
             checkpoints = self._checkpoints.list_for_optimization(optimization_id)
             if not checkpoints:
-                raise CheckpointCompatibilityError(
-                    "No completed compatible checkpoint is available; automatic fresh restart is disabled."
-                )
+                raise CheckpointCompatibilityError("No completed compatible checkpoint is available.")
             if pair_index_to_resume is not None and not any(
                 checkpoint.pair_index == pair_index_to_resume for checkpoint in checkpoints
             ):
                 raise CheckpointCompatibilityError("The selected pair has no compatible checkpoint.")
             for checkpoint in checkpoints:
-                validate_checkpoint(checkpoint.data, checkpoint.manifest, job.payload or {}, job.code_version)
-            if job.code_version != self._current_code_version:
+                validate_checkpoint(
+                    checkpoint.data,
+                    checkpoint.manifest,
+                    job.payload or {},
+                    job.code_version,
+                    sandbox_image=job.sandbox_image,
+                )
+            if job.sandbox_image is None and job.code_version != self._current_code_version:
                 raise CheckpointCompatibilityError("No compatible worker version is available for this checkpoint.")
             if job.execution_budget_id is None:
                 raise CheckpointCompatibilityError(
@@ -1624,26 +1684,7 @@ class RemoteDBJobStore:
                 )
             current_attempt = int(job.attempts or 0)
             if bump_attempts and current_attempt + 1 >= settings.job_max_attempts:
-                raise CheckpointCompatibilityError("This run has reached its automatic recovery attempt limit.")
-            recovery_plan = None
-            checkpoint_revision = None
-            headroom_operation_id = None
-            if automatic:
-                if len(checkpoints) != 1:
-                    raise CheckpointCompatibilityError(
-                        "Automatic recovery requires one independently bounded GEPA checkpoint per job."
-                    )
-                checkpoint = checkpoints[0]
-                manifest = checkpoint.manifest or {}
-                checkpoint_revision = manifest.get("checkpoint_sha256")
-                try:
-                    recovery_plan = validate_recovery_plan(manifest.get("recovery_admission"), manifest)
-                    validate_recovery_runtime(
-                        recovery_plan,
-                        _current_recovery_runtime(job.payload or {}, job.optimization_type),
-                    )
-                except RecoveryAdmissionError as error:
-                    raise CheckpointCompatibilityError(str(error)) from error
+                raise CheckpointCompatibilityError("This run has reached its resume attempt limit.")
             if job.execution_budget_id is not None:
                 if budget_service is None:
                     raise CheckpointCompatibilityError("Recovery requires the authoritative budget service.")
@@ -1665,9 +1706,8 @@ class RemoteDBJobStore:
                     job.recovery = {
                         "state": "recovering",
                         "phase": "waiting_for_usage",
-                        "reason": "Reconciling interrupted requests before recovery.",
+                        "reason": "Reconciling interrupted requests before resuming.",
                         "execution_generation": int(job.execution_generation or 0) + 1,
-                        "checkpoint_revision": checkpoint_revision,
                     }
                     fenced_generation = job.execution_generation
                     previous_status = job.status
@@ -1688,7 +1728,7 @@ class RemoteDBJobStore:
                 budget = budget_service.get(job.execution_budget_id, job.username)
                 if budget.pending_operations or budget.reserved_cents:
                     return None
-                if not automatic and budget.state == "closed" and budget.available_cents > 0:
+                if budget.state == "closed" and budget.available_cents > 0:
                     budget = budget_service.resume_admission(
                         job.execution_budget_id, job.username, expected_generation=job.execution_budget_generation
                     )
@@ -1699,49 +1739,9 @@ class RemoteDBJobStore:
                             job.username,
                             reason="budget_reached",
                         )
-                    _mark_recovery_budget_stop(job, manifest, checkpoint_revision)
+                    _mark_resume_budget_stop(job)
                     session.commit()
                     return None
-                if automatic and recovery_plan is not None:
-                    try:
-                        headroom = budget_service.reserve(
-                            job.execution_budget_id,
-                            job.username,
-                            operation_key=(
-                                f"recovery:{optimization_id}:{recovery_plan['checkpoint_sha256']}:"
-                                f"g{job.execution_budget_generation}"
-                            ),
-                            generation=job.execution_budget_generation,
-                            phase="run",
-                            cost_kind="recovery_headroom",
-                            request_fingerprint=recovery_plan["fingerprint"],
-                            price_snapshot=headroom_price_snapshot(recovery_plan),
-                            max_cents=recovery_plan["max_cents"],
-                            max_wallet_cents=recovery_plan["max_wallet_cents"],
-                            role="recovery",
-                            session=session,
-                        )
-                        headroom_operation_id = headroom.id
-                    except BudgetInFlightError:
-                        job.recovery = {
-                            **(job.recovery or {}),
-                            "state": "recovering",
-                            "phase": "waiting_for_usage",
-                            "reason": "Waiting for covered account work to settle before recovery.",
-                            "checkpoint_revision": checkpoint_revision,
-                        }
-                        session.commit()
-                        return None
-                    except BudgetInsufficientError:
-                        budget_service.stop_admission(
-                            job.execution_budget_id,
-                            job.username,
-                            reason="budget_reached",
-                            session=session,
-                        )
-                        _mark_recovery_budget_stop(job, manifest, checkpoint_revision)
-                        session.commit()
-                        return None
             if pair_index_to_resume is not None:
                 result = job.result if isinstance(job.result, dict) else {}
                 for pair in result.get("pair_results", []):
@@ -1763,23 +1763,14 @@ class RemoteDBJobStore:
                     session.delete(selected)
             job.execution_generation = int(job.execution_generation or 0) + 1
             job.stop_reason = None
-            job.recovery = {
-                "state": "recovering",
-                "phase": "resuming",
-                "attempt": int(job.attempts or 0) + int(bump_attempts),
-                "checkpoint_iteration": max(cp.iteration for cp in checkpoints),
-                "seed_reevaluation_required": True,
-                "execution_generation": int(job.execution_generation or 0),
-                "checkpoint_revision": checkpoint_revision,
-                "headroom_operation_id": headroom_operation_id,
-                "execution_max_cents": recovery_plan.get("execution_max_cents") if recovery_plan else None,
-                "execution_max_wallet_cents": (
-                    recovery_plan.get("execution_max_wallet_cents") if recovery_plan else None
-                ),
-            }
+            job.recovery = None
             current = int(job.attempts or 0)
             next_attempt = current + 1 if bump_attempts else current
             job.attempts = next_attempt  # type: ignore[assignment]
+            if job.sandbox_image is not None:
+                # Workers claim only their own version's jobs; a pinned image carries
+                # the optimizer, so the current workers can run it.
+                job.code_version = self._current_code_version  # type: ignore[assignment]
             job.status = "pending"  # type: ignore[assignment]
             job.claimed_by = None  # type: ignore[assignment]
             job.claimed_at = None  # type: ignore[assignment]
@@ -1799,6 +1790,36 @@ class RemoteDBJobStore:
             job.message = "Resuming" if bump_attempts else "Re-running grid pair"  # type: ignore[assignment]
             session.commit()
             return next_attempt
+        finally:
+            session.close()
+
+    def pin_sandbox_image(self, optimization_id: str, image: str) -> str:
+        """Record the image a protected run executes in, keeping any earlier pin.
+
+        Args:
+            optimization_id: The run about to open its sandbox.
+            image: The deployment's current image, used only when none is pinned.
+
+        Returns:
+            The image every sandbox of this run must boot from.
+
+        Raises:
+            KeyError: When the job row does not exist.
+        """
+        session = self._get_session()
+        try:
+            job = (
+                session.query(JobModel)
+                .filter(JobModel.optimization_id == optimization_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if job is None:
+                raise KeyError(optimization_id)
+            if job.sandbox_image is None:
+                job.sandbox_image = image  # type: ignore[assignment]
+                session.commit()
+            return str(job.sandbox_image)
         finally:
             session.close()
 
@@ -1848,12 +1869,14 @@ class RemoteDBJobStore:
             job.latest_metrics = {}  # type: ignore[assignment]
             job.result = None  # type: ignore[assignment]
             job.attempts = 0  # type: ignore[assignment]
+            job.sandbox_image = None  # type: ignore[assignment]
             job.claimed_by = None  # type: ignore[assignment]
             job.claimed_at = None  # type: ignore[assignment]
             job.lease_expires_at = None  # type: ignore[assignment]
             # Cleared so the fresh run is free to emit its own completion
             # notification — the flag is a single-shot guard set per finished run.
             job.notified_at = None  # type: ignore[assignment]
+            job.notification_claims = None  # type: ignore[assignment]
             job.accumulated_runtime_seconds = 0.0  # type: ignore[assignment]
             # The result is gone, so the footprint shrinks to payload + overview.
             job.stored_bytes = sum(  # type: ignore[assignment]
@@ -2258,14 +2281,11 @@ class RemoteDBJobStore:
         finally:
             session.close()
 
-    def recover_orphaned_jobs(self, *, budget_service: Any = None) -> int:
-        """Recover only compatible interrupted runs with reconciled remaining funding.
-
-        Args:
-            budget_service: Authoritative dispatch fence and cumulative funding service.
+    def recover_orphaned_jobs(self) -> int:
+        """Fail runs whose worker lease expired, leaving any restart to the user.
 
         Returns:
-            Number of expired jobs handled; unsupported jobs become explicit failures.
+            Number of orphaned jobs marked failed.
         """
         session = self._get_session()
         try:
@@ -2277,7 +2297,7 @@ class RemoteDBJobStore:
                 .exists()
             )
             candidates = [
-                self._job_to_dict(job)
+                (job.optimization_id, int(job.execution_generation or 0))
                 for job in session.query(JobModel)
                 .filter(
                     JobModel.status.in_(["running", "validating"]),
@@ -2288,28 +2308,7 @@ class RemoteDBJobStore:
             ]
         finally:
             session.close()
-        for job in candidates:
-            identifier = job["optimization_id"]
-            generation = int(job.get("execution_generation") or 0)
-            reason = "The interruption recovery attempt limit has been reached."
-            if int(job.get("attempts") or 0) + 1 < settings.job_max_attempts:
-                try:
-                    if (
-                        self.requeue_for_resume(
-                            identifier, automatic=True, expected_generation=generation, budget_service=budget_service
-                        )
-                        is not None
-                    ):
-                        continue
-                except (CheckpointCompatibilityError, RuntimeError, ValueError) as exc:
-                    reason = str(exc)
-                refreshed = self.get_job(identifier)
-                if (
-                    isinstance(refreshed.get("recovery"), dict)
-                    and refreshed["recovery"].get("state") == "recovering"
-                    and refreshed["recovery"].get("phase") == "waiting_for_usage"
-                ):
-                    continue
+        for identifier, generation in candidates:
             self.update_job_if_status(
                 identifier,
                 ("running", "validating"),
@@ -2317,8 +2316,8 @@ class RemoteDBJobStore:
                 status="failed",
                 stop_reason="interrupted",
                 completed_at=now.isoformat(),
-                message=reason,
-                recovery={"state": "unavailable", "reason": reason},
+                message=ORPHANED_RUN_MESSAGE,
+                recovery=None,
                 claimed_by=None,
                 claimed_at=None,
                 lease_expires_at=None,
@@ -2615,12 +2614,6 @@ class RemoteDBJobStore:
                 )
             )
             target.latest_metrics = {**(target.latest_metrics or {}), **metrics}
-            if (
-                isinstance(source.recovery, dict)
-                and source.recovery.get("state") == "recovering"
-                and source.recovery.get("phase") == "resuming"
-            ):
-                source.recovery = {**source.recovery, "state": "recovered", "phase": "complete"}
             session.commit()
             return True
         finally:
@@ -2774,7 +2767,7 @@ class RemoteDBJobStore:
                 session.query(ProgressEventModel).filter(ProgressEventModel.optimization_id == optimization_id).count()
             )
             excess = event_count - self._progress_events_cap
-            if excess <= 0:
+            if excess <= 0 or self._is_auto_run(session, optimization_id):
                 return
 
             # One ordered DELETE replaces the prior count→select→top-up→delete
@@ -2797,6 +2790,33 @@ class RemoteDBJobStore:
             session.commit()
         finally:
             session.close()
+
+    @staticmethod
+    def _is_auto_run(session: Session, optimization_id: str) -> bool:
+        """Return whether a job ran Auto lanes, whose full timing is kept for engine analysis.
+
+        The lane-started markers decide it rather than the payload because legacy
+        and unified submissions store the strategy in different shapes, and the
+        markers are structural, so they outlive every other row a trim could drop.
+
+        Args:
+            session: Open database session.
+            optimization_id: ID of the job being trimmed.
+
+        Returns:
+            ``True`` once the job has recorded an explore or continue lane.
+        """
+        lane_metrics = (
+            session.query(ProgressEventModel.metrics)
+            .filter(
+                ProgressEventModel.optimization_id == optimization_id,
+                ProgressEventModel.event == PROGRESS_LANE_STARTED,
+            )
+            .all()
+        )
+        return any(
+            isinstance(metrics, dict) and metrics.get("phase") in AUTO_LANE_PHASES for (metrics,) in lane_metrics
+        )
 
     def get_progress_events(self, optimization_id: str, *, since: int = 0) -> list[ProgressEventRecord]:
         """Retrieve progress events for a job in chronological order.
@@ -2859,15 +2879,17 @@ class RemoteDBJobStore:
         message: str,
         timestamp: datetime | None = None,
         pair_index: int | None = None,
+        source: str | None = None,
+        event: str | None = None,
+        fields: dict[str, Any] | None = None,
+        candidate: str | None = None,
+        case: str | None = None,
     ) -> None:
         """Append a log entry for a job.
 
-        Silently discards the entry if the job no longer exists (a
-        late log from a cleaned-up run is not an error). Retention is
-        enforced by a sampled trim (mirroring progress events): every
-        ``LOG_TRIM_SAMPLE_RATE`` appends the oldest excess rows are deleted
-        in one batch, instead of paying a ``COUNT(*)`` on every line of the
-        worker's hottest write path.
+        Silently discards the entry if the job no longer exists (a late log
+        from a cleaned-up run is not an error). A run's log is never trimmed:
+        its rows count against the owner's storage budget instead.
 
         Args:
             optimization_id: ID of the job emitting the log.
@@ -2876,72 +2898,78 @@ class RemoteDBJobStore:
             message: Log line content.
             timestamp: Optional override for the entry timestamp; defaults to ``now``.
             pair_index: Optional grid-pair index when emitted from a sweep.
+            source: Where the line came from, see :data:`core.run_log.SOURCES`.
+            event: Typed event name, if the line is an event.
+            fields: The event's JSON payload.
+            candidate: Candidate the line belongs to.
+            case: Case the line belongs to.
         """
-        ts = timestamp or datetime.now(UTC)
+        self.append_logs(
+            optimization_id,
+            [
+                {
+                    "level": level,
+                    "logger": logger_name,
+                    "message": message,
+                    "timestamp": timestamp,
+                    "pair_index": pair_index,
+                    "source": source,
+                    "event": event,
+                    "fields": fields,
+                    "candidate": candidate,
+                    "case": case,
+                }
+            ],
+        )
+
+    def append_logs(self, optimization_id: str, entries: list[dict[str, Any]]) -> None:
+        """Append several log entries for a job in one transaction.
+
+        Takes the keys :meth:`append_log` takes as keyword arguments, with
+        ``logger`` in place of ``logger_name``. Text bound for a fixed-width
+        column is cut to fit and ends with ``...``. Once the owner's storage
+        is full the run stores one notice and drops every later entry, see
+        :mod:`core.storage.log_quota`.
+
+        Args:
+            optimization_id: ID of the job emitting the logs.
+            entries: The entries, oldest first.
+        """
+        if not entries:
+            return
+        now = datetime.now(UTC)
         session = self._get_session()
         try:
             # An existence probe, not a critical section: appends are independent
-            # inserts, so the per-job row lock only serialized writers and starved
-            # the connection pool under concurrent log bursts. The sampled trim
-            # below tolerates a transient over-count without correctness loss.
-            exists = session.query(JobModel.optimization_id).filter(JobModel.optimization_id == optimization_id).first()
-            if exists is None:
-                logger.warning("Discarding log entry for missing job %s", optimization_id)
+            # inserts, so a per-job row lock would only serialize writers and
+            # starve the connection pool under concurrent log bursts.
+            owner = session.query(JobModel.username).filter(JobModel.optimization_id == optimization_id).first()
+            if owner is None:
+                logger.warning("Discarding %d log entries for missing job %s", len(entries), optimization_id)
                 return
-
-            entry = LogEntryModel(
-                optimization_id=optimization_id,
-                timestamp=ts,
-                level=level,
-                logger=logger_name,
-                message=message,
-                pair_index=pair_index,
-            )
-            session.add(entry)
-
-            session.commit()
-        finally:
-            session.close()
-        if self._should_trim_logs(optimization_id):
-            self._trim_logs(optimization_id)
-
-    def _should_trim_logs(self, optimization_id: str) -> bool:
-        """Return whether this append should trigger a sampled retention trim.
-
-        Args:
-            optimization_id: ID of the job whose in-memory append counter is advanced.
-
-        Returns:
-            ``True`` every ``LOG_TRIM_SAMPLE_RATE`` appends for a job.
-        """
-        if not hasattr(self, "_log_append_counters"):
-            self._log_append_counters = defaultdict(int)
-            self._log_counter_lock = threading.Lock()
-        with self._log_counter_lock:
-            self._log_append_counters[optimization_id] += 1
-            return self._log_append_counters[optimization_id] % LOG_TRIM_SAMPLE_RATE == 0
-
-    def _trim_logs(self, optimization_id: str) -> None:
-        """Delete the oldest excess log entries for a job in one batch.
-
-        Args:
-            optimization_id: ID of the job whose retained log rows should be
-                brought back down to the configured cap.
-        """
-        session = self._get_session()
-        try:
-            log_count = session.query(LogEntryModel).filter(LogEntryModel.optimization_id == optimization_id).count()
-            excess = log_count - self._log_entries_cap
-            if excess <= 0:
+            if owner.username:
+                # Fail open: a usage lookup that errors must not lose the run's
+                # log, and logging the failure here would re-enter this method.
+                with contextlib.suppress(Exception):
+                    entries = self._log_quota.admit(optimization_id, owner.username, entries)
+            if not entries:
                 return
-            old_ids = (
-                session.query(LogEntryModel.id)
-                .filter(LogEntryModel.optimization_id == optimization_id)
-                .order_by(LogEntryModel.timestamp.asc(), LogEntryModel.id.asc())
-                .limit(excess)
-            )
-            session.query(LogEntryModel).filter(LogEntryModel.id.in_(old_ids.scalar_subquery())).delete(
-                synchronize_session=False
+            session.add_all(
+                LogEntryModel(
+                    optimization_id=optimization_id,
+                    timestamp=entry.get("timestamp") or now,
+                    level=run_log.fit(str(entry.get("level") or "INFO"), run_log.LEVEL_CHARS),
+                    logger=run_log.fit(str(entry.get("logger") or ""), run_log.LOGGER_CHARS),
+                    # Postgres TEXT rejects NUL, which sandbox output can carry.
+                    message=str(entry.get("message") or "").replace("\x00", ""),
+                    pair_index=entry.get("pair_index"),
+                    source=run_log.fit(entry.get("source"), run_log.SOURCE_CHARS),
+                    event=run_log.fit(entry.get("event"), run_log.EVENT_CHARS),
+                    fields=entry.get("fields"),
+                    candidate=run_log.fit(entry.get("candidate"), run_log.CANDIDATE_CHARS),
+                    case_id=run_log.fit(entry.get("case"), run_log.CASE_CHARS),
+                )
+                for entry in entries
             )
             session.commit()
         finally:
@@ -2954,6 +2982,7 @@ class RemoteDBJobStore:
         limit: int | None = None,
         offset: int = 0,
         level: str | None = None,
+        after_id: int | None = None,
     ) -> list[LogEntryRecord]:
         """Retrieve log entries for a job, ordered ascending.
 
@@ -2962,6 +2991,8 @@ class RemoteDBJobStore:
             limit: Maximum number of entries to return; ``None`` means no cap.
             offset: Number of entries to skip.
             level: When set, restricts results to the given level.
+            after_id: When set, returns only entries written after the entry with this id,
+                in write order, which is what a live reader resumes from.
 
         Returns:
             Matching log entries in chronological order.
@@ -2971,25 +3002,15 @@ class RemoteDBJobStore:
             q = session.query(LogEntryModel).filter(LogEntryModel.optimization_id == optimization_id)
             if level:
                 q = q.filter(LogEntryModel.level == level)
-            q = q.order_by(LogEntryModel.timestamp.asc())
+            if after_id is not None:
+                q = q.filter(LogEntryModel.id > after_id).order_by(LogEntryModel.id.asc())
+            else:
+                q = q.order_by(LogEntryModel.timestamp.asc(), LogEntryModel.id.asc())
             if offset:
                 q = q.offset(offset)
             if limit is not None:
                 q = q.limit(limit)
-            logs = q.all()
-            return [
-                cast(
-                    LogEntryRecord,
-                    {
-                        "timestamp": log.timestamp.isoformat() if log.timestamp else None,
-                        "level": log.level,
-                        "logger": log.logger,
-                        "message": log.message,
-                        "pair_index": log.pair_index,
-                    },
-                )
-                for log in logs
-            ]
+            return [_log_record(log) for log in q.all()]
         finally:
             session.close()
 

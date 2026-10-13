@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -36,7 +36,7 @@ from .budget_amounts import (
     cent_units,
     cents_from_units,
 )
-from .service import StripeBillingService, account_committed_cents
+from .service import LOCAL_CUSTOMER_PREFIX, StripeBillingService, account_committed_cents, free_grant_cents
 
 _ACTIVE_STATES = ("reserved", "dispatched", "pending")
 _DISPATCHED_STATES = ("dispatched", "pending")
@@ -179,6 +179,51 @@ def _total(value: int) -> int:
     return value
 
 
+def _admit(
+    session: Session,
+    wallet: BillingCustomerModel,
+    budget: ExecutionBudgetModel,
+    username: str,
+    scope: int,
+    charge: int,
+) -> None:
+    """Check that new coverage fits the budget's limit and the account's funds.
+
+    Args:
+        session: Transaction holding the account and budget locks.
+        wallet: Locked account wallet.
+        budget: Locked execution budget.
+        username: Authenticated owner.
+        scope: Combined scope units the new coverage adds.
+        charge: Wallet units the new coverage adds.
+
+    Raises:
+        BudgetInsufficientError: When the coverage cannot fit without a budget or funding change.
+        BudgetInFlightError: When settling covered work may make the coverage fit.
+    """
+    if not budget.uncapped:
+        remaining = budget.total_cents * CENT_SCALE - budget.settled_units
+        if scope > remaining:
+            raise BudgetInsufficientError(
+                f"The next operation needs up to {ceil_cents(scope)} cents, but only "
+                f"{max(remaining, 0) // CENT_SCALE} of the {budget.total_cents}-cent limit remain."
+            )
+        if scope > remaining - budget.reserved_units:
+            raise BudgetInFlightError("Covered work must settle before this operation can fit.")
+    held = account_committed_cents(session, username)
+    wallet_balance = int(wallet.balance_cents) + int(wallet.grant_remaining or 0)
+    hold_delta = (
+        ceil_cents(budget.wallet_settled_units + budget.wallet_reserved_units + charge)
+        - budget.billed_cents
+        - budget_wallet_hold(budget)
+    )
+    if hold_delta > wallet_balance - held:
+        after_release = ceil_cents(budget.wallet_settled_units + charge) - budget.billed_cents
+        if after_release <= wallet_balance:
+            raise BudgetInFlightError("Other covered work currently holds the required wallet funds.")
+        raise BudgetInsufficientError("The account cannot fund the next operation.")
+
+
 class BudgetService:
     """Own budget admission, immutable usage evidence and exactly-once settlement."""
 
@@ -224,6 +269,16 @@ class BudgetService:
             Locked wallet with its legacy grant resolved.
         """
         wallet = session.get(BillingCustomerModel, username, with_for_update=True)
+        if wallet is None and free_grant_cents() > 0:
+            # A new account's grant is only shown until a mutation creates its
+            # row; create that row here so the grant can also fund a budget.
+            session.add(
+                BillingCustomerModel(
+                    username=username, stripe_customer_id=f"{LOCAL_CUSTOMER_PREFIX}{username}", balance_cents=0
+                )
+            )
+            session.flush()
+            wallet = session.get(BillingCustomerModel, username, with_for_update=True)
         if wallet is None:
             raise BudgetInsufficientError("The account has no funded wallet.")
         StripeBillingService(engine=self._engine)._resolve_grant(wallet, datetime.now(UTC))
@@ -242,6 +297,12 @@ class BudgetService:
         Returns:
             Locked wallet and budget.
         """
+        # Ownership first, without a lock, so a caller with no wallet probing
+        # someone else's budget gets not-found rather than a funding error. An
+        # owner never changes, so the locked re-check below cannot disagree.
+        owner = session.scalar(select(ExecutionBudgetModel.username).where(ExecutionBudgetModel.id == budget_id))
+        if owner != username:
+            raise BudgetNotFoundError("Budget not found.")
         wallet = self._wallet(session, username)
         budget = session.get(ExecutionBudgetModel, budget_id, with_for_update=True)
         if budget is None or budget.username != username:
@@ -637,7 +698,6 @@ class BudgetService:
         max_wallet_cents: Decimal | str | int | float | None = None,
         attempt: int = 0,
         role: str | None = None,
-        headroom_operation_id: str | None = None,
         session: Session | None = None,
     ) -> OperationSnapshot:
         """Admit one physical attempt under its verified scope and wallet bounds.
@@ -655,7 +715,6 @@ class BudgetService:
             max_wallet_cents: Maximum Skynet wallet charge; defaults to the scope bound.
             attempt: Physical retry number; a new billable retry needs a new attempt.
             role: Optional task, judge, proposer or runtime attribution.
-            headroom_operation_id: Recovery hold transferred atomically into this physical operation.
             session: Optional caller transaction for atomic lifecycle publication.
 
         Returns:
@@ -721,40 +780,7 @@ class BudgetService:
             )
             if unresolved is not None:
                 raise BudgetUnreconciledError("Previous-generation paid work must be reconciled before recovery.")
-            headroom = None
-            if headroom_operation_id is not None:
-                headroom = session.get(ExecutionOperationModel, headroom_operation_id, with_for_update=True)
-                if (
-                    headroom is None
-                    or headroom.budget_id != budget.id
-                    or headroom.generation != generation
-                    or headroom.cost_kind != "recovery_headroom"
-                ):
-                    raise BudgetConflictError("The recovery headroom does not belong to this execution generation.")
-                if headroom.state != "reserved" or scope > headroom.max_units or charge > headroom.max_wallet_units:
-                    raise BudgetInsufficientError("Recovery work exceeded its pre-authorized operation bounds.")
-            else:
-                if not budget.uncapped:
-                    remaining = budget.total_cents * CENT_SCALE - budget.settled_units
-                    if scope > remaining:
-                        raise BudgetInsufficientError(
-                            f"The next operation needs up to {ceil_cents(scope)} cents, but only "
-                            f"{max(remaining, 0) // CENT_SCALE} of the {budget.total_cents}-cent limit remain."
-                        )
-                    if scope > remaining - budget.reserved_units:
-                        raise BudgetInFlightError("Covered work must settle before this operation can fit.")
-                held = account_committed_cents(session, username)
-                wallet_balance = int(wallet.balance_cents) + int(wallet.grant_remaining or 0)
-                hold_delta = (
-                    ceil_cents(budget.wallet_settled_units + budget.wallet_reserved_units + charge)
-                    - budget.billed_cents
-                    - budget_wallet_hold(budget)
-                )
-                if hold_delta > wallet_balance - held:
-                    after_release = ceil_cents(budget.wallet_settled_units + charge) - budget.billed_cents
-                    if after_release <= wallet_balance:
-                        raise BudgetInFlightError("Other covered work currently holds the required wallet funds.")
-                    raise BudgetInsufficientError("The account cannot fund the next operation.")
+            _admit(session, wallet, budget, username, scope, charge)
             now = datetime.now(UTC)
             operation = ExecutionOperationModel(
                 id=str(uuid4()),
@@ -774,15 +800,8 @@ class BudgetService:
                 updated_at=now,
             )
             session.add(operation)
-            if headroom is None:
-                budget.reserved_units += scope
-                budget.wallet_reserved_units += charge
-            else:
-                headroom.max_units -= scope
-                headroom.max_wallet_units -= charge
-                headroom.updated_at = now
-                if headroom.max_units == 0 and headroom.max_wallet_units == 0:
-                    headroom.state = "released"
+            budget.reserved_units += scope
+            budget.wallet_reserved_units += charge
             budget.updated_at = now
             return self._operation_snapshot(session, operation, budget, wallet)
 
@@ -980,44 +999,96 @@ class BudgetService:
             operation.updated_at = budget.updated_at = now
             return self._operation_snapshot(session, operation, budget, wallet)
 
-    def trim_recovery_headroom(
+    def extend_coverage(
         self,
         operation_id: str,
         username: str,
         *,
+        evidence_key: str,
         max_cents: Decimal | str | int | float,
         max_wallet_cents: Decimal | str | int | float,
+        evidence: Mapping[str, Any],
     ) -> OperationSnapshot:
-        """Release unused seed coverage while retaining one proved execution operation.
+        """Grow a running sandbox's coverage before the provider is asked to keep it alive longer.
+
+        The extension passes the same admission check as a new operation, so a
+        box only outlives its first slice while the budget and the account can
+        pay for the next one. Coverage only grows: settlement still caps the
+        charge at the operation's total bound.
 
         Args:
-            operation_id: Recovery hold already transferred into replayed physical work.
-            username: Authenticated account owner.
-            max_cents: Remaining combined scope coverage to retain.
-            max_wallet_cents: Remaining wallet coverage to retain.
+            operation_id: Dispatched sandbox attempt in the current generation.
+            username: Authenticated owner.
+            evidence_key: Immutable identity of this extension; replays are idempotent.
+            max_cents: Combined scope coverage the operation holds after the extension.
+            max_wallet_cents: Wallet coverage the operation holds after the extension.
+            evidence: The extended request bound, recorded for audit.
 
         Returns:
-            Updated recovery hold and authoritative budget totals.
+            The operation with its grown coverage and the budget totals.
+
+        Raises:
+            BudgetFencedError: When the operation's execution generation is obsolete.
+            BudgetConflictError: When the operation cannot grow, or the identity was reused.
+            BudgetInsufficientError: When the extension cannot fit without a budget or funding change.
+            BudgetInFlightError: When settling covered work may make the extension fit.
         """
+        key = _identifier(evidence_key)
         scope = cent_units(max_cents)
         charge = cent_units(max_wallet_cents)
+        if charge > scope:
+            raise ValueError("Wallet coverage cannot exceed the combined scope coverage.")
+        document = dict(evidence)
+        fingerprint = _fingerprint({"extension": document, "scope": scope, "wallet": charge})
         with self._transaction() as session:
             wallet, budget, operation = self._operation(session, operation_id, username)
-            if operation.cost_kind != "recovery_headroom" or operation.state not in {"reserved", "released"}:
-                raise BudgetConflictError("Only active recovery headroom can be trimmed.")
-            if operation.state == "released":
-                if scope or charge:
-                    raise BudgetInsufficientError("Recovery consumed its execution headroom before activation.")
+            prior = session.scalar(
+                select(ExecutionUsageEvidenceModel).where(
+                    ExecutionUsageEvidenceModel.operation_id == operation_id,
+                    ExecutionUsageEvidenceModel.evidence_key == key,
+                )
+            )
+            if prior is not None:
+                if prior.fingerprint != fingerprint:
+                    raise BudgetConflictError("This coverage extension already recorded a different bound.")
                 return self._operation_snapshot(session, operation, budget, wallet)
-            if scope > operation.max_units or charge > operation.max_wallet_units:
-                raise BudgetInsufficientError("Recovery consumed more than its proved seed-evaluation allowance.")
-            budget.reserved_units -= operation.max_units - scope
-            budget.wallet_reserved_units -= operation.max_wallet_units - charge
+            if operation.generation != budget.generation:
+                raise BudgetFencedError("The execution generation is obsolete.")
+            if operation.cost_kind != "sandbox" or operation.state not in _DISPATCHED_STATES:
+                raise BudgetConflictError("Only a running sandbox's coverage can be extended.")
+            if budget.state not in {"open", "attached"}:
+                raise BudgetConflictError("This budget is not admitting new work.")
+            if scope <= operation.max_units or charge < operation.max_wallet_units:
+                raise BudgetConflictError("A coverage extension must grow the operation's bound.")
+            _admit(
+                session,
+                wallet,
+                budget,
+                username,
+                scope - operation.max_units,
+                charge - operation.max_wallet_units,
+            )
+            now = datetime.now(UTC)
+            session.add(
+                ExecutionUsageEvidenceModel(
+                    id=str(uuid4()),
+                    operation_id=operation_id,
+                    evidence_key=key,
+                    fingerprint=fingerprint,
+                    actual_units=operation.actual_units,
+                    actual_wallet_units=operation.actual_wallet_units,
+                    billed_cents=0,
+                    final=False,
+                    issue="usage_pending",
+                    evidence=document,
+                    created_at=now,
+                )
+            )
+            budget.reserved_units += scope - operation.max_units
+            budget.wallet_reserved_units += charge - operation.max_wallet_units
             operation.max_units = scope
             operation.max_wallet_units = charge
-            operation.updated_at = budget.updated_at = datetime.now(UTC)
-            if scope == 0 and charge == 0:
-                operation.state = "released"
+            operation.updated_at = budget.updated_at = now
             return self._operation_snapshot(session, operation, budget, wallet)
 
     def fence_generation(
@@ -1078,6 +1149,49 @@ class BudgetService:
             budget.blocked_reason = _identifier(reason)
             budget.updated_at = datetime.now(UTC)
             return self._snapshot(session, budget, wallet)
+
+    def close_for_deleted_jobs(self, job_ids: Sequence[str], *, session: Session) -> int:
+        """Close and detach the budgets of jobs being hard-deleted, keeping their money history.
+
+        Budgets and their ledger rows are the account's financial record, so they
+        outlive the job. Unstarted reservations are released so no money stays
+        held; dispatched work keeps its coverage until its usage reconciles.
+
+        Args:
+            job_ids: Root and grid-child job ids being deleted in ``session``.
+            session: The caller's delete transaction, so budget and job go together.
+
+        Returns:
+            Number of budgets closed.
+        """
+        if not job_ids:
+            return 0
+        owned = session.execute(
+            select(ExecutionBudgetModel.id, ExecutionBudgetModel.username)
+            .where(ExecutionBudgetModel.job_id.in_(list(job_ids)))
+            .order_by(ExecutionBudgetModel.username, ExecutionBudgetModel.id)
+        ).all()
+        now = datetime.now(UTC)
+        for budget_id, username in owned:
+            # Wallet before budget, the same lock order as every other mutation.
+            session.get(BillingCustomerModel, username, with_for_update=True)
+            budget = session.get(ExecutionBudgetModel, budget_id, with_for_update=True)
+            assert budget is not None
+            for operation in session.scalars(
+                select(ExecutionOperationModel).where(
+                    ExecutionOperationModel.budget_id == budget_id, ExecutionOperationModel.state == "reserved"
+                )
+            ):
+                budget.reserved_units -= operation.max_units
+                budget.wallet_reserved_units -= operation.max_wallet_units
+                operation.state = "released"
+                operation.updated_at = now
+            if budget.state != "blocked":
+                budget.state = "closed"
+                budget.blocked_reason = "job_deleted"
+            budget.job_id = None
+            budget.updated_at = now
+        return len(owned)
 
     def resume_admission(self, budget_id: str, username: str, *, expected_generation: int) -> BudgetSnapshot:
         """Reopen an explicitly resumed attached job after obligations are reconciled.

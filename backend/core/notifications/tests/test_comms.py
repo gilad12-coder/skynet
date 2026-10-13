@@ -33,6 +33,20 @@ def test_send_mail_passes_html_to_shared_sender(monkeypatch: pytest.MonkeyPatch)
     assert calls == [("alice@example.com", "hello", "hello", "<p>hi</p>")]
 
 
+def test_send_mail_sends_the_plain_text_part(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rendered plain-text twin goes out as the text part, not the subject."""
+    calls: list[tuple[str, str, str, str | None]] = []
+
+    def _send(to: str, subject: str, body: str, *, html_body: str | None = None) -> None:
+        """Record the shared SMTP sender invocation."""
+        calls.append((to, subject, body, html_body))
+
+    monkeypatch.setattr(comms_module, "send_email", _send)
+
+    assert send_mail("alice@example.com", "hello", "<p>hi</p>", text_body="hi there") is True
+    assert calls == [("alice@example.com", "hello", "hi there", "<p>hi</p>")]
+
+
 def test_send_mail_returns_false_on_smtp_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Swallow an SMTP failure so notifications cannot break app work."""
 

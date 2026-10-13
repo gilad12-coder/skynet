@@ -1,209 +1,120 @@
-"""Notification orchestration.
+"""Run and sharing events, turned into :func:`.dispatch.notify` calls.
 
-Builds the localized HTML email for each Skynet event (job lifecycle + sharing)
-and hands it to the shared SMTP transport. Recipient resolution is centralized
-in :func:`core.notifications.comms.resolve_email`; non-email identities are
-skipped and logged, so every helper here is safe to call unconditionally from
-the API and worker layers.
+Each helper gathers the event's facts (run name, scores, spend, duration)
+and hands them to ``notify``, which stores the inbox item and routes it to the
+user's channels. Every helper is safe to call unconditionally from the API and
+worker layers: a missing engine, recipient or run is a silent no-op.
 """
 
 from __future__ import annotations
 
-import html
 import logging
-import os
+from datetime import UTC, datetime
+from typing import Any
 
+from sqlalchemy.orm import Session
+
+from ..constants import PAYLOAD_OVERVIEW_NAME
 from ..i18n import t
-from ._wordmark import WORDMARK_CSS, wordmark_svg
-from .comms import resolve_email, send_mail
-from .preferences import NotificationCategory, notification_category_enabled
+from ..storage.models import JobModel
+from .catalog import BUDGET_NEAR, FAILED, FINISHED, NEEDS_INPUT, NEW_BEST, SHARED, STUCK
+from .dispatch import notify
+from .preferences import notification_engine
 
 logger = logging.getLogger(__name__)
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3001")
-
-# Email palette mirrors the app design tokens (frontend globals.css) so a
-# notification reads like a page of the product: warm off-white canvas, near-black
-# warm ink, the brown primary, taupe muted text, and the shared 8px radius. Email
-# clients can't read CSS vars, so the concrete hex values are inlined here.
-_BG = "#faf8f5"  # --background
-_CARD = "#ffffff"  # --card
-_FG = "#1c1612"  # --foreground
-_MUTED = "#8c7a6b"  # --muted-foreground
-_PRIMARY = "#3d2e22"  # --primary
-_PRIMARY_FG = "#faf8f5"  # --primary-foreground
-_BORDER = "#ddd6cc"  # --border
-# Heebo is the app's UI typeface; emails rely on the recipient's locally-available
-# Heebo, falling back to Segoe UI/Arial — no external font is fetched (air-gap safe).
-_FONT = "'Heebo','Heebo Variable','Segoe UI',Arial,sans-serif"
-# JetBrains Mono is the app's monospace face; used for the optimization id.
-_MONO = "'JetBrains Mono','JetBrains Mono Variable','SFMono-Regular',Consolas,'Courier New',monospace"
-_PRIMARY_HOVER = "#473528"  # primary lightened, echoing the app's hover:bg-primary/90
-
-# CTA hover feedback (the button keeps its resting shape): lighten on hover with a
-# soft lift shadow, press in on active — matching the app's primary button. Needs
-# a class since inline styles can't carry pseudo-states; Outlook strips it and
-# keeps the static button.
-_BUTTON_CSS = (
-    ".btn{transition:background-color .15s ease,box-shadow .15s ease,transform .08s ease}"
-    f".btn:hover{{background:{_PRIMARY_HOVER}!important;box-shadow:0 6px 16px rgba(61,46,34,0.20)}}"
-    ".btn:active{transform:scale(0.97)}"
-)
-# Unicode bidi isolate (LRI .. PDI): wraps an LTR token inside RTL text so its
-# parentheses/sign keep their order. Built via chr() to keep raw control
-# characters out of the source (ruff PLE2502).
-_LRI = chr(0x2066)
-_PDI = chr(0x2069)
+_ERROR_DETAIL_CHARS = 150
 
 
-def _job_url(optimization_id: str) -> str:
-    """Return the full URL for the optimization detail page."""
-    return f"{FRONTEND_URL}/optimizations/{optimization_id}"
-
-
-def _render_body(body_lines: list[str]) -> str:
-    """Render body lines as centered paragraphs.
-
-    A line containing ``": "`` renders as a centered detail line (muted label,
-    ink value); a line without one renders as a centered lead sentence. The same
-    input shape powers both the job (key/value) and sharing (sentence) emails.
+def _aware(value: datetime | None) -> datetime | None:
+    """Return ``value`` as a UTC-aware datetime (SQLite returns naive ones).
 
     Args:
-        body_lines: Pre-localized text lines for the message body.
+        value: A stored timestamp.
 
     Returns:
-        The inner HTML for the body paragraphs.
+        The aware timestamp, or ``None``.
     """
-    # Spacing lives on each block's TOP margin (heading has none) so the gap
-    # above the CTA is a constant 32px whether or not a body line is present —
-    # the button sits identically across every email variant.
-    parts = []
-    for line in body_lines:
-        label, sep, value = line.partition(": ")
-        if sep:
-            parts.append(
-                f'<p style="margin:20px 0 0;font-size:14px;line-height:1.6;text-align:center;">'
-                f'<span style="color:{_MUTED};">{html.escape(label)}:</span>&nbsp;'
-                f'<span style="color:{_FG};font-weight:600;">{html.escape(value)}</span></p>'
-            )
-        else:
-            parts.append(
-                f'<p style="margin:20px 0 0;font-size:16px;line-height:1.7;text-align:center;color:{_FG};">'
-                f"{html.escape(line)}</p>"
-            )
-    return "".join(parts)
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
-def _html_email(heading: str, body_lines: list[str], cta_label: str, cta_url: str, ref_id: str) -> str:
-    """Render a full, app-themed, RTL HTML email document.
-
-    Full-width single column: a branded header band, a heading, a body
-    (key/value rows or a lead sentence), a primary CTA pill, the optimization id
-    for reference, and a footer — all styled from the app's design tokens with
-    inline styles for email-client robustness.
+def _run_context(optimization_id: str) -> tuple[str, float | None]:
+    """Look up a run's display name and how long it has run.
 
     Args:
-        heading: Title shown under the brand header.
-        body_lines: Pre-localized message lines (see :func:`_render_body`).
-        cta_label: Visible text of the call-to-action button.
-        cta_url: Destination the CTA button links to.
-        ref_id: Optimization id shown (monospace) beneath the CTA.
+        optimization_id: The run.
 
     Returns:
-        A self-contained HTML document suitable for ``mail.HTMLBody``.
+        ``(name, duration_seconds)``; the name falls back to a short id and
+        the duration is ``None`` before the run started.
     """
-    safe_url = html.escape(cta_url, quote=True)
-    home_url = html.escape(FRONTEND_URL, quote=True)
-    return (
-        "<!doctype html>"
-        '<html lang="he" dir="rtl"><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        "<style>"
-        "@media (max-width:600px){.px{padding-left:24px!important;padding-right:24px!important}}"
-        f"{WORDMARK_CSS}{_BUTTON_CSS}"
-        "</style>"
-        f"<title>{html.escape(heading)}</title></head>"
-        f'<body style="margin:0;padding:0;background:{_BG};">'
-        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
-        f'style="background:{_BG};font-family:{_FONT};border-collapse:collapse;">'
-        f'<tr><td class="px" align="center" style="padding:26px 44px;background:{_CARD};'
-        f'border-bottom:1px solid {_BORDER};text-align:center;">'
-        f'<a class="wm" href="{home_url}" aria-label="SKYNET" '
-        'style="text-decoration:none;display:inline-block;">'
-        '<!--[if mso]><span style="font-family:Arial,sans-serif;font-size:22px;font-weight:800;'
-        f'letter-spacing:-1px;color:{_FG};">SKYNET</span><![endif]-->'
-        f"<!--[if !mso]><!-->{wordmark_svg()}<!--<![endif]-->"
-        "</a></td></tr>"
-        f'<tr><td class="px" align="center" style="padding:40px 44px;background:{_CARD};text-align:center;">'
-        f'<h1 style="margin:0;font-size:23px;font-weight:700;line-height:1.4;'
-        f'letter-spacing:-0.02em;color:{_FG};text-align:center;">{html.escape(heading)}</h1>'
-        f"{_render_body(body_lines)}"
-        '<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" '
-        'style="margin:32px auto 0;">'
-        f'<tr><td align="center" style="border-radius:8px;background:{_PRIMARY};">'
-        f'<a class="btn" href="{safe_url}" style="display:inline-block;padding:13px 32px;font-size:15px;'
-        f'font-weight:600;color:{_PRIMARY_FG};text-decoration:none;border-radius:8px;font-family:{_FONT};">'
-        f"{html.escape(cta_label)}</a></td></tr></table>"
-        f'<p style="margin:20px 0 0;font-size:12px;color:{_MUTED};text-align:center;font-family:{_MONO};">'
-        f"{html.escape(t('notifier.email.ref'))}: {html.escape(ref_id)}</p>"
-        "</td></tr>"
-        f'<tr><td class="px" align="center" style="padding:22px 44px;color:{_MUTED};font-size:12px;'
-        f'line-height:1.6;text-align:center;">{html.escape(t("notifier.email.footer"))}</td></tr>'
-        "</table></body></html>"
+    fallback = optimization_id[:8]
+    engine = notification_engine()
+    if engine is None:
+        return fallback, None
+    try:
+        with Session(engine) as session:
+            job = session.get(JobModel, optimization_id)
+            if job is None:
+                return fallback, None
+            overview = job.payload_overview if isinstance(job.payload_overview, dict) else {}
+            name = overview.get(PAYLOAD_OVERVIEW_NAME)
+            started = _aware(job.started_at)
+            ended = _aware(job.completed_at) or datetime.now(UTC)
+    except Exception:
+        logger.debug("Run context lookup failed for %s", optimization_id, exc_info=True)
+        return fallback, None
+    duration = (ended - started).total_seconds() if started else None
+    return (name if isinstance(name, str) and name.strip() else fallback), duration
+
+
+def _emit(
+    username: str | None,
+    event_type: str,
+    optimization_id: str,
+    facts: dict[str, Any],
+    *,
+    once: bool = True,
+) -> None:
+    """Enrich facts with the run's name and duration, then call ``notify``.
+
+    Args:
+        username: Recipient.
+        event_type: Catalog event type.
+        optimization_id: The run.
+        facts: Event-specific facts.
+        once: Whether a repeat of this event for this run is a no-op.
+    """
+    if not username:
+        return
+    name, duration = _run_context(optimization_id)
+    facts.setdefault("duration", round(duration) if duration is not None else None)
+    notify(
+        username,
+        event_type,
+        optimization_id,
+        facts,
+        title=name,
+        dedupe_key=f"{event_type}:{optimization_id}" if once else None,
     )
 
 
-def _deliver(
-    recipient_username: str | None,
-    subject: str,
-    html_body: str,
-    category: NotificationCategory,
-) -> None:
-    """Resolve the recipient's address and send, skipping (logged) when unknown.
+def _score_facts(baseline: float | None, score: float | None) -> dict[str, Any]:
+    """Build the score and delta-vs-baseline facts.
 
     Args:
-        recipient_username: Skynet account to notify.
-        subject: Mail subject line.
-        html_body: Rendered HTML body.
-        category: Optional product-email category checked against preferences.
+        baseline: The starting score, when known.
+        score: The current or final score, when known.
+
+    Returns:
+        ``score`` and, when both are known, ``delta``.
     """
-    if not recipient_username:
-        return
-    if not notification_category_enabled(recipient_username, category):
-        logger.info("Account notification preference disabled category %s; skipping", category)
-        return
-    address = resolve_email(recipient_username)
-    if address is None:
-        logger.info("Account %r has no email identity; skipping notification %r", recipient_username, subject)
-        return
-    send_mail(address, subject, html_body)
-
-
-def notify_job_started(
-    optimization_id: str,
-    username: str,
-    optimization_type: str,
-    optimizer_name: str,
-    module_name: str,
-    model_name: str | None = None,
-) -> None:
-    """Email the owner when their job is submitted.
-
-    The submission email is intentionally minimal — the headline plus a link to
-    the run — so the optimization-metadata params are accepted (callers pass
-    them) but not rendered.
-
-    Args:
-        optimization_id: Job identifier used for the detail link and id line.
-        username: Owner who submitted the job (and the email recipient).
-        optimization_type: Submission metadata; accepted but not rendered.
-        optimizer_name: Submission metadata; accepted but not rendered.
-        module_name: Submission metadata; accepted but not rendered.
-        model_name: Submission metadata; accepted but not rendered.
-    """
-    subject = t("notifier.title.new")
-    html_body = _html_email(subject, [], t("notifier.link.follow"), _job_url(optimization_id), optimization_id)
-    _deliver(username, subject, html_body, "job_updates")
+    facts: dict[str, Any] = {"score": score}
+    if baseline is not None and score is not None:
+        facts["delta"] = score - baseline
+    return facts
 
 
 def notify_job_completed(
@@ -214,95 +125,142 @@ def notify_job_completed(
     baseline_score: float | None = None,
     optimized_score: float | None = None,
 ) -> None:
-    """Email the owner when their job finishes (success, cancelled, or failed).
+    """Emit ``finished`` or ``failed`` for a run that reached a terminal status.
+
+    A cancelled run emits nothing: the owner is the one who cancelled it.
 
     Args:
-        optimization_id: Job identifier used to render the detail link.
-        username: Owner who submitted the job (and the email recipient).
-        status: One of ``"success"``, ``"cancelled"`` or ``"failed"``;
-            unknown statuses are logged and skipped.
-        message: Optional error/context message; rendered (truncated to 150
-            chars) only for the failed branch.
-        baseline_score: Pre-optimization score; combined with
-            ``optimized_score`` to render an improvement line on success.
-        optimized_score: Post-optimization score; rendered with the improvement
-            delta when both scores are present.
+        optimization_id: The run.
+        username: Owner and recipient.
+        status: ``success``, ``stopped``, ``cancelled`` or ``failed``.
+        message: Error message; shown (truncated) on ``failed``.
+        baseline_score: Pre-optimization score.
+        optimized_score: Final score.
     """
-    # The owner is the recipient, so a "user: <owner>" line is redundant.
-    lines: list[str] = []
-
-    if status == "success":
-        subject = t("notifier.title.completed")
-        if baseline_score is not None and optimized_score is not None:
-            improvement = optimized_score - baseline_score
-            sign = "+" if improvement >= 0 else ""
-            # Arrow points left so baseline->optimized reads correctly in RTL; the
-            # signed delta is wrapped in a bidi LTR isolate so its parentheses and
-            # sign don't reorder to "(22.6%+)".
-            lines.append(
-                f"{t('notifier.label.score')}: "
-                f"{baseline_score:.1f}% ← {optimized_score:.1f}% "
-                f"{_LRI}({sign}{improvement:.1f}%){_PDI}"
-            )
-        cta_label = t("notifier.link.results")
-    elif status == "cancelled":
-        subject = t("notifier.title.cancelled")
-        cta_label = t("notifier.link.details")
+    if status in ("success", "stopped"):
+        _emit(username, FINISHED, optimization_id, _score_facts(baseline_score, optimized_score))
     elif status == "failed":
-        subject = t("notifier.title.failed")
-        truncated = f"{message[:150]}..." if message and len(message) > 150 else message
-        if truncated:
-            lines.append(f"{t('notifier.label.error')}: {truncated}")
-        cta_label = t("notifier.link.details")
-    else:
+        detail = message
+        if detail and len(detail) > _ERROR_DETAIL_CHARS:
+            detail = f"{detail[:_ERROR_DETAIL_CHARS]}..."
+        _emit(username, FAILED, optimization_id, {"detail": detail})
+    elif status != "cancelled":
         logger.warning("Skipping notification for unknown job status: %s", status)
-        return
 
-    html_body = _html_email(subject, lines, cta_label, _job_url(optimization_id), optimization_id)
-    _deliver(username, subject, html_body, "job_updates")
+
+def notify_run_new_best(optimization_id: str, username: str, score: float, baseline: float | None = None) -> None:
+    """Emit ``new_best`` when a running optimization beats its starting score.
+
+    Args:
+        optimization_id: The run.
+        username: Owner and recipient.
+        score: The new best score.
+        baseline: The score the run started from.
+    """
+    _emit(username, NEW_BEST, optimization_id, _score_facts(baseline, score))
+
+
+def notify_run_stuck(optimization_id: str, username: str, best_score: float | None, stuck_fraction: float) -> None:
+    """Emit ``stuck`` when a run's best score stalls over part of its budget.
+
+    Args:
+        optimization_id: The run.
+        username: Owner and recipient.
+        best_score: Best score so far.
+        stuck_fraction: Fraction of the evaluation budget spent without improvement.
+    """
+    _emit(
+        username,
+        STUCK,
+        optimization_id,
+        {"score": best_score, "detail": t("notifier.body.stuck", percent=round(stuck_fraction * 100))},
+    )
+
+
+def notify_run_budget(optimization_id: str, username: str, spent_cents: float, limit_cents: int) -> None:
+    """Emit ``budget_near`` when spend crosses the alert fraction of the limit.
+
+    Args:
+        optimization_id: The run.
+        username: Owner and recipient.
+        spent_cents: Cents settled so far.
+        limit_cents: The run's spending limit in cents.
+    """
+    _emit(username, BUDGET_NEAR, optimization_id, {"spent": spent_cents / 100, "limit": limit_cents / 100})
+
+
+def notify_run_needs_input(
+    optimization_id: str, username: str, spent_cents: float | None = None, limit_cents: int | None = None
+) -> None:
+    """Emit ``needs_input`` when a run paused and waits for the owner.
+
+    Args:
+        optimization_id: The run.
+        username: Owner and recipient.
+        spent_cents: Cents spent when it paused, when known.
+        limit_cents: The limit it hit, when known.
+    """
+    facts: dict[str, Any] = {"detail": t("notifier.body.needs_input")}
+    if spent_cents is not None:
+        facts["spent"] = spent_cents / 100
+    if limit_cents is not None:
+        facts["limit"] = limit_cents / 100
+    _emit(username, NEEDS_INPUT, optimization_id, facts)
+
+
+def _emit_shared(optimization_id: str, recipient: str, actor: str, kind: str, detail: str, role: str | None) -> None:
+    """Emit ``shared`` for an invite, a role change or an ownership transfer.
+
+    Args:
+        optimization_id: The shared run.
+        recipient: The user whose access changed.
+        actor: Who changed it.
+        kind: ``invite``, ``role`` or ``transfer``.
+        detail: Localized sentence for the email.
+        role: The granted tier, when there is one.
+    """
+    _emit(
+        recipient,
+        SHARED,
+        optimization_id,
+        {"detail": detail, "actor": actor, "kind": kind, "role": role, "duration": None},
+        once=False,
+    )
 
 
 def notify_share_invite(optimization_id: str, grantee: str, inviter: str, role: str) -> None:
-    """Email a user when they are explicitly invited to an optimization.
+    """Emit ``shared`` when a user is invited to a run.
 
     Args:
-        optimization_id: Optimization that was shared.
-        grantee: Invited username (the email recipient).
-        inviter: Username of the owner/editor who issued the invite.
-        role: Tier granted (``"viewer"`` or ``"editor"``).
+        optimization_id: The shared run.
+        grantee: Invited user (the recipient).
+        inviter: Who issued the invite.
+        role: Tier granted (``viewer`` or ``editor``).
     """
-    role_label = t(f"notifier.share.role.{role}")
-    subject = t("notifier.share.invite.subject")
-    body = t("notifier.share.invite.body", inviter=inviter, role=role_label)
-    html_body = _html_email(subject, [body], t("notifier.link.open"), _job_url(optimization_id), optimization_id)
-    _deliver(grantee, subject, html_body, "sharing_updates")
+    detail = t("notifier.share.invite.body", inviter=inviter, role=t(f"notifier.share.role.{role}"))
+    _emit_shared(optimization_id, grantee, inviter, "invite", detail, role)
 
 
 def notify_role_change(optimization_id: str, grantee: str, actor: str, role: str) -> None:
-    """Email a member when their access tier on an optimization changes.
+    """Emit ``shared`` when a member's access tier changes.
 
     Args:
-        optimization_id: Optimization whose grant changed.
-        grantee: Affected username (the email recipient).
-        actor: Username of the owner/editor who changed the role.
-        role: New tier (``"viewer"`` or ``"editor"``).
+        optimization_id: The run.
+        grantee: Affected user (the recipient).
+        actor: Who changed the role.
+        role: New tier (``viewer`` or ``editor``).
     """
-    role_label = t(f"notifier.share.role.{role}")
-    subject = t("notifier.share.role_change.subject")
-    body = t("notifier.share.role_change.body", actor=actor, role=role_label)
-    html_body = _html_email(subject, [body], t("notifier.link.open"), _job_url(optimization_id), optimization_id)
-    _deliver(grantee, subject, html_body, "sharing_updates")
+    detail = t("notifier.share.role_change.body", actor=actor, role=t(f"notifier.share.role.{role}"))
+    _emit_shared(optimization_id, grantee, actor, "role", detail, role)
 
 
 def notify_ownership_transfer(optimization_id: str, new_owner: str, actor: str) -> None:
-    """Email the new owner when an optimization's ownership is transferred to them.
+    """Emit ``shared`` when a run's ownership moves to a user.
 
     Args:
-        optimization_id: Optimization whose ownership moved.
-        new_owner: Username receiving ownership (the email recipient).
-        actor: Username of the previous owner/admin who transferred it.
+        optimization_id: The run.
+        new_owner: The new owner (the recipient).
+        actor: Who transferred it.
     """
-    subject = t("notifier.share.transfer.subject")
-    body = t("notifier.share.transfer.body", actor=actor)
-    html_body = _html_email(subject, [body], t("notifier.link.open"), _job_url(optimization_id), optimization_id)
-    _deliver(new_owner, subject, html_body, "sharing_updates")
+    detail = t("notifier.share.transfer.body", actor=actor)
+    _emit_shared(optimization_id, new_owner, actor, "transfer", detail, None)

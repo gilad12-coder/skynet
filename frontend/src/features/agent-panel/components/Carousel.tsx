@@ -133,8 +133,8 @@ export function Carousel<T>({
     <div
       className={cn(
         "select-none rounded-xl",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3D2E22]/40 focus-visible:ring-offset-1",
-        framed && "overflow-hidden border border-[#DDD4C8]/40 bg-background/80",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1",
+        framed && "overflow-hidden border border-border/40 bg-background/80",
         className,
       )}
       dir={isRtl ? "rtl" : "ltr"}
@@ -216,7 +216,7 @@ export function Carousel<T>({
               // flagged cues so the strip never leans on colour alone.
               className={cn(
                 "group/dot relative inline-flex size-[44px] items-center justify-center rounded-full cursor-pointer md:size-7 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3D2E22]/40 focus-visible:ring-offset-1",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1",
               )}
             >
               <span
@@ -225,10 +225,10 @@ export function Carousel<T>({
                 className={cn(
                   "h-1.5 rounded-full transition-all duration-200",
                   isActive
-                    ? cn("w-4", !tone && "bg-[#3D2E22]/70")
+                    ? cn("w-4", !tone && "bg-primary-fill/70")
                     : tone
                       ? "w-2.5 opacity-70 group-hover/dot:opacity-100"
-                      : "w-1.5 bg-[#3D2E22]/20 group-hover/dot:bg-[#3D2E22]/40",
+                      : "w-1.5 bg-primary-fill/20 group-hover/dot:bg-primary-fill/40",
                 )}
               />
             </button>
@@ -283,7 +283,7 @@ export function CarouselNav({
         "inline-flex size-[44px] items-center justify-center rounded-full md:size-7 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]",
         "border border-border/50 bg-background/85",
         "transition-all duration-150 cursor-pointer",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3D2E22]/40 focus-visible:ring-offset-1",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1",
         "hover:bg-accent/60 hover:border-border active:scale-[0.96]",
         "disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-background/85",
       )}

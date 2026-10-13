@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Dark mode is class-driven: ThemeProvider (and the pre-paint script in
+   layout.tsx) puts `.dark` on <html> for the Dark choice, or for System when
+   the OS prefers dark. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Above-the-fold subsets pinned to stable public/ URLs so layout.tsx can
    <link rel=preload> them — @fontsource emits content-hashed filenames we
    can't name at author time, which would make a preload miss and go unused.
@@ -28,11 +33,20 @@
     U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: "Geist Variable";
+  font-family: "Onest Variable";
   font-style: normal;
   font-display: swap;
   font-weight: 100 900;
-  src: url(/fonts/geist-latin-wght-normal.woff2) format("woff2-variations");
+  src: url(/fonts/onest-latin-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Bricolage Grotesque Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(/fonts/bricolage-grotesque-latin-opsz-normal.woff2) format("woff2-variations");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
     U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
@@ -173,74 +187,242 @@
 :root {
   color-scheme: light;
 
+  --code-keyword: #b4532f;
+  --code-operator: #515256;
+  --code-accent: #8a4a2f;
+  --code-type: #8a6a12;
+  --code-number: #a85a1c;
+  --code-text: #1c1612;
+  --code-string: #3f7a3a;
+  --code-comment: #88898d;
+  --code-punct: #78797c;
+  --code-function: #2f5f8a;
+
   --radius: 0.5rem;
   --duration-fast: 120ms;
   --duration-base: 160ms;
   --ease-snappy: cubic-bezier(0.2, 0.8, 0.2, 1);
 
-  --background: #faf8f5;
+  --background: #fcfaf7;
   --foreground: #1c1612;
   --card: #ffffff;
   --card-foreground: #1c1612;
   --popover: #ffffff;
   --popover-foreground: #1c1612;
-  --primary: #3d2e22;
-  --primary-foreground: #faf8f5;
-  --primary-hover: #2a1f16;
-  --secondary: #f0ebe4;
-  --secondary-foreground: #2a1f17;
-  --muted: #f0ebe4;
-  --muted-foreground: #8c7a6b;
-  --accent: #ede7dd;
-  --accent-foreground: #2a1f17;
-  --accent-muted: rgba(61, 46, 34, 0.04);
-  --destructive: #b04030;
-  --border: #ddd6cc;
-  --input: #ddd6cc;
-  --ring: #3d2e22;
+  --primary: #b4521f;
+  --primary-foreground: #ffffff;
+  --primary-hover: #8f4318;
+  --primary-fill: #b4521f;
+  --secondary: #f3eee8;
+  --secondary-foreground: #1c1612;
+  --muted: #f3eee8;
+  --muted-foreground: #706356;
+  --accent: #ede6dd;
+  --accent-foreground: #1c1612;
+  --accent-muted: rgba(180, 82, 31, 0.05);
+  --destructive: #d03b3b;
+  --border: #e6ded4;
+  --input: #d8cdc0;
+  --ring: #b4521f;
 
-  --bg: #f5f1ec;
+  --bg: #f5f0ea;
   --surface-1: #ffffff;
-  --surface-2: #faf8f5;
-  --surface-3: #f0ebe4;
-  --border-subtle: #e5ddd4;
+  --surface-2: #faf7f3;
+  --surface-3: #f3eee8;
+  --splash-ground: var(--surface-3);
+  --splash-ink: var(--foreground);
+  --border-subtle: #ece5dc;
   --text-1: #1c1612;
-  --text-2: #5c4d40;
-  --text-3: #a69585;
-  --blue: #7c6350;
-  --blue-light: rgba(124, 99, 80, 0.08);
+  --text-2: #574a3f;
+  --text-3: #706356;
+  --blue: #b4521f;
+  --blue-light: rgba(180, 82, 31, 0.1);
 
-  --danger: #c02a1a;
-  --danger-dim: rgba(192, 42, 26, 0.1);
-  --danger-border: rgba(192, 42, 26, 0.25);
-  --success: #1a7a3a;
-  --success-dim: rgba(26, 122, 58, 0.1);
-  --success-border: rgba(26, 122, 58, 0.25);
-  --warning: #9a6a10;
-  --warning-dim: rgba(154, 106, 16, 0.1);
-  --warning-border: rgba(154, 106, 16, 0.25);
+  --danger: #c4413a;
+  --danger-dim: rgba(196, 65, 58, 0.1);
+  --danger-border: rgba(196, 65, 58, 0.25);
+  --success: #2f7565;
+  --success-dim: rgba(47, 117, 101, 0.1);
+  --success-border: rgba(47, 117, 101, 0.25);
+  --warning: #9a6510;
+  --warning-dim: rgba(154, 101, 16, 0.1);
+  --warning-border: rgba(154, 101, 16, 0.25);
 
-  --shadow-sm: 0 1px 2px rgba(28, 22, 18, 0.05);
-  --shadow-card: 0 1px 3px rgba(28, 22, 18, 0.06), 0 1px 2px rgba(28, 22, 18, 0.04);
-  --shadow-hover: 0 4px 6px rgba(28, 22, 18, 0.07), 0 2px 4px rgba(28, 22, 18, 0.04);
-  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  /* Flat UI: in-page surfaces carry no shadow (a 1px border and a background
+     tone separate them). Only true overlays — dialogs, popovers, menus,
+     tooltips, toasts, the tour card — use --shadow-float. */
+  --shadow-sm: none;
+  --shadow-card: none;
+  --shadow-hover: none;
+  --shadow-inset: none;
+  --shadow-float: 0 8px 24px -6px rgba(19, 19, 19, 0.14), 0 2px 6px -2px rgba(19, 19, 19, 0.08);
 
-  --chart-1: #3d2e22;
-  --chart-2: #7c6350;
-  --chart-3: #a69585;
-  --chart-4: #c8b9a8;
-  --chart-5: #e5ddd4;
+  /* Run-status palette (Light): success is teal, failed red, running the hoatzin's blue face
+     so it never reads as failure; crest-tinted pending and paused sit apart by lightness. */
+  --status-success: var(--success);
+  --status-running: #3f6faa;
+  --status-failed: var(--danger);
+  --status-pending: #f1dccb;
+  --status-paused: #a0694a;
+  --status-cancelled: #a89a8c;
+  --tree-pass: var(--primary);
+  --tree-fail: var(--muted-foreground);
+  --tree-winner: #9c7a3f;
+  --tree-winner-halo: rgba(156, 122, 63, 0.18);
+  --tree-winner-fill: #f8ebc8;
+  --tree-winner-number: #1c1612;
+  --tree-winner-badge-ink: #ffffff;
+  --tree-ghost-fill: #e8e1d8;
+  --tree-grid: oklch(0.91 0.006 50);
+  --tree-grid-axis: oklch(0.94 0.005 50);
+  --trust-ask: #3d6db0;
+  --trust-auto-safe: #2e7d4f;
+  --trust-yolo: #c03a3a;
 
-  --gradient-progress: linear-gradient(90deg, #c8a882, #a68b6b, #d4b896);
+  --chart-1: #b4521f;
+  --chart-2: #cf7a3a;
+  --chart-3: #ddb27c;
+  --chart-4: #6aa5dc;
+  --chart-5: #c9def2;
 
-  --sidebar: #f5f1ec;
+  --gradient-progress: linear-gradient(90deg, #8f4318, #b4521f, #cf7a3a);
+
+  --sidebar: #f5f0ea;
   --sidebar-foreground: #1c1612;
-  --sidebar-primary: #3d2e22;
-  --sidebar-primary-foreground: #faf8f5;
-  --sidebar-accent: #ede7dd;
-  --sidebar-accent-foreground: #2a1f17;
-  --sidebar-border: #ddd6cc;
-  --sidebar-ring: #3d2e22;
+  --sidebar-primary: #b4521f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ede6dd;
+  --sidebar-accent-foreground: #1c1612;
+  --sidebar-border: #e6ded4;
+  --sidebar-ring: #b4521f;
+
+  --skeleton-base: #ede6dd;
+  --skeleton-highlight: #f6f2ed;
+  --scrollbar-thumb: rgba(28, 22, 18, 0.18);
+  --scrollbar-thumb-hover: rgba(28, 22, 18, 0.32);
+  /* Hover/glow tints and the dim behind overlays. */
+  --gold-tint: rgba(180, 82, 31, 0.1);
+  --spotlight-dim: rgba(28, 22, 18, 0.56);
+}
+
+/* ════════════════════════════════════════════
+   DARK MODE
+   Bronze-brown: page #221d19, cards a step up,
+   borders #483d34. Warm off-white text, taupe muted
+   text, rufous accent (deep #b4521f fills, #e0935a
+   text). Every text pair clears WCAG AA.
+   ════════════════════════════════════════════ */
+.dark {
+  color-scheme: dark;
+
+  --code-keyword: #e39b7b;
+  --code-operator: #c2c3c8;
+  --code-accent: #e8b48f;
+  --code-type: #dcbc72;
+  --code-number: #e6a86e;
+  --code-text: #f3ede6;
+  --code-string: #a9c48d;
+  --code-comment: #8b8c92;
+  --code-punct: #a0a1a6;
+  --code-function: #8fb8de;
+
+  --background: #221d19;
+  --foreground: #f3ede6;
+  --card: #2c2621;
+  --card-foreground: #f3ede6;
+  --popover: #312a24;
+  --popover-foreground: #f3ede6;
+  --primary: #e0935a;
+  --primary-foreground: #ffffff;
+  /* Solid surfaces (buttons, bars, dots) keep the deep Light rufous with white on top and
+     brighten on hover; --primary is a lifted amber because it also colours text on dark. */
+  --primary-hover: #c9622a;
+  --primary-fill: #b4521f;
+  --secondary: #382f28;
+  --secondary-foreground: #f3ede6;
+  --muted: #382f28;
+  --muted-foreground: #a89a8c;
+  --accent: #3e342c;
+  --accent-foreground: #f3ede6;
+  --accent-muted: rgba(224, 147, 90, 0.06);
+  --destructive: #e66767;
+  --border: #483d34;
+  --input: #54483d;
+  --ring: #e0935a;
+
+  --bg: #1c1814;
+  --surface-1: #2c2621;
+  --surface-2: #27211d;
+  --surface-3: #382f28;
+  /* The setup splash sits on the page's near-black with pure white type, for full contrast. */
+  --splash-ground: var(--background);
+  --splash-ink: #ffffff;
+  --border-subtle: #3a312a;
+  --text-1: #f3ede6;
+  --text-2: #cdbfb1;
+  --text-3: #a0917f;
+  --blue: #e0935a;
+  --blue-light: rgba(224, 147, 90, 0.14);
+
+  --danger: #ef8a6a;
+  --danger-dim: rgba(239, 138, 106, 0.15);
+  --danger-border: rgba(239, 138, 106, 0.4);
+  --success: #6cc0a8;
+  --success-dim: rgba(108, 192, 168, 0.15);
+  --success-border: rgba(108, 192, 168, 0.4);
+  --warning: #e0a84a;
+  --warning-dim: rgba(224, 168, 74, 0.15);
+  --warning-border: rgba(224, 168, 74, 0.4);
+
+  --shadow-float: 0 10px 28px -6px rgba(0, 0, 0, 0.6), 0 2px 8px -2px rgba(0, 0, 0, 0.45);
+
+  /* Run-status palette (Dark): success is teal, failed red, running the hoatzin's blue face
+     so it never reads as failure; crest-tinted pending and paused sit apart by lightness. */
+  --status-success: var(--success);
+  --status-running: #82b8e6;
+  --status-failed: var(--danger);
+  --status-pending: #5a3e2c;
+  --status-paused: #c08a66;
+  --status-cancelled: #75695e;
+  --tree-pass: var(--primary);
+  --tree-fail: var(--muted-foreground);
+  --tree-winner: #d9a441;
+  --tree-winner-halo: rgba(217, 164, 65, 0.22);
+  --tree-winner-fill: #8a6212;
+  --tree-winner-number: #ffffff;
+  --tree-winner-badge-ink: #2a1f08;
+  --tree-ghost-fill: #382f28;
+  --tree-grid: rgba(255, 255, 255, 0.07);
+  --tree-grid-axis: rgba(255, 255, 255, 0.045);
+  --trust-ask: #7ba3dd;
+  --trust-auto-safe: #7fbf8e;
+  --trust-yolo: #e8706a;
+
+  --chart-1: #e0935a;
+  --chart-2: #f0b98a;
+  --chart-3: #ddb27c;
+  --chart-4: #82b8e6;
+  --chart-5: #8a7d70;
+
+  --gradient-progress: linear-gradient(90deg, #b4521f, #e0935a, #f0b98a);
+
+  --sidebar: #1c1814;
+  --sidebar-foreground: #f3ede6;
+  --sidebar-primary: #e0935a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #382f28;
+  --sidebar-accent-foreground: #f3ede6;
+  --sidebar-border: #483d34;
+  --sidebar-ring: #e0935a;
+
+  --skeleton-base: #312a24;
+  --skeleton-highlight: #3e342c;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+  --gold-tint: rgba(224, 147, 90, 0.14);
+  /* The page is already near-black, so the tour's dim goes deeper still to
+     read as a dim. */
+  --spotlight-dim: rgba(0, 0, 0, 0.62);
 }
 
 /* ════════════════════════════════════════════
@@ -261,6 +443,7 @@
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-hover: var(--primary-hover);
+  --color-primary-fill: var(--primary-fill);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -284,6 +467,7 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-border-subtle: var(--border-subtle);
 }
 
 /* ════════════════════════════════════════════
@@ -338,6 +522,7 @@ html {
      rule overrides the dir attribute (a presentational hint), which forced RTL
      onto body-portaled content (dialogs, sheets) even in the English locale. */
   text-size-adjust: 100%;
+  accent-color: var(--primary-fill);
   /* The documentElement is the app scroller; keep its gutter during Radix scroll locks. */
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -350,37 +535,41 @@ body {
   overflow-x: hidden; /* Prevent decorative orbs and wide content from causing horizontal scroll */
 }
 
-/* Per-locale UI font, keyed off <html lang>. Geist (Latin + Cyrillic) and Heebo
-   (Hebrew) cover most locales; scripts Geist can't draw get a script-matched
-   variable face prepended, with Geist kept after it so embedded English/code in
-   a non-Latin UI still renders in Geist. Switching the locale switches the font
+/* Per-locale UI font, keyed off <html lang>. Onest (Latin + Cyrillic) and Heebo
+   (Hebrew) cover most locales; scripts Onest can't draw get a script-matched
+   variable face prepended, with Onest kept after it so embedded English/code in
+   a non-Latin UI still renders in Onest. Switching the locale switches the font
    automatically — no JS. Latin/Cyrillic locales (incl. ru, uk) use the base. */
 :root {
-  --font-ui: "Geist Variable", "Heebo Variable", system-ui, -apple-system, "Segoe UI", Roboto,
+  --font-ui: "Onest Variable", "Heebo Variable", system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
+  /* Big titles get their own face so they read apart from body text. Bricolage
+     only draws Latin, so every other script falls through to the locale's UI font. */
+  --font-display: "Bricolage Grotesque Variable", var(--font-ui);
 }
 html[lang="ar"] {
-  --font-ui: "Noto Sans Arabic Variable", "Geist Variable", system-ui, sans-serif;
+  --font-ui: "Noto Sans Arabic Variable", "Onest Variable", system-ui, sans-serif;
 }
 html[lang="fa"] {
-  --font-ui: "Vazirmatn Variable", "Geist Variable", system-ui, sans-serif;
+  --font-ui: "Vazirmatn Variable", "Onest Variable", system-ui, sans-serif;
 }
 html[lang="hi"] {
-  --font-ui: "Noto Sans Devanagari Variable", "Geist Variable", system-ui, sans-serif;
+  --font-ui: "Noto Sans Devanagari Variable", "Onest Variable", system-ui, sans-serif;
 }
 html[lang="ja"] {
-  --font-ui: "Noto Sans JP Variable", "Geist Variable", system-ui, sans-serif;
+  --font-ui: "Noto Sans JP Variable", "Onest Variable", system-ui, sans-serif;
 }
 html[lang="ko"] {
-  --font-ui: "Noto Sans KR Variable", "Geist Variable", system-ui, sans-serif;
+  --font-ui: "Noto Sans KR Variable", "Onest Variable", system-ui, sans-serif;
 }
 html[lang="zh-Hans"],
 html[lang="yue"] {
-  --font-ui: "Noto Sans SC Variable", "Geist Variable", system-ui, sans-serif;
+  --font-ui: "Noto Sans SC Variable", "Onest Variable", system-ui, sans-serif;
 }
 
 body {
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--text-1);
   background: var(--bg);
   font-family: var(--font-ui);
@@ -389,9 +578,13 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Display font for headings */
+/* Display font for titles; h3 stays in the UI face as the step below them. */
 h1,
-h2,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-optical-sizing: auto;
+}
 h3 {
   font-family: var(--font-ui);
   font-weight: 700;
@@ -403,34 +596,20 @@ h3 {
   background: var(--card) !important;
   color: var(--foreground) !important;
   border: 1px solid var(--border) !important;
-  box-shadow: var(--shadow-card) !important;
+  box-shadow: var(--shadow-float) !important;
 }
 .Toastify__toast-container {
   width: auto !important;
   max-width: 320px !important;
   min-width: 120px !important;
 }
-/* The restore question needs more room than transient status messages. */
-.Toastify__toast-container:has([data-tutorial="submit-draft-offer"]) {
-  max-width: calc(100vw - 2rem) !important;
-}
-.Toastify__toast:has([data-tutorial="submit-draft-offer"]) {
-  max-width: 100%;
-}
-.Toastify__toast-container:has([data-tutorial="submit-draft-offer"])
-  > .Toastify__toast:not(:has([data-tutorial="submit-draft-offer"])) {
-  max-width: 320px;
-}
-@media (max-width: 480px) {
-  .Toastify__toast-container:has([data-tutorial="submit-draft-offer"]) {
-    inset-inline: 1rem;
-    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
-  }
-}
 .Toastify__toast {
   min-height: 0 !important;
   border-radius: 12px !important;
   width: fit-content !important;
+}
+.Toastify {
+  --toastify-icon-color-success: var(--success);
 }
 .Toastify__toast--success {
   background: var(--surface-3) !important;
@@ -469,7 +648,7 @@ h3 {
 .Toastify__toast--error .Toastify__progress-bar,
 .Toastify__toast--warning .Toastify__progress-bar,
 .Toastify__toast--info .Toastify__progress-bar {
-  background: #7c6350 !important;
+  background: var(--blue) !important;
   background-image: none !important;
 }
 .Toastify__close-button {
@@ -489,11 +668,11 @@ h3 {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(200, 168, 130, 0.35);
+  background: var(--scrollbar-thumb);
   border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(200, 168, 130, 0.6);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Thin scrollbar variant */
@@ -502,10 +681,10 @@ h3 {
   height: 3px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: rgba(200, 168, 130, 0.4);
+  background: var(--scrollbar-thumb);
 }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: rgba(200, 168, 130, 0.7);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Close button — global style for all X dismiss buttons. Positioning is
@@ -530,7 +709,7 @@ h3 {
   }
   .close-button:hover {
     color: var(--foreground);
-    background-color: rgba(200, 168, 130, 0.12);
+    background-color: var(--accent);
     transform: scale(1.08);
     cursor: pointer;
   }
@@ -538,7 +717,7 @@ h3 {
     transform: scale(0.9);
   }
   .close-button:focus-visible {
-    box-shadow: 0 0 0 2px rgba(200, 168, 130, 0.3);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 30%, transparent);
   }
   .close-button:disabled {
     opacity: 0.5;
@@ -566,6 +745,32 @@ h3 {
 }
 [data-settings-text-buttons] [data-slot="button"]:not([data-size^="icon"]):hover {
   @apply bg-accent text-accent-foreground;
+}
+/* Solid accent surface: text inside turns white, but controls that paint their own fill keep theirs. */
+.on-primary {
+  @apply border-primary-fill bg-primary-fill text-primary-foreground;
+}
+.on-primary
+  :is(.text-foreground, .text-primary, [class*="text-primary/"], [class*="text-foreground/"]):not(
+    :is([data-slot="button"], input, textarea, select, [role="menu"]) *,
+    [data-slot="button"]
+  ) {
+  color: inherit;
+}
+.on-primary
+  :is(.text-muted-foreground, [class*="text-muted-foreground/"]):not(
+    :is([data-slot="button"], input, textarea, select, [role="menu"]) *,
+    [data-slot="button"]
+  ) {
+  color: color-mix(in srgb, var(--primary-foreground) 80%, transparent);
+}
+/* Opt-in (data-accent) actions keep the solid accent fill inside the outlined settings set. */
+[data-settings-text-buttons] [data-slot="button"][data-accent]:not([data-size^="icon"]) {
+  @apply border-transparent bg-primary-fill text-primary-foreground;
+}
+[data-settings-text-buttons]
+  [data-slot="button"][data-accent]:not([data-size^="icon"]):hover {
+  @apply bg-primary-hover text-primary-foreground;
 }
 [data-settings-text-buttons]
   [data-slot="button"][data-variant="destructive"]:not([data-size^="icon"]) {
@@ -599,7 +804,7 @@ table tbody tr {
 table tbody tr td:not(:last-child):hover {
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: black;
+  text-decoration-color: var(--foreground);
 }
 
 /* Concepts guide: tables are informational, not copyable. */
@@ -612,16 +817,9 @@ table.no-copy-underline tbody tr td:hover {
   text-decoration: none !important;
 }
 
-/* Subtle hover lift on cards */
+/* Flat cards: hover only firms up the border, no lift. */
 [data-slot="card"] {
-  transition:
-    box-shadow var(--duration-base) var(--ease-snappy),
-    border-color var(--duration-base) var(--ease-snappy);
-}
-
-[data-slot="card"]:hover {
-  box-shadow: var(--shadow-hover);
-  border-color: var(--border);
+  transition: border-color var(--duration-base) var(--ease-snappy);
 }
 
 /* Staggered row entrance — uses transform for GPU compositing */
@@ -801,21 +999,12 @@ code,
   will-change: transform;
 }
 
-.ambient-bg .orb-1 {
-  width: min(600px, 50vw);
-  height: min(600px, 50vw);
-  top: -10%;
-  right: -5%;
-  background: rgba(200, 168, 130, 0.12);
-  animation: orbFloat1 20s ease-in-out infinite;
-}
-
 .ambient-bg .orb-2 {
   width: min(500px, 45vw);
   height: min(500px, 45vw);
   bottom: -10%;
   left: -5%;
-  background: rgba(166, 139, 107, 0.1);
+  background: color-mix(in srgb, var(--primary-fill) 8%, transparent);
   animation: orbFloat2 25s ease-in-out infinite;
 }
 
@@ -833,24 +1022,8 @@ code,
   height: min(350px, 35vw);
   top: 20%;
   left: 60%;
-  background: rgba(212, 184, 150, 0.06);
+  background: color-mix(in srgb, var(--primary-fill) 5%, transparent);
   animation: orbFloat4 18s ease-in-out infinite;
-}
-
-@keyframes orbFloat1 {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-  }
-  25% {
-    transform: translate(-30px, 40px) scale(1.05);
-  }
-  50% {
-    transform: translate(20px, -20px) scale(0.95);
-  }
-  75% {
-    transform: translate(-10px, 30px) scale(1.02);
-  }
 }
 
 @keyframes orbFloat2 {
@@ -895,41 +1068,9 @@ code,
 /* (reduced-motion for orbs merged into main reduced-motion block above) */
 
 /* Spotlight radial glow on hover (follows mouse) */
-[data-slot="card"]::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0;
-  transition: opacity 0.4s ease;
-  background: radial-gradient(
-    400px circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%),
-    rgba(200, 168, 130, 0.06),
-    transparent 60%
-  );
-}
-
-[data-slot="card"]:hover::before {
-  opacity: 1;
-}
-
-/* Top-edge subtle highlight */
-[data-slot="card"]::after {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  height: 1px;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(to left, transparent, rgba(255, 255, 255, 0.5), transparent);
-}
-
 /* Gradient headings */
 h1 {
-  background: linear-gradient(135deg, #1c1612 0%, #3d2e22 50%, #7c6350 100%);
+  background: linear-gradient(135deg, var(--foreground) 0%, var(--foreground) 50%, var(--text-2) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -937,7 +1078,7 @@ h1 {
 
 /* Selection color */
 ::selection {
-  background: rgba(200, 168, 130, 0.25);
+  background: color-mix(in srgb, var(--primary-fill) 22%, transparent);
 }
 
 /* Stat number emphasis */
@@ -946,27 +1087,13 @@ h1 {
   letter-spacing: -0.02em;
 }
 
-/* Hover emphasis on all cards */
+/* Hover emphasis on all cards: a firmer border, no shadow. */
 [data-slot="card"]:hover {
-  box-shadow:
-    0 4px 12px rgba(28, 22, 18, 0.06),
-    0 12px 32px rgba(28, 22, 18, 0.04);
   border-color: #c8b9a8;
 }
 
-/* ── Button glow effects (default variant only) ── */
 button[data-slot="button"][data-variant="default"] {
   position: relative;
-  transition:
-    transform 200ms ease,
-    box-shadow 200ms ease;
-}
-
-button[data-slot="button"][data-variant="default"]:hover {
-  transform: scale(1.02);
-  box-shadow:
-    0 0 20px rgba(61, 46, 34, 0.25),
-    0 0 40px rgba(61, 46, 34, 0.1);
 }
 
 /* Badge refinement */
@@ -982,8 +1109,8 @@ button[data-slot="button"][data-variant="default"]:hover {
 /* ── Animated gradient border on focused inputs ── */
 [data-slot="input"]:focus,
 [data-slot="textarea"]:focus {
-  border-color: rgba(124, 99, 80, 0.5);
-  box-shadow: 0 0 0 3px rgba(124, 99, 80, 0.1);
+  border-color: color-mix(in srgb, var(--ring) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 12%, transparent);
 }
 
 /* ── Sidebar glass effect ── */
@@ -991,17 +1118,6 @@ aside {
   backdrop-filter: blur(16px);
 }
 
-/* ── Header gradient border ── */
-header {
-  border-image: linear-gradient(
-      to left,
-      transparent,
-      rgba(124, 99, 80, 0.2),
-      rgba(200, 168, 130, 0.15),
-      transparent
-    )
-    1;
-}
 
 /* ════════════════════════════════════════════
    3D PERSPECTIVE EFFECTS
@@ -1052,7 +1168,7 @@ header {
   right: 0;
   height: 2px;
   z-index: 100;
-  background: linear-gradient(90deg, #c8a882, #7c6350, #3d2e22);
+  background: var(--gradient-progress);
   transform-origin: left;
   transform: scaleX(var(--scroll-progress, 0));
   transition: transform 60ms linear;
@@ -1126,7 +1242,6 @@ header {
   /* No hover effects on touch */
   [data-slot="card"]:hover {
     transform: none;
-    box-shadow: var(--shadow-card);
   }
 
   /* Hover-revealed controls (copy buttons, chip actions, message actions)
@@ -1136,13 +1251,29 @@ header {
     opacity: 1;
   }
 
-  button[data-slot="button"][data-variant="default"]:hover {
-    transform: none;
-    box-shadow: none;
-  }
-
-  /* Active state instead of hover */
-  [data-slot="card"]:active {
+  /* Active state instead of hover. Not while a control inside the card is the one
+     being pressed: the shrink lands between touchend and the synthesized click, so
+     a large card (the dashboard table) slid small targets out from under the finger
+     and taps near a checkbox's edge clicked the cell behind it. */
+  [data-slot="card"]:active:not(
+      :has(
+          :is(
+              button,
+              a,
+              input,
+              select,
+              textarea,
+              label,
+              [role="button"],
+              [role="checkbox"],
+              [role="switch"],
+              [role="tab"],
+              [role="radio"],
+              [role="link"],
+              [role="menuitem"]
+            ):active
+        )
+    ) {
     transform: scale(0.98);
     transition-duration: 100ms;
   }
@@ -1165,7 +1296,7 @@ header {
 
 /* Page-level flowing gradient background on main content */
 .page-gradient {
-  background: linear-gradient(180deg, #faf8f5 0%, #f0ebe4 45%, #ede7dd 100%);
+  background: var(--background);
   min-height: 100%;
 }
 
@@ -1180,8 +1311,8 @@ header {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background-image: linear-gradient(to right, rgba(221, 214, 204, 0.04) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(221, 214, 204, 0.04) 1px, transparent 1px);
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--border) 4%, transparent) 1px, transparent 1px);
   background-size: 48px 48px;
   mask-image: linear-gradient(180deg, transparent 0%, black 10%, black 90%, transparent 100%);
   -webkit-mask-image: linear-gradient(
@@ -1194,64 +1325,10 @@ header {
 }
 
 /* ════════════════════════════════════════════
-   STATUS PILL GLOW SYSTEM
+   STATUS PILLS
    ════════════════════════════════════════════ */
 
-/* Status pill badges with colored glow */
-.status-pill-success {
-  background: rgba(34, 120, 60, 0.12);
-  color: #1a7a3a;
-  border-color: rgba(34, 120, 60, 0.35);
-  box-shadow:
-    0 0 10px rgba(34, 120, 60, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
-}
-
-.status-pill-running {
-  background: rgba(180, 120, 20, 0.12);
-  color: #9a6a10;
-  border-color: rgba(180, 120, 20, 0.35);
-  box-shadow:
-    0 0 10px rgba(180, 120, 20, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
-}
-
-.status-pill-failed {
-  background: rgba(200, 45, 30, 0.12);
-  color: #c02a1a;
-  border-color: rgba(200, 45, 30, 0.35);
-  box-shadow:
-    0 0 10px rgba(200, 45, 30, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
-}
-
-.status-pill-pending {
-  background: rgba(140, 140, 160, 0.1);
-  color: #6b6b7a;
-  border-color: rgba(140, 140, 160, 0.3);
-  box-shadow:
-    0 0 6px rgba(140, 140, 160, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
-}
-
-.status-pill-cancelled {
-  background: rgba(120, 110, 100, 0.1);
-  color: #6b6058;
-  border-color: rgba(120, 110, 100, 0.25);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
-}
-
-/* Paused: a calm muted steel-blue — intentional "suspended, resume when ready",
-   distinct from the warm reds/ambers of failed/running and the brown of cancelled. */
-.status-pill-paused {
-  background: rgba(74, 102, 140, 0.12);
-  color: #466089;
-  border-color: rgba(74, 102, 140, 0.32);
-  box-shadow:
-    0 0 8px rgba(74, 102, 140, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
-}
-
+/* Status pill badges: flat tint + border */
 /* ════════════════════════════════════════════
    FLUID LAYOUT SYSTEM — Desktop window resizing
    ════════════════════════════════════════════ */
@@ -1359,7 +1436,6 @@ table {
     padding: 0.75rem 1rem;
     margin-bottom: 0.625rem;
     background: var(--background);
-    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
     display: flex;
     flex-direction: column;
     gap: 0.375rem;
@@ -1390,6 +1466,73 @@ table {
   /* Cells with no data-label (e.g. an actions cell) don't reserve label space. */
   table.table-stack td:not([data-label])::before {
     content: none;
+  }
+}
+
+/* A real component drawn as a loading bone (Ghost in shared/ui/skeleton): it
+   keeps its exact box while its text and icons are hidden. */
+.skeleton-ghost {
+  display: contents;
+}
+.skeleton-ghost > * {
+  background: var(--skeleton-base) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: transparent !important;
+  pointer-events: none;
+}
+.skeleton-ghost > * * {
+  visibility: hidden;
+}
+
+/* Gliding columns. A table whose cells opt in with ``collapse`` becomes a
+   size container; as it narrows, those columns drop out and their values
+   glide into the row's primary cell through ``TableInline``. The motion
+   itself is a FLIP animation in ``table-glide.ts``. Tables with no
+   opted-in cell are never made containers, so shrink-to-fit parents keep
+   sizing them by content. */
+[data-slot="table-container"]:has([data-collapse]) {
+  container: table / inline-size;
+}
+[data-slot="table-inline"] {
+  display: none;
+}
+@container table (max-width: 60rem) {
+  [data-collapse="lg"] {
+    display: none;
+  }
+  [data-slot="table-inline"][data-at="lg"] {
+    display: inline-flex;
+  }
+}
+@container table (max-width: 44rem) {
+  [data-collapse="md"] {
+    display: none;
+  }
+  [data-slot="table-inline"][data-at="md"] {
+    display: inline-flex;
+  }
+}
+@container table (max-width: 32rem) {
+  [data-collapse="sm"] {
+    display: none;
+  }
+  [data-slot="table-inline"][data-at="sm"] {
+    display: inline-flex;
+  }
+}
+[data-slot="table-group"][data-state="open"] > tr:not([data-slot="table-group-header"]) {
+  animation: table-group-row-in 200ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+@keyframes table-group-row-in {
+  from {
+    opacity: 0;
+    translate: 0 -0.25rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="table-group"] > tr {
+    animation: none !important;
   }
 }
 
@@ -1435,30 +1578,6 @@ table {
   }
 }
 
-/* ─── Lite mode ──────────────────────────────────────────────────────────────
-   Toggled by LiteModeProvider, which sets data-lite on <html>. Two cheap,
-   high-leverage global wins for low-resource machines:
-     1. Collapse transition timings so every interaction is instant (no animated
-        tweens to schedule/composite). framer-motion JS animation is handled
-        separately via MotionConfig reducedMotion="always".
-     2. Drop the GPU-expensive frosted-glass backdrop-filter (the sticky header).
-   Deliberately NOT touched: CSS @keyframes animations (spinners must keep
-   spinning) and box-shadow (Tailwind focus rings are box-shadow — flattening it
-   would break keyboard-focus visibility). */
-[data-lite] *,
-[data-lite] *::before,
-[data-lite] *::after {
-  transition-duration: 0.001ms !important;
-  transition-delay: 0ms !important;
-  scroll-behavior: auto !important;
-}
-
-[data-lite] [class*="backdrop-blur"],
-[data-lite] [class*="backdrop-saturate"] {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
 /* Workflow canvas — React Flow state styling. Base edge styles are inline
    (per-edge, set in deriveEdges); hover/selected need !important to win
    over those inline values. */
@@ -1468,10 +1587,10 @@ table {
     stroke-width 120ms ease;
 }
 .react-flow__edge:hover .react-flow__edge-path {
-  stroke: #6e5843 !important;
+  stroke: var(--text-2) !important;
 }
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: #3d2e22 !important;
+  stroke: var(--primary) !important;
   stroke-width: 2.5 !important;
 }
 .react-flow__handle {
@@ -1482,11 +1601,11 @@ table {
 .react-flow__handle:hover,
 .react-flow__handle.connectingfrom,
 .react-flow__handle.connectingto {
-  box-shadow: 0 0 0 3px rgba(200, 168, 130, 0.45);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 35%, transparent);
 }
 .react-flow__selection {
-  background: rgba(200, 168, 130, 0.08) !important;
-  border: 1px dashed #c8a882 !important;
+  background: color-mix(in srgb, var(--primary-fill) 6%, transparent) !important;
+  border: 1px dashed var(--primary-fill) !important;
 }
 
 /* Node cards scale in on mount — new nodes, pastes, and agent rewrites all
@@ -1512,4 +1631,31 @@ table {
 .picker-dialog-bg,
 .picker-dialog {
   pointer-events: auto;
+}
+
+/* While the setup tour frames a Settings tab, its dim sits over the modal
+   (z 51). Menus and tooltips opened from the framed controls must rise over
+   it, or they open under the dim and can't be clicked. */
+[data-setup-tour] [data-radix-popper-content-wrapper] {
+  z-index: 53 !important;
+}
+
+/* ════════════════════════════════════════════
+   DARK MODE — rules whose light values are literal
+   ════════════════════════════════════════════ */
+.dark [data-slot="card"]:hover {
+  border-color: var(--input);
+}
+@keyframes cm-line-flash-dark {
+  0% {
+    background-color: rgba(245, 195, 100, 0.22);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .dark .cm-line-flash {
+    animation-name: cm-line-flash-dark;
+  }
 }

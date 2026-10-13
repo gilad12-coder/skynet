@@ -1,11 +1,20 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
+// Railway names PR preview environments `<project>-pr-<n>` (the backend's
+// `is_preview_environment` reads the same suffix). Nobody debugs a preview's
+// minified stack traces, and generating and uploading source maps adds time to
+// every preview build, so previews skip it; staging and production still upload.
+const isPreviewBuild = /-pr-\d+$/.test(process.env.RAILWAY_ENVIRONMENT_NAME ?? "");
+
 const nextConfig: NextConfig = {
   output: "standalone",
   reactStrictMode: true,
   compress: true,
   poweredByHeader: false,
+  // CI's `npm run typecheck` is the type gate; repeating it inside `next build`
+  // added about 90 seconds to every Railway deploy.
+  typescript: { ignoreBuildErrors: true },
   images: {
     formats: ["image/avif", "image/webp"],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920],
@@ -73,6 +82,8 @@ export default withSentryConfig(nextConfig, {
   project: process.env.SENTRY_PROJECT,
   authToken: process.env.SENTRY_AUTH_TOKEN,
   silent: true,
+  sourcemaps: { disable: isPreviewBuild },
+  release: { create: !isPreviewBuild },
   webpack: { treeshake: { removeDebugLogging: true } },
   telemetry: false,
 });

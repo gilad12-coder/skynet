@@ -7,6 +7,7 @@ validates environment variables at startup and provides typed access.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from functools import cached_property, lru_cache
 from pathlib import Path
@@ -29,10 +30,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # at the gateway via env. Requires OPENROUTER_API_KEY otherwise.
 DEFAULT_AGENT_MODEL_ID = "openrouter/z-ai/glm-5.3-flash"
 
-# Vercel's API refuses any sandbox timeout above five hours (``timeout`` should
-# be <= 18000000), whatever a plan allows below that, so a larger configured
-# ceiling can never be admitted and would fail at creation.
-VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 18_000
+# Vercel's API refuses any sandbox timeout above 24 hours (raised from five in
+# June 2026, Pro and Enterprise only), so a larger configured ceiling can never
+# be admitted and would fail at creation.
+VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 86_400
 
 
 # Keyed on the raw CSV rather than cached on the instance: tests monkeypatch
@@ -113,6 +114,18 @@ class Settings(BaseSettings):
         alias="APP_PUBLIC_URL",
         description="Public origin of the web app, used to build Stripe Checkout success/cancel return URLs.",
     )
+    railway_environment_name: str = Field(
+        default="",
+        alias="RAILWAY_ENVIRONMENT_NAME",
+        description="Set by Railway. A name ending in -pr-<number> marks a PR preview environment.",
+    )
+    preview_grant_cents: int = Field(
+        default=0,
+        ge=0,
+        alias="PREVIEW_GRANT_CENTS",
+        description="One-time credit each new account gets in a PR preview environment, so automated "
+        "checks can pay for a run there. Ignored outside preview environments.",
+    )
     smtp_host: str | None = Field(
         default=None,
         alias="SMTP_HOST",
@@ -130,6 +143,36 @@ class Settings(BaseSettings):
     )
     smtp_starttls: bool = Field(
         default=True, alias="SMTP_STARTTLS", description="Upgrade the SMTP connection with STARTTLS."
+    )
+    vapid_public_key: str | None = Field(
+        default=None,
+        alias="VAPID_PUBLIC_KEY",
+        description="Web Push VAPID public key (urlsafe base64, uncompressed P-256 point) browsers subscribe with. Unset turns the Chrome notification channel off.",
+    )
+    vapid_private_key: SecretStr | None = Field(
+        default=None,
+        alias="VAPID_PRIVATE_KEY",
+        description="Web Push VAPID private key (urlsafe base64 raw P-256 scalar, or a PEM) that signs push requests.",
+    )
+    vapid_subject: str | None = Field(
+        default=None,
+        alias="VAPID_SUBJECT",
+        description="VAPID contact claim, a mailto: or https: URL push services can reach the sender at. Unset falls back to APP_PUBLIC_URL.",
+    )
+    slack_client_id: str | None = Field(
+        default=None,
+        alias="SLACK_CLIENT_ID",
+        description="Client ID of the Skynet Slack app. Unset (or SLACK_CLIENT_SECRET / BYOK_VAULT_KEY unset) turns the Slack notification channel off.",
+    )
+    slack_client_secret: SecretStr | None = Field(
+        default=None,
+        alias="SLACK_CLIENT_SECRET",
+        description="Client secret of the Skynet Slack app, used to trade the OAuth code for the bot token.",
+    )
+    slack_redirect_url: str | None = Field(
+        default=None,
+        alias="SLACK_REDIRECT_URL",
+        description="Absolute URL of this backend's /notifications/slack/oauth/callback as registered on the Slack app. Unset derives it from the incoming request.",
     )
     webauthn_rp_id: str | None = Field(
         default=None,
@@ -284,12 +327,7 @@ class Settings(BaseSettings):
         alias="VERCEL_SANDBOX_MAX_LIFETIME_SECONDS",
         gt=0.0,
         le=VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS,
-        description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro and Enterprise teams can raise it to 18000 (5 hours), the most Vercel accepts. A job that outlives its box reopens one on its next call.",
-    )
-    claude_code_byok_egress: bool = Field(
-        default=False,
-        alias="CLAUDE_CODE_BYOK_EGRESS",
-        description="Offer Claude Code as the proposer for users with a verified Anthropic key. Its box may then reach only api.anthropic.com, Vercel's egress proxy adds the user's x-api-key there, and the CLI trusts that proxy's CA through NODE_EXTRA_CA_CERTS. Off until that path is verified on the deployed Vercel team; while off, Claude Code stays unavailable.",
+        description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro and Enterprise teams can raise it to 86400 (24 hours), the most Vercel accepts. A job that outlives its box reopens one on its next call.",
     )
     blackbox_agent_gateway_url: str | None = Field(
         default=None,
@@ -485,11 +523,6 @@ class Settings(BaseSettings):
         default=5000,
         ge=1,
         description="Maximum stored progress events per optimization job before old events are evicted",
-    )
-    log_entries_per_job_cap: int = Field(
-        default=5000,
-        ge=1,
-        description="Maximum stored log entries per optimization job before old entries are evicted",
     )
     dataset_max_file_bytes: int = Field(
         default=50 * 1024 * 1024,
@@ -880,6 +913,15 @@ class Settings(BaseSettings):
         description="Optional custom base URL for the generalist agent LM (e.g. internal OpenAI-compatible gateway)",
     )
 
+    interview_agent_model: str = Field(
+        default="",
+        description=(
+            "LiteLLM model id every agent interview runs when the user picks "
+            "none (onboarding, code interview, tagger dataset interview). Empty "
+            "follows the catalog's measured fastest small featured model."
+        ),
+    )
+
     tagger_assist_model: str = Field(
         default="",
         description=(
@@ -1087,6 +1129,15 @@ class Settings(BaseSettings):
             "kill-switch (per-user balance gate still applies)."
         ),
     )
+    wizard_agent_daily_turns: int = Field(
+        default=50,
+        ge=0,
+        description=(
+            "Turns of the black-box wizard agent (its interview and chat) one account may start per "
+            "UTC day. The wizard agent is free, so this cap replaces the credit charge. 0 disables "
+            "the cap."
+        ),
+    )
     interactive_min_balance_cents: int = Field(
         validation_alias=AliasChoices("INTERACTIVE_MIN_BALANCE_CENTS", "INTERACTIVE_MIN_BALANCE_CREDITS"),
         default=5,
@@ -1269,6 +1320,11 @@ class Settings(BaseSettings):
     def admin_groups_set(self) -> frozenset[str]:
         """Return admin IdP groups as a lowercase frozenset."""
         return _csv_lower_set(self.admin_groups)
+
+    @property
+    def is_preview_environment(self) -> bool:
+        """Return whether this deployment is a Railway PR preview environment."""
+        return re.search(r"-pr-\d+$", self.railway_environment_name) is not None
 
     @property
     def is_stripe_configured(self) -> bool:

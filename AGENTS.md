@@ -3,12 +3,108 @@
 > Full-stack optimization platform for prompts, programs, agents, workflows,
 > datasets, and other user-supplied artifacts.
 
+## Feature gate: challenge every feature (MANDATORY)
+
+Before building any new feature, screen, setting, option or integration,
+challenge it. Do not start coding until it passes. Skynet has **no customer
+requests** yet, so a feature must clearly serve one of these two buckets:
+
+- **Business**: it makes Skynet more money or improves the business model
+  (activation, conversion, retention, paid usage, lower cost to serve).
+  Name the number it should move.
+- **Surprise and delight**: it surprises users enough that they would show
+  it to someone. Name the surprise.
+
+If the user asks for something that fits neither, push back directly, e.g.
+"Why are we building this? Which number does it move, or what's the
+surprise?" Then:
+
+1. Ask what happens if we never build it. "Nothing much" means don't.
+2. Ask whether it is the current bottleneck, or a distraction from it.
+3. Ask whether it improves the core product or only covers for a weak spot
+   (tours, nags, settings that patch bad defaults).
+4. If it passes, build the smallest version that solves the problem: delete
+   requirements that have no clear owner and reason before simplifying,
+   and don't abstract, configure or automate before the manual version works.
+
+Push hard once, then respect the user's decision and build it. Small fixes,
+bug fixes and refactors the user asked for skip the gate. For a full pass,
+run `/scope`.
+
+## Merge policy (MANDATORY)
+
+Feature PRs target `staging`, never `main`. Every PR gets its own Railway PR
+environment, a full copy of staging with an empty database.
+
+**Backend PRs** (no file under `frontend/`) merge themselves into `staging`
+only when **all** of these gates pass:
+
+1. Agent code review is clean.
+2. Tests and the Linear issue's acceptance checks pass in the PR environment.
+3. The diff touches only the files in the issue's `## Files` list.
+4. Up to date: the branch is rebased on the latest `staging`, then tests pass again.
+5. After the merge, the staging smoke test passes. If it fails, revert that
+   PR's single squash commit right away and reopen its issue with the failure.
+
+**UI PRs** (anything touching `frontend/`, including mixed PRs) wait for the
+user. Attach a proof card: one line naming the decision and the Linear issue,
+a 15–30s video of a browser agent walking the acceptance criteria in the PR
+environment, the review verdict, and the diff size. Merge only after the user
+approves that specific PR in chat or on GitHub.
+
+**`staging` → `main`** needs the user's approval every time. Each morning,
+send one card: the backend changes that landed, staging smoke status, and a
+60s video tour of the core flow on staging. Promote only on "promote".
+
+### PR preview environments: keep them able to run an optimization
+
+The merger has to sign up and finish a real run in each `*-pr-<n>` Railway
+environment. Six things broke that once; keep them true:
+
+- **No watch paths on `staging` services.** PR environments copy `staging`,
+  and Railway skips a service whose watch paths the PR doesn't touch. A skipped
+  `litellm` (or its `Postgres-ZPeG` database) means every model call fails with
+  `Litellm_proxyException - Connection error`. Never add watch paths to
+  `litellm`, `backend` or `frontend` on `staging`.
+- **The proxy knows the backend's key.** A PR environment gets a fresh
+  `litellm` database, so the virtual key in `LITELLM_PROXY_API_KEY` is unknown
+  there and every managed call (the assistant included) fails with
+  `Invalid proxy server token`. `deploy/litellm/start.py` registers
+  `LITELLM_SEED_KEY` at boot; on `staging` it must stay a reference to
+  `${{backend.LITELLM_PROXY_API_KEY}}`.
+- **Preview accounts work without email and with credit.** In a `*-pr-<n>`
+  environment, sign-up is auto-verified and a new account gets
+  `PREVIEW_GRANT_CENTS` (set on `staging` `backend` and `worker`, 1000 = $10)
+  that can fund a budget. Production and `staging` keep a 0 grant.
+- **Preview accounts skip the setup intake.** In a `*-pr-<n>` environment a
+  new account (password or OAuth sign-up) starts with the intake marked done
+  and default answers, so it lands straight in the app
+  (`new_account_intake_completed_at` in `core/api/routers/experience.py`).
+  To check a PR that changes the intake, open Settings → Account → Setup
+  questions → "Run the setup again". Production and `staging` keep the intake.
+- **The setup check routes the same models as the run.** An Auto run's
+  payload names its models under `models.*`. `run_preflight` must alias them
+  (`core/worker/unified_aliases.py`) before `ModelGateway.protect_payload`,
+  exactly like the worker does. Otherwise the metric model gets no metered
+  route, and the run fails with "Scorer models need a gateway the sandboxes
+  can reach". Any new payload shape must go through the same aliasing in both
+  places.
+- **A sandbox command's kill timer stays at or under five hours.** A Vercel
+  box may live 24 hours, but a process kill timer above 18,000,000 ms is
+  rejected with `timeout should be <= 18000000`, and every run fails starting
+  its model proxy. `Sandbox.run` caps `kill_after` at
+  `_VERCEL_KILL_TIMER_CEILING_SECONDS`; never cap it at the box lifetime.
+- **Diagnose before labeling `needs-human`.** Check each service's latest
+  deployment in the PR environment (`railway status --json`). A service with
+  no deployment can be started with Railway's `serviceInstanceDeployV2`.
+
 ## Product and runtime model
 
 - **DSPy** is the structured program/prompt optimization path.
 - **Optimize Anything** is the black-box path. Its native engines come from the
   pinned upstream GEPA implementation and include GEPA, Best-of-N and
-  Meta-Harness, plus Skynet's own AutoResearch. `Auto` composes eligible engines without
+  Meta-Harness, plus Skynet's own AutoResearch and the pinned AutoSaddler and
+  ShinkaEvolve packages. `Auto` composes eligible engines without
   redefining their algorithms.
 - **Vercel Sandbox** is the production execution boundary for user workloads,
   including optimization setup, runs, recovery, and completed-run
@@ -221,9 +317,12 @@ When extracting a FastAPI route from `app.py` into a domain router, any
 inline `class FooRequest(BaseModel)` you move must **keep or drop docstrings
 exactly as in the source**. Pydantic emits the class docstring into the
 OpenAPI schema as `components.schemas.FooRequest.description` — add one
-where there wasn't one (or remove one that existed) and the `openapi.json`
-hash drifts, failing the regression gate. If you need to document the
-class for readers, use a comment above the class, not a docstring.
+where there wasn't one (or remove one that existed) and the published
+`openapi.json` changes. No test guards this any more (the old schema-hash
+regression test was removed), so compare the schema before and after by hand,
+e.g. with `.claude/skills/verify-skynet-api/scripts/openapi-hash.sh`. If you
+need to document the class for readers, use a comment above the class, not a
+docstring.
 
 ### Backend — domain router factory pattern
 

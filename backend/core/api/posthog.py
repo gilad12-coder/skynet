@@ -24,8 +24,6 @@ _EVENT_NAMES = {
     "signup_started",
     "signup_succeeded",
     "run_submitted",
-    "grid_search_submitted",
-    "blackbox_submitted",
     "settings_opened",
     "settings_tab_changed",
     "checkout_started",

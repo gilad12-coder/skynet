@@ -3,6 +3,7 @@
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import * as React from "react";
 import {
+  BracketsCurly,
   CaretDown,
   CheckCircle,
   CircleNotch,
@@ -268,7 +269,8 @@ export function ByokJsonImport() {
       {open && (
         <div className="mt-3 flex flex-col gap-3 animate-in fade-in-0 slide-in-from-top-1">
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-semibold text-foreground">
+            <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <BracketsCurly className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
               {msg("settings.keys.json_title")}
             </span>
             <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">

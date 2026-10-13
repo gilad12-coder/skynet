@@ -1,22 +1,23 @@
 /**
  * Per-run pipeline plan for the stage tracker.
  *
- * Every flow validates, splits, measures a baseline and evaluates the winner,
- * but the middle differs by optimization type and algorithm: a DSPy compile
- * (MIPROv2, BootstrapFewShot…), a GEPA reflective search, a single black-box
- * engine, or the auto strategy's parallel exploration followed by a GEPA
- * refinement lane. The plan names those stages and their algorithm so the
- * tracker reads as the run that actually happened.
+ * Every flow validates and evaluates the winner, but the rest depends on the
+ * run. DSPy runs split their dataset and, when there is a test split, measure
+ * a baseline first; black-box runs do neither, since they score the starting
+ * point in the final evaluation. The middle differs by algorithm: a DSPy
+ * compile (MIPROv2, BootstrapFewShot…), a GEPA reflective search, a single
+ * black-box engine, or the auto strategy's parallel exploration followed by a
+ * GEPA refinement lane. The plan lists only the stages this run goes through,
+ * so the tracker reads as the run that actually happened.
  */
-import type {
-  BlackboxStrategy,
-  OptimizationPayloadResponse,
-  OptimizationStatusResponse,
-} from "@/shared/types/api";
+import type { OptimizationPayloadResponse, OptimizationStatusResponse } from "@/shared/types/api";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { engineDisplayName } from "@/features/explore";
 import type { PipelineStage } from "../constants";
+import { plannedStageKeys, singleEngineOf } from "./stage-order";
+
+export { stageInPlan } from "./stage-order";
 
 export interface PlannedStage {
   key: PipelineStage;
@@ -25,7 +26,12 @@ export interface PlannedStage {
   detail?: string;
 }
 
-const HILL_CLIMBING_ENGINES = new Set(["autoresearch", "meta_harness", "autosaddler"]);
+const HILL_CLIMBING_ENGINES = new Set([
+  "autoresearch",
+  "meta_harness",
+  "autosaddler",
+  "shinka_evolve",
+]);
 
 // Optimizer names arrive as dotted DSPy paths ("dspy.teleprompt.MIPROv2") or
 // the bare "gepa" alias; the tracker wants the class name alone.
@@ -56,14 +62,7 @@ function middleStages(
     return [{ key: "optimizing", label: TERMS.optimization }];
   }
 
-  const events = job.progress_events ?? [];
-  const lanes = events.filter((e) => e.event === "lane_started");
-  const singleLane = lanes.find((e) => e.metrics?.phase === "single");
-  const strategy = payload?.payload.strategy as Partial<BlackboxStrategy> | undefined;
-  const singleEngine =
-    (singleLane?.metrics?.engine as string | undefined) ??
-    (strategy?.mode === "single" ? (strategy.engine ?? job.blackbox_result?.engine_used) : null);
-
+  const singleEngine = singleEngineOf(job, payload);
   if (singleEngine) {
     const id = singleEngine.toLowerCase();
     const label =
@@ -80,7 +79,8 @@ function middleStages(
   // The auto strategy (the default) races explore lanes, then hands the best
   // candidate to a GEPA lane to refine.
   const exploreEngines = new Set(
-    lanes
+    (job.progress_events ?? [])
+      .filter((e) => e.event === "lane_started")
       .filter((e) => e.metrics?.phase === "explore")
       .map((e) => e.metrics?.engine)
       .filter((engine): engine is string => typeof engine === "string"),
@@ -102,11 +102,22 @@ export function planPipelineStages(
   job: OptimizationStatusResponse,
   payload: OptimizationPayloadResponse | null | undefined,
 ): PlannedStage[] {
-  return [
-    { key: "validating", label: msg("auto.features.optimizations.constants.literal.1") },
-    { key: "splitting", label: msg("auto.features.optimizations.constants.literal.2") },
-    { key: "baseline", label: TERMS.baselineScore },
-    ...middleStages(job, payload),
-    { key: "evaluating", label: msg("auto.features.optimizations.constants.literal.3") },
-  ];
+  // The stage keys (and so the count the loading skeleton remembers) come from
+  // `plannedStageKeys`; this only labels them.
+  const middle = middleStages(job, payload);
+  const fixed: Partial<Record<PipelineStage, PlannedStage>> = {
+    validating: {
+      key: "validating",
+      label: msg("auto.features.optimizations.constants.literal.1"),
+    },
+    splitting: { key: "splitting", label: msg("auto.features.optimizations.constants.literal.2") },
+    baseline: { key: "baseline", label: TERMS.baselineScore },
+    evaluating: {
+      key: "evaluating",
+      label: msg("auto.features.optimizations.constants.literal.3"),
+    },
+  };
+  return plannedStageKeys(job, payload).map(
+    (key) => fixed[key] ?? middle.find((s) => s.key === key) ?? { key, label: TERMS.optimization },
+  );
 }

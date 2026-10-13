@@ -10,7 +10,7 @@ export function CountBadge({
   return (
     <span
       className={cn(
-        "grid min-w-4 place-items-center rounded-full bg-primary px-1 text-[0.5625rem] font-bold leading-4 text-primary-foreground tabular-nums",
+        "grid min-w-4 place-items-center rounded-full bg-primary-fill px-1 text-[0.5625rem] font-bold leading-4 text-primary-foreground tabular-nums",
         overlay && "absolute -end-0.5 -top-0.5",
         className,
       )}
@@ -28,8 +28,8 @@ export function CountPill({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-1.5 py-px text-[0.6875rem] font-medium tabular-nums",
-        active ? "bg-primary/10 text-primary" : "bg-foreground/10 text-foreground/75",
+        "inline-flex items-center rounded-md px-1.5 py-px text-[0.6875rem] font-medium tabular-nums",
+        active ? "bg-primary-fill text-primary-foreground" : "bg-foreground/10 text-foreground/75",
         className,
       )}
       {...props}

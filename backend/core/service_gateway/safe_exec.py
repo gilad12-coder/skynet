@@ -22,6 +22,7 @@ run inside their own subprocess and exec directly (see
 
 from __future__ import annotations
 
+import ast
 import inspect
 import multiprocessing as mp
 import threading
@@ -35,7 +36,7 @@ from typing import Any
 import dspy
 
 from ..exceptions import ServiceError
-from .optimization.blackbox.runner import IMAGE_HELPER_NAME, LLM_HELPER_NAME, Image, missing_llm
+from .optimization.blackbox.runner import IMAGE_HELPER_NAME, LLM_HELPER_NAME, LOG_HELPER_NAME, Image, log, missing_llm
 from .optimization.blackbox.scorer import load_scorer_from_code
 from .optimization.data import (
     extract_signature_fields,
@@ -64,6 +65,7 @@ _signature_cache: dict[str, SignatureIntrospection] = {}
 _metric_cache: dict[str, MetricIntrospection] = {}
 _transform_cache: dict[str, TransformIntrospection] = {}
 _scorer_cache: dict[str, bool] = {}
+_workspace_cache: dict[str, WorkspaceCodeIntrospection] = {}
 _dogpile_locks: dict[str, threading.Lock] = {}
 _locks_mutex = threading.Lock()
 
@@ -127,6 +129,31 @@ class TransformIntrospection:
 
     callable_name: str
     param_names: list[str]
+
+
+@dataclass(frozen=True)
+class FunctionShape:
+    """The positional arity of one top-level function, as its source declares it.
+
+    ``capacity`` and ``required`` are ``None`` when the name is bound by an
+    assignment or import, whose signature only the sandbox can see.
+    """
+
+    capacity: int | None
+    required: int | None
+
+
+@dataclass(frozen=True)
+class WorkspaceCodeIntrospection:
+    """What the source of one piece of workspace code declares, read without running it.
+
+    ``syntax_error`` is ``"<Type>: <message>"`` when the code does not parse;
+    ``functions`` then is empty.
+    """
+
+    syntax_error: str | None
+    functions: dict[str, FunctionShape]
+    uses_llm: bool
 
 
 @dataclass(frozen=True)
@@ -597,7 +624,9 @@ def _scorer_worker(scorer_code: str, queue: Any) -> None:
         queue: Multiprocessing queue used to return a result dict.
     """
     try:
-        load_scorer_from_code(scorer_code, helpers={LLM_HELPER_NAME: missing_llm, IMAGE_HELPER_NAME: Image})
+        load_scorer_from_code(
+            scorer_code, helpers={LLM_HELPER_NAME: missing_llm, IMAGE_HELPER_NAME: Image, LOG_HELPER_NAME: log}
+        )
         queue.put({"ok": True})
     except BaseException as exc:  # user code is arbitrary — any failure is reported, not raised
         queue.put(_error_payload(exc))
@@ -625,3 +654,111 @@ def validate_scorer_code(code: str, *, timeout_seconds: float = _DEFAULT_PARSE_T
         if not result.get("ok"):
             _raise_child_error(result)
         _bounded_cache_put(_scorer_cache, code, True)
+
+
+# Arity reported for ``*args``: large enough to satisfy every contract.
+_VARARGS_CAPACITY = 1_000
+
+
+def _function_shape(node: ast.FunctionDef | ast.AsyncFunctionDef) -> FunctionShape:
+    """Read a function definition's positional capacity and required count.
+
+    Args:
+        node: A parsed function definition.
+
+    Returns:
+        How many positional arguments it accepts and how many it requires.
+    """
+    args = node.args
+    positional = [*args.posonlyargs, *args.args]
+    capacity = _VARARGS_CAPACITY if args.vararg is not None else len(positional)
+    return FunctionShape(capacity=capacity, required=len(positional) - len(args.defaults))
+
+
+def _introspect_source(code: str) -> dict[str, Any]:
+    """Parse workspace code and describe its top-level names without executing it.
+
+    Args:
+        code: User-authored source.
+
+    Returns:
+        A pickleable description: syntax error, function shapes and ``llm`` use.
+    """
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError) as exc:
+        return {"syntax_error": f"{type(exc).__name__}: {exc}", "functions": {}, "uses_llm": False}
+    functions: dict[str, tuple[int | None, int | None]] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            shape = _function_shape(node)
+            functions[node.name] = (shape.capacity, shape.required)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    functions[target.id] = (None, None)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                functions[(alias.asname or alias.name).split(".")[0]] = (None, None)
+    uses_llm = any(
+        (isinstance(node, ast.Name) and node.id == "llm")
+        or (isinstance(node, ast.Attribute) and node.attr == "llm")
+        or (isinstance(node, ast.alias) and node.name == "llm")
+        for node in ast.walk(tree)
+    )
+    return {"syntax_error": None, "functions": functions, "uses_llm": uses_llm}
+
+
+def _workspace_worker(code: str, queue: Any) -> None:
+    """Child-side entry point for ``introspect_workspace_code``.
+
+    Args:
+        code: User-authored workspace source.
+        queue: Multiprocessing queue used to return a result dict.
+    """
+    try:
+        queue.put({"ok": True, **_introspect_source(code)})
+    except BaseException as exc:  # a hostile source can exhaust the parser — report, never raise
+        queue.put(_error_payload(exc))
+
+
+def introspect_workspace_code(
+    code: str, *, timeout_seconds: float = _DEFAULT_PARSE_TIMEOUT_SECONDS
+) -> WorkspaceCodeIntrospection:
+    """Describe unified workspace code's top-level functions in a subprocess.
+
+    The code is parsed, never executed: its imports may only exist in the
+    sandbox image, so the sandbox contract check is what runs it.
+
+    Args:
+        code: User-authored run or metric source.
+        timeout_seconds: Maximum time to wait for the child to finish.
+
+    Returns:
+        The syntax error, if any, each top-level name's positional arity and
+        whether the code calls the ``llm`` helper.
+
+    Raises:
+        ServiceError: When the child fails or times out.
+    """
+    cached = _workspace_cache.get(code)
+    if cached is not None:
+        return cached
+    with _dogpile_lock(f"ws:{code}"):
+        cached = _workspace_cache.get(code)
+        if cached is not None:
+            return cached
+        result = _run_in_subprocess(_workspace_worker, (code,), timeout_seconds=timeout_seconds)
+        if not result.get("ok"):
+            _raise_child_error(result)
+        introspection = WorkspaceCodeIntrospection(
+            syntax_error=result["syntax_error"],
+            functions={
+                name: FunctionShape(capacity=capacity, required=required)
+                for name, (capacity, required) in result["functions"].items()
+            },
+            uses_llm=bool(result["uses_llm"]),
+        )
+        _bounded_cache_put(_workspace_cache, code, introspection)
+        return introspection

@@ -15,7 +15,7 @@ interface PresenceStripProps {
  * is working so activity is noticeable even at a glance. The hue is
  * driven by the current trust mode so the color carries that signal.
  */
-export function PresenceStrip({ active, hue = "#3D2E22", className }: PresenceStripProps) {
+export function PresenceStrip({ active, hue = "var(--primary)", className }: PresenceStripProps) {
   return (
     <span
       aria-hidden="true"
@@ -24,7 +24,7 @@ export function PresenceStrip({ active, hue = "#3D2E22", className }: PresenceSt
         active && "animate-pulse motion-reduce:animate-none",
         className,
       )}
-      style={{ backgroundColor: active ? hue : `${hue}26` }}
+      style={{ backgroundColor: active ? hue : `color-mix(in srgb, ${hue} 15%, transparent)` }}
     />
   );
 }

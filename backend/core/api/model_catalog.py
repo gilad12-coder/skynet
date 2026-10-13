@@ -102,9 +102,40 @@ class CatalogModel(BaseModel):
             "score per dollar; runs the composer's Auto mode. At most one per catalog."
         ),
     )
+    is_interview_default: bool = Field(
+        default=False,
+        description=(
+            "The model agent interviews run when the user picks none: the fastest "
+            "of the cheaper half of the featured models, by OpenRouter's live "
+            "latency and throughput. At most one per catalog."
+        ),
+    )
+    is_strongest: bool = Field(
+        default=False,
+        description=(
+            "The featured model that thinks by default with the highest Artificial "
+            "Analysis intelligence index; the reflection model's Automatic setting "
+            "runs it. At most one per catalog."
+        ),
+    )
+    display_name: str | None = Field(
+        default=None,
+        description=(
+            "The provider's human-readable model name without the lab prefix "
+            "(e.g. 'Claude Haiku 5.5'). Display only; None when the listing gives none."
+        ),
+    )
     supports_vision: bool = Field(
         default=False,
         description="Model accepts image inputs (required when the dataset has a dspy.Image column).",
+    )
+    lab_tier: int = Field(
+        default=1,
+        description=(
+            "Rank of the model's lab in best-value orderings, read from its vendor: "
+            "0 for the top labs (Anthropic, OpenAI, Google), 2 for Chinese labs, 1 otherwise. "
+            "Best value sorts on it first and on score per dollar second."
+        ),
     )
     available: bool = Field(default=False, description="True if backend has an API key for this model.")
     max_input_tokens: int | None = Field(default=None, description="Context window size.")
@@ -120,6 +151,44 @@ class CatalogModel(BaseModel):
     output_cost_per_token: float | None = Field(
         default=None,
         description="Provider output (completion) cost per token in USD, or None when unpriced.",
+    )
+    intelligence_index: float | None = Field(
+        default=None,
+        description=(
+            "Artificial Analysis intelligence index from OpenRouter's listing. A new "
+            "release OpenRouter has not benchmarked yet carries its line's previous "
+            "score. None when the model is unrated."
+        ),
+    )
+    artificial_analysis_url: str | None = Field(
+        default=None,
+        description=(
+            "The model's Artificial Analysis page, only once a fetch has confirmed the page "
+            "exists and its title names this model; None otherwise, and clients then show "
+            "no link."
+        ),
+    )
+    throughput_tps: float | None = Field(
+        default=None,
+        description=(
+            "Median output tokens per second of the model's fastest healthy OpenRouter "
+            "endpoint over the last 30 minutes, or None when OpenRouter reports none."
+        ),
+    )
+    ttft_ms: float | None = Field(
+        default=None,
+        description=(
+            "Median milliseconds to the first token on that same endpoint over the "
+            "last 30 minutes, or None when OpenRouter reports none."
+        ),
+    )
+    latency_ms: float | None = Field(
+        default=None,
+        description=(
+            "Estimated milliseconds to a complete 150-token reply on that same endpoint: "
+            "the median time to the first token plus 150 tokens at the median output "
+            "speed. None when either median is missing."
+        ),
     )
     zero_retention: bool = Field(
         default=False,
@@ -451,10 +520,46 @@ _FEATURED_PER_LAB = 3
 # The full menus offer a lab's releases from the last two years.
 _PRACTICAL_WINDOW_SECONDS = 2 * 365 * 24 * 3600
 
+# Best value ranks by lab before score per dollar, keyed by OpenRouter vendor
+# slug or LiteLLM provider prefix. Unlisted vendors sit in the middle tier.
+_TOP_LAB_TIER = 0
+_DEFAULT_LAB_TIER = 1
+_LAB_TIERS: dict[str, int] = {
+    **dict.fromkeys(("anthropic", "openai", "google", "gemini", "vertex_ai"), _TOP_LAB_TIER),
+    **dict.fromkeys(
+        (
+            "z-ai",
+            "zai",
+            "zhipuai",
+            "deepseek",
+            "qwen",
+            "dashscope",
+            "alibaba",
+            "moonshotai",
+            "moonshot",
+            "minimax",
+            "bytedance",
+            "bytedance-seed",
+            "volcengine",
+            "xiaomi",
+            "stepfun",
+            "tencent",
+            "meituan",
+            "inclusionai",
+            "baidu",
+        ),
+        2,
+    ),
+}
+
 # Real OpenRouter models the last catalog build left out as impractical. Menus
 # never offer them, but a session or saved pick made before they dropped out
 # keeps running rather than failing validation.
 _hidden_model_values: frozenset[str] = frozenset()
+
+# Benchmark score of each featured model, from the last catalog build. The
+# interview-model pick ranks on it without the catalog exposing the score.
+_featured_scores: dict[str, float] = {}
 
 # LiteLLM provider prefixes offered for bring-your-own-key. The BYOK catalog
 # lists these providers' registry models regardless of platform API keys, since
@@ -697,6 +802,37 @@ def _probe_item_intelligence(item: dict) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
+def _probe_item_display_name(item: dict) -> str | None:
+    """Read the listing's human-readable model name, without its lab prefix.
+
+    OpenRouter names read ``"Anthropic: Claude Haiku 5.5"``; the logo beside
+    the name already shows the lab.
+
+    Args:
+        item: The raw provider item dict.
+
+    Returns:
+        The bare name, or ``None`` when the listing carries none.
+    """
+    name = item.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    return name.split(":", 1)[-1].strip() or None
+
+
+def featured_score(value: str) -> float | None:
+    """Return the benchmark score of a featured model from the last catalog build.
+
+    Args:
+        value: A catalog model id.
+
+    Returns:
+        The Artificial Analysis intelligence index, or ``None`` when the model
+        is not featured or unbenchmarked.
+    """
+    return _featured_scores.get(value)
+
+
 def _model_family(model_id: str) -> str:
     """Collapse a model name to its product line, dropping versions and dates.
 
@@ -850,33 +986,103 @@ def _featured_probe_ids(deployed: dict[str, dict]) -> set[str]:
     return featured
 
 
-def _best_value_probe_id(deployed: dict[str, dict], featured: set[str]) -> tuple[str, float] | None:
-    """Pick the featured model with the best benchmark score per input dollar.
+def lab_tier(model_id: str) -> int:
+    """Rank a model's lab for best-value orderings: top labs first, Chinese labs last.
 
-    Only models that reason without being asked qualify: Auto sends no
-    effort, and a non-thinker would answer hard turns off the cuff.
+    Args:
+        model_id: A catalog value (``openrouter/vendor/model``,
+            ``provider/model``) or an OpenRouter probe id (``vendor/model``).
+
+    Returns:
+        0 for Anthropic, OpenAI and Google, 2 for Chinese labs, 1 otherwise.
+    """
+    parts = model_id.split("/")
+    vendor = parts[1] if parts[0] == "openrouter" and len(parts) > 2 else parts[0]
+    return _LAB_TIERS.get(vendor.lstrip("~").lower(), _DEFAULT_LAB_TIER)
+
+
+def _best_value_probe_id(deployed: dict[str, dict], featured: set[str]) -> tuple[str, tuple[int, float]] | None:
+    """Pick the featured model of the best-ranked lab with the best benchmark score per input dollar.
+
+    Only models that can reason qualify: a non-thinker would answer hard
+    turns off the cuff. An opt-in thinker still thinks under Auto, because
+    :func:`default_effort_for` sends it a low effort. The lab tier (see
+    :func:`lab_tier`) ranks first, score per dollar second.
 
     Args:
         deployed: Probe index of ``vendor/model`` id to raw item.
         featured: Probe ids already chosen by :func:`_featured_probe_ids`.
 
     Returns:
-        ``(probe id, score per dollar)`` of the winner, or ``None`` when no
-        featured model thinks by default with a benchmark and a price.
+        ``(probe id, (negated lab tier, score per dollar))`` of the winner,
+        so larger ranks better, or ``None`` when no featured model can reason
+        with a benchmark and a price.
     """
-    best: tuple[str, float] | None = None
+    best: tuple[str, tuple[int, float]] | None = None
     for probe_id in sorted(featured):
         item = deployed.get(probe_id)
-        if not item or not _probe_item_reasoning(item).get("reasoning_default_enabled"):
+        reasoning = _probe_item_reasoning(item) if item else {}
+        if not reasoning.get("reasoning_default_enabled") and not reasoning.get("reasoning_efforts"):
             continue
         score = _probe_item_intelligence(item)
         price = _probe_item_cost(item, "prompt")
         if score is None or not price:
             continue
-        value = score / price
-        if best is None or value > best[1]:
-            best = (probe_id, value)
+        rank = (-lab_tier(probe_id), score / price)
+        if best is None or rank > best[1]:
+            best = (probe_id, rank)
     return best
+
+
+def _intelligence_by_probe_id(deployed: dict[str, dict]) -> dict[str, float]:
+    """Map each scored model of a listing to its intelligence index.
+
+    A model's own benchmark wins; a line's newest release OpenRouter has not
+    benchmarked yet carries its predecessor's score (see :func:`_scored_lines`).
+
+    Args:
+        deployed: Probe index of ``vendor/model`` id to raw item.
+
+    Returns:
+        ``{probe id: index}`` for every model with an own or inherited score.
+    """
+    scores = {
+        probe_id: score for probe_id, item in deployed.items() if (score := _probe_item_intelligence(item)) is not None
+    }
+    for items in _practical_candidates(deployed).values():
+        for model_id, _item, score in _scored_lines(items).values():
+            if score is not None:
+                scores.setdefault(model_id, score)
+    return scores
+
+
+def _strongest_probe_id(deployed: dict[str, dict], featured: set[str]) -> tuple[str, float] | None:
+    """Pick the featured model with the highest intelligence index that thinks by default.
+
+    Reflection Automatic runs this model: reflection turns are few and decide
+    what the optimizer tries next, so strength beats price there. A new
+    release that inherits its predecessor's score qualifies on release day;
+    a tie goes to the newer release.
+
+    Args:
+        deployed: Probe index of ``vendor/model`` id to raw item.
+        featured: Probe ids already chosen by :func:`_featured_probe_ids`.
+
+    Returns:
+        ``(probe id, index)`` of the winner, or ``None`` when no featured
+        model thinks by default with a score.
+    """
+    scores = _intelligence_by_probe_id(deployed)
+    best: tuple[str, float, int] | None = None
+    for probe_id in sorted(featured):
+        item = deployed.get(probe_id)
+        score = scores.get(probe_id)
+        if not item or score is None or not _probe_item_reasoning(item).get("reasoning_default_enabled"):
+            continue
+        created = item.get("created") if isinstance(item.get("created"), int) else 0
+        if best is None or (score, created) > (best[1], best[2]):
+            best = (probe_id, score, created)
+    return (best[0], best[1]) if best else None
 
 
 def _dominates(a: tuple[str, dict, float], b: tuple[str, dict, float]) -> bool:
@@ -1324,13 +1530,23 @@ def get_catalog() -> ModelCatalogResponse:
                 )
             )
 
-    global _hidden_model_values
+    global _hidden_model_values, _featured_scores
     featured_values: set[str] = set()
     practical_by_dc: dict[tuple[str, str | None], set[str]] = {}
-    best_value: tuple[str, float] | None = None
+    best_value: tuple[str, tuple[int, float]] | None = None
+    strongest: tuple[str, float] | None = None
+    display_names: dict[str, str] = {}
+    scores: dict[str, float] = {}
+    indexes: dict[str, float] = {}
     for (probe_slug, dc_label), deployed in deployed_by_dc.items():
         if not deployed:
             continue
+        for probe_id, item in deployed.items():
+            name = _probe_item_display_name(item)
+            if name:
+                display_names[_probe_prefixed_id(probe_slug, probe_id)] = name
+        for probe_id, index in _intelligence_by_probe_id(deployed).items():
+            indexes[_probe_prefixed_id(probe_slug, probe_id)] = index
         practical_ids = _practical_probe_ids(deployed)
         if practical_ids is not None:
             practical_by_dc[(probe_slug, dc_label)] = {
@@ -1338,10 +1554,18 @@ def get_catalog() -> ModelCatalogResponse:
             }
         featured_ids = _featured_probe_ids(deployed)
         featured_values.update(_probe_prefixed_id(probe_slug, probe_id) for probe_id in featured_ids)
+        for probe_id in featured_ids:
+            score = _probe_item_intelligence(deployed[probe_id])
+            if score is not None:
+                scores[_probe_prefixed_id(probe_slug, probe_id)] = score
         winner = _best_value_probe_id(deployed, featured_ids)
         if winner and (best_value is None or winner[1] > best_value[1]):
             best_value = (_probe_prefixed_id(probe_slug, winner[0]), winner[1])
+        strong = _strongest_probe_id(deployed, featured_ids)
+        if strong and (strongest is None or strong[1] > strongest[1]):
+            strongest = (_probe_prefixed_id(probe_slug, strong[0]), strong[1])
     default_value = best_value[0] if best_value else None
+    strongest_value = strongest[0] if strongest else None
 
     def _practical(m: CatalogModel) -> bool:
         allowed = practical_by_dc.get((m.provider, m.data_center))
@@ -1352,12 +1576,26 @@ def get_catalog() -> ModelCatalogResponse:
     )
     models = [m for m in models if _practical(m) and not excluded_from_managed(m.value)]
     models = [
-        m.model_copy(update={"featured": True, "is_default": m.value == default_value})
-        if m.value in featured_values
-        else m
+        m.model_copy(
+            update={
+                "display_name": display_names.get(m.value),
+                "intelligence_index": indexes.get(m.value),
+                "lab_tier": lab_tier(m.value),
+                **(
+                    {
+                        "featured": True,
+                        "is_default": m.value == default_value,
+                        "is_strongest": m.value == strongest_value,
+                    }
+                    if m.value in featured_values
+                    else {}
+                ),
+            }
+        )
         for m in models
         if m.available and not _REMOVED_MODEL_RE.search(m.value)
     ]
+    _featured_scores = scores
 
     models.sort(key=lambda m: (m.provider, m.data_center or "", m.value))
 
@@ -1374,6 +1612,57 @@ _cached_response: ModelCatalogResponse | None = None
 _cached_at_monotonic: float = 0.0
 _cache_lock = Lock()
 _refresh_in_flight = False
+
+
+def catalog_snapshot() -> ModelCatalogResponse | None:
+    """Return the last built catalog without ever building one.
+
+    Returns:
+        The cached catalog, or ``None`` before the boot prewarm lands.
+    """
+    return _cached_response
+
+
+def unpicked_effort(entry: CatalogModel) -> str | None:
+    """Return the effort to send a catalog model when the caller picked none.
+
+    An unset effort sends OpenRouter no ``reasoning`` param, so an opt-in
+    thinker (Claude, Gemini) would answer without thinking at all. Such a
+    model gets the lowest effort from ``low`` up on its ladder; a model
+    that thinks by default gets its catalog default.
+
+    Args:
+        entry: The model's catalog row.
+
+    Returns:
+        The catalog default effort when the model thinks by default, its
+        low effort when it only thinks on request, else ``None`` (no
+        reasoning control).
+    """
+    if entry.reasoning_default_enabled:
+        return entry.default_reasoning_effort
+    floor = REASONING_EFFORTS.index("low")
+    return next((e for e in entry.reasoning_efforts or [] if REASONING_EFFORTS.index(e) >= floor), None)
+
+
+def default_effort_for(model: str | None) -> str | None:
+    """Return the effort to send ``model`` when the caller picked none.
+
+    Reads only the built catalog, so an LM build never blocks on a cold
+    catalog build. See :func:`unpicked_effort` for the policy.
+
+    Args:
+        model: Catalog model id (``CatalogModel.value``), or ``None``.
+
+    Returns:
+        :func:`unpicked_effort` of the model's catalog row, or ``None`` for
+        an unknown model or before the catalog is built.
+    """
+    snapshot = _cached_response
+    if not model or snapshot is None:
+        return None
+    entry = next((m for m in snapshot.models if m.value == model), None)
+    return unpicked_effort(entry) if entry is not None else None
 
 
 def agent_model_id(configured: str = "") -> str:

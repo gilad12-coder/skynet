@@ -6,6 +6,7 @@ const billingUrl = new URL("../../billing/lib/pricing.ts", import.meta.url).href
 const centUrl = new URL("../../billing/lib/wallet.ts", import.meta.url).href;
 const budgetLimitUrl = new URL("./budget-limit.ts", import.meta.url).href;
 const costBracketUrl = new URL("./cost-bracket.ts", import.meta.url).href;
+const scorerDependenciesUrl = new URL("./scorer-dependencies.ts", import.meta.url).href;
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -14,6 +15,9 @@ registerHooks({
     }
     if (specifier === "./cost-bracket" && context.parentURL === budgetLimitUrl) {
       return { shortCircuit: true, url: costBracketUrl };
+    }
+    if (specifier === "./scorer-dependencies" && context.parentURL === costBracketUrl) {
+      return { shortCircuit: true, url: scorerDependenciesUrl };
     }
     if (specifier === "./wallet" && context.parentURL === billingUrl) {
       return { shortCircuit: true, url: centUrl };

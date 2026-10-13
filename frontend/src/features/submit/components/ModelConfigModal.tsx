@@ -14,8 +14,8 @@ import { Switch } from "@/shared/ui/primitives/switch";
 import { Separator } from "@/shared/ui/primitives/separator";
 import { ModelPicker, modelSupportsThinking } from "./ModelPicker";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
-import { modelProviderSlug } from "@/shared/lib/model-provider";
-import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
+import { modelDisplayName, modelProviderSlug } from "@/shared/lib/model-provider";
+import { effortLabel, effortsFor, unpickedEffort } from "@/shared/lib/model-efforts";
 import { NumberInput } from "@/shared/ui/number-input";
 import { Segmented } from "@/shared/ui/segmented";
 import { Disclosure } from "./Disclosure";
@@ -25,6 +25,7 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { defaultOpen, isVisible, useExperienceLevel } from "@/features/experience";
 
 interface ModelConfigModalProps {
   open: boolean;
@@ -92,6 +93,13 @@ export function ModelConfigModal({
   // layoutId must be unique per instance or Framer pairs them up.
   const parametersId = React.useId();
   const [parametersOpen, setParametersOpen] = React.useState(false);
+  // Expert opens Parameters by default; Guided leaves them out unless the
+  // config already carries a value, which then stays on screen to edit.
+  const level = useExperienceLevel();
+  const paramsFirstOpen = defaultOpen("wizard.model_params", level);
+  const hasParams = (c: ModelConfig) =>
+    c.temperature != null || c.max_tokens != null || !!c.extra?.reasoning_effort;
+  const showParameters = isVisible("wizard.model_params", level) || hasParams(config);
   const [draft, setDraft] = React.useState<ModelConfig>(() => withoutInlineConnection(config));
   const mode = nameOnly ? "managed" : (draft.token_source ?? "managed");
 
@@ -139,9 +147,7 @@ export function ModelConfigModal({
   React.useEffect(() => {
     if (open) {
       setDraft(withoutInlineConnection(config));
-      setParametersOpen(
-        config.temperature != null || config.max_tokens != null || !!config.extra?.reasoning_effort,
-      );
+      setParametersOpen(paramsFirstOpen || hasParams(config));
     }
   }, [open, config]);
 
@@ -158,14 +164,24 @@ export function ModelConfigModal({
   // catalog knows it, else medium, else the middle of the ladder. A model
   // with no ladder takes any level as "on", and medium is OpenRouter's own.
   const defaultEffort = (model: string, ladder: readonly string[]) => {
-    const providerDefault = detectionModels?.find((m) => m.value === model)?.default_reasoning_effort;
+    const hit = detectionModels?.find((m) => m.value === model);
+    const unpicked = unpickedEffort(hit);
+    if (unpicked && ladder.includes(unpicked)) return unpicked;
+    const providerDefault = hit?.default_reasoning_effort;
     if (providerDefault && ladder.includes(providerDefault)) return providerDefault;
-    return ladder.includes("medium") ? "medium" : (ladder[Math.floor(ladder.length / 2)] ?? "medium");
+    return ladder.includes("medium")
+      ? "medium"
+      : (ladder[Math.floor(ladder.length / 2)] ?? "medium");
   };
   const thinkingInfo = (model: string) => {
     const hit = detectionModels?.find((m) => m.value === model);
     const mandatory = !!hit?.reasoning_mandatory;
-    return { mandatory, defaultOn: mandatory || !!hit?.reasoning_default_enabled };
+    // The backend sends an opt-in thinker low effort when none is stored,
+    // so it is on by default too, and turning it off stores "none".
+    return {
+      mandatory,
+      defaultOn: mandatory || !!hit?.reasoning_default_enabled || unpickedEffort(hit) !== null,
+    };
   };
   const { mandatory: thinkingMandatory, defaultOn: thinkingDefaultOn } = thinkingInfo(draft.name);
   const canThink = modelSupportsThinking(draft.name, detectionModels);
@@ -219,10 +235,10 @@ export function ModelConfigModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[85vh] sm:max-w-2xl">
-        <DialogTitleRow title={roleLabel} className="px-4 pt-6 sm:px-6" />
+      <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[85dvh] sm:max-w-2xl">
+        <DialogTitleRow title={roleLabel} className="shrink-0 px-4 pt-6 sm:px-6" />
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
           {visibleRecent.length > 0 && (
             <div className="space-y-1.5">
               <Label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
@@ -237,25 +253,23 @@ export function ModelConfigModal({
                       className={cn(
                         "group/recent flex shrink-0 items-center gap-1.5 rounded-md border ps-2 pe-1 py-1 text-[0.6875rem] font-mono transition-all",
                         isActive
-                          ? "border-primary/50 bg-primary/5 text-foreground"
-                          : "border-border/40 bg-muted/30 text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-muted/50",
+                          ? "on-primary"
+                          : "border-border/40 bg-muted/30 text-muted-foreground hover:border-primary-fill/40 hover:text-foreground hover:bg-muted/50",
                       )}
                     >
                       <button
                         type="button"
                         onClick={() => {
                           setDraft(withoutInlineConnection(rc));
-                          setParametersOpen(
-                            rc.temperature != null ||
-                              rc.max_tokens != null ||
-                              !!rc.extra?.reasoning_effort,
-                          );
+                          setParametersOpen(paramsFirstOpen || hasParams(rc));
                         }}
                         className="flex items-center gap-1.5 cursor-pointer outline-none"
                       >
                         <ProviderLogo slug={modelProviderSlug(rc.name)} size={16} />
-                        <span className="truncate max-w-[120px]">{rc.name.split("/").pop()}</span>
-                        {!nameOnly && !modelDefaultsOnly && (
+                        <span className="truncate max-w-[120px]" dir="ltr">
+                          {modelDisplayName(rc.name, detectionModels)}
+                        </span>
+                        {!nameOnly && !modelDefaultsOnly && showParameters && (
                           <span className="text-[9px] opacity-60">{rc.temperature}</span>
                         )}
                       </button>
@@ -264,7 +278,7 @@ export function ModelConfigModal({
                           type="button"
                           aria-label={formatMsg(
                             "auto.features.submit.components.modelconfigmodal.recent.remove",
-                            { model: rc.name.split("/").pop() ?? rc.name },
+                            { model: modelDisplayName(rc.name, detectionModels) },
                           )}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -329,7 +343,7 @@ export function ModelConfigModal({
                           openTo("providers");
                         }}
                         aria-label={msg("billing.mode.manage_keys")}
-                        className="size-8 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/60"
+                        className="size-8 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                       >
                         <Key className="size-4" aria-hidden="true" />
                       </button>
@@ -356,7 +370,9 @@ export function ModelConfigModal({
                   // new model accepts: "off" becomes the default when the new
                   // model can't turn off (or is off anyway), and a level
                   // outside its ladder moves to its default level.
-                  const ladder = effortsFor(next, detectionModels).filter((level) => level !== "none");
+                  const ladder = effortsFor(next, detectionModels).filter(
+                    (level) => level !== "none",
+                  );
                   const { mandatory, defaultOn } = thinkingInfo(next);
                   let effort = (p.extra?.reasoning_effort as string | undefined) ?? null;
                   if (!modelSupportsThinking(next, detectionModels)) effort = null;
@@ -469,7 +485,7 @@ export function ModelConfigModal({
           )}
         </div>
 
-        <DialogFooter className="border-t border-border/40 px-4 pb-4 pt-4 sm:px-6 sm:pb-6">
+        <DialogFooter className="shrink-0 border-t border-border/40 px-4 pb-4 pt-4 sm:px-6 sm:pb-6">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {msg("auto.features.submit.components.modelconfigmodal.10")}
           </Button>

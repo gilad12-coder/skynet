@@ -1,58 +1,65 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Badge } from "@/shared/ui/primitives/badge";
-import { PingDot } from "@/shared/ui/ping-dot";
-import { getStatusLabel } from "@/shared/constants/job-status";
+import { getStatusLabel, STATUS_DOT_COLOR, STATUS_DOT_FALLBACK } from "@/shared/constants/job-status";
 import { cn } from "@/shared/lib/utils";
 import type { JobStatus } from "@/shared/types/api";
 
 interface StatusBadgeProps {
   status: JobStatus | string;
   className?: string;
-  /** Compact variant for table rows: smaller text, no PingDot. */
+  /** Compact variant for table rows: smaller dot and text. */
   compact?: boolean;
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: "status-pill-pending",
-  validating: "status-pill-running",
-  running: "status-pill-running",
-  success: "status-pill-success",
-  failed: "status-pill-failed",
-  cancelled: "status-pill-cancelled",
-  paused: "status-pill-paused",
-  stopped: "status-pill-paused",
-};
-
-const COMPACT_CLASS = "px-2 py-0.5 text-[0.6875rem] font-semibold";
-
-export function StatusBadge({ status, className = "", compact = false }: StatusBadgeProps) {
-  const label = getStatusLabel(status);
-  const colorClass = STATUS_COLORS[status] ?? "";
-  const isRunning = status === "running";
-  const sizeClass = compact ? COMPACT_CLASS : "text-[0.8125rem] px-3 py-1 font-bold tracking-wide";
-
-  return (
-    <Badge
-      variant="outline"
-      size={compact ? "sm" : "md"}
-      className={cn(
-        sizeClass,
-        colorClass,
-        isRunning && "animate-pulse motion-reduce:animate-none",
-        className,
-      )}
-    >
-      {isRunning && !compact && <PingDot className="me-1" />}
-      {label}
-    </Badge>
-  );
 }
 
 export type StatusTone = "success" | "running" | "failed" | "pending" | "cancelled" | "paused";
 
-/** Compact status pill for non-job statuses (connectors, keys, transactions). */
+/** A small solid status dot; running work gets a soft pulse halo. */
+export function StatusDot({
+  status,
+  size = "md",
+  className,
+}: {
+  status: JobStatus | StatusTone | string;
+  size?: "sm" | "md";
+  className?: string;
+}) {
+  const color = STATUS_DOT_COLOR[status] ?? STATUS_DOT_FALLBACK;
+  const live = status === "running" || status === "validating";
+  const sizeClass = size === "sm" ? "size-1.5" : "size-2";
+  return (
+    <span aria-hidden className={cn("relative inline-flex shrink-0", sizeClass, className)}>
+      {live && (
+        <span
+          className="absolute inset-0 animate-ping rounded-full opacity-60 motion-reduce:animate-none"
+          style={{ backgroundColor: color }}
+        />
+      )}
+      <span className={cn("relative rounded-full", sizeClass)} style={{ backgroundColor: color }} />
+    </span>
+  );
+}
+
+/** A job status as a colored dot and a plain label, no filled pill. */
+export function StatusBadge({ status, className = "", compact = false }: StatusBadgeProps) {
+  return (
+    <span
+      className={cn(
+        "inline-flex w-fit shrink-0 items-center gap-1.5 whitespace-nowrap",
+        compact
+          ? "text-xs font-medium text-muted-foreground"
+          : "text-sm font-medium text-foreground",
+        status === "failed" && "text-[var(--status-failed)]",
+        className,
+      )}
+    >
+      <StatusDot status={status} size={compact ? "sm" : "md"} />
+      {getStatusLabel(status)}
+    </span>
+  );
+}
+
+/** Compact dot-and-label status for non-job statuses (keys, transactions). */
 export function StatusPill({
   tone,
   className,
@@ -63,12 +70,15 @@ export function StatusPill({
   children: ReactNode;
 }) {
   return (
-    <Badge
-      variant="outline"
-      size="sm"
-      className={cn(COMPACT_CLASS, `status-pill-${tone}`, className)}
+    <span
+      className={cn(
+        "inline-flex w-fit shrink-0 items-center gap-1.5 whitespace-nowrap text-xs font-medium text-muted-foreground",
+        tone === "failed" && "text-[var(--status-failed)]",
+        className,
+      )}
     >
+      <StatusDot status={tone} size="sm" />
       {children}
-    </Badge>
+    </span>
   );
 }

@@ -15,19 +15,21 @@ from typing import Any
 
 from core.billing.signals import BudgetReached
 from core.constants import OPTIMIZATION_TYPE_BLACKBOX
+from core.models.unified import UNIFIED_PAYLOAD_KIND
+from core.service_gateway.optimization.blackbox import preflight as blackbox_preflight
 from core.service_gateway.optimization.blackbox.preflight import verify_anything_in_sandbox
 from core.service_gateway.optimization.blackbox.sandbox import (
     ContainedSubprocessRuntime,
     current_sandbox_runtime,
     sandbox_runtime_context,
 )
-from core.worker.checkpoint_compat import runtime_identity
 from core.worker.interaction import run_interaction
 from core.worker.preflight import run_dspy_preflight
+from core.worker.sandbox_protocol import SANDBOX_PROTOCOL
 from core.worker.subprocess_runner import run_service_in_subprocess
 
 EVENT_PREFIX = "SKYNET_JOB_EVENT "
-INCOMPATIBLE_IMAGE_MESSAGE = "The sandbox backend image is incompatible with this worker revision and runtime."
+INCOMPATIBLE_IMAGE_MESSAGE = "The sandbox image speaks an older protocol than this worker; rebuild the sandbox image."
 _CHECKPOINT_PATH = re.compile(r"(?:(?:pair_\d+|gepa)/)?gepa_state\.bin\Z")
 
 
@@ -76,72 +78,73 @@ def _export_checkpoints(directory: Path, events: EventQueue, seen: dict[str, str
             seen[relative] = digest
 
 
-def _short(value: Any) -> str:
-    """Render one identity value, abbreviating digests and revisions.
+def _forget_request(path: Path) -> None:
+    """Remove the request file once it is in memory, so no proposer can read the metric from disk.
+
+    The document carries ``workspace.metric_code`` (unified runs) or
+    ``scorer.metric_code`` (legacy black-box runs). Proposers run as
+    contained commands in this same box and could otherwise find it.
 
     Args:
-        value: Python version, package version, source digest, or revision.
-
-    Returns:
-        The value as text, cut to its leading twelve characters when it is a hash.
+        path: The request file the supervisor wrote.
     """
-    text = str(value)
-    return text[:12] if len(text) > 16 else text
+    with contextlib.suppress(OSError):
+        path.unlink()
 
 
-def _leaves(identity: dict[str, Any]) -> dict[str, Any]:
-    """Flatten the dependency map so every identity part has one name.
+def _is_blackbox_family(payload: dict[str, Any]) -> bool:
+    """Tell whether a payload runs on the black-box engine layer.
 
     Args:
-        identity: Runtime identity as the worker or guest computed it.
+        payload: The guest request payload.
 
     Returns:
-        Python version, each dependency version, source digest, and revision by name.
+        True for legacy black-box runs and for unified runs.
     """
-    leaves: dict[str, Any] = {}
-    for key, value in identity.items():
-        if isinstance(value, dict):
-            leaves.update(value)
-        else:
-            leaves[key] = value
-    return leaves
+    return (
+        payload.get("_optimization_type") == OPTIMIZATION_TYPE_BLACKBOX
+        or payload.get("payload_kind") == UNIFIED_PAYLOAD_KIND
+    )
 
 
-def _identity_mismatch(expected: dict[str, Any], actual: dict[str, Any]) -> str:
-    """Name each part of the runtime identity the image and its worker disagree on.
+def _run_preflight(payload: dict[str, Any], preflight: dict[str, Any], events: EventQueue) -> dict[str, Any]:
+    """Dispatch a setup check to the verifier that matches the payload kind.
 
     Args:
-        expected: Identity the worker computed for itself.
-        actual: Identity this guest computed inside the image.
+        payload: The guest request payload.
+        preflight: Scope and identity of the requested check.
+        events: Parent-owned event transport, for DSPy preview tokens.
 
     Returns:
-        One sentence listing the differing parts, image value first.
+        The verifier's result document.
+
+    Raises:
+        RuntimeError: When a black-box check did not enter its sandbox.
     """
-    theirs, ours = _leaves(expected), _leaves(actual)
-    parts = [
-        f"{name}: {_short(ours.get(name))} in the image, {_short(theirs.get(name))} in the worker"
-        for name in sorted(set(theirs) | set(ours))
-        if theirs.get(name) != ours.get(name)
-    ]
-    return "; ".join(parts) + "."
+    if payload.get("payload_kind") == UNIFIED_PAYLOAD_KIND:
+        return blackbox_preflight.verify_unified_in_sandbox(payload, preflight["scope"])
+    if payload.get("_optimization_type") == OPTIMIZATION_TYPE_BLACKBOX:
+        runtime = current_sandbox_runtime()
+        if runtime is None:
+            raise RuntimeError("Anything setup did not enter its selected sandbox.")
+        return verify_anything_in_sandbox(
+            payload,
+            scope=preflight["scope"],
+            identity=preflight["identity"],
+            runtime=runtime,
+        )
+    return run_dspy_preflight(payload, preflight, lambda token: events.put({"type": "preview_token", **token}))
 
 
 def main() -> None:
     """Load the scoped request and execute the normal service entry point."""
-    document = json.loads(Path(sys.argv[1]).read_text())
+    request_path = Path(sys.argv[1])
+    document = json.loads(request_path.read_text())
+    _forget_request(request_path)
     events = EventQueue(document["nonce"])
-    expected_runtime = document.get("runtime_identity")
-    if expected_runtime is not None:
-        actual_runtime = runtime_identity()
-        if actual_runtime != expected_runtime:
-            events.put(
-                {
-                    "type": "error",
-                    "error": f"{INCOMPATIBLE_IMAGE_MESSAGE} {_identity_mismatch(expected_runtime, actual_runtime)}",
-                    "traceback": "",
-                }
-            )
-            return
+    if document.get("protocol") != SANDBOX_PROTOCOL:
+        events.put({"type": "error", "error": INCOMPATIBLE_IMAGE_MESSAGE, "traceback": ""})
+        return
     tools_route = document["payload"].pop("_skynet_tools_route", None)
     if tools_route is not None:
         if not os.environ.get("SKYNET_BUDGET_RELAY_URL"):
@@ -173,7 +176,7 @@ def main() -> None:
         thread.start()
     runtime_scope = (
         sandbox_runtime_context(ContainedSubprocessRuntime())
-        if document["payload"].get("_optimization_type") == OPTIMIZATION_TYPE_BLACKBOX
+        if _is_blackbox_family(document["payload"])
         else contextlib.nullcontext()
     )
     try:
@@ -182,22 +185,7 @@ def main() -> None:
                 result = run_interaction(document["payload"], interaction, events.put)
                 events.put({"type": "interaction_result", "result": result})
             elif preflight is not None:
-                if document["payload"].get("_optimization_type") == OPTIMIZATION_TYPE_BLACKBOX:
-                    runtime = current_sandbox_runtime()
-                    if runtime is None:
-                        raise RuntimeError("Anything setup did not enter its selected sandbox.")
-                    result = verify_anything_in_sandbox(
-                        document["payload"],
-                        scope=preflight["scope"],
-                        identity=preflight["identity"],
-                        runtime=runtime,
-                    )
-                else:
-                    result = run_dspy_preflight(
-                        document["payload"],
-                        preflight,
-                        lambda token: events.put({"type": "preview_token", **token}),
-                    )
+                result = _run_preflight(document["payload"], preflight, events)
                 events.put({"type": "preflight_result", "result": result})
             else:
                 run_service_in_subprocess(document["payload"], document["artifact_id"], events, "spawn")

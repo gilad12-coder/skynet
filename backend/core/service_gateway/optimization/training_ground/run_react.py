@@ -48,7 +48,6 @@ from core.constants import (
     PROGRESS_OPTIMIZED,
 )
 
-from ...language_models import GepaRecoverySeedBoundary
 from ..budget_stop import BudgetReached
 from ..incumbent import completed_gepa_result
 from ..logged_scores import reset_logged_metrics
@@ -678,7 +677,6 @@ def run_react_optimization(
     run_dir: str | None = None,
     progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
     timing_callbacks: Sequence[Any] = (),
-    recovery_seed_model: object | None = None,
 ) -> dict[str, Any]:
     """Optimise a live react program and report baseline-vs-optimized scalars.
 
@@ -716,8 +714,6 @@ def run_react_optimization(
         timing_callbacks: Stage-timing callbacks (typically the generation-LM
             :class:`GenLMTimingCallback`) to attribute student-rollout latency
             to the baseline/training/evaluation stages. Empty by default.
-        recovery_seed_model: Protected student model used to publish the exact
-            upstream seed-evaluation boundary.
 
     Returns:
         A dict with the servable ``program_state``, baseline/optimized scalar
@@ -748,9 +744,6 @@ def run_react_optimization(
 
     target_stopper = build_target_score_stopper(target_score)
     stop_callbacks = [target_stopper] if target_stopper is not None else None
-    recovery_boundary = GepaRecoverySeedBoundary(recovery_seed_model) if recovery_seed_model is not None else None
-    if recovery_boundary is not None:
-        stop_callbacks = [recovery_boundary, *(stop_callbacks or [])]
     budget_stop: BudgetReached | None = None
     try:
         with track_stage(STAGE_TRAINING, *timing_callbacks):
@@ -762,7 +755,6 @@ def run_react_optimization(
                 reflection_lm=(lambda x: adapter.stripped_lm_call(x)[0]),
                 max_metric_calls=max_metric_calls,
                 stop_callbacks=stop_callbacks,
-                callbacks=[recovery_boundary] if recovery_boundary is not None else None,
                 seed=seed,
                 run_dir=run_dir,
                 # GEPA defaults both off, which left react runs without a score chart

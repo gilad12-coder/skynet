@@ -1,16 +1,11 @@
 import type { ModelConfig } from "@/shared/types/api";
+import type { OptimizerChoice } from "@/shared/types/unified-run";
 
 type CodeAssistDefault = "auto" | "manual";
 type SplitModeDefault = "auto" | "manual";
 type TrustModeDefault = "ask" | "auto_safe" | "yolo";
 
 export interface UserPrefs {
-  // Layout preference: the wizard's collapsible sections start expanded.
-  expandAdvanced: boolean;
-  // Lightweight mode for low-resource machines: kills motion/blur and swaps the
-  // heavy visualizations (charts, SVG trajectory tree, code editor) for static
-  // equivalents. See LiteModeProvider.
-  liteMode: boolean;
   wizardCodeAssist: CodeAssistDefault;
   wizardSplitMode: SplitModeDefault;
   agentTrustMode: TrustModeDefault;
@@ -28,23 +23,20 @@ export interface UserPrefs {
   // Seed for the assist model in new tagging sessions; empty name = the
   // server's default tagging model.
   taggerAssistModel: ModelConfig;
+  // Seeds for the Optimizer step of a new optimization. The engine applies
+  // only when it fits the task (else Auto); an empty model name means the
+  // catalog's default model; null runs means the wizard's own default.
+  optimizerEngine: OptimizerChoice;
+  optimizerTaskModel: ModelConfig;
+  optimizerReflectionModel: ModelConfig;
+  optimizerMaxRuns: number | null;
 }
 
 export type AgentPreferencePatch = Partial<
-  Pick<
-    UserPrefs,
-    | "expandAdvanced"
-    | "liteMode"
-    | "wizardCodeAssist"
-    | "wizardSplitMode"
-    | "taggerAssist"
-    | "dictationEnabled"
-  >
+  Pick<UserPrefs, "wizardCodeAssist" | "wizardSplitMode" | "taggerAssist" | "dictationEnabled">
 >;
 
 const AGENT_PREFERENCE_FIELDS: Record<string, keyof AgentPreferencePatch> = {
-  expand_advanced: "expandAdvanced",
-  lite_mode: "liteMode",
   wizard_code_assist: "wizardCodeAssist",
   wizard_split_mode: "wizardSplitMode",
   tagger_assist: "taggerAssist",
@@ -88,8 +80,6 @@ export function parseAgentPreferencePatch(value: unknown): AgentPreferencePatch 
 }
 
 export const PREF_KEYS: Record<keyof UserPrefs, string> = {
-  expandAdvanced: "skynet.prefs.expand-advanced",
-  liteMode: "skynet.prefs.lite-mode",
   wizardCodeAssist: "skynet.prefs.wizard.code-assist",
   wizardSplitMode: "skynet.prefs.wizard.split-mode",
   agentTrustMode: "skynet.prefs.agent.trust-mode",
@@ -98,11 +88,13 @@ export const PREF_KEYS: Record<keyof UserPrefs, string> = {
   composerEffort: "skynet.prefs.composer.effort",
   dictationEnabled: "skynet.prefs.composer.dictation",
   taggerAssistModel: "skynet.prefs.tagger.assist-model",
+  optimizerEngine: "skynet.prefs.optimizer.engine",
+  optimizerTaskModel: "skynet.prefs.optimizer.task-model",
+  optimizerReflectionModel: "skynet.prefs.optimizer.reflection-model",
+  optimizerMaxRuns: "skynet.prefs.optimizer.max-runs",
 };
 
 export const DEFAULT_PREFS: UserPrefs = {
-  expandAdvanced: false,
-  liteMode: false,
   wizardCodeAssist: "auto",
   wizardSplitMode: "auto",
   agentTrustMode: "ask",
@@ -113,10 +105,15 @@ export const DEFAULT_PREFS: UserPrefs = {
   composerEffort: null,
   dictationEnabled: true,
   taggerAssistModel: { name: "" },
+  optimizerEngine: "auto",
+  optimizerTaskModel: { name: "" },
+  optimizerReflectionModel: { name: "" },
+  optimizerMaxRuns: null,
 };
 
-// `skynet.prefs.advanced-mode` belonged to a retired toggle; a stale value in
-// an old browser is simply ignored now.
+// `skynet.prefs.advanced-mode` and `skynet.prefs.expand-advanced` belonged to
+// retired toggles (the second is now the server-side Expert level); a stale
+// value in an old browser is simply ignored.
 export function migrateLegacyPrefs(): void {
   /* No pending migrations. Kept so callers don't churn when one appears. */
 }

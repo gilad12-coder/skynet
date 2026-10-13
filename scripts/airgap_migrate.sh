@@ -345,7 +345,6 @@ cmd_build_images() {
   local docker_bin="${DOCKER:-docker}"
   local backend_args=(
     --build-arg "REGISTRY_PREFIX=${REGISTRY_PREFIX:-docker.io}"
-    --build-arg "INCLUDE_CLAUDE_CODE=${INCLUDE_CLAUDE_CODE:-false}"
   )
   [[ -n "${DEBIAN_MIRROR:-}" ]] && backend_args+=(--build-arg "DEBIAN_MIRROR=$DEBIAN_MIRROR")
   [[ -n "${PIP_INDEX_URL:-}" ]] && backend_args+=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL")

@@ -55,6 +55,12 @@ export function dispatchGeneralistEvent(
     case "message_reset":
       handlers.onMessageReset?.();
       break;
+    case "steer_applied":
+      handlers.onSteerApplied?.({
+        ids: Array.isArray(data.ids) ? data.ids.map(String) : [],
+        text: String(data.text ?? ""),
+      });
+      break;
     case "conversation_meta":
       handlers.onConversationMeta?.({
         conversation_id: String(data.conversation_id ?? ""),

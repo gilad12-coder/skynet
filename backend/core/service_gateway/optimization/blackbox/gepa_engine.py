@@ -20,7 +20,7 @@ from ....constants import OPTIMIZER_NAME_GEPA
 from ....exceptions import ServiceError
 from ..budget_stop import BudgetReached
 from ..trajectory import capture_proposal_prompts, trajectory_watch
-from .feedback import STR_CANDIDATE_KEY, emit_scorer_feedback
+from .feedback import STR_CANDIDATE_KEY, emit_scorer_feedback, gepa_side_info
 from .native_runtime import run_native_engine
 from .protocol import BudgetExhaustedError, Candidate, EngineContext, EvalServer, Result, Task
 from .upstream import GEPA_SOURCE
@@ -68,8 +68,6 @@ class GepaEngine:
         run_dir = str(Path(ctx.run_dir) / self.name)
         Path(run_dir).mkdir(parents=True, exist_ok=True)
         stop_callbacks: list[Any] = []
-        if ctx.recovery_seed_boundary is not None:
-            stop_callbacks.append(ctx.recovery_seed_boundary)
         if ctx.stop_at_score is not None:
             stop_callbacks.append(ScoreThresholdStopper(ctx.stop_at_score))
         config = GEPAConfig(
@@ -87,18 +85,12 @@ class GepaEngine:
             reflection=ReflectionConfig(reflection_lm=_LaneReflection(ctx.reflection_lm, ctx.check_budget)),
             tracking=TrackingConfig(logger=_JobLogger()),
             stop_callbacks=stop_callbacks or None,
-            callbacks=[ctx.recovery_seed_boundary] if ctx.recovery_seed_boundary is not None else None,
         )
 
         # GEPA hands the dataset rows back by identity and keys each candidate's
-        # per-case scores by the case's index in the validation set (the train
-        # set when no val set was given). Feedback carries that same index so
-        # the tree drawer can pair the scorer's notes with a case's score cell;
-        # train-only cases follow after the validation ones.
-        validation_set = task.val_set or task.train_set
-        example_ids: dict[int, str] = {}
-        for index, example in enumerate([*validation_set, *task.train_set]):
-            example_ids.setdefault(id(example), str(index))
+        # per-case scores by the case's index. Feedback carries that same index
+        # so the tree drawer can pair the scorer's notes with a case's score cell.
+        example_ids = {id(example): str(index) for index, example in enumerate([*task.cases, *task.valset])}
 
         def evaluator(candidate: Candidate, example: Any = None) -> tuple[float, dict[str, Any]]:
             """Route one GEPA evaluation through the budgeted server and report its feedback.
@@ -108,7 +100,8 @@ class GepaEngine:
                 example: The case, or ``None`` in single-task mode.
 
             Returns:
-                The score and side information.
+                The score and side information, named scores as plain numbers
+                for GEPA's objective frontier and their feedback beside them.
             """
             if ctx.check_budget is not None:
                 ctx.check_budget()
@@ -121,13 +114,15 @@ class GepaEngine:
                 score=score,
                 side_info=side_info,
             )
-            return score, side_info
+            return score, gepa_side_info(side_info)
 
         kwargs: dict[str, Any] = {"seed_candidate": task.seed_candidate, "evaluator": evaluator, "config": config}
-        if task.train_set:
-            kwargs["dataset"] = task.train_set
-        if task.val_set:
-            kwargs["valset"] = task.val_set
+        # Train cases drive reflection and the validation cases rank versions.
+        # Without a validation split GEPA ranks on the train cases; the test
+        # split never reaches GEPA, the service's final run scores it.
+        if task.cases:
+            kwargs["dataset"] = task.cases
+            kwargs["valset"] = task.valset or task.cases
         if task.objective:
             kwargs["objective"] = task.objective
         if task.background:

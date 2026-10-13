@@ -87,7 +87,7 @@ def test_resume_rejects_non_terminal_failure(client: TestClient, store: _BaseFak
     store.save_gepa_checkpoint(oid, b"STATE", iteration=1)
     resp = client.post(f"/optimizations/{oid}/resume")
     assert resp.status_code == 409
-    assert "mid-run" in resp.json()["detail"]
+    assert "partway through" in resp.json()["detail"]
 
 
 def test_resume_blocked_at_attempt_cap(client: TestClient, store: _BaseFakeJobStore) -> None:
@@ -130,52 +130,43 @@ def test_grids_are_never_whole_job_resumable(store: _BaseFakeJobStore) -> None:
     assert is_resumable(store, store.get_job("g")) is False
 
 
-def test_restart_grid_pair_reruns_only_that_pair(client: TestClient, store: _BaseFakeJobStore) -> None:
-    """Restarting a failed pair seeds every other pair and re-queues the grid in place."""
-    _seed_grid(store, "grid1", status="success")
-    resp = client.post("/optimizations/grid1/pair/1/restart")
-    assert resp.status_code == 202, resp.text
-    assert store.get_job("grid1")["status"] == "pending"
-    # The other (successful) pair is kept so the runner skips it; the target isn't.
-    assert set(store.get_grid_pair_results("grid1")) == {0}
+@pytest.mark.parametrize("action", ["resume", "restart", "retry"])
+def test_stored_grid_cannot_be_requeued(client: TestClient, store: _BaseFakeJobStore, action: str) -> None:
+    """A stored grid search stays readable but is never queued again.
+
+    Args:
+        client: Router client over the fake store.
+        store: Fake job store holding the stored grid.
+        action: Lifecycle action that would queue new work.
+    """
+    _seed_grid(store, "grid1", status="failed")
+    store.save_gepa_checkpoint("grid1", b"STATE", iteration=1)
+
+    resp = client.post(f"/optimizations/grid1/{action}")
+
+    assert resp.status_code == 409, resp.text
+    assert store.get_job("grid1")["status"] == "failed"
 
 
-def test_restart_grid_pair_works_on_a_successful_grid(client: TestClient, store: _BaseFakeJobStore) -> None:
-    """A failed pair stays restartable even when the grid succeeded overall."""
+def test_stored_grid_cannot_be_cloned(client: TestClient, store: _BaseFakeJobStore) -> None:
+    """Cloning a stored grid search is refused instead of creating a run that would fail.
+
+    Args:
+        client: Router client over the fake store.
+        store: Fake job store holding the stored grid.
+    """
     _seed_grid(store, "grid2", status="success")
-    resp = client.post("/optimizations/grid2/pair/1/restart")
-    assert resp.status_code == 202, resp.text
-
-
-def test_resume_grid_pair_requires_a_checkpoint(client: TestClient, store: _BaseFakeJobStore) -> None:
-    """Resuming a pair with no checkpoint is 409 (restart instead); with one, 202."""
-    _seed_grid(store, "grid3", status="success")
-    resp = client.post("/optimizations/grid3/pair/1/resume")
-    assert resp.status_code == 409
-    assert "restart" in resp.json()["detail"].lower()
-    store.save_gepa_checkpoint("grid3", b"STATE", iteration=1, pair_index=1)
-    resp = client.post("/optimizations/grid3/pair/1/resume")
-    assert resp.status_code == 202, resp.text
-
-
-def test_grid_pair_action_rejects_a_single_run(client: TestClient, store: _BaseFakeJobStore) -> None:
-    """Per-pair re-run on a non-grid optimization is a 404 (not a grid)."""
     store.seed_job(
-        "single",
-        status="failed",
+        "grid2",
+        status="success",
         username="alice",
-        payload_overview={"optimization_type": "run"},
-        result={"baseline_test_metric": 0.5},
+        payload={"generation_models": [{"name": "g0"}]},
+        payload_overview={"optimization_type": "grid_search"},
     )
-    resp = client.post("/optimizations/single/pair/0/restart")
-    assert resp.status_code == 404
 
+    resp = client.post("/optimizations/grid2/clone", json={"count": 1})
 
-def test_grid_pair_action_unknown_index_404(client: TestClient, store: _BaseFakeJobStore) -> None:
-    """An out-of-range pair index is a 404."""
-    _seed_grid(store, "grid4", status="success")
-    resp = client.post("/optimizations/grid4/pair/9/restart")
-    assert resp.status_code == 404
+    assert resp.status_code == 409, resp.text
 
 
 def test_is_resumable_discriminator(store: _BaseFakeJobStore) -> None:
@@ -310,7 +301,7 @@ def test_resume_rejects_stopped_run_without_a_budget_reason(client: TestClient, 
     store.save_gepa_checkpoint("so", b"STATE", iteration=1)
     resp = client.post("/optimizations/so/resume")
     assert resp.status_code == 409
-    assert "mid-run" in resp.json()["detail"]
+    assert "partway through" in resp.json()["detail"]
 
 
 def test_budget_stopped_run_is_resumable_even_at_attempt_cap(store: _BaseFakeJobStore) -> None:

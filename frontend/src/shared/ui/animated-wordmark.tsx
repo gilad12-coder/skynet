@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { HOATZIN_LOCKUP_VIEWBOX, HoatzinShapes } from "@/shared/ui/skynet-mark";
+
 /**
  * Animated "SKYNET" wordmark with morphing SVG letters.
  *
@@ -123,6 +125,15 @@ const LETTERS: LetterDef[] = [
 ];
 
 const TOTAL_WIDTH = 475;
+
+// The hoatzin brand mark (shared/ui/skynet-mark.tsx) leads the letters, taller than them:
+// the cropped neck ends on the baseline (y=90), the eye sits on the letters' centre line
+// (y=46) and the crest rises above the cap height. It stays still while the letters morph.
+const MARK_TOP = -30;
+const MARK_HEIGHT = 120;
+const MARK_WIDTH = 111;
+const MARK_GAP = 22;
+const MARK_SHIFT = MARK_WIDTH + MARK_GAP;
 const VARIANT_NAMES = ["default", "glyph", "serif", "sans"] as const;
 type VariantName = (typeof VARIANT_NAMES)[number];
 
@@ -147,13 +158,14 @@ const TRANSITION = "opacity 300ms cubic-bezier(0.215, 0.610, 0.355, 1.000)";
 
 function VariantGroup({
   variant,
-  content,
+  letter,
   active,
 }: {
   variant: VariantName;
-  content: LetterVariants;
+  letter: LetterDef;
   active: boolean;
 }) {
+  const content = letter.variants;
   const opacity = active ? 1 : 0;
   const style = { opacity, transition: TRANSITION };
 
@@ -170,7 +182,7 @@ function VariantGroup({
   const d =
     variant === "default" ? content.default : variant === "serif" ? content.serif : content.sans;
 
-  return <path d={d} style={style} fillRule="nonzero" />;
+  return <path d={d} style={style} />;
 }
 
 export function AnimatedWordmark({
@@ -180,6 +192,7 @@ export function AnimatedWordmark({
   autoMorphDuration,
   morphSpeed = 250,
   fluid = false,
+  withMark = false,
 }: {
   size?: number;
   className?: string;
@@ -194,19 +207,19 @@ export function AnimatedWordmark({
   morphSpeed?: number;
   /** Fill the parent's width (height derives from the viewBox) instead of using `size`. */
   fluid?: boolean;
+  /** Lead with the hoatzin brand mark, drawn at the letters' height. */
+  withMark?: boolean;
 }) {
+  const totalWidth = withMark ? TOTAL_WIDTH + MARK_SHIFT : TOTAL_WIDTH;
   const [activeVariants, setActiveVariants] = useState<VariantName[]>(() =>
     LETTERS.map(() => "default"),
   );
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reducedMotionRef = useRef(false);
-  // Lite mode is signalled by LiteModeProvider via a data-lite attribute on
-  // <html>. Read it straight from the DOM rather than the settings hook so this
-  // shared/ui leaf imports nothing from features/: a feature import here closes
-  // a client-module cycle (wordmark → settings → prefs → tutorial barrel →
-  // tutorial-overlay → wordmark) that traps Turbopack in an endless recompile.
-  const [lite, setLite] = useState(false);
+  // True while autoMorph owns the animation; a timed autoMorph hands control
+  // back to hover once it settles.
+  const autoActiveRef = useRef(false);
 
   useEffect(() => {
     const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -216,15 +229,6 @@ export function AnimatedWordmark({
     };
     mql.addEventListener("change", handler);
     return () => mql.removeEventListener("change", handler);
-  }, []);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const read = () => setLite(root.hasAttribute("data-lite"));
-    read();
-    const observer = new MutationObserver(read);
-    observer.observe(root, { attributes: true, attributeFilter: ["data-lite"] });
-    return () => observer.disconnect();
   }, []);
 
   const startMorph = useCallback(() => {
@@ -253,38 +257,37 @@ export function AnimatedWordmark({
   }, []);
 
   const handleMouseEnter = useCallback(() => {
-    // When autoMorph owns the lifecycle the wordmark is already morphing — hover
-    // must not spin up a second interval. Lite mode disables the morph outright.
-    if (autoMorph || lite) return;
+    // While autoMorph owns the lifecycle the wordmark is already morphing — hover
+    // must not spin up a second interval.
+    if (autoActiveRef.current) return;
     if (!reducedMotionRef.current) startMorph();
-  }, [autoMorph, lite, startMorph]);
+  }, [startMorph]);
 
   const handleMouseLeave = useCallback(() => {
     // Never reset a continuously-morphing wordmark on leave; it should keep
     // morphing regardless of hover.
-    if (autoMorph) return;
+    if (autoActiveRef.current) return;
     stopMorph();
-  }, [autoMorph, stopMorph]);
+  }, [stopMorph]);
 
   useEffect(() => {
-    // Lite mode keeps the wordmark static — kill any running morph and never
-    // start one, even for callers that opt into autoMorph (splash/idle states).
-    if (lite) {
-      stopMorph();
-      return;
-    }
     if (autoMorph && !reducedMotionRef.current) {
       // Clear any stale ref before starting to avoid the guard in startMorph
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
+      autoActiveRef.current = true;
       startMorph();
       if (autoMorphDuration != null) {
-        stopTimeoutRef.current = setTimeout(stopMorph, autoMorphDuration);
+        stopTimeoutRef.current = setTimeout(() => {
+          autoActiveRef.current = false;
+          stopMorph();
+        }, autoMorphDuration);
       }
     }
     return () => {
+      autoActiveRef.current = false;
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -294,15 +297,18 @@ export function AnimatedWordmark({
         stopTimeoutRef.current = null;
       }
     };
-  }, [autoMorph, autoMorphDuration, lite, startMorph, stopMorph]);
+  }, [autoMorph, autoMorphDuration, startMorph, stopMorph]);
 
-  const aspectRatio = TOTAL_WIDTH / 92;
-  const svgWidth = size * aspectRatio;
+  // `size` stays the letters' height; with the mark the box grows upward to hold the crest.
+  const top = withMark ? MARK_TOP : 0;
+  const boxHeight = 92 - top;
+  const svgHeight = (size * boxHeight) / 92;
+  const svgWidth = (svgHeight * totalWidth) / boxHeight;
 
   return (
     <span
       dir="ltr"
-      className={`${fluid ? "flex w-full justify-center" : "inline-flex"} items-center select-none cursor-default ${className ?? ""}`}
+      className={`${fluid ? "flex w-full justify-center" : "inline-flex"} items-center text-primary select-none cursor-default ${className ?? ""}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       role="img"
@@ -311,20 +317,27 @@ export function AnimatedWordmark({
       <svg
         className="overflow-visible transition-all duration-300 pointer-events-none"
         width={fluid ? undefined : svgWidth}
-        height={fluid ? undefined : size}
-        viewBox={`0 0 ${TOTAL_WIDTH} 92`}
+        height={fluid ? undefined : svgHeight}
+        viewBox={`0 ${top} ${totalWidth} ${boxHeight}`}
         fill="currentColor"
         stroke="none"
         xmlns="http://www.w3.org/2000/svg"
         style={fluid ? { width: "100%", height: "auto", color: "var(--foreground)" } : { color: "var(--foreground)" }}
       >
+        {withMark && (
+          <svg y={MARK_TOP} width={MARK_WIDTH} height={MARK_HEIGHT} viewBox={HOATZIN_LOCKUP_VIEWBOX}>
+            {/* Fluid lockups fill a wide column; fixed ones are header-sized, where the
+                full line work would blur together. */}
+            <HoatzinShapes detail={fluid || svgHeight >= 64 ? "full" : "simple"} />
+          </svg>
+        )}
         {LETTERS.map((letter, li) => (
-          <g key={li} transform={`translate(${letter.offset}, 0)`}>
+          <g key={li} transform={`translate(${letter.offset + (withMark ? MARK_SHIFT : 0)}, 0)`}>
             {VARIANT_NAMES.map((name) => (
               <VariantGroup
                 key={name}
                 variant={name}
-                content={letter.variants}
+                letter={letter}
                 active={activeVariants[li] === name}
               />
             ))}

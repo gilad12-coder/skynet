@@ -31,7 +31,7 @@ import httpx
 import pytest
 import requests  # type: ignore[import-untyped]
 
-from .conftest import backend_auth_headers, requires_server, wait_for_terminal
+from .conftest import backend_auth_headers, fund_account, requires_server, wait_for_terminal
 
 BASE_URL = "http://localhost:8000"
 LOAD_TEST_MODEL = os.getenv("LOAD_TEST_MODEL", "openai/gpt-5.4-nano")
@@ -163,6 +163,36 @@ class TestReadEndpointLoad:
         assert r["p50"] < 0.5, f"p50 too high under rapid fire: {r['p50'] * 1000:.0f}ms"
 
 
+def _optimize_payload(username: str) -> dict:
+    """Build a minimal valid ``/optimize`` body: a prompt optimized on six pairs.
+
+    Args:
+        username: Owner the run is submitted for.
+
+    Returns:
+        A dict matching ``UnifiedRunRequest``.
+    """
+    return {
+        "name": "load-test-run",
+        "username": username,
+        "task": {
+            "objective": "Answer in one word.",
+            "artifact": {"kind": "prompt", "starting_version": "Answer briefly: "},
+        },
+        "data": {
+            "mode": "pairs",
+            "cases": [{"input": {"q": f"Q{i}?"}, "expected": f"A{i}"} for i in range(6)],
+            "input_fields": ["q"],
+        },
+        "optimizer": {"choice": "gepa"},
+        "models": {"reflection_model": {"name": LOAD_TEST_MODEL}},
+        "workspace": {
+            "run_code": 'def run(artifact, input):\n    return artifact + input["q"]\n',
+            "metric_code": "def score(input, output, expected=None):\n    return float(output == expected)\n",
+        },
+    }
+
+
 @pytest.mark.load
 @requires_server
 class TestWriteEndpointLoad:
@@ -170,29 +200,19 @@ class TestWriteEndpointLoad:
 
     def test_10_rapid_submissions_all_accepted(self):
         """Verify 10 rapid valid submissions are all accepted with 201."""
-        payload = {
-            "username": "load-test-submit",
-            "module_name": "predict",
-            "signature_code": (
-                "import dspy\nclass S(dspy.Signature):\n    q: str = dspy.InputField()\n    a: str = dspy.OutputField()"
-            ),
-            "metric_code": "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None): return 1.0",
-            "optimizer_name": "gepa",
-            "dataset": [{"q": "hi", "a": "bye"}],
-            "column_mapping": {"inputs": {"q": "q"}, "outputs": {"a": "a"}},
-            "model_config": {"name": LOAD_TEST_MODEL},
-        }
+        fund_account("load-test-submit")
+        payload = _optimize_payload("load-test-submit")
         r = asyncio.run(
             _hammer(
                 "POST",
-                f"{BASE_URL}/run",
+                f"{BASE_URL}/optimize",
                 n=10,
                 concurrency=5,
                 json_body=payload,
                 username="load-test-submit",
             ),
         )
-        _print_results("POST /run (10 rapid submissions)", r)
+        _print_results("POST /optimize (10 rapid submissions)", r)
         assert r["status_codes"].get(201, 0) == 10, f"Expected all 10 accepted (201), got: {r['status_codes']}"
 
         headers = backend_auth_headers("load-test-submit")
@@ -218,8 +238,8 @@ class TestWriteEndpointLoad:
     def test_50_invalid_submissions_all_rejected_as_422(self):
         """Verify 50 malformed submissions are uniformly rejected with 422."""
         bad_payload = {"username": "load-test-bad"}
-        r = asyncio.run(_hammer("POST", f"{BASE_URL}/run", n=50, concurrency=20, json_body=bad_payload))
-        _print_results("POST /run invalid (50 reqs, 20 concurrent)", r)
+        r = asyncio.run(_hammer("POST", f"{BASE_URL}/optimize", n=50, concurrency=20, json_body=bad_payload))
+        _print_results("POST /optimize invalid (50 reqs, 20 concurrent)", r)
         assert r["status_codes"].get(422, 0) == 50, f"Expected all 50 to be 422, got: {r['status_codes']}"
         assert r["p50"] < 0.5, f"p50 too high for validation path: {r['p50'] * 1000:.0f}ms"
         assert r["p99"] < 2.0, f"p99 too high for validation path: {r['p99'] * 1000:.0f}ms"
@@ -232,20 +252,10 @@ class TestMixedWorkload:
 
     def test_read_endpoints_stay_healthy_while_job_runs(self):
         """Verify read endpoints remain error-free while a real job is running."""
-        payload = {
-            "username": "load-test-mixed",
-            "module_name": "predict",
-            "signature_code": (
-                "import dspy\nclass S(dspy.Signature):\n    q: str = dspy.InputField()\n    a: str = dspy.OutputField()"
-            ),
-            "metric_code": "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None): return 1.0",
-            "optimizer_name": "gepa",
-            "dataset": [{"q": "hi", "a": "bye"}],
-            "column_mapping": {"inputs": {"q": "q"}, "outputs": {"a": "a"}},
-            "model_config": {"name": LOAD_TEST_MODEL},
-        }
+        fund_account("load-test-mixed")
+        payload = _optimize_payload("load-test-mixed")
         headers = backend_auth_headers("load-test-mixed")
-        r = requests.post(f"{BASE_URL}/run", headers=headers, json=payload, timeout=10)
+        r = requests.post(f"{BASE_URL}/optimize", headers=headers, json=payload, timeout=10)
         assert r.status_code == 201, f"Background job submit failed: {r.status_code}"
         job_id = r.json()["optimization_id"]
 

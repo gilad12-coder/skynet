@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 import cloudpickle
+import dspy
 
 try:
     from gepa.proposer.reflective_mutation.reflective_mutation import (
@@ -214,6 +215,9 @@ _current_proposal_iteration: contextvars.ContextVar[int | None] = contextvars.Co
     "_current_proposal_iteration",
     default=None,
 )
+# DSPy's parallel evaluator copies dspy.context overrides into its worker
+# threads but not contextvars, so the iteration rides along there too.
+_ITERATION_SETTING = "skynet_proposal_iteration"
 
 
 def current_proposal_iteration() -> int | None:
@@ -223,7 +227,8 @@ def current_proposal_iteration() -> int | None:
         The iteration index, or ``None`` outside a proposal (valset sweeps,
         the seed evaluation) — the frontend then treats the event as run-wide.
     """
-    return _current_proposal_iteration.get()
+    iteration = _current_proposal_iteration.get()
+    return iteration if iteration is not None else dspy.settings.get(_ITERATION_SETTING)
 
 
 def _extract_feedback(result: Any) -> str:
@@ -911,11 +916,11 @@ def capture_proposal_prompts(optimizer_name: str) -> Iterator[None]:
     def wrapped_propose(self: Any, state: Any) -> Any:
         """Forward to the original propose, then snapshot prompts into the trace."""
         iter_val = getattr(state, "i", None)
-        token = _current_proposal_iteration.set(
-            iter_val if isinstance(iter_val, int) else None
-        )
+        iteration = iter_val if isinstance(iter_val, int) else None
+        token = _current_proposal_iteration.set(iteration)
         try:
-            proposal = original_propose(self, state)
+            with dspy.context(**{_ITERATION_SETTING: iteration}):
+                proposal = original_propose(self, state)
             try:
                 trace = getattr(state, "full_program_trace", None)
                 if not isinstance(trace, list) or not trace:

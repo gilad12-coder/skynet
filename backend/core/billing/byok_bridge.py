@@ -29,7 +29,7 @@ from .byok_vault import ProviderKeyVault, byok_provider_for_litellm, safe_connec
 # list field names. The Anything task role reaches the parent model gateway even
 # though it never reaches ``build_language_model`` directly.
 _RUN_MODEL_KEYS = ("model_config", "task_model_config", "reflection_model_config")
-_GRID_MODEL_LIST_KEYS = ("generation_models", "reflection_models")
+_GRID_MODEL_LIST_KEYS = ("generation_models", "reflection_models", "extra_reflection_model_configs")
 
 
 def provider_slug_for_model(name: str) -> str | None:

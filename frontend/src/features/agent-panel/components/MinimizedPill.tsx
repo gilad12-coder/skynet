@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Sparkle } from "@/shared/ui/icons";
+import { SkynetMark } from "@/shared/ui/skynet-mark";
 import { msg } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
@@ -11,7 +11,6 @@ interface MinimizedPillProps {
   onOpen: () => void;
   active: boolean;
   statusLabel?: string;
-  hue?: string;
   /** Rendered inside an AgentPillDock: the dock places it, so don't float. */
   inline?: boolean;
   className?: string;
@@ -21,7 +20,6 @@ export function MinimizedPill({
   onOpen,
   active,
   statusLabel,
-  hue = "#3D2E22",
   inline = false,
   className,
 }: MinimizedPillProps) {
@@ -32,9 +30,8 @@ export function MinimizedPill({
     <button
       type="button"
       onClick={onOpen}
-      data-tutorial="agent-pill"
+      data-setup="agent"
       aria-label={ariaLabel}
-      title={ariaLabel}
       // Set the writing direction on the pill itself so its logical `end-4`
       // follows the locale (right in LTR/English, left in RTL/Hebrew),
       // independent of whatever direction an ancestor or portal resolves to.
@@ -43,7 +40,7 @@ export function MinimizedPill({
         inline ? "relative" : "fixed bottom-4 end-4 z-40",
         "inline-flex min-h-[44px] items-center gap-2 rounded-full",
         "border border-border/60 bg-background/90 backdrop-blur-md",
-        "px-3.5 py-2 text-[0.75rem] text-foreground shadow-[0_6px_18px_rgba(61,46,34,0.08)]",
+        "px-3.5 py-2 text-[0.75rem] text-foreground shadow-[var(--shadow-float)]",
         "transition-all duration-200 hover:bg-background",
         "active:scale-[0.98] cursor-pointer",
         className,
@@ -52,15 +49,11 @@ export function MinimizedPill({
       <span className="relative inline-flex size-5 items-center justify-center">
         {active && (
           <span
-            className="absolute inset-0 rounded-full animate-ping motion-reduce:animate-none"
-            style={{ backgroundColor: `${hue}33` }}
+            className="absolute inset-0 rounded-full bg-primary-fill/20 animate-ping motion-reduce:animate-none"
           />
         )}
-        <span
-          className="relative inline-flex size-5 items-center justify-center rounded-full text-[#FAF8F5]"
-          style={{ backgroundColor: hue }}
-        >
-          <Sparkle className="size-3" aria-hidden="true" />
+        <span className="relative inline-flex size-5 overflow-hidden rounded-full bg-secondary">
+          <SkynetMark className="size-full" aria-hidden="true" />
         </span>
       </span>
       <span className="truncate max-w-[18ch] leading-none">

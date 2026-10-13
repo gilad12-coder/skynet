@@ -34,7 +34,7 @@ export function SearchSuggestions({
   return (
     <div
       onMouseDown={(e) => e.preventDefault()}
-      className="absolute inset-x-0 top-[calc(100%+0.4rem)] z-20 max-h-[min(70vh,420px)] overflow-y-auto overscroll-contain rounded-2xl border border-border bg-background p-2 shadow-[0_8px_40px_-12px_oklch(0.25_0.04_45/.22)]"
+      className="absolute inset-x-0 top-[calc(100%+0.4rem)] z-20 max-h-[min(70dvh,420px)] overflow-y-auto overscroll-contain rounded-2xl border border-border bg-background p-2 shadow-[var(--shadow-float)]"
     >
       {hasRecent && (
         <div className="flex flex-col gap-0.5">
@@ -45,7 +45,7 @@ export function SearchSuggestions({
             <button
               type="button"
               onClick={onClearRecent}
-              className="rounded px-1.5 py-0.5 text-[11px] text-foreground/45 transition-colors cursor-pointer hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              className="rounded px-1.5 py-0.5 text-[11px] text-foreground/45 transition-colors cursor-pointer hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
             >
               {msg("explore.suggest.clear")}
             </button>
@@ -76,10 +76,12 @@ export function SearchSuggestions({
                 key={s}
                 type="button"
                 onClick={() => onSelect(s)}
-                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[12.5px] text-foreground/80 transition-colors cursor-pointer hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+                className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-[12.5px] text-foreground/80 transition-colors cursor-pointer hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
               >
                 <TrendUp className="size-3 shrink-0 text-foreground/35" aria-hidden="true" />
-                <span dir="auto" className="min-w-0 truncate">{s}</span>
+                <span dir="auto" className="min-w-0 truncate">
+                  {s}
+                </span>
               </button>
             ))}
           </div>

@@ -10,17 +10,21 @@ module so no network call is made.
 
 from __future__ import annotations
 
+import importlib.util
 import math
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import litellm
 import pytest
 import stripe
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from pydantic import SecretStr
-from sqlalchemy import create_engine
+from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, inspect
 from sqlalchemy.orm import Session
 
 from core.api.errors import DomainError
@@ -156,6 +160,19 @@ def test_wallet_seeds_grant_column_on_first_read(engine: object) -> None:
     with Session(engine) as session:
         customer = session.get(BillingCustomerModel, "u@x.com")
     assert customer.grant_remaining == FREE_GRANT_CENTS
+
+
+@pytest.mark.parametrize(("environment_name", "expected"), [("staging", 0), ("skynet-pr-662", 1000)])
+def test_new_account_grant_only_in_preview_environments(
+    engine: object, monkeypatch: pytest.MonkeyPatch, environment_name: str, expected: int
+) -> None:
+    """A new account is seeded with ``PREVIEW_GRANT_CENTS`` only in a PR preview environment."""
+    monkeypatch.setattr(settings, "preview_grant_cents", 1000)
+    monkeypatch.setattr(settings, "railway_environment_name", environment_name)
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    assert service.spendable_cents("u@x.com") == expected
+    assert service.get_wallet("u@x.com").free_grant_total == expected
 
 
 def test_debit_run_draws_from_legacy_grant_first(engine: object) -> None:
@@ -299,6 +316,85 @@ def test_debit_run_settlement_key_charges_once(engine: object) -> None:
     assert first == again == other == cents_for_usage(usages)
     assert _balance(engine, "u@x.com") == 100 - 2 * first
     assert len(_ledger_rows(engine, "u@x.com", "run")) == 2
+
+
+def test_debit_run_records_job_and_grant_split(engine: object) -> None:
+    """A run drawing on grant and paid balance stores the job id and the grant share."""
+    with Session(engine) as session:
+        session.add(
+            BillingCustomerModel(username="u@x.com", stripe_customer_id="cus_u", balance_cents=500, grant_remaining=100)
+        )
+        session.commit()
+    service = StripeBillingService(engine=engine)
+    with patch("core.billing.service.run_cost_cents", return_value=150):
+        charged = service.debit_run("u@x.com", _usages(100_000), model=None, description="r", optimization_id="job-1")
+    assert charged == 150
+    (row,) = _ledger_rows(engine, "u@x.com", "run")
+    assert (row.delta_cents, row.from_grant_cents, row.optimization_id) == (-150, 100, "job-1")
+    assert -row.delta_cents - row.from_grant_cents == 50
+    snapshot = service.get_wallet("u@x.com")
+    assert (snapshot.free_grant_remaining, snapshot.paid_balance_cents) == (0, 450)
+
+
+def test_debit_run_paid_only_records_zero_from_grant(engine: object) -> None:
+    """A run fully covered by the paid balance records ``from_grant_cents = 0``."""
+    with Session(engine) as session:
+        session.add(BillingCustomerModel(username="u@x.com", stripe_customer_id="cus_u", balance_cents=500))
+        session.commit()
+    service = StripeBillingService(engine=engine)
+    charged = service.debit_run("u@x.com", _usages(100_000), model=None, description="r", optimization_id="job-2")
+    (row,) = _ledger_rows(engine, "u@x.com", "run")
+    assert row.delta_cents == -charged
+    assert row.from_grant_cents == 0
+    assert row.optimization_id == "job-2"
+
+
+def test_debit_run_without_job_leaves_optimization_id_null(engine: object) -> None:
+    """An interactive debit (no job) writes a null ``optimization_id``."""
+    with Session(engine) as session:
+        session.add(BillingCustomerModel(username="u@x.com", stripe_customer_id="cus_u", balance_cents=500))
+        session.commit()
+    StripeBillingService(engine=engine).debit_run("u@x.com", _usages(100_000), model=None, description="chat")
+    (row,) = _ledger_rows(engine, "u@x.com", "run")
+    assert row.optimization_id is None
+
+
+def _load_run_attribution_migration() -> object:
+    """Load the wallet-ledger run-attribution migration module from its file.
+
+    Returns:
+        The imported migration module.
+    """
+    path = Path(__file__).resolve().parents[3] / "alembic/versions/c8d9e0f1a2b3_add_wallet_ledger_run_attribution.py"
+    spec = importlib.util.spec_from_file_location("run_attribution_migration", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_run_attribution_migration_adds_and_drops_columns() -> None:
+    """The migration adds both columns and the index; its downgrade removes them."""
+    migration = _load_run_attribution_migration()
+    eng = create_engine("sqlite:///:memory:")
+    legacy = MetaData()
+    Table("wallet_ledger", legacy, Column("id", Integer, primary_key=True), Column("username", String(255)))
+    legacy.create_all(eng)
+    with eng.begin() as conn:
+        conn.exec_driver_sql("INSERT INTO wallet_ledger (id, username) VALUES (1, 'u@x.com')")
+        with patch.object(migration, "op", Operations(MigrationContext.configure(conn))):
+            migration.upgrade()
+        columns = {column["name"] for column in inspect(conn).get_columns("wallet_ledger")}
+        indexes = {index["name"] for index in inspect(conn).get_indexes("wallet_ledger")}
+        old_row = conn.exec_driver_sql("SELECT optimization_id, from_grant_cents FROM wallet_ledger").one()
+        assert {"optimization_id", "from_grant_cents"} <= columns
+        assert "ix_wallet_ledger_optimization_id" in indexes
+        assert tuple(old_row) == (None, None)
+        with patch.object(migration, "op", Operations(MigrationContext.configure(conn))):
+            migration.downgrade()
+        columns = {column["name"] for column in inspect(conn).get_columns("wallet_ledger")}
+        indexes = {index["name"] for index in inspect(conn).get_indexes("wallet_ledger")}
+    assert columns == {"id", "username"}
+    assert "ix_wallet_ledger_optimization_id" not in indexes
 
 
 def test_debit_run_records_and_alerts_uncollected_overrun(engine: object) -> None:

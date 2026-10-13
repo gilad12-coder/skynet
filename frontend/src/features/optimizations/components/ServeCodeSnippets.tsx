@@ -1,17 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import dynamic from "next/dynamic";
 import type { ServeInfoResponse } from "@/shared/types/api";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
-import { Skeleton } from "@/shared/ui/skeleton";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import { LangPicker } from "./ui-primitives";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={180} borderRadius={8} />,
-});
 
 export function ServeCodeSnippets({
   serveInfo,

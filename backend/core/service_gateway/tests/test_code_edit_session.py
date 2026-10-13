@@ -4,19 +4,24 @@ Covers the no-LLM surface of :class:`_CodeEditSession`: the adapter-debris
 strip applied to tool arguments (minimax occasionally emits a malformed
 trailing field marker) and its interaction with the per-turn edit
 guardrails. Validators are monkeypatched — their subprocess round-trip is
-covered elsewhere. The black-box twin, :class:`_BlackboxEditSession`, and
-its static scorer check are covered the same way.
+covered elsewhere. The wizard's twin, :class:`_UnifiedEditSession`, and its
+static run-code / metric contract checks are covered the same way.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 import pytest
 
 from core.service_gateway.agents import code as code_module
 from core.service_gateway.agents.code import (
-    _BlackboxEditSession,
     _CodeEditSession,
-    _validate_scorer_code,
+    _unified_contracts,
+    _unified_validators,
+    _UnifiedEditSession,
+    _validate_run_code,
+    _validate_unified_metric_code,
 )
 from core.service_gateway.agents.parse_salvage import strip_adapter_debris
 
@@ -68,9 +73,7 @@ def test_edit_signature_strips_debris_before_validation(
 ) -> None:
     """A trailing malformed marker is stripped so the edit validates and applies."""
     seen: list[str] = []
-    monkeypatch.setattr(
-        code_module, "_validate_signature_code", lambda c: seen.append(c) or ""
-    )
+    monkeypatch.setattr(code_module, "_validate_signature_code", lambda c: seen.append(c) or "")
     observation = session.edit_signature("tighten docstring", _NEW_SIG + "[[ ## completed ## ]")
     assert "replaced and validated" in observation
     assert session.signature_code == _NEW_SIG.rstrip()
@@ -100,106 +103,227 @@ def test_edit_metric_strips_debris_before_validation(
     assert seen == [new_metric.rstrip()]
 
 
-_SEED = "You are a support agent. Answer briefly.\n"
-_SCORER = "def score(candidate, case=None):\n    return 1.0\n"
+_RUN = "def run(artifact, input):\n    return artifact\n"
+_SCORE = "def score(input, output, expected=None):\n    return 1.0, {'feedback': 'ok'}\n"
+
+
+def _unified(**overrides: object) -> dict:
+    """Build a wizard authoring context as the router hands it over."""
+    base: dict = {
+        "task": {"objective": "Answer tickets.", "artifact": {"kind": "prompt", "starting_version": "Be brief."}},
+        "data_mode": "pairs",
+        "input_fields": ["ticket"],
+        "expected_field": "label",
+        "optimizer": "auto",
+        "metric_shape": "blackbox_side_info",
+        "metric_has_model": False,
+    }
+    return {**base, **overrides}
 
 
 @pytest.fixture
-def bb_events() -> list[dict]:
-    """Collect the SSE events a black-box session emits during a test."""
+def u_events() -> list[dict]:
+    """Collect the SSE events a unified session emits during a test."""
     return []
 
 
 @pytest.fixture
-def bb_session(bb_events: list[dict]) -> _BlackboxEditSession:
-    """Build a black-box session over a starter seed/scorer with a capturing emitter."""
-    return _BlackboxEditSession(seed_text=_SEED, scorer_code=_SCORER, emit=bb_events.append)
+def u_session(u_events: list[dict]) -> _UnifiedEditSession:
+    """Build a unified session over a starter run/metric with the real contract checks."""
+    run_validator, metric_validator = _unified_validators(_unified())
+    return _UnifiedEditSession(
+        run_code=_RUN,
+        metric_code=_SCORE,
+        emit=u_events.append,
+        run_validator=run_validator,
+        metric_validator=metric_validator,
+    )
 
 
-def test_blackbox_edit_seed_rides_signature_events(
-    bb_session: _BlackboxEditSession, bb_events: list[dict]
-) -> None:
-    """A seed edit publishes tool_start → signature_replace → tool_end ok and updates the slot."""
-    observation = bb_session.edit_seed("add tone", "You are a support agent. Be warm.\n")
+def test_unified_edit_run_rides_signature_events(u_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """A run edit publishes tool_start → signature_replace → tool_end ok and updates the slot."""
+    new_run = "def run(artifact, input):\n    return artifact + input['ticket']\n"
+    observation = u_session.edit_run("use the ticket", new_run + "[[ ## completed ## ]")
     assert "replaced" in observation
-    assert bb_session.seed_text == "You are a support agent. Be warm."
-    assert [e["event"] for e in bb_events] == ["tool_start", "signature_replace", "tool_end"]
-    assert bb_events[0]["data"]["tool"] == "edit_seed"
-    assert bb_events[1]["data"]["code"] == "You are a support agent. Be warm."
-    assert bb_events[2]["data"]["status"] == "ok"
+    assert u_session.run_code == new_run.rstrip()
+    assert [e["event"] for e in u_events] == ["tool_start", "signature_replace", "tool_end"]
+    assert u_events[0]["data"]["tool"] == "edit_run"
+    assert u_events[2]["data"]["status"] == "ok"
 
 
-def test_blackbox_second_seed_edit_in_turn_is_rejected(bb_session: _BlackboxEditSession) -> None:
+def test_unified_edit_metric_rides_metric_events(u_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """A valid metric edit publishes metric_replace and updates the slot."""
+    new_score = "def score(input, output, expected=None):\n    return 0.5, {'feedback': 'meh'}\n"
+    observation = u_session.edit_metric("grade softly", new_score)
+    assert "replaced" in observation
+    assert u_session.metric_code == new_score.rstrip()
+    assert [e["event"] for e in u_events] == ["tool_start", "metric_replace", "tool_end"]
+
+
+def test_unified_second_edit_in_turn_is_rejected(u_session: _UnifiedEditSession) -> None:
     """The per-turn guard rejects a second edit of the same artifact."""
-    bb_session.edit_seed("first", "v1")
-    observation = bb_session.edit_seed("second", "v2")
+    u_session.edit_run("first", "def run(artifact, input):\n    return 1\n")
+    observation = u_session.edit_run("second", "def run(artifact, input):\n    return 2\n")
     assert "already replaced" in observation
-    assert bb_session.seed_text == "v1"
+    assert "return 1" in u_session.run_code
 
 
-def test_blackbox_identical_seed_is_rejected(
-    bb_session: _BlackboxEditSession, bb_events: list[dict]
-) -> None:
-    """Current seed plus adapter debris is a no-op, not an edit."""
-    observation = bb_session.edit_seed("noop", _SEED + "[[ ## completed ## ]]")
+def test_unified_identical_edit_is_rejected(u_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """Current code plus adapter debris is a no-op, not an edit."""
+    observation = u_session.edit_metric("noop", _SCORE + "[[ ## completed ## ]]")
     assert "identical" in observation
-    assert bb_session.seed_text == _SEED
-    assert [e["event"] for e in bb_events] == ["tool_start", "tool_end"]
-    assert bb_events[-1]["data"]["status"] == "error"
+    assert [e["event"] for e in u_events] == ["tool_start", "tool_end"]
+    assert u_events[-1]["data"]["status"] == "error"
 
 
-def test_blackbox_edit_scorer_rejects_invalid_code(
-    bb_session: _BlackboxEditSession, bb_events: list[dict]
-) -> None:
-    """A scorer that fails the static check never reaches the editor."""
-    observation = bb_session.edit_scorer("break it", "def score(candidate, case=None:\n    return 1\n")
+def test_unified_metric_in_the_wrong_shape_is_rejected(u_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """A DSPy-shaped metric never lands when the optimizer needs score(input, output)."""
+    observation = u_session.edit_metric("dspy style", "def metric(gold, pred, trace=None):\n    return 1.0\n")
     assert "invalid" in observation
-    assert bb_session.scorer_code == _SCORER
-    assert "metric_replace" not in [e["event"] for e in bb_events]
-    assert bb_events[-1]["data"] == {"id": bb_events[0]["data"]["id"], "tool": "edit_scorer", "status": "error"}
+    assert u_session.metric_code == _SCORE
+    assert "metric_replace" not in [e["event"] for e in u_events]
 
 
-def test_blackbox_edit_scorer_rides_metric_events(
-    bb_session: _BlackboxEditSession, bb_events: list[dict]
-) -> None:
-    """A valid scorer edit publishes metric_replace and updates the slot."""
-    new_scorer = "def score(candidate, case=None):\n    return 0.5, {'feedback': 'meh'}\n"
-    observation = bb_session.edit_scorer("grade softly", new_scorer + "[[ ## completed ## ]")
-    assert "replaced" in observation
-    assert bb_session.scorer_code == new_scorer.rstrip()
-    assert [e["event"] for e in bb_events] == ["tool_start", "metric_replace", "tool_end"]
-    assert bb_events[1]["data"]["code"] == new_scorer.rstrip()
+def test_unified_ask_user_and_set_brief_emit_events(u_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """ask emits once per turn; set_brief writes only the non-empty fields."""
+    u_session.ask_user("Strict match?", '[{"label": "Yes"}, {"label": "No"}]')
+    assert "already shown" in u_session.ask_user("Again?", "[]")
+    u_session.set_brief("", "Tickets are short.")
+    names = [e["event"] for e in u_events]
+    assert names.count("ask") == 1
+    assert {"event": "brief", "data": {"background": "Tickets are short."}} in u_events
 
 
 @pytest.mark.parametrize(
-    ("code", "fragment"),
+    ("code", "kind", "fragment"),
     [
-        ("def score(candidate, case=None):\n    return 1.0\n", ""),
-        ("def metric(candidate, case):\n    return 0.0\n", ""),
-        ("def grade(candidate):\n    return 0.0\n", ""),
-        ("def helper():\n    pass\n\ndef score(candidate, case=None):\n    return 1.0\n", ""),
-        ("def score(*args):\n    return 1.0\n", ""),
-        ("def score(candidate, case=None:\n    return 1\n", "line 1"),
-        ("x = 1\n", "define a function"),
-        ("def a(c):\n    pass\n\ndef b(c):\n    pass\n", "define a function"),
-        ("def score():\n    return 1.0\n", "first argument"),
-        ("   \n", "empty"),
+        ("def run(artifact, input):\n    return 1\n", "prompt", ""),
+        ("def run(artifact, input, extra=None):\n    return 1\n", "code", ""),
+        ("def run(*args):\n    return 1\n", "text", ""),
+        ("def run(input):\n    return 1\n", "prompt", "(artifact, input)"),
+        ("def go(artifact, input):\n    return 1\n", "prompt", "def run"),
+        ("def build_program():\n    return None\n", "dspy_program", ""),
+        ("def build_program(lm):\n    return None\n", "dspy_program", "no arguments"),
+        ("def run(artifact, input):\n    return 1\n", "dspy_program", "build_program"),
+        ("def run(artifact, input:\n    return 1\n", "prompt", "line 1"),
+        ("  \n", "prompt", "empty"),
     ],
 )
-def test_validate_scorer_code(code: str, fragment: str) -> None:
-    """The static check accepts every entrypoint shape the runtime loads and names what's wrong otherwise."""
-    err = _validate_scorer_code(code)
+def test_validate_run_code(code: str, kind: str, fragment: str) -> None:
+    """The run check follows the artifact kind's entrypoint and names what is wrong."""
+    err = _validate_run_code(code, kind)
     if fragment:
         assert fragment in err
     else:
         assert err == ""
 
 
-@pytest.mark.parametrize("scorer_has_model", [True, False])
-def test_scorer_contract_offers_model_judges_only_with_a_model(scorer_has_model: bool) -> None:
-    """The prompt lists the judge shapes that need llm() only when a model is attached."""
-    contract = code_module._scorer_contract("text", scorer_has_model)
+@pytest.mark.parametrize(
+    ("code", "shape", "has_model", "fragment"),
+    [
+        (
+            "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None):\n    return 1\n",
+            "dspy_feedback",
+            False,
+            "",
+        ),
+        ("def metric(gold, pred, trace=None):\n    return 1\n", "dspy_feedback", False, "pred_trace"),
+        ("def metric(gold, pred, trace=None):\n    return 1\n", "dspy_scalar", False, ""),
+        # The validity check calls a scalar DSPy metric with trace, so two parameters fail it.
+        ("def metric(gold, pred):\n    return True\n", "dspy_scalar", False, "trace=None"),
+        ("def score(input, output, expected=None):\n    return 1, {}\n", "dspy_scalar", False, "def metric"),
+        ("def score(input, output):\n    return 1, {}\n", "blackbox_side_info", False, ""),
+        ("def score(input):\n    return 1, {}\n", "blackbox_side_info", False, "score(input, output"),
+        (
+            "from skynet import llm\n\ndef score(input, output, expected=None):\n    return 1, {}\n",
+            "blackbox_side_info",
+            False,
+            "no metric model",
+        ),
+        (
+            "from skynet import llm\n\ndef score(input, output, expected=None):\n    return 1, {}\n",
+            "blackbox_side_info",
+            True,
+            "",
+        ),
+    ],
+)
+def test_validate_unified_metric_code(code: str, shape: str, has_model: bool, fragment: str) -> None:
+    """The metric check enforces the optimizer's exact shape and the metric model."""
+    err = _validate_unified_metric_code(code, shape, has_model)
+    if fragment:
+        assert fragment in err
+    else:
+        assert err == ""
 
-    assert "- Run program:" in contract
-    assert ("- Vision judge:" in contract) is scorer_has_model
-    assert ("- LLM judge:" in contract) is scorer_has_model
+
+@pytest.mark.parametrize(
+    ("shape", "needle"),
+    [
+        ("dspy_feedback", "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None)"),
+        ("dspy_scalar", "def metric(gold, pred, trace=None)"),
+        ("blackbox_side_info", "def score(input, output, expected=None)"),
+    ],
+)
+def test_metric_contract_states_the_exact_shape(shape: str, needle: str) -> None:
+    """The authoring prompt names the exact function the chosen optimizer calls."""
+    _, metric_contract = _unified_contracts(_unified(metric_shape=shape))
+    assert needle in metric_contract
+
+
+@pytest.mark.parametrize("has_model", [True, False])
+def test_metric_contract_offers_llm_only_with_a_model(has_model: bool) -> None:
+    """The llm helper is described only when a metric model is attached."""
+    _, metric_contract = _unified_contracts(_unified(metric_has_model=has_model))
+    assert ("`from skynet import llm` calls it" in metric_contract) is has_model
+
+
+def test_run_contract_follows_the_artifact_kind() -> None:
+    """A DSPy program gets the build_program contract; every other kind gets run()."""
+    program, _ = _unified_contracts(_unified(task={"objective": "x", "artifact": {"kind": "dspy_program"}}))
+    prompt, _ = _unified_contracts(_unified())
+    assert "build_program" in program
+    assert "def run(artifact, input)" in prompt
+
+
+def test_run_contract_is_one_contract_for_every_artifact() -> None:
+    """Every artifact, a DSPy program included, gets run code plus a metric under one contract."""
+    program, _ = _unified_contracts(_unified(task={"objective": "x", "artifact": {"kind": "dspy_program"}}))
+    prompt, _ = _unified_contracts(_unified())
+    deliverables = prompt.split("\n\n", 1)[0]
+    assert program.startswith(deliverables)
+    assert "the run code and the metric" in deliverables
+    assert "validity check" in deliverables
+    assert "signature and the metric" not in program
+    for contract in (program, prompt):
+        assert "The run code is plain python that turns one case input into an output" in contract
+        assert "- Entry point: " in contract
+
+
+def test_a_seed_without_the_authoring_context_fails(monkeypatch) -> None:
+    """There is no Signature seed: a first draft needs the unified context or a workflow."""
+    monkeypatch.setattr(code_module, "_build_agent_lm", lambda *_a: object())
+    monkeypatch.setattr(code_module, "served_model_from", lambda _lm: "test-model")
+
+    async def collect() -> list[dict]:
+        """Drain the agent's event stream for a seed request with no authoring context.
+
+        Returns:
+            Every event the agent emitted.
+        """
+        return [
+            event
+            async for event in code_module.run_code_agent(
+                dataset_columns=["q", "a"],
+                column_roles={"q": "input", "a": "output"},
+                sample_rows=[],
+                user_message="",
+                prior_signature="",
+                prior_metric="",
+                model="test-model",
+            )
+        ]
+
+    events = asyncio.run(collect())
+    assert [e["event"] for e in events] == ["error"]
+    assert "authoring context" in events[0]["data"]["error"]

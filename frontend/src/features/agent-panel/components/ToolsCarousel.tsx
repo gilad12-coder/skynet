@@ -40,8 +40,7 @@ const FEATURED_TOOLS: readonly string[] = [
   "request_code_authoring",
   "validate_code_validate_code_post",
   "discover_models_models_discover_post",
-  "submit_job_run_post",
-  "submit_grid_search_grid_search_post",
+  "submit_unified_run_optimize_post",
   "request_user_inference",
   "clone_job_optimizations",
   "retry_job_optimizations",
@@ -52,11 +51,9 @@ const FEATURED_TOOLS: readonly string[] = [
 // Tour-oriented descriptions (capabilities, not approval warnings). Fallback
 // to TOOL_META.description when a key is missing.
 const TOUR_DESCRIPTIONS: Record<string, string> = perLocale(() => ({
-  submit_job_run_post: formatMsg("auto.features.agent.panel.components.toolscarousel.template.1", {
-    p1: TERMS.optimization,
-  }),
-  submit_grid_search_grid_search_post: msg(
-    "auto.features.agent.panel.components.toolscarousel.literal.1",
+  submit_unified_run_optimize_post: formatMsg(
+    "auto.features.agent.panel.components.toolscarousel.template.1",
+    { p1: TERMS.optimization },
   ),
   rename_job_optimizations: formatMsg(
     "auto.features.agent.panel.components.toolscarousel.template.2",

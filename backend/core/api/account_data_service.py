@@ -28,10 +28,12 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from ..notifications.preferences import settings_from_row
 from ..storage.models import (
     AgentConversationModel,
     AgentMessageModel,
@@ -51,16 +53,21 @@ from ..storage.models import (
     JobModel,
     LogEntryModel,
     ModelPrivacyPreferenceModel,
+    NotificationModel,
     NotificationPreferenceModel,
     OptimizationShareGrantModel,
     OptimizationShareLinkModel,
     PackageRegistryPreferenceModel,
     ProgressEventModel,
+    PushSubscriptionModel,
+    SlackConnectionModel,
     TaggingSessionModel,
     TaggingSessionShareGrantModel,
     TaggingSessionShareLinkModel,
     TelemetryEventModel,
     TwoFactorEmailCodeModel,
+    UserConnectorModel,
+    UserIdentityModel,
     UserModel,
     UserQuotaAuditModel,
     UserQuotaOverrideModel,
@@ -70,7 +77,7 @@ from ..storage.models import (
     WebAuthnCredentialModel,
 )
 
-EXPORT_FORMAT = "skynet-account-export/v1"
+EXPORT_FORMAT = "skynet-account-export/v2"
 
 
 @dataclass
@@ -145,6 +152,8 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
             "use_case": user.use_case,
             "experience_level": user.experience_level,
             "job_role": user.job_role,
+            "intake_completed_at": _iso(user.intake_completed_at),
+            "intake_profile": user.intake_profile,
             "two_factor": {
                 "totp_enabled": user.totp_secret is not None,
                 "email_codes_enabled": bool(user.email_2fa_enabled),
@@ -155,11 +164,13 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
     registry_row = session.get(PackageRegistryPreferenceModel, username)
     privacy_row = session.get(ModelPrivacyPreferenceModel, username)
     notification_row = session.get(NotificationPreferenceModel, username)
+    notification_settings = settings_from_row(notification_row)
     notification_preferences = {
-        "job_updates_enabled": (bool(notification_row.job_updates_enabled) if notification_row is not None else True),
-        "sharing_updates_enabled": (
-            bool(notification_row.sharing_updates_enabled) if notification_row is not None else True
-        ),
+        "grid": notification_settings.grid,
+        "hold_minutes": notification_settings.hold_minutes,
+        "held_channels": list(notification_settings.held_channels),
+        "stuck_fraction": notification_settings.stuck_fraction,
+        "budget_alert_fraction": notification_settings.budget_alert_fraction,
     }
 
     jobs = session.scalars(select(JobModel).where(JobModel.username == username).order_by(JobModel.created_at)).all()
@@ -303,6 +314,83 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         for passkey in passkeys
     ]
 
+    identities = session.scalars(
+        select(UserIdentityModel).where(UserIdentityModel.username == username).order_by(UserIdentityModel.created_at)
+    ).all()
+    sign_in_methods = [
+        {
+            "provider": identity.provider,
+            "provider_email": identity.provider_email,
+            "created_at": _iso(identity.created_at),
+        }
+        for identity in identities
+    ]
+
+    notifications = session.scalars(
+        select(NotificationModel).where(NotificationModel.username == username).order_by(NotificationModel.created_at)
+    ).all()
+    notifications_out = [
+        {
+            "event_type": item.event_type,
+            "optimization_id": item.optimization_id,
+            "title": item.title,
+            "facts": item.facts,
+            "link": item.link,
+            "in_inbox": item.in_inbox,
+            "created_at": _iso(item.created_at),
+            "read_at": _iso(item.read_at),
+            "deliveries": item.deliveries,
+        }
+        for item in notifications
+    ]
+
+    # The endpoint URL is a bearer capability for pushing to the browser, so only its host is reported.
+    push_rows = session.scalars(
+        select(PushSubscriptionModel)
+        .where(PushSubscriptionModel.username == username)
+        .order_by(PushSubscriptionModel.created_at)
+    ).all()
+    push_subscriptions = [
+        {
+            "push_service": urlsplit(sub.endpoint).hostname,
+            "user_agent": sub.user_agent,
+            "created_at": _iso(sub.created_at),
+            "last_used_at": _iso(sub.last_used_at),
+        }
+        for sub in push_rows
+    ]
+
+    slack_row = session.get(SlackConnectionModel, username)
+    slack = (
+        {
+            "team_name": slack_row.team_name,
+            "channel_name": slack_row.channel_name,
+            "status": slack_row.status,
+            "created_at": _iso(slack_row.created_at),
+            "updated_at": _iso(slack_row.updated_at),
+        }
+        if slack_row is not None
+        else None
+    )
+
+    connector_rows = session.scalars(
+        select(UserConnectorModel)
+        .where(UserConnectorModel.username == username)
+        .order_by(UserConnectorModel.created_at)
+    ).all()
+    connectors = [
+        {
+            "provider": connector.provider,
+            "auth_method": connector.auth_method,
+            "account_label": connector.account_label,
+            "scopes": connector.scopes,
+            "status": connector.status,
+            "created_at": _iso(connector.created_at),
+            "updated_at": _iso(connector.updated_at),
+        }
+        for connector in connector_rows
+    ]
+
     return {
         "export_format": EXPORT_FORMAT,
         "exported_at": _iso(datetime.now(UTC)),
@@ -316,6 +404,11 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         "api_token": api_token,
         "provider_keys": provider_keys_out,
         "passkeys": passkeys_out,
+        "sign_in_methods": sign_in_methods,
+        "connectors": connectors,
+        "notifications": notifications_out,
+        "push_subscriptions": push_subscriptions,
+        "slack": slack,
         "notification_preferences": notification_preferences,
         "model_privacy": {"data_policy": privacy_row.data_policy if privacy_row is not None else "deny"},
         "package_registry": {"index_url": registry_row.index_url if registry_row else "https://pypi.org/simple"},
@@ -414,6 +507,7 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(AgentConversationModel).where(AgentConversationModel.username == username))
 
     _run_delete(delete(ApiTokenModel).where(ApiTokenModel.username == username))
+    _run_delete(delete(UserIdentityModel).where(UserIdentityModel.username == username))
     _run_delete(delete(TwoFactorEmailCodeModel).where(TwoFactorEmailCodeModel.email == username))
     _run_delete(delete(WebAuthnCredentialModel).where(WebAuthnCredentialModel.user_email == username))
     _run_delete(delete(WebAuthnChallengeModel).where(WebAuthnChallengeModel.user_email == username))
@@ -423,6 +517,10 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(UserStorageQuotaOverrideModel).where(UserStorageQuotaOverrideModel.username == username))
     _run_delete(delete(AgentStagedDatasetModel).where(AgentStagedDatasetModel.username == username))
     _run_delete(delete(NotificationPreferenceModel).where(NotificationPreferenceModel.username == username))
+    _run_delete(delete(NotificationModel).where(NotificationModel.username == username))
+    _run_delete(delete(PushSubscriptionModel).where(PushSubscriptionModel.username == username))
+    _run_delete(delete(SlackConnectionModel).where(SlackConnectionModel.username == username))
+    _run_delete(delete(UserConnectorModel).where(UserConnectorModel.username == username))
     _run_delete(delete(ModelPrivacyPreferenceModel).where(ModelPrivacyPreferenceModel.username == username))
 
     _run_delete(delete(PackageRegistryPreferenceModel).where(PackageRegistryPreferenceModel.username == username))

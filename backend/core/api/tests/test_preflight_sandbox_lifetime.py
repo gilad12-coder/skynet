@@ -38,11 +38,9 @@ def _run(monkeypatch: pytest.MonkeyPatch, request: WizardPreflightRequest) -> tu
     monkeypatch.setattr(preflight_execution, "ModelGateway", _Gateway)
     monkeypatch.setattr(preflight_execution, "bind_protected_sandbox", bind)
     monkeypatch.setattr(preflight_execution, "payload_uses_token_source", lambda *args, **kwargs: False)
-    monkeypatch.setattr(preflight_execution, "protected_vercel_unavailable_reason", lambda settings, workflow: None)
     monkeypatch.setattr(
         preflight_execution, "_verify_anything", lambda gateway, payload, *, scope, identity: dict(PASSED)
     )
-    monkeypatch.setattr(preflight_execution, "_verify_dspy", lambda payload, *, scope, identity: dict(PASSED))
     status, _ = _perform_preflight(
         request,
         SimpleNamespace(username="alice"),
@@ -72,16 +70,3 @@ def test_anything_check_binds_a_request_sized_sandbox(monkeypatch: pytest.Monkey
     assert bound["owner_id"] == "setup"
 
 
-def test_dspy_check_binds_the_sample_allowance(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A program check gets the fixed sample allowance rather than the run's ceiling."""
-    request = WizardPreflightRequest(
-        scope="evaluation",
-        workflow="dspy",
-        payload={},
-        execution_budget_id="draft",
-        execution_budget_revision=1,
-    )
-
-    _, bound = _run(monkeypatch, request)
-
-    assert bound["lifetime_seconds"] == preflight_execution._DSPY_PREFLIGHT_LIFETIME_SECONDS

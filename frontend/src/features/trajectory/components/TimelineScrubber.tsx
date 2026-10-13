@@ -113,7 +113,7 @@ export function TimelineScrubber({
 
   return (
     <div
-      className="rounded-xl border border-border/40 bg-background/70 px-4 pt-3 pb-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]"
+      className="rounded-xl border border-border/40 bg-background/70 px-4 pt-3 pb-4"
       dir={isRtl ? "rtl" : "ltr"}
     >
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -136,14 +136,14 @@ export function TimelineScrubber({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onKeyDown={onKeyDown}
-        className="relative h-9 cursor-pointer touch-none select-none rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/60"
+        className="relative h-9 cursor-pointer touch-none select-none rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
       >
         <div
           className="absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full"
-          style={{ background: "rgba(28, 22, 18, 0.10)" }}
+          style={{ background: "color-mix(in srgb, var(--foreground) 10%, transparent)" }}
         />
         <div
-          className="absolute top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-[#7C6350]"
+          className="absolute top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-primary-fill"
           style={{ ...(isRtl ? { right: 0 } : { left: 0 }), width: `${filledPct}%` }}
         />
 
@@ -159,7 +159,7 @@ export function TimelineScrubber({
               style={{
                 ...(isRtl ? { right: `${pct}%` } : { left: `${pct}%` }),
                 transform: isRtl ? "translate(50%, -50%)" : "translate(-50%, -50%)",
-                color: isPast ? "#7C6350" : "rgba(28, 22, 18, 0.42)",
+                color: isPast ? "var(--primary)" : "var(--muted-foreground)",
               }}
               aria-hidden="true"
             >
@@ -185,8 +185,8 @@ export function TimelineScrubber({
           ) : null}
           <div
             className={cn(
-              "relative block h-4 w-4 rounded-full border-[1.5px] shadow-[0_1px_2px_rgba(28,22,18,0.18)] transition-transform",
-              isAtLive ? "border-[#1c1612] bg-[#1c1612]" : "border-[#1c1612] bg-[#fbf8f3]",
+              "relative block h-4 w-4 rounded-full border-[1.5px] transition-transform",
+              isAtLive ? "border-foreground bg-foreground" : "border-foreground bg-[#fbf8f3] dark:bg-[#3e372c]",
               dragging && "scale-110",
             )}
           />

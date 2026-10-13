@@ -27,7 +27,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt \
 
 COPY config.yaml /app/config.yaml
 COPY custom_callbacks.py /app/custom_callbacks.py
+COPY start.py /app/start.py
 
 EXPOSE 4000
-ENTRYPOINT ["litellm"]
+# start.py runs litellm with these args and registers LITELLM_SEED_KEY once
+# the proxy is healthy (see the module docstring).
+ENTRYPOINT ["python", "/app/start.py"]
 CMD ["--config", "/app/config.yaml", "--port", "4000", "--host", "::"]
