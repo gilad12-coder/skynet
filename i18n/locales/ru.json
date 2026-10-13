@@ -161,6 +161,7 @@
     "admin.forbidden": "Для этой операции требуются права администратора.",
     "admin.invalid_username": "Имя пользователя не должно быть пустым.",
     "admin.quota_save_failed": "Не удалось сохранить переопределение квоты.",
+    "admin.user_not_found": "Аккаунт для '{email}' не найден.",
     "agent.approval.unknown_call_id": "Нет ожидающего подтверждения для указанного call_id.",
     "agent.status.tool_end": "Инструмент завершил работу.",
     "agent.status.tool_start": "Агент вызывает инструмент…",

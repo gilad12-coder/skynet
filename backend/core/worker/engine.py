@@ -68,7 +68,7 @@ from ..constants import (
     TOKEN_SOURCE_MANAGED,
 )
 from ..exceptions import INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
-from ..i18n import CANCELLATION_REASON, PAUSE_REASON
+from ..i18n import CANCELLATION_REASON, PAUSE_REASON, SAMPLE_DATASETS
 from ..models import BlackboxRunRequest, RunRequest, UnifiedRunRequest
 from ..models.results import TerminalOutcome, result_scores
 from ..notifications import notify_job_completed
@@ -82,6 +82,7 @@ from ..service_gateway.optimization.trajectory import GEPA_STATE_FILENAME
 from ..service_gateway.optimization.unified.contract import validate_unified_payload
 from ..storage import JobStore
 from ..telemetry import record_server_event
+from ..telemetry.run_outcome import completed_properties, failed_properties
 from .budget_probe import (
     STOP_REASON_BUDGET_PROJECTED,
     planned_calls_from_progress,
@@ -233,6 +234,25 @@ def _legacy_settlement_key(optimization_id: str, generation: int | None) -> str 
 
 class CancellationError(Exception):
     """Raised inside a job thread when the job is cancelled by the user."""
+
+
+class OptimizerProcessError(RuntimeError):
+    """Re-raise an optimizer-process failure in the worker, keeping its class name.
+
+    Args:
+        message: The child's error text, shown to the user as the job message.
+        remote_error_class: The child exception's class name, for telemetry.
+    """
+
+    def __init__(self, message: str, remote_error_class: str | None = None) -> None:
+        """Store the child's message and exception class name.
+
+        Args:
+            message: The child's error text.
+            remote_error_class: The child exception's class name, if known.
+        """
+        super().__init__(message)
+        self.remote_error_class = remote_error_class
 
 
 class JobStalledError(InfrastructureInterruptionError):
@@ -662,6 +682,8 @@ class BackgroundWorker:
         bill_legacy_usage = False
         result_dict: dict[str, Any] | None = None
         usage_tracker: dict[str, Any] = {}
+        # Where the run was when it failed, read by run_failed telemetry.
+        run_phase = "preflight"
 
         with self._queue_lock:
             cancel_event = self._cancel_events.get(optimization_id)
@@ -753,6 +775,7 @@ class BackgroundWorker:
                 message="Running optimization",
                 started_at=datetime.now(UTC).isoformat(),
             )
+            run_phase = "sandbox"
 
             budget_gateway: ModelGateway | None = None
             run_process: mp.process.BaseProcess | None = None
@@ -938,6 +961,7 @@ class BackgroundWorker:
                 )
                 assert run_process is not None
                 run_process.start()
+                run_phase = "optimize"
 
                 # From here the child owns its copy of the payload. The
                 # validated request model is a second full copy of the
@@ -1043,7 +1067,7 @@ class BackgroundWorker:
                     error_message = str(subprocess_error.get("error", "Unknown subprocess error"))
                     if subprocess_error.get("failure_kind") == INFRASTRUCTURE_INTERRUPTION:
                         raise InfrastructureInterruptionError(error_message)
-                    raise RuntimeError(error_message)
+                    raise OptimizerProcessError(error_message, subprocess_error.get("error_type") or None)
 
                 if run_process.exitcode not in (0, None) and result_dict is None:
                     if run_process.exitcode == -9:
@@ -1134,7 +1158,15 @@ class BackgroundWorker:
                             baseline_score=_baseline,
                             optimized_score=_optimized,
                         )
-                        self._record_run_outcome(optimization_id, _username, final_status, overview)
+                        self._record_run_outcome(
+                            optimization_id,
+                            _username,
+                            final_status,
+                            overview,
+                            result=result_dict,
+                            payload=payload_dict,
+                            phase=run_phase,
+                        )
                     # Every terminal status is billed for the tokens it spent — a
                     # failed or budget-stopped run still consumed them. The
                     # per-generation settlement key keeps a redelivered leg from
@@ -1276,7 +1308,12 @@ class BackgroundWorker:
                         message=error_message,
                     )
                     self._record_run_outcome(
-                        optimization_id, _username, final_status, overview if isinstance(overview, dict) else {}
+                        optimization_id,
+                        _username,
+                        final_status,
+                        overview if isinstance(overview, dict) else {},
+                        error=exc,
+                        phase=run_phase,
                     )
             if is_shutdown:
                 raise
@@ -1716,6 +1753,11 @@ class BackgroundWorker:
         username: str,
         status: str,
         overview: dict[str, Any],
+        *,
+        result: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+        error: BaseException | None = None,
+        phase: str | None = None,
     ) -> None:
         """Emit the ``run_completed`` / ``run_failed`` / ``run_cancelled`` milestone.
 
@@ -1723,29 +1765,39 @@ class BackgroundWorker:
         completion claim) so each run yields one outcome event, mirroring the
         browser's ``run_submitted``. Only structural descriptors are recorded —
         no error text, no run name — and a telemetry failure never touches the
-        run's status.
+        run's status. ``run_completed`` adds the score, held-out and sample-data
+        facts; ``run_failed`` adds the failure stage and exception class.
 
         Args:
             optimization_id: Finished job id (logged only, never exported).
             username: Owner of the run.
             status: Terminal status (``success``, ``failed`` or ``cancelled``).
             overview: The job's ``payload_overview`` mapping.
+            result: The stored result of a finished run, if any.
+            payload: The stored job payload, read for its dataset rows.
+            error: The exception that ended a failed run, if any.
+            phase: The worker's phase when the run ended.
         """
         name = {"success": "run_completed", "cancelled": "run_cancelled", "stopped": "run_stopped"}.get(
             status, "run_failed"
         )
         try:
+            properties: dict[str, Any] = {
+                "status": status,
+                "optimization_type": overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE),
+                "optimizer": overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME),
+                "model": overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
+                "token_source": overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE),
+            }
+            if name == "run_completed":
+                properties.update(completed_properties(result, payload, SAMPLE_DATASETS))
+            elif name == "run_failed":
+                properties.update(failed_properties(error, phase))
             record_server_event(
                 getattr(self._job_store, "engine", None),
                 username=username or None,
                 name=name,
-                properties={
-                    "status": status,
-                    "optimization_type": overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE),
-                    "optimizer": overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME),
-                    "model": overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
-                    "token_source": overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE),
-                },
+                properties=properties,
             )
         except Exception:  # isolation boundary: telemetry must never affect a run outcome
             logger.debug("Optimization %s: run outcome telemetry failed", optimization_id, exc_info=True)

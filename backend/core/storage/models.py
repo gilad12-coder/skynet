@@ -198,6 +198,10 @@ class UserModel(Base):
     totp_pending_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     email_2fa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recovery_codes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Our own and test accounts (synthetic ``.local`` fixtures, configured
+    # admins, anything an admin flags) that every product metric excludes.
+    # Defaults False so every new sign-up counts as a real user.
+    is_internal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
 
 
 class UserIdentityModel(Base):
@@ -607,6 +611,13 @@ class WalletLedgerModel(Base):
     # it is the one id present on the checkout, charge, and dispute objects
     # alike. None on grants/runs/adjustments and on top-ups predating this column.
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # The job a ``run`` row charged, so cost per run is a sum over this table.
+    # None on interactive debits (serve, agent chat), non-run rows, and rows
+    # written before run attribution landed.
+    optimization_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # Cents of a ``run`` row's charge drawn from the free grant; the paid part
+    # is ``-delta_cents - from_grant_cents``. None on non-run and older rows.
+    from_grant_cents: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC), index=True
     )

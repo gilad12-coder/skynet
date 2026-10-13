@@ -142,6 +142,7 @@ export function LegalDocument({ document, kind }: { document: LegalDoc; kind: Le
           >
             <AnimatedWordmark
               size={16}
+              withMark
               className="cursor-pointer"
               autoMorph
               autoMorphDuration={10000}

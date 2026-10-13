@@ -167,8 +167,9 @@ def test_adopted_database_applies_pending_migrations(fresh_pg: Engine, monkeypat
         )
     sync_migration_head(fresh_pg)
     assert _version(fresh_pg) == _HEAD
-    # The one-time-500 migration tops the pre-existing 200 grant up to 500.
-    assert _grant(fresh_pg) == 500
+    # The pending chain really ran: the one-time-500 migration tops the 200
+    # grant up to 500, then c4f1a7d9e2b5 clears every leftover grant to 0.
+    assert _grant(fresh_pg) == 0
 
 
 @_needs_pg

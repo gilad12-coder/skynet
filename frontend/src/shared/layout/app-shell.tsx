@@ -178,7 +178,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
           <div className="hidden sm:block">
             <AnimatedWordmark size={16} withMark autoMorph autoMorphDuration={10000} morphSpeed={250} />
           </div>
-          <SkynetMark className="sm:hidden size-2.5 shrink-0 text-foreground" aria-hidden="true" />
+          <SkynetMark className="sm:hidden size-5 shrink-0" aria-hidden="true" />
           <span
             className="sm:hidden text-sm font-bold tracking-[0.14em] uppercase text-primary cursor-default"
             style={{ fontFamily: "var(--font-ui)" }}
