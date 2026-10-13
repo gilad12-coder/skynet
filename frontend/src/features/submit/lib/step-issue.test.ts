@@ -106,3 +106,35 @@ for (const level of ["guided", "standard", "expert"] as const) {
     assert.equal(runBlockedReason(passed, null), null);
   });
 }
+
+test("missing code reads as being written while the agent writes it", () => {
+  const ready = readyState("standard", null);
+  const noMetric = { ...ready, workspace: { ...ready.workspace, metricCode: "" } };
+  assert.equal(runBlockedReason(noMetric, null), "submit.v2.metric.issue.metric_code");
+  assert.equal(
+    runBlockedReason(noMetric, null, { agentWriting: true }),
+    "submit.v2.metric.agent.writing_metric",
+  );
+
+  const noRun = { ...noMetric, workspace: { ...noMetric.workspace, runCode: "" } };
+  assert.equal(
+    runBlockedReason(noRun, null, { agentWriting: true }),
+    "submit.v2.metric.agent.writing_run",
+  );
+});
+
+test("a failed check renders its item through the injected message", () => {
+  const failed = readyState("standard", checkResult(false));
+  const item = failed.workspace.lastCheck!.checks.find((check) => check.status === "failed")!;
+  const withoutDetail = {
+    ...failed,
+    workspace: {
+      ...failed.workspace,
+      lastCheck: { ...failed.workspace.lastCheck!, checks: [{ ...item, detail: null }] },
+    },
+  };
+  assert.equal(
+    runBlockedReason(withoutDetail, null, { message: (check) => `en:${check.key}` }),
+    `en:${item.key}`,
+  );
+});

@@ -6,6 +6,7 @@
 import type { ValidateCodeResponse } from "@/shared/types/api";
 import {
   metricShapeFor,
+  type ContractCheckItem,
   type ContractCheckKey,
   type ContractCheckResponse,
   type UnifiedAuthoringContext,
@@ -114,8 +115,14 @@ function editorResult(failures: string[]): ValidateCodeResponse {
   return { valid: failures.length === 0, errors: failures, warnings: [] };
 }
 
-/** Split a validity check's failures onto the run-code and metric editors. */
-export function contractValidations(result: ContractCheckResponse): {
+/**
+ * Split a validity check's failures onto the run-code and metric editors.
+ * `message` renders an item in the active locale; injected so this stays pure.
+ */
+export function contractValidations(
+  result: ContractCheckResponse,
+  message: (check: ContractCheckItem) => string = (check) => check.message,
+): {
   run: ValidateCodeResponse;
   metric: ValidateCodeResponse;
 } {
@@ -123,7 +130,7 @@ export function contractValidations(result: ContractCheckResponse): {
   const metric: string[] = [];
   for (const check of result.checks) {
     if (check.status !== "failed") continue;
-    const text = check.detail ? `${check.message} ${check.detail}` : check.message;
+    const text = check.detail ? `${message(check)} ${check.detail}` : message(check);
     (RUN_KEYS.has(check.key) ? run : metric).push(text);
   }
   return { run: editorResult(run), metric: editorResult(metric) };

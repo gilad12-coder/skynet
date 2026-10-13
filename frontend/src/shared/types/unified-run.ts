@@ -198,8 +198,11 @@ export type ContractCheckKey =
 export interface ContractCheckItem {
   key: ContractCheckKey;
   status: "passed" | "failed" | "pending" | "skipped";
-  /** Localized, user-facing. */
+  /** Hebrew base rendering; render `message_code` in the active locale instead. */
   message: string;
+  /** Backend i18n code for `message`, resolved with `tI18n`; absent on older servers. */
+  message_code?: string | null;
+  message_params?: Record<string, string | number>;
   sample_index?: number | null;
   /** Exact error text, trimmed to frames from the user's own code. */
   detail?: string | null;

@@ -195,3 +195,22 @@ def test_static_failure_never_opens_a_box() -> None:
 
     assert not response.ok
     assert response.samples == []
+
+
+def test_check_items_carry_their_message_code_for_the_client_locale() -> None:
+    """The client renders each item from its code, so an English UI never shows the Hebrew base."""
+    response = static_contract_check(_payload(metric_code="x = 1\n"))
+
+    codes = {check.key: (check.message_code, check.message_params) for check in response.checks}
+    assert codes["workspace.run_signature"] == ("contract.passed", {})
+    assert codes["metric.signature"] == ("contract.metric_missing", {})
+
+
+def test_a_sample_run_error_carries_its_params() -> None:
+    """A failing sample's message code keeps the placeholders the client fills in."""
+    response = _check(_payload(run_code="def run(artifact, input):\n    raise ValueError('boom')\n"))
+
+    failed = next(check for check in response.checks if check.key == "workspace.run" and check.status == "failed")
+    assert failed.message_code == "contract.run_error"
+    assert failed.message_params["index"] == 1
+    assert "boom" in str(failed.message_params["error"])

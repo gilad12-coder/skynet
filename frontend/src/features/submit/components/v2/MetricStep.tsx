@@ -133,6 +133,13 @@ export function MetricStep() {
     reasoningEffort: agentEffort,
   });
 
+  const { setAgentWriting } = ctx;
+  const agentStreaming = agent.status === "streaming";
+  React.useEffect(() => {
+    setAgentWriting(agentStreaming);
+    return () => setAgentWriting(false);
+  }, [agentStreaming, setAgentWriting]);
+
   const contract = useContractCheck(ctx);
   const setupIncomplete = authoringContext === null;
 

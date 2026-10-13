@@ -29,6 +29,7 @@ import {
   isStorageQuotaError,
   submitUnifiedRun,
 } from "@/shared/lib/api";
+import { contractCheckMessage } from "@/shared/lib/i18n";
 import { msg, type MessageKey } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { getActiveMessages } from "@/shared/lib/runtime-messages";
@@ -270,9 +271,10 @@ export function WizardV2Provider({
   const snapshot = contractSnapshot(state);
   const contractStale = state.workspace.lastCheckSnapshot !== snapshot;
 
+  const [agentWriting, setAgentWriting] = useState(false);
   const runBlockedReason = useMemo(
-    () => blockedReason(state, optimizerCatalog),
-    [state, optimizerCatalog],
+    () => blockedReason(state, optimizerCatalog, { message: contractCheckMessage, agentWriting }),
+    [state, optimizerCatalog, agentWriting],
   );
 
   const costBracket = useMemo(
@@ -740,6 +742,7 @@ export function WizardV2Provider({
     optimizerCatalogLoading,
     contractStale,
     runBlockedReason,
+    setAgentWriting,
     buildPayload,
     ensureBudget,
     submit,

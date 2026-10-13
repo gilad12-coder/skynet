@@ -352,12 +352,16 @@ ContractCheckKey = Literal[
 ]
 
 
-# ``message`` is localized for the user; ``detail`` is the exact error text,
-# trimmed to frames from the user's own code.
+# ``message`` is the Hebrew-base rendering; ``message_code`` and
+# ``message_params`` are the i18n code and placeholders the client renders in
+# its own locale, since the check can run in a worker with no request locale.
+# ``detail`` is the exact error text, trimmed to frames from the user's own code.
 class ContractCheckItem(BaseModel):
     key: ContractCheckKey
     status: Literal["passed", "failed", "pending", "skipped"]
     message: str
+    message_code: str | None = None
+    message_params: dict[str, str | int] = Field(default_factory=dict)
     sample_index: int | None = None
     detail: str | None = Field(default=None, max_length=4000)
 

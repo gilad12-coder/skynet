@@ -3,7 +3,11 @@
  * wizard enforces is the gate the tests check, at every experience level.
  */
 import type { ModelConfig } from "@/shared/types/api";
-import { optimizersFor, type OptimizerCatalogResponse } from "@/shared/types/unified-run";
+import {
+  optimizersFor,
+  type ContractCheckItem,
+  type OptimizerCatalogResponse,
+} from "@/shared/types/unified-run";
 
 import { inputsIssue } from "./inputs-mode";
 import { metricUsesModel } from "./scorer-dependencies";
@@ -81,17 +85,28 @@ export function computeStepIssue(
 /**
  * Why Run is blocked, or null when it may run. A failed validity check reports
  * its first failing item's exact text, so the person sees what to fix.
+ * `message` renders a check item in the active locale (injected so this stays
+ * pure); while `agentWriting`, missing code reads as being written, not as a
+ * job left to the person.
  */
 export function runBlockedReason(
   state: WizardV2State,
   catalog: OptimizerCatalogResponse | null,
+  {
+    message = (check) => check.message,
+    agentWriting = false,
+  }: { message?: (check: ContractCheckItem) => string; agentWriting?: boolean } = {},
 ): string | null {
   for (const step of WIZARD_V2_STEPS) {
     const issue = computeStepIssue(state, step, catalog);
     if (!issue) continue;
+    if (agentWriting && issue === "submit.v2.metric.issue.run_code")
+      return "submit.v2.metric.agent.writing_run";
+    if (agentWriting && issue === "submit.v2.metric.issue.metric_code")
+      return "submit.v2.metric.agent.writing_metric";
     if (issue === "submit.v2.metric.check.failed") {
       const failed = state.workspace.lastCheck?.checks.find((item) => item.status === "failed");
-      return failed ? (failed.detail ?? failed.message) : issue;
+      return failed ? (failed.detail ?? message(failed)) : issue;
     }
     return issue;
   }

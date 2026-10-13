@@ -922,7 +922,7 @@ _RUN_CONTRACT = """The run code is plain python that turns one case input into a
 _RUN_ENTRY = (
     f"define {run_entry_for('prompt')}: "
     """artifact is the version under optimization (a str, or a dict of name -> text when the starting version is a mapping), exactly as the optimizer proposes it; input is one case input, a dict keyed by the input fields. Return the output: a str, or any JSON-serializable value the metric reads.
-- The task model comes from the skynet module: `from skynet import llm` (never define your own). llm(prompt, input=None, images=None) -> str; llm(artifact, input["<input field>"]) runs the artifact as the system message with that field as the user message and returns the reply; that is how a prompt is exercised. images= attaches PNG/JPEG bytes, file paths or data: URLs.
+- The task model comes from the skynet module: `from skynet import llm` (never define your own). llm(prompt, input=None, images=None) -> str; llm(artifact, input["<input field>"]) runs the artifact as the system message with that field as the user message and returns the reply; that is how a prompt is exercised. llm() caps the reply length itself (the task model's max tokens, or a default), so never pass a token limit. images= attaches PNG/JPEG bytes, file paths or data: URLs.
 - Per artifact kind: a prompt is exercised with llm(artifact, ...); code is python source to load with exec into a fresh dict namespace (or write to a temp file and run with subprocess and a timeout) and call on the input; text is used as written (return it, or apply it with llm when the objective is about what the text makes a model do)."""
 )
 
@@ -3309,7 +3309,8 @@ async def _run_unified_seed(
     ``metric_patch`` — the wizard's editors sit on the same slots as the
     DSPy Signature / metric — and the finished pair is returned under
     ``signature_code`` / ``metric_code`` for the same reason. Both get the
-    static contract check + repair loop.
+    static contract check + repair loop, and each lane then emits
+    ``artifact_done`` with its ``source`` (``signature`` / ``metric``).
 
     Args:
         lm: The language model driving the seed predictors.
@@ -3362,7 +3363,7 @@ async def _run_unified_seed(
                 results=streamed,
                 reasoning_source=source,
             )
-            return await _validate_and_repair_artifact(
+            checked = await _validate_and_repair_artifact(
                 lm=lm,
                 artifact_kind=name,
                 code=streamed[field],
@@ -3372,6 +3373,10 @@ async def _run_unified_seed(
                 queue=queue,
                 replace_event=replace_event,
             )
+            # The lanes run in parallel and can finish minutes apart, so each
+            # reports its own end rather than the UI guessing from the other's tokens.
+            await queue.put({"event": "artifact_done", "data": {"source": source}})
+            return checked
 
         (run_code, run_err), (metric_code, metric_err) = await asyncio.gather(_lane("run"), _lane("metric"))
         results: dict[str, Any] = {

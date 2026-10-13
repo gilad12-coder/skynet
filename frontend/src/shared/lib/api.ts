@@ -3444,6 +3444,9 @@ export interface CodeAgentHandlers {
   // `source` names the emitting stream ("signature" | "metric" | "workflow" |
   // "agent") — seed mode runs two authors in parallel over one SSE stream.
   onReasoningPatch?: (chunk: string, source: string) => void;
+  // Unified seed: one parallel author ("signature" = run code, or "metric")
+  // finished, its contract check and repair included.
+  onArtifactDone?: (source: string) => void;
   onMessagePatch?: (chunk: string) => void;
   onSignatureReplace?: (code: string) => void;
   onMetricReplace?: (code: string) => void;
@@ -3509,6 +3512,8 @@ export async function streamCodeAgent(
         String(data.chunk ?? ""),
         typeof data.source === "string" && data.source ? data.source : "agent",
       );
+    } else if (event === "artifact_done") {
+      handlers.onArtifactDone?.(String(data.source ?? ""));
     } else if (event === "message_patch") {
       handlers.onMessagePatch?.(String(data.chunk ?? ""));
     } else if (event === "signature_replace") {

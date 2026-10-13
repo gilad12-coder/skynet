@@ -13,6 +13,7 @@ import {
 import { Button } from "@/shared/ui/primitives/button";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import { formatElapsedMs, formatScore } from "@/shared/lib/formatters";
+import { contractCheckMessage } from "@/shared/lib/i18n";
 import { cn } from "@/shared/lib/utils";
 import type {
   ContractCheckItem,
@@ -48,7 +49,7 @@ function CheckRow({ item, guided }: { item: ContractCheckItem; guided: boolean }
             )}
           </p>
           <p className="text-muted-foreground" dir="auto">
-            {item.message}
+            {contractCheckMessage(item)}
           </p>
         </div>
       </div>

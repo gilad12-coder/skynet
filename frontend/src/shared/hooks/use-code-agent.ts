@@ -275,9 +275,12 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   const replyBufRef = React.useRef("");
   const reasoningBufRef = React.useRef("");
   const reasoningSectionsRef = React.useRef<ReasoningSections>({ order: [], bufs: {} });
-  // Latches once per run: the timer stops the moment the model moves from
-  // reasoning to producing artifacts, even if a parallel stream reasons on.
+  // The timer stops once no stream is left reasoning: the seed's run and
+  // metric authors reason in parallel, and one can still be thinking for
+  // minutes after the other's code has landed.
   const reasoningEndedRef = React.useRef(false);
+  // Streams that have reasoned but not yet started writing their output.
+  const reasoningLanesRef = React.useRef<Set<string>>(new Set());
   const autoRanRef = React.useRef(false);
   const [sessionKey, setSessionKey] = React.useState(0);
   const pendingValidationsRef = React.useRef<
@@ -438,6 +441,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       reasoningBufRef.current = "";
       reasoningSectionsRef.current = { order: [], bufs: {} };
       reasoningEndedRef.current = false;
+      reasoningLanesRef.current = new Set();
       pendingValidationsRef.current = [];
       setQuestion(null);
 
@@ -505,8 +509,12 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       // Stop the thinking timer as soon as artifact output starts flowing —
       // otherwise "Thinking" keeps pulsing through the whole code-writing
       // stretch (which renders in the editors, not the chat) and the stream
-      // reads as stuck.
-      const markReasoningDone = () => {
+      // reads as stuck. `source` names the stream that moved on to output;
+      // without one, every stream has.
+      const markReasoningDone = (source?: string) => {
+        if (source === undefined) reasoningLanesRef.current.clear();
+        else reasoningLanesRef.current.delete(source);
+        if (reasoningLanesRef.current.size > 0) return;
         if (reasoningBufRef.current && !reasoningEndedRef.current) {
           reasoningEndedRef.current = true;
           setReasoningEndedAt(Date.now());
@@ -519,6 +527,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       // Reply text streamed before the latest applied steer, which the
       // finished turn's whole-reply `assistant_message` would repeat.
       let replyBeforeSteer: string | null = null;
+      let metricLaneDone = false;
 
       void streamCodeAgent(
         {
@@ -579,6 +588,16 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             if (!(source in sections.bufs)) {
               sections.order.push(source);
               sections.bufs[source] = "";
+              reasoningLanesRef.current.add(source);
+              if (reasoningEndedRef.current) {
+                reasoningEndedRef.current = false;
+                setReasoningEndedAt(null);
+              }
+              if (source === "metric") {
+                setMetricStatus((prev) => (prev === "waiting" ? "writing" : prev));
+              } else if (source === "signature") {
+                setSignatureStatus((prev) => (prev === "waiting" ? "writing" : prev));
+              }
             }
             sections.bufs[source] += chunk;
             reasoningBufRef.current = composeReasoning(sections);
@@ -586,9 +605,13 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           },
           onSignaturePatch: (chunk) => {
             if (sigBufRef.current === "") {
-              setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.2"));
+              setStatusLabel(
+                unified
+                  ? unifiedMsg("submit.v2.metric.agent.writing_run")
+                  : msg("auto.features.submit.hooks.use.code.agent.literal.2"),
+              );
               setSignatureStatus("writing");
-              markReasoningDone();
+              markReasoningDone("signature");
             }
             sigBufRef.current += chunk;
             setSignatureCode(sigBufRef.current);
@@ -596,14 +619,31 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           },
           onMetricPatch: (chunk) => {
             if (metricBufRef.current === "") {
-              setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.3"));
-              setSignatureStatus("done");
+              setStatusLabel(
+                unified
+                  ? unifiedMsg("submit.v2.metric.agent.writing_metric")
+                  : msg("auto.features.submit.hooks.use.code.agent.literal.3"),
+              );
+              // The unified seed's run code finishes on its own `artifact_done`.
+              if (!unified) setSignatureStatus("done");
               setMetricStatus("writing");
-              markReasoningDone();
+              markReasoningDone("metric");
             }
             metricBufRef.current += chunk;
             setMetricCode(metricBufRef.current);
             setMetricValidation(null);
+          },
+          onArtifactDone: (source) => {
+            if (controller.signal.aborted) return;
+            if (source === "signature") {
+              setSignatureStatus("done");
+              if (!metricLaneDone) {
+                setStatusLabel(unifiedMsg("submit.v2.metric.agent.writing_metric"));
+              }
+            } else if (source === "metric") {
+              metricLaneDone = true;
+              setMetricStatus("done");
+            }
           },
           onMessagePatch: (chunk) => {
             if (replyBufRef.current === "") {

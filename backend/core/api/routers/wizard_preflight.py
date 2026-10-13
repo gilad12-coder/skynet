@@ -188,6 +188,7 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
         if isinstance(contract, dict):
             return ContractCheckResponse.model_validate(contract)
         failure = next((check for check in result.checks if check.status != "succeeded"), None)
+        error = failure.message if failure is not None and failure.message else result.status
         return ContractCheckResponse(
             ok=False,
             optimizer_resolved=resolve_optimizer(spec.optimizer.choice, spec.task.artifact.kind),
@@ -198,10 +199,9 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
                 ContractCheckItem(
                     key="workspace.run",
                     status="pending" if result.status == "pending" else "failed",
-                    message=t(
-                        "submit.unified.contract_failed",
-                        error=(failure.message if failure is not None and failure.message else result.status),
-                    ),
+                    message=t("submit.unified.contract_failed", error=error),
+                    message_code="submit.unified.contract_failed",
+                    message_params={"error": error},
                     detail=(failure.message or "")[-4000:] if failure is not None and failure.message else None,
                 ),
             ],

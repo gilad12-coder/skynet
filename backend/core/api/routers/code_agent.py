@@ -487,6 +487,8 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         * ``reasoning_patch`` — ``{"chunk": "<token>", "source": "<stream>"}``
           (both modes; ``source`` separates the parallel seed authors:
           ``signature`` / ``metric`` / ``workflow`` / ``agent``)
+        * ``artifact_done`` — ``{"source": "signature" | "metric"}`` (unified
+          seed: one parallel author finished, check and repair included)
         * ``tool_start`` — ``{"id", "tool", "reason"}`` (chat mode; the
           unified tools are ``ask_user`` / ``set_brief`` / ``edit_run`` /
           ``edit_metric``)

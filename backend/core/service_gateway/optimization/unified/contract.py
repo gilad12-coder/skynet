@@ -100,7 +100,7 @@ def _item(
     sample_index: int | None = None,
     **params: Any,
 ) -> ContractCheckItem:
-    """Build one check item, its message localized.
+    """Build one check item, carrying its message code for the client's locale.
 
     Args:
         key: The contract check key.
@@ -113,10 +113,14 @@ def _item(
     Returns:
         The item; a passing item carries the shared passed message.
     """
+    code = "contract.passed" if passed else message_key
+    code_params = {} if passed else params
     return ContractCheckItem(
         key=key,  # type: ignore[arg-type]
         status="passed" if passed else "failed",
-        message=t("contract.passed") if passed else t(message_key, **params),
+        message=t(code, **code_params),
+        message_code=code,
+        message_params=code_params,
         sample_index=sample_index,
         detail=None if passed or detail is None else detail[-DETAIL_MAX_CHARS:],
     )
@@ -299,7 +303,13 @@ def _sample_items(index: int, shape: MetricShape, probe: WorkspaceProbe) -> list
                 index=number,
                 error=probe.error,
             ),
-            ContractCheckItem(key="metric.shape", status="skipped", message=t(_SHAPE_KEYS[shape]), sample_index=index),
+            ContractCheckItem(
+                key="metric.shape",
+                status="skipped",
+                message=t(_SHAPE_KEYS[shape]),
+                message_code=_SHAPE_KEYS[shape],
+                sample_index=index,
+            ),
         ]
     run = _item("workspace.run", True, "contract.run_error", sample_index=index)
     if probe.stage == "shape":

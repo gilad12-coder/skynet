@@ -386,6 +386,8 @@ export interface WizardV2Context {
   contractStale: boolean;
   /** An i18n key or the exact contract error text. */
   runBlockedReason: string | null;
+  /** The Metric step's coding agent reports whether it is writing the code. */
+  setAgentWriting(writing: boolean): void;
   buildPayload(): UnifiedRunRequest | null;
   /** The wizard's execution budget, created on first use; the sandboxed check bills to it. */
   ensureBudget(): Promise<ExecutionBudget>;

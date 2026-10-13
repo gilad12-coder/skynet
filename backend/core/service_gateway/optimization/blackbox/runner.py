@@ -70,6 +70,10 @@ _RETRY_STATUSES = frozenset({408, 409, 429, 500, 502, 503, 504})
 _ATTEMPTS = 3
 _BACKOFF_SECONDS = 1.0
 _ERROR_BODY_CHARS = 500
+# The budget relay prices each call from its output cap and refuses an uncapped
+# one, so llm() always sends a cap. Same floor the backend puts on its own
+# chat-style LMs (language_models._DEFAULT_REASONING_MAX_TOKENS).
+DEFAULT_MAX_TOKENS = 4000
 _MEDIA_TYPE_BY_EXTENSION = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -559,7 +563,8 @@ class GatewayClient:
             model: Model id as the gateway knows it.
             api_key: Bearer token, or ``None`` when the sandbox injects it.
             temperature: Sampling temperature, when the Scorer step set one.
-            max_tokens: Completion cap, when the Scorer step set one.
+            max_tokens: Completion cap, when the Scorer step set one;
+                :data:`DEFAULT_MAX_TOKENS` otherwise.
             reasoning_effort: Thinking level (``low``, ``high``, ...), when the Scorer step set one.
             timeout_seconds: Per-request timeout.
             protected: Whether the trusted parent owns dispatch and retry coverage.
@@ -571,7 +576,7 @@ class GatewayClient:
         self._model = model
         self._api_key = api_key
         self._temperature = temperature
-        self._max_tokens = max_tokens
+        self._max_tokens = DEFAULT_MAX_TOKENS if max_tokens is None else max_tokens
         self._reasoning_effort = reasoning_effort
         self._timeout_seconds = timeout_seconds
         self._ssl = _ssl_context()
@@ -611,11 +616,9 @@ class GatewayClient:
             messages = scorer_messages(prompt, input, images)
         elif not isinstance(messages, list):
             raise ScorerError("llm(messages=...) takes a list of chat messages.")
-        body: dict[str, Any] = {"model": self._model, "messages": messages}
+        body: dict[str, Any] = {"model": self._model, "messages": messages, "max_tokens": self._max_tokens}
         if self._temperature is not None:
             body["temperature"] = self._temperature
-        if self._max_tokens is not None:
-            body["max_tokens"] = self._max_tokens
         if self._reasoning_effort:
             body["reasoning_effort"] = self._reasoning_effort
         payload = self._post(json.dumps(body).encode("utf-8"))

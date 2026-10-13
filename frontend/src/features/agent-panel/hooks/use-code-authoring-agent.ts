@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { staticContractCheck, validateCode } from "@/shared/lib/api";
+import { contractCheckMessage } from "@/shared/lib/i18n";
 import { msg } from "@/shared/lib/messages";
 import { useCodeAgent, type CodeAgentState } from "@/shared/hooks/use-code-agent";
 import { autoLayoutSpec, defaultWorkflowSpec } from "@/features/submit/workflow/model";
@@ -265,7 +266,7 @@ export function useCodeAuthoringAgent(
     )
       .then((result) => {
         if (controller.signal.aborted) return;
-        const { run, metric } = contractValidations(result);
+        const { run, metric } = contractValidations(result, contractCheckMessage);
         setSignatureValidation(run);
         setMetricValidation(metric);
         setPassedKey(result.ok ? checkKey : null);
