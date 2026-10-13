@@ -1,102 +1,92 @@
 import type { SVGProps } from "react";
 
 /**
- * Skynet's brand mark: a Hoatzin (Opisthocomus hoazin) head in the bird's own colours:
- * bronze head, buff throat, ragged rufous crest, bare blue face, red eye and slate bill.
- * The colours are fixed, not theme tokens, so the bird reads the same in both themes.
- * The neck runs off the bottom edge on purpose; round containers clip it there.
+ * Skynet's brand mark: a Hoatzin (Opisthocomus hoazin) head as minimal geometric line art.
+ * It is built from a few primitives in a 512-unit drawing:
+ * - the face is a circle (centre 288,288, r 70) cut by a straight bill base;
+ * - the bill is the top terminal of the wordmark's default "S": an outer arc, a flat cut at
+ *   the tip and a concave arc back to the face, so the tip hooks below the gape;
+ * - the crest is an even radial fan centred on the face circle, longest in the middle;
+ * - the neck is one curve and the same curve shifted forward.
+ * Every stroke is `currentColor`, so the mark takes the surrounding text colour in both
+ * themes. The neck runs off the bottom edge on purpose; round containers clip it there.
+ *
+ * Two levels of detail, picked by rendered size:
+ * - "full" (about 64px and up): seven lozenge feathers with spines, a ringed eye, three
+ *   neck bands and one faint guide circle around the eye.
+ * - "simple" (icon sizes, and the favicons): five single-stroke feathers, a solid eye and
+ *   strokes that scale with the mark so they stay distinct at 16-32px.
  */
 
-type Shape = { fill: string; d: string } | { fill: string; cx: number; cy: number; r: number };
+export type HoatzinDetail = "full" | "simple";
 
-// Square crop of the 512-unit source drawing, centred on the bird.
+// Square crop of the 512-unit drawing, centred on the bird.
 export const HOATZIN_VIEWBOX = "-2 12 500 500";
 
 // Tight crop for the wordmark lockup: crest tips to mid-neck, no side padding.
 export const HOATZIN_LOCKUP_VIEWBOX = "48 12 400 432";
 
-// Paint order matters: head and throat, crest, blue face, eye, then the bill over the face.
-const SHAPES: readonly Shape[] = [
-  { fill: "#4a3b2c", d: "M355.8 254.1C346.9 227.4 315.8 211.9 280.2 211.9C238 211.9 204.6 231.9 191.3 265.2C184.6 283 182.4 303 182.4 323C175.7 356.4 180.2 387.5 180.2 416.4C180.2 446.7 173 477.1 166.8 512L268.2 512C274.3 476 285.1 443.7 295.8 418.6C309.1 391.9 338 371.9 355.8 351.9Z" },
-  { fill: "#ddb27c", d: "M355.8 351.9C338 371.9 309.1 391.9 295.8 418.6C285.1 443.7 274.3 476 268.2 512L221.9 512C228 487.4 235.3 462.5 240.2 436.4C246.9 403.1 251.3 371.9 246.9 343C271.3 351.9 315.8 358.6 355.8 351.9Z" },
-  { fill: "#c9955c", d: "M246.9 340.8C264.7 357.5 291.4 365.3 318 365.3C331.4 365.3 342.5 361.9 351.4 356.4C331.4 359.7 306.9 358.6 284.7 353C269.1 349.7 255.8 345.3 246.9 340.8Z" },
-  { fill: "#ecd3a8", d: "M355.8 351.9C338 371.9 309.1 391.9 295.8 418.6C284.7 443.1 273.6 472 268 507.6C266.9 474.2 273.6 440.9 286.9 414.2C298 391.9 322.5 369.7 346.9 356.4Z" },
-  { fill: "#4a3b2c", d: "M263.6 363.3Q257.3 380.3 257.6 398.4Q263.9 381.4 263.6 363.3ZM251.7 422.8Q244.1 438.5 243.7 456Q251.3 440.3 251.7 422.8ZM238.3 476.5Q230.3 491.3 230.2 508Q238.2 493.3 238.3 476.5Z" },
-  { fill: "#dcc69a", d: "M201.8 329Q197.1 350.2 199.5 371.7Q204.2 350.6 201.8 329ZM199.5 376.4Q195 397.6 198.4 419Q202.9 397.8 199.5 376.4ZM198.2 422.4Q191.5 442.1 193.1 462.8Q199.9 443.1 198.2 422.4ZM192.5 466.2Q183.8 486.4 184 508.4Q192.7 488.2 192.5 466.2ZM229.2 359.1Q224.3 380.4 227 402.2Q231.8 380.8 229.2 359.1ZM226.6 405.7Q219.7 425.9 220.9 447.1Q227.8 427 226.6 405.7ZM220.3 450.1Q212 467.9 212.2 487.5Q220.5 469.8 220.3 450.1ZM211.4 490.5Q204.4 500.2 206.4 512Q213.5 502.3 211.4 490.5ZM209.1 278.6Q201.4 296.7 202.4 316.4Q210.1 298.2 209.1 278.6ZM226.9 291.9Q218.9 311.1 220.2 331.9Q228.1 312.7 226.9 291.9ZM195.8 309.7Q189.1 328.1 191.3 347.5Q197.9 329.1 195.8 309.7Z" },
-  { fill: "#8f4318", d: "M312 238.6Q345.2 140.6 390.7 48.1Q341.1 138.8 301.8 234.1ZM294.6 233.4Q286.6 122.5 262.1 13.7Q282.2 123.1 283.6 234.8ZM269.1 232.9Q205.7 138.9 125.5 58.2Q202.2 141.6 260.3 239.7ZM248.5 239.9Q151.4 205.1 49.8 185Q150.1 209.3 245.3 250.5ZM235.7 250.8Q147.6 246.8 59.7 259.4Q147.6 251.3 235.9 261.9Z" },
-  { fill: "#2e1a12", d: "M341.1 159.6Q363.8 102.8 390.7 48.1Q361.4 101.8 335.6 157.1ZM285.4 143.8Q276.7 78.4 262.1 13.7Q274 78.7 279.4 144.6ZM214.7 158.6Q173.1 106 125.5 58.2Q171 107.7 209.9 162.3ZM166.6 213.4Q109 196.7 49.8 185Q108.2 199.2 164.9 219.1ZM159.6 250.5Q109.6 252.3 59.7 259.4Q109.7 254.8 159.7 256.2Z" },
-  { fill: "#b4521f", d: "M347.3 257Q372.6 194.1 409.3 139.3Q361.7 186.5 319.9 237.9Z" },
-  { fill: "#cf7a3a", d: "M319.9 237.9Q361.7 186.5 409.3 139.3Q367.1 190.3 333.6 247.4Z" },
-  { fill: "#2e1a12", d: "M375.4 196.1Q391 166.7 409.3 139.3Q385.5 162.9 363.2 187.5Z" },
-  { fill: "#573423", d: "M363.2 187.5Q385.5 162.9 409.3 139.3Q388.2 164.8 369.3 191.8Z" },
-  { fill: "#b4521f", d: "M338.3 244.4Q349.4 145.5 372.1 50.1Q333.2 140.9 297.7 232.7Z" },
-  { fill: "#cf7a3a", d: "M338.3 244.4Q349.4 145.5 372.1 50.1Q341.3 143.2 318 238.5Z" },
-  { fill: "#2e1a12", d: "M350.6 156.3Q359.6 102.7 372.1 50.1Q350.6 100.1 330.2 150.5Z" },
-  { fill: "#573423", d: "M350.6 156.3Q359.6 102.7 372.1 50.1Q355.1 101.4 340.4 153.4Z" },
-  { fill: "#b4521f", d: "M323.6 235.1Q319.1 160.7 312.4 86.2Q304 159.9 285.8 233.1Z" },
-  { fill: "#cf7a3a", d: "M323.6 235.1Q319.1 160.7 312.4 86.2Q311.5 160.3 304.7 234.1Z" },
-  { fill: "#2e1a12", d: "M318.5 160.7Q315.8 123.5 312.4 86.2Q308.2 123.1 301.6 159.8Z" },
-  { fill: "#573423", d: "M318.5 160.7Q315.8 123.5 312.4 86.2Q312 123.3 310 160.2Z" },
-  { fill: "#2e1a12", d: "M260.7 101.5Q240.7 76.9 225.9 49.4Q237.1 78.9 251.7 106.4Z" },
-  { fill: "#b4521f", d: "M307.3 228.5Q276.6 128.9 234.3 32.2Q258.5 133.4 262 239.7Z" },
-  { fill: "#cf7a3a", d: "M307.3 228.5Q276.6 128.9 234.3 32.2Q267.6 131.1 284.7 234.1Z" },
-  { fill: "#2e1a12", d: "M277.9 140.9Q257.9 86.1 234.3 32.2Q247.8 88.6 254.9 146.7Z" },
-  { fill: "#573423", d: "M277.9 140.9Q257.9 86.1 234.3 32.2Q252.9 87.4 266.4 143.8Z" },
-  { fill: "#b4521f", d: "M283.4 229.4Q248.4 173.3 202.9 123Q235.2 180.6 250.4 247.7Z" },
-  { fill: "#cf7a3a", d: "M283.4 229.4Q248.4 173.3 202.9 123Q241.8 177 266.9 238.5Z" },
-  { fill: "#2e1a12", d: "M243.3 171.5Q224.3 146.6 202.9 123Q218.1 150.1 229.5 179.2Z" },
-  { fill: "#573423", d: "M243.3 171.5Q224.3 146.6 202.9 123Q221.2 148.4 236.4 175.4Z" },
-  { fill: "#b4521f", d: "M265.5 229.5Q193.7 174.7 117.5 124.7Q182.4 187.2 237.2 260.9Z" },
-  { fill: "#cf7a3a", d: "M265.5 229.5Q193.7 174.7 117.5 124.7Q188 181 251.3 245.2Z" },
-  { fill: "#2e1a12", d: "M197.5 179.4Q158.1 151.4 117.5 124.7Q152.1 158.1 183.8 194.6Z" },
-  { fill: "#573423", d: "M197.5 179.4Q158.1 151.4 117.5 124.7Q155.1 154.7 190.7 187Z" },
-  { fill: "#2e1a12", d: "M128.6 187.4Q102.2 172.6 80.2 152.6Q99.9 175.3 122.9 194.2Z" },
-  { fill: "#b4521f", d: "M249.3 236.3Q160.1 193.2 63.7 164.2Q152.8 207.5 231.1 271.9Z" },
-  { fill: "#cf7a3a", d: "M249.3 236.3Q160.1 193.2 63.7 164.2Q156.5 200.3 240.2 254.1Z" },
-  { fill: "#2e1a12", d: "M166.7 200Q116.3 180 63.7 164.2Q112.3 187.8 157.7 217.7Z" },
-  { fill: "#573423", d: "M166.7 200Q116.3 180 63.7 164.2Q114.3 183.9 162.2 208.9Z" },
-  { fill: "#b4521f", d: "M233.8 247.6Q164.1 240.1 92.6 245.7Q162.2 254.2 228.8 282.8Z" },
-  { fill: "#cf7a3a", d: "M233.8 247.6Q164.1 240.1 92.6 245.7Q163.1 247.2 231.3 265.2Z" },
-  { fill: "#2e1a12", d: "M163.7 243.4Q128.4 242.9 92.6 245.7Q127.4 250 161.4 259.2Z" },
-  { fill: "#573423", d: "M163.7 243.4Q128.4 242.9 92.6 245.7Q127.9 246.4 162.6 251.3Z" },
-  { fill: "#8f4318", d: "M223.4 263.4Q169.1 277.5 117.7 303.8Q171.9 289.6 230.4 293.7Z" },
-  { fill: "#b4521f", d: "M223.4 263.4Q169.1 277.5 117.7 303.8Q170.5 283.5 226.9 278.6Z" },
-  { fill: "#2e1a12", d: "M167.9 281.2Q142.5 291.1 117.7 303.8Q143.8 296.9 171 294.4Z" },
-  { fill: "#573423", d: "M167.9 281.2Q142.5 291.1 117.7 303.8Q143.2 294 169.5 287.8Z" },
-  { fill: "#b4521f", d: "M303.6 235.9Q278.5 149.1 286.6 60.5Q272.3 149.4 288 236.7Z" },
-  { fill: "#cf7a3a", d: "M303.6 235.9Q278.5 149.1 286.6 60.5Q275.4 149.2 295.8 236.3Z" },
-  { fill: "#2e1a12", d: "M287.4 154.6Q282.3 107.8 286.6 60.5Q278.9 108 279.9 155Z" },
-  { fill: "#573423", d: "M287.4 154.6Q282.3 107.8 286.6 60.5Q280.6 107.9 283.6 154.8Z" },
-  { fill: "#6aa5dc", d: "M355.8 263C349.2 249.7 335.8 241.9 318 238.5C300.2 235.2 282.5 237.4 266.9 244.1C251.3 251.9 240.2 267.4 238 287.5C236.9 305.2 240.2 320.8 246.9 334.1C262.4 349.7 286.9 356.4 311.4 357.5C329.1 358.6 344.7 356.4 355.8 351.9Z" },
-  { fill: "#5289c4", d: "M239.1 303C240.2 316.4 242.4 325.3 246.9 334.1C262.4 349.7 286.9 356.4 311.4 357.5C329.1 358.6 344.7 356.4 355.8 351.9L355.8 344.1C338 349.7 318 349.7 298 345.3C273.6 339.7 253.6 325.3 242.4 305.2C241.3 304.1 240.2 304.1 239.1 303Z" },
-  { fill: "#82b8e6", d: "M355.8 263C349.2 249.7 335.8 241.9 318 238.5C300.2 235.2 282.5 237.4 266.9 244.1C284.7 243 302.5 245.2 318 250.8C333.6 256.3 346.9 264.1 355.8 274.1Z" },
-  { fill: "#3f6faa", cx: 306.9, cy: 285.2, r: 24.5 },
-  { fill: "#4e0d1a", cx: 306.9, cy: 285.2, r: 21.7 },
-  { fill: "#8a1c30", cx: 306.9, cy: 285.2, r: 19.5 },
-  { fill: "#140c0d", cx: 306.9, cy: 285.2, r: 8.2 },
-  { fill: "#fff8f0", cx: 313.6, cy: 278.6, r: 3.3 },
-  { fill: "#4c4d55", d: "M351.4 319.7C371.4 318.6 409.2 320.8 438.1 333C418.1 345.3 391.4 351.9 364.7 353C358 353 353.6 353 351.4 351.9C350.3 343 350.3 331.9 351.4 323Z" },
-  { fill: "#35343b", d: "M335.8 323.6Q348 326.9 360.3 323.6Q348 320.2 335.8 323.6Z" },
-  { fill: "#5f6169", d: "M353.6 260.8C386.9 258.6 418.1 271.9 433.6 296.4C442.5 309.7 445.9 323 442.5 336.4C429.2 329.7 411.4 325.3 391.4 324.1C375.8 323 362.5 323 351.4 323C349.2 303 350.3 280.8 353.6 260.8Z" },
-  { fill: "#7d808a", d: "M353.6 260.8C386.9 258.6 418.1 271.9 433.6 296.4C442.5 309.7 445.9 323 442.5 336.4C429.2 311.9 409.2 291.9 382.5 283C371.4 279.7 361.4 279.7 352.5 280.8Z" },
-  { fill: "#35343b", d: "M372.5 282.5Q378.3 290.7 388.1 288Q382.2 279.8 372.5 282.5Z" },
-];
+// The wordmark lockup aligns the letters' centre line to this point.
+const EYE = { cx: 306.9, cy: 285.2 };
 
-/** The bird's shapes, for nesting inside another SVG. */
-export function HoatzinShapes() {
+// The face circle is closed by the bill base, a chord between its points at -30° and +30°.
+const FACE = "M348.6 253A70 70 0 1 0 348.6 323Z";
+// Outer arc (r 74, centre 348.3,327, like the S's top) to a tip 4° below its centre, a flat
+// cut a third of that radius (the S's terminal), then a concave r 60 arc back to the face
+// (the S's counter). The bill reaches about 64 units past the face, with its tip just below the gape.
+const BILL = "M348.6 253A74 74 0 0 1 422.1 332.2H396.9A60 60 0 0 0 348.6 323";
+const NECK = "M222.2 311.9Q200 410 190 524M298.3 357.2Q277.6 415.1 268 524";
+const NECK_BANDS = "M219.4 418L269.6 406M214.3 454L262.6 442M209.9 490L257.3 478";
+
+// Seven feathers 20° apart (168° to 48°), each a lozenge from r 84 around the face centre.
+// Lengths follow a sine curve, longest in the middle (r 236) and r 168 at both ends.
+const CREST =
+  "M205.8 270.5L178.5 278 123.7 253.1 183.9 252.6Z" +
+  "M216.8 243.5L179.9 235.8 116.7 181 193.6 213.7Z" +
+  "M236.3 221.8L199.6 196 148.3 109.2 220.1 180Z" +
+  "M262 208.1L235.6 168.8 215.1 63.6 260.3 160.7Z" +
+  "M290.9 204.1L279.4 160.8 295.9 61.2 305.4 161.7Z" +
+  "M319.5 210.1L320.7 172.4 363.7 100.7 344.8 182.2Z" +
+  "M344.2 225.6L351.4 198.1 400.4 163.2 370.7 215.5Z";
+const CREST_SPINES =
+  "M205.8 270.5L154.9 259.7M216.8 243.5L154.7 204.7M236.3 221.8L181.7 152M262 208.1L232.9 118.5" +
+  "M290.9 204.1L294 115.5M319.5 210.1L346.9 142.3M344.2 225.6L379.1 186.9";
+
+// Five feathers 30° apart on the same fan, as single strokes from r 90, graduated r 228 to r 170.
+const CREST_SIMPLE =
+  "M200 269.3L121.7 252.7M221.1 227.8L131.2 146.8M260.2 202.4L217.5 71.2M306.7 200L331.9 81.6M348.2 221.1L401.8 161.7";
+
+/**
+ * The bird's strokes in the 512-unit drawing, for embedding in another SVG (the wordmark
+ * lockup). Renders at any size; the caller picks the detail level for its size.
+ */
+export function HoatzinShapes({ detail = "full" }: { detail?: HoatzinDetail }) {
+  if (detail === "simple") {
+    return (
+      <g fill="none" stroke="currentColor" strokeWidth={26} strokeLinecap="round" strokeLinejoin="round">
+        <path d={CREST_SIMPLE + FACE + BILL + NECK} />
+        <circle {...EYE} r={26} fill="currentColor" stroke="none" />
+      </g>
+    );
+  }
+  const line = { vectorEffect: "non-scaling-stroke" } as const;
   return (
-    <>
-      {SHAPES.map((s, i) =>
-        "d" in s ? <path key={i} fill={s.fill} d={s.d} /> : <circle key={i} fill={s.fill} cx={s.cx} cy={s.cy} r={s.r} />,
-      )}
-    </>
+    <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+      <circle {...EYE} r={44} strokeWidth={0.75} strokeOpacity={0.35} {...line} />
+      <path d={CREST_SPINES + NECK_BANDS} strokeWidth={1} {...line} />
+      <path d={CREST + FACE + BILL + NECK} strokeWidth={1.5} {...line} />
+      <circle {...EYE} r={26} strokeWidth={1.5} {...line} />
+      <circle {...EYE} r={15} strokeWidth={1} {...line} />
+      <circle {...EYE} r={6} fill="currentColor" stroke="none" />
+    </g>
   );
 }
 
-export function SkynetMark(props: SVGProps<SVGSVGElement>) {
+/** The standalone mark. Defaults to the reduced detail its icon-sized call sites need. */
+export function SkynetMark({ detail = "simple", ...props }: SVGProps<SVGSVGElement> & { detail?: HoatzinDetail }) {
   return (
     <svg viewBox={HOATZIN_VIEWBOX} xmlns="http://www.w3.org/2000/svg" {...props}>
-      <HoatzinShapes />
+      <HoatzinShapes detail={detail} />
     </svg>
   );
 }
