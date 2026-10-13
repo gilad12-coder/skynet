@@ -447,7 +447,12 @@ export function ModelPicker({
           ))}
         </div>
 
-        <div className="max-h-60 min-h-0 flex-1 overflow-y-auto py-1">
+        {/* Keyed so a new tab or purpose starts at the top: each list is
+            sorted best-first, and a kept scroll offset hid the best models. */}
+        <div
+          key={`${ranking}-${purpose}`}
+          className="max-h-60 min-h-0 flex-1 overflow-y-auto py-1"
+        >
           {filtered.length === 0 && (
             <div className="px-3 py-8 text-center text-xs text-muted-foreground">
               {msg("auto.features.submit.components.modelpicker.3")}
