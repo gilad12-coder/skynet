@@ -46,6 +46,7 @@ from pydantic import ValidationError
 from ...api.model_catalog import agent_model_id
 from ...config import settings
 from ...exceptions import ServiceError
+from ...i18n import t_locale
 from ...models import ModelConfig, WorkflowSpec
 from ...models.unified import METRIC_SIGNATURES, run_entry_for
 from ..language_models import (
@@ -69,8 +70,21 @@ logger = logging.getLogger(__name__)
 _ANSWERED_TERMINATIONS = frozenset({"submit", "forced_submit"})
 
 
+# A seed lane's provider stream keeps sending reasoning, so the per-request
+# read timeout never fires: a model that deliberates without end (a metric lane
+# on GLM 5.3 Flash thought 460 s and never wrote code) would hold the turn open
+# forever. Each lane gets a wall-clock deadline and a tighter completion budget
+# than the chat agent, which rewrites whole artifacts and needs the headroom.
+SEED_LANE_TIMEOUT_SECONDS = 120.0
+SEED_MAX_TOKENS = 16000
+
+
 class AgentStoppedError(RuntimeError):
     """The agent loop ended without calling ``submit`` and without a reply."""
+
+
+class SeedLaneTimeoutError(RuntimeError):
+    """A seed lane ran past its deadline without finishing its artifact."""
 
 
 def _require_answer(prediction: dspy.Prediction | None, reply_text: str) -> None:
@@ -121,7 +135,7 @@ def _format_agent_error(exc: BaseException) -> str:
     name = type(leaf).__name__
     if not text:
         return name or "code agent failed"
-    if isinstance(leaf, AgentStoppedError):
+    if isinstance(leaf, (AgentStoppedError, SeedLaneTimeoutError)):
         return text
     if "Cannot connect to host" in text or "nodename nor servname" in text:
         return "Can't reach the model provider. Check your network and try again."
@@ -1030,10 +1044,14 @@ class GenerateUnifiedMetric(dspy.Signature):
     cases, decide what a measurably better output looks like, then
     implement it in the exact shape ``metric_contract`` states for
     ``metric_shape`` — the function name, its parameters and its return
-    value are fixed by the optimizer the user picked. Prefer graded scores
-    over pass/fail so the optimizer sees progress. Read fields by their
-    exact names. Output ONLY the python code: no markdown fences, no
-    commentary.
+    value are fixed by the optimizer the user picked. Keep it short and
+    simple, and decide quickly: when the expected value is a label or a
+    short answer, normalize both sides (strip, lowercase) and score an
+    exact match, or the expected label appearing in the output; do not
+    try to parse every phrasing or anticipate every edge case, the user
+    refines the metric afterwards. Use graded scores only where the
+    objective is graded by nature. Read fields by their exact names.
+    Output ONLY the python code: no markdown fences, no commentary.
     """
 
     objective: str = dspy.InputField(desc="What a better version of the artifact achieves.")
@@ -3333,6 +3351,7 @@ async def _run_unified_seed(
     authoring_brief: str,
     reply_language: str,
     queue: asyncio.Queue[dict | None],
+    locale: str | None = None,
 ) -> dict[str, Any]:
     """Draft the wizard's run code and metric in parallel, then the intro message.
 
@@ -3349,12 +3368,17 @@ async def _run_unified_seed(
         authoring_brief: Directives both authors must honor; empty when none.
         reply_language: Language name the intro message is written in.
         queue: SSE event queue to push token events onto.
+        locale: UI locale the timeout error is written in; ``None`` is Hebrew.
 
     Returns:
         Mapping with keys ``signature_code`` (the run code), ``metric_code``,
         ``assistant_message``, the boolean ``signature_valid`` /
         ``metric_valid`` flags, and an optional ``validation_error`` string
         when either could not be repaired within the attempt budget.
+
+    Raises:
+        SeedLaneTimeoutError: When a lane runs past
+            ``SEED_LANE_TIMEOUT_SECONDS``; the other lane is cancelled.
     """
     shared = {**_unified_inputs(unified), "authoring_brief": authoring_brief}
     run_validator, metric_validator = _unified_validators(unified)
@@ -3374,6 +3398,15 @@ async def _run_unified_seed(
     with dspy.context(lm=lm):
 
         async def _lane(name: str) -> tuple[str, str]:
+            """Run one lane under its deadline."""
+            try:
+                async with asyncio.timeout(SEED_LANE_TIMEOUT_SECONDS):
+                    return await _draft(name)
+            except TimeoutError:
+                logger.warning("unified seed %s lane passed its %ss deadline", name, SEED_LANE_TIMEOUT_SECONDS)
+                raise SeedLaneTimeoutError(t_locale(locale, "code_agent.seed_lane_timeout")) from None
+
+        async def _draft(name: str) -> tuple[str, str]:
             """Stream one artifact, then check/repair it against its contract."""
             signature, field, event, source, validator, replace_event = lanes[name]
             predict = dspy.Predict(signature)
@@ -3409,7 +3442,14 @@ async def _run_unified_seed(
             await queue.put({"event": "artifact_done", "data": {"source": source}})
             return checked
 
-        (run_code, run_err), (metric_code, metric_err) = await asyncio.gather(_lane("run"), _lane("metric"))
+        try:
+            async with asyncio.TaskGroup() as lanes_group:
+                run_task = lanes_group.create_task(_lane("run"))
+                metric_task = lanes_group.create_task(_lane("metric"))
+        except BaseExceptionGroup as group:
+            raise group.exceptions[0] from None
+        run_code, run_err = run_task.result()
+        metric_code, metric_err = metric_task.result()
         results: dict[str, Any] = {
             "signature_code": run_code,
             "metric_code": metric_code,
@@ -3559,6 +3599,7 @@ async def _run_code_agent_orchestration(
     reply_language: str,
     unified: dict[str, Any] | None,
     steering: SteerInbox | None = None,
+    locale: str | None = None,
 ) -> None:
     """Run the seed or chat path and push the terminal envelope into ``queue``.
 
@@ -3595,6 +3636,7 @@ async def _run_code_agent_orchestration(
             slots hold the run code and the metric.
         steering: The turn's inbox for messages the user sends while it
             runs; ``None`` leaves the turn unsteerable.
+        locale: UI locale of the client, for errors the engine words itself.
     """
     try:
         if unified is not None and is_seed:
@@ -3604,6 +3646,7 @@ async def _run_code_agent_orchestration(
                 authoring_brief=authoring_brief,
                 reply_language=reply_language,
                 queue=queue,
+                locale=locale,
             )
         elif unified is not None:
             validation = "\n".join(v for v in (prior_signature_validation, prior_metric_validation) if v)
@@ -3780,7 +3823,8 @@ async def run_code_agent(
     Yields:
         SSE event dicts of shape ``{"event": str, "data": dict}``.
     """
-    lm = _build_agent_lm(model, reasoning_effort)
+    is_seed = not user_message.strip()
+    lm = _build_agent_lm(model, reasoning_effort, SEED_MAX_TOKENS if is_seed and unified is not None else 32000)
     model_name = model or agent_model_id(settings.code_agent_model)
     if usage_sink is not None:
         usage_sink.append(lm)
@@ -3789,7 +3833,6 @@ async def run_code_agent(
     sample_rows_json = json.dumps(sample_rows[:5], ensure_ascii=False, default=str)
     chat_history_json = json.dumps(chat_history or [], ensure_ascii=False)
     authoring_brief = "\n".join(f"- {d.strip()}" for d in (interview_brief or []) if d.strip())
-    is_seed = not user_message.strip()
 
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
     steering = (
@@ -3828,6 +3871,7 @@ async def run_code_agent(
             reply_language=_reply_language(locale),
             unified=unified,
             steering=steering,
+            locale=locale,
         )
     )
     try:

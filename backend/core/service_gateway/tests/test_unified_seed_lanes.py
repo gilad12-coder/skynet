@@ -241,3 +241,124 @@ async def test_run_code_reaches_the_editor_when_the_provider_sends_it_whole(
     run_done = events.index({"event": "artifact_done", "data": {"source": "signature"}})
     assert "signature_patch" in names[:run_done]
     assert results["signature_code"].strip() == _RUN_CODE
+
+
+async def _reason_forever_on_metric(_program: Any, _inputs: Any, field: str, event: str, **kwargs: Any) -> None:
+    """Finish the run lane at once; think on the metric lane without ever writing code.
+
+    Args:
+        _program: Unused.
+        _inputs: Unused.
+        field: The output field.
+        event: The patch event name.
+        **kwargs: ``queue`` and ``results``.
+    """
+    if field == "metric_code":
+        while True:
+            await kwargs["queue"].put(
+                {"event": "reasoning_patch", "data": {"chunk": "but what if ", "source": "metric"}}
+            )
+            await asyncio.sleep(0.01)
+    kwargs["results"][field] = f"# {field}"
+    await kwargs["queue"].put({"event": event, "data": {"chunk": f"# {field}"}})
+
+
+def _patch_seed_lanes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the seed lanes on the endless-metric pump with a short deadline.
+
+    Args:
+        monkeypatch: The pytest monkeypatch fixture.
+    """
+
+    async def validate(*, code: str, **_kwargs: Any) -> tuple[str, str]:
+        """Accept the code as written.
+
+        Args:
+            code: The streamed code.
+            **_kwargs: Unused.
+
+        Returns:
+            The code and no error.
+        """
+        return code, ""
+
+    monkeypatch.setattr(code, "SEED_LANE_TIMEOUT_SECONDS", 0.3)
+    monkeypatch.setattr(code, "_pump_seed_stream", _reason_forever_on_metric)
+    monkeypatch.setattr(code, "_validate_and_repair_artifact", validate)
+    monkeypatch.setattr(code, "_unified_inputs", lambda _u: {"objective": "o"})
+    monkeypatch.setattr(code, "_inputs_for", lambda _sig, values: values)
+    monkeypatch.setattr(code, "_unified_validators", lambda _u: (lambda c: "", lambda c: ""))
+    monkeypatch.setattr(code, "_unified_column_roles", lambda _u: ([], "{}"))
+    monkeypatch.setattr(code.dspy, "streamify", _fake_streamify)
+
+
+@pytest.mark.asyncio
+async def test_a_lane_that_never_stops_reasoning_is_cut_off_at_its_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A metric lane that only ever thinks ends the seed with a localized error instead of hanging."""
+    _patch_seed_lanes(monkeypatch)
+    queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+    with pytest.raises(code.SeedLaneTimeoutError, match="thought for too long"):
+        await asyncio.wait_for(
+            code._run_unified_seed(
+                lm=None, unified={}, authoring_brief="", reply_language="English", queue=queue, locale="en"
+            ),
+            timeout=5,
+        )
+
+    events = [queue.get_nowait() for _ in range(queue.qsize())]
+    done = [e["data"]["source"] for e in events if e["event"] == "artifact_done"]
+    assert done == ["signature"]
+
+
+@pytest.mark.asyncio
+async def test_seed_turn_runs_on_the_seed_budget_and_ends_with_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The seed LM gets the seed token budget, and a stuck lane closes the turn with an error event."""
+    _patch_seed_lanes(monkeypatch)
+    built: list[tuple[Any, ...]] = []
+
+    def build(*args: Any) -> Any:
+        """Record the LM arguments.
+
+        Args:
+            *args: Model, effort and token budget.
+
+        Returns:
+            A placeholder LM.
+        """
+        built.append(args)
+        return dspy.LM("openai/fake", cache=False)
+
+    monkeypatch.setattr(code, "_build_agent_lm", build)
+    stream = code.run_code_agent(
+        dataset_columns=[],
+        column_roles={},
+        sample_rows=[],
+        user_message="",
+        prior_signature="",
+        prior_metric="",
+        locale="en",
+        unified={"task": {}},
+    )
+
+    events = [event async for event in asyncio_timeout_iter(stream, 5)]
+    assert built[0][2] == code.SEED_MAX_TOKENS
+    assert events[-1]["event"] == "error"
+    assert "thought for too long" in events[-1]["data"]["error"]
+
+
+async def asyncio_timeout_iter(stream: Any, seconds: float) -> Any:
+    """Drain ``stream``, failing when it outlives ``seconds``.
+
+    Args:
+        stream: The async event stream.
+        seconds: The wall-clock limit.
+
+    Yields:
+        Each event.
+    """
+    async with asyncio.timeout(seconds):
+        async for event in stream:
+            yield event
