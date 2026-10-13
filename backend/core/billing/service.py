@@ -1376,7 +1376,9 @@ class StripeBillingService:
             token_source: ``"managed"`` (full cost) or ``"byok"`` (platform fee
                 only); defaults to managed.
             token_sources_by_model: Optional per-model source map for a mixed job.
-            optimization_id: Finishing legacy root job, whose own held ceiling may be consumed.
+            optimization_id: Finishing legacy root job, whose own held ceiling may be
+                consumed; also stamped on the ledger row so the charge is
+                attributable to the job.
             settlement_key: Optional idempotency key stored on the ledger row;
                 a debit whose key is already recorded is a no-op.
 
@@ -1443,6 +1445,8 @@ class StripeBillingService:
                     output_tokens=output_tokens,
                     settlement_key=settlement_key,
                     uncollected_cents=uncollected or None,
+                    optimization_id=optimization_id,
+                    from_grant_cents=from_grant,
                 )
             )
             session.commit()
