@@ -282,6 +282,7 @@
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' bu kullanıcı için bulunamadı — veri kümesini yeniden yükleyin ve tekrar deneyin.",
     "submission.validation_failed": "Yük doğrulaması başarısız oldu. Optimize edici, modül ve sütun eşlemesini kontrol edin.",
     "submission.vision_required": "Veri kümesi görüntü sütunları içeriyor ({fields}) ancak seçilen model ('{model}') görüntü girdilerini desteklemiyor. Görüntü destekli bir model seçin.",
+    "code_agent.seed_lane_timeout": "Model kodu yazmadan çok uzun süre düşündü, bu yüzden taslak durduruldu. Yeniden deneyin ya da daha hızlı bir model veya daha düşük bir akıl yürütme düzeyi seçin.",
     "submit.no_models_available": "Katalogda kullanılabilir model yok — önce bir sağlayıcı API anahtarı yapılandırın.",
     "user.storage.quota_exceeded": "Depolama kotası aşıldı ({quota_mb}MB içinden {used_mb}MB kullanıldı). Yer açın ve tekrar deneyin.",
     "wizard.code_via_authoring_only": "{field}, update_wizard_state aracılığıyla ayarlanamaz. İmza ve Metrik kodu yalnızca request_code_authoring ile yazılır; bu da sonucu sihirbaza ulaşmadan önce doğrular.",

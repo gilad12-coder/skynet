@@ -282,6 +282,7 @@
     "submission.staged_dataset_not_found": "このユーザーの staged_dataset_id '{staged_dataset_id}' が見つかりません。データセットを再アップロードして再試行してください。",
     "submission.validation_failed": "ペイロードの検証に失敗しました。オプティマイザ、モジュール、および列マッピングを確認してください。",
     "submission.vision_required": "データセットに画像列（{fields}）が含まれていますが、選択されたモデル（'{model}'）は画像入力に対応していません。ビジョン対応のモデルを選択してください。",
+    "code_agent.seed_lane_timeout": "モデルがコードを書かずに長く考えすぎたため、下書きを停止しました。もう一度試すか、より高速なモデルか低い推論レベルを選んでください。",
     "submit.no_models_available": "カタログに利用可能なモデルがありません。先にプロバイダーのAPIキーを設定してください。",
     "user.storage.quota_exceeded": "ストレージのクォータを超過しました（{quota_mb}MB 中 {used_mb}MB 使用中）。空き容量を確保して再試行してください。",
     "wizard.code_via_authoring_only": "{field} は update_wizard_state では設定できません。シグネチャおよびメトリックのコードは request_code_authoring でのみ作成され、ウィザードに渡る前に結果が検証されます。",
