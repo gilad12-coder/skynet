@@ -52,10 +52,8 @@ export function MinimizedPill({
             className="absolute inset-0 rounded-full bg-primary-fill/20 animate-ping motion-reduce:animate-none"
           />
         )}
-        <span
-          className="relative inline-flex size-5 items-center justify-center rounded-full bg-primary-fill text-primary-foreground"
-        >
-          <SkynetMark className="size-3" aria-hidden="true" />
+        <span className="relative inline-flex size-5 overflow-hidden rounded-full bg-secondary">
+          <SkynetMark className="size-full" aria-hidden="true" />
         </span>
       </span>
       <span className="truncate max-w-[18ch] leading-none">

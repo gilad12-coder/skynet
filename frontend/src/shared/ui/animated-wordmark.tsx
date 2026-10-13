@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { HOATZIN_VIEWBOX, HoatzinShapes } from "@/shared/ui/skynet-mark";
+
 /**
  * Animated "SKYNET" wordmark with morphing SVG letters.
  *
@@ -27,10 +29,6 @@ type LetterVariants = {
 type LetterDef = {
   offset: number;
   variants: LetterVariants;
-  /** Transform for the default path when it is drawn in another coordinate space. */
-  defaultTransform?: string;
-  /** Fill the alternate paths even-odd so nested outlines read as rings. */
-  evenOdd?: boolean;
 };
 
 // All letters are scaled within a 92-unit high viewBox.
@@ -128,33 +126,11 @@ const LETTERS: LetterDef[] = [
 
 const TOTAL_WIDTH = 475;
 
-// The hexagon brand mark (shared/ui/skynet-mark.tsx) as a morphing glyph. Its
-// default path stays in the mark's own unit space and is scaled so its
-// bounding box spans the full 92-unit letter height, 79.6 units wide.
-const MARK_WIDTH = 79.6;
-const MARK_GAP = 28;
-const MARK: LetterDef = {
-  offset: 0,
-  defaultTransform: "scale(141.47) translate(-0.2196 -0.1655)",
-  evenOdd: true,
-  variants: {
-    default:
-      "m0.5 0.1655-0.2804 0.1566v0.1209l0.2802-0.1524 0.175 0.1008q0.0025 0.0014 0.0025 0.0036v0.2028l-0.1595 0.0889-0.1607-0.0965q-0.0053-0.0032-0.0053-0.0071v-0.1116l-0.1322 0.0724v0.1133l0.2804 0.1586 0.2819-0.1587v-0.3339q0-1e-3 -9e-4 -0.0015z M0.4999 0.3925 0.5923 0.4466v0.1132l-0.0525 0.0295-0.1204-0.0678v-0.0842z",
-    glyph: [
-      { x: 28.5, y: 2.1, w: 22.6, h: 22.6 },
-      { x: 2, y: 68, w: 22.6, h: 22.6 },
-      { x: 55, y: 68, w: 22.6, h: 22.6 },
-    ],
-    serif:
-      "M39.8,0 L79.6,23 L79.6,69 L39.8,92 L0,69 L0,23 Z M39.8,4.1 L76,25.1 L76,66.9 L39.8,87.9 L3.6,66.9 L3.6,25.1 Z M39.8,25.3 L57.7,35.7 L57.7,56.3 L39.8,66.7 L21.9,56.3 L21.9,35.7 Z",
-    sans: "M39.8,0 L79.6,23 L79.6,69 L39.8,92 L0,69 L0,23 Z M39.8,10.1 L70.8,28 L70.8,64 L39.8,81.9 L8.8,64 L8.8,28 Z M39.8,34.5 L49.8,40.3 L49.8,51.7 L39.8,57.5 L29.8,51.7 L29.8,40.3 Z",
-  },
-};
-const MARK_SHIFT = MARK_WIDTH + MARK_GAP;
-const LETTERS_WITH_MARK: LetterDef[] = [
-  MARK,
-  ...LETTERS.map((letter) => ({ ...letter, offset: letter.offset + MARK_SHIFT })),
-];
+// The hoatzin brand mark (shared/ui/skynet-mark.tsx) leads the letters as a square at
+// their full 92-unit height. It stays still while the letters morph.
+const MARK_SIZE = 92;
+const MARK_GAP = 24;
+const MARK_SHIFT = MARK_SIZE + MARK_GAP;
 const VARIANT_NAMES = ["default", "glyph", "serif", "sans"] as const;
 type VariantName = (typeof VARIANT_NAMES)[number];
 
@@ -203,14 +179,7 @@ function VariantGroup({
   const d =
     variant === "default" ? content.default : variant === "serif" ? content.serif : content.sans;
 
-  return (
-    <path
-      d={d}
-      style={style}
-      fillRule={variant !== "default" && letter.evenOdd ? "evenodd" : "nonzero"}
-      transform={variant === "default" ? letter.defaultTransform : undefined}
-    />
-  );
+  return <path d={d} style={style} />;
 }
 
 export function AnimatedWordmark({
@@ -235,13 +204,12 @@ export function AnimatedWordmark({
   morphSpeed?: number;
   /** Fill the parent's width (height derives from the viewBox) instead of using `size`. */
   fluid?: boolean;
-  /** Lead with the hexagon brand mark, drawn at the letters' height and morphing with them. */
+  /** Lead with the hoatzin brand mark, drawn at the letters' height. */
   withMark?: boolean;
 }) {
-  const letters = withMark ? LETTERS_WITH_MARK : LETTERS;
   const totalWidth = withMark ? TOTAL_WIDTH + MARK_SHIFT : TOTAL_WIDTH;
   const [activeVariants, setActiveVariants] = useState<VariantName[]>(() =>
-    letters.map(() => "default"),
+    LETTERS.map(() => "default"),
   );
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -265,7 +233,7 @@ export function AnimatedWordmark({
 
     intervalRef.current = setInterval(() => {
       const count = 2 + Math.floor(Math.random() * 2); // Picks 2 or 3 letters to change
-      const indices = pickRandom(letters.length, count);
+      const indices = pickRandom(LETTERS.length, count);
 
       setActiveVariants((prev) => {
         const next = [...prev];
@@ -275,15 +243,15 @@ export function AnimatedWordmark({
         return next;
       });
     }, morphSpeed);
-  }, [morphSpeed, letters.length]);
+  }, [morphSpeed]);
 
   const stopMorph = useCallback(() => {
     if (intervalRef.current != null) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-    setActiveVariants(letters.map(() => "default"));
-  }, [letters]);
+    setActiveVariants(LETTERS.map(() => "default"));
+  }, []);
 
   const handleMouseEnter = useCallback(() => {
     // While autoMorph owns the lifecycle the wordmark is already morphing — hover
@@ -350,8 +318,13 @@ export function AnimatedWordmark({
         xmlns="http://www.w3.org/2000/svg"
         style={fluid ? { width: "100%", height: "auto", color: "var(--foreground)" } : { color: "var(--foreground)" }}
       >
-        {letters.map((letter, li) => (
-          <g key={li} transform={`translate(${letter.offset}, 0)`}>
+        {withMark && (
+          <svg width={MARK_SIZE} height={MARK_SIZE} viewBox={HOATZIN_VIEWBOX}>
+            <HoatzinShapes />
+          </svg>
+        )}
+        {LETTERS.map((letter, li) => (
+          <g key={li} transform={`translate(${letter.offset + (withMark ? MARK_SHIFT : 0)}, 0)`}>
             {VARIANT_NAMES.map((name) => (
               <VariantGroup
                 key={name}

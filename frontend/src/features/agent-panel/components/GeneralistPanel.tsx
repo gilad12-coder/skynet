@@ -665,7 +665,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const emptyState = (
     <EmptyState
       icon={SkynetMark}
-      iconWrap="circle"
       variant="compact"
       title={msg("auto.features.agent.panel.components.generalistpanel.1")}
     />
@@ -675,8 +674,8 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     <div dir={dir} className="relative flex min-w-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-2.5 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="inline-flex size-6 items-center justify-center rounded-full bg-primary-fill text-primary-foreground">
-            <SkynetMark className="size-3.5" aria-hidden="true" />
+          <span className="inline-flex size-6 shrink-0 overflow-hidden rounded-full bg-secondary">
+            <SkynetMark className="size-full" aria-hidden="true" />
           </span>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 leading-tight">
