@@ -2,7 +2,8 @@
 
 import { MicroPill } from "@/shared/ui/model-chip";
 import * as React from "react";
-import { ArrowSquareOut, Check, CaretDown, Eye, Gauge, MagnifyingGlass, ShieldCheck, Warning } from "@/shared/ui/icons";
+import { motion, useReducedMotion } from "framer-motion";
+import { Check, CaretDown, Eye, Gauge, MagnifyingGlass, ShieldCheck, Warning } from "@/shared/ui/icons";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
@@ -136,52 +137,63 @@ function RowIconTip({
 const seconds = (ms: number | null | undefined) =>
   ms ? msg("submit.modelpicker.speed.seconds", { s: number(ms / 1000, 2) }) : msg("submit.modelpicker.speed.unknown");
 
-/** Labeled time to first token, short-reply latency and output speed for one row. */
+/** Time to first token and output speed for one row. */
 function SpeedTip({ model }: { model: CatalogModel }) {
   const tps = model.throughput_tps
     ? msg("submit.modelpicker.stat.speed", { tps: number(model.throughput_tps, 0) })
     : msg("submit.modelpicker.speed.unknown");
   return (
     <RowIconTip label={msg("submit.modelpicker.speed_label")} icon={<Gauge className="size-3.5" aria-hidden="true" />}>
+      <span className="block font-medium">{msg("submit.modelpicker.speed_label")}</span>
       <span className="block">{msg("submit.modelpicker.speed.ttft", { value: seconds(model.ttft_ms) })}</span>
-      <span className="block">{msg("submit.modelpicker.speed.latency", { value: seconds(model.latency_ms) })}</span>
       <span className="block">{msg("submit.modelpicker.speed.throughput", { value: tps })}</span>
       <span className="mt-1 block opacity-70">{msg("submit.modelpicker.speed.source")}</span>
     </RowIconTip>
   );
 }
 
-/** Score, input price and speed for one row; a stat the catalog lacks is left out. */
+/** The model's intelligence score; hover explains it, click opens its Artificial Analysis page. */
+function ScoreTip({ model }: { model: CatalogModel }) {
+  const score = number(model.intelligence_index ?? 0, 1);
+  const chip =
+    "me-2 flex min-h-[44px] shrink-0 items-center rounded-md border border-border/50 px-2 text-[0.6875rem] font-medium tabular-nums text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground lg:min-h-0 lg:py-0.5";
+  const url = model.artificial_analysis_url;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {url ? (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={msg("submit.modelpicker.score_aria", { score })}
+            className={chip}
+          >
+            {score}
+          </a>
+        ) : (
+          <span tabIndex={0} aria-label={msg("submit.modelpicker.score_aria", { score })} className={chip}>
+            {score}
+          </span>
+        )}
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 leading-relaxed" dir={getActiveDir()}>
+        <span className="block font-medium">{msg("submit.modelpicker.score_tip_title", { score })}</span>
+        <span className="block">{msg("submit.modelpicker.score_tip")}</span>
+        {url && <span className="mt-1 block opacity-70">{msg("submit.modelpicker.score_tip_link")}</span>}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Input price for one row; the score, speed and retention live in hover tooltips. */
 function ModelStats({ model }: { model: CatalogModel }) {
-  const stats: Array<{ text: string; title: string }> = [];
-  if (model.intelligence_index != null) {
-    stats.push({
-      text: msg("submit.modelpicker.stat.score", { score: number(model.intelligence_index, 1) }),
-      title: msg("submit.modelpicker.stat.score_title"),
-    });
-  }
-  if (model.input_cost_per_token) {
-    stats.push({
-      text: msg("submit.modelpicker.stat.price", {
-        price: number(model.input_cost_per_token * 1e6, 2),
-      }),
-      title: msg("submit.modelpicker.stat.price_title"),
-    });
-  }
-  if (model.throughput_tps) {
-    stats.push({
-      text: msg("submit.modelpicker.stat.speed", { tps: number(model.throughput_tps, 0) }),
-      title: msg("submit.modelpicker.stat.speed_title"),
-    });
-  }
-  if (stats.length === 0) return null;
+  if (!model.input_cost_per_token) return null;
   return (
     <span className="flex flex-wrap gap-x-2 text-[0.6875rem] text-muted-foreground">
-      {stats.map((s) => (
-        <span key={s.title} title={s.title}>
-          {s.text}
-        </span>
-      ))}
+      <span title={msg("submit.modelpicker.stat.price_title")}>
+        {msg("submit.modelpicker.stat.price", { price: number(model.input_cost_per_token * 1e6, 2) })}
+      </span>
     </span>
   );
 }
@@ -305,6 +317,7 @@ export function ModelPicker({
   }, [allModels, purpose, query]);
 
   const [ranking, setRanking] = React.useState<ModelRanking>("best_value");
+  const prefersReduced = useReducedMotion();
   const groups = React.useMemo(() => rankModels(filtered, ranking), [filtered, ranking]);
 
   // A provider can fan out across data centers (a public API plus an on-prem
@@ -436,21 +449,33 @@ export function ModelPicker({
               aria-selected={ranking === r}
               onClick={() => setRanking(r)}
               className={cn(
-                "min-h-[44px] flex-1 cursor-pointer rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 lg:min-h-0",
+                "relative min-h-[44px] flex-1 cursor-pointer rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 lg:min-h-0",
                 ranking === r
-                  ? "bg-accent text-foreground"
+                  ? "text-primary-foreground"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {msg(RANKING_LABEL_KEYS[r])}
+              {ranking === r && (
+                <motion.span
+                  layoutId="model-picker-ranking-active"
+                  className="absolute inset-0 rounded-md bg-primary-fill"
+                  transition={
+                    prefersReduced ? { duration: 0 } : { type: "spring", stiffness: 350, damping: 28 }
+                  }
+                />
+              )}
+              <span className="relative">{msg(RANKING_LABEL_KEYS[r])}</span>
             </button>
           ))}
         </div>
 
         {/* Keyed so a new tab or purpose starts at the top: each list is
             sorted best-first, and a kept scroll offset hid the best models. */}
-        <div
+        <motion.div
           key={`${ranking}-${purpose}`}
+          initial={prefersReduced ? false : { opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.18, ease: "easeOut" }}
           className="max-h-60 min-h-0 flex-1 overflow-y-auto py-1"
         >
           {filtered.length === 0 && (
@@ -525,31 +550,17 @@ export function ModelPicker({
                       label={msg("settings.model_privacy.zdr.label")}
                       icon={<ShieldCheck className="size-3.5" aria-hidden="true" />}
                     >
-                      {msg("submit.modelpicker.zdr_tip")}
+                      <span className="block font-medium">{msg("submit.modelpicker.zdr_tip_title")}</span>
+                      <span className="block">{msg("submit.modelpicker.zdr_tip")}</span>
                     </RowIconTip>
                   )}
                   {!!(m.throughput_tps || m.ttft_ms || m.latency_ms) && <SpeedTip model={m} />}
-                  {m.artificial_analysis_url && (
-                    <a
-                      href={m.artificial_analysis_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={msg("submit.modelpicker.aa_link")}
-                      className="me-2 flex min-h-[44px] shrink-0 items-center gap-1 rounded-md border border-border/50 px-2 text-[0.6875rem] font-medium text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground lg:min-h-0 lg:py-0.5"
-                    >
-                      <ArrowSquareOut className="size-3" aria-hidden="true" />
-                      {msg("submit.modelpicker.aa_link_label")}
-                      <span className="sr-only">
-                        {" "}
-                        ({m.display_name || m.label}, {msg("submit.modelpicker.aa_link")})
-                      </span>
-                    </a>
-                  )}
+                  {m.intelligence_index != null && <ScoreTip model={m} />}
                 </div>
               ))}
             </div>
           ))}
-        </div>
+        </motion.div>
       </PopoverContent>
     </Popover>
   );
