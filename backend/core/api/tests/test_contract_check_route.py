@@ -241,6 +241,8 @@ def test_preflight_reports_a_reservation_over_the_limit_as_a_budget_check(
     class _Gateway:
         """Stand in for the model gateway without any paid transport."""
 
+        budget_refusal = None
+
         def __init__(self, runtime: Any) -> None:
             """Ignore the budget runtime."""
 
@@ -279,3 +281,20 @@ def test_preflight_reports_a_reservation_over_the_limit_as_a_budget_check(
 
     assert status == "failed"
     assert result["checks"] == [{"key": key, "status": "failed", "message": SPENT}]
+
+
+@pytest.mark.parametrize(("refusal", "raised"), [(SPENT, BudgetInsufficientError), (None, ValueError)])
+def test_unified_guest_failure_after_a_refused_call_is_a_budget_error(
+    monkeypatch: pytest.MonkeyPatch, refusal: str | None, raised: type[Exception]
+) -> None:
+    """A guest that failed after the limit refused one of its model calls reports the budget, not the code."""
+
+    def guest(payload: dict[str, Any], artifact_id: str, events: Any, start_method: str) -> None:
+        """Fail in the guest the way a sample stopped by the limit does."""
+        events.put({"type": "error", "error": "The code does not match", "traceback": ""})
+
+    monkeypatch.setattr(preflight_execution, "run_vercel_dspy", guest)
+    gateway = SimpleNamespace(budget_refusal=refusal)
+
+    with pytest.raises(raised, match="135 cents" if refusal else "does not match"):
+        preflight_execution._verify_unified(gateway, {}, scope="evaluation", identity="setup-1")

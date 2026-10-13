@@ -348,6 +348,10 @@ export function contractSnapshot(s: WizardV2State): string {
     metricCode: s.workspace.metricCode,
     metricModel: resolvedMetricModel(s)?.name ?? null,
     metricTimeoutSeconds: s.workspace.metricTimeoutSeconds,
+    // The check runs under the spending limit, so a pass under one limit says
+    // nothing about another: a new limit runs the check again.
+    maxCostCents: s.optimizer.budgetUncapped ? null : s.optimizer.maxCostCents,
+    budgetUncapped: s.optimizer.budgetUncapped,
   });
 }
 
