@@ -34,6 +34,15 @@ export interface CloneSlices {
 
 const ARTIFACT_KINDS: readonly ArtifactKind[] = ["prompt", "code", "dspy_program", "text"];
 const DATA_MODES: readonly DataMode[] = ["single", "pairs"];
+// Mirrors BLACKBOX_OPTIMIZERS; a value import would stop node tests loading this file.
+const BLACKBOX_ENGINES: readonly OptimizerChoice[] = [
+  "gepa",
+  "best_of_n",
+  "autoresearch",
+  "meta_harness",
+  "autosaddler",
+  "shinka_evolve",
+];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
@@ -62,6 +71,12 @@ function split(value: unknown): SplitFractions | undefined {
   return typeof train === "number" && typeof val === "number" && typeof test === "number"
     ? { train, val, test }
     : undefined;
+}
+
+/** The spending cap every payload shape stores at the top level, under either name. */
+function maxCostCents(payload: ClonePayload): number | undefined {
+  const cap = payload.max_cost_cents ?? payload.max_cost_credits;
+  return typeof cap === "number" && Number.isFinite(cap) && cap >= 1 ? cap : undefined;
 }
 
 /** Fields every payload shape stores the same way; the job row's display name wins. */
@@ -131,9 +146,7 @@ function cloneUnified(payload: ClonePayload): Omit<CloneSlices, "meta"> {
     taskModel: modelConfig(models.task_model),
     reflectionModel: modelConfig(models.reflection_model),
     extraReflectionModels: Array.isArray(models.extra_reflection_models)
-      ? models.extra_reflection_models
-          .map(modelConfig)
-          .filter((m): m is ModelConfig => m !== null)
+      ? models.extra_reflection_models.map(modelConfig).filter((m): m is ModelConfig => m !== null)
       : [],
   };
   if (typeof optimizer.choice === "string")
@@ -188,16 +201,34 @@ function cloneLegacyBlackbox(payload: ClonePayload): Omit<CloneSlices, "meta"> {
     workspace.metricModelMode = "explicit";
     workspace.metricModel = scorerModel;
   }
+  if (typeof scorer.timeout_seconds === "number" && scorer.timeout_seconds > 0)
+    workspace.metricTimeoutSeconds = scorer.timeout_seconds;
+
+  // Stored payloads may be dumped by alias or by field name.
+  const extras = payload.extra_reflection_model_configs ?? payload.extra_reflection_model_settings;
+  const optimizer: Partial<OptimizerSlice> = {
+    taskModel: modelConfig(payload.task_model_config ?? payload.task_model_settings),
+    reflectionModel: modelConfig(
+      payload.reflection_model_config ?? payload.reflection_model_settings,
+    ),
+    extraReflectionModels: Array.isArray(extras)
+      ? extras.map(modelConfig).filter((m): m is ModelConfig => m !== null)
+      : [],
+  };
+  // Auto mode, or an engine this wizard no longer offers, keeps the default choice.
+  const strategy = isRecord(payload.strategy) ? payload.strategy : {};
+  const engine = BLACKBOX_ENGINES.find((e) => e === strategy.engine);
+  if (strategy.mode === "single" && engine) optimizer.choice = engine;
+  if (isRecord(payload.budget))
+    optimizer.budget = payload.budget as unknown as OptimizerSlice["budget"];
+  if (isRecord(payload.proposer))
+    optimizer.proposer = payload.proposer as unknown as OptimizerSlice["proposer"];
+  if (isRecord(payload.shinka))
+    optimizer.shinka = payload.shinka as unknown as OptimizerSlice["shinka"];
   return {
     task,
     inputs: inputsFromCases(cases, []),
-    // Stored payloads may be dumped by alias or by field name.
-    optimizer: {
-      taskModel: modelConfig(payload.task_model_config ?? payload.task_model_settings),
-      reflectionModel: modelConfig(
-        payload.reflection_model_config ?? payload.reflection_model_settings,
-      ),
-    },
+    optimizer,
     workspace,
   };
 }
@@ -214,7 +245,8 @@ function cloneLegacyDspy(payload: ClonePayload): Omit<CloneSlices, "meta"> {
         outputCols.length > 0 ? Object.fromEntries(outputCols.map((col) => [col, row[col]])) : null,
     }),
   );
-  const inputs: Partial<InputsSlice> = inputCols.length > 0 ? inputsFromCases(cases, inputCols) : {};
+  const inputs: Partial<InputsSlice> =
+    inputCols.length > 0 ? inputsFromCases(cases, inputCols) : {};
   const fractions = split(payload.split_fractions);
   if (fractions) inputs.split = fractions;
   if (typeof payload.shuffle === "boolean") inputs.shuffle = payload.shuffle;
@@ -249,5 +281,7 @@ export function cloneToSlices(
       : optimizationType === "blackbox"
         ? cloneLegacyBlackbox(payload)
         : cloneLegacyDspy(payload);
+  const cap = maxCostCents(payload);
+  if (cap !== undefined) body.optimizer = { ...body.optimizer, maxCostCents: cap };
   return { ...body, meta: cloneMeta(payload, jobName) };
 }

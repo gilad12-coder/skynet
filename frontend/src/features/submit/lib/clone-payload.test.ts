@@ -64,10 +64,7 @@ test("a legacy black-box run maps objective, seed, cases and scorer", () => {
     objective: "Write emails",
     background: "B2B",
     seed_candidate: { system: "Be brief", user: "{brief}" },
-    cases: [
-      { brief: "launch", expected: "Hi" },
-      { brief: "renewal" },
-    ],
+    cases: [{ brief: "launch", expected: "Hi" }, { brief: "renewal" }],
     scorer: { kind: "python", metric_code: "def score(c, o): ...", model: { name: "judge" } },
     reflection_model_config: { name: "refl" },
   });
@@ -105,4 +102,111 @@ test("a legacy DSPy run maps rows by the column mapping and keeps metric_code", 
 test("an unmapped legacy DSPy run leaves the inputs empty", () => {
   const slices = cloneToSlices("grid_search", { dataset: [{ a: 1 }] });
   assert.deepEqual(slices.inputs, {});
+});
+
+// Sanitized stored payload of staging run 52923146 (legacy ShinkaEvolve repository run).
+const SHINKA_SETTINGS = {
+  num_islands: 2,
+  migration_interval: 10,
+  migration_rate: 0,
+  parent_selection: "weighted",
+  parent_selection_lambda: 10,
+  exploitation_alpha: 1,
+  exploitation_ratio: 0.2,
+  num_beams: 5,
+  patch_diff: 0.6,
+  patch_full: 0.3,
+  patch_cross: 0.1,
+  max_patch_attempts: 1,
+  max_patch_resamples: 3,
+  archive_size: 40,
+  num_archive_inspirations: 1,
+  num_top_k_inspirations: 1,
+  elite_selection_ratio: 0.3,
+  use_text_feedback: true,
+  novelty: false,
+  code_embed_sim_threshold: 0.99,
+  max_novelty_attempts: 3,
+  meta_notes: true,
+  meta_rec_interval: 10,
+  meta_max_recommendations: 5,
+  max_parallel_evaluations: 2,
+  max_parallel_proposals: 2,
+  editor: "single_call",
+};
+const LEGACY_SHINKA_RUN = {
+  name: "repo-speedup",
+  is_private: true,
+  objective: "Make the benchmark faster",
+  recipe: "repo",
+  scorer: {
+    kind: "python",
+    metric_code: "def score(c, o): ...",
+    timeout_seconds: 300,
+  },
+  budget: { max_iterations: 4, max_scorer_runs: 8 },
+  strategy: { mode: "single", engine: "shinka_evolve" },
+  target: { kind: "repo", repo: { repository: "owner/repo", commit: "abc123" } },
+  proposer: { harness: "codex", ralph: true, max_tool_calls: 100 },
+  reflection_model_config: { name: "openrouter/refl" },
+  extra_reflection_model_configs: [],
+  shinka: SHINKA_SETTINGS,
+  max_cost_cents: 448,
+};
+
+test("cloning the legacy ShinkaEvolve run restores its engine, limits and scorer settings", () => {
+  const slices = cloneToSlices("blackbox", LEGACY_SHINKA_RUN, "repo-speedup");
+  assert.equal(slices.optimizer.choice, "shinka_evolve");
+  assert.deepEqual(slices.optimizer.budget, { max_iterations: 4, max_scorer_runs: 8 });
+  assert.deepEqual(slices.optimizer.shinka, SHINKA_SETTINGS);
+  assert.deepEqual(slices.optimizer.proposer, {
+    harness: "codex",
+    ralph: true,
+    max_tool_calls: 100,
+  });
+  assert.equal(slices.workspace.metricTimeoutSeconds, 300);
+  assert.equal(slices.optimizer.maxCostCents, 448);
+  assert.equal(slices.optimizer.reflectionModel?.name, "openrouter/refl");
+  assert.deepEqual(slices.optimizer.extraReflectionModels, []);
+  assert.equal(slices.task.objective, "Make the benchmark faster");
+  assert.equal(slices.workspace.metricCode, "def score(c, o): ...");
+  assert.equal(slices.meta.name, "repo-speedup");
+  assert.equal(slices.meta.isPrivate, true);
+});
+
+test("a legacy run's extra optimization models clone by alias or field name", () => {
+  const byAlias = cloneToSlices("blackbox", {
+    extra_reflection_model_configs: [{ name: "a" }, { bad: true }],
+  });
+  assert.deepEqual(
+    byAlias.optimizer.extraReflectionModels?.map((m) => m.name),
+    ["a"],
+  );
+  const byField = cloneToSlices("blackbox", {
+    extra_reflection_model_settings: [{ name: "b" }],
+  });
+  assert.deepEqual(
+    byField.optimizer.extraReflectionModels?.map((m) => m.name),
+    ["b"],
+  );
+});
+
+test("a legacy run in Auto mode keeps the default engine", () => {
+  const auto = cloneToSlices("blackbox", { strategy: { mode: "auto" } });
+  assert.equal(auto.optimizer.choice, undefined);
+  const unknown = cloneToSlices("blackbox", {
+    strategy: { mode: "single", engine: "retired_engine" },
+  });
+  assert.equal(unknown.optimizer.choice, undefined);
+});
+
+test("the spending cap clones for every payload shape", () => {
+  assert.equal(
+    cloneToSlices("blackbox", { payload_kind: "unified_v1", max_cost_cents: 120 }).optimizer
+      .maxCostCents,
+    120,
+  );
+  assert.equal(cloneToSlices("run", { max_cost_credits: 75 }).optimizer.maxCostCents, 75);
+  assert.equal(cloneToSlices("blackbox", {}).optimizer.maxCostCents, undefined);
+  assert.equal(cloneToSlices("blackbox", { max_cost_cents: 0 }).optimizer.maxCostCents, undefined);
 });
