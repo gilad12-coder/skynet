@@ -326,7 +326,9 @@ export function AnimatedWordmark({
       >
         {withMark && (
           <svg y={MARK_TOP} width={MARK_WIDTH} height={MARK_HEIGHT} viewBox={HOATZIN_LOCKUP_VIEWBOX}>
-            <HoatzinShapes />
+            {/* Fluid lockups fill a wide column; fixed ones are header-sized, where the
+                full line work would blur together. */}
+            <HoatzinShapes detail={fluid || svgHeight >= 64 ? "full" : "simple"} />
           </svg>
         )}
         {LETTERS.map((letter, li) => (
