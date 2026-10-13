@@ -2418,7 +2418,7 @@
   "auto.features.submit.hooks.use.code.agent.literal.6": "Editando la métrica…",
   "auto.features.submit.hooks.use.code.agent.literal.7": "Listo",
   "auto.features.submit.hooks.use.code.agent.literal.8": "Error",
-  "auto.features.submit.hooks.use.code.agent.template.1": "Revisa mi {p1} y escribe una Firma y una métrica que se ajusten a él.",
+  "auto.features.submit.hooks.use.code.agent.template.1": "Revisa mi {p1} y escribe el código y una métrica que encajen con él.",
   "auto.features.submit.hooks.use.code.agent.template.2": "El agente está leyendo el {p1}…",
   "auto.features.submit.hooks.use.code.agent.template.5": "La validación encontró errores en la métrica. Corrígela para que pase la validación.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "Se cargaron {p1} filas desde {p2}",

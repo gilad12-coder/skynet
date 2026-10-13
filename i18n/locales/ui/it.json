@@ -2418,7 +2418,7 @@
   "auto.features.submit.hooks.use.code.agent.literal.6": "Modifica della metrica…",
   "auto.features.submit.hooks.use.code.agent.literal.7": "Fatto",
   "auto.features.submit.hooks.use.code.agent.literal.8": "Errore",
-  "auto.features.submit.hooks.use.code.agent.template.1": "Esamina il mio {p1} e scrivi una Signature e una metrica adatte.",
+  "auto.features.submit.hooks.use.code.agent.template.1": "Esamina il mio {p1} e scrivi il codice e una metrica adatti.",
   "auto.features.submit.hooks.use.code.agent.template.2": "L'agente sta leggendo il {p1}…",
   "auto.features.submit.hooks.use.code.agent.template.5": "La convalida ha rilevato errori nella metrica. Correggila in modo che superi la convalida.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "Caricate {p1} righe da {p2}",

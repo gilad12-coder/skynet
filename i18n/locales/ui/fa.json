@@ -2418,7 +2418,7 @@
   "auto.features.submit.hooks.use.code.agent.literal.6": "در حال ویرایش معیار…",
   "auto.features.submit.hooks.use.code.agent.literal.7": "انجام شد",
   "auto.features.submit.hooks.use.code.agent.literal.8": "خطا",
-  "auto.features.submit.hooks.use.code.agent.template.1": "{p1} من را بررسی کن و یک امضا و معیار متناسب با آن بنویس.",
+  "auto.features.submit.hooks.use.code.agent.template.1": "{p1} من را بررسی کن و کد و یک معیار متناسب با آن بنویس.",
   "auto.features.submit.hooks.use.code.agent.template.2": "عامل در حال خواندن {p1} است…",
   "auto.features.submit.hooks.use.code.agent.template.5": "اعتبارسنجی خطاهایی در معیار یافت. آن را اصلاح کنید تا از اعتبارسنجی عبور کند.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "{p1} ردیف از {p2} بارگذاری شد",

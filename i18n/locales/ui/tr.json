@@ -2418,7 +2418,7 @@
   "auto.features.submit.hooks.use.code.agent.literal.6": "Metrik düzenleniyor…",
   "auto.features.submit.hooks.use.code.agent.literal.7": "Tamamlandı",
   "auto.features.submit.hooks.use.code.agent.literal.8": "Hata",
-  "auto.features.submit.hooks.use.code.agent.template.1": "{p1} öğemi inceleyip ona uygun bir İmza ve metrik yaz.",
+  "auto.features.submit.hooks.use.code.agent.template.1": "{p1} öğemi inceleyip ona uygun kodu ve bir metriği yaz.",
   "auto.features.submit.hooks.use.code.agent.template.2": "Aracı {p1} öğesini okuyor…",
   "auto.features.submit.hooks.use.code.agent.template.5": "Doğrulama, metrikte hatalar buldu. Doğrulamayı geçecek şekilde düzelt.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "{p2} dosyasından {p1} satır yüklendi",

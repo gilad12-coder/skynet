@@ -2418,7 +2418,7 @@
   "auto.features.submit.hooks.use.code.agent.literal.6": "Редагування метрики…",
   "auto.features.submit.hooks.use.code.agent.literal.7": "Готово",
   "auto.features.submit.hooks.use.code.agent.literal.8": "Помилка",
-  "auto.features.submit.hooks.use.code.agent.template.1": "Перегляньте мій {p1} і напишіть Сигнатуру та метрику, що йому відповідають.",
+  "auto.features.submit.hooks.use.code.agent.template.1": "Перегляньте мій {p1} і напишіть відповідний код і метрику.",
   "auto.features.submit.hooks.use.code.agent.template.2": "Агент читає {p1}…",
   "auto.features.submit.hooks.use.code.agent.template.5": "Перевірка виявила помилки в метриці. Виправте її так, щоб вона пройшла перевірку.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "Завантажено {p1} рядків з {p2}",

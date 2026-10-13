@@ -2418,7 +2418,7 @@
   "auto.features.submit.hooks.use.code.agent.literal.6": "मीट्रिक संपादित कर रहे हैं…",
   "auto.features.submit.hooks.use.code.agent.literal.7": "पूर्ण",
   "auto.features.submit.hooks.use.code.agent.literal.8": "त्रुटि",
-  "auto.features.submit.hooks.use.code.agent.template.1": "मेरे {p1} की समीक्षा करें और एक सिग्नेचर तथा मीट्रिक लिखें जो इसके अनुकूल हो।",
+  "auto.features.submit.hooks.use.code.agent.template.1": "मेरे {p1} की समीक्षा करें और उसके अनुरूप कोड और एक मेट्रिक लिखें।",
   "auto.features.submit.hooks.use.code.agent.template.2": "एजेंट {p1} पढ़ रहा है…",
   "auto.features.submit.hooks.use.code.agent.template.5": "मान्यकरण को मीट्रिक में त्रुटियाँ मिलीं। इसे ठीक करें ताकि यह मान्यकरण में पास हो।",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "{p2} से {p1} पंक्तियाँ लोड हुईं",

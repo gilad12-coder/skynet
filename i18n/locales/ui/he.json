@@ -1026,7 +1026,7 @@
   "auto.features.submit.hooks.use.code.agent.literal.6": "עורך פונקציית מדידה…",
   "auto.features.submit.hooks.use.code.agent.literal.7": "סיימתי",
   "auto.features.submit.hooks.use.code.agent.literal.8": "שגיאה",
-  "auto.features.submit.hooks.use.code.agent.template.1": "בדוק את ה{p1} שלי וכתוב פרומפט (Signature) ופונקציית מדידה שיתאימו לו.",
+  "auto.features.submit.hooks.use.code.agent.template.1": "בדוק את ה{p1} שלי וכתוב קוד ופונקציית מדידה שיתאימו לו.",
   "auto.features.submit.hooks.use.code.agent.template.2": "הסוכן קורא את ה{p1}…",
   "auto.features.submit.hooks.use.code.agent.template.5": "האימות מצא שגיאות בפונקציית המדידה. תקן אותה כדי שתעבור אימות.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "נטען {p1} שורות מ-{p2}",

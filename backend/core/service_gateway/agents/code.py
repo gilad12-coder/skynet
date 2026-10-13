@@ -173,9 +173,7 @@ def _agent_error_payload(exc: BaseException) -> dict[str, str]:
             break
         if isinstance(leaf, BaseExceptionGroup):
             stack.extend(leaf.exceptions)
-        stack.extend(
-            linked for linked in (leaf.__cause__, leaf.__context__) if linked is not None
-        )
+        stack.extend(linked for linked in (leaf.__cause__, leaf.__context__) if linked is not None)
     return payload
 
 
@@ -757,10 +755,7 @@ class FixCodeArtifact(dspy.Signature):
     )
 
     fixed_code: str = dspy.OutputField(
-        desc=(
-            "The corrected full source for the artifact. No markdown fences, "
-            "no prose — just the Python code."
-        ),
+        desc=("The corrected full source for the artifact. No markdown fences, no prose — just the Python code."),
     )
 
 
@@ -924,29 +919,42 @@ _RUN_CONTRACT = """The run code is plain python that turns one case input into a
 - Let errors raise: the harness reports them to the user. Do not return a fake output on failure.
 - Read input fields by their exact names; never invent fields."""
 
-_RUN_ENTRY = f"define {run_entry_for('prompt')}: " + """artifact is the version under optimization (a str, or a dict of name -> text when the starting version is a mapping), exactly as the optimizer proposes it; input is one case input, a dict keyed by the input fields. Return the output: a str, or any JSON-serializable value the metric reads.
+_RUN_ENTRY = (
+    f"define {run_entry_for('prompt')}: "
+    """artifact is the version under optimization (a str, or a dict of name -> text when the starting version is a mapping), exactly as the optimizer proposes it; input is one case input, a dict keyed by the input fields. Return the output: a str, or any JSON-serializable value the metric reads.
 - The task model comes from the skynet module: `from skynet import llm` (never define your own). llm(prompt, input=None, images=None) -> str; llm(artifact, input["<input field>"]) runs the artifact as the system message with that field as the user message and returns the reply; that is how a prompt is exercised. images= attaches PNG/JPEG bytes, file paths or data: URLs.
 - Per artifact kind: a prompt is exercised with llm(artifact, ...); code is python source to load with exec into a fresh dict namespace (or write to a temp file and run with subprocess and a timeout) and call on the input; text is used as written (return it, or apply it with llm when the objective is about what the text makes a model do)."""
+)
 
 # A DSPy optimizer tunes the module's predictors itself, so the engine needs
 # the module rather than a call; build_program() is that run code's entry
 # point, not a separate deliverable.
-_DSPY_ENTRY = """the artifact is a DSPy program, and the DSPy optimizer tunes its predictors itself, so the run code hands over the module instead of calling it: define """ + run_entry_for("dspy_program") + """ taking no arguments and returning a dspy.Module. `import dspy` at the top; define the dspy.Signature classes and the module it uses inside the run code.
+_DSPY_ENTRY = (
+    """the artifact is a DSPy program, and the DSPy optimizer tunes its predictors itself, so the run code hands over the module instead of calling it: define """
+    + run_entry_for("dspy_program")
+    + """ taking no arguments and returning a dspy.Module. `import dspy` at the top; define the dspy.Signature classes and the module it uses inside the run code.
 - The harness applies the version under optimization, a dict mapping each predictor name (as program.named_predictors() reports it) to its instruction text, configures the task model as the dspy LM and calls program(**input) with the input fields as keyword arguments; the output is the dspy.Prediction it returns. Never call dspy.configure, create a dspy.LM or set instructions yourself.
 - Name the predictors so they match the keys of the starting version; the module's forward takes exactly the input fields as keyword arguments and returns a dspy.Prediction with the output fields the metric reads.
 - Name the signature's input fields exactly as the case input fields. gold holds the case's expected fields under their own names (a single expected value is gold.expected), so name the output fields so the metric can compare pred.<field> with the matching gold field."""
+)
 
 _METRIC_SHAPES = {
     "dspy_feedback": """The metric feeds a DSPy GEPA optimizer, so it returns a score AND feedback text.
-- Define """ + METRIC_SIGNATURES["dspy_feedback"] + """ with all five parameters.
+- Define """
+    + METRIC_SIGNATURES["dspy_feedback"]
+    + """ with all five parameters.
 - gold is a dspy.Example holding the case input fields and the expected output fields (read them as gold.<field>); pred is the dspy.Prediction the program returned (pred.<output field>).
 - Return dspy.Prediction(score=float, feedback=str): score higher is better, 0.0 to 1.0 by convention; feedback says WHY, naming the expected value or the failed check, because the optimizer learns from it. {"score": ..., "feedback": ...} or (score, "feedback") are accepted too.""",
     "dspy_scalar": """The metric feeds a DSPy optimizer that reads only a number.
-- Define """ + METRIC_SIGNATURES["dspy_scalar"] + """.
+- Define """
+    + METRIC_SIGNATURES["dspy_scalar"]
+    + """.
 - gold is a dspy.Example holding the case input fields and the expected output fields (read them as gold.<field>); pred is the dspy.Prediction the program returned (pred.<output field>).
 - Return a float (higher is better, 0.0 to 1.0 by convention) or a bool. No feedback is read.""",
     "blackbox_side_info": """The metric feeds a black-box optimizer that reads a score and side info.
-- Define """ + METRIC_SIGNATURES["blackbox_side_info"] + """.
+- Define """
+    + METRIC_SIGNATURES["blackbox_side_info"]
+    + """.
 - input is the case input dict (keyed by the input fields), output is what run returned for it, expected is the case's expected output (the value of the expected field; None when the case has none). Declare expected only when you use it.
 - Return (score, side_info): score is a float, higher is better, 0.0 to 1.0 by convention; side_info is a dict with "feedback": str saying WHY the output scored that, naming the expected value or the failed check. When several things are measured, add "scores": {"<name>": float, ...}, one entry per thing; the top-level score is then their (weighted) combination.""",
 }
@@ -2545,7 +2553,9 @@ class _WorkflowEditSession:
         try:
             node = json.loads(_strip_json_fences(node_json))
         except (json.JSONDecodeError, ValueError) as exc:
-            return self._tool_result(call_id, "add_node", ok=False, message=f"Edit rejected — node_json does not parse: {exc}")
+            return self._tool_result(
+                call_id, "add_node", ok=False, message=f"Edit rejected — node_json does not parse: {exc}"
+            )
         if not isinstance(node, dict) or node.get("kind") not in ("signature", "transform"):
             return self._tool_result(
                 call_id,
@@ -2556,7 +2566,10 @@ class _WorkflowEditSession:
         node_id = str(node.get("id", ""))
         if not node_id or self._node(node_id) is not None:
             return self._tool_result(
-                call_id, "add_node", ok=False, message=f"Edit rejected — node id '{node_id}' is missing or already taken."
+                call_id,
+                "add_node",
+                ok=False,
+                message=f"Edit rejected — node id '{node_id}' is missing or already taken.",
             )
         if node["kind"] == "signature":
             err = _validate_signature_code(str(node.get("signature_code", "")))
@@ -2595,7 +2608,9 @@ class _WorkflowEditSession:
             return self._tool_result(call_id, "update_node", ok=False, message=rejection)
         existing = self._node(node_id)
         if existing is None:
-            return self._tool_result(call_id, "update_node", ok=False, message=f"Edit rejected — no node with id '{node_id}'.")
+            return self._tool_result(
+                call_id, "update_node", ok=False, message=f"Edit rejected — no node with id '{node_id}'."
+            )
         try:
             node = json.loads(_strip_json_fences(node_json))
         except (json.JSONDecodeError, ValueError) as exc:
@@ -2642,7 +2657,9 @@ class _WorkflowEditSession:
             return self._tool_result(call_id, "remove_node", ok=False, message=rejection)
         node = self._node(node_id)
         if node is None:
-            return self._tool_result(call_id, "remove_node", ok=False, message=f"Edit rejected — no node with id '{node_id}'.")
+            return self._tool_result(
+                call_id, "remove_node", ok=False, message=f"Edit rejected — no node with id '{node_id}'."
+            )
         if node.get("kind") in ("input", "output"):
             return self._tool_result(
                 call_id, "remove_node", ok=False, message="Edit rejected — the input/output anchors cannot be removed."
@@ -2680,7 +2697,9 @@ class _WorkflowEditSession:
         if rejection:
             return self._tool_result(call_id, "connect", ok=False, message=rejection)
         if self._node(source) is None or self._node(target) is None:
-            return self._tool_result(call_id, "connect", ok=False, message="Edit rejected — unknown source or target node id.")
+            return self._tool_result(
+                call_id, "connect", ok=False, message="Edit rejected — unknown source or target node id."
+            )
         if source == target:
             return self._tool_result(call_id, "connect", ok=False, message="Edit rejected — a node cannot feed itself.")
         for e in self._workflow["edges"]:
@@ -2702,7 +2721,9 @@ class _WorkflowEditSession:
         while stack:
             cur = stack.pop()
             if cur == source:
-                return self._tool_result(call_id, "connect", ok=False, message="Edit rejected — that edge would close a cycle.")
+                return self._tool_result(
+                    call_id, "connect", ok=False, message="Edit rejected — that edge would close a cycle."
+                )
             if cur in seen:
                 continue
             seen.add(cur)
@@ -3023,9 +3044,7 @@ async def _run_workflow_seed(
 
             if spec_dict is not None:
                 results["workflow"] = spec_dict
-                await queue.put(
-                    {"event": "workflow_replace", "data": {"workflow": spec_dict, "changed_node_id": None}}
-                )
+                await queue.put({"event": "workflow_replace", "data": {"workflow": spec_dict, "changed_node_id": None}})
             results["workflow_valid"] = not error
             return error
 

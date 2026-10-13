@@ -2418,7 +2418,7 @@
   "auto.features.submit.hooks.use.code.agent.literal.6": "Modification de la métrique…",
   "auto.features.submit.hooks.use.code.agent.literal.7": "Terminé",
   "auto.features.submit.hooks.use.code.agent.literal.8": "Erreur",
-  "auto.features.submit.hooks.use.code.agent.template.1": "Examine mon {p1} et écris une Signature et une métrique qui lui correspondent.",
+  "auto.features.submit.hooks.use.code.agent.template.1": "Examine mon {p1} et écris le code et une métrique adaptés.",
   "auto.features.submit.hooks.use.code.agent.template.2": "L'agent lit le {p1}…",
   "auto.features.submit.hooks.use.code.agent.template.5": "La validation a détecté des erreurs dans la métrique. Corrige-la pour qu'elle passe la validation.",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "{p1} lignes chargées depuis {p2}",

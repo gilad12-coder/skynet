@@ -1891,7 +1891,7 @@
   "auto.features.submit.hooks.use.code.agent.literal.6": "修改緊指標…",
   "auto.features.submit.hooks.use.code.agent.literal.7": "完成",
   "auto.features.submit.hooks.use.code.agent.literal.8": "錯誤",
-  "auto.features.submit.hooks.use.code.agent.template.1": "檢視我嘅 {p1}，並編寫適合佢嘅 Signature 同指標。",
+  "auto.features.submit.hooks.use.code.agent.template.1": "檢視我嘅 {p1}，並編寫適合佢嘅代碼同指標。",
   "auto.features.submit.hooks.use.code.agent.template.2": "Agent 讀取緊 {p1}…",
   "auto.features.submit.hooks.use.code.agent.template.5": "驗證時發現指標有錯。請修正等佢可以通過驗證。",
   "auto.features.submit.hooks.use.submit.wizard.template.1": "已由 {p2} 載入 {p1} 列",
