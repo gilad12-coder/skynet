@@ -129,7 +129,7 @@ frozenlist==1.8.0
     # via
     #   aiohttp
     #   aiosignal
-fsspec==2026.3.0
+fsspec==2026.6.0
     # via huggingface-hub
 gepa @ git+https://github.com/gepa-ai/gepa@0632cdb5dcc052e690eab439e1b4a7e3e9cfe407
     # via
@@ -237,7 +237,7 @@ more-itertools==11.0.2
     # via
     #   jaraco-classes
     #   jaraco-functools
-multidict==6.7.1
+multidict==6.9.1
     # via
     #   aiohttp
     #   yarl
