@@ -26,6 +26,7 @@ import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 
 import { centsToBudgetText, parseBudgetInput } from "@/shared/lib/budget-input";
+import { limitContinueBlock } from "../lib/budget-limit";
 import { chargeableBracket, type CostBracket } from "../lib/cost-bracket";
 import type { WizardV2Context } from "../lib/wizard-v2";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
@@ -58,6 +59,7 @@ type BudgetContext = Pick<
   WizardV2Context,
   | "costBracket"
   | "suggestedCeiling"
+  | "tokenSource"
   | "maxCostCents"
   | "setMaxCostCents"
   | "budgetUncapped"
@@ -68,6 +70,13 @@ type BudgetContext = Pick<
 };
 
 const BUDGET_STEP_CENTS = 100;
+
+/** Why Continue holds while the spending limit sits under the estimate's low end. */
+export function belowEstimateMessage(neededCents: number): string {
+  return formatMsg("submit.budget.error.below_estimate", {
+    amount: formatCentsUsd(neededCents, getActiveIntlLocale()),
+  });
+}
 const BUDGET_STEP_BUTTON_CLASS =
   "flex h-full w-12 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30";
 const ISOLATE_START = "⁦";
@@ -200,6 +209,13 @@ function ReadyBudgetCard({
     minimum == null
       ? null
       : formatMsg("submit.budget.minimum_total", { amount: formatCentsUsd(minimum, locale) });
+  const limitNeeded =
+    parsed.kind === "value"
+      ? limitContinueBlock("budget", costBracket, w.tokenSource, {
+          uncapped: budgetUncapped,
+          limit: parsed.value,
+        })
+      : null;
   const fieldError =
     parsed.kind === "invalid"
       ? formatMsg("submit.budget.error.invalid", { suggested })
@@ -209,7 +225,9 @@ function ReadyBudgetCard({
           ? msg("submit.budget.error.below_one")
           : parsed.kind === "value" && minimum != null && parsed.value < minimum
             ? minimumMessage
-            : null;
+            : limitNeeded != null
+              ? belowEstimateMessage(limitNeeded)
+              : null;
   const fieldHint = fieldError == null && parsed.kind === "empty" ? minimumMessage : null;
   const fieldMessage = fieldError ?? fieldHint;
 

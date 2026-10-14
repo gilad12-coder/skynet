@@ -230,6 +230,7 @@ def test_status_lists_every_provider(vault_key: str, generic_oauth_off: None) ->
         "supabase",
         "bigquery",
         "snowflake",
+        "foundry",
         "langfuse",
         "langsmith",
         "braintrust",
@@ -953,6 +954,125 @@ def test_braintrust_experiment_fetch_follows_cursor(vault_key: str, generic_oaut
         {"id": "e1", "input": "q", "output": "a", "expected": "a", "scores.exact": 1},
         {"id": "e1", "input": "q", "output": "a", "expected": "a", "scores.exact": 1},
     ]
+
+
+def test_foundry_browses_spaces_and_reads_dataset_table(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """Spaces open into folders and datasets; a pasted RID jumps to its dataset; tables read as CSV."""
+    client, store = _make_client()
+    space = "ri.compass.main.folder.s1"
+    dataset = "ri.foundry.main.dataset.d1"
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the Foundry platform API."""
+        assert kwargs["headers"]["Authorization"] == "Bearer fdry_tok"
+        assert kwargs["follow_redirects"] is False
+        parsed = urlparse(url)
+        assert parsed.netloc == "acme.palantirfoundry.com"
+        if parsed.path == "/api/v2/filesystem/spaces":
+            return _response(200, {"data": [{"rid": space, "displayName": "Research"}]})
+        if parsed.path == "/api/v2/admin/users/getCurrent":
+            return _response(200, {"username": "ada"})
+        if parsed.path == f"/api/v2/filesystem/folders/{space}/children":
+            if kwargs["params"].get("pageToken") == "p2":
+                return _response(200, {"data": [{"rid": dataset, "displayName": "qa_pairs"}]})
+            children = [
+                {"rid": "ri.compass.main.folder.f1", "displayName": "raw"},
+                {"rid": "ri.workshop.main.module.w1", "displayName": "App"},
+            ]
+            return _response(200, {"data": children, "nextPageToken": "p2"})
+        if parsed.path == f"/api/v2/datasets/{dataset}":
+            return _response(200, {"rid": dataset, "name": "qa_pairs"})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with (
+        patch("core.connectors.foundry.socket.getaddrinfo", return_value=_PUBLIC_ADDRINFO),
+        patch("core.connectors.transport.CLIENT.request", side_effect=fake_request),
+        patch("core.connectors.transport.CLIENT.stream", return_value=_StreamCtx(CSV)) as stream,
+    ):
+        saved = client.put(
+            "/connectors/foundry/credentials",
+            json={"fields": {"host": "https://acme.palantirfoundry.com/workspace/", "token": "fdry_tok"}},
+        )
+        assert saved.status_code == 200, saved.text
+        assert next(c for c in saved.json()["connectors"] if c["provider"] == "foundry")["account_label"] == "ada"
+        root = client.get("/connectors/foundry/browse").json()["entries"]
+        assert [(e["ref"], e["kind"]) for e in root] == [(space, "folder")]
+        inside = client.get("/connectors/foundry/browse", params={"location": space}).json()["entries"]
+        assert [(e["name"], e["kind"]) for e in inside] == [("raw", "folder"), ("qa_pairs", "file")]
+        jump = client.get("/connectors/foundry/browse", params={"search": dataset}).json()["entries"]
+        assert [(e["ref"], e["name"]) for e in jump] == [(dataset, "qa_pairs")]
+        bad = client.get("/connectors/foundry/preview", params={"ref": "../admin"})
+        assert bad.json()["code"] == "connectors.invalid_ref"
+
+        preview = client.get("/connectors/foundry/preview", params={"ref": dataset}).json()
+        assert preview["rows"][0] == {"name": "ada", "score": "1"}
+        assert stream.call_args.args[1].endswith(f"/api/v2/datasets/{dataset}/readTable")
+        assert stream.call_args.kwargs["params"] == {"format": "CSV", "rowLimit": 20}
+        assert stream.call_args.kwargs["follow_redirects"] is False
+        imported = client.post("/connectors/foundry/import", json={"ref": dataset})
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["dataset"]["name"] == "qa_pairs"
+    library = DatasetLibraryStore(store.engine, PostgresDatasetBlobStore(store.engine))
+    assert library.get_rows(imported.json()["dataset"]["id"]) == [
+        {"name": "ada", "score": "1"},
+        {"name": "bob", "score": "2"},
+    ]
+
+
+_PUBLIC_ADDRINFO = [(2, 1, 6, "", ("52.1.2.3", 443))]
+
+
+@pytest.mark.parametrize(
+    ("host", "address"),
+    [
+        ("http://acme.palantirfoundry.com", "52.1.2.3"),
+        ("https://user:pw@acme.palantirfoundry.com", "52.1.2.3"),
+        ("internal.example.com", "10.0.0.5"),
+        ("localhost", "127.0.0.1"),
+        ("metadata.example.com", "169.254.169.254"),
+    ],
+)
+def test_foundry_refuses_hosts_outside_the_public_internet(
+    vault_key: str,  # noqa: F811
+    generic_oauth_off: None,
+    host: str,
+    address: str,
+) -> None:
+    """A plain-HTTP, credentialed, private, loopback or metadata host never receives the token.
+
+    Args:
+        vault_key: Vault fixture.
+        generic_oauth_off: OAuth fixture.
+        host: The pasted hostname.
+        address: What its DNS resolves to.
+    """
+    client, _ = _make_client()
+    with (
+        patch("core.connectors.foundry.socket.getaddrinfo", return_value=[(2, 1, 6, "", (address, 443))]),
+        patch("core.connectors.transport.CLIENT.request") as outbound,
+    ):
+        saved = client.put("/connectors/foundry/credentials", json={"fields": {"host": host, "token": "fdry_tok"}})
+    assert saved.status_code == 400, saved.text
+    assert saved.json()["code"] == "connectors.invalid_credentials"
+    outbound.assert_not_called()
+
+
+def test_foundry_refuses_redirects(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """A 3xx from the stack fails instead of being followed toward another host."""
+    client, _ = _make_client()
+    with (
+        patch("core.connectors.foundry.socket.getaddrinfo", return_value=_PUBLIC_ADDRINFO),
+        patch(
+            "core.connectors.transport.CLIENT.request",
+            return_value=httpx.Response(302, headers={"Location": "http://169.254.169.254/"}),
+        ),
+    ):
+        saved = client.put(
+            "/connectors/foundry/credentials",
+            json={"fields": {"host": "acme.palantirfoundry.com", "token": "fdry_tok"}},
+        )
+    assert saved.status_code == 502, saved.text
+    assert saved.json()["code"] == "connectors.provider_error"
 
 
 def test_postgres_url_normalises_and_reads_tables(

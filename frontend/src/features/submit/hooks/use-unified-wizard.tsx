@@ -37,7 +37,6 @@ import { getActiveMessages } from "@/shared/lib/runtime-messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import type { ModelConfig } from "@/shared/types/api";
 import {
-  metricShapeFor,
   optimizersFor,
   resolveOptimizer,
   type OptimizerCatalogResponse,
@@ -64,6 +63,7 @@ import { repoRunRequest } from "../lib/repo-run";
 import { metricUsesModel } from "../lib/scorer-dependencies";
 import { computeStepIssue, hasModel, runBlockedReason as blockedReason } from "../lib/step-issue";
 import { canEnterStep, canMoveForward } from "../lib/wizard-steps";
+import { createStepViewTracker } from "../lib/wizard-telemetry";
 import {
   WIZARD_V2_STEPS,
   contractSnapshot,
@@ -243,6 +243,14 @@ export function WizardV2Provider({
   // Reads the blocked flag of the render the level changed in.
   useEffect(() => dispatch({ type: "level", level, optimizerBlocked }), [level]);
 
+  // The tracker drops repeats, so a re-render or a level change on the same
+  // step (and StrictMode's double effect) reports nothing.
+  const [stepViewed] = useState(createStepViewTracker);
+  useEffect(() => {
+    const viewed = stepViewed(state.step, level);
+    if (viewed) track(TelemetryEvent.WizardStepViewed, { ...viewed });
+  }, [stepViewed, state.step, level]);
+
   const canEnter = useCallback(
     (step: WizardStepId) =>
       canEnterStep(step, {
@@ -282,7 +290,6 @@ export function WizardV2Provider({
   }, [steps, state.step, goTo]);
 
   const resolvedOptimizer = kind ? resolveOptimizer(state.optimizer.choice, kind) : null;
-  const metricShape = kind ? metricShapeFor(state.optimizer.choice, kind) : null;
   const snapshot = contractSnapshot(state);
   const contractStale = state.workspace.lastCheckSnapshot !== snapshot;
 
@@ -794,7 +801,6 @@ export function WizardV2Provider({
     patchOptimizer,
     patchWorkspace,
     patchMeta,
-    metricShape,
     resolvedOptimizer,
     optimizerCatalog:
       optimizerCatalog && optimizerCatalog.artifact_kind === kind && optimizerCatalog.data_mode === mode
@@ -813,6 +819,7 @@ export function WizardV2Provider({
     costBracket,
     estimateFor,
     suggestedCeiling,
+    tokenSource,
     maxCostCents,
     setMaxCostCents,
     budgetUncapped,

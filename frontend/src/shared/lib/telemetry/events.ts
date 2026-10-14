@@ -27,4 +27,6 @@ export const TelemetryEvent = {
   TutorialStarted: "tutorial_started",
   TutorialCompleted: "tutorial_completed",
   ShareCreated: "share_created",
+  WizardStepViewed: "wizard_step_viewed",
+  SetupCheckFailed: "setup_check_failed",
 } as const;

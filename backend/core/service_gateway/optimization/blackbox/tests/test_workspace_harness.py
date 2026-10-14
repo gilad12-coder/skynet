@@ -1,4 +1,4 @@
-"""The in-sandbox workspace harness: run code, then the metric, held to the optimizer's shape."""
+"""The in-sandbox workspace harness: run code, then the metric, under the one contract every optimizer runs."""
 
 from __future__ import annotations
 
@@ -13,9 +13,6 @@ import pytest
 
 from .. import runner, workspace_harness
 from ..workspace_harness import (
-    SHAPE_BLACKBOX,
-    SHAPE_DSPY_FEEDBACK,
-    SHAPE_DSPY_SCALAR,
     Workspace,
     encode_stream,
     parse_replies,
@@ -35,14 +32,13 @@ def _restore_helper_module(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, runner.HELPER_MODULE_NAME, None)
 
 
-def _workspace(metric_code: str, *, shape: str = SHAPE_BLACKBOX, run_code: str = RUN_CODE, **extra: Any) -> Workspace:
+def _workspace(metric_code: str, *, run_code: str = RUN_CODE, **extra: Any) -> Workspace:
     """Load a workspace with no model gateways."""
     return Workspace(
         {
             "run_code": run_code,
             "metric_code": metric_code,
             "artifact_kind": extra.get("artifact_kind", "prompt"),
-            "metric_shape": shape,
             "input_fields": extra.get("input_fields", ["q"]),
             "gateways": {"task": None, "metric": None},
         }
@@ -81,54 +77,80 @@ def test_blackbox_metric_returning_a_bare_float_is_a_shape_error() -> None:
     assert "score" not in reply
 
 
-def test_dspy_feedback_metric_returning_a_bare_float_is_a_shape_error() -> None:
-    """GEPA's metric must return a score with feedback, not a bare float."""
-    metric = "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None):\n    return 1.0\n"
-
-    reply = _workspace(metric, shape=SHAPE_DSPY_FEEDBACK).handle(
-        {"candidate": "p", "case": _case("x", {"answer": "p:x"})}
-    )
-
-    assert reply["stage"] == "shape"
-
-
 @pytest.mark.parametrize(
-    "returned",
-    ["{'score': 0.25, 'feedback': 'ok'}", "(0.25, 'ok')", "dspy.Prediction(score=0.25, feedback='ok')"],
+    "returned", ["1.0", "(0.5, 'no dict')", "(0.5, {'scores': {}})", "{'score': 1, 'feedback': ''}"]
 )
-def test_dspy_feedback_metric_accepts_each_documented_form(returned: str) -> None:
-    """A Prediction, a mapping and a pair all become ``(score, {"feedback"})``."""
-    metric = (
-        f"import dspy\ndef metric(gold, pred, trace=None, pred_name=None, pred_trace=None):\n    return {returned}\n"
-    )
+def test_any_other_return_value_is_a_shape_error(returned: str) -> None:
+    """Only ``(score, side_info)`` with a feedback string is accepted, whatever the artifact kind.
 
-    reply = _workspace(metric, shape=SHAPE_DSPY_FEEDBACK).handle(
-        {"candidate": "p", "case": _case("x", {"answer": "p:x"})}
-    )
+    Args:
+        returned: The expression ``score`` returns.
+    """
+    metric = f"def score(input, output, expected=None):\n    return {returned}\n"
 
-    assert reply["score"] == 0.25
-    assert reply["side_info"]["feedback"] == "ok"
-
-
-def test_dspy_scalar_metric_sees_gold_and_pred() -> None:
-    """``gold`` carries the expected fields and ``pred`` wraps the run output."""
-    metric = "def metric(gold, pred, trace=None):\n    return gold.answer == pred.output\n"
-
-    reply = _workspace(metric, shape=SHAPE_DSPY_SCALAR).handle(
-        {"candidate": "p", "case": _case("x", {"answer": "p:x"})}
-    )
-
-    assert reply["score"] == 1.0
-    assert reply["side_info"]["feedback"] == ""
-
-
-def test_dspy_scalar_metric_returning_a_string_is_a_shape_error() -> None:
-    """A scalar metric must return a float or bool."""
-    metric = "def metric(gold, pred, trace=None):\n    return 'great'\n"
-
-    reply = _workspace(metric, shape=SHAPE_DSPY_SCALAR).handle({"candidate": "p", "case": _case("x", {"a": 1})})
+    reply = _workspace(metric).handle({"candidate": "p", "case": _case()})
 
     assert reply["stage"] == "shape"
+
+
+def test_retired_dspy_metric_is_not_called() -> None:
+    """A ``metric(gold, pred, ...)`` written for the retired DSPy shape fails at the metric stage."""
+    metric = "def metric(gold, pred, trace=None):\n    return 1.0\n"
+
+    reply = _workspace(metric).handle({"candidate": "p", "case": _case()})
+
+    assert reply["stage"] == "metric"
+    assert "score" in reply["error"]
+
+
+# The same run code and metric the DSPy engine compiles (unified/tests/test_dspy_engine.py):
+# run returns the module's instruction, so no model is needed to see the candidate applied.
+DSPY_RUN_CODE = (
+    "import dspy\n"
+    "program = dspy.Predict('q -> answer')\n"
+    "def run(artifact, input):\n"
+    "    return dspy.Prediction(answer=program.signature.instructions + ':' + input['q'])\n"
+)
+DSPY_SCORE = (
+    "def score(input, output, expected=None):\n"
+    "    ok = output.answer == expected['answer']\n"
+    "    return float(ok), {'feedback': output.answer}\n"
+)
+
+
+def test_dspy_program_runs_through_run_with_the_candidate_applied() -> None:
+    """A DSPy program uses the same run(artifact, input) and score(...) as every other kind."""
+    workspace = _workspace(DSPY_SCORE, run_code=DSPY_RUN_CODE, artifact_kind="dspy_program")
+
+    reply = workspace.handle({"candidate": {"self": "tuned"}, "case": _case("x", {"answer": "tuned:x"})})
+
+    assert "error" not in reply, reply
+    assert reply["score"] == 1.0
+    assert reply["side_info"]["feedback"] == "tuned:x"
+
+
+def test_dspy_program_without_a_module_level_module_fails_at_the_run_stage() -> None:
+    """The harness must find the module run calls; without one the run stage says how to fix it."""
+    run_code = "import dspy\ndef run(artifact, input):\n    return dspy.Predict('q -> a')(**input)\n"
+
+    reply = _workspace(DSPY_SCORE, run_code=run_code, artifact_kind="dspy_program").handle(
+        {"candidate": {"self": "x"}, "case": _case()}
+    )
+
+    assert reply["stage"] == "run"
+    assert "dspy.Module" in reply["error"]
+
+
+def test_retired_build_program_fails_at_the_run_stage() -> None:
+    """Run code written for the retired ``build_program()`` entry point has no ``run``."""
+    run_code = "import dspy\ndef build_program():\n    return dspy.Predict('q -> a')\n"
+
+    reply = _workspace(DSPY_SCORE, run_code=run_code, artifact_kind="dspy_program").handle(
+        {"candidate": {"self": "x"}, "case": _case()}
+    )
+
+    assert reply["stage"] == "run"
+    assert "run()" in reply["error"]
 
 
 def test_missing_run_fails_at_the_run_stage() -> None:
@@ -233,7 +255,6 @@ def test_candidate_probes_reach_neither_metric_source_nor_expected(tmp_path: Pat
         "run_code": CODE_RUN,
         "metric_code": metric,
         "artifact_kind": "code",
-        "metric_shape": SHAPE_BLACKBOX,
         "gateways": {},
     }
     call = {"candidate": PROBE_CANDIDATE, "case": {"input": {"q": str(dump)}, "expected": gold_marker}}
@@ -281,7 +302,7 @@ def test_load_error_is_reported_for_every_call() -> None:
 
 def test_serve_answers_init_then_each_call() -> None:
     """The JSON-lines protocol answers ``ready`` and then one reply per call."""
-    init = {"run_code": RUN_CODE, "metric_code": BLACKBOX_METRIC, "metric_shape": SHAPE_BLACKBOX, "gateways": {}}
+    init = {"run_code": RUN_CODE, "metric_code": BLACKBOX_METRIC, "gateways": {}}
     lines = [json.dumps(init), json.dumps({"candidate": "a", "case": _case("y", "y")}), ""]
     out = io.StringIO()
 
@@ -303,7 +324,7 @@ def test_env_stream_round_trips_and_the_code_never_touches_disk(tmp_path: Path) 
     (tmp_path / "skynet_runner.py").write_text(
         (harness_dir / "runner.py").read_text(encoding="utf-8"), encoding="utf-8"
     )
-    init = {"run_code": RUN_CODE, "metric_code": metric, "metric_shape": SHAPE_BLACKBOX, "gateways": {}}
+    init = {"run_code": RUN_CODE, "metric_code": metric, "gateways": {}}
     env = {"PATH": "/usr/bin:/bin", **encode_stream([init, {"candidate": "a", "case": _case("y", "y")}])}
 
     result = subprocess.run(

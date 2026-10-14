@@ -1637,6 +1637,7 @@ export type ConnectorProvider =
   | "supabase"
   | "bigquery"
   | "snowflake"
+  | "foundry"
   | "langfuse"
   | "langsmith"
   | "braintrust"

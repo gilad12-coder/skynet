@@ -81,7 +81,6 @@ from ...models import (
     OptimizerOption,
     UnifiedData,
     UnifiedRunRequest,
-    metric_shape_for,
     optimizer_family,
     optimizers_for,
     resolve_optimizer,
@@ -95,7 +94,7 @@ from ...models.blackbox import (
 )
 from ...models.common import ModelConfig, OptimizationType
 from ...models.submissions import _OptimizationRequestBase
-from ...models.unified import METRIC_SIGNATURES, run_entry_for
+from ...models.unified import METRIC_SIGNATURE, RUN_ENTRY
 from ...service_gateway.optimization.blackbox.registry import ENGINES
 from ...service_gateway.optimization.blackbox.service import engine_catalog, validate_blackbox_payload
 from ...service_gateway.optimization.unified.contract import validate_unified_payload
@@ -739,7 +738,7 @@ def _optimizer_option(
 
     Args:
         option_id: The optimizer choice being described.
-        artifact_kind: What the run optimizes; fixes Auto's resolution and the metric shape.
+        artifact_kind: What the run optimizes; fixes Auto's resolution.
         catalog: The black-box engine catalog for text targets.
 
     Returns:
@@ -761,8 +760,6 @@ def _optimizer_option(
     return OptimizerOption(
         id=option_id,
         family=optimizer_family(option_id),
-        metric_shape=metric_shape_for(option_id, artifact_kind),
-        metric_signature=METRIC_SIGNATURES[metric_shape_for(option_id, artifact_kind)],
         available=available,
         unavailable_reason=None if available else reason,
         needs_reflection_model=resolved not in _DSPY_WITHOUT_REFLECTION,
@@ -1079,7 +1076,8 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         return OptimizerCatalogResponse(
             artifact_kind=artifact_kind,
             data_mode=data_mode,
-            run_entry=run_entry_for(artifact_kind),
+            run_entry=RUN_ENTRY,
+            metric_signature=METRIC_SIGNATURE,
             options=options,
             auto_resolves_to=auto_resolves_to,
             sandbox_available=catalog.sandbox_available,

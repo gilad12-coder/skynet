@@ -236,6 +236,14 @@ export const Braintrust = brand({
   path: "M0 12.002C0 5.372 5.374-.002 12.001-.002 18.626-.002 24 5.372 24 12.002c0 6.625-5.374 12-11.999 12h-9.98a2.01 2.01 0 0 1-2.013-2.013V12.01zm0 0",
 });
 
+/** Palantir (Simple Icons, CC0); its near-black #101113 is drawn as black so the mark follows the text colour. */
+export const Palantir = brand({
+  title: "Palantir",
+  hex: "#000000",
+  viewBox: "0 0 24 24",
+  path: "M20.147 18L12 21.178 3.853 18 2.5 20.343 12 24l9.5-3.657L20.147 18zM12 0a9.5 9.5 0 1 0 0 19 9.5 9.5 0 0 0 0-19zm0 16.078a6.568 6.568 0 1 1 0-13.136 6.568 6.568 0 0 1 0 13.136z",
+});
+
 /** GMI Cloud: the symbol from the wordmark on gmicloud.ai, white on black like its favicon. */
 export const GmiCloud = brand({
   title: "GMI Cloud",

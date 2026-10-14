@@ -20,7 +20,6 @@ import {
   type ArtifactKind,
   type ContractCheckResponse,
   type DataMode,
-  type MetricShape,
   type OptimizerCatalogResponse,
   type OptimizerChoice,
   type TaskInterviewTurnResult,
@@ -28,6 +27,7 @@ import {
   type UnifiedChatTurn,
   type UnifiedRunRequest,
 } from "@/shared/types/unified-run";
+import type { TokenSourceMode } from "@/features/billing";
 import type { CostBracket } from "./cost-bracket";
 
 export type WizardStepId = "task" | "inputs" | "optimizer" | "metric";
@@ -391,6 +391,10 @@ export function contractSnapshot(s: WizardV2State): string {
     metricCode: s.workspace.metricCode,
     metricModel: resolvedMetricModel(s)?.name ?? null,
     metricTimeoutSeconds: s.workspace.metricTimeoutSeconds,
+    // The check runs under the spending limit, so a pass under one limit says
+    // nothing about another: a new limit runs the check again.
+    maxCostCents: s.optimizer.budgetUncapped ? null : s.optimizer.maxCostCents,
+    budgetUncapped: s.optimizer.budgetUncapped,
   });
 }
 
@@ -420,7 +424,6 @@ export interface WizardV2Context {
   patchOptimizer(p: Partial<OptimizerSlice>): void;
   patchWorkspace(p: Partial<WorkspaceSlice>): void;
   patchMeta(p: Partial<MetaSlice>): void;
-  metricShape: MetricShape | null;
   resolvedOptimizer: string | null;
   optimizerCatalog: OptimizerCatalogResponse | null;
   optimizerCatalogLoading: boolean;
@@ -444,6 +447,8 @@ export interface WizardV2Context {
   /** The charged estimate with another engine picked, everything else unchanged. */
   estimateFor(choice: OptimizerChoice): { lowCents: number; highCents: number } | null;
   suggestedCeiling: number | null;
+  /** Who pays the run's model tokens, which sets the estimate the limit is held to. */
+  tokenSource: TokenSourceMode;
   maxCostCents: number | null;
   setMaxCostCents(v: number | null): void;
   budgetUncapped: boolean;

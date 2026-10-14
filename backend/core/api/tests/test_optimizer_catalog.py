@@ -47,13 +47,13 @@ def test_dspy_program_with_pairs_offers_every_dspy_optimizer(monkeypatch: pytest
     assert body["auto_resolves_to"] == ["dspy_gepa"]
     assert all(option["available"] for option in body["options"])
     assert by_id["dspy_gepa"]["family"] == "dspy"
-    assert by_id["dspy_gepa"]["metric_shape"] == "dspy_feedback"
     assert by_id["dspy_gepa"]["uses_feedback"] is True
-    assert by_id["dspy_miprov2"]["metric_shape"] == "dspy_scalar"
     assert by_id["dspy_miprov2"]["uses_feedback"] is False
     assert by_id["dspy_bootstrap_fewshot"]["needs_reflection_model"] is False
     assert by_id["auto"]["family"] == "auto"
-    assert by_id["auto"]["metric_shape"] == "dspy_feedback"
+    assert body["run_entry"] == "def run(artifact, input)"
+    assert body["metric_signature"] == "def score(input, output, expected=None)"
+    assert all("metric_shape" not in option for option in body["options"])
 
 
 @pytest.mark.usefixtures("runtimes_up")
@@ -66,7 +66,7 @@ def test_dspy_program_with_one_input_offers_only_gepa(monkeypatch: pytest.Monkey
 
 @pytest.mark.usefixtures("runtimes_up")
 def test_prompt_offers_auto_and_the_blackbox_engines(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A prompt gets Auto plus every black-box engine with the side-info metric shape."""
+    """A prompt gets Auto plus every black-box engine, under the same contract as a DSPy program."""
     body = _catalog(monkeypatch, "prompt", "pairs")
 
     by_id = {option["id"]: option for option in body["options"]}
@@ -79,7 +79,8 @@ def test_prompt_offers_auto_and_the_blackbox_engines(monkeypatch: pytest.MonkeyP
         "autosaddler",
         "shinka_evolve",
     ]
-    assert {option["metric_shape"] for option in body["options"]} == {"blackbox_side_info"}
+    assert body["run_entry"] == "def run(artifact, input)"
+    assert body["metric_signature"] == "def score(input, output, expected=None)"
     assert by_id["gepa"]["family"] == "blackbox"
     assert by_id["gepa"]["uses_feedback"] is True
     assert by_id["best_of_n"]["uses_feedback"] is False

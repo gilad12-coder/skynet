@@ -137,8 +137,8 @@ type Finale = "none" | "splash" | "out";
  * strings these screens need are kept here rather than in a locale file.
  */
 const ENGLISH_ENTRY: Partial<Record<MessageKey, string>> = {
-  "experience.intake.entrance.title": "New to Skynet? Let's get you set up.",
-  "experience.intake.language.title": "Which language should Skynet speak?",
+  "experience.intake.entrance.title": "New to DRWN? Let's get you set up.",
+  "experience.intake.language.title": "Which language should DRWN speak?",
   "experience.intake.language.hint": "The app and the assistant both switch to it.",
   "experience.intake.skip": "Skip setup",
   "experience.intake.next": "Continue",
