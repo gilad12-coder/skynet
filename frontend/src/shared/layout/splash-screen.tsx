@@ -59,7 +59,7 @@ export function SplashScreen() {
       {/* The letters own the centre; the figure hangs above them so its changing
           silhouette never shifts the letters off centre. */}
       <div
-        className="relative"
+        className="relative flex"
         style={
           phase === "active"
             ? undefined
