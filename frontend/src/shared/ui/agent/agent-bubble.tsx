@@ -98,7 +98,13 @@ export function AgentBubble({
 
   if (!hasTools && !hasText && !hasActivity) return null;
 
-  const toolCalls = hasTools && renderToolCall && (
+  // With a turn history, every call (cards too) sits in it in the order it
+  // ran, so the whole turn reads top to bottom with the answer last, as in
+  // Codex. ReActV2 takes back prose written before a tool (message_reset),
+  // so the message's text is the turn's final answer.
+  const inHistory = hasActivity && Boolean(renderToolCall && isStepCall);
+  const cardsFirst = toolCallsBeforeContent || Boolean(isStepCall);
+  const toolCalls = hasTools && !inHistory && renderToolCall && (
     <div className="flex flex-col gap-1.5">
       {cardCalls.map(({ call, isRetry }) => (
         <React.Fragment key={call.id}>{renderToolCall(call, { isRetry })}</React.Fragment>
@@ -110,10 +116,10 @@ export function AgentBubble({
   // cards and the answer sit straight on the panel at full width.
   return (
     <div className={cn("flex w-full min-w-0 flex-col gap-3", className)}>
-      {hasActivity && renderToolCall && isStepCall ? (
+      {inHistory && renderToolCall ? (
         <TurnActivity
           thinking={thinking}
-          steps={stepCalls}
+          steps={visibleToolCalls.map((v) => ({ ...v, card: !isStepCall?.(v.call) }))}
           streaming={turnStreaming}
           renderStep={renderToolCall}
           stepKind={stepKind}
@@ -122,7 +128,7 @@ export function AgentBubble({
       ) : (
         thinking.map((t, i) => <ThinkingSection key={i} thinking={t} compact />)
       )}
-      {toolCallsBeforeContent && toolCalls}
+      {cardsFirst && toolCalls}
       {hasText && (
         <div className="text-sm leading-relaxed text-foreground">
           <React.Suspense
@@ -132,7 +138,7 @@ export function AgentBubble({
           </React.Suspense>
         </div>
       )}
-      {!toolCallsBeforeContent && toolCalls}
+      {!cardsFirst && toolCalls}
     </div>
   );
 }

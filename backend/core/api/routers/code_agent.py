@@ -508,6 +508,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         * ``tool_start`` — ``{"id", "tool", "reason"}`` (chat mode; the
           unified tools are ``ask_user`` / ``set_brief`` / ``edit_run`` /
           ``edit_metric``)
+        * ``code_draft`` — ``{"source": "signature" | "metric", "chunk",
+          "reset"}`` (unified chat mode: an ``edit_run`` / ``edit_metric``
+          call's code while the model writes it; ``reset`` starts a new draft)
         * ``signature_replace`` / ``metric_replace`` — ``{"code"}`` (in
           unified mode these carry the run code / the metric)
         * ``workflow_replace`` — ``{"workflow", "changed_node_id"}``

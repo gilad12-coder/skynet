@@ -20,8 +20,12 @@ export type TurnThinking = AgentThinking & { toolsBefore: number };
 interface TurnActivityProps {
   /** The turn's thinking segments, oldest first. */
   thinking: readonly TurnThinking[];
-  /** Each step with its index among the turn's tool calls. */
-  steps: Array<{ call: AgentToolCall; isRetry: boolean; index: number }>;
+  /**
+   * Each call with its index among the turn's tool calls. A ``card`` call
+   * renders on its own at its place in the history and stays shown when the
+   * history is folded; every other call is a one-line step.
+   */
+  steps: Array<{ call: AgentToolCall; isRetry: boolean; index: number; card?: boolean }>;
   /** The turn is still running. */
   streaming: boolean;
   renderStep: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
@@ -34,7 +38,8 @@ interface TurnActivityProps {
 // Mirrors Codex's turn header: while the agent works, a "Working for 14s"
 // line over the turn's history so far: each stretch of thinking as its own
 // row, with the tools that ran between them under one summary line each; once done, a "Worked for 39s" line over the same
-// history, which stays open and folds away only when clicked.
+// history, which stays open and folds away only when clicked. Cards the user
+// acts on sit at their place in that history and stay shown when it folds.
 export function TurnActivity({
   thinking,
   steps,
@@ -46,7 +51,8 @@ export function TurnActivity({
   const reduce = Boolean(useReducedMotion());
   // The whole turn counts, not only a running step, so the history stays
   // open in the gaps between one tool finishing and the next starting.
-  const isLive = streaming || steps.some(({ call }) => call.status === "running");
+  // A card can wait on the user long after the turn ended, so only steps count.
+  const isLive = streaming || steps.some(({ call, card }) => !card && call.status === "running");
   // Finished history stays open; the header still folds it on request.
   const [open, setOpen] = React.useState(true);
   const [nowTs, setNowTs] = React.useState(() => Date.now());
@@ -58,34 +64,37 @@ export function TurnActivity({
   }, [isLive]);
 
   const start = turnStart(thinking, steps);
-  const failed = steps.some(({ call }) => call.status === "error");
+  const failed = steps.some(({ call, card }) => !card && call.status === "error");
+  const pieces = interleaveThinking(thinking, steps);
+  const hasCards = pieces.some((piece) => piece.kind === "card");
 
-  const history = (
-    <div className="flex flex-col">
-      {interleaveThinking(thinking, steps).map((piece) =>
-        piece.kind === "thinking" ? (
-          <ThinkingSection
-            key={`thinking-${thinking.indexOf(piece.segment)}`}
-            thinking={piece.segment}
-            compact
-          />
-        ) : (
-          <ActivityGroup
-            key={`steps-${piece.steps[0]?.call.id}`}
-            live={isLive}
-            steps={piece.steps.map(({ call }) => ({
-              kind: stepKind?.(call) ?? "tool",
-              status: call.status,
-            }))}
-          >
-            {piece.steps.map(({ call, isRetry }) => (
-              <React.Fragment key={call.id}>{renderStep(call, { isRetry })}</React.Fragment>
-            ))}
-          </ActivityGroup>
-        ),
-      )}
-    </div>
-  );
+  const renderPiece = (piece: (typeof pieces)[number]) =>
+    piece.kind === "card" ? (
+      <div key={`card-${piece.step.call.id}`} className="py-1.5">
+        {renderStep(piece.step.call, { isRetry: piece.step.isRetry })}
+      </div>
+    ) : piece.kind === "thinking" ? (
+      <ThinkingSection
+        key={`thinking-${thinking.indexOf(piece.segment)}`}
+        thinking={piece.segment}
+        compact
+      />
+    ) : (
+      <ActivityGroup
+        key={`steps-${piece.steps[0]?.call.id}`}
+        live={isLive}
+        steps={piece.steps.map(({ call }) => ({
+          kind: stepKind?.(call) ?? "tool",
+          status: call.status,
+        }))}
+      >
+        {piece.steps.map(({ call, isRetry }) => (
+          <React.Fragment key={call.id}>{renderStep(call, { isRetry })}</React.Fragment>
+        ))}
+      </ActivityGroup>
+    );
+
+  const history = <div className="flex flex-col">{pieces.map(renderPiece)}</div>;
 
   if (isLive) {
     return (
@@ -110,19 +119,27 @@ export function TurnActivity({
         failed={failed}
         onToggle={() => setOpen((v) => !v)}
       />
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={reduce ? false : { height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={reduce ? undefined : { height: 0, opacity: 0 }}
-            transition={reduce ? { duration: 0 } : { duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-            className="overflow-hidden"
-          >
-            <div className="max-h-72 overflow-y-auto pt-1.5">{history}</div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {hasCards ? (
+        // Folding keeps the cards mounted where they are, so one waiting on
+        // the user (an upload, the coding tool) keeps its state.
+        <div className="flex flex-col pt-1.5">
+          {pieces.filter((piece) => open || piece.kind === "card").map(renderPiece)}
+        </div>
+      ) : (
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              initial={reduce ? false : { height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={reduce ? undefined : { height: 0, opacity: 0 }}
+              transition={reduce ? { duration: 0 } : { duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+              className="overflow-hidden"
+            >
+              <div className="max-h-72 overflow-y-auto pt-1.5">{history}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
     </div>
   );
 }

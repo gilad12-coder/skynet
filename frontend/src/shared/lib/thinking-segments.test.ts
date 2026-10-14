@@ -25,7 +25,7 @@ test("reasoning, a tool, then reasoning makes two segments with the tool between
   ]);
   const pieces = interleaveThinking(segs, [{ index: 0 }]);
   assert.deepEqual(
-    pieces.map((p) => (p.kind === "thinking" ? `think:${p.segment.reasoning}` : `steps:${p.steps.length}`)),
+    pieces.map((p) => (p.kind === "thinking" ? `think:${p.segment.reasoning}` : p.kind === "steps" ? `steps:${p.steps.length}` : "card")),
     ["think:Let me look.", "steps:1", "think:Found it."],
   );
   assert.deepEqual(
@@ -59,7 +59,7 @@ test("steps between two segments stay one burst", () => {
   const segs = [{ toolsBefore: 0 }, { toolsBefore: 2 }, { toolsBefore: 3 }];
   const pieces = interleaveThinking(segs, [{ index: 0 }, { index: 1 }, { index: 2 }, { index: 3 }]);
   assert.deepEqual(
-    pieces.map((p) => (p.kind === "thinking" ? `t${p.segment.toolsBefore}` : p.steps.map((s) => s.index).join(""))),
+    pieces.map((p) => (p.kind === "thinking" ? `t${p.segment.toolsBefore}` : p.kind === "steps" ? p.steps.map((s) => s.index).join("") : "card")),
     ["t0", "01", "t2", "2", "t3", "3"],
   );
 });
@@ -67,7 +67,7 @@ test("steps between two segments stay one burst", () => {
 test("a segment anchored to a hidden step still lands before the next shown one", () => {
   const pieces = interleaveThinking([{ toolsBefore: 1 }], [{ index: 0 }, { index: 2 }]);
   assert.deepEqual(
-    pieces.map((p) => (p.kind === "thinking" ? "t" : p.steps.map((s) => s.index).join(""))),
+    pieces.map((p) => (p.kind === "thinking" ? "t" : p.kind === "steps" ? p.steps.map((s) => s.index).join("") : "card")),
     ["0", "t", "2"],
   );
 });
@@ -98,4 +98,34 @@ test("a segment with no measurable time has no seconds to show", () => {
   assert.equal(thoughtSeconds(1000, 1040), null);
   assert.equal(thoughtSeconds(null, 1000), null);
   assert.equal(thoughtSeconds(1000, 1060), 0.1);
+});
+
+test("a card keeps its place in the turn: think, tools, card, think, then more tools", () => {
+  // The coding tool's card ran third; the reasoning after it and the call
+  // after that must follow it, not jump above it or fall below the answer.
+  const segs = [{ toolsBefore: 0 }, { toolsBefore: 3 }];
+  const pieces = interleaveThinking(segs, [
+    { index: 0 },
+    { index: 1 },
+    { index: 2, card: true },
+    { index: 3 },
+  ]);
+  assert.deepEqual(
+    pieces.map((p) =>
+      p.kind === "thinking"
+        ? `t${p.segment.toolsBefore}`
+        : p.kind === "steps"
+          ? p.steps.map((s) => s.index).join("")
+          : `card${p.step.index}`,
+    ),
+    ["t0", "01", "card2", "t3", "3"],
+  );
+});
+
+test("a card splits a burst of steps around it", () => {
+  const pieces = interleaveThinking([], [{ index: 0 }, { index: 1, card: true }, { index: 2 }]);
+  assert.deepEqual(
+    pieces.map((p) => (p.kind === "steps" ? p.steps.map((s) => s.index).join("") : p.kind)),
+    ["0", "card", "2"],
+  );
 });

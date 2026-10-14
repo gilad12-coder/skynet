@@ -9,6 +9,7 @@ import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import { liveLanesLast } from "@/shared/hooks/reasoning-order";
 import { appendVersion, type ArtifactVersion } from "@/shared/hooks/artifact-versions";
+import { createCodeDrafts, type DraftSource } from "@/shared/hooks/code-drafts";
 import { TERMS } from "@/shared/lib/terms";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
@@ -368,10 +369,15 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     setMessages((prev) => {
       const last = prev[prev.length - 1];
       if (!last || last.role !== "assistant") return prev;
+      const calls = last.toolCalls ?? [];
       const next = prev.slice();
+      // A streamed edit opens its row before the call runs; the call's own
+      // start then fills in the reason on that same row.
       next[next.length - 1] = {
         ...last,
-        toolCalls: [...(last.toolCalls ?? []), call],
+        toolCalls: calls.some((t) => t.id === call.id)
+          ? calls.map((t) => (t.id === call.id ? { ...t, reason: call.reason || t.reason } : t))
+          : [...calls, call],
       };
       return next;
     });
@@ -511,6 +517,18 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       // that finishes can land its code as a version straight away.
       let latestSignature = snapshot.signatureCode;
       let latestMetric = snapshot.metricCode;
+      // The code an edit call is writing right now, shown live in its editor
+      // and never saved as a version: only the call's checked replace is.
+      const drafts = createCodeDrafts();
+      const dropDraft = (source: DraftSource) => {
+        if (!drafts.drop(source)) return;
+        if (source === "signature") setSignatureCode(lastSignatureCode);
+        else setMetricCode(lastMetricCode);
+      };
+      controller.signal.addEventListener("abort", () => {
+        dropDraft("signature");
+        dropDraft("metric");
+      });
       const chatHistory = history
         .filter((m) => m.content.trim().length > 0)
         .map((m) => ({ role: m.role, content: m.content }));
@@ -731,7 +749,21 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               endedAt: null,
             });
           },
+          onCodeDraft: ({ source, chunk, reset }) => {
+            if (controller.signal.aborted) return;
+            if (source === "signature") {
+              setSignatureCode(drafts.write(source, chunk, reset));
+              setSignatureStatus("writing");
+            } else if (source === "metric") {
+              setMetricCode(drafts.write(source, chunk, reset));
+              setMetricStatus("writing");
+            }
+          },
           onToolEnd: (ev) => {
+            if (ev.status !== "ok") {
+              if (isSeedTool(ev.tool)) dropDraft("signature");
+              else if (isScorerTool(ev.tool)) dropDraft("metric");
+            }
             finishToolCall(ev.id, ev.status === "ok" ? "done" : "error");
             if (isSeedTool(ev.tool)) setSignatureStatus("done");
             else if (isScorerTool(ev.tool)) setMetricStatus("done");
@@ -741,6 +773,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             applyAgentWorkflowRef.current?.(workflow, changedNodeId);
           },
           onSignatureReplace: (code) => {
+            drafts.land("signature");
             const prevCode = lastSignatureCode;
             lastSignatureCode = code;
             latestSignature = code;
@@ -760,6 +793,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             });
           },
           onMetricReplace: (code) => {
+            drafts.land("metric");
             const prevCode = lastMetricCode;
             lastMetricCode = code;
             latestMetric = code;
@@ -784,6 +818,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             // the auto-fix step still matters — abort can land while the
             // validations above are awaited.
             if (controller.signal.aborted) return;
+            dropDraft("signature");
+            dropDraft("metric");
             // A chat turn that ends without a word is a failed turn, not a
             // finished one: the chat offers a retry instead of a bare "Done.".
             if (isChat && !result.assistant_message.trim() && !replyBufRef.current.trim()) {
@@ -933,6 +969,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           },
           onError: (message, code) => {
             if (controller.signal.aborted) return;
+            dropDraft("signature");
+            dropDraft("metric");
             setLimitReached(code === DAILY_LIMIT_CODE);
             setStatus("error");
             setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.8"));

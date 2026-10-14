@@ -15,6 +15,7 @@ import pytest
 
 from core.service_gateway.agents import code as code_module
 from core.service_gateway.agents.code import (
+    NativeToolArgsStreamListener,
     NativeToolCallStreamListener,
     ReactReplyStream,
     _NativeSubmitArgExtractor,
@@ -265,3 +266,101 @@ def test_native_listener_resets_between_turns(monkeypatch: pytest.MonkeyPatch) -
     )
     assert first == "one"
     assert second == "two"
+
+
+_DRAFTS = {"edit_run": "new_code", "edit_metric": "new_code"}
+
+
+def _rebuild(deltas: list[tuple[str, int, str]]) -> dict[str, str]:
+    """Fold ``(tool, offset, delta)`` triples into each tool's draft, as the editor does.
+
+    Args:
+        deltas: The triples ``tool_draft_deltas`` returned, in order.
+
+    Returns:
+        Tool name mapped to the draft text rebuilt from its deltas.
+    """
+    drafts: dict[str, str] = {}
+    for tool, offset, delta in deltas:
+        drafts[tool] = drafts.get(tool, "")[:offset] + delta
+    return drafts
+
+
+def test_text_protocol_streams_the_edit_code_while_it_is_written(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An edit_run call's new_code comes out piece by piece, before the call is complete."""
+    monkeypatch.setattr(code_module, "native_tool_calling_active", lambda: False)
+    base = dspy.ReActV2(_Sig, tools=[_noop], max_iters=3)
+    stream = ReactReplyStream(_SubmitProgram(base.react), "reply", tool_drafts=_DRAFTS)
+
+    pieces = [
+        '{"tool_calls":[{"name":"edit_run","args":{"reason":"fix","new_code":"def run(',
+        "artifact, input):\\n",
+        '    return 1"}}]}',
+    ]
+    deltas = []
+    for i, piece in enumerate(pieces):
+        got = stream.tool_draft_deltas(_response("tool_calls", piece, last=i == len(pieces) - 1))
+        deltas.append(got)
+    assert deltas[0] == [("edit_run", 0, "def run(")]
+    assert deltas[1] == [("edit_run", 8, "artifact, input):\n")]
+    assert _rebuild([d for batch in deltas for d in batch]) == {"edit_run": "def run(artifact, input):\n    return 1"}
+    assert stream.tool_draft_deltas(_response("reasoning", "x")) == []
+
+
+def test_text_protocol_draft_restarts_on_the_next_loop_iteration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After a field ends, a retried edit starts a fresh draft at offset 0; submit never streams as code."""
+    monkeypatch.setattr(code_module, "native_tool_calling_active", lambda: False)
+    base = dspy.ReActV2(_Sig, tools=[_noop], max_iters=3)
+    stream = ReactReplyStream(_SubmitProgram(base.react), "reply", tool_drafts=_DRAFTS)
+
+    first = stream.tool_draft_deltas(
+        _response("tool_calls", '{"tool_calls":[{"name":"edit_metric","args":{"new_code":"a"}}]}', last=True)
+    )
+    second = stream.tool_draft_deltas(
+        _response("tool_calls", '{"tool_calls":[{"name":"edit_metric","args":{"new_code":"b"}}]}', last=True)
+    )
+    reply = stream.tool_draft_deltas(
+        _response("tool_calls", '{"tool_calls":[{"name":"submit","args":{"reply":"done"}}]}', last=True)
+    )
+    assert first == [("edit_metric", 0, "a")]
+    assert second == [("edit_metric", 0, "b")]
+    assert reply == []
+
+
+def test_without_drafts_nothing_streams_as_code() -> None:
+    """A stream built without ``tool_drafts`` leaves tool arguments alone."""
+    base = dspy.ReActV2(_Sig, tools=[_noop], max_iters=3)
+    stream = ReactReplyStream(_SubmitProgram(base.react), "reply")
+    chunk = _response("tool_calls", '{"tool_calls":[{"name":"edit_run","args":{"new_code":"x"}}]}', last=True)
+    assert stream.tool_draft_deltas(chunk) == []
+
+
+def test_native_calling_streams_the_edit_code_from_provider_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Native calling: a third listener forwards every call's deltas and the edit's code streams out."""
+    monkeypatch.setattr(code_module, "native_tool_calling_active", lambda: True)
+    base = dspy.ReActV2(_Sig, tools=[_noop], max_iters=3)
+    stream = ReactReplyStream(_SubmitProgram(base.react), "reply", tool_drafts=_DRAFTS)
+    listeners = stream.listeners()
+    assert len(listeners) == 3
+    args_listener = listeners[2]
+    assert isinstance(args_listener, NativeToolArgsStreamListener)
+
+    chunks = [
+        _lm_chunk([_tool_call(0, name="edit_run", arguments="")]),
+        _lm_chunk([_tool_call(0, arguments='{"reason":"fix","new_code":"def ')]),
+        _lm_chunk([_tool_call(0, arguments='run(): pass"}')]),
+        _lm_chunk([_tool_call(1, name="submit", arguments='{"reply":"ok"}')]),
+        _lm_chunk(finish="tool_calls"),
+    ]
+    deltas = []
+    for chunk in chunks:
+        response = args_listener.receive(chunk)
+        if response is not None:
+            deltas.append(stream.tool_draft_deltas(response))
+    flat = [d for batch in deltas for d in batch]
+    assert [len(batch) for batch in deltas[1:3]] == [1, 1]
+    assert _rebuild(flat) == {"edit_run": "def run(): pass"}
+
+    again = args_listener.receive(_lm_chunk([_tool_call(0, name="edit_run", arguments='{"new_code":"x"}')]))
+    assert again is not None
+    assert stream.tool_draft_deltas(again) == [("edit_run", 0, "x")]

@@ -167,24 +167,29 @@ export function thoughtSeconds(startedAt: number | null, endedAt: number): numbe
   return seconds > 0 ? seconds : null;
 }
 
-export type ActivityPiece<S, T> = { kind: "thinking"; segment: S } | { kind: "steps"; steps: T[] };
+export type ActivityPiece<S, T> =
+  | { kind: "thinking"; segment: S }
+  | { kind: "steps"; steps: T[] }
+  | { kind: "card"; step: T };
 
 /**
  * Lay a turn's thinking segments and tool steps out in the order they ran:
  * each segment goes before the first step that started after it, and the
- * steps between two segments stay together as one burst.
+ * steps between two segments stay together as one burst. A step flagged
+ * ``card`` (a rich card the user acts on) stands on its own at its place and
+ * splits the burst around it.
  *
  * Args:
  *   segments: The turn's thinking segments, oldest first.
  *   steps: The steps to show, each with its index among the turn's tool calls.
  *
  * Returns:
- *   Thinking rows and step bursts, interleaved.
+ *   Thinking rows, step bursts and cards, interleaved.
  */
-export function interleaveThinking<S extends { toolsBefore: number }, T extends { index: number }>(
-  segments: readonly S[],
-  steps: readonly T[],
-): Array<ActivityPiece<S, T>> {
+export function interleaveThinking<
+  S extends { toolsBefore: number },
+  T extends { index: number; card?: boolean },
+>(segments: readonly S[], steps: readonly T[]): Array<ActivityPiece<S, T>> {
   const out: Array<ActivityPiece<S, T>> = [];
   let burst: T[] = [];
   const flush = () => {
@@ -198,7 +203,12 @@ export function interleaveThinking<S extends { toolsBefore: number }, T extends 
       out.push({ kind: "thinking", segment: segments[s] as S });
       s++;
     }
-    burst.push(step);
+    if (step.card) {
+      flush();
+      out.push({ kind: "card", step });
+    } else {
+      burst.push(step);
+    }
   }
   flush();
   for (; s < segments.length; s++) out.push({ kind: "thinking", segment: segments[s] as S });
