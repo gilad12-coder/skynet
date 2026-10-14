@@ -63,7 +63,7 @@ from ..language_models import (
     served_model_from,
 )
 from ..optimization.training_ground.registry import hash_tool_schema
-from .code import ReactReplyStream, _agent_error_payload, _format_agent_error, _reply_language
+from .code import ReactReplyStream, _agent_error_payload, _format_agent_error, _reply_language, _require_answer
 from .conduct import with_conduct
 from .constants import REASONING_FIELD
 from .conversation_react import AppendOnlyChatAdapter, ConversationReAct, history_from_turns
@@ -2248,6 +2248,11 @@ async def _drive_generalist_agent(
 
     Returns:
         The full assistant reply text after the loop completes.
+
+    Raises:
+        AgentStoppedError: When the loop ends with no reply and no ``submit``
+            (the model spent its turn thinking), so the user sees an error
+            instead of an empty message.
     """
     async with _mcp_session(mcp_url, auth_header=auth_header) as session:
         listing = await session.list_tools()
@@ -2350,6 +2355,7 @@ async def _drive_generalist_agent(
             "history": _history_from_chat(chat_history),
         }
         reply_text = ""
+        prediction: dspy.Prediction | None = None
         with dspy.context(lm=lm):
             async for chunk in program(**inputs):
                 if isinstance(chunk, dspy.streaming.StatusMessage):
@@ -2363,9 +2369,11 @@ async def _drive_generalist_agent(
                             reply_text += delta
                             emit({"event": "message_patch", "data": {"chunk": delta}})
                 elif isinstance(chunk, dspy.Prediction):
+                    prediction = chunk
                     final = getattr(chunk, "assistant_message", "") or ""
                     if final and final != reply_text:
                         reply_text = final
+        _require_answer(prediction, reply_text, next_step="Send your message again or pick a different model.")
         return reply_text
 
 

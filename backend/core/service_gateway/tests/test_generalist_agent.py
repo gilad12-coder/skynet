@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 from core.config import settings
 from core.service_gateway.agents import generalist as generalist_module
 from core.service_gateway.agents import web_tools
-from core.service_gateway.agents.code import _agent_error_payload, _SubmitArgExtractor
+from core.service_gateway.agents.code import AgentStoppedError, _agent_error_payload, _SubmitArgExtractor
 from core.service_gateway.agents.generalist import (
     GENERALIST_SYSTEM_PROMPT,
     SCREEN_FOCUS,
@@ -1400,6 +1400,61 @@ async def test_turn_replays_history_natively_and_streams_the_submit(monkeypatch:
     assert events[0]["event"] == "turn_metadata"
     assert events[0]["data"]["allowed_tools"] == ["list_models_for_agent"]
     assert [e["event"] for e in events if e["event"] in ("tool_start", "tool_end")] == ["tool_start", "tool_end"]
+
+
+class _ThinkingOnlyLM(_ScriptedLM):
+    """An LM that spends every call thinking and never returns a tool call or text."""
+
+    def forward(self, prompt=None, messages=None, **kwargs):
+        """Record the request and return a reply cut off by the output cap.
+
+        Args:
+            prompt: Unused legacy prompt.
+            messages: The rendered chat messages.
+            **kwargs: Provider kwargs, including ``tools``.
+
+        Returns:
+            An OpenAI-shaped response with no content and no tool call.
+        """
+        self.requests.append({"messages": messages, **kwargs})
+        return litellm.ModelResponse(
+            model="scripted",
+            choices=[{"index": 0, "finish_reason": "length", "message": {"role": "assistant", "content": None}}],
+            usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        )
+
+
+@pytest.mark.asyncio
+async def test_turn_that_never_answers_raises_instead_of_an_empty_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model that only thinks fails the turn, so the chat shows an error rather than a blank message."""
+    monkeypatch.setattr(settings, "firecrawl_api_key", None)
+
+    @asynccontextmanager
+    async def fake_session(mcp_url: str, *, auth_header: str | None = None) -> AsyncIterator[_FakeSession]:
+        """Yield an empty fake session in place of a Streamable-HTTP client.
+
+        Args:
+            mcp_url: Ignored.
+            auth_header: Ignored.
+        """
+        yield _FakeSession([])
+
+    monkeypatch.setattr(generalist_module, "_mcp_session", fake_session)
+    lm = _ThinkingOnlyLM([])
+
+    with pytest.raises(AgentStoppedError, match="stopped before it answered"):
+        await generalist_module._drive_generalist_agent(
+            mcp_url="http://unused/mcp/",
+            wizard_state=WizardState(),
+            chat_history=[],
+            user_message="build the code for me",
+            trust_mode="yolo",
+            registry=ApprovalRegistry(),
+            emit=lambda event: None,
+            lm=lm,
+            reply_language="English",
+        )
+    assert lm.requests
 
 
 @pytest.mark.asyncio

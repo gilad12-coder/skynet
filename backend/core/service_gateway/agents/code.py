@@ -87,7 +87,12 @@ class SeedLaneTimeoutError(RuntimeError):
     """A seed lane ran past its deadline without finishing its artifact."""
 
 
-def _require_answer(prediction: dspy.Prediction | None, reply_text: str) -> None:
+def _require_answer(
+    prediction: dspy.Prediction | None,
+    reply_text: str,
+    *,
+    next_step: str = "Check the editor, then send your message again or pick a different model.",
+) -> None:
     """Fail a turn that ended without the agent ever answering.
 
     A reasoning model that spends its whole output budget thinking returns no
@@ -98,6 +103,7 @@ def _require_answer(prediction: dspy.Prediction | None, reply_text: str) -> None
     Args:
         prediction: The loop's final prediction; ``None`` when none arrived.
         reply_text: The reply streamed or carried by the final prediction.
+        next_step: The sentence telling the user what to do next.
 
     Raises:
         AgentStoppedError: When the reply is empty and the loop did not end
@@ -110,8 +116,7 @@ def _require_answer(prediction: dspy.Prediction | None, reply_text: str) -> None
         return
     logger.warning("code agent stopped without answering: termination_reason=%s", reason)
     raise AgentStoppedError(
-        "The model stopped before it answered, usually because it ran out of room while thinking. "
-        "Check the editor, then send your message again or pick a different model."
+        "The model stopped before it answered, usually because it ran out of room while thinking. " + next_step
     )
 
 
