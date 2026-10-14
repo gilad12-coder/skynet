@@ -107,8 +107,7 @@ type Action =
 const stepIndex = (step: WizardStepId) => WIZARD_V2_STEPS.indexOf(step);
 
 // Every patch merges into exactly one slice: editing an earlier step never
-// clears a later one, a broken downstream contract only turns stale. The one
-// exception is a single-answer task, whose one input follows its question.
+// clears a later one, a broken downstream contract only turns stale.
 function reducer(state: WizardV2State, action: Action): WizardV2State {
   if (action.type === "go") {
     const furthest =
@@ -117,10 +116,7 @@ function reducer(state: WizardV2State, action: Action): WizardV2State {
     return { ...state, step: action.step, furthestStep: furthest };
   }
   if (action.type === "level") return withLevel(state, action.level, action.optimizerBlocked);
-  return withQuestionInputs(state, {
-    ...state,
-    [action.slice]: { ...state[action.slice], ...action.patch },
-  });
+  return { ...state, [action.slice]: { ...state[action.slice], ...action.patch } };
 }
 
 /** A wizard string, or exact contract text passed through untouched. */
@@ -180,10 +176,13 @@ export function WizardV2Provider({
   children: ReactNode;
 }) {
   const level = useExperienceLevel();
-  const [state, dispatch] = useReducer(reducer, undefined, () => {
+  const [stored, dispatch] = useReducer(reducer, undefined, () => {
     const initial = initialWizardV2State(level, readPref("optimizerMaxRuns"));
     return { ...initial, meta: { ...initial.meta, folderId } };
   });
+  // A single-answer task's one case is derived, never stored, so it always
+  // matches the question.
+  const state = useMemo(() => withQuestionInputs(stored), [stored]);
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();

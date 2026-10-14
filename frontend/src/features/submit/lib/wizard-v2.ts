@@ -296,34 +296,19 @@ export function questionInputs(
   };
 }
 
-const sameCases = (a: readonly UnifiedCase[], b: readonly UnifiedCase[]) =>
-  stableJson(a) === stableJson(b);
-
 /**
- * `next` with a single-answer task's one case following its question. Inputs
- * of the run's own (a cloned run's case, a table) are never replaced: only
- * empty inputs, or the case built from the previous question. When the task
- * stops being single-answer, that built case is cleared again, and a user
- * standing on the now-skipped Inputs step goes back to the task.
+ * The state the wizard shows and submits: a single-answer task with no case of
+ * its own gets the one case built from its question, so it follows every edit
+ * without being stored. A cloned run's case or a table is left alone, and a
+ * user on the skipped Inputs step stands on the task.
  */
-export function withQuestionInputs(prev: WizardV2State, next: WizardV2State): WizardV2State {
-  const built = questionInputs(prev.task).cases;
-  const ours = next.inputs.cases.length === 0 || sameCases(next.inputs.cases, built);
-  if (!isSingleAnswerTask(next)) {
-    if (!isSingleAnswerTask(prev) || !sameCases(next.inputs.cases, built)) return next;
-    const mode = next.inputs.mode === "single" ? null : next.inputs.mode;
-    return {
-      ...next,
-      inputs: { ...next.inputs, mode, cases: [], inputFields: [], expectedField: null },
-    };
-  }
-  let out = next;
-  if (ours) {
-    const derived = questionInputs(next.task);
-    if (!sameCases(next.inputs.cases, derived.cases) || next.inputs.mode !== "single")
-      out = { ...out, inputs: { ...out.inputs, ...derived } };
-  }
-  return out.step === "inputs" ? { ...out, step: "task" } : out;
+export function withQuestionInputs(s: WizardV2State): WizardV2State {
+  if (!isSingleAnswerTask(s) || s.inputs.cases.length > 0) return s;
+  return {
+    ...s,
+    step: s.step === "inputs" ? "task" : s.step,
+    inputs: { ...s.inputs, ...questionInputs(s.task) },
+  };
 }
 
 /**

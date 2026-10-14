@@ -127,7 +127,11 @@ test("the Settings default models win over the catalog default, role by role", (
     reflectionModel: { name: "openai/gpt-default", token_source: "managed" },
   });
   assert.deepEqual(
-    presetModels(initialWizardV2State().optimizer, { taskModel: mine, reflectionModel: mine }, null),
+    presetModels(
+      initialWizardV2State().optimizer,
+      { taskModel: mine, reflectionModel: mine },
+      null,
+    ),
     { taskModel: mine, reflectionModel: mine },
   );
 });
@@ -159,8 +163,14 @@ test("the preset never overwrites a model someone already set, and needs some de
   const empty = initialWizardV2State().optimizer;
   const picked = { name: "anthropic/claude-x", token_source: "managed" as const };
   const prefs = { taskModel: picked, reflectionModel: picked };
-  assert.equal(presetModels({ ...empty, reflectionModel: picked }, prefs, "openai/gpt-default"), null);
-  assert.equal(presetModels({ ...empty, taskModel: picked }, noDefaults, "openai/gpt-default"), null);
+  assert.equal(
+    presetModels({ ...empty, reflectionModel: picked }, prefs, "openai/gpt-default"),
+    null,
+  );
+  assert.equal(
+    presetModels({ ...empty, taskModel: picked }, noDefaults, "openai/gpt-default"),
+    null,
+  );
   assert.equal(presetModels(empty, noDefaults, null), null);
   assert.equal(presetModels(empty, noDefaults, undefined), null);
 });
@@ -196,7 +206,10 @@ test("Guided skips the Optimizer step; Standard and Expert walk it", () => {
 
 test("Guided shows the Optimizer step when its defaults can't run or the user is on it", () => {
   assert.deepEqual(wizardSteps(readyState("guided"), true), WIZARD_V2_STEPS);
-  assert.deepEqual(wizardSteps({ ...readyState("guided"), step: "optimizer" }, false), WIZARD_V2_STEPS);
+  assert.deepEqual(
+    wizardSteps({ ...readyState("guided"), step: "optimizer" }, false),
+    WIZARD_V2_STEPS,
+  );
 });
 
 test("Inputs is one screen, before and after data arrives", () => {
@@ -355,8 +368,7 @@ test("Guided on a single-answer task walks only the task and metric steps", () =
 });
 
 test("a single-answer task runs on exactly one case: its question", () => {
-  const empty = initialWizardV2State("standard");
-  const next = withQuestionInputs(empty, textTask());
+  const next = withQuestionInputs(textTask());
   assert.equal(next.inputs.mode, "single");
   assert.deepEqual(next.inputs.cases, [
     { input: { [QUESTION_INPUT_FIELD]: "Solve 2x + 3 = 7.\n\nShow the steps." } },
@@ -364,55 +376,30 @@ test("a single-answer task runs on exactly one case: its question", () => {
   assert.deepEqual(next.inputs.inputFields, [QUESTION_INPUT_FIELD]);
   assert.equal(next.inputs.expectedField, null);
 
-  const noBackground = withQuestionInputs(empty, textTask("Summarize the report.", " "));
+  const noBackground = withQuestionInputs(textTask("Summarize the report.", " "));
   assert.deepEqual(noBackground.inputs.cases, [
     { input: { [QUESTION_INPUT_FIELD]: "Summarize the report." } },
   ]);
 });
 
-test("the one case follows edits to the question, but a run's own case is kept", () => {
-  const empty = initialWizardV2State("standard");
-  const first = withQuestionInputs(empty, textTask());
-  const edited = withQuestionInputs(first, {
-    ...first,
-    task: { ...first.task, objective: "Solve x + 1 = 3." },
-  });
+test("the one case follows the question, but a run's own case is kept", () => {
+  const edited = withQuestionInputs(textTask("Solve x + 1 = 3."));
   assert.deepEqual(edited.inputs.cases, [
     { input: { [QUESTION_INPUT_FIELD]: "Solve x + 1 = 3.\n\nShow the steps." } },
   ]);
 
   const cloned = {
-    ...first,
-    inputs: { ...first.inputs, cases: [{ input: { problem: "1 + 1" } }] },
+    ...textTask(),
+    inputs: { ...textTask().inputs, cases: [{ input: { problem: "1 + 1" } }] },
   };
-  const keep = withQuestionInputs(first, cloned);
-  assert.equal(keep, cloned);
-  const afterEdit = withQuestionInputs(keep, {
-    ...keep,
-    task: { ...keep.task, background: "Briefly." },
-  });
-  assert.deepEqual(afterEdit.inputs.cases, [{ input: { problem: "1 + 1" } }]);
+  assert.equal(withQuestionInputs(cloned), cloned);
 });
 
-test("leaving single-answer clears the built case; a user on the skipped step goes back to the task", () => {
-  const empty = initialWizardV2State("standard");
-  const text = withQuestionInputs(empty, textTask());
-  const prompt = withQuestionInputs(text, {
-    ...text,
-    task: { ...text.task, artifactKind: "prompt" as const },
-  });
-  assert.equal(prompt.inputs.mode, null);
-  assert.deepEqual(prompt.inputs.cases, []);
-  assert.deepEqual(prompt.inputs.inputFields, []);
-
-  const onInputs = { ...prompt, step: "inputs" as const, furthestStep: "inputs" as const };
-  const backToText = withQuestionInputs(onInputs, {
-    ...onInputs,
-    task: { ...onInputs.task, artifactKind: "text" as const },
-  });
-  assert.equal(backToText.step, "task");
-  assert.equal(backToText.inputs.cases.length, 1);
-
+test("other tasks get no built case; a user on the skipped step stands on the task", () => {
   const prompted = { ...textTask(), task: { ...textTask().task, artifactKind: "prompt" as const } };
-  assert.equal(withQuestionInputs(empty, prompted), prompted);
+  assert.equal(withQuestionInputs(prompted), prompted);
+
+  const onInputs = withQuestionInputs({ ...textTask(), step: "inputs" as const });
+  assert.equal(onInputs.step, "task");
+  assert.equal(onInputs.inputs.cases.length, 1);
 });

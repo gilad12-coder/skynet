@@ -172,7 +172,7 @@ test("a failed run never puts its traceback under the Run button", () => {
 
 test("a single-answer task's skipped Inputs step never blocks Continue or Run", () => {
   const base = readyState("standard", null);
-  const text = withQuestionInputs(initialWizardV2State("standard"), {
+  const text = withQuestionInputs({
     ...base,
     task: { ...base.task, artifactKind: "text" as const },
     inputs: initialWizardV2State("standard").inputs,
