@@ -4156,5 +4156,12 @@
   "submit.modelpicker.tab.best_value": "Bestes Preis-Leistungs-Verhältnis",
   "submit.modelpicker.tab.fastest": "Am schnellsten",
   "submit.modelpicker.tab.smartest": "Am klügsten",
-  "submit.modelpicker.tabs.aria": "Modelle sortieren"
+  "submit.modelpicker.tabs.aria": "Modelle sortieren",
+  "shared.agent.worked_for": "Worked for {duration}",
+  "shared.agent.working_for": "Working for {duration}",
+  "shared.agent.pasted_text": "Eingefügter Text",
+  "shared.agent.pasted_text_lines": "{n} Zeilen",
+  "shared.agent.pasted_text_remove": "Eingefügten Text entfernen",
+  "shared.agent.pasted_text_restore": "Im Textfeld anzeigen",
+  "shared.agent.pasted_text_open": "Eingefügten Text öffnen"
 }

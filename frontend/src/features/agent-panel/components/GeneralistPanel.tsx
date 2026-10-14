@@ -62,6 +62,16 @@ const REQUEST_INFERENCE_TOOL = "request_user_inference";
 const REQUEST_PAIR_INFERENCE_TOOL = "request_user_pair_inference";
 const REQUEST_CODE_TOOL = "request_code_authoring";
 
+// Tools that keep their own interactive card instead of folding into the
+// turn's activity line as a plain step.
+const RICH_CARD_TOOLS = new Set<string>([
+  REQUEST_DATASET_TOOL,
+  REQUEST_LIBRARY_TOOL,
+  REQUEST_INFERENCE_TOOL,
+  REQUEST_PAIR_INFERENCE_TOOL,
+  REQUEST_CODE_TOOL,
+]);
+
 // Submit tools whose success should mirror the manual wizard submit button:
 // play the splash banner, then route to the new optimization's details.
 const SUBMIT_TOOLS: ReadonlySet<string> = new Set(["submit_unified_run_optimize_post"]);
@@ -735,6 +745,14 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     [handleDatasetConfirm, handleLibraryPick, streaming, codeAgent],
   );
 
+  // Mirrors renderToolCall's fall-through: anything that ends up as a plain
+  // ToolCallRow is a working step and folds into the turn's activity line.
+  const isStepCall = React.useCallback((call: AgentToolCall) => {
+    if (RICH_CARD_TOOLS.has(call.tool)) return false;
+    const renderer = getToolRenderer(call.tool);
+    return !(renderer?.card && call.status !== "running");
+  }, []);
+
   const emptyState = (
     <EmptyState
       icon={SkynetMark}
@@ -890,6 +908,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
           editAndResend={agent.editAndResend}
           thinking={thinking}
           renderToolCall={renderToolCall}
+          isStepCall={isStepCall}
           onRunCode={handleRunCode}
           animatePairs
           trailing={() => (

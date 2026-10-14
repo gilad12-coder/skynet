@@ -4156,5 +4156,12 @@
   "submit.modelpicker.tab.best_value": "सबसे किफ़ायती",
   "submit.modelpicker.tab.fastest": "सबसे तेज़",
   "submit.modelpicker.tab.smartest": "सबसे समझदार",
-  "submit.modelpicker.tabs.aria": "मॉडल क्रमबद्ध करें"
+  "submit.modelpicker.tabs.aria": "मॉडल क्रमबद्ध करें",
+  "shared.agent.worked_for": "Worked for {duration}",
+  "shared.agent.working_for": "Working for {duration}",
+  "shared.agent.pasted_text": "चिपकाया गया टेक्स्ट",
+  "shared.agent.pasted_text_lines": "{n} पंक्तियाँ",
+  "shared.agent.pasted_text_remove": "चिपकाया गया टेक्स्ट हटाएँ",
+  "shared.agent.pasted_text_restore": "टेक्स्ट फ़ील्ड में दिखाएँ",
+  "shared.agent.pasted_text_open": "चिपकाया गया टेक्स्ट खोलें"
 }

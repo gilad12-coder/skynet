@@ -4156,5 +4156,12 @@
   "submit.modelpicker.tab.best_value": "Melhor custo-benefício",
   "submit.modelpicker.tab.fastest": "Mais rápido",
   "submit.modelpicker.tab.smartest": "Mais inteligente",
-  "submit.modelpicker.tabs.aria": "Ordenar modelos"
+  "submit.modelpicker.tabs.aria": "Ordenar modelos",
+  "shared.agent.worked_for": "Worked for {duration}",
+  "shared.agent.working_for": "Working for {duration}",
+  "shared.agent.pasted_text": "Texto colado",
+  "shared.agent.pasted_text_lines": "{n} linhas",
+  "shared.agent.pasted_text_remove": "Remover texto colado",
+  "shared.agent.pasted_text_restore": "Mostrar no campo de texto",
+  "shared.agent.pasted_text_open": "Abrir texto colado"
 }
