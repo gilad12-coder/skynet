@@ -27,6 +27,7 @@ import {
   type UnifiedChatTurn,
   type UnifiedRunRequest,
 } from "@/shared/types/unified-run";
+import type { TokenSourceMode } from "@/features/billing";
 import type { CostBracket } from "./cost-bracket";
 
 export type WizardStepId = "task" | "inputs" | "optimizer" | "metric";
@@ -404,6 +405,8 @@ export interface WizardV2Context {
   /** The charged estimate with another engine picked, everything else unchanged. */
   estimateFor(choice: OptimizerChoice): { lowCents: number; highCents: number } | null;
   suggestedCeiling: number | null;
+  /** Who pays the run's model tokens, which sets the estimate the limit is held to. */
+  tokenSource: TokenSourceMode;
   maxCostCents: number | null;
   setMaxCostCents(v: number | null): void;
   budgetUncapped: boolean;

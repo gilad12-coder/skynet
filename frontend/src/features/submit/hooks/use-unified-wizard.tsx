@@ -767,6 +767,7 @@ export function WizardV2Provider({
     costBracket,
     estimateFor,
     suggestedCeiling,
+    tokenSource,
     maxCostCents,
     setMaxCostCents,
     budgetUncapped,

@@ -3695,6 +3695,7 @@
   "submit.budget.error.invalid": "ドル金額を入力してください（例: {suggested}）。",
   "submit.budget.error.fraction": "金額はセント単位まで指定できます — 小数点以下は 2 桁までにしてください。",
   "submit.budget.error.below_one": "上限は $0.01 以上にしてください。",
+  "submit.budget.error.below_estimate": "この実行には少なくとも {amount} が必要です。続行するには上限を引き上げてください。",
   "submit.budget.estimate_preliminary": "暫定見積もり",
   "submit.budget.estimate_preliminary_note": "ケースの追加やモデルの選択に応じて更新されます。",
   "submit.budget.estimate_note": "上限値は、毎回の呼び出しで長いプロンプトと出力を想定したもので、一般的な実行ではありません。",

@@ -3695,6 +3695,7 @@
   "submit.budget.error.invalid": "Inserisci un importo in dollari, ad esempio {suggested}.",
   "submit.budget.error.fraction": "Gli importi arrivano fino al centesimo — usa al massimo due decimali.",
   "submit.budget.error.below_one": "Il limite deve essere di almeno $0.01.",
+  "submit.budget.error.below_estimate": "L’esecuzione richiede almeno {amount}. Aumenta il limite per continuare.",
   "submit.budget.estimate_preliminary": "Stima preliminare",
   "submit.budget.estimate_preliminary_note": "Si aggiorna man mano che aggiungi casi e scegli i modelli.",
   "submit.budget.estimate_note": "L'estremo alto presuppone prompt e output lunghi a ogni chiamata, non un'esecuzione tipica.",
