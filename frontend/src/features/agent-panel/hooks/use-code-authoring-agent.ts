@@ -107,6 +107,59 @@ function rolesToColumnMapping(
   return { inputs, outputs };
 }
 
+interface EditBuffer {
+  value: string;
+  /** The last outside value the buffer saw. */
+  seen: string;
+  /** Values this buffer showed while the user typed, oldest first. */
+  pending: string[];
+}
+
+// Enough of the user's recent keystrokes to recognize any echo still in flight.
+const MAX_PENDING_EDITS = 32;
+
+/**
+ * Hold what an editor shows while the user types into code that lives
+ * elsewhere. On the wizard, each keystroke round-trips through the wizard's
+ * own state, which echoes back older values before it settles. Taken as the
+ * editor's value, an echo replaces the document, which drops keystrokes and
+ * moves the cursor. The buffer ignores outside values it already showed and
+ * adopts any other outside change (the agent writing, an edit in the Metric
+ * step).
+ *
+ * Args:
+ *   external: The code where it lives.
+ *
+ * Returns:
+ *   What the editor shows, and the call for a user edit.
+ */
+function useEditBuffer(external: string): { value: string; edit: (code: string) => void } {
+  const [buffer, setBuffer] = React.useState<EditBuffer>({
+    value: external,
+    seen: external,
+    pending: [],
+  });
+  let current = buffer;
+  if (external !== buffer.seen) {
+    if (external === buffer.pending[buffer.pending.length - 1]) {
+      current = { value: external, seen: external, pending: [] };
+    } else if (buffer.pending.includes(external)) {
+      current = { ...buffer, seen: external };
+    } else {
+      current = { value: external, seen: external, pending: [] };
+    }
+    setBuffer(current);
+  }
+  const edit = React.useCallback((code: string) => {
+    setBuffer((prev) => ({
+      value: code,
+      seen: prev.seen,
+      pending: [...prev.pending, prev.value, code].slice(-MAX_PENDING_EDITS),
+    }));
+  }, []);
+  return { value: current.value, edit };
+}
+
 interface AuthoringCheckArgs {
   context: UnifiedAuthoringContext | null;
   /** Identifies the context by content, so a rebuilt equal object is no change. */
@@ -265,8 +318,14 @@ export function useCodeAuthoringAgent(
     !isWorkflow && wizardCtx?.wizardScreen != null ? wizardCtx.authoringContext : null;
   const shared = wizardContext !== null;
   const applyAgentPatch = wizardCtx?.applyAgentPatch;
-  const signatureCode = shared ? (wizardCtx?.state.run_code ?? "") : localSignatureCode;
-  const metricCode = shared ? (wizardCtx?.state.metric_code ?? "") : localMetricCode;
+  const signatureBuffer = useEditBuffer(
+    shared ? (wizardCtx?.state.run_code ?? "") : localSignatureCode,
+  );
+  const metricBuffer = useEditBuffer(
+    shared ? (wizardCtx?.state.metric_code ?? "") : localMetricCode,
+  );
+  const signatureCode = signatureBuffer.value;
+  const metricCode = metricBuffer.value;
 
   // The setters keep one identity for ``useCodeAgent`` (it captures them in
   // its run), so they read where the code lives from a ref.
@@ -466,19 +525,23 @@ export function useCodeAuthoringAgent(
     send: agent.send,
   });
 
+  const bufferSignatureEdit = signatureBuffer.edit;
+  const bufferMetricEdit = metricBuffer.edit;
   const editSignatureCode = React.useCallback(
     (code: string) => {
+      bufferSignatureEdit(code);
       writeSignatureCode(code);
       setSignatureManuallyEdited(true);
     },
-    [writeSignatureCode],
+    [bufferSignatureEdit, writeSignatureCode],
   );
   const editMetricCode = React.useCallback(
     (code: string) => {
+      bufferMetricEdit(code);
       writeMetricCode(code);
       setMetricManuallyEdited(true);
     },
-    [writeMetricCode],
+    [bufferMetricEdit, writeMetricCode],
   );
 
   // ``useCodeAgent.reset`` clears its own state but not the caller-owned code;
