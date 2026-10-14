@@ -1,10 +1,16 @@
-"""Tests for the FastMCP mount's tool-annotation derivation."""
+"""Tests for the FastMCP mount's tool annotations and tool schemas."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Annotated
 
-from core.api.mcp_mount import _annotations_for_method, _annotations_for_route
+from fastapi import Depends, FastAPI, Header
+from fastmcp import Client, FastMCP
+from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
+from pydantic import BaseModel
+
+from core.api.mcp_mount import AGENT_TAG, _annotations_for_method, _annotations_for_route, _trim_tool_spec
 
 
 def test_annotations_for_method_reads_are_read_only() -> None:
@@ -64,3 +70,57 @@ def test_annotations_for_route_authored_hint_without_method_default() -> None:
     ann = _annotations_for_route(route)
     assert ann is not None
     assert ann.destructiveHint is True
+
+
+class _AuthoringBody(BaseModel):
+    """Request body for the fixture authoring route."""
+
+    goal: str = ""
+
+
+def _auth_header_mcp(seen: list[str | None]) -> FastMCP:
+    """Project one agent route that reads ``authorization`` as a header.
+
+    Args:
+        seen: Collects the ``Authorization`` value each call reached the route with.
+
+    Returns:
+        The FastMCP server built the same way ``mount_mcp_on_app`` builds it.
+    """
+
+    def user(authorization: Annotated[str | None, Header()] = None) -> str:
+        seen.append(authorization)
+        return "user"
+
+    app = FastAPI()
+
+    @app.post("/authoring", operation_id="request_code_authoring", tags=[AGENT_TAG])
+    def authoring(req: _AuthoringBody, current_user: str = Depends(user)) -> dict[str, str]:
+        return {"goal": req.goal}
+
+    return FastMCP.from_fastapi(
+        app=app,
+        route_maps=[RouteMap(tags={AGENT_TAG}, mcp_type=MCPType.TOOL), RouteMap(mcp_type=MCPType.EXCLUDE)],
+        mcp_component_fn=_trim_tool_spec,
+    )
+
+
+async def test_tool_schema_hides_the_authorization_header() -> None:
+    """The bearer header is never offered to the model as a tool argument."""
+    async with Client(_auth_header_mcp([])) as client:
+        tools = await client.list_tools()
+    schema = next(t for t in tools if t.name == "request_code_authoring").inputSchema
+    assert "authorization" not in schema.get("properties", {})
+    assert "goal" in schema["properties"]
+
+
+async def test_model_supplied_authorization_never_reaches_the_header() -> None:
+    """A model-filled ``authorization`` argument cannot replace the bearer."""
+    seen: list[str | None] = []
+    async with Client(_auth_header_mcp(seen)) as client:
+        await client.call_tool(
+            "request_code_authoring",
+            {"goal": "g", "authorization": "The user asked in this turn"},
+            raise_on_error=False,
+        )
+    assert seen == [None]
