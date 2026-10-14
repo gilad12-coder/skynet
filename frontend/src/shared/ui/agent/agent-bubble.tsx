@@ -4,6 +4,7 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 
 import { cn } from "@/shared/lib/utils";
+import type { ActivityKind } from "@/shared/lib/activity-summary";
 
 import { ThinkingSection } from "./thinking-section";
 import { TurnActivity } from "./turn-activity";
@@ -27,6 +28,8 @@ interface AgentBubbleProps {
    * the turn's foldable activity group; every other call keeps its rich card.
    */
   isStepCall?: (call: AgentToolCall) => boolean;
+  /** What kind of step a call is, for the summary line over the turn's steps. */
+  stepKind?: (call: AgentToolCall) => ActivityKind;
   onRunCode?: (code: string, language: string) => void;
   toolCallsBeforeContent?: boolean;
   className?: string;
@@ -37,6 +40,7 @@ export function AgentBubble({
   thinking,
   renderToolCall,
   isStepCall,
+  stepKind,
   onRunCode,
   toolCallsBeforeContent = false,
   className,
@@ -96,6 +100,7 @@ export function AgentBubble({
           thinking={hasThinking ? thinking : undefined}
           steps={stepCalls}
           renderStep={renderToolCall}
+          stepKind={stepKind}
           durationMs={msg.stats?.durationMs}
         />
       ) : (

@@ -222,8 +222,8 @@ export function followUpAuthoringGoal(
 /**
  * Find the chat's most recent call of one tool.
  *
- * The coding tool's card shows the one live coding session, so only the
- * latest call renders it; an earlier card would repeat the same editors.
+ * The coding tool's steps show the one live coding session, so only the
+ * latest call renders them; an earlier call would repeat the same steps.
  *
  * Args:
  *   messages: The agent's chat, oldest first.
@@ -241,4 +241,38 @@ export function latestToolCallId(
     if (call) return call.id;
   }
   return null;
+}
+
+/** One edit the coding agent made to the run code or the metric. */
+export interface AuthoringEdit {
+  file: "run" | "metric";
+  before: string;
+  after: string;
+  ts: number;
+}
+
+/**
+ * Turn the run code's and the metric's version histories into the edits that
+ * made them, oldest first, as the transcript lists them.
+ *
+ * Args:
+ *   runVersions: Each run code the agent landed, oldest first.
+ *   metricVersions: Each metric the agent landed, oldest first.
+ *
+ * Returns:
+ *   One edit per version that changed its code; the first version of a file
+ *   is an edit from empty.
+ */
+export function authoringEdits(
+  runVersions: ReadonlyArray<{ code: string; ts: number }>,
+  metricVersions: ReadonlyArray<{ code: string; ts: number }>,
+): AuthoringEdit[] {
+  const edits = (file: AuthoringEdit["file"], versions: typeof runVersions) =>
+    versions.flatMap((v, i) => {
+      const before = versions[i - 1]?.code ?? "";
+      return v.code === before ? [] : [{ file, before, after: v.code, ts: v.ts }];
+    });
+  return [...edits("run", runVersions), ...edits("metric", metricVersions)].sort(
+    (a, b) => a.ts - b.ts,
+  );
 }

@@ -48,13 +48,13 @@ import { ConversationDrawer } from "./ConversationDrawer";
 import { DATASET_FILE_ACCEPT, DatasetUploadCard, type ConfirmedDataset } from "./DatasetUploadCard";
 import { LibraryDatasetCard, type ConfirmedLibraryDataset } from "./LibraryDatasetCard";
 import { InferenceFormCard } from "./InferenceFormCard";
-import { CodeAuthoringCard } from "./CodeAuthoringCard";
+import { CodeAuthoringActivity } from "./CodeAuthoringActivity";
 import { MinimizedPill } from "./MinimizedPill";
 import { PresenceStrip } from "./PresenceStrip";
 import { ToolCallRow } from "./ToolCallRow";
 import { ToolsCarousel } from "./ToolsCarousel";
 import { TrustToggle } from "./TrustToggle";
-import { getToolRenderer } from "./tool-renderers";
+import { getToolKind, getToolRenderer } from "./tool-renderers";
 import { AGENT_PROMPT_EVENT, takeQueuedAgentPrompt } from "../lib/prompt-queue";
 
 const REQUEST_DATASET_TOOL = "request_user_dataset_datasets_request_upload_post";
@@ -761,7 +761,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
         return <InferenceFormCard call={call} disabled={streaming} />;
       }
       if (call.tool === REQUEST_CODE_TOOL && call.id === liveCodeCallId) {
-        return <CodeAuthoringCard agent={codeAgent} />;
+        return <CodeAuthoringActivity agent={codeAgent} />;
       }
       const renderer = getToolRenderer(call.tool);
       if (renderer?.card && call.status !== "running") {
@@ -773,17 +773,19 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     [handleDatasetConfirm, handleLibraryPick, streaming, codeAgent, liveCodeCallId],
   );
 
-  // Mirrors renderToolCall's fall-through: anything that ends up as a plain
-  // ToolCallRow is a working step and folds into the turn's activity line.
+  // Every call is a step in the turn's activity group except the ones the
+  // user acts on: the request cards, the live coding tool (it keeps working
+  // after the turn ends, so it must not fold away) and the submit summary,
+  // which links to the new run.
   const isStepCall = React.useCallback(
     (call: AgentToolCall) => {
       if (call.tool === REQUEST_CODE_TOOL) return call.id !== liveCodeCallId;
       if (RICH_CARD_TOOLS.has(call.tool)) return false;
-      const renderer = getToolRenderer(call.tool);
-      return !(renderer?.card && call.status !== "running");
+      return !(SUBMIT_TOOLS.has(call.tool) && call.status !== "running");
     },
     [liveCodeCallId],
   );
+  const stepKind = React.useCallback((call: AgentToolCall) => getToolKind(call.tool), []);
 
   const emptyState = (
     <EmptyState
@@ -941,6 +943,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
           thinking={thinking}
           renderToolCall={renderToolCall}
           isStepCall={isStepCall}
+          stepKind={stepKind}
           onRunCode={handleRunCode}
           animatePairs
           trailing={() => (

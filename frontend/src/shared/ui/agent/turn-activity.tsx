@@ -7,7 +7,9 @@ import { CaretRight, WarningCircle } from "@/shared/ui/icons";
 import { cn } from "@/shared/lib/utils";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { formatMsg } from "@/shared/lib/messages";
+import type { ActivityKind } from "@/shared/lib/activity-summary";
 
+import { ActivityGroup } from "./activity-steps";
 import { ThinkingSection } from "./thinking-section";
 import type { AgentThinking, AgentToolCall } from "./types";
 
@@ -15,15 +17,23 @@ interface TurnActivityProps {
   thinking?: AgentThinking;
   steps: Array<{ call: AgentToolCall; isRetry: boolean }>;
   renderStep: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
+  /** What kind of step a call is, for the burst's summary line. */
+  stepKind?: (call: AgentToolCall) => ActivityKind;
   /** Backend-measured turn duration, preferred over the client clock. */
   durationMs?: number | null;
 }
 
 // Mirrors Codex's turn header: while the agent works, a "Working for 14s"
-// line over the turn's history so far, the thinking trace and then each tool
-// in the order it ran; once done, a "Worked for 39s" line that folds that
+// line over the turn's history so far, the thinking row and then its tools
+// under one summary line; once done, a "Worked for 39s" line that folds that
 // history away until clicked, so the answer is what the eye lands on.
-export function TurnActivity({ thinking, steps, renderStep, durationMs }: TurnActivityProps) {
+export function TurnActivity({
+  thinking,
+  steps,
+  renderStep,
+  stepKind,
+  durationMs,
+}: TurnActivityProps) {
   const reduce = Boolean(useReducedMotion());
   const isThinking = Boolean(thinking?.streaming && !thinking.endedAt && thinking.startedAt);
   const running = steps.filter(({ call }) => call.status === "running");
@@ -43,12 +53,22 @@ export function TurnActivity({ thinking, steps, renderStep, durationMs }: TurnAc
   const failed = steps.some(({ call }) => call.status === "error");
 
   const history = (
-    <StepTree>
-      {thinking && <ThinkingSection key="thinking" thinking={thinking} compact />}
-      {steps.map(({ call, isRetry }) => (
-        <React.Fragment key={call.id}>{renderStep(call, { isRetry })}</React.Fragment>
-      ))}
-    </StepTree>
+    <div className="flex flex-col">
+      {thinking && <ThinkingSection thinking={thinking} compact />}
+      {steps.length > 0 && (
+        <ActivityGroup
+          live={isLive}
+          steps={steps.map(({ call }) => ({
+            kind: stepKind?.(call) ?? "tool",
+            status: call.status,
+          }))}
+        >
+          {steps.map(({ call, isRetry }) => (
+            <React.Fragment key={call.id}>{renderStep(call, { isRetry })}</React.Fragment>
+          ))}
+        </ActivityGroup>
+      )}
+    </div>
   );
 
   if (isLive) {
@@ -88,32 +108,6 @@ export function TurnActivity({ thinking, steps, renderStep, durationMs }: TurnAc
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-// The steps hang off one guide line like a file tree: each gets an elbow
-// from the line, and the line stops at the last one.
-function StepTree({ children }: { children: React.ReactNode }) {
-  const items = React.Children.toArray(children);
-  return (
-    <ol className="flex flex-col">
-      {items.map((item, i) => {
-        const last = i === items.length - 1;
-        return (
-          <li
-            key={React.isValidElement(item) ? (item.key ?? i) : i}
-            className="relative min-w-0 ps-5"
-          >
-            <span
-              aria-hidden
-              className={cn("absolute start-[7px] top-0 w-px bg-border", last ? "h-3.5" : "h-full")}
-            />
-            <span aria-hidden className="absolute start-[7px] top-3.5 h-px w-2.5 bg-border" />
-            {item}
-          </li>
-        );
-      })}
-    </ol>
   );
 }
 

@@ -2,6 +2,7 @@ import * as React from "react";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import type { AgentToolCall } from "@/shared/ui/agent/types";
+import type { ActivityKind } from "@/shared/lib/activity-summary";
 import { TERMS } from "@/shared/lib/terms";
 
 import { UUID_RE } from "../lib/entry-format";
@@ -15,8 +16,64 @@ import { TestResultsCard } from "./TestResultsCard";
 import { WalletCard } from "./WalletCard";
 
 export interface ToolRenderer {
+  /**
+   * The call's rendering once it has finished. A result report is a step row
+   * that opens to its result; only the submit summary, which links to the new
+   * run, stands apart from the turn's steps.
+   */
   card?: (call: AgentToolCall) => React.ReactNode;
   summary?: (call: AgentToolCall) => string | null;
+}
+
+// What each tool does, for the summary line over a burst of steps ("Edited
+// a file, ran a check, read results"). A tool not listed reads by its name:
+// get_/list_ tools read, anything else is a generic tool.
+const TOOL_KINDS: Record<string, ActivityKind> = {
+  edit_code_optimizations_edit_code_post: "edit",
+  request_code_authoring: "edit",
+  delete_job_optimizations: "act",
+  bulk_delete_jobs_optimizations_bulk_delete_post: "act",
+  rename_job_optimizations: "act",
+  toggle_pin_job_optimizations: "act",
+  bulk_pin_jobs_optimizations_bulk_pin_post: "act",
+  cancel_job_optimizations: "act",
+  bulk_cancel_jobs_optimizations_bulk_cancel_post: "act",
+  clone_job_optimizations: "act",
+  retry_job_optimizations: "act",
+  pause_job_optimizations: "act",
+  resume_job_optimizations: "act",
+  restart_job_optimizations: "act",
+  submit_unified_run_optimize_post: "act",
+  update_user_preferences: "act",
+  update_wizard_state: "act",
+  set_column_roles_datasets_column_roles_post: "act",
+  stage_sample_dataset_datasets_samples: "act",
+  validate_code_validate_code_post: "check",
+  validate_datasets_validate_post: "check",
+  public_search_dashboard_search_post: "search",
+  web_search: "search",
+  discover_models_models_discover_post: "search",
+  crawl_site: "read",
+  fetch_url: "read",
+  profile_datasets_profile_post: "read",
+  serve_info_serve: "read",
+  serve_pair_info_serve: "read",
+  blackbox_engines_blackbox_engines_get: "read",
+};
+
+/**
+ * Say what kind of step a tool is, for the summary line over its burst.
+ *
+ * Args:
+ *   tool: The tool's name.
+ *
+ * Returns:
+ *   Its kind; get_/list_ tools read, an unknown tool is a generic one.
+ */
+export function getToolKind(tool: string): ActivityKind {
+  const kind = TOOL_KINDS[tool];
+  if (kind) return kind;
+  return /^(get|list)_/.test(tool) ? "read" : "tool";
 }
 
 function getArgs(call: AgentToolCall): Record<string, unknown> {

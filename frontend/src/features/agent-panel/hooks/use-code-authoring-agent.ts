@@ -54,17 +54,13 @@ export interface CodeAuthoringAgentState extends CodeAgentState {
    * metric; the handoff waits on it. Always false in workflow mode.
    */
   contractOk: boolean;
-  /** Where the validity check of the current code stands, for the card. */
+  /** Where the validity check of the current code stands, for the transcript. */
   checkStatus: AuthoringCheckStatus;
   /** Each failed check handed back to the agent for a fix, oldest first. */
   fixAttempts: AuthoringFixAttempt[];
-  /** A user edit in the card's run-code editor. */
-  editSignatureCode: (code: string) => void;
-  /** A user edit in the card's metric editor. */
-  editMetricCode: (code: string) => void;
   /**
    * True when the code lives in the wizard's own run-code and metric slots,
-   * so the card and the Metric step's editors show and edit the same code.
+   * so the Metric step's editors show and edit it.
    */
   sharedWithWizard: boolean;
   /** True when the run targets the multi-module ``workflow`` module. */
@@ -117,59 +113,6 @@ function rolesToColumnMapping(
     else if (role === "output") outputs[col] = col;
   }
   return { inputs, outputs };
-}
-
-interface EditBuffer {
-  value: string;
-  /** The last outside value the buffer saw. */
-  seen: string;
-  /** Values this buffer showed while the user typed, oldest first. */
-  pending: string[];
-}
-
-// Enough of the user's recent keystrokes to recognize any echo still in flight.
-const MAX_PENDING_EDITS = 32;
-
-/**
- * Hold what an editor shows while the user types into code that lives
- * elsewhere. On the wizard, each keystroke round-trips through the wizard's
- * own state, which echoes back older values before it settles. Taken as the
- * editor's value, an echo replaces the document, which drops keystrokes and
- * moves the cursor. The buffer ignores outside values it already showed and
- * adopts any other outside change (the agent writing, an edit in the Metric
- * step).
- *
- * Args:
- *   external: The code where it lives.
- *
- * Returns:
- *   What the editor shows, and the call for a user edit.
- */
-function useEditBuffer(external: string): { value: string; edit: (code: string) => void } {
-  const [buffer, setBuffer] = React.useState<EditBuffer>({
-    value: external,
-    seen: external,
-    pending: [],
-  });
-  let current = buffer;
-  if (external !== buffer.seen) {
-    if (external === buffer.pending[buffer.pending.length - 1]) {
-      current = { value: external, seen: external, pending: [] };
-    } else if (buffer.pending.includes(external)) {
-      current = { ...buffer, seen: external };
-    } else {
-      current = { value: external, seen: external, pending: [] };
-    }
-    setBuffer(current);
-  }
-  const edit = React.useCallback((code: string) => {
-    setBuffer((prev) => ({
-      value: code,
-      seen: prev.seen,
-      pending: [...prev.pending, prev.value, code].slice(-MAX_PENDING_EDITS),
-    }));
-  }, []);
-  return { value: current.value, edit };
 }
 
 interface AuthoringCheckArgs {
@@ -229,7 +172,7 @@ function useAuthoringCheck(args: AuthoringCheckArgs): {
   const [fixes, setFixes] = React.useState<FixRecord[]>([]);
   // A reset clears the result while the code and context stay the same (each
   // wizard screen opens its own chat), so it must re-run the check itself or
-  // the card sits on "checking" until the next edit.
+  // the transcript sits on "checking" until the next edit.
   const [generation, setGeneration] = React.useState(0);
   const fixAttemptsRef = React.useRef(0);
   const key = `${contextKey}\u0000${signatureCode}\u0000${metricCode}`;
@@ -324,12 +267,12 @@ function useAuthoringCheck(args: AuthoringCheckArgs): {
 
 /**
  * Host the canonical wizard code agent (``useCodeAgent``) at the generalist
- * panel level so the panel's coding-tool card shows exactly what the code
+ * panel level so the panel's coding-tool steps show exactly what the code
  * agent does: the same streaming, thinking timer and authoring contract.
  *
  * On the submit wizard the code is the wizard's own: the agent writes into its
- * run-code and metric slots under the context the Metric step registers, so
- * the card and the Metric step's editors are two views of one code. Off the
+ * run-code and metric slots under the context the Metric step registers, and
+ * the Metric step's editors are where the user reads and edits it. Off the
  * wizard the hook keeps the code itself and the panel hands it off once the
  * validity check passes.
  *
@@ -364,14 +307,8 @@ export function useCodeAuthoringAgent(
     !isWorkflow && wizardCtx?.wizardScreen != null ? wizardCtx.authoringContext : null;
   const shared = wizardContext !== null;
   const applyAgentPatch = wizardCtx?.applyAgentPatch;
-  const signatureBuffer = useEditBuffer(
-    shared ? (wizardCtx?.state.run_code ?? "") : localSignatureCode,
-  );
-  const metricBuffer = useEditBuffer(
-    shared ? (wizardCtx?.state.metric_code ?? "") : localMetricCode,
-  );
-  const signatureCode = signatureBuffer.value;
-  const metricCode = metricBuffer.value;
+  const signatureCode = shared ? (wizardCtx?.state.run_code ?? "") : localSignatureCode;
+  const metricCode = shared ? (wizardCtx?.state.metric_code ?? "") : localMetricCode;
 
   // The setters keep one identity for ``useCodeAgent`` (it captures them in
   // its run), so they read where the code lives from a ref.
@@ -586,25 +523,6 @@ export function useCodeAuthoringAgent(
     [check.fixes, agent.messages, agent.status, signatureCode, metricCode],
   );
 
-  const bufferSignatureEdit = signatureBuffer.edit;
-  const bufferMetricEdit = metricBuffer.edit;
-  const editSignatureCode = React.useCallback(
-    (code: string) => {
-      bufferSignatureEdit(code);
-      writeSignatureCode(code);
-      setSignatureManuallyEdited(true);
-    },
-    [bufferSignatureEdit, writeSignatureCode],
-  );
-  const editMetricCode = React.useCallback(
-    (code: string) => {
-      bufferMetricEdit(code);
-      writeMetricCode(code);
-      setMetricManuallyEdited(true);
-    },
-    [bufferMetricEdit, writeMetricCode],
-  );
-
   // ``useCodeAgent.reset`` clears its own state but not the caller-owned code;
   // wrap it so a fresh conversation drops the previous run's artifacts too.
   // The wizard's own code stays: each wizard screen opens its own chat, and
@@ -637,8 +555,6 @@ export function useCodeAuthoringAgent(
     contractOk: authoringContext !== null && check.ok,
     checkStatus: check.status,
     fixAttempts,
-    editSignatureCode,
-    editMetricCode,
     sharedWithWizard: shared,
     isWorkflow,
     workflowSpec,

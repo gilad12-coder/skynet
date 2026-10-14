@@ -3,6 +3,8 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
+import type { ActivityKind } from "@/shared/lib/activity-summary";
+
 import { AgentBubble } from "./agent-bubble";
 import { MessageActions } from "./message-actions";
 import { TtftIndicator } from "./ttft-indicator";
@@ -27,6 +29,7 @@ interface ChatTranscriptProps {
   thinking?: AgentThinking;
   renderToolCall?: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
   isStepCall?: (call: AgentToolCall) => boolean;
+  stepKind?: (call: AgentToolCall) => ActivityKind;
   toolCallsBeforeContent?: boolean;
   onRunCode?: (code: string, language: string) => void;
   animatePairs?: boolean;
@@ -44,6 +47,7 @@ export function ChatTranscript({
   thinking,
   renderToolCall,
   isStepCall,
+  stepKind,
   toolCallsBeforeContent,
   onRunCode,
   animatePairs,
@@ -172,6 +176,7 @@ export function ChatTranscript({
                 thinking={pair.key === latestAgentKey ? thinking : undefined}
                 renderToolCall={renderToolCall}
                 isStepCall={isStepCall}
+                stepKind={stepKind}
                 toolCallsBeforeContent={toolCallsBeforeContent}
                 onRunCode={onRunCode}
                 className="max-w-full"

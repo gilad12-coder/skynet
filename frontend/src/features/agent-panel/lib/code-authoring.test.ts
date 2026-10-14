@@ -16,10 +16,28 @@ registerHooks({
   },
 });
 
-const { describeFixes, followUpAuthoringGoal, latestToolCallId, panelAuthoringContext } =
-  await import(
-    "./code-authoring.ts"
-  );
+const {
+  authoringEdits,
+  describeFixes,
+  followUpAuthoringGoal,
+  latestToolCallId,
+  panelAuthoringContext,
+} = await import("./code-authoring.ts");
+
+test("version histories become edits in the order they landed, skipping repeats", () => {
+  const run = [
+    { code: "a", ts: 1 },
+    { code: "a", ts: 4 },
+    { code: "b", ts: 5 },
+  ];
+  const metric = [{ code: "m", ts: 2 }];
+  assert.deepEqual(authoringEdits(run, metric), [
+    { file: "run", before: "", after: "a", ts: 1 },
+    { file: "metric", before: "", after: "m", ts: 2 },
+    { file: "run", before: "a", after: "b", ts: 5 },
+  ]);
+  assert.deepEqual(authoringEdits([], []), []);
+});
 
 test("the latest call of a tool is found across turns", () => {
   const chat = [
