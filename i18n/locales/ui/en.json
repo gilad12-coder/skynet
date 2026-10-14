@@ -4157,5 +4157,12 @@
   "submit.modelpicker.score_aria": "Intelligence score {score}",
   "submit.modelpicker.score_tip_title": "Intelligence score {score}",
   "submit.modelpicker.score_tip": "Artificial Analysis Intelligence Index, a blend of reasoning, knowledge, math and coding benchmarks. Higher is smarter.",
-  "submit.modelpicker.score_tip_link": "Click to see every benchmark on Artificial Analysis."
+  "submit.modelpicker.score_tip_link": "Click to see every benchmark on Artificial Analysis.",
+  "shared.agent.worked_for": "Worked for {duration}",
+  "shared.agent.working_for": "Working for {duration}",
+  "shared.agent.pasted_text": "Pasted text",
+  "shared.agent.pasted_text_lines": "{n} lines",
+  "shared.agent.pasted_text_remove": "Remove pasted text",
+  "shared.agent.pasted_text_restore": "Show in text field",
+  "shared.agent.pasted_text_open": "Open pasted text"
 }

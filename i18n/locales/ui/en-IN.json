@@ -55,5 +55,12 @@
   "optimizations.grid.open_pair": "Open pair {pair}",
   "optimizations.grid.empty.title": "No pair results",
   "optimizations.grid.empty.description": "This grid search ended without results for any model pair, so there is nothing to compare.",
-  "submit.nav.screen": "Screen {index} of {count}"
+  "submit.nav.screen": "Screen {index} of {count}",
+  "shared.agent.worked_for": "Worked for {duration}",
+  "shared.agent.working_for": "Working for {duration}",
+  "shared.agent.pasted_text": "Pasted text",
+  "shared.agent.pasted_text_lines": "{n} lines",
+  "shared.agent.pasted_text_remove": "Remove pasted text",
+  "shared.agent.pasted_text_restore": "Show in text field",
+  "shared.agent.pasted_text_open": "Open pasted text"
 }

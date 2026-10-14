@@ -26,6 +26,7 @@ interface ChatTranscriptProps {
   editAndResend: (index: number, content: string) => void;
   thinking?: AgentThinking;
   renderToolCall?: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
+  isStepCall?: (call: AgentToolCall) => boolean;
   toolCallsBeforeContent?: boolean;
   onRunCode?: (code: string, language: string) => void;
   animatePairs?: boolean;
@@ -42,6 +43,7 @@ export function ChatTranscript({
   editAndResend,
   thinking,
   renderToolCall,
+  isStepCall,
   toolCallsBeforeContent,
   onRunCode,
   animatePairs,
@@ -162,13 +164,14 @@ export function ChatTranscript({
           ))}
 
         {agentMsg && !isEditing && (
-          <div className="flex justify-end">
-            <div className="flex flex-col items-end gap-1 max-w-[88%]">
+          <div className="flex">
+            <div className="flex w-full min-w-0 flex-col items-start gap-1.5 pt-1">
               {isWaitingFirstToken && <TtftIndicator />}
               <AgentBubble
                 msg={agentMsg}
                 thinking={pair.key === latestAgentKey ? thinking : undefined}
                 renderToolCall={renderToolCall}
+                isStepCall={isStepCall}
                 toolCallsBeforeContent={toolCallsBeforeContent}
                 onRunCode={onRunCode}
                 className="max-w-full"
@@ -209,7 +212,7 @@ export function ChatTranscript({
           initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
-          className="space-y-1.5"
+          className="space-y-3"
         >
           {renderPairBody(pair)}
         </motion.div>
@@ -217,7 +220,7 @@ export function ChatTranscript({
     </AnimatePresence>
   ) : (
     visiblePairs.map((pair) => (
-      <div key={pair.key} className="space-y-1.5">
+      <div key={pair.key} className="space-y-3">
         {renderPairBody(pair)}
       </div>
     ))
