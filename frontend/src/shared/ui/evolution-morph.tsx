@@ -80,17 +80,21 @@ function paint(el: SVGPathElement, part: FramePart | undefined) {
  * it when the figure sits on another surface. Reduced motion shows the human, still.
  * `durationMs` replays the same timeline faster or slower so it lands on the
  * human at that time (the app-load splash is shorter than the submit one).
+ * `still` always shows the still human, for server-rendered markup that has to
+ * honour reduced motion before hydration can read it.
  */
 export function EvolutionMorph({
   width = 260,
   className,
   durationMs = EVOLUTION_DURATION_MS,
+  still = false,
 }: {
   width?: number;
   className?: string;
   durationMs?: number;
+  still?: boolean;
 }) {
-  const reduceMotion = useReducedMotion() ?? false;
+  const reduceMotion = (useReducedMotion() ?? false) || still;
   const pathRefs = useRef<Array<SVGPathElement | null>>([]);
   const { animals, maxParts } = getEvolution();
   const initial = restFrame(reduceMotion ? animals[animals.length - 1]! : animals[0]!);

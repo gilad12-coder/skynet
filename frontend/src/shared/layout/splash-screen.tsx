@@ -54,7 +54,14 @@ export function SplashScreen() {
         <EvolutionMorph
           durationMs={MORPH_MS}
           width={300}
-          className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2"
+          className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2 motion-reduce:hidden"
+        />
+        {/* The server can't know the motion preference, so the still human is
+            swapped in by CSS; otherwise the fish shows until hydration. */}
+        <EvolutionMorph
+          still
+          width={300}
+          className="absolute bottom-full left-1/2 mb-2 hidden -translate-x-1/2 motion-reduce:block"
         />
         <AnimatedWordmark size={72} autoMorph morphSpeed={120} />
       </div>
