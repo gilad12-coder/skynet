@@ -3,9 +3,11 @@
 import * as React from "react";
 import { msg, type MessageKey } from "@/shared/lib/messages";
 import { runContractCheck, staticContractCheck } from "@/shared/lib/api";
+import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import type { ContractCheckResponse } from "@/shared/types/unified-run";
 import type { ContractCheckTiming } from "../lib/contract-validation";
 import { contractSnapshot, withContractBudget, type WizardV2Context } from "../lib/wizard-v2";
+import { contractFailure } from "../lib/wizard-telemetry";
 
 // Typing pauses this long before the static (no-sandbox) check runs.
 const STATIC_DEBOUNCE_MS = 700;
@@ -109,9 +111,14 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
       );
       if (controller.signal.aborted) return null;
       patchWorkspace({ lastCheck: result, lastCheckSnapshot: checkedSnapshot });
+      const failure = contractFailure(result);
+      if (failure) track(TelemetryEvent.SetupCheckFailed, { ...failure });
       return result;
     } catch (err) {
-      if (!isAbort(err) && !controller.signal.aborted) setError(errorText(err));
+      if (!isAbort(err) && !controller.signal.aborted) {
+        setError(errorText(err));
+        track(TelemetryEvent.SetupCheckFailed, { ...contractFailure(null) });
+      }
       return null;
     } finally {
       if (checkAbortRef.current === controller) {
