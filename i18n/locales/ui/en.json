@@ -264,6 +264,7 @@
   "auto.features.agent.panel.components.generalistpanel.4": "What I can do",
   "auto.features.agent.panel.components.generalistpanel.6": "Click to collapse",
   "auto.features.agent.panel.components.generalistpanel.code_ready_note": "The Signature and Metric have been written and validated. You can move to the model step and run the optimization.",
+  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "I'm on this screen now. What do we need here?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "Dataset `{p1}` attached ({p2} rows).\n\nColumn mapping:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "Try again",
   "auto.features.agent.panel.components.generalistpanel.history_button": "Past conversations",
