@@ -1676,6 +1676,7 @@
   "auto.features.agent.panel.components.generalistpanel.4": "Cosa posso fare",
   "auto.features.agent.panel.components.generalistpanel.6": "Fai clic per comprimere",
   "auto.features.agent.panel.components.generalistpanel.code_ready_note": "La Signature e la metrica sono state scritte e convalidate. Puoi passare allo step del modello ed eseguire l'ottimizzazione.",
+  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "Ora sono su questa schermata. Di cosa abbiamo bisogno qui?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "Dataset `{p1}` allegato ({p2} righe).\n\nMappatura delle colonne:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "Riprova",
   "auto.features.agent.panel.components.generalistpanel.history_button": "Conversazioni passate",

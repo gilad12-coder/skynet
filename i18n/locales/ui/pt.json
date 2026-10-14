@@ -1676,6 +1676,7 @@
   "auto.features.agent.panel.components.generalistpanel.4": "O que posso fazer",
   "auto.features.agent.panel.components.generalistpanel.6": "Clique para recolher",
   "auto.features.agent.panel.components.generalistpanel.code_ready_note": "A Assinatura e a métrica foram escritas e validadas. Pode avançar para o passo do modelo e executar a otimização.",
+  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "Agora estou neste ecrã. Do que precisamos aqui?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "Conjunto de dados `{p1}` anexado ({p2} linhas).\n\nMapeamento de colunas:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "Tentar novamente",
   "auto.features.agent.panel.components.generalistpanel.history_button": "Conversas anteriores",

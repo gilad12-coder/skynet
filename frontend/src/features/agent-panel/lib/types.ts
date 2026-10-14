@@ -56,6 +56,16 @@ export interface WizardState {
   metric_code?: string;
   /** The wizard screen on view; the agent may edit only the fields on it. */
   wizard_screen?: string;
+  /** Notes screen agents left for later screens, oldest first. */
+  screen_notes?: ScreenNote[];
+  /** What the Continue button refuses on the screen on view. */
+  screen_issue?: string;
+}
+
+/** A note one wizard screen's agent left for the screens after it. */
+export interface ScreenNote {
+  screen: string;
+  note: string;
 }
 
 export interface ToolStartPayload {

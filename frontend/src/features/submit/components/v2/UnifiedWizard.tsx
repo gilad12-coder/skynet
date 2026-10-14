@@ -95,14 +95,48 @@ function UnifiedWizardFrame() {
     goPrev();
   }, [page, current, steps, position, goPrev, w.state]);
 
+  // Back to one named screen: the agent's go-back lands where the user's
+  // own Back presses would, without walking every screen between.
+  const { goTo } = w;
+  const goToScreen = useCallback(
+    (screen: string) => {
+      const step = steps.find((s) => (stepPages(s, w.state) as readonly string[]).includes(screen));
+      if (!step || steps.indexOf(step) > position) return;
+      const target = (stepPages(step, w.state) as readonly string[]).indexOf(screen);
+      if (step === current && target >= page) return;
+      setPages((p) => ({ ...p, [step]: target }));
+      if (step !== current) goTo(step);
+    },
+    [steps, position, current, page, goTo, w.state],
+  );
+
   // The agent edits only the screen on view, so it is told which one that
-  // is; unmounting the wizard clears it and leaves the agent unscoped.
-  const setWizardScreen = useWizardStateOptional()?.setWizardScreen;
+  // is; unmounting the wizard clears it and leaves the agent unscoped. Its
+  // Continue runs this frame's own ``forward``, the button's handler.
+  const wizardCtx = useWizardStateOptional();
+  const setWizardScreen = wizardCtx?.setWizardScreen;
+  const setScreenIssue = wizardCtx?.setScreenIssue;
+  const setScreenNavigator = wizardCtx?.setScreenNavigator;
   const visibleScreen = stepPages(current, w.state)[page] ?? "";
+  const blockedIssue = forwardOpen ? null : w.stepIssue("inputs");
+  const blockedText = blockedIssue ? v2Text(blockedIssue, w.guided) : null;
   useEffect(() => {
     setWizardScreen?.(visibleScreen);
   }, [visibleScreen, setWizardScreen]);
-  useEffect(() => () => setWizardScreen?.(null), [setWizardScreen]);
+  useEffect(() => {
+    setScreenIssue?.(blockedText);
+  }, [blockedText, setScreenIssue]);
+  useEffect(() => {
+    setScreenNavigator?.({ forward, goToScreen });
+  }, [forward, goToScreen, setScreenNavigator]);
+  useEffect(
+    () => () => {
+      setWizardScreen?.(null);
+      setScreenIssue?.(null);
+      setScreenNavigator?.(null);
+    },
+    [setWizardScreen, setScreenIssue, setScreenNavigator],
+  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
