@@ -406,6 +406,10 @@ class RequestCodeAuthoringResponse(BaseModel):
 
     awaiting_code: bool
     goal: str
+    next_step: str = Field(
+        default="",
+        description="What happens after this call, for the calling agent's closing line.",
+    )
 
 
 class CancelAgentTurnResponse(BaseModel):
@@ -413,6 +417,19 @@ class CancelAgentTurnResponse(BaseModel):
 
     cancelled: bool
 
+
+# The model only sees this tool's result before it writes its reply, and the
+# coding agent writes the code and runs the check only after that turn ended.
+# A closing line written now can only guess at the outcome (it told users the
+# code "is being checked" long after the check finished), so the reply is left
+# to the chat, which shows the edits, the check and how they ended under the call.
+_CODE_AUTHORING_NEXT_STEP = (
+    "The coding agent starts once your turn ends: it writes the run code and the metric "
+    "into the Metric screen's editors and runs the validity check on them by itself. Its "
+    "edits, the check and how they ended show in the chat under this call when it finishes. "
+    "End your turn now with no reply text: do not describe, predict or announce the code, "
+    "the check or their result, do not ask the user to run the check, and do not run it yourself."
+)
 
 _SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -492,6 +509,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         * ``tool_start`` — ``{"id", "tool", "reason"}`` (chat mode; the
           unified tools are ``ask_user`` / ``set_brief`` / ``edit_run`` /
           ``edit_metric``)
+        * ``code_draft`` — ``{"source": "signature" | "metric", "chunk",
+          "reset"}`` (unified chat mode: an ``edit_run`` / ``edit_metric``
+          call's code while the model writes it; ``reset`` starts a new draft)
         * ``signature_replace`` / ``metric_replace`` — ``{"code"}`` (in
           unified mode these carry the run code / the metric)
         * ``workflow_replace`` — ``{"workflow", "changed_node_id"}``
@@ -803,16 +823,19 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         req: RequestCodeAuthoringRequest,
         current_user: AuthenticatedUserDep,
     ) -> RequestCodeAuthoringResponse:
-        """Signal the chat UI to render an inline code-authoring card.
+        """Start the coding agent; its code lands in the Metric screen's editors, its edits show as diffs.
 
         Stateless: the endpoint exists only so the generalist agent can call a
         named tool the frontend recognizes via its ``tool_start`` SSE event.
-        The card streams the dedicated code agent (the same ``run_code_agent``
-        the wizard uses) over ``POST /optimizations/ai-generate-code``, renders
-        the reading→signature→metric timeline, and writes the finished code
-        back into the shared wizard state — so the generalist never hand-writes
-        ``signature_code`` / ``metric_code``. The agent calls this once, ends
-        its turn, and reads the authored code on the next turn.
+        The chat then streams the dedicated code agent (the same
+        ``run_code_agent`` the wizard uses) over
+        ``POST /optimizations/ai-generate-code``, lists its edits and the
+        validity check, and writes the finished code back into the shared
+        wizard state — so the generalist never hand-writes ``signature_code`` /
+        ``metric_code``. The agent calls this once, ends its turn, and reads
+        the authored code on the next turn. The coding agent and its check
+        run after that turn ends, so ``next_step`` tells the model to end the
+        turn without a reply; the chat reports how the run ended.
 
         Args:
             req: Optional plain-language goal for the Signature/Metric.
@@ -822,7 +845,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             A :class:`RequestCodeAuthoringResponse` marker carrying the goal
             back so the card can display it.
         """
-        return RequestCodeAuthoringResponse(awaiting_code=True, goal=req.goal.strip())
+        return RequestCodeAuthoringResponse(
+            awaiting_code=True, goal=req.goal.strip(), next_step=_CODE_AUTHORING_NEXT_STEP
+        )
 
     @router.get(
         "/optimizations/agent-turns/{turn_id}/stream",

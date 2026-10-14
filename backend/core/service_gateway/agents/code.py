@@ -87,7 +87,12 @@ class SeedLaneTimeoutError(RuntimeError):
     """A seed lane ran past its deadline without finishing its artifact."""
 
 
-def _require_answer(prediction: dspy.Prediction | None, reply_text: str) -> None:
+def _require_answer(
+    prediction: dspy.Prediction | None,
+    reply_text: str,
+    *,
+    next_step: str = "Check the editor, then send your message again or pick a different model.",
+) -> None:
     """Fail a turn that ended without the agent ever answering.
 
     A reasoning model that spends its whole output budget thinking returns no
@@ -98,6 +103,7 @@ def _require_answer(prediction: dspy.Prediction | None, reply_text: str) -> None
     Args:
         prediction: The loop's final prediction; ``None`` when none arrived.
         reply_text: The reply streamed or carried by the final prediction.
+        next_step: The sentence telling the user what to do next.
 
     Raises:
         AgentStoppedError: When the reply is empty and the loop did not end
@@ -110,8 +116,7 @@ def _require_answer(prediction: dspy.Prediction | None, reply_text: str) -> None
         return
     logger.warning("code agent stopped without answering: termination_reason=%s", reason)
     raise AgentStoppedError(
-        "The model stopped before it answered, usually because it ran out of room while thinking. "
-        "Check the editor, then send your message again or pick a different model."
+        "The model stopped before it answered, usually because it ran out of room while thinking. " + next_step
     )
 
 
@@ -1453,6 +1458,216 @@ class _NativeSubmitArgExtractor:
         self._emitted_chars = 0
 
 
+# Synthetic stream field carrying the native tool-call deltas of the loop's
+# non-submit tools, so drafts can stream while the submit reply keeps its own.
+TOOL_ARGS_FIELD = "tool_args"
+
+
+class _ToolArgDraftExtractor:
+    """Stream chosen string arguments of the loop's tool calls while the model writes them.
+
+    The ReAct loop only runs a tool once its call is complete, so an
+    ``edit_run`` that rewrites a whole file would reach the editor in one
+    piece. This decodes the growing call instead: under the text protocol
+    from the ``tool_calls`` field's ``{"tool_calls": [{"name", "args"}]}``
+    JSON, under native function calling from the per-index deltas
+    :class:`NativeToolArgsStreamListener` forwards. Each targeted argument
+    comes back as ``(tool, offset, delta)``, where ``offset`` is where the
+    delta starts in that call's argument, so the reader can rebuild the draft
+    and start over on a new call (offset 0).
+
+    One instance per agent turn; state resets on each field's last chunk.
+    """
+
+    def __init__(self, targets: dict[str, str], *, native: bool) -> None:
+        """Bind the extractor to the tool arguments worth streaming.
+
+        Args:
+            targets: Tool name mapped to the string argument to stream, e.g.
+                ``{"edit_run": "new_code"}``.
+            native: Whether the loop uses native function calling.
+        """
+        self._targets = targets
+        self._native = native
+        self._buffer = ""
+        self._calls: dict[int, dict[str, str]] = {}
+        self._emitted: dict[int, int] = {}
+
+    def _deltas(self, calls: list[tuple[int, str, str]]) -> list[tuple[str, int, str]]:
+        """Return the unseen tail of each targeted argument.
+
+        Args:
+            calls: ``(position, tool name, argument so far)`` per call.
+
+        Returns:
+            ``(tool, offset, delta)`` for every call whose argument grew.
+        """
+        out: list[tuple[str, int, str]] = []
+        for position, name, value in calls:
+            emitted = self._emitted.get(position, 0)
+            if len(value) <= emitted:
+                continue
+            out.append((name, emitted, value[emitted:]))
+            self._emitted[position] = len(value)
+        return out
+
+    def _text_calls(self) -> list[tuple[int, str, str]]:
+        """Decode the targeted arguments out of the text protocol's partial JSON.
+
+        Returns:
+            ``(position, tool name, argument so far)`` per targeted call.
+        """
+        try:
+            parsed = jiter.from_json(self._buffer.encode("utf-8"), partial_mode="trailing-strings")
+        except ValueError:
+            return []
+        tool_calls = parsed.get("tool_calls") if isinstance(parsed, dict) else None
+        if not isinstance(tool_calls, list):
+            return []
+        found: list[tuple[int, str, str]] = []
+        for position, call in enumerate(tool_calls):
+            if not isinstance(call, dict):
+                continue
+            name = call.get("name")
+            args = call.get("args")
+            arg = self._targets.get(name) if isinstance(name, str) else None
+            if arg is None or not isinstance(args, dict):
+                continue
+            value = args.get(arg)
+            if isinstance(value, str):
+                found.append((position, name, value))
+        return found
+
+    def _native_calls(self, chunk: str) -> list[tuple[int, str, str]]:
+        """Fold one batch of native tool-call deltas in and decode the targeted arguments.
+
+        Args:
+            chunk: JSON list of ``{"index", "name", "arguments"}`` deltas.
+
+        Returns:
+            ``(index, tool name, argument so far)`` per targeted call touched.
+        """
+        try:
+            deltas = json.loads(chunk)
+        except ValueError:
+            return []
+        touched: list[int] = []
+        for delta in deltas if isinstance(deltas, list) else []:
+            index = delta.get("index") if isinstance(delta, dict) else None
+            if not isinstance(index, int):
+                continue
+            call = self._calls.setdefault(index, {"name": "", "arguments": ""})
+            if delta.get("name"):
+                call["name"] = str(delta["name"])
+            call["arguments"] += str(delta.get("arguments") or "")
+            touched.append(index)
+        found: list[tuple[int, str, str]] = []
+        for index in dict.fromkeys(touched):
+            call = self._calls[index]
+            arg = self._targets.get(call["name"])
+            if arg is None or not call["arguments"]:
+                continue
+            try:
+                parsed = jiter.from_json(call["arguments"].encode("utf-8"), partial_mode="trailing-strings")
+            except ValueError:
+                continue
+            value = parsed.get(arg) if isinstance(parsed, dict) else None
+            if isinstance(value, str):
+                found.append((index, call["name"], value))
+        return found
+
+    def feed(self, chunk: dspy.streaming.StreamResponse) -> list[tuple[str, int, str]]:
+        """Take one stream response and return the targeted arguments' new text.
+
+        Args:
+            chunk: A non-reasoning ``StreamResponse`` from the loop.
+
+        Returns:
+            ``(tool, offset, delta)`` per targeted argument that grew; empty
+            for chunks of any other field.
+        """
+        field = TOOL_ARGS_FIELD if self._native else "tool_calls"
+        if chunk.signature_field_name != field:
+            return []
+        if self._native:
+            out = self._deltas(self._native_calls(chunk.chunk)) if chunk.chunk else []
+        else:
+            self._buffer += chunk.chunk or ""
+            out = self._deltas(self._text_calls()) if chunk.chunk else []
+        if chunk.is_last_chunk:
+            self.reset()
+        return out
+
+    def reset(self) -> None:
+        """Drop accumulated state between ReAct loop iterations."""
+        self._buffer = ""
+        self._calls = {}
+        self._emitted = {}
+
+
+class NativeToolArgsStreamListener(dspy.streaming.StreamListener):
+    """StreamListener that forwards every native tool-call delta of the loop predictor.
+
+    :class:`NativeToolCallStreamListener` keeps only the ``submit`` call, the
+    reply. This sibling forwards all calls' ``index`` / ``name`` /
+    ``arguments`` fragments, as a JSON list on the synthetic
+    :data:`TOOL_ARGS_FIELD`, for :class:`_ToolArgDraftExtractor` to decode
+    the drafts of the tools it targets. The turn's ``finish_reason`` marks
+    the last chunk so the extractor resets between loop iterations.
+    """
+
+    def __init__(self, predict: dspy.Predict, allow_reuse: bool = True):
+        """Bind the listener to the loop predictor and mark the synthetic field.
+
+        Args:
+            predict: ReAct's inner loop predictor.
+            allow_reuse: Whether the listener can fire more than once (required
+                for ReAct's inner predict, which fires per loop iteration).
+        """
+        super().__init__(signature_field_name=TOOL_ARGS_FIELD, predict=predict, allow_reuse=allow_reuse)
+        self.predict_name = TOOL_ARGS_FIELD
+
+    def receive(self, chunk: object) -> dspy.streaming.StreamResponse | None:
+        """Re-emit a LiteLLM chunk's tool-call deltas as one stream response.
+
+        Args:
+            chunk: A raw LiteLLM streaming chunk.
+
+        Returns:
+            A :class:`dspy.streaming.StreamResponse` whose ``chunk`` is the JSON
+            list of deltas, marked ``is_last_chunk`` on the turn's
+            ``finish_reason``, or ``None`` when the chunk carries no tool call.
+        """
+        try:
+            choice = chunk.choices[0]
+        except (AttributeError, IndexError, TypeError):
+            return None
+        delta = getattr(choice, "delta", None)
+        deltas = []
+        for call in (getattr(delta, "tool_calls", None) if delta is not None else None) or []:
+            function = getattr(call, "function", None)
+            deltas.append(
+                {
+                    "index": getattr(call, "index", None),
+                    "name": getattr(function, "name", None) if function is not None else None,
+                    "arguments": getattr(function, "arguments", None) if function is not None else None,
+                }
+            )
+        last = bool(getattr(choice, "finish_reason", None))
+        if not deltas and not last:
+            return None
+        return dspy.streaming.StreamResponse(
+            predict_name=self.predict_name,
+            signature_field_name=TOOL_ARGS_FIELD,
+            chunk=json.dumps(deltas) if deltas else "",
+            is_last_chunk=last,
+        )
+
+    def finalize(self) -> None:
+        """No-op — the last chunk rides the turn's finish_reason."""
+        return
+
+
 class ReasoningStreamListener(dspy.streaming.StreamListener):
     """StreamListener subclass that harvests provider reasoning tokens.
 
@@ -1642,7 +1857,14 @@ class ReactReplyStream:
     then feed every non-reasoning ``StreamResponse`` through ``reply_delta``.
     """
 
-    def __init__(self, program: dspy.Module, reply_field: str, lm: dspy.LM | None = None):
+    def __init__(
+        self,
+        program: dspy.Module,
+        reply_field: str,
+        lm: dspy.LM | None = None,
+        *,
+        tool_drafts: dict[str, str] | None = None,
+    ):
         """Bind to a constructed ReActV2 program and the signature's reply field.
 
         Args:
@@ -1650,6 +1872,9 @@ class ReactReplyStream:
             reply_field: Output field carrying the user-visible reply, a
                 ``submit`` argument.
             lm: The LM the loop runs on; defaults to the active ``dspy.settings.lm``.
+            tool_drafts: Tool name mapped to a string argument to stream while
+                the call is written (see :meth:`tool_draft_deltas`); ``None``
+                streams none.
         """
         self._program = program
         lm = lm or getattr(dspy.settings, "lm", None)
@@ -1665,6 +1890,7 @@ class ReactReplyStream:
                 reply_field,
                 exclusive_submit=bool(getattr(self._program.react, "_serial_tool_calls", False)),
             )
+        self._drafts = _ToolArgDraftExtractor(tool_drafts, native=self._native) if tool_drafts else None
 
     def listeners(self) -> list[dspy.streaming.StreamListener]:
         """Return the reply + reasoning stream listeners for this program.
@@ -1687,10 +1913,26 @@ class ReactReplyStream:
                 predict=self._program.react,
                 allow_reuse=True,
             )
-        return [
+        listeners = [
             reply_listener,
             ReasoningStreamListener(predict=self._program.react, allow_reuse=True),
         ]
+        if self._drafts is not None and self._native:
+            listeners.append(NativeToolArgsStreamListener(predict=self._program.react, allow_reuse=True))
+        return listeners
+
+    def tool_draft_deltas(self, chunk: dspy.streaming.StreamResponse) -> list[tuple[str, int, str]]:
+        """Return the new text of the streamed tool arguments in a chunk.
+
+        Args:
+            chunk: A non-reasoning ``StreamResponse`` from the wrapped program.
+
+        Returns:
+            ``(tool, offset, delta)`` per targeted argument that grew, where
+            ``offset`` is the delta's start in that call's argument; empty
+            when no drafts are streamed or the chunk carries none.
+        """
+        return self._drafts.feed(chunk) if self._drafts is not None else []
 
     def reply_delta(self, chunk: dspy.streaming.StreamResponse) -> str | None:
         """Return the newly streamed reply text from a chunk, or ``None``.
@@ -2177,6 +2419,11 @@ class _CodeEditSession:
         )
 
 
+# The editor each streamed tool argument lands in, named as the seed's
+# ``artifact_done`` sources are.
+_DRAFT_SOURCES = {"edit_run": "signature", "edit_metric": "metric"}
+
+
 class _UnifiedEditSession:
     """Per-turn state for the wizard's ``edit_run`` / ``edit_metric`` tools.
 
@@ -2212,6 +2459,7 @@ class _UnifiedEditSession:
         self._successful_edits = {"run": 0, "metric": 0}
         self._emit = emit
         self._asked = False
+        self._draft_ids: dict[str, str] = {}
 
     @property
     def run_code(self) -> str:
@@ -2245,7 +2493,9 @@ class _UnifiedEditSession:
         Returns:
             The observation string the ReAct agent reads back.
         """
-        call_id = uuid.uuid4().hex[:8]
+        # A streamed draft already opened this call's row; reuse its id so the
+        # row gets its reason instead of a second one appearing.
+        call_id = self._draft_ids.pop(tool, None) or uuid.uuid4().hex[:8]
         self._emit({"event": "tool_start", "data": {"id": call_id, "tool": tool, "reason": reason or ""}})
 
         def _reject(message: str) -> str:
@@ -2277,6 +2527,28 @@ class _UnifiedEditSession:
             f"{label[0].upper()}{label[1:]} replaced. Do NOT edit the {label} again this turn — "
             "call finish and summarize the change in reply."
         )
+
+    def draft(self, tool: str, offset: int, chunk: str) -> None:
+        """Stream a piece of an ``edit_run`` / ``edit_metric`` call's code while the model writes it.
+
+        The first piece of a call opens its tool row (``tool_start``) so the
+        editor shows "Editing" from the first token; every piece goes out as
+        ``code_draft`` for the editor to show live. The call's own run in
+        :meth:`_apply` reuses the row and alone publishes the finished code.
+
+        Args:
+            tool: ``"edit_run"`` or ``"edit_metric"``.
+            offset: Where ``chunk`` starts in the call's ``new_code``; 0 starts
+                a new draft.
+            chunk: The newly written code.
+        """
+        source = _DRAFT_SOURCES.get(tool)
+        if source is None or not chunk:
+            return
+        if offset == 0 or tool not in self._draft_ids:
+            self._draft_ids[tool] = uuid.uuid4().hex[:8]
+            self._emit({"event": "tool_start", "data": {"id": self._draft_ids[tool], "tool": tool, "reason": ""}})
+        self._emit({"event": "code_draft", "data": {"source": source, "chunk": chunk, "reset": offset == 0}})
 
     def ask_user(self, question: str, options_json: str) -> str:
         """Show the user one question with clickable answers.
@@ -3483,7 +3755,7 @@ async def _run_unified_agent(
     # a question, before the reply.
     react = ActingReActV2(UnifiedAssistant, tools=tools, max_iters=8)
     attach_steering(react, steering)
-    reply_stream = ReactReplyStream(react, "reply", lm)
+    reply_stream = ReactReplyStream(react, "reply", lm, tool_drafts=dict.fromkeys(_DRAFT_SOURCES, "new_code"))
     program = dspy.streamify(react, stream_listeners=reply_stream.listeners(), async_streaming=True)
 
     values = {
@@ -3507,6 +3779,8 @@ async def _run_unified_agent(
                 if chunk.signature_field_name == REASONING_FIELD:
                     await queue.put({"event": "reasoning_patch", "data": {"chunk": chunk.chunk, "source": "agent"}})
                 else:
+                    for tool, offset, draft in reply_stream.tool_draft_deltas(chunk):
+                        session.draft(tool, offset, draft)
                     delta = reply_stream.reply_delta(chunk)
                     if delta:
                         reply_text += delta
@@ -3727,6 +4001,9 @@ async def run_code_agent(
     * ``signature_patch`` / ``metric_patch`` — seed-mode token streams.
     * ``reasoning_patch`` — provider thinking tokens (both modes).
     * ``tool_start`` — ``{id, tool, reason}``, before a tool is invoked.
+    * ``code_draft`` — ``{source, chunk, reset}``, unified chat mode: the
+      code an ``edit_run`` / ``edit_metric`` call writes, while it is written
+      (``reset`` starts a new draft).
     * ``signature_replace`` / ``metric_replace`` — ``{code}``, full
       replacement when a tool runs.
     * ``tool_end`` — ``{id, tool, status}``, after the tool returns.

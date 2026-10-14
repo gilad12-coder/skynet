@@ -78,7 +78,6 @@
   "auto.features.optimizations.components.pairdetailview.16": "Execute o programa otimizado para este par — Insira a entrada e obtenha uma previsão.",
   "auto.features.optimizations.components.servechat.6": "Pensando",
   "auto.features.sidebar.components.sidebar.7": "Compartilhar",
-  "auto.features.submit.components.steps.codeagentpanel.template.1": "Lendo {p1}",
   "auto.features.submit.components.steps.codestep.5": "Escrevendo…",
   "auto.features.submit.components.steps.datasetstep.1": "Carregue um arquivo de conjunto de dados e configure o mapeamento de colunas",
   "auto.features.submit.components.steps.datasetstep.literal.1": "Clique para carregar um arquivo CSV, JSON ou Excel",

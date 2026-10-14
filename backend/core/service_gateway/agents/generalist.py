@@ -14,10 +14,10 @@ Phased exposure (the gate):
   ``get_registry_snapshot``, ``get_job_*``, analytics).
 * Unlocked once a dataset is attached: ``validate_code``,
   ``profile_datasets``.
-* Unlocked once the run is NAMED and the task is set:
-  ``request_code_authoring`` (the run code and metric). Mirrors the
-  wizard's Task → Inputs → Optimizer → Metric order so the wizard is
-  populated and verifiable before any code exists.
+* Unlocked once the task is set and the run is NAMED (on the submit
+  wizard's screens the task alone): ``request_code_authoring`` (the run
+  code and metric). Mirrors the wizard's Task → Inputs → Optimizer →
+  Metric order so the wizard is populated and verifiable before any code exists.
 * Unlocked once name + task + inputs + run/metric code + reflection model
   are all set: ``submit_unified_run`` (``POST /optimize``).
 * Always available post-submit: ``cancel_job``, rename/pin.
@@ -63,7 +63,7 @@ from ..language_models import (
     served_model_from,
 )
 from ..optimization.training_ground.registry import hash_tool_schema
-from .code import ReactReplyStream, _agent_error_payload, _format_agent_error, _reply_language
+from .code import ReactReplyStream, _agent_error_payload, _format_agent_error, _reply_language, _require_answer
 from .conduct import with_conduct
 from .constants import REASONING_FIELD
 from .conversation_react import AppendOnlyChatAdapter, ConversationReAct, history_from_turns
@@ -1123,7 +1123,10 @@ def tools_for(state: WizardState) -> set[str]:
     task_ready = _task_ready(state)
     # The code agent writes ``run(artifact, input)`` around the artifact and
     # the metric around the objective, so it needs both before it can start.
-    if name_set and task_ready:
+    # The submit wizard never asks for a name (an unnamed run is valid) and
+    # its Metric screen has no other code writer, so on its screens the task
+    # alone opens the tool.
+    if task_ready and (name_set or "wizard_screen" in state):
         allowed |= _CODE_AUTHORING_TOOLS
     if name_set and task_ready and _inputs_ready(state) and _code_ready(state) and _model_ready(state):
         allowed |= _SUBMIT_TOOLS
@@ -1526,6 +1529,13 @@ def screen_nav_tools(state: WizardState, turn: _TurnAuthoringFlag) -> list[dspy.
 
     async def continue_to_next_screen(note: str | None = None) -> Any:
         """Move the wizard on by one screen, once this screen is complete."""
+        # The coding card writes its code back after this turn ends; moving on
+        # now would leave the Metric screen before the user sees that code.
+        if turn.authoring_requested:
+            return (
+                "Can't continue this turn: request_code_authoring just ran and its code is not in the "
+                "wizard yet. End the turn; the user moves on once they have seen the code."
+            )
         problems = _screen_problems(screen, cast(WizardState, {**state, **turn.wizard_patch}))
         issue = str(state.get("screen_issue") or "").strip()
         # The wizard's own check ran on the turn-start values; once this turn
@@ -1856,13 +1866,27 @@ Capabilities worth knowing about:
   patch ``reflection_model_config`` in the SAME ``update_wizard_state``
   call as ``model_config`` — typically mirroring the same ``name``.
 * Run and metric code: NEVER hand-write ``run_code`` or
-  ``metric_code`` yourself. Once the run is NAMED and the task is set,
-  call ``request_code_authoring`` with a short ``goal`` (or empty to
-  seed from the task). It renders an inline card that runs the
-  dedicated code agent — the SAME one the submit wizard uses — which
-  drafts the run code and the metric, checks them against the
-  optimizer's metric shape, and writes the finished code back into the
-  wizard. After you call it, END your turn: the authored code lands in
+  ``metric_code`` yourself. Once the task is set (and, off the submit
+  wizard, the run is NAMED), call ``request_code_authoring`` with a
+  short ``goal`` (or empty to seed from the task). It is your coding tool, and the wizard has no
+  other code agent: on the Metric screen, when the run code or metric
+  is missing or the user asks for a change, call it. In the chat it
+  shows each edit as a diff and the validity check's result; the code
+  itself lands in the Metric screen's editors, where the user reads
+  and edits it (there are no editors in the chat, so point the user
+  there, not to a card). It hands a failed check back to the coding
+  agent on its own, a bounded number of times. Do not repeat the check's failures to
+  the user unless they ask. The coding agent starts once your turn ends, writes the code
+  AND runs the validity check on its own, and the chat shows its edits, the check and how
+  it ended under the call once it finishes. So after you call it, END your turn with no
+  reply text: never describe, predict or announce what it writes or how the check ends,
+  never ask the user to run the check or to tell you to run it, and do not call
+  ``validate_code_validate_code_post`` for it. Never say the coding agent is writing,
+  checking or running unless you called ``request_code_authoring`` in THIS turn: an
+  earlier call in the history is FINISHED, and its tool result says how it ended. When
+  the user asks for code and ``run_code`` / ``metric_code`` in ``wizard_state`` are empty
+  or do not match what they ask for, call ``request_code_authoring`` now instead of
+  saying it is on its way. After you call it, END your turn: the authored code lands in
   your NEXT turn's ``wizard_state`` (``run_code`` + ``metric_code``),
   and only then does ``submit_unified_run_optimize_post`` unlock. To refine later,
   call it again with a goal like "give partial credit for close
@@ -2235,6 +2259,11 @@ async def _drive_generalist_agent(
 
     Returns:
         The full assistant reply text after the loop completes.
+
+    Raises:
+        AgentStoppedError: When the loop ends with no reply and no ``submit``
+            (the model spent its turn thinking), so the user sees an error
+            instead of an empty message.
     """
     async with _mcp_session(mcp_url, auth_header=auth_header) as session:
         listing = await session.list_tools()
@@ -2337,6 +2366,7 @@ async def _drive_generalist_agent(
             "history": _history_from_chat(chat_history),
         }
         reply_text = ""
+        prediction: dspy.Prediction | None = None
         with dspy.context(lm=lm):
             async for chunk in program(**inputs):
                 if isinstance(chunk, dspy.streaming.StatusMessage):
@@ -2350,9 +2380,11 @@ async def _drive_generalist_agent(
                             reply_text += delta
                             emit({"event": "message_patch", "data": {"chunk": delta}})
                 elif isinstance(chunk, dspy.Prediction):
+                    prediction = chunk
                     final = getattr(chunk, "assistant_message", "") or ""
                     if final and final != reply_text:
                         reply_text = final
+        _require_answer(prediction, reply_text, next_step="Send your message again or pick a different model.")
         return reply_text
 
 

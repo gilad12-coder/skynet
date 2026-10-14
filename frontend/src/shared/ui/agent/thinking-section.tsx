@@ -7,6 +7,7 @@ import { Brain, CaretRight } from "@/shared/ui/icons";
 
 import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { thoughtSeconds } from "@/shared/lib/thinking-segments";
 
 import type { AgentThinking } from "./types";
 
@@ -66,9 +67,12 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
 
   const elapsedMs = startedAt ? (endedAt ?? nowTs) - startedAt : 0;
   const elapsedSec = Math.max(0, Math.round(elapsedMs / 100) / 10);
+  const thought = thoughtSeconds(startedAt, endedAt ?? nowTs);
   const label = isThinking
     ? msg("shared.agent.thinking")
-    : formatMsg("shared.agent.thought_seconds", { seconds: elapsedSec.toFixed(1) });
+    : thought === null
+      ? msg("shared.agent.thought_briefly")
+      : formatMsg("shared.agent.thought_seconds", { seconds: thought.toFixed(1) });
 
   return (
     <div className={cn(!compact && "px-4 py-2")}>

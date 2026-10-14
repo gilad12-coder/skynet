@@ -3577,6 +3577,10 @@ export interface CodeAgentHandlers {
   onMessagePatch?: (chunk: string) => void;
   onSignatureReplace?: (code: string) => void;
   onMetricReplace?: (code: string) => void;
+  // Unified chat: the code an edit_run ("signature") / edit_metric ("metric")
+  // call writes, while the model writes it; `reset` starts a new draft. The
+  // finished, checked code still arrives on the matching *Replace.
+  onCodeDraft?: (ev: { source: string; chunk: string; reset: boolean }) => void;
   // Full-graph snapshot after a seed draft or a successful graph tool op;
   // changedNodeId (null for seed/removals) drives the canvas pulse.
   onWorkflowReplace?: (workflow: WorkflowSpec, changedNodeId: string | null) => void;
@@ -3643,6 +3647,12 @@ export async function streamCodeAgent(
       handlers.onArtifactDone?.(String(data.source ?? ""));
     } else if (event === "message_patch") {
       handlers.onMessagePatch?.(String(data.chunk ?? ""));
+    } else if (event === "code_draft") {
+      handlers.onCodeDraft?.({
+        source: String(data.source ?? ""),
+        chunk: String(data.chunk ?? ""),
+        reset: Boolean(data.reset),
+      });
     } else if (event === "signature_replace") {
       handlers.onSignatureReplace?.(String(data.code ?? ""));
     } else if (event === "metric_replace") {

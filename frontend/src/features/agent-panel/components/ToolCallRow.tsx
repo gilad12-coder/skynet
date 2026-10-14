@@ -2,13 +2,13 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { AnimatePresence, motion } from "framer-motion";
-import { ArrowsClockwise, CaretRight, Warning, type Icon } from "@/shared/ui/icons";
+import { ArrowsClockwise, type Icon } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 import { CopyButton } from "@/shared/ui/copy-button";
 import { looksLikeMarkdown } from "@/shared/lib/markdown-hint";
 
 import { cn } from "@/shared/lib/utils";
+import { StepRow } from "@/shared/ui/agent/activity-steps";
 import type { AgentToolCall } from "@/shared/ui/agent/types";
 
 import { isPlainObject } from "../lib/entry-format";
@@ -26,27 +26,24 @@ const MessageMarkdown = dynamic(
 interface ToolCallRowProps {
   call: AgentToolCall;
   isRetry?: boolean;
-  /** Hebrew one-liner that replaces ``call.reason`` in the collapsed trigger. */
+  /** One-liner (verb and target) that replaces ``call.reason`` in the collapsed line. */
   summary?: string | null;
-  /** Override for the trigger title. Defaults to ``TOOL_META.title``. */
+  /** Override for the line's title. Defaults to ``TOOL_META.title``. */
   title?: string | null;
-  /** Override for the status-glyph icon (done state). Defaults to ``TOOL_META.icon``. */
+  /** Override for the line's icon. Defaults to ``TOOL_META.icon``. */
   icon?: Icon;
   /**
-   * Replaces the default args/result body. Caller renders whatever fits the
-   * tool — e.g. a diff view. Wrapped in the same container as the default
-   * body so vertical rhythm stays identical to the generalist tools.
+   * Replaces the default args/result body, e.g. a result table. Shown in the
+   * same indented area so every tool opens the same way.
    */
   customBody?: React.ReactNode;
 }
 
 /**
- * One tool invocation rendered as a quiet one-line step, as in Codex: the
- * tool's icon and title in muted text, the running step shimmering, and a
- * chevron that appears on hover. Args and result open in a framed box below
- * the line; only errors open on their own. A per-tool summary string
- * (provided by the renderer registry) replaces the raw LLM reason in the
- * collapsed line with a domain-specific Hebrew one-liner.
+ * One tool invocation as a quiet one-line step, as in Codex: the tool's icon
+ * and title in muted text, the per-tool summary after it, the running step
+ * shimmering and a failed one marked with a warning. Clicking opens the args
+ * and result as plain indented text, no frame.
  */
 export function ToolCallRow({
   call,
@@ -58,13 +55,6 @@ export function ToolCallRow({
 }: ToolCallRowProps) {
   const meta = getToolMeta(call.tool);
   const derivedTitle = title ?? getToolTitle(call.tool);
-  const Icon = icon ?? meta.icon;
-
-  const [open, setOpen] = React.useState(call.status === "error");
-
-  React.useEffect(() => {
-    if (call.status === "error") setOpen(true);
-  }, [call.status]);
 
   const payload = (call.payload ?? {}) as Record<string, unknown>;
   const args = isPlainObject(payload.arguments) ? payload.arguments : {};
@@ -76,121 +66,62 @@ export function ToolCallRow({
   const triggerText = summary ?? call.reason ?? null;
   const isError = call.status === "error";
   const showReasonInBody = call.reason && call.reason !== triggerText;
+  const hasBody =
+    customBody !== undefined || showReasonInBody || hasArgs || hasResult || call.status === "running";
 
   return (
-    <div className="min-w-0">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className={cn(
-          "group flex w-full min-w-0 items-center gap-2 py-1 text-start text-[0.8125rem]",
-          "cursor-pointer transition-colors",
-          isError
-            ? "text-[#7A1E13] dark:text-[#ffb2a0]"
-            : open
-              ? "text-foreground"
-              : "text-muted-foreground hover:text-foreground",
-        )}
-      >
-        {isError ? (
-          <Warning
-            className="size-3.5 shrink-0"
-            aria-label={msg("auto.features.agent.panel.components.toolcallrow.literal.7")}
-          />
-        ) : (
-          <Icon className="size-3.5 shrink-0" aria-hidden />
-        )}
-        <span
-          className={cn("shrink-0 truncate", call.status === "running" && "agent-shimmer-text")}
-        >
-          {derivedTitle}
-        </span>
-        {triggerText && (
-          <span className="min-w-0 truncate opacity-70" title={triggerText}>
-            {triggerText}
-          </span>
-        )}
-        {isRetry && (
+    <StepRow
+      icon={icon ?? meta.icon}
+      label={derivedTitle}
+      detail={triggerText && <span title={triggerText}>{triggerText}</span>}
+      status={call.status}
+      errorLabel={msg("auto.features.agent.panel.components.toolcallrow.literal.7")}
+      marks={
+        isRetry && (
           <ArrowsClockwise
             className="size-3 shrink-0 opacity-60"
             aria-label={msg("auto.features.agent.panel.components.toolcallrow.literal.2")}
           />
-        )}
-        <CaretRight
-          className={cn(
-            "size-3 shrink-0 transition-[transform,opacity] duration-150",
-            open ? "rotate-90" : "rtl:-scale-x-100 opacity-0 group-hover:opacity-100",
-          )}
-          aria-hidden="true"
-        />
-      </button>
-
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
-            className="overflow-hidden"
-          >
-            <div
-              className={cn(
-                "mb-2 mt-1 overflow-hidden rounded-lg border",
-                isError
-                  ? "border-[#9B2C1F]/20 dark:border-[#ec7764]/20"
-                  : "border-border/60 bg-muted/30",
+        )
+      }
+    >
+      {hasBody && (
+        <>
+          {showReasonInBody && <div>{call.reason}</div>}
+          {customBody !== undefined ? (
+            customBody
+          ) : (
+            <>
+              {hasArgs && (
+                <Section label={msg("auto.features.agent.panel.components.toolcallrow.literal.3")}>
+                  <dl className="space-y-1.5">
+                    {argEntries.map(([k, v]) => (
+                      <EntryRow key={k} argKey={k} value={v} />
+                    ))}
+                  </dl>
+                </Section>
               )}
-            >
-              <div className="border-b border-border/50 px-3 py-1.5 text-xs text-muted-foreground">
-                {derivedTitle}
-              </div>
-              <div className="space-y-2.5 px-3 py-2.5">
-                {showReasonInBody && (
-                  <div className="text-[0.75rem] leading-snug text-muted-foreground/85">
-                    {call.reason}
-                  </div>
-                )}
-                {customBody !== undefined ? (
-                  customBody
-                ) : (
-                  <>
-                    {hasArgs && (
-                      <Section
-                        label={msg("auto.features.agent.panel.components.toolcallrow.literal.3")}
-                      >
-                        <dl className="space-y-1.5">
-                          {argEntries.map(([k, v]) => (
-                            <EntryRow key={k} argKey={k} value={v} />
-                          ))}
-                        </dl>
-                      </Section>
-                    )}
-                    {hasResult && (
-                      <Section
-                        label={
-                          isError
-                            ? msg("auto.features.agent.panel.components.toolcallrow.literal.4")
-                            : msg("auto.features.agent.panel.components.toolcallrow.literal.5")
-                        }
-                      >
-                        <ResultBody result={result} isError={isError} />
-                      </Section>
-                    )}
-                    {!hasArgs && !hasResult && call.status === "running" && (
-                      <div className="text-[0.75rem] italic text-muted-foreground/75 leading-snug">
-                        {msg("auto.features.agent.panel.components.toolcallrow.2")}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+              {hasResult && (
+                <Section
+                  label={
+                    isError
+                      ? msg("auto.features.agent.panel.components.toolcallrow.literal.4")
+                      : msg("auto.features.agent.panel.components.toolcallrow.literal.5")
+                  }
+                >
+                  <ResultBody result={result} isError={isError} />
+                </Section>
+              )}
+              {!hasArgs && !hasResult && call.status === "running" && (
+                <div className="italic">
+                  {msg("auto.features.agent.panel.components.toolcallrow.2")}
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </StepRow>
   );
 }
 

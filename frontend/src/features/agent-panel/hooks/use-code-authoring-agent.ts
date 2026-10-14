@@ -10,18 +10,34 @@ import { autoLayoutSpec, defaultWorkflowSpec } from "@/features/submit/workflow/
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidationResult } from "@/shared/ui/code-editor";
 import type { ColumnMapping, ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
+import type { UnifiedAuthoringContext } from "@/shared/types/unified-run";
 
 import type { ConfirmedDataset } from "../components/DatasetUploadCard";
-import { contractValidations, panelAuthoringContext, panelContractSpec } from "../lib/code-authoring";
+import {
+  contractValidations,
+  describeFixes,
+  panelAuthoringContext,
+  panelContractSpec,
+  type AuthoringFixAttempt,
+  type FixRecord,
+} from "../lib/code-authoring";
 import type { WizardState } from "../lib/types";
+import { useWizardStateOptional } from "./use-wizard-state";
 
 // The run code and the metric are checked together by the validity check,
 // once the agent settles; there is no per-editor validation outside a workflow.
 const noValidation = async (): Promise<ValidationResult | null> => null;
-// The panel's card is read-only and the generalist cannot write code, so a
-// failed check is handed back to the coding agent, as the wizard's auto-fix
-// does; bounded so a contract the agent cannot meet does not loop.
+// The generalist cannot write code, so a failed check is handed back to the
+// coding agent; bounded so a contract the agent cannot meet does not loop.
 const MAX_CONTRACT_FIXES = 2;
+// Code the user is typing is checked once they pause, not on every keystroke.
+const EDIT_CHECK_DELAY_MS = 600;
+
+/** Where the validity check of the current run code and metric stands. */
+export type AuthoringCheckStatus = "idle" | "checking" | "passed" | "failed";
+
+/** How many failed checks the coding agent is asked to fix, at most. */
+export const MAX_AUTHORING_FIXES = MAX_CONTRACT_FIXES;
 
 /**
  * The code agent's state plus the artifact fields the panel mirror renders and
@@ -38,6 +54,17 @@ export interface CodeAuthoringAgentState extends CodeAgentState {
    * metric; the handoff waits on it. Always false in workflow mode.
    */
   contractOk: boolean;
+  /** Where the validity check of the current code stands, for the transcript. */
+  checkStatus: AuthoringCheckStatus;
+  /** True when run code and a metric already exist, so a new request continues from them. */
+  hasCode: boolean;
+  /** Each failed check handed back to the agent for a fix, oldest first. */
+  fixAttempts: AuthoringFixAttempt[];
+  /**
+   * True when the code lives in the wizard's own run-code and metric slots,
+   * so the Metric step's editors show and edit it.
+   */
+  sharedWithWizard: boolean;
   /** True when the run targets the multi-module ``workflow`` module. */
   isWorkflow: boolean;
   /** The authored graph the inline canvas renders; null until seeded. */
@@ -90,15 +117,166 @@ function rolesToColumnMapping(
   return { inputs, outputs };
 }
 
+interface AuthoringCheckArgs {
+  context: UnifiedAuthoringContext | null;
+  /** Identifies the context by content, so a rebuilt equal object is no change. */
+  contextKey: string;
+  status: CodeAgentState["status"];
+  signatureCode: string;
+  metricCode: string;
+  /** True while the code is exactly what the coding agent last wrote. */
+  agentAuthored: boolean;
+  /** How many messages the coding agent's chat holds right now. */
+  messageCount: number;
+  setSignatureValidation: (result: ValidateCodeResponse | null) => void;
+  setMetricValidation: (result: ValidateCodeResponse | null) => void;
+  send: (message: string) => void;
+}
+
+/**
+ * Run the static validity check (the same one the wizard runs before Run) on
+ * the settled code, land its failures on the editor they belong to, and hand
+ * a failure on the agent's own code back to it, a bounded number of times.
+ * Code the user edited is checked too, but never sent back for a fix.
+ *
+ * Any settled code is checked, not only what a coding turn just finished:
+ * each wizard screen has its own conversation, so coming back to the Metric
+ * screen resets the agent to idle while the wizard keeps its code, and an
+ * edit made after that must still be checked.
+ *
+ * Args:
+ *   args: The authoring context, the agent status, both codes and the sinks.
+ *
+ * Returns:
+ *   The check status, whether the current code passed, the fixes asked for,
+ *   and a reset.
+ */
+function useAuthoringCheck(args: AuthoringCheckArgs): {
+  status: AuthoringCheckStatus;
+  ok: boolean;
+  fixes: FixRecord[];
+  reset: () => void;
+} {
+  const {
+    context,
+    contextKey,
+    status,
+    signatureCode,
+    metricCode,
+    agentAuthored,
+    messageCount,
+    setSignatureValidation,
+    setMetricValidation,
+    send,
+  } = args;
+  const [result, setResult] = React.useState<{ key: string; ok: boolean } | null>(null);
+  const [fixKey, setFixKey] = React.useState<string | null>(null);
+  const [fixes, setFixes] = React.useState<FixRecord[]>([]);
+  // A reset clears the result while the code and context stay the same (each
+  // wizard screen opens its own chat), so it must re-run the check itself or
+  // the transcript sits on "checking" until the next edit.
+  const [generation, setGeneration] = React.useState(0);
+  const fixAttemptsRef = React.useRef(0);
+  const key = `${contextKey}\u0000${signatureCode}\u0000${metricCode}`;
+  const checkable =
+    context !== null && status !== "streaming" && !!signatureCode.trim() && !!metricCode.trim();
+  // Only code a coding turn finished goes back for a fix; a stopped or
+  // failed turn's code is checked but not sent back.
+  const fixable = agentAuthored && status === "done";
+
+  React.useEffect(() => {
+    if (!context || !checkable) return;
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => {
+        staticContractCheck(
+          { spec: panelContractSpec(context, signatureCode, metricCode), sample_count: 1 },
+          controller.signal,
+        )
+          .then((checked) => {
+            if (controller.signal.aborted) return;
+            const { run, metric } = contractValidations(checked, contractCheckMessage);
+            setSignatureValidation(run);
+            setMetricValidation(metric);
+            setResult({ key, ok: checked.ok });
+            if (!checked.ok && fixable && fixAttemptsRef.current < MAX_CONTRACT_FIXES) {
+              fixAttemptsRef.current += 1;
+              const record: FixRecord = {
+                attempt: fixAttemptsRef.current,
+                failures: [...run.errors, ...metric.errors],
+                runBefore: signatureCode,
+                metricBefore: metricCode,
+                from: null,
+              };
+              setFixes((prev) => [...prev, record]);
+              setFixKey(key);
+            }
+          })
+          .catch((err: unknown) => {
+            if (controller.signal.aborted) return;
+            setResult({ key, ok: false });
+            setSignatureValidation({
+              valid: false,
+              errors: [err instanceof Error ? err.message : msg("agent.validation.failed")],
+              warnings: [],
+            });
+          });
+      },
+      agentAuthored ? 0 : EDIT_CHECK_DELAY_MS,
+    );
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    context,
+    checkable,
+    signatureCode,
+    metricCode,
+    key,
+    fixable,
+    generation,
+    setSignatureValidation,
+    setMetricValidation,
+  ]);
+
+  // Sent from its own effect, after the render that stored the failures, so
+  // the fix turn carries them to the agent as its prior validations.
+  React.useEffect(() => {
+    if (!fixKey || status !== "done") return;
+    setFixKey(null);
+    setFixes((prev) =>
+      prev.map((f, i) =>
+        i === prev.length - 1 && f.from === null ? { ...f, from: messageCount } : f,
+      ),
+    );
+    send(msg("submit.v2.metric.agent.fix"));
+  }, [fixKey, status, send, messageCount]);
+
+  const reset = React.useCallback(() => {
+    setResult(null);
+    setFixKey(null);
+    setFixes([]);
+    setGeneration((g) => g + 1);
+    fixAttemptsRef.current = 0;
+  }, []);
+
+  const settled = result !== null && result.key === key;
+  let checkStatus: AuthoringCheckStatus = "idle";
+  if (checkable) checkStatus = settled ? (result.ok ? "passed" : "failed") : "checking";
+  return { status: checkStatus, ok: settled && result.ok, fixes, reset };
+}
+
 /**
  * Host the canonical wizard code agent (``useCodeAgent``) at the generalist
- * panel level so the panel's authoring card mirrors exactly what the code agent
- * does: the same streaming, thinking timer and authoring contract.
+ * panel level so the panel's coding-tool steps show exactly what the code
+ * agent does: the same streaming, thinking timer and authoring contract.
  *
- * This is glue around the shared hook, not a second engine: it owns the code
- * and validation state the hook writes into, hands the agent the same unified
- * authoring context the wizard's Metric step does (run code plus a metric),
- * and runs the same static validity check once the agent settles.
+ * On the submit wizard the code is the wizard's own: the agent writes into its
+ * run-code and metric slots under the context the Metric step registers, and
+ * the Metric step's editors are where the user reads and edits it. Off the
+ * wizard the hook keeps the code itself and the panel hands it off once the
+ * validity check passes.
  *
  * Args:
  *   args: Dataset, the ``armed`` gate, the panel's wizard state, and the
@@ -112,8 +290,8 @@ export function useCodeAuthoringAgent(
 ): CodeAuthoringAgentState {
   const { dataset, armed, wizard, moduleName = "", optimizerName, model, reasoningEffort } = args;
 
-  const [signatureCode, setSignatureCode] = React.useState("");
-  const [metricCode, setMetricCode] = React.useState("");
+  const [localSignatureCode, setLocalSignatureCode] = React.useState("");
+  const [localMetricCode, setLocalMetricCode] = React.useState("");
   const [signatureManuallyEdited, setSignatureManuallyEdited] = React.useState(false);
   const [metricManuallyEdited, setMetricManuallyEdited] = React.useState(false);
   const [signatureValidation, setSignatureValidation] =
@@ -125,18 +303,72 @@ export function useCodeAuthoringAgent(
   const columnKinds = React.useMemo(() => dataset?.columnKinds ?? {}, [dataset]);
 
   const isWorkflow = moduleName.toLowerCase() === "workflow";
-  // What the last passing validity check saw: the context and both codes.
-  const [passedKey, setPassedKey] = React.useState<string | null>(null);
-  const [fixKey, setFixKey] = React.useState<string | null>(null);
-  const fixAttemptsRef = React.useRef(0);
+
+  const wizardCtx = useWizardStateOptional();
+  const wizardContext =
+    !isWorkflow && wizardCtx?.wizardScreen != null ? wizardCtx.authoringContext : null;
+  const shared = wizardContext !== null;
+  const applyAgentPatch = wizardCtx?.applyAgentPatch;
+  const signatureCode = shared ? (wizardCtx?.state.run_code ?? "") : localSignatureCode;
+  const metricCode = shared ? (wizardCtx?.state.metric_code ?? "") : localMetricCode;
+
+  // The setters keep one identity for ``useCodeAgent`` (it captures them in
+  // its run), so they read where the code lives from a ref.
+  const sharedRef = React.useRef(shared);
+  React.useEffect(() => {
+    sharedRef.current = shared;
+  });
+  const writeWizardCode = wizardCtx?.writeCode;
+  const writeSignatureCode = React.useCallback(
+    (code: string) => {
+      if (sharedRef.current && writeWizardCode?.("run", code)) return;
+      if (sharedRef.current && applyAgentPatch) applyAgentPatch({ run_code: code });
+      else setLocalSignatureCode(code);
+    },
+    [writeWizardCode, applyAgentPatch],
+  );
+  const writeMetricCode = React.useCallback(
+    (code: string) => {
+      if (sharedRef.current && writeWizardCode?.("metric", code)) return;
+      if (sharedRef.current && applyAgentPatch) applyAgentPatch({ metric_code: code });
+      else setLocalMetricCode(code);
+    },
+    [writeWizardCode, applyAgentPatch],
+  );
+  // What the coding agent itself last wrote: only a failure on that code goes
+  // back to it for a fix, never one on code the user is typing.
+  const [agentWrote, setAgentWrote] = React.useState({ signature: "", metric: "" });
+  const setSignatureCode = React.useCallback(
+    (code: string) => {
+      setAgentWrote((prev) => ({ ...prev, signature: code }));
+      writeSignatureCode(code);
+    },
+    [writeSignatureCode],
+  );
+  const setMetricCode = React.useCallback(
+    (code: string) => {
+      setAgentWrote((prev) => ({ ...prev, metric: code }));
+      writeMetricCode(code);
+    },
+    [writeMetricCode],
+  );
+  const agentAuthored =
+    signatureCode === agentWrote.signature && metricCode === agentWrote.metric;
 
   // A workflow run hands off a graph, never run code, so it keeps the
   // graph-aware seed and no unified context. The panel rebuilds its wizard
   // snapshot every render, so the context is keyed by content: a new object
   // with the same fields must not re-run the validity check.
-  const contextKey = JSON.stringify(isWorkflow ? null : panelAuthoringContext(wizard, dataset));
+  const contextKey = JSON.stringify(
+    isWorkflow ? null : (wizardContext ?? panelAuthoringContext(wizard, dataset)),
+  );
+  // Each wizard screen opens its own chat, so coming back to the Metric screen
+  // resets the coding agent while the wizard keeps its code. A seed would then
+  // rewrite that code from scratch and drop the user's edits; existing code is
+  // continued with a follow-up turn instead.
+  const hasCode = !isWorkflow && !!signatureCode.trim() && !!metricCode.trim();
   const authoringContext = React.useMemo(
-    () => JSON.parse(contextKey) as ReturnType<typeof panelAuthoringContext>,
+    () => JSON.parse(contextKey) as UnifiedAuthoringContext | null,
     [contextKey],
   );
 
@@ -222,6 +454,19 @@ export function useCodeAuthoringAgent(
     [],
   );
 
+  // On the wizard the coding agent may sharpen the task brief, as it did in
+  // the Metric step's own panel; it lands in the Task step's fields.
+  const onBrief = React.useCallback(
+    (brief: { objective?: string; background?: string }) => {
+      if (!sharedRef.current || !applyAgentPatch) return;
+      const patch: Partial<WizardState> = {};
+      if (brief.objective !== undefined) patch.task_objective = brief.objective;
+      if (brief.background !== undefined) patch.task_background = brief.background;
+      applyAgentPatch(patch);
+    },
+    [applyAgentPatch],
+  );
+
   const agent = useCodeAgent({
     columnRoles,
     columnKinds,
@@ -241,8 +486,9 @@ export function useCodeAuthoringAgent(
     metricValidation,
     runSignatureValidation: noValidation,
     runMetricValidation: isWorkflow ? runWorkflowMetricValidation : noValidation,
-    seedEnabled: armed && (isWorkflow || authoringContext !== null),
+    seedEnabled: armed && (isWorkflow || (authoringContext !== null && !hasCode)),
     unified: authoringContext,
+    onBrief,
     model,
     reasoningEffort,
     isWorkflow,
@@ -251,69 +497,63 @@ export function useCodeAuthoringAgent(
     applyAgentWorkflow,
   });
 
-  const checkKey = `${contextKey}\u0000${signatureCode}\u0000${metricCode}`;
-
-  // Once the agent settles, the static validity check (the same one the
-  // wizard runs before Run) decides whether the code fits the contract; its
-  // failures land on the editor they belong to.
+  // The Metric step's editors show the same code, so they show it streaming.
+  const setCodeWriting = wizardCtx?.setCodeWriting;
+  const runWriting = shared && agent.signatureStatus === "writing";
+  const metricWriting = shared && agent.metricStatus === "writing";
   React.useEffect(() => {
-    if (!authoringContext || agent.status !== "done") return;
-    if (!signatureCode.trim() || !metricCode.trim()) return;
-    const controller = new AbortController();
-    staticContractCheck(
-      { spec: panelContractSpec(authoringContext, signatureCode, metricCode), sample_count: 1 },
-      controller.signal,
-    )
-      .then((result) => {
-        if (controller.signal.aborted) return;
-        const { run, metric } = contractValidations(result, contractCheckMessage);
-        setSignatureValidation(run);
-        setMetricValidation(metric);
-        setPassedKey(result.ok ? checkKey : null);
-        if (!result.ok && fixAttemptsRef.current < MAX_CONTRACT_FIXES) {
-          fixAttemptsRef.current += 1;
-          setFixKey(checkKey);
-        }
-      })
-      .catch((err: unknown) => {
-        if (controller.signal.aborted) return;
-        setSignatureValidation({
-          valid: false,
-          errors: [err instanceof Error ? err.message : msg("agent.validation.failed")],
-          warnings: [],
-        });
-      });
-    return () => controller.abort();
-  }, [authoringContext, agent.status, signatureCode, metricCode, checkKey]);
+    setCodeWriting?.({ run: runWriting, metric: metricWriting });
+  }, [setCodeWriting, runWriting, metricWriting]);
+  React.useEffect(() => () => setCodeWriting?.({ run: false, metric: false }), [setCodeWriting]);
 
-  // Sent from its own effect, after the render that stored the failures, so
-  // the fix turn carries them to the agent as its prior validations.
-  const agentSend = agent.send;
-  React.useEffect(() => {
-    if (!fixKey || agent.status !== "done") return;
-    setFixKey(null);
-    agentSend(msg("submit.v2.metric.agent.fix"));
-  }, [fixKey, agent.status, agentSend]);
+  const check = useAuthoringCheck({
+    context: authoringContext,
+    contextKey,
+    status: agent.status,
+    signatureCode,
+    metricCode,
+    agentAuthored,
+    messageCount: agent.messages.length,
+    setSignatureValidation,
+    setMetricValidation,
+    send: agent.send,
+  });
+  const fixAttempts = React.useMemo(
+    () =>
+      describeFixes(
+        check.fixes,
+        agent.messages,
+        agent.status === "streaming",
+        signatureCode,
+        metricCode,
+      ),
+    [check.fixes, agent.messages, agent.status, signatureCode, metricCode],
+  );
 
-  // ``useCodeAgent.reset`` clears its own state but not the caller-owned code
-  // (the wizard clears that separately); wrap it so a fresh conversation drops
-  // the previous run's artifacts too.
+  // ``useCodeAgent.reset`` clears its own state but not the caller-owned code;
+  // wrap it so a fresh conversation drops the previous run's artifacts too.
+  // The wizard's own code stays: each wizard screen opens its own chat, and
+  // leaving the Metric screen must not wipe what was written there.
+  const agentReset = agent.reset;
+  const checkReset = check.reset;
   const reset = React.useCallback(() => {
-    agent.reset();
-    setSignatureCode("");
-    setMetricCode("");
+    agentReset();
+    setLocalSignatureCode("");
+    setLocalMetricCode("");
+    // The wizard keeps its code across screens, so what the agent wrote there
+    // still counts as its own until someone edits it; a failed check on it,
+    // or on a follow-up's change to one half, still goes back for a fix.
+    if (!sharedRef.current) setAgentWrote({ signature: "", metric: "" });
     setSignatureValidation(null);
     setMetricValidation(null);
-    setPassedKey(null);
-    setFixKey(null);
-    fixAttemptsRef.current = 0;
+    checkReset();
     setSignatureManuallyEdited(false);
     setMetricManuallyEdited(false);
     setWorkflowSpec(null);
     setWorkflowRevision(0);
     setWorkflowTouched(false);
     setAgentPulseNodeId(null);
-  }, [agent.reset]);
+  }, [agentReset, checkReset]);
 
   return {
     ...agent,
@@ -322,7 +562,11 @@ export function useCodeAuthoringAgent(
     metricCode,
     signatureValidation,
     metricValidation,
-    contractOk: authoringContext !== null && passedKey === checkKey,
+    contractOk: authoringContext !== null && check.ok,
+    checkStatus: check.status,
+    hasCode,
+    fixAttempts,
+    sharedWithWizard: shared,
     isWorkflow,
     workflowSpec,
     workflowRevision,

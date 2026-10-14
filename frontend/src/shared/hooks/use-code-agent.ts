@@ -8,6 +8,8 @@ import { streamCodeAgent, type AgentQuestion, type CodeAgentToolName } from "@/s
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import { liveLanesLast } from "@/shared/hooks/reasoning-order";
+import { appendVersion, type ArtifactVersion } from "@/shared/hooks/artifact-versions";
+import { createCodeDrafts, type DraftSource } from "@/shared/hooks/code-drafts";
 import { TERMS } from "@/shared/lib/terms";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
@@ -127,17 +129,19 @@ interface AgentMessage {
   stats?: TurnStats | null;
 }
 
-interface ArtifactVersion {
-  code: string;
-  ts: number;
-}
-
 export interface CodeAgentState {
   status: AgentStatus;
   mode: AgentMode;
   statusLabel: string;
   signatureStatus: ArtifactStatus;
   metricStatus: ArtifactStatus;
+  /**
+   * The run code's / the metric's first chunk of this writing stretch has
+   * reached its editor. A lane is "writing" from the run's start, seconds
+   * before any code arrives, so "Editing run.py" waits on this.
+   */
+  signatureFlowing: boolean;
+  metricFlowing: boolean;
   messages: AgentMessage[];
   error: string | null;
   /** The wizard agent's daily turn cap is used up. */
@@ -256,6 +260,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   const [statusLabel, setStatusLabel] = React.useState("");
   const [signatureStatus, setSignatureStatus] = React.useState<ArtifactStatus>("idle");
   const [metricStatus, setMetricStatus] = React.useState<ArtifactStatus>("idle");
+  const [flowing, setFlowing] = React.useState({ signature: false, metric: false });
+  const markFlowing = React.useCallback((source: "signature" | "metric", on: boolean) => {
+    setFlowing((prev) => (prev[source] === on ? prev : { ...prev, [source]: on }));
+  }, []);
   const [messages, setMessages] = React.useState<AgentMessage[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [limitReached, setLimitReached] = React.useState(false);
@@ -372,10 +380,15 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     setMessages((prev) => {
       const last = prev[prev.length - 1];
       if (!last || last.role !== "assistant") return prev;
+      const calls = last.toolCalls ?? [];
       const next = prev.slice();
+      // A streamed edit opens its row before the call runs; the call's own
+      // start then fills in the reason on that same row.
       next[next.length - 1] = {
         ...last,
-        toolCalls: [...(last.toolCalls ?? []), call],
+        toolCalls: calls.some((t) => t.id === call.id)
+          ? calls.map((t) => (t.id === call.id ? { ...t, reason: call.reason || t.reason } : t))
+          : [...calls, call],
       };
       return next;
     });
@@ -427,6 +440,21 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     [],
   );
 
+  const pushSignatureVersion = React.useCallback((code: string) => {
+    setSignatureVersions((prev) => {
+      const next = appendVersion(prev, code, Date.now());
+      if (next !== prev) setSignatureVersionIndex(next.length - 1);
+      return next;
+    });
+  }, []);
+  const pushMetricVersion = React.useCallback((code: string) => {
+    setMetricVersions((prev) => {
+      const next = appendVersion(prev, code, Date.now());
+      if (next !== prev) setMetricVersionIndex(next.length - 1);
+      return next;
+    });
+  }, []);
+
   const runAgent = React.useCallback(
     (userMessage: string, history: AgentMessage[]) => {
       const isChat = userMessage.length > 0;
@@ -438,6 +466,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
 
       sigBufRef.current = "";
       metricBufRef.current = "";
+      setFlowing({ signature: false, metric: false });
       replyBufRef.current = "";
       reasoningBufRef.current = "";
       reasoningSectionsRef.current = { order: [], bufs: {} };
@@ -496,6 +525,22 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       // previous version — the tool-call card would show a stale diff.
       let lastSignatureCode = snapshot.signatureCode;
       let lastMetricCode = snapshot.metricCode;
+      // What each editor holds right now, streamed or replaced, so a lane
+      // that finishes can land its code as a version straight away.
+      let latestSignature = snapshot.signatureCode;
+      let latestMetric = snapshot.metricCode;
+      // The code an edit call is writing right now, shown live in its editor
+      // and never saved as a version: only the call's checked replace is.
+      const drafts = createCodeDrafts();
+      const dropDraft = (source: DraftSource) => {
+        if (!drafts.drop(source)) return;
+        if (source === "signature") setSignatureCode(lastSignatureCode);
+        else setMetricCode(lastMetricCode);
+      };
+      controller.signal.addEventListener("abort", () => {
+        dropDraft("signature");
+        dropDraft("metric");
+      });
       const chatHistory = history
         .filter((m) => m.content.trim().length > 0)
         .map((m) => ({ role: m.role, content: m.content }));
@@ -530,6 +575,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
         if (reasoningBufRef.current && !reasoningEndedRef.current) {
           reasoningEndedRef.current = true;
           setReasoningEndedAt(Date.now());
+        } else if (!reasoningBufRef.current) {
+          // A model that streams no reasoning would otherwise keep a bare
+          // "Thinking" row up while its code and reply are already flowing.
+          setReasoningStartedAt(null);
         }
       };
 
@@ -626,7 +675,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               setSignatureStatus("writing");
               markReasoningDone("signature");
             }
+            markFlowing("signature", true);
             sigBufRef.current += chunk;
+            latestSignature = sigBufRef.current;
             setSignatureCode(sigBufRef.current);
             setSignatureValidation(null);
           },
@@ -642,21 +693,29 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               setMetricStatus("writing");
               markReasoningDone("metric");
             }
+            markFlowing("metric", true);
             metricBufRef.current += chunk;
+            latestMetric = metricBufRef.current;
             setMetricCode(metricBufRef.current);
             setMetricValidation(null);
           },
           onArtifactDone: (source) => {
             if (controller.signal.aborted) return;
             markReasoningDone(source);
+            if (source === "signature" || source === "metric") markFlowing(source, false);
+            // The seed's turn only ends after the intro message is written,
+            // seconds later; landing the lane's code now keeps its "Edited"
+            // row in the transcript instead of a gap until then.
             if (source === "signature") {
               runLaneDone = true;
+              pushSignatureVersion(latestSignature);
               setSignatureStatus("done");
               if (!metricLaneDone) {
                 setStatusLabel(unifiedMsg("submit.v2.metric.agent.writing_metric"));
               }
             } else if (source === "metric") {
               metricLaneDone = true;
+              pushMetricVersion(latestMetric);
               setMetricStatus("done");
               if (!runLaneDone) {
                 setStatusLabel(unifiedMsg("submit.v2.metric.agent.writing_run"));
@@ -705,18 +764,41 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               endedAt: null,
             });
           },
+          onCodeDraft: ({ source, chunk, reset }) => {
+            if (controller.signal.aborted) return;
+            if (source === "signature") {
+              setSignatureCode(drafts.write(source, chunk, reset));
+              setSignatureStatus("writing");
+              markFlowing("signature", true);
+            } else if (source === "metric") {
+              setMetricCode(drafts.write(source, chunk, reset));
+              setMetricStatus("writing");
+              markFlowing("metric", true);
+            }
+          },
           onToolEnd: (ev) => {
+            if (ev.status !== "ok") {
+              if (isSeedTool(ev.tool)) dropDraft("signature");
+              else if (isScorerTool(ev.tool)) dropDraft("metric");
+            }
             finishToolCall(ev.id, ev.status === "ok" ? "done" : "error");
-            if (isSeedTool(ev.tool)) setSignatureStatus("done");
-            else if (isScorerTool(ev.tool)) setMetricStatus("done");
+            if (isSeedTool(ev.tool)) {
+              setSignatureStatus("done");
+              markFlowing("signature", false);
+            } else if (isScorerTool(ev.tool)) {
+              setMetricStatus("done");
+              markFlowing("metric", false);
+            }
           },
           onWorkflowReplace: (workflow, changedNodeId) => {
             markReasoningDone();
             applyAgentWorkflowRef.current?.(workflow, changedNodeId);
           },
           onSignatureReplace: (code) => {
+            drafts.land("signature");
             const prevCode = lastSignatureCode;
             lastSignatureCode = code;
+            latestSignature = code;
             setSignatureCode(code);
             setSignatureManuallyEdited(false);
             attachCodeToLatestRunningToolCall("seed", prevCode, code);
@@ -726,19 +808,17 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             flashClearRef.current = setTimeout(() => {
               setSignatureFlashLines([]);
             }, 1200);
-            setSignatureVersions((prev) => {
-              const next = [...prev, { code, ts: Date.now() }];
-              setSignatureVersionIndex(next.length - 1);
-              return next;
-            });
+            pushSignatureVersion(code);
             pendingValidationsRef.current.push({
               kind: "signature",
               promise: runnersRef.current.runSignatureValidation(code),
             });
           },
           onMetricReplace: (code) => {
+            drafts.land("metric");
             const prevCode = lastMetricCode;
             lastMetricCode = code;
+            latestMetric = code;
             setMetricCode(code);
             setMetricManuallyEdited(false);
             attachCodeToLatestRunningToolCall("scorer", prevCode, code);
@@ -748,11 +828,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             flashClearRef.current = setTimeout(() => {
               setMetricFlashLines([]);
             }, 1200);
-            setMetricVersions((prev) => {
-              const next = [...prev, { code, ts: Date.now() }];
-              setMetricVersionIndex(next.length - 1);
-              return next;
-            });
+            pushMetricVersion(code);
             pendingValidationsRef.current.push({
               kind: "metric",
               promise: runnersRef.current.runMetricValidation(code),
@@ -764,6 +840,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             // the auto-fix step still matters — abort can land while the
             // validations above are awaited.
             if (controller.signal.aborted) return;
+            dropDraft("signature");
+            dropDraft("metric");
             // A chat turn that ends without a word is a failed turn, not a
             // finished one: the chat offers a retry instead of a bare "Done.".
             if (isChat && !result.assistant_message.trim() && !replyBufRef.current.trim()) {
@@ -791,11 +869,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               }
               setMetricCode(result.metric_code);
               setMetricManuallyEdited(false);
-              setMetricVersions((prev) => {
-                const next = [...prev, { code: result.metric_code, ts: Date.now() }];
-                setMetricVersionIndex(next.length - 1);
-                return next;
-              });
+              pushMetricVersion(result.metric_code);
               pendingValidationsRef.current.push({
                 kind: "metric",
                 promise: runnersRef.current.runMetricValidation(result.metric_code),
@@ -814,16 +888,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
                 setSignatureFlashLines([]);
                 setMetricFlashLines([]);
               }, 800);
-              setSignatureVersions((prev) => {
-                const next = [...prev, { code: result.signature_code, ts: Date.now() }];
-                setSignatureVersionIndex(next.length - 1);
-                return next;
-              });
-              setMetricVersions((prev) => {
-                const next = [...prev, { code: result.metric_code, ts: Date.now() }];
-                setMetricVersionIndex(next.length - 1);
-                return next;
-              });
+              pushSignatureVersion(result.signature_code);
+              pushMetricVersion(result.metric_code);
               pendingValidationsRef.current.push({
                 kind: "signature",
                 promise: runnersRef.current.runSignatureValidation(result.signature_code),
@@ -925,6 +991,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           },
           onError: (message, code) => {
             if (controller.signal.aborted) return;
+            dropDraft("signature");
+            dropDraft("metric");
             setLimitReached(code === DAILY_LIMIT_CODE);
             setStatus("error");
             setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.8"));
@@ -965,7 +1033,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       pushToolCall,
       finishToolCall,
       attachCodeToLatestRunningToolCall,
+      pushSignatureVersion,
+      pushMetricVersion,
       steerStore,
+      markFlowing,
     ],
   );
 
@@ -1146,6 +1217,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     statusLabel,
     signatureStatus,
     metricStatus,
+    signatureFlowing: flowing.signature,
+    metricFlowing: flowing.metric,
     messages,
     error,
     limitReached,

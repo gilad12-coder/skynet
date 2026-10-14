@@ -1,15 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { useCodeAgent } from "@/shared/hooks/use-code-agent";
-import type { ValidateCodeResponse } from "@/shared/types/api";
+import {
+  AgentPanelDock,
+  isGeneralistAgentEnabled,
+  useWizardStateOptional,
+} from "@/features/agent-panel";
 import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unified-run";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
 import { useContractCheck } from "../../hooks/use-contract-check";
 import { authoringCases } from "../../lib/inputs-mode";
 import { metricUsesModel as metricCallsModel } from "../../lib/scorer-dependencies";
 import { AuthoringShell } from "../steps/AuthoringShell";
-import { CodeAgentPanel } from "../steps/CodeAgentPanel";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { CodeWorkspace } from "./CodeWorkspace";
 import { ContractCheckScreen } from "./ContractCheckScreen";
@@ -17,36 +19,23 @@ import { MetricModelRow } from "./MetricModelRow";
 import { RunOverview } from "./RunOverview";
 import { WizardScreen } from "./WizardScreen";
 
-const NO_ROLES: Record<string, string> = {};
-const NO_KINDS: Record<string, "text" | "image"> = {};
 const SAMPLE_CASE_LIMIT = 5;
-const noop = () => {};
-// The unified workspace has no per-editor validation endpoint: the contract
-// check validates run and metric together.
-const noValidation = async (): Promise<ValidateCodeResponse | null> => null;
+const NOT_WRITING = { run: false, metric: false };
 
 /**
- * Step 4, three screens. First the code: the coding agent writes the run code
- * and the metric in the side panel, and the user can edit either. Then the
- * sandbox check, which runs both on a few samples. Then the overview, which
- * holds Run, so the run button never covers the editors.
+ * Step 4, three screens. First the code: the docked agent's coding tool
+ * writes the run code and the metric into these editors, and the user can
+ * edit either here or in the tool's card. Then the sandbox check, which runs
+ * both on a few samples. Then the overview, which holds Run, so the run
+ * button never covers the editors.
  */
 export function MetricStep({ page, onBack }: { page: number; onBack: () => void }) {
   const ctx = useWizardV2();
-  const { state, patchTask, patchWorkspace, guided, optimizerCatalog, inputsInferring } = ctx;
+  const { state, patchWorkspace, guided, optimizerCatalog, inputsInferring } = ctx;
   const { task, inputs, optimizer, workspace } = state;
   const kind = task.artifactKind;
   const repo = Boolean(task.repo);
   const t = (key: string) => v2Msg(key, guided);
-
-  // Code already in a slot (a cloned run, or the user's own) is never
-  // overwritten by the agent's first draft.
-  const [runEdited, setRunEdited] = React.useState(() => workspace.runCode.trim().length > 0);
-  const [metricEdited, setMetricEdited] = React.useState(
-    () => workspace.metricCode.trim().length > 0,
-  );
-  const [agentModel, setAgentModel] = React.useState<string | null>(null);
-  const [agentEffort, setAgentEffort] = React.useState<string | null>(null);
 
   const metricUsesModel = metricCallsModel(state);
   const catalog =
@@ -102,56 +91,39 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     (code: string) => patchWorkspace({ metricCode: code }),
     [patchWorkspace],
   );
-  const onBrief = React.useCallback(
-    (brief: { objective?: string; background?: string }) => {
-      const patch: { objective?: string; background?: string } = {};
-      if (brief.objective !== undefined) patch.objective = brief.objective;
-      if (brief.background !== undefined) patch.background = brief.background;
-      if (Object.keys(patch).length > 0) patchTask(patch);
-    },
-    [patchTask],
-  );
 
-  const agent = useCodeAgent({
-    columnRoles: NO_ROLES,
-    columnKinds: NO_KINDS,
-    parsedDataset: null,
-    moduleName: "",
-    signatureCode: workspace.runCode,
-    metricCode: workspace.metricCode,
-    setSignatureCode: setRunCode,
-    setMetricCode,
-    signatureManuallyEdited: runEdited,
-    metricManuallyEdited: metricEdited,
-    setSignatureManuallyEdited: setRunEdited,
-    setMetricManuallyEdited: setMetricEdited,
-    setSignatureValidation: noop,
-    setMetricValidation: noop,
-    signatureValidation: null,
-    metricValidation: null,
-    runSignatureValidation: noValidation,
-    runMetricValidation: noValidation,
-    // Inference re-roles the columns when it answers, and the Inputs step
-    // stays mounted while it does, so a seed started earlier would write
-    // against input fields the contract check and the run no longer pass.
-    // The agent writes run code against sample inputs, which a repository
-    // run has neither of; its scorer is written by hand.
-    seedEnabled: !repo && authoringContext !== null && !inputsInferring,
-    unified: authoringContext,
-    onBrief,
-    model: agentModel,
-    reasoningEffort: agentEffort,
-  });
+  // The docked agent's coding tool writes under this context, into these
+  // editors' code. Inference re-roles the columns when it answers, and the
+  // Inputs step stays mounted while it does, so code written earlier would
+  // target input fields the contract check and the run no longer pass. A
+  // repository run has no sample inputs to write against; its scorer is
+  // written by hand.
+  const wizardCtx = useWizardStateOptional();
+  const registerContext = wizardCtx?.setAuthoringContext;
+  const sharedContext = repo || inputsInferring ? null : authoringContext;
+  React.useEffect(() => {
+    registerContext?.(sharedContext);
+  }, [registerContext, sharedContext]);
+  React.useEffect(() => () => registerContext?.(null), [registerContext]);
+  const registerSink = wizardCtx?.setCodeSink;
+  React.useEffect(() => {
+    if (!registerSink) return;
+    registerSink((slot, code) => (slot === "run" ? setRunCode(code) : setMetricCode(code)));
+    return () => registerSink(null);
+  }, [registerSink, setRunCode, setMetricCode]);
 
+  const writing = wizardCtx?.codeWriting ?? NOT_WRITING;
+  // The wizard agent sits beside the editors; its coding tool writes the code.
+  const agentEnabled = isGeneralistAgentEnabled();
+  const agentShown = agentEnabled && state.step === "metric" && page === 0;
   const { setAgentWriting } = ctx;
-  const agentStreaming = agent.status === "streaming";
+  const agentStreaming = writing.run || writing.metric;
   React.useEffect(() => {
     setAgentWriting(agentStreaming);
     return () => setAgentWriting(false);
   }, [agentStreaming, setAgentWriting]);
 
   const contract = useContractCheck(ctx);
-  const setupIncomplete = repo || authoringContext === null;
   // Until a fresh sandboxed check exists, the editors' consoles show what the
   // static check spotted while typing.
   const staticFailed = contract.staticResult?.checks.some((item) => item.status === "failed");
@@ -164,27 +136,10 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     <div className="flex h-full min-h-0 flex-col">
       <WizardScreen active={page === 0} className="flex flex-col overflow-hidden">
         <AuthoringShell
+          value={agentEnabled ? "auto" : "manual"}
           title={t("submit.v2.metric.title")}
           description={t("submit.v2.metric.desc")}
-          sidePanel={
-            <CodeAgentPanel
-              agent={agent}
-              unified
-              disabled={setupIncomplete}
-              disabledReason={
-                repo
-                  ? t("submit.v2.repo.agent_off")
-                  : setupIncomplete
-                    ? t("submit.v2.metric.agent.needs_setup")
-                    : undefined
-              }
-              className="absolute inset-0"
-              model={agentModel}
-              onModelChange={setAgentModel}
-              reasoningEffort={agentEffort}
-              onReasoningEffortChange={setAgentEffort}
-            />
-          }
+          sidePanel={agentShown ? <AgentPanelDock className="absolute inset-0" /> : null}
         >
           <div className="min-h-0 flex-1 overflow-y-auto">
             <CodeWorkspace
@@ -192,15 +147,9 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
               metricCode={workspace.metricCode}
               runEntry={catalog?.run_entry ?? null}
               metricSignature={metricSignature}
-              onRunCodeChange={(code) => {
-                setRunCode(code);
-                setRunEdited(true);
-              }}
-              onMetricCodeChange={(code) => {
-                setMetricCode(code);
-                setMetricEdited(true);
-              }}
-              agent={agent}
+              onRunCodeChange={setRunCode}
+              onMetricCodeChange={setMetricCode}
+              writing={writing}
               guided={guided}
               checkResult={consoleResult}
               onCheck={contract.check}

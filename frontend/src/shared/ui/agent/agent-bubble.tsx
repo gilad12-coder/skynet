@@ -4,9 +4,11 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 
 import { cn } from "@/shared/lib/utils";
+import type { ActivityKind } from "@/shared/lib/activity-summary";
 
 import { ThinkingSection } from "./thinking-section";
-import { TurnActivity } from "./turn-activity";
+import { TurnActivity, type TurnThinking } from "./turn-activity";
+import { turnStart, visibleThinking } from "./turn-timing";
 import type { AgentMessage, AgentThinking, AgentToolCall } from "./types";
 
 // react-markdown + remark-gfm (the micromark/mdast/hast tree, ~40-60 KB gzip)
@@ -21,30 +23,44 @@ const MessageMarkdown = dynamic(
 interface AgentBubbleProps {
   msg: AgentMessage;
   thinking?: AgentThinking;
+  /** This turn is still running; defaults to the live thinking's flag. */
+  streaming?: boolean;
   renderToolCall?: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
   /**
    * Calls that render as plain one-line steps. They join the thinking row in
    * the turn's foldable activity group; every other call keeps its rich card.
    */
   isStepCall?: (call: AgentToolCall) => boolean;
+  /** What kind of step a call is, for the summary line over the turn's steps. */
+  stepKind?: (call: AgentToolCall) => ActivityKind;
   onRunCode?: (code: string, language: string) => void;
   toolCallsBeforeContent?: boolean;
+  /**
+   * Shown after the turn's text: the coding tool finishes after the reply was
+   * written, so its closing outcome comes last, as in Codex.
+   */
+  afterContent?: React.ReactNode;
   className?: string;
 }
 
 export function AgentBubble({
   msg,
-  thinking,
+  thinking: liveThinking,
+  streaming,
   renderToolCall,
   isStepCall,
+  stepKind,
   onRunCode,
   toolCallsBeforeContent = false,
+  afterContent,
   className,
 }: AgentBubbleProps) {
-  const visibleToolCalls = React.useMemo<Array<{ call: AgentToolCall; isRetry: boolean }>>(() => {
+  const visibleToolCalls = React.useMemo<
+    Array<{ call: AgentToolCall; isRetry: boolean; index: number }>
+  >(() => {
     const calls = msg.toolCalls;
     if (!calls?.length) return [];
-    const result: Array<{ call: AgentToolCall; isRetry: boolean }> = [];
+    const result: Array<{ call: AgentToolCall; isRetry: boolean; index: number }> = [];
     for (let i = 0; i < calls.length; i++) {
       const call = calls[i];
       if (!call) continue;
@@ -60,10 +76,26 @@ export function AgentBubble({
       const isRetry = calls
         .slice(0, i)
         .some((prior) => prior.tool === call.tool && prior.status === "error");
-      result.push({ call, isRetry });
+      result.push({ call, isRetry, index: i });
     }
     return result;
   }, [msg.toolCalls]);
+
+  const turnStreaming = streaming ?? Boolean(liveThinking?.streaming);
+  // Segments saved on the message win: they stream live and outlast the
+  // turn. Chats that only keep one live thinking state show it as one row.
+  const allThinking = React.useMemo<TurnThinking[]>(
+    () =>
+      msg.thinkingSegments
+        ? msg.thinkingSegments.map((s) => ({ ...s, streaming: turnStreaming }))
+        : liveThinking
+          ? [{ ...liveThinking, toolsBefore: 0 }]
+          : [],
+    [msg.thinkingSegments, liveThinking, turnStreaming],
+  );
+  // A segment with no reasoning yet is no row: it showed as "Thinking" for a
+  // second and then vanished with the turn's header.
+  const thinking = React.useMemo(() => visibleThinking(allThinking), [allThinking]);
 
   const stepCalls =
     renderToolCall && isStepCall ? visibleToolCalls.filter(({ call }) => isStepCall(call)) : [];
@@ -72,14 +104,22 @@ export function AgentBubble({
     : visibleToolCalls;
   const hasTools = cardCalls.length > 0 && Boolean(renderToolCall);
   const hasText = msg.content.trim().length > 0;
-  const hasThinking = Boolean(
-    thinking && (thinking.reasoning || (thinking.streaming && thinking.startedAt)),
-  );
-  const hasActivity = hasThinking || stepCalls.length > 0;
+  const hasThinking = thinking.length > 0;
+  const withHistory = Boolean(renderToolCall && isStepCall);
+  // With a history, a card call (the coding tool) is activity too; without
+  // it, a turn whose only call is that card had no header, and the header
+  // vanished once its reasoning-less thinking row dropped out.
+  const hasActivity = hasThinking || (withHistory ? visibleToolCalls.length > 0 : stepCalls.length > 0);
 
   if (!hasTools && !hasText && !hasActivity) return null;
 
-  const toolCalls = hasTools && renderToolCall && (
+  // With a turn history, every call (cards too) sits in it in the order it
+  // ran, so the whole turn reads top to bottom with the answer last, as in
+  // Codex. ReActV2 takes back prose written before a tool (message_reset),
+  // so the message's text is the turn's final answer.
+  const inHistory = hasActivity && withHistory;
+  const cardsFirst = toolCallsBeforeContent || Boolean(isStepCall);
+  const toolCalls = hasTools && !inHistory && renderToolCall && (
     <div className="flex flex-col gap-1.5">
       {cardCalls.map(({ call, isRetry }) => (
         <React.Fragment key={call.id}>{renderToolCall(call, { isRetry })}</React.Fragment>
@@ -91,17 +131,20 @@ export function AgentBubble({
   // cards and the answer sit straight on the panel at full width.
   return (
     <div className={cn("flex w-full min-w-0 flex-col gap-3", className)}>
-      {hasActivity && renderToolCall && isStepCall ? (
+      {inHistory && renderToolCall ? (
         <TurnActivity
-          thinking={hasThinking ? thinking : undefined}
-          steps={stepCalls}
+          thinking={thinking}
+          steps={visibleToolCalls.map((v) => ({ ...v, card: !isStepCall?.(v.call) }))}
+          streaming={turnStreaming}
           renderStep={renderToolCall}
+          stepKind={stepKind}
           durationMs={msg.stats?.durationMs}
+          startedAt={turnStart(allThinking, [])}
         />
       ) : (
-        hasThinking && thinking && <ThinkingSection thinking={thinking} compact />
+        thinking.map((t, i) => <ThinkingSection key={i} thinking={t} compact />)
       )}
-      {toolCallsBeforeContent && toolCalls}
+      {cardsFirst && toolCalls}
       {hasText && (
         <div className="text-sm leading-relaxed text-foreground">
           <React.Suspense
@@ -111,7 +154,8 @@ export function AgentBubble({
           </React.Suspense>
         </div>
       )}
-      {!toolCallsBeforeContent && toolCalls}
+      {!cardsFirst && toolCalls}
+      {afterContent}
     </div>
   );
 }

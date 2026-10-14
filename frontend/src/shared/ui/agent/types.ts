@@ -1,3 +1,5 @@
+import type { ThinkingSegment } from "@/shared/lib/thinking-segments";
+
 export type AgentStatus = "idle" | "streaming" | "queued" | "done" | "error";
 
 type AgentToolStatus = "running" | "done" | "error";
@@ -10,6 +12,12 @@ export interface AgentToolCall {
   startedAt: number;
   endedAt: number | null;
   payload?: Record<string, unknown>;
+  /**
+   * A card's own work still runs after the call returned (the coding tool
+   * writes and checks code after the chat turn ended), so its turn's header
+   * keeps counting. Set only for display, never stored.
+   */
+  working?: boolean;
 }
 
 export interface AgentMessage {
@@ -20,6 +28,11 @@ export interface AgentMessage {
   /** Concrete model the Auto Router picked for this turn, when resolved. */
   servedModel?: string | null;
   stats?: TurnStats | null;
+  /**
+   * The turn's reasoning, one segment per stretch between tool calls or
+   * prose, kept on the message so it streams live and earlier turns still show it.
+   */
+  thinkingSegments?: readonly ThinkingSegment[];
 }
 
 /** Token usage, cost and timing of one agent turn, as the backend measured it. */
