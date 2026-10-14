@@ -16,9 +16,20 @@ registerHooks({
   },
 });
 
-const { describeFixes, followUpAuthoringGoal, panelAuthoringContext } = await import(
-  "./code-authoring.ts"
-);
+const { describeFixes, followUpAuthoringGoal, latestToolCallId, panelAuthoringContext } =
+  await import(
+    "./code-authoring.ts"
+  );
+
+test("the latest call of a tool is found across turns", () => {
+  const chat = [
+    { toolCalls: [{ id: "a", tool: "request_code_authoring" }] },
+    { toolCalls: [{ id: "b", tool: "request_code_authoring" }, { id: "c", tool: "set_field" }] },
+    {},
+  ];
+  assert.equal(latestToolCallId(chat, "request_code_authoring"), "b");
+  assert.equal(latestToolCallId(chat, "submit"), null);
+});
 
 test("only a repeated coding call with a goal becomes a follow-up", () => {
   assert.equal(followUpAuthoringGoal({ goal: "Give 0.25 for extra text" }, false), null);
