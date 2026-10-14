@@ -24,7 +24,6 @@ function option(id: OptimizerOption["id"], available = true, reason?: string): O
   return {
     id,
     family: id === "auto" ? "auto" : id.startsWith("dspy_") ? "dspy" : "blackbox",
-    metric_shape: "blackbox_side_info",
     available,
     unavailable_reason: reason ?? null,
     needs_reflection_model: true,

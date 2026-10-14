@@ -73,6 +73,17 @@ test("changing the cases, data source, split, task model or metric timeout makes
   assert.notEqual(contractSnapshot(stagedA), contractSnapshot(stagedB));
 });
 
+test("changing the spending limit makes the check stale", () => {
+  const base = checkedState();
+  const capped = { ...base, optimizer: { ...base.optimizer, maxCostCents: 493 } };
+  const snapshot = contractSnapshot(capped);
+
+  const lowered = { ...capped, optimizer: { ...capped.optimizer, maxCostCents: 100 } };
+  const uncapped = { ...capped, optimizer: { ...capped.optimizer, budgetUncapped: true } };
+  assert.notEqual(contractSnapshot(lowered), snapshot);
+  assert.notEqual(contractSnapshot(uncapped), snapshot);
+});
+
 test("the sandboxed check's spec carries the execution budget id and revision", () => {
   const spec = { payload_kind: "unified_v1" } as unknown as UnifiedRunRequest;
   const sent = withContractBudget(spec, { id: "budget-1", revision: 7 });

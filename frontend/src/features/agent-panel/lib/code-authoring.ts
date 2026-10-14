@@ -5,7 +5,6 @@
  */
 import type { ValidateCodeResponse } from "@/shared/types/api";
 import {
-  metricShapeFor,
   type ContractCheckItem,
   type ContractCheckKey,
   type ContractCheckResponse,
@@ -81,7 +80,6 @@ export function panelAuthoringContext(
     expected_field: expectedField,
     sample_cases: sampleCases(dataset, inputFields, expectedField),
     optimizer,
-    metric_shape: metricShapeFor(optimizer, kind),
     // The panel has no metric model to attach, so the metric scores without one.
     metric_has_model: false,
     focus: "run",

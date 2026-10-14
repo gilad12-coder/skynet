@@ -71,6 +71,12 @@ const INPUT_TOKEN_SHARE = 0.7;
 /** The Batch API bills managed model calls at half the list price. */
 export const ECONOMY_PRICE_FACTOR = 0.5;
 
+/** Output cap the sandbox's `llm()` sends on every call (backend runner `DEFAULT_MAX_TOKENS`). */
+const CALL_OUTPUT_TOKENS = 4000;
+
+/** Headroom the backend adds to every model-call reservation (`price_text_request`). */
+const CALL_HOLD_HEADROOM = 1.05;
+
 export interface CostBracketInput {
   /** GEPA `auto` tier ("light"/"medium"/"heavy"), or "" when an explicit eval count is used. */
   autoLevel: string;
@@ -193,6 +199,8 @@ export interface CostBracket {
   runtimeSessionHighCents: number;
   runtimeBillingBasis: RuntimeCostProjection["billingBasis"] | null;
   expectedRuntimeSessions: number;
+  /** Charged cents the dearest single model call reserves before it runs; 0 when unknown. */
+  modelCallHoldCents: number;
   trace: CostBracketTrace;
 }
 
@@ -266,6 +274,39 @@ function runtimeCents(runtime: RuntimeCostProjection | null | undefined): {
   };
 }
 
+/** Cents the box holds the moment it opens; mirrors `runtimeStartHold` before a bracket exists. */
+function runtimeHold(runtime: RuntimeCostProjection | null | undefined): number {
+  if (!runtime || runtime.billingBasis !== "at_cost") return 0;
+  return Math.ceil(Math.max(0, runtime.maximumSessionCents ?? 0));
+}
+
+/**
+ * Charged cents one call of the dearest role reserves before it is sent. The
+ * backend bounds a call's input by the model's whole context window, so a
+ * single call can hold far more than a whole run's expected usage; this is
+ * that bound at the plain input rate, a floor under what the server reserves.
+ * A role whose model has no known context window contributes nothing.
+ */
+function modelCallHold(
+  roles: ProjectedModelRole[],
+  managedMarkup: number,
+  byokFeeFraction: number,
+): number {
+  let hold = 0;
+  for (const role of roles) {
+    const context = role.model?.max_input_tokens;
+    if (typeof context !== "number" || !(context > 0)) continue;
+    const usage = {
+      model: role.model,
+      inputTokens: context * CALL_HOLD_HEADROOM,
+      outputTokens: CALL_OUTPUT_TOKENS * CALL_HOLD_HEADROOM,
+    };
+    const factor = role.tokenSource === "byok" ? byokFeeFraction : managedMarkup;
+    hold = Math.max(hold, centsForUsage([usage], factor));
+  }
+  return hold;
+}
+
 /**
  * Project a low/high cost bracket for a run from its GEPA budget, dataset, and
  * chosen model(s).
@@ -331,7 +372,13 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
   const byokModelLowCents = centsForUsage(roleUsage(lowTokens, byok), 1);
   const byokModelHighCents = centsForUsage(roleUsage(highTokens, byok), 1);
   const runtimeEstimate = runtimeCents(runtime);
-  const lowCents = Math.max(1, managedModelLowCents + byokModelLowCents + runtimeEstimate.low);
+  // Live calls (the sample check, scorer runs) reserve at list price even when the run batches.
+  const modelCallHoldCents = modelCallHold(roles, usageMarkup, byokFeeFraction);
+  const lowCents = Math.max(
+    1,
+    managedModelLowCents + byokModelLowCents + runtimeEstimate.low,
+    runtimeHold(runtime) + modelCallHoldCents,
+  );
   const highCents = Math.max(
     lowCents,
     managedModelHighCents + byokModelHighCents + runtimeEstimate.high,
@@ -373,6 +420,7 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     runtimeSessionHighCents: Math.max(0, runtime?.maximumSessionCents ?? 0),
     runtimeBillingBasis: runtime?.billingBasis ?? null,
     expectedRuntimeSessions: runtime?.expectedSessions ?? 0,
+    modelCallHoldCents,
     trace: {
       metricCalls: calls,
       metricCallSource: budget.source,
@@ -430,7 +478,11 @@ export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): 
     : bracket.highCents - bracket.runtimeHighCents;
   const byokFeeLow = platformFeeCents(byokLow, bracket.byokFeeFraction);
   const byokFeeHigh = platformFeeCents(byokHigh, bracket.byokFeeFraction);
-  const lowCents = Math.max(1, managedLow + byokFeeLow + bracket.runtimeLowCents);
+  const lowCents = Math.max(
+    1,
+    managedLow + byokFeeLow + bracket.runtimeLowCents,
+    runtimeStartHold(bracket) + bracket.modelCallHoldCents,
+  );
   const highCents = Math.max(lowCents, managedHigh + byokFeeHigh + bracket.runtimeHighCents);
   return {
     ...bracket,

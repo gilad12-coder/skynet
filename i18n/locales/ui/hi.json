@@ -3695,6 +3695,7 @@
   "submit.budget.error.invalid": "डॉलर राशि दर्ज करें, उदाहरण के लिए {suggested}।",
   "submit.budget.error.fraction": "राशि सेंट तक जाती है — अधिकतम दो दशमलव स्थानों का उपयोग करें।",
   "submit.budget.error.below_one": "सीमा कम से कम $0.01 होनी चाहिए।",
+  "submit.budget.error.below_estimate": "इस रन को कम से कम {amount} चाहिए। जारी रखने के लिए सीमा बढ़ाएँ।",
   "submit.budget.estimate_preliminary": "प्रारंभिक अनुमान",
   "submit.budget.estimate_preliminary_note": "जैसे-जैसे आप केस जोड़ते और मॉडल चुनते हैं, यह अपडेट होता है।",
   "submit.budget.estimate_note": "ऊपरी सीमा हर कॉल में लंबे प्रॉम्प्ट और आउटपुट मानती है, सामान्य रन नहीं।",

@@ -3161,6 +3161,7 @@
   "submit.budget.error.invalid": "Enter a dollar amount, for example {suggested}.",
   "submit.budget.error.fraction": "Amounts go down to the cent — use at most two decimals.",
   "submit.budget.error.below_one": "The limit must be at least $0.01.",
+  "submit.budget.error.below_estimate": "The run needs at least {amount}. Raise the limit to continue.",
   "submit.budget.estimate_preliminary": "Preliminary estimate",
   "submit.budget.estimate_preliminary_note": "Updates as you add cases and choose models.",
   "submit.budget.estimate_note": "The high end assumes long prompts and outputs on every call, not a typical optimization.",

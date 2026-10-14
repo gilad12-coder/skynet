@@ -221,7 +221,6 @@ async def test_run_code_reaches_the_editor_when_the_provider_sends_it_whole(
     unified = {
         "task": {"objective": "o", "artifact": {"kind": "prompt", "starting_version": "x"}},
         "input_fields": ["review"],
-        "metric_shape": "blackbox_side_info",
     }
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
     results = await code._run_unified_seed(

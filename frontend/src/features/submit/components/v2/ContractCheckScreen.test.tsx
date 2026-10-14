@@ -51,7 +51,6 @@ function state(overrides: Partial<ContractCheckState>): ContractCheckState {
 const failedRun = {
   ok: false,
   optimizer_resolved: "gepa",
-  metric_shape: "scalar",
   fingerprint: "fp",
   checks: [
     item({ key: "workspace.run_signature" }),

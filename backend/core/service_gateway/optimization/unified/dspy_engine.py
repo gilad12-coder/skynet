@@ -1,28 +1,33 @@
 """Run the DSPy optimizers behind the black-box engine protocol.
 
-A unified ``dspy_program`` run defines ``build_program() -> dspy.Module`` in
-its run code. :class:`DspyEngine` builds that program in-process (the worker
-already runs inside the run's outer sandbox), applies the starting
-instructions, compiles it with the chosen DSPy optimizer on the train cases
-(selecting on the validation cases) and hands back the per-predictor
-instructions as the winning candidate plus the compiled program as an
-artifact. The candidate also carries the compiled program's full state (its
-few-shot demos included) under :data:`DSPY_STATE_KEY`, so the final runs, the
-regression guard and the reported scores measure exactly the program that is
-saved. Every metric call is charged to the run's eval server so the
+A unified ``dspy_program`` run writes the same contract as every other
+artifact: its run code defines ``run(artifact, input)`` and calls a
+``dspy.Module`` it builds at module level. :class:`DspyEngine` loads that code
+in-process (the worker already runs inside the run's outer sandbox), finds the
+module, wraps ``run`` in a :class:`RunProgram` whose only sub-module is that
+module, compiles the wrapper with the chosen DSPy optimizer on the train cases
+(selecting on the validation cases) and hands back the module's per-predictor
+instructions as the winning candidate plus the compiled module as an
+artifact. Every case therefore goes through the user's own ``run``, exactly as
+in the sandbox harness. The candidate also carries the compiled module's full
+state (its few-shot demos included) under :data:`DSPY_STATE_KEY`, so the final
+runs, the regression guard and the reported scores measure exactly the program
+that is saved. Every metric call is charged to the run's eval server so the
 scorer-run budget holds exactly as it does for the black-box engines.
 
 The run code and the metric import their ``llm`` from a ``skynet`` helper
 module, as they do in the sandbox harness: the run code's calls go to the
 task model and the metric's to the metric model, both metered by the job.
 
+The metric is the same ``score(input, output, expected=None)`` every engine
+calls; :class:`BudgetedMetric` adapts DSPy's ``(gold, pred, ...)`` call to it.
 The metric source stays here: the DSPy reflection model only ever sees the
 feedback text the metric returns.
 """
 
 from __future__ import annotations
 
-import inspect
+import contextvars
 import json
 import logging
 import sys
@@ -36,24 +41,32 @@ import dspy
 
 from ....exceptions import ServiceError
 from ....models.common import ModelConfig
-from ....models.unified import DSPY_OPTIMIZER_NAMES
+from ....models.unified import DSPY_OPTIMIZER_NAMES, METRIC_SIGNATURE, RUN_ENTRY
 from ....registry import ResolverError, resolve_optimizer_factory
 from ...language_models import build_language_model
 from ..artifacts import persist_program
 from ..blackbox import runner as helper_runtime
+from ..blackbox import workspace_harness
 from ..blackbox.protocol import BudgetExhaustedError, Candidate, EngineContext, EvalServer, Result, Task
-from ..data import DatasetSplits, load_metric_from_code
+from ..data import DatasetSplits
 from ..optimizers import compile_program, instantiate_optimizer
 
 logger = logging.getLogger(__name__)
 
 _GEPA_BUDGET_KEYS = ("auto", "max_full_evals", "max_metric_calls")
-_FEEDBACK_SHAPE = "dspy_feedback"
+# Only DSPy GEPA reflects on feedback text; the others read the score alone.
+_FEEDBACK_OPTIMIZER = "dspy_gepa"
 # Only GEPA has a resolver alias; the other DSPy names resolve by dotted path.
 _FACTORY_PATHS = {"miprov2": "dspy.MIPROv2", "bootstrapfewshot": "dspy.BootstrapFewShot"}
 # A candidate is ``dict[str, str]``; this key holds the compiled program's
 # state as JSON next to the per-predictor instructions.
-DSPY_STATE_KEY = "__dspy_state__"
+DSPY_STATE_KEY = workspace_harness.DSPY_STATE_KEY
+# The case's expected value as it was, next to the label fields a DSPy demo
+# reads, so ``score`` gets exactly what the sandbox harness hands it.
+EXPECTED_KEY = "_skynet_expected"
+# Holds what ``run`` returned when it is not a ``dspy.Prediction``.
+RUN_OUTPUT_KEY = "_skynet_output"
+_ACTIVE_PROGRAM: contextvars.ContextVar[Any] = contextvars.ContextVar("skynet_active_program", default=None)
 
 
 def program_state(program: dspy.Module) -> str:
@@ -141,19 +154,104 @@ def bound_helpers(module: types.ModuleType | None) -> Iterator[None]:
             sys.modules[name] = previous
 
 
-def build_program(run_code: str, helpers: types.ModuleType | None = None) -> dspy.Module:
-    """Execute the run code and return the program its ``build_program()`` makes.
+class _ProgramProxy:
+    """Stand in for the run code's module so ``run`` calls whichever copy the optimizer is scoring.
+
+    DSPy optimizers deep-copy the program they tune, but ``run`` keeps reading
+    the module from its own globals. The proxy sits in those globals and
+    forwards every call and attribute to the copy :class:`RunProgram` marks
+    active for the current thread.
+    """
+
+    def __init__(self, default: dspy.Module) -> None:
+        """Remember the module the run code built.
+
+        Args:
+            default: The module, used whenever no copy is active.
+        """
+        self._default = default
+
+    def _target(self) -> dspy.Module:
+        """Return the module copy active in this thread, else the original."""
+        return _ACTIVE_PROGRAM.get() or self._default
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Call the active module.
+
+        Args:
+            *args: Positional arguments for the module.
+            **kwargs: Keyword arguments for the module.
+
+        Returns:
+            What the module returned.
+        """
+        return self._target()(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        """Read an attribute of the active module.
+
+        Args:
+            name: The attribute.
+
+        Returns:
+            Its value on the active module.
+        """
+        return getattr(self._target(), name)
+
+
+class RunProgram(dspy.Module):
+    """The user's ``run(artifact, input)`` as a DSPy module whose only sub-module is the module ``run`` calls.
+
+    The optimizer tunes ``program``'s predictors; every forward pass marks
+    this instance's ``program`` active and goes through ``run``, so the
+    output the metric sees is the output ``run`` returns.
+    """
+
+    def __init__(self, run: Callable[..., Any], program: dspy.Module) -> None:
+        """Wrap the run function around the module it calls.
+
+        Args:
+            run: The user's ``run(artifact, input)``.
+            program: The module-level ``dspy.Module`` the run code built.
+        """
+        super().__init__()
+        self.program = program
+        self._run = run
+
+    def forward(self, **inputs: Any) -> dspy.Prediction:
+        """Run one case through the user's ``run`` with this instance's module.
+
+        Args:
+            **inputs: The case's input fields.
+
+        Returns:
+            The ``dspy.Prediction`` ``run`` returned, or one holding its output
+            under :data:`RUN_OUTPUT_KEY`.
+        """
+        token = _ACTIVE_PROGRAM.set(self.program)
+        try:
+            output = self._run(program_instructions(self.program), dict(inputs))
+        finally:
+            _ACTIVE_PROGRAM.reset(token)
+        if isinstance(output, dspy.Prediction):
+            return output
+        return dspy.Prediction(**{RUN_OUTPUT_KEY: output})
+
+
+def load_run_program(run_code: str, helpers: types.ModuleType | None = None) -> RunProgram:
+    """Execute the run code and wrap its ``run`` around the ``dspy.Module`` it calls.
 
     Args:
         run_code: The workspace run code.
         helpers: The ``skynet`` module the run code imports from, if any.
 
     Returns:
-        A fresh DSPy module.
+        A fresh :class:`RunProgram`.
 
     Raises:
-        ServiceError: When the code does not compile, defines no
-            ``build_program`` or it does not return a ``dspy.Module``.
+        ServiceError: When the code does not compile, defines no ``run`` or
+            builds no module-level ``dspy.Module`` (or several, none named
+            ``program``).
     """
     namespace: dict[str, Any] = {"dspy": dspy, "__name__": "skynet_run"}
     with bound_helpers(helpers):
@@ -164,13 +262,18 @@ def build_program(run_code: str, helpers: types.ModuleType | None = None) -> dsp
             exec(compile(run_code, "<run_code>", "exec", dont_inherit=True), namespace)
         except SyntaxError as exc:
             raise ServiceError(f"run_code has a syntax error: {exc}") from exc
-        factory = namespace.get("build_program")
-        if not callable(factory):
-            raise ServiceError("run_code must define build_program() returning a dspy.Module.")
-        program = factory()
-    if not isinstance(program, dspy.Module):
-        raise ServiceError(f"build_program() returned {type(program).__name__}, not a dspy.Module.")
-    return program
+    run = namespace.get(workspace_harness.RUN_ENTRY_NAME)
+    if not callable(run):
+        raise ServiceError(f"run_code must define {RUN_ENTRY}.")
+    try:
+        program = workspace_harness.find_program(namespace, dspy.Module)
+    except NameError as exc:
+        raise ServiceError(str(exc)) from exc
+    proxy = _ProgramProxy(program)
+    for name, value in list(namespace.items()):
+        if value is program:
+            namespace[name] = proxy
+    return RunProgram(run, program)
 
 
 def program_instructions(program: dspy.Module) -> dict[str, str]:
@@ -186,7 +289,7 @@ def program_instructions(program: dspy.Module) -> dict[str, str]:
 
 
 def apply_candidate(program: dspy.Module, candidate: Candidate) -> None:
-    """Set the program's predictor instructions from a candidate.
+    """Set the program's state and predictor instructions from a candidate, as the harness does.
 
     Args:
         program: The DSPy module to update in place.
@@ -194,96 +297,87 @@ def apply_candidate(program: dspy.Module, candidate: Candidate) -> None:
             program state under :data:`DSPY_STATE_KEY`; a plain string sets
             every predictor's instruction.
     """
-    if isinstance(candidate, dict) and candidate.get(DSPY_STATE_KEY):
-        program.load_state(json.loads(candidate[DSPY_STATE_KEY]))
-    for name, predictor in program.named_predictors():
-        text = candidate if isinstance(candidate, str) else candidate.get(name)
-        if text is not None:
-            predictor.signature = predictor.signature.with_instructions(str(text))
+    workspace_harness.apply_dspy_candidate(program, candidate)
 
 
 def case_example(case: Any, input_fields: list[str]) -> dspy.Example:
-    """Turn one unified case into the ``gold`` example a DSPy metric reads.
+    """Turn one unified case into the example a DSPy optimizer trains on.
 
     Args:
         case: ``{"input": {...}, "expected": {...}}`` (or a ``UnifiedCase``).
         input_fields: The program's input field names; the case's input keys when empty.
 
     Returns:
-        ``dspy.Example(**input, **expected).with_inputs(*input_fields)``.
+        ``dspy.Example(**input, **expected).with_inputs(*input_fields)``, with
+        the expected value as it was under :data:`EXPECTED_KEY`.
     """
     data = case.model_dump() if hasattr(case, "model_dump") else dict(case)
     inputs = dict(data.get("input") or {})
     expected = data.get("expected")
     outputs = expected if isinstance(expected, dict) else ({} if expected is None else {"expected": expected})
-    return dspy.Example(**inputs, **outputs).with_inputs(*(input_fields or list(inputs)))
+    return dspy.Example(**inputs, **outputs, **{EXPECTED_KEY: expected}).with_inputs(*(input_fields or list(inputs)))
 
 
-def _positional_arity(func: Callable[..., Any]) -> int | None:
-    """Count how many positional arguments ``func`` takes.
-
-    Args:
-        func: The user metric.
-
-    Returns:
-        The positional parameter count, or ``None`` when it takes ``*args``.
-    """
-    try:
-        params = list(inspect.signature(func).parameters.values())
-    except (TypeError, ValueError):
-        return None
-    if any(param.kind is inspect.Parameter.VAR_POSITIONAL for param in params):
-        return None
-    return sum(
-        param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD) for param in params
-    )
-
-
-def normalize_metric_output(raw: Any) -> tuple[float, str]:
-    """Read a score and feedback from any metric return shape the contract allows.
+def load_score(metric_code: str) -> Callable[..., Any]:
+    """Execute the metric code and return its ``score`` function.
 
     Args:
-        raw: ``dspy.Prediction(score, feedback)``, ``{"score", "feedback"}``,
-            ``(score, feedback)``, or a bare float/bool.
+        metric_code: The workspace metric code.
 
     Returns:
-        The score as a float and the feedback text (empty when none).
+        The user's ``score(input, output, expected=None)``.
 
     Raises:
-        ServiceError: When the return value carries no numeric score.
+        ServiceError: When the code does not compile or defines no ``score``.
     """
-    if isinstance(raw, dspy.Prediction | dict):
-        score, feedback = raw.get("score"), raw.get("feedback")
-    elif isinstance(raw, tuple) and len(raw) == 2:
-        score, feedback = raw
-    else:
-        score, feedback = raw, None
+    namespace: dict[str, Any] = {"dspy": dspy, "__name__": "skynet_metric"}
     try:
-        return float(score), "" if feedback is None else str(feedback)
-    except (TypeError, ValueError) as exc:
-        raise ServiceError(f"metric returned {type(raw).__name__} without a numeric score.") from exc
+        # exec: user metric code, in the same per-job worker as the run code.
+        exec(compile(metric_code, "<metric_code>", "exec", dont_inherit=True), namespace)
+    except SyntaxError as exc:
+        raise ServiceError(f"metric_code has a syntax error: {exc}") from exc
+    score = namespace.get(workspace_harness.METRIC_ENTRY_NAME)
+    if not callable(score):
+        raise ServiceError(f"metric_code must define {METRIC_SIGNATURE}.")
+    return score
+
+
+def run_output(pred: Any) -> Any:
+    """Return what ``run`` returned for a prediction :class:`RunProgram` made.
+
+    Args:
+        pred: The prediction DSPy hands the metric.
+
+    Returns:
+        ``run``'s own return value.
+    """
+    if isinstance(pred, dspy.Prediction) and RUN_OUTPUT_KEY in pred:
+        return pred[RUN_OUTPUT_KEY]
+    return pred
 
 
 class BudgetedMetric:
-    """Wrap the user metric so every call is charged to the run's eval server.
+    """Adapt the user's ``score(input, output, expected=None)`` to DSPy and charge every call to the budget.
 
-    For the feedback shape the wrapper returns ``dspy.Prediction(score,
-    feedback)`` whatever the user returned, so DSPy GEPA reflects on the text;
-    for the scalar shape it returns the float.
+    DSPy calls ``metric(gold, pred, ...)``; the wrapper hands ``score`` the
+    case input, what ``run`` returned and the case's expected value, exactly
+    as the sandbox harness does. For DSPy GEPA it returns
+    ``dspy.Prediction(score, feedback)`` so the reflection model reads the
+    feedback; for the other optimizers it returns the float.
     """
 
     def __init__(self, metric: Callable[..., Any], server: EvalServer, *, feedback: bool) -> None:
         """Bind the user metric to the run's budget.
 
         Args:
-            metric: The user's metric callable.
+            metric: The user's ``score`` function.
             server: The run's eval server.
             feedback: Whether the optimizer consumes feedback text.
         """
         self._metric = metric
         self._server = server
         self._feedback = feedback
-        self._arity = _positional_arity(metric)
+        self._takes_expected = workspace_harness.positional_capacity(metric) >= 3
         self._lock = threading.Lock()
         self.exhausted = False
         self.calls = 0
@@ -292,33 +386,40 @@ class BudgetedMetric:
         """Score one prediction and charge it to the budget.
 
         Args:
-            gold: The case as a ``dspy.Example``.
-            pred: The program's prediction.
+            gold: The case as a ``dspy.Example`` (see :func:`case_example`).
+            pred: The prediction :class:`RunProgram` returned.
             trace: DSPy's trace, when the optimizer passes one.
             pred_name: The predictor GEPA asks feedback for, if any.
             pred_trace: That predictor's trace, if any.
 
         Returns:
-            ``dspy.Prediction(score, feedback)`` for the feedback shape,
-            otherwise the score.
+            ``dspy.Prediction(score, feedback)`` for DSPy GEPA, otherwise the score.
 
         Raises:
             BudgetExhaustedError: When the scorer-run budget is spent.
+            ServiceError: When ``score`` does not return ``(score, side_info)``.
         """
         if self.exhausted or self._server.remaining <= 0:
             self.exhausted = True
             raise BudgetExhaustedError("scorer-run budget exhausted")
-        args = (gold, pred, trace, pred_name, pred_trace)
-        raw = self._metric(*(args if self._arity is None else args[: max(2, self._arity)]))
-        score, feedback = normalize_metric_output(raw)
+        inputs = gold.inputs().toDict()
+        output = run_output(pred)
+        if self._takes_expected:
+            raw = self._metric(inputs, output, gold.get(EXPECTED_KEY))
+        else:
+            raw = self._metric(inputs, output)
         try:
-            self._server.charge(None, score, {"feedback": feedback})
+            score, side_info = workspace_harness.normalize_metric(raw)
+        except workspace_harness.ShapeError as exc:
+            raise ServiceError(f"{METRIC_SIGNATURE} must return (score, side_info): {exc}") from exc
+        try:
+            self._server.charge(None, score, side_info)
         except BudgetExhaustedError:
             self.exhausted = True
             raise
         with self._lock:
             self.calls += 1
-        return dspy.Prediction(score=score, feedback=feedback) if self._feedback else score
+        return dspy.Prediction(score=score, feedback=side_info["feedback"]) if self._feedback else score
 
 
 def _model_config(raw: Any) -> ModelConfig | None:
@@ -377,10 +478,10 @@ class DspyEngine:
             if task_model is None:
                 raise ServiceError("A DSPy program needs a task model.")
             task_lm = build_language_model(task_model)
-        program = build_program(str(context["run_code"]), helper_module(task_lm))
+        program = load_run_program(str(context["run_code"]), helper_module(task_lm))
         if task.seed_candidate is not None:
-            apply_candidate(program, task.seed_candidate)
-        seed_candidate = program_instructions(program)
+            apply_candidate(program.program, task.seed_candidate)
+        seed_candidate = program_instructions(program.program)
         input_fields = list(context.get("input_fields") or [])
         splits = DatasetSplits(
             train=[case_example(case, input_fields) for case in task.cases],
@@ -390,12 +491,8 @@ class DspyEngine:
         # Module-level ``from skynet import llm`` binds when the code loads, so
         # each piece of code keeps the model it was loaded with.
         with bound_helpers(helper_module(context.get("metric_lm"))):
-            user_metric = load_metric_from_code(str(context["metric_code"]))
-        metric = BudgetedMetric(
-            user_metric,
-            server,
-            feedback=context.get("metric_shape") == _FEEDBACK_SHAPE,
-        )
+            user_metric = load_score(str(context["metric_code"]))
+        metric = BudgetedMetric(user_metric, server, feedback=self.name == _FEEDBACK_OPTIMIZER)
         try:
             factory = resolve_optimizer_factory(_FACTORY_PATHS.get(optimizer_name, optimizer_name))
         except ResolverError as exc:
@@ -442,9 +539,10 @@ class DspyEngine:
                 total_evals=server.used,
                 metadata={"selection_scope": selection, "metric_calls": metric.calls, "budget_exhausted": True},
             )
-        artifact = persist_program(compiled, None)
+        tuned = compiled.program
+        artifact = persist_program(tuned, None)
         return Result(
-            best_candidate={**program_instructions(compiled), DSPY_STATE_KEY: program_state(compiled)},
+            best_candidate={**program_instructions(tuned), DSPY_STATE_KEY: program_state(tuned)},
             best_score=None,
             total_evals=server.used,
             metadata={

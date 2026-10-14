@@ -2,8 +2,8 @@
 
 One payload covers every optimizer: the DSPy optimizers and the black-box
 engines all run through the black-box engine layer against the same workspace
-contract (a ``run`` function or a ``build_program`` factory, plus a metric
-whose shape the chosen optimizer fixes). Stored runs keep the ``blackbox``
+contract (a ``run(artifact, input)`` function plus a ``score(input, output,
+expected=None)`` metric, whatever the artifact kind or optimizer). Stored runs keep the ``blackbox``
 optimization type and are told apart from legacy black-box runs by
 ``payload_kind``.
 
@@ -46,7 +46,6 @@ OptimizerChoice = Literal[
     "shinka_evolve",
 ]
 OptimizerFamily = Literal["auto", "dspy", "blackbox"]
-MetricShape = Literal["dspy_feedback", "dspy_scalar", "blackbox_side_info"]
 DSPY_OPTIMIZERS: tuple[str, ...] = ("dspy_gepa", "dspy_miprov2", "dspy_bootstrap_fewshot")
 BLACKBOX_OPTIMIZERS: tuple[str, ...] = (
     "gepa",
@@ -130,52 +129,15 @@ def optimizer_family(resolved: str) -> OptimizerFamily:
     return "blackbox"
 
 
-def metric_shape_for(choice: OptimizerChoice, artifact_kind: ArtifactKind) -> MetricShape:
-    """Name the metric signature the resolved optimizer needs.
-
-    Args:
-        choice: The optimizer the user picked.
-        artifact_kind: What is being optimized.
-
-    Returns:
-        ``"dspy_feedback"`` for DSPy GEPA, ``"dspy_scalar"`` for the other DSPy
-        optimizers, otherwise ``"blackbox_side_info"``.
-    """
-    resolved = resolve_optimizer(choice, artifact_kind)
-    if resolved == "dspy_gepa":
-        return "dspy_feedback"
-    if resolved in DSPY_OPTIMIZERS:
-        return "dspy_scalar"
-    return "blackbox_side_info"
-
-
 # The coding agent's contract, its validators and the editors' hints all read
 # these, so what the agent is told and what a person writing by hand is shown
-# never drift apart.
-METRIC_SIGNATURES: dict[str, str] = {
-    "dspy_feedback": "def metric(gold, pred, trace=None, pred_name=None, pred_trace=None)",
-    "dspy_scalar": "def metric(gold, pred, trace=None)",
-    "blackbox_side_info": "def score(input, output, expected=None)",
-}
+# never drift apart. Every artifact kind and every optimizer uses this pair;
+# the engines adapt to it internally.
+RUN_ENTRY = "def run(artifact, input)"
+METRIC_SIGNATURE = "def score(input, output, expected=None)"
 
 
-def run_entry_for(artifact_kind: ArtifactKind) -> str:
-    """Name the entry point the run code must define for an artifact kind.
-
-    Args:
-        artifact_kind: What is being optimized.
-
-    Returns:
-        ``def build_program()`` for a DSPy program (the DSPy optimizer needs
-        the module itself), otherwise ``def run(artifact, input)``.
-    """
-    if artifact_kind == ARTIFACT_KIND_DSPY_PROGRAM:
-        return "def build_program()"
-    return "def run(artifact, input)"
-
-
-# One case. ``expected`` is a dict keyed by output field names when a DSPy
-# metric reads it as ``gold``.
+# One case. ``expected`` reaches the metric's ``expected`` argument as is.
 class UnifiedCase(BaseModel):
     input: dict[str, Any]
     expected: Any | None = None
@@ -319,8 +281,6 @@ class UnifiedRunRequest(BaseModel):
 class OptimizerOption(BaseModel):
     id: OptimizerChoice
     family: OptimizerFamily
-    metric_shape: MetricShape
-    metric_signature: str
     available: bool
     unavailable_reason: str | None = None
     needs_reflection_model: bool
@@ -331,11 +291,12 @@ class OptimizerOption(BaseModel):
 
 # ``GET /optimizers``. ``auto_resolves_to`` lists what Auto runs: DSPy GEPA
 # for a DSPy program, otherwise the engines the Auto strategy explores.
-# ``run_entry`` is the entry point the run code defines for this artifact kind.
+# ``run_entry`` and ``metric_signature`` are the one contract every optimizer runs.
 class OptimizerCatalogResponse(BaseModel):
     artifact_kind: ArtifactKind
     data_mode: DataMode
     run_entry: str
+    metric_signature: str
     default: OptimizerChoice = "auto"
     options: list[OptimizerOption]
     auto_resolves_to: list[str]
@@ -387,7 +348,6 @@ class ContractCheckRequest(BaseModel):
 class ContractCheckResponse(BaseModel):
     ok: bool
     optimizer_resolved: str
-    metric_shape: MetricShape
     uses_llm: bool = False
     checks: list[ContractCheckItem]
     samples: list[ContractSample] = Field(default_factory=list)
@@ -468,7 +428,6 @@ class UnifiedAuthoringContext(BaseModel):
     expected_field: str | None = None
     sample_cases: list[dict[str, Any]] = Field(default_factory=list, max_length=5)
     optimizer: OptimizerChoice
-    metric_shape: MetricShape
     metric_has_model: bool = False
     focus: Literal["run", "metric"] = "run"
 
@@ -481,7 +440,9 @@ __all__ = [
     "DSPY_OPTIMIZERS",
     "DSPY_OPTIMIZER_NAMES",
     "FEEDBACK_OPTIMIZERS",
+    "METRIC_SIGNATURE",
     "MIN_PAIRS_FOR_HELD_OUT",
+    "RUN_ENTRY",
     "UNIFIED_PAYLOAD_KIND",
     "ArtifactKind",
     "ContractCheckItem",
@@ -493,7 +454,6 @@ __all__ = [
     "InputsInferenceRequest",
     "InputsInferenceResponse",
     "InterviewOption",
-    "MetricShape",
     "OptimizerCatalogResponse",
     "OptimizerChoice",
     "OptimizerFamily",
@@ -511,7 +471,6 @@ __all__ = [
     "UnifiedSplitCounts",
     "UnifiedTask",
     "UnifiedWorkspace",
-    "metric_shape_for",
     "optimizer_family",
     "optimizers_for",
     "resolve_optimizer",

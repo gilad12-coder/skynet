@@ -192,7 +192,9 @@ def main() -> None:
     except BudgetReached as error:
         events.put({"type": "error", "error": str(error), "code": "budget_reached", "traceback": ""})
     except Exception as error:
-        events.put({"type": "error", "error": str(error), "traceback": ""})
+        # The parent rebuilds a budget stop from ``error_type`` so a setup
+        # check stopped by the spending limit is not reported as broken code.
+        events.put({"type": "error", "error": str(error), "error_type": type(error).__name__, "traceback": ""})
     finally:
         if export:
             stopped.set()
