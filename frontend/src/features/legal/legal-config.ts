@@ -9,13 +9,13 @@
  */
 
 export const LEGAL_CONFIG = {
-  serviceName: "Skynet",
+  serviceName: "DRWN",
   websiteLabel: "skynetml.com",
   websiteUrl: "https://skynetml.com",
 
   // Dates shown on both documents. Update lastUpdated whenever the text changes.
   effectiveDate: "August 11, 2026",
-  lastUpdated: "September 29, 2026",
+  lastUpdated: "October 13, 2026",
 
   // Skynet is operated by an individual (sole proprietor); this legal name is
   // the operating party and, for the Privacy Policy, the data controller.

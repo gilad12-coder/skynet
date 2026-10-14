@@ -59,9 +59,8 @@ export function TtftIndicator() {
 
 // The glyph: a warm-tan double ripple radiating from a brand-ink core that
 // breathes with a soft brand glow. It replaces the panel's flat `animate-ping`
-// halo (see ThinkingSection's ThinkingIndicator, which now reuses this) so the
-// whole pre-first-token wait — pure gap *and* reasoning — reads as one distinct,
-// premium Skynet moment rather than a plain pulsing dot.
+// halo so the pre-first-token wait reads as one distinct, premium Skynet moment
+// rather than a plain pulsing dot.
 export function EmberGlyph({ reduce }: { reduce: boolean }) {
   if (reduce) {
     return (

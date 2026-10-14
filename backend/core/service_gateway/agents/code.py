@@ -1,9 +1,9 @@
 """DSPy-powered code agent for the submit wizard.
 
-Every program is authored under one contract: the agent writes run code
-(entry point ``run(artifact, input)``, or ``build_program()`` when a DSPy
-optimizer needs the module) plus a metric in the exact shape the chosen
-optimizer needs, and the validity check holds both to it before Run. The
+Every program is authored under one contract, whatever the artifact kind or
+optimizer: the agent writes run code (entry point ``run(artifact, input)``)
+plus a metric (``score(input, output, expected=None)`` returning a score and
+feedback), and the validity check holds both to it before Run. The
 unified authoring context carries that contract, so both modes take it:
 
 * **Seed** (``user_message`` is empty): a non-agentic pass that drafts the
@@ -48,7 +48,7 @@ from ...config import settings
 from ...exceptions import ServiceError
 from ...i18n import t_locale
 from ...models import ModelConfig, WorkflowSpec
-from ...models.unified import METRIC_SIGNATURES, run_entry_for
+from ...models.unified import METRIC_SIGNATURE, RUN_ENTRY
 from ..language_models import (
     apply_model_reasoning_config,
     apply_reasoning_effort,
@@ -227,14 +227,12 @@ def _validate_metric_code(code: str) -> str:
     return ""
 
 
-# Function name, minimum positional-capable parameters and maximum required
-# ones per metric shape. These match the validity check's ``_METRIC_SLOTS``
-# (contract.py): a draft this accepts must not fail the check before Run.
-_METRIC_SIGNATURES: dict[str, tuple[str, int, int, str]] = {
-    "dspy_feedback": ("metric", 5, 5, METRIC_SIGNATURES["dspy_feedback"]),
-    "dspy_scalar": ("metric", 3, 3, METRIC_SIGNATURES["dspy_scalar"]),
-    "blackbox_side_info": ("score", 2, 2, METRIC_SIGNATURES["blackbox_side_info"]),
-}
+# These match the validity check (contract.py): a draft this accepts must not
+# fail the check before Run. ``score`` accepts at least (input, output) and
+# requires at most those two; ``expected`` is optional.
+_METRIC_NAME = "score"
+_METRIC_MIN_ACCEPTED = 2
+_METRIC_MAX_REQUIRED = 2
 
 
 def _parse_functions(code: str, label: str) -> tuple[dict[str, ast.FunctionDef], str, set[str]]:
@@ -278,17 +276,16 @@ def _positional_capacity(fn: ast.FunctionDef) -> tuple[int, int, bool]:
     return len(positional), len(positional) - len(fn.args.defaults), fn.args.vararg is not None
 
 
-def _validate_run_code(code: str, artifact_kind: str) -> str:
+def _validate_run_code(code: str) -> str:
     """Statically check the wizard's run code against the workspace contract.
 
     The sandboxed contract check executes it; here a syntax error or a
-    missing / mis-shaped entrypoint is caught before the code lands in the
-    editor, without executing model-written code in the API process.
+    missing / mis-shaped ``run(artifact, input)`` is caught before the code
+    lands in the editor, without executing model-written code in the API
+    process. Every artifact kind, a DSPy program included, has this one entry point.
 
     Args:
         code: Run-code source.
-        artifact_kind: The artifact kind; ``dspy_program`` needs
-            ``build_program()``, every other kind ``run(artifact, input)``.
 
     Returns:
         An empty string when the code fits the contract, otherwise a short error message.
@@ -296,47 +293,35 @@ def _validate_run_code(code: str, artifact_kind: str) -> str:
     functions, error, _ = _parse_functions(code, "run")
     if error:
         return error
-    if artifact_kind == "dspy_program":
-        fn = functions.get("build_program")
-        if fn is None:
-            return "run error: define def build_program() returning the dspy.Module."
-        required_kwonly = [d for d in fn.args.kw_defaults if d is None]
-        if _positional_capacity(fn)[1] > 0 or required_kwonly:
-            return "run error: build_program() must take no arguments."
-        return ""
     fn = functions.get("run")
     if fn is None:
-        return "run error: define def run(artifact, input)."
+        return f"run error: define {RUN_ENTRY}."
     accepted, required, variadic = _positional_capacity(fn)
     if (accepted < 2 and not variadic) or required > 2:
         return "run error: run must take exactly (artifact, input)."
     return ""
 
 
-def _validate_unified_metric_code(code: str, metric_shape: str, metric_has_model: bool) -> str:
-    """Statically check the wizard's metric against the shape its optimizer needs.
+def _validate_unified_metric_code(code: str, metric_has_model: bool) -> str:
+    """Statically check the wizard's metric against ``score(input, output, expected=None)``.
 
     Args:
         code: Metric source.
-        metric_shape: ``dspy_feedback``, ``dspy_scalar`` or ``blackbox_side_info``.
         metric_has_model: Whether a metric model is attached; without one the
             ``skynet`` helper does not exist in the metric's process.
 
     Returns:
-        An empty string when the code fits the shape, otherwise a short error message.
+        An empty string when the code fits the contract, otherwise a short error message.
     """
     functions, error, imported = _parse_functions(code, "metric")
     if error:
         return error
-    name, minimum, most_required, shape_text = _METRIC_SIGNATURES.get(
-        metric_shape, _METRIC_SIGNATURES["blackbox_side_info"]
-    )
-    fn = functions.get(name)
+    fn = functions.get(_METRIC_NAME)
     if fn is None:
-        return f"metric error: define {shape_text}."
+        return f"metric error: define {METRIC_SIGNATURE}."
     accepted, required, variadic = _positional_capacity(fn)
-    if (accepted < minimum and not variadic) or required > most_required:
-        return f"metric error: the signature must be {shape_text}."
+    if (accepted < _METRIC_MIN_ACCEPTED and not variadic) or required > _METRIC_MAX_REQUIRED:
+        return f"metric error: the signature must be {METRIC_SIGNATURE}."
     if "skynet" in imported and not metric_has_model:
         return "metric error: no metric model is attached, so `from skynet import llm` is unavailable."
     return ""
@@ -934,47 +919,25 @@ _RUN_CONTRACT = """The run code is plain python that turns one case input into a
 - Read input fields by their exact names; never invent fields."""
 
 _RUN_ENTRY = (
-    f"define {run_entry_for('prompt')}: "
+    f"define {RUN_ENTRY}: "
     """artifact is the version under optimization (a str, or a dict of name -> text when the starting version is a mapping), exactly as the optimizer proposes it; input is one case input, a dict keyed by the input fields. Return the output: a str, or any JSON-serializable value the metric reads.
 - The task model comes from the skynet module: `from skynet import llm` (never define your own). llm(prompt, input=None, images=None) -> str; llm(artifact, input["<input field>"]) runs the artifact as the system message with that field as the user message and returns the reply; that is how a prompt is exercised. llm() caps the reply length itself (the task model's max tokens, or a default), so never pass a token limit. images= attaches PNG/JPEG bytes, file paths or data: URLs.
-- Per artifact kind: a prompt is exercised with llm(artifact, ...); code is python source to load with exec into a fresh dict namespace (or write to a temp file and run with subprocess and a timeout) and call on the input; text is used as written (return it, or apply it with llm when the objective is about what the text makes a model do)."""
+- Per artifact kind: a prompt is exercised with llm(artifact, ...); code is python source to load with exec into a fresh dict namespace (or write to a temp file and run with subprocess and a timeout) and call on the input; text is used as written (return it, or apply it with llm when the objective is about what the text makes a model do).
+- The metric is written separately and relies on this output shape, so keep to it: a prompt or text returns the reply str unchanged (never wrap it in a dict), code returns what the code returns, a DSPy program returns its dspy.Prediction.
+- A DSPy program uses the same run(artifact, input): `import dspy` at the top, define the dspy.Signature classes and the dspy.Module in the run code, build ONE instance of the module at module level as `program = MyProgram()`, and have run return program(**input) (the dspy.Prediction it returns is the output). Every optimizer finds that module-level program and tunes its predictors itself: it applies the version under optimization (artifact is then a dict mapping each predictor name, as program.named_predictors() reports it, to its instruction text) and binds the task model as the dspy LM, so never set instructions, call dspy.configure or create a dspy.LM yourself. Name the predictors so they match the keys of the starting version, name the signature's input fields exactly as the case input fields, and name the output fields so the metric can read output.<field>."""
 )
 
-# A DSPy optimizer tunes the module's predictors itself, so the engine needs
-# the module rather than a call; build_program() is that run code's entry
-# point, not a separate deliverable.
-_DSPY_ENTRY = (
-    """the artifact is a DSPy program, and the DSPy optimizer tunes its predictors itself, so the run code hands over the module instead of calling it: define """
-    + run_entry_for("dspy_program")
-    + """ taking no arguments and returning a dspy.Module. `import dspy` at the top; define the dspy.Signature classes and the module it uses inside the run code.
-- The harness applies the version under optimization, a dict mapping each predictor name (as program.named_predictors() reports it) to its instruction text, configures the task model as the dspy LM and calls program(**input) with the input fields as keyword arguments; the output is the dspy.Prediction it returns. Never call dspy.configure, create a dspy.LM or set instructions yourself.
-- Name the predictors so they match the keys of the starting version; the module's forward takes exactly the input fields as keyword arguments and returns a dspy.Prediction with the output fields the metric reads.
-- Name the signature's input fields exactly as the case input fields. gold holds the case's expected fields under their own names (a single expected value is gold.expected), so name the output fields so the metric can compare pred.<field> with the matching gold field."""
+_METRIC_CONTRACT = (
+    """Every optimizer reads the metric the same way: a score AND feedback text.
+- Define """
+    + METRIC_SIGNATURE
+    + """.
+- input is the case input dict (keyed by the input fields), output is exactly what run returned for it, and it is written without seeing the run code, so read it by the artifact kind: for a prompt or text it is the reply str (compare or parse the text; never call .get or getattr on it), for a DSPy program the dspy.Prediction (read output.<field>), for code whatever the code returns (check its type before reading into it), expected is the case's expected output as a dict keyed by the expected field (read expected["<field>"]; None when the case has none). Declare expected only when you use it.
+- Return (score, side_info): score is a float, higher is better, 0.0 to 1.0 by convention; side_info is a dict with "feedback": str saying WHY the output scored that, naming the expected value or the failed check, because the optimizer learns from it. When several things are measured, add "scores": {"<name>": float, ...}, one entry per thing; the top-level score is then their (weighted) combination."""
 )
-
-_METRIC_SHAPES = {
-    "dspy_feedback": """The metric feeds a DSPy GEPA optimizer, so it returns a score AND feedback text.
-- Define """
-    + METRIC_SIGNATURES["dspy_feedback"]
-    + """ with all five parameters.
-- gold is a dspy.Example holding the case input fields and the expected output fields (read them as gold.<field>); pred is the dspy.Prediction the program returned (pred.<output field>).
-- Return dspy.Prediction(score=float, feedback=str): score higher is better, 0.0 to 1.0 by convention; feedback says WHY, naming the expected value or the failed check, because the optimizer learns from it. {"score": ..., "feedback": ...} or (score, "feedback") are accepted too.""",
-    "dspy_scalar": """The metric feeds a DSPy optimizer that reads only a number.
-- Define """
-    + METRIC_SIGNATURES["dspy_scalar"]
-    + """.
-- gold is a dspy.Example holding the case input fields and the expected output fields (read them as gold.<field>); pred is the dspy.Prediction the program returned (pred.<output field>).
-- Return a float (higher is better, 0.0 to 1.0 by convention) or a bool. No feedback is read.""",
-    "blackbox_side_info": """The metric feeds a black-box optimizer that reads a score and side info.
-- Define """
-    + METRIC_SIGNATURES["blackbox_side_info"]
-    + """.
-- input is the case input dict (keyed by the input fields), output is what run returned for it, expected is the case's expected output as a dict keyed by the expected field (read expected["<field>"]; None when the case has none). Declare expected only when you use it.
-- Return (score, side_info): score is a float, higher is better, 0.0 to 1.0 by convention; side_info is a dict with "feedback": str saying WHY the output scored that, naming the expected value or the failed check. When several things are measured, add "scores": {"<name>": float, ...}, one entry per thing; the top-level score is then their (weighted) combination.""",
-}
 
 _METRIC_COMMON = """- Never raise: catch failures and return the lowest score with the error in the feedback.
-- Standard library (and dspy for the DSPy shapes) only; no network of your own.
+- Standard library (and dspy) only; no network of your own.
 - The metric's source is never shown to the optimizer: it learns only from the scores and feedback, so put everything a better version needs to know into the feedback."""
 
 _METRIC_LLM = """A metric model is attached: `from skynet import llm` calls it. llm(prompt) -> str asks a free-form question, e.g. to grade the output against a rubric: parse the reply defensively (look for a number or a verdict word, default to the lowest score). Prefer deterministic checks where they suffice."""
@@ -990,17 +953,13 @@ def _unified_contracts(unified: dict[str, Any]) -> tuple[str, str]:
 
     Returns:
         ``(run_contract, metric_contract)`` texts handed to the authors and the
-        chat agent. Every artifact gets the same contract: run code plus a
-        metric. Only the run code's entry point follows the artifact kind,
-        because a DSPy optimizer needs the module itself.
+        chat agent. Every artifact and every optimizer gets the same contract;
+        only whether a metric model is attached changes the metric's text.
     """
-    kind = str(unified.get("task", {}).get("artifact", {}).get("kind", "prompt"))
-    entry = _DSPY_ENTRY if kind == "dspy_program" else _RUN_ENTRY
-    run_contract = f"{_DELIVERABLES}\n\n{_RUN_CONTRACT.format(entry=entry)}"
-    shape = str(unified.get("metric_shape", "blackbox_side_info"))
+    run_contract = f"{_DELIVERABLES}\n\n{_RUN_CONTRACT.format(entry=_RUN_ENTRY)}"
     metric_contract = "\n\n".join(
         [
-            _METRIC_SHAPES.get(shape, _METRIC_SHAPES["blackbox_side_info"]),
+            _METRIC_CONTRACT,
             _METRIC_COMMON,
             _METRIC_LLM if unified.get("metric_has_model") else _METRIC_NO_LLM,
         ]
@@ -1042,9 +1001,9 @@ class GenerateUnifiedMetric(dspy.Signature):
     the objective: it must reward exactly what the user described and
     nothing else. Read the objective, the background and the sample
     cases, decide what a measurably better output looks like, then
-    implement it in the exact shape ``metric_contract`` states for
-    ``metric_shape`` — the function name, its parameters and its return
-    value are fixed by the optimizer the user picked. Keep it short and
+    implement it in the exact shape ``metric_contract`` states — the
+    function name, its parameters and its return value are the same for
+    every optimizer. Keep it short and
     simple, and decide quickly: when the expected value is a label or a
     short answer, normalize both sides (strip, lowercase) and score an
     exact match, or the expected label appearing in the output; do not
@@ -1060,7 +1019,6 @@ class GenerateUnifiedMetric(dspy.Signature):
     case_fields: list[str] = dspy.InputField(desc="Keys of every case input dict (the input fields).")
     expected_field: str = dspy.InputField(desc="Column the expected output came from; empty when none.")
     sample_cases: str = dspy.InputField(desc="JSON array of up to 5 cases, each {input, expected}.")
-    metric_shape: str = dspy.InputField(desc="dspy_feedback | dspy_scalar | blackbox_side_info.")
     metric_contract: str = dspy.InputField(desc="The exact shape the metric must have; follow it literally.")
     authoring_brief: str = dspy.InputField(desc="Directives the user confirmed, one per line; may be empty.")
 
@@ -1155,8 +1113,7 @@ class UnifiedAssistant(dspy.Signature):
     ## Rule 3: New code satisfies its contract literally.
 
     New run code follows ``run_contract``; a new metric has the exact
-    function name, parameters and return value ``metric_contract`` states
-    for ``metric_shape`` (the optimizer the user picked fixes that shape),
+    function name, parameters and return value ``metric_contract`` states,
     and calls ``llm`` only when the contract says it exists. When
     ``current_validation`` reports an error and the user asks for a fix,
     fix exactly that error.
@@ -1177,7 +1134,6 @@ class UnifiedAssistant(dspy.Signature):
     case_fields: list[str] = dspy.InputField(desc="Keys of every case input dict (the input fields).")
     expected_field: str = dspy.InputField(desc="Column the expected output came from; empty when none.")
     sample_cases: str = dspy.InputField(desc="JSON array of up to 5 cases, each {input, expected}.")
-    metric_shape: str = dspy.InputField(desc="dspy_feedback | dspy_scalar | blackbox_side_info.")
     run_contract: str = dspy.InputField(desc="The exact contract any new run code must satisfy.")
     metric_contract: str = dspy.InputField(desc="The exact shape any new metric must have.")
     current_run: str = dspy.InputField(desc="The run code as currently shown in the editor.")
@@ -2412,7 +2368,7 @@ class _UnifiedEditSession:
         successful edit, call ``finish`` and answer in ``reply`` instead.
 
         The new code is checked against ``metric_contract`` (the exact
-        function name and parameters for ``metric_shape``) before it's
+        function name and parameters of ``score``) before it's
         applied. If the check fails, the edit is rejected and the
         observation returns the error so you can fix the code and try again.
 
@@ -3269,7 +3225,6 @@ def _unified_inputs(unified: dict[str, Any]) -> dict[str, Any]:
             ensure_ascii=False,
             default=str,
         ),
-        "metric_shape": str(unified.get("metric_shape", "blackbox_side_info")),
         "run_contract": run_contract,
         "metric_contract": metric_contract,
     }
@@ -3317,14 +3272,9 @@ def _unified_validators(unified: dict[str, Any]) -> tuple[Callable[[str], str], 
     Returns:
         ``(run_validator, metric_validator)``, each returning an error message or ``""``.
     """
-    kind = str((unified.get("task") or {}).get("artifact", {}).get("kind", "prompt"))
     return (
-        partial(_validate_run_code, artifact_kind=kind),
-        partial(
-            _validate_unified_metric_code,
-            metric_shape=str(unified.get("metric_shape", "blackbox_side_info")),
-            metric_has_model=bool(unified.get("metric_has_model")),
-        ),
+        _validate_run_code,
+        partial(_validate_unified_metric_code, metric_has_model=bool(unified.get("metric_has_model"))),
     )
 
 

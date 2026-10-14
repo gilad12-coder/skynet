@@ -5,7 +5,7 @@ import { LegalDocument, LEGAL_LINKS, TERMS_OF_SERVICE } from "@/features/legal";
 
 export const metadata: Metadata = {
   title: "Terms of Service",
-  description: "The terms that govern your use of the hosted Skynet service.",
+  description: "The terms that govern your use of the hosted DRWN service.",
   alternates: { canonical: LEGAL_LINKS.terms },
   robots: { index: true, follow: true },
 };

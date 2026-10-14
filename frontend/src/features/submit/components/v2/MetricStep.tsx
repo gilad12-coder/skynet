@@ -33,8 +33,7 @@ const noValidation = async (): Promise<ValidateCodeResponse | null> => null;
  */
 export function MetricStep({ page, onBack }: { page: number; onBack: () => void }) {
   const ctx = useWizardV2();
-  const { state, patchTask, patchWorkspace, metricShape, guided, optimizerCatalog, inputsInferring } =
-    ctx;
+  const { state, patchTask, patchWorkspace, guided, optimizerCatalog, inputsInferring } = ctx;
   const { task, inputs, optimizer, workspace } = state;
   const kind = task.artifactKind;
   const t = (key: string) => v2Msg(key, guided);
@@ -53,11 +52,10 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     optimizerCatalog?.artifact_kind === kind && optimizerCatalog.data_mode === inputs.mode
       ? optimizerCatalog
       : null;
-  const metricSignature =
-    catalog?.options.find((option) => option.id === optimizer.choice)?.metric_signature ?? null;
+  const metricSignature = catalog?.metric_signature ?? null;
 
   const authoringContext = React.useMemo<UnifiedAuthoringContext | null>(() => {
-    if (!kind || !inputs.mode || !metricShape) return null;
+    if (!kind || !inputs.mode) return null;
     const samples = authoringCases(
       {
         cases: inputs.cases,
@@ -78,13 +76,11 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
       expected_field: inputs.expectedField,
       sample_cases: samples,
       optimizer: optimizer.choice,
-      metric_shape: metricShape,
       metric_has_model: metricUsesModel,
       focus: "run",
     };
   }, [
     kind,
-    metricShape,
     metricUsesModel,
     task.objective,
     task.background,
