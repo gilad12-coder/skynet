@@ -24,6 +24,7 @@ import {
   getJob,
   getOptimizationPayload,
   getOptimizerCatalog,
+  getConnectors,
   getStagedDataset,
   isInsufficientFundsError,
   isStorageQuotaError,
@@ -473,6 +474,19 @@ export function WizardV2Provider({
     }
     submittingRef.current = true;
     setSubmitPhase("sending");
+    // The server stages the checkout through the user's GitHub link, and
+    // without one its setup check fails with a generic validation error.
+    // When the connector list cannot load, the server still decides.
+    const github = await getConnectors().then(
+      (res) => res.connectors.find((c) => c.provider === "github"),
+      () => undefined,
+    );
+    if (github && !(github.connected && github.status !== "invalid")) {
+      toast.error(msg("submit.blackbox.repo.connect_hint"));
+      submittingRef.current = false;
+      setSubmitPhase("idle");
+      return;
+    }
     try {
       const result = await submitRepoRun(request);
       track(TelemetryEvent.RunSubmitted, {
