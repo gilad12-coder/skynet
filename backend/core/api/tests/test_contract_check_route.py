@@ -222,6 +222,7 @@ def test_sandbox_route_tells_a_spent_budget_from_a_code_mismatch(
     [run] = [item for item in body["checks"] if item["key"] == "workspace.run"]
     assert (run["message_code"], run["message_params"]) == (code, {"error": SPENT})
     assert run["message"] == t(code, error=SPENT)
+    assert run["detail"] is None
 
 
 @pytest.mark.parametrize(

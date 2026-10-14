@@ -210,7 +210,9 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
                     message=t(code, error=error),
                     message_code=code,
                     message_params={"error": error},
-                    detail=(failure.message or "")[-4000:] if failure is not None and failure.message else None,
+                    # The message already carries the error; a detail repeating it
+                    # printed the sentence twice under the editor.
+                    detail=None,
                 ),
             ],
             fingerprint=contract_fingerprint(spec),
