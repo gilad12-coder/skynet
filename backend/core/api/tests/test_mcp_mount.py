@@ -11,6 +11,7 @@ from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
 from pydantic import BaseModel
 
 from core.api.mcp_mount import AGENT_TAG, _annotations_for_method, _annotations_for_route, _trim_tool_spec
+from core.api.routers.code_agent import create_code_agent_router
 
 
 def test_annotations_for_method_reads_are_read_only() -> None:
@@ -124,3 +125,18 @@ async def test_model_supplied_authorization_never_reaches_the_header() -> None:
             raise_on_error=False,
         )
     assert seen == [None]
+
+
+def test_coding_tool_description_points_to_the_metric_editors() -> None:
+    """The coding tool's MCP description must not promise an in-chat card.
+
+    The MCP mount sends only the docstring's first line to the model. When it
+    said the tool renders a "code-authoring card", the agent told users to
+    review and edit the code "in the card", which has no editors; the code
+    lives in the Metric screen's editors.
+    """
+    router = create_code_agent_router()
+    route = next(r for r in router.routes if getattr(r, "operation_id", None) == "request_code_authoring")
+    first_line = (route.endpoint.__doc__ or "").strip().splitlines()[0]
+    assert "Metric screen's editors" in first_line
+    assert "card" not in first_line.lower()

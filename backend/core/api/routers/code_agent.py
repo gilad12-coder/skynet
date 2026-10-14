@@ -803,16 +803,17 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         req: RequestCodeAuthoringRequest,
         current_user: AuthenticatedUserDep,
     ) -> RequestCodeAuthoringResponse:
-        """Signal the chat UI to render an inline code-authoring card.
+        """Start the coding agent; its code lands in the Metric screen's editors, its edits show as diffs.
 
         Stateless: the endpoint exists only so the generalist agent can call a
         named tool the frontend recognizes via its ``tool_start`` SSE event.
-        The card streams the dedicated code agent (the same ``run_code_agent``
-        the wizard uses) over ``POST /optimizations/ai-generate-code``, renders
-        the reading→signature→metric timeline, and writes the finished code
-        back into the shared wizard state — so the generalist never hand-writes
-        ``signature_code`` / ``metric_code``. The agent calls this once, ends
-        its turn, and reads the authored code on the next turn.
+        The chat then streams the dedicated code agent (the same
+        ``run_code_agent`` the wizard uses) over
+        ``POST /optimizations/ai-generate-code``, lists its edits and the
+        validity check, and writes the finished code back into the shared
+        wizard state — so the generalist never hand-writes ``signature_code`` /
+        ``metric_code``. The agent calls this once, ends its turn, and reads
+        the authored code on the next turn.
 
         Args:
             req: Optional plain-language goal for the Signature/Metric.
