@@ -37,7 +37,7 @@ import { WizardScreen } from "./WizardScreen";
  */
 export function TaskStep({ page }: { page: number }) {
   const ctx = useWizardV2();
-  const { state, guided, patchTask } = ctx;
+  const { state, guided, patchTask, patchInputs } = ctx;
   const task = state.task;
   const t = (key: string) => v2Msg(key, guided);
 
@@ -84,14 +84,14 @@ export function TaskStep({ page }: { page: number }) {
         <Segmented<"artifact" | "repo">
           label={t("submit.v2.repo.target_label")}
           value={task.repo ? "repo" : "artifact"}
-          onChange={(target) =>
-            // The engine catalog is keyed on a kind, so a repository stands in as code.
-            patchTask(
-              target === "repo"
-                ? { repo: task.repo ?? emptyRepoDraft(), artifactKind: "code" }
-                : { repo: null },
-            )
-          }
+          onChange={(target) => {
+            // The engine catalog is keyed on a kind and mode, so a repository
+            // stands in as code scored one case at a time, as a clone does.
+            if (target === "repo") {
+              patchTask({ repo: task.repo ?? emptyRepoDraft(), artifactKind: "code" });
+              patchInputs({ mode: "single" });
+            } else patchTask({ repo: null });
+          }}
           className="w-full"
           options={[
             {
