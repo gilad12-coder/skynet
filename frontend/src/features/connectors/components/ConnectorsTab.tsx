@@ -40,6 +40,11 @@ import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { KeyFormActions } from "@/shared/ui/key-form-actions";
 import { Textarea } from "@/shared/ui/primitives/textarea";
 
+// This tab lives in the Settings modal, whose card forms put Save key near the
+// bottom-right corner where the app's toasts stack; top-center only overlaps
+// the modal's title, which has nothing to click.
+const TOAST_OPTIONS = { position: "top-center" } as const;
+
 const CATEGORY_ICONS: Record<ProviderCategory, React.ElementType> = {
   hubs: Cube,
   files: FolderOpen,
@@ -77,7 +82,7 @@ function useConnectorErrorParam() {
     const url = new URL(window.location.href);
     const code = url.searchParams.get("connector_error");
     if (!code) return;
-    toast.error(tI18n(code));
+    toast.error(tI18n(code), TOAST_OPTIONS);
     url.searchParams.delete("connector_error");
     window.history.replaceState(
       window.history.state,
@@ -211,7 +216,7 @@ function ProviderCard({
       const { authorize_url } = await meta.startOAuth(oauthValues);
       window.location.assign(authorize_url);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"));
+      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"), TOAST_OPTIONS);
       setStarting(false);
     }
   };
@@ -227,9 +232,9 @@ function ProviderCard({
       const res = await meta.saveCredentials(trimmedValues());
       onChange(res.connectors);
       closeForm();
-      toast.success(meta.toastConnected);
+      toast.success(meta.toastConnected, TOAST_OPTIONS);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"));
+      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"), TOAST_OPTIONS);
     } finally {
       setSaving(false);
     }
@@ -241,9 +246,9 @@ function ProviderCard({
     try {
       const res = await meta.remove();
       onChange(res.connectors);
-      toast.success(meta.toastDisconnected);
+      toast.success(meta.toastDisconnected, TOAST_OPTIONS);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"));
+      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"), TOAST_OPTIONS);
     } finally {
       setRemoving(false);
     }
