@@ -219,7 +219,6 @@
   "submit.v2.repo.issue.repository": "Choisissez un dépôt, ou écrivez-le sous la forme owner/name.",
   "submit.v2.repo.issue.commit": "Un commit est un SHA de 40 caractères. Laissez vide pour le dernier de la branche.",
   "submit.v2.repo.issue.paths": "Indiquez au moins un chemin que l'optimiseur peut modifier.",
-  "submit.v2.repo.agent_off": "Pour un dépôt, vous écrivez la fonction de notation vous-même : score(repo_path) renvoie un nombre.",
   "submit.v2.repo.check_on_submit": "Vérifié sur le dépôt au lancement",
   "submit.v2.task.artifact.starting_label": "Version de départ",
   "submit.v2.task.artifact.starting_label.guided": "Notre point de départ",

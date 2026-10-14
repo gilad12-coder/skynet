@@ -219,7 +219,6 @@
   "submit.v2.repo.issue.repository": "یک مخزن انتخاب کنید یا آن را به شکل owner/name بنویسید.",
   "submit.v2.repo.issue.commit": "کامیت یک SHA چهل‌نویسه‌ای است. برای آخرین کامیت شاخه خالی بگذارید.",
   "submit.v2.repo.issue.paths": "دست‌کم یک مسیر که بهینه‌ساز می‌تواند تغییر دهد بنویسید.",
-  "submit.v2.repo.agent_off": "در اجرای مخزن، تابع امتیازدهی را خودتان می‌نویسید: score(repo_path) یک عدد برمی‌گرداند.",
   "submit.v2.repo.check_on_submit": "هنگام شروع اجرا در برابر مخزن بررسی می‌شود",
   "submit.v2.task.artifact.starting_label": "نسخهٔ شروع",
   "submit.v2.task.artifact.starting_label.guided": "نقطهٔ شروع",

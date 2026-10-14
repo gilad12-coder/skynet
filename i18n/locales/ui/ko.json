@@ -219,7 +219,6 @@
   "submit.v2.repo.issue.repository": "저장소를 고르거나 owner/name 형식으로 입력하세요.",
   "submit.v2.repo.issue.commit": "커밋은 40자리 SHA입니다. 브랜치의 최신 커밋을 쓰려면 비워 두세요.",
   "submit.v2.repo.issue.paths": "옵티마이저가 변경할 수 있는 경로를 하나 이상 입력하세요.",
-  "submit.v2.repo.agent_off": "저장소 실행에서는 채점 함수를 직접 작성합니다: score(repo_path)가 숫자를 반환합니다.",
   "submit.v2.repo.check_on_submit": "실행을 시작할 때 저장소를 대상으로 확인합니다",
   "submit.v2.task.artifact.starting_label": "시작 버전",
   "submit.v2.task.artifact.starting_label.guided": "출발점",

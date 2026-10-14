@@ -219,7 +219,6 @@
   "submit.v2.repo.issue.repository": "Bir depo seçin ya da owner/name biçiminde yazın.",
   "submit.v2.repo.issue.commit": "Commit 40 karakterlik bir SHA'dır. Daldaki en sonuncusu için boş bırakın.",
   "submit.v2.repo.issue.paths": "Optimize edicinin değiştirebileceği en az bir yol yazın.",
-  "submit.v2.repo.agent_off": "Depo çalıştırmasında puanlama fonksiyonunu kendiniz yazarsınız: score(repo_path) bir sayı döndürür.",
   "submit.v2.repo.check_on_submit": "Çalıştırma başlarken depoya karşı denetlenir",
   "submit.v2.task.artifact.starting_label": "Başlangıç sürümü",
   "submit.v2.task.artifact.starting_label.guided": "Nereden başlıyoruz",

@@ -219,7 +219,6 @@
   "submit.v2.repo.issue.repository": "कोई रिपॉज़िटरी चुनें, या उसे owner/name के रूप में लिखें।",
   "submit.v2.repo.issue.commit": "कमिट 40 अक्षरों का SHA होता है। ब्रांच के नवीनतम के लिए खाली छोड़ें।",
   "submit.v2.repo.issue.paths": "कम से कम एक पाथ लिखें जिसे ऑप्टिमाइज़र बदल सकता है।",
-  "submit.v2.repo.agent_off": "रिपॉज़िटरी रन में स्कोरर आप खुद लिखते हैं: score(repo_path) एक संख्या लौटाता है।",
   "submit.v2.repo.check_on_submit": "रन शुरू करते समय रिपॉज़िटरी पर जाँचा जाता है",
   "submit.v2.task.artifact.starting_label": "शुरुआती संस्करण",
   "submit.v2.task.artifact.starting_label.guided": "शुरुआती बिंदु",

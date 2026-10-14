@@ -219,7 +219,6 @@
   "submit.v2.repo.issue.repository": "اختر مستودعًا، أو اكتبه بالصيغة owner/name.",
   "submit.v2.repo.issue.commit": "الإيداع هو SHA من 40 حرفًا. اتركه فارغًا لاستخدام الأحدث في الفرع.",
   "submit.v2.repo.issue.paths": "اذكر مسارًا واحدًا على الأقل يمكن للمُحسِّن تغييره.",
-  "submit.v2.repo.agent_off": "في تشغيل المستودع تكتب دالة التقييم بنفسك: score(repo_path) تُرجع رقمًا.",
   "submit.v2.repo.check_on_submit": "يُفحص مقابل المستودع عند بدء التشغيل",
   "submit.v2.task.artifact.starting_label": "نسخة البداية",
   "submit.v2.task.artifact.starting_label.guided": "نقطة البداية",

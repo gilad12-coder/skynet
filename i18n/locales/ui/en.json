@@ -3970,7 +3970,6 @@
   "submit.v2.repo.issue.repository": "Pick a repository, or write it as owner/name.",
   "submit.v2.repo.issue.commit": "A commit is a 40-character SHA. Leave it empty for the latest on the branch.",
   "submit.v2.repo.issue.paths": "List at least one path the optimizer may change.",
-  "submit.v2.repo.agent_off": "On a repository run you write the scorer yourself: score(repo_path) returns a number.",
   "submit.v2.repo.check_on_submit": "Checked against the repository when you start the run",
   "submit.v2.task.issue.objective": "Add an objective first.",
   "submit.v2.task.issue.kind": "Pick an artifact type.",

@@ -95,11 +95,11 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   // The docked agent's coding tool writes under this context, into these
   // editors' code. Inference re-roles the columns when it answers, and the
   // Inputs step stays mounted while it does, so code written earlier would
-  // target input fields the contract check and the run no longer pass.
+  // target input fields the contract check and the run no longer pass. A
+  // repository run has no sample inputs to write against; its scorer is
+  // written by hand.
   const wizardCtx = useWizardStateOptional();
   const registerContext = wizardCtx?.setAuthoringContext;
-  // A repository run has no sample inputs to write run code against; its
-  // scorer is written by hand.
   const sharedContext = repo || inputsInferring ? null : authoringContext;
   React.useEffect(() => {
     registerContext?.(sharedContext);

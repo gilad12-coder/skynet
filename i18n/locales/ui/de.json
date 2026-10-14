@@ -219,7 +219,6 @@
   "submit.v2.repo.issue.repository": "Wähle ein Repository oder schreibe es als owner/name.",
   "submit.v2.repo.issue.commit": "Ein Commit ist ein 40-stelliger SHA. Leer lassen für den neuesten auf dem Branch.",
   "submit.v2.repo.issue.paths": "Gib mindestens einen Pfad an, den der Optimierer ändern darf.",
-  "submit.v2.repo.agent_off": "Bei einem Repository schreibst du die Bewertungsfunktion selbst: score(repo_path) gibt eine Zahl zurück.",
   "submit.v2.repo.check_on_submit": "Wird beim Start gegen das Repository geprüft",
   "submit.v2.task.artifact.starting_label": "Ausgangsversion",
   "submit.v2.task.artifact.starting_label.guided": "Unser Ausgangspunkt",

@@ -219,7 +219,6 @@
   "submit.v2.repo.issue.repository": "选择一个仓库，或按 owner/name 格式填写。",
   "submit.v2.repo.issue.commit": "提交是 40 位的 SHA。留空则使用分支上的最新提交。",
   "submit.v2.repo.issue.paths": "至少列出一个优化器可以修改的路径。",
-  "submit.v2.repo.agent_off": "仓库运行需要你自己编写评分函数：score(repo_path) 返回一个数字。",
   "submit.v2.repo.check_on_submit": "开始运行时会针对仓库进行检查",
   "submit.v2.task.artifact.starting_label": "起始版本",
   "submit.v2.task.artifact.starting_label.guided": "起点",

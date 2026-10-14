@@ -219,7 +219,6 @@
   "submit.v2.repo.issue.repository": "Виберіть репозиторій або впишіть його як owner/name.",
   "submit.v2.repo.issue.commit": "Коміт — це SHA з 40 символів. Залиште порожнім, щоб узяти останній у гілці.",
   "submit.v2.repo.issue.paths": "Укажіть хоча б один шлях, який оптимізатор може змінювати.",
-  "submit.v2.repo.agent_off": "Для репозиторію функцію оцінювання ви пишете самі: score(repo_path) повертає число.",
   "submit.v2.repo.check_on_submit": "Перевіряється на репозиторії під час запуску",
   "submit.v2.task.artifact.starting_label": "Початкова версія",
   "submit.v2.task.artifact.starting_label.guided": "З чого починаємо",

@@ -219,7 +219,6 @@
   "submit.v2.repo.issue.repository": "Escolha um repositório ou escreva-o como owner/name.",
   "submit.v2.repo.issue.commit": "Um commit é um SHA de 40 caracteres. Deixe vazio para usar o mais recente da branch.",
   "submit.v2.repo.issue.paths": "Informe pelo menos um caminho que o otimizador pode alterar.",
-  "submit.v2.repo.agent_off": "Em uma execução de repositório, você escreve a função de pontuação: score(repo_path) retorna um número.",
   "submit.v2.repo.check_on_submit": "Verificado no repositório ao iniciar a execução",
   "submit.v2.task.artifact.starting_label": "Versão inicial",
   "submit.v2.task.artifact.starting_label.guided": "De onde partimos",
