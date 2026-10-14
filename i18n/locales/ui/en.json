@@ -1990,7 +1990,6 @@
   "shared.agent.run_code_prompt": "Run the following code snippet ({language}) and return the results:\n\n```{language}\n{code}\n```",
   "shared.agent.seconds_short": "s",
   "shared.agent.send": "Send",
-  "shared.agent.turn_failed_retry": "Retry",
   "shared.agent.thinking": "Thinking",
   "shared.agent.thought_seconds": "Thought for {seconds} seconds",
   "shared.code_editor.collapse": "Collapse",

@@ -3050,7 +3050,6 @@
   "shared.agent.run_code_prompt": "Ejecuta el siguiente fragmento de código ({language}) y devuelve los resultados:\n\n```{language}\n{code}\n```",
   "shared.agent.seconds_short": "s",
   "shared.agent.send": "Enviar",
-  "shared.agent.turn_failed_retry": "Reintentar",
   "shared.agent.thinking": "Pensando",
   "shared.agent.thought_seconds": "Pensó durante {seconds} segundos",
   "shared.code_editor.collapse": "Contraer",

@@ -2685,7 +2685,6 @@
   "shared.agent.run_code_prompt": "執行以下程式碼片段（{language}）並傳回結果：\n\n```{language}\n{code}\n```",
   "shared.agent.seconds_short": "秒",
   "shared.agent.send": "傳送",
-  "shared.agent.turn_failed_retry": "重試",
   "shared.agent.thinking": "諗緊…",
   "shared.agent.thought_seconds": "思考咗 {seconds} 秒",
   "shared.code_editor.collapse": "收起",
