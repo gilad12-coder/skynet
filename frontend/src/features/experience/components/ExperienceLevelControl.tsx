@@ -26,17 +26,9 @@ export function levelLabel(level: ExperienceLevel): string {
 }
 
 /**
- * The Guided / Standard / Expert picker. Settings shows it with labels; the
- * submission wizard shows a compact one in its header. Both write the same
- * saved level.
+ * The Guided / Standard / Expert picker that Settings shows.
  */
-export function ExperienceLevelSwitch({
-  size = "default",
-  iconOnly = false,
-}: {
-  size?: "default" | "sm";
-  iconOnly?: boolean;
-}) {
+function ExperienceLevelSwitch() {
   const experience = useExperienceOptional();
   if (!experience) return null;
   const { level, loaded, setLevel } = experience;
@@ -45,8 +37,6 @@ export function ExperienceLevelSwitch({
       value={level}
       onChange={(next) => void setLevel(next)}
       label={msg("experience.level.title")}
-      size={size}
-      iconOnly={iconOnly}
       segmentClassName="transition-[color,transform] duration-150 ease-out active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100"
       options={EXPERIENCE_LEVELS.map((value) => {
         const LevelIcon = LEVEL_ICONS[value];

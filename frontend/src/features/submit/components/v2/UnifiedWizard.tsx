@@ -4,18 +4,19 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 
 import { useHideAgentPill, useWizardStateOptional } from "@/features/agent-panel";
-import { ExperienceLevelSwitch } from "@/features/experience";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 import { slideVariants } from "../../constants";
 import { ExecutionBudgetProvider } from "../../hooks/use-execution-budget";
 import { WizardV2Provider, useWizardV2Shell, v2Text } from "../../hooks/use-unified-wizard";
+import { limitContinueBlock } from "../../lib/budget-limit";
 import { stepPages } from "../../lib/wizard-pages";
 import { WIZARD_V2_STEPS, type WizardStepId } from "../../lib/wizard-v2";
 import { WIZARD_STAGE, canMoveForward } from "../../lib/wizard-steps";
 import { SubmitNav } from "../SubmitNav";
 import { SubmitSplash } from "../SubmitSplash";
 import { SubmitStepper } from "../SubmitStepper";
+import { belowEstimateMessage } from "../TotalBudgetCard";
 import { InputsStep } from "./InputsStep";
 import { MetricStep } from "./MetricStep";
 import { OptimizerStep } from "./OptimizerStep";
@@ -72,8 +73,15 @@ function UnifiedWizardFrame() {
   const page = Math.min(pages[current], pageCount - 1);
   const lastScreen = position === steps.length - 1 && page === pageCount - 1;
   const { goNext, goPrev, advancing, submitting } = w;
-  const forwardOpen = canMoveForward(current, w.stepIssue("inputs"));
-
+  const visibleScreen = stepPages(current, w.state)[page] ?? "";
+  // A limit under the estimate's low end would only stop the run at its first
+  // model call, so the screen that sets it keeps Continue (the agent's too).
+  const limitNeeded = limitContinueBlock(visibleScreen, w.costBracket, w.tokenSource, {
+    uncapped: w.budgetUncapped,
+    limit: w.maxCostCents,
+  });
+  const inputsOpen = canMoveForward(current, w.stepIssue("inputs"));
+  const forwardOpen = inputsOpen && limitNeeded === null;
   const forward = useCallback(() => {
     if (!forwardOpen) return;
     if (page < pageCount - 1) {
@@ -96,14 +104,52 @@ function UnifiedWizardFrame() {
     goPrev();
   }, [page, current, steps, position, goPrev, w.state]);
 
+  // Back to one named screen: the agent's go-back lands where the user's
+  // own Back presses would, without walking every screen between.
+  const { goTo } = w;
+  const goToScreen = useCallback(
+    (screen: string) => {
+      const step = steps.find((s) => (stepPages(s, w.state) as readonly string[]).includes(screen));
+      if (!step || steps.indexOf(step) > position) return;
+      const target = (stepPages(step, w.state) as readonly string[]).indexOf(screen);
+      if (step === current && target >= page) return;
+      setPages((p) => ({ ...p, [step]: target }));
+      if (step !== current) goTo(step);
+    },
+    [steps, position, current, page, goTo, w.state],
+  );
+
   // The agent edits only the screen on view, so it is told which one that
-  // is; unmounting the wizard clears it and leaves the agent unscoped.
-  const setWizardScreen = useWizardStateOptional()?.setWizardScreen;
-  const visibleScreen = stepPages(current, w.state)[page] ?? "";
+  // is; unmounting the wizard clears it and leaves the agent unscoped. Its
+  // Continue runs this frame's own ``forward``, the button's handler.
+  const wizardCtx = useWizardStateOptional();
+  const setWizardScreen = wizardCtx?.setWizardScreen;
+  const setScreenIssue = wizardCtx?.setScreenIssue;
+  const setScreenNavigator = wizardCtx?.setScreenNavigator;
+  const blockedIssue = w.stepIssue("inputs");
+  const blockedText =
+    !inputsOpen && blockedIssue
+      ? v2Text(blockedIssue, w.guided)
+      : limitNeeded !== null
+        ? belowEstimateMessage(limitNeeded)
+        : null;
   useEffect(() => {
     setWizardScreen?.(visibleScreen);
   }, [visibleScreen, setWizardScreen]);
-  useEffect(() => () => setWizardScreen?.(null), [setWizardScreen]);
+  useEffect(() => {
+    setScreenIssue?.(blockedText);
+  }, [blockedText, setScreenIssue]);
+  useEffect(() => {
+    setScreenNavigator?.({ forward, goToScreen });
+  }, [forward, goToScreen, setScreenNavigator]);
+  useEffect(
+    () => () => {
+      setWizardScreen?.(null);
+      setScreenIssue?.(null);
+      setScreenNavigator?.(null);
+    },
+    [setWizardScreen, setScreenIssue, setScreenNavigator],
+  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -122,18 +168,26 @@ function UnifiedWizardFrame() {
     return () => window.removeEventListener("keydown", onKey);
   }, [forward, back, advancing, submitting, lastScreen]);
 
+  // The stepper's later steps hold too, so the limit can't be skipped past.
+  const stepper =
+    limitNeeded === null
+      ? w
+      : {
+          ...w,
+          canEnter: (step: WizardStepId) =>
+            WIZARD_STAGE[step] <= WIZARD_STAGE[current] && w.canEnter(step),
+          goTo: (step: WizardStepId) => {
+            if (WIZARD_STAGE[step] <= WIZARD_STAGE[current]) w.goTo(step);
+          },
+        };
+
   return (
     <div
       // Every step can hold its agent beside the form, so the frame stays wide.
       className="mx-auto flex h-[calc(100dvh-var(--header-height)-3rem)] w-full min-w-0 max-w-6xl flex-col gap-4 md:-mt-4 md:gap-5"
     >
-      {/* Switching level keeps every answer: the wizard re-lays out around the
-          current step and moves on only if that step drops out. */}
-      <div className="flex shrink-0 items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <SubmitStepper w={w} locked={w.advancing} />
-        </div>
-        <ExperienceLevelSwitch size="sm" iconOnly />
+      <div className="shrink-0">
+        <SubmitStepper w={stepper} locked={w.advancing} />
       </div>
 
       <div

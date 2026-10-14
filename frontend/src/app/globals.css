@@ -1659,3 +1659,34 @@ table {
     animation-name: cm-line-flash-dark;
   }
 }
+
+/* Live "Thinking" / "Working" label in the agent chat: a light sweep across the
+   text instead of raw reasoning streaming into view. */
+.agent-shimmer-text {
+  color: var(--primary);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .agent-shimmer-text {
+    background: linear-gradient(
+        90deg,
+        var(--primary) 0%,
+        var(--primary) 40%,
+        color-mix(in oklab, var(--primary) 35%, transparent) 50%,
+        var(--primary) 60%,
+        var(--primary) 100%
+      )
+      0 0 / 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: agent-shimmer 1.8s linear infinite;
+  }
+}
+@keyframes agent-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}

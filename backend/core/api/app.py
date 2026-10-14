@@ -92,6 +92,7 @@ from .routers.account_data import create_account_data_router
 from .routers.account_security import create_account_security_router
 from .routers.accounts import create_accounts_router
 from .routers.admin import create_admin_router
+from .routers.admin_dashboard import create_admin_dashboard_router
 from .routers.agent_history import create_agent_history_router
 from .routers.analytics import create_analytics_router
 from .routers.api_tokens import create_api_tokens_router
@@ -1306,6 +1307,7 @@ def create_app(
         create_admin_router(job_store=job_store, directory_client=build_directory_client()),
         tags=["Admin"],
     )
+    app.include_router(create_admin_dashboard_router(job_store=job_store), tags=["Admin"])
     app.include_router(create_registry_router(registry=registry), tags=["Registry"])
     app.include_router(create_code_validation_router(), tags=["Code Validation"])
     app.include_router(create_mcp_probe_router(), tags=["Code Validation"])

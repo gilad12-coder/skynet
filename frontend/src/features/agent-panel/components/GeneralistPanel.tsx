@@ -35,6 +35,7 @@ import { useGeneralistPanelState } from "../hooks/use-panel-state";
 import { getConversation } from "../lib/conversation-api";
 import { TRUST_MODE_HUE, useTrustMode } from "../hooks/use-trust-mode";
 import { extractWizardPatch, useWizardStateOptional } from "../hooks/use-wizard-state";
+import { parseScreenNav, switchScreenChat } from "../lib/screen-agent";
 import type { ToolEndPayload, ToolStartPayload, WizardState } from "../lib/types";
 import { stageDatasetForAgent } from "@/shared/lib/api";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
@@ -60,6 +61,16 @@ const REQUEST_LIBRARY_TOOL = "request_user_dataset_from_library";
 const REQUEST_INFERENCE_TOOL = "request_user_inference";
 const REQUEST_PAIR_INFERENCE_TOOL = "request_user_pair_inference";
 const REQUEST_CODE_TOOL = "request_code_authoring";
+
+// Tools that keep their own interactive card instead of folding into the
+// turn's activity line as a plain step.
+const RICH_CARD_TOOLS = new Set<string>([
+  REQUEST_DATASET_TOOL,
+  REQUEST_LIBRARY_TOOL,
+  REQUEST_INFERENCE_TOOL,
+  REQUEST_PAIR_INFERENCE_TOOL,
+  REQUEST_CODE_TOOL,
+]);
 
 // Submit tools whose success should mirror the manual wizard submit button:
 // play the splash banner, then route to the new optimization's details.
@@ -146,8 +157,19 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     const base = wizardCtx?.state ?? {};
     const merged = wizardState ? { ...base, ...wizardState } : base;
     const screen = wizardCtx?.wizardScreen;
-    return screen == null ? merged : { ...merged, wizard_screen: screen };
+    if (screen == null) return merged;
+    const issue = wizardCtx?.screenIssue;
+    return issue
+      ? { ...merged, wizard_screen: screen, screen_issue: issue }
+      : { ...merged, wizard_screen: screen };
   })();
+  // Each wizard screen has its own agent and its own chat. Moving to a
+  // screen resumes the chat held there, or opens a fresh one; an agent move
+  // (Continue / Back) leaves the next screen's agent its opening message.
+  const shownScreen = wizardCtx?.wizardScreen ?? null;
+  const screenChatsRef = React.useRef(new Map<string, string>());
+  const screenOpeningRef = React.useRef<string | null>(null);
+  const shownScreenRef = React.useRef<string | null>(null);
 
   // Agent-submit splash: a successful submit tool plays the same full-screen
   // banner the manual wizard button shows, then routes to the new job's
@@ -205,6 +227,14 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (!wizardCtx) return;
       const patch = extractWizardPatch(ev.result);
       if (Object.keys(patch).length > 0) wizardCtx.applyAgentPatch(patch);
+      const nav = ev.status === "ok" ? parseScreenNav(ev.result) : null;
+      if (nav) {
+        screenOpeningRef.current =
+          nav.action === "back" && nav.request
+            ? nav.request
+            : msg("auto.features.agent.panel.components.generalistpanel.screen_opened_note");
+        wizardCtx.navigateScreen(nav);
+      }
     },
     [updatePrefs, wizardCtx, startSubmitSplash],
   );
@@ -215,6 +245,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     (id: string, title: string, ctx: SessionEventContext) => {
       store.upsertFromMeta(id, title);
       if (!ctx.isActive) return;
+      if (shownScreenRef.current) screenChatsRef.current.set(shownScreenRef.current, id);
       store.setActiveId(id);
       // The user is actively in this conversation — every new turn is "seen"
       // by definition. Without this, the row would render as unread the
@@ -309,9 +340,59 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   }, [searchParams, setOpen, handlePickConversation, router]);
 
   const handleNewConversation = React.useCallback(() => {
+    if (shownScreenRef.current) screenChatsRef.current.delete(shownScreenRef.current);
     agent.newSession();
     store.setActiveId(null);
   }, [agent, store]);
+
+  // Swap the chat when the screen on view changes. Off the wizard the chat
+  // on view stays put. The conversation id is read through a ref so a turn
+  // landing mid-switch cannot re-run this for the same screen.
+  const conversationIdRef = React.useRef(agent.conversationId);
+  React.useEffect(() => {
+    conversationIdRef.current = agent.conversationId;
+  }, [agent.conversationId]);
+  const { activateConversation, openConversation, newSession, send: sendToAgent } = agent;
+  const setActiveConversation = store.setActiveId;
+  React.useEffect(() => {
+    if (shownScreen === null) return;
+    const from = shownScreenRef.current;
+    shownScreenRef.current = shownScreen;
+    const next = switchScreenChat(
+      screenChatsRef.current,
+      from,
+      conversationIdRef.current,
+      shownScreen,
+    );
+    if (next.kind === "stay") return;
+    const opening = screenOpeningRef.current;
+    screenOpeningRef.current = null;
+    if (next.kind === "fresh") {
+      newSession();
+      setActiveConversation(null);
+      if (opening) sendToAgent(opening);
+      return;
+    }
+    const id = next.conversationId;
+    setActiveConversation(id);
+    if (activateConversation(id)) {
+      if (opening) sendToAgent(opening);
+      return;
+    }
+    void getConversation(id).then((detail) => {
+      if (shownScreenRef.current !== shownScreen) return;
+      if (detail) openConversation(id, detail.messages);
+      else newSession();
+      if (opening) sendToAgent(opening);
+    });
+  }, [
+    shownScreen,
+    activateConversation,
+    openConversation,
+    newSession,
+    sendToAgent,
+    setActiveConversation,
+  ]);
 
   // Deleting the conversation you're currently viewing must drop you back to a
   // clean slate — otherwise the panel keeps showing the just-deleted thread and
@@ -664,6 +745,14 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     [handleDatasetConfirm, handleLibraryPick, streaming, codeAgent],
   );
 
+  // Mirrors renderToolCall's fall-through: anything that ends up as a plain
+  // ToolCallRow is a working step and folds into the turn's activity line.
+  const isStepCall = React.useCallback((call: AgentToolCall) => {
+    if (RICH_CARD_TOOLS.has(call.tool)) return false;
+    const renderer = getToolRenderer(call.tool);
+    return !(renderer?.card && call.status !== "running");
+  }, []);
+
   const emptyState = (
     <EmptyState
       icon={SkynetMark}
@@ -819,6 +908,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
           editAndResend={agent.editAndResend}
           thinking={thinking}
           renderToolCall={renderToolCall}
+          isStepCall={isStepCall}
           onRunCode={handleRunCode}
           animatePairs
           trailing={() => (

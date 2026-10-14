@@ -11,6 +11,7 @@ import {
   TreeView,
 } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
+import { splitPastes } from "./pasted-text";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import {
   DropdownMenu,
@@ -88,8 +89,8 @@ function PendingRow({
       ) : (
         <TreeView className="size-4 shrink-0 text-muted-foreground rtl:-scale-x-100" />
       )}
-      <p className="min-w-0 flex-1 truncate text-sm" title={item.text}>
-        {item.text}
+      <p className="min-w-0 flex-1 truncate text-sm" title={previewText(item.text)}>
+        {previewText(item.text)}
       </p>
       {steering ? (
         <span className="shrink-0 px-1.5 text-xs text-muted-foreground">
@@ -205,7 +206,19 @@ export function PendingMessages({
       className="mx-3 rounded-t-xl border border-b-0 border-border bg-muted/40 p-1"
     >
       <PendingSection items={steering} steering onReorder={onReorderSteering} rowProps={rowProps} />
-      <PendingSection items={queued} steering={false} onReorder={onReorderQueued} rowProps={rowProps} />
+      <PendingSection
+        items={queued}
+        steering={false}
+        onReorder={onReorderQueued}
+        rowProps={rowProps}
+      />
     </div>
   );
+}
+
+/** A queued message's one-line preview, with pastes named instead of dumped. */
+function previewText(text: string): string {
+  const { text: typed, pastes } = splitPastes(text);
+  const label = pastes.map(() => `[${msg("shared.agent.pasted_text")}]`).join(" ");
+  return [label, typed].filter(Boolean).join(" ");
 }

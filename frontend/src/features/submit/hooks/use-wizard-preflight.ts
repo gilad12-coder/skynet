@@ -5,6 +5,7 @@ import { msg } from "@/shared/lib/messages";
 import { notifyUser, requestNotificationPermission } from "@/shared/lib/os-notifications";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import { getExecutionBudget, runWizardPreflight } from "@/shared/lib/api";
+import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import type {
   PreflightScope,
   WizardPreflightPayload,
@@ -29,6 +30,7 @@ import {
 } from "../lib/validation-evidence";
 import type { ToastApi } from "../lib/validation-toast";
 import { waitForPreflightUsage } from "../lib/wait-for-preflight-usage";
+import { preflightFailure } from "../lib/wizard-telemetry";
 
 export type { ValidationPhase, ValidationProgress };
 
@@ -58,10 +60,14 @@ export function usePreflightNotifications(): void {
     const seen = new Map<PreflightWorkflow, ValidationStatus | undefined>();
     const follow = () => {
       for (const workflow of WORKFLOWS) {
-        const status = store.getState(workflow).progress?.status;
+        const progress = store.getState(workflow).progress;
+        const status = progress?.status;
         const previous = seen.get(workflow);
         seen.set(workflow, status);
         if (status === previous) continue;
+        // Mounted once at the root, so each failed check is reported exactly once.
+        const failure = preflightFailure(previous, progress);
+        if (failure) track(TelemetryEvent.SetupCheckFailed, { ...failure });
         if (status === "running") requestNotificationPermission();
         else if (previous === "running" && status === "succeeded")
           notifyUser(msg("notify.check.passed"));

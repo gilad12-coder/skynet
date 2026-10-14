@@ -26,7 +26,6 @@ export type OptimizerChoice =
   | "autosaddler"
   | "shinka_evolve";
 export type OptimizerFamily = "auto" | "dspy" | "blackbox";
-export type MetricShape = "dspy_feedback" | "dspy_scalar" | "blackbox_side_info";
 export type UnifiedCandidate = string | Record<string, string>;
 
 export const UNIFIED_PAYLOAD_KIND = "unified_v1";
@@ -64,14 +63,6 @@ export function optimizerFamily(resolved: string): OptimizerFamily {
   if ((DSPY_OPTIMIZERS as readonly string[]).includes(resolved)) return "dspy";
   if (resolved === "auto") return "auto";
   return "blackbox";
-}
-
-/** The metric signature the resolved optimizer calls. */
-export function metricShapeFor(choice: OptimizerChoice, kind: ArtifactKind): MetricShape {
-  const resolved = resolveOptimizer(choice, kind);
-  if (resolved === "dspy_gepa") return "dspy_feedback";
-  if ((DSPY_OPTIMIZERS as readonly string[]).includes(resolved)) return "dspy_scalar";
-  return "blackbox_side_info";
 }
 
 /** Whether the resolved optimizer reads the metric's feedback text. */
@@ -165,9 +156,6 @@ export interface UnifiedSplitCounts {
 export interface OptimizerOption {
   id: OptimizerChoice;
   family: OptimizerFamily;
-  metric_shape: MetricShape;
-  /** The metric's exact signature for this optimizer, as the coding agent is told. */
-  metric_signature: string;
   available: boolean;
   unavailable_reason?: string | null;
   needs_reflection_model: boolean;
@@ -179,8 +167,10 @@ export interface OptimizerOption {
 export interface OptimizerCatalogResponse {
   artifact_kind: ArtifactKind;
   data_mode: DataMode;
-  /** The entry point the run code defines for this artifact kind. */
+  /** The run code's entry point; the same for every artifact kind and optimizer. */
   run_entry: string;
+  /** The metric's exact signature, as the coding agent is told; the same for every optimizer. */
+  metric_signature: string;
   default: OptimizerChoice;
   options: OptimizerOption[];
   auto_resolves_to: string[];
@@ -225,7 +215,6 @@ export interface ContractCheckRequest {
 export interface ContractCheckResponse {
   ok: boolean;
   optimizer_resolved: string;
-  metric_shape: MetricShape;
   checks: ContractCheckItem[];
   samples: ContractSample[];
   fingerprint: string;
@@ -300,7 +289,6 @@ export interface UnifiedAuthoringContext {
   expected_field?: string | null;
   sample_cases?: Array<Record<string, unknown>>;
   optimizer: OptimizerChoice;
-  metric_shape: MetricShape;
   metric_has_model?: boolean;
   focus?: "run" | "metric";
 }

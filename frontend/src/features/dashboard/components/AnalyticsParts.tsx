@@ -36,15 +36,22 @@ export function KpiCard({
   detail,
   accent,
   valueDir,
+  compact = false,
 }: {
   label: ReactNode;
   value: ReactNode;
   detail?: ReactNode;
   accent: StatAccent;
   valueDir?: "ltr" | "rtl";
+  compact?: boolean;
 }) {
   return (
-    <div className="flex h-full min-h-[9.5rem] min-w-0 flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5 transition-colors duration-300 hover:border-border/70 sm:p-6">
+    <div
+      className={cn(
+        "flex h-full min-w-0 flex-col rounded-2xl border border-border/40 bg-card/60 transition-colors duration-300 hover:border-border/70",
+        compact ? "gap-2 rounded-xl p-3" : "min-h-[9.5rem] gap-4 p-5 sm:p-6",
+      )}
+    >
       <div className="flex items-center gap-2">
         <span className={`size-1.5 rounded-full ${ACCENT_DOT[accent]}`} aria-hidden />
         <p className="text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
@@ -54,11 +61,20 @@ export function KpiCard({
       <div className="flex flex-1 flex-col items-center justify-center gap-2">
         <p
           dir={valueDir}
-          className={`text-center text-[2.5rem] font-bold leading-[0.9] tracking-tight tabular-nums sm:text-[3rem] ${ACCENT_TEXT[accent]}`}
+          className={cn(
+            "text-center font-bold leading-[0.9] tracking-tight tabular-nums",
+            compact ? "text-2xl" : "text-[2.5rem] sm:text-[3rem]",
+            ACCENT_TEXT[accent],
+          )}
         >
           {value}
         </p>
-        <p className="min-h-[1rem] text-center text-[0.6875rem] tabular-nums text-muted-foreground">
+        <p
+          className={cn(
+            "text-center text-[0.6875rem] tabular-nums text-muted-foreground",
+            !compact && "min-h-[1rem]",
+          )}
+        >
           {detail}
         </p>
       </div>

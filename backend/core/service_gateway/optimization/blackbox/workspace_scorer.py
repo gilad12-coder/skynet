@@ -12,9 +12,8 @@ ledgers.
 
 What reaches the optimizer is a score and side info. A user-code failure
 becomes ``(0.0, {"error": "<Type>: <message>"})`` with no source or
-traceback; a metric whose return value does not have the resolved
-optimizer's shape stops the run with :class:`ScorerAbortError`, since no
-candidate could ever be scored.
+traceback; a metric that does not return ``(score, side_info)`` stops the
+run with :class:`ScorerAbortError`, since no candidate could ever be scored.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ from ....config import settings
 from ....exceptions import ServiceError
 from ....i18n import t
 from ....models.common import ModelConfig
-from ....models.unified import MetricShape, UnifiedCase, UnifiedRunRequest, metric_shape_for
+from ....models.unified import UnifiedCase, UnifiedRunRequest
 from . import sandbox_log, workspace_harness
 from .harness import GatewayConfig
 from .native_runtime import sanitize_side_info
@@ -56,11 +55,7 @@ logger = logging.getLogger(__name__)
 HARNESS_FILE = "skynet_workspace_harness.py"
 HARNESS_SOURCE = Path(workspace_harness.__file__).read_text(encoding="utf-8")
 _OPENROUTER_PREFIX = "openrouter/"
-SHAPE_MESSAGE_KEYS: dict[str, str] = {
-    "dspy_feedback": "contract.shape.dspy_feedback",
-    "dspy_scalar": "contract.shape.dspy_scalar",
-    "blackbox_side_info": "contract.shape.blackbox",
-}
+SHAPE_MESSAGE_KEY = "contract.shape.blackbox"
 
 
 @dataclass(frozen=True)
@@ -133,16 +128,13 @@ def case_document(case: Any) -> dict[str, Any]:
     return {"input": {}, "expected": None}
 
 
-def shape_message(shape: MetricShape | str) -> str:
-    """Return the localized explanation of what a metric of ``shape`` must return.
-
-    Args:
-        shape: The resolved optimizer's metric shape.
+def shape_message() -> str:
+    """Return the localized explanation of what ``score`` must return.
 
     Returns:
         The user-facing message.
     """
-    return t(SHAPE_MESSAGE_KEYS.get(str(shape), "contract.shape.blackbox"))
+    return t(SHAPE_MESSAGE_KEY)
 
 
 class WorkspaceScorer(SandboxPythonScorer):
@@ -201,12 +193,10 @@ class WorkspaceScorer(SandboxPythonScorer):
             raise ServiceError("Protected workspace code requires opaque model routes from the trusted parent.")
         self._task_gateway = task_gateway
         self._metric_gateway = metric_gateway
-        self._shape: MetricShape = metric_shape_for(payload.optimizer.choice, payload.task.artifact.kind)
         self._init = {
             "run_code": workspace.run_code,
             "metric_code": workspace.metric_code,
             "artifact_kind": payload.task.artifact.kind,
-            "metric_shape": self._shape,
             "input_fields": list(payload.data.input_fields),
             "gateways": {
                 "task": task_gateway.runner_payload() if task_gateway is not None else None,
@@ -240,11 +230,6 @@ class WorkspaceScorer(SandboxPythonScorer):
                 self._metric_usage = ScorerUsage(metric_gateway.billing_model)
 
     @property
-    def metric_shape(self) -> MetricShape:
-        """Return the shape the metric's return value is held to."""
-        return self._shape
-
-    @property
     def ledgers(self) -> tuple[ScorerUsage, ...]:
         """Return every distinct usage ledger this scorer records into."""
         found: list[ScorerUsage] = []
@@ -265,11 +250,11 @@ class WorkspaceScorer(SandboxPythonScorer):
             when the user's code failed.
 
         Raises:
-            ScorerAbortError: When the metric's return value does not have its shape.
+            ScorerAbortError: When ``score`` did not return ``(score, side_info)``.
         """
         probe = self.run(candidate, case)
         if probe.stage == "shape":
-            raise ScorerAbortError(f"{shape_message(self._shape)} ({probe.error})")
+            raise ScorerAbortError(f"{shape_message()} ({probe.error})")
         if probe.error is not None or probe.score is None:
             # In-process engines (GEPA, best-of-n, Auto) hand this straight to a
             # reflection LM, so it gets the same one-line cut native engines get.
