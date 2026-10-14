@@ -11,10 +11,13 @@ from typing import Any, cast
 import dspy
 import litellm
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
+from core.config import settings
 from core.service_gateway.agents import generalist as generalist_module
+from core.service_gateway.agents import web_tools
 from core.service_gateway.agents.code import _agent_error_payload, _SubmitArgExtractor
 from core.service_gateway.agents.generalist import (
     GENERALIST_SYSTEM_PROMPT,
@@ -1308,6 +1311,8 @@ async def test_turn_replays_history_natively_and_streams_the_submit(monkeypatch:
     Also covers the native-tool-call gap the CLI bridge used to close: a
     ``null`` optional never reaches the gated tool.
     """
+    # The local .env may carry a Firecrawl key; the tool list below is the MCP roster alone.
+    monkeypatch.setattr(settings, "firecrawl_api_key", None)
     tool, seen = _make_recording_tool("list_models_for_agent")
     seen["untouched"] = True
 
@@ -1359,3 +1364,56 @@ async def test_turn_replays_history_natively_and_streams_the_submit(monkeypatch:
     assert events[0]["event"] == "turn_metadata"
     assert events[0]["data"]["allowed_tools"] == ["list_models_for_agent"]
     assert [e["event"] for e in events if e["event"] in ("tool_start", "tool_end")] == ["tool_start", "tool_end"]
+
+
+@pytest.mark.asyncio
+async def test_turn_offers_web_tools_when_firecrawl_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With a Firecrawl key the turn lists the web tools and runs them through the gated wrapper."""
+    monkeypatch.setattr(settings, "firecrawl_api_key", SecretStr("fc-test"))
+    posted: list[tuple[str, dict]] = []
+
+    async def fake_post(path: str, body: dict) -> dict:
+        """Record the Firecrawl call and return one search hit.
+
+        Args:
+            path: Firecrawl endpoint path.
+            body: Request body.
+
+        Returns:
+            A Firecrawl ``data`` payload.
+        """
+        posted.append((path, body))
+        return {"web": [{"url": "https://a.example", "title": "A"}]}
+
+    @asynccontextmanager
+    async def fake_session(mcp_url: str, *, auth_header: str | None = None) -> AsyncIterator[_FakeSession]:
+        """Yield an empty fake session in place of a Streamable-HTTP client.
+
+        Args:
+            mcp_url: Ignored.
+            auth_header: Ignored.
+        """
+        yield _FakeSession([])
+
+    monkeypatch.setattr(web_tools, "_firecrawl_post", fake_post)
+    monkeypatch.setattr(generalist_module, "_mcp_session", fake_session)
+    lm = _ScriptedLM([("web_search", {"query": "dspy gepa"}), ("submit", {"assistant_message": "found it"})])
+    events: list[dict] = []
+
+    reply = await generalist_module._drive_generalist_agent(
+        mcp_url="http://unused/mcp/",
+        wizard_state=WizardState(),
+        chat_history=[],
+        user_message="look up gepa",
+        trust_mode="ask",
+        registry=ApprovalRegistry(),
+        emit=events.append,
+        lm=lm,
+        reply_language="English",
+    )
+
+    assert reply == "found it"
+    assert events[0]["data"]["allowed_tools"] == sorted(web_tools.WEB_TOOLS)
+    assert posted == [("/search", {"query": "dspy gepa", "limit": 5})]
+    ends = [e["data"] for e in events if e["event"] == "tool_end"]
+    assert [(e["tool"], e["status"]) for e in ends] == [("web_search", "ok")]
