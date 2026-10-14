@@ -572,6 +572,8 @@ export function WizardV2Provider({
         patchTask(slices.task);
         patchInputs(slices.inputs);
         patchOptimizer(slices.optimizer);
+        // The limit a run enforces is the server budget's; the slice alone is only its mirror.
+        if (slices.optimizer.maxCostCents != null) setMaxCostCents(slices.optimizer.maxCostCents);
         patchWorkspace(slices.workspace);
         patchMeta(slices.meta);
       })

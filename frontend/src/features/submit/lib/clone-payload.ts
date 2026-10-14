@@ -18,7 +18,9 @@ import type {
  * shapes: a unified run (`payload_kind: "unified_v1"`), a legacy black-box
  * run (objective, seed, cases, scorer) or a legacy DSPy run (dataset rows,
  * column mapping, metric code). Unified runs clone in full; legacy runs are
- * mapped best effort and leave the rest for the user to fill.
+ * mapped best effort and leave the rest for the user to fill. A legacy
+ * repository target has no wizard slice, so its repo, commit and setup
+ * command do not carry over.
  *
  * Only type imports here, so node tests can load this file directly.
  */
@@ -76,6 +78,32 @@ function cloneMeta(payload: ClonePayload, jobName?: string | null): Partial<Meta
   return meta;
 }
 
+const OPTIMIZER_CHOICES: readonly OptimizerChoice[] = [
+  "auto",
+  "dspy_gepa",
+  "dspy_miprov2",
+  "dspy_bootstrap_fewshot",
+  "gepa",
+  "best_of_n",
+  "autoresearch",
+  "meta_harness",
+  "autosaddler",
+  "shinka_evolve",
+];
+
+const modelConfigs = (value: unknown): ModelConfig[] =>
+  Array.isArray(value) ? value.map(modelConfig).filter((m): m is ModelConfig => m !== null) : [];
+
+/** Engine knobs a unified `optimizer` block and a legacy payload store under the same keys. */
+function engineKnobs(source: Record<string, unknown>): Partial<OptimizerSlice> {
+  const knobs: Partial<OptimizerSlice> = {};
+  if (isRecord(source.budget)) knobs.budget = source.budget as unknown as OptimizerSlice["budget"];
+  if (isRecord(source.proposer))
+    knobs.proposer = source.proposer as unknown as OptimizerSlice["proposer"];
+  if (isRecord(source.shinka)) knobs.shinka = source.shinka as unknown as OptimizerSlice["shinka"];
+  return knobs;
+}
+
 /** Inputs derived from a list of cases: the mode follows the count. */
 function inputsFromCases(cases: UnifiedCase[], inputFields: string[]): Partial<InputsSlice> {
   if (cases.length === 0) return {};
@@ -130,20 +158,11 @@ function cloneUnified(payload: ClonePayload): Omit<CloneSlices, "meta"> {
   const optimizerSlice: Partial<OptimizerSlice> = {
     taskModel: modelConfig(models.task_model),
     reflectionModel: modelConfig(models.reflection_model),
-    extraReflectionModels: Array.isArray(models.extra_reflection_models)
-      ? models.extra_reflection_models
-          .map(modelConfig)
-          .filter((m): m is ModelConfig => m !== null)
-      : [],
+    extraReflectionModels: modelConfigs(models.extra_reflection_models),
+    ...engineKnobs(optimizer),
   };
   if (typeof optimizer.choice === "string")
     optimizerSlice.choice = optimizer.choice as OptimizerChoice;
-  if (isRecord(optimizer.budget))
-    optimizerSlice.budget = optimizer.budget as unknown as OptimizerSlice["budget"];
-  if (isRecord(optimizer.proposer))
-    optimizerSlice.proposer = optimizer.proposer as unknown as OptimizerSlice["proposer"];
-  if (isRecord(optimizer.shinka))
-    optimizerSlice.shinka = optimizer.shinka as unknown as OptimizerSlice["shinka"];
 
   const metricModel = modelConfig(models.metric_model);
   const reflectionName = optimizerSlice.reflectionModel?.name ?? null;
@@ -183,6 +202,8 @@ function cloneLegacyBlackbox(payload: ClonePayload): Omit<CloneSlices, "meta"> {
   const scorer = isRecord(payload.scorer) ? payload.scorer : {};
   const workspace: Partial<WorkspaceSlice> = {};
   if (typeof scorer.metric_code === "string") workspace.metricCode = scorer.metric_code;
+  if (typeof scorer.timeout_seconds === "number")
+    workspace.metricTimeoutSeconds = scorer.timeout_seconds;
   const scorerModel = modelConfig(scorer.model);
   if (scorerModel) {
     workspace.metricModelMode = "explicit";
@@ -197,9 +218,21 @@ function cloneLegacyBlackbox(payload: ClonePayload): Omit<CloneSlices, "meta"> {
       reflectionModel: modelConfig(
         payload.reflection_model_config ?? payload.reflection_model_settings,
       ),
+      extraReflectionModels: modelConfigs(
+        payload.extra_reflection_model_configs ?? payload.extra_reflection_model_settings,
+      ),
+      ...legacyEngineChoice(payload.strategy),
+      ...engineKnobs(payload),
     },
     workspace,
   };
+}
+
+/** A legacy `strategy` names an engine only in single mode; otherwise it ran Auto, the default. */
+function legacyEngineChoice(strategy: unknown): Partial<OptimizerSlice> {
+  if (!isRecord(strategy) || strategy.mode !== "single") return {};
+  const engine = OPTIMIZER_CHOICES.find((c) => c === strategy.engine);
+  return engine ? { choice: engine } : {};
 }
 
 function cloneLegacyDspy(payload: ClonePayload): Omit<CloneSlices, "meta"> {
@@ -249,5 +282,7 @@ export function cloneToSlices(
       : optimizationType === "blackbox"
         ? cloneLegacyBlackbox(payload)
         : cloneLegacyDspy(payload);
+  if (typeof payload.max_cost_cents === "number")
+    body.optimizer = { ...body.optimizer, maxCostCents: payload.max_cost_cents };
   return { ...body, meta: cloneMeta(payload, jobName) };
 }
