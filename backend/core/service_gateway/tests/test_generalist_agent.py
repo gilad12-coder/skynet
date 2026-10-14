@@ -1044,7 +1044,19 @@ def test_system_prompt_makes_code_authoring_the_wizard_coding_tool() -> None:
     """
     prompt = GENERALIST_SYSTEM_PROMPT or ""
     assert "the wizard has no\n  other code agent" in prompt
-    assert "hands a failed check back to the coding agent" in prompt
+    assert "hands a failed check back to the coding\n  agent" in prompt
+
+
+def test_system_prompt_points_code_review_to_the_metric_editors() -> None:
+    """The prompt must send the user to the Metric editors, not to a chat card.
+
+    The coding tool's chat rows show only diffs and the check; the editable
+    code lives in the Metric screen. Describing in-chat editors made the agent
+    tell users to "confirm the code in the card", which has no such control.
+    """
+    prompt = GENERALIST_SYSTEM_PROMPT or ""
+    assert "lands in the Metric screen's editors" in prompt
+    assert "editors the user can edit" not in prompt
 
 
 def _approval_engine():
