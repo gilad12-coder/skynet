@@ -29,6 +29,7 @@ const {
   parseAuthoringOutcome,
   withAuthoringState,
   followUpAuthoringGoal,
+  seedFollowUpGoal,
   latestToolCallId,
   panelAuthoringContext,
   panelContractSpec,
@@ -123,6 +124,16 @@ test("only a repeated coding call with a goal becomes a follow-up", () => {
   );
   assert.equal(followUpAuthoringGoal({ goal: "   " }, true), null);
   assert.equal(followUpAuthoringGoal({}, true), null);
+});
+
+test("a first coding call naming an extra file is sent after the seed", () => {
+  const goal = "Put the message-building in helpers.py that run.py imports";
+  assert.equal(seedFollowUpGoal({ goal }), goal);
+  assert.equal(seedFollowUpGoal({ goal: "Parse dates in `lib/dates.py`." }), "Parse dates in `lib/dates.py`.");
+  // The seed writes run.py and metric.py itself.
+  assert.equal(seedFollowUpGoal({ goal: "Write run.py and metric.py for ticket routing" }), null);
+  assert.equal(seedFollowUpGoal({ goal: "Score exact matches" }), null);
+  assert.equal(seedFollowUpGoal({}), null);
 });
 
 const dataset = {

@@ -171,6 +171,33 @@ export function followUpAuthoringGoal(
   return goal || null;
 }
 
+// A workspace path besides run.py / metric.py, as a goal names it ("helpers.py", "lib/parse.py").
+const EXTRA_FILE_IN_GOAL =
+  /(?:^|[\s`'"(])((?:[A-Za-z0-9_][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:py|txt|md|json|ya?ml|csv|toml|ini|cfg))\b/g;
+
+/**
+ * The goal of a first ``request_code_authoring`` call that the seed alone
+ * cannot meet, to send once the seed lands.
+ *
+ * The seed drafts only run.py and metric.py from the wizard's context and
+ * never reads the call's goal, so a first request for an extra file (a
+ * helpers.py run.py imports) was dropped while the chat said it was done.
+ *
+ * Args:
+ *   args: The tool call's arguments.
+ *
+ * Returns:
+ *   The goal when it names a workspace file other than run.py and metric.py,
+ *   else null.
+ */
+export function seedFollowUpGoal(args: Readonly<Record<string, unknown>>): string | null {
+  const goal = typeof args.goal === "string" ? args.goal.trim() : "";
+  for (const match of goal.matchAll(EXTRA_FILE_IN_GOAL)) {
+    if (match[1] !== "run.py" && match[1] !== "metric.py") return goal;
+  }
+  return null;
+}
+
 /**
  * Find the chat's most recent call of one tool.
  *

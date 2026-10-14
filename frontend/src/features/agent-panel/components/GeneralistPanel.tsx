@@ -38,6 +38,7 @@ import {
   followUpAuthoringGoal,
   latestToolCallId,
   parseAuthoringOutcome,
+  seedFollowUpGoal,
   withAuthoringState,
 } from "../lib/code-authoring";
 import { getConversation } from "../lib/conversation-api";
@@ -277,6 +278,8 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const [codeFollowUp, setCodeFollowUp] = React.useState<{ id: string; goal: string } | null>(
     null,
   );
+  // A first request's goal the seed cannot meet, sent once the seed lands.
+  const [afterSeed, setAfterSeed] = React.useState<string | null>(null);
   const handleToolStart = React.useCallback((ev: ToolStartPayload, ctx: SessionEventContext) => {
     // The code agent is a panel-scoped singleton tied to the visible chat; a
     // background chat requesting authoring must not hijack it mid-use.
@@ -286,6 +289,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       setCodeArmed(true);
       const goal = followUpAuthoringGoal(ev.arguments ?? {}, codeAgentRanRef.current);
       if (goal) setCodeFollowUp({ id: ev.id, goal });
+      else setAfterSeed(seedFollowUpGoal(ev.arguments ?? {}));
     }
   }, []);
 
@@ -473,6 +477,15 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     setCodeFollowUp(null);
     codeAgentSend(codeFollowUp.goal);
   }, [codeFollowUp, codeAgentSend]);
+  const codeAgentStatus = codeAgent.status;
+  const codeAgentHasCode = codeAgent.hasCode;
+  React.useEffect(() => {
+    if (!afterSeed) return;
+    if (codeAgentStatus === "error") setAfterSeed(null);
+    if (codeAgentStatus !== "done" || !codeAgentHasCode) return;
+    setAfterSeed(null);
+    codeAgentSend(afterSeed);
+  }, [afterSeed, codeAgentStatus, codeAgentHasCode, codeAgentSend]);
 
   // Drop any prior authoring session when the conversation changes (new chat or
   // one loaded from history) so its code + timer don't leak across threads.
@@ -734,7 +747,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     [agent.messages],
   );
   // The run is over once its turn is: the agent checks its code inside it.
-  const codeBusy = codeArmed && authoringBusy(codeAgent);
+  const codeBusy = codeArmed && (authoringBusy(codeAgent) || afterSeed !== null);
   const liveCodeCall = React.useMemo(
     () =>
       agent.messages.flatMap((m) => m.toolCalls ?? []).find((c) => c.id === liveCodeCallId) ?? null,
