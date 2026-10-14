@@ -194,3 +194,27 @@ export function describeFixes(
     };
   });
 }
+
+/**
+ * The change a repeated ``request_code_authoring`` call asks the coding agent for.
+ *
+ * The first call seeds the code from the wizard's context. The coding agent
+ * seeds only once per conversation, so a later call carries its goal to the
+ * agent as a follow-up turn; without it the card stays as it was while the
+ * chat says the code is being changed.
+ *
+ * Args:
+ *   args: The tool call's arguments.
+ *   alreadyRan: Whether the coding agent already wrote code in this conversation.
+ *
+ * Returns:
+ *   The goal to send as a follow-up, or null when there is none to send.
+ */
+export function followUpAuthoringGoal(
+  args: Readonly<Record<string, unknown>>,
+  alreadyRan: boolean,
+): string | null {
+  if (!alreadyRan) return null;
+  const goal = typeof args.goal === "string" ? args.goal.trim() : "";
+  return goal || null;
+}

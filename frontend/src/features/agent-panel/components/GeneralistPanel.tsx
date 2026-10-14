@@ -32,6 +32,7 @@ import { useConversationStore } from "../hooks/use-conversation-store";
 import { useGeneralistAgent, type SessionEventContext } from "../hooks/use-generalist-agent";
 import { useCodeAuthoringAgent } from "../hooks/use-code-authoring-agent";
 import { useGeneralistPanelState } from "../hooks/use-panel-state";
+import { followUpAuthoringGoal } from "../lib/code-authoring";
 import { getConversation } from "../lib/conversation-api";
 import { TRUST_MODE_HUE, useTrustMode } from "../hooks/use-trust-mode";
 import { extractWizardPatch, useWizardStateOptional } from "../hooks/use-wizard-state";
@@ -260,6 +261,11 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   // its run + timer survive the aside collapse / auto-minimize.
   const [codeArmed, setCodeArmed] = React.useState(false);
   const handedOffRef = React.useRef(false);
+  // Read from the tool-start callback, which is created before the code agent.
+  const codeAgentRanRef = React.useRef(false);
+  const [codeFollowUp, setCodeFollowUp] = React.useState<{ id: string; goal: string } | null>(
+    null,
+  );
   const handleToolStart = React.useCallback((ev: ToolStartPayload, ctx: SessionEventContext) => {
     // The code agent is a panel-scoped singleton tied to the visible chat; a
     // background chat requesting authoring must not hijack it mid-use.
@@ -267,6 +273,8 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     if (ev.tool === REQUEST_CODE_TOOL) {
       handedOffRef.current = false;
       setCodeArmed(true);
+      const goal = followUpAuthoringGoal(ev.arguments ?? {}, codeAgentRanRef.current);
+      if (goal) setCodeFollowUp({ id: ev.id, goal });
     }
   }, []);
 
@@ -451,6 +459,16 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   // alone — or the user could fire "submit" mid-authoring against a wizard
   // that has no validated code yet.
   const codeAuthoringActive = codeAgent.status === "streaming";
+  const codeAgentRan = codeAgent.messages.length > 0;
+  React.useEffect(() => {
+    codeAgentRanRef.current = codeAgentRan;
+  }, [codeAgentRan]);
+  const codeAgentSend = codeAgent.send;
+  React.useEffect(() => {
+    if (!codeFollowUp) return;
+    setCodeFollowUp(null);
+    codeAgentSend(codeFollowUp.goal);
+  }, [codeFollowUp, codeAgentSend]);
 
   // Drop any prior authoring session when the conversation changes (new chat or
   // one loaded from history) so its code + timer don't leak across threads.

@@ -16,7 +16,19 @@ registerHooks({
   },
 });
 
-const { describeFixes, panelAuthoringContext } = await import("./code-authoring.ts");
+const { describeFixes, followUpAuthoringGoal, panelAuthoringContext } = await import(
+  "./code-authoring.ts"
+);
+
+test("only a repeated coding call with a goal becomes a follow-up", () => {
+  assert.equal(followUpAuthoringGoal({ goal: "Give 0.25 for extra text" }, false), null);
+  assert.equal(
+    followUpAuthoringGoal({ goal: "  Give 0.25 for extra text " }, true),
+    "Give 0.25 for extra text",
+  );
+  assert.equal(followUpAuthoringGoal({ goal: "   " }, true), null);
+  assert.equal(followUpAuthoringGoal({}, true), null);
+});
 
 const fix1 = {
   attempt: 1,
