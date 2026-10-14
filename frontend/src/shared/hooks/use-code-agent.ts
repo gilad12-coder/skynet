@@ -471,8 +471,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   );
 
   const pushSignatureVersion = React.useCallback((code: string) => {
+    // Stamp now, not in the updater: React runs it at render, after a check
+    // that started in the same batch, which then sorted above this edit.
+    const ts = Date.now();
     setSignatureVersions((prev) => {
-      const next = appendVersion(prev, code, Date.now());
+      const next = appendVersion(prev, code, ts);
       if (next !== prev) setSignatureVersionIndex(next.length - 1);
       return next;
     });
@@ -497,8 +500,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     });
   }, []);
   const pushMetricVersion = React.useCallback((code: string) => {
+    // Stamp now, not in the updater: React runs it at render, after a check
+    // that started in the same batch, which then sorted above this edit.
+    const ts = Date.now();
     setMetricVersions((prev) => {
-      const next = appendVersion(prev, code, Date.now());
+      const next = appendVersion(prev, code, ts);
       if (next !== prev) setMetricVersionIndex(next.length - 1);
       return next;
     });
