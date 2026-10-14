@@ -83,6 +83,7 @@ import {
   type WorkspaceSlice,
   wizardSteps,
   withLevel,
+  withQuestionInputs,
   writeWorkspaceFile,
 } from "../lib/wizard-v2";
 import { useExecutionBudget } from "./use-execution-budget";
@@ -187,10 +188,13 @@ export function WizardV2Provider({
   children: ReactNode;
 }) {
   const level = useExperienceLevel();
-  const [state, dispatch] = useReducer(reducer, undefined, () => {
+  const [stored, dispatch] = useReducer(reducer, undefined, () => {
     const initial = initialWizardV2State(level, readPref("optimizerMaxRuns"));
     return { ...initial, meta: { ...initial.meta, folderId } };
   });
+  // A single-answer task's one case is derived, never stored, so it always
+  // matches the question.
+  const state = useMemo(() => withQuestionInputs(stored), [stored]);
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();

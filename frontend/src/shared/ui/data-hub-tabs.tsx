@@ -57,7 +57,7 @@ export function DataHubTabs({ active }: { active: "datasets" | "sessions" }) {
               <motion.span
                 layoutId="dataHubTabPill"
                 transition={tabPillTransition}
-                className="absolute inset-0 z-0 rounded-full bg-primary-fill"
+                className="absolute inset-0 z-0 rounded-md bg-primary-fill"
                 aria-hidden="true"
               />
             )}

@@ -29,10 +29,8 @@ const {
   inferredRoles,
   inputsFromRoles,
   inputsIssue,
-  parseTypedInput,
   rowsToCases,
   singleInputCase,
-  TYPED_INPUT_FIELD,
   withColumnRole,
 } = await import(inputsModeUrl);
 
@@ -61,16 +59,6 @@ test("cases round-trip back to the rows they carry", () => {
   const cases = rowsToCases([{ q: "a", a: "b" }], ["q"], "a");
   assert.deepEqual(casesToRows(cases), [{ q: "a", a: "b" }]);
   assert.deepEqual(casesToRows([{ input: { q: "a" }, expected: "plain" }]), [{ q: "a" }]);
-});
-
-test("a typed JSON object keeps its fields; anything else is one text field", () => {
-  assert.deepEqual(parseTypedInput('{"topic": "cats", "tone": "warm"}'), {
-    topic: "cats",
-    tone: "warm",
-  });
-  assert.deepEqual(parseTypedInput("write about cats"), { [TYPED_INPUT_FIELD]: "write about cats" });
-  assert.deepEqual(parseTypedInput("{not json"), { [TYPED_INPUT_FIELD]: "{not json" });
-  assert.deepEqual(parseTypedInput("[1, 2]"), { [TYPED_INPUT_FIELD]: "[1, 2]" });
 });
 
 test("a single input becomes one case with a copied input", () => {

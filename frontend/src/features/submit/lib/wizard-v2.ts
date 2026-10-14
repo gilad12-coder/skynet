@@ -268,6 +268,54 @@ export function optimizerModelsReady(s: WizardV2State): boolean {
   return hasModel(s.optimizer.reflectionModel);
 }
 
+/** The field a single-answer task's one input sits under. */
+export const QUESTION_INPUT_FIELD = "question";
+
+/**
+ * Whether the run optimizes one answer itself (a solution, a summary, a
+ * document): a text artifact with no table behind it. Its one input is the
+ * original question, which the objective and background already hold, so the
+ * Inputs step has nothing left to ask. A text task that brings a table keeps
+ * the step.
+ */
+export function isSingleAnswerTask(s: Pick<WizardV2State, "task" | "inputs">): boolean {
+  return (
+    !s.task.repo &&
+    s.task.artifactKind === "text" &&
+    s.inputs.mode !== "pairs" &&
+    s.inputs.datasetLabel === null &&
+    s.inputs.stagedDatasetId === null
+  );
+}
+
+/** A single-answer task's inputs: one case holding the question, its objective then its background. */
+export function questionInputs(
+  task: Pick<TaskSlice, "objective" | "background">,
+): Pick<InputsSlice, "mode" | "cases" | "inputFields" | "expectedField"> {
+  const question = [task.objective.trim(), task.background.trim()].filter(Boolean).join("\n\n");
+  return {
+    mode: "single",
+    cases: [{ input: { [QUESTION_INPUT_FIELD]: question } }],
+    inputFields: [QUESTION_INPUT_FIELD],
+    expectedField: null,
+  };
+}
+
+/**
+ * The state the wizard shows and submits: a single-answer task with no case of
+ * its own gets the one case built from its question, so it follows every edit
+ * without being stored. A cloned run's case or a table is left alone, and a
+ * user on the skipped Inputs step stands on the task.
+ */
+export function withQuestionInputs(s: WizardV2State): WizardV2State {
+  if (!isSingleAnswerTask(s) || s.inputs.cases.length > 0) return s;
+  return {
+    ...s,
+    step: s.step === "inputs" ? "task" : s.step,
+    inputs: { ...s.inputs, ...questionInputs(s.task) },
+  };
+}
+
 /**
  * The steps the wizard walks. Guided skips the Optimizer step and runs on the
  * defaults, unless they can't run (`optimizerBlocked`: no default model, or a
@@ -275,8 +323,10 @@ export function optimizerModelsReady(s: WizardV2State): boolean {
  * the run out of sight.
  */
 export function wizardSteps(s: WizardV2State, optimizerBlocked: boolean): readonly WizardStepId[] {
-  // A repository run is scored on the checkout itself, so it has no inputs.
-  const all = s.task.repo ? WIZARD_V2_STEPS.filter((step) => step !== "inputs") : WIZARD_V2_STEPS;
+  // A repository run is scored on the checkout itself, and a single-answer
+  // task's one input is its question, so neither has an Inputs step.
+  const skipInputs = Boolean(s.task.repo) || isSingleAnswerTask(s);
+  const all = skipInputs ? WIZARD_V2_STEPS.filter((step) => step !== "inputs") : WIZARD_V2_STEPS;
   if (s.level !== "guided" || optimizerBlocked || s.step === "optimizer") return all;
   return all.filter((step) => step !== "optimizer");
 }

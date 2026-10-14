@@ -441,7 +441,7 @@ export function DashboardView() {
                       <motion.span
                         layoutId="dashboardTabPill"
                         transition={tabPillTransition}
-                        className="absolute inset-0 z-0 rounded-full bg-primary-fill"
+                        className="absolute inset-0 z-0 rounded-md bg-primary-fill"
                         aria-hidden="true"
                       />
                     )}
@@ -455,7 +455,7 @@ export function DashboardView() {
                       <motion.span
                         layoutId="dashboardTabPill"
                         transition={tabPillTransition}
-                        className="absolute inset-0 z-0 rounded-full bg-primary-fill"
+                        className="absolute inset-0 z-0 rounded-md bg-primary-fill"
                         aria-hidden="true"
                       />
                     )}
