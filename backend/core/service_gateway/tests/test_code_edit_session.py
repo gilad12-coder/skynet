@@ -490,3 +490,80 @@ def test_real_unified_verifier_maps_lint_to_the_file() -> None:
     assert verdicts["metric.py"]["ok"]
     assert not verdicts["helpers.py"]["ok"]
     assert "F821" in verdicts["helpers.py"]["errors"][0]
+
+
+class _ScriptedReAct:
+    """Stand in for the wizard's ReAct loop: keep its tools for a scripted turn."""
+
+    def __init__(self, signature: object, *, tools: list, max_iters: int) -> None:
+        """Record the bound session tools by name.
+
+        Args:
+            signature: Unused.
+            tools: The session's tool methods.
+            max_iters: Unused.
+        """
+        self.tools = {t.__name__: t for t in tools}
+
+
+class _NoReplyStream:
+    """Stand in for :class:`ReactReplyStream`: the scripted turn streams no tokens."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Accept the real stream's arguments."""
+
+    def listeners(self) -> list:
+        """Return no stream listeners."""
+        return []
+
+
+def test_a_turn_that_edits_after_its_check_ends_with_a_check(monkeypatch) -> None:
+    """A check before the final run.py edit leaves that edit unchecked, so the turn checks again last."""
+    monkeypatch.setattr(code_module, "ActingReActV2", _ScriptedReAct)
+    monkeypatch.setattr(code_module, "ReactReplyStream", _NoReplyStream)
+    monkeypatch.setattr(code_module, "_unified_verifier", lambda unified: _verdicts)
+
+    def streamify(react: _ScriptedReAct, **kwargs: object):
+        """Script the turn the browser test saw: helper, check, then run.py."""
+
+        async def program(**inputs: object):
+            """Write helpers.py, check, edit run.py, then finish."""
+            react.tools["write_file"]("add helper", "helpers.py", "def helper(x):\n    return x\n")
+            react.tools["verify_code"]()
+            new_run = "from helpers import helper\n\ndef run(artifact, input):\n    return helper(artifact)\n"
+            react.tools["edit_run"]("use helper", new_run)
+            yield code_module.dspy.Prediction(reply="Done.", termination_reason="submit")
+
+        return program
+
+    monkeypatch.setattr(code_module.dspy, "streamify", streamify)
+
+    async def turn() -> tuple[dict, list[dict]]:
+        """Run the turn and drain its events."""
+        queue: asyncio.Queue = asyncio.Queue()
+        result = await code_module._run_unified_agent(
+            lm=code_module.dspy.LM("openai/gpt-4o-mini"),
+            unified=_unified(),
+            user_message="Put the logic in a helper in helpers.py that run.py imports.",
+            chat_history_json="[]",
+            prior_run=_RUN,
+            prior_metric=_SCORE,
+            prior_validation="",
+            initial_run=_RUN,
+            initial_metric=_SCORE,
+            reply_language="English",
+            queue=queue,
+        )
+        await asyncio.sleep(0)
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+        return result, events
+
+    result, events = asyncio.run(turn())
+    order = [
+        e["event"] for e in events if e["event"] in {"file_replace", "verify_result", "signature_replace"}
+    ]
+    assert order == ["file_replace", "verify_result", "signature_replace", "verify_result"]
+    assert result["verification"]["ok"] is True
+    assert "from helpers import helper" in result["signature_code"]

@@ -21,8 +21,9 @@ function contractConsoleLine(item: ContractCheckItem, guided: boolean): string {
   return item.detail ? `${head}\n${item.detail}` : head;
 }
 
-// The one editor fills the screen beside the tree.
-const EDITOR_HEIGHT = "max(18rem, calc(100svh - 20rem))";
+// The one editor fills the screen beside the tree; 22rem leaves room for the
+// wizard chrome and the contract hint line, which a 1440x900 screen clipped.
+const EDITOR_HEIGHT = "max(18rem, calc(100svh - 22rem))";
 // Grammar names as @codemirror/language-data knows them; Python is the default.
 const TEXT_GRAMMARS: Record<string, string> = {
   json: "JSON",
@@ -182,6 +183,15 @@ export function CodeWorkspace({
 
   const editor = (
     <EditorBlock id="v2-workspace-file" title={title} writing={isWriting}>
+      {/* Above the editor: the editor fills the card's height, so a line under
+          it falls past the card's bottom edge on a laptop screen. */}
+      {open === RUN_FILE && <ContractHint text={runEntry} />}
+      {open === METRIC_FILE && <ContractHint text={repo ? REPO_SCORER_SIGNATURE : metricSignature} />}
+      {open !== RUN_FILE && open !== METRIC_FILE && (
+        <p className="text-xs text-muted-foreground">
+          {v2Msg("submit.v2.metric.files.extra_hint", guided)}
+        </p>
+      )}
       {open === METRIC_FILE && children}
       <div
         tabIndex={-1}
@@ -207,13 +217,6 @@ export function CodeWorkspace({
           streaming={isWriting}
         />
       </div>
-      {open === RUN_FILE && <ContractHint text={runEntry} />}
-      {open === METRIC_FILE && <ContractHint text={repo ? REPO_SCORER_SIGNATURE : metricSignature} />}
-      {open !== RUN_FILE && open !== METRIC_FILE && (
-        <p className="text-xs text-muted-foreground">
-          {v2Msg("submit.v2.metric.files.extra_hint", guided)}
-        </p>
-      )}
     </EditorBlock>
   );
 
