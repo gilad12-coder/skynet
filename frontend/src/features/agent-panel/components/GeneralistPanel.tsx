@@ -32,7 +32,7 @@ import { useConversationStore } from "../hooks/use-conversation-store";
 import { useGeneralistAgent, type SessionEventContext } from "../hooks/use-generalist-agent";
 import { useCodeAuthoringAgent } from "../hooks/use-code-authoring-agent";
 import { useGeneralistPanelState } from "../hooks/use-panel-state";
-import { followUpAuthoringGoal } from "../lib/code-authoring";
+import { followUpAuthoringGoal, latestToolCallId } from "../lib/code-authoring";
 import { getConversation } from "../lib/conversation-api";
 import { TRUST_MODE_HUE, useTrustMode } from "../hooks/use-trust-mode";
 import { extractWizardPatch, useWizardStateOptional } from "../hooks/use-wizard-state";
@@ -725,6 +725,10 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     [setWidth, isRtl],
   );
 
+  const liveCodeCallId = React.useMemo(
+    () => latestToolCallId(agent.messages, REQUEST_CODE_TOOL),
+    [agent.messages],
+  );
   const renderToolCall = React.useCallback(
     (call: AgentToolCall, ctx: { isRetry: boolean }) => {
       if (call.tool === REQUEST_DATASET_TOOL) {
@@ -756,7 +760,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (call.tool === REQUEST_INFERENCE_TOOL || call.tool === REQUEST_PAIR_INFERENCE_TOOL) {
         return <InferenceFormCard call={call} disabled={streaming} />;
       }
-      if (call.tool === REQUEST_CODE_TOOL) {
+      if (call.tool === REQUEST_CODE_TOOL && call.id === liveCodeCallId) {
         return <CodeAuthoringCard agent={codeAgent} />;
       }
       const renderer = getToolRenderer(call.tool);
@@ -766,16 +770,20 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       const summary = renderer?.summary?.(call) ?? null;
       return <ToolCallRow call={call} isRetry={ctx.isRetry} summary={summary} />;
     },
-    [handleDatasetConfirm, handleLibraryPick, streaming, codeAgent],
+    [handleDatasetConfirm, handleLibraryPick, streaming, codeAgent, liveCodeCallId],
   );
 
   // Mirrors renderToolCall's fall-through: anything that ends up as a plain
   // ToolCallRow is a working step and folds into the turn's activity line.
-  const isStepCall = React.useCallback((call: AgentToolCall) => {
-    if (RICH_CARD_TOOLS.has(call.tool)) return false;
-    const renderer = getToolRenderer(call.tool);
-    return !(renderer?.card && call.status !== "running");
-  }, []);
+  const isStepCall = React.useCallback(
+    (call: AgentToolCall) => {
+      if (call.tool === REQUEST_CODE_TOOL) return call.id !== liveCodeCallId;
+      if (RICH_CARD_TOOLS.has(call.tool)) return false;
+      const renderer = getToolRenderer(call.tool);
+      return !(renderer?.card && call.status !== "running");
+    },
+    [liveCodeCallId],
+  );
 
   const emptyState = (
     <EmptyState

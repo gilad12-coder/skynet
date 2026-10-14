@@ -218,3 +218,27 @@ export function followUpAuthoringGoal(
   const goal = typeof args.goal === "string" ? args.goal.trim() : "";
   return goal || null;
 }
+
+/**
+ * Find the chat's most recent call of one tool.
+ *
+ * The coding tool's card shows the one live coding session, so only the
+ * latest call renders it; an earlier card would repeat the same editors.
+ *
+ * Args:
+ *   messages: The agent's chat, oldest first.
+ *   tool: The tool name to look for.
+ *
+ * Returns:
+ *   The id of the latest call of ``tool``, or null when it was never called.
+ */
+export function latestToolCallId(
+  messages: ReadonlyArray<{ toolCalls?: ReadonlyArray<{ id: string; tool: string }> }>,
+  tool: string,
+): string | null {
+  for (const message of [...messages].reverse()) {
+    const call = [...(message.toolCalls ?? [])].reverse().find((c) => c.tool === tool);
+    if (call) return call.id;
+  }
+  return null;
+}
