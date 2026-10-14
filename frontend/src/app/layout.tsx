@@ -62,7 +62,7 @@ import "./globals.css";
 export const dynamic = "force-dynamic";
 
 const siteUrl = getSiteUrl();
-const siteName = "Skynet";
+const siteName = "DRWN";
 
 /** OpenGraph wants `language_TERRITORY`; the locale tag's hyphen maps to it. */
 function ogLocale(locale: Locale): string {
