@@ -1676,6 +1676,7 @@
   "auto.features.agent.panel.components.generalistpanel.4": "ما يمكنني فعله",
   "auto.features.agent.panel.components.generalistpanel.6": "انقر للطي",
   "auto.features.agent.panel.components.generalistpanel.code_ready_note": "تمت كتابة التوقيع والمقياس والتحقّق منهما. يمكنك الانتقال إلى خطوة النموذج وتشغيل التحسين.",
+  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "أنا الآن في هذه الشاشة. ما الذي نحتاجه هنا؟",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "أُرفقت مجموعة البيانات `{p1}` ({p2} صف).\n\nتعيين الأعمدة:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "حاول مرة أخرى",
   "auto.features.agent.panel.components.generalistpanel.history_button": "المحادثات السابقة",
