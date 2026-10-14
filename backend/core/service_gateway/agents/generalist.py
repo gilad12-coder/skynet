@@ -1528,6 +1528,13 @@ def screen_nav_tools(state: WizardState, turn: _TurnAuthoringFlag) -> list[dspy.
 
     async def continue_to_next_screen(note: str | None = None) -> Any:
         """Move the wizard on by one screen, once this screen is complete."""
+        # The coding card writes its code back after this turn ends; moving on
+        # now would leave the Metric screen before the user sees that code.
+        if turn.authoring_requested:
+            return (
+                "Can't continue this turn: request_code_authoring just ran and its code is not in the "
+                "wizard yet. End the turn; the user moves on once they have seen the code."
+            )
         problems = _screen_problems(screen, cast(WizardState, {**state, **turn.wizard_patch}))
         issue = str(state.get("screen_issue") or "").strip()
         # The wizard's own check ran on the turn-start values; once this turn

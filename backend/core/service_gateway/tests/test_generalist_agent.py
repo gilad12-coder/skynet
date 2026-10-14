@@ -453,6 +453,17 @@ async def test_continue_judges_this_turns_writes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_continue_refused_in_a_turn_that_requested_code() -> None:
+    """A finished Metric screen still stays put in the turn the coding tool ran."""
+    turn = _TurnAuthoringFlag()
+    turn.authoring_requested = True
+    state = {**_READY, "wizard_screen": "metric"}
+    result = await _nav_tools(state, turn)["continue_to_next_screen"].acall()
+    assert isinstance(result, str)
+    assert "request_code_authoring" in result
+
+
+@pytest.mark.asyncio
 async def test_continue_moves_on_and_saves_its_note() -> None:
     """A done screen moves on, and the optional note is kept like ``remember_for_later``."""
     state = {**_READY, "wizard_screen": "brief"}
