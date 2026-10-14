@@ -57,7 +57,9 @@ export function repoRunRequest(
       },
       setup_command: repo.setupCommand.trim() || null,
     },
-    task_model_config: hasModel(optimizer.taskModel) ? prepareModelConfig(optimizer.taskModel) : null,
+    // The server takes a task model only for agent targets; the wizard keeps
+    // one by default, so a repository run must not forward it.
+    task_model_config: null,
     reflection_model_config: prepareModelConfig(optimizer.reflectionModel),
     extra_reflection_model_configs: shinka
       ? optimizer.extraReflectionModels.filter(hasModel).map(prepareModelConfig)

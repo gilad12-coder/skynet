@@ -37,6 +37,7 @@ function repoState() {
   state.inputs.mode = "single";
   state.optimizer.choice = "gepa";
   state.optimizer.reflectionModel = model;
+  state.optimizer.taskModel = model;
   state.workspace.metricCode = "def score(repo_path, case=None):\n    return 1.0";
   return state;
 }
@@ -60,6 +61,7 @@ test("a repository run submits its repo, commit, paths and setup command", () =>
   assert.deepEqual(request.strategy, { mode: "single", engine: "gepa" });
   assert.equal(request.scorer.kind, "python");
   assert.equal(request.max_cost_cents, 500);
+  assert.equal(request.task_model_config, null);
 });
 
 test("Auto cannot optimize a repository", () => {

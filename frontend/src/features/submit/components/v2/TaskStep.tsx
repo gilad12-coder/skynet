@@ -37,7 +37,7 @@ import { WizardScreen } from "./WizardScreen";
  */
 export function TaskStep({ page }: { page: number }) {
   const ctx = useWizardV2();
-  const { state, guided, patchTask, patchInputs } = ctx;
+  const { state, guided, patchTask, patchInputs, patchOptimizer } = ctx;
   const task = state.task;
   const t = (key: string) => v2Msg(key, guided);
 
@@ -90,6 +90,8 @@ export function TaskStep({ page }: { page: number }) {
             if (target === "repo") {
               patchTask({ repo: task.repo ?? emptyRepoDraft(), artifactKind: "code" });
               patchInputs({ mode: "single" });
+              // Auto, the default, has no repository strategy, so the first named engine stands in.
+              if (state.optimizer.choice === "auto") patchOptimizer({ choice: "gepa" });
             } else patchTask({ repo: null });
           }}
           className="w-full"

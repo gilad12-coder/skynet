@@ -76,8 +76,9 @@ export function OptimizerPicker({
     return t("submit.v2.optimizer.plan.cost", { p1: range });
   };
   const choice = state.optimizer.choice;
-  const options = optimizerOptions({ kind, mode, catalog: optimizerCatalog, guided, choice });
-  const issue = optimizerChoiceIssue({ kind, mode, catalog: optimizerCatalog, choice });
+  const repo = Boolean(state.task.repo);
+  const options = optimizerOptions({ kind, mode, catalog: optimizerCatalog, guided, choice, repo });
+  const issue = optimizerChoiceIssue({ kind, mode, catalog: optimizerCatalog, choice, repo });
   const selectedIndex = options.findIndex((option) => option.id === choice);
   const catalog =
     optimizerCatalog?.artifact_kind === kind && optimizerCatalog.data_mode === mode
