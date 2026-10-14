@@ -31,7 +31,7 @@ import type { LegalBlock, LegalDocument as LegalDoc } from "./types";
 import styles from "./legal-document.module.css";
 
 const CHROME = {
-  homeAria: "Skynet home",
+  homeAria: "DRWN home",
   contents: "On this page",
   contentsAria: "Document sections",
   lastUpdated: "Last updated",
@@ -40,9 +40,9 @@ const CHROME = {
   minutes: "min",
   sections: "sections",
   current: "Current document",
-  backToApp: "Return to Skynet",
+  backToApp: "Return to DRWN",
   questions: "Questions about this document?",
-  contactPrompt: "Contact us and we will help clarify how this document applies to Skynet.",
+  contactPrompt: "Contact us and we will help clarify how this document applies to DRWN.",
   termsEyebrow: "Service agreement",
   privacyEyebrow: "Data & privacy",
 } as const;

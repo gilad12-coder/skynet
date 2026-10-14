@@ -173,7 +173,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
       >
         <div className="flex items-center gap-2 cursor-default">
           {/* The morphing mark and wordmark anchor the header at sm+; below sm they
-              collapse to the static mark and a plain SKYNET wordmark where the
+              collapse to the static mark and a plain DRWN wordmark where the
               full SVG would crowd the row. */}
           <div className="hidden sm:block">
             <AnimatedWordmark size={16} withMark autoMorph autoMorphDuration={10000} morphSpeed={250} />
@@ -183,7 +183,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
             className="sm:hidden text-sm font-bold tracking-[0.14em] uppercase text-primary cursor-default"
             style={{ fontFamily: "var(--font-ui)" }}
           >
-            SKYNET
+            DRWN
           </span>
         </div>
 
