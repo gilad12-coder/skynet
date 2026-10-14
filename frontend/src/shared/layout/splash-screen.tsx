@@ -1,22 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { EVOLUTION_DURATION_MS, EvolutionMorph } from "@/shared/ui/evolution-morph";
+import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
+import { EvolutionMorph } from "@/shared/ui/evolution-morph";
 
+// 1.5 s in all: the morph lands on the human at 1.2 s, then a 0.3 s fade.
+const MORPH_MS = 1200;
 const FADE_MS = 300;
 
 /**
- * App-load splash: the evolution morph alone, centred, held until it lands on
- * the human and then faded out. Reduced motion shows the still human and skips
- * the hold.
+ * App-load splash: the evolution morph with the DRWN letters morphing below it,
+ * held until the figure lands on the human and then faded out. Reduced motion
+ * shows the still human and letters and skips the hold.
  */
 export function SplashScreen() {
   const [phase, setPhase] = useState<"active" | "fading" | "done">("active");
 
   useEffect(() => {
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const fadeDelay = reduceMotion ? 0 : EVOLUTION_DURATION_MS;
-    const doneDelay = reduceMotion ? 0 : EVOLUTION_DURATION_MS + FADE_MS;
+    const fadeDelay = reduceMotion ? 0 : MORPH_MS;
+    const doneDelay = reduceMotion ? 0 : MORPH_MS + FADE_MS;
     const fadeTimer = setTimeout(() => setPhase("fading"), fadeDelay);
     const removeTimer = setTimeout(() => setPhase("done"), doneDelay);
 
@@ -30,7 +33,7 @@ export function SplashScreen() {
 
   return (
     <div
-      className="fixed inset-0 z-[99999] flex items-center justify-center bg-background"
+      className="fixed inset-0 z-[99999] flex flex-col items-center justify-center gap-6 bg-background"
       aria-hidden="true"
       style={{
         // Hidden figure lines are masked with this colour, so it must match the backdrop.
@@ -44,7 +47,8 @@ export function SplashScreen() {
           : {}),
       }}
     >
-      <EvolutionMorph />
+      <EvolutionMorph durationMs={MORPH_MS} />
+      <AnimatedWordmark size={40} autoMorph morphSpeed={120} />
     </div>
   );
 }
