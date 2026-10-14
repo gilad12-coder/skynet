@@ -221,28 +221,32 @@ export function CodeWorkspace({
   );
 
   if (repo) return <div className="space-y-5 px-4 py-4 sm:px-6">{editor}</div>;
+  // The pane is narrow while the agent is docked beside it, so the tree sits
+  // above the editor until the pane itself is wide enough for both.
   return (
-    <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 md:flex-row md:items-start">
-      <div className="md:sticky md:top-0 md:w-48 md:shrink-0">
-        <WorkspaceTree
-          paths={paths}
-          files={files}
-          selected={open}
-          onSelect={setChosen}
-          onAdd={(path) => {
-            onFileChange(path, "");
-            setChosen(path);
-          }}
-          onDelete={(path) => {
-            if (open === path) setChosen(RUN_FILE);
-            onFileDelete(path);
-          }}
-          writing={writingPaths}
-          problems={problems}
-          guided={guided}
-        />
+    <div className="@container px-4 py-4 sm:px-6">
+      <div className="flex flex-col gap-4 @2xl:flex-row @2xl:items-start">
+        <div className="@2xl:sticky @2xl:top-0 @2xl:w-48 @2xl:shrink-0">
+          <WorkspaceTree
+            paths={paths}
+            files={files}
+            selected={open}
+            onSelect={setChosen}
+            onAdd={(path) => {
+              onFileChange(path, "");
+              setChosen(path);
+            }}
+            onDelete={(path) => {
+              if (open === path) setChosen(RUN_FILE);
+              onFileDelete(path);
+            }}
+            writing={writingPaths}
+            problems={problems}
+            guided={guided}
+          />
+        </div>
+        <div className="min-w-0 flex-1">{editor}</div>
       </div>
-      <div className="min-w-0 flex-1">{editor}</div>
     </div>
   );
 }
