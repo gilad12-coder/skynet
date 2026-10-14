@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from core.api.preflight_execution import _verify_model_routes
 from core.billing import model_gateway as gateway_module
-from core.billing.budgets import BudgetService
+from core.billing.budgets import BudgetInsufficientError, BudgetService
 from core.billing.model_dispatch import ModelHTTPResult
 from core.billing.model_gateway import (
     EMBEDDING_ROUTE_KEY,
@@ -659,3 +659,29 @@ def test_budget_check_reports_an_interruption_once_retries_run_out(monkeypatch: 
     with pytest.raises(InfrastructureInterruptionError):
         gateway_module.raise_gateway_stop({"url": "http://relay", "token": "t"})
     assert flaky.calls == gateway_module._BUDGET_STATE_ATTEMPTS
+
+
+def test_guest_call_the_limit_refuses_is_remembered(gateway: ModelGateway) -> None:
+    """Keep the reason a guest model call was refused for budget, so setup can report the limit.
+
+    Args:
+        gateway: Funded real HTTP gateway fixture.
+    """
+
+    class _Route:
+        """Refuse every call the way the ledger does when one hold exceeds the limit."""
+
+        def dispatch(self, path: str, body: Any, **kwargs: Any) -> ModelHTTPResult:
+            """Raise the ledger's refusal."""
+            raise BudgetInsufficientError("The next operation needs up to 135 cents.")
+
+    gateway._routes["fixture-token"] = _Route()  # type: ignore[assignment]
+    assert gateway.budget_refusal is None
+
+    try:
+        with pytest.raises(BudgetInsufficientError):
+            gateway.dispatch_guest("fixture-token", "/v1/chat/completions", {"model": "fixture/text"}, {})
+    finally:
+        del gateway._routes["fixture-token"]
+
+    assert gateway.budget_refusal == "The next operation needs up to 135 cents."
