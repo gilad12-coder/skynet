@@ -193,6 +193,9 @@ class ModelGateway:
             timeout: Physical provider request timeout, excluding hidden retries.
         """
         self.runtime = runtime
+        # The guest only sees a 402 for a call the limit could not cover, so the
+        # parent keeps the reason to tell a spent budget from a code failure.
+        self.budget_refusal: str | None = None
         self._client = httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False)
         self._routes: dict[str, OpenRouterDispatcher] = {}
         self._sandbox: SandboxControl | None = None
@@ -551,12 +554,16 @@ class ModelGateway:
             if path != "/v1/_mcp":
                 raise ValueError("The tool capability cannot dispatch models or sandbox commands.")
             return self._tools.dispatch(body)
-        return route.dispatch(
-            path.removeprefix("/v1"),
-            body,
-            operation_key=_model_attempt_key(headers),
-            protocol_headers=headers,
-        )
+        try:
+            return route.dispatch(
+                path.removeprefix("/v1"),
+                body,
+                operation_key=_model_attempt_key(headers),
+                protocol_headers=headers,
+            )
+        except BudgetInsufficientError as error:
+            self.budget_refusal = str(error)
+            raise
 
     def _budget_state(self) -> dict[str, Any]:
         """Expose only the owning run's state and mark replaced capabilities as fenced."""

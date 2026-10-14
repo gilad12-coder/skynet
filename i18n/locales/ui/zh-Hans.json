@@ -3695,6 +3695,7 @@
   "submit.budget.error.invalid": "请输入美元金额，例如 {suggested}。",
   "submit.budget.error.fraction": "金额精确到分——最多使用两位小数。",
   "submit.budget.error.below_one": "上限至少为 $0.01。",
+  "submit.budget.error.below_estimate": "本次运行至少需要 {amount}。请提高上限后继续。",
   "submit.budget.estimate_preliminary": "初步估算",
   "submit.budget.estimate_preliminary_note": "随着添加用例和选择模型而更新。",
   "submit.budget.estimate_note": "上限值假设每次调用都使用较长的提示和输出，而非典型运行。",

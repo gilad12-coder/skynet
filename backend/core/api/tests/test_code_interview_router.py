@@ -170,7 +170,6 @@ _UNIFIED_CONTEXT = {
     "expected_field": "reply",
     "sample_cases": [{"ticket": "hi", "reply": "hello"}],
     "optimizer": "auto",
-    "metric_shape": "blackbox_side_info",
     "metric_has_model": True,
     "focus": "metric",
 }
@@ -187,7 +186,6 @@ def test_seed_endpoint_forwards_unified_context_without_columns(monkeypatch) -> 
     )
     assert resp.status_code == 200
     assert seen["unified"]["task"]["artifact"] == {"kind": "prompt", "starting_version": "Answer the ticket."}
-    assert seen["unified"]["metric_shape"] == "blackbox_side_info"
     assert seen["unified"]["focus"] == "metric"
     assert "blackbox" not in seen
 
@@ -214,7 +212,7 @@ def test_seed_endpoint_rejects_a_malformed_unified_context() -> None:
     """The context is validated against the shared contract."""
     resp = _client().post(
         "/optimizations/ai-generate-code",
-        json={**_SEED_BODY, "unified": {**_UNIFIED_CONTEXT, "metric_shape": "nope"}},
+        json={**_SEED_BODY, "unified": {**_UNIFIED_CONTEXT, "focus": "nope"}},
     )
     assert resp.status_code == 422
 

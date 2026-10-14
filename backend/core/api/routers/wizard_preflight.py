@@ -27,7 +27,6 @@ from ...models.unified import (
     ContractCheckRequest,
     ContractCheckResponse,
     UnifiedRunRequest,
-    metric_shape_for,
     resolve_optimizer,
 )
 from ...service_gateway.optimization.unified.contract import (
@@ -37,7 +36,7 @@ from ...service_gateway.optimization.unified.contract import (
 )
 from ...storage.preflights import setup_seed
 from ..auth import AuthenticatedUser, get_authenticated_user
-from ..preflight_execution import WizardPreflightRequest, WizardPreflightResponse, run_preflight
+from ..preflight_execution import BUDGET_CHECK_KEY, WizardPreflightRequest, WizardPreflightResponse, run_preflight
 from ..preflight_progress import progress_observer
 from ..rate_limit import enforce_submission_rate
 from .submissions import _default_unified_seed, _materialize_unified_cases
@@ -193,18 +192,23 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             return with_message_codes(ContractCheckResponse.model_validate(contract), static)
         failure = next((check for check in result.checks if check.status != "succeeded"), None)
         error = failure.message if failure is not None and failure.message else result.status
+        # A spent budget is not a code mismatch; it is fixed by raising the limit.
+        code = (
+            "submit.unified.contract_budget"
+            if failure is not None and failure.key == BUDGET_CHECK_KEY
+            else "submit.unified.contract_failed"
+        )
         return ContractCheckResponse(
             ok=False,
             optimizer_resolved=resolve_optimizer(spec.optimizer.choice, spec.task.artifact.kind),
-            metric_shape=metric_shape_for(spec.optimizer.choice, spec.task.artifact.kind),
             uses_llm=static.uses_llm,
             checks=[
                 *static.checks,
                 ContractCheckItem(
                     key="workspace.run",
                     status="pending" if result.status == "pending" else "failed",
-                    message=t("submit.unified.contract_failed", error=error),
-                    message_code="submit.unified.contract_failed",
+                    message=t(code, error=error),
+                    message_code=code,
                     message_params={"error": error},
                     detail=(failure.message or "")[-4000:] if failure is not None and failure.message else None,
                 ),

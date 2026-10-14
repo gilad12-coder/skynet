@@ -3695,6 +3695,7 @@
   "submit.budget.error.invalid": "Bir dolar tutarı girin, örneğin {suggested}.",
   "submit.budget.error.fraction": "Tutarlar sent düzeyine kadar iner — en fazla iki ondalık basamak kullanın.",
   "submit.budget.error.below_one": "Limit en az $0.01 olmalıdır.",
+  "submit.budget.error.below_estimate": "Çalıştırma en az {amount} gerektiriyor. Devam etmek için limiti yükseltin.",
   "submit.budget.estimate_preliminary": "Ön tahmin",
   "submit.budget.estimate_preliminary_note": "Örnek ekledikçe ve model seçtikçe güncellenir.",
   "submit.budget.estimate_note": "Üst sınır, her çağrıda uzun istem ve çıktılar varsayar; tipik bir çalıştırmayı değil.",

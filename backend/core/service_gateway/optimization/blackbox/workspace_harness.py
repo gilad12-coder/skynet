@@ -3,12 +3,19 @@
 This file is shipped verbatim into the scorer sandbox as
 ``skynet_workspace_harness.py``, next to ``skynet_runner.py``, whose gateway
 client, helper module and image wrapper it reuses. Like the runner it depends
-on the standard library alone (``dspy`` is imported only for DSPy shapes) and
-stays valid Python 3.9.
+on the standard library alone (``dspy`` is imported only for a DSPy program)
+and stays valid Python 3.9.
+
+Every artifact kind runs one contract: the run code defines
+``run(artifact, input)`` and the metric defines ``score(input, output,
+expected=None)`` returning ``(score, side_info)``. For a DSPy program the run
+code builds its ``dspy.Module`` at module level and calls it inside ``run``;
+the harness finds that module (:func:`find_program`), applies the candidate's
+instructions and state to it and binds the task model as its LM.
 
 Protocol: JSON lines. The first message initializes the workspace::
 
-    {"run_code": str, "metric_code": str, "artifact_kind": str, "metric_shape": str,
+    {"run_code": str, "metric_code": str, "artifact_kind": str,
      "input_fields": [str], "gateways": {"task": {...} | null, "metric": {...} | null}}
 
 and is answered with ``{"ready": true}`` or a load error. Every later
@@ -79,16 +86,18 @@ RUN_CHILD_FLAG = "--run-child"
 # Mirrors ``unified.dspy_engine.DSPY_STATE_KEY``; this file runs alone in the box.
 DSPY_STATE_KEY = "__dspy_state__"
 PREVIEW_MAX_CHARS = 2000
-SHAPE_DSPY_FEEDBACK = "dspy_feedback"
-SHAPE_DSPY_SCALAR = "dspy_scalar"
-SHAPE_BLACKBOX = "blackbox_side_info"
+ARTIFACT_KIND_DSPY_PROGRAM = "dspy_program"
+RUN_ENTRY_NAME = "run"
+METRIC_ENTRY_NAME = "score"
+# When the run code holds several modules, the one under this name is the program.
+PROGRAM_NAME = "program"
 _USER_FILENAMES = (RUN_FILENAME, METRIC_FILENAME)
 _NUMBER_TYPES = (bool, int, float)
 _PR_SET_DUMPABLE = 4
 
 
 class ShapeError(Exception):
-    """The metric returned a value the resolved optimizer cannot read."""
+    """The metric returned a value other than ``(score, side_info)``."""
 
 
 def user_detail(exc: BaseException) -> str:
@@ -174,35 +183,18 @@ def _is_number(value: Any) -> bool:
     return isinstance(value, _NUMBER_TYPES)
 
 
-def normalize_metric(shape: str, raw: Any) -> tuple[float, dict[str, Any]]:
-    """Validate a metric's return value against its shape and normalize it.
+def normalize_metric(raw: Any) -> tuple[float, dict[str, Any]]:
+    """Validate a metric's ``(score, side_info)`` return value and normalize it.
 
     Args:
-        shape: ``dspy_feedback``, ``dspy_scalar`` or ``blackbox_side_info``.
-        raw: What the metric returned.
+        raw: What ``score`` returned.
 
     Returns:
         The score and side info, which always carries a ``feedback`` string.
 
     Raises:
-        ShapeError: When the value does not have the shape's form.
+        ShapeError: When the value is not ``(score, side_info)``.
     """
-    if shape == SHAPE_DSPY_SCALAR:
-        if not _is_number(raw):
-            raise ShapeError(f"expected a number or a boolean, got {type(raw).__name__}")
-        return float(raw), {"feedback": ""}
-    if shape == SHAPE_DSPY_FEEDBACK:
-        if isinstance(raw, dict):
-            score, feedback = raw.get("score"), raw.get("feedback")
-        elif isinstance(raw, (tuple, list)) and len(raw) == 2:
-            score, feedback = raw
-        elif hasattr(raw, "score") and hasattr(raw, "feedback"):
-            score, feedback = raw.score, raw.feedback
-        else:
-            raise ShapeError(f"expected a score with feedback, got {type(raw).__name__}")
-        if not _is_number(score) or not isinstance(feedback, str):
-            raise ShapeError("expected a numeric score and a feedback string")
-        return float(score), {"feedback": feedback}
     if not isinstance(raw, (tuple, list)) or len(raw) != 2:
         raise ShapeError(f"expected (score, side_info), got {type(raw).__name__}")
     score, side_info = raw
@@ -215,6 +207,72 @@ def normalize_metric(shape: str, raw: Any) -> tuple[float, dict[str, Any]]:
         raise ShapeError("side_info['scores'] must map names to numbers")
     plain = json.loads(json.dumps(side_info, default=_runner.side_info_json_default))
     return float(score), plain
+
+
+def find_program(namespace: dict[str, Any], module_type: type) -> Any:
+    """Find the DSPy module the run code builds at module level and calls in ``run``.
+
+    Args:
+        namespace: The executed run code's namespace.
+        module_type: ``dspy.Module``.
+
+    Returns:
+        The single module-level ``dspy.Module`` instance, or the one named
+        :data:`PROGRAM_NAME` when there are several.
+
+    Raises:
+        NameError: When the run code holds no module, or several and none is
+            named :data:`PROGRAM_NAME`.
+    """
+    found: dict[int, tuple[str, Any]] = {}
+    for name, value in namespace.items():
+        if isinstance(value, module_type) and not name.startswith("__"):
+            found.setdefault(id(value), (name, value))
+    if len(found) == 1:
+        return next(iter(found.values()))[1]
+    named = namespace.get(PROGRAM_NAME)
+    if isinstance(named, module_type):
+        return named
+    if not found:
+        raise NameError(
+            "the run code builds no dspy.Module: create it at module level "
+            f"({PROGRAM_NAME} = MyProgram()) and call it inside run(artifact, input)"
+        )
+    names = ", ".join(sorted(name for name, _ in found.values()))
+    raise NameError(f"the run code builds several dspy.Modules ({names}): name the one to optimize {PROGRAM_NAME}")
+
+
+def apply_dspy_candidate(program: Any, candidate: Any) -> None:
+    """Set a DSPy program's state and predictor instructions from a candidate.
+
+    Args:
+        program: The ``dspy.Module`` to update in place.
+        candidate: ``{predictor name: instruction}``, optionally with the full
+            program state under :data:`DSPY_STATE_KEY`; a plain string sets
+            every predictor's instruction.
+    """
+    if isinstance(candidate, dict) and candidate.get(DSPY_STATE_KEY):
+        # The compiled program's demos live here; instructions alone would
+        # score a different program than the one that is saved.
+        program.load_state(json.loads(candidate[DSPY_STATE_KEY]))
+    for name, predictor in program.named_predictors():
+        text = candidate if isinstance(candidate, str) else (candidate or {}).get(name)
+        if text is not None:
+            predictor.signature = predictor.signature.with_instructions(str(text))
+
+
+def run_artifact(candidate: Any) -> Any:
+    """Return the candidate as ``run`` receives it: without the serialized program state.
+
+    Args:
+        candidate: The version under optimization.
+
+    Returns:
+        The candidate, minus :data:`DSPY_STATE_KEY` when it is a mapping.
+    """
+    if isinstance(candidate, dict) and DSPY_STATE_KEY in candidate:
+        return {key: value for key, value in candidate.items() if key != DSPY_STATE_KEY}
+    return candidate
 
 
 def _client(gateway: Any, key_env: str) -> Any:
@@ -349,27 +407,21 @@ class RunStage:
             inputs: The case's input fields.
 
         Returns:
-            The run output (a ``dspy.Prediction`` for a DSPy program).
+            What ``run(artifact, input)`` returned.
         """
-        if self.kind != "dspy_program":
-            return _entry(self.namespace, "run")(candidate, inputs)
+        run = _entry(self.namespace, RUN_ENTRY_NAME)
+        if self.kind != ARTIFACT_KIND_DSPY_PROGRAM:
+            return run(candidate, inputs)
         dspy = importlib.import_module("dspy")
         if self.program is None:
-            self.program = _entry(self.namespace, "build_program")()
+            self.program = find_program(self.namespace, dspy.Module)
             if self.task_llm is not None:
                 self.program_lm = _ProgramLM.build(dspy, self.task_llm, self.task_model)
-        if isinstance(candidate, dict):
-            if candidate.get(DSPY_STATE_KEY):
-                # The compiled program's demos live here; instructions alone
-                # would score a different program than the one that is saved.
-                self.program.load_state(json.loads(candidate[DSPY_STATE_KEY]))
-            for name, predictor in self.program.named_predictors():
-                if name in candidate:
-                    predictor.signature = predictor.signature.with_instructions(str(candidate[name]))
+        apply_dspy_candidate(self.program, candidate)
         if self.program_lm is None:
-            return self.program(**inputs)
+            return run(run_artifact(candidate), inputs)
         with dspy.context(lm=self.program_lm):
-            return self.program(**inputs)
+            return run(run_artifact(candidate), inputs)
 
 
 def run_child(message: dict[str, Any]) -> dict[str, Any]:
@@ -441,8 +493,6 @@ class Workspace:
             init: The first protocol message.
         """
         self.kind = str(init.get("artifact_kind") or "text")
-        self.shape = str(init.get("metric_shape") or SHAPE_BLACKBOX)
-        self.input_fields = [str(name) for name in init.get("input_fields") or []]
         gateways = init.get("gateways") or {}
         self.run_code = str(init.get("run_code") or "")
         self.task_gateway = gateways.get("task")
@@ -456,7 +506,7 @@ class Workspace:
             # here, everything else surfaces in the run child.
             compile(self.run_code, RUN_FILENAME, "exec", dont_inherit=True)
             stage = "metric"
-            if self.kind == "dspy_program" or self.shape != SHAPE_BLACKBOX:
+            if self.kind == ARTIFACT_KIND_DSPY_PROGRAM:
                 # Imported before any run child exists, so nothing a child
                 # writes can stand in for it in this process.
                 importlib.import_module("dspy")
@@ -506,7 +556,7 @@ class Workspace:
         return replies[-1]
 
     def _metric(self, inputs: dict[str, Any], output: Any, expected: Any) -> Any:
-        """Call the metric in the form its shape prescribes.
+        """Call ``score(input, output, expected=None)``.
 
         Args:
             inputs: The case's input fields.
@@ -516,23 +566,8 @@ class Workspace:
         Returns:
             The metric's raw return value.
         """
-        if self.shape == SHAPE_BLACKBOX:
-            fn = _entry(self.metric_ns, "score")
-            return fn(inputs, output, expected) if positional_capacity(fn) >= 3 else fn(inputs, output)
-        dspy = importlib.import_module("dspy")
-        if expected is not None and not isinstance(expected, dict):
-            raise TypeError("case expected must be a dict keyed by output field names for a DSPy metric")
-        gold = dspy.Example(**inputs, **(expected or {})).with_inputs(*(self.input_fields or list(inputs)))
-        if isinstance(output, dspy.Prediction):
-            pred = output
-        elif isinstance(output, dict):
-            pred = dspy.Prediction(**output)
-        else:
-            pred = dspy.Prediction(output=output)
-        fn = _entry(self.metric_ns, "metric")
-        if self.shape == SHAPE_DSPY_FEEDBACK:
-            return fn(gold, pred, None, None, None)
-        return fn(gold, pred, None)
+        fn = _entry(self.metric_ns, METRIC_ENTRY_NAME)
+        return fn(inputs, output, expected) if positional_capacity(fn) >= 3 else fn(inputs, output)
 
     def _usage(self, task_usage: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
         """Combine the run child's task usage with the metric's usage since the last reply.
@@ -585,7 +620,7 @@ class Workspace:
             self._bind(self.metric_module)
             raw = self._metric(inputs, output, expected)
             stage = "shape"
-            score, side_info = normalize_metric(self.shape, raw)
+            score, side_info = normalize_metric(raw)
             reply.update(score=score, side_info=side_info)
         except _runner.GatewayControl as exc:
             reply = {"control": {"code": exc.code, "message": str(exc)}}

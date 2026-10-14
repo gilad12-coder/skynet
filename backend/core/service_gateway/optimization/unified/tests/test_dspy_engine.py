@@ -21,25 +21,41 @@ from core.service_gateway.optimization.blackbox.registry import ENGINES, availab
 from core.service_gateway.optimization.unified import dspy_engine as engine_mod
 from core.service_gateway.optimization.unified.dspy_engine import (
     DSPY_STATE_KEY,
+    EXPECTED_KEY,
     BudgetedMetric,
     DspyEngine,
+    RunProgram,
     apply_candidate,
-    build_program,
     case_example,
-    normalize_metric_output,
+    load_run_program,
     program_instructions,
 )
 
+# The one contract every artifact kind and optimizer runs: run(artifact,
+# input) calling a module-level dspy.Module, scored by score(input, output, expected).
 RUN_CODE = """
 import dspy
 
-def build_program():
-    return dspy.Predict("question -> answer")
+program = dspy.Predict("question -> answer")
+
+def run(artifact, input):
+    return program(**input)
 """
 
-SCALAR_METRIC = """
-def metric(gold, pred, trace=None):
-    return float(pred.answer == gold.answer)
+SCORE_METRIC = """
+def score(input, output, expected=None):
+    ok = output.answer == expected["answer"]
+    return float(ok), {"feedback": "right" if ok else "wrong"}
+"""
+
+# Returns the instruction of whichever module copy run actually called.
+ECHO_RUN_CODE = """
+import dspy
+
+program = dspy.Predict("question -> answer")
+
+def run(artifact, input):
+    return program.signature.instructions + "|" + input["question"]
 """
 
 
@@ -77,7 +93,7 @@ def _ctx(tmp_path: Any) -> EngineContext:
     return EngineContext(reflection_lm=lambda prompt: "", run_dir=str(tmp_path))
 
 
-def _task(train: list[UnifiedCase], val: list[UnifiedCase], *, metric_code: str = SCALAR_METRIC) -> Task:
+def _task(train: list[UnifiedCase], val: list[UnifiedCase], *, metric_code: str = SCORE_METRIC) -> Task:
     """Build a BootstrapFewShot task around the dummy program.
 
     Args:
@@ -96,7 +112,6 @@ def _task(train: list[UnifiedCase], val: list[UnifiedCase], *, metric_code: str 
         context={
             "run_code": RUN_CODE,
             "metric_code": metric_code,
-            "metric_shape": "dspy_scalar",
             "input_fields": ["question"],
             "models": {"reflection_model": {"name": "openai/dummy"}},
             "dspy_kwargs": {"max_bootstrapped_demos": 1, "max_labeled_demos": 1},
@@ -105,74 +120,136 @@ def _task(train: list[UnifiedCase], val: list[UnifiedCase], *, metric_code: str 
     )
 
 
-def test_build_program_and_candidate_round_trip() -> None:
-    """The run code builds a program whose instructions a candidate sets."""
-    program = build_program(RUN_CODE)
-    apply_candidate(program, {"self": "Be terse."})
-    assert program_instructions(program) == {"self": "Be terse."}
+def test_load_run_program_and_candidate_round_trip() -> None:
+    """The run code's module-level module is found, and a candidate sets its instructions."""
+    wrapper = load_run_program(RUN_CODE)
+    assert isinstance(wrapper, RunProgram)
+    apply_candidate(wrapper.program, {"self": "Be terse."})
+    assert program_instructions(wrapper.program) == {"self": "Be terse."}
 
 
-def test_build_program_requires_build_program() -> None:
-    """Run code without build_program() is rejected."""
-    with pytest.raises(ServiceError):
-        build_program("x = 1")
-
-
-def test_case_example_marks_inputs() -> None:
-    """A case becomes a gold example with the declared inputs."""
-    example = case_example(_cases(1)[0], ["question"])
-    assert example.question == "q0"
-    assert example.answer == "a"
-    assert set(example.inputs().keys()) == {"question"}
+def test_load_run_program_requires_run() -> None:
+    """Run code without run(artifact, input) is rejected, the retired build_program() included."""
+    with pytest.raises(ServiceError, match="run"):
+        load_run_program("import dspy\nprogram = dspy.Predict('q -> a')\n")
+    with pytest.raises(ServiceError, match="run"):
+        load_run_program("import dspy\ndef build_program():\n    return dspy.Predict('q -> a')\n")
 
 
 @pytest.mark.parametrize(
-    ("raw", "expected"),
+    ("body", "match"),
     [
-        (dspy.Prediction(score=0.5, feedback="ok"), (0.5, "ok")),
-        ({"score": 1, "feedback": "fine"}, (1.0, "fine")),
-        ((0.25, "meh"), (0.25, "meh")),
-        (True, (1.0, "")),
+        ("x = 1\n", "builds no dspy.Module"),
+        ("a = dspy.Predict('q -> a')\nb = dspy.Predict('q -> a')\n", "several"),
     ],
 )
-def test_normalize_metric_output(raw: Any, expected: tuple[float, str]) -> None:
-    """Every allowed metric return shape becomes a score and feedback.
+def test_load_run_program_needs_one_identifiable_module(body: str, match: str) -> None:
+    """No module, or several with none named ``program``, is a clear error.
 
     Args:
-        raw: What the metric returned.
-        expected: The normalized score and feedback.
+        body: Module-level statements of the run code.
+        match: Text the error carries.
     """
-    assert normalize_metric_output(raw) == expected
+    code = "import dspy\n" + body + "def run(artifact, input):\n    return None\n"
+    with pytest.raises(ServiceError, match=match):
+        load_run_program(code)
 
 
-def test_feedback_metric_wraps_dict_returns_and_charges_the_budget() -> None:
-    """The feedback shape returns a Prediction and every call counts against the server."""
+def test_several_modules_pick_the_one_named_program() -> None:
+    """With several module-level modules, the one named ``program`` is optimized."""
+    code = (
+        "import dspy\n"
+        "helper = dspy.Predict('q -> a')\n"
+        "program = dspy.ChainOfThought('question -> answer')\n"
+        "def run(artifact, input):\n    return program(**input)\n"
+    )
+    wrapper = load_run_program(code)
+    assert isinstance(wrapper.program, dspy.ChainOfThought)
+
+
+def test_every_copy_runs_through_run_with_its_own_module() -> None:
+    """A deep copy the optimizer makes goes through ``run`` with the copy's module, not the original."""
+    original = load_run_program(ECHO_RUN_CODE)
+    apply_candidate(original.program, {"self": "first"})
+    copy = original.deepcopy()
+    apply_candidate(copy.program, {"self": "second"})
+
+    first = original(question="q")
+    second = copy(question="q")
+
+    assert first[engine_mod.RUN_OUTPUT_KEY] == "first|q"
+    assert second[engine_mod.RUN_OUTPUT_KEY] == "second|q"
+    assert engine_mod.run_output(second) == "second|q"
+
+
+def test_case_example_marks_inputs_and_keeps_expected() -> None:
+    """A case becomes an example with the declared inputs and its expected value as it was."""
+    example = case_example(_cases(1)[0], ["question"])
+    assert example.question == "q0"
+    assert example.answer == "a"
+    assert example[EXPECTED_KEY] == {"answer": "a"}
+    assert set(example.inputs().keys()) == {"question"}
+
+
+def test_metric_gets_input_output_and_expected_like_the_harness() -> None:
+    """DSPy's ``(gold, pred)`` call reaches ``score`` as the case input, run's output and the expected value."""
+    server = EvalServer(_never_scored, max_evals=5)
+    calls: list[tuple[Any, ...]] = []
+
+    def score(input: Any, output: Any, expected: Any = None) -> Any:
+        """Record the call."""
+        calls.append((input, output, expected))
+        return 1.0, {"feedback": "ok"}
+
+    gold = case_example(UnifiedCase(input={"question": "q"}, expected="a"), ["question"])
+    pred = dspy.Prediction(**{engine_mod.RUN_OUTPUT_KEY: "a"})
+    assert BudgetedMetric(score, server, feedback=False)(gold, pred, None, "p", None) == 1.0
+    assert calls == [({"question": "q"}, "a", "a")]
+
+
+def test_metric_without_expected_gets_two_arguments() -> None:
+    """``score(input, output)`` is called without the expected value."""
+    server = EvalServer(_never_scored, max_evals=5)
+
+    def score(input: Any, output: Any) -> Any:
+        """Accept anything."""
+        return 0.5, {"feedback": "half"}
+
+    gold = case_example(_cases(1)[0], ["question"])
+    assert BudgetedMetric(score, server, feedback=False)(gold, dspy.Prediction(answer="a")) == 0.5
+
+
+def test_feedback_metric_returns_a_prediction_and_charges_the_budget() -> None:
+    """For DSPy GEPA the score and feedback come back as a Prediction, and every call counts."""
     server = EvalServer(_never_scored, max_evals=2)
 
-    def metric(gold: Any, pred: Any, trace: Any = None, pred_name: Any = None, pred_trace: Any = None) -> Any:
-        """Return a dict score with feedback."""
-        return {"score": 0.75, "feedback": "close"}
+    def score(input: Any, output: Any, expected: Any = None) -> Any:
+        """Return a score with feedback."""
+        return 0.75, {"feedback": "close"}
 
-    wrapped = BudgetedMetric(metric, server, feedback=True)
-    first = wrapped(None, None)
+    gold = case_example(_cases(1)[0], ["question"])
+    wrapped = BudgetedMetric(score, server, feedback=True)
+    first = wrapped(gold, dspy.Prediction(answer="a"))
     assert isinstance(first, dspy.Prediction)
     assert (first.score, first.feedback) == (0.75, "close")
-    wrapped(None, None)
+    wrapped(gold, dspy.Prediction(answer="a"))
     assert server.used == 2
     with pytest.raises(BudgetExhaustedError):
-        wrapped(None, None)
+        wrapped(gold, dspy.Prediction(answer="a"))
     assert wrapped.exhausted is True
 
 
-def test_scalar_metric_gets_only_its_declared_arguments() -> None:
-    """A three-argument metric is called with three arguments and returns a float."""
+def test_metric_with_the_wrong_return_shape_is_rejected() -> None:
+    """``score`` must return ``(score, side_info)`` here exactly as in the harness."""
     server = EvalServer(_never_scored, max_evals=5)
 
-    def metric(gold: Any, pred: Any, trace: Any = None) -> bool:
-        """Accept anything."""
-        return True
+    def score(input: Any, output: Any, expected: Any = None) -> Any:
+        """Return a bare float."""
+        return 1.0
 
-    assert BudgetedMetric(metric, server, feedback=False)(None, None, None, "p", None) == 1.0
+    gold = case_example(_cases(1)[0], ["question"])
+    with pytest.raises(ServiceError, match="side_info"):
+        BudgetedMetric(score, server, feedback=False)(gold, dspy.Prediction(answer="a"))
 
 
 def test_engine_compiles_on_train_and_never_sees_other_cases(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -184,20 +261,20 @@ def test_engine_compiles_on_train_and_never_sees_other_cases(tmp_path: Any, monk
     """
     train, val = _cases(4), _cases(2, offset=4)
     seen: list[str] = []
-    real_load = engine_mod.load_metric_from_code
+    real_load = engine_mod.load_score
 
     def load(code: str) -> Any:
-        """Wrap the real metric so every gold question it scores is recorded."""
+        """Wrap the real metric so every case question it scores is recorded."""
         inner = real_load(code)
 
-        def metric(gold: Any, pred: Any, trace: Any = None) -> Any:
+        def score(input: Any, output: Any, expected: Any = None) -> Any:
             """Record and delegate."""
-            seen.append(gold.question)
-            return inner(gold, pred, trace)
+            seen.append(input["question"])
+            return inner(input, output, expected)
 
-        return metric
+        return score
 
-    monkeypatch.setattr(engine_mod, "load_metric_from_code", load)
+    monkeypatch.setattr(engine_mod, "load_score", load)
     task = _task(train, val)
     server = EvalServer(_never_scored, max_evals=100)
     result = DspyEngine("dspy_bootstrap_fewshot").run(task, server, _ctx(tmp_path))
@@ -220,7 +297,7 @@ def test_engine_candidate_carries_the_compiled_demos(tmp_path: Any) -> None:
     server = EvalServer(_never_scored, max_evals=100)
     result = DspyEngine("dspy_bootstrap_fewshot").run(_task(_cases(4), _cases(2, offset=4)), server, _ctx(tmp_path))
 
-    program = build_program(RUN_CODE)
+    program = load_run_program(RUN_CODE).program
     assert program.demos == []
     apply_candidate(program, result.best_candidate)
 
@@ -255,8 +332,8 @@ def test_metric_llm_import_is_bound_to_the_metric_model(tmp_path: Any) -> None:
     """
     metric_code = (
         "from skynet import llm\n"
-        "def metric(gold, pred, trace=None):\n"
-        "    return float(llm('judge: ' + pred.answer) == 'yes')\n"
+        "def score(input, output, expected=None):\n"
+        "    return float(llm('judge: ' + output.answer) == 'yes'), {'feedback': 'judged'}\n"
     )
     task = _task(_cases(2), [], metric_code=metric_code)
     metric_lm = DummyLM([{"response": "yes"}] * 50)
@@ -295,3 +372,48 @@ def test_dspy_engines_are_registered_but_hidden_from_the_catalog() -> None:
     for engine_id in ("dspy_gepa", "dspy_miprov2", "dspy_bootstrap_fewshot"):
         assert ENGINES[engine_id].hidden is True
         assert engine_id not in available_engine_ids()
+
+
+class _Reflection:
+    """A reflection model whose DSPy LM proposes one fixed instruction."""
+
+    def __init__(self) -> None:
+        """Build the DSPy LM DSPy GEPA reflects with."""
+        self.lm = DummyLM([{"new_instruction": "```\nAnswer with the single letter a.\n```"}] * 50)
+
+    def __call__(self, prompt: Any) -> str:
+        """Answer a black-box style reflection call; DSPy GEPA uses ``lm`` instead."""
+        return ""
+
+
+def test_dspy_gepa_compiles_the_same_run_code_with_score_feedback(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DSPy GEPA tunes the module run calls, with the same score() reaching it as feedback.
+
+    Args:
+        tmp_path: Run directory.
+        monkeypatch: Pytest fixture recording what the metric returns to GEPA.
+    """
+    returned: list[Any] = []
+    real_call = BudgetedMetric.__call__
+
+    def record(self: BudgetedMetric, *args: Any, **kwargs: Any) -> Any:
+        """Record what the wrapped metric hands DSPy GEPA."""
+        out = real_call(self, *args, **kwargs)
+        returned.append(out)
+        return out
+
+    monkeypatch.setattr(BudgetedMetric, "__call__", record)
+    task = _task(_cases(3), _cases(2, offset=3))
+    task.context["dspy_kwargs"] = {"max_metric_calls": 12}
+    server = EvalServer(_never_scored, max_evals=12)
+    ctx = EngineContext(reflection_lm=_Reflection(), run_dir=str(tmp_path))
+
+    result = DspyEngine("dspy_gepa").run(task, server, ctx)
+
+    assert isinstance(result.best_candidate, dict)
+    assert "self" in result.best_candidate
+    assert 0 < server.used <= 12
+    assert returned
+    assert all(isinstance(out, dspy.Prediction) and out.feedback in {"right", "wrong"} for out in returned)

@@ -342,6 +342,11 @@ class PreflightStore:
             fingerprint = verification_fingerprint(
                 session, username=username, workflow=workflow, scope=scope, payload=payload
             )
+            if scope == "evaluation":
+                # An evaluation check runs its samples under the budget's limit, so a
+                # pass under one limit says nothing about another. Execution evidence
+                # keeps the bare digest, which launch re-derives in require_current.
+                fingerprint = json_fingerprint({"inputs": fingerprint, "limit": [budget.total_cents, budget.uncapped]})
             if (
                 exclusive_scope
                 and session.scalar(
