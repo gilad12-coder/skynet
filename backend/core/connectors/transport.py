@@ -29,6 +29,7 @@ PROVIDER_LABELS = {
     "mysql": "MySQL",
     "bigquery": "BigQuery",
     "snowflake": "Snowflake",
+    "foundry": "Palantir Foundry",
     "langfuse": "Langfuse",
     "langsmith": "LangSmith",
     "braintrust": "Braintrust",
@@ -76,6 +77,22 @@ def raise_for_status(response: httpx.Response, provider: str) -> None:
     raise DomainError("connectors.provider_error", status=502, provider=label(provider), status_code=status)
 
 
+def _refuse_redirect(status: int, follow_redirects: bool, provider: str) -> None:
+    """Fail on a redirect the caller chose not to follow.
+
+    Args:
+        status: The response status.
+        follow_redirects: Whether the request followed redirects.
+        provider: Connector name for the message.
+
+    Raises:
+        DomainError: 502 ``provider_error`` for an unfollowed 3xx, which would
+            otherwise pass as success with an empty body.
+    """
+    if not follow_redirects and 300 <= status < 400:
+        raise DomainError("connectors.provider_error", status=502, provider=label(provider), status_code=status)
+
+
 def request(
     method: str,
     url: str,
@@ -85,6 +102,7 @@ def request(
     params: dict[str, Any] | None = None,
     data: dict[str, str] | None = None,
     json: Any = None,
+    follow_redirects: bool = True,
 ) -> httpx.Response:
     """Perform one API call and map failures to domain errors.
 
@@ -96,6 +114,8 @@ def request(
         params: Query parameters.
         data: Form body, if any.
         json: JSON body, if any.
+        follow_redirects: ``False`` for a user-supplied host, so a redirect
+            cannot steer the request at an internal address.
 
     Returns:
         A successful response.
@@ -113,14 +133,23 @@ def request(
             data=data,
             json=json,
             timeout=API_TIMEOUT,
+            follow_redirects=follow_redirects,
         )
     except httpx.HTTPError as exc:
         raise DomainError("connectors.unreachable", status=502, provider=label(provider)) from exc
+    _refuse_redirect(response.status_code, follow_redirects, provider)
     raise_for_status(response, provider)
     return response
 
 
-def get_json(url: str, *, provider: str, headers: dict[str, str], params: dict[str, Any] | None = None) -> Any:
+def get_json(
+    url: str,
+    *,
+    provider: str,
+    headers: dict[str, str],
+    params: dict[str, Any] | None = None,
+    follow_redirects: bool = True,
+) -> Any:
     """GET a JSON document.
 
     Args:
@@ -128,6 +157,7 @@ def get_json(url: str, *, provider: str, headers: dict[str, str], params: dict[s
         provider: Connector name for error messages.
         headers: Request headers.
         params: Query parameters.
+        follow_redirects: Passed through to :func:`request`.
 
     Returns:
         The decoded body.
@@ -135,7 +165,9 @@ def get_json(url: str, *, provider: str, headers: dict[str, str], params: dict[s
     Raises:
         DomainError: 502 ``provider_error`` when the body is not JSON.
     """
-    response = request("GET", url, provider=label(provider), headers=headers, params=params)
+    response = request(
+        "GET", url, provider=label(provider), headers=headers, params=params, follow_redirects=follow_redirects
+    )
     try:
         return response.json()
     except ValueError as exc:
@@ -174,6 +206,7 @@ def download(
     headers: dict[str, str],
     max_bytes: int | None = None,
     params: dict[str, Any] | None = None,
+    follow_redirects: bool = True,
 ) -> tuple[bytes, bool]:
     """Stream a file, stopping early at ``max_bytes`` or refusing past the ceiling.
 
@@ -184,6 +217,8 @@ def download(
         max_bytes: Stop reading after this many bytes and report truncation.
             ``None`` reads everything up to the import ceiling.
         params: Query parameters.
+        follow_redirects: Passed through to the client; ``False`` for a
+            user-supplied host.
 
     Returns:
         ``(content, truncated)``.
@@ -197,7 +232,10 @@ def download(
     received = 0
     truncated = False
     try:
-        with CLIENT.stream("GET", url, headers=headers, params=params, timeout=DOWNLOAD_TIMEOUT) as response:
+        with CLIENT.stream(
+            "GET", url, headers=headers, params=params, timeout=DOWNLOAD_TIMEOUT, follow_redirects=follow_redirects
+        ) as response:
+            _refuse_redirect(response.status_code, follow_redirects, provider)
             raise_for_status(response, provider)
             for chunk in response.iter_bytes():
                 chunks.append(chunk)

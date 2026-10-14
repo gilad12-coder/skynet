@@ -16,6 +16,7 @@ const cantoneseEnglishAllowlist = new Set([
   "connectors.field.account_placeholder",
   "connectors.field.connection_placeholder",
   "connectors.field.endpoint_placeholder",
+  "connectors.field.foundry_host_placeholder",
   "connectors.field.host_placeholder",
   "connectors.field.mysql_url_placeholder",
   "connectors.field.postgres_url_placeholder",
