@@ -341,3 +341,37 @@ def test_unified_evaluation_fingerprint_tracks_code_and_sample_count(store: Pref
     assert digest(base) == digest({**base, "name": "renamed"})
     assert digest(base) != digest({**base, "workspace": {"run_code": "b", "metric_code": "m"}})
     assert digest(base) != digest({**base, "contract_sample_count": 5})
+
+
+def test_evaluation_pass_is_not_reused_after_the_limit_changes(store: PreflightStore) -> None:
+    """A contract check that passed under one spending limit runs again under a new one.
+
+    Args:
+        store: Private setup fixture.
+    """
+    budget_id = _budget(store)
+
+    def claim(revision: int) -> PreflightClaim:
+        """Claim the same unified evaluation under the budget's current revision.
+
+        Args:
+            revision: Budget revision the caller holds.
+
+        Returns:
+            Current evidence and token, if admitted.
+        """
+        return store.claim(
+            username="alice",
+            budget_id=budget_id,
+            revision=revision,
+            workflow="unified",
+            scope="evaluation",
+            payload=PAYLOAD,
+        )
+
+    first = claim(1)
+    store.finish(first.document["id"], claim_token=first.token, status="succeeded", result=SUCCESS)
+    assert claim(1).token is None
+
+    lowered = store.budgets.update_total(budget_id, "alice", 10, expected_revision=1)
+    assert claim(lowered.revision).token is not None
