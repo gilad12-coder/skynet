@@ -172,3 +172,12 @@ test("an unavailable choice reports the catalog's reason", () => {
     null,
   );
 });
+
+test("a repository run offers every engine but Auto, and Auto is not an allowed choice", () => {
+  const input = { kind: "code", mode: "single", catalog: null, choice: "auto", repo: true } as const;
+  const ids = optimizerOptions({ ...input, guided: false }).map((view) => view.id);
+  assert.ok(ids.length > 0);
+  assert.ok(!ids.includes("auto"));
+  assert.deepEqual(optimizerChoiceIssue(input), { kind: "not_allowed" });
+  assert.equal(optimizerChoiceIssue({ ...input, choice: "gepa" }), null);
+});

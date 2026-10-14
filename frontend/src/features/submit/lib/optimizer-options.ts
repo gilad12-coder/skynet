@@ -39,6 +39,12 @@ function catalogFor(
   return catalog && catalog.artifact_kind === kind && catalog.data_mode === mode ? catalog : null;
 }
 
+/** The optimizers a setup allows; a repository run has no Auto, which has no repository strategy. */
+function allowedOptimizers(kind: ArtifactKind, mode: DataMode, repo: boolean): OptimizerChoice[] {
+  const ids = optimizersFor(kind, mode);
+  return repo ? ids.filter((id) => id !== "auto") : ids;
+}
+
 /**
  * Every optimizer that fits `kind` and `mode`, Auto first, in the order
  * `optimizersFor` gives. Catalog entries for ids outside that list are
@@ -52,10 +58,11 @@ export function optimizerOptions(input: {
   catalog: OptimizerCatalogResponse | null;
   guided: boolean;
   choice: OptimizerChoice;
+  repo?: boolean;
 }): OptimizerOptionView[] {
-  const { kind, mode, guided, choice } = input;
+  const { kind, mode, guided, choice, repo = false } = input;
   const catalog = catalogFor(input.catalog, kind, mode);
-  const views = optimizersFor(kind, mode).map((id): OptimizerOptionView => {
+  const views = allowedOptimizers(kind, mode, repo).map((id): OptimizerOptionView => {
     const entry = catalog?.options.find((option) => option.id === id);
     const resolved = resolveOptimizer(id, kind);
     return {
@@ -87,9 +94,10 @@ export function optimizerChoiceIssue(input: {
   mode: DataMode;
   catalog: OptimizerCatalogResponse | null;
   choice: OptimizerChoice;
+  repo?: boolean;
 }): OptimizerChoiceIssue | null {
-  const { kind, mode, choice } = input;
-  if (!optimizersFor(kind, mode).includes(choice)) return { kind: "not_allowed" };
+  const { kind, mode, choice, repo = false } = input;
+  if (!allowedOptimizers(kind, mode, repo).includes(choice)) return { kind: "not_allowed" };
   const catalog = catalogFor(input.catalog, kind, mode);
   const entry = catalog?.options.find((option) => option.id === choice);
   if (entry && !entry.available)

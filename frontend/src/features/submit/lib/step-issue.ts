@@ -45,6 +45,8 @@ export function computeStepIssue(
     case "task":
       return taskIssue(task);
     case "inputs": {
+      // A repository run is scored on its checkout and takes no inputs.
+      if (task.repo) return null;
       const caseCount =
         inputs.cases.length > 0 ? inputs.cases.length : inputs.stagedDatasetId ? inputs.rowCount : 0;
       return inputsIssue({
@@ -58,6 +60,8 @@ export function computeStepIssue(
     case "optimizer": {
       const kind = task.artifactKind;
       if (!kind || !inputs.mode) return "submit.v2.optimizer.needs_setup";
+      // Auto has no repository strategy; every named engine edits a checkout.
+      if (task.repo && optimizer.choice === "auto") return "submit.v2.optimizer.issue.choice";
       if (!optimizersFor(kind, inputs.mode).includes(optimizer.choice))
         return "submit.v2.optimizer.issue.choice";
       const option = catalogOption(state, catalog);
@@ -70,6 +74,9 @@ export function computeStepIssue(
       return null;
     }
     case "metric": {
+      // A repository scorer is checked on the server, against the staged checkout, at submit.
+      if (task.repo)
+        return workspace.metricCode.trim() ? null : "submit.v2.metric.issue.metric_code";
       if (!workspace.runCode.trim()) return "submit.v2.metric.issue.run_code";
       if (!workspace.metricCode.trim()) return "submit.v2.metric.issue.metric_code";
       if (metricUsesModel(state) && !hasModel(resolvedMetricModel(state)))
