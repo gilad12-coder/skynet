@@ -4159,7 +4159,7 @@
   "submit.modelpicker.tab.smartest": "最聰明",
   "submit.modelpicker.tabs.aria": "排序模型",
   "shared.agent.worked_for": "做咗 {duration}",
-  "shared.agent.working_for": "做緊 {duration}",
+  "shared.agent.working_for": "做緊，已經 {duration}",
   "shared.agent.pasted_text": "貼上嘅文字",
   "shared.agent.pasted_text_lines": "{n} 行",
   "shared.agent.pasted_text_remove": "移除貼上嘅文字",

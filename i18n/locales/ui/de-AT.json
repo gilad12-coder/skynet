@@ -25,5 +25,12 @@
   "optimizations.grid.open_pair": "Paar {pair} öffnen",
   "optimizations.grid.empty.title": "Keine Paarergebnisse",
   "optimizations.grid.empty.description": "Diese Rastersuche endete ohne Ergebnisse für ein Modellpaar, daher gibt es nichts zu vergleichen.",
-  "submit.nav.screen": "Ansicht {index} von {count}"
+  "submit.nav.screen": "Ansicht {index} von {count}",
+  "shared.agent.worked_for": "Gearbeitet: {duration}",
+  "shared.agent.working_for": "Arbeitet seit {duration}",
+  "shared.agent.pasted_text": "Eingefügter Text",
+  "shared.agent.pasted_text_lines": "{n} Zeilen",
+  "shared.agent.pasted_text_remove": "Eingefügten Text entfernen",
+  "shared.agent.pasted_text_restore": "Im Textfeld anzeigen",
+  "shared.agent.pasted_text_open": "Eingefügten Text öffnen"
 }

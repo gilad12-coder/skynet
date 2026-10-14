@@ -4158,11 +4158,11 @@
   "submit.modelpicker.tab.fastest": "가장 빠름",
   "submit.modelpicker.tab.smartest": "가장 똑똑함",
   "submit.modelpicker.tabs.aria": "모델 정렬",
-  "shared.agent.worked_for": "Worked for {duration}",
-  "shared.agent.working_for": "Working for {duration}",
+  "shared.agent.worked_for": "{duration} 동안 작업함",
+  "shared.agent.working_for": "{duration}째 작업 중",
   "shared.agent.pasted_text": "붙여넣은 텍스트",
   "shared.agent.pasted_text_lines": "{n}줄",
   "shared.agent.pasted_text_remove": "붙여넣은 텍스트 제거",
-  "shared.agent.pasted_text_restore": "텍스트 입력란에 표시",
+  "shared.agent.pasted_text_restore": "텍스트 필드에 표시",
   "shared.agent.pasted_text_open": "붙여넣은 텍스트 열기"
 }

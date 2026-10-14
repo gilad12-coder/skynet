@@ -27,5 +27,12 @@
   "optimizations.grid.open_pair": "Abrir el par {pair}",
   "optimizations.grid.empty.title": "No hay resultados de pares",
   "optimizations.grid.empty.description": "Esta búsqueda en cuadrícula terminó sin resultados para ningún par de modelos, así que no hay nada que comparar.",
-  "submit.nav.screen": "Pantalla {index} de {count}"
+  "submit.nav.screen": "Pantalla {index} de {count}",
+  "shared.agent.worked_for": "Trabajó durante {duration}",
+  "shared.agent.working_for": "Trabajando desde hace {duration}",
+  "shared.agent.pasted_text": "Texto pegado",
+  "shared.agent.pasted_text_lines": "{n} líneas",
+  "shared.agent.pasted_text_remove": "Quitar texto pegado",
+  "shared.agent.pasted_text_restore": "Mostrar en el campo de texto",
+  "shared.agent.pasted_text_open": "Abrir texto pegado"
 }

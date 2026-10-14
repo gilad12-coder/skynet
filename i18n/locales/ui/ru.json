@@ -4158,11 +4158,11 @@
   "submit.modelpicker.tab.fastest": "Самые быстрые",
   "submit.modelpicker.tab.smartest": "Самые умные",
   "submit.modelpicker.tabs.aria": "Сортировка моделей",
-  "shared.agent.worked_for": "Worked for {duration}",
-  "shared.agent.working_for": "Working for {duration}",
+  "shared.agent.worked_for": "Работал {duration}",
+  "shared.agent.working_for": "Работает уже {duration}",
   "shared.agent.pasted_text": "Вставленный текст",
   "shared.agent.pasted_text_lines": "Строк: {n}",
   "shared.agent.pasted_text_remove": "Удалить вставленный текст",
-  "shared.agent.pasted_text_restore": "Показать в поле ввода",
+  "shared.agent.pasted_text_restore": "Показать в текстовом поле",
   "shared.agent.pasted_text_open": "Открыть вставленный текст"
 }
