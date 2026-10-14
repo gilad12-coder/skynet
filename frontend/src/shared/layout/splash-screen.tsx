@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
 import { EvolutionMorph } from "@/shared/ui/evolution-morph";
 
-// 1.5 s in all: the morph lands on the human at 1.2 s, then a 0.3 s fade.
-const MORPH_MS = 1200;
+// 1.8 s in all: the morph lands on the human at 1.5 s, then a 0.3 s fade.
+const MORPH_MS = 1500;
 const FADE_MS = 300;
 
 /**
- * App-load splash: the evolution morph with the DRWN letters morphing below it,
+ * App-load splash: the DRWN letters morphing at the centre of the screen, with
+ * the evolution morph playing just above them,
  * held until the figure lands on the human and then faded out. Reduced motion
  * shows the still human and letters and skips the hold.
  */
@@ -33,7 +34,7 @@ export function SplashScreen() {
 
   return (
     <div
-      className="fixed inset-0 z-[99999] flex flex-col items-center justify-center gap-6 bg-background"
+      className="fixed inset-0 z-[99999] flex items-center justify-center bg-background"
       aria-hidden="true"
       style={{
         // Hidden figure lines are masked with this colour, so it must match the backdrop.
@@ -47,8 +48,16 @@ export function SplashScreen() {
           : {}),
       }}
     >
-      <EvolutionMorph durationMs={MORPH_MS} />
-      <AnimatedWordmark size={40} autoMorph morphSpeed={120} />
+      {/* The letters own the centre; the figure hangs above them so its changing
+          silhouette never shifts the letters off centre. */}
+      <div className="relative">
+        <EvolutionMorph
+          durationMs={MORPH_MS}
+          width={300}
+          className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2"
+        />
+        <AnimatedWordmark size={72} autoMorph morphSpeed={120} />
+      </div>
     </div>
   );
 }
