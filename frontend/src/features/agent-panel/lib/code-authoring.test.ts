@@ -18,6 +18,7 @@ registerHooks({
 
 const {
   authoringEdits,
+  authoringThinking,
   describeFixes,
   followUpAuthoringGoal,
   latestToolCallId,
@@ -37,6 +38,45 @@ test("version histories become edits in the order they landed, skipping repeats"
     { file: "run", before: "a", after: "b", ts: 5 },
   ]);
   assert.deepEqual(authoringEdits([], []), []);
+});
+
+test("a coding run that streams no reasoning shows no thinking row", () => {
+  // The run's timer opens before any token; once the chat turn that started
+  // the tool ends, a bare "Thinking" row would still sit over the edit rows.
+  assert.equal(
+    authoringThinking({
+      reasoning: "",
+      reasoningStartedAt: 1_000,
+      reasoningEndedAt: null,
+      status: "streaming",
+    }),
+    null,
+  );
+  assert.equal(
+    authoringThinking({ reasoning: "", reasoningStartedAt: null, reasoningEndedAt: null, status: "done" }),
+    null,
+  );
+});
+
+test("streamed reasoning shows as thinking, then as a closed thought", () => {
+  assert.deepEqual(
+    authoringThinking({
+      reasoning: "Compare the label",
+      reasoningStartedAt: 1_000,
+      reasoningEndedAt: null,
+      status: "streaming",
+    }),
+    { reasoning: "Compare the label", startedAt: 1_000, endedAt: null, streaming: true },
+  );
+  assert.deepEqual(
+    authoringThinking({
+      reasoning: "Compare the label",
+      reasoningStartedAt: 1_000,
+      reasoningEndedAt: 4_000,
+      status: "done",
+    }),
+    { reasoning: "Compare the label", startedAt: 1_000, endedAt: 4_000, streaming: false },
+  );
 });
 
 test("the latest call of a tool is found across turns", () => {

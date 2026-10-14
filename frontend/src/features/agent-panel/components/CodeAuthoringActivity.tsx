@@ -18,7 +18,12 @@ import {
   MAX_AUTHORING_FIXES,
   type CodeAuthoringAgentState,
 } from "../hooks/use-code-authoring-agent";
-import { authoringEdits, type AuthoringEdit, type AuthoringFixAttempt } from "../lib/code-authoring";
+import {
+  authoringEdits,
+  authoringThinking,
+  type AuthoringEdit,
+  type AuthoringFixAttempt,
+} from "../lib/code-authoring";
 
 // The same react-flow canvas the /submit wizard uses. Off the wizard it is the
 // only place a workflow (multi-module) run's graph shows, so it stays inline.
@@ -70,6 +75,7 @@ export function CodeAuthoringActivity({ agent }: CodeAuthoringActivityProps) {
     );
   }
 
+  const thinking = authoringThinking(agent);
   const steps: Array<{ key: string; kind: ActivityKind; status: ActivityStatus; row: React.ReactNode }> =
     [];
   for (const edit of authoringEdits(agent.signatureVersions, agent.metricVersions)) {
@@ -113,15 +119,7 @@ export function CodeAuthoringActivity({ agent }: CodeAuthoringActivityProps) {
 
   return (
     <div className="flex min-w-0 flex-col">
-      <ThinkingSection
-        compact
-        thinking={{
-          reasoning: agent.reasoning,
-          startedAt: agent.reasoningStartedAt,
-          endedAt: agent.reasoningEndedAt,
-          streaming,
-        }}
-      />
+      {thinking && <ThinkingSection compact thinking={thinking} />}
       {steps.length > 0 && (
         <ActivityGroup live={streaming} steps={steps}>
           {steps.map((step) => (

@@ -4,6 +4,7 @@
  * handoff waits on. Pure, so the panel and the tests build the same payloads.
  */
 import type { ValidateCodeResponse } from "@/shared/types/api";
+import type { AgentThinking } from "@/shared/ui/agent/types";
 import {
   type ContractCheckItem,
   type ContractCheckKey,
@@ -276,4 +277,34 @@ export function authoringEdits(
   return [...edits("run", runVersions), ...edits("metric", metricVersions)].sort(
     (a, b) => a.ts - b.ts,
   );
+}
+
+/**
+ * The coding tool's thinking row, or null when there is none to show.
+ *
+ * A run starts with its thinking timer open before the model sends anything,
+ * and a model that streams no reasoning never sends any: the tool's live
+ * "Editing" rows already say it is working, so a bare "Thinking" row there
+ * would claim reasoning that never happened, and outlive the chat turn that
+ * started the tool.
+ *
+ * Args:
+ *   agent: The coding agent's reasoning text, its timer, and its status.
+ *
+ * Returns:
+ *   The row's thinking state once reasoning has streamed, else null.
+ */
+export function authoringThinking(agent: {
+  reasoning: string;
+  reasoningStartedAt: number | null;
+  reasoningEndedAt: number | null;
+  status: string;
+}): AgentThinking | null {
+  if (!agent.reasoning) return null;
+  return {
+    reasoning: agent.reasoning,
+    startedAt: agent.reasoningStartedAt,
+    endedAt: agent.reasoningEndedAt,
+    streaming: agent.status === "streaming",
+  };
 }
