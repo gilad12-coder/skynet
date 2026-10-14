@@ -23,6 +23,8 @@ function contractConsoleLine(item: ContractCheckItem, guided: boolean): string {
 
 // Both editors and the validity check share one screen.
 const EDITOR_HEIGHT = "max(14rem, calc(50svh - 14rem))";
+// What the black-box runner calls on a repository run, with the checkout's path.
+const REPO_SCORER_SIGNATURE = "def score(repo_path, case=None) -> float | dict";
 
 // What a person writing the code by hand must define, straight from the
 // contract the coding agent writes under; nothing when the catalog is unknown.
@@ -82,6 +84,7 @@ export function CodeWorkspace({
   metricSignature,
   checkResult,
   onCheck,
+  repo = false,
   children,
 }: {
   runCode: string;
@@ -98,6 +101,11 @@ export function CodeWorkspace({
   checkResult: ContractCheckResponse | null;
   /** Runs the contract check from either editor's Run button. */
   onCheck: () => Promise<ContractCheckResponse | null>;
+  /**
+   * A repository run: the checkout is the candidate, so there is no run code,
+   * and the scorer is checked on the server at submit.
+   */
+  repo?: boolean;
   /** Rendered above the metric editor (the metric model row). */
   children?: ReactNode;
 }) {
@@ -121,6 +129,7 @@ export function CodeWorkspace({
 
   return (
     <div className="space-y-5 px-4 py-4 sm:px-6">
+      {!repo && (
       <EditorBlock
         id="v2-run-code"
         title={v2Msg("submit.v2.metric.run_label", guided)}
@@ -140,6 +149,7 @@ export function CodeWorkspace({
         />
         <ContractHint text={runEntry} />
       </EditorBlock>
+      )}
 
       <EditorBlock
         id="v2-metric-code"
@@ -164,15 +174,15 @@ export function CodeWorkspace({
             value={metricCode}
             onChange={onMetricCodeChange}
             height={EDITOR_HEIGHT}
-            onRun={runMetricCheck}
+            onRun={repo ? undefined : runMetricCheck}
             runLabel={runLabel}
             runningLabel={runningLabel}
-            validationResult={metricConsole}
+            validationResult={repo ? undefined : metricConsole}
             streaming={agent.metricStatus === "writing"}
             flashLines={agent.metricFlashLines}
           />
         </div>
-        <ContractHint text={metricSignature} />
+        <ContractHint text={repo ? REPO_SCORER_SIGNATURE : metricSignature} />
       </EditorBlock>
     </div>
   );

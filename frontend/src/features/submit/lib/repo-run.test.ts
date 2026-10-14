@@ -1,0 +1,91 @@
+import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
+import { test } from "node:test";
+
+const srcUrl = new URL("../../../", import.meta.url).href;
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.startsWith("@/")) {
+      return { shortCircuit: true, url: new URL(`${specifier.slice(2)}.ts`, srcUrl).href };
+    }
+    if (specifier.startsWith(".") && !specifier.endsWith(".ts")) {
+      return { shortCircuit: true, url: new URL(`${specifier}.ts`, context.parentURL).href };
+    }
+    return nextResolve(specifier, context);
+  },
+});
+
+const { initialWizardV2State, emptyRepoDraft } = await import("./wizard-v2.ts");
+const { stepPages } = await import("./wizard-pages.ts");
+const { computeStepIssue } = await import("./step-issue.ts");
+const { repoRunRequest } = await import("./repo-run.ts");
+
+const model = { name: "openai/gpt-default", token_source: "managed" as const };
+
+function repoState() {
+  const state = initialWizardV2State();
+  state.task.objective = "Make the build faster.";
+  state.task.artifactKind = "code";
+  state.task.repo = {
+    ...emptyRepoDraft(),
+    repository: "example/site",
+    commit: "a".repeat(40),
+    editablePaths: ["src", " "],
+    setupCommand: "npm ci",
+  };
+  state.inputs.mode = "single";
+  state.optimizer.choice = "gepa";
+  state.optimizer.reflectionModel = model;
+  state.optimizer.taskModel = model;
+  state.workspace.metricCode = "def score(repo_path, case=None):\n    return 1.0";
+  return state;
+}
+
+const options = { username: "u", tokenSource: "managed" as const, maxCostCents: 500, estimate: null };
+
+test("a repository run submits its repo, commit, paths and setup command", () => {
+  const request = repoRunRequest(repoState(), options);
+  assert.ok(request);
+  assert.deepEqual(request.target, {
+    kind: "repo",
+    repo: {
+      provider: "github",
+      repository: "example/site",
+      branch: null,
+      commit: "a".repeat(40),
+      editable_paths: ["src"],
+    },
+    setup_command: "npm ci",
+  });
+  assert.deepEqual(request.strategy, { mode: "single", engine: "gepa" });
+  assert.equal(request.scorer.kind, "python");
+  assert.equal(request.max_cost_cents, 500);
+  assert.equal(request.task_model_config, null);
+});
+
+test("Auto cannot optimize a repository", () => {
+  const state = repoState();
+  state.optimizer.choice = "auto";
+  assert.equal(repoRunRequest(state, options), null);
+  assert.equal(computeStepIssue(state, "optimizer", null), "submit.v2.optimizer.issue.choice");
+});
+
+test("a repository run skips inputs and needs only the scorer", () => {
+  const state = repoState();
+  state.inputs.mode = null;
+  assert.equal(computeStepIssue(state, "inputs", null), null);
+  assert.equal(computeStepIssue(state, "metric", null), null);
+  state.workspace.metricCode = " ";
+  assert.equal(computeStepIssue(state, "metric", null), "submit.v2.metric.issue.metric_code");
+  assert.deepEqual(stepPages("metric", state), ["metric", "overview"]);
+});
+
+test("the task step names what a repository still lacks", () => {
+  const state = repoState();
+  assert.equal(computeStepIssue(state, "task", null), null);
+  state.task.repo = { ...state.task.repo!, commit: "abc" };
+  assert.equal(computeStepIssue(state, "task", null), "submit.v2.repo.issue.commit");
+  state.task.repo = { ...emptyRepoDraft(), repository: "not a repo" };
+  assert.equal(computeStepIssue(state, "task", null), "submit.v2.repo.issue.repository");
+});
