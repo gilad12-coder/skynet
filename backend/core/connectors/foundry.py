@@ -8,12 +8,15 @@ imports read the table through ``readTable`` as CSV, capped by ``rowLimit``.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
+import socket
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from ..api.errors import DomainError
+from ..config import settings
 from .base import Credential, Entry
 from .records import PREVIEW_ROWS, row_cap
 from .tabular import parse_table
@@ -26,6 +29,9 @@ PAGE_SIZE = 1000
 FOLDER_PREFIX = "ri.compass.main.folder."
 DATASET_PREFIX = "ri.foundry.main.dataset."
 RID_PATTERN = re.compile(r"ri\.[a-z0-9-]+\.[a-z0-9-]+\.[a-z0-9-]+\.[A-Za-z0-9-]+")
+# Bounds a stack that keeps handing back a next-page token.
+MAX_PAGES = 50
+METADATA_ADDRESSES = frozenset({ipaddress.ip_address("169.254.169.254"), ipaddress.ip_address("fd00:ec2::254")})
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -40,24 +46,57 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
 
-def _host(raw: str) -> str:
-    """Normalise the hostname field.
+def _check_public(hostname: str, port: int) -> None:
+    """Refuse a hostname that resolves into the deploy network.
+
+    The hostname is user-supplied and the server calls it with the user's
+    token, so a private or metadata address would turn the connector into an
+    SSRF probe. Air-gapped stacks reuse the ``discover_allow_private`` opt-in.
 
     Args:
-        raw: The pasted host, a bare hostname or a URL.
+        hostname: The stack's hostname.
+        port: The port the connector will dial.
+
+    Raises:
+        DomainError: 400 when it does not resolve, or resolves to a metadata
+            address, or to a non-global address without the opt-in.
+    """
+    try:
+        infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError) as exc:
+        raise DomainError("connectors.invalid_credentials", status=400) from exc
+    for info in infos:
+        # A link-local IPv6 result carries a ``%zone`` suffix ip_address rejects.
+        address = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
+        if address in METADATA_ADDRESSES or (not settings.discover_allow_private and not address.is_global):
+            raise DomainError("connectors.invalid_credentials", status=400)
+
+
+def _host(raw: str) -> str:
+    """Normalise the hostname field and check it points at a public host.
+
+    Args:
+        raw: The pasted host, a bare hostname or an ``https://`` URL.
 
     Returns:
         An ``https://`` origin without a path or trailing slash.
 
     Raises:
-        DomainError: 400 when the field is empty.
+        DomainError: 400 when the field is empty, is not HTTPS, carries
+            credentials, or names a host in the deploy network.
     """
     host = raw.strip()
     if not host:
         raise DomainError("connectors.invalid_credentials", status=400)
-    host = host if host.startswith(("http://", "https://")) else f"https://{host}"
-    scheme, _, rest = host.partition("://")
-    return f"{scheme}://{rest.split('/', 1)[0]}"
+    parsed = urlsplit(host if "://" in host else f"https://{host}")
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise DomainError("connectors.invalid_credentials", status=400)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise DomainError("connectors.invalid_credentials", status=400) from exc
+    _check_public(parsed.hostname, port or 443)
+    return f"https://{parsed.netloc}"
 
 
 def _config(secret: ConnectorSecret) -> tuple[str, dict[str, str]]:
@@ -70,7 +109,8 @@ def _config(secret: ConnectorSecret) -> tuple[str, dict[str, str]]:
         ``(host, headers)``.
     """
     config = json.loads(secret.access_token)
-    return config["host"], _headers(config["token"])
+    # Re-checked on every use: DNS for a stored hostname can change after linking.
+    return _host(config["host"]), _headers(config["token"])
 
 
 def _rid(ref: str, prefix: str) -> str:
@@ -104,16 +144,17 @@ def _pages(host: str, headers: dict[str, str], path: str) -> list[dict[str, Any]
     """
     items: list[dict[str, Any]] = []
     token: str | None = None
-    while True:
+    for _ in range(MAX_PAGES):
         params: dict[str, Any] = {"pageSize": PAGE_SIZE}
         if token:
             params["pageToken"] = token
-        body = get_json(f"{host}{path}", provider=PROVIDER, headers=headers, params=params)
+        body = get_json(f"{host}{path}", provider=PROVIDER, headers=headers, params=params, follow_redirects=False)
         data = body.get("data") if isinstance(body, dict) else None
         items += [i for i in data if isinstance(i, dict)] if isinstance(data, list) else []
         token = body.get("nextPageToken") if isinstance(body, dict) else None
         if not token:
-            return items
+            break
+    return items
 
 
 def verify_credentials(fields: dict[str, str]) -> Credential:
@@ -135,7 +176,13 @@ def verify_credentials(fields: dict[str, str]) -> Credential:
     host = _host(fields.get("host", ""))
     headers = _headers(token)
     try:
-        get_json(f"{host}/api/v2/filesystem/spaces", provider=PROVIDER, headers=headers, params={"pageSize": 1})
+        get_json(
+            f"{host}/api/v2/filesystem/spaces",
+            provider=PROVIDER,
+            headers=headers,
+            params={"pageSize": 1},
+            follow_redirects=False,
+        )
     except DomainError as exc:
         if exc.code in {"connectors.rejected", "connectors.not_found"}:
             raise DomainError("connectors.invalid_credentials", status=400) from exc
@@ -143,7 +190,9 @@ def verify_credentials(fields: dict[str, str]) -> Credential:
     label = host.partition("://")[2]
     # A token scoped to datasets alone may not read its own user; the hostname still names the account.
     try:
-        user = get_json(f"{host}/api/v2/admin/users/getCurrent", provider=PROVIDER, headers=headers)
+        user = get_json(
+            f"{host}/api/v2/admin/users/getCurrent", provider=PROVIDER, headers=headers, follow_redirects=False
+        )
         username = user.get("username") if isinstance(user, dict) else None
         label = username if isinstance(username, str) and username else label
     except DomainError:
@@ -184,7 +233,9 @@ def _dataset_name(host: str, headers: dict[str, str], rid: str) -> str:
     Returns:
         The name, or the RID when Foundry gives none.
     """
-    body = get_json(f"{host}/api/v2/datasets/{quote(rid, safe='')}", provider=PROVIDER, headers=headers)
+    body = get_json(
+        f"{host}/api/v2/datasets/{quote(rid, safe='')}", provider=PROVIDER, headers=headers, follow_redirects=False
+    )
     name = body.get("name") if isinstance(body, dict) else None
     return name if isinstance(name, str) and name else rid
 
@@ -233,6 +284,7 @@ def _read_table(secret: ConnectorSecret, ref: str, limit: int) -> bytes:
         provider=PROVIDER,
         headers={**headers, "Accept": "*/*"},
         params={"format": "CSV", "rowLimit": limit},
+        follow_redirects=False,
     )
     return content
 
