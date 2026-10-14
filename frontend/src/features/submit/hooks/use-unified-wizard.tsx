@@ -82,6 +82,7 @@ import {
   type WorkspaceSlice,
   wizardSteps,
   withLevel,
+  withQuestionInputs,
 } from "../lib/wizard-v2";
 import { useExecutionBudget } from "./use-execution-budget";
 import { useModelCatalog } from "./use-submit-wizard-data";
@@ -106,7 +107,8 @@ type Action =
 const stepIndex = (step: WizardStepId) => WIZARD_V2_STEPS.indexOf(step);
 
 // Every patch merges into exactly one slice: editing an earlier step never
-// clears a later one, a broken downstream contract only turns stale.
+// clears a later one, a broken downstream contract only turns stale. The one
+// exception is a single-answer task, whose one input follows its question.
 function reducer(state: WizardV2State, action: Action): WizardV2State {
   if (action.type === "go") {
     const furthest =
@@ -115,7 +117,10 @@ function reducer(state: WizardV2State, action: Action): WizardV2State {
     return { ...state, step: action.step, furthestStep: furthest };
   }
   if (action.type === "level") return withLevel(state, action.level, action.optimizerBlocked);
-  return { ...state, [action.slice]: { ...state[action.slice], ...action.patch } };
+  return withQuestionInputs(state, {
+    ...state,
+    [action.slice]: { ...state[action.slice], ...action.patch },
+  });
 }
 
 /** A wizard string, or exact contract text passed through untouched. */

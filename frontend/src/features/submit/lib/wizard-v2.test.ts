@@ -16,9 +16,12 @@ registerHooks({
 });
 
 const {
+  QUESTION_INPUT_FIELD,
   WIZARD_V2_STEPS,
   contractSnapshot,
+  emptyRepoDraft,
   initialWizardV2State,
+  isSingleAnswerTask,
   optimizerModelsReady,
   presetEngine,
   presetModels,
@@ -27,6 +30,7 @@ const {
   wizardSteps,
   withContractBudget,
   withLevel,
+  withQuestionInputs,
 } = await import("./wizard-v2.ts");
 const { stepPages } = await import("./wizard-pages.ts");
 
@@ -299,4 +303,116 @@ test("taskInterviewPatch keeps a rationale only from a turn that names the artif
     new Set(["objective", "artifactKind"]),
   );
   assert.deepEqual(handPicked, {});
+});
+
+function textTask(objective = "Solve 2x + 3 = 7.", background = "Show the steps.") {
+  const state = initialWizardV2State("standard");
+  return {
+    ...state,
+    task: {
+      ...state.task,
+      objective,
+      background,
+      artifactKind: "text" as const,
+      startingVersion: "x = 2",
+    },
+  };
+}
+
+const withoutInputs = WIZARD_V2_STEPS.filter((step) => step !== "inputs");
+
+test("a single-answer task skips Inputs; a dataset task keeps it; a repository still skips it", () => {
+  assert.equal(isSingleAnswerTask(textTask()), true);
+  assert.deepEqual(wizardSteps(textTask(), false), withoutInputs);
+
+  const prompt = { ...textTask(), task: { ...textTask().task, artifactKind: "prompt" as const } };
+  assert.equal(isSingleAnswerTask(prompt), false);
+  assert.deepEqual(wizardSteps(prompt, false), WIZARD_V2_STEPS);
+
+  const textWithTable = {
+    ...textTask(),
+    inputs: { ...textTask().inputs, datasetLabel: "rows.csv" },
+  };
+  assert.deepEqual(wizardSteps(textWithTable, false), WIZARD_V2_STEPS);
+  const textWithPairs = { ...textTask(), inputs: { ...textTask().inputs, mode: "pairs" as const } };
+  assert.deepEqual(wizardSteps(textWithPairs, false), WIZARD_V2_STEPS);
+
+  const repo = {
+    ...prompt,
+    task: { ...prompt.task, artifactKind: "code" as const, repo: emptyRepoDraft() },
+  };
+  assert.deepEqual(wizardSteps(repo, false), withoutInputs);
+  assert.equal(
+    isSingleAnswerTask({ ...repo, task: { ...repo.task, artifactKind: "text" as const } }),
+    false,
+  );
+});
+
+test("Guided on a single-answer task walks only the task and metric steps", () => {
+  const guided = { ...textTask(), level: "guided" as const };
+  assert.deepEqual(wizardSteps(guided, false), ["task", "metric"]);
+  assert.deepEqual(wizardSteps(guided, true), ["task", "optimizer", "metric"]);
+});
+
+test("a single-answer task runs on exactly one case: its question", () => {
+  const empty = initialWizardV2State("standard");
+  const next = withQuestionInputs(empty, textTask());
+  assert.equal(next.inputs.mode, "single");
+  assert.deepEqual(next.inputs.cases, [
+    { input: { [QUESTION_INPUT_FIELD]: "Solve 2x + 3 = 7.\n\nShow the steps." } },
+  ]);
+  assert.deepEqual(next.inputs.inputFields, [QUESTION_INPUT_FIELD]);
+  assert.equal(next.inputs.expectedField, null);
+
+  const noBackground = withQuestionInputs(empty, textTask("Summarize the report.", " "));
+  assert.deepEqual(noBackground.inputs.cases, [
+    { input: { [QUESTION_INPUT_FIELD]: "Summarize the report." } },
+  ]);
+});
+
+test("the one case follows edits to the question, but a run's own case is kept", () => {
+  const empty = initialWizardV2State("standard");
+  const first = withQuestionInputs(empty, textTask());
+  const edited = withQuestionInputs(first, {
+    ...first,
+    task: { ...first.task, objective: "Solve x + 1 = 3." },
+  });
+  assert.deepEqual(edited.inputs.cases, [
+    { input: { [QUESTION_INPUT_FIELD]: "Solve x + 1 = 3.\n\nShow the steps." } },
+  ]);
+
+  const cloned = {
+    ...first,
+    inputs: { ...first.inputs, cases: [{ input: { problem: "1 + 1" } }] },
+  };
+  const keep = withQuestionInputs(first, cloned);
+  assert.equal(keep, cloned);
+  const afterEdit = withQuestionInputs(keep, {
+    ...keep,
+    task: { ...keep.task, background: "Briefly." },
+  });
+  assert.deepEqual(afterEdit.inputs.cases, [{ input: { problem: "1 + 1" } }]);
+});
+
+test("leaving single-answer clears the built case; a user on the skipped step goes back to the task", () => {
+  const empty = initialWizardV2State("standard");
+  const text = withQuestionInputs(empty, textTask());
+  const prompt = withQuestionInputs(text, {
+    ...text,
+    task: { ...text.task, artifactKind: "prompt" as const },
+  });
+  assert.equal(prompt.inputs.mode, null);
+  assert.deepEqual(prompt.inputs.cases, []);
+  assert.deepEqual(prompt.inputs.inputFields, []);
+
+  const onInputs = { ...prompt, step: "inputs" as const, furthestStep: "inputs" as const };
+  const backToText = withQuestionInputs(onInputs, {
+    ...onInputs,
+    task: { ...onInputs.task, artifactKind: "text" as const },
+  });
+  assert.equal(backToText.step, "task");
+  assert.equal(backToText.inputs.cases.length, 1);
+
+  const prompted = { ...textTask(), task: { ...textTask().task, artifactKind: "prompt" as const } };
+  assert.equal(withQuestionInputs(empty, prompted), prompted);
 });

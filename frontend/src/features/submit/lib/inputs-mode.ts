@@ -1,7 +1,7 @@
 /**
- * Pure helpers for the wizard v2 Inputs step: turning table rows or a typed
- * input into unified cases, and previewing how many cases the server will
- * hold out for the final score.
+ * Pure helpers for the wizard v2 Inputs step: turning table rows into
+ * unified cases, and previewing how many cases the server will hold out for
+ * the final score.
  */
 import type { SplitFractions } from "@/shared/types/api";
 import type { ColumnRole } from "@/shared/ui/column-role-row";
@@ -12,9 +12,6 @@ import {
 } from "@/shared/types/unified-run";
 
 import { splitExampleCounts } from "./split-example-counts";
-
-/** The field a typed, unstructured input is stored under. */
-export const TYPED_INPUT_FIELD = "input";
 
 export type Row = Record<string, unknown>;
 
@@ -77,25 +74,6 @@ export function casesToRows(cases: readonly UnifiedCase[]): Row[] {
 /** One case for single-input mode. */
 export function singleInputCase(input: Row): UnifiedCase {
   return { input: { ...input } };
-}
-
-/**
- * Read a typed or pasted input: a JSON object keeps its fields, anything else
- * becomes one text field.
- */
-export function parseTypedInput(text: string): Row {
-  const trimmed = text.trim();
-  if (trimmed.startsWith("{")) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return parsed as Row;
-      }
-    } catch {
-      // Not JSON after all; it is plain text.
-    }
-  }
-  return { [TYPED_INPUT_FIELD]: text };
 }
 
 /** Every column except the expected one, in table order. */

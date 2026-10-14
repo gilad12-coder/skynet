@@ -263,6 +263,69 @@ export function optimizerModelsReady(s: WizardV2State): boolean {
   return hasModel(s.optimizer.reflectionModel);
 }
 
+/** The field a single-answer task's one input sits under. */
+export const QUESTION_INPUT_FIELD = "question";
+
+/**
+ * Whether the run optimizes one answer itself (a solution, a summary, a
+ * document): a text artifact with no table behind it. Its one input is the
+ * original question, which the objective and background already hold, so the
+ * Inputs step has nothing left to ask. A text task that brings a table keeps
+ * the step.
+ */
+export function isSingleAnswerTask(s: Pick<WizardV2State, "task" | "inputs">): boolean {
+  return (
+    !s.task.repo &&
+    s.task.artifactKind === "text" &&
+    s.inputs.mode !== "pairs" &&
+    s.inputs.datasetLabel === null &&
+    s.inputs.stagedDatasetId === null
+  );
+}
+
+/** A single-answer task's inputs: one case holding the question, its objective then its background. */
+export function questionInputs(
+  task: Pick<TaskSlice, "objective" | "background">,
+): Pick<InputsSlice, "mode" | "cases" | "inputFields" | "expectedField"> {
+  const question = [task.objective.trim(), task.background.trim()].filter(Boolean).join("\n\n");
+  return {
+    mode: "single",
+    cases: [{ input: { [QUESTION_INPUT_FIELD]: question } }],
+    inputFields: [QUESTION_INPUT_FIELD],
+    expectedField: null,
+  };
+}
+
+const sameCases = (a: readonly UnifiedCase[], b: readonly UnifiedCase[]) =>
+  stableJson(a) === stableJson(b);
+
+/**
+ * `next` with a single-answer task's one case following its question. Inputs
+ * of the run's own (a cloned run's case, a table) are never replaced: only
+ * empty inputs, or the case built from the previous question. When the task
+ * stops being single-answer, that built case is cleared again, and a user
+ * standing on the now-skipped Inputs step goes back to the task.
+ */
+export function withQuestionInputs(prev: WizardV2State, next: WizardV2State): WizardV2State {
+  const built = questionInputs(prev.task).cases;
+  const ours = next.inputs.cases.length === 0 || sameCases(next.inputs.cases, built);
+  if (!isSingleAnswerTask(next)) {
+    if (!isSingleAnswerTask(prev) || !sameCases(next.inputs.cases, built)) return next;
+    const mode = next.inputs.mode === "single" ? null : next.inputs.mode;
+    return {
+      ...next,
+      inputs: { ...next.inputs, mode, cases: [], inputFields: [], expectedField: null },
+    };
+  }
+  let out = next;
+  if (ours) {
+    const derived = questionInputs(next.task);
+    if (!sameCases(next.inputs.cases, derived.cases) || next.inputs.mode !== "single")
+      out = { ...out, inputs: { ...out.inputs, ...derived } };
+  }
+  return out.step === "inputs" ? { ...out, step: "task" } : out;
+}
+
 /**
  * The steps the wizard walks. Guided skips the Optimizer step and runs on the
  * defaults, unless they can't run (`optimizerBlocked`: no default model, or a
@@ -270,8 +333,10 @@ export function optimizerModelsReady(s: WizardV2State): boolean {
  * the run out of sight.
  */
 export function wizardSteps(s: WizardV2State, optimizerBlocked: boolean): readonly WizardStepId[] {
-  // A repository run is scored on the checkout itself, so it has no inputs.
-  const all = s.task.repo ? WIZARD_V2_STEPS.filter((step) => step !== "inputs") : WIZARD_V2_STEPS;
+  // A repository run is scored on the checkout itself, and a single-answer
+  // task's one input is its question, so neither has an Inputs step.
+  const skipInputs = Boolean(s.task.repo) || isSingleAnswerTask(s);
+  const all = skipInputs ? WIZARD_V2_STEPS.filter((step) => step !== "inputs") : WIZARD_V2_STEPS;
   if (s.level !== "guided" || optimizerBlocked || s.step === "optimizer") return all;
   return all.filter((step) => step !== "optimizer");
 }
