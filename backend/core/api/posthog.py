@@ -39,6 +39,8 @@ _EVENT_NAMES = {
     "tutorial_started",
     "tutorial_completed",
     "share_created",
+    "wizard_step_viewed",
+    "setup_check_failed",
 }
 _PROPERTY_KEYS = {
     "cents",
