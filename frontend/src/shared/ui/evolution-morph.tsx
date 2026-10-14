@@ -78,9 +78,23 @@ function paint(el: SVGPathElement, part: FramePart | undefined) {
  * Ink follows `currentColor` (defaults to `--splash-ink`); hidden lines are
  * masked with `--evolution-ground`, which defaults to `--splash-ground`, so set
  * it when the figure sits on another surface. Reduced motion shows the human, still.
+ * `durationMs` replays the same timeline faster or slower so it lands on the
+ * human at that time (the app-load splash is shorter than the submit one).
+ * `still` always shows the still human, for server-rendered markup that has to
+ * honour reduced motion before hydration can read it.
  */
-export function EvolutionMorph({ width = 260, className }: { width?: number; className?: string }) {
-  const reduceMotion = useReducedMotion() ?? false;
+export function EvolutionMorph({
+  width = 260,
+  className,
+  durationMs = EVOLUTION_DURATION_MS,
+  still = false,
+}: {
+  width?: number;
+  className?: string;
+  durationMs?: number;
+  still?: boolean;
+}) {
+  const reduceMotion = (useReducedMotion() ?? false) || still;
   const pathRefs = useRef<Array<SVGPathElement | null>>([]);
   const { animals, maxParts } = getEvolution();
   const initial = restFrame(reduceMotion ? animals[animals.length - 1]! : animals[0]!);
@@ -91,13 +105,14 @@ export function EvolutionMorph({ width = 260, className }: { width?: number; cla
     let start: number | null = null;
     const tick = (now: number) => {
       start ??= now;
-      const parts = frameAt(now - start);
+      const elapsed = ((now - start) * EVOLUTION_DURATION_MS) / durationMs;
+      const parts = frameAt(elapsed);
       pathRefs.current.forEach((el, i) => el && paint(el, parts[i]));
-      if (now - start < EVOLUTION_DURATION_MS) frame = requestAnimationFrame(tick);
+      if (elapsed < EVOLUTION_DURATION_MS) frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [reduceMotion]);
+  }, [reduceMotion, durationMs]);
 
   return (
     <svg
