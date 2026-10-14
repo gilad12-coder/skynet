@@ -10,6 +10,7 @@ import {
   ArrowCounterClockwise,
   Binary,
   CaretRight,
+  ChatText,
   CircleNotch,
   CursorText,
   ListChecks,
@@ -36,6 +37,7 @@ import {
   QuestionChoices,
   QuestionChoicesSkeleton,
 } from "@/shared/ui/agent";
+import { useSteerQueue } from "@/shared/ui/agent/use-steer-queue";
 import type { AgentMessage, AgentThinking } from "@/shared/ui/agent";
 import type { InterviewOption } from "@/shared/lib/api";
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
@@ -54,22 +56,7 @@ import {
   interviewComposerModel,
 } from "../lib/assist";
 import type { AnnotationMode, AssistState, Category, TaggerConfig } from "../lib/types";
-import { Textarea } from "@/shared/ui/primitives/textarea";
-
-/**
- * Focus a just-appended field without the native focus jump: ``focus()``
- * yanks the nearest scroll container to the element instantly, which reads
- * as the list "jumping" at the add button. Focus is taken without scrolling,
- * then the reveal happens as its own smooth glide (instant under
- * reduced-motion).
- */
-function focusAppendedField(el: HTMLElement): void {
-  el.focus({ preventScroll: true });
-  el.scrollIntoView({
-    block: "nearest",
-    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-  });
-}
+import { focusAppendedField, RULE_MARKER_CLASS, RuleList } from "@/shared/ui/rule-list";
 
 /** The confirmed task contract handed back from the labeling-guide card. */
 interface TaskContract {
@@ -183,6 +170,14 @@ export function TaggerInterview({
     onSend(content);
   };
 
+  // Answers typed while the interviewer is replying wait for it to finish.
+  const { midTurn } = useSteerQueue({
+    busy,
+    send: (text) => {
+      if (!done) onSend(text);
+    },
+  });
+
   return (
     // Height subtracts page padding plus the ~2.5rem back-to-sessions bar
     // rendered above, so the thread stays viewport-locked without page scroll.
@@ -205,7 +200,8 @@ export function TaggerInterview({
         <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0 gap-0">
           <div className="flex items-start justify-between gap-3 border-b border-border/40 px-4 py-3 shrink-0">
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-foreground">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <ChatText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 {msg("tagger.assist.interview.title")}
               </h3>
             </div>
@@ -271,6 +267,7 @@ export function TaggerInterview({
             onStop={onStop}
             disabled={!busy && messages.length === 0}
             streaming={busy}
+            midTurn={midTurn}
             placeholder={msg("tagger.assist.interview.placeholder")}
             modelMenu={
               <ComposerModelMenu
@@ -278,6 +275,7 @@ export function TaggerInterview({
                 onChange={onSetInterviewModel}
                 effort={interviewComposerEffort(assist)}
                 onEffortChange={onSetInterviewEffort}
+                defaultFlag="is_interview_default"
               />
             }
           />
@@ -335,16 +333,14 @@ function ContractPendingIndicator() {
       </div>
       <div aria-hidden className="flex h-1 overflow-hidden rounded-full bg-muted">
         <div
-          className="rounded-full bg-primary transition-[width] duration-200 ease-linear"
+          className="rounded-full bg-primary-fill transition-[width] duration-200 ease-linear"
           style={{ width: `${percent}%` }}
         />
       </div>
       <div aria-hidden className="flex flex-col gap-2">
         {(["w-3/4", "w-4/5", "w-2/3"] as const).map((width, index) => (
           <div key={width} className="flex items-center gap-2.5">
-            <span className="w-4 select-none text-end font-mono text-xs tabular-nums text-muted-foreground/50">
-              {index + 1}
-            </span>
+            <span className={RULE_MARKER_CLASS}>{index + 1}</span>
             <Skeleton height={12} containerClassName={cn("leading-none", width)} />
           </div>
         ))}
@@ -440,7 +436,7 @@ function RubricCard({
   const question = config.question ?? "";
   const [categories, setCategories] = useState<Category[]>(config.categories ?? []);
   // Which just-appended field should grab focus once it mounts.
-  const focusAppended = useRef<"category" | "rule" | null>(null);
+  const focusAppended = useRef<"category" | null>(null);
   // The guide is an editable draft, like the code interview's brief; a
   // re-run interview replaces it.
   const [rules, setRules] = useState<string[]>(assist.rubric);
@@ -491,13 +487,6 @@ function RubricCard({
   };
   const cleanedCategories = categories.filter((c) => c.label.trim());
 
-  const updateRule = (idx: number, value: string) =>
-    setRules((prev) => prev.map((r, i) => (i === idx ? value : r)));
-  const removeRule = (idx: number) => setRules((prev) => prev.filter((_, i) => i !== idx));
-  const addRule = () => {
-    focusAppended.current = "rule";
-    setRules((prev) => [...prev, ""]);
-  };
 
   const taskValid = mode !== "multiclass" || cleanedCategories.length >= 2;
 
@@ -619,9 +608,9 @@ function RubricCard({
                       onClick={() => switchMode(opt.mode)}
                       className={cn(
                         "flex items-start gap-3 rounded-xl border p-3.5 text-start transition-all cursor-pointer",
-                        "hover:border-primary/40 hover:bg-primary/5",
+                        "hover:border-primary-fill/40 hover:bg-primary-fill/5",
                         "focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
-                        selected ? "border-primary bg-primary/10 shadow-sm" : "border-border/50",
+                        selected ? "on-primary " : "border-border/50",
                       )}
                     >
                       <opt.icon
@@ -713,6 +702,7 @@ function RubricCard({
               <ModelChip
                 config={modelConfig}
                 emptyLabel={msg("tagger.assist.model.placeholder")}
+                defaultFlag="is_default"
                 catalogModels={catalogModels ?? undefined}
                 onClick={() => setModelDialogOpen(true)}
                 onRemove={assist.model ? () => onSetModel({ name: "" }) : undefined}
@@ -739,52 +729,15 @@ function RubricCard({
                 <CardTitle className="text-lg">{msg("tagger.assist.rubric.guide_title")}</CardTitle>
                 <CardDescription>{msg("tagger.assist.rubric.guide_hint")}</CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-2.5">
-                {rules.map((rule, idx) => (
-                  <div key={idx} className="flex items-start gap-2.5">
-                    <span className="w-4 shrink-0 select-none pt-2.5 text-end font-mono text-xs tabular-nums text-muted-foreground/60">
-                      {idx + 1}
-                    </span>
-                    <Textarea
-                      ref={
-                        idx === rules.length - 1
-                          ? (el: HTMLTextAreaElement | null) => {
-                              if (el && focusAppended.current === "rule") {
-                                focusAppended.current = null;
-                                focusAppendedField(el);
-                              }
-                            }
-                          : undefined
-                      }
-                      value={rule}
-                      onChange={(e) => updateRule(idx, e.target.value)}
-                      rows={2}
-                      aria-label={formatMsg("tagger.assist.rubric.rule_label", {
-                        number: idx + 1,
-                      })}
-                      className="flex-1 text-sm leading-relaxed"
-                      dir="auto"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => removeRule(idx)}
-                      aria-label={msg("tagger.assist.rubric.rule_remove")}
-                      className="mt-1.5"
-                    >
-                      <Trash className="size-3.5 text-muted-foreground" />
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={addRule}
-                  className="gap-1.5 self-start text-muted-foreground"
-                >
-                  <Plus className="size-3.5" />
-                  {msg("tagger.assist.rubric.rule_add")}
-                </Button>
+              <CardContent>
+                <RuleList
+                  rules={rules}
+                  onChange={setRules}
+                  itemLabel={(number) => formatMsg("tagger.assist.rubric.rule_label", { number })}
+                  removeLabel={msg("tagger.assist.rubric.rule_remove")}
+                  addLabel={msg("tagger.assist.rubric.rule_add")}
+                  placeholder={msg("tagger.assist.rubric.rule_placeholder")}
+                />
               </CardContent>
             </Card>
           )}
@@ -808,8 +761,8 @@ function RubricCard({
               // (some locales) clips inside the button instead of spilling
               // over the cards.
               "group relative flex w-full cursor-pointer flex-row items-center justify-center gap-3 overflow-hidden lg:w-[100px] lg:flex-col lg:gap-4",
-              "rounded-2xl bg-primary py-4 text-base font-semibold text-primary-foreground lg:py-8",
-              "transition-all duration-300 hover:scale-[1.01]",
+              "rounded-2xl bg-primary-fill py-4 text-base font-semibold text-primary-foreground lg:py-8",
+              "transition-all duration-300",
               "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60",
             )}
           >

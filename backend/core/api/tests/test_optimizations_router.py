@@ -1814,9 +1814,8 @@ def test_status_surfaces_blackbox_results_under_blackbox_result(
         optimizer_name="auto",
         strategy_mode="auto",
         engine_used="gepa",
-        split_counts=SplitCounts(train=4, val=1, test=1),
-        baseline_test_metric=0.4,
-        optimized_test_metric=0.9,
+        baseline_score=0.4,
+        best_score=0.9,
         metric_improvement=0.5,
         seed_candidate="Be brief.",
         best_candidate="Be brief and cite sources.",
@@ -1847,7 +1846,7 @@ def test_status_surfaces_blackbox_results_under_blackbox_result(
     assert body["blackbox_result"]["best_candidate"] == "Be brief and cite sources."
     assert body["blackbox_result"]["engine_used"] == "gepa"
     assert [lane["engine"] for lane in body["blackbox_result"]["lanes"]] == ["best_of_n", "gepa"]
-    assert body["blackbox_result"]["optimized_test_metric"] == 0.9
+    assert body["blackbox_result"]["best_score"] == 0.9
 
 
 def test_sanitize_payload_scrubs_the_scorer_model_key() -> None:

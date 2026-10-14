@@ -19,21 +19,19 @@ from .mocks import FakeSandboxRuntime, FakeSandboxSession
 
 
 class _WithScore:
-    """Object exposing a numeric ``score`` attribute."""
+    """Object exposing a numeric ``score`` and a ``feedback`` attribute."""
 
     score = 0.25
+    feedback = "attr"
 
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        (0.5, (0.5, {})),
-        (1, (1.0, {})),
-        (True, (1.0, {})),
         ((0.5, {"feedback": "ok"}), (0.5, {"feedback": "ok"})),
         ([0.5, "just text"], (0.5, {"feedback": "just text"})),
-        ({"score": 0.75, "note": "n"}, (0.75, {"note": "n"})),
-        (_WithScore(), (0.25, {})),
+        ({"score": 0.75, "feedback": "f", "note": "n"}, (0.75, {"feedback": "f", "note": "n"})),
+        (_WithScore(), (0.25, {"feedback": "attr"})),
     ],
 )
 def test_normalize_score_accepts_documented_shapes(raw: Any, expected: tuple[float, dict[str, Any]]) -> None:
@@ -46,14 +44,14 @@ def test_normalize_score_accepts_documented_shapes(raw: Any, expected: tuple[flo
     assert normalize_score(raw) == expected
 
 
-@pytest.mark.parametrize("raw", ["0.5", None, {"feedback": "no score"}, (0.5, {}, "extra")])
+@pytest.mark.parametrize("raw", ["0.5", None, {"feedback": "no score"}, (0.5, {}, "extra"), 0.5, {"score": 1}])
 def test_normalize_score_rejects_other_shapes(raw: Any) -> None:
-    """Anything else is a scorer contract violation.
+    """Anything else, including a score without feedback, is a scorer contract violation.
 
     Args:
         raw: An unsupported return value.
     """
-    with pytest.raises(ServiceError, match="scorer must return"):
+    with pytest.raises(ServiceError, match="must return feedback"):
         normalize_score(raw)
 
 
@@ -149,9 +147,13 @@ def test_remote_scorer_posts_candidate_and_case_with_bearer_secret(monkeypatch: 
 def test_remote_scorer_omits_auth_header_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """No secret means no ``Authorization`` header."""
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(scorer_mod.httpx, "post", lambda url, **kw: captured.update(kw) or _FakeResponse(0.5))
+    monkeypatch.setattr(
+        scorer_mod.httpx,
+        "post",
+        lambda url, **kw: captured.update(kw) or _FakeResponse({"score": 0.5, "feedback": "f"}),
+    )
 
-    assert RemoteScorer("https://scorer.example", secret=None, timeout_seconds=1)("x") == (0.5, {})
+    assert RemoteScorer("https://scorer.example", secret=None, timeout_seconds=1)("x") == (0.5, {"feedback": "f"})
     assert captured["headers"] == {}
 
 
@@ -160,7 +162,7 @@ def test_remote_scorer_omits_auth_header_without_secret(monkeypatch: pytest.Monk
     [
         (_FakeResponse(None, status_error=True), "remote scorer request failed"),
         (_FakeResponse(None, non_json=True), "non-JSON body"),
-        (_FakeResponse({"feedback": "no score"}), "scorer must return"),
+        (_FakeResponse({"feedback": "no score"}), "must return feedback"),
     ],
 )
 def test_remote_scorer_reports_bad_replies(
@@ -196,13 +198,13 @@ def test_build_scorer_dispatches_on_kind() -> None:
     """``build_scorer`` returns a remote adapter for ``remote`` and a sandboxed scorer otherwise."""
     remote = build_scorer(BlackboxScorer(kind="remote", url="https://scorer.example"))
     python = build_scorer(
-        BlackboxScorer(metric_code="def score(c, case=None): return 1.0"), runtime=LocalSubprocessRuntime()
+        BlackboxScorer(metric_code="def score(c, case=None): return 1.0, 'f'"), runtime=LocalSubprocessRuntime()
     )
 
     assert isinstance(remote, RemoteScorer)
     assert isinstance(python, SandboxPythonScorer)
     try:
-        assert python("x", None) == (1.0, {})
+        assert python("x", None) == (1.0, {"feedback": "f"})
     finally:
         python.close()
 

@@ -12,6 +12,10 @@ function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>)
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
 }
 
+function DialogTrigger({ ...props }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
+  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
+}
+
 function DialogPortal({ ...props }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
   return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />;
 }
@@ -48,7 +52,11 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed grid w-full max-w-[calc(100%-2rem)] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-[min(32rem,92vw)]",
+          // Capped to the dynamic viewport so short and mobile screens never
+          // push the actions off-screen; a dialog with its own fixed header and
+          // footer overrides the overflow and scrolls its middle instead.
+          "max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain",
+          "fixed grid w-full max-w-[calc(100%-2rem)] gap-4 rounded-lg border bg-background p-6 shadow-[var(--shadow-float)] duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-[min(32rem,92vw)]",
           className,
         )}
         style={{ zIndex: 50, top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}
@@ -140,4 +148,12 @@ function DialogDescription({
   );
 }
 
-export { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle };
+export {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+};

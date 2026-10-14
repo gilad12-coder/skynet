@@ -9,6 +9,7 @@ import {
   deleteDataset,
   deleteJob,
   deleteStagedUpload,
+  deleteTaggerSession,
   getStorageCategoryItems,
   STORAGE_CHANGED_EVENT,
   type StorageItem,
@@ -40,6 +41,7 @@ const CHUNK = 25;
 function deleteItem(item: StorageItem): Promise<unknown> {
   if (item.type === "optimization") return deleteJob(item.id);
   if (item.type === "dataset") return deleteDataset(item.id);
+  if (item.type === "tagging_session") return deleteTaggerSession(item.id);
   if (item.type === "staged_upload") return deleteStagedUpload(item.id);
   return deleteConversation(item.id);
 }

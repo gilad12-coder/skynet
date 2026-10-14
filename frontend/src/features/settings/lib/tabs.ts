@@ -7,6 +7,7 @@
  */
 
 import {
+  Bell,
   ChartBar,
   CreditCard,
   HardDrive,
@@ -31,6 +32,7 @@ export const SETTINGS_TAB_ORDER = [
   "tagging",
   "agent",
   "account",
+  "notifications",
   "security",
   "privacy",
   "billing",
@@ -76,6 +78,12 @@ export const SETTINGS_TABS: Record<SettingsTab, SettingsTabMeta> = {
     icon: User,
     labelKey: "settings.tab.account",
     keywordsKey: "app.shell.search.kw.account",
+    group: "preferences",
+  },
+  notifications: {
+    icon: Bell,
+    labelKey: "settings.tab.notifications",
+    keywordsKey: "app.shell.search.kw.notifications",
     group: "preferences",
   },
   security: {

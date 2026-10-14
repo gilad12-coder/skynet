@@ -2,12 +2,14 @@
 
 The guest that hosts the coding agent never sees the secrets or this box: it
 posts each version through the parent's evaluator capability, and the parent
-rebuilds the checkout, runs the setup command, then calls the user's
+lays it out on a copy of the already set-up tree, then calls the user's
 ``score(repo_path)`` (or ``score(repo_path, case)``) on it.
 
-A scorer may return per-case scores under ``cases``, a mapping of case name to
-score. The run's score stays the top-level number; the cases are feedback that
-GEPA reflects on.
+A scorer returns a score with its feedback, like any scorer, and may return
+per-case results under ``cases``, a mapping of case name to
+``{"score", "feedback"}``. The run's score stays the top-level number; each
+case becomes a named score that every engine reflects on and keeps on its
+Pareto front.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ....billing.model_dispatch import ModelHTTPResult
-from . import runner
+from . import runner, sandbox_log
 from .repo_workspace import REPO_DIR, RepoWorkspace, redact
 from .sandbox import SandboxSession
 from .sandbox_scorer import RUNNER_SOURCE
@@ -30,7 +32,9 @@ CASES_KEY = "cases"
 REPO_SCORER_URL = "https://scoped-evaluator.invalid/score"
 RUNNER_PATH = f"{REPO_DIR}/skynet_runner.py"
 CALLS_DIR = f"{REPO_DIR}/calls"
-# The guest waits for setup and the scorer together, so its relay gets both allowances.
+# The guest waits for the version's checkout and the scorer together; copying a
+# prepared tree with its installed dependencies can take a while, so its relay
+# gets an allowance on top of the scorer's own timeout.
 SETUP_ALLOWANCE_SECONDS = 1_800.0
 
 
@@ -38,30 +42,34 @@ class RepoScoreError(Exception):
     """A version could not be scored; the message is safe to show the agent."""
 
 
-def per_case_scores(side_info: Mapping[str, Any]) -> dict[str, float] | None:
-    """Read and check the per-case scores a repository scorer returned.
+def fold_case_scores(side_info: Mapping[str, Any]) -> dict[str, Any]:
+    """Turn the per-case scores a repository scorer returned into named scores.
+
+    Each case becomes a named score, so every engine reflects on it and
+    treats it as its own objective, exactly like ``scores``.
 
     Args:
         side_info: Everything the scorer returned besides its score.
 
     Returns:
-        Case name to score, or ``None`` when the scorer returned no cases.
+        The side info with ``cases`` folded into ``scores``.
 
     Raises:
-        RepoScoreError: When ``cases`` is not a mapping of names to finite numbers.
+        RepoScoreError: When ``cases`` is not a mapping of names to a finite
+            score with its feedback.
     """
-    cases = side_info.get(CASES_KEY)
+    folded = dict(side_info)
+    cases = folded.pop(CASES_KEY, None)
     if cases is None:
-        return None
-    if not isinstance(cases, dict) or not all(
-        isinstance(name, str)
-        and isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        for name, value in cases.items()
-    ):
-        raise RepoScoreError(f"'{CASES_KEY}' must map each case name to a number.")
-    return {name: float(value) for name, value in cases.items()}
+        return folded
+    try:
+        named = runner.named_scores(cases)
+    except runner.ScorerError as exc:
+        raise RepoScoreError(f"'{CASES_KEY}' must map each case name to a score and feedback. {exc}") from exc
+    if not all(math.isfinite(entry["score"]) for entry in named.values()):
+        raise RepoScoreError(f"'{CASES_KEY}' must map each case name to a finite score.")
+    folded["scores"] = {**named, **(folded.get("scores") or {})}
+    return folded
 
 
 class RepoScorer:
@@ -83,7 +91,7 @@ class RepoScorer:
         self._lock = threading.Lock()
 
     def score(self, patch: str, case: Any = None) -> dict[str, Any]:
-        """Check out one version, set it up and score it.
+        """Check out one version and score it.
 
         Args:
             patch: The version as a git patch against the starting commit.
@@ -93,8 +101,8 @@ class RepoScorer:
             ``{"score": ..., **side_info}``, secrets redacted.
 
         Raises:
-            RepoScoreError: When the version breaks the path rules, does not
-                apply or set up, or the scorer fails or returns no score.
+            RepoScoreError: When the version breaks the path rules or does not
+                apply, or the scorer fails or returns no score.
         """
         secrets = list(self._workspace.secrets.values())
         # Checkout and scoring share one lock: the next version's checkout
@@ -102,10 +110,7 @@ class RepoScorer:
         with self._lock:
             checkout = self._workspace.checkout(patch)
             if checkout.path is None:
-                detail = " ".join(checkout.problems)
-                if checkout.setup_log:
-                    detail += f"\n{checkout.setup_log}"
-                raise RepoScoreError(detail)
+                raise RepoScoreError(" ".join(checkout.problems))
             session = self._workspace.session()
             root = self._box_root(session)
             self._calls += 1
@@ -117,12 +122,15 @@ class RepoScorer:
                     )
                 }
             )
-            result = session.run(
-                f"cd {shlex.quote(checkout.path)} && python3 {shlex.quote(f'{root}/{RUNNER_PATH}')}"
-                f" {shlex.quote(call_dir)}",
-                env=self._workspace.secrets or None,
-                timeout_seconds=self._timeout_seconds,
-            )
+            # A sink makes the session stream stderr live, which is where log() events travel.
+            with sandbox_log.event_scope(source="scorer"):
+                result = session.run(
+                    f"cd {shlex.quote(checkout.path)} && python3 {shlex.quote(f'{root}/{RUNNER_PATH}')}"
+                    f" {shlex.quote(call_dir)}",
+                    env=self._workspace.secrets or None,
+                    timeout_seconds=self._timeout_seconds,
+                    on_output=sandbox_log.ignore_output,
+                )
             if result.timed_out:
                 raise RepoScoreError(f"The scorer exceeded its {self._timeout_seconds:g}s timeout.")
             text = session.read_file(f"{CALLS_DIR}/{self._calls:06d}/{runner.OUTPUT_FILE}")
@@ -132,9 +140,18 @@ class RepoScorer:
         output = json.loads(redact(text, secrets))
         if output.get("error") or output.get("score") is None:
             raise RepoScoreError(str(output.get("error") or "The scorer returned no score."))
-        side_info = dict(output.get("side_info") or {})
-        per_case_scores(side_info)
+        side_info = fold_case_scores(output.get("side_info") or {})
         return {**side_info, "score": float(output["score"])}
+
+    def prepare(self) -> None:
+        """Set the repository up and take its box offline before any version is sent.
+
+        Raises:
+            RepoSetupError: When the repository cannot be unpacked or set up.
+            NetworkCutoffError: When the box's network cannot be switched off and confirmed.
+        """
+        with self._lock:
+            self._workspace.session()
 
     def dispatch(self, body: Mapping[str, Any]) -> ModelHTTPResult:
         """Answer one guest scoring request through the evaluator capability.

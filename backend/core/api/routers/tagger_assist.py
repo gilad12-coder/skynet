@@ -46,17 +46,20 @@ from ...constants import (
 )
 from ...models import ModelConfig
 from ...service_gateway import tagging
+from ...service_gateway.agents.kickoff import fits_kickoff_budget, oversized_kickoff
 from ...storage.models import TaggingSessionModel
 from ...worker.tagging_job import TaggingAutotagPayload, untagged_rows
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort, get_catalog_cached, is_hidden_model
-from ..model_router import effective_reasoning_effort, route_menu_model
+from ..model_router import effective_reasoning_effort, route_interview_model
 from ..sharing_access import ShareRole
 from ..tagging_session_access import require_role
 from ._helpers import enforce_llm_balance, sse_from_events, stream_with_llm_metering
 
 logger = logging.getLogger(__name__)
+
+_SSE_HEADERS = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
@@ -355,7 +358,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             config = _interview_config(row)
             columns = cast("list[str]", row.columns)
             data = cast("list[dict[str, Any]]", row.data)
-        model = route_menu_model(req.model)
+        model = route_interview_model(req.model)
         usage_sink: list = []
         try:
             turn = tagging.interview_turn(
@@ -390,7 +393,9 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
         streamed; options and rubric are still generating), ``message_reset``
         (a failed attempt is being retried or leaked structure was dropped;
         the client drops any partial reply), a terminal ``interview_done``
-        carrying the parsed turn, and ``error`` on failure.
+        carrying the parsed turn, and ``error`` on failure. An opening turn
+        whose sampled rows are over the opening budget is a lone
+        ``kickoff_oversized`` instead, with no model call and no charge.
 
         Args:
             session_id: UUID of the tagger session.
@@ -400,13 +405,17 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
         Returns:
             A ``text/event-stream`` response.
         """
-        await asyncio.to_thread(enforce_llm_balance, job_store, user.username)
         with Session(job_store.engine) as db:
             row = _load_for_role(db, session_id, user)
             config = _interview_config(row)
             columns = cast("list[str]", row.columns)
             data = cast("list[dict[str, Any]]", row.data)
-        model = route_menu_model(req.model)
+        if not req.turns and not fits_kickoff_budget(tagging.opening_sample_bytes(config, columns, data)):
+            return StreamingResponse(
+                sse_from_events(oversized_kickoff("data")), media_type="text/event-stream", headers=_SSE_HEADERS
+            )
+        await asyncio.to_thread(enforce_llm_balance, job_store, user.username)
+        model = await asyncio.to_thread(route_interview_model, req.model)
         usage_sink: list = []
 
         async def source() -> Any:

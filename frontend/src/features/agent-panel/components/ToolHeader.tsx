@@ -20,7 +20,7 @@ const SEVERITY: Record<ApprovalSeverity, { color: string; label: string | null }
       label: msg("auto.features.agent.panel.components.toolscarousel.literal.16"),
     },
     info: {
-      color: "#3D2E22",
+      color: "var(--foreground)",
       label: msg("auto.features.agent.panel.components.toolscarousel.literal.12"),
     },
   }),
@@ -42,9 +42,9 @@ interface ToolHeaderProps {
   className?: string;
 }
 
-// Neutral brand ink for the icon chip when severity is unknown — the same dark
-// brown used elsewhere, carrying no safety connotation on its own.
-const NEUTRAL_ACCENT = "#3D2E22";
+// Neutral ink for the icon chip when severity is unknown — the theme's
+// foreground, carrying no safety connotation on its own.
+const NEUTRAL_ACCENT = "var(--foreground)";
 
 /**
  * The shared tool identity row — a circular icon, the friendly title and (when
@@ -69,7 +69,7 @@ export function ToolHeader({ toolKey, severity, trailing, className }: ToolHeade
       <span
         className="inline-flex size-9 items-center justify-center rounded-full shrink-0"
         style={{
-          backgroundColor: `${accent}14`,
+          backgroundColor: `color-mix(in srgb, ${accent} 8%, transparent)`,
           color: accent,
         }}
       >

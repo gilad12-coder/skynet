@@ -1,7 +1,6 @@
 "use client";
 
 import { ProgressBar } from "@/shared/ui/progress-bar";
-import { Badge } from "@/shared/ui/primitives/badge";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
@@ -9,7 +8,6 @@ import {
   Check,
   CircleNotch,
   Clock,
-  Hourglass,
   ListChecks,
   Warning,
 } from "@/shared/ui/icons";
@@ -29,7 +27,6 @@ import type {
   ValidationUsageWait,
 } from "../lib/preflight-store";
 import { USAGE_WAIT_ATTEMPTS, USAGE_WAIT_INTERVAL_MS } from "../lib/wait-for-preflight-usage";
-import { cnGrid } from "./blackbox/shared";
 
 type PreflightCheck = WizardPreflightResponse["checks"][number];
 
@@ -65,6 +62,13 @@ const checkKeys: Record<string, MessageKey> = {
   "scorer.model": "submit.validation.check.scorer.model",
   "scorer.readiness": "submit.validation.check.scorer.readiness",
   "target.readiness": "submit.validation.check.target.readiness",
+  "metric.contract": "submit.validation.check.metric.contract" as MessageKey,
+  // The unified contract check's items, run on the same screen.
+  "workspace.run_signature": "submit.v2.metric.check.key.workspace.run_signature",
+  "metric.signature": "submit.v2.metric.check.key.metric.signature",
+  "metric.model": "submit.v2.metric.check.key.metric.model",
+  "workspace.run": "submit.v2.metric.check.key.workspace.run",
+  "metric.shape": "submit.v2.metric.check.key.metric.shape",
 };
 
 const roleKeys: Record<string, MessageKey> = {
@@ -82,14 +86,12 @@ const checkStateKeys: Record<PreflightCheck["status"], MessageKey> = {
 
 // The steps a check walks through, in order. A step the server skips drops
 // out of "up next" as soon as a later one starts.
+// The unified run checks its code contract (metric.contract) in the evaluator
+// step, after the sandbox is up and before the models are probed.
 const PLAN: Record<PreflightWorkflow, Record<PreflightScope, readonly ValidationPhase[]>> = {
-  dspy: {
+  unified: {
     evaluation: ["budget", "sandbox", "evaluator", "usage"],
     execution: ["budget", "sandbox", "evaluator", "models", "usage"],
-  },
-  anything: {
-    evaluation: ["budget", "dependencies", "sandbox", "evaluator", "usage"],
-    execution: ["budget", "dependencies", "sandbox", "evaluator", "models", "usage"],
   },
 };
 
@@ -101,8 +103,8 @@ const SUCCESS_LINGER_MS = 1200;
 // A step that has run this long gets a word of reassurance.
 const SLOW_AFTER_MS = 30_000;
 
-// Rough per-step budgets, used only to fill the progress bar and to read out
-// how much time is likely left. The evaluator step dominates a real run.
+// Rough per-step budgets, used only to fill the progress bar. The evaluator
+// step dominates a real run.
 const PHASE_ESTIMATE_MS: Record<ValidationPhase, number> = {
   budget: 4_000,
   dependencies: 20_000,
@@ -111,10 +113,6 @@ const PHASE_ESTIMATE_MS: Record<ValidationPhase, number> = {
   models: 15_000,
   usage: 20_000,
 };
-
-// Below this much time left the finish is close enough that a countdown only
-// flickers, so the estimate steps aside.
-const ETA_HIDE_BELOW_MS = 8_000;
 
 // A running bar never quite fills — the last stretch belongs to the result.
 const RUNNING_BAR_CAP = 0.92;
@@ -138,6 +136,14 @@ function phaseForCheck(key: string, thrown: ValidationPhase): ValidationPhase {
   // "setup" is the run itself giving up, wherever it stood at the time.
   if (key === "setup") return thrown;
   return "evaluator";
+}
+
+/** Collapse/expand a block with a grid-rows transition. */
+function cnGrid(open: boolean): string {
+  return cn(
+    "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
+    open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+  );
 }
 
 function duration(ms: number): string {
@@ -203,11 +209,14 @@ export function ValidationFrame({
   state,
   onBack,
   settled = false,
+  plan: planOverride,
 }: {
   state: ValidationProgress;
   onBack?: () => void;
   /** A finished check kept on the stage it ran from: it neither leaves by itself nor offers a way back. */
   settled?: boolean;
+  /** The steps this check walks, when it is not a preflight of `state.workflow`. */
+  plan?: readonly ValidationPhase[];
 }) {
   const [now, setNow] = useState(() => Date.now());
   const running = state.status === "running";
@@ -258,7 +267,7 @@ export function ValidationFrame({
     checksByRow.set(row, [...(checksByRow.get(row) ?? []), check]);
   }
   const brokenRow = failedPhase ? rowFor(failedPhase) : -1;
-  const plan = PLAN[state.workflow][state.scope];
+  const plan = planOverride ?? PLAN[state.workflow][state.scope];
   const reached = plan.indexOf(current);
   const upcoming = running && reached >= 0 ? plan.slice(reached + 1) : [];
 
@@ -290,14 +299,6 @@ export function ValidationFrame({
         ? "bg-foreground/70"
         : "bg-[var(--warning)]";
 
-  // The estimate only earns a spot on a real wait: while running, off the
-  // usage poll (which shows its own countdown), and with room left to name.
-  const showEta = running && activeKey !== "usage" && remainingMs >= ETA_HIDE_BELOW_MS;
-  const etaLabel =
-    remainingMs >= 60_000
-      ? msg("submit.validation.progress.eta", { minutes: Math.ceil(remainingMs / 60_000) })
-      : msg("submit.validation.progress.eta_soon");
-
   const title = running
     ? msg("submit.validation.progress.title")
     : success
@@ -316,7 +317,7 @@ export function ValidationFrame({
 
   return (
     <section
-      className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg backdrop-blur-xl"
+      className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl"
       aria-busy={running}
       data-tutorial={settled ? undefined : "wizard-validation"}
     >
@@ -345,25 +346,7 @@ export function ValidationFrame({
           )}
         </div>
         <div className="min-w-0 flex-1 space-y-1.5">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.75rem]">{title}</h2>
-            <AnimatePresence initial={false}>
-              {showEta && (
-                <Badge key="eta" asChild variant="secondary" size="sm">
-                  <motion.span
-                    dir="auto"
-                    initial={reduce ? false : { opacity: 0, y: -3 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
-                    transition={{ duration: 0.25, ease: "easeOut" }}
-                  >
-                    <Hourglass aria-hidden="true" />
-                    {etaLabel}
-                  </motion.span>
-                </Badge>
-              )}
-            </AnimatePresence>
-          </div>
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.75rem]">{title}</h2>
           <p
             className="max-w-prose text-[15px] leading-relaxed text-muted-foreground"
             aria-live="polite"
@@ -444,13 +427,19 @@ export function ValidationPlan({
   workflow,
   scope,
   stale,
+  plan,
+  description,
 }: {
   workflow: PreflightWorkflow;
   scope: PreflightScope;
   stale: boolean;
+  /** The steps this check walks, when it is not a preflight of `workflow`. */
+  plan?: readonly ValidationPhase[];
+  /** Replaces the idle line, e.g. when the check cannot run yet. */
+  description?: string;
 }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg backdrop-blur-xl">
+    <section className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl">
       <div className="flex items-start gap-4 px-6 pt-7 pb-6 sm:px-8">
         <div
           className="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted text-foreground"
@@ -465,12 +454,12 @@ export function ValidationPlan({
             )}
           </h2>
           <p className="max-w-prose text-[15px] leading-relaxed text-muted-foreground" dir="auto">
-            {msg(stale ? "submit.preflight.stale" : "submit.preflight.idle")}
+            {description ?? msg(stale ? "submit.preflight.stale" : "submit.preflight.idle")}
           </p>
         </div>
       </div>
       <ol className="divide-y divide-border/60 border-t border-border/60">
-        {PLAN[workflow][scope].map((key, index) => (
+        {(plan ?? PLAN[workflow][scope]).map((key, index) => (
           <UpcomingRow key={key} number={index + 1} phase={key} />
         ))}
       </ol>
@@ -624,7 +613,8 @@ function PhaseRow({
               <ul className="space-y-2">
                 {checks.map((check, index) => (
                   <motion.li
-                    key={check.key}
+                    // A contract check repeats a key once per sample.
+                    key={`${check.key}-${index}`}
                     className="flex items-start gap-2.5 text-sm"
                     initial={reduce ? false : { opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}

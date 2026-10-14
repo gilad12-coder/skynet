@@ -96,28 +96,6 @@ export const TOOL_META: Record<string, ToolMetaDef> = {
     severity: "warning",
     icon: Square,
   },
-  submit_job_run_post: {
-    title: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.6", {
-      p1: TERMS.optimization,
-    }),
-    description: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.7", {
-      p1: TERMS.optimizationTypeRun,
-    }),
-    confirmLabel: () => msg("auto.features.agent.panel.lib.tool.meta.literal.8"),
-    severity: "warning",
-    icon: Play,
-  },
-  submit_grid_search_grid_search_post: {
-    title: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.8", {
-      p1: TERMS.optimizationTypeGrid,
-    }),
-    description: () => msg("auto.features.agent.panel.lib.tool.meta.template.9"),
-    confirmLabel: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.10", {
-      p1: TERMS.optimizationTypeGrid,
-    }),
-    severity: "warning",
-    icon: Play,
-  },
   rename_job_optimizations: {
     title: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.11", {
       p1: TERMS.optimization,
@@ -317,7 +295,7 @@ export const TOOL_META: Record<string, ToolMetaDef> = {
     severity: "warning",
     icon: ArrowsClockwise,
   },
-  submit_blackbox_run_blackbox_run_post: {
+  submit_unified_run_optimize_post: {
     title: () => formatMsg("agent.tool.submit_blackbox.title", { p1: TERMS.optimization }),
     description: () => msg("agent.tool.submit_blackbox.description"),
     confirmLabel: () => msg("auto.features.agent.panel.lib.tool.meta.literal.8"),
@@ -330,13 +308,6 @@ export const TOOL_META: Record<string, ToolMetaDef> = {
     confirmLabel: () => msg("agent.tool.stage_sample.confirm"),
     severity: "info",
     icon: Database,
-  },
-  blackbox_scorer_dry_run_blackbox_scorer_dry_run_post: {
-    title: () => msg("agent.tool.scorer_dry_run.title"),
-    description: () => msg("agent.tool.scorer_dry_run.description"),
-    confirmLabel: () => msg("agent.tool.scorer_dry_run.confirm"),
-    severity: "info",
-    icon: Code,
   },
   request_user_dataset_from_library: {
     title: () => msg("auto.features.agent.panel.components.librarydatasetcard.title"),

@@ -1,6 +1,5 @@
 "use client";
 
-import { EmptyState } from "@/shared/ui/empty-state";
 import * as React from "react";
 import { toast } from "react-toastify";
 import {
@@ -51,6 +50,7 @@ import {
 } from "@/shared/lib/api";
 import { TOUCH_FIELD, TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { cn } from "@/shared/lib/utils";
+import { ConnectedAccounts } from "./ConnectedAccounts";
 
 /** Localize a security API failure: semantic backend codes when present. */
 function describeError(err: unknown): string {
@@ -310,25 +310,22 @@ export function SecurityTab() {
             : msg("settings.security.passkeys.unsupported")
         }
       >
-        <TooltipButton tooltip={msg("settings.security.passkeys.add")}>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            disabled={!passkeysSupported || busy}
-            onClick={() => {
-              setPasskeyName("");
-              setPasskeyOpen(true);
-            }}
-            aria-label={msg("settings.security.passkeys.add")}
-          >
-            <Plus className="size-3.5" aria-hidden="true" />
-          </Button>
-        </TooltipButton>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          disabled={!passkeysSupported || busy}
+          onClick={() => {
+            setPasskeyName("");
+            setPasskeyOpen(true);
+          }}
+          autoTooltip={false}
+          aria-label={msg("settings.security.passkeys.add")}
+        >
+          <Plus className="size-3.5" aria-hidden="true" />
+        </Button>
       </SettingsRow>
 
-      {status.passkeys.length === 0 ? (
-        <EmptyState variant="list" title={msg("settings.security.passkeys.empty")} />
-      ) : (
+      {status.passkeys.length > 0 && (
         <ul className="flex flex-col gap-2.5 ps-7">
           {status.passkeys.map((passkey) => (
             <li
@@ -433,6 +430,8 @@ export function SecurityTab() {
           ))}
         </ul>
       )}
+
+      <ConnectedAccounts identities={status.identities ?? []} onChange={refresh} />
 
       <Dialog open={totpSetup !== null} onOpenChange={(open) => !open && closeTotpDialog()}>
         <DialogContent

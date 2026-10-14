@@ -16,3 +16,24 @@ export function parseTurnStats(raw: unknown): TurnStats | null {
     ttftMs: num(r.ttft_ms),
   };
 }
+
+// A generation window shorter than this is dominated by timing jitter (e.g.
+// the whole reply arrives in one burst right after the first token), so the
+// rate falls back to the full request time instead of reporting an absurd
+// figure like thousands of tokens per second.
+const MIN_GENERATION_MS = 1000;
+
+/**
+ * Output tokens per second for a turn, or null when it can't be computed.
+ *
+ * Uses the generation window (total time minus time to first token) when it
+ * is long enough to be meaningful, otherwise the total time.
+ */
+export function outputTokensPerSecond(
+  stats: Pick<TurnStats, "outputTokens" | "durationMs" | "ttftMs"> | null | undefined,
+): number | null {
+  if (!stats?.outputTokens || !stats.durationMs || stats.durationMs <= 0) return null;
+  const generationMs = stats.durationMs - (stats.ttftMs ?? 0);
+  const windowMs = generationMs >= MIN_GENERATION_MS ? generationMs : stats.durationMs;
+  return stats.outputTokens / (windowMs / 1000);
+}

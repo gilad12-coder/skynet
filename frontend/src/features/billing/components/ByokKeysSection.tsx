@@ -157,7 +157,7 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
             {saved?.apiBase && (
               <code
                 dir="ltr"
-                className="truncate font-mono text-[0.6875rem] text-muted-foreground/70"
+                className="min-w-0 break-all font-mono text-[0.6875rem] text-muted-foreground/70"
               >
                 {saved.apiBase}
               </code>
@@ -231,34 +231,26 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
           )}
           {saved && !editing && (
             <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={startEditing}
-                    className="text-muted-foreground hover:text-foreground"
-                    aria-label={msg("settings.keys.replace")}
-                  >
-                    <PencilSimple className="size-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{msg("settings.keys.replace")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={handleRemove}
-                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    aria-label={msg("settings.keys.remove")}
-                  >
-                    <Trash className="size-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{msg("settings.keys.remove")}</TooltipContent>
-              </Tooltip>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={startEditing}
+                className="text-muted-foreground hover:text-foreground"
+                autoTooltip={false}
+                aria-label={msg("settings.keys.replace")}
+              >
+                <PencilSimple className="size-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={handleRemove}
+                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                autoTooltip={false}
+                aria-label={msg("settings.keys.remove")}
+              >
+                <Trash className="size-4" />
+              </Button>
             </>
           )}
         </div>
@@ -327,7 +319,7 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
 export function ByokKeysSection() {
   useByokErrorParam();
   return (
-    <div className="space-y-3">
+    <div data-setup="model-keys" className="space-y-3">
       <p className="text-xs text-muted-foreground">{msg("settings.keys.description")}</p>
 
       <div className="flex flex-col gap-2">

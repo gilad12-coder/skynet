@@ -1,11 +1,7 @@
 "use client";
 
 import * as React from "react";
-import {
-  getStorageUsage,
-  STORAGE_QUOTA_EVENT,
-  type StorageUsageResponse,
-} from "@/shared/lib/api";
+import { getStorageUsage, STORAGE_QUOTA_EVENT, type StorageUsageResponse } from "@/shared/lib/api";
 import { StorageQuotaModal } from "./StorageQuotaModal";
 
 const BYTES_PER_MB = 1024 * 1024;
@@ -15,7 +11,11 @@ function seedFromDetail(detail: unknown): StorageUsageResponse | null {
   if (!detail || typeof detail !== "object") return null;
   const { used_mb, quota_mb } = detail as { used_mb?: number; quota_mb?: number };
   if (typeof used_mb !== "number" || typeof quota_mb !== "number") return null;
-  return { used_bytes: used_mb * BYTES_PER_MB, quota_bytes: quota_mb * BYTES_PER_MB, breakdown: {} };
+  return {
+    used_bytes: used_mb * BYTES_PER_MB,
+    quota_bytes: quota_mb * BYTES_PER_MB,
+    breakdown: {},
+  };
 }
 
 /**
@@ -50,11 +50,6 @@ export function StorageQuotaModalHost() {
   }, []);
 
   return (
-    <StorageQuotaModal
-      open={open}
-      usage={usage}
-      loading={loading}
-      onClose={() => setOpen(false)}
-    />
+    <StorageQuotaModal open={open} usage={usage} loading={loading} onClose={() => setOpen(false)} />
   );
 }

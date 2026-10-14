@@ -186,6 +186,7 @@ describe("engineOfLatestLane", () => {
     assert.equal(engineOfLatestLane([]), null);
     assert.equal(climbEngineOf([], "meta_harness", null), "meta_harness");
     assert.equal(climbEngineOf([], null, "autosaddler"), "autosaddler");
+    assert.equal(climbEngineOf([], "shinka_evolve", "gepa"), "shinka_evolve");
     assert.equal(climbEngineOf([], "autoresearch", "gepa"), "autoresearch");
     assert.equal(climbEngineOf([], "gepa", "meta_harness"), null);
     assert.equal(climbEngineOf([], "best_of_n", null), null);

@@ -858,10 +858,121 @@ def test_best_value_default_prefers_score_per_dollar_among_default_thinkers() ->
     assert winner[0] == "acme/flash-3"
 
 
+def test_lab_tier_ranks_top_labs_first_and_chinese_labs_last() -> None:
+    """The tier reads the vendor out of catalog values, probe ids and direct-provider ids alike."""
+    assert mc.lab_tier("openrouter/anthropic/claude-haiku-5.5") == 0
+    assert mc.lab_tier("openai/gpt-6-luna") == 0
+    assert mc.lab_tier("openrouter/google/gemini-3.8-flash") == 0
+    assert mc.lab_tier("openrouter/x-ai/grok-4.7") == 1
+    assert mc.lab_tier("openrouter/meta/muse-spark-1.3") == 1
+    assert mc.lab_tier("openrouter/z-ai/glm-5.3-flash") == 2
+    assert mc.lab_tier("deepseek/deepseek-v4.1-flash") == 2
+    assert mc.lab_tier("openrouter/moonshotai/kimi-k3") == 2
+    assert mc.lab_tier("openrouter/qwen/qwen3.8-max-0902") == 2
+
+
+def test_best_value_prefers_a_top_lab_over_a_cheaper_chinese_lab() -> None:
+    """Lab tier ranks before score per dollar, so a far cheaper Chinese model loses to a top lab's."""
+    thinks = {"reasoning": {"default_enabled": True}}
+    listing = {
+        "z-ai/glm-flash": _listed(_NOW, score=42, pricing={"prompt": "0.00000003"}, **thinks),
+        "acme/mid-1": _listed(_NOW, score=46, pricing={"prompt": "0.0000002"}, **thinks),
+        "openai/luna": _listed(_NOW, score=38, pricing={"prompt": "0.0000001"}, **thinks),
+        "openai/sol": _listed(_NOW, score=52, pricing={"prompt": "0.000002"}, **thinks),
+    }
+    featured = mc._featured_probe_ids(listing)
+    assert {"z-ai/glm-flash", "acme/mid-1", "openai/luna"} <= featured
+    winner = mc._best_value_probe_id(listing, featured)
+    assert winner is not None
+    assert winner[0] == "openai/luna"
+
+    without_top = {k: v for k, v in listing.items() if not k.startswith("openai/")}
+    winner = mc._best_value_probe_id(without_top, mc._featured_probe_ids(without_top))
+    assert winner is not None
+    assert winner[0] == "acme/mid-1"
+
+
+def test_best_value_default_on_the_current_listing_is_claude_haiku() -> None:
+    """On today's featured models the default leaves GLM 5.3 Flash for Claude Haiku 5.5.
+
+    Haiku only thinks on request, but it can reason, and an unpicked effort
+    sends it low (see ``default_effort_for``), so it qualifies and wins the
+    top labs on score per dollar.
+    """
+    thinks = {"reasoning": {"default_enabled": True}}
+    opt_in = {"reasoning": {"supported_efforts": ["low", "medium", "high"]}}
+    listing = {
+        "anthropic/claude-haiku-5.5": _listed(_NOW, score=43.4, pricing={"prompt": "0.0000001"}, **opt_in),
+        "anthropic/claude-sonnet-5.5": _listed(_NOW, score=56.0, pricing={"prompt": "0.000002"}, **thinks),
+        "openai/gpt-6-luna": _listed(_NOW, score=38.1, pricing={"prompt": "0.0000001"}, **thinks),
+        "openai/gpt-6.1-sol": _listed(_NOW, score=51.8, pricing={"prompt": "0.000002"}, **thinks),
+        "google/gemini-3.8-flash": _listed(_NOW, score=40.9, pricing={"prompt": "0.00000075"}, **thinks),
+        "z-ai/glm-5.3-flash": _listed(_NOW, score=41.8, pricing={"prompt": "0.0000000261"}, **thinks),
+        "deepseek/deepseek-v4.1-flash": _listed(_NOW, score=39.5, pricing={"prompt": "0.00000015"}, **thinks),
+    }
+    winner = mc._best_value_probe_id(listing, set(listing))
+    assert winner is not None
+    assert winner[0] == "anthropic/claude-haiku-5.5"
+
+
 def test_best_value_default_is_none_without_default_thinkers() -> None:
-    """No featured model reasons by default, so no default is flagged."""
+    """No featured model can reason, so no default is flagged."""
     listing = {"acme/ultra-2": _listed(_NOW, score=60)}
     assert mc._best_value_probe_id(listing, mc._featured_probe_ids(listing)) is None
+
+
+def test_strongest_is_the_highest_index_default_thinker() -> None:
+    """Strongest skips featured models that do not think by default, however high they score."""
+    thinks = {"reasoning": {"default_enabled": True}}
+    listing = {
+        "acme/ultra-2": _listed(_NOW, score=60, pricing={"prompt": "0.000004"}, **thinks),
+        "acme/flash-3": _listed(_NOW, score=45, pricing={"prompt": "0.0000003"}, **thinks),
+        "beta/genius-1": _listed(_NOW, score=70),
+    }
+    featured = mc._featured_probe_ids(listing)
+    assert "beta/genius-1" in featured
+    assert mc._strongest_probe_id(listing, featured) == ("acme/ultra-2", 60)
+
+
+def test_strongest_new_release_inherits_its_predecessors_score() -> None:
+    """An unbenchmarked new release carries its line's score and takes strongest on release day."""
+    thinks = {"reasoning": {"default_enabled": True}}
+    listing = {
+        "acme/ultra-2": _listed(_NOW - 30 * _DAY, score=60, **thinks),
+        "acme/ultra-3": _listed(_NOW, **thinks),
+        "beta/mid-2": _listed(_NOW, score=55, **thinks),
+    }
+    featured = mc._featured_probe_ids(listing)
+    assert mc._intelligence_by_probe_id(listing)["acme/ultra-3"] == 60
+    assert mc._strongest_probe_id(listing, featured) == ("acme/ultra-3", 60)
+
+
+def test_strongest_is_none_without_default_thinkers() -> None:
+    """No featured model reasons by default, so nothing is strongest."""
+    listing = {"acme/ultra-2": _listed(_NOW, score=60)}
+    assert mc._strongest_probe_id(listing, mc._featured_probe_ids(listing)) is None
+
+
+def test_get_catalog_flags_one_strongest_and_carries_indexes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exactly one model is strongest, and an inherited score reaches the catalog entry."""
+    monkeypatch.setattr(litellm, "model_cost", {})
+    monkeypatch.setattr(litellm, "get_valid_models", list)
+    thinks = {"reasoning": {"default_enabled": True}}
+    probe = {
+        ("openrouter", None): {
+            "acme/ultra-2": _listed(_NOW - 30 * _DAY, score=60, **thinks),
+            "acme/ultra-3": _listed(_NOW, **thinks),
+            "beta/mid-2": _listed(_NOW, score=55, pricing={"prompt": "0.0000002"}, **thinks),
+        }
+    }
+    monkeypatch.setattr(mc, "_probe_all_providers", lambda: probe)
+
+    by_value = {m.value: m for m in get_catalog().models}
+    assert [v for v, m in by_value.items() if m.is_strongest] == ["openrouter/acme/ultra-3"]
+    assert by_value["openrouter/acme/ultra-3"].intelligence_index == 60
+    assert by_value["openrouter/beta/mid-2"].intelligence_index == 55
+    assert by_value["openrouter/beta/mid-2"].is_default is True
+    assert all(m.artificial_analysis_url is None for m in by_value.values())
 
 
 def test_practical_keeps_benchmarked_models_and_newest_of_each_line() -> None:

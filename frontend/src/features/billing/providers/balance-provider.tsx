@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSession } from "next-auth/react";
 import { toast } from "react-toastify";
 import { msg } from "@/shared/lib/messages";
 import { getWallet, type BillingWalletResponse } from "@/shared/lib/api";
@@ -99,8 +100,9 @@ export function usePricingTerms(): PricingTerms {
  * Provide the wallet to the client tree.
  *
  * Fetches the real wallet (paid balance, free grant, ledger)
- * from the billing backend on mount and after every `refresh()` — e.g. when a
- * Stripe Checkout returns. The provider starts with a truthful empty value and
+ * from the billing backend once the session is signed in and after every
+ * `refresh()` — e.g. when a Stripe Checkout returns. Signed-out pages make no
+ * wallet request, since the endpoint only answers a signed-in caller. The provider starts with a truthful empty value and
  * exposes an explicit unavailable state when the request fails; it never shows
  * invented balances or ledger rows.
  *
@@ -108,6 +110,7 @@ export function usePricingTerms(): PricingTerms {
  *   children: App subtree.
  */
 export function BalanceProvider({ children }: { children: React.ReactNode }) {
+  const { status: sessionStatus } = useSession();
   const [wallet, setWallet] = React.useState<WalletBalance>(EMPTY_WALLET);
   const [loading, setLoading] = React.useState(true);
   const [syncing, setSyncing] = React.useState(false);
@@ -129,8 +132,14 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   React.useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (sessionStatus === "authenticated") {
+      refresh();
+    } else if (sessionStatus === "unauthenticated") {
+      setWallet(EMPTY_WALLET);
+      setAvailable(false);
+      setLoading(false);
+    }
+  }, [sessionStatus, refresh]);
 
   // Post-checkout sync [FG-3]: Stripe webhooks aren't instant, so on a success
   // return we poll the wallet (without toggling `loading`, to avoid wiping the

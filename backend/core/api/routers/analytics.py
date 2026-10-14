@@ -47,6 +47,7 @@ from ...models import (
     OptimizerStatsResponse,
 )
 from ...models.common import OptimizationStatus
+from ...models.results import result_scores
 from ..auth import AuthenticatedUser, get_authenticated_user, is_admin
 from ..converters import parse_overview
 from ._helpers import build_summary, grant_roles_for
@@ -537,8 +538,7 @@ def create_analytics_router(*, job_store) -> APIRouter:
                 if isinstance(fail, int):
                     failed_pairs += fail
             else:
-                baseline = result_data.get("baseline_test_metric")
-                optimized = result_data.get("optimized_test_metric")
+                baseline, optimized = result_scores(result_data)
                 if isinstance(baseline, int | float) and isinstance(optimized, int | float):
                     improvements.append(optimized - baseline)
 
@@ -649,8 +649,7 @@ def create_analytics_router(*, job_store) -> APIRouter:
                             if isinstance(runtime, int | float):
                                 stats["runtimes"].append(runtime)
                     else:
-                        baseline = result_data.get("baseline_test_metric")
-                        optimized = result_data.get("optimized_test_metric")
+                        baseline, optimized = result_scores(result_data)
                         if isinstance(baseline, int | float) and isinstance(optimized, int | float):
                             stats["improvements"].append(optimized - baseline)
 
@@ -754,8 +753,7 @@ def create_analytics_router(*, job_store) -> APIRouter:
                             if isinstance(baseline, int | float) and isinstance(optimized, int | float):
                                 stats["improvements"].append(optimized - baseline)
                     else:
-                        baseline = result_data.get("baseline_test_metric")
-                        optimized = result_data.get("optimized_test_metric")
+                        baseline, optimized = result_scores(result_data)
                         if isinstance(baseline, int | float) and isinstance(optimized, int | float):
                             stats["improvements"].append(optimized - baseline)
 

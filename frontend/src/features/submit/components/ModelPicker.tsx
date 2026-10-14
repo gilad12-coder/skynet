@@ -2,7 +2,8 @@
 
 import { MicroPill } from "@/shared/ui/model-chip";
 import * as React from "react";
-import { Check, CaretDown, Eye, MagnifyingGlass, Warning } from "@/shared/ui/icons";
+import { motion, useReducedMotion } from "framer-motion";
+import { Check, CaretDown, Eye, Gauge, MagnifyingGlass, ShieldCheck, Warning } from "@/shared/ui/icons";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
@@ -13,8 +14,13 @@ import {
   cachedCatalog,
   getByokModelCatalog,
   cachedByokCatalog,
+  rankModels,
+  type ModelRanking,
+  type RankedGroup,
 } from "@/shared/lib/model-catalog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
+import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { modelProviderSlug } from "@/shared/lib/model-provider";
 import { litellmProviderForByok } from "@/features/billing";
@@ -65,6 +71,132 @@ const PURPOSE_LABEL_KEYS: Record<ModelPurpose, MessageKey> = {
   multilingual: "submit.modelpicker.purpose.multilingual",
   onprem: "submit.modelpicker.purpose.onprem",
 };
+
+const RANKINGS: ModelRanking[] = ["best_value", "smartest", "fastest"];
+
+const RANKING_LABEL_KEYS: Record<ModelRanking, MessageKey> = {
+  best_value: "submit.modelpicker.tab.best_value",
+  smartest: "submit.modelpicker.tab.smartest",
+  fastest: "submit.modelpicker.tab.fastest",
+};
+
+// The leading ranked group needs no header; the tab already names its order.
+const GROUP_LABEL_KEYS: Partial<Record<RankedGroup["kind"], MessageKey>> = {
+  dominated: "submit.modelpicker.group.dominated",
+  unrated: "submit.modelpicker.group.unrated",
+  no_speed: "submit.modelpicker.group.no_speed",
+};
+
+const number = (value: number, digits: number) =>
+  value.toLocaleString(undefined, { maximumFractionDigits: digits });
+
+/**
+ * An icon button beside a picker row that shows `children` in a tooltip on
+ * hover, keyboard focus or tap (Radix tooltips ignore taps, so a click toggles
+ * it too).
+ */
+function RowIconTip({
+  label,
+  icon,
+  children,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = React.useState(false);
+  // Touch has no hover, so a tap toggles; a mouse click must not close the
+  // tooltip its hover just opened.
+  const pointerType = React.useRef("");
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          onPointerDown={(e) => {
+            pointerType.current = e.pointerType;
+          }}
+          onClick={(e) => {
+            e.preventDefault();
+            if (pointerType.current === "touch") setOpen((v) => !v);
+            else setOpen(true);
+          }}
+          className="flex min-h-[44px] w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-0 lg:size-6"
+        >
+          {icon}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 leading-relaxed" dir={getActiveDir()}>
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+const seconds = (ms: number | null | undefined) =>
+  ms ? msg("submit.modelpicker.speed.seconds", { s: number(ms / 1000, 2) }) : msg("submit.modelpicker.speed.unknown");
+
+/** Time to first token and output speed for one row. */
+function SpeedTip({ model }: { model: CatalogModel }) {
+  const tps = model.throughput_tps
+    ? msg("submit.modelpicker.stat.speed", { tps: number(model.throughput_tps, 0) })
+    : msg("submit.modelpicker.speed.unknown");
+  return (
+    <RowIconTip label={msg("submit.modelpicker.speed_label")} icon={<Gauge className="size-3.5" aria-hidden="true" />}>
+      <span className="block font-medium">{msg("submit.modelpicker.speed_label")}</span>
+      <span className="block">{msg("submit.modelpicker.speed.ttft", { value: seconds(model.ttft_ms) })}</span>
+      <span className="block">{msg("submit.modelpicker.speed.throughput", { value: tps })}</span>
+      <span className="mt-1 block opacity-70">{msg("submit.modelpicker.speed.source")}</span>
+    </RowIconTip>
+  );
+}
+
+/** The model's intelligence score; hover explains it, click opens its Artificial Analysis page. */
+function ScoreTip({ model }: { model: CatalogModel }) {
+  const score = number(model.intelligence_index ?? 0, 1);
+  const chip =
+    "me-2 flex min-h-[44px] shrink-0 items-center rounded-md border border-border/50 px-2 text-[0.6875rem] font-medium tabular-nums text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground lg:min-h-0 lg:py-0.5";
+  const url = model.artificial_analysis_url;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {url ? (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={msg("submit.modelpicker.score_aria", { score })}
+            className={chip}
+          >
+            {score}
+          </a>
+        ) : (
+          <span tabIndex={0} aria-label={msg("submit.modelpicker.score_aria", { score })} className={chip}>
+            {score}
+          </span>
+        )}
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 leading-relaxed" dir={getActiveDir()}>
+        <span className="block font-medium">{msg("submit.modelpicker.score_tip_title", { score })}</span>
+        <span className="block">{msg("submit.modelpicker.score_tip")}</span>
+        {url && <span className="mt-1 block opacity-70">{msg("submit.modelpicker.score_tip_link")}</span>}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Input price for one row; the score, speed and retention live in hover tooltips. */
+function ModelStats({ model }: { model: CatalogModel }) {
+  if (!model.input_cost_per_token) return null;
+  return (
+    <span className="flex flex-wrap gap-x-2 text-[0.6875rem] text-muted-foreground">
+      <span title={msg("submit.modelpicker.stat.price_title")}>
+        {msg("submit.modelpicker.stat.price", { price: number(model.input_cost_per_token * 1e6, 2) })}
+      </span>
+    </span>
+  );
+}
 
 /** Searchable combobox for managed or account-scoped BYOK model IDs. */
 export function ModelPicker({
@@ -177,33 +309,26 @@ export function ModelPicker({
     const q = query.trim().toLowerCase();
     if (!q) return byPurpose;
     return byPurpose.filter(
-      (m) => m.value.toLowerCase().includes(q) || m.label.toLowerCase().includes(q),
+      (m) =>
+        m.value.toLowerCase().includes(q) ||
+        m.label.toLowerCase().includes(q) ||
+        !!m.display_name?.toLowerCase().includes(q),
     );
   }, [allModels, purpose, query]);
 
-  // Group by provider *and* data center: a provider that fans out across
-  // several endpoints (e.g. a public API plus an on-prem gateway) gets one
-  // section per data center so the user can see which endpoint a model
-  // resolves through. The NUL byte can't appear in a slug/DC label.
-  const grouped = React.useMemo(() => {
-    const groups = new Map<string, CatalogModel[]>();
-    for (const m of filtered) {
-      const key = `${m.provider}\u0000${m.data_center ?? ""}`;
-      const arr = groups.get(key) ?? [];
-      arr.push(m);
-      groups.set(key, arr);
-    }
-    return groups;
-  }, [filtered]);
+  const [ranking, setRanking] = React.useState<ModelRanking>("best_value");
+  const prefersReduced = useReducedMotion();
+  const groups = React.useMemo(() => rankModels(filtered, ranking), [filtered, ranking]);
 
+  // A provider can fan out across data centers (a public API plus an on-prem
+  // gateway), so each row names the endpoint it resolves through.
   const providerLabel = React.useCallback(
-    (groupKey: string): string => {
-      const [slug = "", dataCenter = ""] = groupKey.split("\u0000");
-      const base = activeCatalog?.providers.find((p) => p.slug === slug)?.label ?? slug;
-      if (!dataCenter) return base;
+    (m: CatalogModel): string => {
+      const base = activeCatalog?.providers.find((p) => p.slug === m.provider)?.label ?? m.provider;
+      if (!m.data_center) return base;
       return formatMsg("auto.features.submit.components.modelpicker.template.2", {
         p1: base,
-        p2: dataCenter,
+        p2: m.data_center,
       });
     },
     [activeCatalog],
@@ -247,7 +372,7 @@ export function ModelPicker({
             <span className="flex min-w-0 flex-1 items-center gap-2" dir="ltr">
               <ProviderLogo slug={modelProviderSlug(value)} size={16} />
               <span className="truncate font-mono text-[0.8125rem]">
-                {selectedModel?.label ?? value}
+                {selectedModel?.display_name || selectedModel?.label || value}
               </span>
             </span>
           ) : (
@@ -268,13 +393,13 @@ export function ModelPicker({
         align="start"
         sideOffset={4}
         role="listbox"
-        className="w-(--radix-popover-trigger-width) overflow-hidden p-0"
+        className="flex w-(--radix-popover-trigger-width) flex-col overflow-hidden p-0"
         onOpenAutoFocus={(e) => {
           e.preventDefault();
           inputRef.current?.focus();
         }}
       >
-        <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-3 py-2">
           <MagnifyingGlass className="size-4 shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
@@ -289,7 +414,7 @@ export function ModelPicker({
           <div
             role="group"
             aria-label={msg("submit.modelpicker.purpose.aria")}
-            className="flex flex-wrap gap-1 border-b border-border/50 px-3 py-2"
+            className="flex shrink-0 flex-wrap gap-1 border-b border-border/50 px-3 py-2"
           >
             {purposeOptions.map((p) => (
               <button
@@ -311,64 +436,131 @@ export function ModelPicker({
           </div>
         )}
 
-        <div className="max-h-60 overflow-y-auto py-1">
+        <div
+          role="tablist"
+          aria-label={msg("submit.modelpicker.tabs.aria")}
+          className="flex shrink-0 gap-1 border-b border-border/50 px-3 py-2"
+        >
+          {RANKINGS.map((r) => (
+            <button
+              key={r}
+              type="button"
+              role="tab"
+              aria-selected={ranking === r}
+              onClick={() => setRanking(r)}
+              className={cn(
+                "relative min-h-[44px] flex-1 cursor-pointer rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 lg:min-h-0",
+                ranking === r
+                  ? "text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {ranking === r && (
+                <motion.span
+                  layoutId="model-picker-ranking-active"
+                  className="absolute inset-0 rounded-md bg-primary-fill"
+                  transition={
+                    prefersReduced ? { duration: 0 } : { type: "spring", stiffness: 350, damping: 28 }
+                  }
+                />
+              )}
+              <span className="relative">{msg(RANKING_LABEL_KEYS[r])}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Keyed so a new tab or purpose starts at the top: each list is
+            sorted best-first, and a kept scroll offset hid the best models. */}
+        <motion.div
+          key={`${ranking}-${purpose}`}
+          initial={prefersReduced ? false : { opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.18, ease: "easeOut" }}
+          className="max-h-60 min-h-0 flex-1 overflow-y-auto py-1"
+        >
           {filtered.length === 0 && (
             <div className="px-3 py-8 text-center text-xs text-muted-foreground">
               {msg("auto.features.submit.components.modelpicker.3")}
             </div>
           )}
-          {Array.from(grouped.entries()).map(([provider, items]) => (
-            <div key={provider} className="py-1">
-              <div
-                className="px-3 py-1 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60 text-start"
-                dir="ltr"
-              >
-                {providerLabel(provider)}
-              </div>
-              {items.map((m) => (
-                <button
-                  key={`${m.provider}:${m.value}`}
-                  type="button"
-                  onClick={() => commit(m)}
+          {groups.map((group) => (
+            <div key={group.kind} className="py-1">
+              {GROUP_LABEL_KEYS[group.kind] && (
+                <div className="px-3 py-1 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60 text-start">
+                  {msg(GROUP_LABEL_KEYS[group.kind]!)}
+                </div>
+              )}
+              {group.models.map((m) => (
+                <div
+                  key={`${m.provider}:${m.data_center ?? ""}:${m.value}`}
                   className={cn(
-                    "flex min-h-[44px] w-full items-center gap-2 px-3 py-1.5 text-start text-sm transition-colors hover:bg-accent/70 lg:min-h-0",
+                    "flex items-center transition-colors hover:bg-accent/70",
                     isSelected(m) && "bg-accent/50",
-                    !m.available && "opacity-60",
                   )}
-                  role="option"
-                  aria-selected={isSelected(m)}
                 >
-                  <span className="flex min-w-0 flex-1 items-center gap-1.5" dir="ltr">
-                    <span className="truncate text-[0.8125rem]">{m.label}</span>
-                    {m.supports_vision && (
-                      <MicroPill tone="primary" title={msg("shared.model_chip.vision_badge")}>
-                        <Eye className="size-2.5" />
-                      </MicroPill>
+                  <button
+                    type="button"
+                    onClick={() => commit(m)}
+                    title={providerLabel(m)}
+                    className={cn(
+                      "flex min-h-[44px] min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-start text-sm lg:min-h-0",
+                      !m.available && "opacity-60",
                     )}
-                    {showRetention && m.zero_retention && (
-                      <MicroPill title={msg("submit.modelpicker.zdr_badge_title")}>
-                        {msg("submit.modelpicker.zdr_badge")}
-                      </MicroPill>
-                    )}
-                    {showRetention && dataPolicy === "zdr" && m.zero_retention === false && (
-                      <MicroPill
-                        className="bg-[var(--warning-dim)] text-[var(--warning)]"
-                        title={msg("submit.modelpicker.zdr_unavailable")}
-                        aria-label={msg("submit.modelpicker.zdr_unavailable")}
-                        role="img"
-                      >
-                        <Warning className="size-2.5" aria-hidden="true" />
-                      </MicroPill>
-                    )}
-                  </span>
-                  <Check
-                    className={cn("size-3.5 shrink-0", isSelected(m) ? "opacity-100" : "opacity-0")}
-                  />
-                </button>
+                    role="option"
+                    aria-selected={isSelected(m)}
+                  >
+                    <ProviderLogo slug={modelProviderSlug(m.value)} size={14} />
+                    <span className="flex min-w-0 flex-1 flex-col" dir="ltr">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-[0.8125rem]">
+                          {m.display_name || m.label}
+                        </span>
+                        {m.supports_vision && (
+                          <MicroPill tone="primary" title={msg("shared.model_chip.vision_badge")}>
+                            <Eye className="size-2.5" />
+                          </MicroPill>
+                        )}
+                        {showRetention && dataPolicy === "zdr" && m.zero_retention === false && (
+                          <MicroPill
+                            className="bg-[var(--warning-dim)] text-[var(--warning)]"
+                            title={msg("submit.modelpicker.zdr_unavailable")}
+                            aria-label={msg("submit.modelpicker.zdr_unavailable")}
+                            role="img"
+                          >
+                            <Warning className="size-2.5" aria-hidden="true" />
+                          </MicroPill>
+                        )}
+                      </span>
+                      {m.data_center && (
+                        <span className="truncate text-[0.6875rem] text-muted-foreground">
+                          {providerLabel(m)}
+                        </span>
+                      )}
+                      <ModelStats model={m} />
+                    </span>
+                    <Check
+                      className={cn(
+                        "size-3.5 shrink-0",
+                        isSelected(m) ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                  </button>
+                  {m.zero_retention && (
+                    <RowIconTip
+                      label={msg("settings.model_privacy.zdr.label")}
+                      icon={<ShieldCheck className="size-3.5" aria-hidden="true" />}
+                    >
+                      <span className="block font-medium">{msg("submit.modelpicker.zdr_tip_title")}</span>
+                      <span className="block">{msg("submit.modelpicker.zdr_tip")}</span>
+                    </RowIconTip>
+                  )}
+                  {!!(m.throughput_tps || m.ttft_ms || m.latency_ms) && <SpeedTip model={m} />}
+                  {m.intelligence_index != null && <ScoreTip model={m} />}
+                </div>
               ))}
             </div>
           ))}
-        </div>
+        </motion.div>
       </PopoverContent>
     </Popover>
   );

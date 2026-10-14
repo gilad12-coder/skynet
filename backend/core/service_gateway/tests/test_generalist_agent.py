@@ -18,16 +18,37 @@ from core.service_gateway.agents import generalist as generalist_module
 from core.service_gateway.agents.code import _agent_error_payload, _SubmitArgExtractor
 from core.service_gateway.agents.generalist import (
     GENERALIST_SYSTEM_PROMPT,
+    SCREEN_FOCUS,
     ApprovalRegistry,
     WizardState,
     _needs_approval,
     _TurnAuthoringFlag,
     _wrap_tool_with_approval,
     approval_key,
+    scope_wizard_tool,
+    screen_nav_tools,
+    screen_signature,
+    screen_snapshot,
+    screen_tools,
     tools_for,
     validate_wizard_patch_order,
+    validate_wizard_screen,
 )
 from core.storage.models import Base
+
+_SUBMIT = "submit_unified_run_optimize_post"
+_READY: dict[str, Any] = {
+    "job_name": "My run",
+    "task_objective": "Answer support questions",
+    "artifact_kind": "prompt",
+    "starting_version": "You are a helpful agent.",
+    "data_mode": "pairs",
+    "dataset_ready": True,
+    "staged_dataset_id": "ds_1",
+    "run_code": "def run(artifact, input):\n    return input['q']\n",
+    "metric_code": "def score(input, output, expected=None):\n    return 1.0, {'feedback': ''}\n",
+    "reflection_model_config": {"name": "openai/gpt-4o-mini"},
+}
 
 
 def test_empty_state_hides_dataset_and_submit_tools() -> None:
@@ -35,9 +56,20 @@ def test_empty_state_hides_dataset_and_submit_tools() -> None:
     allowed = tools_for(WizardState())
     assert "request_code_authoring" not in allowed
     assert "validate_code_validate_code_post" not in allowed
-    assert "submit_job_run_post" not in allowed
-    assert "submit_grid_search_grid_search_post" not in allowed
+    assert _SUBMIT not in allowed
     assert "list_models_for_agent" in allowed
+
+
+def test_removed_submit_tools_are_never_exposed() -> None:
+    """The deleted /run, /grid-search and /blackbox/run tools never reappear."""
+    allowed = tools_for(cast(WizardState, _READY))
+    for removed in (
+        "submit_job_run_post",
+        "submit_grid_search_grid_search_post",
+        "submit_blackbox_run_blackbox_run_post",
+        "blackbox_scorer_dry_run_blackbox_scorer_dry_run_post",
+    ):
+        assert removed not in allowed
 
 
 def test_comparison_tool_is_not_exposed() -> None:
@@ -45,263 +77,52 @@ def test_comparison_tool_is_not_exposed() -> None:
     assert "compare_jobs_optimizations_compare_post" not in tools_for(WizardState())
 
 
-def test_dataset_ready_unlocks_diagnostics_but_not_code_without_name() -> None:
-    """``dataset_ready`` exposes the diagnostic tools, but code authoring stays
-    hidden until the run is named — mirroring the wizard's Basics → Code order."""
-    allowed = tools_for(WizardState(dataset_ready=True, columns_configured=True))
+def test_dataset_ready_unlocks_diagnostics_but_not_code_authoring() -> None:
+    """A staged dataset exposes the diagnostics; authoring waits for a named run with a task."""
+    allowed = tools_for(WizardState(dataset_ready=True))
     assert "validate_code_validate_code_post" in allowed
     assert "profile_datasets_profile_post" in allowed
     assert "request_code_authoring" not in allowed
-    assert "submit_job_run_post" not in allowed
+    assert _SUBMIT not in allowed
 
 
-def test_named_dataset_ready_unlocks_code_authoring() -> None:
-    """Naming the run (with the dataset ready) opens the Signature/Metric step."""
-    allowed = tools_for(WizardState(job_name="Sentiment run", dataset_ready=True, columns_configured=True))
+def test_named_run_with_task_unlocks_code_authoring() -> None:
+    """Name plus objective, artifact kind and starting version opens code authoring."""
+    state = {k: _READY[k] for k in ("job_name", "task_objective", "artifact_kind", "starting_version")}
+    allowed = tools_for(cast(WizardState, state))
     assert "request_code_authoring" in allowed
-    assert "submit_job_run_post" not in allowed
+    assert _SUBMIT not in allowed
 
 
 def test_full_readiness_unlocks_submit() -> None:
-    """Full readiness exposes the submit tool."""
-    allowed = tools_for(
-        WizardState(
-            job_name="My run",
-            dataset_ready=True,
-            columns_configured=True,
-            signature_code="class S(dspy.Signature): ...",
-            metric_code="def metric(): return 1.0",
-            model_configured=True,
-            # GEPA (the default optimizer) reflects on a second model, so the
-            # gate requires a reflection model alongside the generation one.
-            reflection_model_config={"name": "openai/gpt-4o-mini"},
-        )
-    )
-    assert "submit_job_run_post" in allowed
-    # Grid search is intentionally NOT exposed to the agent; users reach
-    # it through the wizard UI directly. See generalist._READY_TO_SUBMIT_TOOLS.
-    assert "submit_grid_search_grid_search_post" not in allowed
+    """Every step settled exposes the one submit tool."""
+    assert _SUBMIT in tools_for(cast(WizardState, _READY))
 
 
-def test_workflow_ready_unlocks_submit() -> None:
-    """A workflow run readies on an authored graph + metric, not a Signature."""
-    base = {
-        "job_name": "Graph run",
-        "dataset_ready": True,
-        "columns_configured": True,
-        "module_name": "workflow",
-        "metric_code": "def metric(gold, pred, trace, pred_name, pred_trace): return 1.0",
-        "model_configured": True,
-        "reflection_model_config": {"name": "openai/gpt-4o-mini"},
-    }
-    # No graph (or an empty one) is not an authored program — submit stays locked
-    # even though there is no Signature to satisfy the single-module gate.
-    assert "submit_job_run_post" not in tools_for(cast(WizardState, base))
-    assert "submit_job_run_post" not in tools_for(cast(WizardState, {**base, "workflow": {"nodes": [], "edges": []}}))
-    ready = {**base, "workflow": {"nodes": [{"id": "input"}, {"id": "out"}], "edges": []}}
-    assert "submit_job_run_post" in tools_for(cast(WizardState, ready))
-
-
-def test_grid_job_type_swaps_submit_tool() -> None:
-    """A grid run exposes the grid submit tool and hides the single-run one."""
-    base = {
-        "job_name": "Sweep",
-        "dataset_ready": True,
-        "columns_configured": True,
-        "signature_code": "class S(dspy.Signature): ...",
-        "metric_code": "def metric(gold, pred, trace, pred_name, pred_trace): return 1.0",
-        "job_type": "grid_search",
-        "use_all_generation_models": True,
-        "use_all_reflection_models": True,
-    }
-    allowed = tools_for(cast(WizardState, base))
-    # Exactly one submit surface, matching job_type — never both (the state
-    # that made the model oscillate between two submit tools).
-    assert "submit_grid_search_grid_search_post" in allowed
-    assert "submit_job_run_post" not in allowed
-
-
-def test_grid_requires_generation_and_reflection_model_lists() -> None:
-    """Grid submit stays locked until both model lists (or use_all flags) are set."""
-    base = {
-        "job_name": "Sweep",
-        "dataset_ready": True,
-        "columns_configured": True,
-        "signature_code": "class S(dspy.Signature): ...",
-        "metric_code": "def metric(gold, pred, trace, pred_name, pred_trace): return 1.0",
-        "job_type": "grid_search",
-    }
-    assert "submit_grid_search_grid_search_post" not in tools_for(cast(WizardState, base))
-    # A generation list alone is not enough for GEPA (it reflects on a second).
-    gen_only = {**base, "generation_models": [{"name": "openai/gpt-4o-mini"}]}
-    assert "submit_grid_search_grid_search_post" not in tools_for(cast(WizardState, gen_only))
-    both = {
-        **base,
-        "generation_models": [{"name": "openai/gpt-4o-mini"}],
-        "reflection_models": [{"name": "openai/gpt-4o"}],
-    }
-    assert "submit_grid_search_grid_search_post" in tools_for(cast(WizardState, both))
-
-
-def test_gepa_without_reflection_model_keeps_submit_locked() -> None:
-    """GEPA with a generation model but no reflection model must NOT unlock submit.
-
-    Mirrors the manual wizard's ``reflection_model_required`` gate: submitting
-    GEPA without a ``reflection_model_config`` is a known 422, so the agent's
-    submit tool stays hidden until the reflection model is set.
-    """
-    base = WizardState(
-        job_name="My run",
-        dataset_ready=True,
-        columns_configured=True,
-        signature_code=(
-            "class Sentiment(dspy.Signature):\n"
-            "    review: str = dspy.InputField()\n"
-            "    label: str = dspy.OutputField()\n"
-        ),
-        metric_code="def metric(gold, pred, trace=None): return 1.0",
-        model_config={"name": "openai/gpt-4o-mini"},
-    )
-    assert "submit_job_run_post" not in tools_for(base)
-    with_reflection = {**base, "reflection_model_config": {"name": "openai/gpt-4o-mini"}}
-    assert "submit_job_run_post" in tools_for(cast(WizardState, with_reflection))
-
-
-# Un-edited templates the frontend seeds into the wizard from the first turn
-# (frontend/src/features/submit/lib/build-signature.ts and build-metric.ts,
-# fallback branch with no columns mapped). Submitting these triggers the
-# server's "Missing inputs: ['input_field']" 400, so the gate must reject them.
-_PLACEHOLDER_SIGNATURE = (
-    "class MySignature(dspy.Signature):\n"
-    '    """Describe the task here."""\n\n'
-    "    # inputs\n"
-    '    input_field: str = dspy.InputField(desc="")\n\n'
-    "    # outputs\n"
-    '    output_field: str = dspy.OutputField(desc="")\n'
-)
-_PLACEHOLDER_METRIC = (
-    "def metric(gold: dspy.Example, pred: dspy.Prediction, trace: bool = None,"
-    " pred_name: str = None, pred_trace: list = None) -> dspy.Prediction:\n"
-    '    fields = ["output_field"]\n'
-    "    total = len(fields)\n"
-    "    correct = 0\n"
-    "    return dspy.Prediction(score=correct / total if total else 0.0)\n"
-)
-
-
-def test_placeholder_code_keeps_submit_locked() -> None:
-    """The seeded placeholder Signature/Metric must NOT unlock submit.
-
-    Everything else is ready (name + dataset + model), but the wizard still
-    holds the frontend's un-edited templates rather than authored code.
-    """
-    allowed = tools_for(
-        WizardState(
-            job_name="My run",
-            dataset_ready=True,
-            columns_configured=True,
-            signature_code=_PLACEHOLDER_SIGNATURE,
-            metric_code=_PLACEHOLDER_METRIC,
-            model_configured=True,
-        )
-    )
-    assert "submit_job_run_post" not in allowed
-    assert "request_code_authoring" in allowed
-
-
-def test_authored_code_unlocks_submit() -> None:
-    """Replacing the placeholders with real authored code unlocks submit."""
-    allowed = tools_for(
-        WizardState(
-            job_name="My run",
-            dataset_ready=True,
-            columns_configured=True,
-            signature_code=(
-                "class Sentiment(dspy.Signature):\n"
-                '    """Classify the sentiment of a review."""\n\n'
-                '    review: str = dspy.InputField(desc="the review text")\n'
-                '    label: str = dspy.OutputField(desc="positive or negative")\n'
-            ),
-            metric_code=(
-                "def metric(gold, pred, trace=None):\n"
-                "    return float(gold.label.strip().lower() == str(pred.label).strip().lower())\n"
-            ),
-            model_configured=True,
-            reflection_model_config={"name": "openai/gpt-4o-mini"},
-        )
-    )
-    assert "submit_job_run_post" in allowed
-
-
-def test_column_mapped_template_unlocks_submit() -> None:
-    """A column-mapped template with the default docstring is NOT a placeholder.
-
-    Once the user maps columns, build-signature.ts emits real field names
-    (e.g. question/answer) but keeps the default ``"Describe the task here."``
-    docstring. That is a valid, submittable Signature — its fields match the
-    column mapping — so the gate must not key on the docstring. Regression for
-    the agent looping back into ``request_code_authoring`` instead of advancing
-    to the Model step after the code card produced a column-mapped signature.
-    """
-    allowed = tools_for(
-        WizardState(
-            job_name="My run",
-            dataset_ready=True,
-            columns_configured=True,
-            signature_code=(
-                "class MySignature(dspy.Signature):\n"
-                '    """Describe the task here."""\n\n'
-                "    # inputs\n"
-                '    question: str = dspy.InputField(desc="")\n\n'
-                "    # outputs\n"
-                '    answer: str = dspy.OutputField(desc="")\n'
-            ),
-            metric_code=(
-                "def metric(gold, pred, trace=None):\n"
-                '    fields = ["answer"]\n'
-                '    return float(getattr(pred, "answer", None) == gold.answer)\n'
-            ),
-            model_configured=True,
-            reflection_model_config={"name": "openai/gpt-4o-mini"},
-        )
-    )
-    assert "submit_job_run_post" in allowed
+def test_single_mode_needs_no_staged_dataset() -> None:
+    """A single-input run carries its case inline, so no dataset is needed to submit."""
+    state = {**_READY, "data_mode": "single"}
+    state.pop("dataset_ready")
+    state.pop("staged_dataset_id")
+    assert _SUBMIT in tools_for(cast(WizardState, state))
 
 
 def test_missing_any_submit_precondition_keeps_submit_hidden() -> None:
-    """Submit tools stay hidden when any single readiness criterion is missing.
-
-    Dataset readiness is satisfied by ``columns_configured`` OR ``dataset_ready``
-    (the wizard flips ``columns_configured`` once roles are assigned; a freshly
-    sample-staged dataset only sets ``dataset_ready``). Flipping both together
-    is what hides the submit tools, so this test groups them into one
-    "dataset_ready" criterion.
-    """
-    base: dict[str, object] = {
-        "job_name": "My run",
-        "dataset_ready": True,
-        "columns_configured": True,
-        "signature_code": "x",
-        "metric_code": "y",
-        "model_configured": True,
-        "reflection_model_config": {"name": "openai/gpt-4o-mini"},
-    }
-    # Sanity-check the base is genuinely submittable, so each removal below is
-    # the sole reason submit disappears (not a second missing precondition).
-    assert "submit_job_run_post" in tools_for(cast(WizardState, base))
-    criteria: dict[str, dict[str, object]] = {
+    """Dropping any single precondition keeps submit hidden."""
+    criteria: dict[str, dict[str, Any]] = {
         "job_name": {"job_name": ""},
-        "dataset_ready": {"dataset_ready": False, "columns_configured": False},
-        "signature_code": {"signature_code": ""},
+        "task_objective": {"task_objective": ""},
+        "artifact_kind": {"artifact_kind": None},
+        "starting_version": {"starting_version": ""},
+        "data_mode": {"data_mode": None},
+        "dataset": {"dataset_ready": False, "staged_dataset_id": None},
+        "run_code": {"run_code": ""},
         "metric_code": {"metric_code": ""},
-        "model_configured": {"model_configured": False},
-        "reflection_model_config": {"reflection_model_config": {}},
+        "reflection_model": {"reflection_model_config": {}},
     }
     for label, overrides in criteria.items():
-        state = {**base, **overrides}
-        assert "submit_job_run_post" not in tools_for(cast(WizardState, state)), (
-            f"submit_job leaked with {label} missing"
-        )
+        state = {**_READY, **overrides}
+        assert _SUBMIT not in tools_for(cast(WizardState, state)), f"submit leaked with {label} missing"
 
 
 def test_order_allows_name_first() -> None:
@@ -309,71 +130,410 @@ def test_order_allows_name_first() -> None:
     assert validate_wizard_patch_order({"job_name": "My run"}, WizardState()) is None
 
 
-def test_order_rejects_dataset_roles_before_name() -> None:
-    """Column roles (Data) require the run to be named first (Basics)."""
-    err = validate_wizard_patch_order({"column_roles": {"q": "input", "a": "output"}}, WizardState())
+def test_order_rejects_task_before_name() -> None:
+    """Task fields require the run to be named first (Basics)."""
+    err = validate_wizard_patch_order({"task_objective": "x"}, WizardState())
     assert err is not None
     assert "Basics" in err
 
 
-def test_order_allows_name_and_dataset_in_one_patch() -> None:
-    """A single patch may set the name AND column roles — each satisfies its own step."""
-    patch = {"job_name": "My run", "column_roles": {"q": "input", "a": "output"}}
+def test_order_allows_name_and_task_in_one_patch() -> None:
+    """A single patch may set the name AND the task — each satisfies its own step."""
+    patch = {"job_name": "My run", "task_objective": "x", "artifact_kind": "prompt", "starting_version": "s"}
     assert validate_wizard_patch_order(patch, WizardState()) is None
 
 
-def test_order_rejects_params_before_dataset() -> None:
-    """Params can't be set before the dataset is ready, even with a name set."""
-    err = validate_wizard_patch_order({"optimizer_name": "gepa"}, WizardState(job_name="My run"))
+def test_order_rejects_inputs_before_task() -> None:
+    """The data mode can't be set before the task is settled, even with a name set."""
+    err = validate_wizard_patch_order({"data_mode": "pairs"}, WizardState(job_name="My run"))
     assert err is not None
-    assert "Data" in err
+    assert "Task" in err
 
 
-def test_order_rejects_model_before_code() -> None:
-    """The Model step is gated on the Code step being authored first."""
-    state = WizardState(job_name="My run", dataset_ready=True, columns_configured=True)
-    err = validate_wizard_patch_order({"model_config": {"name": "openai/gpt-4o"}}, state)
+def test_order_rejects_optimizer_before_inputs() -> None:
+    """The Optimizer step is gated on the Inputs step."""
+    state = {k: _READY[k] for k in ("job_name", "task_objective", "artifact_kind", "starting_version")}
+    err = validate_wizard_patch_order({"optimizer_choice": "gepa"}, cast(WizardState, state))
     assert err is not None
-    assert "Code" in err
+    assert "Inputs" in err
 
 
-def test_order_allows_model_after_code() -> None:
-    """With name + dataset + code present, setting the model is in order."""
-    state = WizardState(
-        job_name="My run",
-        dataset_ready=True,
-        columns_configured=True,
-        signature_code="class S(dspy.Signature): ...",
-        metric_code="def m(): return 1.0",
+def test_order_allows_optimizer_after_inputs() -> None:
+    """With name, task and inputs settled, the optimizer and models are in order."""
+    patch = {"optimizer_choice": "gepa", "reflection_model_config": {"name": "openai/gpt-4o"}}
+    assert validate_wizard_patch_order(patch, cast(WizardState, _READY)) is None
+
+
+def test_screen_allows_any_field_when_wizard_not_on_view() -> None:
+    """Without ``wizard_screen`` the wizard is off screen and nothing is scoped."""
+    assert validate_wizard_screen("update_wizard_state", {"optimizer_choice": "auto"}, WizardState()) is None
+
+
+def test_screen_allows_visible_and_screenless_fields() -> None:
+    """The brief screen takes its own fields plus the run's name and description."""
+    patch = {"job_name": "My run", "job_description": "d", "task_objective": "x", "task_background": "b"}
+    assert validate_wizard_screen("update_wizard_state", patch, WizardState(wizard_screen="brief")) is None
+
+
+def test_screen_rejects_fields_off_the_visible_screen() -> None:
+    """A field from another screen is refused and named in the error."""
+    patch = {"task_objective": "x", "artifact_kind": "prompt", "data_mode": "pairs"}
+    err = validate_wizard_screen("update_wizard_state", patch, WizardState(wizard_screen="brief"))
+    assert err is not None
+    assert "artifact_kind" in err
+    assert "data_mode" in err
+    assert "task_objective" in err.split("may set only", 1)[1]
+
+
+def test_screen_plan_takes_engine_models_and_budget() -> None:
+    """Standard's one plan screen holds the engine, the models and the budget."""
+    patch = {
+        "optimizer_choice": "auto",
+        "model_config": {"name": "openai/gpt-4o"},
+        "reflection_model_config": {"name": "openai/gpt-4o"},
+        "spending_limit_usd": 5.0,
+    }
+    assert validate_wizard_screen("update_wizard_state", patch, WizardState(wizard_screen="plan")) is None
+    err = validate_wizard_screen("update_wizard_state", patch, WizardState(wizard_screen="optimizer"))
+    assert err is not None
+    assert "spending_limit_usd" in err
+
+
+def test_screen_allows_only_screenless_fields_on_a_screen_without_fields() -> None:
+    """The check and overview screens hold no field, so only the name may change."""
+    state = WizardState(wizard_screen="check")
+    assert validate_wizard_screen("update_wizard_state", {"job_name": "n"}, state) is None
+    assert validate_wizard_screen("update_wizard_state", {"seed": 1}, state) is not None
+
+
+def test_screen_leaves_code_fields_to_the_tool_refusal() -> None:
+    """Run and metric code are not screen-scoped; ``update_wizard_state`` refuses them itself."""
+    state = WizardState(wizard_screen="metric")
+    assert validate_wizard_screen("update_wizard_state", {"run_code": "x", "metric_code": "y"}, state) is None
+
+
+def test_screen_gates_code_authoring_to_the_metric_screen() -> None:
+    """Run and metric code are written only while the metric screen is on view."""
+    assert validate_wizard_screen("request_code_authoring", {"goal": ""}, WizardState(wizard_screen="metric")) is None
+    err = validate_wizard_screen("request_code_authoring", {"goal": ""}, WizardState(wizard_screen="budget"))
+    assert err is not None
+    assert "metric" in err
+
+
+@pytest.mark.asyncio
+async def test_wrap_refuses_off_screen_patch_without_calling_tool() -> None:
+    """The wrapper turns an off-screen patch into an error observation."""
+    events: list[dict] = []
+    tool = _wrap_tool_with_approval(
+        _make_fake_tool("update_wizard_state", return_value="should not run"),
+        trust_mode="yolo",
+        registry=ApprovalRegistry(),
+        emit=events.append,
+        outer_loop=asyncio.get_running_loop(),
+        wizard_state=cast(WizardState, {**_READY, "wizard_screen": "brief"}),
     )
-    assert validate_wizard_patch_order({"model_config": {"name": "openai/gpt-4o"}}, state) is None
+    result = await tool.func._async_body(optimizer_choice="auto")
+    assert result.startswith("Not on screen")
+    end = next(e for e in events if e["event"] == "tool_end")
+    assert end["data"]["status"] == "error"
 
 
-def test_order_allows_model_after_column_mapped_template() -> None:
-    """Setting the model is in order once a column-mapped template is present.
+@pytest.mark.asyncio
+async def test_wrap_refuses_code_authoring_off_the_metric_screen() -> None:
+    """``request_code_authoring`` never runs while another screen is on view."""
+    events: list[dict] = []
+    tool = _wrap_tool_with_approval(
+        _make_fake_tool("request_code_authoring", return_value="should not run"),
+        trust_mode="yolo",
+        registry=ApprovalRegistry(),
+        emit=events.append,
+        outer_loop=asyncio.get_running_loop(),
+        wizard_state=cast(WizardState, {**_READY, "wizard_screen": "source"}),
+    )
+    result = await tool.func._async_body(goal="")
+    assert result.startswith("Not on screen")
 
-    Regression for the agent rejecting ``model_config`` with "Do these first:
-    Code" — and looping back into authoring — when the Code step already held a
-    valid column-mapped signature that merely kept the default docstring.
-    """
-    state = WizardState(
-        job_name="My run",
-        dataset_ready=True,
-        columns_configured=True,
-        signature_code=(
-            "class MySignature(dspy.Signature):\n"
-            '    """Describe the task here."""\n\n'
-            '    question: str = dspy.InputField(desc="")\n'
-            '    answer: str = dspy.OutputField(desc="")\n'
+
+def test_system_prompt_names_the_screen_rule() -> None:
+    """The instructions tell the agent to edit only the screen on view."""
+    prompt = GENERALIST_SYSTEM_PROMPT or ""
+    assert "``wizard_state.wizard_screen`` names the wizard screen" in prompt
+
+
+_FULL_SNAPSHOT: dict[str, Any] = {
+    "job_name": "Tickets",
+    "job_description": "d",
+    "is_private": False,
+    "task_objective": "Classify tickets",
+    "task_background": "b",
+    "artifact_kind": "prompt",
+    "starting_version": "v1",
+    "data_mode": "pairs",
+    "dataset_ready": True,
+    "input_fields": ["text"],
+    "optimizer_choice": "auto",
+    "model_config": {"name": "openai/gpt-4o"},
+    "model_configured": True,
+    "max_cost_cents": 500,
+    "run_code": "def run(): ...",
+    "metric_code": "def metric(): ...",
+}
+
+
+@pytest.mark.parametrize(
+    ("screen", "expected"),
+    [
+        ("brief", {"task_objective", "task_background"}),
+        ("artifact", {"artifact_kind", "starting_version", "task_objective"}),
+        ("source", {"data_mode", "dataset_ready", "input_fields", "task_objective", "artifact_kind"}),
+        (
+            "plan",
+            {
+                "optimizer_choice",
+                "model_config",
+                "model_configured",
+                "max_cost_cents",
+                "task_objective",
+                "artifact_kind",
+                "data_mode",
+            },
         ),
-        metric_code='def metric(gold, pred, trace=None):\n    fields = ["answer"]\n    return 1.0\n',
+        ("optimizer", {"optimizer_choice", "artifact_kind", "data_mode"}),
+        ("models", {"model_config", "model_configured", "optimizer_choice"}),
+        ("budget", {"max_cost_cents", "optimizer_choice", "model_config"}),
+        ("metric", {"run_code", "metric_code", "task_objective", "artifact_kind", "starting_version", "input_fields"}),
+        ("check", {"run_code", "metric_code", "input_fields"}),
+    ],
+)
+def test_screen_snapshot_keeps_screen_fields_and_read_only_extras(screen: str, expected: set[str]) -> None:
+    """A screen sees its own fields plus the values it depends on, nothing else."""
+    trimmed = screen_snapshot(cast(WizardState, {**_FULL_SNAPSHOT, "wizard_screen": screen}))
+    assert set(trimmed) == expected | {"wizard_screen"}
+    assert trimmed["wizard_screen"] == screen
+
+
+def test_models_screen_sees_the_optimizer_read_only() -> None:
+    """The models screen shows the optimizer but cannot write it."""
+    state = cast(WizardState, {**_FULL_SNAPSHOT, "wizard_screen": "models"})
+    assert screen_snapshot(state)["optimizer_choice"] == "auto"
+    assert validate_wizard_screen("update_wizard_state", {"optimizer_choice": "gepa"}, state) is not None
+
+
+def test_screen_snapshot_is_whole_without_a_screen() -> None:
+    """Outside the wizard the agent still sees every value."""
+    assert screen_snapshot(cast(WizardState, _FULL_SNAPSHOT)) == _FULL_SNAPSHOT
+
+
+def test_screen_snapshot_shows_notes_only_from_earlier_screens() -> None:
+    """A note reaches the screens after the one it was left on, not that one or earlier."""
+    notes = [{"screen": "brief", "note": "keep it cheap"}, {"screen": "budget", "note": "cap at $5"}]
+    state = {**_FULL_SNAPSHOT, "screen_notes": notes}
+    assert (
+        screen_snapshot(cast(WizardState, {**state, "wizard_screen": "brief"})).get("notes_from_earlier_screens")
+        is None
     )
-    assert validate_wizard_patch_order({"model_config": {"name": "openai/gpt-5.4-nano"}}, state) is None
+    budget = screen_snapshot(cast(WizardState, {**state, "wizard_screen": "budget"}))
+    assert budget["notes_from_earlier_screens"] == ["brief: keep it cheap"]
+    overview = screen_snapshot(cast(WizardState, {**state, "wizard_screen": "overview"}))
+    assert overview["notes_from_earlier_screens"] == ["brief: keep it cheap", "budget: cap at $5"]
+    assert "screen_notes" not in budget
+
+
+def test_screen_snapshot_caps_client_notes() -> None:
+    """Notes from the client are capped in count and length."""
+    notes = [{"screen": "brief", "note": f"{i} " + "x" * 400} for i in range(15)]
+    state = cast(WizardState, {"wizard_screen": "budget", "screen_notes": notes})
+    shown = screen_snapshot(state)["notes_from_earlier_screens"]
+    assert len(shown) == 10
+    assert shown[0].startswith("brief: 5 ")
+    assert all(len(line) <= len("brief: ") + 200 for line in shown)
+
+
+def test_screen_snapshot_names_what_blocks_continue() -> None:
+    """The Continue button's refusal reaches the agent."""
+    state = cast(WizardState, {"wizard_screen": "brief", "screen_issue": "Describe the task first"})
+    assert screen_snapshot(state)["continue_blocked_by"] == "Describe the task first"
+
+
+@pytest.mark.parametrize(
+    ("screen", "kept"),
+    [
+        ("brief", {"update_wizard_state"}),
+        ("metric", {"request_code_authoring"}),
+        ("budget", {"update_wizard_state", "get_wallet_for_agent"}),
+        ("overview", {_SUBMIT, "get_wallet_for_agent"}),
+    ],
+)
+def test_screen_tools_keep_only_the_screens_own_tools(screen: str, kept: set[str]) -> None:
+    """A screen agent gets that screen's tools only; other screens' tools are gone."""
+    allowed = {"update_wizard_state", "request_code_authoring", "get_wallet_for_agent", "list_jobs", _SUBMIT}
+    assert screen_tools(allowed, WizardState(wizard_screen=screen)) == kept
+
+
+def test_screen_tools_unchanged_without_a_screen() -> None:
+    """With no ``wizard_screen`` every tool ``tools_for`` allows stays."""
+    allowed = {"update_wizard_state", "request_code_authoring", "list_jobs"}
+    assert screen_tools(allowed, WizardState()) == allowed
+
+
+def _nav_tools(state: dict[str, Any], turn: _TurnAuthoringFlag | None = None) -> dict[str, dspy.Tool]:
+    """Build the screen agent's local tools, keyed by name.
+
+    Args:
+        state: The wizard snapshot.
+        turn: The turn flag; a fresh one when omitted.
+
+    Returns:
+        The tools by name.
+    """
+    tools = screen_nav_tools(cast(WizardState, state), turn or _TurnAuthoringFlag())
+    return {tool.name: tool for tool in tools}
+
+
+@pytest.mark.asyncio
+async def test_remember_for_later_appends_a_capped_note() -> None:
+    """A note lands in the wizard state with its screen, clipped and capped."""
+    old = [{"screen": "brief", "note": str(i)} for i in range(10)]
+    tools = _nav_tools({"wizard_screen": "artifact", "screen_notes": old})
+    result = await tools["remember_for_later"].acall(note="keep   it\ncheap " + "x" * 300)
+    notes = result["wizard_state"]["screen_notes"]
+    assert len(notes) == 10
+    assert notes[0] == {"screen": "brief", "note": "1"}
+    assert notes[-1]["screen"] == "artifact"
+    assert notes[-1]["note"].startswith("keep it cheap ")
+    assert len(notes[-1]["note"]) == 200
+
+
+@pytest.mark.asyncio
+async def test_remember_for_later_refuses_an_empty_note() -> None:
+    """An empty note writes nothing."""
+    result = await _nav_tools({"wizard_screen": "brief"})["remember_for_later"].acall(note="  ")
+    assert isinstance(result, str)
+
+
+@pytest.mark.asyncio
+async def test_continue_refused_while_the_screen_fails_validation() -> None:
+    """Continue on an empty brief returns the errors, not a move."""
+    result = await _nav_tools({"wizard_screen": "brief"})["continue_to_next_screen"].acall()
+    assert isinstance(result, str)
+    assert "task_objective" in result
+
+
+@pytest.mark.asyncio
+async def test_continue_refused_while_the_wizard_blocks_continue() -> None:
+    """The wizard's own Continue check refuses the move too."""
+    state = {**_READY, "wizard_screen": "brief", "screen_issue": "Name the run"}
+    result = await _nav_tools(state)["continue_to_next_screen"].acall()
+    assert isinstance(result, str)
+    assert "Name the run" in result
+
+
+@pytest.mark.asyncio
+async def test_continue_judges_this_turns_writes() -> None:
+    """A field written earlier this turn counts toward the screen being done."""
+    turn = _TurnAuthoringFlag()
+    turn.wizard_patch["task_objective"] = "Sort tickets"
+    result = await _nav_tools({"wizard_screen": "brief", "screen_issue": "stale"}, turn)[
+        "continue_to_next_screen"
+    ].acall()
+    assert result["screen_nav"] == {"action": "continue", "from": "brief"}
+
+
+@pytest.mark.asyncio
+async def test_continue_moves_on_and_saves_its_note() -> None:
+    """A done screen moves on, and the optional note is kept like ``remember_for_later``."""
+    state = {**_READY, "wizard_screen": "brief"}
+    result = await _nav_tools(state)["continue_to_next_screen"].acall(note="keep it cheap")
+    assert result["screen_nav"] == {"action": "continue", "from": "brief"}
+    assert result["wizard_state"]["screen_notes"] == [{"screen": "brief", "note": "keep it cheap"}]
+
+
+@pytest.mark.asyncio
+async def test_continue_never_leaves_the_overview() -> None:
+    """The last screen submits instead."""
+    result = await _nav_tools({**_READY, "wizard_screen": "overview"})["continue_to_next_screen"].acall()
+    assert isinstance(result, str)
+
+
+@pytest.mark.asyncio
+async def test_go_back_only_to_an_earlier_screen() -> None:
+    """Going back names an earlier screen and carries the request."""
+    tools = _nav_tools({"wizard_screen": "budget"})
+    result = await tools["go_back_to_screen"].acall(screen_id="brief", request="Make it about refunds")
+    assert result["screen_nav"] == {
+        "action": "back",
+        "from": "budget",
+        "screen": "brief",
+        "request": "Make it about refunds",
+    }
+    assert isinstance(await tools["go_back_to_screen"].acall(screen_id="metric", request="x"), str)
+    assert isinstance(await tools["go_back_to_screen"].acall(screen_id="brief", request=" "), str)
+
+
+@pytest.mark.parametrize("screen", list(SCREEN_FOCUS))
+def test_screen_signature_is_short_and_names_the_screen(screen: str) -> None:
+    """Each screen agent gets its own short instructions, not the full prompt."""
+    instructions = screen_signature(screen).instructions
+    assert f"the ``{screen}`` screen" in instructions
+    assert SCREEN_FOCUS[screen] in instructions
+    assert "remember_for_later" in instructions
+    assert len(instructions) < len(GENERALIST_SYSTEM_PROMPT or "")
+
+
+def _wizard_tool() -> dspy.Tool:
+    """Build an ``update_wizard_state`` stand-in with a field per screen.
+
+    Returns:
+        A ``dspy.Tool`` whose arguments span several wizard screens.
+    """
+
+    def update_wizard_state(
+        job_name: str = "",
+        job_description: str = "",
+        is_private: bool = False,
+        task_objective: str = "",
+        artifact_kind: str = "",
+        optimizer_choice: str = "",
+        spending_limit_usd: float = 0.0,
+    ) -> str:
+        """Patch the wizard."""
+        return "ok"
+
+    return dspy.Tool(update_wizard_state)
+
+
+def test_scope_wizard_tool_names_only_current_screen_fields() -> None:
+    """On the budget screen the tool takes the budget plus the screenless fields."""
+    tool = scope_wizard_tool(_wizard_tool(), WizardState(wizard_screen="budget"))
+    assert set(tool.args) == {"spending_limit_usd", "job_name", "job_description", "is_private"}
+    assert "set only spending_limit_usd" in tool.desc
+    assert "optimizer_choice" not in tool.desc
+
+
+def test_scope_wizard_tool_unchanged_without_a_screen() -> None:
+    """Outside the wizard the tool keeps every argument."""
+    tool = scope_wizard_tool(_wizard_tool(), WizardState())
+    assert "optimizer_choice" in tool.args
+    assert "artifact_kind" in tool.args
+
+
+def test_scope_wizard_tool_ignores_other_tools() -> None:
+    """Only ``update_wizard_state`` is narrowed."""
+    other = _make_fake_tool("list_jobs")
+    before = dict(other.args)
+    assert scope_wizard_tool(other, WizardState(wizard_screen="brief")).args == before
+
+
+def test_screen_prompt_keeps_screenless_fields_to_explicit_asks() -> None:
+    """Screen agents set name, description and privacy only when asked."""
+    instructions = screen_signature("brief").instructions
+    assert "Set them only when the user asks for them this turn" in instructions
+    assert "go_back_to_screen" in instructions
 
 
 def test_order_ignores_unmapped_fields() -> None:
     """A patch with no step-mapped fields passes (code fields are rejected elsewhere)."""
-    assert validate_wizard_patch_order({"signature_code": "x"}, WizardState()) is None
+    assert validate_wizard_patch_order({"run_code": "x"}, WizardState()) is None
 
 
 def test_always_tools_include_discovery_and_post_submit() -> None:
@@ -403,14 +563,14 @@ def test_dataset_library_tools_always_available() -> None:
 
 
 def test_pair_inference_trigger_always_available() -> None:
-    """The grid-search pair inference trigger is always exposed and never gates."""
+    """The pair inference trigger for stored grid runs is always exposed and never gates."""
     assert "request_user_pair_inference" in tools_for(WizardState())
     assert _needs_approval("request_user_pair_inference", "ask") is False
 
 
 def test_yolo_never_gates() -> None:
     """Yolo trust-mode never gates any tool."""
-    for name in ("delete_job_optimizations", "submit_job_run_post", "rename_job_optimizations"):
+    for name in ("delete_job_optimizations", "submit_unified_run_optimize_post", "rename_job_optimizations"):
         assert _needs_approval(name, "yolo") is False
 
 
@@ -418,7 +578,7 @@ def test_ask_gates_every_mutation() -> None:
     """Ask trust-mode gates every mutating tool."""
     assert _needs_approval("delete_job_optimizations", "ask") is True
     assert _needs_approval("rename_job_optimizations", "ask") is True
-    assert _needs_approval("submit_job_run_post", "ask") is True
+    assert _needs_approval("submit_unified_run_optimize_post", "ask") is True
 
 
 def test_auto_safe_gates_only_destructive() -> None:
@@ -426,7 +586,7 @@ def test_auto_safe_gates_only_destructive() -> None:
     assert _needs_approval("rename_job_optimizations", "auto_safe") is False
     assert _needs_approval("toggle_pin_job_optimizations", "auto_safe") is False
     assert _needs_approval("delete_job_optimizations", "auto_safe") is True
-    assert _needs_approval("submit_job_run_post", "auto_safe") is True
+    assert _needs_approval("submit_unified_run_optimize_post", "auto_safe") is True
 
 
 def _make_fake_tool(name: str, return_value: str = "ok") -> dspy.Tool:
@@ -495,7 +655,7 @@ async def test_denial_returns_observation_not_exception() -> None:
     events: list[dict] = []
     registry = ApprovalRegistry()
     tool = _wrap_tool_with_approval(
-        _make_fake_tool("submit_job_run_post", return_value="should not run"),
+        _make_fake_tool("submit_unified_run_optimize_post", return_value="should not run"),
         trust_mode="ask",
         registry=registry,
         emit=events.append,
@@ -532,56 +692,92 @@ def _make_recording_tool(name: str) -> tuple[dspy.Tool, dict]:
 
 
 @pytest.mark.asyncio
-async def test_submit_injects_validated_code_over_agent_supplied() -> None:
-    """Submit sources Signature/Metric from the snapshot, discarding agent code."""
-    tool, seen = _make_recording_tool("submit_job_run_post")
-    wizard_state = cast(
-        WizardState,
-        {
-            "signature_code": "class Good(dspy.Signature): ...",
-            "metric_code": "def good(gold, pred, trace, pred_name, pred_trace): return 1.0",
-            "staged_dataset_id": "ds_123",
-        },
-    )
+async def test_submit_fills_unified_payload_from_snapshot() -> None:
+    """Submit builds the unified request from the wizard snapshot."""
+    tool, seen = _make_recording_tool(_SUBMIT)
     _wrap_tool_with_approval(
         tool,
         trust_mode="yolo",
         registry=ApprovalRegistry(),
         emit=lambda _e: None,
         outer_loop=asyncio.get_running_loop(),
-        staged_dataset_id="ds_123",
-        wizard_state=wizard_state,
+        staged_dataset_id="ds_1",
+        wizard_state=cast(
+            WizardState,
+            {
+                **_READY,
+                "task_background": "Tier-1 support",
+                "input_fields": ["q"],
+                "expected_field": "a",
+                "optimizer_choice": "gepa",
+                "split_fractions": {"train": 0.6, "val": 0.2, "test": 0.2},
+                "seed": 7,
+            },
+        ),
     )
-    await tool.func._async_body(
-        signature_code="BROKEN {",
-        metric_code="def m(example, prediction, trace): return 1.0",
-    )
-    assert seen["signature_code"] == "class Good(dspy.Signature): ..."
-    assert seen["metric_code"] == ("def good(gold, pred, trace, pred_name, pred_trace): return 1.0")
-    assert seen["staged_dataset_id"] == "ds_123"
+    await tool.func._async_body()
+    assert seen["name"] == "My run"
+    assert seen["task"] == {
+        "objective": "Answer support questions",
+        "background": "Tier-1 support",
+        "artifact": {"kind": "prompt", "starting_version": "You are a helpful agent."},
+    }
+    assert seen["data"] == {
+        "mode": "pairs",
+        "staged_dataset_id": "ds_1",
+        "input_fields": ["q"],
+        "expected_field": "a",
+        "split": {"train": 0.6, "val": 0.2, "test": 0.2},
+    }
+    assert seen["optimizer"] == {"choice": "gepa"}
+    assert seen["models"] == {"reflection_model": {"name": "openai/gpt-4o-mini"}}
+    assert seen["workspace"] == {"run_code": _READY["run_code"], "metric_code": _READY["metric_code"]}
+    assert seen["seed"] == 7
+    assert seen["is_private"] is True
 
 
 @pytest.mark.asyncio
-async def test_submit_without_snapshot_code_leaves_agent_args() -> None:
-    """With no authored code in the snapshot, submit args pass through unchanged."""
-    tool, seen = _make_recording_tool("submit_job_run_post")
+async def test_submit_injects_snapshot_code_over_agent_supplied() -> None:
+    """Workspace code always comes from the snapshot, discarding what the agent typed."""
+    tool, seen = _make_recording_tool(_SUBMIT)
     _wrap_tool_with_approval(
         tool,
         trust_mode="yolo",
         registry=ApprovalRegistry(),
         emit=lambda _e: None,
         outer_loop=asyncio.get_running_loop(),
-        wizard_state=cast(WizardState, {}),
+        wizard_state=cast(WizardState, {"run_code": "good_run", "metric_code": "good_metric"}),
     )
-    await tool.func._async_body(signature_code="agent_sig", metric_code="agent_metric")
-    assert seen["signature_code"] == "agent_sig"
-    assert seen["metric_code"] == "agent_metric"
+    await tool.func._async_body(workspace={"run_code": "BROKEN {", "metric_code": "bad", "install_command": "pip x"})
+    assert seen["workspace"] == {"run_code": "good_run", "metric_code": "good_metric", "install_command": "pip x"}
+
+
+@pytest.mark.asyncio
+async def test_submit_keeps_agent_supplied_values() -> None:
+    """Agent-supplied name, description, seed and optimizer win over the snapshot."""
+    tool, seen = _make_recording_tool(_SUBMIT)
+    _wrap_tool_with_approval(
+        tool,
+        trust_mode="yolo",
+        registry=ApprovalRegistry(),
+        emit=lambda _e: None,
+        outer_loop=asyncio.get_running_loop(),
+        wizard_state=cast(
+            WizardState,
+            {"job_name": "wizard", "job_description": "wizard", "seed": 1, "optimizer_choice": "gepa"},
+        ),
+    )
+    await tool.func._async_body(name="agent", description="agent", seed=2, optimizer={"choice": "best_of_n"})
+    assert seen["name"] == "agent"
+    assert seen["description"] == "agent"
+    assert seen["seed"] == 2
+    assert seen["optimizer"] == {"choice": "best_of_n"}
 
 
 @pytest.mark.asyncio
 async def test_submit_injects_wizard_description() -> None:
     """Submit carries the wizard's job_description — stripped and clipped to 280."""
-    tool, seen = _make_recording_tool("submit_job_run_post")
+    tool, seen = _make_recording_tool(_SUBMIT)
     _wrap_tool_with_approval(
         tool,
         trust_mode="yolo",
@@ -595,42 +791,9 @@ async def test_submit_injects_wizard_description() -> None:
 
 
 @pytest.mark.asyncio
-async def test_submit_keeps_agent_supplied_description() -> None:
-    """An agent-supplied description wins over the wizard snapshot's."""
-    tool, seen = _make_recording_tool("submit_job_run_post")
-    _wrap_tool_with_approval(
-        tool,
-        trust_mode="yolo",
-        registry=ApprovalRegistry(),
-        emit=lambda _e: None,
-        outer_loop=asyncio.get_running_loop(),
-        wizard_state=cast(WizardState, {"job_description": "from the wizard"}),
-    )
-    await tool.func._async_body(description="from the agent")
-    assert seen["description"] == "from the agent"
-
-
-@pytest.mark.asyncio
-async def test_submit_injects_source_dataset_id() -> None:
-    """A library-dataset run injects source_dataset_id when no dataset is supplied."""
-    tool, seen = _make_recording_tool("submit_job_run_post")
-    _wrap_tool_with_approval(
-        tool,
-        trust_mode="yolo",
-        registry=ApprovalRegistry(),
-        emit=lambda _e: None,
-        outer_loop=asyncio.get_running_loop(),
-        source_dataset_id="lib_42",
-        wizard_state=cast(WizardState, {"source_dataset_id": "lib_42"}),
-    )
-    await tool.func._async_body()
-    assert seen["source_dataset_id"] == "lib_42"
-
-
-@pytest.mark.asyncio
-async def test_submit_staged_dataset_wins_over_source() -> None:
-    """Staged and library ids are mutually exclusive: staged injects, source does not."""
-    tool, seen = _make_recording_tool("submit_job_run_post")
+async def test_submit_inline_cases_suppress_staged_id() -> None:
+    """Cases the agent passes inline are not overridden by the staged dataset id."""
+    tool, seen = _make_recording_tool(_SUBMIT)
     _wrap_tool_with_approval(
         tool,
         trust_mode="yolo",
@@ -638,50 +801,16 @@ async def test_submit_staged_dataset_wins_over_source() -> None:
         emit=lambda _e: None,
         outer_loop=asyncio.get_running_loop(),
         staged_dataset_id="ds_1",
-        source_dataset_id="lib_1",
-        wizard_state=cast(WizardState, {}),
+        wizard_state=cast(WizardState, {"data_mode": "single"}),
     )
-    await tool.func._async_body()
-    assert seen["staged_dataset_id"] == "ds_1"
-    assert "source_dataset_id" not in seen
-
-
-@pytest.mark.asyncio
-async def test_submit_injects_workflow_graph_over_signature() -> None:
-    """A workflow submit ships the authored graph and drops signature_code."""
-    tool, seen = _make_recording_tool("submit_job_run_post")
-    graph = {"nodes": [{"id": "input"}, {"id": "out"}], "edges": []}
-    wizard_state = cast(
-        WizardState,
-        {
-            "module_name": "workflow",
-            "workflow": graph,
-            "metric_code": "def good(gold, pred, trace, pred_name, pred_trace): return 1.0",
-            "staged_dataset_id": "ds_9",
-        },
-    )
-    _wrap_tool_with_approval(
-        tool,
-        trust_mode="yolo",
-        registry=ApprovalRegistry(),
-        emit=lambda _e: None,
-        outer_loop=asyncio.get_running_loop(),
-        staged_dataset_id="ds_9",
-        wizard_state=wizard_state,
-    )
-    # The agent leaves a stale Signature in its args; the workflow snapshot wins.
-    await tool.func._async_body(signature_code="class Leftover(dspy.Signature): ...")
-    assert seen["module_name"] == "workflow"
-    assert seen["workflow"] == graph
-    assert "signature_code" not in seen
-    assert seen["metric_code"] == "def good(gold, pred, trace, pred_name, pred_trace): return 1.0"
-    assert seen["staged_dataset_id"] == "ds_9"
+    await tool.func._async_body(data={"cases": [{"input": {"q": "hi"}}]})
+    assert seen["data"] == {"cases": [{"input": {"q": "hi"}}], "mode": "single"}
 
 
 @pytest.mark.asyncio
 async def test_submit_defaults_to_private() -> None:
     """Submit forces ``is_private`` to private when the snapshot never set it."""
-    tool, seen = _make_recording_tool("submit_job_run_post")
+    tool, seen = _make_recording_tool(_SUBMIT)
     _wrap_tool_with_approval(
         tool,
         trust_mode="yolo",
@@ -690,14 +819,14 @@ async def test_submit_defaults_to_private() -> None:
         outer_loop=asyncio.get_running_loop(),
         wizard_state=cast(WizardState, {}),
     )
-    await tool.func._async_body()
+    await tool.func._async_body(is_private=False)
     assert seen["is_private"] is True
 
 
 @pytest.mark.asyncio
 async def test_submit_respects_explicit_public() -> None:
     """A snapshot ``is_private=False`` (user asked for public) reaches submit."""
-    tool, seen = _make_recording_tool("submit_grid_search_grid_search_post")
+    tool, seen = _make_recording_tool(_SUBMIT)
     _wrap_tool_with_approval(
         tool,
         trust_mode="yolo",
@@ -712,7 +841,7 @@ async def test_submit_respects_explicit_public() -> None:
 
 @pytest.mark.asyncio
 async def test_non_submit_tool_does_not_inject_code() -> None:
-    """Code injection is scoped to submit tools; other tools are untouched."""
+    """Code injection is scoped to the submit tool; other tools are untouched."""
     tool, seen = _make_recording_tool("update_wizard_state")
     _wrap_tool_with_approval(
         tool,
@@ -720,11 +849,10 @@ async def test_non_submit_tool_does_not_inject_code() -> None:
         registry=ApprovalRegistry(),
         emit=lambda _e: None,
         outer_loop=asyncio.get_running_loop(),
-        wizard_state=cast(WizardState, {"signature_code": "snap", "metric_code": "snap"}),
+        wizard_state=cast(WizardState, {"run_code": "snap", "metric_code": "snap"}),
     )
     await tool.func._async_body(job_name="x")
-    assert "signature_code" not in seen
-    assert "metric_code" not in seen
+    assert "workspace" not in seen
 
 
 @pytest.mark.asyncio
@@ -821,13 +949,13 @@ async def test_submit_blocked_when_authoring_requested_same_turn() -> None:
     """A submit that follows request_code_authoring in one turn is denied.
 
     ``request_code_authoring`` writes its authored code back to the wizard
-    asynchronously, so the new Signature/Metric is not in this turn's snapshot.
+    asynchronously, so the new run and metric code is not in this turn's snapshot.
     The shared turn flag must cause the same-turn submit to short-circuit with
     a denial observation rather than ship stale code into a doomed run.
     """
     flag = _TurnAuthoringFlag()
     authoring, _ = _make_recording_tool("request_code_authoring")
-    submit, submit_seen = _make_recording_tool("submit_job_run_post")
+    submit, submit_seen = _make_recording_tool("submit_unified_run_optimize_post")
     common = {
         "trust_mode": "yolo",
         "registry": ApprovalRegistry(),
@@ -839,7 +967,7 @@ async def test_submit_blocked_when_authoring_requested_same_turn() -> None:
     _wrap_tool_with_approval(authoring, **common)
     _wrap_tool_with_approval(submit, **common)
 
-    await authoring.func._async_body(goal="fix the signature field names")
+    await authoring.func._async_body(goal="fix the run code")
     result = await submit.func._async_body(name="My run")
 
     assert "Submit blocked" in result
@@ -854,7 +982,7 @@ async def test_submit_runs_when_no_authoring_this_turn() -> None:
     snapshot — must be unaffected by the same-turn backstop.
     """
     flag = _TurnAuthoringFlag()
-    submit, submit_seen = _make_recording_tool("submit_job_run_post")
+    submit, submit_seen = _make_recording_tool("submit_unified_run_optimize_post")
     _wrap_tool_with_approval(
         submit,
         trust_mode="yolo",
@@ -876,7 +1004,7 @@ def test_system_prompt_forbids_submit_in_authoring_turn() -> None:
     is the primary defense for this bug.
     """
     prompt = GENERALIST_SYSTEM_PROMPT or ""
-    assert "NEVER call ``submit_job_run_post`` in the SAME turn as" in prompt
+    assert "NEVER call ``submit_unified_run_optimize_post`` in the SAME turn as" in prompt
     assert "request_code_authoring" in prompt
 
 
@@ -967,70 +1095,28 @@ def test_agent_error_payload_plain_error_has_no_code() -> None:
     assert payload == {"error": "RuntimeError: boom"}
 
 
-_BLACKBOX_SUBMIT = "submit_blackbox_run_blackbox_run_post"
-_BLACKBOX_DRY_RUN = "blackbox_scorer_dry_run_blackbox_scorer_dry_run_post"
-_SCORER = {"kind": "python", "metric_code": "def score(candidate, case=None):\n    return 1.0"}
-
-
-def test_blackbox_mode_swaps_dspy_tools_for_blackbox_tools() -> None:
-    """Black-box mode works from an empty wizard and hides the DSPy authoring/submit tools."""
-    allowed = tools_for(cast(WizardState, {"job_type": "blackbox"}))
-    assert {_BLACKBOX_SUBMIT, _BLACKBOX_DRY_RUN} <= allowed
-    assert "request_code_authoring" not in allowed
-    assert "submit_job_run_post" not in allowed
-    assert "submit_grid_search_grid_search_post" not in allowed
-    assert "profile_datasets_profile_post" not in allowed
-
-
-def test_blackbox_mode_keeps_dataset_tools_once_cases_are_staged() -> None:
-    """Staged cases unlock the dataset diagnostics in black-box mode too."""
-    allowed = tools_for(cast(WizardState, {"job_type": "blackbox", "dataset_ready": True}))
-    assert "profile_datasets_profile_post" in allowed
-    assert "request_code_authoring" not in allowed
-
-
-def test_dspy_mode_never_exposes_blackbox_tools() -> None:
-    """The black-box submit and dry run stay hidden outside black-box mode."""
-    allowed = tools_for(cast(WizardState, {"job_type": "run", "job_name": "x", "dataset_ready": True}))
-    assert _BLACKBOX_SUBMIT not in allowed
-    assert _BLACKBOX_DRY_RUN not in allowed
-
-
-def test_new_always_and_lifecycle_tools_are_reachable() -> None:
-    """Sample datasets, the split check, engines and pause/resume/restart need no wizard progress."""
+def test_always_on_catalog_and_lifecycle_tools_are_reachable() -> None:
+    """Sample datasets, the engine and optimizer catalogs, and pause/resume/restart need no wizard progress."""
     allowed = tools_for(cast(WizardState, {}))
     assert {
         "list_sample_datasets_datasets_samples_get",
         "stage_sample_dataset_datasets_samples",
         "blackbox_engines_blackbox_engines_get",
+        "optimizer_catalog_optimizers_get",
         "pause_job_optimizations",
         "resume_job_optimizations",
         "restart_job_optimizations",
     } <= allowed
 
 
-def test_trust_gating_of_lifecycle_and_blackbox_tools() -> None:
-    """Balance-spending tools gate in auto-safe; pause, samples and the dry run only gate in ask."""
-    for tool in ("resume_job_optimizations", "restart_job_optimizations", _BLACKBOX_SUBMIT):
+def test_trust_gating_of_lifecycle_and_submit_tools() -> None:
+    """Balance-spending tools gate in auto-safe; pause and samples only gate in ask."""
+    for tool in ("resume_job_optimizations", "restart_job_optimizations", _SUBMIT):
         assert _needs_approval(tool, "auto_safe") is True
         assert _needs_approval(tool, "yolo") is False
-    for tool in ("pause_job_optimizations", "stage_sample_dataset_datasets_samples", _BLACKBOX_DRY_RUN):
+    for tool in ("pause_job_optimizations", "stage_sample_dataset_datasets_samples"):
         assert _needs_approval(tool, "ask") is True
         assert _needs_approval(tool, "auto_safe") is False
-
-
-def test_order_allows_target_score_and_react_config_as_params() -> None:
-    """The new Params fields follow the same order rule as the rest of the step."""
-    ready = cast(WizardState, {"job_name": "x", "dataset_ready": True})
-    assert validate_wizard_patch_order({"target_score": 90, "react_config": {"mcp_url": "https://m"}}, ready) is None
-    assert validate_wizard_patch_order({"target_score": 90}, cast(WizardState, {"job_name": "x"})) is not None
-
-
-def test_order_is_not_enforced_in_blackbox_mode() -> None:
-    """Entering black-box mode, and patching inside it, works from an empty wizard."""
-    empty = cast(WizardState, {})
-    assert validate_wizard_patch_order({"job_type": "blackbox", "target_score": 90}, empty) is None
-    assert validate_wizard_patch_order({"seed": 7}, cast(WizardState, {"job_type": "blackbox"})) is None
 
 
 def test_approval_key_binds_to_owner() -> None:
@@ -1066,197 +1152,6 @@ async def test_pending_approval_resolves_only_with_owner_key() -> None:
     assert registry.resolve(approval_key(call_id, "bob"), True) is False
     assert registry.resolve(approval_key(call_id, "alice"), True) is True
     assert await call_task == "deleted"
-
-
-@pytest.mark.asyncio
-async def test_submit_fills_params_from_snapshot() -> None:
-    """Params-step choices the agent omitted reach submit; a supplied argument wins."""
-    tool, seen = _make_recording_tool("submit_job_run_post")
-    _wrap_tool_with_approval(
-        tool,
-        trust_mode="yolo",
-        registry=ApprovalRegistry(),
-        emit=lambda _e: None,
-        outer_loop=asyncio.get_running_loop(),
-        wizard_state=cast(
-            WizardState,
-            {
-                "module_name": "cot",
-                "optimizer_name": "gepa",
-                "target_score": 85,
-                "seed": 7,
-                "split_fractions": {"train": 0.6, "val": 0.2, "test": 0.2},
-            },
-        ),
-    )
-    await tool.func._async_body(seed=11)
-    assert seen["module_name"] == "cot"
-    assert seen["optimizer_name"] == "gepa"
-    assert seen["target_score"] == 85
-    assert seen["split_fractions"] == {"train": 0.6, "val": 0.2, "test": 0.2}
-    assert seen["seed"] == 11
-    assert "tool_source" not in seen
-
-
-@pytest.mark.asyncio
-async def test_run_submit_injects_tool_source_for_react_module() -> None:
-    """A react run ships the wizard's MCP server as its live tool source."""
-    tool, seen = _make_recording_tool("submit_job_run_post")
-    _wrap_tool_with_approval(
-        tool,
-        trust_mode="yolo",
-        registry=ApprovalRegistry(),
-        emit=lambda _e: None,
-        outer_loop=asyncio.get_running_loop(),
-        wizard_state=cast(
-            WizardState,
-            {"module_name": "react", "react_config": {"mcpUrl": "https://mcp.example/mcp", "toolFilter": ["search"]}},
-        ),
-    )
-    await tool.func._async_body()
-    assert seen["tool_source"] == {
-        "kind": "live_mcp",
-        "mcp_url": "https://mcp.example/mcp",
-        "tool_filter": ["search"],
-    }
-
-
-@pytest.mark.asyncio
-async def test_tool_source_skipped_for_grid_and_toolless_modules() -> None:
-    """The grid request has no tool_source, and a predict run never needs one."""
-    react_state = {"module_name": "react", "react_config": {"mcpUrl": "https://mcp.example/mcp"}}
-    for tool_name, state in (
-        ("submit_grid_search_grid_search_post", react_state),
-        ("submit_job_run_post", {**react_state, "module_name": "predict"}),
-    ):
-        tool, seen = _make_recording_tool(tool_name)
-        _wrap_tool_with_approval(
-            tool,
-            trust_mode="yolo",
-            registry=ApprovalRegistry(),
-            emit=lambda _e: None,
-            outer_loop=asyncio.get_running_loop(),
-            wizard_state=cast(WizardState, state),
-        )
-        await tool.func._async_body()
-        assert "tool_source" not in seen
-
-
-@pytest.mark.asyncio
-async def test_workflow_with_mcp_node_injects_tool_source() -> None:
-    """A workflow counts as tool-using when any node is an MCP node."""
-    tool, seen = _make_recording_tool("submit_job_run_post")
-    _wrap_tool_with_approval(
-        tool,
-        trust_mode="yolo",
-        registry=ApprovalRegistry(),
-        emit=lambda _e: None,
-        outer_loop=asyncio.get_running_loop(),
-        wizard_state=cast(
-            WizardState,
-            {
-                "module_name": "workflow",
-                "workflow": {"nodes": [{"id": "a", "kind": "mcp"}]},
-                "react_config": {"mcpUrl": "https://mcp.example/mcp"},
-            },
-        ),
-    )
-    await tool.func._async_body()
-    assert seen["tool_source"] == {"kind": "live_mcp", "mcp_url": "https://mcp.example/mcp"}
-
-
-@pytest.mark.asyncio
-async def test_blackbox_submit_fills_task_from_snapshot() -> None:
-    """Objective, seed, scorer, staged cases, name and privacy come from the wizard."""
-    flag = _TurnAuthoringFlag()
-    flag.dry_run_ok_scorers.add(_SCORER["metric_code"])
-    tool, seen = _make_recording_tool(_BLACKBOX_SUBMIT)
-    _wrap_tool_with_approval(
-        tool,
-        trust_mode="yolo",
-        registry=ApprovalRegistry(),
-        emit=lambda _e: None,
-        outer_loop=asyncio.get_running_loop(),
-        staged_dataset_id="ds_9",
-        authoring_flag=flag,
-        wizard_state=cast(
-            WizardState,
-            {
-                "job_type": "blackbox",
-                "job_name": "Tidy prompt",
-                "blackbox_objective": "Make it shorter",
-                "blackbox_seed": "You are a bot.",
-                "blackbox_scorer_code": _SCORER["metric_code"],
-            },
-        ),
-    )
-    await tool.func._async_body()
-    assert seen["objective"] == "Make it shorter"
-    assert seen["seed_candidate"] == "You are a bot."
-    assert seen["scorer"] == _SCORER
-    assert seen["staged_dataset_id"] == "ds_9"
-    assert seen["name"] == "Tidy prompt"
-    assert seen["is_private"] is True
-
-
-@pytest.mark.asyncio
-async def test_blackbox_submit_blocked_without_passing_dry_run() -> None:
-    """A Python scorer that was never dry-run this turn cannot be submitted."""
-    events: list[dict] = []
-    tool, seen = _make_recording_tool(_BLACKBOX_SUBMIT)
-    _wrap_tool_with_approval(
-        tool,
-        trust_mode="yolo",
-        registry=ApprovalRegistry(),
-        emit=events.append,
-        outer_loop=asyncio.get_running_loop(),
-        wizard_state=cast(WizardState, {"job_type": "blackbox"}),
-    )
-    result = await tool.func._async_body(objective="o", seed_candidate="s", scorer=_SCORER)
-    assert result.startswith("Submit blocked")
-    assert seen == {}
-    assert events[-1]["data"]["status"] == "error"
-
-
-@pytest.mark.asyncio
-async def test_blackbox_submit_allowed_after_passing_dry_run() -> None:
-    """A failed dry run keeps the gate shut; an ok one opens it for the same scorer only."""
-    flag = _TurnAuthoringFlag()
-    loop = asyncio.get_running_loop()
-
-    def wrap(tool: dspy.Tool) -> dspy.Tool:
-        """Wrap a tool on the shared turn flag.
-
-        Args:
-            tool: The tool to wrap.
-
-        Returns:
-            The wrapped tool.
-        """
-        return _wrap_tool_with_approval(
-            tool,
-            trust_mode="yolo",
-            registry=ApprovalRegistry(),
-            emit=lambda _e: None,
-            outer_loop=loop,
-            authoring_flag=flag,
-            wizard_state=cast(WizardState, {"job_type": "blackbox"}),
-        )
-
-    submit, seen = _make_recording_tool(_BLACKBOX_SUBMIT)
-    wrap(submit)
-    failing = wrap(_make_fake_tool(_BLACKBOX_DRY_RUN, return_value='{"ok": false, "error": "boom"}'))
-    await failing.func._async_body(candidate="s", scorer=_SCORER)
-    assert (await submit.func._async_body(objective="o", seed_candidate="s", scorer=_SCORER)).startswith(
-        "Submit blocked"
-    )
-    passing = wrap(_make_fake_tool(_BLACKBOX_DRY_RUN, return_value='{"ok": true, "score": 1.0}'))
-    await passing.func._async_body(candidate="s", scorer=_SCORER)
-    other = {"kind": "python", "metric_code": "def score(candidate, case=None):\n    return 0.0"}
-    assert (await submit.func._async_body(objective="o", seed_candidate="s", scorer=other)).startswith("Submit blocked")
-    assert seen == {}
-    assert await submit.func._async_body(objective="o", seed_candidate="s", scorer=_SCORER) == "ok"
-    assert seen["scorer"] == _SCORER
 
 
 @pytest.mark.asyncio
@@ -1310,9 +1205,9 @@ async def test_sample_staging_keeps_an_existing_job_name() -> None:
 
 
 def test_system_prompt_covers_new_capabilities() -> None:
-    """The prompt names the modules, modes and tools the agent now supports."""
+    """The prompt names the unified setup fields and tools the agent now supports."""
     prompt = GENERALIST_SYSTEM_PROMPT or ""
-    for needle in ("react", "flex", "blackbox", "target_score", "validate_datasets", "restart"):
+    for needle in ("optimizer_catalog", "artifact_kind", "data_mode", "run_code", "validate_datasets", "restart"):
         assert needle in prompt
 
 
@@ -1424,7 +1319,7 @@ async def test_turn_replays_history_natively_and_streams_the_submit(monkeypatch:
             mcp_url: Ignored.
             auth_header: Ignored.
         """
-        yield _FakeSession(["list_models_for_agent", "submit_job_run_post"])
+        yield _FakeSession(["list_models_for_agent", "submit_unified_run_optimize_post"])
 
     monkeypatch.setattr(generalist_module, "_mcp_session", fake_session)
     monkeypatch.setattr(dspy.Tool, "from_mcp_tool", staticmethod(lambda session, spec: tool))

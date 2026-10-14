@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from core.billing.openrouter_quotes import price_text_request
+from core.billing.openrouter_quotes import price_embedding_request, price_text_request
 from core.billing.operation_pricing import ChargePolicy, UnpricedOperationError
 
 REQUEST = {"model": "fixture/text", "max_tokens": 100, "messages": [{"role": "user", "content": "hello"}]}
@@ -153,3 +153,77 @@ def test_audio_input_stays_rejected_even_when_the_endpoint_prices_it() -> None:
     }
     with pytest.raises(UnpricedOperationError, match=re.escape("This input modality has no verified price bound.")):
         price_text_request(request, _catalog(GEMINI_PRICING), POLICY)
+
+
+EMBEDDING_CATALOG = {
+    "id": "openai/text-embedding-3-small",
+    "architecture": {"output_modalities": ["embeddings"]},
+    "endpoints": [
+        {
+            "tag": "openai",
+            "provider_name": "OpenAI",
+            "context_length": 8192,
+            "pricing": {"prompt": "0.00000002", "completion": "0", "discount": 0},
+        },
+        {
+            "tag": "azure",
+            "provider_name": "Azure",
+            "context_length": 8192,
+            "pricing": {"prompt": "0.00000002", "completion": "0", "discount": 0},
+        },
+    ],
+}
+
+
+def test_embeddings_reserve_a_full_context_per_input() -> None:
+    """Bound every embedded text by the endpoint context and pin the priced endpoints."""
+    request = {"model": "openai/text-embedding-3-small", "input": ["a", "b"]}
+    priced = price_embedding_request(request, EMBEDDING_CATALOG, POLICY)
+    # Two inputs x 8192 tokens x $0.02/M, plus the 5% fee margin.
+    assert Decimal(priced.quote.price_snapshot["maximum_provider_usd"]) == Decimal("0.00034406400")
+    assert priced.body["provider"]["only"] == ["openai", "azure"]
+    assert priced.body["provider"]["allow_fallbacks"] is False
+    assert priced.body["input"] == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    ("request_body", "catalog", "message"),
+    [
+        pytest.param(
+            {"model": "openai/text-embedding-3-small", "input": []},
+            EMBEDDING_CATALOG,
+            "must embed one or more texts",
+            id="no-input",
+        ),
+        pytest.param(
+            {"model": "openai/text-embedding-3-small", "input": [[1, 2, 3]]},
+            EMBEDDING_CATALOG,
+            "must embed one or more texts",
+            id="token-arrays",
+        ),
+        pytest.param(
+            {"model": "fixture/text", "input": "hello"},
+            _catalog({"prompt": "0.00001", "completion": "0.00002"}),
+            "not an embeddings model",
+            id="chat-model",
+        ),
+        pytest.param(
+            {"model": "other/model", "input": "hello"},
+            EMBEDDING_CATALOG,
+            "differs from its verified price catalog",
+            id="other-model",
+        ),
+    ],
+)
+def test_unbounded_embedding_requests_never_authorize_work(
+    request_body: dict[str, Any], catalog: dict[str, Any], message: str
+) -> None:
+    """Refuse an embeddings request whose cost the catalog cannot bound.
+
+    Args:
+        request_body: Guest embeddings body.
+        catalog: Endpoint catalog the request is priced against.
+        message: Expected refusal text.
+    """
+    with pytest.raises(UnpricedOperationError, match=message):
+        price_embedding_request(request_body, catalog, POLICY)

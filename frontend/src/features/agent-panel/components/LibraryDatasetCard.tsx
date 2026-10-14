@@ -78,8 +78,8 @@ export function LibraryDatasetCard({ call, alreadyConfirmed, onConfirm }: Librar
 
   if (phase === "done") {
     return (
-      <div className="flex items-center gap-2 rounded-2xl border border-[#5E7A5E]/25 bg-[#F0F4EC] px-4 py-3 text-[0.8125rem] text-[#2F3E32]">
-        <CheckCircle className="size-3.5 shrink-0 text-[#3E5240]" aria-hidden="true" />
+      <div className="flex items-center gap-2 rounded-2xl border border-[#5E7A5E]/25 bg-[#F0F4EC] dark:bg-[#383e31] px-4 py-3 text-[0.8125rem] text-[#2F3E32] dark:text-[#cadccd]">
+        <CheckCircle className="size-3.5 shrink-0 text-[#3E5240] dark:text-[#bbd3bd]" aria-hidden="true" />
         <span dir="auto" className="min-w-0 flex-1 truncate">
           {pickedName
             ? formatMsg("auto.features.agent.panel.components.librarydatasetcard.picked", {
@@ -92,9 +92,9 @@ export function LibraryDatasetCard({ call, alreadyConfirmed, onConfirm }: Librar
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-[#C8A882]/30 bg-[#FAF8F5] shadow-sm">
-      <div className="flex items-center gap-2 border-b border-[#3D2E22]/10 px-4 py-2.5 text-[0.8125rem] font-medium text-[#3D2E22]">
-        <Database className="size-3.5 text-[#3D2E22]" aria-hidden="true" />
+    <div className="overflow-hidden rounded-2xl border border-primary-fill/30 bg-background">
+      <div className="flex items-center gap-2 border-b border-primary-fill/10 px-4 py-2.5 text-[0.8125rem] font-medium text-primary">
+        <Database className="size-3.5 text-primary" aria-hidden="true" />
         {msg("auto.features.agent.panel.components.librarydatasetcard.title")}
       </div>
 
@@ -106,8 +106,8 @@ export function LibraryDatasetCard({ call, alreadyConfirmed, onConfirm }: Librar
         )}
 
         {phase === "error" && (
-          <div className="flex items-center gap-1.5 text-[0.75rem] text-[#7A1E13]">
-            <XCircle className="size-3 shrink-0 text-[#9B2C1F]" aria-hidden="true" />
+          <div className="flex items-center gap-1.5 text-[0.75rem] text-[#7A1E13] dark:text-[#ffb2a0]">
+            <XCircle className="size-3 shrink-0 text-[#9B2C1F] dark:text-[#ffa595]" aria-hidden="true" />
             <span>{msg("auto.features.agent.panel.components.librarydatasetcard.error")}</span>
           </div>
         )}

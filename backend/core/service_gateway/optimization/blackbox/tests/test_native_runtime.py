@@ -5,10 +5,12 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import subprocess
 import sys
 import tarfile
+import threading
 import tomllib
 from dataclasses import replace
 from pathlib import Path
@@ -22,13 +24,24 @@ from gepa.oa.task import Task as UpstreamTask
 
 from core.billing.pricing import model_token_costs
 from core.billing.runtime import UsagePendingError
+from core.billing.usage_tags import USAGE_TAGS_HEADER
+from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.constants import PROGRESS_CANDIDATE, PROGRESS_CASE_SCORED
 from core.exceptions import ServiceError
 from core.models.blackbox import BlackboxProposer, BlackboxTarget
 from core.service_gateway.language_models import total_tokens_from_history, usage_by_model_from_history
 from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededError
 
-from .. import gepa_engine, harness_bridge, native_runner, native_runtime, repo_tree
+from .. import (
+    autosaddler_runner,
+    best_of_n,
+    gepa_engine,
+    harness_bridge,
+    native_runner,
+    native_runtime,
+    repo_tree,
+    sandbox_log,
+)
 from ..harness import GatewayConfig, build_launch, launch_payload
 from ..native_runtime import NativeOptions, _bootstrap_command, check_native_runtime, run_native_engine
 from ..protocol import EvalServer, Result, ScorerAbortError, Task
@@ -160,7 +173,9 @@ class ReadinessSession(FakeSession):
         self.calls.append((command, kwargs))
         if self.bootstrap is not None and len(self.calls) == 1:
             return self.bootstrap
-        return CommandResult(exit_code=1 if self.fail else 0, stdout='{"ready": true, "autosaddler": true}\n')
+        return CommandResult(
+            exit_code=1 if self.fail else 0, stdout='{"ready": true, "autosaddler": true, "shinka": true}\n'
+        )
 
     def close(self) -> None:
         """Always record closure while preserving an unresolved sandbox usage signal."""
@@ -195,7 +210,8 @@ def test_native_readiness_checks_selected_isolation_without_search(
         "autoresearch_version": native_runtime.AUTORESEARCH_VERSION,
         "autosaddler_source": native_runtime.AUTOSADDLER_REVISION,
         "autosaddler_ready": True,
-        "claude_version": native_runtime.CLAUDE_VERSION,
+        "shinka_version": native_runtime.SHINKA_VERSION,
+        "shinka_ready": True,
     }
     assert adapter.spec.network_disabled is True
     assert "native_input.json" not in session.files
@@ -331,7 +347,7 @@ def test_native_transport_preserves_engine_choice_and_scores_once(
     progress: list[dict[str, Any]] = []
     ctx.progress_callback = lambda event, metrics: progress.append(metrics)
     result = run_native_engine(
-        "meta_harness", Task("seed", train_set=[{"id": "case"}]), EvalServer(score, max_evals=3), ctx
+        "meta_harness", Task("seed", cases=[{"id": "case"}]), EvalServer(score, max_evals=3), ctx
     )
 
     assert calls == [("better", {"id": "case"})]
@@ -362,7 +378,7 @@ def test_protected_managed_runtime_does_not_nest_upstream_jail(tmp_path: Path, m
     runtime.injects_headers = False
     run_native_engine(
         "meta_harness",
-        Task("seed", train_set=[{"id": "case"}]),
+        Task("seed", cases=[{"id": "case"}]),
         EvalServer(lambda *_: (0.75, {}), max_evals=3),
         _context(tmp_path, runtime),
     )
@@ -370,10 +386,11 @@ def test_protected_managed_runtime_does_not_nest_upstream_jail(tmp_path: Path, m
     assert session.closed
 
 
-def test_repository_tree_and_rules_reach_the_autoresearch_sandbox(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("engine_id", ["autoresearch", "gepa_repo", "best_of_n_repo", "meta_harness", "autosaddler"])
+def test_repository_tree_and_rules_reach_every_repository_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine_id: str
 ) -> None:
-    """Upload the packed tree chunk by chunk, with the rules the agent's eval.sh checks."""
+    """Upload the packed tree chunk by chunk with its rules; the guest never gets registry network."""
     monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
     chunks = [tmp_path / "tree.0000.b64", tmp_path / "tree.0001.b64"]
     for index, chunk in enumerate(chunks):
@@ -383,8 +400,11 @@ def test_repository_tree_and_rules_reach_the_autoresearch_sandbox(
     ctx = _context(tmp_path, FakeRuntime(session))
     repo = {"chunks": [str(chunk) for chunk in chunks], "editable_paths": ["src"], "readonly_paths": ["vendor/lib"]}
     ctx.native_options = replace(ctx.native_options, repo=repo)
-    run_native_engine("autoresearch", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+    task = Task("", cases=[{"id": "a"}, {"id": "b"}])
+    run_native_engine(engine_id, task, EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
 
+    assert ctx.native_options.sandbox_runtime.spec.allowed_hosts == ()
+    assert not set(ctx.native_options.sandbox_runtime.spec.allowed_hosts) & set(PACKAGE_REGISTRY_HOSTS)
     assert (session.files["repo-tree/tree.0000.b64"], session.files["repo-tree/tree.0001.b64"]) == ("chunk0", "chunk1")
     assert json.loads(session.files["native_input.json"])["repo"] == {
         "chunks": ["repo-tree/tree.0000.b64", "repo-tree/tree.0001.b64"],
@@ -394,12 +414,12 @@ def test_repository_tree_and_rules_reach_the_autoresearch_sandbox(
     assert session.files["repo_tree.py"] == Path(repo_tree.__file__).read_text()
 
 
-def test_only_autoresearch_and_gepa_take_a_repository(tmp_path: Path) -> None:
-    """Meta-Harness edits one text file, so a repository run never reaches it."""
+@pytest.mark.parametrize("engine_id", ["gepa_repo", "best_of_n_repo"])
+def test_repository_only_engines_refuse_a_text_run(tmp_path: Path, engine_id: str) -> None:
+    """GEPA's and Best-of-N's agent samplers edit a checkout, so a text run never reaches them."""
     ctx = _context(tmp_path, FakeRuntime(FakeSession()))
-    ctx.native_options = replace(ctx.native_options, repo={"chunks": [], "editable_paths": ["."], "readonly_paths": []})
-    with pytest.raises(ServiceError, match="Only AutoResearch and GEPA"):
-        run_native_engine("meta_harness", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+    with pytest.raises(ServiceError, match="needs a repository checkout"):
+        run_native_engine(engine_id, Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
 
 
 def test_gepa_hands_a_repository_run_to_the_native_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -416,6 +436,25 @@ def test_gepa_hands_a_repository_run_to_the_native_runtime(tmp_path: Path, monke
     ctx.native_options = replace(ctx.native_options, repo={"chunks": [], "editable_paths": ["."], "readonly_paths": []})
     result = gepa_engine.GepaEngine().run(Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
     assert calls == ["gepa_repo"]
+    assert result.best_score == 1.0
+
+
+def test_best_of_n_hands_a_repository_run_to_the_native_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Best-of-N on a repository samples coding-agent versions in the native sandbox."""
+    calls: list[str] = []
+
+    def fake_native(engine_id: str, *_: object) -> Result:
+        """Record which native engine Best-of-N asked for."""
+        calls.append(engine_id)
+        return Result(best_candidate="", best_score=1.0, total_evals=1)
+
+    monkeypatch.setattr(best_of_n, "run_native_engine", fake_native)
+    ctx = _context(tmp_path, FakeRuntime(FakeSession()))
+    ctx.native_options = replace(ctx.native_options, repo={"chunks": [], "editable_paths": ["."], "readonly_paths": []})
+    result = best_of_n.BestOfNEngine().run(Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+    assert calls == ["best_of_n_repo"]
     assert result.best_score == 1.0
 
 
@@ -437,7 +476,11 @@ _GEPA_AGENT = "pathlib.Path('src/a.py').write_text('a = 2\\n')\n"
 
 @pytest.mark.parametrize(
     ("engine_id", "agent", "starts"),
-    [("autoresearch", _AUTORESEARCH_AGENT, []), ("gepa_repo", _GEPA_AGENT, [[]])],
+    [
+        ("autoresearch", _AUTORESEARCH_AGENT, []),
+        ("gepa_repo", _GEPA_AGENT, [[]]),
+        ("best_of_n_repo", _GEPA_AGENT, []),
+    ],
 )
 def test_real_native_runner_unpacks_the_repository_for_its_engine(
     tmp_path: Path, engine_id: str, agent: str, starts: list[list[str]]
@@ -479,7 +522,7 @@ def test_real_native_runner_unpacks_the_repository_for_its_engine(
         "max_concurrency": 1,
         "timeout_seconds": 20,
         "task": {"name": "test", "seed_candidate": ""},
-        "proposer": {"harness": "claude_code", "ralph": False},
+        "proposer": {"ralph": False},
         "repo": {"chunks": chunk_names, "editable_paths": ["src"], "readonly_paths": []},
     }
     (tmp_path / "input.json").write_text(json.dumps(payload))
@@ -547,6 +590,33 @@ def test_native_timeout_and_missing_usage_fail_without_fallback(
         run_native_engine("autoresearch", Task("seed"), EvalServer(lambda *_: (1.0, {}), max_evals=2), ctx)
     assert len(session.calls) == 2
     assert session.closed
+
+
+def test_native_run_lives_as_long_as_its_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A run has no wall-clock cap of its own; only the sandbox's platform lifetime bounds it."""
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    monkeypatch.setattr(native_runtime.settings, "vercel_sandbox_max_lifetime_seconds", 86_400.0)
+    session = FakeSession()
+    runtime = FakeRuntime(session)
+    run_native_engine(
+        "autoresearch", Task("seed"), EvalServer(lambda *_: (1.0, {}), max_evals=2), _context(tmp_path, runtime)
+    )
+    assert runtime.spec is not None
+    assert runtime.spec.lifetime_seconds == 86_400.0
+    assert session.calls[-1][1]["timeout_seconds"] > 85_000
+
+
+@pytest.mark.parametrize("runner", [native_runner, autosaddler_runner])
+def test_supervisor_stop_is_not_reported_as_a_reply_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: Any
+) -> None:
+    """A run stopped by its supervisor keeps that reason instead of a fake evaluator timeout."""
+    monkeypatch.chdir(tmp_path)
+    mailbox = runner.EvaluatorMailbox("nonce", 60.0)
+    threading.Timer(0.2, mailbox.stopped.set).start()
+    with pytest.raises(runner.EvaluationStopped, match="stopped this run"):
+        mailbox.evaluate("candidate")
+    assert mailbox.error is None
 
 
 def test_native_usage_ledger_survives_lane_replacement() -> None:
@@ -656,7 +726,21 @@ def test_usage_prefers_cli_summaries_and_deduplicates_transcript_messages(tmp_pa
         "cache_read_input_tokens": 5,
         "cache_creation_input_tokens": 0,
         "total_tokens": 24,
+        "calls": 2,
     }
+
+
+def test_usage_counts_summary_turns_when_the_transcript_is_missing(tmp_path: Path) -> None:
+    """A CLI summary with no mirrored transcript still contributes its request count."""
+    summary = {
+        "session_id": "solo",
+        "num_turns": 7,
+        "modelUsage": {"openai/gpt-test": {"inputTokens": 50, "outputTokens": 5}},
+    }
+    (tmp_path / "iter1_stdout.json").write_text(json.dumps(summary))
+    usage = native_runner.collect_usage([tmp_path], "fallback")
+    assert usage["openai/gpt-test"]["calls"] == 7
+    assert usage["openai/gpt-test"]["prompt_tokens"] == 50
 
 
 def test_artifact_restore_rejects_parent_traversal(tmp_path: Path) -> None:
@@ -728,7 +812,7 @@ def test_real_native_runner_drives_upstream_with_fake_cli(tmp_path: Path, engine
         payload["task"]["train_set"] = [{"id": "a"}, {"id": "b"}]
     else:
         # One research round keeps the fake's single scripted evaluation the whole run.
-        payload["proposer"] = {"harness": "claude_code", "ralph": False}
+        payload["proposer"] = {"ralph": False}
     (tmp_path / "input.json").write_text(json.dumps(payload))
     env = {"PATH": f"{binary}{os.pathsep}/usr/bin:/bin", "HOME": str(tmp_path), "PYTHONUNBUFFERED": "1"}
     if variant == "repeated":
@@ -791,20 +875,258 @@ def test_autosaddler_bootstrap_pins_upstream_into_a_python_312_venv() -> None:
     assert "import autosaddler.v2.core.engine" in protected
 
 
+def test_shinka_bootstrap_installs_the_pinned_requirements_into_a_python_312_venv() -> None:
+    """Install the pinned ShinkaEvolve requirements on their own interpreter, without a proposer harness."""
+    command = _bootstrap_command("vercel", engine_id="shinka_evolve")
+    assert f"uv venv --python {native_runtime._AUTOSADDLER_PYTHON} native_venv" in command
+    assert "--no-deps -r shinka_requirements.txt" in command
+    assert "import shinka.core.async_runner" in command
+    assert "native_source.tar.gz.b64" not in command
+    assert "node -e" not in command
+    protected = _bootstrap_command("vercel", protected=True, engine_id="shinka_evolve")
+    assert "uv venv" not in protected
+    assert "import shinka.core.async_runner" in protected
+    assert f"if [ -x {native_runtime.SHINKA_IMAGE_PYTHON} ]" in protected
+
+
+def test_dockerfile_bakes_shinka_into_the_venv_the_runtime_uses() -> None:
+    """Keep the opt-in ShinkaEvolve venv at the runtime's path, built from the same pinned requirements."""
+    dockerfile = (Path(__file__).resolve().parents[5] / "Dockerfile").read_text()
+    venv = native_runtime.SHINKA_IMAGE_PYTHON.removesuffix("/bin/python")
+    assert "ARG INCLUDE_SHINKA_EVOLVE=false" in dockerfile
+    assert '[ "$INCLUDE_SHINKA_EVOLVE" = "1" ]' in dockerfile
+    assert f"python -m venv {venv}" in dockerfile
+    assert "core/service_gateway/optimization/blackbox/shinka_requirements.txt" in dockerfile
+    assert f'{native_runtime.SHINKA_IMAGE_PYTHON} -c "import shinka.core.async_runner"' in dockerfile
+
+
+def test_native_readiness_probes_shinka_in_the_image_venv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Report ShinkaEvolve readiness from the image's own venv rather than the backend interpreter.
+
+    Args:
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "verified-source")
+    session = ReadinessSession()
+    options = NativeOptions(
+        runtime="vercel",
+        model="test/model",
+        gateway=GatewayConfig(url="http://127.0.0.1:9000/v1", api_key="scoped"),
+        budget_route={"url": "http://127.0.0.1:9000/v1", "token": "scoped"},
+        sandbox_runtime=FakeRuntime(session),
+        max_token_cost=1,
+    )
+    check_native_runtime(options)
+    probe = session.calls[1][0]
+    assert native_runtime.SHINKA_IMAGE_PYTHON in probe
+    assert "os.X_OK" in probe
+    assert "find_spec(" in probe
+
+
+def test_shinka_runner_files_carry_the_pinned_requirements() -> None:
+    """Ship the self-contained runner with a requirements file pinning the upstream release."""
+    files = native_runtime._runner_files("shinka_evolve")
+    assert set(files) == {
+        "shinka_runner.py",
+        "shinka_bundle.py",
+        "harness_bridge.py",
+        "repo_tree.py",
+        "shinka_requirements.txt",
+    }
+    assert f"shinka-evolve=={native_runtime.SHINKA_VERSION}" in files["shinka_requirements.txt"]
+
+
+def test_shinka_transport_routes_every_model_through_its_own_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hand each optimization route to the guest by variable, never in the payload or a network-edge header.
+
+    Args:
+        tmp_path: Artifact destination.
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    session = FakeSession()
+    session.candidate = {"system": "better"}
+    runtime = FakeRuntime(session)
+    ctx = _context(tmp_path, runtime)
+    ctx.native_options = replace(
+        ctx.native_options,
+        shinka={"num_islands": 3},
+        shinka_models=(
+            {"model": "claude-test", "url": "https://gateway.example/v1", "token": "route-a"},
+            {"model": "gpt-test", "url": "https://gateway.example/v1", "token": "route-b"},
+        ),
+    )
+    result = run_native_engine(
+        "shinka_evolve",
+        Task({"system": "seed"}, cases=[{"id": "case"}]),
+        EvalServer(lambda *_: (0.5, {}), max_evals=3),
+        ctx,
+    )
+
+    payload = json.loads(session.files["native_input.json"])
+    assert payload["shinka"] == {"num_islands": 3}
+    assert payload["shinka_models"] == [
+        {"model": "claude-test", "url": "https://gateway.example/v1", "key_env": "SKYNET_SHINKA_KEY_0"},
+        {"model": "gpt-test", "url": "https://gateway.example/v1", "key_env": "SKYNET_SHINKA_KEY_1"},
+    ]
+    assert payload["shinka_meta_key_env"] == "SKYNET_SHINKA_META_KEY"
+    assert "route-a" not in session.files["native_input.json"]
+    env = session.calls[1][1]["env"]
+    assert (env["SKYNET_SHINKA_KEY_0"], env["SKYNET_SHINKA_KEY_1"]) == ("route-a", "route-b")
+    assert env["SKYNET_SHINKA_META_KEY"] == "route-a"
+    assert env["SHINKA_PRICING_MODE"] == "offline"
+    assert runtime.spec.inject_headers == {}
+    assert session.calls[1][0].count("shinka_runner.py") == 1
+    assert result.best_candidate == {"system": "better"}
+    assert result.best_score == 0.5
+    assert "shinka_editor" not in payload
+    assert payload["proposer"]["max_tool_calls"] == 100
+
+
+def test_shinka_agent_editor_ships_a_tagged_pi_launch_per_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Prepare Pi and hand the guest one file-tools-only Pi launch per optimization route, billed as mutations.
+
+    Args:
+        tmp_path: Artifact destination.
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    session = FakeSession()
+    session.candidate = "better"
+    ctx = _context(tmp_path, FakeRuntime(session))
+    ctx.native_options = replace(
+        ctx.native_options,
+        proposer=BlackboxProposer(harness="pi", max_tool_calls=12),
+        shinka={"editor": "agent"},
+        shinka_models=(
+            {"model": "claude-test", "url": "https://gateway.example/v1", "token": "route-a"},
+            {"model": "gpt-test", "url": "https://gateway.example/v1", "token": "route-b"},
+        ),
+    )
+    run_native_engine("shinka_evolve", Task("seed"), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+
+    payload = json.loads(session.files["native_input.json"])
+    editor = payload["shinka_editor"]
+    assert editor["max_tool_calls"] == 12
+    assert [launch["key_env"] for launch in editor["launches"]] == ["SKYNET_SHINKA_KEY_0", "SKYNET_SHINKA_KEY_1"]
+    launch = editor["launches"][0]
+    assert launch["model"] == "claude-test"
+    assert launch["output_format"] == "pi"
+    assert "--tools read,grep,find,ls,edit,write" in launch["run_command"]
+    assert "--no-extensions --no-skills --no-context-files" in launch["run_command"]
+    models = json.loads(launch["files"][".skynet/pi/models.json"])
+    provider = next(iter(models["providers"].values()))
+    tags = json.loads(provider["headers"][USAGE_TAGS_HEADER])
+    assert tags == {"caller": "proposer", "kind": "mutation"}
+    assert "route-a" not in session.files["native_input.json"]
+    assert "pi" in session.calls[0][0]
+    assert "node -e" in session.calls[0][0]
+
+
+def test_shinka_bootstrap_prepares_pi_only_for_the_agent_editor() -> None:
+    """Install Pi and check Node for the agent editor, and skip both for single-call ShinkaEvolve."""
+    plain = _bootstrap_command("vercel", engine_id="shinka_evolve", harness="pi", install_command="npm i -g pi@1")
+    agent = _bootstrap_command(
+        "vercel", engine_id="shinka_evolve", harness="pi", install_command="npm i -g pi@1", shinka_agent=True
+    )
+    assert "npm i -g pi@1" not in plain
+    assert "npm i -g pi@1" in agent
+    assert "node -e" in agent
+
+
+def test_shinka_novelty_hands_the_judge_and_embeddings_their_own_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Route duplicate rejection's judge and embeddings by variable, so their calls are tagged apart.
+
+    Args:
+        tmp_path: Artifact destination.
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    session = FakeSession()
+    session.candidate = "better"
+    ctx = _context(tmp_path, FakeRuntime(session))
+    ctx.native_options = replace(
+        ctx.native_options,
+        shinka={"novelty": True},
+        shinka_models=({"model": "claude-test", "url": "https://gateway.example/v1", "token": "route-a"},),
+        shinka_embedding={
+            "model": "openai/text-embedding-3-small",
+            "url": "https://gw.example/v1",
+            "token": "route-emb",
+        },
+    )
+    run_native_engine("shinka_evolve", Task("seed"), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+
+    payload = json.loads(session.files["native_input.json"])
+    assert payload["shinka_embedding"] == {
+        "model": "openai/text-embedding-3-small",
+        "url": "https://gw.example/v1",
+        "key_env": "SKYNET_SHINKA_EMBED_KEY",
+    }
+    assert payload["shinka_novelty_key_env"] == "SKYNET_SHINKA_NOVELTY_KEY"
+    assert "route-emb" not in session.files["native_input.json"]
+    env = session.calls[1][1]["env"]
+    assert (env["SKYNET_SHINKA_NOVELTY_KEY"], env["SKYNET_SHINKA_EMBED_KEY"]) == ("route-a", "route-emb")
+
+
+def test_shinka_ships_a_repository_checkout_with_its_bundle_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ship the repository tree and the bundle and tree helpers the runner loads beside itself.
+
+    Args:
+        tmp_path: Artifact destination.
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    chunk = tmp_path / "tree.0000.b64"
+    chunk.write_text("dHJlZQ==", encoding="ascii")
+    session = FakeSession()
+    session.candidate = "diff --git a/src/a.py b/src/a.py\n"
+    ctx = _context(tmp_path, FakeRuntime(session))
+    ctx.native_options = replace(
+        ctx.native_options,
+        repo={"chunks": [str(chunk)], "editable_paths": ["src"], "readonly_paths": ["vendor"]},
+        shinka_models=({"model": "m", "url": "https://gateway.example/v1", "token": "t"},),
+    )
+    run_native_engine("shinka_evolve", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+
+    payload = json.loads(session.files["native_input.json"])
+    assert payload["repo"] == {
+        "chunks": ["repo-tree/tree.0000.b64"],
+        "editable_paths": ["src"],
+        "readonly_paths": ["vendor"],
+    }
+    assert {"shinka_runner.py", "shinka_bundle.py", "repo_tree.py"} <= set(session.files)
+
+
 def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
     """Ship the self-contained runner with every prompt and skill of the Skynet plugin."""
     files = native_runtime._runner_files("autosaddler")
     assert set(files) == {
         "autosaddler_runner.py",
         "harness_bridge.py",
+        "repo_tree.py",
         "autosaddler_plugin/LICENSE",
         "autosaddler_plugin/NOTICE.md",
-        "autosaddler_plugin/SYSTEM.md",
-        "autosaddler_plugin/prompts/diagnose_patch.md",
-        "autosaddler_plugin/prompts/evolve.md",
-        "autosaddler_plugin/prompts/reflect.md",
-        "autosaddler_plugin/skills/candidate-patch/SKILL.md",
-        "autosaddler_plugin/skills/patch-verification/SKILL.md",
+        *(
+            f"autosaddler_plugin/{prefix}{name}"
+            for prefix in ("", "repo/")
+            for name in (
+                "SYSTEM.md",
+                "prompts/diagnose_patch.md",
+                "prompts/evolve.md",
+                "prompts/reflect.md",
+                "skills/candidate-patch/SKILL.md",
+                "skills/patch-verification/SKILL.md",
+            )
+        ),
     }
     assert all(text.strip() for text in files.values())
     assert set(native_runtime._runner_files("meta_harness")) == {
@@ -833,7 +1155,7 @@ def test_autosaddler_transport_scores_named_parts_without_the_gepa_archive(
         calls.append((candidate, example))
         return 0.75, {}
 
-    task = Task({"system": "seed", "user": "ask"}, train_set=[{"id": "a"}], val_set=[{"id": "b"}])
+    task = Task({"system": "seed", "user": "ask"}, cases=[{"id": "a"}, {"id": "b"}])
     result = run_native_engine("autosaddler", task, EvalServer(score, max_evals=3), _context(tmp_path, runtime))
 
     assert calls == [({"system": "better", "user": "ask"}, {"id": "case"})]
@@ -858,28 +1180,39 @@ def test_autosaddler_transport_rejects_a_candidate_of_the_wrong_shape(
     session = FakeSession()
     runtime = FakeRuntime(session)
     scorer = MagicMock(return_value=(0.5, {}))
-    task = Task({"system": "seed", "user": "ask"}, train_set=[{"id": "a"}], val_set=[{"id": "b"}])
+    task = Task({"system": "seed", "user": "ask"}, cases=[{"id": "a"}, {"id": "b"}])
     with pytest.raises(ServiceError, match="invalid candidate shape"):
         run_native_engine("autosaddler", task, EvalServer(scorer, max_evals=3), _context(tmp_path, runtime))
     scorer.assert_not_called()
 
 
 @pytest.mark.parametrize(
-    ("task", "message"),
-    [
-        (Task(None, train_set=[{"id": "a"}, {"id": "b"}]), "requires a seed candidate"),
-        (Task("seed", train_set=[{"id": "a"}]), "at least two visible examples"),
-        (Task("seed"), "at least two visible examples"),
-    ],
+    "task",
+    [Task(None), Task("seed"), Task("seed", cases=[{"id": "a"}]), Task("seed", cases=[{"id": "a"}, {"id": "b"}])],
 )
-def test_autosaddler_transport_needs_a_seed_and_two_visible_examples(tmp_path: Path, task: Task, message: str) -> None:
-    """Fail before launching a sandbox when upstream has nothing to patch or confirm against."""
-    runtime = FakeRuntime(FakeSession())
-    with pytest.raises(ServiceError, match=message):
-        run_native_engine(
-            "autosaddler", task, EvalServer(lambda *_: (0.5, {}), max_evals=3), _context(tmp_path, runtime)
-        )
-    assert runtime.spec is None
+def test_autosaddler_transport_runs_with_zero_one_or_many_cases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, task: Task
+) -> None:
+    """AutoSaddler needs no cases and no seed: a blank run patches an empty text, cases go in once.
+
+    Args:
+        tmp_path: Workspace.
+        monkeypatch: Skips packing the GEPA archive.
+        task: The run's starting point and cases.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", MagicMock(side_effect=AssertionError("unused")))
+    session = FakeSession()
+    runtime = FakeRuntime(session)
+
+    result = run_native_engine(
+        "autosaddler", task, EvalServer(lambda *_: (0.5, {}), max_evals=3), _context(tmp_path, runtime)
+    )
+
+    assert result.best_candidate == "better"
+    sent = json.loads(session.files["native_input.json"])["task"]
+    assert sent["seed_candidate"] == (task.seed_candidate or "")
+    assert sent["train_set"] == (task.cases or None)
+    assert "val_set" not in sent
 
 
 @pytest.mark.parametrize("engine_id", ["autoresearch", "meta_harness"])
@@ -928,7 +1261,6 @@ def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path
             "harness": "pi",
             "model": "claude-test",
             "price": {"input": 0.0, "output": 0.0},
-            "effort": "high",
             "ralph": False,
         },
         "task": {"name": "test", "seed_candidate": "seed"},
@@ -977,10 +1309,9 @@ def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path
 
 
 def test_bootstrap_installs_only_the_selected_proposer_harness() -> None:
-    """Skip the Claude CLI install and probe the chosen harness when the proposer is not Claude Code."""
+    """Install and probe only the chosen harness."""
     pi_bootstrap = _bootstrap_command("vercel", harness="pi", install_command="npm install -g pi@1.2.3")
     assert "npm install -g pi@1.2.3" in pi_bootstrap
-    assert "@anthropic-ai/claude-code" not in pi_bootstrap
     assert "pi --version" in pi_bootstrap
     protected = _bootstrap_command("vercel", protected=True, harness="pi", install_command="npm install -g pi@1.2.3")
     assert "npm install" not in protected
@@ -988,7 +1319,7 @@ def test_bootstrap_installs_only_the_selected_proposer_harness() -> None:
     custom = _bootstrap_command("vercel", harness="custom", install_command="pip install my-agent")
     assert "pip install my-agent" in custom
     assert "--version" not in custom.split("pip install my-agent", 1)[1].split("native-python", 1)[0]
-    assert "@anthropic-ai/claude-code" in _bootstrap_command("vercel")
+    assert "codex --version" in _bootstrap_command("vercel")
 
 
 def test_run_native_engine_serializes_the_proposer_without_the_gateway_key(
@@ -999,13 +1330,12 @@ def test_run_native_engine_serializes_the_proposer_without_the_gateway_key(
     session = FakeSession()
     runtime = FakeRuntime(session)
     ctx = _context(tmp_path, runtime)
-    proposer = BlackboxProposer(harness="codex", effort="high", max_candidates_per_iter=3, ralph=False)
+    proposer = BlackboxProposer(harness="codex", max_candidates_per_iter=3, ralph=False)
     ctx.native_options = replace(ctx.native_options, proposer=proposer)
     run_native_engine("autoresearch", Task("seed"), EvalServer(lambda c, e: (0.5, {}), max_evals=3), ctx)
     payload = json.loads(session.files["native_input.json"])
     assert payload["proposer"]["harness"] == "codex"
     assert payload["proposer"]["output_format"] == "codex"
-    assert payload["proposer"]["effort"] == "high"
     assert payload["proposer"]["max_candidates_per_iter"] == 3
     assert payload["proposer"]["ralph"] is False
     assert list(payload["proposer"]["price"].values()) == list(model_token_costs("claude-test"))
@@ -1013,35 +1343,6 @@ def test_run_native_engine_serializes_the_proposer_without_the_gateway_key(
     assert harness_bridge.KEY_TOKEN in session.files["native_input.json"]
     assert session.calls[1][1]["env"][harness_bridge.KEY_ENV] == "skynet-managed"
     assert "codex --version" in session.calls[0][0]
-    assert "@anthropic-ai/claude-code" not in session.calls[0][0]
-
-
-def test_direct_claude_code_box_reaches_only_anthropic_and_flags_the_guest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Ask the parent for Anthropic egress and tell the guest runner to bypass the mailbox."""
-    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
-    session = FakeSession()
-    runtime = FakeRuntime(session)
-    monkeypatch.setattr(native_runtime, "raise_gateway_stop", lambda route: None)
-    runtime.protected = True
-    runtime.injects_headers = False
-    ctx = _context(tmp_path, runtime)
-    ctx.native_options = replace(
-        ctx.native_options,
-        model="claude-sonnet-4-5",
-        direct_anthropic=True,
-        budget_route={"url": "http://127.0.0.1:9000/v1", "token": "scoped"},
-    )
-    run_native_engine(
-        "meta_harness", Task("seed", train_set=[{"id": "case"}]), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx
-    )
-    assert runtime.spec.allowed_hosts == ("api.anthropic.com",)
-    assert session.calls[1][1]["env"][harness_bridge.DIRECT_ANTHROPIC_ENV] == "1"
-    offline = _context(tmp_path, FakeRuntime(FakeSession()))
-    offline.native_options = replace(offline.native_options, direct_anthropic=True)
-    with pytest.raises(ServiceError, match="protected sandbox"):
-        run_native_engine("meta_harness", Task("seed"), EvalServer(lambda *_: (0.5, {}), max_evals=3), offline)
 
 
 class _RecordingMailbox:
@@ -1050,6 +1351,7 @@ class _RecordingMailbox:
     def __init__(self) -> None:
         """Start with no recorded progress."""
         self.lines: list[dict[str, Any]] = []
+        self.labels = threading.local()
 
     def evaluate(self, candidate: Any, example: Any = None) -> tuple[float, dict[str, Any]]:
         """Score a text by its vowel density, ignoring the case.
@@ -1129,3 +1431,96 @@ def test_mailbox_relays_case_scores_and_per_case_versions() -> None:
     assert candidate["parent_id"] is None
     assert candidate["score"] == 0.75
     assert candidate["per_example"] == [{"id": "0", "score": 1.0}, {"id": "1", "score": 0.5}]
+
+
+def test_mailbox_relays_the_lineage_an_engine_reports() -> None:
+    """A version's parent and generation reach the candidate event; engines that omit them keep the defaults."""
+    sink: list[tuple[str, dict[str, Any]]] = []
+    mailbox = native_runtime._EvaluatorMailbox(
+        FakeSession(),
+        EvalServer(lambda *_: (1.0, {}), max_evals=3),
+        "nonce",
+        progress_callback=lambda event, metrics: sink.append((event, metrics)),
+    )
+
+    mailbox.on_output(
+        "stdout",
+        'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 4, "candidate": "x", "score": 0.5, "total_evals": 1, '
+        '"parent_id": 1, "generation": 2}\n'
+        'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 5, "candidate": "y", "score": 0.5, "total_evals": 2, '
+        '"parent_id": null, "generation": true}\n',
+    )
+
+    assert mailbox.error is None
+    candidates = [metrics for event, metrics in sink if event == PROGRESS_CANDIDATE]
+    assert [(c["candidate_id"], c["parent_id"], c["generation"]) for c in candidates] == [
+        ("4", "1", 2),
+        ("5", None, 0),
+    ]
+
+
+def test_a_versions_agent_tool_calls_reach_the_run_log(caplog: pytest.LogCaptureFixture) -> None:
+    """Log how many tool calls the agent spent on a version, and only when the child reports them.
+
+    Args:
+        caplog: Captures the run log.
+    """
+    mailbox = native_runtime._EvaluatorMailbox(FakeSession(), EvalServer(lambda *_: (1.0, {}), max_evals=3), "nonce")
+
+    with caplog.at_level(logging.INFO, logger=native_runtime.logger.name):
+        mailbox.on_output(
+            "stdout",
+            'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 1, "candidate": "x", "score": 0.5, "total_evals": 1, '
+            '"tool_calls": 12, "tool_cap_reached": false}\n'
+            'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 2, "candidate": "y", "score": 0.6, "total_evals": 2, '
+            '"tool_calls": 100, "tool_cap_reached": true}\n'
+            'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 3, "candidate": "z", "score": 0.7, "total_evals": 3}\n',
+        )
+
+    lines = [record.getMessage() for record in caplog.records if "scored" in record.getMessage()]
+    assert lines == [
+        "Candidate 1 scored 0.5000 after 1 evaluations; the agent used 12 tool call(s)",
+        "Candidate 2 scored 0.6000 after 2 evaluations; the agent used 100 tool call(s), hitting the cap",
+        "Candidate 3 scored 0.7000 after 3 evaluations",
+    ]
+
+
+def test_each_evaluation_runs_in_a_scope_of_the_candidate_and_case_the_child_names() -> None:
+    """Scorer events logged while scoring a request carry its candidate and case labels."""
+    seen: list[dict[str, Any] | None] = []
+
+    def evaluator(candidate: str, example: Any = None) -> tuple[float, dict[str, Any]]:
+        """Record the event scope the scorer would run in."""
+        seen.append(sandbox_log._scope.get())
+        return 1.0, {}
+
+    mailbox = native_runtime._EvaluatorMailbox(FakeSession(), EvalServer(evaluator, max_evals=3), "nonce")
+    request = {"candidate": "seed", "example": {"q": 1}, "candidate_id": 4, "case": "2"}
+    mailbox.on_output(
+        "stdout",
+        f"SKYNET_NATIVE_RPC nonce {json.dumps({**request, 'id': '0' * 32})}\n"
+        f"SKYNET_NATIVE_RPC nonce {json.dumps({**request, 'id': '1' * 32, 'candidate_id': True, 'case': [1]})}\n",
+    )
+    assert mailbox.error is None
+    assert seen == [{"candidate": "4", "case": "2"}, {}]
+
+
+def test_the_child_names_the_candidate_and_case_of_each_request(tmp_path: Path) -> None:
+    """Each evaluation is labelled with the registered candidate id and the case's position."""
+    labels: list[tuple[Any, Any]] = []
+    mailbox = _RecordingMailbox()
+
+    def evaluate(candidate: str, example: Any = None, **kwargs: Any) -> tuple[float, dict[str, Any]]:
+        """Record the labels the request would carry."""
+        labels.append((mailbox.labels.candidate_id, mailbox.labels.case))
+        return 1.0, {}
+
+    mailbox.evaluate = evaluate  # type: ignore[method-assign]
+    task = UpstreamTask("seed", train_set=[{"id": "a"}, {"id": "b"}])
+    server = native_runner.ProgressEvalServer(
+        task, mailbox, OptimizeAnythingConfig(max_evals=8, max_concurrency=1), tmp_path
+    )
+    server._register_candidate("seed")
+    server.evaluate("seed", list(server._examples.values())[1])
+    server.evaluate("unregistered", None)
+    assert labels == [(0, "1"), (None, None)]

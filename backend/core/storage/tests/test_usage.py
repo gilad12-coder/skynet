@@ -27,6 +27,7 @@ from core.storage.models import (
     DatasetModel,
     JobEmbeddingModel,
     LogEntryModel,
+    TaggingSessionModel,
 )
 from core.storage.remote import RemoteDBJobStore
 from core.storage.usage import (
@@ -319,6 +320,58 @@ def test_category_items_lists_staged_uploads(store: _SQLiteJobStore) -> None:
     assert items[0].type == "staged_upload"
     assert items[0].name == "data.csv"
     assert items[0].bytes > 0
+
+
+def _insert_tagging_session(store: _SQLiteJobStore, *, session_id: str, username: str, name: str, rows: list) -> None:
+    """Insert a labeling session row directly for storage-accounting tests."""
+    with store._session_factory() as session:
+        session.add(
+            TaggingSessionModel(
+                id=session_id,
+                username=username,
+                name=name,
+                config={},
+                columns=["q"],
+                data=rows,
+                annotations={"0": "yes"},
+                row_count=len(rows),
+            )
+        )
+        session.commit()
+
+
+def test_tagging_sessions_count_toward_storage(store: _SQLiteJobStore) -> None:
+    """A labeling session's rows and labels land in their own breakdown category and the total."""
+    _insert_tagging_session(store, session_id="ts-1", username="alice", name="Labels", rows=[{"q": "x" * 200}])
+
+    usage = compute_user_storage(store.engine, "alice")
+    assert usage.breakdown["tagging_sessions"] > 200
+    assert usage.total == sum(usage.breakdown.values())
+    assert usage.counts["tagging_sessions"] == 1
+    assert compute_user_storage(store.engine, "bob").breakdown["tagging_sessions"] == 0
+
+
+def test_category_items_lists_tagging_sessions(store: _SQLiteJobStore) -> None:
+    """The tagging_sessions category lists sessions whose sizes sum to the category total."""
+    _insert_tagging_session(store, session_id="ts-small", username="alice", name="Small", rows=[{"q": "1"}])
+    _insert_tagging_session(store, session_id="ts-big", username="alice", name="Big", rows=[{"q": "y" * 500}])
+
+    items = compute_user_storage_category_items(store.engine, "alice", "tagging_sessions")
+    assert [item.id for item in items] == ["ts-big", "ts-small"]
+    assert {item.type for item in items} == {"tagging_session"}
+    assert sum(item.bytes for item in items) == compute_user_storage(store.engine, "alice").breakdown["tagging_sessions"]
+
+
+def test_storage_counts_cover_every_category(store: _SQLiteJobStore) -> None:
+    """Item counts are reported for every category, matching what was stored."""
+    _insert_dataset(store, dataset_id="ds-1", owner="alice", name="Set", byte_size=10)
+    _insert_staged(store, staged_id="st-1", username="alice", filename="a.csv", rows=[{"q": "1"}])
+
+    counts = compute_user_storage(store.engine, "alice").counts
+    assert set(counts) == set(STORAGE_CATEGORIES)
+    assert counts["datasets"] == 1
+    assert counts["staged_uploads"] == 1
+    assert counts["optimizations"] == 0
 
 
 def test_category_items_are_owner_scoped(store: _SQLiteJobStore) -> None:

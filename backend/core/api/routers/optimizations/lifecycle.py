@@ -13,7 +13,6 @@ Internal (dashboard plumbing, hidden from public docs):
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -121,44 +120,20 @@ def _require_new_budget_configuration(job: dict[str, Any]) -> None:
         )
 
 
-def _cancel_grid_pair_children(job_store: Any, worker: Any, parent_optimization_id: str) -> None:
-    """Propagate a cancelled distributed grid to its pair-child rows.
+def _require_executable_type(optimization_type: str) -> None:
+    """Refuse to queue new work for a stored grid search.
 
-    Pending children flip terminal instantly (so no worker ever claims
-    them); running children get the same CAS the parent got and their worker
-    notices on its next store-cancel poll. Terminal children are left alone.
-    A child whose CAS loses the race (it just finished) is fine — the
-    finalizer sees the parent already ``cancelled`` and stands down.
+    Stored grid runs stay readable, but the worker no longer executes grid
+    searches, so a clone, retry, resume or restart of one could only fail.
 
     Args:
-        job_store: The active job store.
-        worker: The in-process worker (for same-pod cancel events), or None.
-        parent_optimization_id: The cancelled grid parent.
+        optimization_type: The stored run's overview optimization type.
+
+    Raises:
+        DomainError: 409 ``optimization.grid_search_retired`` for a grid search.
     """
-    getter = getattr(job_store, "get_grid_pair_children", None)
-    if not callable(getter):
-        return
-    try:
-        children = getter(parent_optimization_id)
-    except Exception:
-        logger.exception("Cancel fan-out failed for grid %s", parent_optimization_id)
-        return
-    now = datetime.now(UTC).isoformat()
-    for child in children:
-        if child.get("status") in ("success", "failed", "cancelled", "stopped"):
-            continue
-        child_id = child["optimization_id"]
-        with contextlib.suppress(Exception):
-            if worker:
-                worker.cancel_job(child_id)
-            _set_terminal_if_active(
-                job_store,
-                child_id,
-                ("pending", "validating", "running"),
-                status="cancelled",
-                message=CANCELLATION_REASON,
-                completed_at=now,
-            )
+    if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH:
+        raise DomainError("optimization.grid_search_retired", status=409)
 
 
 def register_lifecycle_routes(
@@ -228,7 +203,6 @@ def register_lifecycle_routes(
             # pre-check above; reflect the row's actual status.
             current = status_to_job_status(job_store.get_job(optimization_id).get("status", "pending"))
             raise DomainError("optimization.already_terminal", status=409, params={"status": current.value})
-        _cancel_grid_pair_children(job_store, worker, optimization_id)
         logger.info("Optimization %s (%s) cancelled", optimization_id, status.value)
         return JobCancelResponse(optimization_id=optimization_id, status="cancelled")
 
@@ -366,7 +340,6 @@ def register_lifecycle_routes(
                         completed_at=now,
                     ):
                         raise ValueError("The run has already reached a terminal state.")
-                    _cancel_grid_pair_children(job_store, worker, optimization_id)
                 except Exception as exc:
                     logger.exception("Bulk cancel failed for %s", optimization_id)
                     skipped.append(
@@ -423,6 +396,7 @@ def register_lifecycle_routes(
 
         overview = parse_overview(job_data)
         optimization_type = overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE, OPTIMIZATION_TYPE_RUN)
+        _require_executable_type(optimization_type)
         prefix = (req.name_prefix or CLONE_NAME_PREFIX).strip()
         source_name = overview.get(PAYLOAD_OVERVIEW_NAME) or optimization_id[:8]
         cloned_payload_seed: dict[str, Any] = {**source_payload, "username": current_user.username}
@@ -492,6 +466,7 @@ def register_lifecycle_routes(
 
         overview = parse_overview(job_data)
         optimization_type = overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE, OPTIMIZATION_TYPE_RUN)
+        _require_executable_type(optimization_type)
         source_name = overview.get(PAYLOAD_OVERVIEW_NAME) or optimization_id[:8]
         retry_name = f"{RETRY_NAME_PREFIX} {source_name}".strip()
         retry_payload_seed: dict[str, Any] = {**source_payload, "username": current_user.username}
@@ -555,12 +530,11 @@ def register_lifecycle_routes(
                 params={"status": status.value},
             )
 
-        has_checkpoint = getattr(job_store, "has_gepa_checkpoint", None)
-        has_pairs = getattr(job_store, "has_grid_pair_results", None)
-        resumable_state = (callable(has_checkpoint) and has_checkpoint(optimization_id)) or (
-            callable(has_pairs) and has_pairs(optimization_id)
+        _require_executable_type(
+            parse_overview(job_data).get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE, OPTIMIZATION_TYPE_RUN)
         )
-        if not resumable_state:
+        has_checkpoint = getattr(job_store, "has_gepa_checkpoint", None)
+        if not (callable(has_checkpoint) and has_checkpoint(optimization_id)):
             raise DomainError("optimization.resume_not_resumable", status=409)
 
         # Continuing a projection pause under a limit the measured burn already
@@ -584,8 +558,8 @@ def register_lifecycle_routes(
 
         # A manual pause/resume or a continuation past the spending limit is
         # user-driven, not failure recovery: it neither consumes an attempt nor is
-        # bounded by the cap. Only failed/cancelled resumes share
-        # ``job_max_attempts`` with automatic pod-failure recovery.
+        # bounded by the cap. Only failed/cancelled resumes count against
+        # ``job_max_attempts``.
         is_paused = status == OptimizationStatus.paused or budget_stop
         if not is_paused:
             attempts = int(job_data.get("attempts") or 0)
@@ -612,7 +586,7 @@ def register_lifecycle_routes(
             raise DomainError(
                 "optimization.resume_not_resumable",
                 status=409,
-                detail="Recovery is waiting for usage settlement or the run changed state.",
+                detail="In-flight usage is still settling or the run changed state.",
             )
         logger.info("Resumed optimization %s in place (attempt %s)", optimization_id, new_attempt)
         return JobCancelResponse(optimization_id=optimization_id, status=OptimizationStatus.pending.value)
@@ -648,6 +622,9 @@ def register_lifecycle_routes(
         """
         job_data, _role = require_role_at_least(job_store, optimization_id, current_user, ShareRole.editor)
         _require_new_budget_configuration(job_data)
+        _require_executable_type(
+            parse_overview(job_data).get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE, OPTIMIZATION_TYPE_RUN)
+        )
 
         status = status_to_job_status(job_data.get("status", "pending"))
         if status not in {OptimizationStatus.failed, OptimizationStatus.cancelled}:
@@ -661,178 +638,6 @@ def register_lifecycle_routes(
             raise DomainError("optimization.not_found", status=404)
         logger.info("Restarted optimization %s in place from scratch", optimization_id)
         return JobCancelResponse(optimization_id=optimization_id, status=OptimizationStatus.pending.value)
-
-    def _rerun_grid_pair(
-        optimization_id: str, pair_index: int, current_user: AuthenticatedUser, *, resume: bool
-    ) -> JobCancelResponse:
-        """Re-queue a terminal grid to re-run only ``pair_index``, keeping the others.
-
-        Treats one grid pair like a single run: every *other* pair is seeded from
-        the stored result so the worker keeps it, and the grid is re-queued in
-        place to run only the target — fresh (``resume=False``) or from its saved
-        checkpoint (``resume=True``). This is unbounded by ``job_max_attempts``
-        (a targeted user action), works regardless of the grid's overall status,
-        and merges the target's new result back into the grid result.
-
-        Args:
-            optimization_id: The grid optimization id.
-            pair_index: The pair to re-run.
-            current_user: Authenticated caller resolved from the bearer token.
-            resume: Continue the pair from its checkpoint instead of re-running it.
-
-        Returns:
-            A ``JobCancelResponse`` echoing the id and its new ``pending`` status.
-
-        Raises:
-            DomainError: 404 (unknown id / not a grid / no result / missing pair),
-                403 (share role below ``editor``), 409 (grid not terminal, or
-                resume with no checkpoint for the pair).
-        """
-        job_data, _role = require_role_at_least(job_store, optimization_id, current_user, ShareRole.editor)
-        overview = parse_overview(job_data)
-        if overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) != OPTIMIZATION_TYPE_GRID_SEARCH:
-            raise DomainError("grid_search.not_a_grid_search", status=404)
-        status = status_to_job_status(job_data.get("status", "pending"))
-        if status not in TERMINAL_STATUSES:
-            raise DomainError("optimization.pair_not_rerunnable", status=409, params={"status": status.value})
-        if not resume:
-            _require_new_budget_configuration(job_data)
-
-        result_data = job_data.get("result")
-        pair_results = result_data.get("pair_results") if isinstance(result_data, dict) else None
-        if not pair_results:
-            raise DomainError("grid_search.no_result_to_modify", status=404)
-        by_index = {pr.get("pair_index"): pr for pr in pair_results if isinstance(pr, dict)}
-        if pair_index not in by_index:
-            raise DomainError("grid_search.pair_position_missing", status=404, params={"pair_index": pair_index})
-
-        if job_data.get("execution_budget_id") is not None:
-            try:
-                attempt = job_store.requeue_for_resume(
-                    optimization_id,
-                    bump_attempts=False,
-                    expected_generation=job_data.get("execution_generation"),
-                    budget_service=BudgetService(engine=job_store.engine),
-                    pair_index_to_resume=pair_index,
-                )
-            except (CheckpointCompatibilityError, ValueError) as error:
-                raise DomainError("optimization.pair_not_resumable", status=409, detail=str(error)) from error
-            if attempt is None:
-                raise DomainError(
-                    "optimization.pair_not_resumable",
-                    status=409,
-                    detail="Recovery is waiting for usage settlement or the run changed state.",
-                )
-            return JobCancelResponse(optimization_id=optimization_id, status=OptimizationStatus.pending.value)
-
-        # Distributed grid: the pair lives in its own child row — re-queue
-        # THAT row (its checkpoints are keyed by the child id + global pair
-        # index) and flip the parent back to ``running`` so the finalizer's
-        # CAS can land when the pair finishes. The parent's stored pair-result
-        # archive row for this index is dropped so the fresh outcome replaces
-        # it at re-assembly.
-        children_getter = getattr(job_store, "get_grid_pair_children", None)
-        pair_children = {
-            int(c.get("pair_index") or 0): c for c in (children_getter(optimization_id) if children_getter else [])
-        }
-        if pair_children:
-            child = pair_children.get(pair_index)
-            if child is None:
-                raise DomainError("grid_search.pair_position_missing", status=404, params={"pair_index": pair_index})
-            child_id = child["optimization_id"]
-            if resume:
-                checkpoint = job_store.get_gepa_checkpoint(child_id, pair_index)
-                if checkpoint is None:
-                    raise DomainError("optimization.pair_not_resumable", status=409)
-            else:
-                job_store.delete_gepa_checkpoint(child_id, pair_index)
-                job_store.delete_grid_pair_results(child_id)
-            job_store.delete_grid_pair_result(optimization_id, pair_index)
-            job_store.update_job(
-                optimization_id,
-                status="running",
-                completed_at=None,
-                message=f"Re-running pair {pair_index}",
-            )
-            if job_store.requeue_for_resume(child_id, bump_attempts=False) is None:
-                raise DomainError("optimization.not_found", status=404)
-            logger.info(
-                "Re-running distributed grid pair %s of %s via child %s (resume=%s)",
-                pair_index,
-                optimization_id,
-                child_id,
-                resume,
-            )
-            return JobCancelResponse(optimization_id=optimization_id, status=OptimizationStatus.running.value)
-
-        if resume:
-            getter = getattr(job_store, "get_gepa_checkpoint", None)
-            checkpoint = getter(optimization_id, pair_index) if callable(getter) else None
-            if checkpoint is None:
-                raise DomainError("optimization.pair_not_resumable", status=409)
-
-        # Seed every other pair so the runner keeps it and re-runs only the target.
-        job_store.delete_grid_pair_results(optimization_id)
-        for idx, pr in by_index.items():
-            if idx != pair_index:
-                job_store.save_grid_pair_result(optimization_id, idx, pr)
-        if not resume:
-            job_store.delete_gepa_checkpoint(optimization_id, pair_index)
-
-        requeued = job_store.requeue_for_resume(optimization_id, bump_attempts=False)
-        if requeued is None:
-            raise DomainError("optimization.not_found", status=404)
-        logger.info("Re-running grid pair %s of %s (resume=%s)", pair_index, optimization_id, resume)
-        return JobCancelResponse(optimization_id=optimization_id, status=OptimizationStatus.pending.value)
-
-    @router.post(
-        "/optimizations/{optimization_id}/pair/{pair_index}/restart",
-        response_model=JobCancelResponse,
-        status_code=202,
-        summary="Re-run one failed grid-search pair from scratch, keeping the others",
-    )
-    def restart_grid_pair(
-        optimization_id: str, pair_index: int, current_user: AuthenticatedUserDep
-    ) -> JobCancelResponse:
-        """Re-run a single grid pair fresh — like a single run's Restart, scoped to one pair.
-
-        Every other pair's result is kept; only this pair re-runs from scratch.
-        Works even on a grid that succeeded overall, so a failed pair never costs
-        you the good ones.
-
-        Args:
-            optimization_id: The grid optimization id.
-            pair_index: The pair to re-run from scratch.
-            current_user: Authenticated caller resolved from the bearer token.
-
-        Returns:
-            A ``JobCancelResponse`` for the re-queued grid.
-        """
-        return _rerun_grid_pair(optimization_id, pair_index, current_user, resume=False)
-
-    @router.post(
-        "/optimizations/{optimization_id}/pair/{pair_index}/resume",
-        response_model=JobCancelResponse,
-        status_code=202,
-        summary="Resume one grid-search pair from its checkpoint, keeping the others",
-    )
-    def resume_grid_pair(
-        optimization_id: str, pair_index: int, current_user: AuthenticatedUserDep
-    ) -> JobCancelResponse:
-        """Resume a single grid pair from its checkpoint — like a single run's Resume, per pair.
-
-        Every other pair's result is kept; only this pair continues mid-GEPA from
-        its saved checkpoint. 409 if the pair has no checkpoint (restart it instead).
-
-        Args:
-            optimization_id: The grid optimization id.
-            pair_index: The pair to resume.
-            current_user: Authenticated caller resolved from the bearer token.
-
-        Returns:
-            A ``JobCancelResponse`` for the re-queued grid.
-        """
-        return _rerun_grid_pair(optimization_id, pair_index, current_user, resume=True)
 
     @router.post(
         "/optimizations/bulk-pin",

@@ -17,7 +17,8 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-from .common import ModelConfig, SplitCounts, SplitFractions
+from .artifacts import ProgramArtifact
+from .common import ModelConfig
 from .results import LMActivity, ModelTokenUsage
 from .scorer_dependencies import ScorerDependencyLock
 
@@ -26,12 +27,15 @@ BLACKBOX_ENGINE_BEST_OF_N = "best_of_n"
 BLACKBOX_ENGINE_AUTORESEARCH = "autoresearch"
 BLACKBOX_ENGINE_META_HARNESS = "meta_harness"
 BLACKBOX_ENGINE_AUTOSADDLER = "autosaddler"
+BLACKBOX_ENGINE_SHINKA_EVOLVE = "shinka_evolve"
 BLACKBOX_STRATEGY_AUTO = "auto"
 BLACKBOX_TARGET_TEXT = "text"
 BLACKBOX_TARGET_AGENT = "agent"
 BLACKBOX_TARGET_REPO = "repo"
 BLACKBOX_HARNESS_PI = "pi"
 BLACKBOX_HARNESS_CODEX = "codex"
+# Claude Code is closed source, so Skynet neither ships nor runs it. Stored
+# runs may still name it; new requests that do are rejected.
 BLACKBOX_HARNESS_CLAUDE_CODE = "claude_code"
 BLACKBOX_HARNESS_OPENCODE = "opencode"
 BLACKBOX_HARNESS_PRIME = "prime"
@@ -39,18 +43,34 @@ BLACKBOX_HARNESS_CUSTOM = "custom"
 BLACKBOX_HARNESSES = (
     BLACKBOX_HARNESS_PI,
     BLACKBOX_HARNESS_CODEX,
-    BLACKBOX_HARNESS_CLAUDE_CODE,
     BLACKBOX_HARNESS_OPENCODE,
     BLACKBOX_HARNESS_PRIME,
     BLACKBOX_HARNESS_CUSTOM,
 )
 # Engines that accept a multi-part (named files) starting point.
-BLACKBOX_MULTI_PART_ENGINES = frozenset({BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_AUTOSADDLER})
-# Engines that can optimize a repository: both drive a coding agent that edits
-# a real checkout. GEPA only searches there; the agent writes every version.
-BLACKBOX_REPO_ENGINES = frozenset({BLACKBOX_ENGINE_AUTORESEARCH, BLACKBOX_ENGINE_GEPA})
+BLACKBOX_MULTI_PART_ENGINES = frozenset(
+    {BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_AUTOSADDLER, BLACKBOX_ENGINE_SHINKA_EVOLVE}
+)
+# Engines that can optimize a repository: each writes versions against a real
+# checkout (a coding agent's edits, or ShinkaEvolve's per-file bundles) and the
+# parent scores the resulting patch.
+BLACKBOX_REPO_ENGINES = frozenset(
+    {
+        BLACKBOX_ENGINE_AUTORESEARCH,
+        BLACKBOX_ENGINE_GEPA,
+        BLACKBOX_ENGINE_BEST_OF_N,
+        BLACKBOX_ENGINE_META_HARNESS,
+        BLACKBOX_ENGINE_AUTOSADDLER,
+        BLACKBOX_ENGINE_SHINKA_EVOLVE,
+    }
+)
 # Single-mode engines that honor an explicit iteration cap.
-BLACKBOX_ITERATION_LIMIT_ENGINES = frozenset({BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER})
+BLACKBOX_ITERATION_LIMIT_ENGINES = frozenset(
+    {BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER, BLACKBOX_ENGINE_SHINKA_EVOLVE}
+)
+CLAUDE_CODE_RETIRED = "Claude Code is no longer available as an agent harness. Choose another one, such as codex."
+# Extra optimization models a single run may add beyond the reflection model.
+BLACKBOX_MAX_EXTRA_REFLECTION_MODELS = 4
 # Stands in for ``module_name`` in the job overview and notifications, where
 # DSPy jobs record the program they optimized.
 BLACKBOX_MODULE_NAME = "blackbox"
@@ -99,9 +119,10 @@ class BlackboxScorer(BaseModel):
 
 
 # Hard stops for a run. ``max_scorer_runs`` caps optimizer-driven scorer
-# calls (the baseline/final test-set evaluations are outside the cap);
+# calls (the final run that re-scores the starting point and the winner is
+# outside the cap);
 # ``max_iterations`` caps proposer rounds for the engines that iterate
-# (Meta-Harness, AutoSaddler); ``stop_at_score`` ends the run early once a version
+# (Meta-Harness, AutoSaddler, ShinkaEvolve generations); ``stop_at_score`` ends the run early once a version
 # reaches it.
 class BlackboxBudget(BaseModel):
     max_scorer_runs: int = Field(default=200, ge=1, le=100_000)
@@ -203,7 +224,9 @@ class BlackboxRepoSource(BaseModel):
 # can be metered independently; ``model`` remains for stored-client compatibility.
 # ``repo``: every version is a patch against ``repo.commit``. The scorer runs
 # on a checkout with the patch applied, after ``setup_command``; the coding
-# agent that writes versions is the request's ``proposer``.
+# agent that writes versions is the request's ``proposer``. The wizard never
+# sends a ``setup_command`` for a repository: the parent infers one from the
+# fetched tree while staging it and stores it back on the run.
 class BlackboxTarget(BaseModel):
     kind: Literal["text", "agent", "repo"] = BLACKBOX_TARGET_TEXT
     harness: str = BLACKBOX_HARNESS_PI
@@ -223,8 +246,8 @@ class BlackboxTarget(BaseModel):
             The validated target instance.
 
         Raises:
-            ValueError: When an agent target names no model or an unknown
-                harness, a custom harness has no run command, or the
+            ValueError: When an agent target names no model or an unknown or
+                retired harness, a custom harness has no run command, or the
                 repository and target kind disagree.
         """
         if (self.kind == BLACKBOX_TARGET_REPO) != (self.repo is not None):
@@ -233,6 +256,8 @@ class BlackboxTarget(BaseModel):
             return self
         if not (self.model or "").strip():
             raise ValueError("An agent target needs a model.")
+        if self.harness == BLACKBOX_HARNESS_CLAUDE_CODE:
+            raise ValueError(CLAUDE_CODE_RETIRED)
         if self.harness not in BLACKBOX_HARNESSES:
             raise ValueError(f"Unknown harness '{self.harness}'. Known harnesses: {', '.join(BLACKBOX_HARNESSES)}.")
         if self.harness == BLACKBOX_HARNESS_CUSTOM and not (self.run_command or "").strip():
@@ -240,22 +265,22 @@ class BlackboxTarget(BaseModel):
         return self
 
 
-BLACKBOX_PROPOSER_EFFORTS = ("low", "medium", "high", "max")
-
-
 # The coding agent that drives a harness-based engine (Meta-Harness,
 # AutoResearch, AutoSaddler and the Auto lanes built from them). Any harness
 # Skynet offers for agent targets can be the proposer; the engine knobs mirror
 # the upstream engine configs and are ignored by engines that lack them.
+# ``max_tool_calls`` caps the tool calls one proposer session may make: the
+# harness is stopped once it starts one more, and the edits it already made
+# stand. It also bounds each ShinkaEvolve agent-editor session. Harnesses whose
+# output reports no tool calls as they happen (a custom command) are not capped.
 class BlackboxProposer(BaseModel):
     harness: str = BLACKBOX_HARNESS_CODEX
     install_command: str | None = None
     run_command: str | None = None
-    effort: str | None = None
-    max_thinking_tokens: int | None = Field(default=None, ge=1_024, le=128_000)
     max_candidates_per_iter: int | None = Field(default=None, ge=1, le=8)
     ralph: bool = True
     max_no_eval_seconds: float | None = Field(default=None, gt=0, le=7_200)
+    max_tool_calls: int = Field(default=100, ge=1, le=1000)
 
     @model_validator(mode="after")
     def _ensure_launchable(self) -> BlackboxProposer:
@@ -265,17 +290,74 @@ class BlackboxProposer(BaseModel):
             The validated proposer instance.
 
         Raises:
-            ValueError: When the harness or effort level is unknown, or a
-                custom harness has no run command.
+            ValueError: When the harness is unknown or retired, or a custom
+                harness has no run command.
         """
+        if self.harness == BLACKBOX_HARNESS_CLAUDE_CODE:
+            raise ValueError(CLAUDE_CODE_RETIRED)
         if self.harness not in BLACKBOX_HARNESSES:
             raise ValueError(
                 f"Unknown proposer harness '{self.harness}'. Known harnesses: {', '.join(BLACKBOX_HARNESSES)}."
             )
         if self.harness == BLACKBOX_HARNESS_CUSTOM and not (self.run_command or "").strip():
             raise ValueError("A custom proposer harness needs a run_command.")
-        if self.effort is not None and self.effort not in BLACKBOX_PROPOSER_EFFORTS:
-            raise ValueError(f"Unknown effort '{self.effort}'. Known levels: {', '.join(BLACKBOX_PROPOSER_EFFORTS)}.")
+        return self
+
+
+# ShinkaEvolve's evolution knobs (island model, parent selection, mutation
+# mix, archive and inspirations, meta notes, parallelism). Every field defaults
+# to the upstream Sakana default, except ``use_text_feedback`` which is on so
+# scorer feedback reaches the mutation prompts. ``patch_diff``/``patch_full``/
+# ``patch_cross`` are the probabilities of each mutation kind and sum to 1.
+# ``novelty`` turns on duplicate rejection: proposals too close (by embedding)
+# to an existing version are judged by the first optimization model and
+# resampled when they add nothing new. ``editor`` picks how a version is
+# written: ``single_call`` is upstream's one model call answering with a
+# diff, full rewrite or crossover; ``agent`` runs a Pi coding agent (read,
+# search and edit tools only) on the parent's files in a scratch directory,
+# routed to the model the bandit picked, and the version is whatever it left
+# there. The patch mix is ignored in ``agent`` mode.
+class BlackboxShinkaSettings(BaseModel):
+    num_islands: int = Field(default=2, ge=1, le=8)
+    migration_interval: int = Field(default=10, ge=1, le=100)
+    migration_rate: float = Field(default=0.0, ge=0, le=1)
+    parent_selection: Literal["weighted", "power_law", "beam_search"] = "weighted"
+    parent_selection_lambda: float = Field(default=10.0, ge=0.1, le=100)
+    exploitation_alpha: float = Field(default=1.0, ge=0, le=10)
+    exploitation_ratio: float = Field(default=0.2, ge=0, le=1)
+    num_beams: int = Field(default=5, ge=1, le=20)
+    patch_diff: float = Field(default=0.6, ge=0, le=1)
+    patch_full: float = Field(default=0.3, ge=0, le=1)
+    patch_cross: float = Field(default=0.1, ge=0, le=1)
+    max_patch_attempts: int = Field(default=1, ge=1, le=10)
+    max_patch_resamples: int = Field(default=3, ge=1, le=10)
+    archive_size: int = Field(default=40, ge=1, le=500)
+    num_archive_inspirations: int = Field(default=1, ge=0, le=10)
+    num_top_k_inspirations: int = Field(default=1, ge=0, le=10)
+    elite_selection_ratio: float = Field(default=0.3, ge=0, le=1)
+    use_text_feedback: bool = True
+    novelty: bool = False
+    code_embed_sim_threshold: float = Field(default=0.99, ge=0.5, le=1)
+    max_novelty_attempts: int = Field(default=3, ge=1, le=10)
+    meta_notes: bool = True
+    meta_rec_interval: int = Field(default=10, ge=1, le=100)
+    meta_max_recommendations: int = Field(default=5, ge=1, le=20)
+    max_parallel_evaluations: int = Field(default=2, ge=1, le=8)
+    max_parallel_proposals: int = Field(default=2, ge=1, le=8)
+    editor: Literal["single_call", "agent"] = "single_call"
+
+    @model_validator(mode="after")
+    def _ensure_consistent(self) -> BlackboxShinkaSettings:
+        """Require a mutation mix that sums to 1.
+
+        Returns:
+            The validated settings instance.
+
+        Raises:
+            ValueError: When the three mutation probabilities do not sum to 1.
+        """
+        if abs(self.patch_diff + self.patch_full + self.patch_cross - 1.0) > 1e-6:
+            raise ValueError("patch_diff, patch_full and patch_cross must sum to 1.")
         return self
 
 
@@ -319,8 +401,6 @@ class BlackboxRunRequest(BaseModel):
     # By-reference twin of ``cases`` for agent callers: a dataset already staged
     # server-side, so the rows never travel through the model's tool arguments.
     staged_dataset_id: str | None = Field(default=None, min_length=1, max_length=64)
-    split_fractions: SplitFractions = Field(default_factory=SplitFractions)
-    shuffle: bool = True
     seed: int | None = None
     budget: BlackboxBudget = Field(default_factory=BlackboxBudget)
     strategy: BlackboxStrategy = Field(default_factory=BlackboxStrategy)
@@ -329,6 +409,15 @@ class BlackboxRunRequest(BaseModel):
     proposer: BlackboxProposer = Field(default_factory=BlackboxProposer)
     task_model_settings: ModelConfig | None = Field(default=None, alias="task_model_config")
     reflection_model_settings: ModelConfig = Field(alias="reflection_model_config")
+    # More optimization models for ShinkaEvolve (alone or as an Auto lane),
+    # which picks between all of them, the reflection model first, with a
+    # bandit. Other engines ignore them.
+    extra_reflection_model_settings: list[ModelConfig] = Field(
+        default_factory=list,
+        alias="extra_reflection_model_configs",
+        max_length=BLACKBOX_MAX_EXTRA_REFLECTION_MODELS,
+    )
+    shinka: BlackboxShinkaSettings | None = None
     token_source: Literal["managed", "byok"] = "managed"
     is_private: bool = False
     economy_mode: bool = Field(
@@ -379,30 +468,30 @@ class BlackboxRunRequest(BaseModel):
             The validated request instance.
 
         Raises:
-            ValueError: When the seed is blank, an empty dict, or missing
-                without an objective; when a multi-part seed is paired with
-                an engine that only takes text; or when an agent target has
-                no cases to run the agent on; or when an iteration cap is
-                supplied outside a single Meta-Harness run.
+            ValueError: When the seed is blank or an empty dict; when a multi-part seed is paired with
+                an engine that only takes text; or when an iteration cap is
+                supplied outside a single Meta-Harness, AutoSaddler or
+                ShinkaEvolve run; or when extra optimization models are sent
+                to a single run of another engine.
         """
         seed = self.seed_candidate
         if self.target.kind == BLACKBOX_TARGET_REPO:
             self._ensure_repo_run()
         elif seed is None:
+            # The scorer alone drives the climb; with nothing to draft a seed
+            # from, the run starts from empty text.
             if not (self.objective or "").strip():
-                raise ValueError("Without a starting point, an objective is required.")
+                self.seed_candidate = ""
         elif isinstance(seed, dict):
             if not seed:
                 raise ValueError("A multi-part starting point needs at least one part.")
             if self.strategy.mode != "single" or self.strategy.engine not in BLACKBOX_MULTI_PART_ENGINES:
                 raise ValueError(
                     "Multi-part starting points are only supported by the "
-                    f"{' and '.join(sorted(BLACKBOX_MULTI_PART_ENGINES))} engines."
+                    f"{', '.join(sorted(BLACKBOX_MULTI_PART_ENGINES))} engines."
                 )
         elif not seed.strip():
             raise ValueError("The starting point cannot be blank.")
-        if self.target.kind == BLACKBOX_TARGET_AGENT and not self.cases:
-            raise ValueError("An agent target needs at least one case: the tasks the agent is run on.")
         if self.target.kind == BLACKBOX_TARGET_AGENT and self.task_model_settings is not None:
             task_model = self.task_model_settings.normalized_identifier()
             if not task_model:
@@ -415,7 +504,15 @@ class BlackboxRunRequest(BaseModel):
         if self.budget.max_iterations is not None and (
             self.strategy.mode != "single" or self.strategy.engine not in BLACKBOX_ITERATION_LIMIT_ENGINES
         ):
-            raise ValueError("An iteration limit is only supported by single Meta-Harness or AutoSaddler runs.")
+            raise ValueError(
+                "An iteration limit is only supported by single Meta-Harness, AutoSaddler or ShinkaEvolve runs."
+            )
+        if (
+            self.extra_reflection_model_settings
+            and self.strategy.mode == "single"
+            and self.strategy.engine != BLACKBOX_ENGINE_SHINKA_EVOLVE
+        ):
+            raise ValueError("Extra optimization models are only used by ShinkaEvolve and Auto runs.")
         return self
 
     def _ensure_repo_run(self) -> None:
@@ -426,7 +523,7 @@ class BlackboxRunRequest(BaseModel):
 
         Raises:
             ValueError: When the seed is multi-part, the scorer is not Python
-                code, or the run is not a single AutoResearch or GEPA run.
+                code, or the run is not a single-engine run.
         """
         multi_part = isinstance(self.seed_candidate, dict)
         if multi_part:
@@ -435,7 +532,7 @@ class BlackboxRunRequest(BaseModel):
             raise ValueError("A repository run is scored by Python code that receives the checkout's path.")
         self.seed_candidate = self.seed_candidate or ""
         if self.strategy.mode != "single" or self.strategy.engine not in BLACKBOX_REPO_ENGINES:
-            raise ValueError(f"A repository target runs a single {' or '.join(sorted(BLACKBOX_REPO_ENGINES))} engine.")
+            raise ValueError("A repository target runs one engine; Auto mode does not optimize a repository.")
 
 
 # ``POST /blackbox/scorer/dry-run``: score one version on one case before
@@ -499,17 +596,52 @@ class BlackboxCandidateNode(BaseModel):
     discovery_evals: int = 0
 
 
-# Result persisted for a finished black-box job. ``baseline_test_metric`` /
-# ``optimized_test_metric`` keep the DSPy result names so the summary and
-# billing paths read them unchanged.
+# One named score a scorer returned, with the feedback that explains it.
+class BlackboxNamedScore(BaseModel):
+    score: float
+    feedback: str = ""
+
+
+# The final run's fresh scores of the starting point and the winner on one case.
+class BlackboxCaseResult(BaseModel):
+    index: int
+    baseline_score: float | None = None
+    best_score: float | None = None
+    baseline_feedback: str | None = None
+    best_feedback: str | None = None
+
+
+# How a unified run's cases were split. Selection (the winner and the
+# regression guard) used ``selection_split``; the reported scores were measured
+# on ``report_split``. ``held_out`` is true only when the report used test
+# cases no optimizer saw.
+class UnifiedSplitCounts(BaseModel):
+    train: int
+    val: int
+    test: int
+    held_out: bool
+    selection_split: Literal["val", "train", "all"]
+    report_split: Literal["test", "val", "all"]
+
+
+# Result persisted for a finished black-box job. The winner is chosen from the
+# optimization run's scores; ``baseline_score`` / ``best_score`` come from a
+# separate final run that scores the starting point and the winner afresh (on
+# every case, or once each without cases). Named scores are means over cases.
 class BlackboxRunResponse(BaseModel):
     optimizer_name: str
     strategy_mode: Literal["auto", "single"]
     engine_used: str
-    split_counts: SplitCounts
-    baseline_test_metric: float | None = None
-    optimized_test_metric: float | None = None
+    baseline_score: float | None = None
+    best_score: float | None = None
     metric_improvement: float | None = None
+    baseline_feedback: str | None = None
+    best_feedback: str | None = None
+    baseline_named_scores: dict[str, BlackboxNamedScore] = Field(default_factory=dict)
+    best_named_scores: dict[str, BlackboxNamedScore] = Field(default_factory=dict)
+    case_results: list[BlackboxCaseResult] = Field(default_factory=list)
+    case_count: int = 0
+    final_scorer_runs: int = 0
     seed_candidate: BlackboxCandidate | None = None
     best_candidate: BlackboxCandidate
     regression_guard_applied: bool = False
@@ -528,6 +660,44 @@ class BlackboxRunResponse(BaseModel):
     lm_activity: LMActivity | None = None
     optimization_metadata: dict[str, Any] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)
+    # Unified runs only: how cases were split, the selection scores measured
+    # on ``split_counts.selection_split`` (``baseline_score``/``best_score``
+    # stay the reported scores, on ``split_counts.report_split``), the
+    # optimizer Auto resolved to, and a DSPy optimizer's compiled program.
+    split_counts: UnifiedSplitCounts | None = None
+    baseline_val_score: float | None = None
+    best_val_score: float | None = None
+    optimizer_resolved: str | None = None
+    program_artifact: ProgramArtifact | None = None
+
+    # Results stored before the final run existed carry the DSPy names for
+    # their held-out scores; read them as the baseline and best scores.
+    @model_validator(mode="before")
+    @classmethod
+    def _fold_held_out_scores(cls, data: Any) -> Any:
+        """Map a stored result's held-out test metrics onto the final-run scores.
+
+        Args:
+            data: The raw result mapping.
+
+        Returns:
+            The mapping with ``baseline_score`` / ``best_score`` filled from the
+            legacy fields when only those exist.
+        """
+        if not isinstance(data, dict):
+            return data
+        legacy = {"baseline_test_metric", "optimized_test_metric", "split_counts"}
+        # A unified run's split_counts is the current field, not the legacy
+        # DSPy SplitCounts; keep it.
+        split = data.get("split_counts")
+        if isinstance(split, UnifiedSplitCounts) or (isinstance(split, dict) and "selection_split" in split):
+            legacy.discard("split_counts")
+        if not legacy & data.keys():
+            return data
+        folded = {key: value for key, value in data.items() if key not in legacy}
+        folded.setdefault("baseline_score", data.get("baseline_test_metric"))
+        folded.setdefault("best_score", data.get("optimized_test_metric"))
+        return folded
 
     # Results stored by the retired plateau relay strategy stay readable:
     # they open as Auto runs whose hand-off lanes ended by completing.
@@ -583,6 +753,42 @@ class BlackboxAgentRunResponse(BaseModel):
     transcript_length: int = 0
 
 
+# One file or folder of a repository run's tree at its pinned commit;
+# ``size`` is a file's byte count when GitHub reports it.
+class BlackboxRepoTreeEntry(BaseModel):
+    path: str
+    type: Literal["file", "dir"]
+    size: int | None = None
+
+
+# ``GET /optimizations/{id}/repository/tree``: every file and folder of a
+# repository run at its pinned commit, sorted by path. ``truncated`` is
+# GitHub's flag for a tree too large to list whole.
+class BlackboxRepoTreeResponse(BaseModel):
+    repository: str
+    commit: str
+    entries: list[BlackboxRepoTreeEntry]
+    truncated: bool = False
+
+
+# ``GET /optimizations/{id}/repository/file``: one file at a repository run's
+# pinned commit. ``content`` is set only for a UTF-8 text file within the size
+# cap; ``missing`` marks a path the commit lacks, which a version may add.
+class BlackboxRepoFileResponse(BaseModel):
+    path: str
+    content: str | None = None
+    binary: bool = False
+    too_large: bool = False
+    missing: bool = False
+    size: int | None = None
+
+
+# ``POST /optimizations/{id}/repository/archive``: the version to zip, sent as
+# its patch text so the request names it exactly as the run recorded it.
+class BlackboxRepoArchiveRequest(BaseModel):
+    patch: str = Field(max_length=10 * 1024 * 1024)
+
+
 # One entry of ``GET /blackbox/engines``: the catalog the wizard renders,
 # with availability resolved for the requested target kind.
 class BlackboxEngineInfo(BaseModel):
@@ -626,9 +832,6 @@ class BlackboxEngineCatalogResponse(BaseModel):
     auto_unavailable_reason: str | None = None
     auto_checkpoint_recovery_supported: bool = False
     auto_checkpoint_recovery_reason: str | None = None
-    # Whether this deployment runs Claude Code as the proposer; each user still
-    # needs a verified Anthropic key of their own.
-    claude_code_proposer_available: bool = False
     proposer_runtimes: list[BlackboxProposerRuntimeInfo] = Field(default_factory=list)
     upstream_revision: str | None = None
     run_recovery_eligibility: str = "Requires a supported engine, a compatible saved checkpoint, and funded headroom."

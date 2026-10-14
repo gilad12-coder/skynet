@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ from core.exceptions import ServiceError
 from core.models.common import ModelConfig
 from core.service_gateway.language_models import lm_call_count, total_tokens_from_history, usage_by_model_from_history
 
+from .. import sandbox_log
 from .. import sandbox_scorer as sandbox_scorer_mod
 from ..harness import GatewayConfig
 from ..sandbox import CommandResult, LocalSubprocessRuntime, OutputSink
@@ -39,7 +41,7 @@ _GATEWAY = ScorerGateway(
     url="http://gw.example/v1", model="judge", api_key="k", billing_model="fake/judge", timeout_seconds=9.0
 )
 _OK = {"score": 0.5, "side_info": {}, "error": None, "usage": []}
-_LLM_SCORER = "def score(candidate, case=None):\n    return float(llm(candidate, case['input']))\n"
+_LLM_SCORER = "def score(candidate, case=None):\n    return float(llm(candidate, case['input'])), 'judged'\n"
 
 
 class _RunnerSession(FakeSandboxSession):
@@ -81,7 +83,8 @@ class _RunnerSession(FakeSandboxSession):
         call_dir = command.split()[-1]
         payload = json.loads(self.files[f"{call_dir}/input.json"])
         self.payloads.append(payload)
-        answer = self._respond(payload)
+        # Like the real runner: the scorer source comes from the box's code file.
+        answer = self._respond({"code": self.files.get(sandbox_scorer_mod.runner.CODE_FILE, ""), **payload})
         if isinstance(answer, CommandResult):
             return answer
         self.files[f"{call_dir}/output.json"] = json.dumps(answer)
@@ -225,7 +228,9 @@ def test_sandbox_scorer_installs_the_runner_once_and_runs_one_call_per_directory
     assert box.timeouts == [7.5, 7.5]
     assert box.payloads[1]["candidate"] == "hello"
     assert box.payloads[1]["case"] == {"input": "x"}
-    assert box.payloads[1]["code"] == "def score(c): return 1"
+    assert "code" not in box.payloads[1]
+    assert box.files[sandbox_scorer_mod.runner.CODE_FILE] == "def score(c): return 1"
+    assert spec.private is True
     assert box.payloads[1]["gateway"] == {
         "url": "http://gw.example/v1",
         "model": "judge",
@@ -543,14 +548,17 @@ def test_probe_scorer_runs_the_real_runner_through_the_local_runtime() -> None:
     """End to end on the host: the vowel scorer scores a seed and returns its side info."""
     probe = probe_scorer(scorer_code=VOWEL_SCORER_CODE, candidate="aeiou", runtime=LocalSubprocessRuntime())
 
-    assert probe == ScorerProbeResult(score=1.0, side_info={"vowels": 5}, error=None, usage_by_model={})
+    assert probe == ScorerProbeResult(
+        score=1.0, side_info={"feedback": "5 vowel(s)", "vowels": 5}, error=None, usage_by_model={}
+    )
 
 
 @pytest.mark.parametrize(
     ("code", "error"),
     [
         ("def score(c, case=None): raise ValueError('bad candidate')", "ValueError: bad candidate"),
-        ("def score(c, case=None): return 'nope'", "scorer must return"),
+        ("def score(c, case=None): return 'nope'", "must return feedback"),
+        ("def score(c, case=None): return 1.0", "must return feedback"),
         ("def !!!", "scorer code has a syntax error"),
         (_LLM_SCORER, "no model was chosen in the Scorer step"),
     ],
@@ -572,7 +580,7 @@ def test_probe_scorer_carries_large_side_info_and_images_back_from_the_box() -> 
     """Multi-megabyte side info, image objects and odd types all survive the file round trip."""
     code = (
         "def score(candidate, case=None):\n"
-        "    return 0.5, {'blob': 'x' * 3_000_000, 'render': Image(base64_data='aGk=', media_type='image/png'), 'odd': {1, 2}}\n"
+        "    return 0.5, {'feedback': 'f', 'blob': 'x' * 3_000_000, 'render': Image(base64_data='aGk=', media_type='image/png'), 'odd': {1, 2}}\n"
     )
 
     probe = probe_scorer(scorer_code=code, candidate="x", runtime=LocalSubprocessRuntime())
@@ -610,7 +618,9 @@ def test_probe_scorer_calls_the_gateway_from_inside_the_box_and_bills_the_tokens
         finally:
             scorer.close()
 
-    assert probe == ScorerProbeResult(score=0.75, side_info={}, error=None, usage_by_model={"fake/judge": (5, 2)})
+    assert probe == ScorerProbeResult(
+        score=0.75, side_info={"feedback": "judged"}, error=None, usage_by_model={"fake/judge": (5, 2)}
+    )
     [request] = judge.requests
     assert request["authorization"] == "Bearer secret-key"
     assert request["body"]["model"] == "judge"
@@ -725,3 +735,35 @@ def test_sandbox_scorer_reports_an_uninstallable_candidate_package_as_feedback()
     assert [request["action"] for request in box.requests] == ["install", "extend"]
     assert box.commands[-1] == f"python3 {RUNNER_FILE} {CALLS_DIR}/000001"
     assert box.closed is False
+
+
+def test_scorer_log_events_reach_the_run_log_tagged_with_their_candidate_and_case() -> None:
+    """End to end through the real runner: ``log()`` streams out, prints stay hidden."""
+    code = (
+        "from skynet import log\n"
+        "def score(candidate, case=None):\n"
+        "    log('judge.retry', 'retrying the judge', level='warning', attempt=2)\n"
+        "    print('hidden from the log')\n"
+        "    return 1.0, 'ok'\n"
+    )
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler(logging.DEBUG)
+    handler.emit = records.append  # type: ignore[method-assign]
+    sandbox_log.stream_logger.addHandler(handler)
+    try:
+        with sandbox_log.event_scope(candidate="3", case="1"):
+            probe = probe_scorer(scorer_code=code, candidate="x", runtime=LocalSubprocessRuntime())
+    finally:
+        sandbox_log.stream_logger.removeHandler(handler)
+    assert probe.score == 1.0
+    [event] = [record for record in records if record.run_log["event"]]
+    assert event.levelno == logging.WARNING
+    assert event.getMessage() == "retrying the judge"
+    assert event.run_log == {
+        "source": "scorer",
+        "event": "judge.retry",
+        "fields": {"attempt": 2},
+        "candidate": "3",
+        "case": "1",
+    }
+    assert not any("hidden from the log" in record.getMessage() for record in records)

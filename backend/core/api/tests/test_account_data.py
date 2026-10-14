@@ -9,10 +9,17 @@ prove deletion never reaches another user's rows.
 
 from __future__ import annotations
 
+import csv
+import io
+import json
+import pickle
+import zipfile
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
+import pyarrow.feather as feather
+import pyarrow.parquet as pq
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -29,12 +36,17 @@ from ...storage.models import (
     BillingCustomerModel,
     DatasetModel,
     JobModel,
+    NotificationModel,
     NotificationPreferenceModel,
+    PushSubscriptionModel,
+    SlackConnectionModel,
     TelemetryEventModel,
+    UserConnectorModel,
     UserModel,
     WalletLedgerModel,
 )
 from ..account_data_service import _anonymized_username
+from ..account_export_formats import EXPORT_FORMATS
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..routers.account_data import create_account_data_router
@@ -77,8 +89,36 @@ def _seed_user_data(engine: Any, username: str, stripe_id: str) -> None:
                 BillingCustomerModel(username=username, stripe_customer_id=stripe_id),
                 NotificationPreferenceModel(
                     username=username,
-                    job_updates_enabled=False,
-                    sharing_updates_enabled=True,
+                    channel_grid={"finished": {"email": False}},
+                    hold_minutes=5,
+                ),
+                NotificationModel(
+                    username=username,
+                    event_type="finished",
+                    title="Run finished",
+                    facts={"score": 0.9},
+                ),
+                PushSubscriptionModel(
+                    username=username,
+                    endpoint=f"https://fcm.googleapis.com/fcm/send/secret-{username}",
+                    p256dh="p256dh-key",
+                    auth="auth-secret",
+                ),
+                SlackConnectionModel(
+                    username=username,
+                    team_id="T1",
+                    team_name="NOVA",
+                    bot_user_id="B1",
+                    slack_user_id="U1",
+                    bot_token_encrypted="encrypted-bot-token",
+                    channel_name="alerts",
+                ),
+                UserConnectorModel(
+                    username=username,
+                    provider="github",
+                    auth_method="oauth",
+                    account_label="octocat",
+                    secret_ciphertext=b"encrypted-token",
                 ),
             ]
         )
@@ -143,10 +183,14 @@ def test_export_returns_owned_data_without_secrets(harness: SimpleNamespace) -> 
     assert body["billing"]["ledger"][0]["kind"] == "grant"
     assert body["api_token"]["last4"] == "abcd"
     assert "token_hash" not in body["api_token"]
-    assert body["notification_preferences"] == {
-        "job_updates_enabled": False,
-        "sharing_updates_enabled": True,
-    }
+    notification_preferences = body["notification_preferences"]
+    assert notification_preferences["grid"]["finished"]["email"] is False
+    assert notification_preferences["grid"]["failed"]["email"] is True
+    assert notification_preferences["hold_minutes"] == 5
+    assert notification_preferences["held_channels"] == ["email"]
+    assert notification_preferences["stuck_fraction"] == 0.25
+    assert body["account"]["intake_completed_at"] is None
+    assert body["account"]["intake_profile"] is None
     # No other account's rows leak into this export.
     assert all(job["optimization_id"] != f"job-{_OTHER}" for job in body["optimizations"])
 
@@ -226,3 +270,66 @@ def test_delete_provisioned_oauth_account_needs_no_password(harness: SimpleNames
     with Session(harness.engine) as session:
         assert session.get(UserModel, oauth_email) is None
         assert session.get(JobModel, f"job-{oauth_email}") is None
+
+
+def test_export_includes_channels_and_connectors_without_secrets(harness: SimpleNamespace) -> None:
+    """Inbox, Chrome alerts, Slack and connectors are exported, their tokens are not."""
+    body = harness.client.get("/account/export").json()
+    raw = json.dumps(body)
+
+    assert body["export_format"] == "skynet-account-export/v2"
+    assert [item["title"] for item in body["notifications"]] == ["Run finished"]
+    assert body["push_subscriptions"][0]["push_service"] == "fcm.googleapis.com"
+    assert body["slack"]["team_name"] == "NOVA"
+    assert body["connectors"][0]["account_label"] == "octocat"
+    for secret in ("secret-", "auth-secret", "p256dh-key", "encrypted-bot-token", "encrypted-token"):
+        assert secret not in raw
+
+
+@pytest.mark.parametrize("export_format", EXPORT_FORMATS)
+def test_export_renders_every_format(harness: SimpleNamespace, export_format: str) -> None:
+    """Each format downloads as a readable file holding the account's runs."""
+    resp = harness.client.get("/account/export", params={"format": export_format})
+    assert resp.status_code == 200
+    disposition = resp.headers["content-disposition"]
+    assert "attachment" in disposition
+    job_id = f"job-{_EMAIL}"
+
+    if export_format == "json":
+        assert resp.json()["optimizations"][0]["optimization_id"] == job_id
+    elif export_format == "pkl":
+        assert disposition.endswith('.pkl"')
+        assert pickle.loads(resp.content)["optimizations"][0]["optimization_id"] == job_id
+    elif export_format == "xlsx":
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as book:
+            assert "xl/workbook.xml" in book.namelist()
+            assert 'name="optimizations"' in book.read("xl/workbook.xml").decode()
+            sheets = "".join(book.read(n).decode() for n in book.namelist() if n.startswith("xl/worksheets/"))
+            assert job_id in sheets
+    else:
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as archive:
+            names = archive.namelist()
+            runs = next(n for n in names if n.endswith(f"/optimizations.{export_format}"))
+            assert any(n.endswith(f"/billing_ledger.{export_format}") for n in names)
+            data = archive.read(runs)
+        if export_format == "csv":
+            rows = list(csv.DictReader(io.StringIO(data.decode("utf-8-sig"))))
+            assert rows[0]["optimization_id"] == job_id
+        else:
+            reader = pq.read_table if export_format == "parquet" else feather.read_table
+            assert reader(io.BytesIO(data)).column("optimization_id").to_pylist() == [job_id]
+
+
+def test_export_rejects_unknown_format(harness: SimpleNamespace) -> None:
+    """An unsupported format is a validation error, not a silent JSON fallback."""
+    assert harness.client.get("/account/export", params={"format": "docx"}).status_code == 422
+
+
+def test_delete_removes_channels_and_connectors(harness: SimpleNamespace) -> None:
+    """Deletion clears the inbox, Chrome alerts, Slack link and connectors, sparing others."""
+    assert harness.client.post("/account/delete", json={"password": _PASSWORD}).status_code == 200
+    with Session(harness.engine) as session:
+        for model in (NotificationModel, PushSubscriptionModel, SlackConnectionModel, UserConnectorModel):
+            owners = set(session.scalars(select(model.username)))
+            assert _EMAIL not in owners
+            assert _OTHER in owners

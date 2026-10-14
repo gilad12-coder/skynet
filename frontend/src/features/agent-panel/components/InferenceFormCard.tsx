@@ -146,15 +146,15 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
 
   return (
     <div className="w-full">
-      <div className="rounded-2xl border border-[#C8A882]/40 bg-gradient-to-br from-[#FAF8F5] to-[#F5EFE6] shadow-[0_4px_16px_rgba(61,46,34,0.06)] overflow-hidden">
-        <div className="px-4 pt-3.5 pb-2.5 border-b border-[#C8A882]/25 bg-white/40">
+      <div className="rounded-2xl border border-primary-fill/40 bg-card overflow-hidden">
+        <div className="px-4 pt-3.5 pb-2.5 border-b border-primary-fill/25 bg-white/40 dark:bg-white/5">
           <div className="flex items-start gap-2.5">
-            <span className="shrink-0 size-7 rounded-full inline-flex items-center justify-center bg-[#C8A882]/25 text-[#3D2E22]">
+            <span className="shrink-0 size-7 rounded-full inline-flex items-center justify-center bg-primary-fill text-primary-foreground">
               <Sparkle className="size-3.5" aria-hidden="true" />
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <div className="text-[0.8125rem] font-semibold text-[#3D2E22] leading-tight">
+                <div className="text-[0.8125rem] font-semibold text-primary leading-tight">
                   {msg("auto.features.agent.panel.lib.tool.meta.literal.70")}
                 </div>
                 {pairIndex != null && (
@@ -171,15 +171,15 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
 
         <div className="px-4 py-4">
           {!info && !infoError && (
-            <div className="text-[0.75rem] text-[#6B5B4A] flex items-center justify-center gap-1.5 py-3">
+            <div className="text-[0.75rem] text-[#6B5B4A] dark:text-[#cfbdaa] flex items-center justify-center gap-1.5 py-3">
               <CircleNotch className="size-3.5 animate-spin" aria-hidden="true" />
               {msg("auto.features.agent.panel.components.inferenceformcard.literal.8")}
             </div>
           )}
 
           {infoError && (
-            <div className="text-[0.75rem] text-[#7A1E13] flex items-start gap-1.5 py-2">
-              <XCircle className="size-3.5 shrink-0 mt-0.5 text-[#9B2C1F]" aria-hidden="true" />
+            <div className="text-[0.75rem] text-[#7A1E13] dark:text-[#ffb2a0] flex items-start gap-1.5 py-2">
+              <XCircle className="size-3.5 shrink-0 mt-0.5 text-[#9B2C1F] dark:text-[#ffa595]" aria-hidden="true" />
               <span className="break-words min-w-0" dir="auto">
                 {infoError}
               </span>
@@ -187,7 +187,7 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
           )}
 
           {info && fields.length === 0 && (
-            <div className="text-[0.75rem] text-[#6B5B4A] py-2">
+            <div className="text-[0.75rem] text-[#6B5B4A] dark:text-[#cfbdaa] py-2">
               {msg("auto.features.agent.panel.components.inferenceformcard.literal.6")}
             </div>
           )}
@@ -196,17 +196,17 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
             <div className="space-y-3 mb-4">
               <div className="flex justify-start">
                 <div
-                  className="max-w-[92%] rounded-2xl rounded-br-sm bg-[#3D2E22] px-4 py-3 text-sm text-[#FAF8F5] shadow-sm sm:max-w-[80%]"
+                  className="max-w-[92%] rounded-2xl rounded-br-sm bg-primary-fill px-4 py-3 text-sm text-primary-foreground sm:max-w-[80%]"
                   dir="ltr"
                 >
                   {fields.map((k, i, arr) => (
                     <div key={k} className="font-mono leading-relaxed">
-                      <span className="text-[#C8A882] text-xs">{k}: </span>
+                      <span className="text-primary text-xs">{k}: </span>
                       <span className="whitespace-pre-wrap break-words">
                         {submittedInputs[k] ?? ""}
                       </span>
                       {i < arr.length - 1 && arr.length > 1 && (
-                        <div className="h-px bg-white/10 my-1.5" />
+                        <div className="h-px bg-white/10 dark:bg-black/10 my-1.5" />
                       )}
                     </div>
                   ))}
@@ -236,8 +236,8 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
           )}
 
           {runError && (
-            <div className="mb-3 text-[0.75rem] text-[#7A1E13] flex items-start gap-1.5">
-              <XCircle className="size-3.5 shrink-0 mt-0.5 text-[#9B2C1F]" aria-hidden="true" />
+            <div className="mb-3 text-[0.75rem] text-[#7A1E13] dark:text-[#ffb2a0] flex items-start gap-1.5">
+              <XCircle className="size-3.5 shrink-0 mt-0.5 text-[#9B2C1F] dark:text-[#ffa595]" aria-hidden="true" />
               <span className="break-words min-w-0" dir="auto">
                 {msg("auto.features.agent.panel.components.inferenceformcard.literal.7")} {runError}
               </span>
@@ -315,7 +315,7 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
                         }}
                         rows={1}
                         disabled={running || disabled}
-                        className="block h-[44px] max-h-[120px] w-full resize-none overflow-hidden rounded-2xl border border-[#DDD4C8] bg-muted/20 px-4 py-[11px] text-sm font-mono leading-[20px] shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/40 focus:border-[#C8A882] focus:outline-none focus-visible:outline-none focus-visible:ring-0 disabled:opacity-60 sm:h-[42px] [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+                        className="block h-[44px] max-h-[120px] w-full resize-none overflow-hidden rounded-2xl border border-border bg-muted/20 px-4 py-[11px] text-sm font-mono leading-[20px] shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/40 focus:border-primary-fill focus:outline-none focus-visible:outline-none focus-visible:ring-0 disabled:opacity-60 sm:h-[42px] [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
                       />
                     </div>
                   ))}

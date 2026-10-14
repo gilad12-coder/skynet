@@ -4,10 +4,13 @@ import * as React from "react";
 import { toast } from "react-toastify";
 import { readPref } from "@/features/settings";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { I18N_KEY } from "@/shared/lib/i18n";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
 
 import type { AgentMessage, AgentStatus, AgentToolCall } from "@/shared/ui/agent/types";
 import { parseTurnStats } from "@/shared/ui/agent/turn-stats";
+import { midTurnOf, SteerQueue, type MidTurnQueue } from "@/shared/ui/agent/steer-queue";
+import { agentSteerChannel, newSteerKey } from "@/shared/ui/agent/use-steer-queue";
 
 import { confirmGeneralistApproval, streamGeneralistAgent } from "../lib/stream";
 import type {
@@ -35,6 +38,8 @@ export interface GeneralistAgentState {
   reasoningStartedAt: number | null;
   reasoningEndedAt: number | null;
   error: string | null;
+  /** Machine code of the error, e.g. the balance gate's, so the panel can offer its way out. */
+  errorCode: string | null;
   pendingApproval: PendingApprovalPayload | null;
   conversationId: string | null;
   /** LiteLLM id of the composer menu's chosen model; null runs the default. */
@@ -44,6 +49,9 @@ export interface GeneralistAgentState {
   reasoningEffort: string | null;
   setReasoningEffort: (effort: string | null) => void;
   send: (message: string, wizardStateOverride?: WizardState) => void;
+  /** The displayed chat's messages sent mid-turn: steered into the running
+   *  turn or queued to run after it. */
+  midTurn: MidTurnQueue;
   editAndResend: (messageIndex: number, content: string) => void;
   retry: () => void;
   stop: () => void;
@@ -83,8 +91,7 @@ const OPTIMIZATION_MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "bulk_delete_jobs_optimizations_bulk_delete_post",
   "cancel_job_optimizations",
   "bulk_cancel_jobs_optimizations_bulk_cancel_post",
-  "submit_job_run_post",
-  "submit_grid_search_grid_search_post",
+  "submit_unified_run_optimize_post",
   "rename_job_optimizations",
   "toggle_pin_job_optimizations",
   "clone_job_optimizations",
@@ -93,17 +100,12 @@ const OPTIMIZATION_MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "pause_job_optimizations",
   "resume_job_optimizations",
   "restart_job_optimizations",
-  "submit_blackbox_run_blackbox_run_post",
 ]);
 
 // Submit tools whose success consumes the staged dataset + readiness. After
 // one fires we drop the sticky wizard overlay so the next turn starts clean
 // rather than re-carrying the just-submitted run's dataset id and flags.
-const SUBMIT_TOOLS: ReadonlySet<string> = new Set([
-  "submit_job_run_post",
-  "submit_grid_search_grid_search_post",
-  "submit_blackbox_run_blackbox_run_post",
-]);
+const SUBMIT_TOOLS: ReadonlySet<string> = new Set(["submit_unified_run_optimize_post"]);
 
 // Cap on each prior tool result echoed back in chat history; the backend
 // bounds it again, this just keeps the request body small.
@@ -144,6 +146,8 @@ interface SessionView {
   reasoningStartedAt: number | null;
   reasoningEndedAt: number | null;
   error: string | null;
+  /** Machine code of the error, e.g. the balance gate's, so the panel can offer its way out. */
+  errorCode: string | null;
   pendingApproval: PendingApprovalPayload | null;
 }
 
@@ -181,6 +185,7 @@ function blankSession(key: string): SessionView {
     reasoningStartedAt: null,
     reasoningEndedAt: null,
     error: null,
+    errorCode: null,
     pendingApproval: null,
   };
 }
@@ -224,6 +229,29 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
   const runtimesRef = React.useRef(new Map<string, SessionRuntime>());
   const streamingKeysRef = React.useRef(new Set<string>());
   const queueRef = React.useRef<string[]>([]);
+
+  // Each chat's follow-ups sent mid-turn. Separate from the parallel-stream
+  // queue above: these wait for their own chat's turn to end, then run in it.
+  // Each queue's sender is attached by the effect further down.
+  const [steerQueues] = React.useState(() => new Map<string, SteerQueue>());
+  const steerQueueFor = React.useCallback(
+    (key: string): SteerQueue => {
+      let queue = steerQueues.get(key);
+      if (!queue) {
+        queue = new SteerQueue();
+        steerQueues.set(key, queue);
+      }
+      return queue;
+    },
+    [steerQueues],
+  );
+  const dropSteerQueue = React.useCallback(
+    (key: string) => {
+      steerQueues.get(key)?.clear();
+      steerQueues.delete(key);
+    },
+    [steerQueues],
+  );
 
   // Seeded from the settings-modal default; the panel is client-only
   // (ssr:false), so the localStorage read is hydration-safe.
@@ -401,6 +429,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         reasoningStartedAt: Date.now(),
         reasoningEndedAt: null,
         error: null,
+        errorCode: null,
         pendingApproval: null,
       });
 
@@ -408,6 +437,13 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         rt.controller = null;
         if (streamingKeysRef.current.delete(key)) requestPump();
       };
+
+      const steerKey = newSteerKey();
+      const steerQueue = steerQueueFor(key);
+      steerQueue.openTurn(agentSteerChannel(steerKey));
+      // The reply bubble closed by the latest applied steer, which the
+      // finished turn's `assistant_message` may repeat.
+      let replyBeforeSteer: string | null = null;
 
       // Every stream callback short-circuits on ``controller.signal.aborted``
       // so a slow stream replaced by a fresh ``send`` (or by the unmount-time
@@ -423,9 +459,32 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           locale: getActiveLocale(),
           model: modelRef.current ?? undefined,
           reasoning_effort: effortRef.current ?? undefined,
+          steer_key: steerKey,
         },
         {
           signal: controller.signal,
+          onSteerApplied: ({ ids, text }) => {
+            if (controller.signal.aborted) return;
+            steerQueue.applied(ids);
+            if (!text.trim()) return;
+            replyBeforeSteer = (replyBeforeSteer ?? "") + rt.replyBuf;
+            rt.replyBuf = "";
+            // The reply so far stays as its own bubble, tool activity and
+            // all; the rest of the turn streams into a new one after the
+            // user's message.
+            patchMessages(key, (prev) => {
+              const last = prev[prev.length - 1];
+              const kept =
+                last && last.role === "assistant" && !last.content && !last.toolCalls?.length
+                  ? prev.slice(0, -1)
+                  : prev;
+              return [
+                ...kept,
+                { role: "user", content: text },
+                { role: "assistant", content: "", toolCalls: [] },
+              ];
+            });
+          },
           onConversationMeta: (ev) => {
             if (controller.signal.aborted) return;
             if (!ev.conversation_id) return;
@@ -522,6 +581,15 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             patchMessages(key, (prev) => {
               const last = prev[prev.length - 1];
               if (!last || last.role !== "assistant") return prev;
+              let reply = result.assistant_message;
+              if (replyBeforeSteer !== null) {
+                if (replyBeforeSteer && reply.startsWith(replyBeforeSteer)) {
+                  reply = reply.slice(replyBeforeSteer.length).trimStart();
+                }
+                reply = last.content || reply;
+                // Nothing came after the steer: no hollow bubble.
+                if (!reply && !last.toolCalls?.length) return prev.slice(0, -1);
+              }
               const fallback =
                 last.content ||
                 (last.toolCalls?.length
@@ -530,7 +598,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
               const next = prev.slice();
               next[next.length - 1] = {
                 ...last,
-                content: result.assistant_message || fallback,
+                content: reply || fallback,
                 model: result.model,
                 servedModel: result.served_model,
                 stats: parseTurnStats(result.stats),
@@ -547,7 +615,12 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
               // Known machine codes get a localized message; anything else
               // shows the backend's text as-is.
               error:
-                code === "context_too_long" ? msg("agent.error.context_too_long") : message,
+                code === "context_too_long"
+                  ? msg("agent.error.context_too_long")
+                  : code === I18N_KEY.BILLING_INSUFFICIENT_FUNDS
+                    ? msg("agent.error.insufficient_funds")
+                    : message,
+              errorCode: code ?? null,
             });
             patchMessages(key, (prev) => {
               const last = prev[prev.length - 1];
@@ -578,7 +651,17 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         },
       );
     },
-    [appendReply, eventContext, finishToolCall, getRuntime, patchMessages, patchSession, pushToolCall, requestPump],
+    [
+      appendReply,
+      eventContext,
+      finishToolCall,
+      getRuntime,
+      patchMessages,
+      patchSession,
+      pushToolCall,
+      requestPump,
+      steerQueueFor,
+    ],
   );
 
   // The pump is idempotent, so the mount-time effect run and
@@ -682,6 +765,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           reasoningStartedAt: null,
           reasoningEndedAt: null,
           error: null,
+          errorCode: null,
           pendingApproval: null,
         });
       });
@@ -717,6 +801,20 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     },
     [getRuntime, requestRun],
   );
+
+  // A follow-up runs in the chat it was sent from, displayed or not. Ending
+  // a turn (done, error, stop) settles its unread steers and lets the chat's
+  // queue run its next follow-up.
+  React.useEffect(() => {
+    for (const [key, queue] of steerQueues) {
+      queue.setSend((text) => {
+        const session = sessionsRef.current.get(key);
+        if (session) requestRun(key, text, session.messages);
+      });
+      const session = sessions.get(key);
+      queue.setBusy(session ? isBusy(session) : false);
+    }
+  }, [sessions, steerQueues, requestRun, activeKey]);
 
   const editAndResend = React.useCallback(
     (messageIndex: number, content: string) => {
@@ -778,11 +876,13 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         if (key === keepKey) continue;
         if (isBusy(session) || session.status === "error") continue;
         if (session.conversationId === null && session.messages.length > 0) continue;
+        if (steerQueues.get(key)?.hasPending()) continue;
         draft.delete(key);
         runtimesRef.current.delete(key);
+        dropSteerQueue(key);
       }
     },
-    [],
+    [dropSteerQueue, steerQueues],
   );
 
   const newSession = React.useCallback(() => {
@@ -841,6 +941,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       const key = found;
       abortSession(key);
       runtimesRef.current.delete(key);
+      dropSteerQueue(key);
       const wasActive = activeKeyRef.current === key;
       if (wasActive) {
         const freshKey = nextKey();
@@ -855,10 +956,21 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         });
       }
     },
-    [abortSession, commit, nextKey, setActive],
+    [abortSession, commit, nextKey, setActive, dropSteerQueue],
   );
 
   const active = sessions.get(activeKey) ?? blankSession(activeKey);
+
+  const activeSteerQueue = steerQueueFor(activeKey);
+  const steerSnapshot = React.useSyncExternalStore(
+    activeSteerQueue.subscribe,
+    activeSteerQueue.getSnapshot,
+    activeSteerQueue.getSnapshot,
+  );
+  const midTurn = React.useMemo(
+    () => midTurnOf(() => activeSteerQueue, steerSnapshot),
+    [activeSteerQueue, steerSnapshot],
+  );
 
   const confirmApproval = React.useCallback(
     async (approved: boolean) => {
@@ -902,6 +1014,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     reasoningStartedAt: active.reasoningStartedAt,
     reasoningEndedAt: active.reasoningEndedAt,
     error: active.error,
+    errorCode: active.errorCode,
     pendingApproval: active.pendingApproval,
     conversationId: active.conversationId,
     model,
@@ -909,6 +1022,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     reasoningEffort,
     setReasoningEffort,
     send,
+    midTurn,
     editAndResend,
     retry,
     stop,

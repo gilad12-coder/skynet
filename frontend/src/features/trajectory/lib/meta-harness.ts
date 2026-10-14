@@ -21,6 +21,7 @@ const CLIMB_ENGINES: ReadonlySet<string> = new Set([
   "meta_harness",
   "autoresearch",
   "autosaddler",
+  "shinka_evolve",
 ]);
 
 function laneOf(event: ProgressEvent): number {

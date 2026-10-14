@@ -1,26 +1,23 @@
 """Routes for submitting optimization jobs. [PUBLIC DEV API]
 
-``POST /run`` — single optimization run.
-``POST /grid-search`` — sweep over (generation, reflection) model pairs.
-``POST /blackbox/run`` — black-box text optimization against a scorer.
-``POST /blackbox/scorer/dry-run`` — score one version before submitting.
+``POST /optimize`` — one optimization run of a prompt, code, text or DSPy
+program, for every optimizer.
+``GET /optimizers`` — the optimizers that fit a setup, with availability.
 ``GET /blackbox/engines`` — the engine catalog with per-deployment availability.
 
-``/run`` and ``/grid-search`` are part of the public dev surface and are
-listed in ``_SCALAR_PUBLIC_PATHS`` (see ``backend/core/api/app.py``); the
-black-box routes join it once the contract settles.
+Stored grid-search, DSPy and legacy black-box runs stay readable; the worker
+still executes legacy payloads already queued or resumed.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header
-from sqlalchemy.orm import Session
+from pydantic import ValidationError
 
 from ...billing import (
     ProviderKeyVault,
@@ -31,93 +28,79 @@ from ...billing import (
     provider_slug_for_model,
 )
 from ...billing.budgets import BudgetError, BudgetService
-from ...billing.credential_safety import public_endpoint
 from ...billing.protected_credentials import ProtectedCredentialVault, protect_execution_credentials
 from ...config import settings
 from ...constants import (
     COMPOSITION_SINGLE,
-    COMPOSITION_WORKFLOW,
     OPTIMIZATION_TYPE_BLACKBOX,
-    OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
-    PAYLOAD_OVERVIEW_COLUMN_MAPPING,
-    PAYLOAD_OVERVIEW_COMPILE_KWARGS,
+    PAYLOAD_OVERVIEW_ARTIFACT_KIND,
     PAYLOAD_OVERVIEW_COMPOSITION,
-    PAYLOAD_OVERVIEW_DATASET_FILENAME,
+    PAYLOAD_OVERVIEW_DATA_MODE,
     PAYLOAD_OVERVIEW_DATASET_ROWS,
     PAYLOAD_OVERVIEW_DESCRIPTION,
     PAYLOAD_OVERVIEW_ESTIMATED_HIGH,
     PAYLOAD_OVERVIEW_ESTIMATED_LOW,
-    PAYLOAD_OVERVIEW_GENERATION_MODELS,
     PAYLOAD_OVERVIEW_IS_PRIVATE,
     PAYLOAD_OVERVIEW_MAX_COST_CENTS,
     PAYLOAD_OVERVIEW_MODEL_NAME,
     PAYLOAD_OVERVIEW_MODEL_SETTINGS,
-    PAYLOAD_OVERVIEW_MODULE_KWARGS,
     PAYLOAD_OVERVIEW_MODULE_NAME,
     PAYLOAD_OVERVIEW_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
-    PAYLOAD_OVERVIEW_OPTIMIZER_KWARGS,
+    PAYLOAD_OVERVIEW_OPTIMIZER_CHOICE,
     PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
+    PAYLOAD_OVERVIEW_OPTIMIZER_RESOLVED,
+    PAYLOAD_OVERVIEW_PAYLOAD_KIND,
     PAYLOAD_OVERVIEW_REFLECTION_MODEL,
-    PAYLOAD_OVERVIEW_REFLECTION_MODELS,
     PAYLOAD_OVERVIEW_SEED,
     PAYLOAD_OVERVIEW_SHUFFLE,
-    PAYLOAD_OVERVIEW_SIGNATURE_CODE,
-    PAYLOAD_OVERVIEW_SOURCE_DATASET_ID,
+    PAYLOAD_OVERVIEW_SPLIT_COUNTS,
     PAYLOAD_OVERVIEW_SPLIT_FRACTIONS,
-    PAYLOAD_OVERVIEW_TASK_FINGERPRINT,
     PAYLOAD_OVERVIEW_TASK_MODEL,
     PAYLOAD_OVERVIEW_TOKEN_SOURCE,
     PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL,
-    PAYLOAD_OVERVIEW_TOOL_SOURCE,
-    PAYLOAD_OVERVIEW_TOTAL_PAIRS,
     PAYLOAD_OVERVIEW_USERNAME,
-    PAYLOAD_OVERVIEW_WORKFLOW,
     TOKEN_SOURCE_BYOK,
 )
-from ...i18n import t
 from ...i18n_keys import I18nKey
 from ...models import (
+    DSPY_OPTIMIZERS,
+    FEEDBACK_OPTIMIZERS,
+    UNIFIED_PAYLOAD_KIND,
+    ArtifactKind,
     BlackboxEngineCatalogResponse,
     BlackboxRunRequest,
-    GridSearchRequest,
+    DataMode,
     OptimizationStatus,
     OptimizationSubmissionResponse,
-    RunRequest,
-    ScorerDryRunRequest,
-    ScorerDryRunResponse,
+    OptimizerCatalogResponse,
+    OptimizerChoice,
+    OptimizerOption,
+    UnifiedData,
+    UnifiedRunRequest,
+    optimizer_family,
+    optimizers_for,
+    resolve_optimizer,
 )
-from ...models.blackbox import BLACKBOX_MODULE_NAME, BLACKBOX_STRATEGY_AUTO
+from ...models.blackbox import BLACKBOX_ITERATION_LIMIT_ENGINES, BLACKBOX_MODULE_NAME, BLACKBOX_TARGET_TEXT
 from ...models.common import ModelConfig, OptimizationType
 from ...models.submissions import _OptimizationRequestBase
-from ...models.workflow import WORKFLOW_MODULE_NAME
-from ...notifications import notify_job_started
-from ...registry import RegistryError
-from ...service_gateway import ServiceError
-from ...service_gateway.optimization.blackbox.service import (
-    claude_code_available,
-    claude_code_in_use,
-    claude_code_model,
-    engine_catalog,
-    validate_blackbox_payload,
-)
-from ...service_gateway.safe_exec import validate_signature_code
-from ...storage.dataset_library import DatasetLibraryStore, PostgresDatasetBlobStore
+from ...models.unified import METRIC_SIGNATURE, RUN_ENTRY
+from ...service_gateway.optimization.blackbox.registry import ENGINES
+from ...service_gateway.optimization.blackbox.service import engine_catalog
+from ...service_gateway.optimization.unified.contract import validate_unified_payload
+from ...service_gateway.optimization.unified.split import split_cases, task_fingerprint
 from ...storage.preflights import PreflightStore, setup_seed
 from ...storage.usage import json_byte_size
 from ...worker.engine import get_worker
 from ..auth import AuthenticatedUser, get_authenticated_user
-from ..dataset_access import resolve_effective_role
 from ..errors import DomainError
 from ..model_billing import normalize_model_token_sources
-from ..model_catalog import get_catalog_cached
 from ..preflight_execution import WizardPreflightRequest, run_preflight
-from ..protected_preview import run_protected_preview
 from ..rate_limit import enforce_submission_rate
 from ..submission_idempotency import resolve_submission_replay_keys
 from ._helpers import (
-    compute_task_fingerprint,
     enforce_job_quota,
     enforce_storage_quota,
     stable_seed,
@@ -126,6 +109,13 @@ from ._helpers import (
 from .execution_budgets import budget_http_error
 
 logger = logging.getLogger(__name__)
+
+# Preflight evidence and replay keys are scoped by request family; unified
+# runs are their own family so their evidence never matches a legacy payload.
+UNIFIED_WORKFLOW = "unified"
+_UNIFIED_CONTRACT_FAILED = "submit.unified.contract_failed"
+# The DSPy optimizer that bootstraps demos from the task model alone.
+_DSPY_WITHOUT_REFLECTION = frozenset({"dspy_bootstrap_fewshot"})
 
 
 def _ensure_api_budget(
@@ -241,6 +231,20 @@ def _persistable_payload(payload, job_store) -> dict:
     )
 
 
+def _preflight_workflow(payload) -> str:
+    """Name the request family a payload's setup evidence was recorded under.
+
+    Args:
+        payload: Typed submission request.
+
+    Returns:
+        ``"unified"``, ``"anything"`` or ``"dspy"``.
+    """
+    if isinstance(payload, UnifiedRunRequest):
+        return UNIFIED_WORKFLOW
+    return "anything" if isinstance(payload, BlackboxRunRequest) else "dspy"
+
+
 def _create_submission_job(job_store, optimization_id: str, payload, key: str | None, verified: dict | None) -> None:
     """Atomically attach verified setup spend to the single accepted root job.
 
@@ -266,7 +270,7 @@ def _create_submission_job(job_store, optimization_id: str, payload, key: str | 
             preflight_id=payload.preflight_id,
             preflight_fingerprint=payload.preflight_fingerprint,
             preflight_payload=verified,
-            preflight_workflow="anything" if isinstance(payload, BlackboxRunRequest) else "dspy",
+            preflight_workflow=_preflight_workflow(payload),
         )
         payload.execution_budget_generation = job["execution_budget_generation"]
     except BudgetError as error:
@@ -360,197 +364,6 @@ def _existing_submission_response(job_store, optimization_id: str) -> Optimizati
         module_name=overview.get(PAYLOAD_OVERVIEW_MODULE_NAME, ""),
         optimizer_name=overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME, ""),
     )
-
-
-def _catalog_models_as_configs() -> list[ModelConfig]:
-    """Return every available catalog model wrapped as a ``ModelConfig``.
-
-    Used by the grid-search route to expand ``use_all_available_*`` flags
-    into concrete model lists.
-
-    Returns:
-        A list of ``ModelConfig`` instances, one per available catalog model.
-
-    Raises:
-        DomainError: 400 ``submit.no_models_available`` when the catalog
-            reports no available models (usually no provider API keys configured).
-    """
-    catalog = get_catalog_cached()
-    configs = [ModelConfig(name=entry.value) for entry in catalog.models]
-    if not configs:
-        raise DomainError("submit.no_models_available", status=400)
-    return configs
-
-
-def _enforce_vision_capability(
-    *,
-    signature_code: str,
-    candidate_models: list[ModelConfig],
-) -> None:
-    """Reject submissions whose signature has dspy.Image inputs but a non-vision model.
-
-    Parses ``signature_code`` once via the safe-exec subprocess, then — only when
-    ``dspy.Image`` typed inputs are present — looks up every candidate model in
-    the catalog and requires ``supports_vision`` for each one.
-
-    Args:
-        signature_code: User-provided DSPy Signature source.
-        candidate_models: Models that would receive image-bearing inputs.
-
-    Raises:
-        DomainError: 400 ``submission.vision_required`` listing offending
-            models when any candidate lacks vision support.
-    """
-    intro = validate_signature_code(signature_code)
-    image_fields = list(intro.image_input_fields)
-    if not image_fields:
-        return
-
-    catalog = get_catalog_cached()
-    vision_supported: dict[str, bool] = {entry.value: entry.supports_vision for entry in catalog.models}
-
-    offenders = sorted(
-        {
-            cfg.normalized_identifier()
-            for cfg in candidate_models
-            if not vision_supported.get(cfg.normalized_identifier(), False)
-        }
-    )
-    if offenders:
-        raise DomainError(
-            I18nKey.SUBMISSION_VISION_REQUIRED,
-            status=400,
-            fields=", ".join(image_fields),
-            model=", ".join(offenders),
-        )
-
-
-def _materialize_staged_dataset(
-    payload: _OptimizationRequestBase,
-    *,
-    job_store,
-    username: str,
-) -> str | None:
-    """Inline a staged dataset into ``payload.dataset`` ahead of validation.
-
-    Agent-driven submits arrive with ``staged_dataset_id`` set instead of an
-    inline ``dataset`` so the model never has to ferry tens of thousands of
-    rows through its tool arguments. This helper loads the persisted rows
-    and swaps them onto ``payload.dataset``; eviction happens in
-    :func:`_evict_staged_dataset`, called only after the job has been
-    successfully created. Keeping the row alive across validation lets a
-    failed submit (e.g. missing reflection_model_config) be retried without
-    forcing the user to re-upload — historically the eager delete here
-    silently consumed the staged row on the first 422 and the next attempt
-    hit 400 ``staged_dataset_not_found``.
-
-    Args:
-        payload: The validated request body (mutated in place).
-        job_store: Backend exposing ``get_staged_dataset``.
-        username: Authenticated submitter; staging rows are scoped to one owner.
-
-    Returns:
-        The staged id when one was consumed (caller passes it to
-        :func:`_evict_staged_dataset` after the job lands), or ``None`` for
-        inline payloads.
-
-    Raises:
-        DomainError: 400 ``submission.staged_dataset_not_found`` when the id is
-            unknown or owned by another user.
-    """
-    staged_id = payload.staged_dataset_id
-    if not staged_id:
-        return None
-    rows = job_store.get_staged_dataset(staged_id, username)
-    if not rows:
-        raise DomainError(
-            I18nKey.SUBMISSION_STAGED_DATASET_NOT_FOUND,
-            status=400,
-            staged_dataset_id=staged_id,
-        )
-    payload.dataset = rows
-    payload.staged_dataset_id = None
-    return staged_id
-
-
-def _evict_staged_dataset(job_store, staged_id: str | None, username: str) -> None:
-    """Drop the staged row after the job has been committed; never raises."""
-    if not staged_id:
-        return
-    try:
-        job_store.delete_staged_dataset(staged_id, username)
-    except Exception:
-        logger.warning("Failed to evict staged dataset %s after consumption", staged_id, exc_info=True)
-
-
-def _materialize_library_dataset(
-    payload: _OptimizationRequestBase,
-    *,
-    job_store,
-    user: AuthenticatedUser,
-) -> str | None:
-    """Inline a personal-library dataset into ``payload.dataset`` by reference.
-
-    The submit-wizard consumer path sends ``source_dataset_id`` instead of inline
-    rows so the browser never re-uploads a file already saved to the library.
-    This helper resolves the caller's access (viewer-or-above on the dataset),
-    loads the saved rows onto ``payload.dataset``, and clears the reference so the
-    persisted payload carries the exact rows the run used — the link back to the
-    dataset survives in the payload overview, not the payload. Unlike a staged
-    dataset, the library entry is never evicted: it is a durable, navigable source
-    every run that used it points at.
-
-    Args:
-        payload: The validated request body (mutated in place).
-        job_store: Backend whose ``engine`` carries the dataset tables.
-        user: Authenticated submitter; access is resolved against their grants.
-
-    Returns:
-        The source dataset id when one was consumed (recorded in the overview by
-        the caller), or ``None`` for inline/staged payloads.
-
-    Raises:
-        DomainError: 404 ``dataset.library.not_found`` when the caller cannot
-            reach the dataset or its rows are missing.
-    """
-    source_id = payload.source_dataset_id
-    if not source_id:
-        return None
-    with Session(job_store.engine) as session:
-        role = resolve_effective_role(session, source_id, user)
-    if role is None:
-        raise DomainError("dataset.library.not_found", status=404)
-    store = DatasetLibraryStore(job_store.engine, PostgresDatasetBlobStore(job_store.engine))
-    rows = store.get_rows(source_id)
-    if not rows:
-        raise DomainError("dataset.library.not_found", status=404)
-    payload.dataset = rows
-    payload.source_dataset_id = None
-    return source_id
-
-
-def _expand_catalog_grid_payload(payload: GridSearchRequest) -> None:
-    """Populate generation/reflection model lists from the catalog when flagged.
-
-    Replaces ``payload.generation_models`` and/or ``payload.reflection_models``
-    with every available catalog model when the matching
-    ``use_all_available_*`` flag is set. When neither flag is set this is a
-    no-op.
-
-    Args:
-        payload: The grid-search request to mutate in place.
-
-    Raises:
-        DomainError: 400 when expansion is requested but no models are
-            available.
-    """
-    if not (payload.use_all_available_generation_models or payload.use_all_available_reflection_models):
-        return
-    expanded = _catalog_models_as_configs()
-    if payload.use_all_available_generation_models:
-        payload.generation_models = expanded
-    if payload.use_all_available_reflection_models:
-        payload.reflection_models = expanded
 
 
 # Statuses whose runs hold a live claim on the balance: queued/leased work,
@@ -754,435 +567,232 @@ def _enforce_byok_connections(job_store, username: str, model_configs: list[Mode
             raise DomainError("billing.byok_model_not_served", status=400, model=name, provider=provider)
 
 
-def _scrubbed_tool_source(tool_source) -> dict | None:
-    """Return the overview-safe projection of a tool source.
+def _materialize_unified_cases(payload: UnifiedRunRequest, *, job_store, username: str) -> None:
+    """Inline a staged dataset into ``payload.data.cases`` as unified cases.
 
-    Persists only what serve-time reconstruction needs (``kind``,
-    ``mcp_url``, ``tool_filter``) — never ``mcp_auth_header``, which is a
-    secret; serve re-sources live MCP rosters with no auth header, matching
-    the react overlay behavior.
+    Each staged row becomes one case: ``input`` keeps the row's
+    ``input_fields`` (every column but ``expected_field`` when none are
+    named) and ``expected`` takes ``expected_field`` when it is set. The
+    staged row is left in place so a rejected submit can be retried; the TTL
+    sweep reclaims it. The rebuilt data block is validated again, so a staged
+    table that does not fit the data mode is rejected like an inline one.
 
     Args:
-        tool_source: The submitted ``ToolSource``, or ``None``.
+        payload: The unified request, mutated in place.
+        job_store: Backend exposing ``get_staged_dataset``.
+        username: Authenticated submitter; staging rows are scoped to one owner.
+
+    Raises:
+        DomainError: 400 ``submission.staged_dataset_not_found`` when the id
+            is unknown or owned by another user, or 422
+            ``submit.unified.contract_failed`` when the rows do not fit the
+            data mode.
+    """
+    data = payload.data
+    staged_id = data.staged_dataset_id
+    if not staged_id:
+        return
+    if data.cases is None:
+        rows = job_store.get_staged_dataset(staged_id, username)
+        if not rows:
+            raise DomainError(
+                I18nKey.SUBMISSION_STAGED_DATASET_NOT_FOUND,
+                status=400,
+                staged_dataset_id=staged_id,
+            )
+        expected_field = data.expected_field
+        cases = []
+        # Same shape as the wizard's inline ``rowsToCases`` (inputs-mode.ts):
+        # ``expected`` keyed by the field name, which DSPy metrics read as
+        # ``gold.<field>``, so a by-reference submit and its inline twin match.
+        for row in rows:
+            fields = data.input_fields or list(row)
+            cases.append(
+                {
+                    "input": {field: row.get(field) for field in fields if field != expected_field},
+                    "expected": {expected_field: row.get(expected_field)} if expected_field else None,
+                }
+            )
+    else:
+        cases = [case.model_dump(mode="json") for case in data.cases]
+    try:
+        payload.data = UnifiedData.model_validate(
+            {**data.model_dump(mode="json"), "cases": cases, "staged_dataset_id": None}
+        )
+    except ValidationError as error:
+        raise DomainError(_UNIFIED_CONTRACT_FAILED, status=422, error=_first_error(error)) from error
+
+
+def _first_error(error: ValidationError) -> str:
+    """Return the first readable message of a Pydantic validation error.
+
+    Args:
+        error: The validation error raised while rebuilding a request block.
 
     Returns:
-        The scrubbed dict, or ``None`` when no tool source was supplied.
+        The first error message, without Pydantic's ``Value error,`` prefix.
     """
-    if tool_source is None:
-        return None
-    scrubbed: dict = {"kind": tool_source.kind}
-    if tool_source.mcp_url is not None:
-        scrubbed["mcp_url"] = public_endpoint(tool_source.mcp_url)
-    if tool_source.tool_filter is not None:
-        scrubbed["tool_filter"] = list(tool_source.tool_filter)
-    return scrubbed
+    errors = error.errors()
+    message = str(errors[0].get("msg", "")) if errors else str(error)
+    return message.removeprefix("Value error, ")
+
+
+def _default_unified_seed(payload: UnifiedRunRequest) -> None:
+    """Seed a unified run from its task identity when the caller sent none.
+
+    Never seeded from the optimization id: resubmitting the same task must
+    reproduce the same train/val/test split.
+
+    Args:
+        payload: Unified request with its cases already materialized.
+    """
+    if payload.seed is None:
+        payload.seed = stable_seed(task_fingerprint(payload))
+
+
+def _unified_overview(
+    payload: UnifiedRunRequest,
+    *,
+    token_sources_by_model: dict[str, str],
+) -> dict:
+    """Build the stored overview of a unified run.
+
+    The run is stored as a black-box run so every existing read path keeps
+    working; the extra keys say how the wizard configured it.
+
+    Args:
+        payload: The validated unified request with cases and seed set.
+        token_sources_by_model: Normalized per-model billing sources.
+
+    Returns:
+        The overview dict for :meth:`set_payload_overview`.
+    """
+    artifact_kind = payload.task.artifact.kind
+    optimizer_resolved = resolve_optimizer(payload.optimizer.choice, artifact_kind)
+    cases = payload.data.cases or []
+    splits = split_cases(
+        cases,
+        payload.data.mode,
+        payload.data.split,
+        shuffle=payload.data.shuffle,
+        seed=cast(int, payload.seed),
+    )
+    reflection = payload.models.reflection_model
+    reflection_name = reflection.normalized_identifier()
+    task_model = payload.models.task_model
+    return {
+        PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE: OPTIMIZATION_TYPE_BLACKBOX,
+        **_execution_overview(payload),
+        PAYLOAD_OVERVIEW_COMPOSITION: COMPOSITION_SINGLE,
+        PAYLOAD_OVERVIEW_NAME: payload.name,
+        PAYLOAD_OVERVIEW_DESCRIPTION: payload.description,
+        PAYLOAD_OVERVIEW_USERNAME: payload.username,
+        PAYLOAD_OVERVIEW_MODULE_NAME: BLACKBOX_MODULE_NAME,
+        # The list and detail views show the engine through optimizer_name,
+        # exactly as they do for a legacy black-box run's strategy engine.
+        PAYLOAD_OVERVIEW_OPTIMIZER_NAME: optimizer_resolved,
+        PAYLOAD_OVERVIEW_MODEL_NAME: reflection_name,
+        PAYLOAD_OVERVIEW_MODEL_SETTINGS: strip_api_key(reflection.model_dump()),
+        PAYLOAD_OVERVIEW_REFLECTION_MODEL: reflection_name,
+        PAYLOAD_OVERVIEW_TASK_MODEL: task_model.normalized_identifier() if task_model else None,
+        PAYLOAD_OVERVIEW_DATASET_ROWS: len(cases),
+        PAYLOAD_OVERVIEW_SPLIT_FRACTIONS: payload.data.split.model_dump(),
+        PAYLOAD_OVERVIEW_SHUFFLE: payload.data.shuffle,
+        PAYLOAD_OVERVIEW_SEED: payload.seed,
+        PAYLOAD_OVERVIEW_TOKEN_SOURCE: payload.token_source,
+        PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL: token_sources_by_model,
+        PAYLOAD_OVERVIEW_MAX_COST_CENTS: payload.max_cost_cents,
+        PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_cents_low,
+        PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_cents_high,
+        PAYLOAD_OVERVIEW_IS_PRIVATE: payload.is_private,
+        PAYLOAD_OVERVIEW_PAYLOAD_KIND: UNIFIED_PAYLOAD_KIND,
+        PAYLOAD_OVERVIEW_ARTIFACT_KIND: artifact_kind,
+        PAYLOAD_OVERVIEW_OPTIMIZER_CHOICE: payload.optimizer.choice,
+        PAYLOAD_OVERVIEW_OPTIMIZER_RESOLVED: optimizer_resolved,
+        PAYLOAD_OVERVIEW_DATA_MODE: payload.data.mode,
+        PAYLOAD_OVERVIEW_SPLIT_COUNTS: {
+            "train": splits.counts.train,
+            "val": splits.counts.val,
+            "test": splits.counts.test,
+        },
+    }
+
+
+def _optimizer_option(
+    option_id: OptimizerChoice,
+    artifact_kind: ArtifactKind,
+    catalog: BlackboxEngineCatalogResponse,
+) -> OptimizerOption:
+    """Describe one optimizer choice with its availability on this deployment.
+
+    Args:
+        option_id: The optimizer choice being described.
+        artifact_kind: What the run optimizes; fixes Auto's resolution.
+        catalog: The black-box engine catalog for text targets.
+
+    Returns:
+        The catalog option.
+    """
+    resolved = resolve_optimizer(option_id, artifact_kind)
+    family = optimizer_family(resolved)
+    available = True
+    reason: str | None = None
+    native_proposer = False
+    if family == "auto":
+        available = catalog.auto_available
+        reason = catalog.auto_unavailable_reason
+    elif family == "blackbox":
+        engine = next((entry for entry in catalog.engines if entry.id == resolved), None)
+        available = engine is not None and engine.available
+        reason = engine.unavailable_reason if engine is not None else None
+        native_proposer = ENGINES[resolved].requires_proposer if resolved in ENGINES else False
+    return OptimizerOption(
+        id=option_id,
+        family=optimizer_family(option_id),
+        available=available,
+        unavailable_reason=None if available else reason,
+        needs_reflection_model=resolved not in _DSPY_WITHOUT_REFLECTION,
+        uses_feedback=resolved in FEEDBACK_OPTIMIZERS,
+        supports_iteration_limit=resolved in BLACKBOX_ITERATION_LIMIT_ENGINES,
+        native_proposer=native_proposer,
+    )
 
 
 def create_submissions_router(*, service, job_store) -> APIRouter:
     """Build the submissions router.
 
     Args:
-        service: Optimization service used for synchronous validation.
+        service: Optimization service handed to the in-process worker.
         job_store: Job-store instance used to persist new submissions.
 
     Returns:
-        A FastAPI ``APIRouter`` exposing the ``/run`` and ``/grid-search``
-        endpoints.
+        A FastAPI ``APIRouter`` exposing ``/optimize``, ``/optimizers`` and
+        ``/blackbox/engines``.
     """
     router = APIRouter()
 
     @router.post(
-        "/run",
+        "/optimize",
         response_model=OptimizationSubmissionResponse,
         status_code=201,
-        summary="Submit a single DSPy optimization run",
+        summary="Submit an optimization run",
         tags=["agent"],
     )
-    def submit_job(
-        payload: RunRequest,
+    def submit_unified_run(
+        payload: UnifiedRunRequest,
         current_user: AuthenticatedUserDep,
         idempotency_key: IdempotencyKeyHeader = None,
     ) -> OptimizationSubmissionResponse:
-        """Queue one end-to-end DSPy optimization for background execution.
+        """Queue one optimization of a prompt, code, text or DSPy program.
 
-        Validates synchronously, persists a job row, and enqueues the
-        payload. Returns HTTP 201 immediately; poll
-        ``/optimizations/{id}/summary`` or stream via
-        ``/optimizations/{id}/stream`` for progress. Security:
-        ``model_settings.api_key`` is stripped from the persisted overview;
-        the persisted owner is the authenticated caller, not whatever the
+        Every optimizer (the DSPy optimizers and the black-box engines) runs
+        through the black-box engine layer against the workspace code, so the
+        run is stored as a black-box run marked ``payload_kind=unified_v1``.
+        The persisted owner is the authenticated caller, not whatever the
         client posted.
 
         Args:
-            payload: The run-request body validated by FastAPI.
-            current_user: Authenticated submitter resolved from the bearer token.
-            idempotency_key: Optional caller-controlled replay identity.
-
-        Returns:
-            An ``OptimizationSubmissionResponse`` carrying the assigned id
-            and ``pending`` status.
-
-        Raises:
-            DomainError: 400 (validation), 409 (quota), 422 (malformed body).
-        """
-        payload.username = current_user.username
-
-        replay_keys = resolve_submission_replay_keys(
-            payload,
-            username=payload.username,
-            workflow="dspy",
-            supplied_key=idempotency_key,
-        )
-        normalized_key = replay_keys.job
-        if normalized_key:
-            existing_id = job_store.find_job_by_idempotency_key(payload.username, normalized_key)
-            if existing_id:
-                cached = _existing_submission_response(job_store, existing_id)
-                if cached is not None:
-                    logger.info(
-                        "Idempotent retry hit: returning existing %s for user=%s",
-                        existing_id,
-                        payload.username,
-                    )
-                    return cached
-
-        _enforce_submission_admission(job_store, payload.username)
-
-        _run_model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-        _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
-        if payload.execution_budget_id is None:
-            _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
-        _enforce_byok_connections(job_store, payload.username, _run_model_configs)
-
-        staged_id = _materialize_staged_dataset(payload, job_store=job_store, username=payload.username)
-        source_dataset_id = _materialize_library_dataset(payload, job_store=job_store, user=current_user)
-        _ensure_api_budget(
-            payload,
-            job_store,
-            "dspy",
-            replay_keys.budget,
-            current_user,
-            recover_existing=replay_keys.synthesized,
-        )
-        verified = _protected_submission(payload, job_store, "dspy")
-
-        try:
-            if verified is None:
-                service.validate_payload(payload)
-        except (ServiceError, RegistryError) as exc:
-            # Log the resolver/validation detail server-side only; the client
-            # gets a stable code without the internal registry surface leaked.
-            logger.warning("Payload validation failed: %s", exc)
-            raise DomainError("submission.validation_failed", status=400) from exc
-
-        # Workflow runs have no top-level signature; per-node image fields are
-        # rejected by the workflow deep-validation pass instead.
-        if payload.signature_code is not None and verified is None:
-            _enforce_vision_capability(
-                signature_code=payload.signature_code,
-                candidate_models=[payload.model_settings],
-            )
-
-        optimization_id = str(uuid4())
-        # Workflow runs fingerprint the whole graph spec in place of the
-        # single signature source — same identity semantics, different carrier.
-        program_source = payload.signature_code or json.dumps(
-            payload.workflow.model_dump() if payload.workflow else None,
-            sort_keys=True,
-            ensure_ascii=False,
-        )
-        task_fingerprint = compute_task_fingerprint(program_source, payload.metric_code, payload.dataset)
-        # Derive the default seed from the task fingerprint (not the optimization id)
-        # so repeated submissions of the same task retain reproducible data splits.
-        if payload.seed is None:
-            payload.seed = stable_seed(task_fingerprint)
-
-        # Single serialization, reused by the quota gate here and the submit
-        # persist below — the dump copies the whole dataset, so building it
-        # twice doubled the request's transient footprint. Taken only after
-        # the last payload mutations (cost-ceiling cap, seed) so the counted
-        # bytes are exactly the persisted bytes.
-        payload_dump = _persistable_payload(payload, job_store)
-        enforce_job_quota(job_store, payload.username)
-        enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
-
-        composition = (
-            COMPOSITION_WORKFLOW if payload.module_name.lower() == WORKFLOW_MODULE_NAME else COMPOSITION_SINGLE
-        )
-        _create_submission_job(job_store, optimization_id, payload, normalized_key, verified)
-        payload_dump["execution_budget_generation"] = payload.execution_budget_generation
-        job_store.set_payload_overview(
-            optimization_id,
-            {
-                PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE: OPTIMIZATION_TYPE_RUN,
-                **_execution_overview(payload),
-                PAYLOAD_OVERVIEW_COMPOSITION: composition,
-                PAYLOAD_OVERVIEW_NAME: payload.name,
-                PAYLOAD_OVERVIEW_DESCRIPTION: payload.description,
-                PAYLOAD_OVERVIEW_USERNAME: payload.username,
-                PAYLOAD_OVERVIEW_MODULE_NAME: payload.module_name,
-                PAYLOAD_OVERVIEW_MODULE_KWARGS: dict(payload.module_kwargs),
-                PAYLOAD_OVERVIEW_SIGNATURE_CODE: payload.signature_code,
-                PAYLOAD_OVERVIEW_OPTIMIZER_NAME: payload.optimizer_name,
-                PAYLOAD_OVERVIEW_MODEL_NAME: payload.model_settings.normalized_identifier(),
-                PAYLOAD_OVERVIEW_MODEL_SETTINGS: strip_api_key(payload.model_settings.model_dump()),
-                PAYLOAD_OVERVIEW_REFLECTION_MODEL: (
-                    payload.reflection_model_settings.normalized_identifier()
-                    if payload.reflection_model_settings
-                    else None
-                ),
-                PAYLOAD_OVERVIEW_TASK_MODEL: (
-                    payload.task_model_settings.normalized_identifier() if payload.task_model_settings else None
-                ),
-                PAYLOAD_OVERVIEW_COLUMN_MAPPING: payload.column_mapping.model_dump(),
-                PAYLOAD_OVERVIEW_DATASET_ROWS: len(payload.dataset),
-                PAYLOAD_OVERVIEW_DATASET_FILENAME: payload.dataset_filename,
-                PAYLOAD_OVERVIEW_SPLIT_FRACTIONS: payload.split_fractions.model_dump(),
-                PAYLOAD_OVERVIEW_SHUFFLE: payload.shuffle,
-                PAYLOAD_OVERVIEW_SEED: payload.seed,
-                PAYLOAD_OVERVIEW_OPTIMIZER_KWARGS: dict(payload.optimizer_kwargs),
-                PAYLOAD_OVERVIEW_COMPILE_KWARGS: dict(payload.compile_kwargs),
-                PAYLOAD_OVERVIEW_TASK_FINGERPRINT: task_fingerprint,
-                PAYLOAD_OVERVIEW_TOKEN_SOURCE: payload.token_source,
-                PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL: _token_sources_by_model,
-                PAYLOAD_OVERVIEW_MAX_COST_CENTS: payload.max_cost_cents,
-                PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_cents_low,
-                PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_cents_high,
-                PAYLOAD_OVERVIEW_IS_PRIVATE: payload.is_private,
-                PAYLOAD_OVERVIEW_SOURCE_DATASET_ID: source_dataset_id,
-                PAYLOAD_OVERVIEW_WORKFLOW: payload.workflow.model_dump() if payload.workflow else None,
-                PAYLOAD_OVERVIEW_TOOL_SOURCE: _scrubbed_tool_source(payload.tool_source),
-            },
-        )
-        _evict_staged_dataset(job_store, staged_id, payload.username)
-
-        _persist_and_signal_job(job_store, service, optimization_id, payload_dump)
-
-        logger.info(
-            "Enqueued job %s for module=%s optimizer=%s",
-            optimization_id,
-            payload.module_name,
-            payload.optimizer_name,
-        )
-
-        notify_job_started(
-            optimization_id=optimization_id,
-            username=payload.username,
-            optimization_type=OPTIMIZATION_TYPE_RUN,
-            optimizer_name=payload.optimizer_name,
-            module_name=payload.module_name,
-            model_name=payload.model_settings.normalized_identifier(),
-        )
-
-        return OptimizationSubmissionResponse(
-            optimization_id=optimization_id,
-            optimization_type=cast(OptimizationType, OPTIMIZATION_TYPE_RUN),
-            status=OptimizationStatus.pending,
-            created_at=datetime.now(UTC),
-            name=payload.name,
-            username=payload.username,
-            module_name=payload.module_name,
-            optimizer_name=payload.optimizer_name,
-        )
-
-    @router.post(
-        "/grid-search",
-        response_model=OptimizationSubmissionResponse,
-        status_code=201,
-        summary="Submit a grid search over model pairs",
-        tags=["agent"],
-    )
-    def submit_grid_search(
-        payload: GridSearchRequest,
-        current_user: AuthenticatedUserDep,
-        idempotency_key: IdempotencyKeyHeader = None,
-    ) -> OptimizationSubmissionResponse:
-        """Queue a sweep over ``(generation_model, reflection_model)`` pairs.
-
-        Runs one optimization per Cartesian pair serially inside a single
-        job. When ``use_all_available_generation_models`` or
-        ``use_all_available_reflection_models`` is set, the server replaces
-        the matching list with every model currently available in the
-        catalog before validation or enqueue. Poll
-        ``/optimizations/{id}/summary`` for per-pair progress. The persisted
-        owner is the authenticated caller, not whatever the client posted.
-
-        Args:
-            payload: The grid-search request body validated by FastAPI.
-            current_user: Authenticated submitter resolved from the bearer token.
-            idempotency_key: Optional caller-controlled replay identity.
-
-        Returns:
-            An ``OptimizationSubmissionResponse`` carrying the assigned id
-            and ``pending`` status.
-
-        Raises:
-            DomainError: 400 (validation/empty catalog), 409 (quota), 422
-                (malformed).
-        """
-        payload.username = current_user.username
-        replay_keys = resolve_submission_replay_keys(
-            payload,
-            username=payload.username,
-            workflow="dspy",
-            supplied_key=idempotency_key,
-        )
-        _expand_catalog_grid_payload(payload)
-
-        normalized_key = replay_keys.job
-        if normalized_key:
-            existing_id = job_store.find_job_by_idempotency_key(payload.username, normalized_key)
-            if existing_id:
-                cached = _existing_submission_response(job_store, existing_id)
-                if cached is not None:
-                    logger.info(
-                        "Idempotent grid-search retry hit: returning existing %s for user=%s",
-                        existing_id,
-                        payload.username,
-                    )
-                    return cached
-
-        _enforce_submission_admission(job_store, payload.username)
-
-        _grid_model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-        _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
-        if payload.execution_budget_id is None:
-            _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
-        _enforce_byok_connections(job_store, payload.username, _grid_model_configs)
-
-        staged_id = _materialize_staged_dataset(payload, job_store=job_store, username=payload.username)
-        source_dataset_id = _materialize_library_dataset(payload, job_store=job_store, user=current_user)
-
-        _ensure_api_budget(
-            payload,
-            job_store,
-            "dspy",
-            replay_keys.budget,
-            current_user,
-            recover_existing=replay_keys.synthesized,
-        )
-        verified = _protected_submission(payload, job_store, "dspy")
-        if verified is None and hasattr(service, "validate_grid_search_payload"):
-            try:
-                service.validate_grid_search_payload(payload)
-            except (ServiceError, RegistryError) as exc:
-                # Log the detail server-side only; don't leak it to the client.
-                logger.warning("Grid search validation failed: %s", exc)
-                raise DomainError("submission.validation_failed", status=400) from exc
-
-        if verified is None:
-            _enforce_vision_capability(
-                signature_code=payload.signature_code,
-                candidate_models=list(payload.generation_models),
-            )
-
-        optimization_id = str(uuid4())
-        if payload.seed is None:
-            payload.seed = stable_seed(optimization_id)
-        total_pairs = len(payload.generation_models) * len(payload.reflection_models)
-
-        task_fingerprint = compute_task_fingerprint(payload.signature_code, payload.metric_code, payload.dataset)
-
-        # Same single-serialization pattern as /run — see the note there.
-        payload_dump = _persistable_payload(payload, job_store)
-        enforce_job_quota(job_store, payload.username)
-        enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
-
-        _create_submission_job(job_store, optimization_id, payload, normalized_key, verified)
-        payload_dump["execution_budget_generation"] = payload.execution_budget_generation
-        job_store.set_payload_overview(
-            optimization_id,
-            {
-                PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE: OPTIMIZATION_TYPE_GRID_SEARCH,
-                **_execution_overview(payload),
-                # A grid search sweeps model pairs over a single module — the request
-                # model rejects workflows — so its composition is always "single".
-                PAYLOAD_OVERVIEW_COMPOSITION: COMPOSITION_SINGLE,
-                PAYLOAD_OVERVIEW_NAME: payload.name,
-                PAYLOAD_OVERVIEW_DESCRIPTION: payload.description,
-                PAYLOAD_OVERVIEW_USERNAME: payload.username,
-                PAYLOAD_OVERVIEW_MODULE_NAME: payload.module_name,
-                PAYLOAD_OVERVIEW_MODULE_KWARGS: dict(payload.module_kwargs),
-                PAYLOAD_OVERVIEW_SIGNATURE_CODE: payload.signature_code,
-                PAYLOAD_OVERVIEW_OPTIMIZER_NAME: payload.optimizer_name,
-                PAYLOAD_OVERVIEW_COLUMN_MAPPING: payload.column_mapping.model_dump(),
-                PAYLOAD_OVERVIEW_DATASET_ROWS: len(payload.dataset),
-                PAYLOAD_OVERVIEW_DATASET_FILENAME: payload.dataset_filename,
-                PAYLOAD_OVERVIEW_SPLIT_FRACTIONS: payload.split_fractions.model_dump(),
-                PAYLOAD_OVERVIEW_SHUFFLE: payload.shuffle,
-                PAYLOAD_OVERVIEW_SEED: payload.seed,
-                PAYLOAD_OVERVIEW_OPTIMIZER_KWARGS: dict(payload.optimizer_kwargs),
-                PAYLOAD_OVERVIEW_COMPILE_KWARGS: dict(payload.compile_kwargs),
-                PAYLOAD_OVERVIEW_TOTAL_PAIRS: total_pairs,
-                PAYLOAD_OVERVIEW_GENERATION_MODELS: [
-                    strip_api_key(model.model_dump()) for model in payload.generation_models
-                ],
-                PAYLOAD_OVERVIEW_REFLECTION_MODELS: [
-                    strip_api_key(model.model_dump()) for model in payload.reflection_models
-                ],
-                PAYLOAD_OVERVIEW_TASK_FINGERPRINT: task_fingerprint,
-                PAYLOAD_OVERVIEW_TOKEN_SOURCE: payload.token_source,
-                PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL: _token_sources_by_model,
-                PAYLOAD_OVERVIEW_MAX_COST_CENTS: payload.max_cost_cents,
-                PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_cents_low,
-                PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_cents_high,
-                PAYLOAD_OVERVIEW_IS_PRIVATE: payload.is_private,
-                PAYLOAD_OVERVIEW_SOURCE_DATASET_ID: source_dataset_id,
-            },
-        )
-        _evict_staged_dataset(job_store, staged_id, payload.username)
-
-        _persist_and_signal_job(job_store, service, optimization_id, payload_dump)
-
-        logger.info(
-            "Enqueued grid search %s: %d pairs, module=%s optimizer=%s",
-            optimization_id,
-            total_pairs,
-            payload.module_name,
-            payload.optimizer_name,
-        )
-
-        notify_job_started(
-            optimization_id=optimization_id,
-            username=payload.username,
-            optimization_type=OPTIMIZATION_TYPE_GRID_SEARCH,
-            optimizer_name=payload.optimizer_name,
-            module_name=payload.module_name,
-            model_name=t("optimization.pairs_label", count=total_pairs),
-        )
-
-        return OptimizationSubmissionResponse(
-            optimization_id=optimization_id,
-            optimization_type=cast(OptimizationType, OPTIMIZATION_TYPE_GRID_SEARCH),
-            status=OptimizationStatus.pending,
-            created_at=datetime.now(UTC),
-            name=payload.name,
-            username=payload.username,
-            module_name=payload.module_name,
-            optimizer_name=payload.optimizer_name,
-        )
-
-    @router.post(
-        "/blackbox/run",
-        response_model=OptimizationSubmissionResponse,
-        status_code=201,
-        summary="Submit a black-box text optimization",
-        tags=["agent"],
-    )
-    def submit_blackbox_run(
-        payload: BlackboxRunRequest,
-        current_user: AuthenticatedUserDep,
-        idempotency_key: IdempotencyKeyHeader = None,
-    ) -> OptimizationSubmissionResponse:
-        """Queue a black-box optimization of a text artifact against a scorer.
-
-        No DSPy program is involved: the job hands the starting point, cases
-        and scorer to the strategy layer (``auto`` explores every available
-        engine, then continues from the best version with GEPA). The persisted
-        owner is the authenticated caller, not whatever the client posted.
-
-        Args:
-            payload: The black-box request body validated by FastAPI.
+            payload: The unified request body validated by FastAPI.
             current_user: Authenticated submitter resolved from the bearer token.
             idempotency_key: Optional dedup key; a repeat returns the original.
 
@@ -1191,30 +801,19 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             and ``pending`` status.
 
         Raises:
-            DomainError: 400 (unknown engine / scorer code does not load),
-                402 (no balance), 409 (quota), 422 (malformed).
+            DomainError: 400 (unknown staged dataset), 402 (no balance), 409
+                (quota or stale setup evidence), 422 (workspace code does not
+                fit the optimizer).
         """
         payload.username = current_user.username
         # Resolved before the replay key is derived so a by-reference submit
-        # and its inline twin hash to the same request. The staged rows are
-        # left in place (the TTL sweep reclaims them): a rejected submit can
-        # be retried, and the DSPy wizard may still be using the same upload.
-        if payload.staged_dataset_id:
-            if not payload.cases:
-                staged_rows = job_store.get_staged_dataset(payload.staged_dataset_id, payload.username)
-                if not staged_rows:
-                    raise DomainError(
-                        I18nKey.SUBMISSION_STAGED_DATASET_NOT_FOUND,
-                        status=400,
-                        staged_dataset_id=payload.staged_dataset_id,
-                    )
-                payload.cases = staged_rows
-            payload.staged_dataset_id = None
+        # and its inline twin hash to the same request.
+        _materialize_unified_cases(payload, job_store=job_store, username=payload.username)
 
         replay_keys = resolve_submission_replay_keys(
             payload,
             username=payload.username,
-            workflow="anything",
+            workflow=UNIFIED_WORKFLOW,
             supplied_key=idempotency_key,
         )
         normalized_key = replay_keys.job
@@ -1224,24 +823,11 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                 cached = _existing_submission_response(job_store, existing_id)
                 if cached is not None:
                     logger.info(
-                        "Idempotent blackbox retry hit: returning existing %s for user=%s",
+                        "Idempotent unified retry hit: returning existing %s for user=%s",
                         existing_id,
                         payload.username,
                     )
                     return cached
-
-        # Refused before any budget is reserved; the protected path below never
-        # reaches ``validate_blackbox_payload`` here.
-        if claude_code_in_use(payload):
-            if not claude_code_available(payload):
-                raise DomainError("submission.claude_code_unavailable", status=400)
-            if claude_code_model(payload.reflection_model_settings.name) is None:
-                raise DomainError("submission.claude_code_model_unsupported", status=400)
-            engine = getattr(job_store, "engine", None)
-            if engine is not None and not ProviderKeyVault(engine=engine).has_verified_connection(
-                payload.username, "anthropic"
-            ):
-                raise DomainError("submission.claude_code_needs_anthropic_key", status=400)
 
         _enforce_submission_admission(job_store, payload.username)
 
@@ -1251,82 +837,47 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
         _enforce_byok_connections(job_store, payload.username, _model_configs)
 
+        try:
+            validate_unified_payload(payload)
+        except ValueError as exc:
+            raise DomainError(_UNIFIED_CONTRACT_FAILED, status=422, error=str(exc)) from exc
+        # Seeded before the budget step, which would otherwise default the
+        # seed from the budget id and break split reproducibility.
+        _default_unified_seed(payload)
+
         _ensure_api_budget(
             payload,
             job_store,
-            "anything",
+            UNIFIED_WORKFLOW,
             replay_keys.budget,
             current_user,
             recover_existing=replay_keys.synthesized,
         )
-        verified = _protected_submission(payload, job_store, "anything")
-        try:
-            if verified is None:
-                validate_blackbox_payload(payload)
-        except ServiceError as exc:
-            # Log the detail server-side only; don't leak it to the client.
-            logger.warning("Blackbox validation failed: %s", exc)
-            raise DomainError("submission.validation_failed", status=400) from exc
+        verified = _protected_submission(payload, job_store, UNIFIED_WORKFLOW)
 
         optimization_id = str(uuid4())
-        if payload.seed is None:
-            payload.seed = stable_seed(optimization_id)
-        optimizer_name = payload.strategy.engine or BLACKBOX_STRATEGY_AUTO
-        reflection_model = payload.reflection_model_settings.normalized_identifier()
+        overview = _unified_overview(payload, token_sources_by_model=_token_sources_by_model)
 
-        # Same single-serialization pattern as /run — see the note there.
+        # Same single-serialization pattern as the other submit routes: the
+        # dump copies every case, so it is built once after the last mutation.
         payload_dump = _persistable_payload(payload, job_store)
         enforce_job_quota(job_store, payload.username)
         enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
 
         _create_submission_job(job_store, optimization_id, payload, normalized_key, verified)
         payload_dump["execution_budget_generation"] = payload.execution_budget_generation
-        job_store.set_payload_overview(
-            optimization_id,
-            {
-                PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE: OPTIMIZATION_TYPE_BLACKBOX,
-                **_execution_overview(payload),
-                PAYLOAD_OVERVIEW_COMPOSITION: COMPOSITION_SINGLE,
-                PAYLOAD_OVERVIEW_NAME: payload.name,
-                PAYLOAD_OVERVIEW_DESCRIPTION: payload.description,
-                PAYLOAD_OVERVIEW_USERNAME: payload.username,
-                PAYLOAD_OVERVIEW_MODULE_NAME: BLACKBOX_MODULE_NAME,
-                PAYLOAD_OVERVIEW_OPTIMIZER_NAME: optimizer_name,
-                # The reflection model is the only model a black-box run
-                # bills, so it doubles as the overview's primary model.
-                PAYLOAD_OVERVIEW_MODEL_NAME: reflection_model,
-                PAYLOAD_OVERVIEW_MODEL_SETTINGS: strip_api_key(payload.reflection_model_settings.model_dump()),
-                PAYLOAD_OVERVIEW_REFLECTION_MODEL: reflection_model,
-                PAYLOAD_OVERVIEW_DATASET_ROWS: len(payload.cases or []),
-                PAYLOAD_OVERVIEW_SPLIT_FRACTIONS: payload.split_fractions.model_dump(),
-                PAYLOAD_OVERVIEW_SHUFFLE: payload.shuffle,
-                PAYLOAD_OVERVIEW_SEED: payload.seed,
-                PAYLOAD_OVERVIEW_TOKEN_SOURCE: payload.token_source,
-                PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL: _token_sources_by_model,
-                PAYLOAD_OVERVIEW_MAX_COST_CENTS: payload.max_cost_cents,
-                PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_cents_low,
-                PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_cents_high,
-                PAYLOAD_OVERVIEW_IS_PRIVATE: payload.is_private,
-            },
-        )
+        overview.update(_execution_overview(payload))
+        job_store.set_payload_overview(optimization_id, overview)
 
         _persist_and_signal_job(job_store, service, optimization_id, payload_dump)
 
+        optimizer_name = overview[PAYLOAD_OVERVIEW_OPTIMIZER_NAME]
         logger.info(
-            "Enqueued blackbox run %s: strategy=%s optimizer=%s scorer=%s",
+            "Enqueued unified run %s: artifact=%s optimizer=%s mode=%s",
             optimization_id,
-            payload.strategy.mode,
+            payload.task.artifact.kind,
             optimizer_name,
-            payload.scorer.kind,
-        )
-
-        notify_job_started(
-            optimization_id=optimization_id,
-            username=payload.username,
-            optimization_type=OPTIMIZATION_TYPE_BLACKBOX,
-            optimizer_name=optimizer_name,
-            module_name=BLACKBOX_MODULE_NAME,
-            model_name=reflection_model,
+            payload.data.mode,
         )
 
         return OptimizationSubmissionResponse(
@@ -1338,6 +889,48 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             username=payload.username,
             module_name=BLACKBOX_MODULE_NAME,
             optimizer_name=optimizer_name,
+        )
+
+    @router.get(
+        "/optimizers",
+        response_model=OptimizerCatalogResponse,
+        summary="List the optimizers that fit a setup and their availability",
+        tags=["agent"],
+    )
+    def optimizer_catalog(
+        current_user: AuthenticatedUserDep,
+        artifact_kind: ArtifactKind,
+        data_mode: DataMode,
+    ) -> OptimizerCatalogResponse:
+        """Describe the optimizers the wizard may offer for one artifact kind and data mode.
+
+        DSPy optimizers are always available; black-box engines and the
+        black-box Auto strategy carry this deployment's availability.
+
+        Args:
+            current_user: Authenticated caller resolved from the bearer token.
+            artifact_kind: What the run optimizes.
+            data_mode: Whether the run has one input or input/output pairs.
+
+        Returns:
+            The relevant options, Auto first, with what Auto resolves to.
+        """
+        del current_user
+        catalog = engine_catalog(BLACKBOX_TARGET_TEXT)
+        options = [
+            _optimizer_option(option, artifact_kind, catalog) for option in optimizers_for(artifact_kind, data_mode)
+        ]
+        auto_resolved = resolve_optimizer("auto", artifact_kind)
+        auto_resolves_to = [auto_resolved] if auto_resolved in DSPY_OPTIMIZERS else list(catalog.auto_engines)
+        return OptimizerCatalogResponse(
+            artifact_kind=artifact_kind,
+            data_mode=data_mode,
+            run_entry=RUN_ENTRY,
+            metric_signature=METRIC_SIGNATURE,
+            options=options,
+            auto_resolves_to=auto_resolves_to,
+            sandbox_available=catalog.sandbox_available,
+            sandbox_reason=catalog.sandbox_reason,
         )
 
     @router.get(
@@ -1363,44 +956,5 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         """
         del current_user
         return engine_catalog(target)
-
-    @router.post(
-        "/blackbox/scorer/dry-run",
-        response_model=ScorerDryRunResponse,
-        summary="Score one version with a scorer before submitting",
-        tags=["agent"],
-    )
-    def blackbox_scorer_dry_run(
-        payload: ScorerDryRunRequest,
-        current_user: AuthenticatedUserDep,
-        idempotency_key: IdempotencyKeyHeader = None,
-    ) -> ScorerDryRunResponse:
-        """Run the scorer once so a broken one fails here, not in the job.
-
-        Model and sandbox operations reserve shared setup funds before
-        dispatch. Scorer failures remain renderable results, and uncertain
-        usage retains its coverage in the returned budget.
-
-        Args:
-            payload: The scorer spec, one version and an optional case.
-            current_user: Authenticated caller resolved from the bearer token.
-            idempotency_key: Optional replay identity preventing duplicate paid execution.
-
-        Returns:
-            The score and side information, or the error that stopped it.
-
-        Raises:
-            DomainError: When rate, funding, or budget ownership prevents admission.
-        """
-        enforce_submission_rate(current_user.username)
-        return ScorerDryRunResponse.model_validate(
-            run_protected_preview(
-                payload.model_dump(mode="json"),
-                kind="scorer",
-                user=current_user,
-                job_store=job_store,
-                idempotency_key=idempotency_key,
-            )
-        )
 
     return router

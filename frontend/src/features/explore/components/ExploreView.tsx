@@ -14,19 +14,13 @@ import {
   SignIn,
   Warning,
 } from "@/shared/ui/icons";
-import { logSearchQuery, type PublicDashboardPoint } from "@/shared/lib/api";
+import { logSearchQuery } from "@/shared/lib/api";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { EmptyState } from "@/shared/ui/empty-state";
-import { registerTutorialHook } from "@/features/tutorial";
 import { usePublicDashboard } from "../hooks/use-public-dashboard";
 import { useFacetOptions } from "../hooks/use-facet-options";
-import {
-  FACET_LIMIT,
-  FACET_LIMIT_MAX,
-  FACET_LIMIT_STEP,
-  facetsFromPoints,
-} from "../lib/facet-options";
+import { FACET_LIMIT, FACET_LIMIT_MAX, FACET_LIMIT_STEP } from "../lib/facet-options";
 import { useSemanticSearch } from "../hooks/use-semantic-search";
 import { useRecentQueries } from "../hooks/use-recent-queries";
 import { usePopularQueries } from "../hooks/use-popular-queries";
@@ -36,7 +30,12 @@ import { SearchBar } from "./SearchBar";
 import { FiltersDrawer, FilterSummary, type DrawerField } from "./FiltersDrawer";
 import { ResultsList } from "./ResultsList";
 import { ResultsToolbar } from "./ResultsToolbar";
-import { ResultsSkeleton } from "./ResultsSkeleton";
+import {
+  exploreLayoutKey,
+  ResultsPaneSkeleton,
+  type ExploreResultsLayout,
+} from "./ResultsSkeleton";
+import { rememberLayout, useLayoutHint } from "@/shared/lib/layout-hint";
 import { Pagination } from "./Pagination";
 
 /**
@@ -46,17 +45,8 @@ import { Pagination } from "./Pagination";
 export function ExploreView() {
   const { data: session, status } = useSession();
   const sessionUser = sessionIdentity(session);
-  const { points: realPoints, loading: corpusLoading, error: corpusError } = usePublicDashboard();
-  const [demoPoints, setDemoPoints] = React.useState<PublicDashboardPoint[] | null>(null);
-  const rawPoints = demoPoints ?? realPoints;
+  const { points: rawPoints, loading: corpusLoading, error: corpusError } = usePublicDashboard();
   const points = Array.isArray(rawPoints) ? rawPoints : [];
-
-  React.useEffect(() => registerTutorialHook("setDemoExplorePoints", setDemoPoints), []);
-  React.useEffect(() => {
-    const onExit = () => setDemoPoints(null);
-    window.addEventListener("tutorial-exited", onExit);
-    return () => window.removeEventListener("tutorial-exited", onExit);
-  }, []);
 
   const { query, response, actions, appliedFilterCount } = useSemanticSearch({
     sessionUser,
@@ -130,9 +120,8 @@ export function ExploreView() {
   // The open field's values come from a per-corpus facets fetch so each tab
   // lists only the values it can filter to (a model private to "mine" never
   // shows under "public"); the backend caps the list and answers the value
-  // search. The tutorial's demo corpus has no backend scope, so there the
-  // same ranking is applied client-side to the injected demo points.
-  const fetchedOptions = useFacetOptions(
+  // search.
+  const facetOptions = useFacetOptions(
     query.corpus,
     sessionUser,
     {
@@ -143,15 +132,10 @@ export function ExploreView() {
       dateFrom: query.dateFrom,
       dateTo: query.dateTo,
     },
-    demoPoints ? null : openDimension,
+    openDimension,
     facetQuery,
     facetLimit,
   );
-  const facetOptions = React.useMemo(() => {
-    if (!demoPoints || !openDimension) return fetchedOptions;
-    const demo = facetsFromPoints(demoPoints, facetQuery, facetLimit);
-    return { options: demo[openDimension], total: demo.totals[openDimension], loading: false };
-  }, [demoPoints, openDimension, facetQuery, facetLimit, fetchedOptions]);
   const canShowMore =
     facetLimit < FACET_LIMIT_MAX && facetOptions.total > facetOptions.options.length;
   // Popular searches for a blank field: real trending only — what people
@@ -307,18 +291,34 @@ function ListPane({
   hasFilters: boolean;
   sessionUser: string;
 }) {
+  const layoutKey = exploreLayoutKey(query.corpus);
+  const remembered = useLayoutHint<ExploreResultsLayout>(layoutKey);
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const shown = !response.loading && !response.error ? response.results : null;
+  React.useEffect(() => {
+    const list = listRef.current;
+    if (!shown || !list) return;
+    const lines = (el: Element | null) =>
+      el ? Math.round(el.clientHeight / parseFloat(getComputedStyle(el).lineHeight)) : 0;
+    const layout: ExploreResultsLayout = {
+      rows: [...list.querySelectorAll("#explore-results > li")].map((li) => [
+        lines(li.querySelector("h3")),
+        lines(li.querySelector("p")),
+      ]),
+      page: query.page,
+      size: query.size,
+      total: response.total,
+    };
+    rememberLayout(layoutKey, layout);
+    rememberLayout(exploreLayoutKey("last"), layout);
+  }, [shown, layoutKey, query.page, query.size, response.total]);
+
   if (response.error) {
     return <InlineErrorRow message={msg("explore.results.error")} className="mx-auto max-w-2xl" />;
   }
 
   if (response.loading && response.results.length === 0) {
-    return (
-      <div className="flex flex-col gap-2">
-        <div className="border-t border-border/55">
-          <ResultsSkeleton rows={4} />
-        </div>
-      </div>
-    );
+    return <ResultsPaneSkeleton layout={remembered} />;
   }
 
   if (!response.loading && response.results.length === 0) {
@@ -346,7 +346,6 @@ function ListPane({
           icon={PaperPlaneTilt}
           iconWrap="tile"
           title={msg("explore.corpus.mine.empty")}
-          description={msg("explore.corpus.mine.empty.hint")}
           action={{ label: msg("explore.empty.cta"), href: "/submit", icon: Plus }}
           className="mt-3.5"
         />
@@ -357,7 +356,6 @@ function ListPane({
         <EmptyState
           variant="list"
           title={msg("explore.corpus.shared.empty")}
-          description={msg("explore.corpus.shared.empty.hint")}
           className="pt-4"
         />
       );
@@ -398,6 +396,7 @@ function ListPane({
         hasQuery={query.text.trim().length > 0}
       />
       <motion.div
+        ref={listRef}
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}

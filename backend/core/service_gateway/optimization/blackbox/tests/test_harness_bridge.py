@@ -186,22 +186,147 @@ def test_shim_resumes_by_restating_the_opening_prompt(tmp_path: Path) -> None:
     assert "unsupported --output-format" in rejected.stderr
 
 
-def test_direct_anthropic_points_claude_at_the_edge_with_only_a_placeholder(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Send a direct run to Anthropic with the placeholder key, and leave other runs on the gateway."""
-    gateway = {"ANTHROPIC_BASE_URL": "http://127.0.0.1:9/mailbox", "ANTHROPIC_AUTH_TOKEN": "gateway-token"}
-    untouched = dict(gateway)
-    harness_bridge.use_direct_anthropic(untouched)
-    assert untouched == gateway
-    ca = tmp_path / "proxy-ca.crt"
-    ca.write_text("certificate")
-    monkeypatch.setattr(harness_bridge, "PROXY_CA_PATH", str(ca))
-    direct = {**gateway, "SKYNET_CLAUDE_DIRECT": "1"}
-    harness_bridge.use_direct_anthropic(direct)
-    assert direct == {
-        "SKYNET_CLAUDE_DIRECT": "1",
-        "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
-        "ANTHROPIC_API_KEY": "sk-ant-skynet-edge-injected",
-        "NODE_EXTRA_CA_CERTS": str(ca),
+def test_failed_result_names_the_error_event_codex_writes_to_stdout() -> None:
+    """Keep Codex's stdout error events next to its stderr banner, which says nothing on its own."""
+    stdout = "\n".join(
+        [
+            json.dumps({"type": "thread.started", "thread_id": "t1"}),
+            json.dumps({"type": "turn.started"}),
+            json.dumps({"type": "error", "message": "unexpected status 401 Unauthorized"}),
+            json.dumps({"type": "turn.failed", "error": {"message": "stream disconnected before completion"}}),
+        ]
+    )
+    outcome = SessionOutcome(
+        text=None,
+        stdout=stdout,
+        stderr="Reading additional input from stdin...\n",
+        returncode=1,
+        usage={},
+        cost_usd=None,
+        duration_seconds=2.0,
+    )
+    document = result_document("sid", "m1", outcome)
+    assert document["is_error"] is True
+    assert "Reading additional input from stdin..." in document["result"]
+    assert "unexpected status 401 Unauthorized" in document["result"]
+    assert "stream disconnected before completion" in document["result"]
+    assert "thread.started" not in document["result"]
+
+
+def test_failed_result_falls_back_to_plain_stdout_lines() -> None:
+    """Report the tail of non-JSON stdout when the harness wrote no error events."""
+    outcome = SessionOutcome(
+        text=None,
+        stdout="booting\nfatal: config missing\n",
+        stderr="",
+        returncode=2,
+        usage={},
+        cost_usd=None,
+        duration_seconds=0.1,
+    )
+    assert harness_bridge.failure_detail(outcome) == "stdout: booting\nfatal: config missing"
+
+
+def test_harness_gets_an_empty_stdin(tmp_path: Path) -> None:
+    """Give the harness a closed stdin so a CLI that reads it never waits on the bridge's own input."""
+    proposer = {**_PLAIN, "run_command": 'if read -r line; then echo "got:$line"; else echo eof; fi'}
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+    outcome = run_session(
+        proposer, workspace=workspace, prompt="x", model="m1", session_dir=tmp_path / "s", timeout_seconds=10
+    )
+    assert outcome.stdout.strip() == "eof"
+
+
+def test_shim_reports_why_the_harness_failed_on_stderr(tmp_path: Path) -> None:
+    """Surface the harness's own error even when its stdout ends with an ordinary chat message."""
+    home = tmp_path / "home"
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    shim_dir = install_shim(home, Path(harness_bridge.__file__).resolve(), sys.executable)
+    config = tmp_path / "proposer.json"
+    failing = {**_PLAIN, "run_command": "echo 'I will now edit the scorer.'; echo 'stream disconnected' >&2; exit 3"}
+    config.write_text(json.dumps({**failing, "model": "m1"}))
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        harness_bridge.CONFIG_ENV: str(config),
+        "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}",
     }
+    failed = subprocess.run(
+        ["claude", "--print", "task", "--output-format", "json"],
+        cwd=workspace,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert failed.returncode == 3
+    assert json.loads(failed.stdout)["is_error"] is True
+    assert "stream disconnected" in failed.stderr
+
+
+def _tool_events_command(count: int) -> str:
+    """Build a shell command that edits a file, streams Pi tool-call events, then lingers.
+
+    Args:
+        count: Tool calls to announce.
+
+    Returns:
+        The command.
+    """
+    lines = " ".join(
+        f"echo '{json.dumps({'type': 'tool_execution_start', 'toolCallId': f'c{index}'})}';" for index in range(count)
+    )
+    return f"echo edited > note.txt; {lines} sleep 5; echo late > late.txt"
+
+
+def test_tool_call_cap_stops_the_harness_and_keeps_its_edits(tmp_path: Path) -> None:
+    """Stop a harness once it starts more tool calls than the cap, without calling the session failed."""
+    proposer = {**_PLAIN, "output_format": "pi", "run_command": _tool_events_command(5), "max_tool_calls": 3}
+    workspace = tmp_path / "work"
+    outcome = run_session(proposer, workspace=workspace, prompt="x", model="m", session_dir=tmp_path / "session")
+    assert outcome.tool_cap_reached is True
+    # Events already in the pipe when the stop lands are still counted.
+    assert outcome.tool_calls > 3
+    assert outcome.duration_seconds < 4
+    assert outcome.failed is False
+    assert (workspace / "note.txt").read_text() == "edited\n"
+    assert not (workspace / "late.txt").exists()
+    document = result_document("sid", "m", outcome)
+    assert document["is_error"] is False
+    assert "tool-call cap" in document["result"]
+
+
+def test_tool_calls_are_counted_but_not_capped_without_a_cap(tmp_path: Path) -> None:
+    """Let a harness run to its end when the launch names no cap."""
+    command = _tool_events_command(5).replace("sleep 5; ", "")
+    proposer = {**_PLAIN, "output_format": "pi", "run_command": command}
+    outcome = run_session(proposer, workspace=tmp_path / "w", prompt="x", model="m", session_dir=tmp_path / "s")
+    assert outcome.tool_cap_reached is False
+    assert outcome.returncode == 0
+    assert (tmp_path / "w" / "late.txt").exists()
+
+
+def test_tool_call_ids_read_every_streaming_format() -> None:
+    """Name tool calls in the Pi, Codex and OpenCode stream shapes, and none in plain output."""
+    tool_call_ids = harness_bridge.tool_call_ids
+    assert tool_call_ids("pi", {"type": "tool_execution_start", "toolCallId": "a"}) == ["a"]
+    assert tool_call_ids("pi", {"type": "tool_execution_end", "toolCallId": "a"}) == []
+    started = {"type": "item.started", "item": {"id": "i1", "type": "command_execution"}}
+    assert tool_call_ids("codex", started) == ["i1"]
+    assert tool_call_ids("codex", {**started, "type": "item.completed"}) == ["i1"]
+    assert tool_call_ids("codex", {"type": "item.completed", "item": {"id": "i2", "type": "agent_message"}}) == []
+    assert tool_call_ids("opencode", {"type": "tool_use", "part": {"callID": "o1"}}) == ["o1"]
+    assert tool_call_ids("plain", {"type": "tool_execution_start"}) == []
+
+
+def test_codex_tool_call_counts_once_across_start_and_completion(tmp_path: Path) -> None:
+    """Count a Codex item announced on start and settled on completion as one call."""
+    item = {"id": "i1", "type": "command_execution"}
+    events = [{"type": "item.started", "item": item}, {"type": "item.completed", "item": item}]
+    command = "; ".join(f"echo '{json.dumps(event)}'" for event in events)
+    proposer = {**_PLAIN, "output_format": "codex", "run_command": command, "max_tool_calls": 5}
+    outcome = run_session(proposer, workspace=tmp_path / "w", prompt="x", model="m", session_dir=tmp_path / "s")
+    assert outcome.tool_calls == 1
+    assert outcome.tool_cap_reached is False

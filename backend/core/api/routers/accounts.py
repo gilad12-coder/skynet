@@ -21,10 +21,12 @@ from typing import Annotated, TypeGuard
 
 from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from ...config import settings
-from ...storage.models import UserModel
+from ...notifications.email_render import render_account_email
+from ...storage.models import UserIdentityModel, UserModel
 from ..email_sender import email_configured, send_email
 from ..email_verification import (
     issue_verification_code,
@@ -39,13 +41,32 @@ from ..password_reset import issue_reset_code, reset_code_on_cooldown, verify_re
 from ..passwords import hash_password, verify_password
 from ..rate_limit import enforce_account_rate
 from ..two_factor import enforce_second_factor
+from .experience import new_account_intake_completed_at, normalize_experience_level
 
 logger = logging.getLogger(__name__)
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _USE_CASES = frozenset({"classification", "extraction", "rag_agents", "generation", "other"})
-_EXPERIENCE_LEVELS = frozenset({"new", "familiar", "expert"})
 _JOB_ROLES = frozenset({"engineer", "researcher", "pm", "other"})
+# Accounts store no language preference and these internal routes carry no
+# request locale, so code emails keep the English they were always sent in.
+ACCOUNT_EMAIL_LOCALE = "en"
+
+
+def _send_account_code(email: str, kind: str, code: str) -> None:
+    """Render an account code email and send it with its HTML and text parts.
+
+    Args:
+        email: Recipient address.
+        kind: ``verification``, ``password_reset`` or ``sign_in``.
+        code: The one-time code.
+
+    Raises:
+        OSError: When the SMTP relay is unreachable.
+        RuntimeError: When the relay rejects the message.
+    """
+    subject, html, text = render_account_email(kind, ACCOUNT_EMAIL_LOCALE, code)
+    send_email(email, subject, text, html_body=html)
 
 
 # Credentials supplied when creating a Skynet-native account.
@@ -73,6 +94,28 @@ class LoginRequest(BaseModel):
 class OAuthProvisionRequest(BaseModel):
     email: str = Field(description="Provider-asserted email; also the cross-app identity.")
     name: str = Field(default="", description="Display name from the provider profile.")
+    other_emails: list[str] = Field(
+        default_factory=list,
+        max_length=50,
+        description=(
+            "Other provider-verified emails on the same identity; an existing account "
+            "under one of them is reused when none exists under ``email``."
+        ),
+    )
+    provider: str = Field(default="", max_length=32, description="Provider id, such as 'google' or 'github'.")
+    provider_account_id: str = Field(
+        default="",
+        max_length=255,
+        description="The provider's stable account id; a linked one decides the account before any email does.",
+    )
+
+
+# Links a provider account to the signed-in account from Settings.
+class OAuthLinkRequest(BaseModel):
+    username: str = Field(description="The signed-in account the provider account joins.")
+    provider: str = Field(min_length=1, max_length=32, description="Provider id, such as 'google' or 'github'.")
+    provider_account_id: str = Field(min_length=1, max_length=255, description="The provider's stable account id.")
+    provider_email: str = Field(default="", max_length=255, description="The provider account's email, for display.")
 
 
 # The resolved account the frontend turns into a session — never carries a secret.
@@ -80,9 +123,7 @@ class AccountInfo(BaseModel):
     email: str = Field(description="Lowercased account email, which is the identity.")
     name: str = Field(description="Display name.")
     role: str = Field(description="Authorization role: 'admin' or 'user'.")
-    first_login: bool = Field(
-        default=False, description="Whether this sign-in is the account's first."
-    )
+    first_login: bool = Field(default=False, description="Whether this sign-in is the account's first.")
 
 
 # Simple acknowledgement for state-changing auth calls. Lives here (not in the
@@ -125,6 +166,45 @@ def _normalise_email(raw: str) -> str:
         The normalized email.
     """
     return raw.strip().lower()
+
+
+def _existing_account(session: Session, emails: list[str]) -> UserModel | None:
+    """Return the first account registered under one of the given emails.
+
+    Args:
+        session: Open database session.
+        emails: Provider-verified emails, in the provider's order.
+
+    Returns:
+        The matching account row, or None when no email has one.
+    """
+    for raw in emails:
+        candidate = _normalise_email(raw)
+        if not _EMAIL_RE.match(candidate):
+            continue
+        row = session.get(UserModel, candidate)
+        if row is not None:
+            return row
+    return None
+
+
+def _linked_account(session: Session, provider: str, provider_account_id: str) -> UserModel | None:
+    """Return the account a provider account was linked to, if any.
+
+    Args:
+        session: Open database session.
+        provider: Provider id.
+        provider_account_id: The provider's stable account id.
+
+    Returns:
+        The linked account row, or None when the provider account is unlinked.
+    """
+    if not provider or not provider_account_id:
+        return None
+    identity = session.get(UserIdentityModel, (provider, provider_account_id))
+    if identity is None:
+        return None
+    return session.get(UserModel, str(identity.username))
 
 
 def _coerce_choice(value: str, allowed: frozenset[str]) -> str | None:
@@ -284,8 +364,9 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
                     created_at=datetime.now(UTC),
                     email_verified=verified,
                     use_case=_coerce_choice(body.use_case, _USE_CASES),
-                    experience_level=_coerce_choice(body.experience_level, _EXPERIENCE_LEVELS),
+                    experience_level=normalize_experience_level(body.experience_level),
                     job_role=_coerce_choice(body.job_role, _JOB_ROLES),
+                    intake_completed_at=new_account_intake_completed_at(),
                 )
             )
             code = None if verified else issue_verification_code(session, email)
@@ -296,12 +377,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
             # broken relay surfaces (the alert sink forwards warnings) instead of
             # silently stranding new sign-ups on the verification step.
             try:
-                send_email(
-                    email,
-                    "Confirm your Skynet email",
-                    f"Your Skynet confirmation code is {code}. It expires in 30 minutes.\n\n"
-                    "If you didn't create a Skynet account, you can ignore this email.",
-                )
+                _send_account_code(email, "verification", code)
             except (OSError, RuntimeError):
                 logger.warning("Failed to send verification email at registration", exc_info=True)
         return AccountInfo(email=email, name=name, role=_role_for(email))
@@ -391,10 +467,13 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         first sign-in creates a row with no password, so ``/auth/login`` can
         never sign in to it, and later sign-ins only stamp ``last_login_at``. A
         local account with the same email is reused untouched, so one person
-        stays one identity however they sign in.
+        stays one identity however they sign in. When no account exists under
+        the email, an account under one of the provider's other verified emails
+        is reused instead. An existing account whose email was never confirmed
+        loses its password, since the provider is the first proof of ownership.
 
         Args:
-            body: Provider-asserted email and display name.
+            body: Provider-asserted email, display name, and other verified emails.
             x_internal_auth: Shared-secret header proving the caller is the
                 trusted frontend.
 
@@ -411,7 +490,18 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
             raise DomainError("accounts.invalid_email", status=422)
         now = datetime.now(UTC)
         with Session(job_store.engine) as session:
-            row = session.get(UserModel, email)
+            row = _linked_account(session, body.provider, body.provider_account_id)
+            linked = row is not None
+            if row is None:
+                row = session.get(UserModel, email)
+            if row is None:
+                row = _existing_account(session, body.other_emails)
+            if row is not None and not linked and not bool(row.email_verified):
+                # The password was set by whoever registered the address without
+                # ever proving it; the provider just proved it, so that password
+                # must not keep a way into the owner's account.
+                row.password_hash = ""
+                row.email_verified = True
             if row is None:
                 # The provider already vouched for the email, and an empty hash
                 # never verifies, so the row is verified yet unreachable through
@@ -422,13 +512,81 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
                     password_hash="",
                     created_at=now,
                     email_verified=True,
+                    intake_completed_at=new_account_intake_completed_at(),
                 )
                 session.add(row)
+            if not linked and body.provider and body.provider_account_id:
+                session.merge(
+                    UserIdentityModel(
+                        provider=body.provider,
+                        provider_account_id=body.provider_account_id,
+                        username=str(row.email),
+                        provider_email=email,
+                        created_at=now,
+                    )
+                )
             first_login = row.last_login_at is None
             row.last_login_at = now
+            email = str(row.email)
             name = str(row.name)
             session.commit()
         return AccountInfo(email=email, name=name, role=_role_for(email), first_login=first_login)
+
+    @router.post(
+        "/auth/oauth/link",
+        response_model=AccountInfo,
+        summary="Link a provider account to a signed-in account",
+    )
+    def link_oauth(
+        body: OAuthLinkRequest,
+        x_internal_auth: Annotated[str | None, Header()] = None,
+    ) -> AccountInfo:
+        """Make a Google or GitHub account sign in to an existing account.
+
+        The frontend calls this after the user, already signed in, finishes
+        the provider's consent screen from Settings. Linking goes by the
+        provider's account id, so the provider's emails never have to match.
+        Each account keeps one link per provider; a new one replaces the old.
+
+        Args:
+            body: The signed-in account and the provider account joining it.
+            x_internal_auth: Shared-secret header proving the caller is the
+                trusted frontend.
+
+        Returns:
+            The signed-in account, which the session keeps.
+
+        Raises:
+            DomainError: 403 on a bad internal secret; 404 when the account
+                does not exist; 409 when the provider account already signs in
+                to a different account.
+        """
+        _require_internal_auth(x_internal_auth)
+        username = _normalise_email(body.username)
+        with Session(job_store.engine) as session:
+            row = session.get(UserModel, username)
+            if row is None:
+                raise DomainError("accounts.not_found", status=404)
+            existing = session.get(UserIdentityModel, (body.provider, body.provider_account_id))
+            if existing is not None and str(existing.username) != username:
+                raise DomainError("accounts.identity_in_use", status=409)
+            if existing is None:
+                session.execute(
+                    delete(UserIdentityModel).where(
+                        UserIdentityModel.username == username, UserIdentityModel.provider == body.provider
+                    )
+                )
+                session.add(
+                    UserIdentityModel(
+                        provider=body.provider,
+                        provider_account_id=body.provider_account_id,
+                        username=username,
+                        provider_email=_normalise_email(body.provider_email),
+                        created_at=datetime.now(UTC),
+                    )
+                )
+            session.commit()
+            return AccountInfo(email=username, name=str(row.name), role=_role_for(username))
 
     @router.post(
         "/auth/password-reset/request",
@@ -441,22 +599,23 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
     ) -> OkResponse:
         """Email a reset code to an account that has forgotten its password.
 
-        Returns the same acknowledgement whether or not the address has an
-        account, so this route can't be used to enumerate registered emails. A
-        per-account cooldown bounds how often a code is sent, keeping it from
-        being a mail-bomb oracle since no password is required here.
+        An unknown address is refused, so the sign-in card can say so instead
+        of asking for a code that will never arrive. A per-account cooldown
+        bounds how often a code is sent, keeping it from being a mail-bomb
+        oracle since no password is required here.
 
         Args:
             body: The account email to send a code to.
             x_internal_auth: Shared-secret header proving the trusted frontend.
 
         Returns:
-            Acknowledgement (identical for known and unknown emails).
+            Acknowledgement that a code was sent, or is still on its way.
 
         Raises:
             DomainError: 403 on a bad internal secret; 422 when the deployment
                 has no SMTP relay (a global, account-independent condition);
-                502 when the relay rejects the send.
+                404 ``accounts.not_found`` when no account uses the email; 502
+                when the relay rejects the send.
         """
         _require_internal_auth(x_internal_auth)
         if not email_configured():
@@ -464,17 +623,14 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         email = _normalise_email(body.email)
         enforce_account_rate(email, "pwreset")
         with Session(job_store.engine) as session:
-            if session.get(UserModel, email) is None or reset_code_on_cooldown(session, email):
+            if session.get(UserModel, email) is None:
+                raise DomainError("accounts.not_found", status=404)
+            if reset_code_on_cooldown(session, email):
                 return OkResponse()
             code = issue_reset_code(session, email)
             session.commit()
         try:
-            send_email(
-                email,
-                "Your Skynet password-reset code",
-                f"Your Skynet password-reset code is {code}. It expires in 30 minutes.\n\n"
-                "If you didn't ask to reset your password, you can ignore this email.",
-            )
+            _send_account_code(email, "password_reset", code)
         except (OSError, RuntimeError) as exc:
             raise DomainError("accounts.email_send_failed", status=502) from exc
         return OkResponse()
@@ -554,22 +710,13 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         enforce_account_rate(email, "verify")
         with Session(job_store.engine) as session:
             row = session.get(UserModel, email)
-            nothing_to_send = (
-                row is None
-                or bool(row.email_verified)
-                or verification_code_on_cooldown(session, email)
-            )
+            nothing_to_send = row is None or bool(row.email_verified) or verification_code_on_cooldown(session, email)
             if nothing_to_send:
                 return OkResponse()
             code = issue_verification_code(session, email)
             session.commit()
         try:
-            send_email(
-                email,
-                "Confirm your Skynet email",
-                f"Your Skynet confirmation code is {code}. It expires in 30 minutes.\n\n"
-                "If you didn't create a Skynet account, you can ignore this email.",
-            )
+            _send_account_code(email, "verification", code)
         except (OSError, RuntimeError) as exc:
             raise DomainError("accounts.email_send_failed", status=502) from exc
         return OkResponse()

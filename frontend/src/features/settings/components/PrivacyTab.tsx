@@ -4,15 +4,21 @@ import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import * as React from "react";
 import { signOut, useSession } from "next-auth/react";
 import { toast } from "react-toastify";
+import { Popover as PopoverPrimitive } from "radix-ui";
 import {
   At,
+  BracketsCurly,
   ChartBar,
   CircleNotch,
   Database,
   DownloadSimple,
-  Envelope,
   Eraser,
+  Feather,
+  FileText,
+  Package,
   ShieldCheck,
+  Stack,
+  Table,
   Trash,
   User,
 } from "@/shared/ui/icons";
@@ -23,13 +29,11 @@ import {
   ApiError,
   deleteAccount,
   exportAccountData,
+  type AccountExportFormat,
   getModelPrivacy,
-  getNotificationPreferences,
   getSecurityStatus,
   invalidateCache,
   updateModelPrivacy,
-  updateNotificationPreferences,
-  type NotificationPreferences,
 } from "@/shared/lib/api";
 import type { ModelDataPolicy } from "@/shared/types/api";
 import { isTelemetryOptedOut, setTelemetryOptOut } from "@/shared/lib/telemetry/client";
@@ -37,11 +41,15 @@ import { SettingsRow } from "@/shared/ui/settings-row";
 import { CopyButton } from "@/shared/ui/copy-button";
 import { Button } from "@/shared/ui/primitives/button";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
-import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import { Switch } from "@/shared/ui/primitives/switch";
 import { Segmented, type SegmentedOption } from "@/shared/ui/segmented";
+import {
+  COMPACT_POPOVER_ICON_CLASS,
+  COMPACT_POPOVER_ITEM_CLASS,
+  COMPACT_POPOVER_PANEL_CLASS,
+} from "@/shared/ui/compact-popover-menu";
 import { Separator } from "@/shared/ui/primitives/separator";
 import {
   Dialog,
@@ -51,6 +59,7 @@ import {
   DialogTitle,
 } from "@/shared/ui/primitives/dialog";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
+import { SETUP_SETTING_EVENT, type SetupSettingDetail } from "@/features/experience";
 
 /** Localize a data-action failure: semantic backend codes when present. */
 function describeError(err: unknown, fallback: string): string {
@@ -95,6 +104,25 @@ function CopyValueRow({
   );
 }
 
+/**
+ * The account export's formats, in the table export menu's order plus Pickle.
+ * The extension shows what arrives: CSV, Parquet and Feather come as a ZIP with
+ * one file per table.
+ */
+const ACCOUNT_EXPORT_FORMATS: ReadonlyArray<{
+  format: AccountExportFormat;
+  label: string;
+  ext: string;
+  Icon: typeof FileText;
+}> = [
+  { format: "json", label: "JSON", ext: ".json", Icon: BracketsCurly },
+  { format: "csv", label: "CSV", ext: ".zip", Icon: FileText },
+  { format: "xlsx", label: "Excel", ext: ".xlsx", Icon: Table },
+  { format: "pkl", label: "Pickle", ext: ".pkl", Icon: Package },
+  { format: "parquet", label: "Parquet", ext: ".zip", Icon: Stack },
+  { format: "feather", label: "Feather", ext: ".zip", Icon: Feather },
+];
+
 /** Privacy & data settings: telemetry opt-out, cache clearing, data export, and account deletion. */
 export function PrivacyTab() {
   const { data: session } = useSession();
@@ -107,13 +135,6 @@ export function PrivacyTab() {
   const [deleting, setDeleting] = React.useState(false);
   // null until the security probe resolves; OAuth-only identities have no password.
   const [hasPassword, setHasPassword] = React.useState<boolean | null>(null);
-  const [notificationPreferences, setNotificationPreferences] =
-    React.useState<NotificationPreferences | null>(null);
-  const [notificationLoading, setNotificationLoading] = React.useState(false);
-  const [notificationSaving, setNotificationSaving] = React.useState<
-    keyof NotificationPreferences | null
-  >(null);
-  const [notificationLoadError, setNotificationLoadError] = React.useState(false);
   const [modelPolicy, setModelPolicy] = React.useState<ModelDataPolicy | null>(null);
   const [modelPolicyLoading, setModelPolicyLoading] = React.useState(false);
   const [modelPolicySaving, setModelPolicySaving] = React.useState(false);
@@ -128,40 +149,6 @@ export function PrivacyTab() {
       .then((s) => setHasPassword(s.has_password))
       .catch(() => setHasPassword(null));
   }, [signedOut]);
-
-  const loadNotificationPreferences = React.useCallback(async () => {
-    if (signedOut) return;
-    setNotificationLoading(true);
-    setNotificationLoadError(false);
-    try {
-      setNotificationPreferences(await getNotificationPreferences());
-    } catch {
-      setNotificationLoadError(true);
-    } finally {
-      setNotificationLoading(false);
-    }
-  }, [signedOut]);
-
-  React.useEffect(() => {
-    void loadNotificationPreferences();
-  }, [loadNotificationPreferences]);
-
-  const setNotificationPreference = React.useCallback(
-    async (field: keyof NotificationPreferences, enabled: boolean) => {
-      setNotificationSaving(field);
-      try {
-        const updated = await updateNotificationPreferences({ [field]: enabled });
-        setNotificationPreferences(updated);
-        setNotificationLoadError(false);
-        toast.success(msg("settings.notifications.saved"));
-      } catch (err) {
-        toast.error(describeError(err, msg("settings.notifications.save_error")));
-      } finally {
-        setNotificationSaving(null);
-      }
-    },
-    [],
-  );
 
   const loadModelPolicy = React.useCallback(async () => {
     if (signedOut) return;
@@ -194,6 +181,19 @@ export function PrivacyTab() {
     }
   }, []);
 
+  // The first-login setup asks the model policy from its own card while this
+  // tab is open behind it; its answer lands here and saves at once, since the
+  // setup closes the tab right after.
+  React.useEffect(() => {
+    const onSetupAnswer = (event: Event) => {
+      const { privacy } = (event as CustomEvent<SetupSettingDetail>).detail;
+      setModelPolicy(privacy);
+      void saveModelPolicy(privacy);
+    };
+    window.addEventListener(SETUP_SETTING_EVENT, onSetupAnswer);
+    return () => window.removeEventListener(SETUP_SETTING_EVENT, onSetupAnswer);
+  }, [saveModelPolicy]);
+
   const modelPolicyDisabled = signedOut || modelPolicy === null || modelPolicySaving;
   const modelPolicyOptions: Array<SegmentedOption<ModelDataPolicy>> = (
     Object.keys(MODEL_POLICY_KEYS) as ModelDataPolicy[]
@@ -209,19 +209,10 @@ export function PrivacyTab() {
     toast.success(msg("settings.privacy.clear_cache.success"));
   }, []);
 
-  const handleExport = React.useCallback(async () => {
+  const handleExport = React.useCallback(async (format: AccountExportFormat) => {
     setExporting(true);
     try {
-      const bundle = await exportAccountData();
-      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "skynet-account-export.json";
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
+      await exportAccountData(format);
       toast.success(msg("settings.privacy.export.success"));
     } catch (err) {
       toast.error(describeError(err, msg("settings.privacy.export.error")));
@@ -271,50 +262,6 @@ export function PrivacyTab() {
             }}
           />
         </SettingsRow>
-
-        {notificationLoadError && (
-          <InlineErrorRow
-            message={msg("settings.notifications.load_error")}
-            className="items-center py-2"
-            action={
-              <RetryIconButton
-                label={msg("settings.notifications.retry")}
-                loading={notificationLoading}
-                onClick={() => void loadNotificationPreferences()}
-              />
-            }
-          />
-        )}
-
-        <SettingsRow
-          icon={Envelope}
-          label={msg("settings.notifications.jobs.label")}
-          description={msg("settings.notifications.jobs.description")}
-        >
-          <Switch
-            checked={notificationPreferences?.job_updates_enabled ?? false}
-            disabled={signedOut || notificationPreferences === null || notificationSaving !== null}
-            onCheckedChange={(enabled) =>
-              void setNotificationPreference("job_updates_enabled", enabled)
-            }
-            aria-label={msg("settings.notifications.jobs.label")}
-          />
-        </SettingsRow>
-
-        <SettingsRow
-          icon={Envelope}
-          label={msg("settings.notifications.sharing.label")}
-          description={msg("settings.notifications.sharing.description")}
-        >
-          <Switch
-            checked={notificationPreferences?.sharing_updates_enabled ?? false}
-            disabled={signedOut || notificationPreferences === null || notificationSaving !== null}
-            onCheckedChange={(enabled) =>
-              void setNotificationPreference("sharing_updates_enabled", enabled)
-            }
-            aria-label={msg("settings.notifications.sharing.label")}
-          />
-        </SettingsRow>
       </div>
 
       <Separator />
@@ -333,7 +280,7 @@ export function PrivacyTab() {
             }
           />
         )}
-        <div className="flex items-start gap-3 pt-3">
+        <div data-setup="model-privacy" className="flex items-start gap-3 pt-3">
           <ShieldCheck
             className="size-4 mt-0.5 text-muted-foreground shrink-0"
             aria-hidden="true"
@@ -373,16 +320,15 @@ export function PrivacyTab() {
           label={msg("settings.privacy.clear_cache.label")}
           description={msg("settings.privacy.clear_cache.description")}
         >
-          <TooltipButton tooltip={msg("settings.privacy.clear_cache.action")}>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              onClick={handleClearCache}
-              aria-label={msg("settings.privacy.clear_cache.action")}
-            >
-              <Eraser className="size-3.5" aria-hidden="true" />
-            </Button>
-          </TooltipButton>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={handleClearCache}
+            autoTooltip={false}
+            aria-label={msg("settings.privacy.clear_cache.action")}
+          >
+            <Eraser className="size-3.5" aria-hidden="true" />
+          </Button>
         </SettingsRow>
 
         <CopyValueRow
@@ -408,24 +354,57 @@ export function PrivacyTab() {
           label={msg("settings.privacy.export.label")}
           description={msg("settings.privacy.export.description")}
         >
-          <TooltipButton tooltip={msg("settings.privacy.export.action")}>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              disabled={signedOut || exporting}
-              onClick={() => void handleExport()}
-              aria-label={msg("settings.privacy.export.action")}
-            >
-              {exporting ? (
-                <CircleNotch
-                  className="size-3.5 animate-spin motion-reduce:animate-none"
-                  aria-hidden="true"
-                />
-              ) : (
-                <DownloadSimple className="size-3.5" aria-hidden="true" />
-              )}
-            </Button>
-          </TooltipButton>
+          <PopoverPrimitive.Root>
+            <PopoverPrimitive.Trigger asChild>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                disabled={signedOut || exporting}
+                autoTooltip={false}
+                aria-label={msg("settings.privacy.export.action")}
+              >
+                {exporting ? (
+                  <CircleNotch
+                    className="size-3.5 animate-spin motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <DownloadSimple className="size-3.5" aria-hidden="true" />
+                )}
+              </Button>
+            </PopoverPrimitive.Trigger>
+            <PopoverPrimitive.Portal>
+              <PopoverPrimitive.Content
+                align="end"
+                side="bottom"
+                sideOffset={6}
+                className={COMPACT_POPOVER_PANEL_CLASS}
+              >
+                {ACCOUNT_EXPORT_FORMATS.map(({ format, label, ext, Icon }) => (
+                  <div key={format}>
+                    {format === "parquet" && (
+                      <div className="mx-3.5 mt-1.5 mb-1 border-t border-border/40 pt-1.5 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground/50">
+                        {msg("export.table.columnar")}
+                      </div>
+                    )}
+                    <PopoverPrimitive.Close asChild>
+                      <button
+                        type="button"
+                        onClick={() => void handleExport(format)}
+                        className={COMPACT_POPOVER_ITEM_CLASS}
+                      >
+                        <Icon className={COMPACT_POPOVER_ICON_CLASS} />
+                        <span className="flex-1 text-start">{label}</span>
+                        <span className="ms-auto font-mono text-[0.625rem] text-muted-foreground/60">
+                          {ext}
+                        </span>
+                      </button>
+                    </PopoverPrimitive.Close>
+                  </div>
+                ))}
+              </PopoverPrimitive.Content>
+            </PopoverPrimitive.Portal>
+          </PopoverPrimitive.Root>
         </SettingsRow>
 
         <SettingsRow

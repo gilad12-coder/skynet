@@ -54,6 +54,7 @@ from ...models import (
     RunResponse,
     WorkflowSpec,
 )
+from ...models.results import result_scores
 from ...models.serve import WorkflowNodeTrace
 from ...registry import ResolverError, resolve_module_factory
 from ...service_gateway.language_models import usage_by_model_from_history
@@ -305,8 +306,12 @@ async def sse_from_events(
     otherwise leaves the connection idle long enough for an intermediary
     (ingress/LB idle timeout) to silently drop it mid-turn.
 
+    A mapping that also carries an ``id`` gets an ``id: <id>`` line, which a
+    resumable stream's client echoes back to resume after that event.
+
     Args:
-        source: Async iterable yielding ``{"event": str, "data": dict}`` mappings.
+        source: Async iterable yielding ``{"event": str, "data": dict}``
+            mappings, optionally with an ``id``.
 
     Yields:
         SSE-formatted strings ready for ``StreamingResponse``.
@@ -329,7 +334,9 @@ async def sse_from_events(
             next_event = None
             name = event["event"]
             payload = json.dumps(event["data"], ensure_ascii=False, default=str)
-            yield f"event: {name}\ndata: {payload}\n\n"
+            event_id = event.get("id")
+            prefix = f"id: {event_id}\n" if event_id is not None else ""
+            yield f"{prefix}event: {name}\ndata: {payload}\n\n"
     finally:
         if next_event is not None:
             next_event.cancel()
@@ -759,8 +766,7 @@ def _resume_candidate_id(job_data: dict) -> str | None:
     resumable_status = status in {OptimizationStatus.failed, OptimizationStatus.cancelled, OptimizationStatus.paused}
     if not resumable_status and not budget_stop:
         return None
-    # A grid is resumed per pair (in its results), not via a whole-job button, so
-    # the top-level flag stays False for grids — see ``grid_resumable_pairs``.
+    # Grid searches are retired: a stored grid stays readable but never resumes.
     if parse_overview(job_data).get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_GRID_SEARCH:
         return None
     # A manual pause or a budget stop is user-driven, not failure recovery, so it is
@@ -893,27 +899,6 @@ def _has_resumable_state(job_store: Any, optimization_id: str) -> bool:
     return bool(callable(has_pairs) and has_pairs(optimization_id))
 
 
-def grid_resumable_pairs(job_store: Any, optimization_id: str) -> list[int]:
-    """Return the grid pair indices that have a saved checkpoint to resume from.
-
-    Drives the per-pair control in the grid results: a failed pair whose index is
-    here crashed mid-GEPA and offers Resume; a failed pair not here failed without
-    state and offers Restart. Successful pairs have no checkpoint (dropped when
-    they finished), so they never appear.
-
-    Args:
-        job_store: The job store to query.
-        optimization_id: The grid job id.
-
-    Returns:
-        Sorted pair indices with a checkpoint (empty when none or unsupported).
-    """
-    lister = getattr(job_store, "list_gepa_checkpoints", None)
-    if not callable(lister):
-        return []
-    return sorted(cp.pair_index for cp in lister(optimization_id) if cp.pair_index >= 0)
-
-
 def build_summary(job_data: dict) -> OptimizationSummaryResponse:
     """Build a compact dashboard-card summary from a raw job dict.
 
@@ -958,8 +943,7 @@ def build_summary(job_data: dict) -> OptimizationSummaryResponse:
             completed_pairs = result_data.get("completed_pairs")
             failed_pairs = result_data.get("failed_pairs")
         else:
-            baseline = result_data.get("baseline_test_metric")
-            optimized = result_data.get("optimized_test_metric")
+            baseline, optimized = result_scores(result_data)
 
     # For grid search, pull live counters from latest_metrics if result not yet available
     if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH:

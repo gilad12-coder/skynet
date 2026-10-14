@@ -77,6 +77,7 @@ import {
   CanvasZoomReadout,
 } from "@/shared/ui/canvas-control-button";
 import { cn } from "@/shared/lib/utils";
+import { WORKFLOW_CANVAS_HEIGHT_CLASS, WORKFLOW_TOOLBAR_CLASS } from "./WorkflowCanvasSkeleton";
 import {
   COMPACT_POPOVER_ICON_CLASS,
   COMPACT_POPOVER_ITEM_CLASS,
@@ -809,13 +810,13 @@ function CanvasInner({
       ref={rootRef}
       className={cn(
         fullscreen
-          ? "fixed inset-0 z-50 flex h-screen w-screen flex-col bg-background"
+          ? "fixed inset-0 z-50 flex h-dvh w-screen flex-col bg-background"
           : "relative flex flex-col",
         className,
       )}
       data-tutorial="workflow-canvas"
     >
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border/40 bg-[#FAF8F5] px-3 py-2">
+      <div className={WORKFLOW_TOOLBAR_CLASS}>
         {/* Fullscreen swaps the start-side editing buttons for the agent
             toggle: node adding + tidy stay reachable via the context menu,
             and the agent panel toggles like the generalist panel does —
@@ -847,7 +848,7 @@ function CanvasInner({
         )}
         <span className="ms-auto" />
         {issues.length > 0 && (
-          <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#A3512B]">
+          <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#A3512B] dark:text-[#fea47d]">
             <Warning className="size-3" />
             {formatMsg("workflow.toolbar.issues", { p1: issues.length })}
           </span>
@@ -906,7 +907,7 @@ function CanvasInner({
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: -slideFrom, opacity: 0 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
-              className="absolute inset-y-0 start-0 z-20 w-[min(400px,90vw)] overflow-hidden border-e border-border/40 bg-card shadow-xl"
+              className="absolute inset-y-0 start-0 z-20 w-[min(400px,90vw)] overflow-hidden border-e border-border/40 bg-card shadow-[var(--shadow-float)]"
             >
               {agentPanel}
             </motion.div>
@@ -915,7 +916,7 @@ function CanvasInner({
         <div
           dir="ltr"
           ref={flowWrapRef}
-          className={cn("min-w-0 flex-1", fullscreen ? "min-h-0" : "h-[480px]")}
+          className={cn("min-w-0 flex-1", fullscreen ? "min-h-0" : WORKFLOW_CANVAS_HEIGHT_CLASS)}
         >
           <ReactFlow
             nodes={nodes}
@@ -947,14 +948,14 @@ function CanvasInner({
             fitView
             fitViewOptions={FIT_VIEW}
             deleteKeyCode={["Backspace", "Delete"]}
-            className="bg-[#FDFCFA]"
+            className="bg-[#FDFCFA] dark:bg-[#3c362a]"
           >
             <Background gap={16} size={1.25} color="#E3D9CB" />
             <ZoomControls />
             <Panel position="bottom-center" className="pointer-events-none !m-3">
               <span
                 dir="auto"
-                className="hidden whitespace-nowrap rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] text-muted-foreground/80 shadow-xs backdrop-blur sm:inline-flex"
+                className="hidden whitespace-nowrap rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] text-muted-foreground/80 backdrop-blur sm:inline-flex"
               >
                 {msg("workflow.canvas.gestures")}
               </span>
@@ -964,14 +965,14 @@ function CanvasInner({
               zoomable
               position="bottom-right"
               nodeColor={(n) =>
-                n.type === "input_anchor" || n.type === "output_anchor" ? "#C8A882" : "#DDD2C2"
+                n.type === "input_anchor" || n.type === "output_anchor" ? "var(--primary)" : "var(--border)"
               }
-              nodeStrokeColor="#B9A78F"
+              nodeStrokeColor="var(--input)"
               nodeBorderRadius={10}
-              maskColor="rgba(61, 46, 34, 0.06)"
-              bgColor="#FAF8F5"
+              maskColor="color-mix(in srgb, var(--foreground) 6%, transparent)"
+              bgColor="var(--card)"
               className={cn(
-                "!m-3 hidden overflow-hidden rounded-lg border border-border/60 shadow-sm transition-opacity duration-300 sm:block",
+                "!m-3 hidden overflow-hidden rounded-lg border border-border/60 transition-opacity duration-300 sm:block",
                 navActive ? "opacity-100" : "pointer-events-none opacity-0",
               )}
             />
@@ -986,7 +987,7 @@ function CanvasInner({
               exit={{ x: slideFrom, opacity: 0 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
               className={cn(
-                "absolute inset-y-0 end-0 z-20 overflow-hidden border-s border-border/40 bg-card shadow-xl",
+                "absolute inset-y-0 end-0 z-20 overflow-hidden border-s border-border/40 bg-card shadow-[var(--shadow-float)]",
                 fullscreen ? "w-full sm:w-[min(360px,88vw)]" : "w-full sm:w-[min(320px,88vw)]",
               )}
             >
@@ -1039,7 +1040,7 @@ function CanvasInner({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.08 } }}
             transition={{ duration: 0.12, ease: "easeOut" }}
-            className="absolute z-30 min-w-44 rounded-xl border border-border/60 bg-background/95 py-1.5 shadow-lg backdrop-blur-xl"
+            className="absolute z-30 min-w-44 rounded-xl border border-border/60 bg-background/95 py-1.5 shadow-[var(--shadow-float)] backdrop-blur-xl"
             style={{
               insetInlineStart: menu.x,
               top: menu.y,
@@ -1203,7 +1204,7 @@ function ToolbarButton({
       variant="ghost"
       className={cn(
         "h-7 gap-1.5 px-2 text-xs",
-        active ? "bg-[#3D2E22]/8 text-foreground" : "text-muted-foreground hover:text-foreground",
+        active ? "on-primary" : "text-muted-foreground hover:text-foreground",
       )}
       onClick={onClick}
       title={iconOnly ? label : undefined}
@@ -1228,10 +1229,10 @@ function DryRunResultBar({
     <div
       className={cn(
         "flex items-start gap-3 border-t px-4 py-2.5 text-xs",
-        failed ? "border-destructive/30 bg-[#FBF0EC]" : "border-border/40 bg-[#F5F8F1]",
+        failed ? "border-destructive/30 bg-[#FBF0EC] dark:bg-[#463832]" : "border-border/40 bg-[#F5F8F1] dark:bg-[#363b2f]",
       )}
     >
-      <span className={cn("mt-0.5 font-semibold", failed ? "text-destructive" : "text-[#5A7247]")}>
+      <span className={cn("mt-0.5 font-semibold", failed ? "text-destructive" : "text-[#5A7247] dark:text-[#adc899]")}>
         {failed ? msg("workflow.dryrun.failed") : msg("workflow.dryrun.succeeded")}
       </span>
       <div className="min-w-0 flex-1 space-y-0.5">

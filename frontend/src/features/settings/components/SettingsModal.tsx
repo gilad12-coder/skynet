@@ -18,7 +18,6 @@ import {
   Cpu,
   Key,
   ArrowSquareOut,
-  Feather,
   HardDrive,
   Translate,
   Microphone,
@@ -37,12 +36,7 @@ import {
   Info,
   X,
 } from "@/shared/ui/icons";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/primitives/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/shared/ui/primitives/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/primitives/tabs";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import {
@@ -58,6 +52,8 @@ import { CopyButton } from "@/shared/ui/copy-button";
 import { ExpandToggleButton } from "@/shared/ui/expand-toggle-button";
 import { WalletTab, UsageTab, ByokKeysSection } from "@/features/billing";
 import { ConnectorsTab } from "@/features/connectors";
+import { AdminDashboard } from "@/features/dashboard";
+import { ExperienceLevelControl } from "@/features/experience";
 import { Input } from "@/shared/ui/primitives/input";
 import { NumberInput } from "@/shared/ui/number-input";
 import {
@@ -66,6 +62,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableInline,
   TableRow,
 } from "@/shared/ui/primitives/table";
 import {
@@ -95,7 +92,6 @@ import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { LEGAL_CONFIG } from "@/features/legal";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
-import { useTutorialContext } from "@/features/tutorial";
 import {
   deleteStorageQuotaOverride,
   generateApiToken,
@@ -112,7 +108,11 @@ import {
 import { useUserPrefs } from "../hooks/use-user-prefs";
 import { useSettingsModal } from "../hooks/use-settings-modal";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
+import { AdminMetricsCard } from "./AdminMetricsCard";
+import { NotificationsTab } from "./NotificationsTab";
 import { PrivacyTab } from "./PrivacyTab";
+import { ColorThemeControl } from "./ColorThemeControl";
+import { OptimizationDefaults } from "./OptimizationDefaults";
 import { PackageRegistrySetting } from "./PackageRegistrySetting";
 import { SecurityTab } from "./SecurityTab";
 import { SETTINGS_TABS, visibleSettingsTabs, type SettingsTab } from "../lib/tabs";
@@ -159,6 +159,7 @@ function WizardTab() {
         </Select>
       </SettingsRow>
       <PackageRegistrySetting />
+      <OptimizationDefaults />
     </div>
   );
 }
@@ -205,6 +206,7 @@ function TaggingTab() {
         <ModelChip
           config={prefs.taggerAssistModel}
           emptyLabel={msg("tagger.assist.model.placeholder")}
+          defaultFlag="is_default"
           catalogModels={catalogModels ?? undefined}
           onClick={() => setModelDialogOpen(true)}
           onRemove={
@@ -288,7 +290,7 @@ function AgentTab() {
 
 function AccountTab() {
   const { data: session } = useSession();
-  const { prefs, setPref } = useUserPrefs();
+  const { setOpen } = useSettingsModal();
   const username = session?.user?.name ?? "";
   const role = (session?.user as Record<string, unknown> | undefined)?.role;
   const isAdmin = role === "admin";
@@ -311,26 +313,9 @@ function AccountTab() {
         <LanguageSwitcher />
       </SettingsRow>
 
-      <>
-        <SettingsRow
-          icon={Sparkle}
-          label={msg("settings.account.expand_advanced.label")}
-          description={msg("settings.account.expand_advanced.description")}
-        >
-          <Switch
-            checked={prefs.expandAdvanced}
-            onCheckedChange={(v) => setPref("expandAdvanced", v)}
-          />
-        </SettingsRow>
+      <ColorThemeControl />
 
-        <SettingsRow
-          icon={Feather}
-          label={msg("settings.account.lite.label")}
-          description={msg("settings.account.lite.description")}
-        >
-          <Switch checked={prefs.liteMode} onCheckedChange={(v) => setPref("liteMode", v)} />
-        </SettingsRow>
-      </>
+      <ExperienceLevelControl onRerun={() => setOpen(false)} />
     </div>
   );
 }
@@ -442,7 +427,7 @@ function UsernameCombobox({
             // pointer-events-auto: the parent Sheet sets pointer-events:none on
             // <body>, which this body-portaled popup would otherwise inherit,
             // leaving the suggestions unclickable.
-            className="pointer-events-auto fixed z-[9999] overflow-auto rounded-md border border-border/70 bg-popover shadow-lg"
+            className="pointer-events-auto fixed z-[9999] overflow-auto rounded-md border border-border/70 bg-popover shadow-[var(--shadow-float)]"
             style={{
               top: pos.top,
               left: pos.left,
@@ -609,7 +594,8 @@ function UsageMeter({ used, budget }: { used: number; budget: number }) {
   );
 }
 
-function AdminTab() {
+/** Admin tab: the admin dashboard, compact until the modal is expanded, then storage budgets. */
+function AdminTab({ expanded }: { expanded: boolean }) {
   const { data: session } = useSession();
   const isRtl = getActiveDir() === "rtl";
   const [overrides, setOverrides] = React.useState<StorageQuotaOverride[]>([]);
@@ -766,6 +752,9 @@ function AdminTab() {
         <InlineErrorRow message={msg("settings.admin.storage.auth_missing")} />
       )}
 
+      <AdminDashboard active={Boolean(session?.backendAccessToken)} compact={!expanded} />
+      <AdminMetricsCard enabled={Boolean(session?.backendAccessToken)} compact={!expanded} />
+
       <SettingsRow
         icon={HardDrive}
         label={msg("settings.admin.storage.title")}
@@ -838,7 +827,7 @@ function AdminTab() {
 
           <div className="flex-1 overflow-auto">
             <div className="table-scroll">
-              <Table style={{ minWidth: "560px" }}>
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <ColumnHeader
@@ -873,6 +862,7 @@ function AdminTab() {
                       onSort={toggleSort}
                       width={colResize.widths["used_bytes"]}
                       onResize={colResize.setColumnWidth}
+                      collapse="sm"
                     />
                     <ColumnHeader
                       label={msg("settings.admin.storage.updated_by")}
@@ -888,6 +878,7 @@ function AdminTab() {
                       setOpenFilter={colFilters.setOpenFilter}
                       width={colResize.widths["updated_by"]}
                       onResize={colResize.setColumnWidth}
+                      collapse="sm"
                     />
                     <TableHead className="w-12" />
                   </TableRow>
@@ -916,28 +907,30 @@ function AdminTab() {
                         <span className="text-[0.6875rem] text-muted-foreground">MB</span>
                       </span>
                     </TableCell>
-                    <TableCell className="text-center text-xs text-muted-foreground/70">
+                    <TableCell
+                      collapse="sm"
+                      className="text-center text-xs text-muted-foreground/70"
+                    >
                       —
                     </TableCell>
-                    <TableCell className="text-center text-xs text-muted-foreground/70">
+                    <TableCell
+                      collapse="sm"
+                      className="text-center text-xs text-muted-foreground/70"
+                    >
                       —
                     </TableCell>
                     <TableCell className="w-12 text-center">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => void addPendingUser()}
-                            disabled={busy || !pendingUsername.trim() || pendingBudgetMb === ""}
-                            className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
-                            aria-label={msg("settings.admin.storage.add_row")}
-                          >
-                            <Plus className="size-3.5 text-primary" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>{msg("settings.admin.storage.add_row")}</TooltipContent>
-                      </Tooltip>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => void addPendingUser()}
+                        disabled={busy || !pendingUsername.trim() || pendingBudgetMb === ""}
+                        className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                        autoTooltip={false}
+                        aria-label={msg("settings.admin.storage.add_row")}
+                      >
+                        <Plus className="size-3.5 text-primary" />
+                      </Button>
                     </TableCell>
                   </TableRow>
 
@@ -961,11 +954,27 @@ function AdminTab() {
                         className="transition-colors duration-150 hover:bg-muted/50"
                       >
                         <TableCell
-                          className="max-w-[200px] truncate text-center font-semibold text-xs text-foreground"
+                          className="max-w-[200px] text-center font-semibold text-xs text-foreground"
                           dir="ltr"
                           title={item.username}
                         >
-                          {item.username}
+                          <div className="flex min-w-0 items-center justify-center gap-2">
+                            <span className="truncate">{item.username}</span>
+                            <TableInline
+                              at="sm"
+                              className={cn(
+                                "font-mono font-normal",
+                                item.effective_bytes > 0 &&
+                                  item.used_bytes > item.effective_bytes &&
+                                  "text-destructive",
+                              )}
+                            >
+                              {formatStorageSize(item.used_bytes)}
+                            </TableInline>
+                            <TableInline at="sm" className="font-normal">
+                              {item.updated_by || msg("settings.admin.storage.default")}
+                            </TableInline>
+                          </div>
                         </TableCell>
                         <TableCell className="text-center">
                           <EditableBudgetCell
@@ -974,10 +983,11 @@ function AdminTab() {
                             disabled={busy}
                           />
                         </TableCell>
-                        <TableCell className="text-center">
+                        <TableCell collapse="sm" className="text-center">
                           <UsageMeter used={item.used_bytes} budget={item.effective_bytes} />
                         </TableCell>
                         <TableCell
+                          collapse="sm"
                           className="max-w-[180px] truncate text-center text-xs text-muted-foreground"
                           dir="ltr"
                           title={item.updated_by || msg("settings.admin.storage.default")}
@@ -985,23 +995,16 @@ function AdminTab() {
                           {item.updated_by || msg("settings.admin.storage.default")}
                         </TableCell>
                         <TableCell className="w-12 text-center">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                onClick={() => void handleDelete(item.username)}
-                                disabled={busy}
-                                className="close-button mx-auto disabled:opacity-50 disabled:cursor-not-allowed"
-                                aria-label={msg("settings.admin.storage.delete")}
-                              >
-                                <X aria-hidden="true" />
-                                <span className="sr-only">
-                                  {msg("settings.admin.storage.delete")}
-                                </span>
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent>{msg("settings.admin.storage.delete")}</TooltipContent>
-                          </Tooltip>
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(item.username)}
+                            disabled={busy}
+                            className="close-button mx-auto disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-label={msg("settings.admin.storage.delete")}
+                          >
+                            <X aria-hidden="true" />
+                            <span className="sr-only">{msg("settings.admin.storage.delete")}</span>
+                          </button>
                         </TableCell>
                       </TableRow>
                     ))
@@ -1047,21 +1050,17 @@ function AboutTab() {
         label={msg("settings.about.feedback.label")}
         description={msg("settings.about.feedback.description")}
       >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              asChild
-              aria-label={msg("settings.about.feedback.action")}
-            >
-              <a href={feedbackHref}>
-                <PaperPlaneTilt className="size-3.5" aria-hidden="true" />
-              </a>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{msg("settings.about.feedback.action")}</TooltipContent>
-        </Tooltip>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          asChild
+          autoTooltip={false}
+          aria-label={msg("settings.about.feedback.action")}
+        >
+          <a href={feedbackHref}>
+            <PaperPlaneTilt className="size-3.5" aria-hidden="true" />
+          </a>
+        </Button>
       </SettingsRow>
 
       <SettingsRow
@@ -1069,20 +1068,16 @@ function AboutTab() {
         label={msg("settings.about.reset_all.label")}
         description={msg("settings.about.reset_all.description")}
       >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              onClick={handleResetAll}
-              className="size-[44px] text-destructive hover:text-destructive sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
-              aria-label={msg("settings.about.reset_all.action")}
-            >
-              <ArrowCounterClockwise className="size-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{msg("settings.about.reset_all.action")}</TooltipContent>
-        </Tooltip>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          onClick={handleResetAll}
+          className="size-[44px] text-destructive hover:text-destructive sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+          autoTooltip={false}
+          aria-label={msg("settings.about.reset_all.action")}
+        >
+          <ArrowCounterClockwise className="size-3.5" />
+        </Button>
       </SettingsRow>
     </div>
   );
@@ -1163,21 +1158,17 @@ function ApiTab() {
         {loaded &&
           !revealed &&
           (info ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon-sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={handleRevoke}
-                  className="size-[44px] text-destructive hover:text-destructive sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
-                  aria-label={msg("settings.api.revoke")}
-                >
-                  <Trash className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{msg("settings.api.revoke")}</TooltipContent>
-            </Tooltip>
+            <Button
+              size="icon-sm"
+              variant="outline"
+              disabled={busy}
+              onClick={handleRevoke}
+              className="size-[44px] text-destructive hover:text-destructive sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+              autoTooltip={false}
+              aria-label={msg("settings.api.revoke")}
+            >
+              <Trash className="size-3.5" />
+            </Button>
           ) : (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1198,8 +1189,8 @@ function ApiTab() {
       </SettingsRow>
 
       {revealed && (
-        <div className="space-y-2 rounded-md border border-[#C8A882]/40 bg-[#FAF8F5] px-3 py-3">
-          <div className="flex items-start gap-1.5 text-xs text-[#7A1E13]">
+        <div className="space-y-2 rounded-md border border-primary-fill/40 bg-background px-3 py-3">
+          <div className="flex items-start gap-1.5 text-xs text-[#7A1E13] dark:text-[#ffb2a0]">
             <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
             <span>{msg("settings.api.reveal_warning")}</span>
           </div>
@@ -1207,17 +1198,12 @@ function ApiTab() {
             <code className="min-w-0 flex-1 break-all font-mono text-xs text-foreground">
               {revealed}
             </code>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <CopyButton
-                  text={revealed ?? ""}
-                  ariaLabel={msg("settings.api.copy")}
-                  copiedAriaLabel={msg("settings.api.copied")}
-                  className="shrink-0"
-                />
-              </TooltipTrigger>
-              <TooltipContent>{msg("settings.api.copy")}</TooltipContent>
-            </Tooltip>
+            <CopyButton
+              text={revealed ?? ""}
+              ariaLabel={msg("settings.api.copy")}
+              copiedAriaLabel={msg("settings.api.copied")}
+              className="shrink-0"
+            />
           </div>
           <Button variant="outline" size="sm" onClick={() => setRevealed(null)} className="w-full">
             {msg("settings.api.done")}
@@ -1257,22 +1243,18 @@ function ApiTab() {
         label={msg("settings.api.docs_label")}
         description={msg("settings.api.docs_description")}
       >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              asChild
-              className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
-              aria-label={msg("settings.api.docs_action")}
-            >
-              <a href={docsUrl} target="_blank" rel="noopener noreferrer">
-                <ArrowSquareOut className="size-3.5" />
-              </a>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{msg("settings.api.docs_action")}</TooltipContent>
-        </Tooltip>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          asChild
+          className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+          autoTooltip={false}
+          aria-label={msg("settings.api.docs_action")}
+        >
+          <a href={docsUrl} target="_blank" rel="noopener noreferrer">
+            <ArrowSquareOut className="size-3.5" />
+          </a>
+        </Button>
       </SettingsRow>
     </div>
   );
@@ -1290,7 +1272,7 @@ const SETTINGS_GROUPS = [
 // to scan when the list is filtered. On mobile the rail becomes a horizontal
 // strip, so each item drops back to its intrinsic width.
 const SETTINGS_RAIL_ITEM_CLASS =
-  "min-h-[44px] w-full flex-none justify-start gap-2.5 rounded-lg px-3 py-2 font-medium text-sidebar-foreground/60 data-[state=inactive]:hover:bg-sidebar-accent/40 data-[state=inactive]:hover:text-sidebar-foreground data-[state=active]:bg-transparent data-[state=active]:border-transparent data-[state=active]:font-medium data-[state=active]:text-primary data-[state=active]:hover:text-primary max-md:w-auto! md:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]";
+  "min-h-[44px] w-full flex-none justify-start gap-2.5 rounded-lg px-3 py-2 font-medium text-sidebar-foreground/60 data-[state=inactive]:hover:bg-sidebar-accent/40 data-[state=inactive]:hover:text-sidebar-foreground data-[state=active]:bg-transparent data-[state=active]:border-transparent data-[state=active]:font-medium data-[state=active]:text-primary-foreground data-[state=active]:hover:text-primary-foreground max-md:w-auto! md:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]";
 
 // Tabs dense enough (ledgers, connection lists, admin tables) to earn a
 // toggle that grows the modal to fill the screen.
@@ -1312,8 +1294,7 @@ function SettingsPanelHeader({ tab, action }: { tab: SettingsTab; action?: React
 }
 
 export function SettingsModal() {
-  const { open, setOpen, targetTab, clearTarget } = useSettingsModal();
-  const { state: tutorialState } = useTutorialContext();
+  const { open, setOpen, targetTab, clearTarget, guided } = useSettingsModal();
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "admin";
   const isPhone = useIsPhone();
@@ -1328,10 +1309,7 @@ export function SettingsModal() {
     setActiveTab(tab);
     track(TelemetryEvent.SettingsTabChanged, { tab });
   }, []);
-  const tabs = React.useMemo(
-    () => visibleSettingsTabs(isAdmin),
-    [isAdmin],
-  );
+  const tabs = React.useMemo(() => visibleSettingsTabs(isAdmin), [isAdmin]);
   React.useEffect(() => {
     if (!tabs.includes(activeTab)) setActiveTab(isPhone ? "account" : "wizard");
   }, [activeTab, tabs, isPhone]);
@@ -1353,11 +1331,19 @@ export function SettingsModal() {
     wasOpen.current = open;
   }, [open]);
   return (
-    <Dialog open={open} onOpenChange={setOpen} modal={!tutorialState.isVisible}>
+    // The setup frames a setting here from its own card over the page, so
+    // while it guides, the modal is left to the setup's dim and its buttons.
+    <Dialog open={open} onOpenChange={setOpen} modal={!guided}>
       <DialogContent
         data-settings-text-buttons
         aria-describedby={undefined}
+        onOpenAutoFocus={guided ? (e) => e.preventDefault() : undefined}
+        onInteractOutside={guided ? (e) => e.preventDefault() : undefined}
         onEscapeKeyDown={(e) => {
+          if (guided) {
+            e.preventDefault();
+            return;
+          }
           // Escape leaves full screen before it closes settings.
           if (expanded) {
             e.preventDefault();
@@ -1384,13 +1370,12 @@ export function SettingsModal() {
           id={settingsTabsId}
           className={cn(
             "flex h-[calc(100dvh-5.75rem)] min-h-0 flex-col gap-0 transition-[height] duration-200 ease-out motion-reduce:transition-none md:flex-row",
-            expanded ? "sm:h-[calc(94dvh-5.75rem)]" : "max-h-[680px] sm:h-[min(72vh,680px)]",
+            expanded ? "sm:h-[calc(94dvh-5.75rem)]" : "max-h-[680px] sm:h-[min(72dvh,680px)]",
           )}
         >
           <TabsList
             aria-label={msg("settings.title")}
-            data-tutorial="settings-navigation"
-            className="relative flex h-auto w-full shrink-0 items-stretch justify-start gap-1 overflow-x-auto rounded-none border-0 border-b border-border/40 bg-transparent px-3 pb-3 pt-2 shadow-none no-scrollbar max-md:flex-row! md:w-[220px] md:overflow-x-visible md:overflow-y-auto md:border-b-0 md:border-e"
+            className="relative flex h-auto w-full shrink-0 items-stretch justify-start gap-1 overflow-x-auto rounded-none border-0 border-b border-border/40 bg-transparent px-3 pb-3 pt-2 shadow-none no-scrollbar max-md:flex-row! md:max-h-full md:w-[220px] md:overflow-x-visible md:overflow-y-auto md:border-b-0 md:border-e"
           >
             {SETTINGS_GROUPS.map((group) => (
               <div key={group.key} className="contents md:block">
@@ -1406,8 +1391,7 @@ export function SettingsModal() {
                         {tab === activeTab && (
                           <motion.div
                             layoutId="settings-rail-active"
-                            className="absolute inset-0 rounded-lg bg-primary/[0.08] ring-1 ring-primary/10"
-                            style={{ borderInlineStart: "3px solid var(--primary)" }}
+                            className="absolute inset-0 rounded-lg bg-primary-fill"
                             transition={
                               prefersReduced
                                 ? { duration: 0 }
@@ -1458,13 +1442,16 @@ export function SettingsModal() {
               <TabsContent value="agent">
                 <AgentTab />
               </TabsContent>
-              <TabsContent value="account" data-tutorial="settings-account">
+              <TabsContent value="account">
                 <AccountTab />
+              </TabsContent>
+              <TabsContent value="notifications">
+                <NotificationsTab />
               </TabsContent>
               <TabsContent value="security">
                 <SecurityTab />
               </TabsContent>
-              <TabsContent value="privacy" data-tutorial="settings-privacy">
+              <TabsContent value="privacy">
                 <PrivacyTab />
               </TabsContent>
               <TabsContent value="billing">
@@ -1473,7 +1460,7 @@ export function SettingsModal() {
               <TabsContent value="usage">
                 <UsageTab />
               </TabsContent>
-              <TabsContent value="providers" data-tutorial="settings-providers">
+              <TabsContent value="providers">
                 <ByokKeysSection />
               </TabsContent>
               <TabsContent value="connectors">
@@ -1484,7 +1471,7 @@ export function SettingsModal() {
               </TabsContent>
               {isAdmin && (
                 <TabsContent value="admin">
-                  <AdminTab />
+                  <AdminTab expanded={expanded} />
                 </TabsContent>
               )}
               <TabsContent value="about">

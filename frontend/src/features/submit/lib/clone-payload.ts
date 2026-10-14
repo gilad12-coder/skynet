@@ -1,129 +1,253 @@
-import type { ParsedDataset } from "@/shared/lib/parse-dataset";
-import type { SplitFractions, WorkflowSpec } from "@/shared/types/api";
-import type { ColumnRole } from "../constants";
+import type { ModelConfig, SplitFractions } from "@/shared/types/api";
+import type {
+  ArtifactKind,
+  DataMode,
+  OptimizerChoice,
+  UnifiedCase,
+} from "@/shared/types/unified-run";
+import type {
+  InputsSlice,
+  MetaSlice,
+  OptimizerSlice,
+  TaskSlice,
+  WorkspaceSlice,
+} from "./wizard-v2";
 
 /**
- * Recipe-independent view of a stored optimization payload, shared by both
- * wizards' `?clone=` hydration. The recipe picker lets a run be cloned into
- * either wizard, so each must read the other's rows: a Program (DSPy) run keeps
- * them under `dataset` (+ `column_order`, `column_mapping`), an Anything
- * (black-box) run under `cases`.
+ * `?clone=` hydration for the wizard. A stored payload is one of three
+ * shapes: a unified run (`payload_kind: "unified_v1"`), a legacy black-box
+ * run (objective, seed, cases, scorer) or a legacy DSPy run (dataset rows,
+ * column mapping, metric code). Unified runs clone in full; legacy runs are
+ * mapped best effort and leave the rest for the user to fill.
+ *
+ * Only type imports here, so node tests can load this file directly.
  */
 export type ClonePayload = Record<string, unknown>;
 
-export type CloneRecipe = "program" | "anything";
-
-/** Which wizard authored a stored payload, from its job's optimization type. */
-export function cloneSourceRecipe(optimizationType: string): CloneRecipe {
-  return optimizationType === "blackbox" ? "anything" : "program";
+export interface CloneSlices {
+  task: Partial<TaskSlice>;
+  inputs: Partial<InputsSlice>;
+  optimizer: Partial<OptimizerSlice>;
+  workspace: Partial<WorkspaceSlice>;
+  meta: Partial<MetaSlice>;
 }
 
-export interface CloneBasics {
-  name: string | null;
-  description: string | null;
-  isPrivate: boolean | null;
-  split: Partial<SplitFractions> | null;
-  shuffle: boolean | null;
-  seed: number | null;
+const ARTIFACT_KINDS: readonly ArtifactKind[] = ["prompt", "code", "dspy_program", "text"];
+const DATA_MODES: readonly DataMode[] = ["single", "pairs"];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+const text = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value : undefined;
+
+const modelConfig = (value: unknown): ModelConfig | null =>
+  isRecord(value) && typeof value.name === "string" && value.name.trim()
+    ? (value as unknown as ModelConfig)
+    : null;
+
+/** A starting version is text or a map of named text parts; anything else is dropped. */
+function startingVersion(value: unknown): string | Record<string, string> | undefined {
+  if (typeof value === "string") return value;
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value);
+  return entries.length > 0 && entries.every(([, part]) => typeof part === "string")
+    ? (Object.fromEntries(entries) as Record<string, string>)
+    : undefined;
 }
 
-/**
- * Reads the fields every recipe stores the same way. The job row's display
- * name (`jobName`) wins over the payload's, matching what the run view shows.
- */
-export function cloneBasics(payload: ClonePayload, jobName?: string | null): CloneBasics {
-  const name = jobName || payload.name;
-  const split = payload.split_fractions as Partial<SplitFractions> | null | undefined;
+function split(value: unknown): SplitFractions | undefined {
+  if (!isRecord(value)) return undefined;
+  const { train, val, test } = value;
+  return typeof train === "number" && typeof val === "number" && typeof test === "number"
+    ? { train, val, test }
+    : undefined;
+}
+
+/** Fields every payload shape stores the same way; the job row's display name wins. */
+function cloneMeta(payload: ClonePayload, jobName?: string | null): Partial<MetaSlice> {
+  const meta: Partial<MetaSlice> = {};
+  const name = text(jobName) ?? text(payload.name);
+  if (name) meta.name = name;
+  const description = text(payload.description);
+  if (description) meta.description = description;
+  if (typeof payload.is_private === "boolean") meta.isPrivate = payload.is_private;
+  if (payload.economy_mode === true) meta.economyMode = true;
+  return meta;
+}
+
+/** Inputs derived from a list of cases: the mode follows the count. */
+function inputsFromCases(cases: UnifiedCase[], inputFields: string[]): Partial<InputsSlice> {
+  if (cases.length === 0) return {};
+  const columns = Object.keys(cases[0]?.input ?? {});
   return {
-    name: name ? String(name) : null,
-    description: payload.description ? String(payload.description) : null,
-    isPrivate: payload.is_private == null ? null : Boolean(payload.is_private),
-    split: split && typeof split === "object" ? split : null,
-    shuffle: payload.shuffle == null ? null : Boolean(payload.shuffle),
-    seed: payload.seed == null ? null : Number(payload.seed),
+    mode: cases.length === 1 ? "single" : "pairs",
+    cases,
+    columns,
+    sampleRows: cases.slice(0, 5).map((c) => c.input),
+    rowCount: cases.length,
+    inputFields: inputFields.length > 0 ? inputFields : columns,
   };
 }
 
-const isRow = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === "object" && !Array.isArray(value);
+function cloneUnified(payload: ClonePayload): Omit<CloneSlices, "meta"> {
+  const task = isRecord(payload.task) ? payload.task : {};
+  const artifact = isRecord(task.artifact) ? task.artifact : {};
+  const data = isRecord(payload.data) ? payload.data : {};
+  const optimizer = isRecord(payload.optimizer) ? payload.optimizer : {};
+  const models = isRecord(payload.models) ? payload.models : {};
+  const workspace = isRecord(payload.workspace) ? payload.workspace : {};
 
-/**
- * The stored rows of either recipe as a wizard dataset, or null when the
- * payload carries none. Restores the submitted `column_order` when present
- * (the rows' own key order is scrambled by JSONB), appending any column the
- * saved order didn't cover.
- */
-export function cloneRows(payload: ClonePayload): ParsedDataset | null {
-  const stored = Array.isArray(payload.dataset)
-    ? payload.dataset
-    : Array.isArray(payload.cases)
-      ? payload.cases
-      : [];
-  const rows = stored.filter(isRow);
-  const first = rows[0];
-  if (!first) return null;
-  const rowKeys = Object.keys(first);
-  const savedOrder = Array.isArray(payload.column_order)
-    ? payload.column_order.filter(
-        (column): column is string => typeof column === "string" && rowKeys.includes(column),
+  const kind = ARTIFACT_KINDS.find((k) => k === artifact.kind) ?? null;
+  const taskSlice: Partial<TaskSlice> = {
+    objective: typeof task.objective === "string" ? task.objective : "",
+    background: typeof task.background === "string" ? task.background : "",
+    artifactKind: kind,
+    startingVersion: startingVersion(artifact.starting_version) ?? null,
+  };
+
+  const cases = Array.isArray(data.cases)
+    ? data.cases.filter(isRecord).map(
+        (c): UnifiedCase => ({
+          input: isRecord(c.input) ? c.input : {},
+          expected: c.expected ?? null,
+        }),
       )
     : [];
-  const columns =
-    savedOrder.length > 0
-      ? [...savedOrder, ...rowKeys.filter((column) => !savedOrder.includes(column))]
-      : rowKeys;
-  return { columns, rows, rowCount: rows.length };
+  const inputFields = Array.isArray(data.input_fields)
+    ? data.input_fields.filter((f): f is string => typeof f === "string")
+    : [];
+  const inputsSlice: Partial<InputsSlice> = {
+    ...inputsFromCases(cases, inputFields),
+    expectedField: typeof data.expected_field === "string" ? data.expected_field : null,
+    shuffle: typeof data.shuffle === "boolean" ? data.shuffle : true,
+  };
+  const mode = DATA_MODES.find((m) => m === data.mode);
+  if (mode) inputsSlice.mode = mode;
+  const fractions = split(data.split);
+  if (fractions) inputsSlice.split = fractions;
+
+  const optimizerSlice: Partial<OptimizerSlice> = {
+    taskModel: modelConfig(models.task_model),
+    reflectionModel: modelConfig(models.reflection_model),
+    extraReflectionModels: Array.isArray(models.extra_reflection_models)
+      ? models.extra_reflection_models
+          .map(modelConfig)
+          .filter((m): m is ModelConfig => m !== null)
+      : [],
+  };
+  if (typeof optimizer.choice === "string")
+    optimizerSlice.choice = optimizer.choice as OptimizerChoice;
+  if (isRecord(optimizer.budget))
+    optimizerSlice.budget = optimizer.budget as unknown as OptimizerSlice["budget"];
+  if (isRecord(optimizer.proposer))
+    optimizerSlice.proposer = optimizer.proposer as unknown as OptimizerSlice["proposer"];
+  if (isRecord(optimizer.shinka))
+    optimizerSlice.shinka = optimizer.shinka as unknown as OptimizerSlice["shinka"];
+
+  const metricModel = modelConfig(models.metric_model);
+  const reflectionName = optimizerSlice.reflectionModel?.name ?? null;
+  const workspaceSlice: Partial<WorkspaceSlice> = {
+    runCode: typeof workspace.run_code === "string" ? workspace.run_code : "",
+    metricCode: typeof workspace.metric_code === "string" ? workspace.metric_code : "",
+    // A metric model that is the reflection model was inherited, not picked.
+    metricModelMode: metricModel && metricModel.name !== reflectionName ? "explicit" : "inherit",
+    metricModel: metricModel && metricModel.name !== reflectionName ? metricModel : null,
+  };
+  if (typeof workspace.metric_timeout_seconds === "number")
+    workspaceSlice.metricTimeoutSeconds = workspace.metric_timeout_seconds;
+
+  return {
+    task: taskSlice,
+    inputs: inputsSlice,
+    optimizer: optimizerSlice,
+    workspace: workspaceSlice,
+  };
+}
+
+function cloneLegacyBlackbox(payload: ClonePayload): Omit<CloneSlices, "meta"> {
+  const seed = startingVersion(payload.seed_candidate);
+  const task: Partial<TaskSlice> = {
+    objective: text(payload.objective) ?? "",
+    background: text(payload.background) ?? "",
+  };
+  if (seed !== undefined) task.startingVersion = seed;
+  // Legacy cases are flat rows the scorer read whole; an `expected` key, when
+  // present, was the answer the scorer compared against.
+  const cases = Array.isArray(payload.cases)
+    ? payload.cases.filter(isRecord).map((row): UnifiedCase => {
+        const { expected, ...input } = row;
+        return { input, expected: expected ?? null };
+      })
+    : [];
+  const scorer = isRecord(payload.scorer) ? payload.scorer : {};
+  const workspace: Partial<WorkspaceSlice> = {};
+  if (typeof scorer.metric_code === "string") workspace.metricCode = scorer.metric_code;
+  const scorerModel = modelConfig(scorer.model);
+  if (scorerModel) {
+    workspace.metricModelMode = "explicit";
+    workspace.metricModel = scorerModel;
+  }
+  return {
+    task,
+    inputs: inputsFromCases(cases, []),
+    // Stored payloads may be dumped by alias or by field name.
+    optimizer: {
+      taskModel: modelConfig(payload.task_model_config ?? payload.task_model_settings),
+      reflectionModel: modelConfig(
+        payload.reflection_model_config ?? payload.reflection_model_settings,
+      ),
+    },
+    workspace,
+  };
+}
+
+function cloneLegacyDspy(payload: ClonePayload): Omit<CloneSlices, "meta"> {
+  const mapping = isRecord(payload.column_mapping) ? payload.column_mapping : {};
+  const inputCols = Object.keys(isRecord(mapping.inputs) ? mapping.inputs : {});
+  const outputCols = Object.keys(isRecord(mapping.outputs) ? mapping.outputs : {});
+  const rows = Array.isArray(payload.dataset) ? payload.dataset.filter(isRecord) : [];
+  const cases = rows.map(
+    (row): UnifiedCase => ({
+      input: Object.fromEntries(inputCols.map((col) => [col, row[col]])),
+      expected:
+        outputCols.length > 0 ? Object.fromEntries(outputCols.map((col) => [col, row[col]])) : null,
+    }),
+  );
+  const inputs: Partial<InputsSlice> = inputCols.length > 0 ? inputsFromCases(cases, inputCols) : {};
+  const fractions = split(payload.split_fractions);
+  if (fractions) inputs.split = fractions;
+  if (typeof payload.shuffle === "boolean") inputs.shuffle = payload.shuffle;
+  if (outputCols.length === 1) inputs.expectedField = outputCols[0] ?? null;
+  const workspace: Partial<WorkspaceSlice> = {};
+  if (typeof payload.metric_code === "string") workspace.metricCode = payload.metric_code;
+  return {
+    task: { artifactKind: "dspy_program" },
+    inputs,
+    optimizer: {
+      taskModel: modelConfig(payload.model_config ?? payload.model_settings),
+      reflectionModel: modelConfig(
+        payload.reflection_model_config ?? payload.reflection_model_settings,
+      ),
+    },
+    workspace,
+  };
 }
 
 /**
- * Column roles for cloned rows. `column_mapping` persists only inputs and
- * outputs — "ignore" is implicit — so every column is seeded to ignore and the
- * mapped roles overlaid, exactly like an upload followed by role picks. Rows
- * from an Anything run carry no mapping and come back all-ignore: the Cases
- * step then asks for the input/output picks the Program recipe needs.
+ * The wizard slices a stored run fills. A cloned setup is still walked step
+ * by step and its contract checked again before Run.
  */
-export function cloneColumnRoles(
+export function cloneToSlices(
+  optimizationType: string,
   payload: ClonePayload,
-  columns: readonly string[],
-): Record<string, ColumnRole> {
-  const roles: Record<string, ColumnRole> = {};
-  for (const column of columns) roles[column] = "ignore";
-  const mapping = payload.column_mapping as
-    | { inputs?: Record<string, unknown>; outputs?: Record<string, unknown> }
-    | null
-    | undefined;
-  for (const column of Object.keys(mapping?.inputs ?? {})) roles[column] = "input";
-  for (const column of Object.keys(mapping?.outputs ?? {})) roles[column] = "output";
-  return roles;
-}
-
-/**
- * Restore the run-level MCP permission contract from a cloned payload.
- *
- * Missing and null filters are the legacy full-roster contract. An array is
- * an explicit allow-list and stays exact, including an empty (invalid) list,
- * so the wizard can explain it instead of widening permissions.
- */
-export function cloneReactToolFilter(payload: ClonePayload): string[] | null | undefined {
-  const source = payload.tool_source;
-  if (!source || typeof source !== "object" || Array.isArray(source)) return undefined;
-  const record = source as Record<string, unknown>;
-  if (!("tool_filter" in record) || record.tool_filter == null) return null;
-  if (!Array.isArray(record.tool_filter)) return [];
-  return record.tool_filter.filter((name): name is string => typeof name === "string");
-}
-
-/**
- * The stored workflow graph of a Program run that used the workflow module,
- * or null when the payload carries none — every other module submits a single
- * `signature_code` instead. A shape check keeps a legacy or malformed payload
- * out: the canvas is driven by `nodes` and `edges`, and the Start step seeds a
- * fresh starter graph when they're absent.
- */
-export function cloneWorkflowSpec(payload: ClonePayload): WorkflowSpec | null {
-  const spec = payload.workflow;
-  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return null;
-  const record = spec as Record<string, unknown>;
-  if (!Array.isArray(record.nodes) || !Array.isArray(record.edges)) return null;
-  return spec as WorkflowSpec;
+  jobName?: string | null,
+): CloneSlices {
+  const body =
+    payload.payload_kind === "unified_v1"
+      ? cloneUnified(payload)
+      : optimizationType === "blackbox"
+        ? cloneLegacyBlackbox(payload)
+        : cloneLegacyDspy(payload);
+  return { ...body, meta: cloneMeta(payload, jobName) };
 }

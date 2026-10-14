@@ -34,11 +34,11 @@ const WORD_GLYPH = "W";
 const REGEX_GLYPH = ".*";
 
 const ICON_BUTTON_CLASS =
-  "flex shrink-0 items-center rounded p-0.5 text-[#7C6350] transition-[transform,background-color] duration-150 ease-out hover:bg-black/5 enabled:hover:scale-105 enabled:active:scale-95 motion-reduce:transform-none motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#C8B8A4] disabled:cursor-not-allowed disabled:opacity-40";
+  "flex shrink-0 items-center rounded p-0.5 text-[var(--text-2)] transition-[transform,background-color] duration-150 ease-out hover:bg-black/5 dark:hover:bg-white/10 enabled:active:scale-95 motion-reduce:transform-none motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#C8B8A4] disabled:cursor-not-allowed disabled:opacity-40";
 const TEXT_BUTTON_CLASS =
-  "shrink-0 rounded px-1.5 py-0.5 font-medium text-[#7C6350] transition-[transform,background-color] duration-150 ease-out hover:bg-black/5 enabled:hover:scale-105 enabled:active:scale-95 motion-reduce:transform-none motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#C8B8A4] disabled:cursor-not-allowed disabled:opacity-40";
+  "shrink-0 rounded px-1.5 py-0.5 font-medium text-[var(--text-2)] transition-[transform,background-color] duration-150 ease-out hover:bg-black/5 dark:hover:bg-white/10 enabled:active:scale-95 motion-reduce:transform-none motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#C8B8A4] disabled:cursor-not-allowed disabled:opacity-40";
 const FIELD_CLASS =
-  "min-w-0 flex-1 bg-transparent py-1 font-mono text-[11.5px] text-[#3D2E22] outline-none placeholder:text-[#B09878]";
+  "min-w-0 flex-1 bg-transparent py-1 font-mono text-[11.5px] text-primary outline-none placeholder:text-[#B09878] dark:placeholder:text-[#d2b998]";
 
 interface PanelHost {
   dom: HTMLElement;
@@ -94,7 +94,7 @@ function Toggle({ pressed, label, onClick, children }: ToggleProps) {
         aria-label={label}
         onClick={onClick}
         className={`rounded px-1 font-mono text-[10.5px] leading-4 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#C8B8A4] ${
-          pressed ? "bg-[#E8DDD4] text-[#3D2E22]" : "text-[#8C7A6B] hover:bg-black/5"
+          pressed ? "bg-[#E8DDD4] dark:bg-[#4d4239] text-primary" : "text-muted-foreground hover:bg-black/5 dark:hover:bg-white/10"
         }`}
       >
         {children}
@@ -200,7 +200,7 @@ function FindPanel({ view, listeners, replaceOpen, onReplaceOpenChange }: FindPa
     <div
       dir="ltr"
       onKeyDown={handleKeyDown}
-      className="flex flex-col gap-1 px-2 py-1.5 font-sans text-[11px] text-[#3D2E22] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150"
+      className="flex flex-col gap-1 px-2 py-1.5 font-sans text-[11px] text-primary motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150"
     >
       <div className="flex items-center gap-1">
         {!readOnly && (
@@ -223,14 +223,14 @@ function FindPanel({ view, listeners, replaceOpen, onReplaceOpenChange }: FindPa
           </TooltipButton>
         )}
         <div
-          className={`relative flex min-w-0 flex-1 items-center rounded-md border bg-[#FAF6F0] transition-colors focus-within:ring-1 ${
+          className={`relative flex min-w-0 flex-1 items-center rounded-md border bg-[#FAF6F0] dark:bg-[#40382d] transition-colors focus-within:ring-1 ${
             invalid
               ? "border-[#B5654A] focus-within:ring-[#B5654A]/40"
-              : "border-[#E5DDD4] focus-within:border-[#C8B8A4] focus-within:ring-[#C8B8A4]/50"
+              : "border-border-subtle focus-within:border-[#C8B8A4] dark:focus-within:border-[#6d6254] focus-within:ring-[#C8B8A4]/50"
           }`}
         >
           <MagnifyingGlass
-            className="pointer-events-none absolute left-1.5 size-3 text-[#8C7A6B]"
+            className="pointer-events-none absolute left-1.5 size-3 text-muted-foreground"
             aria-hidden="true"
           />
           <input
@@ -274,48 +274,42 @@ function FindPanel({ view, listeners, replaceOpen, onReplaceOpenChange }: FindPa
         <span
           aria-live="polite"
           className={`min-w-[5.5rem] text-center tabular-nums ${
-            nothingFound ? "text-[#B5654A]" : "text-[#8C7A6B]"
+            nothingFound ? "text-[#B5654A] dark:text-[#fba588]" : "text-muted-foreground"
           }`}
         >
           {countLabel}
         </span>
-        <TooltipButton tooltip={msg("shared.code_editor.find.previous")}>
-          <button
-            type="button"
-            aria-label={msg("shared.code_editor.find.previous")}
-            disabled={count.total === 0}
-            onClick={() => findPrevious(view)}
-            className={ICON_BUTTON_CLASS}
-          >
-            <ArrowUp className="size-3" />
-          </button>
-        </TooltipButton>
-        <TooltipButton tooltip={msg("shared.code_editor.find.next")}>
-          <button
-            type="button"
-            aria-label={msg("shared.code_editor.find.next")}
-            disabled={count.total === 0}
-            onClick={() => findNext(view)}
-            className={ICON_BUTTON_CLASS}
-          >
-            <ArrowDown className="size-3" />
-          </button>
-        </TooltipButton>
-        <TooltipButton tooltip={msg("shared.code_editor.find.close")}>
-          <button
-            type="button"
-            aria-label={msg("shared.code_editor.find.close")}
-            onClick={() => closeSearchPanel(view)}
-            className={ICON_BUTTON_CLASS}
-          >
-            <X className="size-3" />
-          </button>
-        </TooltipButton>
+        <button
+          type="button"
+          aria-label={msg("shared.code_editor.find.previous")}
+          disabled={count.total === 0}
+          onClick={() => findPrevious(view)}
+          className={ICON_BUTTON_CLASS}
+        >
+          <ArrowUp className="size-3" />
+        </button>
+        <button
+          type="button"
+          aria-label={msg("shared.code_editor.find.next")}
+          disabled={count.total === 0}
+          onClick={() => findNext(view)}
+          className={ICON_BUTTON_CLASS}
+        >
+          <ArrowDown className="size-3" />
+        </button>
+        <button
+          type="button"
+          aria-label={msg("shared.code_editor.find.close")}
+          onClick={() => closeSearchPanel(view)}
+          className={ICON_BUTTON_CLASS}
+        >
+          <X className="size-3" />
+        </button>
       </div>
 
       {showReplace && (
         <div className="flex items-center gap-1 pl-5">
-          <div className="flex min-w-0 flex-1 items-center rounded-md border border-[#E5DDD4] bg-[#FAF6F0] transition-colors focus-within:border-[#C8B8A4] focus-within:ring-1 focus-within:ring-[#C8B8A4]/50">
+          <div className="flex min-w-0 flex-1 items-center rounded-md border border-border-subtle bg-[#FAF6F0] dark:bg-[#40382d] transition-colors focus-within:border-[#C8B8A4] dark:focus-within:border-[#6d6254] focus-within:ring-1 focus-within:ring-[#C8B8A4]/50">
             <input
               ref={replaceRef}
               type="text"

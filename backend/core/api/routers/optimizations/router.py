@@ -11,7 +11,9 @@ from .deletion import register_deletion_routes
 from .detail import register_detail_routes
 from .lifecycle import register_lifecycle_routes
 from .listing import register_listing_routes
-from .streaming import register_dashboard_stream, register_job_stream
+from .repository import register_repository_routes
+from .streaming import register_dashboard_stream, register_job_stream, register_log_stream
+from .usage import register_usage_routes
 
 
 def create_optimizations_router(*, job_store, get_worker_ref: Callable[[], Any]) -> APIRouter:
@@ -35,8 +37,11 @@ def create_optimizations_router(*, job_store, get_worker_ref: Callable[[], Any])
     register_listing_routes(router, job_store=job_store)
     register_dashboard_stream(router, job_store=job_store)
     register_detail_routes(router, job_store=job_store)
+    register_repository_routes(router, job_store=job_store)
+    register_usage_routes(router, job_store=job_store)
     register_lifecycle_routes(router, job_store=job_store, get_worker_ref=get_worker_ref)
     register_deletion_routes(router, job_store=job_store)
     register_job_stream(router, job_store=job_store)
+    register_log_stream(router, job_store=job_store)
 
     return router

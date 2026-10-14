@@ -164,10 +164,6 @@ class OptimizationStatusResponse(_JobResponseBase):
     # names, plus lanes and the best version), which ``RunResponse`` rejects;
     # they surface here, mirroring ``grid_result`` for grids.
     blackbox_result: BlackboxRunResponse | None = None
-    # Grid pair indices with a saved checkpoint: a failed pair listed here offers
-    # Resume (continue mid-GEPA), one not listed offers Restart (re-run fresh).
-    # Empty for single runs and for grids with no in-flight pair state.
-    grid_resumable_pairs: list[int] = Field(default_factory=list)
     effective_role: str | None = Field(
         default=None,
         description=(

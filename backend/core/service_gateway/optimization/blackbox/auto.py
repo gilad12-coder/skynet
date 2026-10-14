@@ -10,17 +10,20 @@ from pathlib import Path
 from typing import Any
 
 import dspy
+from gepa.oa.budget import BudgetExhausted
 from gepa.oa.config import OptimizeAnythingConfig
 from gepa.oa.engine import Result as UpstreamResult
 from gepa.oa.ensemble import optimize_best_of
 from gepa.oa.eval_server import EvalServer as UpstreamEvalServer
 from gepa.oa.task import Task as UpstreamTask
 
+from ....billing.usage_tags import usage_scope
 from ....constants import PROGRESS_LANE_COMPLETED, PROGRESS_LANE_HANDOFF, PROGRESS_LANE_STARTED
 from ....exceptions import ServiceError
 from ....models.blackbox import BlackboxStrategy
 from ..budget_stop import BudgetReached
-from .protocol import EngineContext, EvalServer, Result, Task
+from ..cost_ceiling import CostCeilingExceededError
+from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, ScorerAbortError, Task
 from .registry import NO_CAPABILITIES, EngineCapabilities, get_engine
 from .upstream import AUTO_ENGINES, GEPA_SOURCE, local_result
 
@@ -37,6 +40,19 @@ class LaneOutcome:
     error: str | None = None
     best_candidate: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def lane_tag(phase: str, engine: str) -> str:
+    """Name the Auto lane a billed call belongs to.
+
+    Args:
+        phase: Composition phase, ``explore`` or ``continue``.
+        engine: Engine running in the lane.
+
+    Returns:
+        The ``lane`` usage tag value, ``<phase>-<engine>``.
+    """
+    return f"{phase}-{engine}"
 
 
 def _completed_lane_incumbent(lanes: list[LaneOutcome], server: EvalServer, interrupted: Any = None) -> Result | None:
@@ -153,7 +169,8 @@ class _LaneEngine:
             upstream: Upstream composition's evaluation server.
 
         Returns:
-            An upstream result retaining the engine's aggregate score.
+            An upstream result retaining the engine's aggregate score; a lane
+            that failed returns its seed at ``-inf`` so another lane wins.
         """
         with self.lock:
             invocation = self.invocations
@@ -181,10 +198,14 @@ class _LaneEngine:
         context = replace(self.ctx, run_dir=str(Path(self.ctx.run_dir) / lane_id), progress_callback=progress)
         server = EvalServer(upstream.evaluate, max_evals=upstream.budget.remaining or 0)
         local_task = Task(
-            task.seed_candidate, task.objective, task.background, task.train_set or [], task.val_set or []
+            task.seed_candidate,
+            task.objective,
+            task.background,
+            list(task.train_set or []),
+            valset=list(task.val_set or []),
         )
         try:
-            with dspy.context(**self.model_context):
+            with dspy.context(**self.model_context), usage_scope(lane=lane_tag(self.phase, self.name)):
                 result = get_engine(self.name, self.caps).run(local_task, server, _admit_context(context))
             lane.best_candidate, lane.best_score = result.best_candidate, result.best_score
             lane.metadata = result.metadata
@@ -200,9 +221,19 @@ class _LaneEngine:
                 lane.best_candidate, lane.best_score = exc.result.best_candidate, exc.result.best_score
                 lane.metadata = dict(exc.result.metadata)
             raise
-        except Exception as exc:
+        except (ScorerAbortError, CostCeilingExceededError, BudgetExhausted, BudgetExhaustedError) as exc:
             lane.status, lane.error = "failed", str(exc)
             raise
+        except Exception as exc:
+            # One engine crashing must not sink the others' work: the lane
+            # loses the comparison and the run carries on.
+            lane.status, lane.error = "failed", str(exc)
+            return UpstreamResult(
+                best_candidate=task.seed_candidate,
+                best_score=-math.inf,
+                total_evals=server.used,
+                metadata={"engine": self.name, "phase": self.phase, "failed": True},
+            )
         finally:
             lane.scorer_runs = server.used
             if callback is not None:
@@ -240,7 +271,7 @@ def run_strategy(
 
     Args:
         strategy: Selected engine or composition.
-        task: Optimization inputs without held-out test data.
+        task: Optimization inputs.
         server: Run-wide scoring allowance and evidence collector.
         ctx: Model routing, runtime and artifact directory.
         progress_callback: Optional job event sink.
@@ -329,8 +360,10 @@ def run_strategy(
     kwargs = {
         "seed_candidate": task.seed_candidate,
         "evaluator": server.evaluate,
-        "dataset": task.train_set or None,
-        "valset": task.val_set or None,
+        # Upstream's dataset is the train split; the validation split rides
+        # along as its valset so each lane can select on it.
+        "dataset": task.cases or None,
+        "valset": task.valset or None,
         "objective": task.objective,
         "background": task.background,
         "name": Path(ctx.run_dir).name,
@@ -357,14 +390,11 @@ def run_strategy(
             for lane in lanes
             if lane.best_score is not None
         ]
-        exc.evidence["selection_scope"] = (
-            "validation"
-            if exc.result is not None and task.val_set
-            else "training"
-            if exc.result is not None
-            else "unpublished_composition"
-        )
+        exc.evidence["selection_scope"] = "validation" if exc.result is not None else "unpublished_composition"
         raise
+    if winner.metadata.get("failed"):
+        errors = "; ".join(f"{lane.engine}: {lane.error}" for lane in lanes if lane.error)
+        raise ServiceError(f"Every Auto exploration lane failed ({errors}).")
     if progress_callback is not None:
         progress_callback(
             PROGRESS_LANE_HANDOFF,
@@ -400,14 +430,17 @@ def run_strategy(
             PROGRESS_LANE_STARTED, {"engine": "gepa", "phase": "continue", "budget": continuation_server.remaining}
         )
     try:
-        continued = get_engine("gepa", caps).run(
-            replace(task, seed_candidate=winner.best_candidate), continuation_server, _admit_context(continuation_ctx)
-        )
+        with usage_scope(lane=lane_tag("continue", "gepa")):
+            continued = get_engine("gepa", caps).run(
+                replace(task, seed_candidate=winner.best_candidate),
+                continuation_server,
+                _admit_context(continuation_ctx),
+            )
     except BudgetReached as exc:
         if not isinstance(exc.result, Result):
             exc.result = local_result(winner, server)
         exc.evidence["_lanes"] = lanes
-        exc.evidence["selection_scope"] = "validation" if task.val_set else "training"
+        exc.evidence["selection_scope"] = "validation"
         raise
     lanes.append(
         LaneOutcome(

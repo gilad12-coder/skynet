@@ -27,7 +27,7 @@ def resolve_email(username: str) -> str | None:
     return address
 
 
-def send_mail(to: str, subject: str, html_body: str) -> bool:
+def send_mail(to: str, subject: str, html_body: str, *, text_body: str | None = None) -> bool:
     """Send an HTML notification through the configured SMTP relay.
 
     Delivery failures are logged and returned as ``False`` so notifications
@@ -37,12 +37,13 @@ def send_mail(to: str, subject: str, html_body: str) -> bool:
         to: Registered recipient email address.
         subject: Mail subject line.
         html_body: RTL HTML message body.
+        text_body: Plain-text alternative; ``None`` falls back to the subject.
 
     Returns:
         ``True`` when the SMTP relay accepted the message, otherwise ``False``.
     """
     try:
-        send_email(to, subject, subject, html_body=html_body)
+        send_email(to, subject, text_body or subject, html_body=html_body)
         logger.info("Notification email sent to %s", to)
         return True
     except Exception as exc:  # A notification failure must never fail its job or request.

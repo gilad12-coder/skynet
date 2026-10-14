@@ -16,6 +16,7 @@ import dspy
 import httpx
 import litellm
 
+from ..api.model_catalog import default_effort_for
 from ..billing.model_gateway import ROUTE_KEY, raise_gateway_stop
 from ..billing.pricing import ModelUsage
 from ..billing.runtime import UsagePendingError
@@ -77,87 +78,6 @@ def _gateway_failure_code(error: BaseException) -> str | None:
             nested for nested in (current.__cause__, current.__context__) if isinstance(nested, BaseException)
         )
     return None
-
-
-def finish_recovery_seed(language_model: object) -> None:
-    """Tell the trusted parent that mandatory seed evaluation has completed.
-
-    Args:
-        language_model: Task model carrying the parent-issued budget route.
-
-    Raises:
-        ServiceError: When the parent rejects or cannot durably apply the marker.
-    """
-    route = getattr(language_model, "budget_route", None)
-    if not isinstance(route, dict):
-        return
-    try:
-        response = httpx.post(
-            f"{os.environ.get('SKYNET_BUDGET_RELAY_URL', str(route['url'])).rstrip('/')}/_budget/recovery-seed-complete",
-            headers={"Authorization": f"Bearer {route['token']}"},
-            json={},
-            timeout=10,
-            trust_env=False,
-        )
-        response.raise_for_status()
-    except httpx.TransportError as error:
-        raise InfrastructureInterruptionError(
-            "The trusted parent transport was interrupted while finalizing seed evaluation."
-        ) from error
-    except (httpx.HTTPStatusError, KeyError) as error:
-        raise ServiceError("The recovery seed-evaluation bound could not be finalized.") from error
-
-
-class GepaRecoverySeedBoundary:
-    """Publish the recovery marker only after upstream finishes its seed valset evaluation."""
-
-    def __init__(self, language_model: object) -> None:
-        """Bind the model route used to reach the trusted parent.
-
-        Args:
-            language_model: Task or reflection LM carrying the scoped budget route.
-        """
-        self._language_model = language_model
-        self._lock = threading.Lock()
-        self._completed = False
-        self._failure: BaseException | None = None
-
-    def on_valset_evaluated(self, event: Mapping[str, Any]) -> None:
-        """Mark the exact upstream iteration-zero seed evaluation boundary.
-
-        Args:
-            event: Upstream GEPA valset event.
-        """
-        if event.get("iteration") != 0 or event.get("candidate_idx") != 0:
-            return
-        with self._lock:
-            if self._completed or self._failure is not None:
-                return
-            try:
-                finish_recovery_seed(self._language_model)
-                self._completed = True
-            except BaseException as error:
-                self._failure = error
-
-    def __call__(self, _state: object) -> bool:
-        """Surface marker failure through GEPA's stopping boundary.
-
-        Args:
-            _state: Upstream state supplied to every stopper.
-
-        Returns:
-            False because this observer never changes optimizer stopping semantics.
-
-        Raises:
-            BaseException: When the trusted marker transport failed or was rejected.
-            ServiceError: When the pinned upstream callback boundary did not run.
-        """
-        with self._lock:
-            if self._failure is not None:
-                raise self._failure
-            if not self._completed:
-                raise ServiceError("The pinned GEPA runtime did not publish its seed-evaluation boundary.")
-        return False
 
 
 def _is_openai_reasoning_model(model_name: str) -> bool:
@@ -643,6 +563,12 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
     if config.max_tokens is not None:
         lm_kwargs["max_tokens"] = config.max_tokens
     lm_kwargs.update(config.extra)
+    if not lm_kwargs.get("reasoning_effort"):
+        # Auto and the optimizer roles send no effort, which leaves an
+        # opt-in thinker (Claude Haiku, the best-value default) not thinking.
+        effort = default_effort_for(model_name)
+        if effort:
+            lm_kwargs["reasoning_effort"] = effort
     budget_route = lm_kwargs.pop(ROUTE_KEY, None)
     _apply_managed_gateway(lm_kwargs)
     _translate_gateway_reasoning(lm_kwargs)

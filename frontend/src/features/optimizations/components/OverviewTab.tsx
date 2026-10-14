@@ -4,7 +4,7 @@ import { ProgressBar } from "@/shared/ui/progress-bar";
 import { PingDot } from "@/shared/ui/ping-dot";
 import { memo, useMemo, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { ChatText, Coins, Gauge, Hourglass, Timer, TrendUp } from "@/shared/ui/icons";
+import { ChatText, Gauge, Hourglass, Timer, TrendUp } from "@/shared/ui/icons";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import {
   Table,
@@ -12,10 +12,12 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableInline,
   TableRow,
 } from "@/shared/ui/primitives/table";
 import { FadeIn, StaggerContainer, StaggerItem, TiltCard } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { blackboxBaselineScore, blackboxBestScore } from "@/shared/lib/blackbox-scores";
 import type {
   BlackboxStrategy,
   LMActivity,
@@ -25,7 +27,8 @@ import type {
 } from "@/shared/types/api";
 import type { PipelineStage } from "../constants";
 import { detectPairStage, detectStage } from "../lib/detect-stage";
-import { planPipelineStages } from "../lib/pipeline-plan";
+import { planPipelineStages, stageInPlan } from "../lib/pipeline-plan";
+import { runShapeKey } from "../lib/run-kind-hint";
 import {
   formatBlackboxDelta,
   formatBlackboxScore,
@@ -40,9 +43,12 @@ import { InfoCard } from "./ui-primitives";
 import { PipelineStages, computeStageTimestamps } from "./PipelineStages";
 import { MetaHarnessPanel, TrajectoryPanel, climbEngineOf } from "@/features/trajectory";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { buildBlackboxTrajectoryContext } from "../lib/blackbox-trajectory";
 import { describeBlackboxArtifact } from "../lib/blackbox-artifact";
+import { buildVersions, versionForPrompt } from "../lib/blackbox-versions";
+import { VersionFeedback } from "./BlackboxFinalScores";
+import { sideInfoFeedback, sideInfoNamedScores } from "@/shared/lib/blackbox-scores";
+import { RepoCandidateBrowser } from "./RepoCandidateBrowser";
 
 const ScoreChart = dynamic(() => import("@/shared/ui/score-chart").then((m) => m.ScoreChart), {
   ssr: false,
@@ -114,8 +120,8 @@ function OverviewTabImpl({
   activePair,
   onPairSelect,
   onPairDeleted,
-  trajectoryPreviewLayout,
   payload,
+  resultCard,
 }: {
   job: OptimizationStatusResponse;
   isActive: boolean;
@@ -124,10 +130,11 @@ function OverviewTabImpl({
   activePair?: PairResult | null;
   onPairSelect: (pairIndex: number) => void;
   onPairDeleted?: (pairIndex: number) => void;
-  trajectoryPreviewLayout?: { width: number; height: number };
   // The submitted payload: a black-box run's recipe and cases tell the
   // candidate tree what a candidate is and whether per-case scores exist.
   payload?: OptimizationPayloadResponse | null;
+  // Standard level leads a finished run's Overview with its result card.
+  resultCard?: ReactNode;
 }) {
   const metrics = job.latest_metrics ?? {};
   const isPairContext = activePair != null;
@@ -135,13 +142,32 @@ function OverviewTabImpl({
   // grid-search pair view — the goal is "exactly identical components", so a
   // pair is just a run scoped by pair_index plus aggregation around it.
   const isBlackbox = job.optimization_type === "blackbox";
-  const blackboxTrajectory = useMemo(
-    () =>
-      isBlackbox
-        ? buildBlackboxTrajectoryContext(job.blackbox_result ?? null, payload ?? null)
-        : null,
-    [isBlackbox, job.blackbox_result, payload],
-  );
+  const isRepo = isBlackbox && payload?.payload?.recipe === "repo";
+  const blackboxTrajectory = useMemo(() => {
+    if (!isBlackbox) return null;
+    const context = buildBlackboxTrajectoryContext(job.blackbox_result ?? null, payload ?? null);
+    const versions = job.blackbox_result ? buildVersions(job.blackbox_result) : [];
+    const renderVersionFeedback = (prompt: Record<string, string>) => {
+      const version = versionForPrompt(versions, prompt);
+      if (!version) return null;
+      const hasFeedback =
+        sideInfoFeedback(version.sideInfo) !== null ||
+        Object.keys(sideInfoNamedScores(version.sideInfo)).length > 0;
+      return hasFeedback ? <VersionFeedback sideInfo={version.sideInfo} /> : null;
+    };
+    if (!isRepo) return { ...context, renderVersionFeedback };
+    return {
+      ...context,
+      renderVersionFeedback,
+      renderRepoVersion: (prompt: Record<string, string>) => (
+        <RepoCandidateBrowser
+          optimizationId={job.optimization_id}
+          versions={versions}
+          prompt={prompt}
+        />
+      ),
+    };
+  }, [isBlackbox, isRepo, job.blackbox_result, job.optimization_id, payload]);
   const scoreChartArtifact = useMemo(
     () =>
       isBlackbox
@@ -149,7 +175,7 @@ function OverviewTabImpl({
         : undefined,
     [isBlackbox, job.blackbox_result, payload],
   );
-  // A hill-climbing lane (Meta-Harness, AutoResearch, AutoSaddler) gets the
+  // A hill-climbing lane (Meta-Harness, AutoResearch, AutoSaddler, ShinkaEvolve) gets the
   // climb view instead of the tree; the lane that produced the newest
   // versions decides.
   const strategyEngine = (payload?.payload.strategy as Partial<BlackboxStrategy> | undefined)
@@ -167,20 +193,26 @@ function OverviewTabImpl({
 
   const pairIndex = isPairContext ? activePair.pair_index : undefined;
   const stagePlan = planPipelineStages(job, payload);
-  const currentStage = isPairContext
-    ? detectPairStage(job, activePair.pair_index)
-    : job.status === "success"
-      ? "done"
-      : detectStage(job);
+  const currentStage = stageInPlan(
+    stagePlan,
+    isPairContext
+      ? detectPairStage(job, activePair.pair_index)
+      : job.status === "success"
+        ? "done"
+        : detectStage(job),
+  );
   const stageTs = computeStageTimestamps(
     job.progress_events ?? [],
     job.started_at,
     job.status === "stopped" ? null : job.completed_at,
     pairIndex,
   );
-  const stagesActive = isPairContext
-    ? isActive && currentStage !== "done" && !activePair.error
-    : isActive;
+  // A pending job sits in the queue unclaimed: nothing has started, so no
+  // stage may read as in progress even though the status counts as active.
+  const isQueued = job.status === "pending";
+  const stagesActive =
+    !isQueued &&
+    (isPairContext ? isActive && currentStage !== "done" && !activePair.error : isActive);
   const stagesFailed = isPairContext
     ? !!activePair.error || (!isActive && job.status !== "stopped" && currentStage !== "done")
     : job.status === "failed" || job.status === "cancelled";
@@ -204,11 +236,10 @@ function OverviewTabImpl({
   // Black-box runs persist their scores on `blackbox_result` (raw scorer
   // values, not percentages) — `job.result` stays null for them.
   const bbResult = isBlackbox ? job.blackbox_result : null;
-  const numberFormat = new Intl.NumberFormat(getActiveIntlLocale());
   const baseline =
-    runResult?.baseline_test_metric ?? bbResult?.baseline_test_metric ?? baselineFromEvents;
+    runResult?.baseline_test_metric ?? blackboxBaselineScore(bbResult) ?? baselineFromEvents;
   const optimized =
-    runResult?.optimized_test_metric ?? bbResult?.optimized_test_metric ?? optimizedFromEvents;
+    runResult?.optimized_test_metric ?? blackboxBestScore(bbResult) ?? optimizedFromEvents;
   const improvement =
     runResult?.metric_improvement ??
     bbResult?.metric_improvement ??
@@ -219,7 +250,11 @@ function OverviewTabImpl({
   const stageIndex = (stage: PipelineStage | "done") =>
     stage === "done" ? stagePlan.length : stagePlan.findIndex((s) => s.key === stage);
   const skippedStages: PipelineStage[] = [];
-  if (baseline == null && stageIndex(currentStage) > stageIndex("baseline"))
+  if (
+    baseline == null &&
+    stageIndex("baseline") !== -1 &&
+    stageIndex(currentStage) > stageIndex("baseline")
+  )
     skippedStages.push("baseline");
   if (optimized == null && currentStage === "done" && !stagesFailed)
     skippedStages.push("evaluating");
@@ -266,7 +301,8 @@ function OverviewTabImpl({
 
   // Status text reflects what the user is looking at — for a pair, that is
   // the pair's own state (running/done/failed), not the parent grid.
-  const viewStatus: "running" | "success" | "failed" | "cancelled" | "other" = (() => {
+  const viewStatus: "queued" | "running" | "success" | "failed" | "cancelled" | "other" = (() => {
+    if (isQueued) return "queued";
     if (isPairContext) {
       if (activePair.error) return "failed";
       if (currentStage === "done") return "success";
@@ -282,24 +318,28 @@ function OverviewTabImpl({
 
   return (
     <>
+      {resultCard}
+
       {renderRunBlocks && job.status !== "stopped" && job.recovery?.state !== "recovering" && (
         <FadeIn>
           <p className="text-sm text-muted-foreground">
-            {viewStatus === "running"
-              ? formatMsg("auto.features.optimizations.components.overviewtab.template.1", {
-                  p1: TERMS.optimization,
-                })
-              : viewStatus === "cancelled"
-                ? formatMsg("auto.features.optimizations.components.overviewtab.template.2", {
+            {viewStatus === "queued"
+              ? formatMsg("optimization.overview.queued", { p1: TERMS.optimization })
+              : viewStatus === "running"
+                ? formatMsg("auto.features.optimizations.components.overviewtab.template.1", {
                     p1: TERMS.optimization,
                   })
-                : viewStatus === "failed"
-                  ? formatMsg("auto.features.optimizations.components.overviewtab.template.3", {
+                : viewStatus === "cancelled"
+                  ? formatMsg("auto.features.optimizations.components.overviewtab.template.2", {
                       p1: TERMS.optimization,
                     })
-                  : formatMsg("auto.features.optimizations.components.overviewtab.template.4", {
-                      p1: TERMS.optimization,
-                    })}
+                  : viewStatus === "failed"
+                    ? formatMsg("auto.features.optimizations.components.overviewtab.template.3", {
+                        p1: TERMS.optimization,
+                      })
+                    : formatMsg("auto.features.optimizations.components.overviewtab.template.4", {
+                        p1: TERMS.optimization,
+                      })}
           </p>
         </FadeIn>
       )}
@@ -341,26 +381,26 @@ function OverviewTabImpl({
 
           return (
             <FadeIn>
-              <div className="rounded-xl border border-[#E3DCD0] bg-[#FBF9F4] px-4 py-3.5">
+              <div className="rounded-xl border border-border bg-card px-4 py-3.5">
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="flex items-center gap-2 text-sm font-semibold text-[#1C1612]">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <PingDot size="sm" />
                     {isBlackbox
                       ? msg("optimization.progress.blackbox")
                       : msg("optimization.progress.gepa")}
                   </span>
                   <span dir="ltr" className="flex items-baseline gap-1.5 font-mono tabular-nums">
-                    <span className="text-sm font-semibold text-[#1C1612]">
+                    <span className="text-sm font-semibold text-foreground">
                       {tqdmPercent.toFixed(0)}%
                     </span>
-                    <span className="text-[0.6875rem] text-[#A89680]">
+                    <span className="text-[0.6875rem] text-muted-foreground">
                       {tqdmN ?? 0}/{tqdmTotal ?? "?"}
                     </span>
                   </span>
                 </div>
                 <ProgressBar value={tqdmPercent} className="mt-2" />
                 {stats.length > 0 && (
-                  <div className="mt-3.5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-[#E3DCD0]/70 pt-3.5 sm:grid-cols-3">
+                  <div className="mt-3.5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-border/70 pt-3.5 sm:grid-cols-3">
                     {stats.map((s) => (
                       <LiveStat key={s.key} icon={s.icon} label={s.label} value={s.value} />
                     ))}
@@ -381,14 +421,14 @@ function OverviewTabImpl({
             isActive={stagesActive}
             isFailed={stagesFailed}
             skippedStages={skippedStages}
-            dataTutorial={isPairContext ? undefined : "pipeline-stages"}
+            hintKey={runShapeKey(job.optimization_id, isPairContext)}
           />
         </FadeIn>
       )}
 
       {bbResult && (
         <FadeIn delay={0.1}>
-          <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2.5">
             <InfoCard
               label={
                 <HelpTip text={tip("blackbox.stats.scorer_runs")}>
@@ -399,34 +439,12 @@ function OverviewTabImpl({
               icon={<Gauge className="size-3.5" />}
             />
             <InfoCard
-              label={
-                <HelpTip text={tip("blackbox.stats.runtime")}>
-                  {msg("optimization.blackbox.stats.runtime")}
-                </HelpTip>
-              }
-              value={formatDuration(bbResult.runtime_seconds)}
+              label={msg("optimization.blackbox.stats.runtime")}
+              // The header clock counts the whole run (clone, baseline, wrap-up), not
+              // just the engine's search, so the card reads the same number.
+              value={formatDuration(job.elapsed_seconds ?? bbResult.runtime_seconds)}
               icon={<Timer className="size-3.5" />}
             />
-            <InfoCard
-              label={
-                <HelpTip text={tip("blackbox.stats.lm_calls")}>
-                  {msg("optimization.blackbox.stats.lm_calls")}
-                </HelpTip>
-              }
-              value={String(bbResult.num_lm_calls)}
-              icon={<ChatText className="size-3.5" />}
-            />
-            {bbResult.total_tokens != null && (
-              <InfoCard
-                label={
-                  <HelpTip text={tip("blackbox.stats.tokens")}>
-                    {msg("optimization.blackbox.stats.tokens")}
-                  </HelpTip>
-                }
-                value={numberFormat.format(bbResult.total_tokens)}
-                icon={<Coins className="size-3.5" />}
-              />
-            )}
           </div>
         </FadeIn>
       )}
@@ -439,11 +457,7 @@ function OverviewTabImpl({
             <div className="grid grid-cols-2 gap-2.5">
               {runResult.num_lm_calls != null && (
                 <InfoCard
-                  label={
-                    <HelpTip text={tip("lm.calls_count")}>
-                      {msg("auto.features.optimizations.components.overviewtab.1")}
-                    </HelpTip>
-                  }
+                  label={msg("auto.features.optimizations.components.overviewtab.1")}
                   value={formatMsg(
                     "auto.features.optimizations.components.overviewtab.template.6",
                     { p1: runResult.num_lm_calls },
@@ -453,11 +467,7 @@ function OverviewTabImpl({
               )}
               {runResult.avg_response_time_ms != null && (
                 <InfoCard
-                  label={
-                    <HelpTip text={tip("lm.avg_response_time")}>
-                      {msg("auto.features.optimizations.components.overviewtab.2")}
-                    </HelpTip>
-                  }
+                  label={msg("auto.features.optimizations.components.overviewtab.2")}
                   value={formatMsg(
                     "auto.features.optimizations.components.overviewtab.template.7",
                     { p1: (runResult.avg_response_time_ms / 1000).toFixed(1) },
@@ -470,7 +480,7 @@ function OverviewTabImpl({
         )}
 
       {renderRunBlocks && showScoreCards && (
-        <div data-tutorial="score-cards">
+        <div>
           <StaggerContainer className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <StaggerItem>
               <TiltCard className=" rounded-xl border border-border/50 bg-card p-6 text-center">
@@ -483,7 +493,7 @@ function OverviewTabImpl({
               </TiltCard>
             </StaggerItem>
             <StaggerItem>
-              <TiltCard className="rounded-xl border border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10 p-6 text-center shadow-[0_0_20px_rgba(var(--primary),0.08)]">
+              <TiltCard className="rounded-xl border on-primary p-6 text-center">
                 <p className="text-[0.6875rem] text-muted-foreground mb-2 font-medium tracking-wide">
                   <HelpTip text={tip(isBlackbox ? "blackbox.score.optimized" : "score.optimized")}>
                     {TERMS.optimizedScore}
@@ -496,17 +506,13 @@ function OverviewTabImpl({
             </StaggerItem>
             <StaggerItem>
               <TiltCard
-                className={`rounded-xl border p-6 text-center ${(displayImprovement ?? 0) >= 0 ? "border-stone-400/50 bg-gradient-to-br from-stone-100/50 to-stone-200/30" : "border-[var(--danger-border)] bg-[var(--danger-dim)]"}`}
+                className={`rounded-xl border p-6 text-center ${(displayImprovement ?? 0) >= 0 ? "border-border bg-muted/50" : "border-[var(--danger-border)] bg-[var(--danger-dim)]"}`}
               >
                 <p className="text-[0.6875rem] text-muted-foreground mb-2 font-medium tracking-wide">
-                  <HelpTip
-                    text={tip(isBlackbox ? "blackbox.score.improvement" : "score.improvement")}
-                  >
-                    {msg("auto.features.optimizations.components.overviewtab.3")}
-                  </HelpTip>
+                  {msg("auto.features.optimizations.components.overviewtab.3")}
                 </p>
                 <p
-                  className={`text-3xl font-mono font-bold tabular-nums ${(displayImprovement ?? 0) >= 0 ? "text-stone-600" : "text-[var(--danger)]"}`}
+                  className={`text-3xl font-mono font-bold tabular-nums ${(displayImprovement ?? 0) >= 0 ? "text-stone-600 dark:text-stone-300" : "text-[var(--danger)]"}`}
                 >
                   {fmtDelta(displayImprovement)}
                 </p>
@@ -518,7 +524,7 @@ function OverviewTabImpl({
 
       {renderRunBlocks && loggedMetricNames.length > 0 && (
         <FadeIn delay={0.1}>
-          <div className="rounded-xl border border-[#E3DCD0] bg-[#FBF9F4] px-4 py-3.5">
+          <div className="rounded-xl border border-border bg-card px-4 py-3.5">
             {/* Semantic table so screen readers announce each value with its
                 column header. Columns use logical alignment and the table
                 follows the page direction — baseline stays on the reading
@@ -535,7 +541,10 @@ function OverviewTabImpl({
                   <TableHead className="h-auto w-full px-0 pb-1.5 text-[0.6875rem] font-medium text-muted-foreground/70">
                     {msg("optimization.logged_metrics.metric_col")}
                   </TableHead>
-                  <TableHead className="h-auto px-0 pb-1.5 ps-4 text-end text-[0.6875rem] font-medium text-muted-foreground/70">
+                  <TableHead
+                    collapse="sm"
+                    className="h-auto px-0 pb-1.5 ps-4 text-end text-[0.6875rem] font-medium text-muted-foreground/70"
+                  >
                     <HelpTip text={tip("score.baseline")}>
                       {msg("optimization.logged_metrics.baseline_col")}
                     </HelpTip>
@@ -546,9 +555,7 @@ function OverviewTabImpl({
                     </HelpTip>
                   </TableHead>
                   <TableHead className="h-auto px-0 pb-1.5 ps-4 text-end text-[0.6875rem] font-medium text-muted-foreground/70">
-                    <HelpTip text={tip("score.improvement")}>
-                      {msg("optimization.logged_metrics.change_col")}
-                    </HelpTip>
+                    {msg("optimization.logged_metrics.change_col")}
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -570,11 +577,22 @@ function OverviewTabImpl({
                         scope="row"
                         dir="auto"
                         title={name}
-                        className="w-full max-w-0 truncate py-2 pe-3 text-start font-mono text-xs font-normal text-foreground"
+                        className="w-full max-w-0 py-2 pe-3 text-start font-mono text-xs font-normal text-foreground"
                       >
-                        {name}
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate">{name}</span>
+                          <TableInline at="sm" className="font-sans">
+                            {msg("optimization.logged_metrics.baseline_col")}
+                            <span dir="ltr" className="font-mono">
+                              {formatLoggedValue(baselineValue, loggedDecimals)}
+                            </span>
+                          </TableInline>
+                        </div>
                       </th>
-                      <TableCell className="px-0 py-2 ps-4 text-end font-mono text-xs tabular-nums text-muted-foreground">
+                      <TableCell
+                        collapse="sm"
+                        className="px-0 py-2 ps-4 text-end font-mono text-xs tabular-nums text-muted-foreground"
+                      >
                         <span dir="ltr">{formatLoggedValue(baselineValue, loggedDecimals)}</span>
                       </TableCell>
                       <TableCell className="px-0 py-2 ps-4 text-end font-mono text-xs font-semibold tabular-nums text-primary">
@@ -615,7 +633,6 @@ function OverviewTabImpl({
         <TrajectoryPanel
           job={job}
           pairIndex={pairIndex}
-          previewLayout={trajectoryPreviewLayout}
           toolSeverities={runResult?.program_artifact?.react_overlay?.tool_severities}
           blackbox={blackboxTrajectory}
         />
@@ -623,24 +640,17 @@ function OverviewTabImpl({
 
       {renderRunBlocks && scorePoints.length > 1 && (
         <FadeIn delay={0.1}>
-          <Card
-            className="relative overflow-hidden shadow-[0_1px_3px_rgba(28,22,18,0.04),inset_0_1px_0_rgba(255,255,255,0.5)]"
-            data-tutorial="score-chart"
-          >
+          <Card className="relative overflow-hidden">
             <div
-              className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-[#C8A882]/40 to-transparent"
+              className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-primary-fill/40 to-transparent"
               aria-hidden="true"
             />
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <TrendUp className="size-4" aria-hidden="true" />
-                <HelpTip
-                  text={tip(isBlackbox ? "blackbox.score.progression" : "score.progression")}
-                >
-                  <span className="font-bold tracking-tight">
-                    {msg("auto.features.optimizations.components.overviewtab.4")}
-                  </span>
-                </HelpTip>
+                <span className="font-bold tracking-tight">
+                  {msg("auto.features.optimizations.components.overviewtab.4")}
+                </span>
               </CardTitle>
             </CardHeader>
             <CardContent>

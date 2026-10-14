@@ -7,8 +7,8 @@ import { Sparkle } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
-import { TERMS } from "@/shared/lib/terms";
 import { Skeleton } from "@/shared/ui/skeleton";
+import { LazyCodeEditor } from "@/shared/ui/lazy-code-editor";
 import { ActivityBreadcrumb } from "@/shared/ui/agent/activity-breadcrumb";
 import { ChatErrorBanner } from "@/shared/ui/agent/chat-error-banner";
 import { ThinkingSection } from "@/shared/ui/agent/thinking-section";
@@ -16,11 +16,6 @@ import { getActiveDir } from "@/shared/lib/runtime-locale";
 import type { ValidateCodeResponse } from "@/shared/types/api";
 
 import type { CodeAuthoringAgentState } from "../hooks/use-code-authoring-agent";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={150} borderRadius={8} />,
-});
 
 // The same react-flow canvas the /submit wizard uses, mounted inline so a
 // workflow (multi-module) run can be authored and edited without leaving chat.
@@ -40,7 +35,7 @@ interface CodeAuthoringCardProps {
  * Inline mirror of the wizard's code agent, shown in the generalist chat when
  * the agent calls ``request_code_authoring``. It renders the lifted code-agent
  * state with the same shared pieces the wizard uses — the thinking timer, the
- * reading→signature→metric breadcrumb, and the streaming Signature + Metric
+ * reading→run code→metric breadcrumb, and the streaming run code + metric
  * editors — so it reflects exactly what the code agent is doing. It drives
  * nothing itself: the panel hosts the agent and writes the result into the
  * shared wizard state on completion.
@@ -70,9 +65,9 @@ export function CodeAuthoringCard({ agent }: CodeAuthoringCardProps) {
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-[#C8A882]/30 bg-[#FAF8F5] shadow-sm">
-      <div className="flex items-center gap-2 border-b border-[#3D2E22]/10 px-4 py-2.5 text-[0.8125rem] font-medium text-[#3D2E22]">
-        <Sparkle className="size-3.5 text-[#3D2E22]" aria-hidden="true" />
+    <div className="overflow-hidden rounded-2xl border border-primary-fill/30 bg-background">
+      <div className="flex items-center gap-2 border-b border-primary-fill/10 px-4 py-2.5 text-[0.8125rem] font-medium text-primary">
+        <Sparkle className="size-3.5 text-primary" aria-hidden="true" />
         {msg("auto.features.submit.components.steps.codestep.1")}
       </div>
 
@@ -108,7 +103,7 @@ export function CodeAuthoringCard({ agent }: CodeAuthoringCardProps) {
           )
         ) : (
           <ArtifactBlock
-            label={TERMS.signature}
+            label={msg("submit.v2.metric.run_label")}
             code={agent.signatureCode}
             streaming={agent.signatureStatus === "writing"}
             validationResult={agent.signatureValidation}
@@ -116,7 +111,7 @@ export function CodeAuthoringCard({ agent }: CodeAuthoringCardProps) {
           />
         )}
         <ArtifactBlock
-          label={TERMS.metric}
+          label={msg("submit.v2.metric.metric_label")}
           code={agent.metricCode}
           streaming={agent.metricStatus === "writing"}
           validationResult={agent.metricValidation}
@@ -147,13 +142,13 @@ function ArtifactBlock({
       <span
         className={cn(
           "text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground",
-          streaming && "text-[#3D2E22]",
+          streaming && "text-primary",
         )}
         dir={getActiveDir()}
       >
         {label}
       </span>
-      <CodeEditor
+      <LazyCodeEditor
         value={code}
         onChange={NOOP}
         height="150px"

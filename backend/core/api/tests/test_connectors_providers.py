@@ -336,6 +336,138 @@ def test_github_import_refuses_oversized_file_before_download(
     stream.assert_not_called()
 
 
+def _github_picker_api(method: str, url: str, **kwargs: Any) -> httpx.Response:
+    """Route mocked GitHub API calls behind the repository picker.
+
+    Args:
+        method: HTTP method.
+        url: Request URL.
+        **kwargs: Request options; ``params`` carries the branch page.
+
+    Returns:
+        The canned response.
+    """
+    path = urlparse(url).path
+    if path == "/user":
+        return _response(200, {"login": "octo"})
+    if path == "/user/repos":
+        return _response(
+            200,
+            [
+                {
+                    "full_name": "octo/app",
+                    "private": True,
+                    "description": "The app",
+                    "language": "Python",
+                    "default_branch": "main",
+                    "pushed_at": "2026-01-02T00:00:00Z",
+                },
+                {"full_name": "octo/docs", "private": False, "description": None, "language": None},
+            ],
+        )
+    if path == "/repos/public/lib":
+        return _response(200, {"full_name": "public/lib", "private": False, "default_branch": "trunk"})
+    if path == "/repos/nobody/missing":
+        return _response(404, {"message": "Not Found"})
+    if path == "/repos/octo/app":
+        return _response(200, {"full_name": "octo/app", "default_branch": "main"})
+    if path == "/repos/octo/app/branches":
+        page = kwargs["params"]["page"]
+        names = [f"b{(page - 1) * 100 + i}" for i in range(100)] if page < 4 else []
+        return _response(200, [{"name": name} for name in names])
+    if path == "/repos/octo/app/git/trees/feature%2Fx":
+        return _response(
+            200,
+            {
+                "truncated": False,
+                "tree": [
+                    {"path": "src", "type": "tree"},
+                    {"path": "src/app.py", "type": "blob"},
+                    {"path": "vendor/lib", "type": "commit"},
+                    {"path": "README.md", "type": "blob"},
+                ],
+            },
+        )
+    if path == "/repos/octo/app/git/trees/HEAD":
+        return _response(200, {"truncated": True, "tree": [{"path": "a.txt", "type": "blob"}]})
+    raise AssertionError(f"unexpected call {method} {url}")
+
+
+@pytest.mark.usefixtures("vault_key", "generic_oauth_off")
+def test_github_picker_lists_repositories_with_details() -> None:
+    """The picker gets every repository's details, filtered, plus a typed public one."""
+    client, _ = _make_client()
+    with patch("core.connectors.transport.CLIENT.request", side_effect=_github_picker_api):
+        client.put("/connectors/github/credentials", json={"fields": {"token": "ghp_secret"}})
+        listed = client.get("/connectors/github/repos")
+        filtered = client.get("/connectors/github/repos", params={"search": "DOCS"}).json()["repositories"]
+        typed = client.get("/connectors/github/repos", params={"search": "public/lib"}).json()["repositories"]
+        unknown = client.get("/connectors/github/repos", params={"search": "nobody/missing"}).json()
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["repositories"][0] == {
+        "full_name": "octo/app",
+        "private": True,
+        "description": "The app",
+        "language": "Python",
+        "default_branch": "main",
+        "pushed_at": "2026-01-02T00:00:00Z",
+    }
+    assert [r["full_name"] for r in filtered] == ["octo/docs"]
+    assert typed[0]["full_name"] == "public/lib"
+    assert typed[0]["default_branch"] == "trunk"
+    assert unknown == {"repositories": []}
+
+
+@pytest.mark.usefixtures("vault_key", "generic_oauth_off")
+def test_github_picker_branches_are_paginated_and_capped() -> None:
+    """Branches page through GitHub up to the cap, with the default branch kept in the list."""
+    client, _ = _make_client()
+    with patch("core.connectors.transport.CLIENT.request", side_effect=_github_picker_api):
+        client.put("/connectors/github/credentials", json={"fields": {"token": "ghp_secret"}})
+        response = client.get("/connectors/github/branches", params={"repo": "octo/app"})
+        invalid = client.get("/connectors/github/branches", params={"repo": "octo/app/extra"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["default_branch"] == "main"
+    assert body["branches"][0] == "main"
+    assert len(body["branches"]) == github.BRANCH_LIMIT + 1
+    assert invalid.status_code == 400
+
+
+@pytest.mark.usefixtures("vault_key", "generic_oauth_off")
+def test_github_picker_tree_lists_files_and_folders() -> None:
+    """The tree keeps files and folders, skips submodules, and reports truncation."""
+    client, _ = _make_client()
+    with patch("core.connectors.transport.CLIENT.request", side_effect=_github_picker_api):
+        client.put("/connectors/github/credentials", json={"fields": {"token": "ghp_secret"}})
+        tree = client.get("/connectors/github/tree", params={"repo": "octo/app", "branch": "feature/x"})
+        default = client.get("/connectors/github/tree", params={"repo": "octo/app"}).json()
+    assert tree.status_code == 200, tree.text
+    assert tree.json() == {
+        "entries": [
+            {"path": "src", "type": "dir"},
+            {"path": "src/app.py", "type": "file"},
+            {"path": "README.md", "type": "file"},
+        ],
+        "truncated": False,
+    }
+    assert default == {"entries": [{"path": "a.txt", "type": "file"}], "truncated": True}
+
+
+@pytest.mark.usefixtures("vault_key", "generic_oauth_off")
+def test_github_picker_needs_a_linked_account() -> None:
+    """Every picker route answers 409 before GitHub is linked."""
+    client, _ = _make_client()
+    for path, params in (
+        ("/connectors/github/repos", {}),
+        ("/connectors/github/branches", {"repo": "octo/app"}),
+        ("/connectors/github/tree", {"repo": "octo/app"}),
+    ):
+        response = client.get(path, params=params)
+        assert response.status_code == 409
+        assert response.json()["code"] == "connectors.not_connected"
+
+
 @pytest.mark.usefixtures("vault_key", "generic_oauth_off")
 def test_github_oauth_start_and_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     """The generic OAuth pair mints PKCE state and stores the exchanged token."""

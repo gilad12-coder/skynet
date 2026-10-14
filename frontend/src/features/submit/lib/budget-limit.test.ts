@@ -6,6 +6,7 @@ const billingUrl = new URL("../../billing/lib/pricing.ts", import.meta.url).href
 const centUrl = new URL("../../billing/lib/wallet.ts", import.meta.url).href;
 const budgetLimitUrl = new URL("./budget-limit.ts", import.meta.url).href;
 const costBracketUrl = new URL("./cost-bracket.ts", import.meta.url).href;
+const scorerDependenciesUrl = new URL("./scorer-dependencies.ts", import.meta.url).href;
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -15,6 +16,9 @@ registerHooks({
     if (specifier === "./cost-bracket" && context.parentURL === budgetLimitUrl) {
       return { shortCircuit: true, url: costBracketUrl };
     }
+    if (specifier === "./scorer-dependencies" && context.parentURL === costBracketUrl) {
+      return { shortCircuit: true, url: scorerDependenciesUrl };
+    }
     if (specifier === "./wallet" && context.parentURL === billingUrl) {
       return { shortCircuit: true, url: centUrl };
     }
@@ -23,7 +27,7 @@ registerHooks({
 });
 
 const { projectCostBracket, runtimeCostProjection } = await import("./cost-bracket.ts");
-const { budgetShortfall, limitFloor } = await import(budgetLimitUrl);
+const { budgetShortfall, limitContinueBlock, limitFloor } = await import(budgetLimitUrl);
 
 const cheap = {
   value: "cheap",
@@ -78,4 +82,20 @@ test("an uncapped run falls short while the balance cannot cover the opening hol
   assert.deepEqual(uncapped(235), { kind: "balance", needed: 236 });
   assert.equal(uncapped(236), null);
   assert.equal(uncapped(null), null);
+});
+
+test("Continue on the budget screen is held below the estimate's low end and open at or above it", () => {
+  const needed = Math.ceil(limitFloor(bracket, "managed"));
+  const block = (limit: number | null, screen = "budget", uncapped = false) =>
+    limitContinueBlock(screen, bracket, "managed", { uncapped, limit });
+
+  assert.equal(block(needed - 1), needed);
+  assert.equal(block(100), needed);
+  assert.equal(block(needed), null);
+  assert.equal(block(needed + 500), null);
+  assert.equal(block(100, "plan"), needed);
+  assert.equal(block(100, "metric"), null);
+  assert.equal(block(100, "budget", true), null);
+  assert.equal(block(null), null);
+  assert.equal(limitContinueBlock("budget", null, "managed", { uncapped: false, limit: 1 }), null);
 });

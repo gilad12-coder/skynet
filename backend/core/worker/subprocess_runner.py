@@ -18,9 +18,10 @@ from typing import Any
 
 import dspy
 
+from .. import run_log
 from ..config import settings
-from ..constants import OPTIMIZATION_TYPE_BLACKBOX, OPTIMIZATION_TYPE_GRID_SEARCH, OPTIMIZATION_TYPE_RUN
-from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
+from ..constants import OPTIMIZATION_TYPE_BLACKBOX, OPTIMIZATION_TYPE_RUN
+from ..models import UNIFIED_PAYLOAD_KIND, BlackboxRunRequest, RunRequest, UnifiedRunRequest
 from ..models.results import TerminalOutcome
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
@@ -28,6 +29,7 @@ from ..service_gateway.language_models import activate_job_lm_budget, activate_j
 from ..service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
 from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY
 from ..service_gateway.optimization.blackbox.sandbox import sandbox_runtime_context
+from ..service_gateway.optimization.blackbox.sandbox_log import stream_logger as sandbox_stream_logger
 from ..service_gateway.optimization.blackbox.service import run_blackbox_optimization
 from ..service_gateway.optimization.budget_stop import BudgetReached
 from ..service_gateway.optimization.llm_error import (
@@ -35,6 +37,7 @@ from ..service_gateway.optimization.llm_error import (
     enrich_error_message,
     reset_llm_error,
 )
+from ..service_gateway.optimization.unified.service import run_unified_optimization
 from ..service_gateway.react_compat import configure_native_tool_calling
 from .constants import EVENT_AGENT_RUN, EVENT_LOG, EVENT_PROGRESS, EVENT_RESULT, EVENT_TERMINAL
 from .failure_events import failure_event
@@ -138,6 +141,7 @@ class SubprocessLogHandler(logging.Handler):
                 "logger": record.name,
                 "message": message,
                 "pair_index": get_current_pair_index(),
+                **run_log.entry_fields(record),
             },
         )
 
@@ -159,7 +163,7 @@ def run_service_in_subprocess(
     - ``EVENT_PROGRESS`` — one event per ``progress_callback`` invocation from the
       optimizer, carrying ``event`` (phase name) and ``metrics`` (dict).
     - ``EVENT_RESULT`` — emitted once on success, containing the serialised
-      ``RunResponse`` or ``GridSearchResponse``.
+      ``RunResponse`` or ``BlackboxRunResponse``.
     - ``EVENT_ERROR`` — emitted on any ``BaseException``, containing the error
       string and formatted traceback.
 
@@ -192,9 +196,8 @@ def run_service_in_subprocess(
     # off; suppress() so an incompatible dspy build can't fail the job.
     with contextlib.suppress(Exception):
         configure_native_tool_calling()
-    # Cap this child's in-flight LM calls: grid pair threads x GEPA eval
-    # threads multiply, and without a ceiling a single job can spray the
-    # provider hard enough to trip rate limits and fail the run.
+    # Cap this child's in-flight LM calls: GEPA eval threads multiply, and
+    # without a ceiling a single job can spray the provider hard enough to trip rate limits and fail the run.
     activate_job_lm_budget(settings.job_lm_max_concurrency)
     activate_job_usage_registry()
     service = _FORK_SERVICE if start_method == "fork" and _FORK_SERVICE is not None else DspyService(ServiceRegistry())
@@ -211,6 +214,9 @@ def run_service_in_subprocess(
     forwarded_loggers = (
         logging.getLogger("dspy"),
         logging.getLogger("core.service_gateway.optimization"),
+        # Provider failures and refusals the model gateway saw for this run.
+        logging.getLogger("core.billing.model_dispatch"),
+        sandbox_stream_logger,
     )
     saved_levels = [lg.level for lg in forwarded_loggers]
     for lg in forwarded_loggers:
@@ -231,7 +237,6 @@ def run_service_in_subprocess(
         payload_dict = dict(payload_dict)
         optimization_type = payload_dict.pop("_optimization_type", OPTIMIZATION_TYPE_RUN)
         gepa_log_dir_path = payload_dict.pop("_gepa_log_dir", None)
-        completed_pairs = payload_dict.pop("_completed_pairs", None)
         target_route = payload_dict.pop("_skynet_target_route", None)
         evaluator_route = payload_dict.pop("_skynet_evaluator_route", None)
         repo_snapshot = payload_dict.pop(REPO_SNAPSHOT_KEY, None)
@@ -242,24 +247,20 @@ def run_service_in_subprocess(
                     RemoteSandboxRuntime(budget_gateway_descriptor["url"], budget_gateway_descriptor["control_token"])
                 )
             )
-        # Distributed grid pair: this child holds one pair of a larger grid and
-        # must report the pair's GLOBAL index / the grid's real pair count.
-        pair_index_base = int(payload_dict.pop("_pair_index_base", 0) or 0)
-        grid_total_pairs = payload_dict.pop("_grid_total_pairs", None)
         progress_callback = partial(_emit_progress_event, event_queue)
 
-        if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH:
-            if not hasattr(service, "run_grid_search"):
-                service = DspyService(ServiceRegistry())
-            grid_payload = GridSearchRequest.model_validate(payload_dict)
-            result: Any = service.run_grid_search(
-                grid_payload,
-                artifact_id=artifact_id,
+        result: Any
+        if optimization_type == OPTIMIZATION_TYPE_BLACKBOX and payload_dict.get("payload_kind") == UNIFIED_PAYLOAD_KIND:
+            unified_payload = UnifiedRunRequest.model_validate(payload_dict)
+            result = run_unified_optimization(
+                unified_payload,
+                artifact_id=stable_job_id,
                 progress_callback=progress_callback,
                 gepa_log_dir_path=gepa_log_dir_path,
-                completed_pairs=completed_pairs,
-                pair_index_base=pair_index_base,
-                total_pairs_override=int(grid_total_pairs) if grid_total_pairs is not None else None,
+                agent_run_sink=partial(_emit_agent_run_event, event_queue),
+                target_route=target_route,
+                evaluator_route=evaluator_route,
+                repo_snapshot=repo_snapshot,
             )
         elif optimization_type == OPTIMIZATION_TYPE_BLACKBOX:
             blackbox_payload = BlackboxRunRequest.model_validate(payload_dict)

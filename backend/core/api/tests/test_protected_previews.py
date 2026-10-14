@@ -14,7 +14,7 @@ from core.billing.operation_pricing import ChargePolicy, operation_quote
 from core.billing.runtime import PaidResult, UsagePendingError
 from core.storage.models import BillingCustomerModel, ExecutionBudgetModel, ExecutionOperationModel, JobModel
 
-from .test_protected_submissions import _Gateway, _Harness, _payload
+from .test_protected_submissions import _Gateway, _Harness
 from .test_protected_submissions import harness as _harness_fixture
 
 harness = _harness_fixture
@@ -33,15 +33,6 @@ def _workflow_payload(runtime: str = "vercel") -> dict[str, Any]:
         "inputs": {"question": "explicit debug value"},
         "model_config": {"name": "fixture/model"},
         "execution_runtime": runtime,
-    }
-
-
-def _scorer_payload() -> dict[str, Any]:
-    """Return an explicit candidate and case requiring the protected scorer path."""
-    return {
-        "scorer": {"kind": "python", "metric_code": "def score(candidate, case): return 0.75"},
-        "candidate": "real user candidate",
-        "case": {"question": "explicit scorer case"},
     }
 
 
@@ -86,18 +77,6 @@ def previews(harness: _Harness, monkeypatch: pytest.MonkeyPatch) -> tuple[_Harne
             runtime.service.mark_dispatched(operation.id, runtime.username, "fixture-box")
             runtime.service.mark_pending(operation.id, runtime.username)
 
-    def scorer(gateway, payload: dict[str, Any], identity: str, on_token) -> dict[str, Any]:
-        """Replace the protected scorer SDK call while preserving actual admission."""
-        charge(gateway.runtime, payload, "scorer")
-        return {
-            "ok": not state["failed"],
-            "score": None if state["failed"] else 0.75,
-            "side_info": {"case": payload["case"]},
-            "elapsed_ms": 12,
-            "error": "Scorer rejected this candidate" if state["failed"] else None,
-            "usage_by_model": [{"model": "fixture/model", "input_tokens": 10, "output_tokens": 2}],
-        }
-
     def execute(payload: dict[str, Any], artifact_id: str, events, start_method: str) -> None:
         """Replace the external guest process and return its actual-shaped output frames."""
         assert payload["_preflight"]["kind"] == "workflow_preview"
@@ -131,8 +110,8 @@ def previews(harness: _Harness, monkeypatch: pytest.MonkeyPatch) -> tuple[_Harne
             }
         )
 
+    state["charge"] = charge
     monkeypatch.setattr(protected_preview, "ModelGateway", Gateway)
-    monkeypatch.setattr(protected_preview, "_run_scorer", scorer)
     monkeypatch.setattr(protected_preview, "run_vercel_dspy", execute)
     monkeypatch.setattr(
         protected_preview, "bind_protected_sandbox", lambda *args, **kwargs: state["bound"].append(kwargs)
@@ -141,12 +120,11 @@ def previews(harness: _Harness, monkeypatch: pytest.MonkeyPatch) -> tuple[_Harne
     return harness, state
 
 
-@pytest.mark.parametrize("kind", ["scorer", "workflow"])
-def test_preview_creates_budget_and_replays_without_spending_again(previews, kind: str) -> None:
+def test_preview_creates_budget_and_replays_without_spending_again(previews) -> None:
     """Return real debug output and exactly attributed charges from the shared ledger."""
     harness, state = previews
-    route = "/blackbox/scorer/dry-run" if kind == "scorer" else "/workflows/dry-run"
-    payload = _scorer_payload() if kind == "scorer" else _workflow_payload()
+    route = "/workflows/dry-run"
+    payload = _workflow_payload()
     response = harness.client.post(route, json=payload, headers={"Idempotency-Key": "preview"})
     assert response.status_code == 200, response.text
     result = response.json()
@@ -155,12 +133,8 @@ def test_preview_creates_budget_and_replays_without_spending_again(previews, kin
     assert result["budget"]["setup_spent_cents"] == "1"
     assert result["usage_by_model"][0]["input_tokens"] == 10
     assert harness.count(JobModel) == 0
-    if kind == "scorer":
-        assert result["score"] == 0.75
-        assert state["calls"][0]["payload"]["candidate"] == payload["candidate"]
-    else:
-        assert result["outputs"] == payload["inputs"]
-        assert result["node_traces"][0]["inputs"] == payload["inputs"]
+    assert result["outputs"] == payload["inputs"]
+    assert result["node_traces"][0]["inputs"] == payload["inputs"]
     replay = harness.client.post(route, json=payload, headers={"Idempotency-Key": "preview"})
     assert replay.status_code == 200, replay.text
     assert replay.json()["preflight_id"] == result["preflight_id"]
@@ -171,43 +145,40 @@ def test_preview_uses_shared_budget_and_rejects_changed_idempotency_input(previe
     """Preserve one approved total and prevent a replay key from authorizing different debug code."""
     harness, state = previews
     budget = harness.budgets.create("alice", 20, idempotency_key="shared")
-    payload = {**_scorer_payload(), "execution_budget_id": budget.id, "execution_budget_revision": budget.revision}
-    first = harness.client.post("/blackbox/scorer/dry-run", json=payload, headers={"Idempotency-Key": "same"})
+    payload = {**_workflow_payload(), "execution_budget_id": budget.id, "execution_budget_revision": budget.revision}
+    first = harness.client.post("/workflows/dry-run", json=payload, headers={"Idempotency-Key": "same"})
     assert first.status_code == 200, first.text
-    second = harness.client.post("/blackbox/scorer/dry-run", json=payload, headers={"Idempotency-Key": "another"})
+    second = harness.client.post("/workflows/dry-run", json=payload, headers={"Idempotency-Key": "another"})
     assert second.status_code == 200, second.text
     assert second.json()["budget"]["id"] == budget.id
     assert second.json()["budget"]["setup_spent_cents"] == "2"
     assert second.json()["cents_charged"] == 1
-    changed = {**payload, "candidate": "different"}
-    refused = harness.client.post("/blackbox/scorer/dry-run", json=changed, headers={"Idempotency-Key": "same"})
+    changed = {**payload, "inputs": {"question": "different"}}
+    refused = harness.client.post("/workflows/dry-run", json=changed, headers={"Idempotency-Key": "same"})
     assert refused.status_code == 409, refused.text
     assert len(state["calls"]) == 2
 
 
-@pytest.mark.parametrize("kind", ["scorer", "workflow"])
-def test_preview_retains_completed_output_while_usage_is_pending(previews, kind: str) -> None:
+def test_preview_retains_completed_output_while_usage_is_pending(previews) -> None:
     """Keep actual outputs, observed model usage, and uncertain runtime coverage together."""
     harness, state = previews
     state["pending"] = True
-    route = "/blackbox/scorer/dry-run" if kind == "scorer" else "/workflows/dry-run"
-    response = harness.client.post(route, json=_scorer_payload() if kind == "scorer" else _workflow_payload())
+    response = harness.client.post("/workflows/dry-run", json=_workflow_payload())
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["preview_status"] == "pending"
     assert body["budget"]["reserved_cents"] == "1"
     assert body["budget"]["pending_operations"] == 1
     assert body["cents_charged"] == 1
-    assert body["score"] == 0.75 if kind == "scorer" else body["outputs"] == {"question": "explicit debug value"}
+    assert body["outputs"] == {"question": "explicit debug value"}
 
 
-@pytest.mark.parametrize("kind", ["scorer", "workflow"])
-def test_failed_preview_replay_preserves_error_and_single_charge(previews, kind: str) -> None:
+def test_failed_preview_replay_preserves_error_and_single_charge(previews) -> None:
     """Reuse failed debug results on the same transport key without a second paid attempt."""
     harness, state = previews
     state["failed"] = True
-    route = "/blackbox/scorer/dry-run" if kind == "scorer" else "/workflows/dry-run"
-    payload = _scorer_payload() if kind == "scorer" else _workflow_payload()
+    route = "/workflows/dry-run"
+    payload = _workflow_payload()
     first = harness.client.post(route, json=payload, headers={"Idempotency-Key": "failed"})
     second = harness.client.post(route, json=payload, headers={"Idempotency-Key": "failed"})
     assert first.status_code == second.status_code == 200
@@ -235,9 +206,9 @@ def test_unfunded_or_foreign_preview_never_dispatches(previews) -> None:
     harness, state = previews
     foreign = harness.budgets.create("bob", 20, idempotency_key="foreign")
     response = harness.client.post(
-        "/blackbox/scorer/dry-run",
+        "/workflows/dry-run",
         json={
-            **_scorer_payload(),
+            **_workflow_payload(),
             "execution_budget_id": foreign.id,
             "execution_budget_revision": foreign.revision,
         },
@@ -251,46 +222,19 @@ def test_unfunded_or_foreign_preview_never_dispatches(previews) -> None:
     assert not state["calls"]
 
 
-def test_remote_scorer_cannot_fall_back_to_host_http() -> None:
-    """Refuse an unissued evaluator capability before opening any remote scorer transport."""
-    payload = {"scorer": {"kind": "remote", "url": "https://scorer.example/score"}, "candidate": "actual"}
-    with pytest.raises(ValueError, match="protected parent relay"):
-        protected_preview._run_scorer(None, payload, "unissued", None)
-
-
-def test_preview_evidence_does_not_authorize_an_optimization(previews) -> None:
-    """Keep explicit debug approval separate from complete optimization setup evidence."""
-    harness, state = previews
-    preview = harness.client.post("/blackbox/scorer/dry-run", json=_scorer_payload()).json()
-    response = harness.client.post(
-        "/blackbox/run",
-        json={
-            **_payload("/blackbox/run"),
-            "execution_budget_id": preview["budget"]["id"],
-            "execution_budget_revision": preview["budget"]["revision"],
-            "preflight_id": preview["preflight_id"],
-            "preflight_fingerprint": "0" * 64,
-        },
-    )
-    assert response.status_code == 409
-    assert harness.count(JobModel) == 0
-    assert len(state["calls"]) == 1
-
-
 def test_unaffordable_preview_is_rejected_before_physical_dispatch(previews) -> None:
     """Keep the wallet untouched when the real operation bound cannot fit its allowance."""
     harness, state = previews
     budget = harness.budgets.create("alice", 1, idempotency_key="too-small")
     response = harness.client.post(
-        "/blackbox/scorer/dry-run",
+        "/workflows/dry-run",
         json={
-            **_scorer_payload(),
+            **_workflow_payload(),
             "execution_budget_id": budget.id,
             "execution_budget_revision": budget.revision,
         },
     )
     assert response.status_code == 200, response.text
-    assert response.json()["ok"] is False
     assert response.json()["preview_status"] == "failed"
     assert response.json()["cents_charged"] == 0
     assert not state["calls"]
@@ -302,10 +246,10 @@ def test_pending_preview_replay_does_not_open_another_runtime(previews) -> None:
     harness, state = previews
     state["pending"] = True
     headers = {"Idempotency-Key": "pending-preview"}
-    first = harness.client.post("/blackbox/scorer/dry-run", json=_scorer_payload(), headers=headers)
-    replay = harness.client.post("/blackbox/scorer/dry-run", json=_scorer_payload(), headers=headers)
+    first = harness.client.post("/workflows/dry-run", json=_workflow_payload(), headers=headers)
+    replay = harness.client.post("/workflows/dry-run", json=_workflow_payload(), headers=headers)
     assert first.status_code == replay.status_code == 200
     assert replay.json()["preflight_id"] == first.json()["preflight_id"]
-    assert replay.json()["score"] == 0.75
+    assert replay.json()["outputs"] == {"question": "explicit debug value"}
     assert replay.json()["budget"]["reserved_cents"] == "1"
     assert len(state["calls"]) == len(state["bound"]) == 1

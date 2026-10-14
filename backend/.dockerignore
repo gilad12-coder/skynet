@@ -7,3 +7,4 @@ __pycache__
 *.md
 .env*
 !THIRD_PARTY_NOTICES.md
+!news/*.md

@@ -27,6 +27,12 @@ import {
   type PricingTerms,
   type TokenSourceMode,
 } from "@/features/billing";
+// Type-only on purpose: the node test runner loads this module without the
+// app's alias map, so the few unified rules it needs are restated below and
+// pinned to the shared ones by cost-bracket.test.ts.
+import type { OptimizerCatalogResponse, OptimizerChoice } from "@/shared/types/unified-run";
+import { metricUsesModel } from "./scorer-dependencies";
+import type { WizardV2State } from "./wizard-v2";
 
 /** GEPA metric-call budgets by `auto` tier — mirrors the backend `_AUTO_BUDGETS`. */
 export const AUTO_METRIC_CALLS: Record<string, number> = {
@@ -64,6 +70,12 @@ const INPUT_TOKEN_SHARE = 0.7;
 
 /** The Batch API bills managed model calls at half the list price. */
 export const ECONOMY_PRICE_FACTOR = 0.5;
+
+/** Output cap the sandbox's `llm()` sends on every call (backend runner `DEFAULT_MAX_TOKENS`). */
+const CALL_OUTPUT_TOKENS = 4000;
+
+/** Headroom the backend adds to every model-call reservation (`price_text_request`). */
+const CALL_HOLD_HEADROOM = 1.05;
 
 export interface CostBracketInput {
   /** GEPA `auto` tier ("light"/"medium"/"heavy"), or "" when an explicit eval count is used. */
@@ -187,6 +199,8 @@ export interface CostBracket {
   runtimeSessionHighCents: number;
   runtimeBillingBasis: RuntimeCostProjection["billingBasis"] | null;
   expectedRuntimeSessions: number;
+  /** Charged cents the dearest single model call reserves before it runs; 0 when unknown. */
+  modelCallHoldCents: number;
   trace: CostBracketTrace;
 }
 
@@ -260,6 +274,39 @@ function runtimeCents(runtime: RuntimeCostProjection | null | undefined): {
   };
 }
 
+/** Cents the box holds the moment it opens; mirrors `runtimeStartHold` before a bracket exists. */
+function runtimeHold(runtime: RuntimeCostProjection | null | undefined): number {
+  if (!runtime || runtime.billingBasis !== "at_cost") return 0;
+  return Math.ceil(Math.max(0, runtime.maximumSessionCents ?? 0));
+}
+
+/**
+ * Charged cents one call of the dearest role reserves before it is sent. The
+ * backend bounds a call's input by the model's whole context window, so a
+ * single call can hold far more than a whole run's expected usage; this is
+ * that bound at the plain input rate, a floor under what the server reserves.
+ * A role whose model has no known context window contributes nothing.
+ */
+function modelCallHold(
+  roles: ProjectedModelRole[],
+  managedMarkup: number,
+  byokFeeFraction: number,
+): number {
+  let hold = 0;
+  for (const role of roles) {
+    const context = role.model?.max_input_tokens;
+    if (typeof context !== "number" || !(context > 0)) continue;
+    const usage = {
+      model: role.model,
+      inputTokens: context * CALL_HOLD_HEADROOM,
+      outputTokens: CALL_OUTPUT_TOKENS * CALL_HOLD_HEADROOM,
+    };
+    const factor = role.tokenSource === "byok" ? byokFeeFraction : managedMarkup;
+    hold = Math.max(hold, centsForUsage([usage], factor));
+  }
+  return hold;
+}
+
 /**
  * Project a low/high cost bracket for a run from its GEPA budget, dataset, and
  * chosen model(s).
@@ -325,7 +372,13 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
   const byokModelLowCents = centsForUsage(roleUsage(lowTokens, byok), 1);
   const byokModelHighCents = centsForUsage(roleUsage(highTokens, byok), 1);
   const runtimeEstimate = runtimeCents(runtime);
-  const lowCents = Math.max(1, managedModelLowCents + byokModelLowCents + runtimeEstimate.low);
+  // Live calls (the sample check, scorer runs) reserve at list price even when the run batches.
+  const modelCallHoldCents = modelCallHold(roles, usageMarkup, byokFeeFraction);
+  const lowCents = Math.max(
+    1,
+    managedModelLowCents + byokModelLowCents + runtimeEstimate.low,
+    runtimeHold(runtime) + modelCallHoldCents,
+  );
   const highCents = Math.max(
     lowCents,
     managedModelHighCents + byokModelHighCents + runtimeEstimate.high,
@@ -367,6 +420,7 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     runtimeSessionHighCents: Math.max(0, runtime?.maximumSessionCents ?? 0),
     runtimeBillingBasis: runtime?.billingBasis ?? null,
     expectedRuntimeSessions: runtime?.expectedSessions ?? 0,
+    modelCallHoldCents,
     trace: {
       metricCalls: calls,
       metricCallSource: budget.source,
@@ -424,7 +478,11 @@ export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): 
     : bracket.highCents - bracket.runtimeHighCents;
   const byokFeeLow = platformFeeCents(byokLow, bracket.byokFeeFraction);
   const byokFeeHigh = platformFeeCents(byokHigh, bracket.byokFeeFraction);
-  const lowCents = Math.max(1, managedLow + byokFeeLow + bracket.runtimeLowCents);
+  const lowCents = Math.max(
+    1,
+    managedLow + byokFeeLow + bracket.runtimeLowCents,
+    runtimeStartHold(bracket) + bracket.modelCallHoldCents,
+  );
   const highCents = Math.max(lowCents, managedHigh + byokFeeHigh + bracket.runtimeHighCents);
   return {
     ...bracket,
@@ -507,4 +565,139 @@ function roundToNiceCap(cents: number): number {
   if (cents <= 0) return 1;
   const step = niceCapStep(cents);
   return Math.ceil(cents / step) * step;
+}
+
+/** Options the unified projection needs beyond the wizard state. */
+export interface UnifiedCostBracketOptions {
+  /** The model catalog, for per-model prices; models price at defaults without it. */
+  models?: readonly CatalogModel[] | null;
+  runtime?: RuntimeCostProjection | null;
+  pricing?: Pick<PricingTerms, "usageMarkup" | "byokFeeFraction">;
+}
+
+/** Mirrors `MIN_PAIRS_FOR_HELD_OUT`: fewer pairs than this get no test split. */
+const UNIFIED_MIN_PAIRS_FOR_HELD_OUT = 5;
+
+/** Mirrors `resolveOptimizer`: Auto on a DSPy program is DSPy GEPA. */
+export function unifiedResolvedOptimizer(
+  choice: OptimizerChoice,
+  kind: NonNullable<WizardV2State["task"]["artifactKind"]>,
+): string {
+  if (choice === "auto") return kind === "dspy_program" ? "dspy_gepa" : "auto";
+  return choice;
+}
+
+/** Mirrors `usesNativeProposer`: the optimizers whose proposer is a coding agent. */
+function unifiedNativeProposer(resolved: string): boolean {
+  return (
+    resolved === "auto" ||
+    resolved === "meta_harness" ||
+    resolved === "autoresearch" ||
+    resolved === "autosaddler"
+  );
+}
+
+/**
+ * Cases the final re-score runs on: everything outside train, since the
+ * backend reports on test and selects on validation. Mirrors split.py
+ * closely enough for an estimate; the exact split happens server side.
+ */
+function finalScoredCases(state: WizardV2State): number {
+  const { inputs } = state;
+  if (inputs.mode !== "pairs") return 1;
+  const total = inputs.cases.length > 0 ? inputs.cases.length : inputs.rowCount;
+  if (total <= 0) return 0;
+  if (total < UNIFIED_MIN_PAIRS_FOR_HELD_OUT) return Math.max(1, Math.round(total * inputs.split.val));
+  const held = Math.round(total * (inputs.split.val + inputs.split.test));
+  return Math.max(1, Math.min(total, held));
+}
+
+/**
+ * The cost bracket for a unified (wizard v2) run, or null until the task's
+ * artifact kind is known. Black-box families count the search budget plus the
+ * final held-out re-score; DSPy optimizers reuse the DSPy projection with the
+ * scorer-run budget as their metric-call budget. `catalog` is the optimizer
+ * catalog: when it matches the setup, its native-proposer flag decides
+ * whether economy pricing applies.
+ */
+export function projectUnifiedCostBracket(
+  state: WizardV2State,
+  catalog: OptimizerCatalogResponse | null,
+  options: UnifiedCostBracketOptions = {},
+): CostBracket | null {
+  const kind = state.task.artifactKind;
+  if (!kind) return null;
+  const { optimizer, inputs, workspace, meta } = state;
+  const resolved = unifiedResolvedOptimizer(optimizer.choice, kind);
+  const findModel = (config: ModelConfig | null): CatalogModel | null =>
+    config?.name.trim()
+      ? (options.models?.find((candidate) => candidate.value === config.name) ?? null)
+      : null;
+  const roleFor = (
+    role: ProjectedModelRole["role"],
+    config: ModelConfig | null,
+    tokenShare: number,
+  ): ProjectedModelRole[] =>
+    config?.name.trim()
+      ? [{ role, model: findModel(config), tokenSource: config.token_source ?? "managed", tokenShare }]
+      : [];
+  const metricModel = !metricUsesModel(state)
+    ? null
+    : workspace.metricModelMode === "inherit"
+      ? optimizer.reflectionModel
+      : workspace.metricModel;
+  const scorerRuns = Math.max(0, optimizer.budget.max_scorer_runs ?? 0);
+  const datasetRows = inputs.cases.length > 0 ? inputs.cases.length : inputs.rowCount;
+  const pricing = options.pricing;
+
+  if (resolved.startsWith("dspy_")) {
+    return projectCostBracket({
+      autoLevel: "",
+      maxFullEvals: "",
+      maxMetricCalls: String(scorerRuns),
+      datasetRows,
+      modelRoles: [
+        ...roleFor(
+          "task",
+          optimizer.taskModel,
+          optimizer.reflectionModel ? 1 - REFLECTION_TOKEN_SHARE : 1,
+        ),
+        ...roleFor("optimization", optimizer.reflectionModel, REFLECTION_TOKEN_SHARE),
+        ...roleFor("judge", metricModel, 1),
+      ],
+      runtime: options.runtime,
+      pricing,
+      economyMode: meta.economyMode,
+    });
+  }
+
+  const option =
+    catalog && catalog.artifact_kind === kind && catalog.data_mode === inputs.mode
+      ? catalog.options.find((candidate) => candidate.id === optimizer.choice)
+      : undefined;
+  const nativeProposer = option?.native_proposer ?? unifiedNativeProposer(resolved);
+  // ShinkaEvolve samples each mutation from the pool, so the pool shares one budget.
+  const optimizationPool = [
+    optimizer.reflectionModel,
+    ...(optimizer.choice === "shinka_evolve" ? optimizer.extraReflectionModels : []),
+  ].filter((model): model is ModelConfig => Boolean(model?.name.trim()));
+  return projectCostBracket({
+    autoLevel: "",
+    maxFullEvals: "",
+    // The final run re-scores the starting version and the winner outside the
+    // search budget, once per held-out case each (blackboxFinalScorerRuns).
+    maxMetricCalls: String(scorerRuns + 2 * Math.max(1, finalScoredCases(state))),
+    datasetRows,
+    modelRoles: [
+      ...optimizationPool.flatMap((model) =>
+        roleFor("optimization", model, 1 / optimizationPool.length),
+      ),
+      ...roleFor("task", optimizer.taskModel, 1),
+      ...roleFor("judge", metricModel, 1),
+    ],
+    runtime: options.runtime,
+    pricing,
+    // Coding-agent proposers stream their calls, which never batch.
+    economyMode: meta.economyMode && !nativeProposer,
+  });
 }

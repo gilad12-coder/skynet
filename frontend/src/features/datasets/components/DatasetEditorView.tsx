@@ -1,7 +1,6 @@
 "use client";
 
 import { EmptyState } from "@/shared/ui/empty-state";
-import { LoadingState } from "@/shared/ui/loading-state";
 import { RolePill } from "@/shared/ui/role-pill";
 import { BackLink } from "@/shared/ui/back-link";
 import * as React from "react";
@@ -37,15 +36,32 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/primitives/table";
+import {
   editDatasetRows,
   getDatasetRows,
+  listDatasetOptimizations,
+  listDatasets,
   setApiAuthToken,
   type DatasetColumnSchema,
+  type DatasetOptimizationRef,
+  type DatasetSummary,
 } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
+import { DatasetEditorSkeleton, EDITOR_PAGE_SIZE, editorLayoutKey } from "./DatasetEditorSkeleton";
+import { rememberLayout } from "@/shared/lib/layout-hint";
+import { DatasetRowsView } from "./DatasetRowsView";
+import { DatasetShareDialog } from "./DatasetShareDialog";
+import { DatasetUsageButton } from "./DatasetUsageButton";
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = EDITOR_PAGE_SIZE;
 const SAVE_DEBOUNCE_MS = 800;
 const SAVE_RETRY_MS = 10_000;
 const HISTORY_LIMIT = 100;
@@ -185,8 +201,18 @@ export function DatasetEditorView() {
   );
   const undoRef = React.useRef<() => void>(() => {});
   const redoRef = React.useRef<() => void>(() => {});
+  // The library entry carries the caller's role; viewers get the read-only
+  // grid, editors and owners the spreadsheet. Unknown (still loading or not in
+  // the library list) stays editable — the PUT is the real permission check.
+  const [summary, setSummary] = React.useState<DatasetSummary | null>(null);
+  const [optimizations, setOptimizations] = React.useState<DatasetOptimizationRef[] | null>(null);
+  const [readerIndex, setReaderIndex] = React.useState<number | null>(null);
+  const readOnly = summary?.role === "viewer";
   const name =
-    typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("name") : null;
+    summary?.name ??
+    (typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("name")
+      : null);
   const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
   const runSave = React.useCallback(async () => {
@@ -248,6 +274,12 @@ export function DatasetEditorView() {
       .catch(() => {
         if (!cancelled) setState({ mode: "notfound" });
       });
+    listDatasets()
+      .then((res) => !cancelled && setSummary(res.datasets.find((d) => d.id === id) ?? null))
+      .catch(() => {});
+    listDatasetOptimizations(id)
+      .then((res) => !cancelled && setOptimizations(res.optimizations))
+      .catch(() => !cancelled && setOptimizations([]));
     return () => {
       cancelled = true;
     };
@@ -343,12 +375,34 @@ export function DatasetEditorView() {
     };
   }, [id]);
 
+  const readyShape =
+    state.mode === "ready"
+      ? {
+          cols: state.columns.length,
+          rows: Math.max(
+            0,
+            Math.min(state.rows.length - page * EDITOR_PAGE_SIZE, EDITOR_PAGE_SIZE),
+          ),
+          pager: state.rows.length > EDITOR_PAGE_SIZE,
+        }
+      : null;
+  const readyShapeJson = readyShape && JSON.stringify(readyShape);
+  React.useEffect(() => {
+    if (readyShapeJson) rememberLayout(editorLayoutKey(id), JSON.parse(readyShapeJson));
+  }, [id, readyShapeJson]);
+
+  // DatasetRowsView resets its sort/filters whenever ``rows`` changes identity.
+  const viewerRows = React.useMemo(
+    () => (state.mode === "ready" ? { columns: state.columns, rows: state.rows } : null),
+    [state],
+  );
+
   if (state.mode === "loading") {
-    return <LoadingState fullPage />;
+    return <DatasetEditorSkeleton />;
   }
   if (state.mode === "notfound") {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
+      <div className="flex min-h-[60dvh] flex-col items-center justify-center gap-4">
         <XCircle className="size-12 text-destructive" />
         <p className="text-lg text-muted-foreground">{msg("datasets.editor.notfound")}</p>
         <Button asChild variant="outline">
@@ -865,40 +919,43 @@ export function DatasetEditorView() {
             )}
           </div>
         )}
-        <div className="flex items-center gap-0.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={undo}
-                disabled={history.current.past.length === 0}
-                aria-label={msg("datasets.editor.undo")}
-              >
-                <ArrowCounterClockwise className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {msg("datasets.editor.undo")} · {isMac ? "⌘Z" : "Ctrl+Z"}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={redo}
-                disabled={history.current.future.length === 0}
-                aria-label={msg("datasets.editor.redo")}
-              >
-                <ArrowClockwise className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {msg("datasets.editor.redo")} · {isMac ? "⌘⇧Z" : "Ctrl+Y"}
-            </TooltipContent>
-          </Tooltip>
-        </div>
+        {!readOnly && (
+          <div className="flex items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={undo}
+                  disabled={history.current.past.length === 0}
+                  aria-label={msg("datasets.editor.undo")}
+                >
+                  <ArrowCounterClockwise className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {msg("datasets.editor.undo")} · {isMac ? "⌘Z" : "Ctrl+Z"}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={redo}
+                  disabled={history.current.future.length === 0}
+                  aria-label={msg("datasets.editor.redo")}
+                >
+                  <ArrowClockwise className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {msg("datasets.editor.redo")} · {isMac ? "⌘⇧Z" : "Ctrl+Y"}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
+        <DatasetUsageButton optimizations={optimizations} />
         <ExportTableMenu
           iconOnly
           disabled={rows.length === 0}
@@ -932,275 +989,290 @@ export function DatasetEditorView() {
               : msg("datasets.editor.tag")}
           </TooltipContent>
         </Tooltip>
+        {summary?.role === "owner" && <DatasetShareDialog datasetId={id} />}
       </div>
 
-      {/* The container is the keyboard surface for selection mode: it holds
+      {readOnly ? (
+        <div className="flex min-h-[60dvh] flex-col overflow-hidden rounded-2xl border border-border/40 bg-card/60">
+          <DatasetRowsView
+            rows={viewerRows}
+            filename={name ?? undefined}
+            readerIndex={readerIndex}
+            setReaderIndex={setReaderIndex}
+          />
+        </div>
+      ) : (
+        <>
+          {/* The container is the keyboard surface for selection mode: it holds
           DOM focus while cells are selected-but-not-editing, so arrows, Tab,
           typing and clipboard events all land here. */}
-      <div
-        ref={gridRef}
-        tabIndex={0}
-        onKeyDown={handleGridKey}
-        onPaste={handleGridPaste}
-        onFocus={(e) => {
-          if (e.target !== e.currentTarget) return;
-          if (!sel && rows.length > 0 && columns.length > 0) {
-            setSel({
-              anchor: { row: safePage * PAGE_SIZE, col: 0 },
-              head: { row: safePage * PAGE_SIZE, col: 0 },
-            });
-          }
-        }}
-        className="overflow-x-auto rounded-2xl border border-border/40 bg-card/60 outline-none focus-visible:border-ring/60"
-      >
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-border/60 bg-muted/40">
-              <th className="w-12 px-2 py-2 text-start text-[0.75rem] font-semibold text-muted-foreground">
-                #
-              </th>
-              {columns.map((column, colIdx) => (
-                <th key={column} className="min-w-[10rem] px-1 py-1 text-start">
-                  <div className="flex items-center gap-1">
-                    <input
-                      value={headerDrafts[colIdx] ?? column}
-                      onChange={(e) =>
-                        setHeaderDrafts((prev) => ({ ...prev, [colIdx]: e.target.value }))
-                      }
-                      onBlur={() => commitRename(colIdx)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                      }}
-                      dir="ltr"
-                      className={cn(
-                        "w-full min-w-0 rounded-md border border-transparent bg-transparent px-2 py-1",
-                        "font-mono text-xs font-semibold text-foreground outline-none",
-                        "hover:border-input focus-visible:border-ring",
-                      )}
-                      aria-label={msg("datasets.editor.rename_column")}
-                    />
-                    {roles[column] === "output" && (
-                      <RolePill role="output">{msg("datasets.editor.output_badge")}</RolePill>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => deleteColumn(colIdx)}
-                      disabled={columns.length <= 1}
-                      aria-label={msg("datasets.editor.delete_column")}
-                      className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    >
-                      <X className="size-3.5" />
-                    </Button>
-                  </div>
-                </th>
-              ))}
-              <th className="w-40 px-2 py-1 text-start">
-                {newColumn === null ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setNewColumn("")}
-                    className="gap-1.5 text-muted-foreground"
-                  >
-                    <Plus className="size-3.5" />
-                    {msg("datasets.editor.add_column")}
-                  </Button>
-                ) : (
-                  <Input
-                    value={newColumn}
-                    onChange={(e) => setNewColumn(e.target.value)}
-                    onBlur={addColumn}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") addColumn();
-                      if (e.key === "Escape") setNewColumn(null);
-                    }}
-                    placeholder={msg("datasets.editor.column_placeholder")}
-                    dir="ltr"
-                    autoFocus
-                    className="h-8 px-2 font-mono text-xs"
-                  />
-                )}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {pageRows.map((row, i) => {
-              const rowIdx = safePage * PAGE_SIZE + i;
-              return (
-                <ContextMenu key={rowIdx}>
-                  <ContextMenuTrigger asChild>
-                    <tr className="group border-b border-border/30 last:border-b-0">
-                      {/* The row number doubles as the delete affordance: hovering
-                          the row swaps it for the trash button, keeping the action
-                          at the start of the row instead of a trailing column that
-                          drifts off-screen on wide datasets. */}
-                      <td className="relative px-2 py-1 text-xs text-muted-foreground tabular-nums">
-                        <span className="transition-opacity group-hover:opacity-0">
-                          {rowIdx + 1}
-                        </span>
+          <div
+            ref={gridRef}
+            tabIndex={0}
+            onKeyDown={handleGridKey}
+            onPaste={handleGridPaste}
+            onFocus={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (!sel && rows.length > 0 && columns.length > 0) {
+                setSel({
+                  anchor: { row: safePage * PAGE_SIZE, col: 0 },
+                  head: { row: safePage * PAGE_SIZE, col: 0 },
+                });
+              }
+            }}
+            className="overflow-hidden rounded-2xl border border-border/40 bg-card/60 outline-none focus-visible:border-ring/60"
+          >
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">#</TableHead>
+                  {columns.map((column, colIdx) => (
+                    <TableHead key={column} className="h-auto min-w-[10rem] px-1 py-1">
+                      <div className="flex items-center gap-1">
+                        <input
+                          value={headerDrafts[colIdx] ?? column}
+                          onChange={(e) =>
+                            setHeaderDrafts((prev) => ({ ...prev, [colIdx]: e.target.value }))
+                          }
+                          onBlur={() => commitRename(colIdx)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          }}
+                          dir="ltr"
+                          className={cn(
+                            "w-full min-w-0 rounded-md border border-transparent bg-transparent px-2 py-1",
+                            "font-mono text-xs font-semibold text-foreground outline-none",
+                            "hover:border-input focus-visible:border-ring",
+                          )}
+                          aria-label={msg("datasets.editor.rename_column")}
+                        />
+                        {roles[column] === "output" && (
+                          <RolePill role="output">{msg("datasets.editor.output_badge")}</RolePill>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon-xs"
-                          onClick={() => deleteRow(rowIdx)}
-                          aria-label={msg("datasets.editor.delete_row")}
-                          className="absolute inset-y-0 start-1 my-auto text-muted-foreground opacity-100 transition-opacity focus-visible:bg-accent focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100"
+                          onClick={() => deleteColumn(colIdx)}
+                          disabled={columns.length <= 1}
+                          aria-label={msg("datasets.editor.delete_column")}
+                          className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                         >
-                          <Trash className="size-3.5" />
+                          <X className="size-3.5" />
                         </Button>
-                      </td>
-                      {columns.map((column, colIdx) => {
-                        const isEditing =
-                          editing !== null && editing.row === rowIdx && editing.col === colIdx;
-                        const inRange =
-                          !isEditing &&
-                          selBounds !== null &&
-                          rowIdx >= selBounds.top &&
-                          rowIdx <= selBounds.bottom &&
-                          colIdx >= selBounds.left &&
-                          colIdx <= selBounds.right;
-                        const isAnchor =
-                          selRange !== null &&
-                          selRange.anchor.row === rowIdx &&
-                          selRange.anchor.col === colIdx;
-                        const inFill =
-                          fillPreview !== null &&
-                          rowIdx >= fillPreview.top &&
-                          rowIdx <= fillPreview.bottom &&
-                          colIdx >= fillPreview.left &&
-                          colIdx <= fillPreview.right;
-                        // The handle rides the selection's bottom-right cell.
-                        const showHandle =
-                          editing === null &&
-                          selBounds !== null &&
-                          rowIdx === selBounds.bottom &&
-                          colIdx === selBounds.right;
-                        return (
-                          <td
-                            key={column}
-                            className="relative px-1 py-0.5 align-top"
-                            onMouseDown={(e) =>
-                              handleCellMouseDown(e, { row: rowIdx, col: colIdx })
-                            }
-                            onMouseEnter={() => handleCellMouseEnter({ row: rowIdx, col: colIdx })}
-                            onDoubleClick={() => startEdit({ row: rowIdx, col: colIdx })}
-                          >
-                            <input
-                              value={cellText(row[column])}
-                              data-cell={`${rowIdx}:${column}`}
-                              readOnly={!isEditing}
-                              tabIndex={-1}
-                              onChange={(e) => setCell(rowIdx, column, e.target.value)}
-                              onKeyDown={(e) => handleCellKey(e, rowIdx, column)}
-                              onBlur={() => {
-                                // Click-away commits the edit; the burst reset
-                                // makes a later re-entry a fresh undo step.
-                                if (isEditing) {
-                                  setEditing(null);
-                                  history.current.burstKey = null;
+                      </div>
+                    </TableHead>
+                  ))}
+                  <TableHead className="h-auto w-40 py-1">
+                    {newColumn === null ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setNewColumn("")}
+                        className="gap-1.5 text-muted-foreground"
+                      >
+                        <Plus className="size-3.5" />
+                        {msg("datasets.editor.add_column")}
+                      </Button>
+                    ) : (
+                      <Input
+                        value={newColumn}
+                        onChange={(e) => setNewColumn(e.target.value)}
+                        onBlur={addColumn}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") addColumn();
+                          if (e.key === "Escape") setNewColumn(null);
+                        }}
+                        placeholder={msg("datasets.editor.column_placeholder")}
+                        dir="ltr"
+                        autoFocus
+                        className="h-8 px-2 font-mono text-xs"
+                      />
+                    )}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageRows.map((row, i) => {
+                  const rowIdx = safePage * PAGE_SIZE + i;
+                  return (
+                    <ContextMenu key={rowIdx}>
+                      <ContextMenuTrigger asChild>
+                        <TableRow className="group">
+                          {/* The row number doubles as the delete affordance: hovering
+                          the row swaps it for the trash button, keeping the action
+                          at the start of the row instead of a trailing column that
+                          drifts off-screen on wide datasets. */}
+                          <TableCell className="relative px-2 py-1 text-xs text-muted-foreground tabular-nums">
+                            <span className="transition-opacity group-hover:opacity-0">
+                              {rowIdx + 1}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={() => deleteRow(rowIdx)}
+                              aria-label={msg("datasets.editor.delete_row")}
+                              className="absolute inset-y-0 start-1 my-auto text-muted-foreground opacity-100 transition-opacity focus-visible:bg-accent focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100"
+                            >
+                              <Trash className="size-3.5" />
+                            </Button>
+                          </TableCell>
+                          {columns.map((column, colIdx) => {
+                            const isEditing =
+                              editing !== null && editing.row === rowIdx && editing.col === colIdx;
+                            const inRange =
+                              !isEditing &&
+                              selBounds !== null &&
+                              rowIdx >= selBounds.top &&
+                              rowIdx <= selBounds.bottom &&
+                              colIdx >= selBounds.left &&
+                              colIdx <= selBounds.right;
+                            const isAnchor =
+                              selRange !== null &&
+                              selRange.anchor.row === rowIdx &&
+                              selRange.anchor.col === colIdx;
+                            const inFill =
+                              fillPreview !== null &&
+                              rowIdx >= fillPreview.top &&
+                              rowIdx <= fillPreview.bottom &&
+                              colIdx >= fillPreview.left &&
+                              colIdx <= fillPreview.right;
+                            // The handle rides the selection's bottom-right cell.
+                            const showHandle =
+                              editing === null &&
+                              selBounds !== null &&
+                              rowIdx === selBounds.bottom &&
+                              colIdx === selBounds.right;
+                            return (
+                              <TableCell
+                                key={column}
+                                className="relative px-1 py-0.5 align-top"
+                                onMouseDown={(e) =>
+                                  handleCellMouseDown(e, { row: rowIdx, col: colIdx })
                                 }
-                              }}
-                              dir="auto"
-                              className={cn(
-                                "w-full min-w-0 rounded-md border border-transparent bg-transparent px-2 py-1",
-                                "text-sm text-foreground outline-none",
-                                isEditing
-                                  ? "border-ring bg-background"
-                                  : "cursor-default hover:border-input/60",
-                                inRange && "bg-primary/10",
-                                inFill && "border-dashed border-primary/50 bg-primary/5",
-                                isAnchor && !isEditing && "border-ring",
-                              )}
-                            />
-                            {showHandle && (
-                              <button
-                                type="button"
-                                tabIndex={-1}
-                                aria-label={msg("datasets.editor.fill_handle")}
-                                onMouseDown={startFill}
-                                className="absolute bottom-0.5 end-1 z-20 size-2 cursor-ns-resize rounded-[2px] border border-background bg-primary"
-                              />
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="min-w-44">
-                    <ContextMenuItem onSelect={() => insertRow(rowIdx)}>
-                      <ArrowUp className="size-4 shrink-0 text-muted-foreground" />
-                      {msg("datasets.editor.insert_row_above")}
-                    </ContextMenuItem>
-                    <ContextMenuItem onSelect={() => insertRow(rowIdx + 1)}>
-                      <ArrowDown className="size-4 shrink-0 text-muted-foreground" />
-                      {msg("datasets.editor.insert_row_below")}
-                    </ContextMenuItem>
-                    <ContextMenuItem onSelect={() => duplicateRow(rowIdx)}>
-                      <Copy className="size-4 shrink-0 text-muted-foreground" />
-                      {msg("datasets.editor.duplicate_row")}
-                    </ContextMenuItem>
-                    <ContextMenuSeparator />
-                    <ContextMenuItem
-                      onSelect={() => deleteRow(rowIdx)}
-                      className="text-destructive data-[highlighted]:bg-destructive/10"
+                                onMouseEnter={() =>
+                                  handleCellMouseEnter({ row: rowIdx, col: colIdx })
+                                }
+                                onDoubleClick={() => startEdit({ row: rowIdx, col: colIdx })}
+                              >
+                                <input
+                                  value={cellText(row[column])}
+                                  data-cell={`${rowIdx}:${column}`}
+                                  readOnly={!isEditing}
+                                  tabIndex={-1}
+                                  onChange={(e) => setCell(rowIdx, column, e.target.value)}
+                                  onKeyDown={(e) => handleCellKey(e, rowIdx, column)}
+                                  onBlur={() => {
+                                    // Click-away commits the edit; the burst reset
+                                    // makes a later re-entry a fresh undo step.
+                                    if (isEditing) {
+                                      setEditing(null);
+                                      history.current.burstKey = null;
+                                    }
+                                  }}
+                                  dir="auto"
+                                  className={cn(
+                                    "w-full min-w-0 rounded-md border border-transparent bg-transparent px-2 py-1",
+                                    "text-sm text-foreground outline-none",
+                                    isEditing
+                                      ? "border-ring bg-background"
+                                      : "cursor-default hover:border-input/60",
+                                    inRange && "bg-primary-fill/10",
+                                    inFill &&
+                                      "border-dashed border-primary-fill/50 bg-primary-fill/5",
+                                    isAnchor && !isEditing && "border-ring",
+                                  )}
+                                />
+                                {showHandle && (
+                                  <button
+                                    type="button"
+                                    tabIndex={-1}
+                                    aria-label={msg("datasets.editor.fill_handle")}
+                                    onMouseDown={startFill}
+                                    className="absolute bottom-0.5 end-1 z-20 size-2 cursor-ns-resize rounded-[2px] border border-background bg-primary-fill"
+                                  />
+                                )}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="min-w-44">
+                        <ContextMenuItem onSelect={() => insertRow(rowIdx)}>
+                          <ArrowUp className="size-4 shrink-0 text-muted-foreground" />
+                          {msg("datasets.editor.insert_row_above")}
+                        </ContextMenuItem>
+                        <ContextMenuItem onSelect={() => insertRow(rowIdx + 1)}>
+                          <ArrowDown className="size-4 shrink-0 text-muted-foreground" />
+                          {msg("datasets.editor.insert_row_below")}
+                        </ContextMenuItem>
+                        <ContextMenuItem onSelect={() => duplicateRow(rowIdx)}>
+                          <Copy className="size-4 shrink-0 text-muted-foreground" />
+                          {msg("datasets.editor.duplicate_row")}
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem
+                          onSelect={() => deleteRow(rowIdx)}
+                          className="text-destructive data-[highlighted]:bg-destructive/10"
+                        >
+                          <Trash className="size-4 shrink-0" />
+                          {msg("datasets.editor.delete_row")}
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  );
+                })}
+                {rows.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={columns.length + 2} className="p-0 whitespace-normal">
+                      <EmptyState variant="list" title={msg("datasets.editor.empty")} />
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+              <tfoot>
+                <TableRow className="border-t">
+                  <TableCell colSpan={columns.length + 2} className="p-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={addRow}
+                      className="w-full justify-start gap-1.5 text-muted-foreground"
                     >
-                      <Trash className="size-4 shrink-0" />
-                      {msg("datasets.editor.delete_row")}
-                    </ContextMenuItem>
-                  </ContextMenuContent>
-                </ContextMenu>
-              );
-            })}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={columns.length + 2}>
-                  <EmptyState variant="list" title={msg("datasets.editor.empty")} />
-                </td>
-              </tr>
-            )}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-border/40">
-              <td colSpan={columns.length + 2} className="p-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={addRow}
-                  className="w-full justify-start gap-1.5 text-muted-foreground"
-                >
-                  <Plus className="size-3.5" />
-                  {msg("datasets.editor.add_row")}
-                </Button>
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+                      <Plus className="size-3.5" />
+                      {msg("datasets.editor.add_row")}
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              </tfoot>
+            </Table>
+          </div>
 
-      {pageCount > 1 && (
-        <div className="flex items-center justify-end gap-2">
-          <Button
-            variant="outline"
-            size="icon-sm"
-            onClick={() => setPage(Math.max(0, safePage - 1))}
-            disabled={safePage === 0}
-            aria-label={msg("datasets.editor.prev_page")}
-          >
-            <CaretLeft className="size-4 rtl:rotate-180" />
-          </Button>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {formatMsg("datasets.editor.rows_range", { from, to, total: rows.length })}
-          </span>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
-            disabled={safePage >= pageCount - 1}
-            aria-label={msg("datasets.editor.next_page")}
-          >
-            <CaretRight className="size-4 rtl:rotate-180" />
-          </Button>
-        </div>
+          {pageCount > 1 && (
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={() => setPage(Math.max(0, safePage - 1))}
+                disabled={safePage === 0}
+                aria-label={msg("datasets.editor.prev_page")}
+              >
+                <CaretLeft className="size-4 rtl:rotate-180" />
+              </Button>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {formatMsg("datasets.editor.rows_range", { from, to, total: rows.length })}
+              </span>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
+                disabled={safePage >= pageCount - 1}
+                aria-label={msg("datasets.editor.next_page")}
+              >
+                <CaretRight className="size-4 rtl:rotate-180" />
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

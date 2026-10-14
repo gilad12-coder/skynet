@@ -18,7 +18,7 @@ from .mocks import make_ctx, vowel_scorer
 
 def test_meta_harness_forwards_the_managed_runtime_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Preserve inputs and the upstream aggregate winner in the Vercel runtime."""
-    task = Task(seed_candidate="seed", objective="improve code", val_set=[{"id": "a"}, {"id": "b"}])
+    task = Task(seed_candidate="seed", objective="improve code", cases=[{"id": "a"}, {"id": "b"}])
     server = EvalServer(vowel_scorer, max_evals=10)
     server.evaluate("aeiou", {"id": "a"})
     incumbent = Result(best_candidate="completed version", best_score=0.4, total_evals=5)

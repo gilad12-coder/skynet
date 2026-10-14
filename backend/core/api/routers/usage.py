@@ -38,6 +38,8 @@ class StorageUsageResponse(BaseModel):
     used_bytes: int
     quota_bytes: int
     breakdown: dict[str, int]
+    # How many deletable items each category holds, keyed like ``breakdown``.
+    counts: dict[str, int] = {}
 
 
 class StorageItemResponse(BaseModel):
@@ -100,6 +102,7 @@ def create_usage_router(*, job_store) -> APIRouter:
             used_bytes=usage.total,
             quota_bytes=quota,
             breakdown=usage.breakdown,
+            counts=usage.counts,
         )
 
     @router.get(

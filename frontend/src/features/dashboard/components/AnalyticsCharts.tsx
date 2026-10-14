@@ -6,14 +6,13 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import { ChartEmptyState } from "@/shared/charts/chart-utils";
-import { ChartTable } from "@/shared/charts/chart-table";
-import { useLiteMode } from "@/features/settings";
 import { getStatusLabel } from "@/shared/constants/job-status";
 import type { DashboardAnalyticsGranularity } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
@@ -52,7 +51,7 @@ type TooltipRow = { label: string; value: string; color?: string };
 function TooltipCard({ title, rows }: { title: string; rows: TooltipRow[] }) {
   return (
     <div
-      className="rounded-xl border border-border/60 bg-background/95 p-3 text-sm shadow-lg backdrop-blur-sm"
+      className="rounded-xl border border-border/60 bg-background/95 p-3 text-sm shadow-[var(--shadow-float)] backdrop-blur-sm"
       dir={getActiveDir()}
     >
       <p className="mb-2 font-semibold text-foreground">{title}</p>
@@ -66,7 +65,10 @@ function TooltipCard({ title, rows }: { title: string; rows: TooltipRow[] }) {
               />
             )}
             <span className="text-xs">{row.label}:</span>
-            <span className="ms-auto font-mono font-semibold tabular-nums text-foreground" dir="ltr">
+            <span
+              className="ms-auto font-mono font-semibold tabular-nums text-foreground"
+              dir="ltr"
+            >
               {row.value}
             </span>
           </div>
@@ -82,8 +84,8 @@ function TooltipCard({ title, rows }: { title: string; rows: TooltipRow[] }) {
  * the user has three runs or three thousand. When `withAverage` is set (the
  * dataset-size breakdown) a line traces the mean improvement per bucket so the
  * "does more data help?" question is answered on the same axis. Clicking a
- * bar (or a row in lite mode) hands its bucket edges to `onBucketClick` so
- * the dashboard can narrow to that range.
+ * bar hands its bucket edges to `onBucketClick` so the dashboard can narrow
+ * to that range.
  */
 export function RangeHistogram({
   data,
@@ -98,7 +100,6 @@ export function RangeHistogram({
   emptyMessage?: string;
   onBucketClick?: (bar: HistogramBar) => void;
 }) {
-  const lite = useLiteMode();
   const runsLabel = msg("dashboard.analytics.runs");
   const avgLabel = msg("auto.features.dashboard.components.analyticstab.8");
 
@@ -112,35 +113,6 @@ export function RangeHistogram({
       }
     : undefined;
 
-  if (lite) {
-    return (
-      <div className="h-[240px]">
-        <ChartTable
-          rows={data}
-          onRowClick={clickable ? (row) => onBucketClick(row) : undefined}
-          columns={[
-            {
-              key: "label",
-              label: `${msg("dashboard.analytics.col_range")} (${unitLabel})`,
-              format: (value) => <span dir="ltr">{String(value)}</span>,
-            },
-            { key: "count", label: runsLabel, align: "end" },
-            ...(withAverage
-              ? [
-                  {
-                    key: "avgImprovement" as const,
-                    label: avgLabel,
-                    align: "end" as const,
-                    format: (value: unknown) => formatPoints(value as number | null),
-                  },
-                ]
-              : []),
-          ]}
-        />
-      </div>
-    );
-  }
-
   const tooltip = (
     <Tooltip
       cursor={CURSOR_FILL}
@@ -148,13 +120,13 @@ export function RangeHistogram({
         const row = payload?.[0]?.payload as HistogramBar | undefined;
         if (!active || !row) return null;
         const rows: TooltipRow[] = [
-          { label: runsLabel, value: String(row.count), color: "var(--color-chart-2)" },
+          { label: runsLabel, value: String(row.count), color: "var(--primary-fill)" },
         ];
         if (withAverage) {
           rows.push({
             label: avgLabel,
             value: formatPoints(row.avgImprovement),
-            color: "var(--color-chart-4)",
+            color: "var(--color-primary)",
           });
         }
         return <TooltipCard title={`${row.label} ${unitLabel}`} rows={rows} />;
@@ -209,7 +181,7 @@ export function RangeHistogram({
               yAxisId="count"
               dataKey="count"
               name={runsLabel}
-              fill="var(--color-chart-2)"
+              fill="var(--primary-fill)"
               radius={[4, 4, 0, 0]}
               maxBarSize={48}
               animationDuration={300}
@@ -221,9 +193,9 @@ export function RangeHistogram({
               type="monotone"
               dataKey="avgImprovement"
               name={avgLabel}
-              stroke="var(--color-chart-4)"
+              stroke="var(--color-primary)"
               strokeWidth={2}
-              dot={{ r: 3, strokeWidth: 0, fill: "var(--color-chart-4)" }}
+              dot={{ r: 3, strokeWidth: 0, fill: "var(--color-primary)" }}
               connectNulls={false}
               animationDuration={300}
             />
@@ -236,7 +208,7 @@ export function RangeHistogram({
               yAxisId="count"
               dataKey="count"
               name={runsLabel}
-              fill="var(--color-chart-2)"
+              fill="var(--primary-fill)"
               radius={[4, 4, 0, 0]}
               maxBarSize={48}
               animationDuration={300}
@@ -272,39 +244,23 @@ export function StackedTimeline({
   data,
   granularity,
   onSelect,
+  height = 220,
 }: {
   data: TimelinePoint[];
   granularity: DashboardAnalyticsGranularity;
   onSelect?: (start: string, end: string) => void;
+  height?: number;
 }) {
-  const lite = useLiteMode();
   const successLabel = getStatusLabel("success");
   const failedLabel = getStatusLabel("failed");
   const otherLabel = msg("dashboard.analytics.legend_other");
   const totalLabel = msg("dashboard.analytics.runs");
   const dateLabel = msg("dashboard.analytics.col_date");
   const clickable = onSelect != null;
-  const select = (point: TimelinePoint) => onSelect?.(point.date, bucketEnd(point.date, granularity));
+  const select = (point: TimelinePoint) =>
+    onSelect?.(point.date, bucketEnd(point.date, granularity));
 
   if (data.length === 0) return <ChartEmptyState />;
-
-  if (lite) {
-    return (
-      <div className="h-[240px]">
-        <ChartTable
-          rows={data}
-          columns={[
-            { key: "label", label: msg("dashboard.analytics.col_date") },
-            { key: "success", label: successLabel, align: "end" },
-            { key: "failed", label: failedLabel, align: "end" },
-            { key: "other", label: otherLabel, align: "end" },
-            { key: "total", label: totalLabel, align: "end" },
-          ]}
-          onRowClick={clickable ? (row) => select(row) : undefined}
-        />
-      </div>
-    );
-  }
 
   const handleClick = clickable
     ? (_: unknown, index: number) => {
@@ -320,9 +276,13 @@ export function StackedTimeline({
   ] as const;
 
   return (
-    <div className="h-[220px] min-w-0" dir="ltr">
+    <div className="min-w-0" style={{ height }} dir="ltr">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ left: 4, right: 8, top: 10, bottom: 20 }} barCategoryGap="20%">
+        <BarChart
+          data={data}
+          margin={{ left: 4, right: 8, top: 10, bottom: 20 }}
+          barCategoryGap="20%"
+        >
           <CartesianGrid vertical={false} strokeDasharray="3 3" className={GRID_CLASS} />
           <XAxis
             dataKey="label"
@@ -377,6 +337,106 @@ export function StackedTimeline({
           ))}
         </BarChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+export interface DailySeries {
+  key: string;
+  label: string;
+  color: string;
+}
+
+/**
+ * Daily counts as one line per series (signups, activations, active users),
+ * on the same axes and tooltip as the other analytics charts. A legend row
+ * above the plot names each line, since lines carry no labels of their own.
+ */
+export function DailyLines({
+  data,
+  series,
+  yLabel,
+  height = 220,
+}: {
+  data: ReadonlyArray<{ label: string; [key: string]: string | number }>;
+  series: readonly DailySeries[];
+  yLabel: string;
+  height?: number;
+}) {
+  if (data.length === 0) return <ChartEmptyState />;
+  const dateLabel = msg("dashboard.analytics.col_date");
+
+  return (
+    <div className="min-w-0 space-y-2">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[0.6875rem] text-muted-foreground">
+        {series.map((s) => (
+          <span key={s.key} className="inline-flex items-center gap-1.5">
+            <span
+              className="size-2 rounded-full"
+              style={{ backgroundColor: s.color }}
+              aria-hidden
+            />
+            {s.label}
+          </span>
+        ))}
+      </div>
+      <div className="min-w-0" style={{ height }} dir="ltr">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ left: 4, right: 8, top: 10, bottom: 20 }}>
+            <CartesianGrid vertical={false} strokeDasharray="3 3" className={GRID_CLASS} />
+            <XAxis
+              dataKey="label"
+              tickLine={AXIS_LINE}
+              axisLine={AXIS_LINE}
+              tick={AXIS_TICK}
+              minTickGap={28}
+              interval="preserveStartEnd"
+              className="fill-muted-foreground"
+              label={axisTitle(dateLabel, "insideBottom")}
+            />
+            <YAxis
+              tickLine={AXIS_LINE}
+              axisLine={AXIS_LINE}
+              tick={AXIS_TICK}
+              allowDecimals={false}
+              width={44}
+              className="fill-muted-foreground"
+              label={axisTitle(yLabel, "insideLeft")}
+            />
+            <Tooltip
+              cursor={{ stroke: "var(--border)" }}
+              content={({ active, payload }) => {
+                const point = payload?.[0]?.payload as
+                  | { label: string; [key: string]: string | number }
+                  | undefined;
+                if (!active || !point) return null;
+                return (
+                  <TooltipCard
+                    title={point.label}
+                    rows={series.map((s) => ({
+                      label: s.label,
+                      value: String(point[s.key]),
+                      color: s.color,
+                    }))}
+                  />
+                );
+              }}
+            />
+            {series.map((s) => (
+              <Line
+                key={s.key}
+                type="monotone"
+                dataKey={s.key}
+                name={s.label}
+                stroke={s.color}
+                strokeWidth={2}
+                dot={false}
+                animationDuration={300}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }

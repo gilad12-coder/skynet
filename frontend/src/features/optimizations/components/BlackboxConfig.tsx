@@ -2,7 +2,6 @@
 
 import type { ReactNode } from "react";
 import {
-  Brain,
   Coins,
   Cpu,
   Cube,
@@ -36,6 +35,7 @@ import type {
   BlackboxBudget,
   BlackboxProposer,
   BlackboxScorer,
+  BlackboxShinkaSettings,
   BlackboxStrategy,
   BlackboxTarget,
   OptimizationStatusResponse,
@@ -92,13 +92,6 @@ const RECIPE_LABELS: Record<string, string> = perLocale(() => ({
   prompt: msg("optimization.config.recipe.prompt"),
   code: msg("optimization.config.recipe.code"),
   anything: msg("optimization.config.recipe.anything"),
-}));
-
-const EFFORT_LABELS: Record<string, string> = perLocale(() => ({
-  low: msg("submit.blackbox.proposer.effort.low"),
-  medium: msg("submit.blackbox.proposer.effort.medium"),
-  high: msg("submit.blackbox.proposer.effort.high"),
-  max: msg("submit.blackbox.proposer.effort.max"),
 }));
 
 function modelName(cfg: Record<string, unknown> | null): string {
@@ -166,10 +159,16 @@ export function BlackboxConfigCard({
   const target = (payload.target ?? {}) as Partial<BlackboxTarget>;
   const scorer = (payload.scorer ?? {}) as Partial<BlackboxScorer>;
   const proposer = (payload.proposer ?? null) as Partial<BlackboxProposer> | null;
+  const shinka = (payload.shinka ?? null) as Partial<BlackboxShinkaSettings> | null;
+  // A single ShinkaEvolve run has no coding-agent proposer; its proposer block
+  // only carries the agent editor's tool-call cap.
+  const shinkaRun = strategy.mode === "single" && strategy.engine === "shinka_evolve";
   const reflectionCard = toModelCard(payload.reflection_model_config);
   const taskCard = toModelCard(payload.task_model_config);
   const scorerModelCard = toModelCard(scorer.model);
-  const split = (payload.split_fractions ?? job.split_fractions ?? null) as {
+  // Only runs submitted before cases stopped being split carry a split or a
+  // shuffle flag; newer runs score every case.
+  const split = (payload.split_fractions ?? null) as {
     train: number;
     val: number;
     test: number;
@@ -178,7 +177,6 @@ export function BlackboxConfigCard({
   const objective = typeof payload.objective === "string" ? payload.objective : "";
   const background = typeof payload.background === "string" ? payload.background : "";
   const engine = job.blackbox_result?.engine_used ?? strategy.engine;
-  const splitCounts = job.blackbox_result?.split_counts ?? null;
   const timeout =
     typeof scorer.timeout_seconds === "number"
       ? formatMsg("optimization.blackbox.config.scorer_timeout", {
@@ -224,30 +222,28 @@ export function BlackboxConfigCard({
   const generalRows: ConfigRow[] = [];
   if (isPrivate != null) {
     generalRows.push({
-      label: <HelpTip text={tip("submit.privacy")}>{msg("submit.basics.privacy.label")}</HelpTip>,
+      label: msg("submit.basics.privacy.label"),
       value: isPrivate ? msg("submit.basics.privacy.private") : msg("submit.basics.privacy.public"),
       icon: isPrivate ? <Lock /> : <Globe />,
     });
   }
   if (tokenSource) {
     generalRows.push({
-      label: (
-        <HelpTip text={tip("config.billing_source")}>{msg("submit.budget.billing_source")}</HelpTip>
-      ),
+      label: msg("submit.budget.billing_source"),
       value: tokenSource === "byok" ? msg("billing.mode.byok") : msg("billing.mode.managed"),
       icon: tokenSource === "byok" ? <Key /> : <Wallet />,
     });
   }
   if (runtime) {
     generalRows.push({
-      label: <HelpTip text={tip("config.runtime")}>{msg("optimization.config.runtime")}</HelpTip>,
+      label: msg("optimization.config.runtime"),
       value: runtime === "vercel" ? msg("submit.runtime.vercel") : runtime,
       icon: <RocketLaunch />,
     });
   }
   if (hasCostCap) {
     generalRows.push({
-      label: <HelpTip text={tip("submit.budget")}>{msg("submit.budget.label")}</HelpTip>,
+      label: msg("submit.budget.label"),
       value:
         costCap != null ? formatCentsUsd(costCap, locale) : msg("submit.budget.uncapped_short"),
       icon: <Coins />,
@@ -305,11 +301,7 @@ export function BlackboxConfigCard({
   }
   if (budget.stop_at_score != null) {
     optimizationRows.push({
-      label: (
-        <HelpTip text={tip("blackbox.config.budget_stop")}>
-          {msg("optimization.blackbox.config.budget_stop_label")}
-        </HelpTip>
-      ),
+      label: msg("optimization.blackbox.config.budget_stop_label"),
       value: String(budget.stop_at_score),
       icon: <Target />,
     });
@@ -330,17 +322,23 @@ export function BlackboxConfigCard({
     value: seedValue,
     icon: <Stack />,
   });
-  if (proposer?.harness) {
-    const effort = proposer.effort ? EFFORT_LABELS[proposer.effort] : null;
+  const toolCallsRow = (calls: number): ConfigRow => ({
+    label: (
+      <HelpTip text={tip("submit.blackbox.proposer_max_tool_calls")}>
+        {msg("submit.blackbox.proposer.max_tool_calls")}
+      </HelpTip>
+    ),
+    value: String(calls),
+    icon: <Wrench />,
+  });
+  if (proposer?.harness && !shinkaRun) {
     optimizationRows.push({
       label: (
         <HelpTip text={tip("submit.blackbox.proposer")}>
           {msg("submit.blackbox.review.proposer")}
         </HelpTip>
       ),
-      value: effort
-        ? `${harnessLabel(proposer.harness)} · ${effort}`
-        : harnessLabel(proposer.harness),
+      value: harnessLabel(proposer.harness),
       icon: <Robot />,
     });
     if (proposer.max_candidates_per_iter != null) {
@@ -365,17 +363,6 @@ export function BlackboxConfigCard({
         icon: <Repeat />,
       });
     }
-    if (proposer.max_thinking_tokens != null) {
-      optimizationRows.push({
-        label: (
-          <HelpTip text={tip("config.proposer_thinking")}>
-            {msg("optimization.config.proposer_thinking")}
-          </HelpTip>
-        ),
-        value: String(proposer.max_thinking_tokens),
-        icon: <Brain />,
-      });
-    }
     if (proposer.max_no_eval_seconds != null) {
       optimizationRows.push({
         label: (
@@ -387,14 +374,12 @@ export function BlackboxConfigCard({
         icon: <Hourglass />,
       });
     }
+    if (proposer.max_tool_calls != null)
+      optimizationRows.push(toolCallsRow(proposer.max_tool_calls));
     const proposerInstall = command(proposer.install_command);
     if (proposerInstall) {
       optimizationRows.push({
-        label: (
-          <HelpTip text={tip("config.proposer_commands")}>
-            {msg("optimization.config.proposer_install")}
-          </HelpTip>
-        ),
+        label: msg("optimization.config.proposer_install"),
         value: proposerInstall,
         icon: <Terminal />,
       });
@@ -402,15 +387,25 @@ export function BlackboxConfigCard({
     const proposerRun = command(proposer.run_command);
     if (proposerRun) {
       optimizationRows.push({
-        label: (
-          <HelpTip text={tip("config.proposer_commands")}>
-            {msg("optimization.config.proposer_run")}
-          </HelpTip>
-        ),
+        label: msg("optimization.config.proposer_run"),
         value: proposerRun,
         icon: <Terminal />,
       });
     }
+  }
+
+  if (shinka?.editor === "single_call" || shinka?.editor === "agent") {
+    optimizationRows.push({
+      label: (
+        <HelpTip text={tip("submit.blackbox.shinka.editor")}>
+          {msg("optimization.config.shinka_editor")}
+        </HelpTip>
+      ),
+      value: msg(`submit.blackbox.shinka.editor.${shinka.editor}`),
+      icon: <Gear />,
+    });
+    if (shinkaRun && shinka.editor === "agent" && proposer?.max_tool_calls != null)
+      optimizationRows.push(toolCallsRow(proposer.max_tool_calls));
   }
 
   const targetRows: ConfigRow[] = [];
@@ -444,7 +439,7 @@ export function BlackboxConfigCard({
     const value = command(target[key]);
     if (value) {
       targetRows.push({
-        label: <HelpTip text={tip("config.target_commands")}>{msg(labelKey)}</HelpTip>,
+        label: msg(labelKey),
         value,
         icon: <Terminal />,
       });
@@ -452,22 +447,14 @@ export function BlackboxConfigCard({
   }
   if (timeout) {
     targetRows.push({
-      label: (
-        <HelpTip text={tip("blackbox.config.scorer_timeout")}>
-          {msg("optimization.blackbox.config.scorer_timeout_label")}
-        </HelpTip>
-      ),
+      label: msg("optimization.blackbox.config.scorer_timeout_label"),
       value: timeout,
       icon: <Wrench />,
     });
   }
   if (install) {
     targetRows.push({
-      label: (
-        <HelpTip text={tip("blackbox.config.scorer_install")}>
-          {msg("optimization.blackbox.config.scorer_install_label")}
-        </HelpTip>
-      ),
+      label: msg("optimization.blackbox.config.scorer_install_label"),
       value: install,
       icon: <Wrench />,
     });
@@ -477,18 +464,13 @@ export function BlackboxConfigCard({
     : [];
   if (pinned.length > 0) {
     targetRows.push({
-      label: (
-        <HelpTip text={tip("config.scorer_packages")}>
-          {msg("optimization.config.scorer_packages")}
-        </HelpTip>
-      ),
+      label: msg("optimization.config.scorer_packages"),
       value: pinned.join(", "),
       icon: <Package />,
     });
   }
 
-  const shuffleVal =
-    payload.shuffle != null ? Boolean(payload.shuffle) : job.shuffle != null ? job.shuffle : null;
+  const shuffleVal = payload.shuffle != null ? Boolean(payload.shuffle) : null;
   const seedVal = (payload.seed ?? job.seed) as number | null | undefined;
   const dataRows: ConfigRow[] = [];
   if (shuffleVal != null) {
@@ -533,10 +515,10 @@ export function BlackboxConfigCard({
                   <SlideHeroCard
                     index={0}
                     label={
-                      <HelpTip text={tip("submit.name")}>
+                      <>
                         {msg("auto.features.submit.components.steps.summarystep.3")}
                         {TERMS.optimization}
-                      </HelpTip>
+                      </>
                     }
                     value={name}
                     icon={<Tag />}
@@ -555,14 +537,7 @@ export function BlackboxConfigCard({
                 </div>
                 <MiniGrid rows={generalRows} />
                 {description && (
-                  <SlideNote
-                    label={
-                      <HelpTip text={tip("config.description")}>
-                        {msg("optimization.config.description")}
-                      </HelpTip>
-                    }
-                    text={description}
-                  />
+                  <SlideNote label={msg("optimization.config.description")} text={description} />
                 )}
               </div>
             )}
@@ -707,22 +682,6 @@ export function BlackboxConfigCard({
                     }
                     icon={<Database />}
                   />
-                  {splitCounts && (splitCounts.train ?? 0) > 0 && (
-                    <SlideHeroCard
-                      index={1}
-                      label={
-                        <HelpTip text={tip("blackbox.config.split_counts")}>
-                          {msg("optimization.blackbox.config.split_counts")}
-                        </HelpTip>
-                      }
-                      value={formatMsg("optimization.blackbox.config.split_counts_value", {
-                        train: splitCounts.train ?? 0,
-                        val: splitCounts.val ?? 0,
-                        test: splitCounts.test ?? 0,
-                      })}
-                      icon={<Shuffle />}
-                    />
-                  )}
                 </div>
                 {split &&
                   (holdout ? (

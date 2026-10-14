@@ -60,22 +60,24 @@ baseline:
     full pre-optimization result phrase.
 
 generationModel:
-  en: generation model
-  he: מודל מג׳נרט
-  note: Singular label for the model that generates task outputs.
+  en: task model
+  he: מודל משימה
+  note: Singular label for the model that runs the task and produces outputs.
+    Same name in the DSPy and black-box flows.
   direction: Model identifiers remain LTR in UI.
 
 generationModelPlural:
-  en: generation models
-  he: מודלי מג׳נרט
-  note: Plural form must reuse the מג׳נרט stem from generationModel; do not
-    drift to alternatives like ג׳ינרוט.
+  en: task models
+  he: מודלי משימה
+  note: Plural form must reuse the משימה stem from generationModel.
   direction: Model identifiers remain LTR in UI.
 
 reflectionModel:
-  en: feedback model
-  he: מודל משוב
-  note: GEPA reflection-step model — user-facing term is "feedback model".
+  en: optimization model
+  he: מודל אופטימיזציה
+  note: The model that reads feedback and proposes the next version, in every
+    engine (GEPA calls it the reflection model). Do not say "feedback model"
+    or "reflection model" in UI copy.
   direction: Model identifiers remain LTR in UI.
 
 candidate:
@@ -98,7 +100,7 @@ generation:
   en: generation
   he: דור
   note: Depth in the parent tree (root = 0). Reuse the family-tree sense.
-    Do not confuse with "generation_model" (that stays מודל מג׳נרט).
+    Do not confuse with the task model (generation_model, מודל משימה).
 
 trajectory:
   en: trajectory

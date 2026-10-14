@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { XCircle } from "@/shared/ui/icons";
 
@@ -14,16 +14,10 @@ import {
 } from "@/shared/lib/api";
 import { formatMsg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
-// Leaf import on purpose — the tutorial barrel deliberately does not re-export
-// the demo fixtures (see features/tutorial/index.ts).
-// eslint-disable-next-line no-restricted-imports -- deliberate leaf import; see above
-import {
-  DEMO_OPTIMIZATION_ID,
-  DEMO_GRID_OPTIMIZATION_ID,
-  DEMO_BLACKBOX_OPTIMIZATION_ID,
-} from "@/features/tutorial/lib/demo-data";
 import { OptimizationDetailView } from "./OptimizationDetailView";
 import { OptimizationDetailSkeleton } from "./OptimizationDetailSkeleton";
+import { rememberProbedRun, useRunKindHint } from "../lib/run-kind-hint";
+import { planPipelineStages } from "../lib/pipeline-plan";
 
 type GateState =
   | { mode: "loading" }
@@ -40,11 +34,13 @@ type GateState =
  * to 404 on the access-gated detail route. This probes ``getJob`` first (with the
  * bearer attached, so the owner path is unchanged) and only on a no-access
  * failure falls back to the public composite — keeping public discoverability
- * and view access in sync. Demo ids skip the probe (they never hit the network).
+ * and view access in sync.
  */
 export function OptimizationDetailGate() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  // A grid pair deep link renders the pair strip above the tabs.
+  const isPairLink = useSearchParams().get("pair") != null;
   const { data: session, status } = useSession();
   const [state, setState] = useState<GateState>({ mode: "loading" });
   // The id whose probe already resolved to a stable view. The session token
@@ -54,17 +50,9 @@ export function OptimizationDetailGate() {
   // and tab state mid-use. "notfound" is deliberately not latched so a later
   // sign-in can still upgrade it.
   const resolvedIdRef = useRef<string | null>(null);
-
-  const isDemo =
-    id === DEMO_OPTIMIZATION_ID ||
-    id === DEMO_GRID_OPTIMIZATION_ID ||
-    id === DEMO_BLACKBOX_OPTIMIZATION_ID;
+  const kindHint = useRunKindHint(id);
 
   useEffect(() => {
-    if (isDemo) {
-      setState({ mode: "owned" });
-      return;
-    }
     if (status === "loading") return;
     // Attach the bearer before probing — effects run child-before-parent, so the
     // root ApiAuthTokenBridge may not have synced it yet; without this the
@@ -84,7 +72,12 @@ export function OptimizationDetailGate() {
         // gets misrendered as "wasn't found" while it is happily training.
         for (let attempt = 0; ; attempt++) {
           try {
-            await getJob(id);
+            const probed = await getJob(id);
+            rememberProbedRun(
+              id,
+              probed.optimization_type,
+              planPipelineStages(probed, null).map((s) => ({ detail: !!s.detail, foot: "time" })),
+            );
             if (cancelled) return;
             resolvedIdRef.current = id;
             setState({ mode: "owned" });
@@ -118,13 +111,15 @@ export function OptimizationDetailGate() {
     return () => {
       cancelled = true;
     };
-  }, [id, isDemo, status, session?.backendAccessToken, router]);
+  }, [id, status, session?.backendAccessToken, router]);
 
-  if (state.mode === "loading") return <OptimizationDetailSkeleton />;
+  if (state.mode === "loading") {
+    return <OptimizationDetailSkeleton pair={isPairLink} grid={kindHint === "grid_search"} />;
+  }
   if (state.mode === "public") return <OptimizationDetailView shareData={state.data} />;
   if (state.mode === "notfound") {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+      <div className="flex flex-col items-center justify-center min-h-[60dvh] gap-4">
         <XCircle className="size-12 text-destructive" />
         <p className="text-lg text-muted-foreground">
           {formatMsg("auto.app.optimizations.id.page.template.2", { p1: TERMS.optimization })}

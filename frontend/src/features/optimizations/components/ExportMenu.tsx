@@ -143,14 +143,13 @@ export function ExportMenu({
     <div className="relative" ref={ref}>
       <Button
         size="icon-sm"
-        variant="ghost"
         aria-label={msg("auto.features.optimizations.components.exportmenu.1")}
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => setOpen((o) => !o)}
         data-telemetry="results-export-menu"
       >
-        <DownloadSimple className="size-[1.05rem] text-primary" aria-hidden="true" />
+        <DownloadSimple className="size-[1.05rem]" aria-hidden="true" />
       </Button>
       <AnimatePresence>
         {open && (

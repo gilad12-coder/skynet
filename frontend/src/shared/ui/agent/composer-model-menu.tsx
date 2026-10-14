@@ -4,11 +4,16 @@ import * as React from "react";
 import { Check, CaretDown, CaretRight } from "@/shared/ui/icons";
 
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
-import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
+import { effortLabel, effortsFor, unpickedEffort } from "@/shared/lib/model-efforts";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
-import { modelProviderSlug } from "@/shared/lib/model-provider";
+import {
+  catalogFallbackModel,
+  modelDisplayName,
+  modelProviderSlug,
+  type DefaultModelFlag,
+} from "@/shared/lib/model-provider";
 import type { ModelCatalogResponse } from "@/shared/types/api";
 import {
   DropdownMenu,
@@ -28,11 +33,11 @@ interface ComposerModelMenuProps {
   effort: string | null;
   onEffortChange: (effort: string | null) => void;
   disabled?: boolean;
-}
-
-/** Short display name for a LiteLLM id ("openai/gpt-4o-mini" → "gpt-4o-mini"). */
-function shortName(id: string): string {
-  return id.split("/").pop() || id;
+  /**
+   * Catalog flag naming the model that runs with no pick. Interviews run the
+   * fast `is_interview_default`; it falls back to `is_default` when absent.
+   */
+  defaultFlag?: DefaultModelFlag;
 }
 
 // The retired "Auto · Intelligent" entry; saved prefs and conversations may
@@ -80,6 +85,7 @@ export function ComposerModelMenu({
   effort,
   onEffortChange,
   disabled,
+  defaultFlag = "is_default",
 }: ComposerModelMenuProps) {
   const savedValue = rawValue === RETIRED_AUTO_MODEL ? null : rawValue;
   const [open, setOpen] = React.useState(false);
@@ -136,17 +142,15 @@ export function ComposerModelMenu({
 
   // No pick runs the catalog's flagged default, so the chip names it and its
   // efforts apply.
-  const catalogDefault = available.find((m) => m.is_default) ?? null;
+  const catalogDefault = catalogFallbackModel(available, defaultFlag);
   const effective = value ?? catalogDefault?.value ?? null;
-  const displayName = effective ? shortName(effective) : msg("agent.model_menu.effort_default");
+  const displayName = effective
+    ? modelDisplayName(effective, available)
+    : msg("agent.model_menu.effort_default");
   const current = available.find((m) => m.value === effective);
   const canThink = !!current?.supports_thinking;
   const efforts = effortsFor(effective, available);
-  // An off-by-default thinker runs "Default" with no reasoning at all, so it
-  // has no default level to name.
-  const defaultEffort = current?.reasoning_default_enabled
-    ? (current.default_reasoning_effort ?? null)
-    : null;
+  const defaultEffort = unpickedEffort(current);
 
   const pick = (model: string | null) => {
     onChange(model);
@@ -200,11 +204,11 @@ export function ComposerModelMenu({
             <CaretRight className="size-3.5 shrink-0 text-muted-foreground rtl:rotate-180" />
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-72 overflow-hidden p-0">
-            <div className="max-h-72 overflow-y-auto py-1">
+            <div className="max-h-[min(18rem,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto py-1">
               {currentExtra && (
                 <MenuItem
                   selected
-                  label={shortName(currentExtra.value)}
+                  label={modelDisplayName(currentExtra.value, available)}
                   icon={<ProviderLogo slug={modelProviderSlug(currentExtra.value)} size={16} />}
                   onSelect={() => pick(currentExtra.value)}
                 />
@@ -213,7 +217,7 @@ export function ComposerModelMenu({
                 <MenuItem
                   key={m.value}
                   selected={effective === m.value}
-                  label={shortName(m.value)}
+                  label={modelDisplayName(m.value, available)}
                   icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={16} />}
                   onSelect={() => pick(m.value)}
                 />

@@ -2,13 +2,23 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { test } from "node:test";
 
+import type { OptimizerChoice } from "@/shared/types/unified-run";
+
 const billingUrl = new URL("../../billing/lib/pricing.ts", import.meta.url).href;
 const centUrl = new URL("../../billing/lib/wallet.ts", import.meta.url).href;
+const unifiedRunUrl = new URL("../../../shared/types/unified-run.ts", import.meta.url).href;
+const scorerDependenciesUrl = new URL("./scorer-dependencies.ts", import.meta.url).href;
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === "@/features/billing") {
       return { shortCircuit: true, url: billingUrl };
+    }
+    if (specifier === "@/shared/types/unified-run") {
+      return { shortCircuit: true, url: unifiedRunUrl };
+    }
+    if (specifier === "./scorer-dependencies") {
+      return { shortCircuit: true, url: scorerDependenciesUrl };
     }
     if (specifier === "./wallet" && context.parentURL === billingUrl) {
       return { shortCircuit: true, url: centUrl };
@@ -22,9 +32,13 @@ const {
   defaultCeilingForBracket,
   defaultCeilingTrace,
   projectCostBracket,
+  projectUnifiedCostBracket,
   runtimeCostProjection,
   runtimeStartHold,
+  unifiedResolvedOptimizer,
 } = await import("./cost-bracket.ts");
+const { initialWizardV2State } = await import("./wizard-v2.ts");
+const { optimizersFor, resolveOptimizer } = await import(unifiedRunUrl);
 const { platformFeeCents, DEFAULT_PRICING_TERMS } = await import(billingUrl);
 const MARKUP = DEFAULT_PRICING_TERMS.usageMarkup;
 const FEE = DEFAULT_PRICING_TERMS.byokFeeFraction;
@@ -282,6 +296,52 @@ test("the runtime start hold is one full-lifetime session, and only when billed 
   );
 });
 
+test("the low end covers the box hold plus one call's context-window reservation", () => {
+  // A small run's usage estimate can sit far below what one call reserves:
+  // the gateway bounds each call's input by the model's whole context window.
+  const wide = { ...model("wide", 0.00000125, 0.00001), max_input_tokens: 400_000 };
+  const usageOnly = projectCostBracket({
+    ...base,
+    modelRoles: [{ role: "task", model: cheap, tokenSource: "managed", tokenShare: 1 }],
+  });
+  const managed = projectCostBracket({
+    ...base,
+    modelRoles: [{ role: "task", model: wide, tokenSource: "managed", tokenShare: 1 }],
+  });
+  const withBox = projectCostBracket({
+    ...base,
+    modelRoles: [{ role: "task", model: wide, tokenSource: "managed", tokenShare: 1 }],
+    runtime: runtimeCostProjection(
+      {
+        billing_basis: "at_cost",
+        minimum_session_cents: "0.1",
+        maximum_session_cents: "52.4",
+        maximum_lifetime_seconds: 600,
+        vcpus: 2,
+      },
+      1,
+    ),
+  });
+  const byok = projectCostBracket({
+    ...base,
+    modelRoles: [{ role: "task", model: wide, tokenSource: "byok", tokenShare: 1 }],
+  });
+  const economy = projectCostBracket({
+    ...base,
+    economyMode: true,
+    modelRoles: [{ role: "task", model: wide, tokenSource: "managed", tokenShare: 1 }],
+  });
+
+  // (400k x 1.05 x $1.25/M + 4000 x 1.05 x $10/M) x 1.15 markup = 65.2 cents.
+  assert.equal(managed.modelCallHoldCents, 66);
+  assert.equal(managed.lowCents, 66);
+  assert.equal(chargeableBracket(managed, "managed").lowCents, 66);
+  assert.equal(chargeableBracket(withBox, "managed").lowCents, 53 + 66);
+  assert.equal(chargeableBracket(byok, "byok").lowCents, 3);
+  assert.equal(economy.modelCallHoldCents, 66);
+  assert.equal(usageOnly.modelCallHoldCents, 0);
+});
+
 test("the ceiling trace shows the working behind the default cap", () => {
   const small = projectCostBracket({
     ...base,
@@ -328,4 +388,101 @@ test("applies the backend's markup to managed roles and its fee fraction to BYOK
   assert.equal(markedUp.byokModelHighCents, atCost.byokModelHighCents);
   const charged = chargeableBracket(markedUp, "managed");
   assert.equal(charged.charge.byokFeeHigh, platformFeeCents(markedUp.byokModelHighCents, 0.1));
+});
+
+function unifiedState(patch: {
+  kind?: "prompt" | "code" | "dspy_program" | "text" | null;
+  choice?: OptimizerChoice;
+  cases?: number;
+  metricCode?: string;
+  economy?: boolean;
+}) {
+  const state = initialWizardV2State();
+  state.task.artifactKind = patch.kind === undefined ? "prompt" : patch.kind;
+  state.inputs.mode = "pairs";
+  state.inputs.cases = Array.from({ length: patch.cases ?? 20 }, (_, i) => ({
+    input: { q: String(i) },
+    expected: "a",
+  }));
+  state.optimizer.choice = patch.choice ?? "auto";
+  state.optimizer.taskModel = { name: "cheap" } as never;
+  state.optimizer.reflectionModel = { name: "pricey" } as never;
+  state.optimizer.budget = { max_scorer_runs: 100, max_iterations: null, stop_at_score: null };
+  state.workspace.metricCode = patch.metricCode ?? "def score(input, output):\n    return 1.0, {}";
+  state.meta.economyMode = patch.economy ?? false;
+  return state;
+}
+
+const unifiedModels = [model("cheap", 1e-7, 4e-7), model("pricey", 3e-6, 1.5e-5)];
+
+test("the unified projection's resolver matches the shared one for every allowed choice", () => {
+  for (const kind of ["prompt", "code", "dspy_program", "text"] as const)
+    for (const mode of ["single", "pairs"] as const)
+      for (const choice of optimizersFor(kind, mode))
+        assert.equal(unifiedResolvedOptimizer(choice, kind), resolveOptimizer(choice, kind));
+});
+
+test("no unified estimate before the task names an artifact", () => {
+  assert.equal(projectUnifiedCostBracket(unifiedState({ kind: null }), null), null);
+});
+
+test("a black-box run counts the search budget plus the held-out re-score", () => {
+  const bracket = projectUnifiedCostBracket(unifiedState({ choice: "gepa", cases: 20 }), null, {
+    models: unifiedModels,
+  });
+  assert.ok(bracket);
+  // 100 search runs plus the start and the winner on 20 * 0.3 = 6 held-out cases.
+  assert.equal(bracket.trace.metricCalls, 112);
+  const biggerState = unifiedState({ choice: "gepa", cases: 20 });
+  biggerState.optimizer.budget = { max_scorer_runs: 400 };
+  const bigger = projectUnifiedCostBracket(biggerState, null, { models: unifiedModels });
+  assert.ok(bigger && bigger.managedModelHighCents > bracket.managedModelHighCents);
+});
+
+test("a DSPy program prices through the DSPy projection", () => {
+  const dspy = projectUnifiedCostBracket(
+    unifiedState({ kind: "dspy_program", choice: "dspy_miprov2" }),
+    null,
+    { models: unifiedModels },
+  );
+  assert.ok(dspy);
+  assert.ok(dspy.managedModelHighCents > 0);
+});
+
+test("the metric model counts only when the metric uses the llm helper", () => {
+  const plain = projectUnifiedCostBracket(unifiedState({ choice: "gepa" }), null, {
+    models: unifiedModels,
+  });
+  const judged = projectUnifiedCostBracket(
+    unifiedState({
+      choice: "gepa",
+      metricCode: "from skynet import llm\ndef score(input, output):\n    return 1.0, {}",
+    }),
+    null,
+    { models: unifiedModels },
+  );
+  assert.ok(plain && judged);
+  assert.ok(judged.managedModelHighCents > plain.managedModelHighCents);
+});
+
+test("economy pricing skips coding-agent proposers", () => {
+  const agentFull = projectUnifiedCostBracket(unifiedState({ choice: "meta_harness" }), null, {
+    models: unifiedModels,
+  });
+  const agentEconomy = projectUnifiedCostBracket(
+    unifiedState({ choice: "meta_harness", economy: true }),
+    null,
+    { models: unifiedModels },
+  );
+  assert.equal(agentEconomy?.managedModelHighCents, agentFull?.managedModelHighCents);
+  const directFull = projectUnifiedCostBracket(unifiedState({ choice: "gepa" }), null, {
+    models: unifiedModels,
+  });
+  const directEconomy = projectUnifiedCostBracket(
+    unifiedState({ choice: "gepa", economy: true }),
+    null,
+    { models: unifiedModels },
+  );
+  assert.ok(directEconomy && directFull);
+  assert.ok(directEconomy.managedModelHighCents <= directFull.managedModelHighCents);
 });

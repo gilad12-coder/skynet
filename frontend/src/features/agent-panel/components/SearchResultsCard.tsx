@@ -98,7 +98,7 @@ function SearchTypeChip({ kind }: { kind: "semantic" | "lexical" }) {
     ? msg("auto.features.agent.panel.components.searchresultscard.type_semantic")
     : msg("auto.features.agent.panel.components.searchresultscard.type_lexical");
   return (
-    <Badge variant="outline" size="sm" title={label}>
+    <Badge variant="outline" size="sm">
       <Icon aria-hidden="true" />
       <span>{label}</span>
     </Badge>

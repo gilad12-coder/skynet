@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { PencilSimple } from "@/shared/ui/icons";
 
 import { cn } from "@/shared/lib/utils";
@@ -11,12 +12,29 @@ import { CopyButton } from "@/shared/ui/copy-button";
 
 import { autoResizeTextarea } from "./auto-resize";
 import { Textarea } from "@/shared/ui/primitives/textarea";
+import { MarkdownPreviewField } from "@/shared/ui/markdown-preview-field";
+
+import { PastedTextCard } from "./pasted-text-card";
+import { joinPastes, shouldAttachPaste, splitPastes, type SplitMessage } from "./pasted-text";
+
+/** Messages sent before cards existed show a long body as a card too. */
+function splitSent(content: string): SplitMessage {
+  const split = splitPastes(content);
+  if (!split.pastes.length && shouldAttachPaste(content)) return { text: "", pastes: [content] };
+  return split;
+}
+
+// What the user types renders as markdown too, lazily like the agent's
+// replies, so the parser stays out of the first-load chunk.
+const MessageMarkdown = dynamic(() => import("./message-markdown").then((m) => m.MessageMarkdown), {
+  ssr: false,
+});
 
 /** Pill button styles for the edit-and-resend row under a user message. */
 export const USER_BUBBLE_EDIT_CANCEL_CLASS =
-  "text-[0.75rem] font-medium text-foreground/80 hover:text-foreground bg-white border border-[#DDD4C8] hover:bg-muted px-3.5 py-1.5 rounded-full transition-all duration-150 cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3D2E22]/25 focus-visible:ring-offset-1";
+  "text-[0.75rem] font-medium text-foreground/80 hover:text-foreground bg-card border border-border hover:bg-muted px-3.5 py-1.5 rounded-full transition-all duration-150 cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-offset-1";
 export const USER_BUBBLE_EDIT_SEND_CLASS =
-  "text-[0.75rem] font-medium text-white bg-[#3D2E22] hover:bg-[#3D2E22]/90 px-4 py-1.5 rounded-full transition-all duration-150 cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3D2E22]/40 focus-visible:ring-offset-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100";
+  "text-[0.75rem] font-medium text-primary-foreground bg-primary-fill hover:bg-primary-hover px-4 py-1.5 rounded-full transition-all duration-150 cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100";
 
 interface UserBubbleProps {
   content: string;
@@ -25,20 +43,38 @@ interface UserBubbleProps {
 }
 
 export function UserBubble({ content, onEdit, editable = true }: UserBubbleProps) {
+  const { text, pastes } = splitSent(content);
+
   return (
     <div className="flex justify-start group/user">
-      <div
-        className="max-w-[80%] rounded-[22px] rounded-es-[4px] bg-[#3D2E22] text-[#FAF8F5] px-4 py-2.5 text-sm leading-[1.45] shadow-sm"
-        dir="auto"
-      >
-        {content}
+      <div className="flex max-w-[80%] flex-col items-start gap-1.5">
+        {pastes.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {pastes.map((paste, i) => (
+              <PastedTextCard key={i} text={paste} />
+            ))}
+          </div>
+        )}
+        {text && (
+          <div
+            className="max-w-full rounded-[22px] rounded-es-[4px] bg-primary-fill text-primary-foreground px-4 py-2.5 text-sm leading-[1.45]"
+            dir="auto"
+          >
+            <React.Suspense fallback={<span className="whitespace-pre-wrap">{text}</span>}>
+              <MessageMarkdown content={text} />
+            </React.Suspense>
+          </div>
+        )}
       </div>
       {/* Hover-revealed actions beside the bubble: copy (always) + edit (when
           editable), mirroring the assistant reply's copy affordance. */}
       <div
         className={cn(
           "self-center ms-1.5 flex items-center gap-0.5",
-          "opacity-0 group-hover/user:opacity-100 transition-opacity",
+          "opacity-0 group-hover/user:opacity-100 focus-within:opacity-100 transition-opacity",
+          // The global coarse-pointer reveal only matches the unnamed
+          // `group-hover:` spelling, so touch screens (iPad) need their own.
+          "any-pointer-coarse:opacity-100",
         )}
       >
         <CopyButton
@@ -79,6 +115,7 @@ export function UserBubbleEditor({
   disabled,
 }: UserBubbleEditorProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const draft = splitPastes(value);
 
   React.useEffect(() => {
     autoResizeTextarea(textareaRef.current);
@@ -87,27 +124,47 @@ export function UserBubbleEditor({
   return (
     <div className="flex justify-start">
       <div className="max-w-[80%] w-full space-y-2">
-        <Textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            autoResizeTextarea(e.target);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              onSubmit();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              onCancel();
-            }
-          }}
-          className="max-h-[120px] min-h-[40px]"
-          rows={1}
-          autoFocus
-          dir="auto"
-        />
+        {draft.pastes.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {draft.pastes.map((paste, i) => (
+              <PastedTextCard
+                key={i}
+                text={paste}
+                onRemove={() =>
+                  onChange(
+                    joinPastes({
+                      text: draft.text,
+                      pastes: draft.pastes.filter((_, j) => j !== i),
+                    }),
+                  )
+                }
+              />
+            ))}
+          </div>
+        )}
+        <MarkdownPreviewField value={draft.text}>
+          <Textarea
+            ref={textareaRef}
+            value={draft.text}
+            onChange={(e) => {
+              onChange(joinPastes({ text: e.target.value, pastes: draft.pastes }));
+              autoResizeTextarea(e.target);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onSubmit();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                onCancel();
+              }
+            }}
+            className="max-h-[120px] min-h-[40px]"
+            rows={1}
+            autoFocus
+            dir="auto"
+          />
+        </MarkdownPreviewField>
         <div className="flex justify-start gap-1.5">
           <button type="button" onClick={onCancel} className={USER_BUBBLE_EDIT_CANCEL_CLASS}>
             {msg("shared.agent.cancel")}

@@ -30,11 +30,11 @@ export function useTrustMode(): {
   return { mode, setMode, next };
 }
 
-// The hue map is locale-independent and stays concrete.
+// Per-theme tokens, so the three modes stay distinct in every theme.
 export const TRUST_MODE_HUE: Record<TrustMode, string> = {
-  ask: "#3D2E22",
-  auto_safe: "#5E7A5E",
-  yolo: "#A85A1A",
+  ask: "var(--trust-ask)",
+  auto_safe: "var(--trust-auto-safe)",
+  yolo: "var(--trust-yolo)",
 };
 
 // Labels/descriptions are thunks, not resolved strings: `msg()` reads the active

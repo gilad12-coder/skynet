@@ -24,7 +24,6 @@ _SETTINGS_ENV_VARS = (
     "EMBEDDING_INDEX_SWEEP_INTERVAL",
     "EMBEDDING_INDEX_SWEEP_BATCH_SIZE",
     "PROGRESS_EVENTS_PER_JOB_CAP",
-    "LOG_ENTRIES_PER_JOB_CAP",
     "CANCEL_POLL_INTERVAL",
     "JOB_RUN_START_METHOD",
     "DB_POOL_SIZE",
@@ -93,7 +92,6 @@ def test_settings_defaults_storage_retention_caps() -> None:
     s = Settings(_env_file=None)
 
     assert s.progress_events_per_job_cap == 5000
-    assert s.log_entries_per_job_cap == 5000
 
 
 def test_settings_defaults_job_max_attempts() -> None:
@@ -205,12 +203,10 @@ def test_settings_env_override_worker_threads(monkeypatch: pytest.MonkeyPatch) -
 def test_settings_env_override_storage_retention_caps(monkeypatch: pytest.MonkeyPatch) -> None:
     """Storage retention caps are configurable via environment."""
     monkeypatch.setenv("PROGRESS_EVENTS_PER_JOB_CAP", "123")
-    monkeypatch.setenv("LOG_ENTRIES_PER_JOB_CAP", "456")
 
     s = Settings(_env_file=None)
 
     assert s.progress_events_per_job_cap == 123
-    assert s.log_entries_per_job_cap == 456
 
 
 def test_settings_env_override_job_max_attempts(monkeypatch: pytest.MonkeyPatch) -> None:

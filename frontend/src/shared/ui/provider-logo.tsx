@@ -25,6 +25,7 @@ import {
   SambaNova,
   Together,
   XAI,
+  XiaomiMiMo,
   ZAI,
 } from "@lobehub/icons";
 import { GmiCloud } from "@/shared/ui/brand-marks";
@@ -84,6 +85,8 @@ function renderBrand(slug: string, size: number): React.ReactNode {
       return <Qwen.Avatar size={size} />;
     case "groq":
       return <Groq.Avatar size={size} />;
+    case "xiaomi":
+      return <XiaomiMiMo.Avatar size={size} />;
     case "moonshot":
     case "moonshotai":
       return <Moonshot.Avatar size={size} />;

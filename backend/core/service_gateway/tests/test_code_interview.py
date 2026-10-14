@@ -1,229 +1,140 @@
-"""Tests for the Signature & Metric interview engine.
+"""Tests for the shared interview-turn driver.
 
-Pure-function coverage of the turn parser and input assembly — the streaming
-path is exercised through the router test with the engine monkeypatched, so
-no LLM or network is touched here.
+The streamify loop is replaced by a scripted generator, so no LLM or network
+is touched: the tests pin the event sequence every interview (task, intake)
+relays and the retry / salvage behavior.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-from types import SimpleNamespace
+from typing import Any
 
+import dspy
+import pytest
+
+from core.service_gateway.agents import code_interview
 from core.service_gateway.agents.code_interview import (
     MAX_INTERVIEW_QUESTIONS,
-    BlackboxInterviewTurnSig,
-    CodeInterviewTurnSig,
-    _blackbox_interview_inputs,
-    _interview_inputs,
-    _parse_interview_prediction,
+    _parse_json,
+    _transcript_json,
+    relay_interview_turn,
 )
 
 
-def _pred(**fields: str) -> SimpleNamespace:
-    """Build a prediction-shaped object with the given output fields."""
-    return SimpleNamespace(**fields)
-
-
-def test_parse_turn_in_progress() -> None:
-    """A mid-interview turn keeps the answer options and withholds the brief."""
-    turn = _parse_interview_prediction(
-        _pred(
-            message="How strict should matching be?",
-            options_json=(
-                '[{"label": "Exact", "description": "Only identical strings match."},'
-                ' {"label": "Lenient", "description": "Ignore case and whitespace."}]'
-            ),
-            brief_json='["premature directive"]',
-            done="false",
-        ),
-        asked=1,
+def _chunk(field: str, text: str, last: bool) -> dspy.streaming.StreamResponse:
+    """Build one streamed chunk of an output field."""
+    return dspy.streaming.StreamResponse(
+        predict_name="predict", signature_field_name=field, chunk=text, is_last_chunk=last
     )
-    assert turn["done"] is False
-    assert turn["options"] == [
-        {"label": "Exact", "description": "Only identical strings match."},
-        {"label": "Lenient", "description": "Ignore case and whitespace."},
-    ]
-    assert turn["brief"] == []
-    assert turn["message"] == "How strict should matching be?"
-    assert turn["model"]
 
 
-def test_parse_turn_accepts_bare_string_options() -> None:
-    """A plain list of answer strings is coerced into labelled options."""
-    turn = _parse_interview_prediction(
-        _pred(
-            message="Pick a tone",
-            options_json='["Formal", "Casual"]',
-            brief_json="[]",
-            done="false",
-        ),
-        asked=1,
-    )
-    assert turn["options"] == [
-        {"label": "Formal", "description": ""},
-        {"label": "Casual", "description": ""},
-    ]
+def _script(*attempts: list[Any] | Exception):
+    """Return a streamify stand-in that replays one scripted attempt per call.
 
+    Args:
+        *attempts: Per attempt, the chunks to yield, or an exception to raise
+            before yielding anything.
 
-def test_parse_turn_done_emits_brief_and_drops_options() -> None:
-    """A finished turn carries the cleaned brief and no options."""
-    turn = _parse_interview_prediction(
-        _pred(
-            message="Wrapping up.",
-            options_json='[{"label": "Yes", "description": ""}]',
-            brief_json='["Outputs must be lowercase.", "  ", "Score partial matches at 0.5."]',
-            done="true",
-        ),
-        asked=3,
-    )
-    assert turn["done"] is True
-    assert turn["options"] == []
-    assert turn["brief"] == ["Outputs must be lowercase.", "Score partial matches at 0.5."]
-
-
-def test_parse_turn_forces_done_at_question_limit() -> None:
-    """Hitting the question cap ends the interview even if the model resists."""
-    turn = _parse_interview_prediction(
-        _pred(message="One more?", options_json="[]", brief_json="[]", done="false"),
-        asked=MAX_INTERVIEW_QUESTIONS,
-    )
-    assert turn["done"] is True
-
-
-def test_parse_turn_tolerates_garbage_outputs() -> None:
-    """Unparseable JSON fields degrade to empty lists, never raise."""
-    turn = _parse_interview_prediction(
-        _pred(message="hi", options_json="not json", brief_json="{broken", done="nope"),
-        asked=0,
-    )
-    assert turn["options"] == []
-    assert turn["brief"] == []
-    assert turn["done"] is False
-
-
-def test_parse_turn_caps_options_at_four() -> None:
-    """At most four answer options survive parsing."""
-    turn = _parse_interview_prediction(
-        _pred(
-            message="Pick one",
-            options_json='["a", "b", "c", "d", "e"]',
-            brief_json="[]",
-            done="false",
-        ),
-        asked=0,
-    )
-    assert [o["label"] for o in turn["options"]] == ["a", "b", "c", "d"]
-
-
-def test_interview_signature_streams_done_before_payload_fields() -> None:
-    """``done`` precedes the slow payload fields so the stream can hint early.
-
-    The interview stream emits ``turn_hint`` from the streamed ``done`` field;
-    that only works while ``done`` is generated before options and brief.
+    Returns:
+        A callable shaped like ``dspy.streamify``.
     """
-    fields = list(CodeInterviewTurnSig.output_fields)
-    assert fields.index("done") < fields.index("options_json")
-    assert fields.index("done") < fields.index("brief_json")
+    queue = list(attempts)
+
+    def fake_streamify(*_args: Any, **_kwargs: Any):
+        """Hand out the next scripted attempt as an async program."""
+        attempt = queue.pop(0)
+
+        async def program(**_inputs: Any):
+            """Yield the scripted chunks, or raise the scripted error."""
+            if isinstance(attempt, Exception):
+                raise attempt
+            for item in attempt:
+                yield item
+
+        return program
+
+    return fake_streamify
 
 
-def test_interview_inputs_shapes_and_language() -> None:
-    """Inputs are valid JSON, carry the model fallback, and map the locale."""
-    inputs = _interview_inputs(
-        dataset_columns=["text", "label"],
-        column_roles={"text": "input", "label": "output"},
-        column_kinds={"text": "text"},
-        sample_rows=[{"text": "hi", "label": "pos"}],
-        job_model="",
-        turns=[],
-        locale="en",
-    )
-    assert json.loads(inputs["column_roles"]) == {"text": "input", "label": "output"}
-    assert json.loads(inputs["sample_rows"]) == [{"text": "hi", "label": "pos"}]
-    assert json.loads(inputs["transcript_json"]) == []
-    assert inputs["job_model"] == "not chosen yet"
-    assert inputs["reply_language"] == "English"
+async def _collect(**kwargs: Any) -> list[dict]:
+    """Drain :func:`relay_interview_turn` into a list."""
+    return [event async for event in relay_interview_turn(**kwargs)]
 
 
-def test_interview_inputs_appends_question_count_note() -> None:
-    """Once questions were asked, the transcript carries the limit reminder."""
-    turns = [
-        {"role": "assistant", "content": "Q1?"},
-        {"role": "user", "content": "A1"},
-    ]
-    inputs = _interview_inputs(
-        dataset_columns=["text"],
-        column_roles={"text": "input"},
-        column_kinds={},
-        sample_rows=[],
-        job_model="openai/gpt-4o-mini",
-        turns=turns,
-        locale=None,
-    )
-    transcript = json.loads(inputs["transcript_json"])
+def _relay_kwargs(parse=None) -> dict[str, Any]:
+    """Build the relay's keyword arguments with a stub LM and parser."""
+    return {
+        "predict": object(),
+        "lm": dspy.LM("openai/test-model"),
+        "inputs": {"x": "1"},
+        "asked": 2,
+        "model": "openai/test-model",
+        "parse": parse or (lambda pred, asked: {"message": pred.message, "asked": asked}),
+    }
+
+
+def test_parse_json_falls_back_on_garbage() -> None:
+    """Empty or unparseable text yields the fallback, valid JSON parses."""
+    assert _parse_json("", []) == []
+    assert _parse_json("{broken", {}) == {}
+    assert _parse_json('["a"]', []) == ["a"]
+
+
+def test_transcript_json_appends_the_limit_note_once_asked() -> None:
+    """No note before the first question; afterwards the count and cap are spelled out."""
+    assert json.loads(_transcript_json([])) == []
+    turns = [{"role": "assistant", "content": "Q1?"}, {"role": "user", "content": "A1"}]
+    transcript = json.loads(_transcript_json(turns))
     assert transcript[:2] == turns
     assert transcript[-1]["role"] == "system"
     assert f"1 of at most {MAX_INTERVIEW_QUESTIONS}" in transcript[-1]["content"]
-    assert inputs["job_model"] == "openai/gpt-4o-mini"
-    assert inputs["reply_language"] == "Hebrew"
 
 
-_BLACKBOX = {
-    "recipe": "prompt",
-    "objective": "  Replies that resolve the ticket in one message.  ",
-    "background": " Support desk for a SaaS product. ",
-    "target_kind": "text",
-    "scorer_has_model": True,
-}
-
-
-def test_blackbox_interview_inputs_shapes() -> None:
-    """The authoring context is mapped field-for-field, with cases JSON-encoded."""
-    inputs = _blackbox_interview_inputs(
-        _BLACKBOX,
-        case_columns=["ticket", "expected"],
-        sample_cases=[{"ticket": "hi", "expected": "hello"}],
-        job_model="",
-        turns=[],
-        locale="en",
+def test_relay_streams_message_hint_and_done(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Message chunks, the ``done`` hint and the parsed terminal event arrive in order."""
+    monkeypatch.setattr(
+        code_interview.dspy,
+        "streamify",
+        _script(
+            [
+                _chunk("message", "Hel", False),
+                _chunk("message", "lo", True),
+                _chunk("done", "tr", False),
+                _chunk("done", "ue", True),
+                dspy.Prediction(message="Hello", done="true"),
+            ]
+        ),
     )
-    assert inputs["objective"] == "Replies that resolve the ticket in one message."
-    assert inputs["background"] == "Support desk for a SaaS product."
-    assert inputs["recipe"] == "prompt"
-    assert inputs["target_kind"] == "text"
-    assert inputs["case_columns"] == ["ticket", "expected"]
-    assert json.loads(inputs["sample_cases"]) == [{"ticket": "hi", "expected": "hello"}]
-    assert inputs["scorer_has_model"] == "true"
-    assert inputs["job_model"] == "not chosen yet"
-    assert json.loads(inputs["transcript_json"]) == []
-    assert inputs["reply_language"] == "English"
+    events = asyncio.run(_collect(**_relay_kwargs()))
+    names = [e["event"] for e in events]
+    assert names == ["message_patch", "message_patch", "message_end", "turn_hint", "interview_done"]
+    assert events[3]["data"] == {"final": True}
+    done = events[-1]["data"]
+    assert done["message"] == "Hello"
+    assert done["asked"] == 2
+    assert done["model"] == "openai/test-model"
 
 
-def test_blackbox_interview_inputs_defaults_and_question_note() -> None:
-    """Missing optional fields fall back sanely and the limit reminder is appended."""
-    turns = [{"role": "assistant", "content": "Q1?"}, {"role": "user", "content": "A1"}]
-    inputs = _blackbox_interview_inputs(
-        {"objective": "shorter code"},
-        case_columns=[],
-        sample_cases=[],
-        job_model="openai/gpt-4o-mini",
-        turns=turns,
-        locale=None,
+def test_relay_retries_once_with_a_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed first attempt is retried after a ``message_reset``."""
+    monkeypatch.setattr(
+        code_interview.dspy,
+        "streamify",
+        _script(RuntimeError("boom"), [dspy.Prediction(message="ok", done="false")]),
     )
-    assert inputs["recipe"] == "anything"
-    assert inputs["target_kind"] == "text"
-    assert inputs["background"] == ""
-    assert inputs["scorer_has_model"] == "false"
-    assert inputs["job_model"] == "openai/gpt-4o-mini"
-    transcript = json.loads(inputs["transcript_json"])
-    assert transcript[:2] == turns
-    assert f"1 of at most {MAX_INTERVIEW_QUESTIONS}" in transcript[-1]["content"]
-    assert inputs["reply_language"] == "Hebrew"
+    events = asyncio.run(_collect(**_relay_kwargs()))
+    assert [e["event"] for e in events] == ["message_reset", "interview_done"]
+    assert events[-1]["data"]["message"] == "ok"
 
 
-def test_blackbox_interview_signature_orders_done_before_options() -> None:
-    """The model commits to ``done`` before writing options / brief, like the DSPy signature."""
-    outputs = list(BlackboxInterviewTurnSig.output_fields)
-    assert outputs.index("done") < outputs.index("options_json")
-    assert outputs.index("done") < outputs.index("brief_json")
-    assert "scorer_has_model" in BlackboxInterviewTurnSig.input_fields
+def test_relay_raises_after_the_last_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every attempt failing propagates the error for the router to translate."""
+    monkeypatch.setattr(
+        code_interview.dspy,
+        "streamify",
+        _script(RuntimeError("one"), RuntimeError("two")),
+    )
+    with pytest.raises(RuntimeError, match="two"):
+        asyncio.run(_collect(**_relay_kwargs()))

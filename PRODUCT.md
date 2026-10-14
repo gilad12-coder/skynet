@@ -27,7 +27,7 @@ Success means the user ends up with a measurably better artifact they can trust 
 ## Positioning
 
 - The user owns the metric. Skynet runs the search, the sandboxing, the budget and the evidence, and it verifies the user's scorer before spending anything on it.
-- Runs are metered at provider cost plus a flat markup. Runs that don't beat their baseline are refunded.
+- Runs are metered at provider cost plus a flat markup.
 
 ## Constraints
 

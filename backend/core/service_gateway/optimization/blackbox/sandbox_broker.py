@@ -10,10 +10,9 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, Protocol
 
-from ....billing.vercel_usage import SANDBOX_NETWORK_BYTES_CAP, quote_vercel_sandbox
+from ....billing.vercel_usage import PACKAGE_REGISTRY_HOSTS, quote_vercel_sandbox
 from ....config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
 from ....exceptions import ServiceError
-from .harness_bridge import ANTHROPIC_HOST
 from .sandbox import CommandResult, OutputSink, SandboxRuntime, SandboxSession, SandboxSpec
 
 _MAX_FILE_BYTES = 16 * 1024 * 1024
@@ -109,6 +108,114 @@ def _relative_path(value: Any) -> str:
     return str(path)
 
 
+class ParentSandboxSession:
+    """One box the trusted parent opened for itself; no guest capability names it."""
+
+    def __init__(self, session: SandboxSession, command_runner: SandboxCommandRunner | None) -> None:
+        """Wrap a box with the run's model mailbox, as guest commands get.
+
+        Args:
+            session: The provider session.
+            command_runner: Optional model mailbox command wrapper.
+        """
+        self._session = session
+        self._command_runner = command_runner
+        self._closed = False
+
+    def write_files(self, files: Mapping[str, str]) -> None:
+        """Write text files at paths relative to the working directory.
+
+        Args:
+            files: Relative path to content.
+        """
+        self._session.write_files(files)
+
+    def read_file(self, path: str) -> str | None:
+        """Return a file's text, or ``None`` when absent.
+
+        Args:
+            path: Relative file path.
+
+        Returns:
+            The file's text, or ``None``.
+        """
+        return self._session.read_file(path)
+
+    def run(
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
+    ) -> CommandResult:
+        """Run a command through the model mailbox when the run has one.
+
+        Args:
+            command: Shell command line.
+            env: Extra environment for this command.
+            timeout_seconds: Kill the command after this long.
+            on_output: Receives output as it streams.
+
+        Returns:
+            The command's outcome.
+        """
+        options = {"env": env, "timeout_seconds": timeout_seconds, "on_output": on_output}
+        if self._command_runner is not None:
+            return self._command_runner(self._session, command, **options)
+        return self._session.run(command, **options)
+
+    def disable_network(self) -> None:
+        """Switch the box to deny-all networking and confirm the provider applied it.
+
+        Raises:
+            ServiceError: When the provider cannot switch or confirm it.
+        """
+        switch = getattr(self._session, "disable_network", None)
+        if switch is None:
+            raise ServiceError("This sandbox runtime cannot switch a box's network off.")
+        switch()
+
+    def close(self) -> None:
+        """Destroy the box and settle its usage, once."""
+        if self._closed:
+            return
+        self._closed = True
+        self._session.close()
+
+
+class _ParentSandboxRuntime:
+    """Open parent-only boxes limited to the hosts the run was funded for."""
+
+    injects_headers = False
+
+    def __init__(self, broker: SandboxBroker, allowed_hosts: tuple[str, ...]) -> None:
+        """Bind the broker and the funded host list.
+
+        Args:
+            broker: The run's broker, which owns billing and cleanup.
+            allowed_hosts: The most a box opened here may reach.
+        """
+        self._broker = broker
+        self._allowed_hosts = allowed_hosts
+
+    def open(self, spec: SandboxSpec) -> ParentSandboxSession:
+        """Open one parent-only box.
+
+        Args:
+            spec: Lifetime, operation identity and hosts for the box.
+
+        Returns:
+            The box.
+
+        Raises:
+            ServiceError: When the spec asks for hosts the run was not funded for.
+        """
+        if not set(spec.allowed_hosts) <= set(self._allowed_hosts):
+            raise ServiceError("The parent's box cannot reach hosts this run was not funded for.")
+        return self._broker._open_parent(spec)
+
+
 class SandboxBroker:
     """Expose only owned guest operations while retaining credentials and billing."""
 
@@ -121,7 +228,6 @@ class SandboxBroker:
         vcpus: int = 2,
         tags: Mapping[str, str] | None = None,
         command_runner: SandboxCommandRunner | None = None,
-        anthropic_api_key: str | None = None,
     ) -> None:
         """Bind one parent-owned runtime and deployment-selected resource profile.
 
@@ -132,9 +238,6 @@ class SandboxBroker:
             vcpus: Fixed allocation selected by the parent.
             tags: Parent-owned job identity used by cleanup and reconciliation.
             command_runner: Optional model mailbox command wrapper.
-            anthropic_api_key: The run owner's verified Anthropic key. When set, a
-                box may ask to reach Anthropic, and the network edge adds this key
-                to those requests; it never enters the box.
         """
         self._runtime = runtime
         self._image = image
@@ -144,21 +247,17 @@ class SandboxBroker:
                 "image": image,
                 "lifetime_ms": math.ceil(self._maximum * 1000),
                 "vcpus": vcpus,
-                "network_disabled": anthropic_api_key is None,
-                **(
-                    {"allowed_hosts": [ANTHROPIC_HOST], "network_bytes_cap": SANDBOX_NETWORK_BYTES_CAP}
-                    if anthropic_api_key is not None
-                    else {}
-                ),
+                "network_disabled": True,
                 "ports": [],
                 "persistent": False,
             }
         )
-        self._anthropic_api_key = anthropic_api_key
         self._vcpus = vcpus
         self._tags = dict(tags or {})
         self._command_runner = command_runner
         self._sessions: dict[str, _OwnedSession] = {}
+        # Kept apart from ``_sessions`` so no guest handle can ever address them.
+        self._parent_sessions: list[ParentSandboxSession] = []
         self._opened: dict[str, tuple[dict[str, Any], str]] = {}
         self._opening: set[str] = set()
         self._lock = threading.Lock()
@@ -181,10 +280,7 @@ class SandboxBroker:
         return owned
 
     def _open(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        """Create a sandbox using the parent's fixed image, network, and resource profile.
-
-        A box stays offline unless it asks for Anthropic and this run holds its
-        owner's Anthropic key.
+        """Create an offline sandbox using the parent's fixed image and resource profile.
 
         Args:
             payload: Stable request_id and a requested guest spec.
@@ -203,10 +299,9 @@ class SandboxBroker:
             raise ServiceError("The child cannot override the trusted sandbox image or resource profile.")
         if spec.get("inject_headers"):
             raise ServiceError("Protected sandbox model calls use the parent mailbox.")
-        hosts = spec.get("allowed_hosts") or []
-        if hosts and (hosts != [ANTHROPIC_HOST] or self._anthropic_api_key is None):
+        if spec.get("allowed_hosts"):
             raise ServiceError("This run cannot open network access from its sandbox.")
-        requested = {"lifetime_seconds": lifetime, "env": _environment(spec.get("env")), "allowed_hosts": hosts}
+        requested = {"lifetime_seconds": lifetime, "env": _environment(spec.get("env"))}
         with self._lock:
             if self._closed:
                 raise ServiceError("The sandbox broker is closed.")
@@ -228,9 +323,7 @@ class SandboxBroker:
                     image=self._image,
                     vcpus=self._vcpus,
                     tags=self._tags,
-                    network_disabled=not hosts,
-                    allowed_hosts=tuple(hosts),
-                    inject_headers={ANTHROPIC_HOST: {"x-api-key": self._anthropic_api_key}} if hosts else {},
+                    network_disabled=True,
                     operation_key=f"sandbox:{request_id}",
                 )
             )
@@ -247,6 +340,69 @@ class SandboxBroker:
         finally:
             with self._lock:
                 self._opening.discard(request_id)
+
+    def parent_runtime(self, allowed_hosts: tuple[str, ...]) -> _ParentSandboxRuntime:
+        """Return a runtime only the trusted parent holds, for its own scoring box.
+
+        Nothing reaches it through :meth:`handle`, so the guest's boxes stay
+        limited to Anthropic however it asks.
+
+        Args:
+            allowed_hosts: Package registries the box may reach until the
+                parent switches its network off.
+
+        Returns:
+            The parent-only runtime.
+
+        Raises:
+            ServiceError: When a host is not a known package registry.
+        """
+        if not set(allowed_hosts) <= set(PACKAGE_REGISTRY_HOSTS):
+            raise ServiceError("A parent box may reach only package registries.")
+        return _ParentSandboxRuntime(self, tuple(sorted(set(allowed_hosts))))
+
+    def _open_parent(self, spec: SandboxSpec) -> ParentSandboxSession:
+        """Open a parent-only box on the broker's fixed image and billing.
+
+        Args:
+            spec: Lifetime, operation identity and hosts for the box.
+
+        Returns:
+            The box, closed with the broker if the parent never closes it.
+
+        Raises:
+            ServiceError: When the spec carries credentials or exceeds the profile.
+        """
+        if spec.inject_headers or spec.env:
+            raise ServiceError("A parent box must not carry credentials in its environment or network.")
+        if not spec.operation_key:
+            raise ServiceError("A parent box requires a stable operation identity.")
+        hosts = tuple(sorted(set(spec.allowed_hosts)))
+        with self._lock:
+            if self._closed:
+                raise ServiceError("The sandbox broker is closed.")
+        session = ParentSandboxSession(
+            self._runtime.open(
+                SandboxSpec(
+                    lifetime_seconds=_duration(spec.lifetime_seconds, self._maximum),
+                    image=self._image,
+                    vcpus=self._vcpus,
+                    tags=self._tags,
+                    network_disabled=not hosts,
+                    allowed_hosts=hosts,
+                    operation_key=spec.operation_key,
+                )
+            ),
+            self._command_runner,
+        )
+        with self._lock:
+            closing = self._closed
+            if not closing:
+                self._parent_sessions.append(session)
+        if closing:
+            session.close()
+            raise ServiceError("The sandbox broker closed during creation.")
+        return session
 
     def handle(self, action: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Perform one non-streaming action inside an owned guest sandbox.
@@ -311,12 +467,13 @@ class SandboxBroker:
         """
         with self._lock:
             self._closed = True
-            owned = tuple(self._sessions.values())
+            owned = tuple(item.session for item in self._sessions.values()) + tuple(self._parent_sessions)
             self._sessions.clear()
+            self._parent_sessions.clear()
         failure: BaseException | None = None
-        for item in owned:
+        for session in owned:
             try:
-                item.session.close()
+                session.close()
             except BaseException as error:
                 failure = failure or error
         if failure is not None:

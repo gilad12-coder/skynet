@@ -1,228 +1,146 @@
-"""Tests for ``core.notifications.notifier`` HTML email orchestration."""
+"""Tests for ``core.notifications.notifier``: run and sharing events become ``notify`` calls."""
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
 import core.notifications.notifier as notifier_module
-from core.i18n import t
 from core.notifications.notifier import (
     notify_job_completed,
-    notify_job_started,
     notify_ownership_transfer,
     notify_role_change,
+    notify_run_budget,
+    notify_run_needs_input,
+    notify_run_new_best,
+    notify_run_stuck,
     notify_share_invite,
 )
 
-from .conftest import FakeMail
+
+class _Recorder:
+    """Stand-in for ``notify`` that records each call."""
+
+    def __init__(self) -> None:
+        """Start with no calls."""
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, username: str, event_type: str, optimization_id: str | None, facts: dict, **kwargs: Any):
+        """Record one call.
+
+        Args:
+            username: Recipient.
+            event_type: Catalog event type.
+            optimization_id: The run.
+            facts: Event facts.
+            **kwargs: ``title``, ``dedupe_key`` and the rest.
+
+        Returns:
+            A fake notification id.
+        """
+        self.calls.append({"username": username, "event": event_type, "run": optimization_id, "facts": facts, **kwargs})
+        return "n1"
 
 
-def _patch_delivery(monkeypatch, fake_mail, resolver=lambda username: username):
-    """Route the notifier through ``fake_mail`` with a stub email resolver.
+@pytest.fixture
+def sent(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
+    """Route the notifier's ``notify`` calls into a recorder with a fixed run context.
 
     Args:
         monkeypatch: pytest's ``MonkeyPatch`` fixture.
-        fake_mail: The ``FakeMail`` recording deliveries.
-        resolver: ``resolve_email`` stand-in; defaults to the identity so the
-            recorded ``to`` equals the username. Return ``None`` to simulate
-            a legacy non-email identity.
+
+    Returns:
+        The recorder.
     """
-    monkeypatch.setattr(notifier_module, "send_mail", fake_mail.send_mail)
-    monkeypatch.setattr(notifier_module, "resolve_email", resolver)
+    recorder = _Recorder()
+    monkeypatch.setattr(notifier_module, "notify", recorder)
+    monkeypatch.setattr(notifier_module, "_run_context", lambda _id: ("Support bot", 125.0))
+    return recorder
 
 
-def test_job_started_delivers_once_to_owner(monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail) -> None:
-    """A submitted job emails its owner exactly once."""
-    _patch_delivery(monkeypatch, fake_mail)
+def test_success_emits_finished_with_score_delta_and_duration(sent: _Recorder) -> None:
+    """A successful run emits ``finished`` with its score, the delta and how long it ran."""
+    notify_job_completed("run1", "alice", "success", baseline_score=40.0, optimized_score=55.0)
 
-    notify_job_started(
-        optimization_id="abc123",
-        username="alice",
-        optimization_type="run",
-        optimizer_name="GEPA",
-        module_name="MyModule",
-    )
-
-    assert fake_mail.call_count == 1
-    assert fake_mail.last()["to"] == "alice"
+    call = sent.calls[0]
+    assert (call["event"], call["run"], call["username"], call["title"]) == ("finished", "run1", "alice", "Support bot")
+    assert call["facts"] == {"score": 55.0, "delta": 15.0, "duration": 125}
+    assert call["dedupe_key"] == "finished:run1"
 
 
-def test_job_started_is_minimal_title_and_link(monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail) -> None:
-    """The submission email shows the title + run link, with no config metadata."""
-    _patch_delivery(monkeypatch, fake_mail)
+def test_failed_emits_failed_with_a_truncated_error(sent: _Recorder) -> None:
+    """A failed run emits ``failed`` carrying the error as its detail."""
+    notify_job_completed("run1", "alice", "failed", message="x" * 400)
 
-    notify_job_started(
-        optimization_id="abc123",
-        username="alice",
-        optimization_type="run",
-        optimizer_name="GEPA",
-        module_name="MyModule",
-        model_name="gpt-4o",
-    )
-
-    call = fake_mail.last()
-    assert call["subject"] == t("notifier.title.new")
-    assert "abc123" in call["html"]  # run link + id reference
-    # Optimization metadata is intentionally not rendered.
-    assert "GEPA" not in call["html"]
-    assert "MyModule" not in call["html"]
-    assert "gpt-4o" not in call["html"]
-    assert t("notifier.label.type") not in call["html"]
+    call = sent.calls[0]
+    assert call["event"] == "failed"
+    assert call["facts"]["detail"].endswith("...")
+    assert len(call["facts"]["detail"]) < 200
 
 
-def test_job_started_skips_when_email_unresolved(monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail) -> None:
-    """A legacy non-email account identity is skipped."""
-    _patch_delivery(monkeypatch, fake_mail, resolver=lambda username: None)
-
-    notify_job_started(
-        optimization_id="abc123",
-        username="alice",
-        optimization_type="run",
-        optimizer_name="GEPA",
-        module_name="MyModule",
-    )
-
-    assert fake_mail.call_count == 0
-
-
-def test_job_started_skips_when_job_emails_are_disabled(monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail) -> None:
-    """An owner who disabled job updates receives no lifecycle email."""
-    _patch_delivery(monkeypatch, fake_mail)
-    monkeypatch.setattr(
-        notifier_module,
-        "notification_category_enabled",
-        lambda username, category: category != "job_updates",
-    )
-
-    notify_job_started(
-        optimization_id="abc123",
-        username="alice",
-        optimization_type="run",
-        optimizer_name="GEPA",
-        module_name="MyModule",
-    )
-
-    assert fake_mail.call_count == 0
-
-
-def test_share_invite_skips_when_sharing_emails_are_disabled(
-    monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail
-) -> None:
-    """A grantee who disabled sharing updates receives no invite email."""
-    _patch_delivery(monkeypatch, fake_mail)
-    monkeypatch.setattr(
-        notifier_module,
-        "notification_category_enabled",
-        lambda username, category: category != "sharing_updates",
-    )
-
-    notify_share_invite(optimization_id="abc123", grantee="bob", inviter="alice", role="viewer")
-
-    assert fake_mail.call_count == 0
-
-
-def test_job_completed_success_renders_score_line(monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail) -> None:
-    """A successful job emails the owner with the score improvement line."""
-    _patch_delivery(monkeypatch, fake_mail)
-
-    notify_job_completed(
-        optimization_id="abc123",
-        username="alice",
-        status="success",
-        baseline_score=40.0,
-        optimized_score=55.0,
-    )
-
-    call = fake_mail.last()
-    assert call["subject"] == t("notifier.title.completed")
-    assert "40.0%" in call["html"]
-    assert "55.0%" in call["html"]
-    assert "+15.0%" in call["html"]
-
-
-def test_job_completed_cancelled_subject(monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail) -> None:
-    """A cancelled job uses the cancelled subject."""
-    _patch_delivery(monkeypatch, fake_mail)
-
-    notify_job_completed(optimization_id="abc123", username="alice", status="cancelled")
-
-    assert fake_mail.last()["subject"] == t("notifier.title.cancelled")
-
-
-def test_job_completed_failed_includes_error(monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail) -> None:
-    """A failed job uses the failed subject and renders the error message."""
-    _patch_delivery(monkeypatch, fake_mail)
-
-    notify_job_completed(
-        optimization_id="abc123",
-        username="alice",
-        status="failed",
-        message="boom happened",
-    )
-
-    call = fake_mail.last()
-    assert call["subject"] == t("notifier.title.failed")
-    assert "boom happened" in call["html"]
-
-
-def test_job_completed_unknown_status_skips(
-    monkeypatch: pytest.MonkeyPatch,
-    fake_mail: FakeMail,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """An unknown status logs a warning and sends nothing."""
-    _patch_delivery(monkeypatch, fake_mail)
-
+def test_cancelled_and_unknown_statuses_emit_nothing(sent: _Recorder, caplog: pytest.LogCaptureFixture) -> None:
+    """The owner cancelled the run themselves; an unknown status only logs."""
+    notify_job_completed("run1", "alice", "cancelled")
     with caplog.at_level("WARNING", logger="core.notifications.notifier"):
-        notify_job_completed(optimization_id="abc123", username="alice", status="weird")
+        notify_job_completed("run1", "alice", "weird")
 
-    assert fake_mail.call_count == 0
-    assert "Skipping notification for unknown job status: weird" in caplog.text
-
-
-def test_share_invite_emails_grantee_with_role_and_link(monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail) -> None:
-    """An explicit invite emails the grantee with the inviter, tier, and link."""
-    _patch_delivery(monkeypatch, fake_mail)
-
-    notify_share_invite(optimization_id="abc123", grantee="bob", inviter="alice", role="editor")
-
-    call = fake_mail.last()
-    assert call["to"] == "bob"
-    assert call["subject"] == t("notifier.share.invite.subject")
-    assert "alice" in call["html"]
-    assert t("notifier.share.role.editor") in call["html"]
-    assert "abc123" in call["html"]
+    assert sent.calls == []
+    assert "unknown job status: weird" in caplog.text
 
 
-def test_share_invite_skips_when_email_unresolved(monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail) -> None:
-    """A legacy non-email account identity receives no invite email."""
-    _patch_delivery(monkeypatch, fake_mail, resolver=lambda username: None)
+@pytest.mark.parametrize(
+    ("emit", "event", "facts"),
+    [
+        (lambda: notify_run_new_best("run9", "alice", 0.8, 0.5), "new_best", {"score": 0.8}),
+        (lambda: notify_run_stuck("run9", "alice", 0.5, 0.25), "stuck", {"score": 0.5}),
+        (lambda: notify_run_budget("run9", "alice", 800, 1000), "budget_near", {"spent": 8.0, "limit": 10.0}),
+        (lambda: notify_run_needs_input("run9", "alice", 1200, 1000), "needs_input", {"spent": 12.0, "limit": 10.0}),
+    ],
+)
+def test_in_run_events_carry_their_facts(sent: _Recorder, emit, event: str, facts: dict) -> None:
+    """Each in-run event goes through ``notify`` once, with its key numbers."""
+    emit()
 
-    notify_share_invite(optimization_id="abc123", grantee="bob", inviter="alice", role="viewer")
-
-    assert fake_mail.call_count == 0
-
-
-def test_role_change_emails_member(monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail) -> None:
-    """A role change emails the member with the actor and the new tier."""
-    _patch_delivery(monkeypatch, fake_mail)
-
-    notify_role_change(optimization_id="abc123", grantee="bob", actor="alice", role="viewer")
-
-    call = fake_mail.last()
-    assert call["to"] == "bob"
-    assert call["subject"] == t("notifier.share.role_change.subject")
-    assert "alice" in call["html"]
-    assert t("notifier.share.role.viewer") in call["html"]
+    call = sent.calls[0]
+    assert call["event"] == event
+    for key, value in facts.items():
+        assert call["facts"][key] == pytest.approx(value)
+    assert call["dedupe_key"] == f"{event}:run9"
 
 
-def test_ownership_transfer_emails_new_owner(monkeypatch: pytest.MonkeyPatch, fake_mail: FakeMail) -> None:
-    """A transfer emails the new owner naming the previous owner."""
-    _patch_delivery(monkeypatch, fake_mail)
+def test_new_best_carries_the_delta_vs_the_starting_score(sent: _Recorder) -> None:
+    """The new-best delta is measured against the run's starting score."""
+    notify_run_new_best("run9", "alice", 0.8, 0.5)
 
-    notify_ownership_transfer(optimization_id="abc123", new_owner="bob", actor="alice")
+    assert sent.calls[0]["facts"]["delta"] == pytest.approx(0.3)
 
-    call = fake_mail.last()
-    assert call["to"] == "bob"
-    assert call["subject"] == t("notifier.share.transfer.subject")
-    assert "alice" in call["html"]
+
+@pytest.mark.parametrize(
+    ("emit", "recipient", "kind"),
+    [
+        (lambda: notify_share_invite("abc", "bob", "alice", "editor"), "bob", "invite"),
+        (lambda: notify_role_change("abc", "bob", "alice", "viewer"), "bob", "role"),
+        (lambda: notify_ownership_transfer("abc", "bob", "alice"), "bob", "transfer"),
+    ],
+)
+def test_sharing_events_emit_shared_to_the_affected_user(sent: _Recorder, emit, recipient: str, kind: str) -> None:
+    """Invites, role changes and transfers all emit ``shared``; they may repeat."""
+    emit()
+
+    call = sent.calls[0]
+    assert (call["event"], call["username"], call["facts"]["kind"], call["facts"]["actor"]) == (
+        "shared",
+        recipient,
+        kind,
+        "alice",
+    )
+    assert "alice" in call["facts"]["detail"]
+    assert call["dedupe_key"] is None
+
+
+def test_missing_recipient_is_a_no_op(sent: _Recorder) -> None:
+    """An event without a recipient never reaches ``notify``."""
+    notify_job_completed("run1", "", "success")
+
+    assert sent.calls == []

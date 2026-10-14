@@ -220,7 +220,7 @@ def run_dspy_preflight(
     ]
     if scope == "evaluation":
         return {"scope": scope, "checks": [*checks, {"key": "sample_prediction", "status": "pending"}]}
-    configs = payload.get("generation_models") or [payload.get("model_config")]
+    configs = [payload.get("model_config")]
     scores = []
     workflow_results = []
     for index, config in enumerate(configs):

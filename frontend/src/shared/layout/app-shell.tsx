@@ -5,12 +5,10 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
-import { Popover as PopoverPrimitive } from "radix-ui";
-import { List, GraduationCap, Lightbulb, Feather } from "@/shared/ui/icons";
-import { ConceptsGuide, registerTutorialHook, TutorialMenu } from "@/features/tutorial";
+import { List } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/shared/ui/primitives/tooltip";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
+import { SkynetMark } from "@/shared/ui/skynet-mark";
 import { GlobalSearch } from "@/shared/layout/global-search";
 import { useLocale } from "@/shared/providers";
 import { dirForLocale } from "@/shared/lib/locale";
@@ -19,16 +17,28 @@ import { JobsStreamProvider } from "@/shared/hooks/use-jobs-stream";
 import { PageContainer } from "@/shared/layout/page-container";
 import { MobileShell } from "@/shared/layout/mobile-shell";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
-import { useUserPrefs, LiteModeHint } from "@/features/settings";
 import { BalanceChip } from "@/features/billing";
+import { NotificationBell } from "@/features/notifications";
 import {
   GeneralistPanel,
   GeneralistPanelProvider,
   WizardStateProvider,
   isGeneralistAgentEnabled,
 } from "@/features/agent-panel";
+import { IntakeHost } from "@/features/experience";
 
-const Sidebar = dynamic(() => import("@/features/sidebar").then((m) => m.Sidebar), { ssr: false });
+// The rail's surface holds its place (the width .app-main already reserves)
+// while the chunk loads, so the md+ rail doesn't pop in beside the page.
+const Sidebar = dynamic(() => import("@/features/sidebar").then((m) => m.Sidebar), {
+  ssr: false,
+  loading: () => (
+    <div
+      aria-hidden="true"
+      className="hidden h-full border-e border-sidebar-border/60 bg-sidebar/80 backdrop-blur-xl md:block"
+      style={{ width: "var(--app-sidebar-width, min(240px, 40vw, 92vw))" }}
+    />
+  ),
+});
 
 const HEADER_HEIGHT_PX = 53;
 const SIDEBAR_ID = "app-sidebar";
@@ -46,7 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // authenticated (the route is login-gated like the rest of the app).
   if (pathname.startsWith("/share/")) {
     return (
-      <main className="min-h-screen" dir={dir}>
+      <main className="min-h-dvh" dir={dir}>
         {children}
       </main>
     );
@@ -59,7 +69,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // "loading" and the branch is stable from first render.
   if (pathname.startsWith("/optimizations/") && status === "unauthenticated") {
     return (
-      <main className="min-h-screen" dir={dir}>
+      <main className="min-h-dvh" dir={dir}>
         {children}
       </main>
     );
@@ -67,7 +77,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (pathname === "/login") {
     return (
-      <main className="min-h-screen" dir={dir}>
+      <main className="min-h-dvh" dir={dir}>
         {children}
       </main>
     );
@@ -78,7 +88,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // force dir="ltr" regardless of the UI locale.
   if (pathname === "/terms" || pathname === "/privacy") {
     return (
-      <main className="min-h-screen" dir="ltr">
+      <main className="min-h-dvh" dir="ltr">
         {children}
       </main>
     );
@@ -92,23 +102,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function ShellChrome({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
-  const [conceptsOpen, setConceptsOpen] = React.useState(false);
   const [isDesktop, setIsDesktop] = React.useState(false);
   const pathname = usePathname();
   const { locale } = useLocale();
   const dir = dirForLocale(locale);
   const isRtl = dir === "rtl";
-  const { prefs, setPref } = useUserPrefs();
   const generalistEnabled = isGeneralistAgentEnabled();
   const progressRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     setSidebarOpen(false);
   }, [pathname]);
-
-  // Let the tutorial slide the sidebar drawer in/out so its spotlight steps
-  // have an on-screen target below 768px, where the sidebar is off-canvas.
-  React.useEffect(() => registerTutorialHook("setSidebarOpen", setSidebarOpen), []);
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -145,13 +149,12 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
 
   const shell = (
     <div
-      className="flex min-h-screen flex-col"
+      className="flex min-h-dvh flex-col"
       style={{ ["--header-height" as string]: `${HEADER_HEIGHT_PX}px` }}
     >
       <div ref={progressRef} className="scroll-progress" aria-hidden="true" />
 
       <div className="ambient-bg" aria-hidden="true">
-        <div className="orb orb-1" />
         <div className="orb orb-2" />
         <div className="orb orb-3" />
         <div className="orb orb-4" />
@@ -161,43 +164,27 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="fixed inset-x-0 top-0 z-30 flex h-[var(--header-height)] items-center justify-between border-b border-border/40 bg-background/60 px-2 py-0 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.03)] backdrop-blur-2xl backdrop-saturate-[1.8] sm:px-4"
+        className="fixed inset-x-0 top-0 z-30 flex h-[var(--header-height)] items-center justify-between border-b border-border/40 bg-background/60 px-2 py-0 backdrop-blur-2xl backdrop-saturate-[1.8] sm:px-4"
         dir="ltr"
         style={{
           borderImage:
             "linear-gradient(to right, transparent, var(--border) 20%, var(--border) 80%, transparent) 1",
         }}
       >
-        <div className="flex items-center gap-1.5 cursor-default">
-          {/* The morphing wordmark anchors the header at sm+; below sm it collapses
-              to a plain SKYNET wordmark where the full SVG would crowd the row. */}
+        <div className="flex items-center gap-2 cursor-default">
+          {/* The morphing mark and wordmark anchor the header at sm+; below sm they
+              collapse to the static mark and a plain SKYNET wordmark where the
+              full SVG would crowd the row. */}
           <div className="hidden sm:block">
-            <AnimatedWordmark size={16} autoMorph autoMorphDuration={10000} morphSpeed={250} />
+            <AnimatedWordmark size={16} withMark autoMorph autoMorphDuration={10000} morphSpeed={250} />
           </div>
+          <SkynetMark className="sm:hidden size-5 shrink-0" aria-hidden="true" />
           <span
-            className="sm:hidden text-sm font-bold tracking-[0.14em] uppercase text-foreground cursor-default"
+            className="sm:hidden text-sm font-bold tracking-[0.14em] uppercase text-primary cursor-default"
             style={{ fontFamily: "var(--font-ui)" }}
           >
             SKYNET
           </span>
-          {prefs.liteMode && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setPref("liteMode", false)}
-                  className="inline-flex items-center gap-1 rounded-full border border-border bg-accent/60 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
-                  aria-label={msg("app.shell.lite.exit_aria")}
-                >
-                  <Feather className="size-3" aria-hidden="true" />
-                  {msg("app.shell.lite.badge")}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" dir={dir}>
-                {msg("app.shell.lite.tooltip")}
-              </TooltipContent>
-            </Tooltip>
-          )}
         </div>
 
         <div className="flex flex-1 justify-center px-2">
@@ -209,46 +196,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
               never more than a glance away; the chip's own popover carries the
               breakdown and the wallet path. */}
           <BalanceChip />
-          {/* Tutorials are grouped by workflow so this button opens a replayable
-              guide chooser rather than starting one long product tour. */}
-          <PopoverPrimitive.Root>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <PopoverPrimitive.Trigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground hover:text-foreground"
-                    aria-label={msg("app.shell.tour_aria")}
-                  >
-                    <GraduationCap className="size-4" />
-                  </Button>
-                </PopoverPrimitive.Trigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" dir={dir}>
-                {msg("app.shell.tour_tooltip")}
-              </TooltipContent>
-            </Tooltip>
-            <TutorialMenu />
-          </PopoverPrimitive.Root>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setConceptsOpen(true)}
-                className="text-muted-foreground hover:text-foreground"
-                aria-label={msg("app.shell.concepts_aria")}
-              >
-                <Lightbulb className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" dir={dir}>
-              {msg("app.shell.concepts_tooltip")}
-            </TooltipContent>
-          </Tooltip>
+          <NotificationBell />
           <Button
             type="button"
             variant="ghost"
@@ -300,18 +248,26 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      {conceptsOpen && <ConceptsGuide open onClose={() => setConceptsOpen(false)} />}
-      <LiteModeHint />
     </div>
   );
 
-  if (!generalistEnabled) return <JobsStreamProvider>{shell}</JobsStreamProvider>;
+  // The shared wizard state is mounted with or without the agent: the
+  // first-login setup prefills the wizard through it either way.
+  if (!generalistEnabled) {
+    return (
+      <WizardStateProvider>
+        <JobsStreamProvider>{shell}</JobsStreamProvider>
+        <IntakeHost />
+      </WizardStateProvider>
+    );
+  }
 
   return (
     <WizardStateProvider>
       <GeneralistPanelProvider>
         <JobsStreamProvider>{shell}</JobsStreamProvider>
         <GeneralistPanel />
+        <IntakeHost />
       </GeneralistPanelProvider>
     </WizardStateProvider>
   );

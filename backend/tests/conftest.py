@@ -20,6 +20,11 @@ from uuid import uuid4
 import pytest
 import requests  # type: ignore[import-untyped]
 from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from core.config import settings
+from core.storage.models import BillingCustomerModel
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
@@ -106,6 +111,28 @@ requires_server = pytest.mark.skipif(
     not is_server_available(),
     reason="Backend server not running on localhost:8000 — start with: cd backend && .venv/bin/python main.py",
 )
+
+
+def fund_account(username: str, cents: int = 1_000) -> None:
+    """Give a live-server test account a paid balance so ``/optimize`` accepts it.
+
+    The submit gate refuses an account with no spendable cents and new accounts
+    get no free grant, so live submit tests must seed the shared dev database
+    the server reads before they post a run.
+
+    Args:
+        username: Account to fund.
+        cents: Paid balance to set on the account.
+    """
+    engine = create_engine(settings.remote_db_url.get_secret_value())
+    with Session(engine) as session:
+        customer = session.get(BillingCustomerModel, username)
+        if customer is None:
+            customer = BillingCustomerModel(username=username, stripe_customer_id=f"cus_test_{username}")
+            session.add(customer)
+        customer.balance_cents = cents
+        session.commit()
+    engine.dispose()
 
 
 _TERMINAL = frozenset({"success", "failed", "cancelled"})

@@ -44,3 +44,23 @@ export function budgetShortfall(
   const floor = limitFloor(bracket, mode);
   return limit != null && limit < floor ? { kind: "limit", needed: floor } : null;
 }
+
+/** The wizard screens that set the spending limit. */
+const LIMIT_SCREENS: ReadonlySet<string> = new Set(["budget", "plan"]);
+
+/**
+ * Cents the spending limit has to reach before Continue may leave `screen`,
+ * or null when it may. Only the screens that set the limit hold Continue; a
+ * limit under the estimate's low end would only stop the run at its first
+ * model call. No limit, or no estimate yet, holds nothing.
+ */
+export function limitContinueBlock(
+  screen: string,
+  bracket: CostBracket | null,
+  mode: TokenSourceMode,
+  { uncapped, limit }: Pick<BudgetChoice, "uncapped" | "limit">,
+): number | null {
+  if (!LIMIT_SCREENS.has(screen) || !bracket || uncapped) return null;
+  const shortfall = budgetShortfall(bracket, mode, { uncapped, limit, balance: null });
+  return shortfall ? Math.ceil(shortfall.needed) : null;
+}

@@ -1,6 +1,7 @@
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { readServerSentEvents } from "@/shared/lib/sse";
 import { fetchWithAuthRetry, parseInterviewOptions, type InterviewOption } from "@/shared/lib/api";
+import { kickoffOpening } from "@/shared/lib/agent-kickoff";
 import { msg } from "@/shared/lib/messages";
 import type { AssistPrediction, DatasetSpec, TaggerConfig } from "./types";
 
@@ -53,7 +54,9 @@ export interface InterviewStreamHandlers {
 /**
  * Stream one tagger-interview turn via SSE. Mirrors `streamGeneralistAgent`
  * — same transport, same `reasoning_patch` / `message_patch` event shapes —
- * with a terminal `interview_done` instead of the agent's `done`.
+ * with a terminal `interview_done` instead of the agent's `done`. An opening
+ * over the server's size budget arrives as the fixed `kickoff_oversized`
+ * opening and lands through `onDone` like any reply.
  */
 export async function streamInterviewTurn(
   sessionId: string,
@@ -89,6 +92,20 @@ export async function streamInterviewTurn(
   try {
     await readServerSentEvents(res.body, ({ event, data }) => {
       const payload = data as Record<string, unknown>;
+      const opening = kickoffOpening(event, payload);
+      if (opening !== null) {
+        finished = true;
+        handlers.onDone({
+          message: opening,
+          options: [],
+          rubric: [],
+          done: false,
+          taskOverride: {},
+          datasetSpec: null,
+          title: "",
+        });
+        return;
+      }
       switch (event) {
         case "reasoning_patch":
           handlers.onReasoningPatch?.(String(payload.chunk ?? ""));

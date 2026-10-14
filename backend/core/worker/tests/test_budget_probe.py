@@ -168,10 +168,10 @@ def test_progress_and_checkpoint_feed_the_probe_tracker() -> None:
     worker._drain_subprocess_events("fed", events, checkpoint_tracker=tracker)
     assert tracker["planned_calls"] == 230
 
-    base = worker._prepare_gepa_dir("fed", is_grid=False)
+    base = worker._prepare_gepa_dir("fed")
     try:
         (base / GEPA_STATE_FILENAME).write_bytes(_state(2))
-        worker._persist_gepa_checkpoint("fed", base, tracker, is_grid=False)
+        worker._persist_gepa_checkpoint("fed", base, tracker)
     finally:
         shutil.rmtree(base, ignore_errors=True)
     assert tracker[-1]["metric_calls"] == store.manifests[-1]["metric_calls"] == 10

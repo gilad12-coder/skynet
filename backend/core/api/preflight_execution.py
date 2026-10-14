@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 from typing import Any, Literal
@@ -9,7 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from ..billing import ProviderKeyVault, payload_uses_token_source
-from ..billing.budgets import BudgetConflictError, BudgetError, BudgetService
+from ..billing.budgets import BudgetConflictError, BudgetError, BudgetInsufficientError, BudgetService
 from ..billing.model_dispatch import ModelHTTPResult
 from ..billing.model_gateway import ModelGateway
 from ..billing.protected_credentials import (
@@ -18,31 +19,44 @@ from ..billing.protected_credentials import (
     protect_execution_credentials,
     resolve_execution_credentials,
 )
-from ..billing.protected_execution import bind_protected_sandbox, protected_vercel_unavailable_reason
+from ..billing.protected_execution import bind_protected_sandbox
 from ..billing.runtime import BudgetRuntime, UsagePendingError
+from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..config import settings
 from ..constants import OPTIMIZATION_TYPE_BLACKBOX, TOKEN_SOURCE_MANAGED
-from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
-from ..models.common import SplitFractions
+from ..models import BlackboxRunRequest
+from ..models.blackbox import BLACKBOX_ENGINE_SHINKA_EVOLVE
+from ..models.unified import (
+    CONTRACT_SAMPLE_COUNT_KEY,
+    CONTRACT_SAMPLE_MAX,
+    UNIFIED_PAYLOAD_KIND,
+    UnifiedRunRequest,
+    resolve_optimizer,
+)
+from ..service_gateway.optimization.blackbox.native_runtime import NATIVE_ENGINES
 from ..service_gateway.optimization.blackbox.preflight import preflight_lifetime_seconds
-from ..service_gateway.optimization.data import split_examples
 from ..storage.preflights import PreflightStore
-from ..worker.repo_staging import StagedRepository, bind_repo_scorer, is_repo_payload, stage_repository
+from ..worker.repo_staging import (
+    StagedRepository,
+    bind_repo_scorer,
+    infer_repo_setup,
+    is_repo_payload,
+    stage_repository,
+)
+from ..worker.unified_aliases import alias_unified_model_roles, strip_unified_model_aliases
 from ..worker.vercel_dspy import run_vercel_dspy
 from .model_billing import normalize_model_token_sources
 from .preflight_progress import report_preflight_phase
 from .routers.execution_budgets import ExecutionBudgetResponse, budget_http_error, budget_response
 
-# One sample prediction and its metric call, with room for a slow program.
-_DSPY_PREFLIGHT_LIFETIME_SECONDS = 1800
-
 
 class WizardPreflightRequest(BaseModel):
     scope: Literal["evaluation", "execution"]
-    workflow: Literal["anything", "dspy"]
+    workflow: Literal["anything", "unified"]
     payload: dict[str, Any]
     execution_budget_id: str = Field(min_length=1, max_length=64)
     execution_budget_revision: int = Field(ge=1)
+    contract_sample_count: int | None = Field(default=None, ge=1, le=CONTRACT_SAMPLE_MAX)
 
     @field_validator("payload")
     @classmethod
@@ -88,16 +102,6 @@ class WizardPreflightResponse(BaseModel):
     workflow_result: dict[str, Any] | None = None
 
 
-_GRID_REQUEST_FIELDS = frozenset(
-    {
-        "generation_models",
-        "reflection_models",
-        "use_all_available_generation_models",
-        "use_all_available_reflection_models",
-    }
-)
-
-
 def _canonical_execution_payload(request: WizardPreflightRequest, username: str) -> dict[str, Any]:
     """Apply the submission schema before hashing complete execution inputs.
 
@@ -111,12 +115,13 @@ def _canonical_execution_payload(request: WizardPreflightRequest, username: str)
     payload = {**request.payload, "username": username}
     if request.workflow == "anything":
         typed = BlackboxRunRequest.model_validate(payload)
-    elif _GRID_REQUEST_FIELDS.intersection(payload):
-        typed = GridSearchRequest.model_validate(payload)
     else:
-        typed = RunRequest.model_validate(payload)
+        typed = UnifiedRunRequest.model_validate(payload)
     normalize_model_token_sources(typed)
     return typed.model_dump(mode="json", by_alias=True)
+
+
+BUDGET_CHECK_KEY = "budget"
 
 
 def _check(key: str, status: str, message: str | None = None, field: str | None = None) -> dict[str, Any]:
@@ -148,30 +153,6 @@ def _mark_usage_pending(result: dict[str, Any], message: str) -> dict[str, Any]:
         "checks": checks,
         "pending_reason": _pending_reason("usage_reconciliation", message),
     }
-
-
-def _sample(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Choose only training or validation data using the submitted deterministic split.
-
-    Args:
-        payload: Canonical scorer inputs and split configuration.
-
-    Returns:
-        One non-held-out case, or None for a task without cases.
-    """
-    cases = payload.get("cases") or []
-    if not cases:
-        return None
-    splits = split_examples(
-        cases,
-        SplitFractions.model_validate(payload.get("split_fractions") or {}),
-        shuffle=payload.get("shuffle", True),
-        seed=payload.get("seed") or 0,
-    )
-    eligible = splits.train or splits.val
-    if not eligible:
-        raise ValueError("Setup needs at least one training or validation case; held-out data is never used.")
-    return eligible[0]
 
 
 def _provider_refusal(response: ModelHTTPResult) -> str:
@@ -246,18 +227,55 @@ def _verify_anything(gateway: ModelGateway, payload: dict[str, Any], *, scope: s
         "_preflight": {"scope": scope, "identity": identity},
     }
     run_vercel_dspy(protected, f"preflight-{identity}", events, "spawn")
-    if events.error or events.result is None:
-        raise ValueError(events.error or "The runtime did not return setup evidence.")
-    result = events.result
+    result = events.evidence(gateway)
     optimizer_ready = any(check.get("key") == "optimizer" for check in result["checks"])
     if scope == "execution" and optimizer_ready:
         public = {key: value for key, value in payload.items() if not key.startswith("_")}
         typed = BlackboxRunRequest.model_validate(public)
+        # ShinkaEvolve calls its optimization models over chat completions, not
+        # through a native harness on the Anthropic protocol.
         native = (
             typed.strategy.mode != "single"
-            or typed.strategy.engine in {"meta_harness", "autoresearch"}
+            or typed.strategy.engine in NATIVE_ENGINES - {BLACKBOX_ENGINE_SHINKA_EVOLVE}
             or typed.target.kind == "repo"
         )
+        optimizer_index = next(index for index, check in enumerate(result["checks"]) if check.get("key") == "optimizer")
+        result["checks"][optimizer_index:optimizer_index] = _verify_model_routes(gateway, native=native)
+    return result
+
+
+def _verify_unified(gateway: ModelGateway, payload: dict[str, Any], *, scope: str, identity: str) -> dict[str, Any]:
+    """Run a unified run's contract check, and its engine readiness in execution scope, in the outer sandbox.
+
+    The guest runs ``verify_unified_in_sandbox``; its contract check scores
+    train and validation samples only.
+
+    Args:
+        gateway: Shared setup model and sandbox authority.
+        payload: Canonical protected unified request.
+        scope: Evaluation or complete execution readiness.
+        identity: Stable preflight evidence identity.
+
+    Returns:
+        Real checks, including ``metric.contract``, and the contract outcome
+        under ``workflow_result``.
+    """
+    report_preflight_phase("sandbox")
+    events = _Events()
+    protected = {
+        **payload,
+        "payload_kind": UNIFIED_PAYLOAD_KIND,
+        "_optimization_type": OPTIMIZATION_TYPE_BLACKBOX,
+        "_preflight": {"scope": scope, "identity": identity},
+    }
+    run_vercel_dspy(protected, f"preflight-{identity}", events, "spawn")
+    result = events.evidence(gateway)
+    optimizer_ready = any(check.get("key") == "optimizer" for check in result["checks"])
+    if scope == "execution" and optimizer_ready:
+        public = {key: value for key, value in payload.items() if not key.startswith("_")}
+        typed = UnifiedRunRequest.model_validate(public)
+        resolved = resolve_optimizer(typed.optimizer.choice, typed.task.artifact.kind)
+        native = resolved == "auto" or resolved in NATIVE_ENGINES - {BLACKBOX_ENGINE_SHINKA_EVOLVE}
         optimizer_index = next(index for index, check in enumerate(result["checks"]) if check.get("key") == "optimizer")
         result["checks"][optimizer_index:optimizer_index] = _verify_model_routes(gateway, native=native)
     return result
@@ -270,6 +288,7 @@ class _Events:
         """Initialize a setup-only event collector."""
         self.result: dict[str, Any] | None = None
         self.error: str | None = None
+        self.error_type: str | None = None
 
     def put(self, event: dict[str, Any]) -> None:
         """Preserve a real result or error without interpreting optimizer logs as checks."""
@@ -279,18 +298,34 @@ class _Events:
             self.result = event["result"]
         elif event.get("type") == "error":
             self.error = str(event.get("error") or "Setup execution failed.")
+            self.error_type = event.get("error_type")
 
+    def evidence(self, gateway: ModelGateway) -> dict[str, Any]:
+        """Return the runtime's setup evidence, or raise the failure it reported.
 
-def _verify_dspy(payload: dict[str, Any], *, scope: str, identity: str) -> dict[str, Any]:
-    """Run program readiness and a non-held-out sample through the selected isolated executor."""
-    report_preflight_phase("sandbox")
-    events = _Events()
-    sample = _sample({**payload, "cases": payload.get("dataset") or []})
-    payload = {**payload, "dataset": [sample] if sample is not None else [], "_preflight": {"scope": scope}}
-    run_vercel_dspy(payload, f"preflight-{identity}", events, "spawn")
-    if events.error or events.result is None:
-        raise ValueError(events.error or "The runtime did not return setup evidence.")
-    return events.result
+        Args:
+            gateway: The setup's model gateway, which saw any call the limit refused.
+
+        Returns:
+            The guest's terminal preflight result.
+
+        Raises:
+            BudgetInsufficientError: When the spending limit stopped the runtime.
+            ValueError: For any other runtime failure, or when no result came back.
+        """
+        # ``run_vercel_dspy`` turns every exception into an error event, so the
+        # budget stop has to be rebuilt from its type name to reach the
+        # ``budget`` check instead of the generic ``setup`` one. A guest model
+        # call the limit refused only reaches the guest as a 402, which its
+        # client raises under its own type, so the gateway's record of the
+        # refusal decides that case.
+        if self.error_type == BudgetInsufficientError.__name__:
+            raise BudgetInsufficientError(self.error or "The spending limit cannot cover setup.")
+        if self.error and gateway.budget_refusal is not None:
+            raise BudgetInsufficientError(gateway.budget_refusal)
+        if self.error or self.result is None:
+            raise ValueError(self.error or "The runtime did not return setup evidence.")
+        return self.result
 
 
 def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) -> WizardPreflightResponse:
@@ -307,8 +342,13 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
     report_preflight_phase("budget")
     budgets = BudgetService(engine=job_store.engine)
     evidence = PreflightStore(job_store.engine)
-    if request.scope == "execution":
+    # A unified check runs the full workspace contract, so its inputs are complete at every scope.
+    if request.scope == "execution" or request.workflow == "unified":
         request = request.model_copy(update={"payload": _canonical_execution_payload(request, user.username)})
+    if request.workflow == "unified" and request.contract_sample_count is not None:
+        request = request.model_copy(
+            update={"payload": {**request.payload, CONTRACT_SAMPLE_COUNT_KEY: request.contract_sample_count}}
+        )
     try:
         snapshot = budgets.get(request.execution_budget_id, user.username)
         if snapshot.revision != request.execution_budget_revision:
@@ -338,8 +378,14 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
         return WizardPreflightResponse.model_validate({**claim.document, "budget": budget_response(snapshot)})
     try:
         with evidence.heartbeat(claim.document["id"], claim_token=claim.token):
+            source = request.payload
+            if request.workflow == "unified":
+                # Without the legacy aliases the metric model gets no metered
+                # route, and the guest falls back to a gateway only the backend has.
+                source = copy.deepcopy(source)
+                alias_unified_model_roles(source)
             parent_payload = resolve_execution_credentials(
-                request.payload,
+                source,
                 username=user.username,
                 binding_id=request.execution_budget_id,
                 vault=credential_vault,
@@ -403,26 +449,6 @@ def _perform_preflight(
     status = "failed"
     result: dict[str, Any] = {}
     try:
-        if (
-            request.workflow == "dspy"
-            and request.scope == "evaluation"
-            and protected_vercel_unavailable_reason(settings, "dspy")
-        ):
-            return "pending", {
-                "checks": [
-                    _check(
-                        "runtime",
-                        "pending",
-                        "The managed execution sandbox is not available on this deployment.",
-                        "execution_runtime",
-                    )
-                ],
-                "pending_reason": _pending_reason(
-                    "later_stage_dependency",
-                    "The managed execution sandbox is not available on this deployment.",
-                    "execution_runtime",
-                ),
-            }
         remote_evaluation = (
             request.workflow == "anything"
             and request.scope == "evaluation"
@@ -447,23 +473,25 @@ def _perform_preflight(
         )
         # The box's hold is priced on its whole lifetime, so a check gets the
         # time its own work can take rather than the run's configured ceiling.
-        lifetime_seconds = (
-            math.ceil(preflight_lifetime_seconds(payload))
-            if request.workflow == "anything"
-            else _DSPY_PREFLIGHT_LIFETIME_SECONDS
-        )
+        lifetime_seconds = math.ceil(preflight_lifetime_seconds(payload))
         bind_protected_sandbox(
             gateway,
             settings,
-            workflow=request.workflow,
+            # Unified runs execute on the Anything image: the workspace harness and every engine ship there.
+            workflow="anything" if request.workflow == "unified" else request.workflow,
             owner_id=document["id"],
             lifetime_seconds=lifetime_seconds,
+            parent_hosts=(
+                PACKAGE_REGISTRY_HOSTS if request.workflow == "anything" and is_repo_payload(payload) else ()
+            ),
         )
         protected = gateway.protect_payload(
             payload,
             managed_key=settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else "",
             allow_private_tools=settings.discover_allow_private,
         )
+        if request.workflow == "unified":
+            strip_unified_model_aliases(protected)
         # The ledger keys the run's sandbox hold by this identity, and a settled
         # or released hold from an earlier run would block a new dispatch under
         # the same key, so every run of the row carries its own number.
@@ -476,14 +504,12 @@ def _perform_preflight(
                 binding_id=request.execution_budget_id,
                 engine=engine,
             )
+            infer_repo_setup(protected, staged, gateway)
             bind_repo_scorer(protected, staged, gateway, owner_id=f"preflight-{identity}")
-        result = (
-            _verify_anything(gateway, protected, scope=request.scope, identity=identity)
-            if request.workflow == "anything"
-            else _verify_dspy(protected, scope=request.scope, identity=identity)
-        )
-        if request.workflow == "dspy" and request.scope == "execution":
-            result["checks"].extend(_verify_model_routes(gateway, native=False))
+        if request.workflow == "anything":
+            result = _verify_anything(gateway, protected, scope=request.scope, identity=identity)
+        else:
+            result = _verify_unified(gateway, protected, scope=request.scope, identity=identity)
         states = {check["status"] for check in result["checks"]}
         if not states or not states.issubset({"failed", "pending", "succeeded"}):
             raise ValueError("Setup did not return a complete set of readiness checks.")
@@ -501,6 +527,8 @@ def _perform_preflight(
                 "Previous provider or sandbox usage is awaiting final confirmation.",
             ),
         )
+    except BudgetInsufficientError as error:
+        result = {"checks": [_check(BUDGET_CHECK_KEY, "failed", str(error))]}
     except Exception as error:
         result = {"checks": [_check("setup", "failed", str(error))]}
     finally:

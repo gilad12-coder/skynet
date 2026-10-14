@@ -1,4 +1,4 @@
-"""Bound final OpenRouter text requests using live endpoint prices and routing caps."""
+"""Bound final OpenRouter text and embeddings requests using live endpoint prices and routing caps."""
 
 from __future__ import annotations
 
@@ -279,6 +279,84 @@ def price_text_request(request: Mapping[str, Any], catalog: Mapping[str, Any], p
         "input_bound": "maximum endpoint context including provider formatting",
         "max_output_tokens": output_limit,
         "input_image_count": image_count,
+        "endpoints": [
+            {"tag": endpoint["tag"], "context_length": endpoint["context_length"], "pricing": endpoint["pricing"]}
+            for endpoint, _, _ in candidates
+        ],
+        "maximum_provider_usd": str(maximum),
+        "maximum_openrouter_byok_fee_fraction": "0.05",
+    }
+    return PricedRequest(body, operation_quote(body, maximum, policy, evidence))
+
+
+def price_embedding_request(
+    request: Mapping[str, Any], catalog: Mapping[str, Any], policy: ChargePolicy
+) -> PricedRequest:
+    """Reserve an enforceable upper bound for one embeddings request.
+
+    Each input is bounded by the endpoint's full context window, since the
+    tokenizer that bills it is the provider's, not the guest's.
+
+    Args:
+        request: Final OpenAI-compatible ``/embeddings`` body.
+        catalog: Fresh endpoint response for the exact routed model.
+        policy: Approved managed or BYOK cent conversion.
+
+    Returns:
+        A copied request with price and endpoint caps, and its immutable quote.
+
+    Raises:
+        UnpricedOperationError: When the request cannot be bounded without changing its meaning.
+    """
+    body = copy.deepcopy(dict(request))
+    if any(body.get(key) for key in _UNSUPPORTED_REQUEST_FIELDS):
+        raise UnpricedOperationError("This request includes a cost category without verified coverage.")
+    if body.get("model") != catalog.get("id"):
+        raise UnpricedOperationError("The resolved model differs from its verified price catalog.")
+    if "embeddings" not in (catalog.get("architecture") or {}).get("output_modalities", []):
+        raise UnpricedOperationError("This model is not an embeddings model.")
+    inputs = body.get("input")
+    inputs = [inputs] if isinstance(inputs, str) else inputs
+    if not isinstance(inputs, list) or not inputs or not all(isinstance(item, str) for item in inputs):
+        raise UnpricedOperationError("An embeddings request must embed one or more texts.")
+    routing = body.get("provider") or {}
+    if not isinstance(routing, dict):
+        raise UnpricedOperationError("Unrecognized provider routing cannot authorize work.")
+    routing = copy.deepcopy(routing)
+    selected = set(routing.get("only") or [])
+    ignored = set(routing.get("ignore") or [])
+    candidates = []
+    for endpoint in catalog.get("endpoints") or []:
+        tag = endpoint.get("tag")
+        names = {tag, endpoint.get("provider_name"), str(tag).split("/")[0]}
+        if (selected and not names.intersection(selected)) or names.intersection(ignored):
+            continue
+        if not isinstance(tag, str) or not tag:
+            raise UnpricedOperationError("A priced endpoint is missing its routing identity.")
+        context = _positive_integer(endpoint.get("context_length"), "endpoint context bound")
+        rates = _rate_maxima(endpoint.get("pricing") or {})
+        candidates.append((endpoint, rates, len(inputs) * (context * rates["prompt"] + rates["request"])))
+    if not candidates:
+        raise UnpricedOperationError("No selected provider has verified embeddings pricing.")
+    caps = {
+        "prompt": max(rates["prompt"] for _, rates, _ in candidates) * 1_000_000,
+        "request": max(rates["request"] for _, rates, _ in candidates),
+    }
+    for name, value in (routing.get("max_price") or {}).items():
+        amount = exact_nonnegative(value)
+        caps[name] = min(caps.get(name, amount), amount)
+    routing["max_price"] = {name: float(value) for name, value in caps.items()}
+    routing["only"] = [endpoint["tag"] for endpoint, _, _ in candidates]
+    routing["allow_fallbacks"] = False
+    body["provider"] = routing
+    maximum = max(amount for _, _, amount in candidates) * Decimal("1.05")
+    evidence = {
+        "provider": "openrouter",
+        "model": body["model"],
+        "retrieved_at": time.time(),
+        "source": f"https://openrouter.ai/api/v1/models/{body['model']}/endpoints",
+        "input_bound": "maximum endpoint context per input",
+        "input_count": len(inputs),
         "endpoints": [
             {"tag": endpoint["tag"], "context_length": endpoint["context_length"], "pricing": endpoint["pricing"]}
             for endpoint, _, _ in candidates

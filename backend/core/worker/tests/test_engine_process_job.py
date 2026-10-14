@@ -21,13 +21,12 @@ from core.i18n import CANCELLATION_REASON
 from core.storage.base import JobStore
 
 from .. import engine as engine_module
-from ..checkpoint_compat import CheckpointCompatibilityError
 from ..constants import EVENT_ERROR, EVENT_RESULT
 from ..engine import BackgroundWorker, WorkerShutdownError, reset_worker_for_tests
 from .conftest import FakeJobStore
 from .mocks import (
-    REAL_GRID_PAYLOAD,
     REAL_RUN_PAYLOAD,
+    REAL_UNIFIED_PAYLOAD,
     fake_mp_process,
     fake_mp_queue,
     make_mp_context,
@@ -111,7 +110,6 @@ def test_process_job_parses_json_string_payload_overview(
 
     with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service") as mock_svc:
         mock_svc.return_value.validate_payload = MagicMock()
-        mock_svc.return_value.validate_grid_search_payload = MagicMock()
         worker._process_job("opt-2", 0)
 
     # If the JSON-string branch worked, job succeeded (not failed due to bad overview).
@@ -190,11 +188,11 @@ def test_process_job_sets_status_failed_on_nonzero_exit_without_result(
     assert store._jobs["opt-4"]["status"] == "failed"
 
 
-def test_process_job_sigkill_without_checkpoint_does_not_restart(
+def test_process_job_sigkill_fails_without_restart(
     worker: BackgroundWorker,
     store: FakeJobStore,
 ) -> None:
-    """A SIGKILL without a compatible checkpoint fails without spending on a fresh restart."""
+    """A SIGKILL leaves the run failed for the user to resume, retry or clone."""
     store.seed_job("opt-oom", payload=REAL_RUN_PAYLOAD, attempts=0)
     store.engine = MagicMock()
     worker.enqueue_job("opt-oom")
@@ -203,28 +201,21 @@ def test_process_job_sigkill_without_checkpoint_does_not_restart(
     worker._mp_ctx = ctx
     worker._mp_start_method = "spawn"
 
-    with (
-        patch("core.worker.engine.notify_job_completed"),
-        patch.object(worker, "_get_service") as mock_svc,
-        patch.object(
-            store,
-            "requeue_for_resume",
-            side_effect=CheckpointCompatibilityError("No completed compatible checkpoint is available."),
-        ),
-    ):
+    with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service") as mock_svc:
         mock_svc.return_value.validate_payload = MagicMock()
         worker._process_job("opt-oom", 0)
 
     assert store._jobs["opt-oom"]["status"] == "failed"
+    assert store._jobs["opt-oom"]["stop_reason"] == "interrupted"
     assert store._jobs["opt-oom"]["attempts"] == 0
-    assert "compatible checkpoint" in store._jobs["opt-oom"]["message"]
+    assert store.requeue_calls == []
 
 
-def test_process_job_recovers_classified_infrastructure_event(
+def test_process_job_fails_classified_infrastructure_event(
     worker: BackgroundWorker,
     store: FakeJobStore,
 ) -> None:
-    """Route a trusted sandbox/provider transport interruption into automatic recovery."""
+    """Fail a sandbox/provider transport interruption instead of requeueing it."""
     store.seed_job("opt-transient", payload=REAL_RUN_PAYLOAD, attempts=0)
     store.engine = MagicMock()
     worker.enqueue_job("opt-transient")
@@ -246,10 +237,9 @@ def test_process_job_recovers_classified_infrastructure_event(
         mock_svc.return_value.validate_payload = MagicMock()
         worker._process_job("opt-transient", 0)
 
-    assert store._jobs["opt-transient"]["status"] == "pending"
-    assert store._jobs["opt-transient"]["attempts"] == 1
-    assert len(store.requeue_calls) == 1
-    assert store.requeue_calls[0]["automatic"] is True
+    assert store._jobs["opt-transient"]["status"] == "failed"
+    assert store._jobs["opt-transient"]["stop_reason"] == "interrupted"
+    assert store.requeue_calls == []
 
 
 def test_process_job_does_not_recover_deterministic_failure_event(
@@ -279,39 +269,6 @@ def test_process_job_does_not_recover_deterministic_failure_event(
         worker._process_job("opt-deterministic", 0)
 
     assert store._jobs["opt-deterministic"]["status"] == "failed"
-    assert store.requeue_calls == []
-
-
-def test_process_job_enforces_recovery_attempt_cap_for_transient_event(
-    worker: BackgroundWorker,
-    store: FakeJobStore,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """End a repeated infrastructure interruption at the existing attempt cap."""
-    monkeypatch.setattr(engine_module.settings, "job_max_attempts", 3)
-    store.seed_job("opt-transient-cap", payload=REAL_RUN_PAYLOAD, attempts=2)
-    store.engine = MagicMock()
-    worker.enqueue_job("opt-transient-cap")
-    ctx, _proc = make_mp_context(
-        exitcode=1,
-        result_events=[
-            {
-                "type": EVENT_ERROR,
-                "error": "provider stream interrupted",
-                "error_type": "InfrastructureInterruptionError",
-                "failure_kind": INFRASTRUCTURE_INTERRUPTION,
-            }
-        ],
-    )
-    worker._mp_ctx = ctx
-    worker._mp_start_method = "spawn"
-
-    with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service") as mock_svc:
-        mock_svc.return_value.validate_payload = MagicMock()
-        worker._process_job("opt-transient-cap", 0)
-
-    assert store._jobs["opt-transient-cap"]["status"] == "failed"
-    assert "attempt limit" in store._jobs["opt-transient-cap"]["recovery"]["reason"]
     assert store.requeue_calls == []
 
 
@@ -351,73 +308,60 @@ def test_process_job_sets_status_failed_when_subprocess_sends_no_result(
     assert store._jobs["opt-5"]["status"] == "failed"
 
 
-def test_process_job_grid_search_all_pairs_failed_sets_status_failed(
+def test_process_job_fails_a_queued_grid_search_without_running_it(
     worker: BackgroundWorker,
     store: FakeJobStore,
 ) -> None:
-    """A grid search whose pairs all error out is marked failed."""
-    payload = REAL_GRID_PAYLOAD
+    """A grid search queued before grid search was retired fails instead of executing."""
     store.seed_job(
         "opt-6",
-        payload=payload,
+        payload=REAL_RUN_PAYLOAD,
         payload_overview={"optimization_type": "grid_search", "username": "bob"},
     )
     worker.enqueue_job("opt-6")
-
-    grid_result = {
-        "completed_pairs": 0,
-        "total_pairs": 3,
-        "pair_results": [
-            {"error": "model timeout"},
-            {"error": "out of memory"},
-            {"error": "model timeout"},
-        ],
-    }
-    ctx, _proc = make_mp_context(
-        exitcode=0,
-        result_events=[{"type": EVENT_RESULT, "result": grid_result}],
-    )
+    ctx, _proc = make_mp_context(exitcode=0, result_events=[])
     worker._mp_ctx = ctx
     worker._mp_start_method = "spawn"
 
-    with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service") as mock_svc:
-        mock_svc.return_value.validate_grid_search_payload = MagicMock()
+    with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service"):
         worker._process_job("opt-6", 0)
 
     assert store._jobs["opt-6"]["status"] == "failed"
-    assert "model timeout" in store._jobs["opt-6"]["message"]
+    assert store._jobs["opt-6"]["message"] == engine_module.GRID_SEARCH_RETIRED_MESSAGE
+    ctx.Process.assert_not_called()
 
 
-def test_process_job_grid_search_all_pairs_failed_message_includes_first_error(
+def test_process_job_validates_unified_payload_against_its_contract(
     worker: BackgroundWorker,
     store: FakeJobStore,
 ) -> None:
-    """The failure message includes the first pair error."""
-    payload = REAL_GRID_PAYLOAD
+    """A unified run is parsed as a unified request and checked by the workspace contract."""
     store.seed_job(
         "opt-7",
-        payload=payload,
-        payload_overview={"optimization_type": "grid_search", "username": "bob"},
+        payload=REAL_UNIFIED_PAYLOAD,
+        payload_overview={"optimization_type": "blackbox", "username": "bob"},
+        execution_budget_id="budget-7",
     )
     worker.enqueue_job("opt-7")
-
-    grid_result = {
-        "completed_pairs": 0,
-        "total_pairs": 2,
-        "pair_results": [{"error": "first error detail"}, {"error": "second error"}],
-    }
-    ctx, _proc = make_mp_context(
-        exitcode=0,
-        result_events=[{"type": EVENT_RESULT, "result": grid_result}],
-    )
+    ctx, _proc = make_mp_context(exitcode=0, result_events=[])
     worker._mp_ctx = ctx
     worker._mp_start_method = "spawn"
 
-    with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service") as mock_svc:
-        mock_svc.return_value.validate_grid_search_payload = MagicMock()
+    with (
+        patch("core.worker.engine.notify_job_completed"),
+        patch.object(worker, "_get_service"),
+        patch.object(engine_module, "validate_blackbox_payload") as legacy_validate,
+        patch.object(
+            engine_module, "validate_unified_payload", side_effect=ValueError("metric shape mismatch")
+        ) as validate,
+    ):
         worker._process_job("opt-7", 0)
 
-    assert "first error detail" in store._jobs["opt-7"]["message"]
+    validate.assert_called_once()
+    assert validate.call_args.args[0].payload_kind == "unified_v1"
+    legacy_validate.assert_not_called()
+    assert store._jobs["opt-7"]["status"] == "failed"
+    assert "metric shape mismatch" in store._jobs["opt-7"]["message"]
 
 
 def test_process_job_handles_key_error_when_job_deleted_mid_run(
@@ -602,33 +546,6 @@ def test_process_job_watchdog_fails_run_that_emits_no_events(
     assert proc.terminate.called
 
 
-def test_process_job_watchdog_recovers_stall_when_checkpoint_admission_succeeds(
-    worker: BackgroundWorker,
-    store: FakeJobStore,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Treat a bounded stall as a recoverable infrastructure interruption."""
-    store.seed_job("opt-stall-recovery", payload=REAL_RUN_PAYLOAD, attempts=0)
-    store.engine = MagicMock()
-    worker.enqueue_job("opt-stall-recovery")
-    ctx, proc = _stall_ctx()
-    worker._mp_ctx = ctx
-    worker._mp_start_method = "spawn"
-    monkeypatch.setattr(engine_module.settings, "job_stall_timeout_seconds", 1.0)
-
-    with (
-        patch("core.worker.engine.notify_job_completed"),
-        patch.object(worker, "_get_service") as mock_svc,
-        patch.object(engine_module.time, "monotonic", side_effect=itertools.count(0.0, 100_000.0)),
-    ):
-        mock_svc.return_value.validate_payload = MagicMock()
-        worker._process_job("opt-stall-recovery", 0)
-
-    assert store._jobs["opt-stall-recovery"]["status"] == "pending"
-    assert store._jobs["opt-stall-recovery"]["attempts"] == 1
-    assert proc.terminate.called
-
-
 def test_process_job_watchdog_disabled_when_timeout_zero(
     worker: BackgroundWorker,
     store: FakeJobStore,
@@ -728,6 +645,12 @@ def test_process_job_records_run_completed_milestone(
         "optimizer": "gepa",
         "model": "openai/gpt-4o-mini",
         "token_source": "managed",
+        "baseline": 0.5,
+        "optimized": 0.7,
+        "lift": pytest.approx(0.2),
+        "held_out": False,
+        "held_out_rows": None,
+        "from_sample": False,
     }
 
 
@@ -877,7 +800,7 @@ def test_process_job_does_not_bill_platform_infrastructure_interruption(
     worker: BackgroundWorker,
     store: FakeJobStore,
 ) -> None:
-    """A leg lost to a platform-side interruption is recovered without charging the user."""
+    """A leg lost to a platform-side interruption fails without charging the user."""
     debit = _run_failing_leg(
         worker,
         store,
@@ -889,5 +812,27 @@ def test_process_job_does_not_bill_platform_infrastructure_interruption(
             "failure_kind": INFRASTRUCTURE_INTERRUPTION,
         },
     )
-    assert store._jobs["opt-bill-infra"]["status"] == "pending"
+    assert store._jobs["opt-bill-infra"]["status"] == "failed"
     debit.assert_not_called()
+
+
+def test_an_inferred_setup_command_is_stored_on_the_run(worker: BackgroundWorker, store: FakeJobStore) -> None:
+    """The run's own payload keeps the inferred command, so its config page shows it."""
+    store.seed_job("opt-repo", payload={"target": {"kind": "repo", "repo": {"repository": "acme/app"}}})
+
+    worker._record_setup_command("opt-repo", "uv sync --frozen")
+
+    assert store._jobs["opt-repo"]["payload"]["target"] == {
+        "kind": "repo",
+        "repo": {"repository": "acme/app"},
+        "setup_command": "uv sync --frozen",
+    }
+
+
+def test_the_pinned_commit_is_stored_on_the_run(worker: BackgroundWorker, store: FakeJobStore) -> None:
+    """A run submitted on a branch keeps the commit staging pinned it to."""
+    store.seed_job("opt-repo", payload={"target": {"kind": "repo", "repo": {"repository": "acme/app"}}})
+
+    worker._record_repo_commit("opt-repo", "a" * 40)
+
+    assert store._jobs["opt-repo"]["payload"]["target"]["repo"] == {"repository": "acme/app", "commit": "a" * 40}

@@ -1,9 +1,10 @@
 """Python scorers behind the sandbox seam: one box per job, one runner call per evaluation.
 
 User scorer code never runs on the worker. :class:`SandboxPythonScorer`
-opens a sandbox lazily on the first evaluation, ships :mod:`.runner` into
-it once, and turns every ``(candidate, case)`` into a ``calls/NNNNNN/``
-directory the runner scores from ``input.json`` into ``output.json``. The
+opens a sandbox lazily on the first evaluation, ships :mod:`.runner` and the
+scorer source into it once, and turns every ``(candidate, case)`` into a
+``calls/NNNNNN/`` directory the runner scores from ``input.json`` into
+``output.json``. The per-call inputs never repeat the scorer source. The
 scorer's ``llm()`` calls leave the box for the gateway
 :func:`scorer_gateway` resolves; their token usage comes back with each
 result and lands in a :class:`ScorerUsage` ledger the run's cost ceiling
@@ -37,7 +38,7 @@ from ....config import Settings, settings
 from ....exceptions import ServiceError
 from ....models.common import ModelConfig
 from ...language_models import usage_by_model_from_history
-from . import package_setup, runner
+from . import package_setup, runner, sandbox_log
 from .agent_eval import gateway_from_settings
 from .harness import ENV_API_KEY
 from .heartbeat import heartbeat
@@ -350,6 +351,7 @@ class SandboxPythonScorer:
             inject_headers=injected,
             network_disabled=self._protected,
             operation_key=f"scorer:{uuid.uuid4().hex}" if self._protected else None,
+            private=True,
         )
         self._session: SandboxSession | None = None
         self._calls = 0
@@ -390,7 +392,6 @@ class SandboxPythonScorer:
             ServiceError: When the box could not run the scorer at all.
         """
         payload = {
-            "code": self._code,
             "candidate": candidate,
             "case": case,
             "gateway": self._gateway.runner_payload() if self._gateway is not None else None,
@@ -438,7 +439,6 @@ class SandboxPythonScorer:
         """
         payload = {
             "mode": "readiness",
-            "code": self._code,
             "gateway": self._gateway.runner_payload() if self._gateway is not None else None,
         }
         with self._lock:
@@ -473,18 +473,21 @@ class SandboxPythonScorer:
         session.write_files(
             {f"{call_dir}/{runner.INPUT_FILE}": json.dumps(payload, default=runner.side_info_json_default)}
         )
-        result = session.run(
-            f"python3 {RUNNER_FILE} {shlex.quote(call_dir)}",
-            env={
-                **({ENV_API_KEY: self._env_key} if self._env_key else {}),
-                **({"PYTHONPATH": ".skynet-dependencies/site"} if self._dependency_lock is not None else {}),
-                # The protected image has no display or GPU; PyOpenGL-based renderers
-                # (pyrender and friends) would otherwise try to open an X display.
-                **({"PYOPENGL_PLATFORM": "osmesa"} if self._protected else {}),
-            }
-            or None,
-            timeout_seconds=self._timeout_seconds,
-        )
+        # A sink makes the session stream stderr live, which is where log() events travel.
+        with sandbox_log.event_scope(source="scorer"):
+            result = session.run(
+                f"python3 {RUNNER_FILE} {shlex.quote(call_dir)}",
+                env={
+                    **({ENV_API_KEY: self._env_key} if self._env_key else {}),
+                    **({"PYTHONPATH": ".skynet-dependencies/site"} if self._dependency_lock is not None else {}),
+                    # The protected image has no display or GPU; PyOpenGL-based renderers
+                    # (pyrender and friends) would otherwise try to open an X display.
+                    **({"PYOPENGL_PLATFORM": "osmesa"} if self._protected else {}),
+                }
+                or None,
+                timeout_seconds=self._timeout_seconds,
+                on_output=sandbox_log.ignore_output,
+            )
         logger.debug(
             "scorer call %d finished in %.1fs (exit %s)", self._calls, time.perf_counter() - started, result.exit_code
         )
@@ -513,7 +516,7 @@ class SandboxPythonScorer:
             session = self._runtime.open(replace(self._spec, name=name))
             logger.info("scorer sandbox: ready in %.1fs", time.perf_counter() - opened)
             try:
-                session.write_files({RUNNER_FILE: RUNNER_SOURCE})
+                session.write_files({RUNNER_FILE: RUNNER_SOURCE, runner.CODE_FILE: self._code})
                 self._install(session)
             except BaseException:
                 session.close()

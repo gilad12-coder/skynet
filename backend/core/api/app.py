@@ -52,14 +52,13 @@ from ..billing import (
     start_openrouter_float_sweeper,
     warn_if_local_key_uncapped,
 )
-from ..billing.budgets import BudgetService
 from ..billing.data_policy import configure_data_policy
 from ..config import settings
 from ..connectors.registry import oauth_config_problems
 from ..error_reporting import capture_exception
 from ..exceptions import AppError
 from ..models import HEALTH_STATUS_OK, HealthResponse, QueueStatusResponse
-from ..notifications import configure_notification_preferences
+from ..notifications import configure_notification_preferences, start_notification_hold_sweeper
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.embedding_pipeline import (
@@ -93,6 +92,7 @@ from .routers.account_data import create_account_data_router
 from .routers.account_security import create_account_security_router
 from .routers.accounts import create_accounts_router
 from .routers.admin import create_admin_router
+from .routers.admin_dashboard import create_admin_dashboard_router
 from .routers.agent_history import create_agent_history_router
 from .routers.analytics import create_analytics_router
 from .routers.api_tokens import create_api_tokens_router
@@ -106,12 +106,14 @@ from .routers.dataset_share import create_dataset_share_router
 from .routers.datasets import create_datasets_router
 from .routers.execution_budgets import create_execution_budgets_router
 from .routers.execution_runtimes import create_execution_runtimes_router
+from .routers.experience import create_experience_router
 from .routers.folders import create_folders_router
 from .routers.generalist_agent import create_generalist_agent_router
 from .routers.mcp_probe import create_mcp_probe_router
 from .routers.model_privacy import create_model_privacy_router
 from .routers.models import create_models_router
 from .routers.notification_preferences import create_notification_preferences_router
+from .routers.notifications import create_notifications_router
 from .routers.optimizations import create_optimizations_router
 from .routers.optimizations_meta import create_optimizations_meta_router
 from .routers.package_registry import create_package_registry_router
@@ -718,6 +720,7 @@ def create_app(
     openrouter_float_sweeper = None
     issuing_funding_sweeper = None
     embedding_sweeper = None
+    notification_hold_sweeper = None
     loop_lag_monitor = None
 
     @asynccontextmanager
@@ -739,13 +742,14 @@ def create_app(
             openrouter_float_sweeper, \
             issuing_funding_sweeper, \
             embedding_sweeper, \
+            notification_hold_sweeper, \
             worker
         # Reclaim jobs whose worker lease has expired. Under multi-pod scaling
         # this only fails rows whose ``lease_expires_at`` is in the past — a
         # peer pod's in-flight job is not orphaned and is left alone. The
         # periodic sweeper (below) covers steady-state; this one-shot keeps
         # boot latency low when a single replica restarts.
-        job_store.recover_orphaned_jobs(budget_service=BudgetService(engine=job_store.engine))
+        job_store.recover_orphaned_jobs()
         for problem in oauth_config_problems():
             logger.warning("Connector OAuth misconfigured: %s", problem)
         # ``recover_pending_jobs`` is no longer required for correctness because
@@ -777,6 +781,9 @@ def create_app(
         # Keeps the Issuing balance behind the provider card funded, so upstream
         # top-ups charged to that card don't decline.
         issuing_funding_sweeper = start_issuing_funding_sweeper(job_store.engine)
+        # Releases notifications held for the user's hold window (non-urgent
+        # email/push/Slack wait so reading the inbox first can cancel them).
+        notification_hold_sweeper = start_notification_hold_sweeper(getattr(job_store, "engine", None))
         warn_if_local_key_uncapped()
         if settings.event_loop_lag_monitor_enabled:
             loop_lag_monitor = start_event_loop_lag_monitor()
@@ -869,6 +876,8 @@ def create_app(
                 issuing_funding_sweeper.stop()
             if embedding_sweeper:
                 embedding_sweeper.stop()
+            if notification_hold_sweeper:
+                notification_hold_sweeper.stop()
             if loop_lag_monitor:
                 loop_lag_monitor.stop()
 
@@ -1298,6 +1307,7 @@ def create_app(
         create_admin_router(job_store=job_store, directory_client=build_directory_client()),
         tags=["Admin"],
     )
+    app.include_router(create_admin_dashboard_router(job_store=job_store), tags=["Admin"])
     app.include_router(create_registry_router(registry=registry), tags=["Registry"])
     app.include_router(create_code_validation_router(), tags=["Code Validation"])
     app.include_router(create_mcp_probe_router(), tags=["Code Validation"])
@@ -1317,6 +1327,8 @@ def create_app(
     app.include_router(create_account_security_router(job_store=job_store), tags=["Auth"])
     app.include_router(create_account_data_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_notification_preferences_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_notifications_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_experience_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_model_privacy_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_package_registry_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_scorer_dependencies_router(job_store=job_store), tags=["Wizard"])

@@ -1,13 +1,11 @@
 import type {
-  BlackboxRunRequest,
   ExecutionRuntime,
-  GridSearchRequest,
-  RunRequest,
   ScorerDryRunResponse,
   WorkflowDryRunResponse,
   RuntimeCostProfile,
 } from "./api";
 import type { ExecutionBudget } from "./execution-budget";
+import type { UnifiedRunRequest } from "./unified-run";
 
 export type PreflightScope = "evaluation" | "execution";
 type PreflightStatus = "succeeded" | "failed" | "pending";
@@ -15,10 +13,10 @@ type PreflightPendingCategory =
   | "later_stage_dependency"
   | "usage_reconciliation"
   | "setup_incomplete";
-export type WizardPreflightPayload = BlackboxRunRequest | RunRequest | GridSearchRequest;
+export type WizardPreflightPayload = UnifiedRunRequest;
 export interface WizardPreflightRequest {
   scope: PreflightScope;
-  workflow: "anything" | "dspy";
+  workflow: "unified";
   payload: WizardPreflightPayload;
   execution_budget_id: string;
   execution_budget_revision: number;

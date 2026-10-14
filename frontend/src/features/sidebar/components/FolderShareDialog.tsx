@@ -23,7 +23,6 @@ import {
   SelectValue,
 } from "@/shared/ui/primitives/select";
 import { Switch } from "@/shared/ui/primitives/switch";
-import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { CopyButton } from "@/shared/ui/copy-button";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import {
@@ -180,7 +179,7 @@ export function FolderShareDialog({
           className="w-[min(32rem,92vw)] max-w-[min(32rem,92vw)] overflow-hidden p-0 sm:max-w-lg"
           aria-describedby={undefined}
         >
-          <div className="flex max-h-[85vh] flex-col">
+          <div className="flex max-h-[85dvh] flex-col">
             <DialogHeader className="shrink-0 border-b border-border/40 px-4 pb-4 pt-6 sm:px-6">
               <DialogTitle className="flex min-w-0 items-center gap-2">
                 <FolderOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -286,23 +285,22 @@ export function FolderShareDialog({
                             )}
                           </SelectContent>
                         </Select>
-                        <TooltipButton tooltip={msg("share.remove_member_aria")}>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                            disabled={saving}
-                            onClick={() =>
-                              void apply(
-                                () => removeFolderShareMember(folderId, member.username),
-                                msg("share.member_removed"),
-                              )
-                            }
-                            aria-label={msg("share.remove_member_aria")}
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                        </TooltipButton>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          disabled={saving}
+                          onClick={() =>
+                            void apply(
+                              () => removeFolderShareMember(folderId, member.username),
+                              msg("share.member_removed"),
+                            )
+                          }
+                          autoTooltip={false}
+                          aria-label={msg("share.remove_member_aria")}
+                        >
+                          <X className="size-3.5" />
+                        </Button>
                       </SettingsRow>
                     ),
                   )}
@@ -413,21 +411,19 @@ export function FolderShareDialog({
                   {shareUrl && state.general_access === "anyone" && (
                     <div
                       dir="ltr"
-                      className="flex items-center gap-1 rounded-xl border border-input/90 bg-background/75 ps-3 pe-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.72),0_12px_26px_-24px_rgba(15,23,42,0.45)] backdrop-blur-sm"
+                      className="flex items-center gap-1 rounded-xl border border-input/90 bg-background/75 ps-3 pe-1 backdrop-blur-sm"
                     >
                       <code className="min-w-0 flex-1 truncate py-2 font-mono text-[0.6875rem] text-muted-foreground">
                         {shareUrl}
                       </code>
                       <div aria-hidden className="h-5 w-px shrink-0 bg-border/70" />
-                      <TooltipButton tooltip={msg("share.copy_link")}>
-                        <CopyButton
-                          text={shareUrl}
-                          ariaLabel={msg("share.copy_link")}
-                          onCopied={() => toast.success(msg("share.link_copied"))}
-                          onCopyError={() => toast.error(msg("clipboard.copy_failed"))}
-                          className="shrink-0 focus-visible:bg-accent focus-visible:ring-0"
-                        />
-                      </TooltipButton>
+                      <CopyButton
+                        text={shareUrl}
+                        ariaLabel={msg("share.copy_link")}
+                        onCopied={() => toast.success(msg("share.link_copied"))}
+                        onCopyError={() => toast.error(msg("clipboard.copy_failed"))}
+                        className="shrink-0 focus-visible:bg-accent focus-visible:ring-0"
+                      />
                     </div>
                   )}
                 </div>

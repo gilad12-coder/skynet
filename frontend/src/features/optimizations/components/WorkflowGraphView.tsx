@@ -11,7 +11,6 @@
 
 import * as React from "react";
 import { createPortal } from "react-dom";
-import dynamic from "next/dynamic";
 import {
   Background,
   MarkerType,
@@ -40,18 +39,13 @@ import {
   CanvasZoomReadout,
 } from "@/shared/ui/canvas-control-button";
 import { Label } from "@/shared/ui/primitives/label";
-import { Skeleton } from "@/shared/ui/skeleton";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import { cn } from "@/shared/lib/utils";
 import { msg } from "@/shared/lib/messages";
 import { autoLayoutSpec } from "@/features/submit/workflow/model";
 import { NODE_TYPES, flowTypeFor, type CanvasNode } from "@/features/submit/workflow/nodes";
 import type { WorkflowNodeSpec, WorkflowSpec } from "@/shared/types/api";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={160} borderRadius={8} />,
-});
 
 const FIT_VIEW = { padding: 0.2, maxZoom: 1 };
 
@@ -165,7 +159,7 @@ function GraphView({ spec }: { spec: WorkflowSpec }) {
             maxZoom={3}
             fitView
             fitViewOptions={FIT_VIEW}
-            className="bg-[#FDFCFA]"
+            className="bg-[#FDFCFA] dark:bg-[#3c362a]"
           >
             <Background gap={16} size={1.25} color="#E3D9CB" />
             <ViewControls />
@@ -183,7 +177,7 @@ function GraphView({ spec }: { spec: WorkflowSpec }) {
             <Panel position="bottom-center" className="pointer-events-none !m-3">
               <span
                 dir="auto"
-                className="max-w-[calc(100vw-5rem)] truncate whitespace-nowrap rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] text-muted-foreground/80 shadow-xs backdrop-blur"
+                className="max-w-[calc(100vw-5rem)] truncate whitespace-nowrap rounded-md border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] text-muted-foreground/80 backdrop-blur"
               >
                 {msg("optimization.workflow.hint")}
               </span>
@@ -199,7 +193,7 @@ function GraphView({ spec }: { spec: WorkflowSpec }) {
               exit={{ x: slideFrom, opacity: 0 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
               className={cn(
-                "absolute inset-y-0 end-0 z-20 overflow-hidden border-s border-border/40 bg-card shadow-xl",
+                "absolute inset-y-0 end-0 z-20 overflow-hidden border-s border-border/40 bg-card shadow-[var(--shadow-float)]",
                 fullscreen ? "w-[min(360px,88vw)]" : "w-[min(320px,88vw)]",
               )}
             >
