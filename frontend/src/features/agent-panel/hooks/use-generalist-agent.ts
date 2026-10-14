@@ -6,6 +6,13 @@ import { readPref } from "@/features/settings";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { I18N_KEY } from "@/shared/lib/i18n";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
+import {
+  appendReasoning,
+  closeThinking,
+  reopenThinking,
+  startThinking,
+  type ThinkingSegment,
+} from "@/shared/lib/thinking-segments";
 
 import type { AgentMessage, AgentStatus, AgentToolCall } from "@/shared/ui/agent/types";
 import { parseTurnStats } from "@/shared/ui/agent/turn-stats";
@@ -34,9 +41,6 @@ export interface GeneralistAgentState {
   status: AgentStatus;
   statusLabel: string;
   messages: AgentMessage[];
-  reasoning: string;
-  reasoningStartedAt: number | null;
-  reasoningEndedAt: number | null;
   error: string | null;
   /** Machine code of the error, e.g. the balance gate's, so the panel can offer its way out. */
   errorCode: string | null;
@@ -142,9 +146,6 @@ interface SessionView {
   status: AgentStatus;
   statusLabel: string;
   messages: AgentMessage[];
-  reasoning: string;
-  reasoningStartedAt: number | null;
-  reasoningEndedAt: number | null;
   error: string | null;
   /** Machine code of the error, e.g. the balance gate's, so the panel can offer its way out. */
   errorCode: string | null;
@@ -163,11 +164,6 @@ interface PendingRun {
 /** Per-session mutable machinery that must never trigger a render. */
 interface SessionRuntime {
   controller: AbortController | null;
-  reasoningBuf: string;
-  // Mirrors the session's reasoning timestamps so ``onDone`` can stamp the
-  // finished turn's thinking onto its message without reading render state.
-  reasoningStartedAt: number | null;
-  reasoningEndedAt: number | null;
   replyBuf: string;
   // Sticky overlay of wizard fields derived synchronously this session
   // (e.g. ``staged_dataset_id`` from an in-panel upload). The panel-only
@@ -185,27 +181,15 @@ function blankSession(key: string): SessionView {
     status: "idle",
     statusLabel: "",
     messages: [],
-    reasoning: "",
-    reasoningStartedAt: null,
-    reasoningEndedAt: null,
     error: null,
     errorCode: null,
     pendingApproval: null,
   };
 }
 
-/** Stamp the end of the turn's reasoning once; later calls keep the first stamp. */
-function endReasoning(rt: SessionRuntime): number {
-  rt.reasoningEndedAt ??= Date.now();
-  return rt.reasoningEndedAt;
-}
-
 function blankRuntime(): SessionRuntime {
   return {
     controller: null,
-    reasoningBuf: "",
-    reasoningStartedAt: null,
-    reasoningEndedAt: null,
     replyBuf: "",
     persistentExtras: {},
     pendingRun: null,
@@ -385,6 +369,27 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     [patchMessages],
   );
 
+  // The turn's thinking lives on its newest assistant message, so a steer's
+  // fresh bubble starts its own segments.
+  const patchThinking = React.useCallback(
+    (
+      key: string,
+      update: (segments: readonly ThinkingSegment[], toolCount: number) => readonly ThinkingSegment[],
+    ) => {
+      patchMessages(key, (prev) => {
+        const last = prev[prev.length - 1];
+        if (!last || last.role !== "assistant") return prev;
+        const segments = last.thinkingSegments ?? [];
+        const nextSegments = update(segments, last.toolCalls?.length ?? 0);
+        if (nextSegments === segments) return prev;
+        const next = prev.slice();
+        next[next.length - 1] = { ...last, thinkingSegments: nextSegments };
+        return next;
+      });
+    },
+    [patchMessages],
+  );
+
   const finishToolCall = React.useCallback(
     (key: string, id: string, nextStatus: "done" | "error", result?: unknown) => {
       patchMessages(key, (prev) => {
@@ -430,22 +435,17 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       const rt = getRuntime(key);
       const controller = new AbortController();
       rt.controller = controller;
-      rt.reasoningBuf = "";
-      rt.reasoningStartedAt = Date.now();
-      rt.reasoningEndedAt = null;
       rt.replyBuf = "";
       streamingKeysRef.current.add(key);
 
       patchSession(key, {
         status: "streaming",
         statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.1"),
-        reasoning: "",
-        reasoningStartedAt: rt.reasoningStartedAt,
-        reasoningEndedAt: null,
         error: null,
         errorCode: null,
         pendingApproval: null,
       });
+      patchThinking(key, (segments, toolCount) => startThinking(segments, Date.now(), toolCount));
 
       const releaseSlot = () => {
         rt.controller = null;
@@ -483,13 +483,18 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             if (!text.trim()) return;
             replyBeforeSteer = (replyBeforeSteer ?? "") + rt.replyBuf;
             rt.replyBuf = "";
+            patchThinking(key, (segments) => closeThinking(segments, Date.now()));
             // The reply so far stays as its own bubble, tool activity and
             // all; the rest of the turn streams into a new one after the
             // user's message.
             patchMessages(key, (prev) => {
               const last = prev[prev.length - 1];
               const kept =
-                last && last.role === "assistant" && !last.content && !last.toolCalls?.length
+                last &&
+                last.role === "assistant" &&
+                !last.content &&
+                !last.toolCalls?.length &&
+                !last.thinkingSegments?.length
                   ? prev.slice(0, -1)
                   : prev;
               return [
@@ -507,15 +512,15 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           },
           onReasoningPatch: (chunk) => {
             if (controller.signal.aborted) return;
-            if (rt.reasoningBuf === "") {
-              rt.reasoningStartedAt = Date.now();
-              patchSession(key, { reasoningStartedAt: rt.reasoningStartedAt });
-            }
-            rt.reasoningBuf += chunk;
-            patchSession(key, { reasoning: rt.reasoningBuf });
+            patchThinking(key, (segments, toolCount) =>
+              appendReasoning(segments, chunk, Date.now(), toolCount),
+            );
           },
           onToolStart: (ev) => {
             if (controller.signal.aborted) return;
+            // A tool call ends the current stretch of thinking; reasoning
+            // after it opens a new "Thought for" row below the tool.
+            patchThinking(key, (segments) => closeThinking(segments, Date.now()));
             patchSession(key, {
               statusLabel: formatMsg(
                 "auto.features.agent.panel.hooks.use.generalist.agent.template.1",
@@ -568,8 +573,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             if (rt.replyBuf === "") {
               patchSession(key, {
                 statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.4"),
-                ...(rt.reasoningBuf ? { reasoningEndedAt: endReasoning(rt) } : {}),
               });
+              patchThinking(key, (segments) => closeThinking(segments, Date.now()));
             }
             rt.replyBuf += chunk;
             appendReply(key, chunk);
@@ -577,8 +582,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           onMessageReset: () => {
             if (controller.signal.aborted) return;
             rt.replyBuf = "";
-            rt.reasoningEndedAt = null;
-            patchSession(key, { reasoningEndedAt: null });
+            patchThinking(key, reopenThinking);
             patchMessages(key, (prev) => {
               const last = prev[prev.length - 1];
               if (!last || last.role !== "assistant" || last.content === "") return prev;
@@ -592,8 +596,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             patchSession(key, {
               status: "done",
               statusLabel: "",
-              ...(rt.reasoningBuf ? { reasoningEndedAt: endReasoning(rt) } : {}),
             });
+            patchThinking(key, (segments) => closeThinking(segments, Date.now()));
             patchMessages(key, (prev) => {
               const last = prev[prev.length - 1];
               if (!last || last.role !== "assistant") return prev;
@@ -604,7 +608,9 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
                 }
                 reply = last.content || reply;
                 // Nothing came after the steer: no hollow bubble.
-                if (!reply && !last.toolCalls?.length) return prev.slice(0, -1);
+                if (!reply && !last.toolCalls?.length && !last.thinkingSegments?.length) {
+                  return prev.slice(0, -1);
+                }
               }
               const fallback =
                 last.content ||
@@ -618,17 +624,6 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
                 model: result.model,
                 servedModel: result.served_model,
                 stats: parseTurnStats(result.stats),
-                // The live thinking state belongs to the newest turn only and
-                // resets on the next send; a copy on the message keeps this
-                // turn's "Thought for" row after that.
-                thinking: rt.reasoningBuf
-                  ? {
-                      reasoning: rt.reasoningBuf,
-                      startedAt: rt.reasoningStartedAt,
-                      endedAt: rt.reasoningEndedAt,
-                      streaming: false,
-                    }
-                  : last.thinking,
               };
               return next;
             });
@@ -649,10 +644,11 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
                     : message,
               errorCode: code ?? null,
             });
+            patchThinking(key, (segments) => closeThinking(segments, Date.now()));
             patchMessages(key, (prev) => {
               const last = prev[prev.length - 1];
               if (!last || last.role !== "assistant") return prev;
-              if (!last.content && !last.toolCalls?.length) {
+              if (!last.content && !last.toolCalls?.length && !last.thinkingSegments?.length) {
                 // Nothing rendered yet — drop the empty assistant placeholder.
                 return prev.slice(0, -1);
               }
@@ -685,6 +681,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       getRuntime,
       patchMessages,
       patchSession,
+      patchThinking,
       pushToolCall,
       requestPump,
       steerQueueFor,
@@ -751,7 +748,6 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       // turn — other sessions' streams are untouched.
       abortSession(key);
       const rt = getRuntime(key);
-      rt.reasoningBuf = "";
       rt.replyBuf = "";
 
       const chatHistory: ChatTurn[] = history
@@ -788,9 +784,6 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             { role: "user", content: userMessage },
             { role: "assistant", content: "", toolCalls: [] },
           ],
-          reasoning: "",
-          reasoningStartedAt: null,
-          reasoningEndedAt: null,
           error: null,
           errorCode: null,
           pendingApproval: null,
@@ -879,6 +872,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     const wasQueued = sessionsRef.current.get(key)?.status === "queued";
     abortSession(key);
     patchSession(key, { status: "idle", statusLabel: "" });
+    patchThinking(key, (segments) => closeThinking(segments, Date.now()));
     if (wasQueued) {
       // Nothing streamed yet — drop the empty assistant placeholder so the
       // transcript doesn't keep a hollow bubble for a turn that never ran.
@@ -890,7 +884,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         return prev;
       });
     }
-  }, [abortSession, patchMessages, patchSession]);
+  }, [abortSession, patchMessages, patchSession, patchThinking]);
 
   /**
    * Drop background sessions that are safely re-openable: idle/done ones whose
@@ -1037,9 +1031,6 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     status: active.status,
     statusLabel: active.statusLabel,
     messages: active.messages,
-    reasoning: active.reasoning,
-    reasoningStartedAt: active.reasoningStartedAt,
-    reasoningEndedAt: active.reasoningEndedAt,
     error: active.error,
     errorCode: active.errorCode,
     pendingApproval: active.pendingApproval,

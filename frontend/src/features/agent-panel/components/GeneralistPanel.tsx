@@ -19,7 +19,7 @@ import { ChatTranscript } from "@/shared/ui/agent/chat-transcript";
 import { Composer } from "@/shared/ui/agent/composer";
 import { SkynetMark } from "@/shared/ui/skynet-mark";
 import { ComposerModelMenu } from "@/shared/ui/agent/composer-model-menu";
-import type { AgentThinking, AgentToolCall } from "@/shared/ui/agent/types";
+import type { AgentToolCall } from "@/shared/ui/agent/types";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { SubmitSplashOverlay, SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 import { cn } from "@/shared/lib/utils";
@@ -415,13 +415,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     },
     [agent, store],
   );
-
-  const thinking: AgentThinking = {
-    reasoning: agent.reasoning,
-    startedAt: agent.reasoningStartedAt,
-    endedAt: agent.reasoningEndedAt,
-    streaming,
-  };
 
   const [draft, setDraft] = React.useState("");
   const [attachOpen, setAttachOpen] = React.useState(false);
@@ -931,7 +924,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
           agent.messages.length,
           agent.messages[agent.messages.length - 1]?.content,
           agent.messages[agent.messages.length - 1]?.toolCalls?.length,
-          agent.reasoning,
+          agent.messages[agent.messages.length - 1]?.thinkingSegments?.at(-1)?.reasoning,
           agent.statusLabel,
           agent.pendingApproval?.id ?? "",
         ]}
@@ -940,7 +933,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
           messages={agent.messages}
           streaming={streaming}
           editAndResend={agent.editAndResend}
-          thinking={thinking}
           renderToolCall={renderToolCall}
           isStepCall={isStepCall}
           stepKind={stepKind}

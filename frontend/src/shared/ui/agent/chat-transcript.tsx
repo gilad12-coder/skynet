@@ -139,9 +139,14 @@ export function ChatTranscript({
     // null (no text, tools, or reasoning yet). The ember stands in for that
     // empty placeholder and is unmounted the moment any of those signals lands.
     const pairThinking = pair.key === latestAgentKey ? thinking : undefined;
-    const hasThinking = Boolean(
-      pairThinking && (pairThinking.reasoning || (pairThinking.streaming && pairThinking.startedAt)),
-    );
+    const hasThinking = agentMsg?.thinkingSegments
+      ? agentMsg.thinkingSegments.some(
+          (s) => s.reasoning || (isStreamingThisPair && s.startedAt),
+        )
+      : Boolean(
+          pairThinking &&
+            (pairThinking.reasoning || (pairThinking.streaming && pairThinking.startedAt)),
+        );
     const isWaitingFirstToken =
       isStreamingThisPair &&
       agentText.length === 0 &&
@@ -174,6 +179,7 @@ export function ChatTranscript({
               <AgentBubble
                 msg={agentMsg}
                 thinking={pair.key === latestAgentKey ? thinking : undefined}
+                streaming={isStreamingThisPair}
                 renderToolCall={renderToolCall}
                 isStepCall={isStepCall}
                 stepKind={stepKind}

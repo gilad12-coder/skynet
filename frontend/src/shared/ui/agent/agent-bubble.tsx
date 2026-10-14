@@ -7,7 +7,7 @@ import { cn } from "@/shared/lib/utils";
 import type { ActivityKind } from "@/shared/lib/activity-summary";
 
 import { ThinkingSection } from "./thinking-section";
-import { TurnActivity } from "./turn-activity";
+import { TurnActivity, type TurnThinking } from "./turn-activity";
 import type { AgentMessage, AgentThinking, AgentToolCall } from "./types";
 
 // react-markdown + remark-gfm (the micromark/mdast/hast tree, ~40-60 KB gzip)
@@ -22,6 +22,8 @@ const MessageMarkdown = dynamic(
 interface AgentBubbleProps {
   msg: AgentMessage;
   thinking?: AgentThinking;
+  /** This turn is still running; defaults to the live thinking's flag. */
+  streaming?: boolean;
   renderToolCall?: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
   /**
    * Calls that render as plain one-line steps. They join the thinking row in
@@ -38,6 +40,7 @@ interface AgentBubbleProps {
 export function AgentBubble({
   msg,
   thinking: liveThinking,
+  streaming,
   renderToolCall,
   isStepCall,
   stepKind,
@@ -45,10 +48,12 @@ export function AgentBubble({
   toolCallsBeforeContent = false,
   className,
 }: AgentBubbleProps) {
-  const visibleToolCalls = React.useMemo<Array<{ call: AgentToolCall; isRetry: boolean }>>(() => {
+  const visibleToolCalls = React.useMemo<
+    Array<{ call: AgentToolCall; isRetry: boolean; index: number }>
+  >(() => {
     const calls = msg.toolCalls;
     if (!calls?.length) return [];
-    const result: Array<{ call: AgentToolCall; isRetry: boolean }> = [];
+    const result: Array<{ call: AgentToolCall; isRetry: boolean; index: number }> = [];
     for (let i = 0; i < calls.length; i++) {
       const call = calls[i];
       if (!call) continue;
@@ -64,14 +69,22 @@ export function AgentBubble({
       const isRetry = calls
         .slice(0, i)
         .some((prior) => prior.tool === call.tool && prior.status === "error");
-      result.push({ call, isRetry });
+      result.push({ call, isRetry, index: i });
     }
     return result;
   }, [msg.toolCalls]);
 
-  // The live state wins while the turn streams; once it's done, the copy
-  // saved on the message keeps the row through later turns.
-  const thinking = liveThinking?.streaming ? liveThinking : (msg.thinking ?? liveThinking);
+  const turnStreaming = streaming ?? Boolean(liveThinking?.streaming);
+  // Segments saved on the message win: they stream live and outlast the
+  // turn. Chats that only keep one live thinking state show it as one row.
+  const thinking = React.useMemo<TurnThinking[]>(() => {
+    const all: TurnThinking[] = msg.thinkingSegments
+      ? msg.thinkingSegments.map((s) => ({ ...s, streaming: turnStreaming }))
+      : liveThinking
+        ? [{ ...liveThinking, toolsBefore: 0 }]
+        : [];
+    return all.filter((t) => t.reasoning || (t.streaming && t.startedAt));
+  }, [msg.thinkingSegments, liveThinking, turnStreaming]);
 
   const stepCalls =
     renderToolCall && isStepCall ? visibleToolCalls.filter(({ call }) => isStepCall(call)) : [];
@@ -80,9 +93,7 @@ export function AgentBubble({
     : visibleToolCalls;
   const hasTools = cardCalls.length > 0 && Boolean(renderToolCall);
   const hasText = msg.content.trim().length > 0;
-  const hasThinking = Boolean(
-    thinking && (thinking.reasoning || (thinking.streaming && thinking.startedAt)),
-  );
+  const hasThinking = thinking.length > 0;
   const hasActivity = hasThinking || stepCalls.length > 0;
 
   if (!hasTools && !hasText && !hasActivity) return null;
@@ -101,14 +112,15 @@ export function AgentBubble({
     <div className={cn("flex w-full min-w-0 flex-col gap-3", className)}>
       {hasActivity && renderToolCall && isStepCall ? (
         <TurnActivity
-          thinking={hasThinking ? thinking : undefined}
+          thinking={thinking}
           steps={stepCalls}
+          streaming={turnStreaming}
           renderStep={renderToolCall}
           stepKind={stepKind}
           durationMs={msg.stats?.durationMs}
         />
       ) : (
-        hasThinking && thinking && <ThinkingSection thinking={thinking} compact />
+        thinking.map((t, i) => <ThinkingSection key={i} thinking={t} compact />)
       )}
       {toolCallsBeforeContent && toolCalls}
       {hasText && (
