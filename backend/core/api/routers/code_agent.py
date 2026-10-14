@@ -411,8 +411,11 @@ class RequestCodeAuthoringRequest(BaseModel):
         default="",
         max_length=400,
         description=(
-            "Optional plain-language goal for the Signature/Metric (empty seeds "
-            "both from the dataset). Echoed back so the card can show it."
+            "What the user asked the code to do, in their words, keeping every file "
+            "name and structure they named (e.g. 'put the parsing in a helper in "
+            "helpers.py that run.py imports'); the coding agent receives it verbatim. "
+            "Empty seeds the run code and metric from the task. Echoed back so the "
+            "card can show it."
         ),
     )
 

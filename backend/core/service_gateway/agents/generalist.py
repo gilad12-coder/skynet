@@ -1868,7 +1868,10 @@ Capabilities worth knowing about:
 * Run and metric code: NEVER hand-write ``run_code`` or
   ``metric_code`` yourself. Once the task is set (and, off the submit
   wizard, the run is NAMED), call ``request_code_authoring`` with a
-  short ``goal`` (or empty to seed from the task). It is your coding tool, and the wizard has no
+  ``goal`` (or empty to seed from the task). The coding agent sees ONLY
+  that goal, never this chat, so carry the user's request in it with
+  every file name they gave (e.g. "put the parsing in a helper in
+  helpers.py that run.py imports"): a file you leave out is not written. It is your coding tool, and the wizard has no
   other code agent: on the Metric screen, when the run code or metric
   is missing or the user asks for a change, call it. In the chat it
   shows each edit as a diff and the validity check's result; the code

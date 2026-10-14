@@ -1092,13 +1092,17 @@ class UnifiedAssistant(dspy.Signature):
       (``from helpers import name``). The metric cannot import these files.
     * ``delete_file(reason, path)`` — deletes one of those extra files.
     * ``verify_code()`` — checks every file: it parses, passes lint, and
-      run.py / metric.py fit their contracts. Call it after every change;
-      when it reports errors, fix exactly those files and call it again.
+      run.py / metric.py fit their contracts. Call it ONCE, after every
+      file the request needs is written (a helpers.py AND the run.py that
+      imports it), never between them; when it reports errors, fix exactly
+      those files and call it again.
     * ``finish`` — end the turn and answer in ``reply``.
 
     The workspace is a folder: run.py and metric.py always exist, and
     ``current_files`` lists the other files with their text. Keep the run
-    code in run.py unless a helper file makes it clearer.
+    code in run.py unless a helper file makes it clearer. When the user
+    names another file (a helpers.py, a utils.py), create it with
+    ``write_file`` and import it from run.py; never fold it into run.py.
 
     ## Rule 0: Pull out what the user knows about judging an output.
 
@@ -2632,7 +2636,8 @@ class _UnifiedEditSession:
         self._emit({"event": replace_event, "data": {"code": new_code}})
         self._emit({"event": "tool_end", "data": {"id": call_id, "tool": tool, "status": "ok"}})
         return (
-            f"{label[0].upper()}{label[1:]} replaced. Call {VERIFY_TOOL} to check the workspace; do NOT edit "
+            f"{label[0].upper()}{label[1:]} replaced. Write the other files the request needs, then call "
+            f"{VERIFY_TOOL} to check the workspace; do NOT edit "
             f"the {label} again this turn unless {VERIFY_TOOL} reports an error in it."
         )
 
@@ -2812,7 +2817,7 @@ class _UnifiedEditSession:
         ``from helpers import name``. NEVER use it for run.py or metric.py:
         those are written with ``edit_run`` / ``edit_metric``. The metric
         cannot import these files: they exist only while the run code runs.
-        Call ``verify_code`` after writing.
+        Call ``verify_code`` once every file the request needs is written.
 
         ``path`` is relative, uses ``/`` between folders, has no ``..`` and
         ends in ``.py`` or a text suffix. ``reason`` is prose in the reply
@@ -2863,7 +2868,10 @@ class _UnifiedEditSession:
         self._emit(
             {"event": "tool_end", "data": {"id": call_id, "tool": WRITE_FILE_TOOL, "status": "ok", "path": path}}
         )
-        return f"{path} {'created' if created else 'replaced'}. Call {VERIFY_TOOL} to check the workspace."
+        return (
+            f"{path} {'created' if created else 'replaced'}. Write the other files the request needs "
+            f"(run.py importing it), then call {VERIFY_TOOL} to check the workspace."
+        )
 
     def delete_file(self, reason: str, path: str) -> str:
         """Delete an extra workspace file. run.py and metric.py can never be deleted.
@@ -2892,7 +2900,9 @@ class _UnifiedEditSession:
 
         Each Python file must parse and pass lint (undefined names, broken
         imports); run.py and metric.py must fit ``run_contract`` /
-        ``metric_contract``. Call it after every change. When it reports
+        ``metric_contract``. Call it once every file the request needs is
+        written, never between two of them (a helper and the run.py that
+        imports it are checked together). When it reports
         errors, fix exactly those files (each may be written once more) and
         call it again; when it passes, call ``finish``.
 
