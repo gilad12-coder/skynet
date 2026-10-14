@@ -227,6 +227,10 @@ function useAuthoringCheck(args: AuthoringCheckArgs): {
   const [result, setResult] = React.useState<{ key: string; ok: boolean } | null>(null);
   const [fixKey, setFixKey] = React.useState<string | null>(null);
   const [fixes, setFixes] = React.useState<FixRecord[]>([]);
+  // A reset clears the result while the code and context stay the same (each
+  // wizard screen opens its own chat), so it must re-run the check itself or
+  // the card sits on "checking" until the next edit.
+  const [generation, setGeneration] = React.useState(0);
   const fixAttemptsRef = React.useRef(0);
   const key = `${contextKey}\u0000${signatureCode}\u0000${metricCode}`;
   const checkable =
@@ -286,6 +290,7 @@ function useAuthoringCheck(args: AuthoringCheckArgs): {
     metricCode,
     key,
     fixable,
+    generation,
     setSignatureValidation,
     setMetricValidation,
   ]);
@@ -307,6 +312,7 @@ function useAuthoringCheck(args: AuthoringCheckArgs): {
     setResult(null);
     setFixKey(null);
     setFixes([]);
+    setGeneration((g) => g + 1);
     fixAttemptsRef.current = 0;
   }, []);
 

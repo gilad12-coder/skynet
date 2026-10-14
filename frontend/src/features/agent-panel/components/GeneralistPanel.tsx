@@ -480,7 +480,12 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   // off; the card surfaces the failures and the user steers via chat.
   const applyAgentPatch = wizardCtx?.applyAgentPatch;
   const agentSend = agent.send;
+  // On the wizard the code already lives in the Metric step's editors and the
+  // card shows the check passing. The note would arrive as a user turn telling
+  // the agent to move on, and it would leave the Metric screen unasked.
+  const onWizardScreen = shownScreen !== null;
   React.useEffect(() => {
+    if (onWizardScreen) return;
     if (handedOffRef.current) return;
     if (!codeArmed) return;
     if (agent.status === "streaming") return;
@@ -517,6 +522,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       authoredCode,
     );
   }, [
+    onWizardScreen,
     codeArmed,
     agent.status,
     agentSend,
