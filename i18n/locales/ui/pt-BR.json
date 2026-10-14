@@ -168,5 +168,12 @@
   "optimizations.grid.open_pair": "Abrir o par {pair}",
   "optimizations.grid.empty.title": "Nenhum resultado de pares",
   "optimizations.grid.empty.description": "Esta busca em grade terminou sem resultados para nenhum par de modelos, então não há nada para comparar.",
-  "agent.error.insufficient_funds": "Seu saldo está vazio. Adicione fundos para continuar conversando com o agente."
+  "agent.error.insufficient_funds": "Seu saldo está vazio. Adicione fundos para continuar conversando com o agente.",
+  "shared.agent.worked_for": "Trabalhou por {duration}",
+  "shared.agent.working_for": "Trabalhando há {duration}",
+  "shared.agent.pasted_text": "Texto colado",
+  "shared.agent.pasted_text_lines": "{n} linhas",
+  "shared.agent.pasted_text_remove": "Remover texto colado",
+  "shared.agent.pasted_text_restore": "Mostrar no campo de texto",
+  "shared.agent.pasted_text_open": "Abrir texto colado"
 }

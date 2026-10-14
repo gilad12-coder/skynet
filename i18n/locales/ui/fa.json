@@ -4157,5 +4157,12 @@
   "submit.modelpicker.tab.best_value": "بهترین ارزش",
   "submit.modelpicker.tab.fastest": "سریع‌ترین",
   "submit.modelpicker.tab.smartest": "باهوش‌ترین",
-  "submit.modelpicker.tabs.aria": "مرتب‌سازی مدل‌ها"
+  "submit.modelpicker.tabs.aria": "مرتب‌سازی مدل‌ها",
+  "shared.agent.worked_for": "به مدت {duration} کار کرد",
+  "shared.agent.working_for": "در حال کار به مدت {duration}",
+  "shared.agent.pasted_text": "متن جای‌گذاری‌شده",
+  "shared.agent.pasted_text_lines": "{n} خط",
+  "shared.agent.pasted_text_remove": "حذف متن جای‌گذاری‌شده",
+  "shared.agent.pasted_text_restore": "نمایش در کادر متن",
+  "shared.agent.pasted_text_open": "باز کردن متن جای‌گذاری‌شده"
 }

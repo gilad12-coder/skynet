@@ -4157,5 +4157,12 @@
   "submit.modelpicker.tab.best_value": "コスパ重視",
   "submit.modelpicker.tab.fastest": "最速",
   "submit.modelpicker.tab.smartest": "最も賢い",
-  "submit.modelpicker.tabs.aria": "モデルを並べ替え"
+  "submit.modelpicker.tabs.aria": "モデルを並べ替え",
+  "shared.agent.worked_for": "{duration} 作業しました",
+  "shared.agent.working_for": "{duration} 作業中",
+  "shared.agent.pasted_text": "貼り付けたテキスト",
+  "shared.agent.pasted_text_lines": "{n} 行",
+  "shared.agent.pasted_text_remove": "貼り付けたテキストを削除",
+  "shared.agent.pasted_text_restore": "テキスト欄に表示",
+  "shared.agent.pasted_text_open": "貼り付けたテキストを開く"
 }

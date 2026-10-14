@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { cn } from "@/shared/lib/utils";
 
 import { ThinkingSection } from "./thinking-section";
+import { TurnActivity } from "./turn-activity";
 import type { AgentMessage, AgentThinking, AgentToolCall } from "./types";
 
 // react-markdown + remark-gfm (the micromark/mdast/hast tree, ~40-60 KB gzip)
@@ -21,6 +22,11 @@ interface AgentBubbleProps {
   msg: AgentMessage;
   thinking?: AgentThinking;
   renderToolCall?: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
+  /**
+   * Calls that render as plain one-line steps. They join the thinking row in
+   * the turn's foldable activity group; every other call keeps its rich card.
+   */
+  isStepCall?: (call: AgentToolCall) => boolean;
   onRunCode?: (code: string, language: string) => void;
   toolCallsBeforeContent?: boolean;
   className?: string;
@@ -30,6 +36,7 @@ export function AgentBubble({
   msg,
   thinking,
   renderToolCall,
+  isStepCall,
   onRunCode,
   toolCallsBeforeContent = false,
   className,
@@ -58,44 +65,45 @@ export function AgentBubble({
     return result;
   }, [msg.toolCalls]);
 
-  const hasTools = visibleToolCalls.length > 0 && Boolean(renderToolCall);
+  const stepCalls =
+    renderToolCall && isStepCall ? visibleToolCalls.filter(({ call }) => isStepCall(call)) : [];
+  const cardCalls = stepCalls.length
+    ? visibleToolCalls.filter(({ call }) => !isStepCall?.(call))
+    : visibleToolCalls;
+  const hasTools = cardCalls.length > 0 && Boolean(renderToolCall);
   const hasText = msg.content.trim().length > 0;
   const hasThinking = Boolean(
     thinking && (thinking.reasoning || (thinking.streaming && thinking.startedAt)),
   );
+  const hasActivity = hasThinking || stepCalls.length > 0;
 
-  if (!hasTools && !hasText && !hasThinking) return null;
+  if (!hasTools && !hasText && !hasActivity) return null;
 
   const toolCalls = hasTools && renderToolCall && (
-    <div
-      className={cn(
-        "flex flex-col gap-1.5 px-2.5 py-2",
-        (hasThinking || (!toolCallsBeforeContent && hasText)) && "border-t border-primary-fill/[0.08]",
-      )}
-    >
-      {visibleToolCalls.map(({ call, isRetry }) => (
+    <div className="flex flex-col gap-1.5">
+      {cardCalls.map(({ call, isRetry }) => (
         <React.Fragment key={call.id}>{renderToolCall(call, { isRetry })}</React.Fragment>
       ))}
     </div>
   );
 
+  // No bubble around the agent's side, as in Codex: the turn header, the
+  // cards and the answer sit straight on the panel at full width.
   return (
-    <div
-      className={cn(
-        "max-w-[88%] overflow-hidden rounded-[22px] rounded-ee-[4px] bg-muted/60",
-        className,
+    <div className={cn("flex w-full min-w-0 flex-col gap-3", className)}>
+      {hasActivity && renderToolCall && isStepCall ? (
+        <TurnActivity
+          thinking={hasThinking ? thinking : undefined}
+          steps={stepCalls}
+          renderStep={renderToolCall}
+          durationMs={msg.stats?.durationMs}
+        />
+      ) : (
+        hasThinking && thinking && <ThinkingSection thinking={thinking} compact />
       )}
-    >
-      {hasThinking && thinking && <ThinkingSection thinking={thinking} />}
       {toolCallsBeforeContent && toolCalls}
       {hasText && (
-        <div
-          className={cn(
-            "px-4 py-3 text-sm leading-relaxed text-foreground",
-            (hasThinking || (toolCallsBeforeContent && hasTools)) &&
-              "border-t border-primary-fill/[0.08]",
-          )}
-        >
+        <div className="text-sm leading-relaxed text-foreground">
           <React.Suspense
             fallback={<span className="whitespace-pre-wrap">{msg.content}</span>}
           >
