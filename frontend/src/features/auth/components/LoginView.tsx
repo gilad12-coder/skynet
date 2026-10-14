@@ -101,7 +101,7 @@ function oauthReturnUrl(): string {
 }
 
 /**
- * Oversized SKYNET wordmark shared by every login state, so the SSO redirect
+ * Oversized DRWN wordmark shared by every login state, so the SSO redirect
  * moment and the credential form read as the same place. It fills the column
  * width and morphs continuously as an ambient "alive" signal.
  */

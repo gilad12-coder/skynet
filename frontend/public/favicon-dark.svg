@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
-  <title>Skynet</title>
+  <title>DRWN</title>
   <!-- App-icon tile (dark: globals.css bg and border). The bird is the "simple" brand mark (shared/ui/skynet-mark.tsx) with
        strokes heavy enough to hold at 16px; the neck runs off the tile's bottom edge. -->
   <defs><clipPath id="t"><rect width="96" height="96" rx="20"/></clipPath></defs>

@@ -82,7 +82,7 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
           className="text-sm font-bold uppercase tracking-[0.14em] text-foreground"
           style={{ fontFamily: "var(--font-ui)" }}
         >
-          SKYNET
+          DRWN
         </Link>
         <div className="flex items-center gap-1">
           <GlobalSearch />
