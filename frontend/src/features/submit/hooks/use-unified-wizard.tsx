@@ -61,6 +61,7 @@ import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/prefligh
 import { metricUsesModel } from "../lib/scorer-dependencies";
 import { computeStepIssue, hasModel, runBlockedReason as blockedReason } from "../lib/step-issue";
 import { canEnterStep, canMoveForward } from "../lib/wizard-steps";
+import { createStepViewTracker } from "../lib/wizard-telemetry";
 import {
   WIZARD_V2_STEPS,
   contractSnapshot,
@@ -239,6 +240,14 @@ export function WizardV2Provider({
   const steps = useMemo(() => wizardSteps(state, optimizerBlocked), [state, optimizerBlocked]);
   // Reads the blocked flag of the render the level changed in.
   useEffect(() => dispatch({ type: "level", level, optimizerBlocked }), [level]);
+
+  // The tracker drops repeats, so a re-render or a level change on the same
+  // step (and StrictMode's double effect) reports nothing.
+  const [stepViewed] = useState(createStepViewTracker);
+  useEffect(() => {
+    const viewed = stepViewed(state.step, level);
+    if (viewed) track(TelemetryEvent.WizardStepViewed, { ...viewed });
+  }, [stepViewed, state.step, level]);
 
   const canEnter = useCallback(
     (step: WizardStepId) =>
