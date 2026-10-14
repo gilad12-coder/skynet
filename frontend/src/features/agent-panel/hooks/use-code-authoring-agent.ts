@@ -333,19 +333,22 @@ export function useCodeAuthoringAgent(
   React.useEffect(() => {
     sharedRef.current = shared;
   });
+  const writeWizardCode = wizardCtx?.writeCode;
   const writeSignatureCode = React.useCallback(
     (code: string) => {
+      if (sharedRef.current && writeWizardCode?.("run", code)) return;
       if (sharedRef.current && applyAgentPatch) applyAgentPatch({ run_code: code });
       else setLocalSignatureCode(code);
     },
-    [applyAgentPatch],
+    [writeWizardCode, applyAgentPatch],
   );
   const writeMetricCode = React.useCallback(
     (code: string) => {
+      if (sharedRef.current && writeWizardCode?.("metric", code)) return;
       if (sharedRef.current && applyAgentPatch) applyAgentPatch({ metric_code: code });
       else setLocalMetricCode(code);
     },
-    [applyAgentPatch],
+    [writeWizardCode, applyAgentPatch],
   );
   // What the coding agent itself last wrote: only a failure on that code goes
   // back to it for a fix, never one on code the user is typing.

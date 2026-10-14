@@ -62,7 +62,16 @@ interface WizardStateContextValue {
   /** Which wizard code the agent's coding tool is streaming in right now. */
   codeWriting: CodeWriting;
   setCodeWriting: (writing: CodeWriting) => void;
+  /**
+   * Write code straight into the Metric step's editors, the code's one home.
+   * Returns false when no Metric step is mounted to take it.
+   */
+  writeCode: (slot: keyof CodeWriting, code: string) => boolean;
+  setCodeSink: (sink: CodeSink | null) => void;
 }
+
+/** Where the Metric step takes code written outside its own editors. */
+export type CodeSink = (slot: keyof CodeWriting, code: string) => void;
 
 /** Which of the wizard's two code slots the coding tool is writing. */
 export interface CodeWriting {
@@ -99,6 +108,19 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
   const [authoringContext, setAuthoringContext] = React.useState<UnifiedAuthoringContext | null>(
     null,
   );
+  // Streamed code skips the agent-patch channel: that channel names only the
+  // last patch's keys per render, so a final run-code write batched with a
+  // metric write never reached the editors and the stale draft won.
+  const codeSinkRef = React.useRef<CodeSink | null>(null);
+  const setCodeSink = React.useCallback((sink: CodeSink | null) => {
+    codeSinkRef.current = sink;
+  }, []);
+  const writeCode = React.useCallback((slot: keyof CodeWriting, code: string) => {
+    const sink = codeSinkRef.current;
+    if (!sink) return false;
+    sink(slot, code);
+    return true;
+  }, []);
   const [codeWriting, setCodeWritingState] = React.useState<CodeWriting>(NOT_WRITING);
   const setCodeWriting = React.useCallback((next: CodeWriting) => {
     setCodeWritingState((prev) =>
@@ -214,6 +236,8 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       setAuthoringContext,
       codeWriting,
       setCodeWriting,
+      writeCode,
+      setCodeSink,
     }),
     [
       state,
@@ -231,6 +255,8 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       authoringContext,
       codeWriting,
       setCodeWriting,
+      writeCode,
+      setCodeSink,
     ],
   );
 

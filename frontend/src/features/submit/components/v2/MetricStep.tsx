@@ -102,6 +102,12 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     registerContext?.(sharedContext);
   }, [registerContext, sharedContext]);
   React.useEffect(() => () => registerContext?.(null), [registerContext]);
+  const registerSink = wizardCtx?.setCodeSink;
+  React.useEffect(() => {
+    if (!registerSink) return;
+    registerSink((slot, code) => (slot === "run" ? setRunCode(code) : setMetricCode(code)));
+    return () => registerSink(null);
+  }, [registerSink, setRunCode, setMetricCode]);
 
   const writing = wizardCtx?.codeWriting ?? NOT_WRITING;
   // The wizard agent sits beside the editors; its coding tool writes the code.
