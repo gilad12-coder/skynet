@@ -4,7 +4,7 @@ import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import * as React from "react";
 import dynamic from "next/dynamic";
 import { CheckCircle, CircleNotch, Sparkle, WarningCircle } from "@/shared/ui/icons";
-import { msg } from "@/shared/lib/messages";
+import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
 import { IndexPager } from "@/shared/ui/index-pager";
@@ -16,10 +16,12 @@ import { ThinkingSection } from "@/shared/ui/agent/thinking-section";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import type { ValidateCodeResponse } from "@/shared/types/api";
 
-import type {
-  AuthoringCheckStatus,
-  CodeAuthoringAgentState,
+import {
+  MAX_AUTHORING_FIXES,
+  type AuthoringCheckStatus,
+  type CodeAuthoringAgentState,
 } from "../hooks/use-code-authoring-agent";
+import type { AuthoringFixAttempt } from "../lib/code-authoring";
 
 // The same react-flow canvas the /submit wizard uses, mounted inline so a
 // workflow (multi-module) run can be authored and edited without leaving chat.
@@ -134,6 +136,7 @@ export function CodeAuthoringCard({ agent }: CodeAuthoringCardProps) {
             />
           }
         />
+        {!agent.isWorkflow && <FixAttempts attempts={agent.fixAttempts} />}
         {!agent.isWorkflow && <CheckStatusRow status={agent.checkStatus} />}
       </div>
 
@@ -176,6 +179,69 @@ function CheckStatusRow({ status }: { status: AuthoringCheckStatus }) {
       />
       {msg(key)}
     </p>
+  );
+}
+
+/**
+ * Each time a failed check went back to the agent: which attempt it was,
+ * what the check flagged, and what the agent changed in reply.
+ */
+function FixAttempts({ attempts }: { attempts: AuthoringFixAttempt[] }) {
+  if (attempts.length === 0) return null;
+  return (
+    <ol dir={getActiveDir()} className="space-y-2">
+      {attempts.map((a) => {
+        const changed = [
+          a.fix?.runChanged ? msg("submit.v2.metric.run_label") : null,
+          a.fix?.metricChanged ? msg("submit.v2.metric.metric_label") : null,
+        ].filter((label): label is string => label !== null);
+        return (
+          <li
+            key={a.attempt}
+            className="space-y-1 rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-[0.75rem]"
+          >
+            <p className="font-medium text-foreground">
+              {formatMsg("agent.coding_tool.fix.attempt", {
+                p1: a.attempt,
+                p2: MAX_AUTHORING_FIXES,
+              })}
+            </p>
+            <div>
+              <p className="text-muted-foreground">{msg("agent.coding_tool.fix.failed")}</p>
+              <ul className="list-disc space-y-0.5 ps-4 text-destructive">
+                {a.failures.map((failure, i) => (
+                  <li key={i} dir="auto" className="break-words">
+                    {failure}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="text-muted-foreground">{msg("agent.coding_tool.fix.fix")}</p>
+              {a.fix === null ? (
+                <p className="flex items-center gap-1.5 text-muted-foreground">
+                  <CircleNotch className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                  {msg("agent.coding_tool.fix.writing")}
+                </p>
+              ) : (
+                <>
+                  {a.fix.reply && (
+                    <p dir="auto" className="line-clamp-4 whitespace-pre-line text-foreground">
+                      {a.fix.reply}
+                    </p>
+                  )}
+                  <p className="text-muted-foreground">
+                    {changed.length > 0
+                      ? formatMsg("agent.coding_tool.fix.changed", { p1: changed.join(", ") })
+                      : msg("agent.coding_tool.fix.unchanged")}
+                  </p>
+                </>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

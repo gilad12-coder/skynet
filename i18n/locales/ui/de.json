@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "Eingefügten Text öffnen",
   "agent.coding_tool.check.checking": "Code wird geprüft…",
   "agent.coding_tool.check.passed": "Der Code besteht die Prüfung",
-  "agent.coding_tool.check.failed": "Die Prüfung hat Probleme gefunden"
+  "agent.coding_tool.check.failed": "Die Prüfung hat Probleme gefunden",
+  "agent.coding_tool.fix.attempt": "Korrekturversuch {p1} von {p2}",
+  "agent.coding_tool.fix.failed": "Was die Prüfung gefunden hat",
+  "agent.coding_tool.fix.fix": "Die Korrektur",
+  "agent.coding_tool.fix.writing": "Korrektur wird geschrieben…",
+  "agent.coding_tool.fix.changed": "Geändert: {p1}",
+  "agent.coding_tool.fix.unchanged": "Kein Code geändert"
 }

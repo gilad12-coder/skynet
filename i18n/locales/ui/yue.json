@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "打開貼上嘅文字",
   "agent.coding_tool.check.checking": "檢查緊程式碼…",
   "agent.coding_tool.check.passed": "程式碼通過檢查",
-  "agent.coding_tool.check.failed": "檢查搵到問題"
+  "agent.coding_tool.check.failed": "檢查搵到問題",
+  "agent.coding_tool.fix.attempt": "修正嘗試 {p1}/{p2}",
+  "agent.coding_tool.fix.failed": "檢查搵到嘅問題",
+  "agent.coding_tool.fix.fix": "修正",
+  "agent.coding_tool.fix.writing": "寫緊修正…",
+  "agent.coding_tool.fix.changed": "改咗：{p1}",
+  "agent.coding_tool.fix.unchanged": "冇改到程式碼"
 }

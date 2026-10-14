@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "Ouvrir le texte collé",
   "agent.coding_tool.check.checking": "Vérification du code…",
   "agent.coding_tool.check.passed": "Le code passe la vérification",
-  "agent.coding_tool.check.failed": "La vérification a trouvé des problèmes"
+  "agent.coding_tool.check.failed": "La vérification a trouvé des problèmes",
+  "agent.coding_tool.fix.attempt": "Tentative de correction {p1} sur {p2}",
+  "agent.coding_tool.fix.failed": "Ce que la vérification a trouvé",
+  "agent.coding_tool.fix.fix": "La correction",
+  "agent.coding_tool.fix.writing": "Rédaction de la correction…",
+  "agent.coding_tool.fix.changed": "Modifié : {p1}",
+  "agent.coding_tool.fix.unchanged": "Aucun code modifié"
 }

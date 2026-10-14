@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "貼り付けたテキストを開く",
   "agent.coding_tool.check.checking": "コードを確認しています…",
   "agent.coding_tool.check.passed": "コードはチェックに合格しました",
-  "agent.coding_tool.check.failed": "チェックで問題が見つかりました"
+  "agent.coding_tool.check.failed": "チェックで問題が見つかりました",
+  "agent.coding_tool.fix.attempt": "修正の試行 {p1}/{p2}",
+  "agent.coding_tool.fix.failed": "チェックで見つかった問題",
+  "agent.coding_tool.fix.fix": "修正内容",
+  "agent.coding_tool.fix.writing": "修正を書いています…",
+  "agent.coding_tool.fix.changed": "変更: {p1}",
+  "agent.coding_tool.fix.unchanged": "コードは変更されていません"
 }

@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "붙여넣은 텍스트 열기",
   "agent.coding_tool.check.checking": "코드를 확인하는 중…",
   "agent.coding_tool.check.passed": "코드가 검사를 통과했습니다",
-  "agent.coding_tool.check.failed": "검사에서 문제를 찾았습니다"
+  "agent.coding_tool.check.failed": "검사에서 문제를 찾았습니다",
+  "agent.coding_tool.fix.attempt": "수정 시도 {p1}/{p2}",
+  "agent.coding_tool.fix.failed": "검사에서 발견된 문제",
+  "agent.coding_tool.fix.fix": "수정 내용",
+  "agent.coding_tool.fix.writing": "수정 사항 작성 중…",
+  "agent.coding_tool.fix.changed": "변경됨: {p1}",
+  "agent.coding_tool.fix.unchanged": "변경된 코드 없음"
 }

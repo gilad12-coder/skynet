@@ -133,3 +133,64 @@ export function contractValidations(
   }
   return { run: editorResult(run), metric: editorResult(metric) };
 }
+
+/** One time a failed check went back to the coding agent for a fix. */
+export interface AuthoringFixAttempt {
+  /** 1-based, counted per conversation. */
+  attempt: number;
+  /** What the check flagged on the agent's code. */
+  failures: string[];
+  /** What the agent did about it; null while its fix turn is still running. */
+  fix: { reply: string; runChanged: boolean; metricChanged: boolean } | null;
+}
+
+/** A fix the check asked for, before it is paired with the agent's reply. */
+export interface FixRecord {
+  attempt: number;
+  failures: string[];
+  runBefore: string;
+  metricBefore: string;
+  /** How many agent messages existed when the fix was asked for; null until sent. */
+  from: number | null;
+}
+
+/**
+ * Pair each fix the check asked for with what the agent did about it.
+ *
+ * Args:
+ *   fixes: The fixes asked for, oldest first.
+ *   messages: The coding agent's chat.
+ *   streaming: Whether a coding turn is running right now.
+ *   runCode: The run code now.
+ *   metricCode: The metric now.
+ *
+ * Returns:
+ *   One attempt per fix; its ``fix`` stays null until the fix turn finished.
+ */
+export function describeFixes(
+  fixes: readonly FixRecord[],
+  messages: ReadonlyArray<{ role: string; content: string }>,
+  streaming: boolean,
+  runCode: string,
+  metricCode: string,
+): AuthoringFixAttempt[] {
+  return fixes.map((f, i) => {
+    const base = { attempt: f.attempt, failures: f.failures };
+    const next = fixes[i + 1];
+    if (f.from === null || (!next && streaming)) return { ...base, fix: null };
+    const until = next?.from ?? messages.length;
+    const replies = messages.slice(f.from, until).filter((m) => m.role === "assistant");
+    if (replies.length === 0) return { ...base, fix: null };
+    return {
+      ...base,
+      fix: {
+        reply: replies
+          .map((m) => m.content.trim())
+          .filter(Boolean)
+          .join("\n\n"),
+        runChanged: (next ? next.runBefore : runCode) !== f.runBefore,
+        metricChanged: (next ? next.metricBefore : metricCode) !== f.metricBefore,
+      },
+    };
+  });
+}

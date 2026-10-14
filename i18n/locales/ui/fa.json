@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "باز کردن متن جای‌گذاری‌شده",
   "agent.coding_tool.check.checking": "در حال بررسی کد…",
   "agent.coding_tool.check.passed": "کد از بررسی عبور می‌کند",
-  "agent.coding_tool.check.failed": "بررسی مشکلاتی پیدا کرد"
+  "agent.coding_tool.check.failed": "بررسی مشکلاتی پیدا کرد",
+  "agent.coding_tool.fix.attempt": "تلاش اصلاح {p1} از {p2}",
+  "agent.coding_tool.fix.failed": "آنچه بررسی پیدا کرد",
+  "agent.coding_tool.fix.fix": "اصلاح",
+  "agent.coding_tool.fix.writing": "در حال نوشتن اصلاح…",
+  "agent.coding_tool.fix.changed": "تغییر کرد: {p1}",
+  "agent.coding_tool.fix.unchanged": "هیچ کدی تغییر نکرد"
 }

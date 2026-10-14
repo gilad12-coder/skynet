@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "פתח טקסט מודבק",
   "agent.coding_tool.check.checking": "בודקים את הקוד…",
   "agent.coding_tool.check.passed": "הקוד עובר את הבדיקה",
-  "agent.coding_tool.check.failed": "הבדיקה מצאה בעיות"
+  "agent.coding_tool.check.failed": "הבדיקה מצאה בעיות",
+  "agent.coding_tool.fix.attempt": "ניסיון תיקון {p1} מתוך {p2}",
+  "agent.coding_tool.fix.failed": "מה הבדיקה מצאה",
+  "agent.coding_tool.fix.fix": "התיקון",
+  "agent.coding_tool.fix.writing": "כותבים את התיקון…",
+  "agent.coding_tool.fix.changed": "שונה: {p1}",
+  "agent.coding_tool.fix.unchanged": "לא שונה קוד"
 }

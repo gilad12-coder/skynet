@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "चिपकाया गया टेक्स्ट खोलें",
   "agent.coding_tool.check.checking": "कोड की जाँच हो रही है…",
   "agent.coding_tool.check.passed": "कोड जाँच में पास है",
-  "agent.coding_tool.check.failed": "जाँच में समस्याएँ मिलीं"
+  "agent.coding_tool.check.failed": "जाँच में समस्याएँ मिलीं",
+  "agent.coding_tool.fix.attempt": "सुधार प्रयास {p2} में से {p1}",
+  "agent.coding_tool.fix.failed": "जाँच में क्या मिला",
+  "agent.coding_tool.fix.fix": "सुधार",
+  "agent.coding_tool.fix.writing": "सुधार लिखा जा रहा है…",
+  "agent.coding_tool.fix.changed": "बदला गया: {p1}",
+  "agent.coding_tool.fix.unchanged": "कोई कोड नहीं बदला"
 }

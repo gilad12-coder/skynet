@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "Yapıştırılan metni aç",
   "agent.coding_tool.check.checking": "Kod kontrol ediliyor…",
   "agent.coding_tool.check.passed": "Kod kontrolden geçiyor",
-  "agent.coding_tool.check.failed": "Kontrol sorunlar buldu"
+  "agent.coding_tool.check.failed": "Kontrol sorunlar buldu",
+  "agent.coding_tool.fix.attempt": "Düzeltme denemesi {p1}/{p2}",
+  "agent.coding_tool.fix.failed": "Kontrolün bulduğu sorunlar",
+  "agent.coding_tool.fix.fix": "Düzeltme",
+  "agent.coding_tool.fix.writing": "Düzeltme yazılıyor…",
+  "agent.coding_tool.fix.changed": "Değişti: {p1}",
+  "agent.coding_tool.fix.unchanged": "Kod değişmedi"
 }

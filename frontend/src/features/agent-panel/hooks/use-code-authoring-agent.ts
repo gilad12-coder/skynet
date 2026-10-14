@@ -13,7 +13,14 @@ import type { ColumnMapping, ValidateCodeResponse, WorkflowSpec } from "@/shared
 import type { UnifiedAuthoringContext } from "@/shared/types/unified-run";
 
 import type { ConfirmedDataset } from "../components/DatasetUploadCard";
-import { contractValidations, panelAuthoringContext, panelContractSpec } from "../lib/code-authoring";
+import {
+  contractValidations,
+  describeFixes,
+  panelAuthoringContext,
+  panelContractSpec,
+  type AuthoringFixAttempt,
+  type FixRecord,
+} from "../lib/code-authoring";
 import type { WizardState } from "../lib/types";
 import { useWizardStateOptional } from "./use-wizard-state";
 
@@ -28,6 +35,9 @@ const EDIT_CHECK_DELAY_MS = 600;
 
 /** Where the validity check of the current run code and metric stands. */
 export type AuthoringCheckStatus = "idle" | "checking" | "passed" | "failed";
+
+/** How many failed checks the coding agent is asked to fix, at most. */
+export const MAX_AUTHORING_FIXES = MAX_CONTRACT_FIXES;
 
 /**
  * The code agent's state plus the artifact fields the panel mirror renders and
@@ -46,6 +56,8 @@ export interface CodeAuthoringAgentState extends CodeAgentState {
   contractOk: boolean;
   /** Where the validity check of the current code stands, for the card. */
   checkStatus: AuthoringCheckStatus;
+  /** Each failed check handed back to the agent for a fix, oldest first. */
+  fixAttempts: AuthoringFixAttempt[];
   /** A user edit in the card's run-code editor. */
   editSignatureCode: (code: string) => void;
   /** A user edit in the card's metric editor. */
@@ -169,6 +181,8 @@ interface AuthoringCheckArgs {
   metricCode: string;
   /** True while the code is exactly what the coding agent last wrote. */
   agentAuthored: boolean;
+  /** How many messages the coding agent's chat holds right now. */
+  messageCount: number;
   setSignatureValidation: (result: ValidateCodeResponse | null) => void;
   setMetricValidation: (result: ValidateCodeResponse | null) => void;
   send: (message: string) => void;
@@ -180,15 +194,22 @@ interface AuthoringCheckArgs {
  * a failure on the agent's own code back to it, a bounded number of times.
  * Code the user edited is checked too, but never sent back for a fix.
  *
+ * Any settled code is checked, not only what a coding turn just finished:
+ * each wizard screen has its own conversation, so coming back to the Metric
+ * screen resets the agent to idle while the wizard keeps its code, and an
+ * edit made after that must still be checked.
+ *
  * Args:
  *   args: The authoring context, the agent status, both codes and the sinks.
  *
  * Returns:
- *   The check status, whether the current code passed, and a reset.
+ *   The check status, whether the current code passed, the fixes asked for,
+ *   and a reset.
  */
 function useAuthoringCheck(args: AuthoringCheckArgs): {
   status: AuthoringCheckStatus;
   ok: boolean;
+  fixes: FixRecord[];
   reset: () => void;
 } {
   const {
@@ -198,16 +219,21 @@ function useAuthoringCheck(args: AuthoringCheckArgs): {
     signatureCode,
     metricCode,
     agentAuthored,
+    messageCount,
     setSignatureValidation,
     setMetricValidation,
     send,
   } = args;
   const [result, setResult] = React.useState<{ key: string; ok: boolean } | null>(null);
   const [fixKey, setFixKey] = React.useState<string | null>(null);
+  const [fixes, setFixes] = React.useState<FixRecord[]>([]);
   const fixAttemptsRef = React.useRef(0);
   const key = `${contextKey}\u0000${signatureCode}\u0000${metricCode}`;
   const checkable =
-    context !== null && status === "done" && !!signatureCode.trim() && !!metricCode.trim();
+    context !== null && status !== "streaming" && !!signatureCode.trim() && !!metricCode.trim();
+  // Only code a coding turn finished goes back for a fix; a stopped or
+  // failed turn's code is checked but not sent back.
+  const fixable = agentAuthored && status === "done";
 
   React.useEffect(() => {
     if (!context || !checkable) return;
@@ -224,8 +250,16 @@ function useAuthoringCheck(args: AuthoringCheckArgs): {
             setSignatureValidation(run);
             setMetricValidation(metric);
             setResult({ key, ok: checked.ok });
-            if (!checked.ok && agentAuthored && fixAttemptsRef.current < MAX_CONTRACT_FIXES) {
+            if (!checked.ok && fixable && fixAttemptsRef.current < MAX_CONTRACT_FIXES) {
               fixAttemptsRef.current += 1;
+              const record: FixRecord = {
+                attempt: fixAttemptsRef.current,
+                failures: [...run.errors, ...metric.errors],
+                runBefore: signatureCode,
+                metricBefore: metricCode,
+                from: null,
+              };
+              setFixes((prev) => [...prev, record]);
               setFixKey(key);
             }
           })
@@ -251,7 +285,7 @@ function useAuthoringCheck(args: AuthoringCheckArgs): {
     signatureCode,
     metricCode,
     key,
-    agentAuthored,
+    fixable,
     setSignatureValidation,
     setMetricValidation,
   ]);
@@ -261,19 +295,25 @@ function useAuthoringCheck(args: AuthoringCheckArgs): {
   React.useEffect(() => {
     if (!fixKey || status !== "done") return;
     setFixKey(null);
+    setFixes((prev) =>
+      prev.map((f, i) =>
+        i === prev.length - 1 && f.from === null ? { ...f, from: messageCount } : f,
+      ),
+    );
     send(msg("submit.v2.metric.agent.fix"));
-  }, [fixKey, status, send]);
+  }, [fixKey, status, send, messageCount]);
 
   const reset = React.useCallback(() => {
     setResult(null);
     setFixKey(null);
+    setFixes([]);
     fixAttemptsRef.current = 0;
   }, []);
 
   const settled = result !== null && result.key === key;
   let checkStatus: AuthoringCheckStatus = "idle";
   if (checkable) checkStatus = settled ? (result.ok ? "passed" : "failed") : "checking";
-  return { status: checkStatus, ok: settled && result.ok, reset };
+  return { status: checkStatus, ok: settled && result.ok, fixes, reset };
 }
 
 /**
@@ -523,10 +563,22 @@ export function useCodeAuthoringAgent(
     signatureCode,
     metricCode,
     agentAuthored,
+    messageCount: agent.messages.length,
     setSignatureValidation,
     setMetricValidation,
     send: agent.send,
   });
+  const fixAttempts = React.useMemo(
+    () =>
+      describeFixes(
+        check.fixes,
+        agent.messages,
+        agent.status === "streaming",
+        signatureCode,
+        metricCode,
+      ),
+    [check.fixes, agent.messages, agent.status, signatureCode, metricCode],
+  );
 
   const bufferSignatureEdit = signatureBuffer.edit;
   const bufferMetricEdit = metricBuffer.edit;
@@ -578,6 +630,7 @@ export function useCodeAuthoringAgent(
     metricValidation,
     contractOk: authoringContext !== null && check.ok,
     checkStatus: check.status,
+    fixAttempts,
     editSignatureCode,
     editMetricCode,
     sharedWithWizard: shared,

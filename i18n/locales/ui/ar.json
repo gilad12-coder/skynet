@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "فتح النص الملصق",
   "agent.coding_tool.check.checking": "جارٍ فحص الشيفرة…",
   "agent.coding_tool.check.passed": "الشيفرة تجتاز الفحص",
-  "agent.coding_tool.check.failed": "عثر الفحص على مشكلات"
+  "agent.coding_tool.check.failed": "عثر الفحص على مشكلات",
+  "agent.coding_tool.fix.attempt": "محاولة الإصلاح {p1} من {p2}",
+  "agent.coding_tool.fix.failed": "ما وجده الفحص",
+  "agent.coding_tool.fix.fix": "الإصلاح",
+  "agent.coding_tool.fix.writing": "جارٍ كتابة الإصلاح…",
+  "agent.coding_tool.fix.changed": "تم التغيير: {p1}",
+  "agent.coding_tool.fix.unchanged": "لم تتغير أي شيفرة"
 }

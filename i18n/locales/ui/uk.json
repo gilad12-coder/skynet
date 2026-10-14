@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "Відкрити вставлений текст",
   "agent.coding_tool.check.checking": "Перевіряємо код…",
   "agent.coding_tool.check.passed": "Код проходить перевірку",
-  "agent.coding_tool.check.failed": "Перевірка знайшла проблеми"
+  "agent.coding_tool.check.failed": "Перевірка знайшла проблеми",
+  "agent.coding_tool.fix.attempt": "Спроба виправлення {p1} з {p2}",
+  "agent.coding_tool.fix.failed": "Що знайшла перевірка",
+  "agent.coding_tool.fix.fix": "Виправлення",
+  "agent.coding_tool.fix.writing": "Пишемо виправлення…",
+  "agent.coding_tool.fix.changed": "Змінено: {p1}",
+  "agent.coding_tool.fix.unchanged": "Код не змінено"
 }

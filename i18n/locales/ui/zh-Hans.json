@@ -4149,5 +4149,11 @@
   "shared.agent.pasted_text_open": "打开粘贴的文本",
   "agent.coding_tool.check.checking": "正在检查代码…",
   "agent.coding_tool.check.passed": "代码通过检查",
-  "agent.coding_tool.check.failed": "检查发现问题"
+  "agent.coding_tool.check.failed": "检查发现问题",
+  "agent.coding_tool.fix.attempt": "修复尝试 {p1}/{p2}",
+  "agent.coding_tool.fix.failed": "检查发现的问题",
+  "agent.coding_tool.fix.fix": "修复",
+  "agent.coding_tool.fix.writing": "正在编写修复…",
+  "agent.coding_tool.fix.changed": "已更改：{p1}",
+  "agent.coding_tool.fix.unchanged": "未更改代码"
 }

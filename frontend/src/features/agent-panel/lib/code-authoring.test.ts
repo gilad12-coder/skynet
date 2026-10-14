@@ -16,7 +16,63 @@ registerHooks({
   },
 });
 
-const { panelAuthoringContext } = await import("./code-authoring.ts");
+const { describeFixes, panelAuthoringContext } = await import("./code-authoring.ts");
+
+const fix1 = {
+  attempt: 1,
+  failures: ["The metric must return a number"],
+  runBefore: "run v1",
+  metricBefore: "metric v1",
+  from: 2,
+};
+
+test("a fix stays pending until its turn has sent and finished", () => {
+  const notSent = describeFixes([{ ...fix1, from: null }], [], false, "run v1", "metric v1");
+  assert.equal(notSent[0].fix, null);
+  const chat = [
+    { role: "user", content: "write it" },
+    { role: "assistant", content: "done" },
+    { role: "user", content: "fix it" },
+    { role: "assistant", content: "" },
+  ];
+  assert.equal(describeFixes([fix1], chat, true, "run v1", "metric v2")[0].fix, null);
+});
+
+test("a finished fix carries the agent's reply and which code it changed", () => {
+  const chat = [
+    { role: "user", content: "write it" },
+    { role: "assistant", content: "done" },
+    { role: "user", content: "fix it" },
+    { role: "assistant", content: " Returned a float score. " },
+  ];
+  const [attempt] = describeFixes([fix1], chat, false, "run v1", "metric v2");
+  assert.equal(attempt.attempt, 1);
+  assert.deepEqual(attempt.failures, ["The metric must return a number"]);
+  assert.deepEqual(attempt.fix, {
+    reply: "Returned a float score.",
+    runChanged: false,
+    metricChanged: true,
+  });
+});
+
+test("an earlier fix is measured against the code the next check saw", () => {
+  const fix2 = { ...fix1, attempt: 2, runBefore: "run v2", metricBefore: "metric v1", from: 4 };
+  const chat = [
+    { role: "user", content: "write it" },
+    { role: "assistant", content: "done" },
+    { role: "user", content: "fix it" },
+    { role: "assistant", content: "Fixed the run." },
+    { role: "user", content: "fix it" },
+    { role: "assistant", content: "Fixed the metric." },
+  ];
+  const [first, second] = describeFixes([fix1, fix2], chat, false, "run v2", "metric v2");
+  assert.deepEqual(first.fix, { reply: "Fixed the run.", runChanged: true, metricChanged: false });
+  assert.deepEqual(second.fix, {
+    reply: "Fixed the metric.",
+    runChanged: false,
+    metricChanged: true,
+  });
+});
 
 const dataset = {
   rows: [{ message: "I was charged twice", label: "billing" }],
