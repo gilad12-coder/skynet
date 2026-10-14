@@ -44,12 +44,15 @@ _EVENT_NAMES = {
 }
 _PROPERTY_KEYS = {
     "cents",
+    "check",
+    "code",
     "engine",
     "generation_models",
     "has_cases",
     "has_reflection",
     "href",
     "id",
+    "index",
     "kind",
     "label",
     "method",
@@ -69,6 +72,7 @@ _PROPERTY_KEYS = {
     "shared",
     "source",
     "status",
+    "step",
     "strategy",
     "tab",
     "tag",
