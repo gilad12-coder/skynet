@@ -56,6 +56,8 @@ export interface CodeAuthoringAgentState extends CodeAgentState {
   contractOk: boolean;
   /** Where the validity check of the current code stands, for the card. */
   checkStatus: AuthoringCheckStatus;
+  /** True when run code and a metric already exist, so a new request continues from them. */
+  hasCode: boolean;
   /** Each failed check handed back to the agent for a fix, oldest first. */
   fixAttempts: AuthoringFixAttempt[];
   /** A user edit in the card's run-code editor. */
@@ -423,6 +425,11 @@ export function useCodeAuthoringAgent(
   const contextKey = JSON.stringify(
     isWorkflow ? null : (wizardContext ?? panelAuthoringContext(wizard, dataset)),
   );
+  // Each wizard screen opens its own chat, so coming back to the Metric screen
+  // resets the coding agent while the wizard keeps its code. A seed would then
+  // rewrite that code from scratch and drop the user's edits; existing code is
+  // continued with a follow-up turn instead.
+  const hasCode = !isWorkflow && !!signatureCode.trim() && !!metricCode.trim();
   const authoringContext = React.useMemo(
     () => JSON.parse(contextKey) as UnifiedAuthoringContext | null,
     [contextKey],
@@ -542,7 +549,7 @@ export function useCodeAuthoringAgent(
     metricValidation,
     runSignatureValidation: noValidation,
     runMetricValidation: isWorkflow ? runWorkflowMetricValidation : noValidation,
-    seedEnabled: armed && (isWorkflow || authoringContext !== null),
+    seedEnabled: armed && (isWorkflow || (authoringContext !== null && !hasCode)),
     unified: authoringContext,
     onBrief,
     model,
@@ -636,6 +643,7 @@ export function useCodeAuthoringAgent(
     metricValidation,
     contractOk: authoringContext !== null && check.ok,
     checkStatus: check.status,
+    hasCode,
     fixAttempts,
     editSignatureCode,
     editMetricCode,

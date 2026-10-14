@@ -198,14 +198,15 @@ export function describeFixes(
 /**
  * The change a repeated ``request_code_authoring`` call asks the coding agent for.
  *
- * The first call seeds the code from the wizard's context. The coding agent
- * seeds only once per conversation, so a later call carries its goal to the
- * agent as a follow-up turn; without it the card stays as it was while the
- * chat says the code is being changed.
+ * The first call seeds the code from the wizard's context. Once code exists
+ * the coding agent does not seed again, so a later call carries its goal to
+ * the agent as a follow-up turn; without it the card stays as it was while
+ * the chat says the code is being changed.
  *
  * Args:
  *   args: The tool call's arguments.
- *   alreadyRan: Whether the coding agent already wrote code in this conversation.
+ *   alreadyRan: Whether the coding agent already wrote code, in this
+ *     conversation or an earlier screen's.
  *
  * Returns:
  *   The goal to send as a follow-up, or null when there is none to send.

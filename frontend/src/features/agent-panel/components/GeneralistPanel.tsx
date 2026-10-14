@@ -459,7 +459,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   // alone — or the user could fire "submit" mid-authoring against a wizard
   // that has no validated code yet.
   const codeAuthoringActive = codeAgent.status === "streaming";
-  const codeAgentRan = codeAgent.messages.length > 0;
+  const codeAgentRan = codeAgent.messages.length > 0 || codeAgent.hasCode;
   React.useEffect(() => {
     codeAgentRanRef.current = codeAgentRan;
   }, [codeAgentRan]);
