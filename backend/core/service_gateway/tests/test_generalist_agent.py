@@ -94,6 +94,19 @@ def test_named_run_with_task_unlocks_code_authoring() -> None:
     assert _SUBMIT not in allowed
 
 
+def test_wizard_screen_opens_code_authoring_without_a_run_name() -> None:
+    """On the submit wizard an unnamed run with a task still gets the coding tool.
+
+    The wizard never asks for a name, and since SKY-26 its Metric screen has no
+    code writer other than ``request_code_authoring``.
+    """
+    state = {k: _READY[k] for k in ("task_objective", "artifact_kind", "starting_version")}
+    assert "request_code_authoring" not in tools_for(cast(WizardState, state))
+    on_wizard = cast(WizardState, {**state, "wizard_screen": "metric"})
+    assert "request_code_authoring" in screen_tools(tools_for(on_wizard), on_wizard)
+    assert _SUBMIT not in tools_for(on_wizard)
+
+
 def test_full_readiness_unlocks_submit() -> None:
     """Every step settled exposes the one submit tool."""
     assert _SUBMIT in tools_for(cast(WizardState, _READY))
