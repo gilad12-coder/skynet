@@ -622,7 +622,10 @@ export function useCodeAuthoringAgent(
     agentReset();
     setLocalSignatureCode("");
     setLocalMetricCode("");
-    setAgentWrote({ signature: "", metric: "" });
+    // The wizard keeps its code across screens, so what the agent wrote there
+    // still counts as its own until someone edits it; a failed check on it,
+    // or on a follow-up's change to one half, still goes back for a fix.
+    if (!sharedRef.current) setAgentWrote({ signature: "", metric: "" });
     setSignatureValidation(null);
     setMetricValidation(null);
     checkReset();
