@@ -87,6 +87,8 @@ class I18nKey(StrEnum):
     CONNECTORS_UNKNOWN_PROVIDER = 'connectors.unknown_provider'
     CONNECTORS_UNREACHABLE = 'connectors.unreachable'
     CONNECTORS_VAULT_NOT_CONFIGURED = 'connectors.vault_not_configured'
+    CONTRACT_FILE_INVALID = 'contract.file_invalid'
+    CONTRACT_FILES_UNSUPPORTED = 'contract.files_unsupported'
     CONTRACT_METRIC_ERROR = 'contract.metric_error'
     CONTRACT_METRIC_MISSING = 'contract.metric_missing'
     CONTRACT_METRIC_MODEL_MISSING = 'contract.metric_model_missing'

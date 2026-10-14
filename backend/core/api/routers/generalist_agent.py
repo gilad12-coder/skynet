@@ -89,14 +89,18 @@ def _coding_outcome_text(outcome: dict[str, Any]) -> str:
 
     Args:
         outcome: The compact outcome the panel recorded: ``files`` (each with
-            ``file``, ``added``, ``removed``), ``check`` and ``errors``.
+            ``file``, ``added``, ``removed``), ``deleted``, ``check`` and ``errors``.
 
     Returns:
-        A sentence saying the run finished, what it wrote and how the check ended.
+        A sentence saying the run finished, what it wrote or deleted and how
+        its last check ended.
     """
     files = [f for f in outcome.get("files") or [] if isinstance(f, dict)]
     wrote = ", ".join(f"{f.get('file')} (+{f.get('added', 0)} -{f.get('removed', 0)})" for f in files)
-    parts = [f"FINISHED: the coding agent wrote {wrote}" if wrote else "FINISHED: the coding agent changed no file"]
+    deleted = ", ".join(str(d) for d in outcome.get("deleted") or [])
+    changes = [f"wrote {wrote}" if wrote else "", f"deleted {deleted}" if deleted else ""]
+    changed = " and ".join(c for c in changes if c)
+    parts = [f"FINISHED: the coding agent {changed}" if changed else "FINISHED: the coding agent changed no file"]
     status = outcome.get("status")
     if status == "stopped":
         parts.append("it was stopped before it finished")

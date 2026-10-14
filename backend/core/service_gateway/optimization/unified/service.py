@@ -90,6 +90,7 @@ def unified_job_spec(
         "artifact_kind": payload.task.artifact.kind,
         "run_code": payload.workspace.run_code,
         "metric_code": payload.workspace.metric_code,
+        "files": dict(payload.workspace.files),
         "input_fields": list(payload.data.input_fields),
         "expected_field": payload.data.expected_field,
         "models": {

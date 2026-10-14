@@ -65,6 +65,8 @@
     "winningCandidate": "最良候補"
   },
   "messages": {
+    "contract.file_invalid": "ファイル {path} が無効です: {error}",
+    "contract.files_unsupported": "DSPy オプティマイザーは run.py と metric.py しか実行しません。追加ファイルのコードを run.py に移すか、別のオプティマイザーを選んでください。",
     "contract.metric_error": "サンプル {index} でメトリクスが失敗しました: {error}",
     "contract.metric_missing": "メトリクスのコードに、このオプティマイザーが呼び出す関数が定義されていません。",
     "contract.metric_model_missing": "メトリクスがモデルを呼び出すため、メトリクスのモデルを選んでください。",

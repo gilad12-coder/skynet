@@ -356,3 +356,137 @@ def test_unified_draft_of_a_retry_opens_a_new_row(u_session: _UnifiedEditSession
     assert len(starts) == 3
     assert starts[0] == starts[1] != starts[2]
     assert [e["data"]["source"] for e in u_events if e["event"] == "code_draft"] == ["metric", "metric"]
+
+
+def _verdicts(run_code: str, metric_code: str, files: dict[str, str]) -> list[dict]:
+    """Fail ``helpers.py`` while it is missing ``def helper``; pass everything else.
+
+    Args:
+        run_code: Unused.
+        metric_code: Unused.
+        files: The extra files.
+
+    Returns:
+        One verdict per file.
+    """
+    out = [
+        {"path": "run.py", "ok": True, "errors": [], "warnings": []},
+        {"path": "metric.py", "ok": True, "errors": [], "warnings": []},
+    ]
+    for path, text in sorted(files.items()):
+        broken = path == "helpers.py" and "def helper" not in text
+        errors = [f"{path}:1:1 F821 Undefined name `helper`"] if broken else []
+        out.append({"path": path, "ok": not broken, "errors": errors, "warnings": []})
+    return out
+
+
+@pytest.fixture
+def ws_session(u_events: list[dict]) -> _UnifiedEditSession:
+    """Build a unified session with one extra file and a scripted verifier."""
+    run_validator, metric_validator = _unified_validators(_unified())
+    return _UnifiedEditSession(
+        run_code=_RUN,
+        metric_code=_SCORE,
+        emit=u_events.append,
+        run_validator=run_validator,
+        metric_validator=metric_validator,
+        files={"notes.txt": "hi"},
+        verifier=_verdicts,
+    )
+
+
+def test_write_file_creates_an_extra_file(ws_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """write_file adds the file, emits file_replace and closes its row ok."""
+    observation = ws_session.write_file("add helper", "helpers.py", "def helper():\n    return 1\n")
+    assert "created" in observation
+    assert ws_session.files["helpers.py"] == "def helper():\n    return 1"
+    kinds = [e["event"] for e in u_events]
+    assert kinds == ["tool_start", "file_replace", "tool_end"]
+    assert u_events[1]["data"] == {"path": "helpers.py", "code": "def helper():\n    return 1"}
+    assert u_events[2]["data"]["status"] == "ok"
+    assert u_events[0]["data"]["path"] == "helpers.py"
+
+
+@pytest.mark.parametrize("path", ["/etc/passwd", "../x.py", "a/../b.py", "run.py", "metric.py", "x.exe", "skynet.py"])
+def test_write_file_rejects_unsafe_or_fixed_paths(
+    ws_session: _UnifiedEditSession, u_events: list[dict], path: str
+) -> None:
+    """Absolute, parent, fixed and non-text paths are refused and nothing changes."""
+    observation = ws_session.write_file("x", path, "x = 1\n")
+    assert "rejected" in observation
+    assert path not in ws_session.files
+    assert u_events[-1]["data"]["status"] == "error"
+    assert not any(e["event"] == "file_replace" for e in u_events)
+
+
+def test_write_file_rejects_python_that_does_not_parse(ws_session: _UnifiedEditSession) -> None:
+    """A helper that does not parse is refused with its line."""
+    observation = ws_session.write_file("x", "helpers.py", "def (:\n")
+    assert "does not parse" in observation
+    assert "helpers.py" not in ws_session.files
+
+
+def test_delete_file_removes_extra_files_but_never_run_or_metric(
+    ws_session: _UnifiedEditSession, u_events: list[dict]
+) -> None:
+    """Extra files can be deleted; run.py and metric.py cannot."""
+    assert "deleted" in ws_session.delete_file("tidy", "notes.txt")
+    assert ws_session.files == {}
+    assert {"event": "file_delete", "data": {"path": "notes.txt"}} in u_events
+    assert "cannot be deleted" in ws_session.delete_file("x", "run.py")
+    assert "no file" in ws_session.delete_file("x", "ghost.py")
+
+
+def test_verify_code_reports_each_file_and_opens_a_fix(ws_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """A failed check names the file, emits per-file results and allows one more write of it."""
+    ws_session.write_file("add helper", "helpers.py", "x = helper\n")
+    u_events.clear()
+    observation = ws_session.verify_code()
+    assert "helpers.py: helpers.py:1:1 F821" in observation
+    assert "run.py: OK" in observation
+    result = next(e["data"] for e in u_events if e["event"] == "verify_result")
+    assert result["ok"] is False
+    assert [f["path"] for f in result["files"]] == ["run.py", "metric.py", "helpers.py", "notes.txt"]
+    assert [e["event"] for e in u_events] == ["tool_start", "verify_result", "tool_end"]
+    assert u_events[0]["data"]["tool"] == "verify_code"
+    assert u_events[-1]["data"]["status"] == "error"
+    assert ws_session.verified
+    assert "created" not in ws_session.write_file("fix", "helpers.py", "def helper():\n    return 1\n")
+    assert ws_session.files["helpers.py"].startswith("def helper")
+    assert not ws_session.verified
+    assert "rejected" in ws_session.write_file("again", "helpers.py", "def helper():\n    return 2\n")
+    assert "All files pass" in ws_session.verify_code()
+
+
+def test_verify_code_without_a_verifier_closes_its_row(u_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """With no verifier the row still closes, as failed."""
+    assert "No check" in u_session.verify_code()
+    assert u_events[-1]["data"] == {"id": u_events[0]["data"]["id"], "tool": "verify_code", "status": "error"}
+
+
+def test_write_file_draft_streams_to_its_path(ws_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """A write_file draft opens one row for its path and the write reuses it."""
+    ws_session.draft("write_file:helpers.py", 0, "def helper")
+    ws_session.draft("write_file:helpers.py", 10, "():\n")
+    assert [e["event"] for e in u_events] == ["tool_start", "code_draft", "code_draft"]
+    assert u_events[1]["data"] == {"source": "file", "chunk": "def helper", "reset": True, "path": "helpers.py"}
+    row = u_events[0]["data"]["id"]
+    ws_session.write_file("add", "helpers.py", "def helper():\n    return 1\n")
+    assert u_events[-1]["data"]["id"] == row
+
+
+def test_write_file_draft_to_an_unsafe_path_is_dropped(ws_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """A draft for a path write_file would refuse never reaches the tree."""
+    ws_session.draft("write_file:../evil.py", 0, "x")
+    assert u_events == []
+
+
+def test_real_unified_verifier_maps_lint_to_the_file() -> None:
+    """The real check flags an undefined name in the helper, not in run.py."""
+    verify = code_module._unified_verifier(_unified(optimizer="gepa"))
+    run = "from helpers import helper\n\ndef run(artifact, input):\n    return helper(artifact)\n"
+    verdicts = {v["path"]: v for v in verify(run, _SCORE, {"helpers.py": "def helper(x):\n    return y\n"})}
+    assert verdicts["run.py"]["ok"]
+    assert verdicts["metric.py"]["ok"]
+    assert not verdicts["helpers.py"]["ok"]
+    assert "F821" in verdicts["helpers.py"]["errors"][0]

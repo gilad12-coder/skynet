@@ -65,6 +65,8 @@
     "winningCandidate": "победивший кандидат"
   },
   "messages": {
+    "contract.file_invalid": "Файл {path} недействителен: {error}",
+    "contract.files_unsupported": "Оптимизаторы DSPy запускают только run.py и metric.py. Перенесите код из дополнительных файлов в run.py или выберите другой оптимизатор.",
     "contract.metric_error": "Метрика завершилась с ошибкой на примере {index}: {error}",
     "contract.metric_missing": "Код метрики не определяет функцию, которую вызывает этот оптимизатор.",
     "contract.metric_model_missing": "Метрика вызывает модель, поэтому выберите модель метрики.",

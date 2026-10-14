@@ -367,6 +367,8 @@
     "contract.shape.blackbox": "פונקציית הציון חייבת להחזיר (score, side_info), כש־side_info הוא מילון עם מחרוזת feedback.",
     "contract.metric_model_missing": "פונקציית המדידה קוראת למודל, לכן בחרו מודל לפונקציית המדידה.",
     "contract.runner_outdated": "סביבת ההרצה של הבדיקה ישנה יותר מהקוד ועדיין מצפה לחוזה הקודם, ולכן צריך לבנות אותה מחדש. הקוד שלכם לא צריך שינוי.",
+    "contract.files_unsupported": "אופטימייזרים של DSPy מריצים רק את run.py ו־metric.py. העבירו את הקוד מהקבצים הנוספים אל run.py, או בחרו אופטימייזר אחר.",
+    "contract.file_invalid": "הקובץ {path} לא תקין: {error}",
     "contract.passed": "הקוד תואם את מה שהאופטימייזר צריך."
   },
   "backend": {

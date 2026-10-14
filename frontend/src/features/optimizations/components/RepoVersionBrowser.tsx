@@ -7,35 +7,13 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import {
-  CaretRight,
   Code,
   DotsThree,
   Eye,
   File,
-  FileC,
-  FileCode,
-  FileCpp,
-  FileCss,
-  FileCsv,
-  FileHtml,
-  FileImage,
-  FileJs,
-  FileLock,
-  FileMd,
-  FilePy,
-  FileRs,
-  FileSql,
-  FileSvg,
-  FileTs,
-  FileTsx,
-  FileTxt,
-  FileZip,
-  Folder,
-  FolderOpen,
   Folders,
   MagnifyingGlass,
 } from "@/shared/ui/icons";
@@ -46,9 +24,9 @@ import { Input } from "@/shared/ui/primitives/input";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { RenderedText } from "@/shared/ui/rendered-text";
+import { FileTreeList, type FileTreeRowLook } from "@/shared/ui/file-tree";
 import { getRepositoryFile, getRepositoryTree } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 import { CODE_HIGHLIGHT_SPECS } from "@/shared/ui/code-highlight-style";
 import type { RepositoryFileResponse, RepositoryTreeEntry } from "@/shared/types/api";
@@ -63,14 +41,11 @@ import {
 } from "../lib/blackbox-diff";
 import { applyFilePatch, parsePatch, type ApplyResult, type FilePatch } from "../lib/repo-patch";
 import {
-  ancestors,
   buildRepoTree,
   changedFolders,
   hasFile,
   repoFileKind,
-  visibleRows,
   type RepoNode,
-  type RepoRow,
   type RepoScope,
 } from "../lib/repo-browser";
 import type { HighlightToken } from "../lib/repo-highlight";
@@ -158,57 +133,6 @@ const SPEC_STYLE: CSSProperties[] = CODE_HIGHLIGHT_SPECS.map((spec) => ({
   fontStyle: spec.fontStyle,
 }));
 
-const ICON_BY_EXTENSION: Record<string, typeof File> = {
-  c: FileC,
-  h: FileC,
-  cc: FileCpp,
-  cpp: FileCpp,
-  hpp: FileCpp,
-  css: FileCss,
-  scss: FileCss,
-  csv: FileCsv,
-  tsv: FileCsv,
-  html: FileHtml,
-  htm: FileHtml,
-  png: FileImage,
-  jpg: FileImage,
-  jpeg: FileImage,
-  gif: FileImage,
-  webp: FileImage,
-  js: FileJs,
-  mjs: FileJs,
-  cjs: FileJs,
-  jsx: FileJs,
-  lock: FileLock,
-  md: FileMd,
-  mdx: FileMd,
-  py: FilePy,
-  pyi: FilePy,
-  rs: FileRs,
-  sql: FileSql,
-  svg: FileSvg,
-  ts: FileTs,
-  mts: FileTs,
-  tsx: FileTsx,
-  txt: FileTxt,
-  zip: FileZip,
-  gz: FileZip,
-  tar: FileZip,
-  json: FileCode,
-  yaml: FileCode,
-  yml: FileCode,
-  toml: FileCode,
-  go: FileCode,
-  java: FileCode,
-  rb: FileCode,
-  sh: FileCode,
-};
-
-function extensionOf(name: string): string {
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
-}
-
 function trimFinalNewline(text: string): string {
   return text.endsWith("\n") ? text.slice(0, -1) : text;
 }
@@ -247,128 +171,33 @@ function writeSetting(key: string, value: string): void {
   }
 }
 
-/** Folders open by default in one list: those holding a change, plus the open file's. */
-function defaultOpen(root: RepoNode, scope: RepoScope, selected: string | null): Set<string> {
+/** Folders open by default in one list: those holding a change. */
+function defaultOpen(root: RepoNode, scope: RepoScope): Set<string> {
   // The other-files list hides every change, so opening a folder for one
   // would show it full of unrelated files.
-  const open = scope === "unchanged" ? new Set<string>() : changedFolders(root);
-  if (selected) ancestors(selected).forEach((path) => open.add(path));
-  return open;
+  return scope === "unchanged" ? new Set<string>() : changedFolders(root);
 }
 
-function TreeList({
-  root,
-  scope,
-  filter,
-  selected,
-  label,
-  onSelect,
-}: {
-  root: RepoNode;
-  scope: RepoScope;
-  filter: string;
-  selected: string | null;
-  label: string;
-  onSelect: (path: string) => void;
-}) {
-  const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(new Map());
-  const [focused, setFocused] = useState<string | null>(null);
-  const rowRefs = useRef(new Map<string, HTMLDivElement>());
-
-  const expanded = useMemo(() => {
-    const open = defaultOpen(root, scope, selected);
-    for (const [path, isOpen] of overrides) {
-      if (isOpen) open.add(path);
-      else open.delete(path);
-    }
-    return open;
-  }, [root, scope, selected, overrides]);
-  const rows = useMemo(
-    () => visibleRows(root, expanded, filter, scope),
-    [root, expanded, filter, scope],
-  );
-
-  // A file opened from outside the tree (the first change, a moved-file link)
-  // can sit far down a long list; bring it into view without moving the page.
-  useEffect(() => {
-    if (selected) rowRefs.current.get(selected)?.scrollIntoView({ block: "nearest" });
-  }, [selected]);
-  const focusIndex = Math.max(
-    0,
-    rows.findIndex((row) => row.node.path === (focused ?? selected)),
-  );
-
-  const toggle = (path: string, open?: boolean) =>
-    setOverrides((prev) => new Map(prev).set(path, open ?? !expanded.has(path)));
-
-  const focusRow = (row: RepoRow | undefined) => {
-    if (!row) return;
-    setFocused(row.node.path);
-    rowRefs.current.get(row.node.path)?.focus();
-  };
-
-  const activate = (row: RepoRow) => {
-    if (row.node.type === "dir") toggle(row.node.path);
-    else onSelect(row.node.path);
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const row = rows[focusIndex];
-    if (!row) return;
-    const rtl = getActiveDir() === "rtl";
-    const inward = rtl ? "ArrowLeft" : "ArrowRight";
-    const outward = rtl ? "ArrowRight" : "ArrowLeft";
-    let handled = true;
-    if (event.key === "ArrowDown") focusRow(rows[focusIndex + 1]);
-    else if (event.key === "ArrowUp") focusRow(rows[focusIndex - 1]);
-    else if (event.key === "Home") focusRow(rows[0]);
-    else if (event.key === "End") focusRow(rows[rows.length - 1]);
-    else if (event.key === "Enter" || event.key === " ") activate(row);
-    else if (event.key === inward) {
-      if (row.node.type === "dir" && !row.expanded) toggle(row.node.path, true);
-      else if (row.node.type === "dir") focusRow(rows[focusIndex + 1]);
-    } else if (event.key === outward) {
-      if (row.node.type === "dir" && row.expanded && !filter) toggle(row.node.path, false);
-      else {
-        const parentPath = ancestors(row.node.path).pop();
-        focusRow(rows.find((r) => r.node.path === parentPath));
-      }
-    } else handled = false;
-    if (handled) {
-      // Keeps the arrows from also stepping the version behind the tree.
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  };
-
-  if (rows.length === 0) {
-    return filter ? (
-      <p className="px-1 py-1 text-xs text-foreground/70">
-        {msg("optimization.blackbox.repo.browser.no_match")}
-      </p>
-    ) : null;
-  }
-  return (
-    <div role="tree" aria-label={label} onKeyDown={onKeyDown}>
-      {rows.map((row, i) => (
-        <TreeRow
-          key={row.node.path}
-          row={row}
-          selected={row.node.path === selected}
-          tabbable={i === focusIndex}
-          rowRef={(el) => {
-            if (el) rowRefs.current.set(row.node.path, el);
-            else rowRefs.current.delete(row.node.path);
-          }}
-          onActivate={() => {
-            setFocused(row.node.path);
-            activate(row);
-          }}
+function rowLook(node: RepoNode): FileTreeRowLook {
+  const change = node.change;
+  const isDir = node.type === "dir";
+  return {
+    nameClassName: cn(
+      node.removed && "line-through decoration-1",
+      node.changedCount > 0 && !isDir && "font-medium text-foreground",
+    ),
+    nameStyle: node.removed ? { color: REMOVED_FG } : undefined,
+    trailing:
+      !isDir && change ? (
+        <ChangeCounts
+          added={node.removed && change.status === "renamed" ? 0 : change.added}
+          removed={change.removed}
         />
-      ))}
-    </div>
-  );
+      ) : undefined,
+  };
 }
+
+const ALL_FILES = (): boolean => true;
 
 function FileTree({
   root,
@@ -381,6 +210,7 @@ function FileTree({
 }) {
   const [filter, setFilter] = useState("");
   const treeLabel = msg("optimization.blackbox.repo.browser.tree_aria");
+  const baseOpen = useMemo(() => defaultOpen(root, "all"), [root]);
 
   return (
     <div className="flex min-h-0 flex-col gap-2">
@@ -407,92 +237,18 @@ function FileTree({
         </div>
       </div>
       <div className="max-h-[22rem] min-h-0 overflow-auto rounded-md @2xl:max-h-[32rem]">
-        <TreeList
+        <FileTreeList
           root={root}
-          scope="all"
+          baseOpen={baseOpen}
           filter={filter}
           selected={selected}
           label={treeLabel}
+          emptyText={msg("optimization.blackbox.repo.browser.no_match")}
+          include={ALL_FILES}
+          look={rowLook}
           onSelect={onSelect}
         />
       </div>
-    </div>
-  );
-}
-
-function TreeRow({
-  row,
-  selected,
-  tabbable,
-  rowRef,
-  onActivate,
-}: {
-  row: RepoRow;
-  selected: boolean;
-  tabbable: boolean;
-  rowRef: (el: HTMLDivElement | null) => void;
-  onActivate: () => void;
-}) {
-  const { node, depth, expanded } = row;
-  const isDir = node.type === "dir";
-  const Icon = isDir
-    ? expanded
-      ? FolderOpen
-      : Folder
-    : (ICON_BY_EXTENSION[extensionOf(node.name)] ?? File);
-  const change = node.change;
-  const changed = node.changedCount > 0;
-  return (
-    <div
-      ref={rowRef}
-      role="treeitem"
-      aria-level={depth + 1}
-      aria-expanded={isDir ? expanded : undefined}
-      aria-selected={isDir ? undefined : selected}
-      tabIndex={tabbable ? 0 : -1}
-      onClick={onActivate}
-      className={cn(
-        "relative flex min-h-8 cursor-pointer select-none items-center gap-1.5 rounded-md pe-2 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 lg:min-h-7 any-pointer-coarse:min-h-11",
-        selected
-          ? "on-primary font-medium before:absolute before:inset-y-1 before:start-0 before:w-0.5 before:rounded-full before:bg-primary-fill"
-          : "text-foreground/80 hover:bg-muted/70",
-      )}
-      style={{ paddingInlineStart: `${depth + 0.25}rem` }}
-    >
-      <span className="flex size-3.5 shrink-0 items-center justify-center" aria-hidden="true">
-        {isDir && (
-          <CaretRight
-            className={cn(
-              "size-3 text-muted-foreground transition-transform duration-150 rtl:-scale-x-100",
-              expanded && "rotate-90 rtl:-rotate-90",
-            )}
-          />
-        )}
-      </span>
-      <Icon
-        className={cn("size-3.5 shrink-0", isDir ? "text-primary/80" : "text-muted-foreground")}
-        aria-hidden="true"
-      />
-      <span
-        className={cn(
-          // The name stays LTR for paths, but in an RTL row it must still sit
-          // next to its icon, so its text aligns to the row's start.
-          "min-w-0 flex-1 truncate font-mono rtl:text-right",
-          node.removed && "line-through decoration-1",
-          changed && !isDir && "font-medium text-foreground",
-        )}
-        style={node.removed ? { color: REMOVED_FG } : undefined}
-        dir="ltr"
-        title={node.path}
-      >
-        {node.name}
-      </span>
-      {!isDir && change && (
-        <ChangeCounts
-          added={node.removed && change.status === "renamed" ? 0 : change.added}
-          removed={change.removed}
-        />
-      )}
     </div>
   );
 }

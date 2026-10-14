@@ -1,14 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  ancestors,
-  buildRepoTree,
-  changedFolders,
-  hasFile,
-  repoFileKind,
-  visibleRows,
-} from "./repo-browser.ts";
-import { parsePatch } from "./repo-patch.ts";
+import { registerHooks } from "node:module";
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.startsWith(".") && !specifier.endsWith(".ts")) {
+      return { shortCircuit: true, url: new URL(`${specifier}.ts`, context.parentURL).href };
+    }
+    return nextResolve(specifier, context);
+  },
+});
+
+const { ancestors, buildRepoTree, changedFolders, hasFile, repoFileKind, visibleRows } =
+  await import("./repo-browser.ts");
+const { parsePatch } = await import("./repo-patch.ts");
 
 const ENTRIES = [
   { path: "README.md", type: "file" as const, size: 10 },

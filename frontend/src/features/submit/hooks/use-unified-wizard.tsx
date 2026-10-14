@@ -68,6 +68,7 @@ import { createStepViewTracker } from "../lib/wizard-telemetry";
 import {
   WIZARD_V2_STEPS,
   contractSnapshot,
+  deleteWorkspaceFile,
   initialWizardV2State,
   presetEngine,
   presetModels,
@@ -82,6 +83,7 @@ import {
   type WorkspaceSlice,
   wizardSteps,
   withLevel,
+  writeWorkspaceFile,
 } from "../lib/wizard-v2";
 import { useExecutionBudget } from "./use-execution-budget";
 import { useModelCatalog } from "./use-submit-wizard-data";
@@ -100,6 +102,9 @@ type SliceName = "task" | "inputs" | "optimizer" | "workspace" | "meta";
 
 type Action =
   | { type: "patch"; slice: SliceName; patch: object }
+  // A file write reads the files it lands in from the state it reduces, so
+  // writes to two files streamed in one tick both survive.
+  | { type: "file"; path: string; text: string | null }
   | { type: "go"; step: WizardStepId }
   | { type: "level"; level: ExperienceLevel; optimizerBlocked: boolean };
 
@@ -115,6 +120,13 @@ function reducer(state: WizardV2State, action: Action): WizardV2State {
     return { ...state, step: action.step, furthestStep: furthest };
   }
   if (action.type === "level") return withLevel(state, action.level, action.optimizerBlocked);
+  if (action.type === "file") {
+    const patch =
+      action.text === null
+        ? deleteWorkspaceFile(state.workspace, action.path)
+        : writeWorkspaceFile(state.workspace, action.path, action.text);
+    return patch ? { ...state, workspace: { ...state.workspace, ...patch } } : state;
+  }
   return { ...state, [action.slice]: { ...state[action.slice], ...action.patch } };
 }
 
@@ -203,6 +215,10 @@ export function WizardV2Provider({
   );
   const patchWorkspace = useCallback(
     (patch: Partial<WorkspaceSlice>) => dispatch({ type: "patch", slice: "workspace", patch }),
+    [],
+  );
+  const setWorkspaceFile = useCallback(
+    (path: string, text: string | null) => dispatch({ type: "file", path, text }),
     [],
   );
   const patchMeta = useCallback(
@@ -394,6 +410,7 @@ export function WizardV2Provider({
       workspace: {
         run_code: workspace.runCode,
         metric_code: workspace.metricCode,
+        ...(Object.keys(workspace.files).length > 0 && { files: workspace.files }),
         metric_timeout_seconds: workspace.metricTimeoutSeconds,
       },
       token_source: tokenSource,
@@ -814,6 +831,7 @@ export function WizardV2Provider({
     patchInputs,
     patchOptimizer,
     patchWorkspace,
+    setWorkspaceFile,
     patchMeta,
     resolvedOptimizer,
     optimizerCatalog:

@@ -65,6 +65,8 @@
     "winningCandidate": "kazanan aday"
   },
   "messages": {
+    "contract.file_invalid": "{path} dosyası geçerli değil: {error}",
+    "contract.files_unsupported": "DSPy optimize edicileri yalnızca run.py ve metric.py dosyalarını çalıştırır. Ek dosyaların kodunu run.py'ye taşıyın veya başka bir optimize edici seçin.",
     "contract.metric_error": "Metrik {index}. örnekte başarısız oldu: {error}",
     "contract.metric_missing": "Metrik kodu, bu optimize edicinin çağırdığı fonksiyonu tanımlamıyor.",
     "contract.metric_model_missing": "Metrik bir model çağırıyor, bu yüzden bir metrik modeli seçin.",

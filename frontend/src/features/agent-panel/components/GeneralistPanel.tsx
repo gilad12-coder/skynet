@@ -733,7 +733,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     () => latestToolCallId(agent.messages, REQUEST_CODE_TOOL),
     [agent.messages],
   );
-  // The run is over only once its check and every fix it asked for settled.
+  // The run is over once its turn is: the agent checks its code inside it.
   const codeBusy = codeArmed && authoringBusy(codeAgent);
   const liveCodeCall = React.useMemo(
     () =>
@@ -755,14 +755,13 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       return;
     }
     if (busyForCallRef.current !== liveCodeCall.id) return;
-    // A user edit in the editors re-runs the check, so a new verdict is stored too.
     const key = [
       liveCodeCall.id,
       codeAgent.status,
-      codeAgent.checkStatus,
+      codeAgent.verification?.id ?? "",
       codeAgent.signatureVersions.length,
       codeAgent.metricVersions.length,
-      codeAgent.fixAttempts.length,
+      Object.values(codeAgent.fileVersions).reduce((n, versions) => n + versions.length, 0),
     ].join("|");
     if (recordedRef.current === key) return;
     recordedRef.current = key;

@@ -103,8 +103,12 @@ export interface OptimizerSlice {
 }
 
 export interface WorkspaceSlice {
+  /** `run.py`. */
   runCode: string;
+  /** `metric.py`. */
   metricCode: string;
+  /** Every other workspace file, relative path to text (helpers `run.py` imports). */
+  files: Record<string, string>;
   metricModelMode: "inherit" | "explicit";
   metricModel: ModelConfig | null;
   metricTimeoutSeconds: number;
@@ -188,6 +192,7 @@ export function initialWizardV2State(
     workspace: {
       runCode: "",
       metricCode: "",
+      files: {},
       metricModelMode: "inherit",
       metricModel: null,
       metricTimeoutSeconds: DEFAULT_METRIC_TIMEOUT_SECONDS,
@@ -338,6 +343,97 @@ export function presetEngine(
   return optimizersFor(kind, mode).includes(engine) ? engine : null;
 }
 
+/* ── Workspace files ─────────────────────────────────────────────────── */
+
+/** The two files every workspace has; their text is `runCode` / `metricCode`. */
+export const RUN_FILE = "run.py";
+export const METRIC_FILE = "metric.py";
+export const FIXED_FILES: readonly string[] = [RUN_FILE, METRIC_FILE];
+
+// Mirror backend/core/models/unified.py so a bad name is caught as it is typed.
+export const WORKSPACE_FILE_MAX_COUNT = 20;
+export const WORKSPACE_FILE_MAX_CHARS = 200_000;
+const WORKSPACE_PATH_MAX_CHARS = 120;
+const WORKSPACE_PATH_MAX_DEPTH = 4;
+export const WORKSPACE_FILE_SUFFIXES: readonly string[] = [
+  ".py",
+  ".txt",
+  ".md",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".csv",
+  ".toml",
+  ".ini",
+  ".cfg",
+];
+const PATH_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+const RESERVED_TOP_LEVEL = new Set([RUN_FILE, METRIC_FILE, "skynet", "skynet.py"]);
+
+/**
+ * Why a path cannot name a new extra file, as an i18n key, or null when it
+ * can: relative, `/` between folders, no `..` or hidden parts, a Python or
+ * text suffix, not a fixed file, and not already taken by a file or folder.
+ */
+export function workspacePathIssue(
+  path: string,
+  files: Readonly<Record<string, string>>,
+): string | null {
+  if (!path || path.length > WORKSPACE_PATH_MAX_CHARS) return "submit.v2.metric.files.error.length";
+  if (path.startsWith("/") || path.includes("\\") || path.includes(":"))
+    return "submit.v2.metric.files.error.relative";
+  const segments = path.split("/");
+  if (segments.length > WORKSPACE_PATH_MAX_DEPTH) return "submit.v2.metric.files.error.depth";
+  if (segments.some((seg) => seg === "." || seg === ".." || !PATH_SEGMENT.test(seg)))
+    return "submit.v2.metric.files.error.chars";
+  if (RESERVED_TOP_LEVEL.has(segments[0] ?? "")) return "submit.v2.metric.files.error.reserved";
+  if (!WORKSPACE_FILE_SUFFIXES.some((suffix) => path.endsWith(suffix)))
+    return "submit.v2.metric.files.error.suffix";
+  if (path in files) return "submit.v2.metric.files.error.exists";
+  const taken = Object.keys(files);
+  if (taken.some((other) => other.startsWith(`${path}/`) || path.startsWith(`${other}/`)))
+    return "submit.v2.metric.files.error.exists";
+  if (taken.length >= WORKSPACE_FILE_MAX_COUNT) return "submit.v2.metric.files.error.count";
+  return null;
+}
+
+/** Every workspace file's path: run.py, metric.py, then the extra files by path. */
+export function workspacePaths(ws: Pick<WorkspaceSlice, "files">): string[] {
+  return [...FIXED_FILES, ...Object.keys(ws.files).sort()];
+}
+
+/** One file's text, or null for a path the workspace does not hold. */
+export function workspaceFileText(
+  ws: Pick<WorkspaceSlice, "runCode" | "metricCode" | "files">,
+  path: string,
+): string | null {
+  if (path === RUN_FILE) return ws.runCode;
+  if (path === METRIC_FILE) return ws.metricCode;
+  return ws.files[path] ?? null;
+}
+
+/** The patch that writes one file, creating an extra file that does not exist yet. */
+export function writeWorkspaceFile(
+  ws: Pick<WorkspaceSlice, "files">,
+  path: string,
+  text: string,
+): Partial<WorkspaceSlice> {
+  if (path === RUN_FILE) return { runCode: text };
+  if (path === METRIC_FILE) return { metricCode: text };
+  return { files: { ...ws.files, [path]: text } };
+}
+
+/** The patch that deletes one extra file; run.py and metric.py are never deleted. */
+export function deleteWorkspaceFile(
+  ws: Pick<WorkspaceSlice, "files">,
+  path: string,
+): Partial<WorkspaceSlice> | null {
+  if (FIXED_FILES.includes(path) || !(path in ws.files)) return null;
+  const files = { ...ws.files };
+  delete files[path];
+  return { files };
+}
+
 /** The metric model the run will use: the reflection model unless one was picked explicitly. */
 export function resolvedMetricModel(s: WizardV2State): ModelConfig | null {
   return s.workspace.metricModelMode === "inherit"
@@ -389,6 +485,8 @@ export function contractSnapshot(s: WizardV2State): string {
     taskModel: s.optimizer.taskModel?.name.trim() || null,
     runCode: s.workspace.runCode,
     metricCode: s.workspace.metricCode,
+    // Left out when empty so a check stored before extra files existed stays current.
+    ...(Object.keys(s.workspace.files).length > 0 && { files: s.workspace.files }),
     metricModel: resolvedMetricModel(s)?.name ?? null,
     metricTimeoutSeconds: s.workspace.metricTimeoutSeconds,
     // The check runs under the spending limit, so a pass under one limit says
@@ -423,6 +521,8 @@ export interface WizardV2Context {
   patchInputs(p: Partial<InputsSlice>): void;
   patchOptimizer(p: Partial<OptimizerSlice>): void;
   patchWorkspace(p: Partial<WorkspaceSlice>): void;
+  /** Write one workspace file (creating an extra one), or delete an extra one with null. */
+  setWorkspaceFile(path: string, text: string | null): void;
   patchMeta(p: Partial<MetaSlice>): void;
   resolvedOptimizer: string | null;
   optimizerCatalog: OptimizerCatalogResponse | null;

@@ -48,13 +48,23 @@ from ...config import settings
 from ...exceptions import ServiceError
 from ...i18n import t_locale
 from ...models import ModelConfig, WorkflowSpec
-from ...models.unified import METRIC_SIGNATURE, RUN_ENTRY
+from ...models.unified import (
+    METRIC_FILE,
+    METRIC_SIGNATURE,
+    RUN_ENTRY,
+    RUN_FILE,
+    WORKSPACE_FILE_MAX_CHARS,
+    resolve_optimizer,
+    workspace_files_error,
+    workspace_path_error,
+)
 from ..language_models import (
     apply_model_reasoning_config,
     apply_reasoning_effort,
     build_language_model,
     served_model_from,
 )
+from ..optimization.unified.contract import verify_workspace
 from ..react_compat import native_tool_calling_active
 from ..safe_exec import validate_metric_code, validate_signature_code
 from .acting_react import ActingReActV2
@@ -1075,9 +1085,20 @@ class UnifiedAssistant(dspy.Signature):
       with clickable answers. Call ``finish`` right after it.
     * ``set_brief(objective, background)`` — writes what you learned into
       the job's Objective and Background fields.
-    * ``edit_run(reason, new_code)`` — REWRITES the run code.
-    * ``edit_metric(reason, new_code)`` — REWRITES the metric.
+    * ``edit_run(reason, new_code)`` — REWRITES run.py, the run code.
+    * ``edit_metric(reason, new_code)`` — REWRITES metric.py, the metric.
+    * ``write_file(reason, path, content)`` — creates or rewrites another
+      file in the workspace, e.g. a helpers.py that run.py imports
+      (``from helpers import name``). The metric cannot import these files.
+    * ``delete_file(reason, path)`` — deletes one of those extra files.
+    * ``verify_code()`` — checks every file: it parses, passes lint, and
+      run.py / metric.py fit their contracts. Call it after every change;
+      when it reports errors, fix exactly those files and call it again.
     * ``finish`` — end the turn and answer in ``reply``.
+
+    The workspace is a folder: run.py and metric.py always exist, and
+    ``current_files`` lists the other files with their text. Keep the run
+    code in run.py unless a helper file makes it clearer.
 
     ## Rule 0: Pull out what the user knows about judging an output.
 
@@ -1095,8 +1116,8 @@ class UnifiedAssistant(dspy.Signature):
 
     ## Rule 1: Edit only on request. Never edit just to answer.
 
-    Call ``edit_run`` or ``edit_metric`` ONLY when the user's latest
-    message is a direct instruction to CHANGE, MODIFY, REPLACE, ADD,
+    Call ``edit_run``, ``edit_metric``, ``write_file`` or ``delete_file``
+    ONLY when the user's latest message is a direct instruction to CHANGE, MODIFY, REPLACE, ADD,
     REMOVE, FIX, or REWRITE that code, or answers a question you asked
     about how to judge outputs. For questions, explanations, opinions and
     small talk, answer in ``reply``. If the user says "don't change
@@ -1143,6 +1164,9 @@ class UnifiedAssistant(dspy.Signature):
     metric_contract: str = dspy.InputField(desc="The exact shape any new metric must have.")
     current_run: str = dspy.InputField(desc="The run code as currently shown in the editor.")
     current_metric: str = dspy.InputField(desc="The metric as currently shown in the editor.")
+    current_files: str = dspy.InputField(
+        desc="JSON object of the workspace's other files, path to text; {} when there are none.",
+    )
     current_validation: str = dspy.InputField(
         desc="Latest check result for the run code and metric ('OK', an error, or empty when not run).",
     )
@@ -1479,15 +1503,20 @@ class _ToolArgDraftExtractor:
     One instance per agent turn; state resets on each field's last chunk.
     """
 
-    def __init__(self, targets: dict[str, str], *, native: bool) -> None:
+    def __init__(self, targets: dict[str, str], *, native: bool, keys: dict[str, str] | None = None) -> None:
         """Bind the extractor to the tool arguments worth streaming.
 
         Args:
             targets: Tool name mapped to the string argument to stream, e.g.
                 ``{"edit_run": "new_code"}``.
             native: Whether the loop uses native function calling.
+            keys: Tool name mapped to a second argument naming what the draft
+                is for, e.g. ``{"write_file": "path"}``. Such a tool's drafts
+                come back as ``"<tool>:<key>"`` and only once the key is
+                written, so the reader knows which file they belong to.
         """
         self._targets = targets
+        self._keys = keys or {}
         self._native = native
         self._buffer = ""
         self._calls: dict[int, dict[str, str]] = {}
@@ -1510,6 +1539,23 @@ class _ToolArgDraftExtractor:
             out.append((name, emitted, value[emitted:]))
             self._emitted[position] = len(value)
         return out
+
+    def _label(self, name: str, args: dict[str, Any]) -> str | None:
+        """Name a call's draft, adding its key argument when the tool has one.
+
+        Args:
+            name: The tool name.
+            args: The call's arguments decoded so far.
+
+        Returns:
+            ``name``, ``"<name>:<key>"``, or ``None`` while the key is still
+            missing (the argument after it has not started, so it may be cut).
+        """
+        key_arg = self._keys.get(name)
+        if key_arg is None:
+            return name
+        key = args.get(key_arg)
+        return f"{name}:{key}" if isinstance(key, str) and key else None
 
     def _text_calls(self) -> list[tuple[int, str, str]]:
         """Decode the targeted arguments out of the text protocol's partial JSON.
@@ -1534,8 +1580,9 @@ class _ToolArgDraftExtractor:
             if arg is None or not isinstance(args, dict):
                 continue
             value = args.get(arg)
-            if isinstance(value, str):
-                found.append((position, name, value))
+            label = self._label(name, args)
+            if isinstance(value, str) and label is not None:
+                found.append((position, label, value))
         return found
 
     def _native_calls(self, chunk: str) -> list[tuple[int, str, str]]:
@@ -1572,8 +1619,9 @@ class _ToolArgDraftExtractor:
             except ValueError:
                 continue
             value = parsed.get(arg) if isinstance(parsed, dict) else None
-            if isinstance(value, str):
-                found.append((index, call["name"], value))
+            label = self._label(call["name"], parsed) if isinstance(parsed, dict) else None
+            if isinstance(value, str) and label is not None:
+                found.append((index, label, value))
         return found
 
     def feed(self, chunk: dspy.streaming.StreamResponse) -> list[tuple[str, int, str]]:
@@ -1864,6 +1912,7 @@ class ReactReplyStream:
         lm: dspy.LM | None = None,
         *,
         tool_drafts: dict[str, str] | None = None,
+        tool_draft_keys: dict[str, str] | None = None,
     ):
         """Bind to a constructed ReActV2 program and the signature's reply field.
 
@@ -1875,6 +1924,8 @@ class ReactReplyStream:
             tool_drafts: Tool name mapped to a string argument to stream while
                 the call is written (see :meth:`tool_draft_deltas`); ``None``
                 streams none.
+            tool_draft_keys: Tool name mapped to the argument naming its
+                draft's target (see :class:`_ToolArgDraftExtractor`).
         """
         self._program = program
         lm = lm or getattr(dspy.settings, "lm", None)
@@ -1890,7 +1941,9 @@ class ReactReplyStream:
                 reply_field,
                 exclusive_submit=bool(getattr(self._program.react, "_serial_tool_calls", False)),
             )
-        self._drafts = _ToolArgDraftExtractor(tool_drafts, native=self._native) if tool_drafts else None
+        self._drafts = (
+            _ToolArgDraftExtractor(tool_drafts, native=self._native, keys=tool_draft_keys) if tool_drafts else None
+        )
 
     def listeners(self) -> list[dspy.streaming.StreamListener]:
         """Return the reply + reasoning stream listeners for this program.
@@ -2422,17 +2475,30 @@ class _CodeEditSession:
 # The editor each streamed tool argument lands in, named as the seed's
 # ``artifact_done`` sources are.
 _DRAFT_SOURCES = {"edit_run": "signature", "edit_metric": "metric"}
+WRITE_FILE_TOOL = "write_file"
+VERIFY_TOOL = "verify_code"
+# What each streamed tool argument holds, and for ``write_file`` which
+# argument names the file its draft lands in.
+_UNIFIED_TOOL_DRAFTS = {**dict.fromkeys(_DRAFT_SOURCES, "new_code"), WRITE_FILE_TOOL: "content"}
+_UNIFIED_TOOL_DRAFT_KEYS = {WRITE_FILE_TOOL: "path"}
+# Verifies the whole workspace: ``(run_code, metric_code, files)`` to one
+# ``{"path", "ok", "errors", "warnings"}`` verdict per file.
+WorkspaceVerifier = Callable[[str, str, dict[str, str]], list[dict[str, Any]]]
 
 
 class _UnifiedEditSession:
-    """Per-turn state for the wizard's ``edit_run`` / ``edit_metric`` tools.
+    """Per-turn state for the wizard workspace's tools.
 
-    The run code rides the ``signature_*`` events and the metric the
+    ``run.py`` and ``metric.py`` are written by ``edit_run`` / ``edit_metric``;
+    the run code rides the ``signature_*`` events and the metric the
     ``metric_*`` events so the editor wiring is shared with the DSPy
-    artifacts. Same per-turn guardrail as :class:`_CodeEditSession` (one
-    successful edit per artifact) and the same thread-safe emit callback;
-    each replacement is statically checked against its contract before it
-    is applied.
+    artifacts. Every other file is written by ``write_file`` (``file_replace``)
+    and removed by ``delete_file`` (``file_delete``), and ``verify_code``
+    checks every file on its own (``verify_result``). Each file takes one
+    successful write per turn, plus one more after each failed
+    ``verify_code``, so the agent can fix what the check found; each
+    replacement of ``run.py`` / ``metric.py`` is statically checked against
+    its contract before it is applied.
     """
 
     def __init__(
@@ -2443,8 +2509,10 @@ class _UnifiedEditSession:
         emit: Callable[[dict], None],
         run_validator: Callable[[str], str],
         metric_validator: Callable[[str], str],
+        files: dict[str, str] | None = None,
+        verifier: WorkspaceVerifier | None = None,
     ) -> None:
-        """Initialize the session with the editor contents and the contract checks.
+        """Initialize the session with the workspace contents and the checks.
 
         Args:
             run_code: The run code as currently shown in the editor.
@@ -2453,13 +2521,22 @@ class _UnifiedEditSession:
             run_validator: Returns an error message for run code that breaks
                 its contract, or an empty string.
             metric_validator: Same for the metric.
+            files: Path to text of every extra workspace file.
+            verifier: Checks the whole workspace for ``verify_code``; ``None``
+                makes ``verify_code`` report that no check is available.
         """
         self._slots = {"run": run_code, "metric": metric_code}
         self._validators = {"run": run_validator, "metric": metric_validator}
-        self._successful_edits = {"run": 0, "metric": 0}
+        self._successful_edits: dict[str, int] = {"run": 0, "metric": 0}
+        self._files = dict(files or {})
+        self._verifier = verifier
         self._emit = emit
         self._asked = False
         self._draft_ids: dict[str, str] = {}
+        # Files that may be written once more because the last check failed.
+        self._fixable: set[str] = set()
+        self._verified_state: tuple[str, str, tuple[tuple[str, str], ...]] | None = None
+        self.last_verification: dict[str, Any] | None = None
 
     @property
     def run_code(self) -> str:
@@ -2478,6 +2555,36 @@ class _UnifiedEditSession:
             The current metric source.
         """
         return self._slots["metric"]
+
+    @property
+    def files(self) -> dict[str, str]:
+        """Return the live extra files (updated after each successful write or delete).
+
+        Returns:
+            Path to text of every extra file.
+        """
+        return dict(self._files)
+
+    def _state(self) -> tuple[str, str, tuple[tuple[str, str], ...]]:
+        """Return the workspace as one comparable value, to tell whether it changed since the last check."""
+        return self._slots["run"], self._slots["metric"], tuple(sorted(self._files.items()))
+
+    @property
+    def verified(self) -> bool:
+        """Return whether ``verify_code`` ran on exactly the current workspace."""
+        return self._verified_state == self._state()
+
+    def _may_write(self, key: str) -> bool:
+        """Return whether a file still has a write left this turn.
+
+        Args:
+            key: ``"run"``, ``"metric"`` or an extra file's path.
+
+        Returns:
+            True when the file was not written yet this turn, or the last
+            ``verify_code`` failed since it was.
+        """
+        return self._successful_edits.get(key, 0) == 0 or key in self._fixable
 
     def _apply(self, *, slot: str, tool: str, label: str, reason: str, new_code: str, replace_event: str) -> str:
         """Run the guard → strip → validate → publish pipeline for one tool call.
@@ -2503,7 +2610,7 @@ class _UnifiedEditSession:
             self._emit({"event": "tool_end", "data": {"id": call_id, "tool": tool, "status": "error"}})
             return message
 
-        if self._successful_edits[slot] >= 1:
+        if not self._may_write(slot):
             return _reject(
                 f"Edit rejected — the {label} was already replaced in this turn. "
                 "STOP editing; call finish and summarize the change in reply."
@@ -2521,15 +2628,16 @@ class _UnifiedEditSession:
             )
         self._slots[slot] = new_code
         self._successful_edits[slot] += 1
+        self._fixable.discard(slot)
         self._emit({"event": replace_event, "data": {"code": new_code}})
         self._emit({"event": "tool_end", "data": {"id": call_id, "tool": tool, "status": "ok"}})
         return (
-            f"{label[0].upper()}{label[1:]} replaced. Do NOT edit the {label} again this turn — "
-            "call finish and summarize the change in reply."
+            f"{label[0].upper()}{label[1:]} replaced. Call {VERIFY_TOOL} to check the workspace; do NOT edit "
+            f"the {label} again this turn unless {VERIFY_TOOL} reports an error in it."
         )
 
     def draft(self, tool: str, offset: int, chunk: str) -> None:
-        """Stream a piece of an ``edit_run`` / ``edit_metric`` call's code while the model writes it.
+        """Stream a piece of an ``edit_run`` / ``edit_metric`` / ``write_file`` call's code while the model writes it.
 
         The first piece of a call opens its tool row (``tool_start``) so the
         editor shows "Editing" from the first token; every piece goes out as
@@ -2537,18 +2645,27 @@ class _UnifiedEditSession:
         :meth:`_apply` reuses the row and alone publishes the finished code.
 
         Args:
-            tool: ``"edit_run"`` or ``"edit_metric"``.
+            tool: ``"edit_run"``, ``"edit_metric"`` or ``"write_file:<path>"``.
             offset: Where ``chunk`` starts in the call's ``new_code``; 0 starts
                 a new draft.
             chunk: The newly written code.
         """
-        source = _DRAFT_SOURCES.get(tool)
+        name, _, path = tool.partition(":")
+        source = "file" if name == WRITE_FILE_TOOL and path else _DRAFT_SOURCES.get(tool)
         if source is None or not chunk:
+            return
+        if source == "file" and workspace_path_error(path) is not None:
             return
         if offset == 0 or tool not in self._draft_ids:
             self._draft_ids[tool] = uuid.uuid4().hex[:8]
-            self._emit({"event": "tool_start", "data": {"id": self._draft_ids[tool], "tool": tool, "reason": ""}})
-        self._emit({"event": "code_draft", "data": {"source": source, "chunk": chunk, "reset": offset == 0}})
+            start: dict[str, Any] = {"id": self._draft_ids[tool], "tool": name, "reason": ""}
+            if source == "file":
+                start["path"] = path
+            self._emit({"event": "tool_start", "data": start})
+        data: dict[str, Any] = {"source": source, "chunk": chunk, "reset": offset == 0}
+        if source == "file":
+            data["path"] = path
+        self._emit({"event": "code_draft", "data": data})
 
     def ask_user(self, question: str, options_json: str) -> str:
         """Show the user one question with clickable answers.
@@ -2664,6 +2781,185 @@ class _UnifiedEditSession:
             new_code=new_code,
             replace_event="metric_replace",
         )
+
+    def _file_call(self, tool: str, path: str, reason: str) -> tuple[str, Callable[[str], str]]:
+        """Open a ``write_file`` / ``delete_file`` row and return its id and a rejecter.
+
+        Args:
+            tool: The tool name.
+            path: The file the call is about.
+            reason: The model's rationale.
+
+        Returns:
+            ``(call_id, reject)``; ``reject(message)`` closes the row as failed
+            and returns the observation.
+        """
+        call_id = self._draft_ids.pop(f"{tool}:{path}", None) or uuid.uuid4().hex[:8]
+        self._emit({"event": "tool_start", "data": {"id": call_id, "tool": tool, "reason": reason or "", "path": path}})
+
+        def _reject(message: str) -> str:
+            """Close the tool call as failed and return its observation."""
+            self._emit({"event": "tool_end", "data": {"id": call_id, "tool": tool, "status": "error", "path": path}})
+            return message
+
+        return call_id, _reject
+
+    def write_file(self, reason: str, path: str, content: str) -> str:
+        """Create or replace an extra workspace file that the run code imports.
+
+        Use it for helper modules (``helpers.py``, ``lib/parse.py``) or data
+        files ``run.py`` reads; ``run.py`` imports a helper as
+        ``from helpers import name``. NEVER use it for run.py or metric.py:
+        those are written with ``edit_run`` / ``edit_metric``. The metric
+        cannot import these files: they exist only while the run code runs.
+        Call ``verify_code`` after writing.
+
+        ``path`` is relative, uses ``/`` between folders, has no ``..`` and
+        ends in ``.py`` or a text suffix. ``reason`` is prose in the reply
+        language (<=10 words). ``content`` is the COMPLETE file, not a diff.
+
+        Args:
+            reason: Short rationale, in the reply language.
+            path: The file's path, e.g. ``helpers.py``.
+            content: The complete file text.
+
+        Returns:
+            An observation string the ReAct agent reads back.
+        """
+        path = (path or "").strip()
+        call_id, reject = self._file_call(WRITE_FILE_TOOL, path, reason)
+        if path in (RUN_FILE, METRIC_FILE):
+            tool = "edit_run" if path == RUN_FILE else "edit_metric"
+            return reject(f"Write rejected — {path} is written with {tool}, not {WRITE_FILE_TOOL}.")
+        error = workspace_path_error(path)
+        if error is not None:
+            return reject(f"Write rejected — {error}. Pick another path.")
+        if not self._may_write(path):
+            return reject(
+                f"Write rejected — {path} was already written in this turn. "
+                f"Call {VERIFY_TOOL}, or finish and summarize the change in reply."
+            )
+        content = strip_adapter_debris(content)
+        if len(content) > WORKSPACE_FILE_MAX_CHARS:
+            return reject(f"Write rejected — a file may hold at most {WORKSPACE_FILE_MAX_CHARS} characters.")
+        if self._files.get(path, "").strip() == content.strip() and path in self._files:
+            return reject(f"Write rejected — {path} already holds exactly this content.")
+        error = workspace_files_error({**self._files, path: content})
+        if error is not None:
+            return reject(f"Write rejected — {error}.")
+        if path.endswith(".py"):
+            try:
+                ast.parse(content)
+            except SyntaxError as exc:
+                return reject(
+                    f"Write rejected — {path} does not parse: {exc.msg} (line {exc.lineno}). "
+                    f"Fix it and call {WRITE_FILE_TOOL} again with the complete file."
+                )
+        created = path not in self._files
+        self._files[path] = content
+        self._successful_edits[path] = self._successful_edits.get(path, 0) + 1
+        self._fixable.discard(path)
+        self._emit({"event": "file_replace", "data": {"path": path, "code": content}})
+        self._emit(
+            {"event": "tool_end", "data": {"id": call_id, "tool": WRITE_FILE_TOOL, "status": "ok", "path": path}}
+        )
+        return f"{path} {'created' if created else 'replaced'}. Call {VERIFY_TOOL} to check the workspace."
+
+    def delete_file(self, reason: str, path: str) -> str:
+        """Delete an extra workspace file. run.py and metric.py can never be deleted.
+
+        Args:
+            reason: Short rationale, in the reply language (<=10 words).
+            path: The file's path, as ``write_file`` named it.
+
+        Returns:
+            An observation string the ReAct agent reads back.
+        """
+        path = (path or "").strip()
+        call_id, reject = self._file_call("delete_file", path, reason)
+        if path in (RUN_FILE, METRIC_FILE):
+            return reject(f"Delete rejected — {path} is part of every workspace and cannot be deleted.")
+        if path not in self._files:
+            existing = ", ".join(sorted(self._files)) or "none"
+            return reject(f"Delete rejected — there is no file {path}. Extra files: {existing}.")
+        del self._files[path]
+        self._emit({"event": "file_delete", "data": {"path": path}})
+        self._emit({"event": "tool_end", "data": {"id": call_id, "tool": "delete_file", "status": "ok", "path": path}})
+        return f"{path} deleted. Call {VERIFY_TOOL} if run.py imported it."
+
+    def verify_code(self) -> str:
+        """Check every workspace file without running it: run.py, metric.py and each extra file.
+
+        Each Python file must parse and pass lint (undefined names, broken
+        imports); run.py and metric.py must fit ``run_contract`` /
+        ``metric_contract``. Call it after every change. When it reports
+        errors, fix exactly those files (each may be written once more) and
+        call it again; when it passes, call ``finish``.
+
+        Returns:
+            One line per file, ``OK`` or its errors, and an overall verdict.
+        """
+        return self.run_verify()
+
+    def run_verify(self) -> str:
+        """Run the workspace check as one ``verify_code`` tool row.
+
+        Returns:
+            The observation ``verify_code`` hands back to the agent.
+        """
+        call_id = uuid.uuid4().hex[:8]
+        self._emit({"event": "tool_start", "data": {"id": call_id, "tool": VERIFY_TOOL, "reason": ""}})
+        if self._verifier is None:
+            self._emit({"event": "tool_end", "data": {"id": call_id, "tool": VERIFY_TOOL, "status": "error"}})
+            return "No check is available here."
+        try:
+            verdicts = self._verifier(self._slots["run"], self._slots["metric"], dict(self._files))
+        except Exception as exc:
+            logger.exception("verify_code failed")
+            self._emit({"event": "tool_end", "data": {"id": call_id, "tool": VERIFY_TOOL, "status": "error"}})
+            return f"The check could not run: {type(exc).__name__}. Call finish."
+        ok = all(v["ok"] for v in verdicts)
+        result = {"id": call_id, "ok": ok, "files": verdicts}
+        self.last_verification = result
+        self._verified_state = self._state()
+        keys = {RUN_FILE: "run", METRIC_FILE: "metric"}
+        self._fixable = {keys.get(v["path"], v["path"]) for v in verdicts if not v["ok"]}
+        self._emit({"event": "verify_result", "data": result})
+        self._emit(
+            {"event": "tool_end", "data": {"id": call_id, "tool": VERIFY_TOOL, "status": "ok" if ok else "error"}}
+        )
+        lines = [f"{v['path']}: OK" if v["ok"] else f"{v['path']}: " + "; ".join(v["errors"]) for v in verdicts]
+        lines.extend(f"{v['path']} (warning): " + "; ".join(v["warnings"]) for v in verdicts if v["warnings"])
+        verdict = (
+            "All files pass. Call finish."
+            if ok
+            else "Fix the files with errors (each may be written once more), then call verify_code again."
+        )
+        return "\n".join([*lines, verdict])
+
+
+def _unified_verifier(unified: dict[str, Any]) -> WorkspaceVerifier:
+    """Bind :func:`verify_workspace` to the wizard's setup.
+
+    Args:
+        unified: The wizard's authoring context as a dict.
+
+    Returns:
+        A verifier for :class:`_UnifiedEditSession`.
+    """
+    task = unified.get("task") or {}
+    kind = (task.get("artifact") or {}).get("kind") or "prompt"
+    optimizer = resolve_optimizer(unified.get("optimizer") or "auto", kind)
+    has_model = bool(unified.get("metric_has_model"))
+
+    def _verify(run_code: str, metric_code: str, files: dict[str, str]) -> list[dict[str, Any]]:
+        """Check the workspace and return each file's verdict as plain data."""
+        verdicts = verify_workspace(
+            run_code, metric_code, files, metric_has_model=has_model, optimizer_resolved=optimizer
+        )
+        return [v.as_dict() for v in verdicts]
+
+    return _verify
 
 
 class _WorkflowEditSession:
@@ -3574,8 +3870,9 @@ async def _run_unified_seed(
     reply_language: str,
     queue: asyncio.Queue[dict | None],
     locale: str | None = None,
+    prior_files: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Draft the wizard's run code and metric in parallel, then the intro message.
+    """Draft the wizard's run code and metric in parallel, check them, then write the intro message.
 
     The run code streams as ``signature_patch`` and the metric as
     ``metric_patch`` — the wizard's editors sit on the same slots as the
@@ -3591,12 +3888,14 @@ async def _run_unified_seed(
         reply_language: Language name the intro message is written in.
         queue: SSE event queue to push token events onto.
         locale: UI locale the timeout error is written in; ``None`` is Hebrew.
+        prior_files: The workspace's other files, checked with the new code.
 
     Returns:
         Mapping with keys ``signature_code`` (the run code), ``metric_code``,
-        ``assistant_message``, the boolean ``signature_valid`` /
-        ``metric_valid`` flags, and an optional ``validation_error`` string
-        when either could not be repaired within the attempt budget.
+        ``files``, ``assistant_message``, the boolean ``signature_valid`` /
+        ``metric_valid`` flags, ``verification`` (the closing ``verify_code``
+        result), and an optional ``validation_error`` string when either
+        could not be repaired within the attempt budget.
 
     Raises:
         SeedLaneTimeoutError: When a lane runs past
@@ -3684,6 +3983,18 @@ async def _run_unified_seed(
             errors.append(f"Metric: {metric_err}")
         if errors:
             results["validation_error"] = "\n".join(errors)
+        checker = _UnifiedEditSession(
+            run_code=run_code,
+            metric_code=metric_code,
+            emit=partial(_emit_to_code_queue, asyncio.get_running_loop(), queue),
+            run_validator=run_validator,
+            metric_validator=metric_validator,
+            files=prior_files,
+            verifier=_unified_verifier(unified),
+        )
+        await asyncio.to_thread(checker.run_verify)
+        results["files"] = checker.files
+        results["verification"] = checker.last_verification
 
         async for chunk in msg_program(
             objective=shared["objective"],
@@ -3714,13 +4025,19 @@ async def _run_unified_agent(
     reply_language: str,
     queue: asyncio.Queue[dict | None],
     steering: SteerInbox | None = None,
-) -> dict[str, str]:
-    """Run the wizard's ReAct agent with ``ask_user``/``set_brief``/``edit_run``/``edit_metric``.
+    prior_files: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Run the wizard's ReAct agent over the workspace.
 
-    Tools are bound methods on a :class:`_UnifiedEditSession` that emit
-    ``tool_start`` / ``signature_replace`` (run code) or ``metric_replace``
-    (metric) / ``tool_end`` thread-safely, and the ``reply`` streams as
-    ``message_patch`` tokens.
+    Tools are bound methods on a :class:`_UnifiedEditSession`
+    (``ask_user`` / ``set_brief`` / ``edit_run`` / ``edit_metric`` /
+    ``write_file`` / ``delete_file`` / ``verify_code``) that emit
+    ``tool_start`` / ``signature_replace`` (run code), ``metric_replace``
+    (metric), ``file_replace`` / ``file_delete`` (other files) or
+    ``verify_result`` / ``tool_end`` thread-safely, and the ``reply`` streams
+    as ``message_patch`` tokens. A turn that changed the workspace and did not
+    check the result ends with a ``verify_code`` run of its own, so every
+    change is checked once.
 
     Args:
         lm: Language model bound to the ReAct loop.
@@ -3736,10 +4053,13 @@ async def _run_unified_agent(
         queue: SSE event queue receiving lifecycle and token events.
         steering: The turn's inbox for messages the user sends while it
             runs; ``None`` leaves the turn unsteerable.
+        prior_files: The workspace's other files, path to text.
 
     Returns:
-        Mapping with keys ``signature_code`` (the run code), ``metric_code``
-        and ``assistant_message`` reflecting post-turn state.
+        Mapping with keys ``signature_code`` (the run code), ``metric_code``,
+        ``files``, ``assistant_message`` and ``verification`` (the last
+        ``verify_code`` result, or ``None`` when nothing was checked)
+        reflecting post-turn state.
     """
     loop = asyncio.get_running_loop()
     run_validator, metric_validator = _unified_validators(unified)
@@ -3749,13 +4069,25 @@ async def _run_unified_agent(
         emit=partial(_emit_to_code_queue, loop, queue),
         run_validator=run_validator,
         metric_validator=metric_validator,
+        files=prior_files,
+        verifier=_unified_verifier(unified),
     )
-    tools: list[Callable[..., str]] = [session.ask_user, session.set_brief, session.edit_run, session.edit_metric]
-    # Both artifacts edited with one validator-driven retry each, a brief and
-    # a question, before the reply.
-    react = ActingReActV2(UnifiedAssistant, tools=tools, max_iters=8)
+    tools: list[Callable[..., str]] = [
+        session.ask_user,
+        session.set_brief,
+        session.edit_run,
+        session.edit_metric,
+        session.write_file,
+        session.delete_file,
+        session.verify_code,
+    ]
+    # Both files edited with a validator-driven retry, a check, a fix and a
+    # second check, a brief and a question, before the reply.
+    react = ActingReActV2(UnifiedAssistant, tools=tools, max_iters=12)
     attach_steering(react, steering)
-    reply_stream = ReactReplyStream(react, "reply", lm, tool_drafts=dict.fromkeys(_DRAFT_SOURCES, "new_code"))
+    reply_stream = ReactReplyStream(
+        react, "reply", lm, tool_drafts=_UNIFIED_TOOL_DRAFTS, tool_draft_keys=_UNIFIED_TOOL_DRAFT_KEYS
+    )
     program = dspy.streamify(react, stream_listeners=reply_stream.listeners(), async_streaming=True)
 
     values = {
@@ -3763,6 +4095,7 @@ async def _run_unified_agent(
         "focus": "metric" if unified.get("focus") == "metric" else "run",
         "current_run": prior_run,
         "current_metric": prior_metric,
+        "current_files": json.dumps(prior_files or {}, ensure_ascii=False),
         "current_validation": prior_validation or "",
         "initial_run": initial_run or prior_run,
         "initial_metric": initial_metric or prior_metric,
@@ -3791,11 +4124,16 @@ async def _run_unified_agent(
                 if final and final != reply_text:
                     reply_text = final
     _require_answer(prediction, reply_text)
+    changed = (session.run_code, session.metric_code, session.files) != (prior_run, prior_metric, prior_files or {})
+    if changed and not session.verified:
+        await asyncio.to_thread(session.run_verify)
 
     return {
         "signature_code": session.run_code,
         "metric_code": session.metric_code,
+        "files": session.files,
         "assistant_message": reply_text,
+        "verification": session.last_verification,
     }
 
 
@@ -3824,6 +4162,7 @@ async def _run_code_agent_orchestration(
     unified: dict[str, Any] | None,
     steering: SteerInbox | None = None,
     locale: str | None = None,
+    prior_files: dict[str, str] | None = None,
 ) -> None:
     """Run the seed or chat path and push the terminal envelope into ``queue``.
 
@@ -3861,6 +4200,7 @@ async def _run_code_agent_orchestration(
         steering: The turn's inbox for messages the user sends while it
             runs; ``None`` leaves the turn unsteerable.
         locale: UI locale of the client, for errors the engine words itself.
+        prior_files: The wizard workspace's other files (unified paths only).
     """
     try:
         if unified is not None and is_seed:
@@ -3871,6 +4211,7 @@ async def _run_code_agent_orchestration(
                 reply_language=reply_language,
                 queue=queue,
                 locale=locale,
+                prior_files=prior_files,
             )
         elif unified is not None:
             validation = "\n".join(v for v in (prior_signature_validation, prior_metric_validation) if v)
@@ -3887,6 +4228,7 @@ async def _run_code_agent_orchestration(
                 reply_language=reply_language,
                 queue=queue,
                 steering=steering,
+                prior_files=prior_files,
             )
         elif is_seed and prior_workflow is not None:
             results = await _run_workflow_seed(
@@ -3970,6 +4312,7 @@ async def run_code_agent(
     unified: dict[str, Any] | None = None,
     steer_owner: str | None = None,
     steer_key: str | None = None,
+    prior_files: dict[str, str] | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream code-agent events to the UI.
 
@@ -4003,14 +4346,21 @@ async def run_code_agent(
     * ``tool_start`` — ``{id, tool, reason}``, before a tool is invoked.
     * ``code_draft`` — ``{source, chunk, reset}``, unified chat mode: the
       code an ``edit_run`` / ``edit_metric`` call writes, while it is written
-      (``reset`` starts a new draft).
+      (``reset`` starts a new draft). A ``write_file`` draft has ``source``
+      ``"file"`` and carries its ``path``.
     * ``signature_replace`` / ``metric_replace`` — ``{code}``, full
       replacement when a tool runs.
+    * ``file_replace`` — ``{path, code}``; ``file_delete`` — ``{path}``: an
+      extra workspace file written or deleted (unified chat mode).
+    * ``verify_result`` — ``{id, ok, files: [{path, ok, errors, warnings}]}``,
+      a ``verify_code`` row's per-file result (unified paths).
     * ``tool_end`` — ``{id, tool, status}``, after the tool returns.
     * ``message_patch`` — chat-mode reply token stream.
     * ``done`` — ``{signature_code, metric_code, assistant_message, model,
-      served_model}``; the seed path additionally carries ``signature_valid`` /
-      ``metric_valid`` booleans and an optional ``validation_error``.
+      served_model}``; the unified paths add ``files`` and ``verification``
+      (the last ``verify_result``, or ``None``), and the seed path
+      additionally carries ``signature_valid`` / ``metric_valid`` booleans
+      and an optional ``validation_error``.
     * ``error`` — ``{error}``.
 
     Args:
@@ -4046,6 +4396,8 @@ async def run_code_agent(
         steer_owner: Username whose mid-turn messages this turn reads.
         steer_key: Client-chosen key those messages are posted under; with
             ``steer_owner`` it makes a chat turn steerable.
+        prior_files: The wizard workspace's other files, path to text
+            (unified paths only).
 
     Yields:
         SSE event dicts of shape ``{"event": str, "data": dict}``.
@@ -4099,6 +4451,7 @@ async def run_code_agent(
             unified=unified,
             steering=steering,
             locale=locale,
+            prior_files=prior_files,
         )
     )
     try:

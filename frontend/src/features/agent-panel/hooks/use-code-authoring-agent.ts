@@ -13,31 +13,17 @@ import type { ColumnMapping, ValidateCodeResponse, WorkflowSpec } from "@/shared
 import type { UnifiedAuthoringContext } from "@/shared/types/unified-run";
 
 import type { ConfirmedDataset } from "../components/DatasetUploadCard";
-import {
-  contractValidations,
-  describeFixes,
-  panelAuthoringContext,
-  panelContractSpec,
-  type AuthoringFixAttempt,
-  type FixRecord,
-} from "../lib/code-authoring";
+import { contractValidations, panelAuthoringContext, panelContractSpec } from "../lib/code-authoring";
 import type { WizardState } from "../lib/types";
 import { useWizardStateOptional } from "./use-wizard-state";
 
 // The run code and the metric are checked together by the validity check,
 // once the agent settles; there is no per-editor validation outside a workflow.
 const noValidation = async (): Promise<ValidationResult | null> => null;
-// The generalist cannot write code, so a failed check is handed back to the
-// coding agent; bounded so a contract the agent cannot meet does not loop.
-const MAX_CONTRACT_FIXES = 2;
 // Code the user is typing is checked once they pause, not on every keystroke.
 const EDIT_CHECK_DELAY_MS = 600;
-
-/** Where the validity check of the current run code and metric stands. */
-export type AuthoringCheckStatus = "idle" | "checking" | "passed" | "failed";
-
-/** How many failed checks the coding agent is asked to fix, at most. */
-export const MAX_AUTHORING_FIXES = MAX_CONTRACT_FIXES;
+const NO_FILES: Readonly<Record<string, string>> = {};
+const NOT_WRITING_FILES: readonly string[] = [];
 
 /**
  * The code agent's state plus the artifact fields the panel mirror renders and
@@ -49,17 +35,15 @@ export interface CodeAuthoringAgentState extends CodeAgentState {
   metricCode: string;
   signatureValidation: ValidateCodeResponse | null;
   metricValidation: ValidateCodeResponse | null;
+  /** The workspace's files besides run.py and metric.py, path to text. */
+  files: Readonly<Record<string, string>>;
   /**
-   * True once the validity check passed for exactly the current run code and
-   * metric; the handoff waits on it. Always false in workflow mode.
+   * True once the validity check passed for exactly the current workspace;
+   * the handoff waits on it. Always false in workflow mode.
    */
   contractOk: boolean;
-  /** Where the validity check of the current code stands, for the transcript. */
-  checkStatus: AuthoringCheckStatus;
   /** True when run code and a metric already exist, so a new request continues from them. */
   hasCode: boolean;
-  /** Each failed check handed back to the agent for a fix, oldest first. */
-  fixAttempts: AuthoringFixAttempt[];
   /**
    * True when the code lives in the wizard's own run-code and metric slots,
    * so the Metric step's editors show and edit it.
@@ -124,20 +108,17 @@ interface AuthoringCheckArgs {
   status: CodeAgentState["status"];
   signatureCode: string;
   metricCode: string;
-  /** True while the code is exactly what the coding agent last wrote. */
-  agentAuthored: boolean;
-  /** How many messages the coding agent's chat holds right now. */
-  messageCount: number;
+  files: Readonly<Record<string, string>>;
   setSignatureValidation: (result: ValidateCodeResponse | null) => void;
   setMetricValidation: (result: ValidateCodeResponse | null) => void;
-  send: (message: string) => void;
 }
 
 /**
  * Run the static validity check (the same one the wizard runs before Run) on
- * the settled code, land its failures on the editor they belong to, and hand
- * a failure on the agent's own code back to it, a bounded number of times.
- * Code the user edited is checked too, but never sent back for a fix.
+ * the settled workspace and land its failures on the file they belong to.
+ * The handoff waits on it. The coding agent checks its own code with its
+ * ``verify_code`` tool and fixes what that finds inside its turn, so nothing
+ * here sends a failure back to it.
  *
  * Any settled code is checked, not only what a coding turn just finished:
  * each wizard screen has its own conversation, so coming back to the Metric
@@ -145,85 +126,66 @@ interface AuthoringCheckArgs {
  * edit made after that must still be checked.
  *
  * Args:
- *   args: The authoring context, the agent status, both codes and the sinks.
+ *   args: The authoring context, the agent status, the files and the sinks.
  *
  * Returns:
- *   The check status, whether the current code passed, the fixes asked for,
- *   and a reset.
+ *   Whether the current workspace passed, and a reset.
  */
-function useAuthoringCheck(args: AuthoringCheckArgs): {
-  status: AuthoringCheckStatus;
-  ok: boolean;
-  fixes: FixRecord[];
-  reset: () => void;
-} {
+function useAuthoringCheck(args: AuthoringCheckArgs): { ok: boolean; reset: () => void } {
   const {
     context,
     contextKey,
     status,
     signatureCode,
     metricCode,
-    agentAuthored,
-    messageCount,
+    files,
     setSignatureValidation,
     setMetricValidation,
-    send,
   } = args;
   const [result, setResult] = React.useState<{ key: string; ok: boolean } | null>(null);
-  const [fixKey, setFixKey] = React.useState<string | null>(null);
-  const [fixes, setFixes] = React.useState<FixRecord[]>([]);
   // A reset clears the result while the code and context stay the same (each
-  // wizard screen opens its own chat), so it must re-run the check itself or
-  // the transcript sits on "checking" until the next edit.
+  // wizard screen opens its own chat), so it must re-run the check itself.
   const [generation, setGeneration] = React.useState(0);
-  const fixAttemptsRef = React.useRef(0);
-  const key = `${contextKey}\u0000${signatureCode}\u0000${metricCode}`;
+  const filesKey = JSON.stringify(files);
+  const key = `${contextKey}\u0000${signatureCode}\u0000${metricCode}\u0000${filesKey}`;
   const checkable =
     context !== null && status !== "streaming" && !!signatureCode.trim() && !!metricCode.trim();
-  // Only code a coding turn finished goes back for a fix; a stopped or
-  // failed turn's code is checked but not sent back.
-  const fixable = agentAuthored && status === "done";
+  // A finished coding turn is checked at once; typing waits for a pause.
+  const delay = status === "done" ? 0 : EDIT_CHECK_DELAY_MS;
 
   React.useEffect(() => {
     if (!context || !checkable) return;
     const controller = new AbortController();
-    const timer = setTimeout(
-      () => {
-        staticContractCheck(
-          { spec: panelContractSpec(context, signatureCode, metricCode), sample_count: 1 },
-          controller.signal,
-        )
-          .then((checked) => {
-            if (controller.signal.aborted) return;
-            const { run, metric } = contractValidations(checked, contractCheckMessage);
-            setSignatureValidation(run);
-            setMetricValidation(metric);
-            setResult({ key, ok: checked.ok });
-            if (!checked.ok && fixable && fixAttemptsRef.current < MAX_CONTRACT_FIXES) {
-              fixAttemptsRef.current += 1;
-              const record: FixRecord = {
-                attempt: fixAttemptsRef.current,
-                failures: [...run.errors, ...metric.errors],
-                runBefore: signatureCode,
-                metricBefore: metricCode,
-                from: null,
-              };
-              setFixes((prev) => [...prev, record]);
-              setFixKey(key);
-            }
-          })
-          .catch((err: unknown) => {
-            if (controller.signal.aborted) return;
-            setResult({ key, ok: false });
-            setSignatureValidation({
-              valid: false,
-              errors: [err instanceof Error ? err.message : msg("agent.validation.failed")],
-              warnings: [],
-            });
+    const timer = setTimeout(() => {
+      staticContractCheck(
+        {
+          spec: panelContractSpec(
+            context,
+            signatureCode,
+            metricCode,
+            JSON.parse(filesKey) as Record<string, string>,
+          ),
+          sample_count: 1,
+        },
+        controller.signal,
+      )
+        .then((checked) => {
+          if (controller.signal.aborted) return;
+          const { run, metric } = contractValidations(checked, contractCheckMessage);
+          setSignatureValidation(run);
+          setMetricValidation(metric);
+          setResult({ key, ok: checked.ok });
+        })
+        .catch((err: unknown) => {
+          if (controller.signal.aborted) return;
+          setResult({ key, ok: false });
+          setSignatureValidation({
+            valid: false,
+            errors: [err instanceof Error ? err.message : msg("agent.validation.failed")],
+            warnings: [],
           });
-      },
-      agentAuthored ? 0 : EDIT_CHECK_DELAY_MS,
-    );
+        });
+    }, delay);
     return () => {
       clearTimeout(timer);
       controller.abort();
@@ -233,38 +195,20 @@ function useAuthoringCheck(args: AuthoringCheckArgs): {
     checkable,
     signatureCode,
     metricCode,
+    filesKey,
     key,
-    fixable,
+    delay,
     generation,
     setSignatureValidation,
     setMetricValidation,
   ]);
 
-  // Sent from its own effect, after the render that stored the failures, so
-  // the fix turn carries them to the agent as its prior validations.
-  React.useEffect(() => {
-    if (!fixKey || status !== "done") return;
-    setFixKey(null);
-    setFixes((prev) =>
-      prev.map((f, i) =>
-        i === prev.length - 1 && f.from === null ? { ...f, from: messageCount } : f,
-      ),
-    );
-    send(msg("submit.v2.metric.agent.fix"));
-  }, [fixKey, status, send, messageCount]);
-
   const reset = React.useCallback(() => {
     setResult(null);
-    setFixKey(null);
-    setFixes([]);
     setGeneration((g) => g + 1);
-    fixAttemptsRef.current = 0;
   }, []);
 
-  const settled = result !== null && result.key === key;
-  let checkStatus: AuthoringCheckStatus = "idle";
-  if (checkable) checkStatus = settled ? (result.ok ? "passed" : "failed") : "checking";
-  return { status: checkStatus, ok: settled && result.ok, fixes, reset };
+  return { ok: checkable && result !== null && result.key === key && result.ok, reset };
 }
 
 /**
@@ -292,6 +236,7 @@ export function useCodeAuthoringAgent(
 
   const [localSignatureCode, setLocalSignatureCode] = React.useState("");
   const [localMetricCode, setLocalMetricCode] = React.useState("");
+  const [localFiles, setLocalFiles] = React.useState<Readonly<Record<string, string>>>(NO_FILES);
   const [signatureManuallyEdited, setSignatureManuallyEdited] = React.useState(false);
   const [metricManuallyEdited, setMetricManuallyEdited] = React.useState(false);
   const [signatureValidation, setSignatureValidation] =
@@ -311,6 +256,7 @@ export function useCodeAuthoringAgent(
   const applyAgentPatch = wizardCtx?.applyAgentPatch;
   const signatureCode = shared ? (wizardCtx?.state.run_code ?? "") : localSignatureCode;
   const metricCode = shared ? (wizardCtx?.state.metric_code ?? "") : localMetricCode;
+  const files = shared ? (wizardCtx?.workspaceFiles ?? NO_FILES) : localFiles;
 
   // The setters keep one identity for ``useCodeAgent`` (it captures them in
   // its run), so they read where the code lives from a ref.
@@ -335,25 +281,22 @@ export function useCodeAuthoringAgent(
     },
     [writeWizardCode, applyAgentPatch],
   );
-  // What the coding agent itself last wrote: only a failure on that code goes
-  // back to it for a fix, never one on code the user is typing.
-  const [agentWrote, setAgentWrote] = React.useState({ signature: "", metric: "" });
-  const setSignatureCode = React.useCallback(
-    (code: string) => {
-      setAgentWrote((prev) => ({ ...prev, signature: code }));
-      writeSignatureCode(code);
+  const writeWizardFile = wizardCtx?.writeFile;
+  const setFile = React.useCallback(
+    (path: string, text: string | null) => {
+      if (sharedRef.current && writeWizardFile?.(path, text)) return;
+      setLocalFiles((prev) => {
+        if (text === null) {
+          if (!(path in prev)) return prev;
+          const next = { ...prev };
+          delete next[path];
+          return next;
+        }
+        return prev[path] === text ? prev : { ...prev, [path]: text };
+      });
     },
-    [writeSignatureCode],
+    [writeWizardFile],
   );
-  const setMetricCode = React.useCallback(
-    (code: string) => {
-      setAgentWrote((prev) => ({ ...prev, metric: code }));
-      writeMetricCode(code);
-    },
-    [writeMetricCode],
-  );
-  const agentAuthored =
-    signatureCode === agentWrote.signature && metricCode === agentWrote.metric;
 
   // A workflow run hands off a graph, never run code, so it keeps the
   // graph-aware seed and no unified context. The panel rebuilds its wizard
@@ -474,8 +417,8 @@ export function useCodeAuthoringAgent(
     moduleName,
     signatureCode,
     metricCode,
-    setSignatureCode,
-    setMetricCode,
+    setSignatureCode: writeSignatureCode,
+    setMetricCode: writeMetricCode,
     signatureManuallyEdited,
     metricManuallyEdited,
     setSignatureManuallyEdited,
@@ -489,6 +432,8 @@ export function useCodeAuthoringAgent(
     seedEnabled: armed && (isWorkflow || (authoringContext !== null && !hasCode)),
     unified: authoringContext,
     onBrief,
+    files: files as Record<string, string>,
+    setFile,
     model,
     reasoningEffort,
     isWorkflow,
@@ -501,10 +446,14 @@ export function useCodeAuthoringAgent(
   const setCodeWriting = wizardCtx?.setCodeWriting;
   const runWriting = shared && agent.signatureStatus === "writing";
   const metricWriting = shared && agent.metricStatus === "writing";
+  const filesWriting = shared ? agent.writingFiles : NOT_WRITING_FILES;
   React.useEffect(() => {
-    setCodeWriting?.({ run: runWriting, metric: metricWriting });
-  }, [setCodeWriting, runWriting, metricWriting]);
-  React.useEffect(() => () => setCodeWriting?.({ run: false, metric: false }), [setCodeWriting]);
+    setCodeWriting?.({ run: runWriting, metric: metricWriting, files: filesWriting });
+  }, [setCodeWriting, runWriting, metricWriting, filesWriting]);
+  React.useEffect(
+    () => () => setCodeWriting?.({ run: false, metric: false, files: NOT_WRITING_FILES }),
+    [setCodeWriting],
+  );
 
   const check = useAuthoringCheck({
     context: authoringContext,
@@ -512,23 +461,10 @@ export function useCodeAuthoringAgent(
     status: agent.status,
     signatureCode,
     metricCode,
-    agentAuthored,
-    messageCount: agent.messages.length,
+    files,
     setSignatureValidation,
     setMetricValidation,
-    send: agent.send,
   });
-  const fixAttempts = React.useMemo(
-    () =>
-      describeFixes(
-        check.fixes,
-        agent.messages,
-        agent.status === "streaming",
-        signatureCode,
-        metricCode,
-      ),
-    [check.fixes, agent.messages, agent.status, signatureCode, metricCode],
-  );
 
   // ``useCodeAgent.reset`` clears its own state but not the caller-owned code;
   // wrap it so a fresh conversation drops the previous run's artifacts too.
@@ -540,10 +476,7 @@ export function useCodeAuthoringAgent(
     agentReset();
     setLocalSignatureCode("");
     setLocalMetricCode("");
-    // The wizard keeps its code across screens, so what the agent wrote there
-    // still counts as its own until someone edits it; a failed check on it,
-    // or on a follow-up's change to one half, still goes back for a fix.
-    if (!sharedRef.current) setAgentWrote({ signature: "", metric: "" });
+    setLocalFiles(NO_FILES);
     setSignatureValidation(null);
     setMetricValidation(null);
     checkReset();
@@ -562,10 +495,9 @@ export function useCodeAuthoringAgent(
     metricCode,
     signatureValidation,
     metricValidation,
+    files,
     contractOk: authoringContext !== null && check.ok,
-    checkStatus: check.status,
     hasCode,
-    fixAttempts,
     sharedWithWizard: shared,
     isWorkflow,
     workflowSpec,

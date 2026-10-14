@@ -4,8 +4,9 @@
 same box :class:`~.sandbox_scorer.SandboxPythonScorer` opens (image,
 network, install command, pinned dependencies), and ships
 :mod:`.workspace_harness` into it next to the runner. Each evaluation runs
-the harness once; the run code and metric travel only inside the harness's
-message stream, never as a file in the box. The harness binds ``llm`` to
+the harness once; the run code, metric and extra files travel only inside
+the harness's message stream; only the run child writes the extra files, to
+a temporary directory it removes. The harness binds ``llm`` to
 the task model while the run code runs and to the metric model while the
 metric runs; both models' usage is billed through :class:`ScorerUsage`
 ledgers.
@@ -196,6 +197,7 @@ class WorkspaceScorer(SandboxPythonScorer):
         self._init = {
             "run_code": workspace.run_code,
             "metric_code": workspace.metric_code,
+            "files": dict(workspace.files),
             "artifact_kind": payload.task.artifact.kind,
             "input_fields": list(payload.data.input_fields),
             "gateways": {

@@ -15,7 +15,7 @@ instructions and state to it and binds the task model as its LM.
 
 Protocol: JSON lines. The first message initializes the workspace::
 
-    {"run_code": str, "metric_code": str, "artifact_kind": str,
+    {"run_code": str, "metric_code": str, "files": {path: str}, "artifact_kind": str,
      "input_fields": [str], "gateways": {"task": {...} | null, "metric": {...} | null}}
 
 and is answered with ``{"ready": true}`` or a load error. Every later
@@ -27,14 +27,17 @@ with ``{"output_preview", "score", "side_info", "usage"}`` or
 
 The run code and the candidate never share a process with the metric: each
 call runs them in a fresh child interpreter (``--run-child``) that receives
-only the run code, the task model, the candidate and the case's inputs, and
-answers with the output as JSON. Candidate-written code (a ``code`` artifact
+only the run code, its extra workspace files, the task model, the candidate
+and the case's inputs, and answers with the output as JSON. The extra files
+(helpers ``run.py`` imports) are written to a fresh temporary directory at the
+front of the child's ``sys.path`` and removed when the child is done; the
+metric's process never sees them. Candidate-written code (a ``code`` artifact
 the run code executes) therefore cannot read the metric source, the
 expected value or the metric model's key, and a run-stage ``error`` is cut to
 one short line.
 
-The code arrives only inside the message stream and is never written to a
-file. ``python3 skynet_workspace_harness.py`` reads the stream from stdin;
+The run and metric code arrive only inside the message stream and are never
+written to a file. ``python3 skynet_workspace_harness.py`` reads the stream from stdin;
 with ``--env`` it reads it from base64 chunks in ``SKYNET_WS_STREAM_<n>``
 environment variables, because the sandbox API runs one command at a time
 without stdin, and drops them from the environment before user code runs.
@@ -53,8 +56,10 @@ import inspect
 import json
 import linecache
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import traceback
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -92,6 +97,10 @@ METRIC_ENTRY_NAME = "score"
 # When the run code holds several modules, the one under this name is the program.
 PROGRAM_NAME = "program"
 _USER_FILENAMES = (RUN_FILENAME, METRIC_FILENAME)
+FILES_DIR_PREFIX = "skynet_ws_files_"
+# The run child's extra-files directory, so tracebacks name a helper file by
+# its workspace path. Set only inside a run child.
+_files_dir: str | None = None
 _NUMBER_TYPES = (bool, int, float)
 _PR_SET_DUMPABLE = 4
 
@@ -109,7 +118,13 @@ def user_detail(exc: BaseException) -> str:
     Returns:
         A traceback-style text, at most :data:`DETAIL_MAX_CHARS` characters.
     """
-    frames = [frame for frame in traceback.extract_tb(exc.__traceback__) if frame.filename in _USER_FILENAMES]
+    frames = []
+    for frame in traceback.extract_tb(exc.__traceback__):
+        if frame.filename in _USER_FILENAMES:
+            frames.append(frame)
+        elif _files_dir is not None and frame.filename.startswith(_files_dir + os.sep):
+            frame.filename = frame.filename[len(_files_dir) + 1 :].replace(os.sep, "/")
+            frames.append(frame)
     lines = ["Traceback (user code):\n", *traceback.format_list(frames)] if frames else []
     lines.extend(traceback.format_exception_only(type(exc), exc))
     text = "".join(lines).rstrip()
@@ -424,19 +439,60 @@ class RunStage:
             return run(run_artifact(candidate), inputs)
 
 
+def _safe_relative(path: str) -> bool:
+    """Return whether ``path`` stays inside the directory it is joined to.
+
+    Args:
+        path: An extra file's workspace path; the API validated it already.
+
+    Returns:
+        True for a relative ``/``-separated path with no empty, ``.`` or ``..`` part.
+    """
+    parts = path.split("/")
+    return bool(path) and not path.startswith("/") and "\\" not in path and all(p not in ("", ".", "..") for p in parts)
+
+
+def write_files(files: dict[str, Any]) -> str:
+    """Write the extra workspace files to a fresh directory.
+
+    Args:
+        files: Path to text of every extra file.
+
+    Returns:
+        The directory, to put at the front of ``sys.path``.
+
+    Raises:
+        ValueError: When a path would leave the directory.
+    """
+    root = tempfile.mkdtemp(prefix=FILES_DIR_PREFIX)
+    for path, text in files.items():
+        if not _safe_relative(str(path)):
+            shutil.rmtree(root, ignore_errors=True)
+            raise ValueError(f"unsafe workspace path: {path!r}")
+        target = Path(root).joinpath(*str(path).split("/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(text), encoding="utf-8")
+    return root
+
+
 def run_child(message: dict[str, Any]) -> dict[str, Any]:
     """Run one case's run stage; the body of the ``--run-child`` process.
 
     Args:
-        message: ``{"run_code", "artifact_kind", "gateway", "candidate", "inputs"}``.
+        message: ``{"run_code", "files", "artifact_kind", "gateway", "candidate", "inputs"}``.
 
     Returns:
         ``{"output", "prediction", "output_preview", "usage"}``, or
         ``{"error", "detail", "usage"}``, or ``{"control", "usage"}``.
     """
+    global _files_dir
     stage: RunStage | None = None
     reply: dict[str, Any]
+    files = message.get("files") or {}
     try:
+        if files:
+            _files_dir = os.path.realpath(write_files(dict(files)))
+            sys.path.insert(0, _files_dir)
         stage = RunStage(message)
         output = stage.run(message.get("candidate"), dict(message.get("inputs") or {}))
         plain, is_prediction = _plain_output(output)
@@ -445,6 +501,9 @@ def run_child(message: dict[str, Any]) -> dict[str, Any]:
         reply = {"control": {"code": exc.code, "message": str(exc)}}
     except BaseException as exc:  # user code is arbitrary — any failure is reported, not raised
         reply = {"error": run_error_text(exc), "detail": user_detail(exc)}
+    finally:
+        if _files_dir is not None:
+            shutil.rmtree(_files_dir, ignore_errors=True)
     client = stage.task_llm if stage is not None else None
     if client is not None and client.control is not None:
         reply = {"control": client.control}
@@ -495,6 +554,7 @@ class Workspace:
         self.kind = str(init.get("artifact_kind") or "text")
         gateways = init.get("gateways") or {}
         self.run_code = str(init.get("run_code") or "")
+        self.files = dict(init.get("files") or {})
         self.task_gateway = gateways.get("task")
         self.metric_llm = _client(gateways.get("metric"), ENV_METRIC_API_KEY)
         self.metric_module = _helpers(self.metric_llm)
@@ -533,6 +593,7 @@ class Workspace:
         """
         message = {
             "run_code": self.run_code,
+            "files": self.files,
             "artifact_kind": self.kind,
             "gateway": self.task_gateway,
             "candidate": candidate,

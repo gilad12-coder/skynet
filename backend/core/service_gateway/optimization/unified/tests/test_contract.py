@@ -20,6 +20,7 @@ from ..contract import (
     run_contract_check,
     static_contract_check,
     validate_unified_payload,
+    verify_workspace,
     with_message_codes,
 )
 
@@ -52,8 +53,12 @@ def _payload(
     run_code: str = RUN_CODE,
     metric_code: str = BLACKBOX_METRIC,
     metric_model: str | None = None,
+    files: dict[str, str] | None = None,
 ) -> UnifiedRunRequest:
     """Build a pairs-mode unified run with six inline cases."""
+    workspace: dict[str, Any] = {"run_code": run_code, "metric_code": metric_code, "metric_timeout_seconds": 30}
+    if files is not None:
+        workspace["files"] = files
     return UnifiedRunRequest.model_validate(
         {
             "task": {"objective": "o", "artifact": {"kind": kind, "starting_version": "p"}},
@@ -67,7 +72,7 @@ def _payload(
                 "reflection_model": {"name": "openrouter/task"},
                 "metric_model": {"name": metric_model} if metric_model else None,
             },
-            "workspace": {"run_code": run_code, "metric_code": metric_code, "metric_timeout_seconds": 30},
+            "workspace": workspace,
         }
     )
 
@@ -384,3 +389,118 @@ def test_every_item_and_sample_result_carries_a_message_code(run_code: str, metr
     assert response.samples
     assert all(check.message_code for check in response.checks)
     assert {check.sample_index for check in response.checks if check.sample_index is not None} == {0, 1}
+
+
+HELPER_RUN = "from helpers import join\n\ndef run(artifact, input):\n    return join(artifact, input['q'])\n"
+HELPER = "def join(a, b):\n    return a + ':' + b\n"
+
+
+def test_old_payload_without_files_loads_and_keeps_its_fingerprint() -> None:
+    """A workspace with only run_code / metric_code loads with no files and hashes as before."""
+    payload = _payload()
+    assert payload.workspace.files == {}
+    assert contract_fingerprint(payload) == contract_fingerprint(_payload(files={}))
+    assert contract_fingerprint(_payload(files={"helpers.py": HELPER})) != contract_fingerprint(payload)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/abs.py",
+        "../up.py",
+        "a/../b.py",
+        "a\\b.py",
+        "run.py",
+        "metric.py",
+        ".hidden.py",
+        "x.exe",
+        "a//b.py",
+        "skynet/x.py",
+    ],
+)
+def test_unsafe_file_paths_are_refused(path: str) -> None:
+    """Absolute, parent, hidden, fixed, reserved and non-text paths never validate."""
+    with pytest.raises(ValueError):
+        _payload(files={path: "x = 1\n"})
+
+
+def test_file_limits_are_enforced() -> None:
+    """Too many files, or a file that is also a folder, are refused."""
+    with pytest.raises(ValueError):
+        _payload(files={f"f{i}.py": "" for i in range(21)})
+    with pytest.raises(ValueError):
+        _payload(files={"lib.py": "", "lib.py/x.py": ""})
+    assert _payload(files={"lib/parse.py": "", "data/rules.json": "{}"}).workspace.files
+
+
+def test_static_check_reports_extra_files() -> None:
+    """A parsing helper passes; a broken one names its file; DSPy optimizers refuse extra files."""
+    assert (
+        _statuses(static_contract_check(_payload(run_code=HELPER_RUN, files={"helpers.py": HELPER})))["workspace.files"]
+        == "passed"
+    )
+    broken = static_contract_check(_payload(files={"helpers.py": "def (:\n"}))
+    item = next(check for check in broken.checks if check.key == "workspace.files")
+    assert item.status == "failed"
+    assert "helpers.py" in (item.detail or "")
+    dspy = static_contract_check(
+        _payload(
+            kind="dspy_program",
+            optimizer="dspy_gepa",
+            run_code=DSPY_RUN_CODE,
+            metric_code=DSPY_METRIC,
+            files={"helpers.py": HELPER},
+        )
+    )
+    assert _statuses(dspy)["workspace.files"] == "failed"
+
+
+def test_sampled_check_runs_run_code_that_imports_a_helper_file() -> None:
+    """run.py imports helpers.py from the workspace and the box scores it."""
+    response = _check(_payload(run_code=HELPER_RUN, files={"helpers.py": HELPER}))
+
+    assert response.ok, [(c.key, c.detail) for c in response.checks]
+    assert all(sample.score == 1.0 for sample in response.samples)
+
+
+def test_metric_cannot_import_candidate_files() -> None:
+    """The metric runs apart from the run code's files, so importing one fails."""
+    metric = "from helpers import join\n\ndef score(input, output, expected=None):\n    return 1.0, {}\n"
+    response = _check(_payload(run_code=HELPER_RUN, metric_code=metric, files={"helpers.py": HELPER}), sample_count=1)
+
+    assert not response.ok
+
+
+def test_verify_workspace_gives_each_file_its_own_verdict() -> None:
+    """Lint and contract failures land on the file they come from."""
+    verdicts = {
+        v.path: v
+        for v in verify_workspace(
+            "from helpers import join\n\ndef go(artifact, input):\n    return join(artifact)\n",
+            BLACKBOX_METRIC,
+            {"helpers.py": "def join(a):\n    return a + missing\n", "notes.md": "# notes"},
+            metric_has_model=False,
+            optimizer_resolved="best_of_n",
+        )
+    }
+    assert list(verdicts) == ["run.py", "metric.py", "helpers.py", "notes.md"]
+    assert not verdicts["run.py"].ok
+    assert any("run(artifact, input)" in error for error in verdicts["run.py"].errors)
+    assert verdicts["metric.py"].ok
+    assert not verdicts["helpers.py"].ok
+    assert "F821" in verdicts["helpers.py"].errors[0]
+    assert verdicts["notes.md"].ok
+
+
+def test_static_check_lints_each_python_file_on_its_own() -> None:
+    """Each parsing Python file gets its own lint; a file that does not parse is left to its check item."""
+    response = static_contract_check(
+        _payload(
+            run_code=HELPER_RUN,
+            files={"helpers.py": "def join(a, b):\n    return a + missing\n", "broken.py": "def (:\n", "notes.md": "x"},
+        )
+    )
+    lints = {lint.path: lint for lint in response.files}
+    assert list(lints) == ["run.py", "metric.py", "helpers.py"]
+    assert lints["run.py"].errors == []
+    assert any("F821" in error for error in lints["helpers.py"].errors)

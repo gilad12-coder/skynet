@@ -65,6 +65,8 @@
     "winningCandidate": "胜出候选项"
   },
   "messages": {
+    "contract.file_invalid": "文件 {path} 无效：{error}",
+    "contract.files_unsupported": "DSPy 优化器只运行 run.py 和 metric.py。请把额外文件中的代码移到 run.py，或选择其他优化器。",
     "contract.metric_error": "指标在示例 {index} 上失败：{error}",
     "contract.metric_missing": "指标代码没有定义此优化器调用的函数。",
     "contract.metric_model_missing": "你的指标会调用模型，请选择指标模型。",

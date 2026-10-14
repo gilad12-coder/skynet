@@ -8,6 +8,8 @@ entry points must exist with a fitting arity, and a metric that calls
 ``llm`` needs a metric model. Code written for the retired per-optimizer
 shapes (``build_program()``, ``metric(gold, pred, ...)``) fails with a detail
 asking to regenerate it.
+Extra workspace files (helpers ``run.py`` imports) must parse, and only the
+black-box engines can run them: the DSPy optimizers load ``run.py`` alone.
 The sandboxed check then runs the starting version through the code and the
 metric on a few training/validation cases (never test) and reports the
 user's exact error, user-code frames only, when anything does not fit.
@@ -17,16 +19,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from ....i18n import t
 from ....models.unified import (
+    DSPY_OPTIMIZERS,
+    METRIC_FILE,
     METRIC_SIGNATURE,
     RUN_ENTRY,
+    RUN_FILE,
     ContractCheckItem,
     ContractCheckResponse,
     ContractSample,
     UnifiedRunRequest,
+    WorkspaceFileLint,
     resolve_optimizer,
 )
 from ...safe_exec import FunctionShape, WorkspaceCodeIntrospection, introspect_workspace_code
@@ -63,7 +74,7 @@ def contract_fingerprint(payload: UnifiedRunRequest) -> str:
         The sha256 hex digest of the canonical JSON of the artifact, the data
         (inline cases or the staged dataset id), data mode, input and expected
         fields, split and shuffle, resolved optimizer, both pieces of code, the
-        task and metric models' names and the metric timeout.
+        task and metric models' names, the metric timeout and any extra files.
     """
     data = payload.data
     task_model = payload.models.task_model
@@ -87,6 +98,10 @@ def contract_fingerprint(payload: UnifiedRunRequest) -> str:
         "metric_model": metric_model.name if metric_model is not None else None,
         "metric_timeout_seconds": payload.workspace.metric_timeout_seconds,
     }
+    # Added only when present so fingerprints of single-file workspaces
+    # stay what they were before extra files existed.
+    if payload.workspace.files:
+        body["files"] = dict(payload.workspace.files)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -191,6 +206,36 @@ def _metric_items(payload: UnifiedRunRequest, code: WorkspaceCodeIntrospection) 
     return [signature, model]
 
 
+def _files_item(payload: UnifiedRunRequest) -> ContractCheckItem | None:
+    """Check the extra workspace files parse and the optimizer can run them.
+
+    Args:
+        payload: The unified run.
+
+    Returns:
+        The ``workspace.files`` item, or ``None`` when there are no extra files.
+    """
+    files = payload.workspace.files
+    if not files:
+        return None
+    if resolve_optimizer(payload.optimizer.choice, payload.task.artifact.kind) in DSPY_OPTIMIZERS:
+        return _item("workspace.files", False, "contract.files_unsupported", detail=", ".join(sorted(files)))
+    for path in sorted(files):
+        if not path.endswith(".py"):
+            continue
+        error = introspect_workspace_code(files[path]).syntax_error
+        if error is not None:
+            return _item(
+                "workspace.files",
+                False,
+                "contract.file_invalid",
+                detail=f"{path}: {error}",
+                path=path,
+                error=error,
+            )
+    return _item("workspace.files", True, "contract.file_invalid")
+
+
 def _static_items(payload: UnifiedRunRequest) -> tuple[list[ContractCheckItem], bool]:
     """Run every source-level check.
 
@@ -198,13 +243,201 @@ def _static_items(payload: UnifiedRunRequest) -> tuple[list[ContractCheckItem], 
         payload: The unified run.
 
     Returns:
-        The run signature, metric signature and metric model items, and
-        whether the metric code calls ``llm``.
+        The run signature, metric signature and metric model items (plus the
+        extra files' item when there are any), and whether the metric code
+        calls ``llm``.
     """
     run_code = introspect_workspace_code(payload.workspace.run_code)
     metric_code = introspect_workspace_code(payload.workspace.metric_code)
     items = [_run_item(run_code), *_metric_items(payload, metric_code)]
+    files = _files_item(payload)
+    if files is not None:
+        items.append(files)
     return items, metric_code.uses_llm
+
+
+# Pyflakes catches what fails at import or call time: undefined names and
+# broken imports. Everything else it reports is a warning, never a blocker.
+_RUFF_SELECT = "E9,F"
+_RUFF_ERROR_CODES = frozenset({"E902", "E999", "F821", "F822", "F823"})
+_RUFF_TIMEOUT_SECONDS = 10.0
+_RUFF_MAX_FINDINGS = 20
+
+
+# One file's verdict from :func:`verify_workspace`.
+@dataclass
+class FileVerification:
+    path: str
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        """Return whether the file has no errors."""
+        return not self.errors
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the verdict as plain data for an SSE event or an agent observation.
+
+        Returns:
+            ``{"path", "ok", "errors", "warnings"}``.
+        """
+        return {"path": self.path, "ok": self.ok, "errors": list(self.errors), "warnings": list(self.warnings)}
+
+
+def _ruff_binary() -> str | None:
+    """Return the ruff executable next to this interpreter or on ``PATH``, if any."""
+    beside = Path(sys.executable).with_name("ruff")
+    return str(beside) if beside.is_file() else shutil.which("ruff")
+
+
+def ruff_findings(path: str, code: str) -> tuple[list[str], list[str]]:
+    """Lint one Python file with ruff, reading it from stdin so nothing is written.
+
+    Args:
+        path: The file's workspace path, shown in each finding.
+        code: The file's source.
+
+    Returns:
+        ``(errors, warnings)`` as ``"<path>:<line>:<col> <code> <message>"``
+        lines; both empty when ruff is unavailable or fails.
+    """
+    binary = _ruff_binary()
+    if binary is None:
+        return [], []
+    try:
+        result = subprocess.run(
+            [
+                binary,
+                "check",
+                "--isolated",
+                "--no-cache",
+                "--select",
+                _RUFF_SELECT,
+                "--output-format",
+                "json",
+                "--stdin-filename",
+                path,
+                "-",
+            ],
+            input=code,
+            capture_output=True,
+            text=True,
+            timeout=_RUFF_TIMEOUT_SECONDS,
+            check=False,
+        )
+        findings = json.loads(result.stdout or "[]")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return [], []
+    errors: list[str] = []
+    warnings: list[str] = []
+    for finding in findings[:_RUFF_MAX_FINDINGS] if isinstance(findings, list) else []:
+        location = finding.get("location") or {}
+        rule = str(finding.get("code") or "E999")
+        line = f"{path}:{location.get('row', 0)}:{location.get('column', 0)} {rule} {finding.get('message', '')}"
+        (errors if rule in _RUFF_ERROR_CODES else warnings).append(line)
+    return errors, warnings
+
+
+def _contract_errors(path: str, code: WorkspaceCodeIntrospection, *, metric_has_model: bool) -> list[str]:
+    """Return the contract errors of ``run.py`` or ``metric.py``, in the agent's English.
+
+    Args:
+        path: :data:`RUN_FILE` or :data:`METRIC_FILE`.
+        code: The file's introspection, which parsed.
+        metric_has_model: Whether a metric model is attached.
+
+    Returns:
+        One line per broken rule; empty when the file fits its contract.
+    """
+    if path == RUN_FILE:
+        if _fits(code.functions.get(RUN_ENTRY_NAME), 2, 2):
+            return []
+        if RUN_ENTRY_NAME not in code.functions and LEGACY_RUN_ENTRY in code.functions:
+            return [REGENERATE_RUN]
+        return [f"{RUN_FILE} must define {RUN_ENTRY}."]
+    errors: list[str] = []
+    function = code.functions.get(METRIC_ENTRY_NAME)
+    if function is None and LEGACY_METRIC_ENTRY in code.functions:
+        errors.append(REGENERATE_METRIC)
+    elif not _fits(function, 2, 2):
+        errors.append(f"{METRIC_FILE} must define {METRIC_SIGNATURE} returning (score, side_info).")
+    if code.uses_llm and not metric_has_model:
+        errors.append(f"{METRIC_FILE} calls llm but no metric model is attached: remove the call or attach one.")
+    return errors
+
+
+def workspace_lint(payload: UnifiedRunRequest) -> list[WorkspaceFileLint]:
+    """Lint every Python file of the workspace that parses, each on its own.
+
+    A file that does not parse is left out: its syntax error is already a
+    check item.
+
+    Args:
+        payload: The unified run.
+
+    Returns:
+        ``run.py``, ``metric.py`` and then the extra Python files by path,
+        each with its ruff findings.
+    """
+    workspace = payload.workspace
+    sources = {RUN_FILE: workspace.run_code, METRIC_FILE: workspace.metric_code}
+    sources.update((path, workspace.files[path]) for path in sorted(workspace.files) if path.endswith(".py"))
+    lints: list[WorkspaceFileLint] = []
+    for path, text in sources.items():
+        if introspect_workspace_code(text).syntax_error is not None:
+            continue
+        errors, warnings = ruff_findings(path, text)
+        lints.append(WorkspaceFileLint(path=path, errors=errors, warnings=warnings))
+    return lints
+
+
+def verify_workspace(
+    run_code: str,
+    metric_code: str,
+    files: dict[str, str],
+    *,
+    metric_has_model: bool,
+    optimizer_resolved: str,
+) -> list[FileVerification]:
+    """Check every workspace file on its own, without running any of it.
+
+    Each Python file must parse and pass ruff's error rules; ``run.py`` and
+    ``metric.py`` must also fit the contract :func:`static_contract_check`
+    enforces, and extra files are refused for the DSPy optimizers. Text
+    files are listed as passing.
+
+    Args:
+        run_code: ``run.py``.
+        metric_code: ``metric.py``.
+        files: Path to text of every extra file.
+        metric_has_model: Whether a metric model is attached.
+        optimizer_resolved: The optimizer the run resolves to.
+
+    Returns:
+        One verdict per file: ``run.py``, ``metric.py``, then the extra files by path.
+    """
+    sources = {RUN_FILE: run_code, METRIC_FILE: metric_code, **{path: files[path] for path in sorted(files)}}
+    verdicts: list[FileVerification] = []
+    for path, text in sources.items():
+        verdict = FileVerification(path)
+        verdicts.append(verdict)
+        if path in files and optimizer_resolved in DSPY_OPTIMIZERS:
+            verdict.errors.append(
+                f"{path}: DSPy optimizers load only {RUN_FILE} and {METRIC_FILE}; move this code into {RUN_FILE}."
+            )
+        if not path.endswith(".py"):
+            continue
+        code = introspect_workspace_code(text)
+        if code.syntax_error is not None:
+            verdict.errors.append(f"{path}: {code.syntax_error}")
+            continue
+        if path in (RUN_FILE, METRIC_FILE):
+            verdict.errors.extend(_contract_errors(path, code, metric_has_model=metric_has_model))
+        lint_errors, lint_warnings = ruff_findings(path, text)
+        verdict.errors.extend(lint_errors)
+        verdict.warnings.extend(lint_warnings)
+    return verdicts
 
 
 def _response(
@@ -334,10 +567,12 @@ def static_contract_check(payload: UnifiedRunRequest) -> ContractCheckResponse:
         payload: The unified run.
 
     Returns:
-        The static items, with no samples.
+        The static items and each Python file's lint, with no samples.
     """
     checks, uses_llm = _static_items(payload)
-    return _response(payload, checks, [], uses_llm=uses_llm)
+    response = _response(payload, checks, [], uses_llm=uses_llm)
+    response.files = workspace_lint(payload)
+    return response
 
 
 def _preview(value: Any) -> str:

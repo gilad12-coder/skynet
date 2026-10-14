@@ -367,6 +367,8 @@
     "contract.shape.blackbox": "The score function must return (score, side_info), where side_info is a dict with a feedback string.",
     "contract.metric_model_missing": "The metric calls a model, so choose a metric model.",
     "contract.runner_outdated": "The check's code runner is older than this contract and still expects the retired one, so it needs a rebuild. Your code needs no change.",
+    "contract.files_unsupported": "DSPy optimizers run only run.py and metric.py. Move the extra files' code into run.py, or pick another optimizer.",
+    "contract.file_invalid": "The file {path} is not valid: {error}",
     "contract.passed": "The code matches what the optimizer needs."
   }
 }

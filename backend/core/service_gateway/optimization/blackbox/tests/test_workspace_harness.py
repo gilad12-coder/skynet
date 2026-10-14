@@ -38,6 +38,7 @@ def _workspace(metric_code: str, *, run_code: str = RUN_CODE, **extra: Any) -> W
         {
             "run_code": run_code,
             "metric_code": metric_code,
+            "files": extra.get("files", {}),
             "artifact_kind": extra.get("artifact_kind", "prompt"),
             "input_fields": extra.get("input_fields", ["q"]),
             "gateways": {"task": None, "metric": None},
@@ -342,3 +343,85 @@ def test_env_stream_round_trips_and_the_code_never_touches_disk(tmp_path: Path) 
     for path in tmp_path.rglob("*"):
         if path.is_file():
             assert secret not in path.read_text(encoding="utf-8", errors="ignore")
+
+
+HELPER_RUN = "from helpers import shout\n\ndef run(artifact, input):\n    return shout(artifact + ':' + input['q'])\n"
+
+
+def test_run_code_imports_an_extra_workspace_file() -> None:
+    """An extra file sits on the run child's path, so ``run.py`` can import it."""
+    metric = "def score(input, output, expected=None):\n    return 1.0, {'feedback': output}\n"
+    files = {"helpers.py": "def shout(text):\n    return text.upper()\n"}
+
+    reply = _workspace(metric, run_code=HELPER_RUN, files=files).handle({"candidate": "p", "case": _case("x")})
+
+    assert reply["side_info"]["feedback"] == "P:X"
+
+
+def test_run_code_imports_an_extra_file_from_a_package_folder() -> None:
+    """Nested paths become folders, importable as namespace packages."""
+    run_code = "from lib.text import shout\n\ndef run(artifact, input):\n    return shout(input['q'])\n"
+    metric = "def score(input, output, expected=None):\n    return 1.0, {'feedback': output}\n"
+
+    reply = _workspace(metric, run_code=run_code, files={"lib/text.py": "def shout(t):\n    return t + '!'\n"}).handle(
+        {"candidate": "p", "case": _case("hi")}
+    )
+
+    assert reply["side_info"]["feedback"] == "hi!"
+
+
+def test_metric_cannot_import_candidate_files() -> None:
+    """The extra files exist only in the run child: the metric cannot import them."""
+    metric = (
+        "def score(input, output, expected=None):\n"
+        "    try:\n"
+        "        import helpers\n"
+        "        return 1.0, {'feedback': 'leaked'}\n"
+        "    except ImportError:\n"
+        "        return 0.0, {'feedback': 'isolated'}\n"
+    )
+    files = {"helpers.py": "def shout(text):\n    return text.upper()\n"}
+
+    reply = _workspace(metric, run_code=HELPER_RUN, files=files).handle({"candidate": "p", "case": _case()})
+
+    assert reply["side_info"]["feedback"] == "isolated"
+
+
+def test_extra_files_are_removed_after_the_run_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The temporary files directory is gone once the child answers."""
+    monkeypatch.setattr(workspace_harness.tempfile, "tempdir", str(tmp_path))
+    reply = workspace_harness.run_child(
+        {
+            "run_code": HELPER_RUN,
+            "files": {"helpers.py": "def shout(t):\n    return t\n"},
+            "candidate": "p",
+            "inputs": {"q": "x"},
+        }
+    )
+
+    assert reply["output"] == "p:x"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_helper_file_frames_carry_their_workspace_path() -> None:
+    """A failure inside a helper file names it by its workspace path, not the temp dir."""
+    metric = "def score(input, output, expected=None):\n    return 1.0, {'feedback': ''}\n"
+    files = {"helpers.py": "def shout(text):\n    raise ValueError('boom')\n"}
+
+    reply = _workspace(metric, run_code=HELPER_RUN, files=files).handle({"candidate": "p", "case": _case()})
+
+    assert reply["stage"] == "run"
+    assert reply["error"] == "ValueError: boom"
+    assert 'File "helpers.py"' in reply["detail"]
+    assert workspace_harness.FILES_DIR_PREFIX not in reply["detail"]
+
+
+@pytest.mark.parametrize("path", ["../escape.py", "/abs.py", "a//b.py", "a/./b.py"])
+def test_write_files_refuses_paths_that_leave_the_directory(path: str) -> None:
+    """The harness re-checks every path even though the API validated it.
+
+    Args:
+        path: A path that would escape or alias the files directory.
+    """
+    with pytest.raises(ValueError):
+        workspace_harness.write_files({path: "x = 1\n"})

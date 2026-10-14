@@ -66,20 +66,41 @@ interface WizardStateContextValue {
    * Write code straight into the Metric step's editors, the code's one home.
    * Returns false when no Metric step is mounted to take it.
    */
-  writeCode: (slot: keyof CodeWriting, code: string) => boolean;
+  writeCode: (slot: CodeSlot, code: string) => boolean;
   setCodeSink: (sink: CodeSink | null) => void;
+  /**
+   * The Metric step's extra workspace files (besides run.py and metric.py),
+   * path to text; empty when no Metric step is mounted.
+   */
+  workspaceFiles: Readonly<Record<string, string>>;
+  setWorkspaceFiles: (files: Readonly<Record<string, string>>) => void;
+  /**
+   * Write one extra workspace file, or delete it with null. Returns false
+   * when no Metric step is mounted to take it.
+   */
+  writeFile: (path: string, text: string | null) => boolean;
+  setFileSink: (sink: FileSink | null) => void;
 }
 
-/** Where the Metric step takes code written outside its own editors. */
-export type CodeSink = (slot: keyof CodeWriting, code: string) => void;
+/** The wizard's two fixed code slots: run.py and metric.py. */
+export type CodeSlot = "run" | "metric";
 
-/** Which of the wizard's two code slots the coding tool is writing. */
+/** Where the Metric step takes code written outside its own editors. */
+export type CodeSink = (slot: CodeSlot, code: string) => void;
+
+/** Where the Metric step takes an extra file written or deleted outside its editor. */
+export type FileSink = (path: string, text: string | null) => void;
+
+/** Which of the wizard's code the coding tool is writing. */
 export interface CodeWriting {
   run: boolean;
   metric: boolean;
+  /** Extra workspace files being written, by path. */
+  files: readonly string[];
 }
 
-const NOT_WRITING: CodeWriting = { run: false, metric: false };
+const NOT_WRITING: CodeWriting = { run: false, metric: false, files: [] };
+const NO_FILES: Readonly<Record<string, string>> = {};
 
 const Ctx = React.createContext<WizardStateContextValue | null>(null);
 
@@ -115,16 +136,36 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
   const setCodeSink = React.useCallback((sink: CodeSink | null) => {
     codeSinkRef.current = sink;
   }, []);
-  const writeCode = React.useCallback((slot: keyof CodeWriting, code: string) => {
+  const writeCode = React.useCallback((slot: CodeSlot, code: string) => {
     const sink = codeSinkRef.current;
     if (!sink) return false;
     sink(slot, code);
     return true;
   }, []);
+  const fileSinkRef = React.useRef<FileSink | null>(null);
+  const setFileSink = React.useCallback((sink: FileSink | null) => {
+    fileSinkRef.current = sink;
+  }, []);
+  const writeFile = React.useCallback((path: string, text: string | null) => {
+    const sink = fileSinkRef.current;
+    if (!sink) return false;
+    sink(path, text);
+    return true;
+  }, []);
+  const [workspaceFiles, setWorkspaceFilesState] =
+    React.useState<Readonly<Record<string, string>>>(NO_FILES);
+  const setWorkspaceFiles = React.useCallback((files: Readonly<Record<string, string>>) => {
+    setWorkspaceFilesState(Object.keys(files).length === 0 ? NO_FILES : files);
+  }, []);
   const [codeWriting, setCodeWritingState] = React.useState<CodeWriting>(NOT_WRITING);
   const setCodeWriting = React.useCallback((next: CodeWriting) => {
     setCodeWritingState((prev) =>
-      prev.run === next.run && prev.metric === next.metric ? prev : next,
+      prev.run === next.run &&
+      prev.metric === next.metric &&
+      prev.files.length === next.files.length &&
+      prev.files.every((path, i) => path === next.files[i])
+        ? prev
+        : next,
     );
   }, []);
 
@@ -238,6 +279,10 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       setCodeWriting,
       writeCode,
       setCodeSink,
+      workspaceFiles,
+      setWorkspaceFiles,
+      writeFile,
+      setFileSink,
     }),
     [
       state,
@@ -257,6 +302,10 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       setCodeWriting,
       writeCode,
       setCodeSink,
+      workspaceFiles,
+      setWorkspaceFiles,
+      writeFile,
+      setFileSink,
     ],
   );
 
