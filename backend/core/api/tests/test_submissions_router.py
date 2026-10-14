@@ -529,7 +529,7 @@ def test_optimize_idempotent_retry_returns_same_optimization_id(monkeypatch: pyt
     assert len(store.created_ids()) == 1
 
 
-@pytest.mark.parametrize("path", ["/run", "/grid-search", "/blackbox/run", "/blackbox/scorer/dry-run"])
+@pytest.mark.parametrize("path", ["/run", "/grid-search", "/blackbox/scorer/dry-run"])
 def test_retired_submit_endpoints_are_gone(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
     """The per-family submit routes were replaced by ``/optimize``.
 

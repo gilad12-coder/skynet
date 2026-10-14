@@ -36,6 +36,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   const { state, patchTask, patchWorkspace, guided, optimizerCatalog, inputsInferring } = ctx;
   const { task, inputs, optimizer, workspace } = state;
   const kind = task.artifactKind;
+  const repo = Boolean(task.repo);
   const t = (key: string) => v2Msg(key, guided);
 
   // Code already in a slot (a cloned run, or the user's own) is never
@@ -133,7 +134,9 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     // Inference re-roles the columns when it answers, and the Inputs step
     // stays mounted while it does, so a seed started earlier would write
     // against input fields the contract check and the run no longer pass.
-    seedEnabled: authoringContext !== null && !inputsInferring,
+    // The agent writes run code against sample inputs, which a repository
+    // run has neither of; its scorer is written by hand.
+    seedEnabled: !repo && authoringContext !== null && !inputsInferring,
     unified: authoringContext,
     onBrief,
     model: agentModel,
@@ -148,7 +151,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   }, [agentStreaming, setAgentWriting]);
 
   const contract = useContractCheck(ctx);
-  const setupIncomplete = authoringContext === null;
+  const setupIncomplete = repo || authoringContext === null;
   // Until a fresh sandboxed check exists, the editors' consoles show what the
   // static check spotted while typing.
   const staticFailed = contract.staticResult?.checks.some((item) => item.status === "failed");
@@ -168,7 +171,13 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
               agent={agent}
               unified
               disabled={setupIncomplete}
-              disabledReason={setupIncomplete ? t("submit.v2.metric.agent.needs_setup") : undefined}
+              disabledReason={
+                repo
+                  ? t("submit.v2.repo.agent_off")
+                  : setupIncomplete
+                    ? t("submit.v2.metric.agent.needs_setup")
+                    : undefined
+              }
               className="absolute inset-0"
               model={agentModel}
               onModelChange={setAgentModel}
@@ -195,6 +204,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
               guided={guided}
               checkResult={consoleResult}
               onCheck={contract.check}
+              repo={repo}
             >
               {metricUsesModel && (
                 <MetricModelRow
@@ -209,10 +219,13 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           </div>
         </AuthoringShell>
       </WizardScreen>
-      <WizardScreen active={page === 1}>
-        <ContractCheckScreen cc={contract} guided={guided} active={page === 1} onBack={onBack} />
-      </WizardScreen>
-      <WizardScreen active={page === 2} className="flex flex-col overflow-hidden">
+      {!repo && (
+        <WizardScreen active={page === 1}>
+          <ContractCheckScreen cc={contract} guided={guided} active={page === 1} onBack={onBack} />
+        </WizardScreen>
+      )}
+      {/* A repository run has no check screen, so its overview is the second page. */}
+      <WizardScreen active={page === (repo ? 1 : 2)} className="flex flex-col overflow-hidden">
         <RunOverview state={state} cc={contract} guided={guided} />
       </WizardScreen>
     </div>
