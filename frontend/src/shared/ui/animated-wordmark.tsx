@@ -128,8 +128,9 @@ function randomOtherVariant(current: VariantName): VariantName {
   return others[Math.floor(Math.random() * others.length)]!;
 }
 
-// Uses cubic-bezier equivalent to 'ease-out-cubic' for incredibly smooth overlaps
-const TRANSITION = "opacity 300ms cubic-bezier(0.215, 0.610, 0.355, 1.000)";
+// Only the outgoing variant fades. When both sides of a swap faded, ticks faster
+// than the fade (120-250 ms) left letters fully blank for hundreds of ms.
+const FADE_OUT = "opacity 300ms cubic-bezier(0.215, 0.610, 0.355, 1.000)";
 
 function VariantGroup({
   variant,
@@ -141,8 +142,7 @@ function VariantGroup({
   active: boolean;
 }) {
   const content = letter.variants;
-  const opacity = active ? 1 : 0;
-  const style = { opacity, transition: TRANSITION };
+  const style = active ? { opacity: 1, transition: "none" } : { opacity: 0, transition: FADE_OUT };
 
   if (variant === "glyph") {
     return (
