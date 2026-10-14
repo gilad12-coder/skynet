@@ -52,7 +52,7 @@ test("a file item maps to the file it names", () => {
 test("a run failure maps to the helper its traceback ends in", () => {
   const detail = [
     "Traceback (user code):",
-    '  File "run.py", line 4, in run',
+    '  File "<run_code>", line 4, in run',
     '  File "helpers.py", line 2, in shout',
     "ZeroDivisionError: division by zero",
   ].join("\n");
@@ -61,6 +61,17 @@ test("a run failure maps to the helper its traceback ends in", () => {
   // An unknown file in the traceback is not a workspace file.
   assert.equal(checkFile(failed, []), "run.py");
   assert.equal(checkFile(failed, ["other.py"]), "run.py");
+});
+
+test("a run failure back in run.py after a helper stays with run.py", () => {
+  const detail = [
+    "Traceback (user code):",
+    '  File "<run_code>", line 4, in run',
+    '  File "helpers.py", line 2, in apply',
+    '  File "<run_code>", line 2, in step',
+    "KeyError: 'q'",
+  ].join("\n");
+  assert.equal(checkFile(item("workspace.run", "failed", 0, { detail }), ["helpers.py"]), "run.py");
 });
 
 test("lint lands on its own file, warnings stay warnings", () => {

@@ -18,6 +18,8 @@ export interface ContractConsole {
 
 // A traceback frame as the harness writes it: `File "helpers.py", line 3`.
 const FRAME = /File "([^"]+)", line \d+/g;
+// The harness compiles run.py under this name, so its frames carry it.
+const RUN_FRAME = "<run_code>";
 
 /**
  * Which file a check item is about. A metric item is metric.py; a file item
@@ -34,7 +36,8 @@ export function checkFile(
   if (item.key === "workspace.run" && item.detail && extraPaths.length > 0) {
     let last: string | null = null;
     for (const match of item.detail.matchAll(FRAME)) {
-      if (match[1] === RUN_FILE || extraPaths.includes(match[1] ?? "")) last = match[1] ?? null;
+      const name = match[1] === RUN_FRAME ? RUN_FILE : (match[1] ?? "");
+      if (name === RUN_FILE || extraPaths.includes(name)) last = name;
     }
     if (last) return last;
   }
