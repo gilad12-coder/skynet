@@ -1307,6 +1307,8 @@ export type MessageKey =
   | "connectors.field.endpoint_placeholder"
   | "connectors.field.endpoint_url"
   | "connectors.field.endpoint_url_placeholder"
+  | "connectors.field.foundry_host"
+  | "connectors.field.foundry_host_placeholder"
   | "connectors.field.host"
   | "connectors.field.host_placeholder"
   | "connectors.field.key"
@@ -1335,6 +1337,9 @@ export type MessageKey =
   | "connectors.field.token_placeholder"
   | "connectors.field.username"
   | "connectors.field.warehouse"
+  | "connectors.foundry.blurb"
+  | "connectors.foundry.credentials_help"
+  | "connectors.foundry.name"
   | "connectors.gcs.blurb"
   | "connectors.gcs.credentials_help"
   | "connectors.gcs.name"
@@ -5475,6 +5480,8 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "connectors.field.endpoint_placeholder": "https://api.smith.langchain.com",
   "connectors.field.endpoint_url": "נקודת קצה מותאמת (אופציונלי)",
   "connectors.field.endpoint_url_placeholder": "https://…",
+  "connectors.field.foundry_host": "כתובת ה-Foundry",
+  "connectors.field.foundry_host_placeholder": "yourcompany.palantirfoundry.com",
   "connectors.field.host": "כתובת שרת (אופציונלי)",
   "connectors.field.host_placeholder": "https://cloud.langfuse.com",
   "connectors.field.key": "מפתח API",
@@ -5503,6 +5510,9 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.field.username": "שם משתמש",
   "connectors.field.warehouse": "Warehouse",
+  "connectors.foundry.blurb": "ייבוא טבלאות דאטהסט מה-spaces והפרויקטים שלכם ב-Palantir Foundry.",
+  "connectors.foundry.credentials_help": "צרו טוקן ב-Foundry תחת Account ← Settings ← Tokens, והדביקו את כתובת ה-stack שלכם. כדי לפתוח דאטהסט אחד ישירות, הדביקו את ה-RID שלו בחיפוש.",
+  "connectors.foundry.name": "Palantir Foundry",
   "connectors.gcs.blurb": "ייבוא קבצים מהדליים שלכם ב-Cloud Storage.",
   "connectors.gcs.credentials_help": "הדביקו את מפתח ה-JSON של חשבון שירות עם הרשאת Storage Object Viewer על הדליים הדרושים. אפשר ליצור מפתח עם gcloud iam service-accounts keys create.",
   "connectors.gcs.name": "Google Cloud Storage",
@@ -18019,6 +18029,8 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "connectors.field.endpoint_placeholder": "https://api.smith.langchain.com",
   "connectors.field.endpoint_url": "Custom endpoint (optional)",
   "connectors.field.endpoint_url_placeholder": "https://…",
+  "connectors.field.foundry_host": "Foundry hostname",
+  "connectors.field.foundry_host_placeholder": "yourcompany.palantirfoundry.com",
   "connectors.field.host": "Host (optional)",
   "connectors.field.host_placeholder": "https://cloud.langfuse.com",
   "connectors.field.key": "API key",
@@ -18047,6 +18059,9 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.field.username": "Username",
   "connectors.field.warehouse": "Warehouse",
+  "connectors.foundry.blurb": "Import dataset tables from your Palantir Foundry spaces and projects.",
+  "connectors.foundry.credentials_help": "Generate a token under Account → Settings → Tokens in Foundry, and paste your stack's hostname. To open one dataset directly, paste its RID into the search.",
+  "connectors.foundry.name": "Palantir Foundry",
   "connectors.gcs.blurb": "Import files from your Cloud Storage buckets.",
   "connectors.gcs.credentials_help": "Paste the JSON key of a service account with Storage Object Viewer on your buckets. Create one with gcloud iam service-accounts keys create.",
   "connectors.gcs.name": "Google Cloud Storage",

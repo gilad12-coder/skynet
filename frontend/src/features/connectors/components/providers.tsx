@@ -20,6 +20,7 @@ import {
   Kaggle,
   MySQL,
   OneDrive,
+  Palantir,
   PostgreSQL,
   Supabase,
 } from "@/shared/ui/brand-marks";
@@ -89,7 +90,10 @@ export const PROVIDER_GROUPS: Array<{
     providers: ["google_drive", "onedrive", "github", "s3", "gcs", "azure_blob"],
   },
   { category: "docs", providers: ["google_sheets", "notion"] },
-  { category: "databases", providers: ["postgres", "mysql", "supabase", "bigquery", "snowflake"] },
+  {
+    category: "databases",
+    providers: ["postgres", "mysql", "supabase", "bigquery", "snowflake", "foundry"],
+  },
   { category: "traces", providers: ["langfuse", "langsmith", "braintrust"] },
 ];
 
@@ -420,6 +424,23 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
           secretField("token", msg("connectors.field.pat")),
           { key: "warehouse", label: msg("connectors.field.warehouse"), required: true },
           { key: "role", label: msg("connectors.field.role") },
+        ],
+      };
+    case "foundry":
+      return {
+        ...generic(id, "databases", msg("connectors.foundry.name")),
+        blurb: msg("connectors.foundry.blurb"),
+        Avatar: Palantir.Avatar,
+        Mark: Palantir.Mark,
+        credentialsHelp: msg("connectors.foundry.credentials_help"),
+        fields: [
+          {
+            key: "host",
+            label: msg("connectors.field.foundry_host"),
+            placeholder: msg("connectors.field.foundry_host_placeholder"),
+            required: true,
+          },
+          secretField("token", msg("connectors.field.token")),
         ],
       };
     case "langfuse":

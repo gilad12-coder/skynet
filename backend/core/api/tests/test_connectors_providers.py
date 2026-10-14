@@ -230,6 +230,7 @@ def test_status_lists_every_provider(vault_key: str, generic_oauth_off: None) ->
         "supabase",
         "bigquery",
         "snowflake",
+        "foundry",
         "langfuse",
         "langsmith",
         "braintrust",
@@ -952,6 +953,66 @@ def test_braintrust_experiment_fetch_follows_cursor(vault_key: str, generic_oaut
     assert preview["rows"] == [
         {"id": "e1", "input": "q", "output": "a", "expected": "a", "scores.exact": 1},
         {"id": "e1", "input": "q", "output": "a", "expected": "a", "scores.exact": 1},
+    ]
+
+
+def test_foundry_browses_spaces_and_reads_dataset_table(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """Spaces open into folders and datasets; a pasted RID jumps to its dataset; tables read as CSV."""
+    client, store = _make_client()
+    space = "ri.compass.main.folder.s1"
+    dataset = "ri.foundry.main.dataset.d1"
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the Foundry platform API."""
+        assert kwargs["headers"]["Authorization"] == "Bearer fdry_tok"
+        parsed = urlparse(url)
+        assert parsed.netloc == "acme.palantirfoundry.com"
+        if parsed.path == "/api/v2/filesystem/spaces":
+            return _response(200, {"data": [{"rid": space, "displayName": "Research"}]})
+        if parsed.path == "/api/v2/admin/users/getCurrent":
+            return _response(200, {"username": "ada"})
+        if parsed.path == f"/api/v2/filesystem/folders/{space}/children":
+            if kwargs["params"].get("pageToken") == "p2":
+                return _response(200, {"data": [{"rid": dataset, "displayName": "qa_pairs"}]})
+            children = [
+                {"rid": "ri.compass.main.folder.f1", "displayName": "raw"},
+                {"rid": "ri.workshop.main.module.w1", "displayName": "App"},
+            ]
+            return _response(200, {"data": children, "nextPageToken": "p2"})
+        if parsed.path == f"/api/v2/datasets/{dataset}":
+            return _response(200, {"rid": dataset, "name": "qa_pairs"})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with (
+        patch("core.connectors.transport.CLIENT.request", side_effect=fake_request),
+        patch("core.connectors.transport.CLIENT.stream", return_value=_StreamCtx(CSV)) as stream,
+    ):
+        saved = client.put(
+            "/connectors/foundry/credentials",
+            json={"fields": {"host": "https://acme.palantirfoundry.com/workspace/", "token": "fdry_tok"}},
+        )
+        assert saved.status_code == 200, saved.text
+        assert next(c for c in saved.json()["connectors"] if c["provider"] == "foundry")["account_label"] == "ada"
+        root = client.get("/connectors/foundry/browse").json()["entries"]
+        assert [(e["ref"], e["kind"]) for e in root] == [(space, "folder")]
+        inside = client.get("/connectors/foundry/browse", params={"location": space}).json()["entries"]
+        assert [(e["name"], e["kind"]) for e in inside] == [("raw", "folder"), ("qa_pairs", "file")]
+        jump = client.get("/connectors/foundry/browse", params={"search": dataset}).json()["entries"]
+        assert [(e["ref"], e["name"]) for e in jump] == [(dataset, "qa_pairs")]
+        bad = client.get("/connectors/foundry/preview", params={"ref": "../admin"})
+        assert bad.json()["code"] == "connectors.invalid_ref"
+
+        preview = client.get("/connectors/foundry/preview", params={"ref": dataset}).json()
+        assert preview["rows"][0] == {"name": "ada", "score": "1"}
+        assert stream.call_args.args[1].endswith(f"/api/v2/datasets/{dataset}/readTable")
+        assert stream.call_args.kwargs["params"] == {"format": "CSV", "rowLimit": 20}
+        imported = client.post("/connectors/foundry/import", json={"ref": dataset})
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["dataset"]["name"] == "qa_pairs"
+    library = DatasetLibraryStore(store.engine, PostgresDatasetBlobStore(store.engine))
+    assert library.get_rows(imported.json()["dataset"]["id"]) == [
+        {"name": "ada", "score": "1"},
+        {"name": "bob", "score": "2"},
     ]
 
 

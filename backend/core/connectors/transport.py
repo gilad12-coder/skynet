@@ -29,6 +29,7 @@ PROVIDER_LABELS = {
     "mysql": "MySQL",
     "bigquery": "BigQuery",
     "snowflake": "Snowflake",
+    "foundry": "Palantir Foundry",
     "langfuse": "Langfuse",
     "langsmith": "LangSmith",
     "braintrust": "Braintrust",
