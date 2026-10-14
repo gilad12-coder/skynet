@@ -34,6 +34,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   const { state, patchWorkspace, guided, optimizerCatalog, inputsInferring } = ctx;
   const { task, inputs, optimizer, workspace } = state;
   const kind = task.artifactKind;
+  const repo = Boolean(task.repo);
   const t = (key: string) => v2Msg(key, guided);
 
   const metricUsesModel = metricCallsModel(state);
@@ -97,7 +98,9 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   // target input fields the contract check and the run no longer pass.
   const wizardCtx = useWizardStateOptional();
   const registerContext = wizardCtx?.setAuthoringContext;
-  const sharedContext = inputsInferring ? null : authoringContext;
+  // A repository run has no sample inputs to write run code against; its
+  // scorer is written by hand.
+  const sharedContext = repo || inputsInferring ? null : authoringContext;
   React.useEffect(() => {
     registerContext?.(sharedContext);
   }, [registerContext, sharedContext]);
@@ -150,6 +153,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
               guided={guided}
               checkResult={consoleResult}
               onCheck={contract.check}
+              repo={repo}
             >
               {metricUsesModel && (
                 <MetricModelRow
@@ -164,10 +168,13 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           </div>
         </AuthoringShell>
       </WizardScreen>
-      <WizardScreen active={page === 1}>
-        <ContractCheckScreen cc={contract} guided={guided} active={page === 1} onBack={onBack} />
-      </WizardScreen>
-      <WizardScreen active={page === 2} className="flex flex-col overflow-hidden">
+      {!repo && (
+        <WizardScreen active={page === 1}>
+          <ContractCheckScreen cc={contract} guided={guided} active={page === 1} onBack={onBack} />
+        </WizardScreen>
+      )}
+      {/* A repository run has no check screen, so its overview is the second page. */}
+      <WizardScreen active={page === (repo ? 1 : 2)} className="flex flex-col overflow-hidden">
         <RunOverview state={state} cc={contract} guided={guided} />
       </WizardScreen>
     </div>

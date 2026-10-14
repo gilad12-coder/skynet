@@ -2,6 +2,7 @@
 
 ``POST /optimize`` — one optimization run of a prompt, code, text or DSPy
 program, for every optimizer.
+``POST /blackbox/run`` — one optimization of a GitHub repository.
 ``GET /optimizers`` — the optimizers that fit a setup, with availability.
 ``GET /blackbox/engines`` — the engine catalog with per-deployment availability.
 
@@ -63,6 +64,7 @@ from ...constants import (
     PAYLOAD_OVERVIEW_USERNAME,
     TOKEN_SOURCE_BYOK,
 )
+from ...exceptions import ServiceError
 from ...i18n_keys import I18nKey
 from ...models import (
     DSPY_OPTIMIZERS,
@@ -83,12 +85,18 @@ from ...models import (
     optimizers_for,
     resolve_optimizer,
 )
-from ...models.blackbox import BLACKBOX_ITERATION_LIMIT_ENGINES, BLACKBOX_MODULE_NAME, BLACKBOX_TARGET_TEXT
+from ...models.blackbox import (
+    BLACKBOX_ITERATION_LIMIT_ENGINES,
+    BLACKBOX_MODULE_NAME,
+    BLACKBOX_STRATEGY_AUTO,
+    BLACKBOX_TARGET_REPO,
+    BLACKBOX_TARGET_TEXT,
+)
 from ...models.common import ModelConfig, OptimizationType
 from ...models.submissions import _OptimizationRequestBase
 from ...models.unified import METRIC_SIGNATURE, RUN_ENTRY
 from ...service_gateway.optimization.blackbox.registry import ENGINES
-from ...service_gateway.optimization.blackbox.service import engine_catalog
+from ...service_gateway.optimization.blackbox.service import engine_catalog, validate_blackbox_payload
 from ...service_gateway.optimization.unified.contract import validate_unified_payload
 from ...service_gateway.optimization.unified.split import split_cases, task_fingerprint
 from ...storage.preflights import PreflightStore, setup_seed
@@ -113,6 +121,9 @@ logger = logging.getLogger(__name__)
 # Preflight evidence and replay keys are scoped by request family; unified
 # runs are their own family so their evidence never matches a legacy payload.
 UNIFIED_WORKFLOW = "unified"
+# Repository runs keep the legacy black-box family, which the preflight and
+# worker still read.
+_BLACKBOX_WORKFLOW = "anything"
 _UNIFIED_CONTRACT_FAILED = "submit.unified.contract_failed"
 # The DSPy optimizer that bootstraps demos from the task model alone.
 _DSPY_WITHOUT_REFLECTION = frozenset({"dspy_bootstrap_fewshot"})
@@ -766,8 +777,8 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         job_store: Job-store instance used to persist new submissions.
 
     Returns:
-        A FastAPI ``APIRouter`` exposing ``/optimize``, ``/optimizers`` and
-        ``/blackbox/engines``.
+        A FastAPI ``APIRouter`` exposing ``/optimize``, ``/blackbox/run``,
+        ``/optimizers`` and ``/blackbox/engines``.
     """
     router = APIRouter()
 
@@ -878,6 +889,146 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             payload.task.artifact.kind,
             optimizer_name,
             payload.data.mode,
+        )
+
+        return OptimizationSubmissionResponse(
+            optimization_id=optimization_id,
+            optimization_type=cast(OptimizationType, OPTIMIZATION_TYPE_BLACKBOX),
+            status=OptimizationStatus.pending,
+            created_at=datetime.now(UTC),
+            name=payload.name,
+            username=payload.username,
+            module_name=BLACKBOX_MODULE_NAME,
+            optimizer_name=optimizer_name,
+        )
+
+    @router.post(
+        "/blackbox/run",
+        response_model=OptimizationSubmissionResponse,
+        status_code=201,
+        summary="Submit a repository optimization",
+    )
+    def submit_repo_run(
+        payload: BlackboxRunRequest,
+        current_user: AuthenticatedUserDep,
+        idempotency_key: IdempotencyKeyHeader = None,
+    ) -> OptimizationSubmissionResponse:
+        """Queue a black-box optimization of a GitHub repository against a scorer.
+
+        Only repository targets come through here; prompts, code, text and
+        DSPy programs submit to ``/optimize``. Without an execution budget the
+        server creates one and runs the setup check itself, which stages the
+        repository and infers a setup command when none is given. The
+        persisted owner is the authenticated caller.
+
+        Args:
+            payload: The black-box request body validated by FastAPI.
+            current_user: Authenticated submitter resolved from the bearer token.
+            idempotency_key: Optional dedup key; a repeat returns the original.
+
+        Returns:
+            An ``OptimizationSubmissionResponse`` carrying the assigned id
+            and ``pending`` status.
+
+        Raises:
+            DomainError: 400 (not a repository target, or the scorer does not
+                load), 402 (no balance), 409 (quota or a failed setup check).
+        """
+        if payload.target.kind != BLACKBOX_TARGET_REPO or payload.target.repo is None:
+            raise DomainError("submission.validation_failed", status=400)
+        payload.username = current_user.username
+        payload.staged_dataset_id = None
+
+        replay_keys = resolve_submission_replay_keys(
+            payload,
+            username=payload.username,
+            workflow=_BLACKBOX_WORKFLOW,
+            supplied_key=idempotency_key,
+        )
+        normalized_key = replay_keys.job
+        if normalized_key:
+            existing_id = job_store.find_job_by_idempotency_key(payload.username, normalized_key)
+            if existing_id:
+                cached = _existing_submission_response(job_store, existing_id)
+                if cached is not None:
+                    logger.info(
+                        "Idempotent repo retry hit: returning existing %s for user=%s",
+                        existing_id,
+                        payload.username,
+                    )
+                    return cached
+
+        _enforce_submission_admission(job_store, payload.username)
+
+        _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
+        _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
+        if payload.execution_budget_id is None:
+            _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
+        _enforce_byok_connections(job_store, payload.username, _model_configs)
+
+        _ensure_api_budget(
+            payload,
+            job_store,
+            _BLACKBOX_WORKFLOW,
+            replay_keys.budget,
+            current_user,
+            recover_existing=replay_keys.synthesized,
+        )
+        verified = _protected_submission(payload, job_store, _BLACKBOX_WORKFLOW)
+        try:
+            if verified is None:
+                validate_blackbox_payload(payload)
+        except ServiceError as exc:
+            # Log the detail server-side only; don't leak it to the client.
+            logger.warning("Repo run validation failed: %s", exc)
+            raise DomainError("submission.validation_failed", status=400) from exc
+
+        optimization_id = str(uuid4())
+        if payload.seed is None:
+            payload.seed = stable_seed(optimization_id)
+        optimizer_name = payload.strategy.engine or BLACKBOX_STRATEGY_AUTO
+        reflection_model = payload.reflection_model_settings.normalized_identifier()
+
+        payload_dump = _persistable_payload(payload, job_store)
+        enforce_job_quota(job_store, payload.username)
+        enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
+
+        _create_submission_job(job_store, optimization_id, payload, normalized_key, verified)
+        payload_dump["execution_budget_generation"] = payload.execution_budget_generation
+        job_store.set_payload_overview(
+            optimization_id,
+            {
+                PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE: OPTIMIZATION_TYPE_BLACKBOX,
+                **_execution_overview(payload),
+                PAYLOAD_OVERVIEW_COMPOSITION: COMPOSITION_SINGLE,
+                PAYLOAD_OVERVIEW_NAME: payload.name,
+                PAYLOAD_OVERVIEW_DESCRIPTION: payload.description,
+                PAYLOAD_OVERVIEW_USERNAME: payload.username,
+                PAYLOAD_OVERVIEW_MODULE_NAME: BLACKBOX_MODULE_NAME,
+                PAYLOAD_OVERVIEW_OPTIMIZER_NAME: optimizer_name,
+                # The reflection model is the only model a black-box run
+                # bills, so it doubles as the overview's primary model.
+                PAYLOAD_OVERVIEW_MODEL_NAME: reflection_model,
+                PAYLOAD_OVERVIEW_MODEL_SETTINGS: strip_api_key(payload.reflection_model_settings.model_dump()),
+                PAYLOAD_OVERVIEW_REFLECTION_MODEL: reflection_model,
+                PAYLOAD_OVERVIEW_DATASET_ROWS: len(payload.cases or []),
+                PAYLOAD_OVERVIEW_SEED: payload.seed,
+                PAYLOAD_OVERVIEW_TOKEN_SOURCE: payload.token_source,
+                PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL: _token_sources_by_model,
+                PAYLOAD_OVERVIEW_MAX_COST_CENTS: payload.max_cost_cents,
+                PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_cents_low,
+                PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_cents_high,
+                PAYLOAD_OVERVIEW_IS_PRIVATE: payload.is_private,
+            },
+        )
+
+        _persist_and_signal_job(job_store, service, optimization_id, payload_dump)
+
+        logger.info(
+            "Enqueued repo run %s: repository=%s optimizer=%s",
+            optimization_id,
+            payload.target.repo.repository,
+            optimizer_name,
         )
 
         return OptimizationSubmissionResponse(
