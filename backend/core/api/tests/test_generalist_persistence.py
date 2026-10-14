@@ -587,6 +587,22 @@ def test_history_marks_an_unrecorded_coding_call_finished() -> None:
     assert "not running now" in result
 
 
+def test_history_says_code_is_gone_when_editors_are_empty() -> None:
+    """A finished coding run replayed over empty editors tells the model to write the code again."""
+    outcome = {"files": [{"file": "run.py", "added": 5, "removed": 0}], "check": "passed", "errors": []}
+    call = ChatToolCall(tool="request_code_authoring", status="done", result=json.dumps({"outcome": outcome}))
+    turns = [ChatTurn(role="assistant", content="", tool_calls=[call])]
+
+    empty = history_for_agent(turns, {"run_code": "", "metric_code": "def score(): ..."})[0]["tools"][0]["result"]
+    filled = history_for_agent(turns, {"run_code": "def run(): ...", "metric_code": "def score(): ..."})[0]["tools"][0][
+        "result"
+    ]
+
+    assert "EMPTY now" in empty
+    assert "call request_code_authoring again" in empty
+    assert "EMPTY" not in filled
+
+
 def test_history_for_agent_bounds_turns_text_and_tool_results() -> None:
     """A long conversation is clipped to the newest turns, with each field capped."""
     calls = [ChatToolCall(tool=f"t{i}", status="done", result="r" * 5000) for i in range(50)]

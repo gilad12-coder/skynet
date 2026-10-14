@@ -113,6 +113,29 @@ def _coding_outcome_text(outcome: dict[str, Any]) -> str:
     return ", ".join(parts) + ". It is not running now."
 
 
+# Replayed alone, a finished run reads as "the code is in the editors"; after a
+# reload or a reset the editors are empty and the model claimed code that wasn't
+# there instead of writing it again.
+_CODE_GONE_NOTE = (
+    " The Metric editors are EMPTY now: that code is gone. If the user wants code, "
+    "call request_code_authoring again in this turn."
+)
+
+
+def _editors_empty(wizard_state: dict[str, Any] | None) -> bool:
+    """Return whether the wizard snapshot has no run code or no metric code.
+
+    Args:
+        wizard_state: The wizard snapshot sent with this turn, if any.
+
+    Returns:
+        True when the snapshot is present and either code field is blank.
+    """
+    if not wizard_state:
+        return False
+    return not all(str(wizard_state.get(field) or "").strip() for field in ("run_code", "metric_code"))
+
+
 def _history_tool_result(call: ChatToolCall) -> str:
     """Return the result text an earlier tool call shows the model.
 
@@ -142,7 +165,7 @@ def _history_tool_result(call: ChatToolCall) -> str:
     )
 
 
-def history_for_agent(turns: list[ChatTurn]) -> list[dict[str, Any]]:
+def history_for_agent(turns: list[ChatTurn], wizard_state: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Bound the prior turns and attach each assistant turn's tool trace.
 
     Without the trace the model only sees its own prose from earlier turns, so
@@ -150,11 +173,14 @@ def history_for_agent(turns: list[ChatTurn]) -> list[dict[str, Any]]:
 
     Args:
         turns: The client-supplied prior turns, oldest first.
+        wizard_state: This turn's wizard snapshot, used to tell the model when
+            an earlier coding run's output is no longer in the editors.
 
     Returns:
         At most ``HISTORY_MAX_TURNS`` ``{role, content}`` dicts, newest kept,
         each assistant turn that called tools carrying a compact ``tools`` list.
     """
+    editors_empty = _editors_empty(wizard_state)
     history: list[dict[str, Any]] = []
     for turn in turns[-HISTORY_MAX_TURNS:]:
         entry: dict[str, Any] = {"role": turn.role, "content": turn.content[:HISTORY_TURN_MAX_CHARS]}
@@ -163,7 +189,8 @@ def history_for_agent(turns: list[ChatTurn]) -> list[dict[str, Any]]:
                 {
                     "tool": call.tool,
                     "status": call.status,
-                    "result": _history_tool_result(call)[:HISTORY_TOOL_RESULT_MAX_CHARS],
+                    "result": _history_tool_result(call)[:HISTORY_TOOL_RESULT_MAX_CHARS]
+                    + (_CODE_GONE_NOTE if editors_empty and call.tool == CODE_AUTHORING_TOOL else ""),
                 }
                 for call in turn.tool_calls[-HISTORY_MAX_TOOL_CALLS:]
             ]
@@ -724,7 +751,7 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
         usage_sink: list = []
         source = run_generalist_agent(
             wizard_state=wizard_state,
-            chat_history=history_for_agent(req.chat_history),
+            chat_history=history_for_agent(req.chat_history, req.wizard_state),
             user_message=req.user_message,
             trust_mode=req.trust_mode,
             auth_header=authorization,
