@@ -6,6 +6,7 @@ import type {
 import type {
   BlackboxAgentRunResponse,
   BlackboxCandidate,
+  BlackboxRunRequest,
   ScorerDependencyLock,
   BlackboxEngineCatalogResponse,
   ColumnMapping,
@@ -432,6 +433,15 @@ export interface WorkflowDryRunStreamHandlers {
 
 export function submitUnifiedRun(req: UnifiedRunRequest, opts?: { idempotencyKey?: string }) {
   return request<OptimizationSubmissionResponse>("/optimize", {
+    method: "POST",
+    body: JSON.stringify(req),
+    ...(opts?.idempotencyKey ? { headers: { "Idempotency-Key": opts.idempotencyKey } } : {}),
+  });
+}
+
+/** Queue a repository run; prompts, code, text and DSPy programs submit to `/optimize`. */
+export function submitRepoRun(req: BlackboxRunRequest, opts?: { idempotencyKey?: string }) {
+  return request<OptimizationSubmissionResponse>("/blackbox/run", {
     method: "POST",
     body: JSON.stringify(req),
     ...(opts?.idempotencyKey ? { headers: { "Idempotency-Key": opts.idempotencyKey } } : {}),

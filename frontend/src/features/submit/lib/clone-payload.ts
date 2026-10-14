@@ -9,6 +9,7 @@ import type {
   InputsSlice,
   MetaSlice,
   OptimizerSlice,
+  RepoDraft,
   TaskSlice,
   WorkspaceSlice,
 } from "./wizard-v2";
@@ -19,8 +20,8 @@ import type {
  * run (objective, seed, cases, scorer) or a legacy DSPy run (dataset rows,
  * column mapping, metric code). Unified runs clone in full; legacy runs are
  * mapped best effort and leave the rest for the user to fill. A legacy
- * repository target has no wizard slice, so its repo, commit and setup
- * command do not carry over.
+ * repository target becomes the task's repository: repo, branch, commit,
+ * editable paths and setup command.
  *
  * Only type imports here, so node tests can load this file directly.
  */
@@ -184,6 +185,25 @@ function cloneUnified(payload: ClonePayload): Omit<CloneSlices, "meta"> {
   };
 }
 
+const strings = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string" && !!v.trim()) : [];
+
+/** A legacy repository `target`, or null when the run optimized text. */
+function legacyRepo(target: unknown): RepoDraft | null {
+  if (!isRecord(target) || target.kind !== "repo" || !isRecord(target.repo)) return null;
+  const repo = target.repo;
+  const repository = text(repo.repository);
+  if (!repository) return null;
+  const paths = strings(repo.editable_paths);
+  return {
+    repository,
+    branch: text(repo.branch) ?? "",
+    commit: text(repo.commit) ?? "",
+    editablePaths: paths.length > 0 ? paths : ["."],
+    setupCommand: text(target.setup_command) ?? "",
+  };
+}
+
 function cloneLegacyBlackbox(payload: ClonePayload): Omit<CloneSlices, "meta"> {
   const seed = startingVersion(payload.seed_candidate);
   const task: Partial<TaskSlice> = {
@@ -191,6 +211,13 @@ function cloneLegacyBlackbox(payload: ClonePayload): Omit<CloneSlices, "meta"> {
     background: text(payload.background) ?? "",
   };
   if (seed !== undefined) task.startingVersion = seed;
+  const repo = legacyRepo(payload.target);
+  if (repo) {
+    // The wizard keys its engine catalog on a kind and mode, so a repository
+    // run stands in as one piece of code scored once per round.
+    task.repo = repo;
+    task.artifactKind = "code";
+  }
   // Legacy cases are flat rows the scorer read whole; an `expected` key, when
   // present, was the answer the scorer compared against.
   const cases = Array.isArray(payload.cases)
@@ -211,7 +238,7 @@ function cloneLegacyBlackbox(payload: ClonePayload): Omit<CloneSlices, "meta"> {
   }
   return {
     task,
-    inputs: inputsFromCases(cases, []),
+    inputs: repo ? { mode: "single" } : inputsFromCases(cases, []),
     // Stored payloads may be dumped by alias or by field name.
     optimizer: {
       taskModel: modelConfig(payload.task_model_config ?? payload.task_model_settings),

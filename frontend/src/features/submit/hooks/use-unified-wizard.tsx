@@ -27,6 +27,7 @@ import {
   getStagedDataset,
   isInsufficientFundsError,
   isStorageQuotaError,
+  submitRepoRun,
   submitUnifiedRun,
 } from "@/shared/lib/api";
 import { contractCheckMessage } from "@/shared/lib/i18n";
@@ -59,6 +60,7 @@ import { fileNewRun } from "../lib/file-new-run";
 import { inputsFromRoles, rowsToCases, singleInputCase, type Row } from "../lib/inputs-mode";
 import { prepareModelConfig } from "../lib/model-config";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
+import { repoRunRequest } from "../lib/repo-run";
 import { metricUsesModel } from "../lib/scorer-dependencies";
 import { computeStepIssue, hasModel, runBlockedReason as blockedReason } from "../lib/step-issue";
 import { canEnterStep, canMoveForward } from "../lib/wizard-steps";
@@ -426,6 +428,58 @@ export function WizardV2Provider({
     return null;
   };
 
+  // A submitted run opens on its page once the splash has played.
+  const openSubmitted = async (optimizationId: string) => {
+    submittedRef.current = true;
+    await fileNewRun(optimizationId, state.meta.folderId);
+    const jobUrl = `/optimizations/${optimizationId}`;
+    setSubmitPhase("splash");
+    window.dispatchEvent(new Event("sidebar:collapse"));
+    setTimeout(() => {
+      setSubmitPhase("done");
+      router.push(jobUrl);
+      offerRunDoneNotifications();
+    }, SUBMIT_SPLASH_HOLD_MS);
+  };
+
+  const submitFailed = (err: unknown) => {
+    // The storage 409 and the balance 402 each open their own shared modal.
+    if (!isStorageQuotaError(err) && !isInsufficientFundsError(err)) {
+      toast.error(err instanceof Error ? err.message : msg("submit.submit_failed"));
+    }
+    submittingRef.current = false;
+    setSubmitPhase("idle");
+  };
+
+  // The server creates a repository run's budget and runs its setup check
+  // (staging the checkout, inferring a setup command) on submit.
+  const submitRepo = async () => {
+    const request = repoRunRequest(state, {
+      username,
+      tokenSource,
+      maxCostCents: budgetUncapped ? null : maxCostCents,
+      estimate: chargeable,
+    });
+    if (runBlockedReason || !request) {
+      toast.error(v2Text(runBlockedReason ?? "submit.v2.metric.issue.metric_code", guided));
+      return;
+    }
+    submittingRef.current = true;
+    setSubmitPhase("sending");
+    try {
+      const result = await submitRepoRun(request);
+      track(TelemetryEvent.RunSubmitted, {
+        artifact_kind: "repo",
+        data_mode: "single",
+        optimizer: state.optimizer.choice,
+        optimizer_resolved: resolvedOptimizer,
+      });
+      await openSubmitted(result.optimization_id);
+    } catch (err) {
+      submitFailed(err);
+    }
+  };
+
   const submit = async () => {
     if (submittingRef.current || busy) return;
     const blocked = firstBlockedStep();
@@ -434,6 +488,7 @@ export function WizardV2Provider({
       toast.error(v2Text(computeStepIssue(state, blocked, optimizerCatalog) ?? "", guided));
       return;
     }
+    if (state.task.repo) return submitRepo();
     if (runBlockedReason || !payload) {
       toast.error(v2Text(runBlockedReason ?? "submit.v2.metric.check.needed", guided));
       return;
@@ -487,23 +542,9 @@ export function WizardV2Provider({
         optimizer: request.optimizer.choice,
         optimizer_resolved: resolvedOptimizer,
       });
-      submittedRef.current = true;
-      await fileNewRun(result.optimization_id, state.meta.folderId);
-      const jobUrl = `/optimizations/${result.optimization_id}`;
-      setSubmitPhase("splash");
-      window.dispatchEvent(new Event("sidebar:collapse"));
-      setTimeout(() => {
-        setSubmitPhase("done");
-        router.push(jobUrl);
-        offerRunDoneNotifications();
-      }, SUBMIT_SPLASH_HOLD_MS);
+      await openSubmitted(result.optimization_id);
     } catch (err) {
-      // The storage 409 and the balance 402 each open their own shared modal.
-      if (!isStorageQuotaError(err) && !isInsufficientFundsError(err)) {
-        toast.error(err instanceof Error ? err.message : msg("submit.submit_failed"));
-      }
-      submittingRef.current = false;
-      setSubmitPhase("idle");
+      submitFailed(err);
     }
   };
 

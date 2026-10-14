@@ -40,6 +40,30 @@ export const DEFAULT_UNIFIED_SPLIT: Readonly<SplitFractions> = {
 };
 export const DEFAULT_METRIC_TIMEOUT_SECONDS = 60;
 
+/**
+ * A GitHub repository the run optimizes in place of an artifact. Empty
+ * branch and commit mean the default branch's head; an empty setup command
+ * is inferred by the server's setup check.
+ */
+export interface RepoDraft {
+  repository: string;
+  branch: string;
+  commit: string;
+  editablePaths: string[];
+  setupCommand: string;
+}
+
+/** The whole repository, the editable paths a new repository run starts with. */
+export const WHOLE_REPOSITORY: readonly string[] = ["."];
+
+export const emptyRepoDraft = (): RepoDraft => ({
+  repository: "",
+  branch: "",
+  commit: "",
+  editablePaths: [...WHOLE_REPOSITORY],
+  setupCommand: "",
+});
+
 export interface TaskSlice {
   objective: string;
   background: string;
@@ -47,6 +71,8 @@ export interface TaskSlice {
   startingVersion: string | Record<string, string> | null;
   artifactRationale: string;
   transcript: UnifiedChatTurn[];
+  /** Set for a repository run, which has no artifact or inputs of its own. */
+  repo: RepoDraft | null;
 }
 
 export interface InputsSlice {
@@ -124,6 +150,7 @@ export function initialWizardV2State(
       startingVersion: null,
       artifactRationale: "",
       transcript: [],
+      repo: null,
     },
     inputs: {
       mode: null,
@@ -186,12 +213,25 @@ const hasModel = (config: ModelConfig | null): boolean => Boolean(config?.name.t
  */
 export function taskIssue(task: TaskSlice): string | null {
   if (!task.objective.trim()) return "submit.v2.task.issue.objective";
+  if (task.repo) return repoIssue(task.repo);
   if (!task.artifactKind) return "submit.v2.task.issue.kind";
   const v = task.startingVersion;
   const empty =
     v === null ||
     (typeof v === "string" ? !v.trim() : Object.values(v).every((part) => !part.trim()));
   return empty ? "submit.v2.task.issue.starting" : null;
+}
+
+export const REPO_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
+const COMMIT_SHA = /^[0-9a-f]{40}$/i;
+
+/** What a repository target still lacks, or null when it can run. */
+export function repoIssue(repo: RepoDraft): string | null {
+  if (!REPO_NAME_PATTERN.test(repo.repository.trim())) return "submit.v2.repo.issue.repository";
+  if (repo.commit.trim() && !COMMIT_SHA.test(repo.commit.trim()))
+    return "submit.v2.repo.issue.commit";
+  if (!repo.editablePaths.some((path) => path.trim())) return "submit.v2.repo.issue.paths";
+  return null;
 }
 
 /**
@@ -230,8 +270,10 @@ export function optimizerModelsReady(s: WizardV2State): boolean {
  * the run out of sight.
  */
 export function wizardSteps(s: WizardV2State, optimizerBlocked: boolean): readonly WizardStepId[] {
-  if (s.level !== "guided" || optimizerBlocked || s.step === "optimizer") return WIZARD_V2_STEPS;
-  return WIZARD_V2_STEPS.filter((step) => step !== "optimizer");
+  // A repository run is scored on the checkout itself, so it has no inputs.
+  const all = s.task.repo ? WIZARD_V2_STEPS.filter((step) => step !== "inputs") : WIZARD_V2_STEPS;
+  if (s.level !== "guided" || optimizerBlocked || s.step === "optimizer") return all;
+  return all.filter((step) => step !== "optimizer");
 }
 
 /**

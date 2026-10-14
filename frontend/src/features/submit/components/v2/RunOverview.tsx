@@ -97,19 +97,38 @@ export function RunOverview({
             {task.objective}
           </span>
         </Row>
-        {task.artifactKind && (
-          <Row label={t("submit.v2.task.artifact.kind_label")}>
-            {t(`submit.v2.task.artifact.kind.${task.artifactKind}`)}
+        {task.repo ? (
+          <Row label={t("submit.v2.repo.repository_label")}>
+            <span className="break-all font-mono" dir="ltr">
+              {task.repo.repository}
+              {task.repo.commit.trim()
+                ? ` @ ${task.repo.commit.trim().slice(0, 7)}`
+                : task.repo.branch.trim()
+                  ? ` @ ${task.repo.branch.trim()}`
+                  : ""}
+            </span>
+          </Row>
+        ) : (
+          task.artifactKind && (
+            <Row label={t("submit.v2.task.artifact.kind_label")}>
+              {t(`submit.v2.task.artifact.kind.${task.artifactKind}`)}
+            </Row>
+          )
+        )}
+        {!task.repo && (
+          <Row label={msg("submit.v2.stage.inputs" as MessageKey)}>
+            <span dir="auto">{data}</span>
           </Row>
         )}
-        <Row label={msg("submit.v2.stage.inputs" as MessageKey)}>
-          <span dir="auto">{data}</span>
-        </Row>
         <Row label={msg("submit.v2.stage.optimizer" as MessageKey)}>
           {optimizerLabel(optimizer.choice, guided)}
         </Row>
         <Row label={t("submit.v2.metric.check.title")}>
-          <CheckStatus cc={cc} guided={guided} />
+          {task.repo ? (
+            <span className="text-muted-foreground">{t("submit.v2.repo.check_on_submit")}</span>
+          ) : (
+            <CheckStatus cc={cc} guided={guided} />
+          )}
         </Row>
       </dl>
     </div>

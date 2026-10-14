@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { ArrowCounterClockwise } from "@/shared/ui/icons";
+import { ArrowCounterClockwise, Code, GithubLogo } from "@/shared/ui/icons";
 import {
   AgentThread,
   ChatTranscript,
@@ -17,14 +17,16 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Label } from "@/shared/ui/primitives/label";
 import { TEXTAREA_SURFACE_CLASS } from "@/shared/ui/primitives/textarea";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
+import { Segmented } from "@/shared/ui/segmented";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 
 import { useTaskInterview, type TaskInterviewState } from "../../hooks/use-task-interview";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
-import { taskIssue } from "../../lib/wizard-v2";
+import { emptyRepoDraft, taskIssue } from "../../lib/wizard-v2";
 import { AuthoringShell } from "../steps/AuthoringShell";
 import { ArtifactConfirmCard, v2Msg } from "./ArtifactConfirmCard";
+import { RepoTargetCard } from "./RepoTargetCard";
 import { WizardScreen } from "./WizardScreen";
 
 /**
@@ -35,7 +37,7 @@ import { WizardScreen } from "./WizardScreen";
  */
 export function TaskStep({ page }: { page: number }) {
   const ctx = useWizardV2();
-  const { state, guided } = ctx;
+  const { state, guided, patchTask } = ctx;
   const task = state.task;
   const t = (key: string) => v2Msg(key, guided);
 
@@ -75,17 +77,56 @@ export function TaskStep({ page }: { page: number }) {
           rows={4}
         />
       </WizardScreen>
-      <WizardScreen active={page === 1} className="relative px-4 py-5 sm:px-6 sm:py-6">
-        <ArtifactConfirmCard
-          kind={task.artifactKind}
-          onKindChange={(k) => interview.editField("artifactKind", k)}
-          startingVersion={task.startingVersion}
-          onStartingVersionChange={(v) => interview.editField("startingVersion", v)}
-          rationale={task.artifactRationale}
-          issue={taskIssue(task)}
-          writing={interview.busy}
-          guided={guided}
+      <WizardScreen
+        active={page === 1}
+        className="relative flex flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6"
+      >
+        <Segmented<"artifact" | "repo">
+          label={t("submit.v2.repo.target_label")}
+          value={task.repo ? "repo" : "artifact"}
+          onChange={(target) =>
+            // The engine catalog is keyed on a kind, so a repository stands in as code.
+            patchTask(
+              target === "repo"
+                ? { repo: task.repo ?? emptyRepoDraft(), artifactKind: "code" }
+                : { repo: null },
+            )
+          }
+          className="w-full"
+          options={[
+            {
+              value: "artifact",
+              label: t("submit.blackbox.repo.kind_text"),
+              tip: t("submit.blackbox.repo.kind_text_desc"),
+              icon: <Code className="size-3.5" aria-hidden="true" />,
+            },
+            {
+              value: "repo",
+              label: t("submit.blackbox.repo.kind_repo"),
+              tip: t("submit.blackbox.repo.kind_repo_desc"),
+              icon: <GithubLogo className="size-3.5" aria-hidden="true" />,
+            },
+          ]}
         />
+        {task.repo ? (
+          <RepoTargetCard
+            repo={task.repo}
+            onChange={(repo) => patchTask({ repo })}
+            issue={taskIssue(task)}
+            guided={guided}
+          />
+        ) : (
+          <ArtifactConfirmCard
+            kind={task.artifactKind}
+            onKindChange={(k) => interview.editField("artifactKind", k)}
+            startingVersion={task.startingVersion}
+            onStartingVersionChange={(v) => interview.editField("startingVersion", v)}
+            rationale={task.artifactRationale}
+            issue={taskIssue(task)}
+            writing={interview.busy}
+            guided={guided}
+          />
+        )}
       </WizardScreen>
     </AuthoringShell>
   );

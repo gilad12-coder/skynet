@@ -211,6 +211,24 @@ test("a stored legacy repository run clones every setting the wizard holds", () 
   assert.deepEqual(slices.optimizer.shinka, LEGACY_REPO_RUN.shinka);
   assert.deepEqual(slices.optimizer.proposer, LEGACY_REPO_RUN.proposer);
   assert.equal(slices.optimizer.maxCostCents, 448);
+  assert.deepEqual(slices.task.repo, {
+    repository: "example/site",
+    branch: "",
+    commit: "0000000000000000000000000000000000000000",
+    editablePaths: ["."],
+    setupCommand: "npm ci && npm run build",
+  });
+  assert.equal(slices.task.artifactKind, "code");
+  assert.deepEqual(slices.inputs, { mode: "single" });
+});
+
+test("a legacy text run clones without a repository", () => {
+  const slices = cloneToSlices("blackbox", {
+    target: { kind: "text" },
+    cases: [{ question: "q" }],
+  });
+  assert.equal(slices.task.repo, undefined);
+  assert.equal(slices.inputs.rowCount, 1);
 });
 
 test("a legacy Auto-mode run keeps the default engine", () => {
