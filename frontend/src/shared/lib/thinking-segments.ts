@@ -45,6 +45,8 @@ export function startThinking(
  *   chunk: The reasoning delta.
  *   now: The current time in ms.
  *   toolCount: How many tool calls the turn has started.
+ *   since: When the turn's previous event (a tool call or the last
+ *     segment) ended, in ms; null when there was none.
  *
  * Returns:
  *   The updated segments.
@@ -54,10 +56,15 @@ export function appendReasoning(
   chunk: string,
   now: number,
   toolCount: number,
+  since: number | null = null,
 ): ThinkingSegment[] {
   const open = openLast(segments);
   if (!open) {
-    return [...segments, { reasoning: chunk, startedAt: now, endedAt: null, toolsBefore: toolCount }];
+    // The model starts thinking when the previous event ends, not when its
+    // reasoning reaches us: providers often send it in one burst right before
+    // the next call, which made every later segment read "Thought for 0.0s".
+    const startedAt = since !== null && since < now ? since : now;
+    return [...segments, { reasoning: chunk, startedAt, endedAt: null, toolsBefore: toolCount }];
   }
   const next = segments.slice();
   // The clock of an empty placeholder starts at the first token, not at send.
@@ -112,6 +119,52 @@ export function reopenThinking(
   const next = segments.slice();
   next[next.length - 1] = { ...last, endedAt: null };
   return next;
+}
+
+/**
+ * When the turn's latest event ended: the last tool call to finish (or start,
+ * while it runs) or the last closed thinking segment.
+ *
+ * Args:
+ *   segments: The turn's segments so far.
+ *   toolCalls: The turn's tool calls so far.
+ *
+ * Returns:
+ *   That time in ms, or null when the turn has had no such event.
+ */
+export function lastEventAt(
+  segments: readonly ThinkingSegment[],
+  toolCalls: ReadonlyArray<{ startedAt: number; endedAt: number | null }>,
+): number | null {
+  let latest: number | null = null;
+  for (const call of toolCalls) {
+    const at = call.endedAt ?? call.startedAt;
+    if (latest === null || at > latest) latest = at;
+  }
+  for (const segment of segments) {
+    if (segment.endedAt !== null && (latest === null || segment.endedAt > latest)) {
+      latest = segment.endedAt;
+    }
+  }
+  return latest;
+}
+
+/**
+ * A finished segment's length as the "Thought for" row shows it, in tenths
+ * of a second.
+ *
+ * Args:
+ *   startedAt: When the segment started, in ms; null when unknown.
+ *   endedAt: When it ended, in ms.
+ *
+ * Returns:
+ *   The seconds rounded to one decimal, or null when that would read 0.0,
+ *   so the row says the model thought briefly instead.
+ */
+export function thoughtSeconds(startedAt: number | null, endedAt: number): number | null {
+  if (startedAt === null) return null;
+  const seconds = Math.round((endedAt - startedAt) / 100) / 10;
+  return seconds > 0 ? seconds : null;
 }
 
 export type ActivityPiece<S, T> = { kind: "thinking"; segment: S } | { kind: "steps"; steps: T[] };

@@ -3065,6 +3065,7 @@
   "shared.agent.seconds_short": "秒",
   "shared.agent.send": "送信",
   "shared.agent.thinking": "思考中",
+  "shared.agent.thought_briefly": "少し考えました",
   "shared.agent.thought_seconds": "{seconds} 秒間思考しました",
   "shared.code_editor.collapse": "折りたたむ",
   "shared.code_editor.copied": "コピーしました",

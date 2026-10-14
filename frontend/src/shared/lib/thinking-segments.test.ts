@@ -5,8 +5,10 @@ import {
   appendReasoning,
   closeThinking,
   interleaveThinking,
+  lastEventAt,
   reopenThinking,
   startThinking,
+  thoughtSeconds,
   type ThinkingSegment,
 } from "./thinking-segments.ts";
 
@@ -68,4 +70,32 @@ test("a segment anchored to a hidden step still lands before the next shown one"
     pieces.map((p) => (p.kind === "thinking" ? "t" : p.steps.map((s) => s.index).join(""))),
     ["0", "t", "2"],
   );
+});
+
+test("reasoning that lands in one burst after a tool is timed from the tool's end", () => {
+  let segs: readonly ThinkingSegment[] = closeThinking(appendReasoning([], "plan", 0, 0), 1000);
+  const tools = [{ startedAt: 1000, endedAt: 1500 }];
+  const since = lastEventAt(segs, tools);
+  assert.equal(since, 1500);
+  segs = appendReasoning(segs, "whole thought at once", 4000, 1, since);
+  segs = closeThinking(segs, 4000);
+  assert.equal(segs[1]?.startedAt, 1500);
+  assert.equal(thoughtSeconds(segs[1]?.startedAt ?? null, segs[1]?.endedAt ?? 0), 2.5);
+});
+
+test("an open placeholder still starts at the first token", () => {
+  const segs = appendReasoning(startThinking([], 0, 0), "a", 700, 0, 0);
+  assert.equal(segs[0]?.startedAt, 700);
+});
+
+test("lastEventAt takes a running tool's start and is null for a fresh turn", () => {
+  assert.equal(lastEventAt([], []), null);
+  assert.equal(lastEventAt([], [{ startedAt: 300, endedAt: null }]), 300);
+});
+
+test("a segment with no measurable time has no seconds to show", () => {
+  assert.equal(thoughtSeconds(1000, 1000), null);
+  assert.equal(thoughtSeconds(1000, 1040), null);
+  assert.equal(thoughtSeconds(null, 1000), null);
+  assert.equal(thoughtSeconds(1000, 1060), 0.1);
 });

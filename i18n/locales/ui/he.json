@@ -2099,6 +2099,7 @@
   "shared.agent.seconds_short": "s",
   "shared.agent.send": "שלח/שלחי",
   "shared.agent.thinking": "חושב",
+  "shared.agent.thought_briefly": "חשב לרגע",
   "shared.agent.thought_seconds": "חשב במשך {seconds} שניות",
   "shared.code_editor.collapse": "כווץ/י",
   "shared.code_editor.copied": "הועתק",

@@ -1986,6 +1986,7 @@
   "shared.agent.seconds_short": "s",
   "shared.agent.send": "Send",
   "shared.agent.thinking": "Thinking",
+  "shared.agent.thought_briefly": "Thought briefly",
   "shared.agent.thought_seconds": "Thought for {seconds} seconds",
   "shared.code_editor.collapse": "Collapse",
   "shared.code_editor.copied": "Copied",

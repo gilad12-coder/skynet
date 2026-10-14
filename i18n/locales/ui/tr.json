@@ -3065,6 +3065,7 @@
   "shared.agent.seconds_short": "sn",
   "shared.agent.send": "Gönder",
   "shared.agent.thinking": "Düşünüyor",
+  "shared.agent.thought_briefly": "Kısaca düşündü",
   "shared.agent.thought_seconds": "{seconds} saniye düşündü",
   "shared.code_editor.collapse": "Daralt",
   "shared.code_editor.copied": "Kopyalandı",

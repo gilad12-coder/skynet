@@ -1520,3 +1520,15 @@ async def test_turn_offers_web_tools_when_firecrawl_is_configured(monkeypatch: p
     assert posted == [("/search", {"query": "dspy gepa", "limit": 5})]
     ends = [e["data"] for e in events if e["event"] == "tool_end"]
     assert [(e["tool"], e["status"]) for e in ends] == [("web_search", "ok")]
+
+
+def test_system_prompt_says_the_coding_tool_runs_the_check_itself() -> None:
+    """The prompt must stop the agent from promising a check it will not run.
+
+    The reply to a coding-tool turn is written before the coding agent starts.
+    Without this rule it said "I haven't run the check yet, tell me to run it",
+    and the check then passed on its own a few seconds later.
+    """
+    prompt = " ".join((GENERALIST_SYSTEM_PROMPT or "").split())
+    assert "runs the validity check on its own, right after your reply" in prompt
+    assert "never say the check has not run" in prompt

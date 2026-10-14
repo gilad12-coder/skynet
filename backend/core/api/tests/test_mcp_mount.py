@@ -11,7 +11,7 @@ from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
 from pydantic import BaseModel
 
 from core.api.mcp_mount import AGENT_TAG, _annotations_for_method, _annotations_for_route, _trim_tool_spec
-from core.api.routers.code_agent import create_code_agent_router
+from core.api.routers.code_agent import RequestCodeAuthoringRequest, create_code_agent_router
 
 
 def test_annotations_for_method_reads_are_read_only() -> None:
@@ -140,3 +140,19 @@ def test_coding_tool_description_points_to_the_metric_editors() -> None:
     first_line = (route.endpoint.__doc__ or "").strip().splitlines()[0]
     assert "Metric screen's editors" in first_line
     assert "card" not in first_line.lower()
+
+
+def test_coding_tool_result_says_the_check_runs_on_its_own() -> None:
+    """The coding tool's result must tell the model the code and check are under way.
+
+    The coding agent writes the code and runs the validity check seconds after
+    the generalist's reply. With a bare marker result, the reply said "I haven't
+    run the check yet, tell me to run it" while the check was about to pass.
+    """
+    router = create_code_agent_router()
+    route = next(r for r in router.routes if getattr(r, "operation_id", None) == "request_code_authoring")
+    result = route.endpoint(RequestCodeAuthoringRequest(goal=" match the category "), SimpleNamespace())
+    assert result.awaiting_code is True
+    assert result.goal == "match the category"
+    assert "runs the validity check on them by itself" in result.next_step
+    assert "Do not say the check has not run" in result.next_step

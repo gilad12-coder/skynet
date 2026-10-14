@@ -8,6 +8,7 @@ import { streamCodeAgent, type AgentQuestion, type CodeAgentToolName } from "@/s
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import { liveLanesLast } from "@/shared/hooks/reasoning-order";
+import { appendVersion, type ArtifactVersion } from "@/shared/hooks/artifact-versions";
 import { TERMS } from "@/shared/lib/terms";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
@@ -125,11 +126,6 @@ interface AgentMessage {
   /** Concrete model selected by Auto Router, when the route was automatic. */
   servedModel?: string | null;
   stats?: TurnStats | null;
-}
-
-interface ArtifactVersion {
-  code: string;
-  ts: number;
 }
 
 export interface CodeAgentState {
@@ -427,6 +423,21 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     [],
   );
 
+  const pushSignatureVersion = React.useCallback((code: string) => {
+    setSignatureVersions((prev) => {
+      const next = appendVersion(prev, code, Date.now());
+      if (next !== prev) setSignatureVersionIndex(next.length - 1);
+      return next;
+    });
+  }, []);
+  const pushMetricVersion = React.useCallback((code: string) => {
+    setMetricVersions((prev) => {
+      const next = appendVersion(prev, code, Date.now());
+      if (next !== prev) setMetricVersionIndex(next.length - 1);
+      return next;
+    });
+  }, []);
+
   const runAgent = React.useCallback(
     (userMessage: string, history: AgentMessage[]) => {
       const isChat = userMessage.length > 0;
@@ -496,6 +507,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       // previous version — the tool-call card would show a stale diff.
       let lastSignatureCode = snapshot.signatureCode;
       let lastMetricCode = snapshot.metricCode;
+      // What each editor holds right now, streamed or replaced, so a lane
+      // that finishes can land its code as a version straight away.
+      let latestSignature = snapshot.signatureCode;
+      let latestMetric = snapshot.metricCode;
       const chatHistory = history
         .filter((m) => m.content.trim().length > 0)
         .map((m) => ({ role: m.role, content: m.content }));
@@ -530,6 +545,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
         if (reasoningBufRef.current && !reasoningEndedRef.current) {
           reasoningEndedRef.current = true;
           setReasoningEndedAt(Date.now());
+        } else if (!reasoningBufRef.current) {
+          // A model that streams no reasoning would otherwise keep a bare
+          // "Thinking" row up while its code and reply are already flowing.
+          setReasoningStartedAt(null);
         }
       };
 
@@ -627,6 +646,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               markReasoningDone("signature");
             }
             sigBufRef.current += chunk;
+            latestSignature = sigBufRef.current;
             setSignatureCode(sigBufRef.current);
             setSignatureValidation(null);
           },
@@ -643,20 +663,26 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               markReasoningDone("metric");
             }
             metricBufRef.current += chunk;
+            latestMetric = metricBufRef.current;
             setMetricCode(metricBufRef.current);
             setMetricValidation(null);
           },
           onArtifactDone: (source) => {
             if (controller.signal.aborted) return;
             markReasoningDone(source);
+            // The seed's turn only ends after the intro message is written,
+            // seconds later; landing the lane's code now keeps its "Edited"
+            // row in the transcript instead of a gap until then.
             if (source === "signature") {
               runLaneDone = true;
+              pushSignatureVersion(latestSignature);
               setSignatureStatus("done");
               if (!metricLaneDone) {
                 setStatusLabel(unifiedMsg("submit.v2.metric.agent.writing_metric"));
               }
             } else if (source === "metric") {
               metricLaneDone = true;
+              pushMetricVersion(latestMetric);
               setMetricStatus("done");
               if (!runLaneDone) {
                 setStatusLabel(unifiedMsg("submit.v2.metric.agent.writing_run"));
@@ -717,6 +743,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           onSignatureReplace: (code) => {
             const prevCode = lastSignatureCode;
             lastSignatureCode = code;
+            latestSignature = code;
             setSignatureCode(code);
             setSignatureManuallyEdited(false);
             attachCodeToLatestRunningToolCall("seed", prevCode, code);
@@ -726,11 +753,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             flashClearRef.current = setTimeout(() => {
               setSignatureFlashLines([]);
             }, 1200);
-            setSignatureVersions((prev) => {
-              const next = [...prev, { code, ts: Date.now() }];
-              setSignatureVersionIndex(next.length - 1);
-              return next;
-            });
+            pushSignatureVersion(code);
             pendingValidationsRef.current.push({
               kind: "signature",
               promise: runnersRef.current.runSignatureValidation(code),
@@ -739,6 +762,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           onMetricReplace: (code) => {
             const prevCode = lastMetricCode;
             lastMetricCode = code;
+            latestMetric = code;
             setMetricCode(code);
             setMetricManuallyEdited(false);
             attachCodeToLatestRunningToolCall("scorer", prevCode, code);
@@ -748,11 +772,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             flashClearRef.current = setTimeout(() => {
               setMetricFlashLines([]);
             }, 1200);
-            setMetricVersions((prev) => {
-              const next = [...prev, { code, ts: Date.now() }];
-              setMetricVersionIndex(next.length - 1);
-              return next;
-            });
+            pushMetricVersion(code);
             pendingValidationsRef.current.push({
               kind: "metric",
               promise: runnersRef.current.runMetricValidation(code),
@@ -791,11 +811,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               }
               setMetricCode(result.metric_code);
               setMetricManuallyEdited(false);
-              setMetricVersions((prev) => {
-                const next = [...prev, { code: result.metric_code, ts: Date.now() }];
-                setMetricVersionIndex(next.length - 1);
-                return next;
-              });
+              pushMetricVersion(result.metric_code);
               pendingValidationsRef.current.push({
                 kind: "metric",
                 promise: runnersRef.current.runMetricValidation(result.metric_code),
@@ -814,16 +830,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
                 setSignatureFlashLines([]);
                 setMetricFlashLines([]);
               }, 800);
-              setSignatureVersions((prev) => {
-                const next = [...prev, { code: result.signature_code, ts: Date.now() }];
-                setSignatureVersionIndex(next.length - 1);
-                return next;
-              });
-              setMetricVersions((prev) => {
-                const next = [...prev, { code: result.metric_code, ts: Date.now() }];
-                setMetricVersionIndex(next.length - 1);
-                return next;
-              });
+              pushSignatureVersion(result.signature_code);
+              pushMetricVersion(result.metric_code);
               pendingValidationsRef.current.push({
                 kind: "signature",
                 promise: runnersRef.current.runSignatureValidation(result.signature_code),
@@ -965,6 +973,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       pushToolCall,
       finishToolCall,
       attachCodeToLatestRunningToolCall,
+      pushSignatureVersion,
+      pushMetricVersion,
       steerStore,
     ],
   );

@@ -3065,6 +3065,7 @@
   "shared.agent.seconds_short": "से",
   "shared.agent.send": "भेजें",
   "shared.agent.thinking": "सोच रहे हैं",
+  "shared.agent.thought_briefly": "पल भर सोचा",
   "shared.agent.thought_seconds": "{seconds} सेकंड तक सोचा",
   "shared.code_editor.collapse": "संक्षिप्त करें",
   "shared.code_editor.copied": "कॉपी किया गया",

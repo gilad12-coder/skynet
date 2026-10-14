@@ -406,6 +406,10 @@ class RequestCodeAuthoringResponse(BaseModel):
 
     awaiting_code: bool
     goal: str
+    next_step: str = Field(
+        default="",
+        description="What happens after this call, for the calling agent's closing line.",
+    )
 
 
 class CancelAgentTurnResponse(BaseModel):
@@ -413,6 +417,18 @@ class CancelAgentTurnResponse(BaseModel):
 
     cancelled: bool
 
+
+# The model only sees this tool's result before it writes its reply, and the
+# coding agent writes the code and runs the check seconds after that reply.
+# A bare marker let it tell users "I haven't run the check, tell me to run it"
+# while the check was about to pass on its own.
+_CODE_AUTHORING_NEXT_STEP = (
+    "The coding agent is now writing the run code and the metric into the Metric "
+    "screen's editors, then runs the validity check on them by itself; its edits "
+    "and the check result show under your reply. End your turn with one short line "
+    "saying the code is being written and checked now. Do not say the check has not "
+    "run, do not ask the user to run it or to tell you to run it, and do not run it yourself."
+)
 
 _SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -813,7 +829,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         validity check, and writes the finished code back into the shared
         wizard state — so the generalist never hand-writes ``signature_code`` /
         ``metric_code``. The agent calls this once, ends its turn, and reads
-        the authored code on the next turn.
+        the authored code on the next turn. The coding agent and its check
+        run after that turn's reply, so ``next_step`` tells the model to say
+        they are under way rather than describe a check that has not run.
 
         Args:
             req: Optional plain-language goal for the Signature/Metric.
@@ -823,7 +841,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             A :class:`RequestCodeAuthoringResponse` marker carrying the goal
             back so the card can display it.
         """
-        return RequestCodeAuthoringResponse(awaiting_code=True, goal=req.goal.strip())
+        return RequestCodeAuthoringResponse(
+            awaiting_code=True, goal=req.goal.strip(), next_step=_CODE_AUTHORING_NEXT_STEP
+        )
 
     @router.get(
         "/optimizations/agent-turns/{turn_id}/stream",

@@ -9,6 +9,7 @@ import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import {
   appendReasoning,
   closeThinking,
+  lastEventAt,
   reopenThinking,
   startThinking,
   type ThinkingSegment,
@@ -374,13 +375,21 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
   const patchThinking = React.useCallback(
     (
       key: string,
-      update: (segments: readonly ThinkingSegment[], toolCount: number) => readonly ThinkingSegment[],
+      update: (
+        segments: readonly ThinkingSegment[],
+        toolCount: number,
+        since: number | null,
+      ) => readonly ThinkingSegment[],
     ) => {
       patchMessages(key, (prev) => {
         const last = prev[prev.length - 1];
         if (!last || last.role !== "assistant") return prev;
         const segments = last.thinkingSegments ?? [];
-        const nextSegments = update(segments, last.toolCalls?.length ?? 0);
+        const nextSegments = update(
+          segments,
+          last.toolCalls?.length ?? 0,
+          lastEventAt(segments, last.toolCalls ?? []),
+        );
         if (nextSegments === segments) return prev;
         const next = prev.slice();
         next[next.length - 1] = { ...last, thinkingSegments: nextSegments };
@@ -512,8 +521,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           },
           onReasoningPatch: (chunk) => {
             if (controller.signal.aborted) return;
-            patchThinking(key, (segments, toolCount) =>
-              appendReasoning(segments, chunk, Date.now(), toolCount),
+            patchThinking(key, (segments, toolCount, since) =>
+              appendReasoning(segments, chunk, Date.now(), toolCount, since),
             );
           },
           onToolStart: (ev) => {

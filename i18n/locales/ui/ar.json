@@ -3065,6 +3065,7 @@
   "shared.agent.seconds_short": "ث",
   "shared.agent.send": "إرسال",
   "shared.agent.thinking": "التفكير",
+  "shared.agent.thought_briefly": "فكّر لحظة",
   "shared.agent.thought_seconds": "فكّر لمدة {seconds} ثانية",
   "shared.code_editor.collapse": "طيّ",
   "shared.code_editor.copied": "تم النسخ",

@@ -3065,6 +3065,7 @@
   "shared.agent.seconds_short": "с",
   "shared.agent.send": "Отправить",
   "shared.agent.thinking": "Думаю",
+  "shared.agent.thought_briefly": "Недолго подумал",
   "shared.agent.thought_seconds": "Думал {seconds} секунд",
   "shared.code_editor.collapse": "Свернуть",
   "shared.code_editor.copied": "Скопировано",

@@ -2695,6 +2695,7 @@
   "shared.agent.seconds_short": "秒",
   "shared.agent.send": "傳送",
   "shared.agent.thinking": "諗緊…",
+  "shared.agent.thought_briefly": "諗咗一陣",
   "shared.agent.thought_seconds": "思考咗 {seconds} 秒",
   "shared.code_editor.collapse": "收起",
   "shared.code_editor.copied": "已複製",

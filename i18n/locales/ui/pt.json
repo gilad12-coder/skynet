@@ -3065,6 +3065,7 @@
   "shared.agent.seconds_short": "s",
   "shared.agent.send": "Enviar",
   "shared.agent.thinking": "A pensar",
+  "shared.agent.thought_briefly": "Pensou por um instante",
   "shared.agent.thought_seconds": "Pensou durante {seconds} segundos",
   "shared.code_editor.collapse": "Reduzir",
   "shared.code_editor.copied": "Copiado",

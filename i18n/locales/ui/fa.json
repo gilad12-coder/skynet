@@ -3065,6 +3065,7 @@
   "shared.agent.seconds_short": "ثانیه",
   "shared.agent.send": "ارسال",
   "shared.agent.thinking": "در حال تفکر",
+  "shared.agent.thought_briefly": "لحظه‌ای فکر کرد",
   "shared.agent.thought_seconds": "{seconds} ثانیه فکر کرد",
   "shared.code_editor.collapse": "جمع کردن",
   "shared.code_editor.copied": "کپی شد",

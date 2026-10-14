@@ -3065,6 +3065,7 @@
   "shared.agent.seconds_short": "秒",
   "shared.agent.send": "发送",
   "shared.agent.thinking": "正在思考",
+  "shared.agent.thought_briefly": "思考了片刻",
   "shared.agent.thought_seconds": "思考了 {seconds} 秒",
   "shared.code_editor.collapse": "折叠",
   "shared.code_editor.copied": "已复制",

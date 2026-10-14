@@ -3065,6 +3065,7 @@
   "shared.agent.seconds_short": "с",
   "shared.agent.send": "Надіслати",
   "shared.agent.thinking": "Обмірковування",
+  "shared.agent.thought_briefly": "Недовго подумав",
   "shared.agent.thought_seconds": "Обмірковування зайняло {seconds} с",
   "shared.code_editor.collapse": "Згорнути",
   "shared.code_editor.copied": "Скопійовано",

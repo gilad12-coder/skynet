@@ -3065,6 +3065,7 @@
   "shared.agent.seconds_short": "초",
   "shared.agent.send": "보내기",
   "shared.agent.thinking": "생각 중",
+  "shared.agent.thought_briefly": "잠시 생각함",
   "shared.agent.thought_seconds": "{seconds}초 동안 생각함",
   "shared.code_editor.collapse": "접기",
   "shared.code_editor.copied": "복사됨",
