@@ -17,7 +17,6 @@ import {
   inferredRoles,
   heldOutCounts,
   inputsFromRoles,
-  parseTypedInput,
   singleInputCase,
   withColumnRole,
   type HeldOutCounts,
@@ -31,8 +30,6 @@ interface LoadedData {
   rows: Row[];
   columns: string[];
   label: string | null;
-  /** What the user typed, for a single input; sent as the inference note. */
-  note: string;
 }
 
 // The full rows live outside the wizard state, which only keeps the cases
@@ -57,7 +54,6 @@ export interface InputsInferenceState {
   setLibraryOpen: (open: boolean) => void;
   handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
   handlePickDataset: (dataset: DatasetSummary) => Promise<void>;
-  applyTypedInput: (text: string) => void;
   reinfer: () => void;
   /** Each table column's Input / Output / Ignore role. */
   roles: Record<string, ColumnRole>;
@@ -66,8 +62,7 @@ export interface InputsInferenceState {
 }
 
 /**
- * Step 2's data flow: loads a table (upload, library or connector import) or
- * a typed input, asks the backend how it should be read (one input or
+ * Step 2's data flow: loads a table (upload, library or connector import), asks the backend how it should be read (one input or
  * input/output pairs), and keeps the cases in the inputs slice in step with
  * the column roles the user picks.
  */
@@ -84,7 +79,6 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
   const [inferError, setInferError] = React.useState(false);
   const [inference, setInference] = React.useState<InputsInferenceResponse | null>(null);
   const [libraryOpen, setLibraryOpen] = React.useState(false);
-  const [note, setNote] = React.useState("");
   const abortRef = React.useRef<AbortController | null>(null);
 
   React.useEffect(() => () => abortRef.current?.abort(), []);
@@ -112,7 +106,7 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
             columns: data.columns,
             sample_rows: data.rows.slice(0, SAMPLE_ROWS),
             row_count: data.rows.length,
-            user_note: data.note,
+            user_note: "",
             locale: getActiveLocale(),
           },
           controller.signal,
@@ -148,18 +142,19 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
     [task.objective, task.background, task.artifactKind, task.startingVersion, patchInputs],
   );
 
-  // A fresh source replaces the cases outright; inference then refines how
-  // they are read. Until it answers, a table takes the classic default roles
-  // (the last column the output) and a typed input is a single case, so the
-  // step is never empty.
+  // A fresh table replaces the cases outright; inference then refines how
+  // they are read. Until it answers, the table takes the classic default
+  // roles (the last column the output), so the step is never empty.
   const load = React.useCallback(
     (data: LoadedData) => {
-      const isTable = data.label !== null;
       const columns = data.columns;
       rowsCache = null;
       setRows(data.rows);
-      setNote(data.note);
       setInference(null);
+      const roles: Record<string, ColumnRole> = {};
+      columns.forEach((c, idx) => {
+        roles[c] = defaultRoleFor(idx, columns.length);
+      });
       const slice: Partial<InputsSlice> = {
         datasetLabel: data.label,
         stagedDatasetId: null,
@@ -167,21 +162,8 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
         sampleRows: data.rows.slice(0, SAMPLE_ROWS),
         rowCount: data.rows.length,
         rationale: "",
+        ...inputsFromRoles(columns, roles, data.rows),
       };
-      if (isTable) {
-        const roles: Record<string, ColumnRole> = {};
-        columns.forEach((c, idx) => {
-          roles[c] = defaultRoleFor(idx, columns.length);
-        });
-        Object.assign(slice, inputsFromRoles(columns, roles, data.rows));
-      } else {
-        Object.assign(slice, {
-          mode: "single",
-          inputFields: Object.keys(data.rows[0] ?? {}),
-          expectedField: null,
-          cases: data.rows[0] ? [singleInputCase(data.rows[0])] : [],
-        });
-      }
       patchInputs(slice);
       rowsCache = { key: cacheKey(slice as InputsSlice), rows: data.rows };
       void infer(data);
@@ -201,7 +183,6 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
           rows: parsed.rows as Row[],
           columns: parsed.columns,
           label: file.name,
-          note: "",
         });
       } catch {
         toast.error(msg("submit.dataset.file_error"));
@@ -223,7 +204,6 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
           rows: data,
           columns: res.columns.length > 0 ? res.columns : Object.keys(data[0] ?? {}),
           label: dataset.name,
-          note: "",
         });
       } catch {
         toast.error(msg("submit.dataset.file_error"));
@@ -234,19 +214,10 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
     [load],
   );
 
-  const applyTypedInput = React.useCallback(
-    (text: string) => {
-      if (!text.trim()) return;
-      const input = parseTypedInput(text);
-      load({ rows: [input], columns: Object.keys(input), label: null, note: text });
-    },
-    [load],
-  );
-
   const reinfer = React.useCallback(() => {
     if (rows.length === 0) return;
-    void infer({ rows, columns: inputs.columns, label: inputs.datasetLabel, note });
-  }, [infer, rows, inputs.columns, inputs.datasetLabel, note]);
+    void infer({ rows, columns: inputs.columns, label: inputs.datasetLabel });
+  }, [infer, rows, inputs.columns, inputs.datasetLabel]);
 
   const roles = React.useMemo(
     () => columnRoles(inputs.columns, inputs.inputFields, inputs.expectedField),
@@ -265,7 +236,6 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
     abortRef.current = null;
     rowsCache = null;
     setRows([]);
-    setNote("");
     setInference(null);
     setInferring(false);
     setInferError(false);
@@ -299,7 +269,6 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
     setLibraryOpen,
     handleFileUpload,
     handlePickDataset,
-    applyTypedInput,
     reinfer,
     roles,
     setColumnRole,

@@ -1,15 +1,10 @@
 "use client";
 
-import * as React from "react";
-
 import { DatasetPickerDialog } from "@/features/datasets";
 import { ImportFromMenu } from "@/features/connectors";
 import { Books, Trash, UploadSimple } from "@/shared/ui/icons";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Button } from "@/shared/ui/primitives/button";
-import { Label } from "@/shared/ui/primitives/label";
-import { Separator } from "@/shared/ui/primitives/separator";
-import { Textarea } from "@/shared/ui/primitives/textarea";
 import { PingDot } from "@/shared/ui/ping-dot";
 import { DATASET_UPLOAD_ACCEPT } from "@/shared/lib/parse-dataset";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
@@ -25,11 +20,12 @@ import { WizardScreen } from "./WizardScreen";
 type MessageParams = Record<string, string | number>;
 
 /**
- * Step 2, Inputs: bring a table (upload, library or connector import) or
- * type one input on one screen. Once a table is loaded, each column gets an
- * Input / Output / Ignore role (preselected from the backend's inference)
- * and the split sits right below. The step is done once the roles are valid.
- * Auto hosts the app's generalist agent, which has the inputs tools, beside it.
+ * Step 2, Inputs: bring a table (upload, library or connector import). Once
+ * it is loaded, each column gets an Input / Output / Ignore role (preselected
+ * from the backend's inference) and the split sits right below. The step is
+ * done once the roles are valid. A single-answer task skips the step: its one
+ * input is the question itself. Auto hosts the app's generalist agent, which
+ * has the inputs tools, beside it.
  */
 export function InputsStep() {
   const ctx = useWizardV2();
@@ -39,7 +35,6 @@ export function InputsStep() {
   const t = (key: string, params?: MessageParams) => v2Msg(key, guided, params);
   const fmt = (n: number) => new Intl.NumberFormat(getActiveIntlLocale()).format(n);
 
-  const [typed, setTyped] = React.useState("");
   const hasData = inputs.cases.length > 0;
   const fromTable = inputs.datasetLabel !== null;
 
@@ -65,10 +60,7 @@ export function InputsStep() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    setTyped("");
-                    inference.clear();
-                  }}
+                  onClick={inference.clear}
                   className="min-h-11 gap-1.5 lg:min-h-8"
                 >
                   <Trash className="size-3.5" aria-hidden="true" />
@@ -127,36 +119,6 @@ export function InputsStep() {
                 onImported={(dataset) => void inference.handlePickDataset(dataset)}
                 className="min-h-11 flex-1 justify-center gap-2 lg:min-h-9"
               />
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Separator className="flex-1" />
-              <span className="text-xs text-muted-foreground">
-                {t("submit.v2.inputs.source.or_type")}
-              </span>
-              <Separator className="flex-1" />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="v2-typed-input">{t("submit.v2.inputs.source.typed_label")}</Label>
-              <Textarea
-                id="v2-typed-input"
-                value={typed}
-                onChange={(e) => setTyped(e.target.value)}
-                placeholder={t("submit.v2.inputs.source.typed_placeholder")}
-                rows={4}
-                dir="auto"
-                className="min-h-24 text-sm"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => inference.applyTypedInput(typed)}
-                disabled={!typed.trim() || inference.inferring}
-                className="min-h-11 self-end lg:min-h-9"
-              >
-                {t("submit.v2.inputs.source.typed_use")}
-              </Button>
             </div>
           </section>
 
