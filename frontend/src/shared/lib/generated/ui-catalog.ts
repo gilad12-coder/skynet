@@ -47,6 +47,8 @@ export type MessageKey =
   | "agent.pending.steering"
   | "agent.pending.steering_badge"
   | "agent.tool.blackbox_engines.title"
+  | "agent.tool.crawl_site.title"
+  | "agent.tool.fetch_url.title"
   | "agent.tool.list_samples.title"
   | "agent.tool.pause_job.confirm"
   | "agent.tool.pause_job.description"
@@ -66,6 +68,7 @@ export type MessageKey =
   | "agent.tool.submit_blackbox.description"
   | "agent.tool.submit_blackbox.title"
   | "agent.tool.validate_datasets.title"
+  | "agent.tool.web_search.title"
   | "agent.validation.failed"
   | "agent_run.answer.empty"
   | "agent_run.answer.pending"
@@ -4215,6 +4218,8 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "agent.pending.steering": "הסוכן יקרא את זה בשלב הבא שלו",
   "agent.pending.steering_badge": "נשלחה",
   "agent.tool.blackbox_engines.title": "מנועי אופטימיזציה זמינים",
+  "agent.tool.crawl_site.title": "סריקת אתר",
+  "agent.tool.fetch_url.title": "קריאת דף אינטרנט",
   "agent.tool.list_samples.title": "דאטאסטים לדוגמה",
   "agent.tool.pause_job.confirm": "השהה/השהי",
   "agent.tool.pause_job.description": "האופטימיזציה תישמר בנקודת ביקורת ותפנה את העובד. אפשר להמשיך אותה מאותה נקודה.",
@@ -4234,6 +4239,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "agent.tool.submit_blackbox.description": "תיפתח אופטימיזציה חדשה שמשפרת את נקודת ההתחלה מול פונקציית הציון. הפעולה מחויבת מהיתרה שלך ועשויה לקחת זמן.",
   "agent.tool.submit_blackbox.title": "הרצת {p1} מסוג ״כל דבר״",
   "agent.tool.validate_datasets.title": "בדיקת חלוקת הדאטאסט",
+  "agent.tool.web_search.title": "חיפוש ברשת",
   "agent.validation.failed": "האימות נכשל",
   "agent_run.answer.empty": "הסוכן לא השאיר תשובה.",
   "agent_run.answer.pending": "הסוכן עדיין לא כתב את תשובתו.",
@@ -16759,6 +16765,8 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "agent.pending.steering": "Will be read at the agent's next step",
   "agent.pending.steering_badge": "Sent",
   "agent.tool.blackbox_engines.title": "Available optimization engines",
+  "agent.tool.crawl_site.title": "Crawl a website",
+  "agent.tool.fetch_url.title": "Read a web page",
   "agent.tool.list_samples.title": "Sample datasets",
   "agent.tool.pause_job.confirm": "Pause",
   "agent.tool.pause_job.description": "The optimization is checkpointed and its worker is freed. You can resume it from the same point.",
@@ -16778,6 +16786,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "agent.tool.submit_blackbox.description": "A new optimization will improve the starting point against the scoring function. This spends from your balance and may take a while.",
   "agent.tool.submit_blackbox.title": "Start an \"anything\" {p1}",
   "agent.tool.validate_datasets.title": "Dataset split check",
+  "agent.tool.web_search.title": "Search the web",
   "agent.validation.failed": "Validation failed",
   "agent_run.answer.empty": "The agent left no answer.",
   "agent_run.answer.pending": "The agent has not written its answer yet.",

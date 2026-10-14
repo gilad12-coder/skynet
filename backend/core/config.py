@@ -355,6 +355,11 @@ class Settings(BaseSettings):
         alias="OPENROUTER_API_KEY",
         description="OpenRouter master-account (inference) API key. Read-only here: the float monitor uses it to read the shared prepaid balance (GET /api/v1/credits) so it can warn when the OpenRouter float runs thin against outstanding customer balances. Managed inference itself routes through the LiteLLM proxy or per-user provisioned keys, not this field.",
     )
+    firecrawl_api_key: SecretStr | None = Field(
+        default=None,
+        alias="FIRECRAWL_API_KEY",
+        description="Firecrawl API key. When set, the wizard agent gets web_search, fetch_url and crawl_site tools so it can search the web and read links the user gives it. Unset leaves the agent without web access.",
+    )
     # Every *_CENTS variable still reads its pre-rename *_CREDITS name so existing deployments keep their values.
     openrouter_balance_floor_cents: int = Field(
         default=1000,
