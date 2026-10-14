@@ -479,9 +479,17 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   }, [codeFollowUp, codeAgentSend]);
   const codeAgentStatus = codeAgent.status;
   const codeAgentHasCode = codeAgent.hasCode;
+  // The seed may not have started when the goal is queued, so "idle" means
+  // stopped only once the seed has streamed.
+  const seedStreamedRef = React.useRef(false);
   React.useEffect(() => {
-    if (!afterSeed) return;
-    if (codeAgentStatus === "error") setAfterSeed(null);
+    if (!afterSeed) {
+      seedStreamedRef.current = false;
+      return;
+    }
+    if (codeAgentStatus === "streaming") seedStreamedRef.current = true;
+    const stopped = codeAgentStatus === "idle" && seedStreamedRef.current;
+    if (codeAgentStatus === "error" || stopped) setAfterSeed(null);
     if (codeAgentStatus !== "done" || !codeAgentHasCode) return;
     setAfterSeed(null);
     codeAgentSend(afterSeed);
@@ -505,6 +513,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     if (prev === agent.conversationId) return;
     if (prev === null && agent.conversationId !== null) return;
     setCodeArmed(false);
+    setAfterSeed(null);
     handedOffRef.current = false;
     codeAgentReset();
   }, [agent.conversationId, codeAgentReset]);

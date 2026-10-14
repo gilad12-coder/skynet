@@ -416,6 +416,8 @@ def test_old_payload_without_files_loads_and_keeps_its_fingerprint() -> None:
         "x.exe",
         "a//b.py",
         "skynet/x.py",
+        "lib\n/x.py",
+        "x.py\n",
     ],
 )
 def test_unsafe_file_paths_are_refused(path: str) -> None:

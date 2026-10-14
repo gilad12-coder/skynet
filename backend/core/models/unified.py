@@ -148,7 +148,7 @@ WORKSPACE_FILES_MAX_TOTAL_CHARS = 500_000
 WORKSPACE_PATH_MAX_CHARS = 120
 WORKSPACE_PATH_MAX_DEPTH = 4
 WORKSPACE_FILE_SUFFIXES = (".py", ".txt", ".md", ".json", ".yaml", ".yml", ".csv", ".toml", ".ini", ".cfg")
-_PATH_SEGMENT = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+_PATH_SEGMENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 # ``skynet`` is the helper module the harness injects; a file under that
 # name would silently lose to it.
 _RESERVED_TOP_LEVEL = frozenset({RUN_FILE, METRIC_FILE, "skynet", "skynet.py"})
@@ -174,7 +174,7 @@ def workspace_path_error(path: str) -> str | None:
     segments = path.split("/")
     if len(segments) > WORKSPACE_PATH_MAX_DEPTH:
         return f"the path may be at most {WORKSPACE_PATH_MAX_DEPTH} levels deep"
-    if any(segment in ("", ".", "..") or not _PATH_SEGMENT.match(segment) for segment in segments):
+    if any(segment in ("", ".", "..") or not _PATH_SEGMENT.fullmatch(segment) for segment in segments):
         return "each part of the path may use letters, digits, _, - and . only, and no part may be empty or .."
     if segments[0] in _RESERVED_TOP_LEVEL:
         return f"{segments[0]} is reserved"

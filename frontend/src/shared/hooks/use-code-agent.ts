@@ -477,10 +477,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       return next;
     });
   }, []);
-  const pushFileVersion = React.useCallback((path: string, code: string) => {
+  const pushFileVersion = React.useCallback((path: string, code: string, ts = Date.now()) => {
     setFileVersions((prev) => {
       const versions = prev[path] ?? [];
-      const next = appendVersion(versions, code, Date.now());
+      const next = appendVersion(versions, code, ts);
       return next === versions ? prev : { ...prev, [path]: next };
     });
   }, []);
@@ -867,6 +867,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             const prevCode = latestFiles[path] ?? "";
             latestFiles[path] = code;
             setFileRef.current?.(path, code);
+            // A file the user wrote or cloned is the base the agent's first
+            // version diffs against; stamped 0 so it is never counted as an edit.
+            if (prevCode) pushFileVersion(path, prevCode, 0);
             pushFileVersion(path, code);
             setMessages((prev) => {
               const last = prev[prev.length - 1];
