@@ -1008,6 +1008,18 @@ def test_system_prompt_forbids_submit_in_authoring_turn() -> None:
     assert "request_code_authoring" in prompt
 
 
+def test_system_prompt_makes_code_authoring_the_wizard_coding_tool() -> None:
+    """The prompt must name ``request_code_authoring`` as the wizard's only code agent.
+
+    SKY-26 removed the Metric step's own coding panel, so the generalist is the
+    only way code gets written on that screen; dropping this would leave the
+    Metric screen with nothing that writes code.
+    """
+    prompt = GENERALIST_SYSTEM_PROMPT or ""
+    assert "the wizard has no\n  other code agent" in prompt
+    assert "hands a failed check back to the coding agent" in prompt
+
+
 def _approval_engine():
     """In-memory shared-across-threads SQLite engine with the ORM schema."""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)

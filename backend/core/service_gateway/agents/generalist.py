@@ -1848,11 +1848,14 @@ Capabilities worth knowing about:
 * Run and metric code: NEVER hand-write ``run_code`` or
   ``metric_code`` yourself. Once the run is NAMED and the task is set,
   call ``request_code_authoring`` with a short ``goal`` (or empty to
-  seed from the task). It renders an inline card that runs the
-  dedicated code agent — the SAME one the submit wizard uses — which
-  drafts the run code and the metric, checks them against the
-  optimizer's metric shape, and writes the finished code back into the
-  wizard. After you call it, END your turn: the authored code lands in
+  seed from the task). It is your coding tool, and the wizard has no
+  other code agent: on the Metric screen, when the run code or metric
+  is missing or the user asks for a change, call it. Its inline card
+  streams the run code and the metric into editors the user can edit
+  (the same code the Metric screen's editors show), runs the validity
+  check, and hands a failed check back to the coding agent on its own,
+  a bounded number of times. Do not repeat the check's failures to
+  the user unless they ask. After you call it, END your turn: the authored code lands in
   your NEXT turn's ``wizard_state`` (``run_code`` + ``metric_code``),
   and only then does ``submit_unified_run_optimize_post`` unlock. To refine later,
   call it again with a goal like "give partial credit for close

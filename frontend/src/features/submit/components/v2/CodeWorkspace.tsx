@@ -2,13 +2,11 @@
 
 import { useCallback, useMemo, type ReactNode } from "react";
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
-import type { CodeAgentState } from "@/shared/hooks/use-code-agent";
 import { contractCheckMessage } from "@/shared/lib/i18n";
 import type { ContractCheckItem, ContractCheckResponse } from "@/shared/types/unified-run";
 import { contractConsole, type ContractEditor } from "../../lib/contract-console";
 import { withScorerImports } from "../../lib/scorer-dependencies";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
-import { VersionStepper } from "../steps/CodeAgentPanel";
 import { v2Msg } from "./ArtifactConfirmCard";
 
 /** One failed check as a line in an editor's console. */
@@ -38,14 +36,12 @@ function ContractHint({ text }: { text: string | null | undefined }) {
 function EditorBlock({
   id,
   title,
-  agent,
-  artifact,
+  writing,
   children,
 }: {
   id: string;
   title: string;
-  agent: CodeAgentState;
-  artifact: "signature" | "metric";
+  writing: boolean;
   children: ReactNode;
 }) {
   return (
@@ -54,12 +50,7 @@ function EditorBlock({
         <h4 id={`${id}-label`} className="text-sm font-medium">
           {title}
         </h4>
-        <div className="flex items-center gap-2">
-          <VersionStepper agent={agent} artifact={artifact} />
-          <ArtifactStatusChip
-            status={artifact === "signature" ? agent.signatureStatus : agent.metricStatus}
-          />
-        </div>
+        <ArtifactStatusChip status={writing ? "writing" : "idle"} />
       </div>
       {children}
     </section>
@@ -69,14 +60,14 @@ function EditorBlock({
 /**
  * The run code (how a candidate produces an output) and the metric (how that
  * output is scored), stacked on one screen. Every program uses the same
- * contract: the agent writes both, the user can edit either.
+ * contract: the agent's coding tool writes both, the user can edit either.
  */
 export function CodeWorkspace({
   runCode,
   metricCode,
   onRunCodeChange,
   onMetricCodeChange,
-  agent,
+  writing,
   guided,
   runEntry,
   metricSignature,
@@ -88,7 +79,8 @@ export function CodeWorkspace({
   metricCode: string;
   onRunCodeChange: (code: string) => void;
   onMetricCodeChange: (code: string) => void;
-  agent: CodeAgentState;
+  /** Which code the docked agent's coding tool is streaming in right now. */
+  writing: { run: boolean; metric: boolean };
   guided: boolean;
   /** The run code's entry point for the artifact kind, from the optimizer catalog. */
   runEntry?: string | null;
@@ -124,8 +116,7 @@ export function CodeWorkspace({
       <EditorBlock
         id="v2-run-code"
         title={v2Msg("submit.v2.metric.run_label", guided)}
-        agent={agent}
-        artifact="signature"
+        writing={writing.run}
       >
         <CodeEditor
           value={runCode}
@@ -135,8 +126,7 @@ export function CodeWorkspace({
           runLabel={runLabel}
           runningLabel={runningLabel}
           validationResult={runConsole}
-          streaming={agent.signatureStatus === "writing"}
-          flashLines={agent.signatureFlashLines}
+          streaming={writing.run}
         />
         <ContractHint text={runEntry} />
       </EditorBlock>
@@ -144,8 +134,7 @@ export function CodeWorkspace({
       <EditorBlock
         id="v2-metric-code"
         title={v2Msg("submit.v2.metric.metric_label", guided)}
-        agent={agent}
-        artifact="metric"
+        writing={writing.metric}
       >
         {children}
         <div
@@ -168,8 +157,7 @@ export function CodeWorkspace({
             runLabel={runLabel}
             runningLabel={runningLabel}
             validationResult={metricConsole}
-            streaming={agent.metricStatus === "writing"}
-            flashLines={agent.metricFlashLines}
+            streaming={writing.metric}
           />
         </div>
         <ContractHint text={metricSignature} />
