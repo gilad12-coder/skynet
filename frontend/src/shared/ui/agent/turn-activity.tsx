@@ -25,8 +25,8 @@ interface TurnActivityProps {
 
 // Mirrors Codex's turn header: while the agent works, a "Working for 14s"
 // line over the turn's history so far, the thinking row and then its tools
-// under one summary line; once done, a "Worked for 39s" line that folds that
-// history away until clicked, so the answer is what the eye lands on.
+// under one summary line; once done, a "Worked for 39s" line over the same
+// history, which stays open and folds away only when clicked.
 export function TurnActivity({
   thinking,
   steps,
@@ -40,7 +40,8 @@ export function TurnActivity({
   // The whole turn counts, not only a running step, so the history stays
   // open in the gaps between one tool finishing and the next starting.
   const isLive = isThinking || running.length > 0 || Boolean(thinking?.streaming);
-  const [open, setOpen] = React.useState(false);
+  // Finished history stays open; the header still folds it on request.
+  const [open, setOpen] = React.useState(true);
   const [nowTs, setNowTs] = React.useState(() => Date.now());
 
   React.useEffect(() => {

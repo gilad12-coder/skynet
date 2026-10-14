@@ -164,6 +164,10 @@ interface PendingRun {
 interface SessionRuntime {
   controller: AbortController | null;
   reasoningBuf: string;
+  // Mirrors the session's reasoning timestamps so ``onDone`` can stamp the
+  // finished turn's thinking onto its message without reading render state.
+  reasoningStartedAt: number | null;
+  reasoningEndedAt: number | null;
   replyBuf: string;
   // Sticky overlay of wizard fields derived synchronously this session
   // (e.g. ``staged_dataset_id`` from an in-panel upload). The panel-only
@@ -190,10 +194,18 @@ function blankSession(key: string): SessionView {
   };
 }
 
+/** Stamp the end of the turn's reasoning once; later calls keep the first stamp. */
+function endReasoning(rt: SessionRuntime): number {
+  rt.reasoningEndedAt ??= Date.now();
+  return rt.reasoningEndedAt;
+}
+
 function blankRuntime(): SessionRuntime {
   return {
     controller: null,
     reasoningBuf: "",
+    reasoningStartedAt: null,
+    reasoningEndedAt: null,
     replyBuf: "",
     persistentExtras: {},
     pendingRun: null,
@@ -419,6 +431,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       const controller = new AbortController();
       rt.controller = controller;
       rt.reasoningBuf = "";
+      rt.reasoningStartedAt = Date.now();
+      rt.reasoningEndedAt = null;
       rt.replyBuf = "";
       streamingKeysRef.current.add(key);
 
@@ -426,7 +440,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         status: "streaming",
         statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.1"),
         reasoning: "",
-        reasoningStartedAt: Date.now(),
+        reasoningStartedAt: rt.reasoningStartedAt,
         reasoningEndedAt: null,
         error: null,
         errorCode: null,
@@ -494,7 +508,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           onReasoningPatch: (chunk) => {
             if (controller.signal.aborted) return;
             if (rt.reasoningBuf === "") {
-              patchSession(key, { reasoningStartedAt: Date.now() });
+              rt.reasoningStartedAt = Date.now();
+              patchSession(key, { reasoningStartedAt: rt.reasoningStartedAt });
             }
             rt.reasoningBuf += chunk;
             patchSession(key, { reasoning: rt.reasoningBuf });
@@ -553,7 +568,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             if (rt.replyBuf === "") {
               patchSession(key, {
                 statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.4"),
-                ...(rt.reasoningBuf ? { reasoningEndedAt: Date.now() } : {}),
+                ...(rt.reasoningBuf ? { reasoningEndedAt: endReasoning(rt) } : {}),
               });
             }
             rt.replyBuf += chunk;
@@ -562,6 +577,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           onMessageReset: () => {
             if (controller.signal.aborted) return;
             rt.replyBuf = "";
+            rt.reasoningEndedAt = null;
             patchSession(key, { reasoningEndedAt: null });
             patchMessages(key, (prev) => {
               const last = prev[prev.length - 1];
@@ -576,7 +592,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             patchSession(key, {
               status: "done",
               statusLabel: "",
-              ...(rt.reasoningBuf ? { reasoningEndedAt: Date.now() } : {}),
+              ...(rt.reasoningBuf ? { reasoningEndedAt: endReasoning(rt) } : {}),
             });
             patchMessages(key, (prev) => {
               const last = prev[prev.length - 1];
@@ -602,6 +618,17 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
                 model: result.model,
                 servedModel: result.served_model,
                 stats: parseTurnStats(result.stats),
+                // The live thinking state belongs to the newest turn only and
+                // resets on the next send; a copy on the message keeps this
+                // turn's "Thought for" row after that.
+                thinking: rt.reasoningBuf
+                  ? {
+                      reasoning: rt.reasoningBuf,
+                      startedAt: rt.reasoningStartedAt,
+                      endedAt: rt.reasoningEndedAt,
+                      streaming: false,
+                    }
+                  : last.thinking,
               };
               return next;
             });

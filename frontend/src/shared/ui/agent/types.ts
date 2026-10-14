@@ -20,6 +20,8 @@ export interface AgentMessage {
   /** Concrete model the Auto Router picked for this turn, when resolved. */
   servedModel?: string | null;
   stats?: TurnStats | null;
+  /** The turn's finished reasoning, kept so earlier turns still show it. */
+  thinking?: AgentThinking;
 }
 
 /** Token usage, cost and timing of one agent turn, as the backend measured it. */

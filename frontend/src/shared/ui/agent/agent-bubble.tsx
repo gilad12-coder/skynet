@@ -37,7 +37,7 @@ interface AgentBubbleProps {
 
 export function AgentBubble({
   msg,
-  thinking,
+  thinking: liveThinking,
   renderToolCall,
   isStepCall,
   stepKind,
@@ -68,6 +68,10 @@ export function AgentBubble({
     }
     return result;
   }, [msg.toolCalls]);
+
+  // The live state wins while the turn streams; once it's done, the copy
+  // saved on the message keeps the row through later turns.
+  const thinking = liveThinking?.streaming ? liveThinking : (msg.thinking ?? liveThinking);
 
   const stepCalls =
     renderToolCall && isStepCall ? visibleToolCalls.filter(({ call }) => isStepCall(call)) : [];
