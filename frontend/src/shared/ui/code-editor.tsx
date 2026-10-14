@@ -35,6 +35,7 @@ import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { FIND_SHORTCUT, useEditorFind } from "@/shared/ui/code-editor-find";
 import { CODE_HIGHLIGHT_SPECS } from "@/shared/ui/code-highlight-style";
+import { inCommentOrString } from "@/shared/ui/code-completion";
 
 const beigeEditorTheme = EditorView.theme(
   {
@@ -179,6 +180,7 @@ const dspyCompletions = [
 function dspyCompletion(context: CompletionContext): CompletionResult | null {
   const word = context.matchBefore(/[\w.]+/);
   if (!word || (word.from === word.to && !context.explicit)) return null;
+  if (inCommentOrString(context.state, context.pos)) return null;
   return {
     from: word.from,
     options: dspyCompletions,

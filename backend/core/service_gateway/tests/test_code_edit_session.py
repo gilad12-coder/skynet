@@ -322,3 +322,37 @@ def test_run_and_metric_contracts_agree_on_a_prompt_output() -> None:
     assert "a prompt or text returns the reply str unchanged" in run_contract
     assert "for a prompt or text it is the reply str" in metric_contract
     assert "never call .get or getattr on it" in metric_contract
+
+
+def test_unified_draft_opens_the_row_and_the_edit_reuses_it(
+    u_session: _UnifiedEditSession, u_events: list[dict]
+) -> None:
+    """Streamed code opens the edit's row early; the finished call keeps that row and alone lands the code."""
+    new_run = "def run(artifact, input):\n    return input['ticket']\n"
+    u_session.draft("edit_run", 0, new_run[:10])
+    u_session.draft("edit_run", 10, new_run[10:])
+    u_session.edit_run("use the ticket", new_run)
+
+    names = [e["event"] for e in u_events]
+    assert names == ["tool_start", "code_draft", "code_draft", "tool_start", "signature_replace", "tool_end"]
+    ids = {e["data"]["id"] for e in u_events if e["event"] in ("tool_start", "tool_end")}
+    assert len(ids) == 1
+    drafts = [e["data"] for e in u_events if e["event"] == "code_draft"]
+    assert drafts == [
+        {"source": "signature", "chunk": new_run[:10], "reset": True},
+        {"source": "signature", "chunk": new_run[10:], "reset": False},
+    ]
+    assert u_events[3]["data"]["reason"] == "use the ticket"
+
+
+def test_unified_draft_of_a_retry_opens_a_new_row(u_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """A rejected edit's retry streams into a fresh row; unknown tools never draft."""
+    u_session.draft("edit_metric", 0, "def metric(gold, pred):")
+    u_session.edit_metric("dspy style", "def metric(gold, pred):\n    return 1.0\n")
+    u_session.draft("edit_metric", 0, "def score(")
+    u_session.draft("ask_user", 0, "nope")
+
+    starts = [e["data"]["id"] for e in u_events if e["event"] == "tool_start"]
+    assert len(starts) == 3
+    assert starts[0] == starts[1] != starts[2]
+    assert [e["data"]["source"] for e in u_events if e["event"] == "code_draft"] == ["metric", "metric"]

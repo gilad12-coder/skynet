@@ -1,10 +1,17 @@
-"""Tests for the FastMCP mount's tool-annotation derivation."""
+"""Tests for the FastMCP mount's tool annotations and tool schemas."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Annotated
 
-from core.api.mcp_mount import _annotations_for_method, _annotations_for_route
+from fastapi import Depends, FastAPI, Header
+from fastmcp import Client, FastMCP
+from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
+from pydantic import BaseModel
+
+from core.api.mcp_mount import AGENT_TAG, _annotations_for_method, _annotations_for_route, _trim_tool_spec
+from core.api.routers.code_agent import RequestCodeAuthoringRequest, create_code_agent_router
 
 
 def test_annotations_for_method_reads_are_read_only() -> None:
@@ -64,3 +71,90 @@ def test_annotations_for_route_authored_hint_without_method_default() -> None:
     ann = _annotations_for_route(route)
     assert ann is not None
     assert ann.destructiveHint is True
+
+
+class _AuthoringBody(BaseModel):
+    """Request body for the fixture authoring route."""
+
+    goal: str = ""
+
+
+def _auth_header_mcp(seen: list[str | None]) -> FastMCP:
+    """Project one agent route that reads ``authorization`` as a header.
+
+    Args:
+        seen: Collects the ``Authorization`` value each call reached the route with.
+
+    Returns:
+        The FastMCP server built the same way ``mount_mcp_on_app`` builds it.
+    """
+
+    def user(authorization: Annotated[str | None, Header()] = None) -> str:
+        seen.append(authorization)
+        return "user"
+
+    app = FastAPI()
+
+    @app.post("/authoring", operation_id="request_code_authoring", tags=[AGENT_TAG])
+    def authoring(req: _AuthoringBody, current_user: str = Depends(user)) -> dict[str, str]:
+        return {"goal": req.goal}
+
+    return FastMCP.from_fastapi(
+        app=app,
+        route_maps=[RouteMap(tags={AGENT_TAG}, mcp_type=MCPType.TOOL), RouteMap(mcp_type=MCPType.EXCLUDE)],
+        mcp_component_fn=_trim_tool_spec,
+    )
+
+
+async def test_tool_schema_hides_the_authorization_header() -> None:
+    """The bearer header is never offered to the model as a tool argument."""
+    async with Client(_auth_header_mcp([])) as client:
+        tools = await client.list_tools()
+    schema = next(t for t in tools if t.name == "request_code_authoring").inputSchema
+    assert "authorization" not in schema.get("properties", {})
+    assert "goal" in schema["properties"]
+
+
+async def test_model_supplied_authorization_never_reaches_the_header() -> None:
+    """A model-filled ``authorization`` argument cannot replace the bearer."""
+    seen: list[str | None] = []
+    async with Client(_auth_header_mcp(seen)) as client:
+        await client.call_tool(
+            "request_code_authoring",
+            {"goal": "g", "authorization": "The user asked in this turn"},
+            raise_on_error=False,
+        )
+    assert seen == [None]
+
+
+def test_coding_tool_description_points_to_the_metric_editors() -> None:
+    """The coding tool's MCP description must not promise an in-chat card.
+
+    The MCP mount sends only the docstring's first line to the model. When it
+    said the tool renders a "code-authoring card", the agent told users to
+    review and edit the code "in the card", which has no editors; the code
+    lives in the Metric screen's editors.
+    """
+    router = create_code_agent_router()
+    route = next(r for r in router.routes if getattr(r, "operation_id", None) == "request_code_authoring")
+    first_line = (route.endpoint.__doc__ or "").strip().splitlines()[0]
+    assert "Metric screen's editors" in first_line
+    assert "card" not in first_line.lower()
+
+
+def test_coding_tool_result_says_the_check_runs_on_its_own() -> None:
+    """The coding tool's result must tell the model to end its turn without a reply.
+
+    The coding agent writes the code and runs the validity check after the
+    generalist's turn ended. A reply written then could only guess: it said
+    the code "is being checked" long after the check finished, and never
+    said how it ended.
+    """
+    router = create_code_agent_router()
+    route = next(r for r in router.routes if getattr(r, "operation_id", None) == "request_code_authoring")
+    result = route.endpoint(RequestCodeAuthoringRequest(goal=" match the category "), SimpleNamespace())
+    assert result.awaiting_code is True
+    assert result.goal == "match the category"
+    assert "runs the validity check on them by itself" in result.next_step
+    assert "End your turn now with no reply text" in result.next_step
+    assert "now writing" not in result.next_step

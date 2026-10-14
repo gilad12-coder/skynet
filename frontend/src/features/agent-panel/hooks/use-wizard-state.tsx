@@ -8,6 +8,7 @@ import {
   type ArtifactKind,
   type DataMode,
   type OptimizerChoice,
+  type UnifiedAuthoringContext,
 } from "@/shared/types/unified-run";
 
 import type { ScreenNav, ScreenNavigator } from "../lib/screen-agent";
@@ -51,7 +52,34 @@ interface WizardStateContextValue {
   setScreenNavigator: (navigator: ScreenNavigator | null) => void;
   /** Move the wizard as a screen agent asked, through the frame's handlers. */
   navigateScreen: (nav: ScreenNav) => void;
+  /**
+   * The context the wizard's Metric step writes code under (its task, inputs
+   * and sample cases). The agent's coding tool authors against it while the
+   * wizard is on view; null when no Metric step is mounted or ready.
+   */
+  authoringContext: UnifiedAuthoringContext | null;
+  setAuthoringContext: (context: UnifiedAuthoringContext | null) => void;
+  /** Which wizard code the agent's coding tool is streaming in right now. */
+  codeWriting: CodeWriting;
+  setCodeWriting: (writing: CodeWriting) => void;
+  /**
+   * Write code straight into the Metric step's editors, the code's one home.
+   * Returns false when no Metric step is mounted to take it.
+   */
+  writeCode: (slot: keyof CodeWriting, code: string) => boolean;
+  setCodeSink: (sink: CodeSink | null) => void;
 }
+
+/** Where the Metric step takes code written outside its own editors. */
+export type CodeSink = (slot: keyof CodeWriting, code: string) => void;
+
+/** Which of the wizard's two code slots the coding tool is writing. */
+export interface CodeWriting {
+  run: boolean;
+  metric: boolean;
+}
+
+const NOT_WRITING: CodeWriting = { run: false, metric: false };
 
 const Ctx = React.createContext<WizardStateContextValue | null>(null);
 
@@ -76,6 +104,28 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
   }, []);
   const navigateScreen = React.useCallback((nav: ScreenNav) => {
     runScreenNav(nav, navigatorRef.current);
+  }, []);
+  const [authoringContext, setAuthoringContext] = React.useState<UnifiedAuthoringContext | null>(
+    null,
+  );
+  // Streamed code skips the agent-patch channel: that channel names only the
+  // last patch's keys per render, so a final run-code write batched with a
+  // metric write never reached the editors and the stale draft won.
+  const codeSinkRef = React.useRef<CodeSink | null>(null);
+  const setCodeSink = React.useCallback((sink: CodeSink | null) => {
+    codeSinkRef.current = sink;
+  }, []);
+  const writeCode = React.useCallback((slot: keyof CodeWriting, code: string) => {
+    const sink = codeSinkRef.current;
+    if (!sink) return false;
+    sink(slot, code);
+    return true;
+  }, []);
+  const [codeWriting, setCodeWritingState] = React.useState<CodeWriting>(NOT_WRITING);
+  const setCodeWriting = React.useCallback((next: CodeWriting) => {
+    setCodeWritingState((prev) =>
+      prev.run === next.run && prev.metric === next.metric ? prev : next,
+    );
   }, []);
 
   const setField = React.useCallback<WizardStateContextValue["setField"]>(
@@ -182,6 +232,12 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       setScreenIssue,
       setScreenNavigator,
       navigateScreen,
+      authoringContext,
+      setAuthoringContext,
+      codeWriting,
+      setCodeWriting,
+      writeCode,
+      setCodeSink,
     }),
     [
       state,
@@ -196,6 +252,11 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       screenIssue,
       setScreenNavigator,
       navigateScreen,
+      authoringContext,
+      codeWriting,
+      setCodeWriting,
+      writeCode,
+      setCodeSink,
     ],
   );
 

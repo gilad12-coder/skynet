@@ -19,7 +19,7 @@ import { ChatTranscript } from "@/shared/ui/agent/chat-transcript";
 import { Composer } from "@/shared/ui/agent/composer";
 import { SkynetMark } from "@/shared/ui/skynet-mark";
 import { ComposerModelMenu } from "@/shared/ui/agent/composer-model-menu";
-import type { AgentThinking, AgentToolCall } from "@/shared/ui/agent/types";
+import type { AgentMessage, AgentToolCall } from "@/shared/ui/agent/types";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { SubmitSplashOverlay, SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 import { cn } from "@/shared/lib/utils";
@@ -32,6 +32,14 @@ import { useConversationStore } from "../hooks/use-conversation-store";
 import { useGeneralistAgent, type SessionEventContext } from "../hooks/use-generalist-agent";
 import { useCodeAuthoringAgent } from "../hooks/use-code-authoring-agent";
 import { useGeneralistPanelState } from "../hooks/use-panel-state";
+import {
+  authoringBusy,
+  authoringOutcome,
+  followUpAuthoringGoal,
+  latestToolCallId,
+  parseAuthoringOutcome,
+  withAuthoringState,
+} from "../lib/code-authoring";
 import { getConversation } from "../lib/conversation-api";
 import { TRUST_MODE_HUE, useTrustMode } from "../hooks/use-trust-mode";
 import { extractWizardPatch, useWizardStateOptional } from "../hooks/use-wizard-state";
@@ -47,13 +55,17 @@ import { ConversationDrawer } from "./ConversationDrawer";
 import { DATASET_FILE_ACCEPT, DatasetUploadCard, type ConfirmedDataset } from "./DatasetUploadCard";
 import { LibraryDatasetCard, type ConfirmedLibraryDataset } from "./LibraryDatasetCard";
 import { InferenceFormCard } from "./InferenceFormCard";
-import { CodeAuthoringCard } from "./CodeAuthoringCard";
+import {
+  authoringOutcomeLine,
+  CodeAuthoringActivity,
+  CodeAuthoringOutcome,
+} from "./CodeAuthoringActivity";
 import { MinimizedPill } from "./MinimizedPill";
 import { PresenceStrip } from "./PresenceStrip";
 import { ToolCallRow } from "./ToolCallRow";
 import { ToolsCarousel } from "./ToolsCarousel";
 import { TrustToggle } from "./TrustToggle";
-import { getToolRenderer } from "./tool-renderers";
+import { getToolKind, getToolRenderer } from "./tool-renderers";
 import { AGENT_PROMPT_EVENT, takeQueuedAgentPrompt } from "../lib/prompt-queue";
 
 const REQUEST_DATASET_TOOL = "request_user_dataset_datasets_request_upload_post";
@@ -260,6 +272,11 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   // its run + timer survive the aside collapse / auto-minimize.
   const [codeArmed, setCodeArmed] = React.useState(false);
   const handedOffRef = React.useRef(false);
+  // Read from the tool-start callback, which is created before the code agent.
+  const codeAgentRanRef = React.useRef(false);
+  const [codeFollowUp, setCodeFollowUp] = React.useState<{ id: string; goal: string } | null>(
+    null,
+  );
   const handleToolStart = React.useCallback((ev: ToolStartPayload, ctx: SessionEventContext) => {
     // The code agent is a panel-scoped singleton tied to the visible chat; a
     // background chat requesting authoring must not hijack it mid-use.
@@ -267,6 +284,8 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     if (ev.tool === REQUEST_CODE_TOOL) {
       handedOffRef.current = false;
       setCodeArmed(true);
+      const goal = followUpAuthoringGoal(ev.arguments ?? {}, codeAgentRanRef.current);
+      if (goal) setCodeFollowUp({ id: ev.id, goal });
     }
   }, []);
 
@@ -408,13 +427,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     [agent, store],
   );
 
-  const thinking: AgentThinking = {
-    reasoning: agent.reasoning,
-    startedAt: agent.reasoningStartedAt,
-    endedAt: agent.reasoningEndedAt,
-    streaming,
-  };
-
   const [draft, setDraft] = React.useState("");
   const [attachOpen, setAttachOpen] = React.useState(false);
   // The + button opens the OS file picker directly; the popover only appears
@@ -451,6 +463,16 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   // alone — or the user could fire "submit" mid-authoring against a wizard
   // that has no validated code yet.
   const codeAuthoringActive = codeAgent.status === "streaming";
+  const codeAgentRan = codeAgent.messages.length > 0 || codeAgent.hasCode;
+  React.useEffect(() => {
+    codeAgentRanRef.current = codeAgentRan;
+  }, [codeAgentRan]);
+  const codeAgentSend = codeAgent.send;
+  React.useEffect(() => {
+    if (!codeFollowUp) return;
+    setCodeFollowUp(null);
+    codeAgentSend(codeFollowUp.goal);
+  }, [codeFollowUp, codeAgentSend]);
 
   // Drop any prior authoring session when the conversation changes (new chat or
   // one loaded from history) so its code + timer don't leak across threads.
@@ -480,7 +502,12 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   // off; the card surfaces the failures and the user steers via chat.
   const applyAgentPatch = wizardCtx?.applyAgentPatch;
   const agentSend = agent.send;
+  // On the wizard the code already lives in the Metric step's editors and the
+  // card shows the check passing. The note would arrive as a user turn telling
+  // the agent to move on, and it would leave the Metric screen unasked.
+  const onWizardScreen = shownScreen !== null;
   React.useEffect(() => {
+    if (onWizardScreen) return;
     if (handedOffRef.current) return;
     if (!codeArmed) return;
     if (agent.status === "streaming") return;
@@ -517,6 +544,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       authoredCode,
     );
   }, [
+    onWizardScreen,
     codeArmed,
     agent.status,
     agentSend,
@@ -701,6 +729,52 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     [setWidth, isRtl],
   );
 
+  const liveCodeCallId = React.useMemo(
+    () => latestToolCallId(agent.messages, REQUEST_CODE_TOOL),
+    [agent.messages],
+  );
+  // The run is over only once its check and every fix it asked for settled.
+  const codeBusy = codeArmed && authoringBusy(codeAgent);
+  const liveCodeCall = React.useMemo(
+    () =>
+      agent.messages.flatMap((m) => m.toolCalls ?? []).find((c) => c.id === liveCodeCallId) ?? null,
+    [agent.messages, liveCodeCallId],
+  );
+
+  // Store how the run ended on its call once it settles, so the rows (and the
+  // generalist's history) stay the same after a reload. Only a run this call
+  // started counts: a follow-up call finds the last run settled before its
+  // own one begins.
+  const recordToolOutcome = agent.recordToolOutcome;
+  const busyForCallRef = React.useRef<string | null>(null);
+  const recordedRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!codeArmed || !liveCodeCall) return;
+    if (codeBusy) {
+      busyForCallRef.current = liveCodeCall.id;
+      return;
+    }
+    if (busyForCallRef.current !== liveCodeCall.id) return;
+    // A user edit in the editors re-runs the check, so a new verdict is stored too.
+    const key = [
+      liveCodeCall.id,
+      codeAgent.status,
+      codeAgent.checkStatus,
+      codeAgent.signatureVersions.length,
+      codeAgent.metricVersions.length,
+      codeAgent.fixAttempts.length,
+    ].join("|");
+    if (recordedRef.current === key) return;
+    recordedRef.current = key;
+    recordToolOutcome(liveCodeCall.id, authoringOutcome(codeAgent, liveCodeCall.startedAt, Date.now()));
+  }, [codeArmed, codeBusy, liveCodeCall, codeAgent, recordToolOutcome]);
+
+  // The coding call keeps its turn's header live while it runs, and a stored
+  // run's end is when the turn's "Worked for" stops, live and after a reload.
+  const shownMessages = React.useMemo(
+    () => withAuthoringState(agent.messages, REQUEST_CODE_TOOL, codeBusy ? liveCodeCallId : null),
+    [agent.messages, codeBusy, liveCodeCallId],
+  );
   const renderToolCall = React.useCallback(
     (call: AgentToolCall, ctx: { isRetry: boolean }) => {
       if (call.tool === REQUEST_DATASET_TOOL) {
@@ -733,7 +807,13 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
         return <InferenceFormCard call={call} disabled={streaming} />;
       }
       if (call.tool === REQUEST_CODE_TOOL) {
-        return <CodeAuthoringCard agent={codeAgent} />;
+        const outcome = parseAuthoringOutcome(call.payload?.outcome);
+        // The run this session started shows live until its outcome is stored;
+        // every other call, and any call after a reload, renders what it stored.
+        if (call.id === liveCodeCallId && codeArmed && (codeBusy || !outcome)) {
+          return <CodeAuthoringActivity agent={codeAgent} since={call.startedAt} />;
+        }
+        return <CodeAuthoringOutcome outcome={outcome} />;
       }
       const renderer = getToolRenderer(call.tool);
       if (renderer?.card && call.status !== "running") {
@@ -742,16 +822,32 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       const summary = renderer?.summary?.(call) ?? null;
       return <ToolCallRow call={call} isRetry={ctx.isRetry} summary={summary} />;
     },
-    [handleDatasetConfirm, handleLibraryPick, streaming, codeAgent],
+    [handleDatasetConfirm, handleLibraryPick, streaming, codeAgent, liveCodeCallId, codeArmed, codeBusy],
   );
 
-  // Mirrors renderToolCall's fall-through: anything that ends up as a plain
-  // ToolCallRow is a working step and folds into the turn's activity line.
+  // The run's closing line comes after the turn's text: the reply was written
+  // before the run started, so only this can say how it ended.
+  const renderAfterContent = React.useCallback((m: AgentMessage) => {
+    const call = [...(m.toolCalls ?? [])].reverse().find((c) => c.tool === REQUEST_CODE_TOOL);
+    const outcome = call ? parseAuthoringOutcome(call.payload?.outcome) : null;
+    const line = outcome ? authoringOutcomeLine(outcome) : null;
+    if (!line) return null;
+    return (
+      <p dir="auto" className="text-sm leading-relaxed text-foreground">
+        {line}
+      </p>
+    );
+  }, []);
+
+  // Every call is a step in the turn's activity group except the ones the
+  // user acts on: the request cards, the coding tool (its rows stay shown when
+  // the turn's history folds, live and after a reload) and the submit
+  // summary, which links to the new run.
   const isStepCall = React.useCallback((call: AgentToolCall) => {
     if (RICH_CARD_TOOLS.has(call.tool)) return false;
-    const renderer = getToolRenderer(call.tool);
-    return !(renderer?.card && call.status !== "running");
+    return !(SUBMIT_TOOLS.has(call.tool) && call.status !== "running");
   }, []);
+  const stepKind = React.useCallback((call: AgentToolCall) => getToolKind(call.tool), []);
 
   const emptyState = (
     <EmptyState
@@ -897,19 +993,20 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
           agent.messages.length,
           agent.messages[agent.messages.length - 1]?.content,
           agent.messages[agent.messages.length - 1]?.toolCalls?.length,
-          agent.reasoning,
+          agent.messages[agent.messages.length - 1]?.thinkingSegments?.at(-1)?.reasoning,
           agent.statusLabel,
           agent.pendingApproval?.id ?? "",
         ]}
       >
         <ChatTranscript
-          messages={agent.messages}
+          messages={shownMessages}
           streaming={streaming}
           editAndResend={agent.editAndResend}
-          thinking={thinking}
           renderToolCall={renderToolCall}
           isStepCall={isStepCall}
+          stepKind={stepKind}
           onRunCode={handleRunCode}
+          renderAfterContent={renderAfterContent}
           animatePairs
           trailing={() => (
             <>

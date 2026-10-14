@@ -3,6 +3,8 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
+import type { ActivityKind } from "@/shared/lib/activity-summary";
+
 import { AgentBubble } from "./agent-bubble";
 import { MessageActions } from "./message-actions";
 import { TtftIndicator } from "./ttft-indicator";
@@ -27,8 +29,11 @@ interface ChatTranscriptProps {
   thinking?: AgentThinking;
   renderToolCall?: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
   isStepCall?: (call: AgentToolCall) => boolean;
+  stepKind?: (call: AgentToolCall) => ActivityKind;
   toolCallsBeforeContent?: boolean;
   onRunCode?: (code: string, language: string) => void;
+  /** What an agent message shows after its text, such as a tool's closing outcome. */
+  renderAfterContent?: (msg: AgentMessage) => React.ReactNode;
   animatePairs?: boolean;
   trailing?: (state: ChatTranscriptState) => React.ReactNode;
 }
@@ -44,8 +49,10 @@ export function ChatTranscript({
   thinking,
   renderToolCall,
   isStepCall,
+  stepKind,
   toolCallsBeforeContent,
   onRunCode,
+  renderAfterContent,
   animatePairs,
   trailing,
 }: ChatTranscriptProps) {
@@ -135,9 +142,14 @@ export function ChatTranscript({
     // null (no text, tools, or reasoning yet). The ember stands in for that
     // empty placeholder and is unmounted the moment any of those signals lands.
     const pairThinking = pair.key === latestAgentKey ? thinking : undefined;
-    const hasThinking = Boolean(
-      pairThinking && (pairThinking.reasoning || (pairThinking.streaming && pairThinking.startedAt)),
-    );
+    const hasThinking = agentMsg?.thinkingSegments
+      ? agentMsg.thinkingSegments.some(
+          (s) => s.reasoning || (isStreamingThisPair && s.startedAt),
+        )
+      : Boolean(
+          pairThinking &&
+            (pairThinking.reasoning || (pairThinking.streaming && pairThinking.startedAt)),
+        );
     const isWaitingFirstToken =
       isStreamingThisPair &&
       agentText.length === 0 &&
@@ -170,10 +182,13 @@ export function ChatTranscript({
               <AgentBubble
                 msg={agentMsg}
                 thinking={pair.key === latestAgentKey ? thinking : undefined}
+                streaming={isStreamingThisPair}
                 renderToolCall={renderToolCall}
                 isStepCall={isStepCall}
+                stepKind={stepKind}
                 toolCallsBeforeContent={toolCallsBeforeContent}
                 onRunCode={onRunCode}
+                afterContent={renderAfterContent?.(agentMsg)}
                 className="max-w-full"
               />
               {showActions && (

@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 from core.config import settings
 from core.service_gateway.agents import generalist as generalist_module
 from core.service_gateway.agents import web_tools
-from core.service_gateway.agents.code import _agent_error_payload, _SubmitArgExtractor
+from core.service_gateway.agents.code import AgentStoppedError, _agent_error_payload, _SubmitArgExtractor
 from core.service_gateway.agents.generalist import (
     GENERALIST_SYSTEM_PROMPT,
     SCREEN_FOCUS,
@@ -95,6 +95,19 @@ def test_named_run_with_task_unlocks_code_authoring() -> None:
     allowed = tools_for(cast(WizardState, state))
     assert "request_code_authoring" in allowed
     assert _SUBMIT not in allowed
+
+
+def test_wizard_screen_opens_code_authoring_without_a_run_name() -> None:
+    """On the submit wizard an unnamed run with a task still gets the coding tool.
+
+    The wizard never asks for a name, and since SKY-26 its Metric screen has no
+    code writer other than ``request_code_authoring``.
+    """
+    state = {k: _READY[k] for k in ("task_objective", "artifact_kind", "starting_version")}
+    assert "request_code_authoring" not in tools_for(cast(WizardState, state))
+    on_wizard = cast(WizardState, {**state, "wizard_screen": "metric"})
+    assert "request_code_authoring" in screen_tools(tools_for(on_wizard), on_wizard)
+    assert _SUBMIT not in tools_for(on_wizard)
 
 
 def test_full_readiness_unlocks_submit() -> None:
@@ -440,6 +453,17 @@ async def test_continue_judges_this_turns_writes() -> None:
         "continue_to_next_screen"
     ].acall()
     assert result["screen_nav"] == {"action": "continue", "from": "brief"}
+
+
+@pytest.mark.asyncio
+async def test_continue_refused_in_a_turn_that_requested_code() -> None:
+    """A finished Metric screen still stays put in the turn the coding tool ran."""
+    turn = _TurnAuthoringFlag()
+    turn.authoring_requested = True
+    state = {**_READY, "wizard_screen": "metric"}
+    result = await _nav_tools(state, turn)["continue_to_next_screen"].acall()
+    assert isinstance(result, str)
+    assert "request_code_authoring" in result
 
 
 @pytest.mark.asyncio
@@ -1011,6 +1035,30 @@ def test_system_prompt_forbids_submit_in_authoring_turn() -> None:
     assert "request_code_authoring" in prompt
 
 
+def test_system_prompt_makes_code_authoring_the_wizard_coding_tool() -> None:
+    """The prompt must name ``request_code_authoring`` as the wizard's only code agent.
+
+    SKY-26 removed the Metric step's own coding panel, so the generalist is the
+    only way code gets written on that screen; dropping this would leave the
+    Metric screen with nothing that writes code.
+    """
+    prompt = GENERALIST_SYSTEM_PROMPT or ""
+    assert "the wizard has no\n  other code agent" in prompt
+    assert "hands a failed check back to the coding\n  agent" in prompt
+
+
+def test_system_prompt_points_code_review_to_the_metric_editors() -> None:
+    """The prompt must send the user to the Metric editors, not to a chat card.
+
+    The coding tool's chat rows show only diffs and the check; the editable
+    code lives in the Metric screen. Describing in-chat editors made the agent
+    tell users to "confirm the code in the card", which has no such control.
+    """
+    prompt = GENERALIST_SYSTEM_PROMPT or ""
+    assert "lands in the Metric screen's editors" in prompt
+    assert "editors the user can edit" not in prompt
+
+
 def _approval_engine():
     """In-memory shared-across-threads SQLite engine with the ORM schema."""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -1366,6 +1414,61 @@ async def test_turn_replays_history_natively_and_streams_the_submit(monkeypatch:
     assert [e["event"] for e in events if e["event"] in ("tool_start", "tool_end")] == ["tool_start", "tool_end"]
 
 
+class _ThinkingOnlyLM(_ScriptedLM):
+    """An LM that spends every call thinking and never returns a tool call or text."""
+
+    def forward(self, prompt=None, messages=None, **kwargs):
+        """Record the request and return a reply cut off by the output cap.
+
+        Args:
+            prompt: Unused legacy prompt.
+            messages: The rendered chat messages.
+            **kwargs: Provider kwargs, including ``tools``.
+
+        Returns:
+            An OpenAI-shaped response with no content and no tool call.
+        """
+        self.requests.append({"messages": messages, **kwargs})
+        return litellm.ModelResponse(
+            model="scripted",
+            choices=[{"index": 0, "finish_reason": "length", "message": {"role": "assistant", "content": None}}],
+            usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        )
+
+
+@pytest.mark.asyncio
+async def test_turn_that_never_answers_raises_instead_of_an_empty_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model that only thinks fails the turn, so the chat shows an error rather than a blank message."""
+    monkeypatch.setattr(settings, "firecrawl_api_key", None)
+
+    @asynccontextmanager
+    async def fake_session(mcp_url: str, *, auth_header: str | None = None) -> AsyncIterator[_FakeSession]:
+        """Yield an empty fake session in place of a Streamable-HTTP client.
+
+        Args:
+            mcp_url: Ignored.
+            auth_header: Ignored.
+        """
+        yield _FakeSession([])
+
+    monkeypatch.setattr(generalist_module, "_mcp_session", fake_session)
+    lm = _ThinkingOnlyLM([])
+
+    with pytest.raises(AgentStoppedError, match="stopped before it answered"):
+        await generalist_module._drive_generalist_agent(
+            mcp_url="http://unused/mcp/",
+            wizard_state=WizardState(),
+            chat_history=[],
+            user_message="build the code for me",
+            trust_mode="yolo",
+            registry=ApprovalRegistry(),
+            emit=lambda event: None,
+            lm=lm,
+            reply_language="English",
+        )
+    assert lm.requests
+
+
 @pytest.mark.asyncio
 async def test_turn_offers_web_tools_when_firecrawl_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     """With a Firecrawl key the turn lists the web tools and runs them through the gated wrapper."""
@@ -1417,3 +1520,31 @@ async def test_turn_offers_web_tools_when_firecrawl_is_configured(monkeypatch: p
     assert posted == [("/search", {"query": "dspy gepa", "limit": 5})]
     ends = [e["data"] for e in events if e["event"] == "tool_end"]
     assert [(e["tool"], e["status"]) for e in ends] == [("web_search", "ok")]
+
+
+def test_system_prompt_says_the_coding_tool_runs_the_check_itself() -> None:
+    """The prompt must stop the agent from announcing a run it cannot see.
+
+    The reply to a coding-tool turn is written before the coding agent starts,
+    so it said the code "is being written and checked" and never said how the
+    check ended. The chat reports that under the call instead.
+    """
+    prompt = " ".join((GENERALIST_SYSTEM_PROMPT or "").split())
+    assert "runs the validity check on its own" in prompt
+    assert "END your turn with no reply text" in prompt
+    assert "never ask the user to run the check" in prompt
+
+
+def test_system_prompt_never_claims_a_coding_run_it_did_not_start() -> None:
+    """A later turn must not say the coding agent is running unless it called it.
+
+    After a reload the agent replied "I already sent your request, it is
+    writing and checking them now" with empty editors, and nothing ran.
+    """
+    prompt = " ".join((GENERALIST_SYSTEM_PROMPT or "").split())
+    assert (
+        "Never say the coding agent is writing, checking or running unless you called "
+        "``request_code_authoring`` in THIS turn"
+    ) in prompt
+    assert "an earlier call in the history is FINISHED" in prompt
+    assert "are empty or do not match what they ask for, call ``request_code_authoring`` now" in prompt

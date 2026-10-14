@@ -5,7 +5,6 @@ import {
   Brain,
   CaretRight,
   ChatText,
-  Check,
   CheckCircle,
   DotsThree,
   FileText,
@@ -17,10 +16,14 @@ import {
   Terminal,
   UserCircle,
   Wrench,
+  type Icon as StepIcon,
 } from "@/shared/ui/icons";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
+import { diffStats, lineDiff } from "@/shared/lib/line-diff";
+import type { ActivityKind, ActivityStatus } from "@/shared/lib/activity-summary";
+import { ActivityGroup, StepRow } from "@/shared/ui/agent/activity-steps";
 import { MessageMarkdown } from "@/shared/ui/agent/message-markdown";
 import { CopyButton } from "@/shared/ui/copy-button";
 import { PingDot } from "@/shared/ui/ping-dot";
@@ -59,7 +62,7 @@ const STEP_ICONS: Record<TranscriptStep, Icon> = {
   check: CheckCircle,
 };
 
-const TOOL_ICONS: Record<string, Icon> = {
+const TOOL_ICONS: Record<string, StepIcon> = {
   bash: Terminal,
   read: FileText,
   write: PencilSimpleLine,
@@ -80,10 +83,6 @@ function compactCount(n: number): string {
   if (n < 1000) return n.toLocaleString();
   const thousands = n / 1000;
   return `${thousands >= 100 ? Math.round(thousands) : thousands.toFixed(1).replace(/\.0$/, "")}k`;
-}
-
-function lineCount(text: string): number {
-  return text.replace(/\s+$/, "").split("\n").length;
 }
 
 /** The blinking end-of-text mark of something still being written. */
@@ -393,107 +392,126 @@ function describeTool(tool: ToolPart): ToolFace {
   return { headline: path, body, diff: false, copyText: body };
 }
 
+// What each of the coding agent's tools did, as a verb, and the kind of step
+// it is for the summary line over its burst.
+const TOOL_VERBS: Record<string, { done: MessageKey; running: MessageKey; kind: ActivityKind }> = {
+  bash: {
+    done: "agent_run.transcript.verb.ran",
+    running: "agent_run.transcript.verb.running",
+    kind: "run",
+  },
+  read: {
+    done: "agent_run.transcript.verb.read",
+    running: "agent_run.transcript.verb.reading",
+    kind: "read",
+  },
+  write: {
+    done: "agent_run.transcript.verb.wrote",
+    running: "agent_run.transcript.verb.writing",
+    kind: "edit",
+  },
+  edit: {
+    done: "agent_run.transcript.verb.edited",
+    running: "agent_run.transcript.verb.editing",
+    kind: "edit",
+  },
+};
+
+function toolStatus(tool: ToolPart, live: boolean): ActivityStatus {
+  if (tool.done) return tool.isError ? "error" : "done";
+  return live ? "running" : "done";
+}
+
+/** One tool call as a one-line step that opens to what it was given and what it printed. */
 function ToolEntry({ tool, live }: { tool: ToolPart; live: boolean }) {
   const { headline, body, diff, copyText } = describeTool(tool);
-  const [open, setOpen] = useState(true);
-  const running = !tool.done && live;
-  const failed = tool.done && tool.isError;
-  const Glyph = TOOL_ICONS[tool.name] ?? Wrench;
+  const status = toolStatus(tool, live);
+  const running = status === "running";
+  const failed = status === "error";
+  const verb = TOOL_VERBS[tool.name];
   const result = tool.result !== null && tool.result.trim().length > 0 ? tool.result : null;
-  const bodyLines = body === null ? 0 : lineCount(body);
+  const stats = useMemo(() => {
+    if (!diff) return null;
+    const { oldText, newText } = tool.args;
+    return diffStats(
+      lineDiff(
+        typeof oldText === "string" ? oldText : "",
+        typeof newText === "string" ? newText : "",
+      ),
+    );
+  }, [diff, tool.args]);
+  const hasBody = body !== null || result !== null || (copyText !== null && copyText.length > 0);
   return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-md border",
-        failed ? "border-[var(--danger-border)]" : "border-border/60",
-      )}
-    >
-      <div
-        className={cn(
-          "flex h-7 items-center gap-1.5 pe-1 ps-1.5 text-[10px]",
-          failed ? "bg-[var(--danger-dim)]" : "bg-secondary/60",
-        )}
-      >
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-          className={cn(
-            "flex h-full min-w-0 flex-1 items-center gap-1.5 rounded text-start",
-            FOCUS_RING,
-          )}
-        >
-          <CaretRight
-            className={cn(CARET_CLASS, open && "rotate-90 rtl:rotate-90")}
-            aria-hidden="true"
-          />
-          <Glyph className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span className="shrink-0 font-mono font-medium text-foreground/85">{tool.name}</span>
-          {headline ? (
-            <span className="min-w-0 truncate font-mono text-muted-foreground" dir="ltr">
-              {headline}
-            </span>
-          ) : null}
-        </button>
-        {bodyLines > CLIP_LINES ? (
-          <span className="shrink-0 font-mono tabular-nums text-[var(--text-3)]">
-            {formatMsg("agent_run.transcript.lines", { n: bodyLines })}
-          </span>
-        ) : null}
-        {running ? (
-          <span className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground">
-            <PingDot size="sm" />
-            {msg("agent_run.transcript.tool_running")}
-          </span>
-        ) : failed ? (
-          <span className="shrink-0 font-semibold text-[var(--danger)]">
-            {msg("agent_run.transcript.tool_failed")}
-          </span>
-        ) : tool.done ? (
-          <span className="inline-flex shrink-0 items-center text-[var(--success)]">
-            <Check className="size-3" aria-hidden="true" />
-            <span className="sr-only">{msg("agent_run.transcript.tool_done")}</span>
-          </span>
-        ) : null}
-        {copyText !== null && copyText.length > 0 ? (
-          <CopyButton
-            text={copyText}
-            ariaLabel={msg("agent_run.transcript.copy_input")}
-            copiedAriaLabel={msg("agent_run.transcript.copied")}
-            className="text-muted-foreground"
-          />
-        ) : null}
-      </div>
-      <Disclosure open={open}>
-        {body !== null ? (
-          <FoldedText
-            text={body}
-            diff={diff}
-            className="px-2.5 py-2 font-mono text-[11px] leading-[1.5] text-foreground/90"
-          />
-        ) : null}
-        {result !== null ? (
-          <div
-            className={cn(
-              "bg-background",
-              body !== null && "border-t",
-              failed ? "border-[var(--danger-border)]" : "border-border/50",
+    <StepRow
+      icon={TOOL_ICONS[tool.name] ?? Wrench}
+      label={verb ? msg(running ? verb.running : verb.done) : tool.name}
+      detail={
+        (headline || stats) && (
+          <span dir="ltr" className="font-mono">
+            {headline}
+            {stats && (
+              <span className="tabular-nums">
+                {" "}
+                <span className="text-[var(--success)]">+{stats.added}</span>{" "}
+                <span className="text-[var(--danger)]">−{stats.removed}</span>
+              </span>
             )}
-          >
+          </span>
+        )
+      }
+      status={status}
+      errorLabel={msg("agent_run.transcript.tool_failed")}
+    >
+      {hasBody && (
+        <>
+          {copyText !== null && copyText.length > 0 ? (
+            <div className="flex justify-end">
+              <CopyButton
+                text={copyText}
+                ariaLabel={msg("agent_run.transcript.copy_input")}
+                copiedAriaLabel={msg("agent_run.transcript.copied")}
+                className="text-muted-foreground"
+              />
+            </div>
+          ) : null}
+          {body !== null ? (
+            <FoldedText
+              text={body}
+              diff={diff}
+              className="font-mono text-[11px] leading-[1.5] text-foreground/90"
+            />
+          ) : null}
+          {result !== null ? (
             <FoldedText
               text={result}
               tail={running}
               writing={running}
               className={cn(
-                "px-2.5 py-2 font-mono text-[11px] leading-[1.5]",
+                "font-mono text-[11px] leading-[1.5]",
                 failed ? "text-[var(--danger)]" : "text-[var(--text-2)]",
               )}
             />
-          </div>
-        ) : null}
-      </Disclosure>
-    </div>
+          ) : null}
+        </>
+      )}
+    </StepRow>
   );
+}
+
+type TurnRun =
+  | { kind: "part"; part: Exclude<TurnBlock["parts"][number], ToolPart>; index: number }
+  | { kind: "tools"; tools: ToolPart[]; index: number };
+
+/** Gather each stretch of tool calls between two pieces of prose or thinking into one burst. */
+function groupParts(parts: TurnBlock["parts"]): TurnRun[] {
+  const runs: TurnRun[] = [];
+  parts.forEach((part, index) => {
+    const last = runs[runs.length - 1];
+    if (part.kind !== "tool") runs.push({ kind: "part", part, index });
+    else if (last?.kind === "tools") last.tools.push(part);
+    else runs.push({ kind: "tools", tools: [part], index });
+  });
+  return runs;
 }
 
 function TurnEntry({ block, live }: { block: TurnBlock; live: boolean }) {
@@ -511,13 +529,26 @@ function TurnEntry({ block, live }: { block: TurnBlock; live: boolean }) {
         }
       />
       <div className="mt-1 space-y-2">
-        {block.parts.map((part, index) => {
-          const partStreaming = streaming && index === lastIndex;
-          if (part.kind === "thinking")
-            return <ThinkingEntry key={index} text={part.text} streaming={partStreaming} />;
-          if (part.kind === "text")
-            return <ReplyEntry key={index} text={part.text} streaming={partStreaming} />;
-          return <ToolEntry key={index} tool={part} live={live} />;
+        {groupParts(block.parts).map((run) => {
+          if (run.kind === "tools")
+            return (
+              <ActivityGroup
+                key={run.index}
+                live={streaming && run.index + run.tools.length - 1 === lastIndex}
+                steps={run.tools.map((tool) => ({
+                  kind: TOOL_VERBS[tool.name]?.kind ?? "tool",
+                  status: toolStatus(tool, live),
+                }))}
+              >
+                {run.tools.map((tool) => (
+                  <ToolEntry key={tool.id} tool={tool} live={live} />
+                ))}
+              </ActivityGroup>
+            );
+          const partStreaming = streaming && run.index === lastIndex;
+          if (run.part.kind === "thinking")
+            return <ThinkingEntry key={run.index} text={run.part.text} streaming={partStreaming} />;
+          return <ReplyEntry key={run.index} text={run.part.text} streaming={partStreaming} />;
         })}
       </div>
     </li>

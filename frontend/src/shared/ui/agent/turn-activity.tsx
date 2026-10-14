@@ -7,31 +7,72 @@ import { CaretRight, WarningCircle } from "@/shared/ui/icons";
 import { cn } from "@/shared/lib/utils";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { formatMsg } from "@/shared/lib/messages";
+import type { ActivityKind } from "@/shared/lib/activity-summary";
+import { interleaveThinking } from "@/shared/lib/thinking-segments";
 
+import { ActivityGroup } from "./activity-steps";
 import { ThinkingSection } from "./thinking-section";
+import { earliestStart, finishedTurnMs, turnStart } from "./turn-timing";
 import type { AgentThinking, AgentToolCall } from "./types";
 
+/** One "Thinking" / "Thought for" row of a turn, placed by the tool calls before it. */
+export type TurnThinking = AgentThinking & { toolsBefore: number };
+
 interface TurnActivityProps {
-  thinking?: AgentThinking;
-  steps: Array<{ call: AgentToolCall; isRetry: boolean }>;
+  /** The turn's thinking segments, oldest first. */
+  thinking: readonly TurnThinking[];
+  /**
+   * Each call with its index among the turn's tool calls. A ``card`` call
+   * renders on its own at its place in the history and stays shown when the
+   * history is folded; every other call is a one-line step.
+   */
+  steps: Array<{ call: AgentToolCall; isRetry: boolean; index: number; card?: boolean }>;
+  /** The turn is still running. */
+  streaming: boolean;
   renderStep: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
-  /** Backend-measured turn duration, preferred over the client clock. */
+  /** What kind of step a call is, for the burst's summary line. */
+  stepKind?: (call: AgentToolCall) => ActivityKind;
+  /** Backend-measured turn duration; the history's own span wins when longer. */
   durationMs?: number | null;
+  /**
+   * The turn's start from every thinking segment, including ones that never
+   * got reasoning and so show no row.
+   */
+  startedAt?: number | null;
 }
 
 // Mirrors Codex's turn header: while the agent works, a "Working for 14s"
-// line over the turn's history so far, the thinking trace and then each tool
-// in the order it ran; once done, a "Worked for 39s" line that folds that
-// history away until clicked, so the answer is what the eye lands on.
-export function TurnActivity({ thinking, steps, renderStep, durationMs }: TurnActivityProps) {
+// line over the turn's history so far: each stretch of thinking as its own
+// row, with the tools that ran between them under one summary line each; once done, a "Worked for 39s" line over the same
+// history, which stays open and folds away only when clicked. Cards the user
+// acts on sit at their place in that history and stay shown when it folds.
+export function TurnActivity({
+  thinking,
+  steps,
+  streaming,
+  renderStep,
+  stepKind,
+  durationMs,
+  startedAt = null,
+}: TurnActivityProps) {
   const reduce = Boolean(useReducedMotion());
-  const isThinking = Boolean(thinking?.streaming && !thinking.endedAt && thinking.startedAt);
-  const running = steps.filter(({ call }) => call.status === "running");
   // The whole turn counts, not only a running step, so the history stays
   // open in the gaps between one tool finishing and the next starting.
-  const isLive = isThinking || running.length > 0 || Boolean(thinking?.streaming);
-  const [open, setOpen] = React.useState(false);
+  // A card can wait on the user long after the turn ended, so only steps count.
+  // The coding tool's card keeps working after the turn, so it keeps the header live.
+  const isLive =
+    streaming ||
+    steps.some(({ call, card }) => call.working || (!card && call.status === "running"));
+  // Finished history stays open; the header still folds it on request.
+  const [open, setOpen] = React.useState(true);
   const [nowTs, setNowTs] = React.useState(() => Date.now());
+  const [mountedAt] = React.useState(() => Date.now());
+  // One start for the whole turn, so the live timer only ever counts up.
+  const [start, setStart] = React.useState<number | null>(() =>
+    earliestStart(startedAt, turnStart(thinking, steps)),
+  );
+  const nextStart = earliestStart(start, earliestStart(startedAt, turnStart(thinking, steps)));
+  if (nextStart !== start) setStart(nextStart);
 
   React.useEffect(() => {
     if (!isLive) return;
@@ -39,24 +80,45 @@ export function TurnActivity({ thinking, steps, renderStep, durationMs }: TurnAc
     return () => clearInterval(id);
   }, [isLive]);
 
-  const start = turnStart(thinking, steps);
-  const failed = steps.some(({ call }) => call.status === "error");
+  const failed = steps.some(({ call, card }) => !card && call.status === "error");
+  const pieces = interleaveThinking(thinking, steps);
+  const hasCards = pieces.some((piece) => piece.kind === "card");
 
-  const history = (
-    <StepTree>
-      {thinking && <ThinkingSection key="thinking" thinking={thinking} compact />}
-      {steps.map(({ call, isRetry }) => (
-        <React.Fragment key={call.id}>{renderStep(call, { isRetry })}</React.Fragment>
-      ))}
-    </StepTree>
-  );
+  const renderPiece = (piece: (typeof pieces)[number]) =>
+    piece.kind === "card" ? (
+      <div key={`card-${piece.step.call.id}`} className="py-1.5">
+        {renderStep(piece.step.call, { isRetry: piece.step.isRetry })}
+      </div>
+    ) : piece.kind === "thinking" ? (
+      <ThinkingSection
+        key={`thinking-${thinking.indexOf(piece.segment)}`}
+        thinking={piece.segment}
+        compact
+      />
+    ) : (
+      <ActivityGroup
+        key={`steps-${piece.steps[0]?.call.id}`}
+        live={isLive}
+        stayOpen
+        steps={piece.steps.map(({ call }) => ({
+          kind: stepKind?.(call) ?? "tool",
+          status: call.status,
+        }))}
+      >
+        {piece.steps.map(({ call, isRetry }) => (
+          <React.Fragment key={call.id}>{renderStep(call, { isRetry })}</React.Fragment>
+        ))}
+      </ActivityGroup>
+    );
+
+  const history = <div className="flex flex-col">{pieces.map(renderPiece)}</div>;
 
   if (isLive) {
     return (
       <div className="flex flex-col">
         <Header
           label={formatMsg("shared.agent.working_for", {
-            duration: formatSpan(start ? nowTs - start : 0),
+            duration: formatSpan(nowTs - (start ?? mountedAt)),
           })}
           live
         />
@@ -65,7 +127,7 @@ export function TurnActivity({ thinking, steps, renderStep, durationMs }: TurnAc
     );
   }
 
-  const elapsed = durationMs ?? turnSpanMs(thinking, steps);
+  const elapsed = finishedTurnMs(start, thinking, steps, durationMs);
   return (
     <div className="flex flex-col">
       <Header
@@ -74,46 +136,28 @@ export function TurnActivity({ thinking, steps, renderStep, durationMs }: TurnAc
         failed={failed}
         onToggle={() => setOpen((v) => !v)}
       />
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={reduce ? false : { height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={reduce ? undefined : { height: 0, opacity: 0 }}
-            transition={reduce ? { duration: 0 } : { duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-            className="overflow-hidden"
-          >
-            <div className="max-h-72 overflow-y-auto pt-1.5">{history}</div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {hasCards ? (
+        // Folding keeps the cards mounted where they are, so one waiting on
+        // the user (an upload, the coding tool) keeps its state.
+        <div className="flex flex-col pt-1.5">
+          {pieces.filter((piece) => open || piece.kind === "card").map(renderPiece)}
+        </div>
+      ) : (
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              initial={reduce ? false : { height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={reduce ? undefined : { height: 0, opacity: 0 }}
+              transition={reduce ? { duration: 0 } : { duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+              className="overflow-hidden"
+            >
+              <div className="max-h-72 overflow-y-auto pt-1.5">{history}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
     </div>
-  );
-}
-
-// The steps hang off one guide line like a file tree: each gets an elbow
-// from the line, and the line stops at the last one.
-function StepTree({ children }: { children: React.ReactNode }) {
-  const items = React.Children.toArray(children);
-  return (
-    <ol className="flex flex-col">
-      {items.map((item, i) => {
-        const last = i === items.length - 1;
-        return (
-          <li
-            key={React.isValidElement(item) ? (item.key ?? i) : i}
-            className="relative min-w-0 ps-5"
-          >
-            <span
-              aria-hidden
-              className={cn("absolute start-[7px] top-0 w-px bg-border", last ? "h-3.5" : "h-full")}
-            />
-            <span aria-hidden className="absolute start-[7px] top-3.5 h-px w-2.5 bg-border" />
-            {item}
-          </li>
-        );
-      })}
-    </ol>
   );
 }
 
@@ -158,26 +202,6 @@ function Header({
       {content}
     </button>
   );
-}
-
-function turnStart(
-  thinking: AgentThinking | undefined,
-  steps: Array<{ call: AgentToolCall }>,
-): number | null {
-  const starts = steps.map(({ call }) => call.startedAt).filter(Boolean);
-  if (thinking?.startedAt) starts.push(thinking.startedAt);
-  return starts.length ? Math.min(...starts) : null;
-}
-
-function turnSpanMs(
-  thinking: AgentThinking | undefined,
-  steps: Array<{ call: AgentToolCall }>,
-): number {
-  const start = turnStart(thinking, steps);
-  if (start === null) return 0;
-  const ends = steps.map(({ call }) => call.endedAt ?? call.startedAt);
-  if (thinking?.endedAt) ends.push(thinking.endedAt);
-  return Math.max(0, Math.max(start, ...ends) - start);
 }
 
 function formatSpan(ms: number): string {
