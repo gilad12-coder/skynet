@@ -12,6 +12,12 @@ export interface AgentToolCall {
   startedAt: number;
   endedAt: number | null;
   payload?: Record<string, unknown>;
+  /**
+   * A card's own work still runs after the call returned (the coding tool
+   * writes and checks code after the chat turn ended), so its turn's header
+   * keeps counting. Set only for display, never stored.
+   */
+  working?: boolean;
 }
 
 export interface AgentMessage {

@@ -62,3 +62,24 @@ export function joinSummary(phrases: readonly string[], locale: string): string 
   const line = phrases.join(", ");
   return line.charAt(0).toLocaleUpperCase(locale) + line.slice(1);
 }
+
+/**
+ * Whether a burst shows its rows.
+ *
+ * Without ``stayOpen`` a burst folds on its own once it finished; in the agent
+ * panel that collapsed a coding run's "Edited run.py +5 −0" rows into "Edited
+ * files, ran a check" the moment its check passed.
+ *
+ * Args:
+ *   choice: What the reader last clicked, or null when they never did.
+ *   state: Whether the burst is live, has a step running, or stays open.
+ *
+ * Returns:
+ *   True when the rows show.
+ */
+export function activityGroupOpen(
+  choice: boolean | null,
+  state: { live: boolean; running: boolean; stayOpen: boolean },
+): boolean {
+  return choice ?? (state.stayOpen || state.live || state.running);
+}

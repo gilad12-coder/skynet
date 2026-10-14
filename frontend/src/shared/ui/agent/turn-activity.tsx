@@ -12,6 +12,7 @@ import { interleaveThinking } from "@/shared/lib/thinking-segments";
 
 import { ActivityGroup } from "./activity-steps";
 import { ThinkingSection } from "./thinking-section";
+import { earliestStart, finishedTurnMs, turnStart } from "./turn-timing";
 import type { AgentThinking, AgentToolCall } from "./types";
 
 /** One "Thinking" / "Thought for" row of a turn, placed by the tool calls before it. */
@@ -31,8 +32,13 @@ interface TurnActivityProps {
   renderStep: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
   /** What kind of step a call is, for the burst's summary line. */
   stepKind?: (call: AgentToolCall) => ActivityKind;
-  /** Backend-measured turn duration, preferred over the client clock. */
+  /** Backend-measured turn duration; the history's own span wins when longer. */
   durationMs?: number | null;
+  /**
+   * The turn's start from every thinking segment, including ones that never
+   * got reasoning and so show no row.
+   */
+  startedAt?: number | null;
 }
 
 // Mirrors Codex's turn header: while the agent works, a "Working for 14s"
@@ -47,15 +53,26 @@ export function TurnActivity({
   renderStep,
   stepKind,
   durationMs,
+  startedAt = null,
 }: TurnActivityProps) {
   const reduce = Boolean(useReducedMotion());
   // The whole turn counts, not only a running step, so the history stays
   // open in the gaps between one tool finishing and the next starting.
   // A card can wait on the user long after the turn ended, so only steps count.
-  const isLive = streaming || steps.some(({ call, card }) => !card && call.status === "running");
+  // The coding tool's card keeps working after the turn, so it keeps the header live.
+  const isLive =
+    streaming ||
+    steps.some(({ call, card }) => call.working || (!card && call.status === "running"));
   // Finished history stays open; the header still folds it on request.
   const [open, setOpen] = React.useState(true);
   const [nowTs, setNowTs] = React.useState(() => Date.now());
+  const [mountedAt] = React.useState(() => Date.now());
+  // One start for the whole turn, so the live timer only ever counts up.
+  const [start, setStart] = React.useState<number | null>(() =>
+    earliestStart(startedAt, turnStart(thinking, steps)),
+  );
+  const nextStart = earliestStart(start, earliestStart(startedAt, turnStart(thinking, steps)));
+  if (nextStart !== start) setStart(nextStart);
 
   React.useEffect(() => {
     if (!isLive) return;
@@ -63,7 +80,6 @@ export function TurnActivity({
     return () => clearInterval(id);
   }, [isLive]);
 
-  const start = turnStart(thinking, steps);
   const failed = steps.some(({ call, card }) => !card && call.status === "error");
   const pieces = interleaveThinking(thinking, steps);
   const hasCards = pieces.some((piece) => piece.kind === "card");
@@ -83,6 +99,7 @@ export function TurnActivity({
       <ActivityGroup
         key={`steps-${piece.steps[0]?.call.id}`}
         live={isLive}
+        stayOpen
         steps={piece.steps.map(({ call }) => ({
           kind: stepKind?.(call) ?? "tool",
           status: call.status,
@@ -101,7 +118,7 @@ export function TurnActivity({
       <div className="flex flex-col">
         <Header
           label={formatMsg("shared.agent.working_for", {
-            duration: formatSpan(start ? nowTs - start : 0),
+            duration: formatSpan(nowTs - (start ?? mountedAt)),
           })}
           live
         />
@@ -110,7 +127,7 @@ export function TurnActivity({
     );
   }
 
-  const elapsed = durationMs ?? turnSpanMs(thinking, steps);
+  const elapsed = finishedTurnMs(start, thinking, steps, durationMs);
   return (
     <div className="flex flex-col">
       <Header
@@ -185,26 +202,6 @@ function Header({
       {content}
     </button>
   );
-}
-
-function turnStart(
-  thinking: readonly AgentThinking[],
-  steps: Array<{ call: AgentToolCall }>,
-): number | null {
-  const starts = steps.map(({ call }) => call.startedAt).filter(Boolean);
-  for (const t of thinking) if (t.startedAt) starts.push(t.startedAt);
-  return starts.length ? Math.min(...starts) : null;
-}
-
-function turnSpanMs(
-  thinking: readonly AgentThinking[],
-  steps: Array<{ call: AgentToolCall }>,
-): number {
-  const start = turnStart(thinking, steps);
-  if (start === null) return 0;
-  const ends = steps.map(({ call }) => call.endedAt ?? call.startedAt);
-  for (const t of thinking) if (t.endedAt) ends.push(t.endedAt);
-  return Math.max(0, Math.max(start, ...ends) - start);
 }
 
 function formatSpan(ms: number): string {

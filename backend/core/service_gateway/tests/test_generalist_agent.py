@@ -1523,12 +1523,28 @@ async def test_turn_offers_web_tools_when_firecrawl_is_configured(monkeypatch: p
 
 
 def test_system_prompt_says_the_coding_tool_runs_the_check_itself() -> None:
-    """The prompt must stop the agent from promising a check it will not run.
+    """The prompt must stop the agent from announcing a run it cannot see.
 
-    The reply to a coding-tool turn is written before the coding agent starts.
-    Without this rule it said "I haven't run the check yet, tell me to run it",
-    and the check then passed on its own a few seconds later.
+    The reply to a coding-tool turn is written before the coding agent starts,
+    so it said the code "is being written and checked" and never said how the
+    check ended. The chat reports that under the call instead.
     """
     prompt = " ".join((GENERALIST_SYSTEM_PROMPT or "").split())
-    assert "runs the validity check on its own, right after your reply" in prompt
-    assert "never say the check has not run" in prompt
+    assert "runs the validity check on its own" in prompt
+    assert "END your turn with no reply text" in prompt
+    assert "never ask the user to run the check" in prompt
+
+
+def test_system_prompt_never_claims_a_coding_run_it_did_not_start() -> None:
+    """A later turn must not say the coding agent is running unless it called it.
+
+    After a reload the agent replied "I already sent your request, it is
+    writing and checking them now" with empty editors, and nothing ran.
+    """
+    prompt = " ".join((GENERALIST_SYSTEM_PROMPT or "").split())
+    assert (
+        "Never say the coding agent is writing, checking or running unless you called "
+        "``request_code_authoring`` in THIS turn"
+    ) in prompt
+    assert "an earlier call in the history is FINISHED" in prompt
+    assert "are empty or do not match what they ask for, call ``request_code_authoring`` now" in prompt

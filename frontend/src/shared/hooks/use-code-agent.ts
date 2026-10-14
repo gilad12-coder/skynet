@@ -135,6 +135,13 @@ export interface CodeAgentState {
   statusLabel: string;
   signatureStatus: ArtifactStatus;
   metricStatus: ArtifactStatus;
+  /**
+   * The run code's / the metric's first chunk of this writing stretch has
+   * reached its editor. A lane is "writing" from the run's start, seconds
+   * before any code arrives, so "Editing run.py" waits on this.
+   */
+  signatureFlowing: boolean;
+  metricFlowing: boolean;
   messages: AgentMessage[];
   error: string | null;
   /** The wizard agent's daily turn cap is used up. */
@@ -253,6 +260,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   const [statusLabel, setStatusLabel] = React.useState("");
   const [signatureStatus, setSignatureStatus] = React.useState<ArtifactStatus>("idle");
   const [metricStatus, setMetricStatus] = React.useState<ArtifactStatus>("idle");
+  const [flowing, setFlowing] = React.useState({ signature: false, metric: false });
+  const markFlowing = React.useCallback((source: "signature" | "metric", on: boolean) => {
+    setFlowing((prev) => (prev[source] === on ? prev : { ...prev, [source]: on }));
+  }, []);
   const [messages, setMessages] = React.useState<AgentMessage[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [limitReached, setLimitReached] = React.useState(false);
@@ -455,6 +466,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
 
       sigBufRef.current = "";
       metricBufRef.current = "";
+      setFlowing({ signature: false, metric: false });
       replyBufRef.current = "";
       reasoningBufRef.current = "";
       reasoningSectionsRef.current = { order: [], bufs: {} };
@@ -663,6 +675,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               setSignatureStatus("writing");
               markReasoningDone("signature");
             }
+            markFlowing("signature", true);
             sigBufRef.current += chunk;
             latestSignature = sigBufRef.current;
             setSignatureCode(sigBufRef.current);
@@ -680,6 +693,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               setMetricStatus("writing");
               markReasoningDone("metric");
             }
+            markFlowing("metric", true);
             metricBufRef.current += chunk;
             latestMetric = metricBufRef.current;
             setMetricCode(metricBufRef.current);
@@ -688,6 +702,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           onArtifactDone: (source) => {
             if (controller.signal.aborted) return;
             markReasoningDone(source);
+            if (source === "signature" || source === "metric") markFlowing(source, false);
             // The seed's turn only ends after the intro message is written,
             // seconds later; landing the lane's code now keeps its "Edited"
             // row in the transcript instead of a gap until then.
@@ -754,9 +769,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             if (source === "signature") {
               setSignatureCode(drafts.write(source, chunk, reset));
               setSignatureStatus("writing");
+              markFlowing("signature", true);
             } else if (source === "metric") {
               setMetricCode(drafts.write(source, chunk, reset));
               setMetricStatus("writing");
+              markFlowing("metric", true);
             }
           },
           onToolEnd: (ev) => {
@@ -765,8 +782,13 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               else if (isScorerTool(ev.tool)) dropDraft("metric");
             }
             finishToolCall(ev.id, ev.status === "ok" ? "done" : "error");
-            if (isSeedTool(ev.tool)) setSignatureStatus("done");
-            else if (isScorerTool(ev.tool)) setMetricStatus("done");
+            if (isSeedTool(ev.tool)) {
+              setSignatureStatus("done");
+              markFlowing("signature", false);
+            } else if (isScorerTool(ev.tool)) {
+              setMetricStatus("done");
+              markFlowing("metric", false);
+            }
           },
           onWorkflowReplace: (workflow, changedNodeId) => {
             markReasoningDone();
@@ -1014,6 +1036,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       pushSignatureVersion,
       pushMetricVersion,
       steerStore,
+      markFlowing,
     ],
   );
 
@@ -1194,6 +1217,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     statusLabel,
     signatureStatus,
     metricStatus,
+    signatureFlowing: flowing.signature,
+    metricFlowing: flowing.metric,
     messages,
     error,
     limitReached,

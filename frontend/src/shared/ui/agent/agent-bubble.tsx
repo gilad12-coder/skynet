@@ -8,6 +8,7 @@ import type { ActivityKind } from "@/shared/lib/activity-summary";
 
 import { ThinkingSection } from "./thinking-section";
 import { TurnActivity, type TurnThinking } from "./turn-activity";
+import { turnStart, visibleThinking } from "./turn-timing";
 import type { AgentMessage, AgentThinking, AgentToolCall } from "./types";
 
 // react-markdown + remark-gfm (the micromark/mdast/hast tree, ~40-60 KB gzip)
@@ -34,6 +35,11 @@ interface AgentBubbleProps {
   stepKind?: (call: AgentToolCall) => ActivityKind;
   onRunCode?: (code: string, language: string) => void;
   toolCallsBeforeContent?: boolean;
+  /**
+   * Shown after the turn's text: the coding tool finishes after the reply was
+   * written, so its closing outcome comes last, as in Codex.
+   */
+  afterContent?: React.ReactNode;
   className?: string;
 }
 
@@ -46,6 +52,7 @@ export function AgentBubble({
   stepKind,
   onRunCode,
   toolCallsBeforeContent = false,
+  afterContent,
   className,
 }: AgentBubbleProps) {
   const visibleToolCalls = React.useMemo<
@@ -77,14 +84,18 @@ export function AgentBubble({
   const turnStreaming = streaming ?? Boolean(liveThinking?.streaming);
   // Segments saved on the message win: they stream live and outlast the
   // turn. Chats that only keep one live thinking state show it as one row.
-  const thinking = React.useMemo<TurnThinking[]>(() => {
-    const all: TurnThinking[] = msg.thinkingSegments
-      ? msg.thinkingSegments.map((s) => ({ ...s, streaming: turnStreaming }))
-      : liveThinking
-        ? [{ ...liveThinking, toolsBefore: 0 }]
-        : [];
-    return all.filter((t) => t.reasoning || (t.streaming && t.startedAt));
-  }, [msg.thinkingSegments, liveThinking, turnStreaming]);
+  const allThinking = React.useMemo<TurnThinking[]>(
+    () =>
+      msg.thinkingSegments
+        ? msg.thinkingSegments.map((s) => ({ ...s, streaming: turnStreaming }))
+        : liveThinking
+          ? [{ ...liveThinking, toolsBefore: 0 }]
+          : [],
+    [msg.thinkingSegments, liveThinking, turnStreaming],
+  );
+  // A segment with no reasoning yet is no row: it showed as "Thinking" for a
+  // second and then vanished with the turn's header.
+  const thinking = React.useMemo(() => visibleThinking(allThinking), [allThinking]);
 
   const stepCalls =
     renderToolCall && isStepCall ? visibleToolCalls.filter(({ call }) => isStepCall(call)) : [];
@@ -94,7 +105,11 @@ export function AgentBubble({
   const hasTools = cardCalls.length > 0 && Boolean(renderToolCall);
   const hasText = msg.content.trim().length > 0;
   const hasThinking = thinking.length > 0;
-  const hasActivity = hasThinking || stepCalls.length > 0;
+  const withHistory = Boolean(renderToolCall && isStepCall);
+  // With a history, a card call (the coding tool) is activity too; without
+  // it, a turn whose only call is that card had no header, and the header
+  // vanished once its reasoning-less thinking row dropped out.
+  const hasActivity = hasThinking || (withHistory ? visibleToolCalls.length > 0 : stepCalls.length > 0);
 
   if (!hasTools && !hasText && !hasActivity) return null;
 
@@ -102,7 +117,7 @@ export function AgentBubble({
   // ran, so the whole turn reads top to bottom with the answer last, as in
   // Codex. ReActV2 takes back prose written before a tool (message_reset),
   // so the message's text is the turn's final answer.
-  const inHistory = hasActivity && Boolean(renderToolCall && isStepCall);
+  const inHistory = hasActivity && withHistory;
   const cardsFirst = toolCallsBeforeContent || Boolean(isStepCall);
   const toolCalls = hasTools && !inHistory && renderToolCall && (
     <div className="flex flex-col gap-1.5">
@@ -124,6 +139,7 @@ export function AgentBubble({
           renderStep={renderToolCall}
           stepKind={stepKind}
           durationMs={msg.stats?.durationMs}
+          startedAt={turnStart(allThinking, [])}
         />
       ) : (
         thinking.map((t, i) => <ThinkingSection key={i} thinking={t} compact />)
@@ -139,6 +155,7 @@ export function AgentBubble({
         </div>
       )}
       {!cardsFirst && toolCalls}
+      {afterContent}
     </div>
   );
 }

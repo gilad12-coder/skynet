@@ -18,6 +18,7 @@ All endpoints are hidden from the public Scalar reference (none are in
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -62,6 +63,7 @@ HISTORY_MAX_TURNS = 24
 HISTORY_TURN_MAX_CHARS = 4000
 HISTORY_MAX_TOOL_CALLS = 8
 HISTORY_TOOL_RESULT_MAX_CHARS = 400
+CODE_AUTHORING_TOOL = "request_code_authoring"
 
 
 # One tool call an earlier assistant turn made, as the panel recorded it.
@@ -79,6 +81,64 @@ class ChatTurn(BaseModel):
     tool_calls: list[ChatToolCall] = Field(
         default_factory=list,
         description="Assistant turns only: the tool calls that turn made, oldest first.",
+    )
+
+
+def _coding_outcome_text(outcome: dict[str, Any]) -> str:
+    """Describe a finished coding-tool run in one line for the model.
+
+    Args:
+        outcome: The compact outcome the panel recorded: ``files`` (each with
+            ``file``, ``added``, ``removed``), ``check`` and ``errors``.
+
+    Returns:
+        A sentence saying the run finished, what it wrote and how the check ended.
+    """
+    files = [f for f in outcome.get("files") or [] if isinstance(f, dict)]
+    wrote = ", ".join(f"{f.get('file')} (+{f.get('added', 0)} -{f.get('removed', 0)})" for f in files)
+    parts = [f"FINISHED: the coding agent wrote {wrote}" if wrote else "FINISHED: the coding agent changed no file"]
+    status = outcome.get("status")
+    if status == "stopped":
+        parts.append("it was stopped before it finished")
+    elif status == "error":
+        parts.append("it failed with an error")
+    check = outcome.get("check")
+    if check == "passed":
+        parts.append("the validity check passed")
+    elif check == "failed":
+        errors = "; ".join(str(e) for e in (outcome.get("errors") or [])[:3])
+        parts.append(f"the validity check failed: {errors}" if errors else "the validity check failed")
+    else:
+        parts.append("the validity check did not run")
+    return ", ".join(parts) + ". It is not running now."
+
+
+def _history_tool_result(call: ChatToolCall) -> str:
+    """Return the result text an earlier tool call shows the model.
+
+    The coding tool's own result is written before the coding agent starts
+    and says it "is now writing" the code; replayed on a later turn it made
+    the model claim the agent was still running. That call is always over by
+    the next turn, so history carries what it finished with instead.
+
+    Args:
+        call: One tool call from an earlier assistant turn.
+
+    Returns:
+        The call's result text, or, for the coding tool, its finished outcome.
+    """
+    if call.tool != CODE_AUTHORING_TOOL:
+        return call.result or ""
+    try:
+        parsed = json.loads(call.result or "")
+    except ValueError:
+        parsed = None
+    outcome = parsed.get("outcome") if isinstance(parsed, dict) else None
+    if isinstance(outcome, dict):
+        return _coding_outcome_text(outcome)
+    return (
+        "FINISHED: this earlier coding request is over and the coding agent is not running now; "
+        "its outcome was not recorded. Read run_code and metric_code in wizard_state for what it wrote."
     )
 
 
@@ -103,7 +163,7 @@ def history_for_agent(turns: list[ChatTurn]) -> list[dict[str, Any]]:
                 {
                     "tool": call.tool,
                     "status": call.status,
-                    "result": (call.result or "")[:HISTORY_TOOL_RESULT_MAX_CHARS],
+                    "result": _history_tool_result(call)[:HISTORY_TOOL_RESULT_MAX_CHARS],
                 }
                 for call in turn.tool_calls[-HISTORY_MAX_TOOL_CALLS:]
             ]

@@ -4,6 +4,7 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 import { CheckCircle, PencilSimple, WarningCircle } from "@/shared/ui/icons";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 import { cn } from "@/shared/lib/utils";
 import { diffHunks, diffStats, lineDiff } from "@/shared/lib/line-diff";
@@ -19,10 +20,13 @@ import {
   type CodeAuthoringAgentState,
 } from "../hooks/use-code-authoring-agent";
 import {
-  authoringEdits,
-  authoringThinking,
+  liveAuthoringView,
+  outcomeAuthoringView,
+  outcomeLine,
   type AuthoringEdit,
   type AuthoringFixAttempt,
+  type AuthoringOutcome,
+  type AuthoringView,
 } from "../lib/code-authoring";
 
 // The same react-flow canvas the /submit wizard uses. Off the wizard it is the
@@ -42,6 +46,8 @@ const ADDED_TONE = "text-[#5A7247] dark:text-[#adc899]";
 interface CodeAuthoringActivityProps {
   /** Lifted code-agent state, owned by the panel so it survives collapse. */
   agent: CodeAuthoringAgentState;
+  /** When the tool call started; edits from earlier calls belong to their own rows. */
+  since?: number;
 }
 
 /**
@@ -51,7 +57,7 @@ interface CodeAuthoringActivityProps {
  * check's verdict, all under one summary line. The code itself is read and
  * edited in the wizard's Metric step, not here.
  */
-export function CodeAuthoringActivity({ agent }: CodeAuthoringActivityProps) {
+export function CodeAuthoringActivity({ agent, since = 0 }: CodeAuthoringActivityProps) {
   const streaming = agent.status === "streaming";
   const authored = agent.isWorkflow ? !!agent.workflowSpec : !!agent.signatureCode;
   const hasOutput = streaming || authored || !!agent.metricCode || !!agent.reasoning;
@@ -65,8 +71,8 @@ export function CodeAuthoringActivity({ agent }: CodeAuthoringActivityProps) {
     return <ChatErrorBanner message={agent.error} />;
   }
 
-  // Before the seed starts (or on a reopened historical conversation where the
-  // run state was cleared) there is nothing to mirror — show the neutral hint.
+  // Before the seed starts there is nothing to mirror — show the neutral hint.
+  // A finished call renders from its stored outcome instead, never this.
   if (!hasOutput) {
     return (
       <p className="py-1 text-[0.8125rem] text-muted-foreground">
@@ -75,58 +81,9 @@ export function CodeAuthoringActivity({ agent }: CodeAuthoringActivityProps) {
     );
   }
 
-  const thinking = authoringThinking(agent);
-  const steps: Array<{ key: string; kind: ActivityKind; status: ActivityStatus; row: React.ReactNode }> =
-    [];
-  for (const edit of authoringEdits(agent.signatureVersions, agent.metricVersions)) {
-    steps.push({
-      key: `edit-${edit.file}-${edit.ts}`,
-      kind: "edit",
-      status: "done",
-      row: <EditRow edit={edit} />,
-    });
-  }
-  const writing = [
-    !agent.isWorkflow && agent.signatureStatus === "writing" ? "run" : null,
-    agent.metricStatus === "writing" ? "metric" : null,
-  ].filter((file): file is AuthoringEdit["file"] => file !== null);
-  for (const file of writing) {
-    steps.push({
-      key: `writing-${file}`,
-      kind: "edit",
-      status: "running",
-      row: (
-        <StepRow
-          icon={PencilSimple}
-          label={formatMsg("agent.coding_tool.editing", { file: FILE_NAMES[file] })}
-          status="running"
-        />
-      ),
-    });
-  }
-  if (!agent.isWorkflow) {
-    for (const attempt of agent.fixAttempts) {
-      steps.push({
-        key: `fix-${attempt.attempt}`,
-        kind: "check",
-        status: attempt.fix === null ? "running" : "done",
-        row: <FixRow attempt={attempt} />,
-      });
-    }
-    const check = checkStep(agent);
-    if (check) steps.push(check);
-  }
-
   return (
     <div className="flex min-w-0 flex-col">
-      {thinking && <ThinkingSection compact thinking={thinking} />}
-      {steps.length > 0 && (
-        <ActivityGroup live={streaming} steps={steps}>
-          {steps.map((step) => (
-            <React.Fragment key={step.key}>{step.row}</React.Fragment>
-          ))}
-        </ActivityGroup>
-      )}
+      <AuthoringRows view={liveAuthoringView(agent, since)} />
       {agent.isWorkflow && !agent.sharedWithWizard && agent.workflowSpec && (
         <div
           dir="ltr"
@@ -145,12 +102,102 @@ export function CodeAuthoringActivity({ agent }: CodeAuthoringActivityProps) {
   );
 }
 
+/**
+ * A finished coding call, rendered from what it stored, so a reopened
+ * conversation shows the rows the run ended with. A call from before outcomes
+ * were stored shows one done row.
+ */
+export function CodeAuthoringOutcome({ outcome }: { outcome: AuthoringOutcome | null }) {
+  if (!outcome) {
+    return <StepRow icon={PencilSimple} label={msg("agent.coding_tool.past")} status="done" />;
+  }
+  return (
+    <div className="flex min-w-0 flex-col">
+      <AuthoringRows view={outcomeAuthoringView(outcome)} />
+      {outcome.error && <InlineErrorRow message={outcome.error} className="mt-2 py-2" />}
+    </div>
+  );
+}
+
+/**
+ * The closing line a finished run gets under its turn, after the turn's text.
+ *
+ * Args:
+ *   outcome: The run's stored outcome.
+ *
+ * Returns:
+ *   The sentence, or null for a run that failed (its error row says why).
+ */
+export function authoringOutcomeLine(outcome: AuthoringOutcome): string | null {
+  const line = outcomeLine(outcome);
+  if (!line) return null;
+  if (line.key === "agent.coding_tool.outcome.stopped" || line.key === "agent.coding_tool.outcome.none") {
+    return msg(line.key);
+  }
+  const files = new Intl.ListFormat(getActiveIntlLocale(), { type: "conjunction" }).format(
+    line.files.map((file) => FILE_NAMES[file]),
+  );
+  return formatMsg(line.key, { files });
+}
+
+/** The thinking row and the steps under their summary line. */
+function AuthoringRows({ view }: { view: AuthoringView }) {
+  const steps: Array<{ key: string; kind: ActivityKind; status: ActivityStatus; row: React.ReactNode }> =
+    [];
+  for (const edit of view.edits) {
+    steps.push({
+      key: `edit-${edit.file}-${edit.ts}`,
+      kind: "edit",
+      status: "done",
+      row: <EditRow edit={edit} />,
+    });
+  }
+  for (const file of view.writing) {
+    steps.push({
+      key: `writing-${file}`,
+      kind: "edit",
+      status: "running",
+      row: (
+        <StepRow
+          icon={PencilSimple}
+          label={formatMsg("agent.coding_tool.editing", { file: FILE_NAMES[file] })}
+          status="running"
+        />
+      ),
+    });
+  }
+  for (const attempt of view.fixes) {
+    steps.push({
+      key: `fix-${attempt.attempt}`,
+      kind: "check",
+      status: attempt.fix === null ? "running" : "done",
+      row: <FixRow attempt={attempt} />,
+    });
+  }
+  const check = checkStep(view);
+  if (check) steps.push(check);
+
+  return (
+    <>
+      {view.thinking && <ThinkingSection compact thinking={view.thinking} />}
+      {steps.length > 0 && (
+        // Finished rows stay as they ended; only the reader folds them.
+        <ActivityGroup stayOpen steps={steps}>
+          {steps.map((step) => (
+            <React.Fragment key={step.key}>{step.row}</React.Fragment>
+          ))}
+        </ActivityGroup>
+      )}
+    </>
+  );
+}
+
 /** The validity check's verdict on the current code, as the last step. */
 function checkStep(
-  agent: CodeAuthoringAgentState,
+  view: AuthoringView,
 ): { key: string; kind: ActivityKind; status: ActivityStatus; row: React.ReactNode } | null {
-  if (agent.checkStatus === "idle") return null;
-  if (agent.checkStatus === "checking") {
+  if (view.check === "idle") return null;
+  if (view.check === "checking") {
     return {
       key: "check",
       kind: "check",
@@ -160,7 +207,7 @@ function checkStep(
       ),
     };
   }
-  if (agent.checkStatus === "passed") {
+  if (view.check === "passed") {
     return {
       key: "check",
       kind: "check",
@@ -168,10 +215,7 @@ function checkStep(
       row: <StepRow icon={CheckCircle} label={msg("agent.coding_tool.check.passed")} status="done" />,
     };
   }
-  const errors = [
-    ...(agent.signatureValidation?.errors ?? []),
-    ...(agent.metricValidation?.errors ?? []),
-  ];
+  const errors = view.errors;
   return {
     key: "check",
     kind: "check",

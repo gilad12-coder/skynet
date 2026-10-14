@@ -143,11 +143,12 @@ def test_coding_tool_description_points_to_the_metric_editors() -> None:
 
 
 def test_coding_tool_result_says_the_check_runs_on_its_own() -> None:
-    """The coding tool's result must tell the model the code and check are under way.
+    """The coding tool's result must tell the model to end its turn without a reply.
 
-    The coding agent writes the code and runs the validity check seconds after
-    the generalist's reply. With a bare marker result, the reply said "I haven't
-    run the check yet, tell me to run it" while the check was about to pass.
+    The coding agent writes the code and runs the validity check after the
+    generalist's turn ended. A reply written then could only guess: it said
+    the code "is being checked" long after the check finished, and never
+    said how it ended.
     """
     router = create_code_agent_router()
     route = next(r for r in router.routes if getattr(r, "operation_id", None) == "request_code_authoring")
@@ -155,4 +156,5 @@ def test_coding_tool_result_says_the_check_runs_on_its_own() -> None:
     assert result.awaiting_code is True
     assert result.goal == "match the category"
     assert "runs the validity check on them by itself" in result.next_step
-    assert "Do not say the check has not run" in result.next_step
+    assert "End your turn now with no reply text" in result.next_step
+    assert "now writing" not in result.next_step

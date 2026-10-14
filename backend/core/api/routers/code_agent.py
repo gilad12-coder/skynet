@@ -419,15 +419,16 @@ class CancelAgentTurnResponse(BaseModel):
 
 
 # The model only sees this tool's result before it writes its reply, and the
-# coding agent writes the code and runs the check seconds after that reply.
-# A bare marker let it tell users "I haven't run the check, tell me to run it"
-# while the check was about to pass on its own.
+# coding agent writes the code and runs the check only after that turn ended.
+# A closing line written now can only guess at the outcome (it told users the
+# code "is being checked" long after the check finished), so the reply is left
+# to the chat, which shows the edits, the check and how they ended under the call.
 _CODE_AUTHORING_NEXT_STEP = (
-    "The coding agent is now writing the run code and the metric into the Metric "
-    "screen's editors, then runs the validity check on them by itself; its edits "
-    "and the check result show under your reply. End your turn with one short line "
-    "saying the code is being written and checked now. Do not say the check has not "
-    "run, do not ask the user to run it or to tell you to run it, and do not run it yourself."
+    "The coding agent starts once your turn ends: it writes the run code and the metric "
+    "into the Metric screen's editors and runs the validity check on them by itself. Its "
+    "edits, the check and how they ended show in the chat under this call when it finishes. "
+    "End your turn now with no reply text: do not describe, predict or announce the code, "
+    "the check or their result, do not ask the user to run the check, and do not run it yourself."
 )
 
 _SSE_HEADERS = {
@@ -833,8 +834,8 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         wizard state — so the generalist never hand-writes ``signature_code`` /
         ``metric_code``. The agent calls this once, ends its turn, and reads
         the authored code on the next turn. The coding agent and its check
-        run after that turn's reply, so ``next_step`` tells the model to say
-        they are under way rather than describe a check that has not run.
+        run after that turn ends, so ``next_step`` tells the model to end the
+        turn without a reply; the chat reports how the run ended.
 
         Args:
             req: Optional plain-language goal for the Signature/Metric.

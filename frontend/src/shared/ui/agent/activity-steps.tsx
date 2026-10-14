@@ -19,6 +19,7 @@ import { cn } from "@/shared/lib/utils";
 import { formatMsg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import {
+  activityGroupOpen,
   joinSummary,
   summarizeActivity,
   type ActivityKind,
@@ -155,19 +156,24 @@ interface ActivityGroupProps {
   children: React.ReactNode;
   /** The burst is still going, so it shows its rows until the reader closes them. */
   live?: boolean;
+  /**
+   * The rows stay shown once the burst finished too, as the agent panel's
+   * history does; only the reader's click folds them.
+   */
+  stayOpen?: boolean;
 }
 
 /**
  * A burst of steps folded under one summary line built from their verbs
  * ("Edited a file, ran a check, read results"), as in Codex. The line opens
- * to the rows; it stays open while the burst is live unless the reader closes it.
- * A burst of one step is just its row.
+ * to the rows; it stays open while the burst is live (or, with ``stayOpen``,
+ * after it too) unless the reader closes it. A burst of one step is just its row.
  */
-export function ActivityGroup({ steps, children, live = false }: ActivityGroupProps) {
+export function ActivityGroup({ steps, children, live = false, stayOpen = false }: ActivityGroupProps) {
   const [choice, setChoice] = React.useState<boolean | null>(null);
   const summary = summarizeActivity(steps);
   if (steps.length <= 1 || !summary.lead) return <div className="flex flex-col">{children}</div>;
-  const open = choice ?? (live || summary.running);
+  const open = activityGroupOpen(choice, { live, running: summary.running, stayOpen });
   const LeadIcon = ACTIVITY_ICONS[summary.lead];
   const label = joinSummary(
     summary.parts.map(({ kind, count }) => formatMsg(SUMMARY_KEYS[kind], { count })),

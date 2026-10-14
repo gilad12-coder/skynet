@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { joinSummary, summarizeActivity } from "./activity-summary.ts";
+import { activityGroupOpen, joinSummary, summarizeActivity } from "./activity-summary.ts";
 import { diffHunks, diffStats, lineDiff } from "./line-diff.ts";
 
 test("a burst names each kind once, edits first, with how many ran", () => {
@@ -66,4 +66,12 @@ test("hunks keep context around changes and fold the rest", () => {
     { type: "del", text: "8" },
     { type: "add", text: "X" },
   ]);
+});
+
+test("a finished burst in the agent panel stays open until the reader folds it", () => {
+  const done = { live: false, running: false, stayOpen: true };
+  assert.equal(activityGroupOpen(null, done), true);
+  assert.equal(activityGroupOpen(false, done), false);
+  assert.equal(activityGroupOpen(null, { ...done, stayOpen: false }), false);
+  assert.equal(activityGroupOpen(null, { live: true, running: false, stayOpen: false }), true);
 });

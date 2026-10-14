@@ -32,6 +32,8 @@ interface ChatTranscriptProps {
   stepKind?: (call: AgentToolCall) => ActivityKind;
   toolCallsBeforeContent?: boolean;
   onRunCode?: (code: string, language: string) => void;
+  /** What an agent message shows after its text, such as a tool's closing outcome. */
+  renderAfterContent?: (msg: AgentMessage) => React.ReactNode;
   animatePairs?: boolean;
   trailing?: (state: ChatTranscriptState) => React.ReactNode;
 }
@@ -50,6 +52,7 @@ export function ChatTranscript({
   stepKind,
   toolCallsBeforeContent,
   onRunCode,
+  renderAfterContent,
   animatePairs,
   trailing,
 }: ChatTranscriptProps) {
@@ -185,6 +188,7 @@ export function ChatTranscript({
                 stepKind={stepKind}
                 toolCallsBeforeContent={toolCallsBeforeContent}
                 onRunCode={onRunCode}
+                afterContent={renderAfterContent?.(agentMsg)}
                 className="max-w-full"
               />
               {showActions && (
