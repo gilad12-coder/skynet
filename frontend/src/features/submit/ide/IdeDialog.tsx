@@ -11,7 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/shared/ui/primitives/button";
-import { CheckCircle, CircleNotch, X, XCircle } from "@/shared/ui/icons";
+import { CheckCircle, CircleNotch, ListChecks, X, XCircle } from "@/shared/ui/icons";
 import type { ContractCheckResponse } from "@/shared/types/unified-run";
 import type { ContractConsole } from "../lib/contract-console";
 import { blankEntryFile, diffWorkspace, workspaceTexts } from "../lib/ide-workspace";
@@ -242,15 +242,30 @@ export function IdeDialog({
           {v2Msg("submit.v2.ide.title", guided)}
         </h2>
         <div className="ms-auto flex items-center gap-2">
-          <Button size="sm" onClick={runCheck} disabled={!workbench || checking}>
-            {checking && <CircleNotch className="size-4 animate-spin" aria-hidden />}
-            {checking
-              ? v2Msg("submit.v2.metric.check.running", guided)
-              : v2Msg("submit.v2.metric.check.run", guided)}
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={runCheck}
+            disabled={!workbench || checking}
+            aria-label={
+              checking
+                ? v2Msg("submit.v2.metric.check.running", guided)
+                : v2Msg("submit.v2.metric.check.run", guided)
+            }
+          >
+            {checking ? (
+              <CircleNotch className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <ListChecks className="size-4" aria-hidden />
+            )}
           </Button>
-          <Button size="sm" variant="ghost" onClick={close}>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={close}
+            aria-label={v2Msg("submit.v2.ide.close", guided)}
+          >
             <X className="size-4" aria-hidden />
-            {v2Msg("submit.v2.ide.close", guided)}
           </Button>
         </div>
       </header>
