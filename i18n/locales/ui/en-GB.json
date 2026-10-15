@@ -1,5 +1,4 @@
 {
-  "agent.validation.failed": "Validation failed",
   "app.meta.description": "Prompt optimisation with DSPy — automatically improve the performance of language models",
   "app.shell.search.kw.about": "about version API URL feedback reset preferences",
   "app.shell.search.kw.account": "account username role language interface advanced options",
@@ -22,7 +21,6 @@
   "auth.login.meta_description": "Sign in to DRWN, a prompt-optimisation platform",
   "auto.app.optimizations.id.page.20": "Run the optimised program in real time — enter input and get a prediction.",
   "auto.app.submit.layout.template.1": "Create a new prompt optimisation with DSPy — choose {p1}, upload {p2}, and improve performance",
-  "auto.features.agent.panel.components.generalistpanel.code_ready_note": "The Signature and Metric have been written and validated. You can move to the model step and run the optimisation.",
   "auto.features.agent.panel.components.toolscarousel.literal.17": "Opens a form in the chat where you enter input and run it through the optimised program of a completed run.",
   "auto.features.agent.panel.components.toolscarousel.template.8": "Analyses {p1} to identify columns, types, and examples.",
   "auto.features.agent.panel.lib.tool.meta.literal.23": "Analyse",

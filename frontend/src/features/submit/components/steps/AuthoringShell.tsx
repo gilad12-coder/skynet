@@ -1,39 +1,10 @@
 "use client";
 
-import { PingDot } from "@/shared/ui/ping-dot";
 import * as React from "react";
-import { Check } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { Segmented } from "@/shared/ui/segmented";
-import type { ArtifactStatus } from "@/shared/hooks/use-code-agent";
-
-export function ArtifactStatusChip({ status }: { status: ArtifactStatus }) {
-  if (status === "idle") return null;
-  if (status === "waiting") {
-    return (
-      <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-muted-foreground/70">
-        {msg("auto.features.submit.components.steps.codestep.4")}
-        <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-      </span>
-    );
-  }
-  if (status === "writing") {
-    return (
-      <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-primary">
-        {msg("auto.features.submit.components.steps.codestep.5")}
-        <PingDot size="sm" tone="agent" />
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#5A7247] dark:text-[#adc899]">
-      {msg("auto.features.submit.components.steps.codestep.6")}
-      <Check className="size-3" />
-    </span>
-  );
-}
 
 function ModeToggle({
   value,

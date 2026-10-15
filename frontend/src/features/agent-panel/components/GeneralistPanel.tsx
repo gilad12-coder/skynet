@@ -19,7 +19,7 @@ import { ChatTranscript } from "@/shared/ui/agent/chat-transcript";
 import { Composer } from "@/shared/ui/agent/composer";
 import { SkynetMark } from "@/shared/ui/skynet-mark";
 import { ComposerModelMenu } from "@/shared/ui/agent/composer-model-menu";
-import type { AgentMessage, AgentToolCall } from "@/shared/ui/agent/types";
+import type { AgentToolCall } from "@/shared/ui/agent/types";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { SubmitSplashOverlay, SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 import { cn } from "@/shared/lib/utils";
@@ -30,22 +30,12 @@ import { I18N_KEY } from "@/shared/lib/i18n";
 
 import { useConversationStore } from "../hooks/use-conversation-store";
 import { useGeneralistAgent, type SessionEventContext } from "../hooks/use-generalist-agent";
-import { useCodeAuthoringAgent } from "../hooks/use-code-authoring-agent";
 import { useGeneralistPanelState } from "../hooks/use-panel-state";
-import {
-  authoringBusy,
-  authoringOutcome,
-  followUpAuthoringGoal,
-  latestToolCallId,
-  parseAuthoringOutcome,
-  seedFollowUpGoal,
-  withAuthoringState,
-} from "../lib/code-authoring";
 import { getConversation } from "../lib/conversation-api";
 import { TRUST_MODE_HUE, useTrustMode } from "../hooks/use-trust-mode";
 import { extractWizardPatch, useWizardStateOptional } from "../hooks/use-wizard-state";
 import { parseScreenNav, switchScreenChat } from "../lib/screen-agent";
-import type { ToolEndPayload, ToolStartPayload, WizardState } from "../lib/types";
+import type { ToolEndPayload, WizardState } from "../lib/types";
 import { stageDatasetForAgent } from "@/shared/lib/api";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
@@ -56,11 +46,6 @@ import { ConversationDrawer } from "./ConversationDrawer";
 import { DATASET_FILE_ACCEPT, DatasetUploadCard, type ConfirmedDataset } from "./DatasetUploadCard";
 import { LibraryDatasetCard, type ConfirmedLibraryDataset } from "./LibraryDatasetCard";
 import { InferenceFormCard } from "./InferenceFormCard";
-import {
-  authoringOutcomeLine,
-  CodeAuthoringActivity,
-  CodeAuthoringOutcome,
-} from "./CodeAuthoringActivity";
 import { MinimizedPill } from "./MinimizedPill";
 import { PresenceStrip } from "./PresenceStrip";
 import { ToolCallRow } from "./ToolCallRow";
@@ -73,7 +58,6 @@ const REQUEST_DATASET_TOOL = "request_user_dataset_datasets_request_upload_post"
 const REQUEST_LIBRARY_TOOL = "request_user_dataset_from_library";
 const REQUEST_INFERENCE_TOOL = "request_user_inference";
 const REQUEST_PAIR_INFERENCE_TOOL = "request_user_pair_inference";
-const REQUEST_CODE_TOOL = "request_code_authoring";
 
 // Tools that keep their own interactive card instead of folding into the
 // turn's activity line as a plain step.
@@ -82,7 +66,6 @@ const RICH_CARD_TOOLS = new Set<string>([
   REQUEST_LIBRARY_TOOL,
   REQUEST_INFERENCE_TOOL,
   REQUEST_PAIR_INFERENCE_TOOL,
-  REQUEST_CODE_TOOL,
 ]);
 
 // Submit tools whose success should mirror the manual wizard submit button:
@@ -268,36 +251,10 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     [store],
   );
 
-  // Arm the code-authoring mirror only on a live tool-start (not a reopened
-  // historical call). The code agent itself is hosted below at panel scope, so
-  // its run + timer survive the aside collapse / auto-minimize.
-  const [codeArmed, setCodeArmed] = React.useState(false);
-  const handedOffRef = React.useRef(false);
-  // Read from the tool-start callback, which is created before the code agent.
-  const codeAgentRanRef = React.useRef(false);
-  const [codeFollowUp, setCodeFollowUp] = React.useState<{ id: string; goal: string } | null>(
-    null,
-  );
-  // A first request's goal the seed cannot meet, sent once the seed lands.
-  const [afterSeed, setAfterSeed] = React.useState<string | null>(null);
-  const handleToolStart = React.useCallback((ev: ToolStartPayload, ctx: SessionEventContext) => {
-    // The code agent is a panel-scoped singleton tied to the visible chat; a
-    // background chat requesting authoring must not hijack it mid-use.
-    if (!ctx.isActive) return;
-    if (ev.tool === REQUEST_CODE_TOOL) {
-      handedOffRef.current = false;
-      setCodeArmed(true);
-      const goal = followUpAuthoringGoal(ev.arguments ?? {}, codeAgentRanRef.current);
-      if (goal) setCodeFollowUp({ id: ev.id, goal });
-      else setAfterSeed(seedFollowUpGoal(ev.arguments ?? {}));
-    }
-  }, []);
-
   const { openTo: openSettingsTo } = useSettingsModal();
   const agent = useGeneralistAgent({
     wizardState: effectiveWizard,
     trustMode,
-    onToolStart: handleToolStart,
     onToolEnd: handleToolEnd,
     onConversationMeta: handleConversationMeta,
   });
@@ -438,152 +395,10 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const attachInputRef = React.useRef<HTMLInputElement | null>(null);
   const [attachFile, setAttachFile] = React.useState<File | null>(null);
   const confirmedDatasetCallsRef = React.useRef<Set<string>>(new Set());
-  // Latest dataset the user confirmed in-panel — supplies columns + roles +
-  // sample rows to the hosted code agent. Kept as state (not a ref) so the
-  // hosted agent re-renders into "armed" once a dataset is attached.
-  const [lastConfirmedDataset, setLastConfirmedDataset] = React.useState<ConfirmedDataset | null>(
-    null,
-  );
-
-  // Host the canonical code agent at panel scope (mirroring how the wizard
-  // hosts it at wizard scope) so authoring survives the aside collapse /
-  // auto-minimize / conversation switch instead of restarting on remount.
-  const codeAgent = useCodeAuthoringAgent({
-    dataset: lastConfirmedDataset,
-    armed: codeArmed,
-    wizard: effectiveWizard,
-    optimizerName:
-      typeof effectiveWizard.optimizer_name === "string"
-        ? effectiveWizard.optimizer_name
-        : undefined,
-    // Code authoring follows the conversation's chosen model, so picking a
-    // concrete model in the composer (instead of the auto-router default) also
-    // steers the seed — the escape hatch when the default is rate-limited.
-    model: agent.model,
-    reasoningEffort: agent.reasoningEffort,
-  });
-  // The agent's turn ends BEFORE its card finishes (the code agent streams
-  // after the turn), so the composer locks on this signal — not ``streaming``
-  // alone — or the user could fire "submit" mid-authoring against a wizard
-  // that has no validated code yet.
-  const codeAuthoringActive = codeAgent.status === "streaming";
-  const codeAgentRan = codeAgent.messages.length > 0 || codeAgent.hasCode;
-  React.useEffect(() => {
-    codeAgentRanRef.current = codeAgentRan;
-  }, [codeAgentRan]);
-  const codeAgentSend = codeAgent.send;
-  React.useEffect(() => {
-    if (!codeFollowUp) return;
-    setCodeFollowUp(null);
-    codeAgentSend(codeFollowUp.goal);
-  }, [codeFollowUp, codeAgentSend]);
-  const codeAgentStatus = codeAgent.status;
-  const codeAgentHasCode = codeAgent.hasCode;
-  // The seed may not have started when the goal is queued, so "idle" means
-  // stopped only once the seed has streamed.
-  const seedStreamedRef = React.useRef(false);
-  React.useEffect(() => {
-    if (!afterSeed) {
-      seedStreamedRef.current = false;
-      return;
-    }
-    if (codeAgentStatus === "streaming") seedStreamedRef.current = true;
-    const stopped = codeAgentStatus === "idle" && seedStreamedRef.current;
-    if (codeAgentStatus === "error" || stopped) setAfterSeed(null);
-    if (codeAgentStatus !== "done" || !codeAgentHasCode) return;
-    setAfterSeed(null);
-    codeAgentSend(afterSeed);
-  }, [afterSeed, codeAgentStatus, codeAgentHasCode, codeAgentSend]);
-
-  // Drop any prior authoring session when the conversation changes (new chat or
-  // one loaded from history) so its code + timer don't leak across threads.
-  //
-  // Guard against the *handoff turn itself* tripping this reset: the agentSend
-  // below assigns a fresh conversation id (null → realId) for a brand-new
-  // thread, and that materialization must NOT clear the just-set handoff latch
-  // (it would let the completion effect re-fire and double-send code_ready_note
-  // ~31ms apart). So reset only on a genuine thread switch — a change between
-  // two distinct known ids, or a drop back to null (new chat / delete) — never
-  // on the initial null → id assignment of the current thread.
-  const codeAgentReset = codeAgent.reset;
-  const lastConvIdRef = React.useRef<string | null>(agent.conversationId);
-  React.useEffect(() => {
-    const prev = lastConvIdRef.current;
-    lastConvIdRef.current = agent.conversationId;
-    if (prev === agent.conversationId) return;
-    if (prev === null && agent.conversationId !== null) return;
-    setCodeArmed(false);
-    setAfterSeed(null);
-    handedOffRef.current = false;
-    codeAgentReset();
-  }, [agent.conversationId, codeAgentReset]);
-
-  // Auto-orchestrate: once authoring settles with code that passes the validity
-  // check, write it into the shared wizard state and nudge the generalist to
-  // proceed — no manual "the code is ready". On a failed check we don't hand
-  // off; the card surfaces the failures and the user steers via chat.
-  const applyAgentPatch = wizardCtx?.applyAgentPatch;
-  const agentSend = agent.send;
-  // On the wizard the code already lives in the Metric step's editors and the
-  // card shows the check passing. The note would arrive as a user turn telling
-  // the agent to move on, and it would leave the Metric screen unasked.
-  const onWizardScreen = shownScreen !== null;
-  React.useEffect(() => {
-    if (onWizardScreen) return;
-    if (handedOffRef.current) return;
-    if (!codeArmed) return;
-    if (agent.status === "streaming") return;
-    if (codeAgent.status !== "done") return;
-    if (!codeAgent.metricCode.trim()) return;
-    // A workflow run carries the graph (validated authoritatively by the
-    // backend on submit; the canvas already surfaces graph issues); every
-    // other run carries run code plus a metric under the one contract.
-    let authoredCode: Partial<WizardState>;
-    if (codeAgent.isWorkflow) {
-      const metVal = codeAgent.metricValidation;
-      if (!metVal || metVal.errors.length > 0) return;
-      const spec = codeAgent.workflowSpec;
-      // Require a real step between the input/output anchors before handing off.
-      if (!spec || spec.nodes.length < 3) return;
-      authoredCode = { workflow: spec, metric_code: codeAgent.metricCode };
-    } else {
-      if (!codeAgent.contractOk) return;
-      authoredCode = {
-        run_code: codeAgent.signatureCode,
-        metric_code: codeAgent.metricCode,
-      };
-    }
-    handedOffRef.current = true;
-    // Ride the authored program on this SAME nudge turn as an explicit override,
-    // not just via applyAgentPatch. agentSend reads a render-lagged snapshot, so
-    // without the override the code_ready_note turn would ship a wizard_state
-    // with empty program fields — the agent would see "Code incomplete", reject
-    // the Model step as out-of-order, and loop back into request_code_authoring.
-    // Mirrors the dataset handoff above.
-    applyAgentPatch?.(authoredCode);
-    agentSend(
-      msg("auto.features.agent.panel.components.generalistpanel.code_ready_note"),
-      authoredCode,
-    );
-  }, [
-    onWizardScreen,
-    codeArmed,
-    agent.status,
-    agentSend,
-    applyAgentPatch,
-    codeAgent.status,
-    codeAgent.isWorkflow,
-    codeAgent.workflowSpec,
-    codeAgent.signatureCode,
-    codeAgent.metricCode,
-    codeAgent.contractOk,
-    codeAgent.metricValidation,
-  ]);
 
   const handleDatasetConfirm = React.useCallback(
     async (callId: string, confirmed: ConfirmedDataset) => {
       confirmedDatasetCallsRef.current.add(callId);
-      setLastConfirmedDataset(confirmed);
       // Stage the rows on the backend before notifying the agent so the
       // very next turn's wizard_state carries ``staged_dataset_id``. The
       // submit wizard's own staging path only runs when its form is
@@ -705,6 +520,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
 
   // Prompts other features queue (the first-login setup) open the panel and
   // go out as if typed; one queued before the lazy panel mounted drains here.
+  const agentSend = agent.send;
   React.useEffect(() => {
     const drain = () => {
       const prompt = takeQueuedAgentPrompt();
@@ -719,14 +535,14 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
 
   const handleRunCode = React.useCallback(
     (code: string, language: string) => {
-      if (streaming || codeAuthoringActive) return;
+      if (streaming) return;
       const prompt = formatMsg("shared.agent.run_code_prompt", {
         language: language || "code",
         code,
       });
       agent.send(prompt);
     },
-    [agent, streaming, codeAuthoringActive],
+    [agent, streaming],
   );
 
   const resizingRef = React.useRef(false);
@@ -751,51 +567,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     [setWidth, isRtl],
   );
 
-  const liveCodeCallId = React.useMemo(
-    () => latestToolCallId(agent.messages, REQUEST_CODE_TOOL),
-    [agent.messages],
-  );
-  // The run is over once its turn is: the agent checks its code inside it.
-  const codeBusy = codeArmed && (authoringBusy(codeAgent) || afterSeed !== null);
-  const liveCodeCall = React.useMemo(
-    () =>
-      agent.messages.flatMap((m) => m.toolCalls ?? []).find((c) => c.id === liveCodeCallId) ?? null,
-    [agent.messages, liveCodeCallId],
-  );
-
-  // Store how the run ended on its call once it settles, so the rows (and the
-  // generalist's history) stay the same after a reload. Only a run this call
-  // started counts: a follow-up call finds the last run settled before its
-  // own one begins.
-  const recordToolOutcome = agent.recordToolOutcome;
-  const busyForCallRef = React.useRef<string | null>(null);
-  const recordedRef = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    if (!codeArmed || !liveCodeCall) return;
-    if (codeBusy) {
-      busyForCallRef.current = liveCodeCall.id;
-      return;
-    }
-    if (busyForCallRef.current !== liveCodeCall.id) return;
-    const key = [
-      liveCodeCall.id,
-      codeAgent.status,
-      codeAgent.verification?.id ?? "",
-      codeAgent.signatureVersions.length,
-      codeAgent.metricVersions.length,
-      Object.values(codeAgent.fileVersions).reduce((n, versions) => n + versions.length, 0),
-    ].join("|");
-    if (recordedRef.current === key) return;
-    recordedRef.current = key;
-    recordToolOutcome(liveCodeCall.id, authoringOutcome(codeAgent, liveCodeCall.startedAt, Date.now()));
-  }, [codeArmed, codeBusy, liveCodeCall, codeAgent, recordToolOutcome]);
-
-  // The coding call keeps its turn's header live while it runs, and a stored
-  // run's end is when the turn's "Worked for" stops, live and after a reload.
-  const shownMessages = React.useMemo(
-    () => withAuthoringState(agent.messages, REQUEST_CODE_TOOL, codeBusy ? liveCodeCallId : null),
-    [agent.messages, codeBusy, liveCodeCallId],
-  );
   const renderToolCall = React.useCallback(
     (call: AgentToolCall, ctx: { isRetry: boolean }) => {
       if (call.tool === REQUEST_DATASET_TOOL) {
@@ -827,15 +598,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (call.tool === REQUEST_INFERENCE_TOOL || call.tool === REQUEST_PAIR_INFERENCE_TOOL) {
         return <InferenceFormCard call={call} disabled={streaming} />;
       }
-      if (call.tool === REQUEST_CODE_TOOL) {
-        const outcome = parseAuthoringOutcome(call.payload?.outcome);
-        // The run this session started shows live until its outcome is stored;
-        // every other call, and any call after a reload, renders what it stored.
-        if (call.id === liveCodeCallId && codeArmed && (codeBusy || !outcome)) {
-          return <CodeAuthoringActivity agent={codeAgent} since={call.startedAt} />;
-        }
-        return <CodeAuthoringOutcome outcome={outcome} />;
-      }
       const renderer = getToolRenderer(call.tool);
       if (renderer?.card && call.status !== "running") {
         return renderer.card(call);
@@ -843,27 +605,12 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       const summary = renderer?.summary?.(call) ?? null;
       return <ToolCallRow call={call} isRetry={ctx.isRetry} summary={summary} />;
     },
-    [handleDatasetConfirm, handleLibraryPick, streaming, codeAgent, liveCodeCallId, codeArmed, codeBusy],
+    [handleDatasetConfirm, handleLibraryPick, streaming],
   );
 
-  // The run's closing line comes after the turn's text: the reply was written
-  // before the run started, so only this can say how it ended.
-  const renderAfterContent = React.useCallback((m: AgentMessage) => {
-    const call = [...(m.toolCalls ?? [])].reverse().find((c) => c.tool === REQUEST_CODE_TOOL);
-    const outcome = call ? parseAuthoringOutcome(call.payload?.outcome) : null;
-    const line = outcome ? authoringOutcomeLine(outcome) : null;
-    if (!line) return null;
-    return (
-      <p dir="auto" className="text-sm leading-relaxed text-foreground">
-        {line}
-      </p>
-    );
-  }, []);
-
   // Every call is a step in the turn's activity group except the ones the
-  // user acts on: the request cards, the coding tool (its rows stay shown when
-  // the turn's history folds, live and after a reload) and the submit
-  // summary, which links to the new run.
+  // user acts on: the request cards and the submit summary, which links to
+  // the new run.
   const isStepCall = React.useCallback((call: AgentToolCall) => {
     if (RICH_CARD_TOOLS.has(call.tool)) return false;
     return !(SUBMIT_TOOLS.has(call.tool) && call.status !== "running");
@@ -1020,14 +767,13 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
         ]}
       >
         <ChatTranscript
-          messages={shownMessages}
+          messages={agent.messages}
           streaming={streaming}
           editAndResend={agent.editAndResend}
           renderToolCall={renderToolCall}
           isStepCall={isStepCall}
           stepKind={stepKind}
           onRunCode={handleRunCode}
-          renderAfterContent={renderAfterContent}
           animatePairs
           trailing={() => (
             <>
@@ -1067,7 +813,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
         placeholder={msg("auto.features.agent.panel.components.generalistpanel.literal.5")}
         streaming={activeBusy}
         midTurn={agent.midTurn}
-        disabled={codeAuthoringActive}
         modelMenu={
           <ComposerModelMenu
             value={agent.model}
@@ -1104,7 +849,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
                   <PopoverTrigger asChild>
                     <button
                       type="button"
-                      disabled={codeAuthoringActive}
                       aria-label={msg("agent.composer.attach")}
                       onClick={(e) => {
                         // Skip the popover toggle — go straight to the

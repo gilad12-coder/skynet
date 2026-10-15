@@ -404,51 +404,11 @@ class EditCodeResponse(BaseModel):
     assistant_message: str = ""
 
 
-class RequestCodeAuthoringRequest(BaseModel):
-    """Request body for ``POST /optimizations/request-code-authoring``."""
-
-    goal: str = Field(
-        default="",
-        max_length=400,
-        description=(
-            "What the user asked the code to do, in their words, keeping every file "
-            "name and structure they named (e.g. 'put the parsing in a helper in "
-            "helpers.py that run.py imports'); the coding agent receives it verbatim. "
-            "Empty seeds the run code and metric from the task. Echoed back so the "
-            "card can show it."
-        ),
-    )
-
-
-class RequestCodeAuthoringResponse(BaseModel):
-    """Envelope for ``POST /optimizations/request-code-authoring`` — UI-trigger marker."""
-
-    awaiting_code: bool
-    goal: str
-    next_step: str = Field(
-        default="",
-        description="What happens after this call, for the calling agent's closing line.",
-    )
-
-
 class CancelAgentTurnResponse(BaseModel):
     """Envelope for ``POST /optimizations/agent-turns/{turn_id}/cancel``."""
 
     cancelled: bool
 
-
-# The model only sees this tool's result before it writes its reply, and the
-# coding agent writes the code and runs the check only after that turn ended.
-# A closing line written now can only guess at the outcome (it told users the
-# code "is being checked" long after the check finished), so the reply is left
-# to the chat, which shows the edits, the check and how they ended under the call.
-_CODE_AUTHORING_NEXT_STEP = (
-    "The coding agent starts once your turn ends: it writes the run code and the metric "
-    "into the Metric screen's editors and runs the validity check on them by itself. Its "
-    "edits, the check and how they ended show in the chat under this call when it finishes. "
-    "End your turn now with no reply text: do not describe, predict or announce the code, "
-    "the check or their result, do not ask the user to run the check, and do not run it yourself."
-)
 
 _SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -830,43 +790,6 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             signature_code=final_signature,
             metric_code=final_metric,
             assistant_message=assistant_message,
-        )
-
-    @router.post(
-        "/optimizations/request-code-authoring",
-        response_model=RequestCodeAuthoringResponse,
-        operation_id="request_code_authoring",
-        summary="Ask the chat panel to author the Signature + Metric via the code agent",
-        tags=["agent"],
-    )
-    def request_code_authoring(
-        req: RequestCodeAuthoringRequest,
-        current_user: AuthenticatedUserDep,
-    ) -> RequestCodeAuthoringResponse:
-        """Start the coding agent; its code lands in the Metric screen's editors, its edits show as diffs.
-
-        Stateless: the endpoint exists only so the generalist agent can call a
-        named tool the frontend recognizes via its ``tool_start`` SSE event.
-        The chat then streams the dedicated code agent (the same
-        ``run_code_agent`` the wizard uses) over
-        ``POST /optimizations/ai-generate-code``, lists its edits and the
-        validity check, and writes the finished code back into the shared
-        wizard state — so the generalist never hand-writes ``signature_code`` /
-        ``metric_code``. The agent calls this once, ends its turn, and reads
-        the authored code on the next turn. The coding agent and its check
-        run after that turn ends, so ``next_step`` tells the model to end the
-        turn without a reply; the chat reports how the run ended.
-
-        Args:
-            req: Optional plain-language goal for the Signature/Metric.
-            current_user: The authenticated caller (required; gates LLM spend).
-
-        Returns:
-            A :class:`RequestCodeAuthoringResponse` marker carrying the goal
-            back so the card can display it.
-        """
-        return RequestCodeAuthoringResponse(
-            awaiting_code=True, goal=req.goal.strip(), next_step=_CODE_AUTHORING_NEXT_STEP
         )
 
     @router.get(

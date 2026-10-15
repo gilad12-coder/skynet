@@ -3,6 +3,7 @@ export { AgentPanelDock } from "./components/AgentPanelDock";
 export { AgentPillDock } from "./components/AgentPillDock";
 export { ApprovalCard } from "./components/ApprovalCard";
 export { ToolCallRow } from "./components/ToolCallRow";
+export { CodingCallRows } from "./components/CodeAuthoringActivity";
 export { ToolsCarousel } from "./components/ToolsCarousel";
 export { Carousel, CarouselNav } from "./components/Carousel";
 export { ToolHeader } from "./components/ToolHeader";

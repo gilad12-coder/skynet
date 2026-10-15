@@ -28,6 +28,8 @@ export interface AgentMessage {
   /** Concrete model the Auto Router picked for this turn, when resolved. */
   servedModel?: string | null;
   stats?: TurnStats | null;
+  /** A user turn the app sent on the user's behalf: the transcript shows no bubble for it. */
+  hidden?: boolean;
   /**
    * The turn's reasoning, one segment per stretch between tool calls or
    * prose, kept on the message so it streams live and earlier turns still show it.

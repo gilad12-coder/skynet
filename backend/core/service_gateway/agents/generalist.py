@@ -14,10 +14,6 @@ Phased exposure (the gate):
   ``get_registry_snapshot``, ``get_job_*``, analytics).
 * Unlocked once a dataset is attached: ``validate_code``,
   ``profile_datasets``.
-* Unlocked once the task is set and the run is NAMED (on the submit
-  wizard's screens the task alone): ``request_code_authoring`` (the run
-  code and metric). Mirrors the wizard's Task → Inputs → Optimizer →
-  Metric order so the wizard is populated and verifiable before any code exists.
 * Unlocked once name + task + inputs + run/metric code + reflection model
   are all set: ``submit_unified_run`` (``POST /optimize``).
 * Always available post-submit: ``cancel_job``, rename/pin.
@@ -423,20 +419,15 @@ def _needs_approval(tool_name: str, trust_mode: TrustMode) -> bool:
 
 
 class _TurnAuthoringFlag:
-    """Turn-scoped flag recording whether ``request_code_authoring`` fired.
+    """Turn-scoped state shared by the tool wrappers of one user turn.
 
     One instance is created per user turn in :func:`_drive_generalist_agent`
-    and shared across every :class:`_ApprovalGatedTool` wrapper for that turn.
-    ``request_code_authoring`` writes its authored run and metric code back to
-    the wizard asynchronously (a later turn), so a submit in the SAME turn
-    would ship stale code into a doomed run. The wrapper sets this
-    flag when authoring is (re)requested and denies any submit that follows in
-    the same turn. The prompt is the primary guard; this is the backstop.
+    and shared across every :class:`_ApprovalGatedTool` wrapper for that turn,
+    so a wizard write in one call is visible to the guards of the next.
     """
 
     def __init__(self) -> None:
-        """Initialize the flag as not-yet-requested for this turn."""
-        self.authoring_requested = False
+        """Initialize the turn state with nothing written yet."""
         # The wrappers only hold the turn-start snapshot, so a name the agent
         # sets mid-turn is tracked here for the sample-staging guard.
         self.job_named = False
@@ -539,11 +530,8 @@ class _ApprovalGatedTool:
                 (so the agent can't populate a later-step field before its
                 earlier steps are complete). One ``update_wizard_state`` call
                 per turn means the snapshot is stable for the check.
-            authoring_flag: Turn-scoped flag shared across all wrappers in this
-                turn. Set when ``request_code_authoring`` fires; checked to
-                deny a submit that follows it in the same turn
-                (the authored code is written back asynchronously, so it is not
-                yet in this turn's snapshot).
+            authoring_flag: Turn-scoped state shared across all wrappers in
+                this turn (the name and wizard fields written so far).
             needs_approval: Policy deciding whether a call must pause for
                 confirmation. Defaults to the wizard-tool classifier
                 :func:`_needs_approval`; the react-serve driver injects a
@@ -602,14 +590,7 @@ class _ApprovalGatedTool:
         # routes read that as "not supplied", but the step-order check and the
         # snapshot fill go by which keys are present.
         kwargs = {key: value for key, value in kwargs.items() if value is not None}
-        # ``request_code_authoring`` writes the authored Signature/Metric back
-        # to the wizard asynchronously (a later turn), so a submit in the same
-        # turn would ship stale/unauthored code. The prompt forbids this; this
-        # is the runtime backstop.
-        if self._tool_name in _CODE_AUTHORING_TOOLS:
-            self._authoring_flag.authoring_requested = True
-        submit_after_authoring = self._tool_name in _SUBMIT_TOOLS and self._authoring_flag.authoring_requested
-        if self._tool_name in _SUBMIT_TOOLS and not submit_after_authoring:
+        if self._tool_name in _SUBMIT_TOOLS:
             self._inject_unified_snapshot(kwargs)
         # Profiling a staged dataset needs the same rehydration submit relies
         # on: the rows live behind an opaque id, never inline in the model's
@@ -635,26 +616,7 @@ class _ApprovalGatedTool:
             }
         )
         try:
-            if submit_after_authoring:
-                denial = (
-                    "Submit blocked: request_code_authoring ran this turn, so the "
-                    "authored run and metric code is not in the wizard yet. End the "
-                    "turn with a status message and submit on a later turn once "
-                    "the code is reflected in wizard_state."
-                )
-                self._emit(
-                    {
-                        "event": "tool_end",
-                        "data": {
-                            "id": call_id,
-                            "tool": self._tool_name,
-                            "status": "error",
-                            "result": denial,
-                        },
-                    }
-                )
-                return denial
-            if self._tool_name == "update_wizard_state" or self._tool_name in _SCREEN_TOOLS:
+            if self._tool_name == "update_wizard_state":
                 order_error = validate_wizard_screen(self._tool_name, kwargs, self._wizard_state)
                 if order_error is None and self._tool_name == "update_wizard_state":
                     order_error = validate_wizard_patch_order(kwargs, self._wizard_state)
@@ -755,7 +717,7 @@ class _ApprovalGatedTool:
 
         The model has historically re-typed its own broken code (and dropped
         fields) into submit arguments, so the workspace code always comes from
-        the snapshot, which only ``request_code_authoring`` writes. Every other
+        the snapshot, which only the Metric step's coding agent writes. Every other
         value fills in only when the agent left it out, except privacy, which
         is forced: the request model defaults to public and a run must only go
         public when the user asked for it.
@@ -878,9 +840,8 @@ def _wrap_tool_with_approval(
             submit tool calls that omit it.
         wizard_state: Turn-start wizard snapshot used to validate
             ``update_wizard_state`` field ordering.
-        authoring_flag: Turn-scoped flag shared across all wrappers in the
-            turn, used to block a submit that follows
-            ``request_code_authoring`` in the same turn.
+        authoring_flag: Turn-scoped state shared across all wrappers in the
+            turn (the name and wizard fields written so far).
         needs_approval: Optional gating policy override; defaults to the
             wizard-tool classifier when omitted.
         approval_owner: Username pending approvals are bound to, if known.
@@ -1037,12 +998,6 @@ _DATASET_READY_TOOLS = frozenset(
         "validate_datasets_validate_post",
     }
 )
-# UI-trigger tool — calling it renders an inline code-authoring card that runs
-# the dedicated code agent (streaming the run code and the metric) and writes
-# the result back to the wizard, so the generalist never hand-writes workspace
-# code. Gated behind a named run with a task (see ``tools_for``) so the agent
-# fills the wizard in the same order the manual wizard enforces.
-_CODE_AUTHORING_TOOLS = frozenset({"request_code_authoring"})
 # The one submit surface: ``POST /optimize`` takes every artifact kind and
 # optimizer, so there is never a second submit tool for the model to waver on.
 _SUBMIT_TOOLS = frozenset({"submit_unified_run_optimize_post"})
@@ -1121,13 +1076,6 @@ def tools_for(state: WizardState) -> set[str]:
         allowed |= _DATASET_READY_TOOLS
     name_set = _name_set(state)
     task_ready = _task_ready(state)
-    # The code agent writes ``run(artifact, input)`` around the artifact and
-    # the metric around the objective, so it needs both before it can start.
-    # The submit wizard never asks for a name (an unnamed run is valid) and
-    # its Metric screen has no other code writer, so on its screens the task
-    # alone opens the tool.
-    if task_ready and (name_set or "wizard_screen" in state):
-        allowed |= _CODE_AUTHORING_TOOLS
     if name_set and task_ready and _inputs_ready(state) and _code_ready(state) and _model_ready(state):
         allowed |= _SUBMIT_TOOLS
     return allowed
@@ -1139,7 +1087,7 @@ def tools_for(state: WizardState) -> set[str]:
 # (Basics → Task → Inputs → Optimizer) at the field granularity, so the agent
 # gets a precise, actionable error the moment it tries to skip ahead.
 # ``run_code`` / ``metric_code`` are intentionally absent: ``update_wizard_state``
-# rejects them outright (they are authored only via ``request_code_authoring``).
+# rejects them outright (only the Metric step's coding agent writes them).
 _WIZARD_STEP_LABELS = ("Basics", "Task", "Inputs", "Optimizer")
 _FIELD_STEP: dict[str, int] = {
     "job_name": 0,
@@ -1245,21 +1193,16 @@ _SCREEN_FIELDS: dict[str, frozenset[str]] = {
 # run gates every later step, so they stay editable from any screen.
 _SCREENLESS_FIELDS = frozenset({"job_name", "job_description", "is_private"})
 # ``update_wizard_state`` refuses these on every screen with its own pointer to
-# ``request_code_authoring``; a "Not on screen" error would send the agent
+# the Metric step's coding agent; a "Not on screen" error would send the agent
 # looking for a screen where they are writable, and none exists.
 _SCREEN_EXEMPT_FIELDS = frozenset({"run_code", "metric_code"})
-# Tools that write a wizard field themselves, and the screens that show it.
-_SCREEN_TOOLS: dict[str, frozenset[str]] = {
-    "request_code_authoring": frozenset({"metric"}),
-}
 
 
 def validate_wizard_screen(tool_name: str, kwargs: dict[str, Any], state: WizardState) -> str | None:
     """Reject a wizard write that lands outside the screen the user is viewing.
 
     Args:
-        tool_name: The tool being called: ``update_wizard_state`` or one of
-            ``_SCREEN_TOOLS``.
+        tool_name: The tool being called (``update_wizard_state``).
         kwargs: The call's keyword arguments.
         state: The turn-start wizard snapshot.
 
@@ -1271,15 +1214,6 @@ def validate_wizard_screen(tool_name: str, kwargs: dict[str, Any], state: Wizard
     if "wizard_screen" not in state:
         return None
     screen = state.get("wizard_screen") or ""
-    if tool_name in _SCREEN_TOOLS:
-        targets = _SCREEN_TOOLS[tool_name]
-        if screen in targets:
-            return None
-        return (
-            f"Not on screen: ``{tool_name}`` writes the {' / '.join(sorted(targets))} screen, but the user is "
-            f"viewing {screen or 'no editable screen'!r}. Ask them to move to that screen "
-            "with the wizard's arrows, then call it on a later turn."
-        )
     visible = _SCREEN_FIELDS.get(screen, frozenset())
     allowed = visible | _SCREENLESS_FIELDS | _SCREEN_EXEMPT_FIELDS
     outside = sorted(field for field in kwargs if field not in allowed)
@@ -1295,7 +1229,7 @@ def validate_wizard_screen(tool_name: str, kwargs: dict[str, Any], state: Wizard
 
 # Read-only values a screen also shows beside the fields it writes, so the
 # agent can see what is already there: the budget is stored as cents, and the
-# metric screen holds the code ``request_code_authoring`` wrote.
+# metric screen holds the code its coding agent wrote.
 _SCREEN_SNAPSHOT_EXTRAS: dict[str, frozenset[str]] = {
     "artifact": frozenset({"task_objective"}),
     "source": frozenset({"task_objective", "artifact_kind", "dataset_ready", "input_fields", "expected_field"}),
@@ -1361,7 +1295,7 @@ _SCREEN_ALLOWED_TOOLS: dict[str, frozenset[str]] = {
     ),
     "models": frozenset({"update_wizard_state", "list_models_for_agent", "discover_models_models_discover_post"}),
     "budget": frozenset({"update_wizard_state", "get_wallet_for_agent"}),
-    "metric": frozenset({"request_code_authoring", "validate_code_validate_code_post"}),
+    "metric": frozenset({"validate_code_validate_code_post"}),
     "check": frozenset({"validate_code_validate_code_post"}),
     "overview": frozenset({"submit_unified_run_optimize_post", "get_wallet_for_agent"}),
 }
@@ -1462,7 +1396,7 @@ def screen_tools(allowed: set[str], state: WizardState) -> set[str]:
         return allowed
     screen = state.get("wizard_screen") or ""
     own = _SCREEN_ALLOWED_TOOLS.get(screen, frozenset())
-    return {name for name in allowed if name in own and screen in _SCREEN_TOOLS.get(name, frozenset({screen}))}
+    return {name for name in allowed if name in own}
 
 
 def _screen_problems(screen: str, state: WizardState) -> list[str]:
@@ -1484,7 +1418,7 @@ def _screen_problems(screen: str, state: WizardState) -> list[str]:
     if screen in ("plan", "models") and not _model_ready(state):
         return ["reflection_model_config needs a model"]
     if screen == "metric" and not _code_ready(state):
-        return ["the run code and the metric are not written yet (use request_code_authoring)"]
+        return ["the run code and the metric are not written yet (the coding agent in the Metric step writes them)"]
     if screen == "overview":
         return ["this is the last screen; submit the run instead"]
     return []
@@ -1529,13 +1463,6 @@ def screen_nav_tools(state: WizardState, turn: _TurnAuthoringFlag) -> list[dspy.
 
     async def continue_to_next_screen(note: str | None = None) -> Any:
         """Move the wizard on by one screen, once this screen is complete."""
-        # The coding card writes its code back after this turn ends; moving on
-        # now would leave the Metric screen before the user sees that code.
-        if turn.authoring_requested:
-            return (
-                "Can't continue this turn: request_code_authoring just ran and its code is not in the "
-                "wizard yet. End the turn; the user moves on once they have seen the code."
-            )
         problems = _screen_problems(screen, cast(WizardState, {**state, **turn.wizard_patch}))
         issue = str(state.get("screen_issue") or "").strip()
         # The wizard's own check ran on the turn-start values; once this turn
@@ -1690,7 +1617,8 @@ The wizard screen on view:
   (optimizer_choice, model_config, reflection_model_config,
   spending_limit_usd), ``optimizer`` (optimizer_choice), ``models``
   (model_config, reflection_model_config), ``budget``
-  (spending_limit_usd) and ``metric`` (``request_code_authoring``);
+  (spending_limit_usd) and ``metric`` (the run code and metric, which
+  its own coding agent writes);
   ``check`` and ``overview`` hold nothing to edit. A write outside the
   screen on view is refused with a "Not on screen" error. Fill what the
   visible screen holds in one call, then tell the user what the next
@@ -1727,15 +1655,11 @@ Rules:
        right unless the user names one; ``optimizer_catalog`` lists what
        fits the artifact and data mode), ``reflection_model_config``
        (always needed) and ``model_config`` (the task model).
-    5. Code — ``request_code_authoring`` has the coding agent write the
+    5. Code — the coding agent in the Metric screen's editor writes the
        code the run needs: run code plus a metric, the same for every
-       artifact, a ``dspy_program`` included. Never write either yourself; the user edits them in the wizard,
-       and the validity check confirms they fit the data before Run. The
-       tool becomes available ONLY after the run is named AND the task
-       is set. If you want to author code
-       and the tool is NOT in your list this turn, the cause is a missing
-       ``job_name`` or task field — set it first, then it unlocks next
-       turn.
+       artifact, a ``dspy_program`` included. Never write either
+       yourself; point the user to that coding agent, and the validity
+       check confirms the code fits the data before Run.
     6. Submit — ``submit_unified_run_optimize_post`` unlocks once name + task + inputs +
        run/metric code + reflection model are all present.
   Do NOT skip ahead. Field order is ENFORCED: if you set an
@@ -1746,9 +1670,7 @@ Rules:
     1. Do the ONE named step.
     2. END THE TURN with a short status line (in ``reply_language``).
   Never re-fire the rejected patch in the same turn: it unlocks on its
-  own once the earlier step lands in a future ``wizard_state``. Never
-  re-request ``request_code_authoring`` just because a later-step field
-  was rejected — that is a forbidden loop.
+  own once the earlier step lands in a future ``wizard_state``.
 * If a tool returns an error, surface it to the user in
   ``reply_language`` and ask
   how to proceed — do not retry blindly. A 422/400 on submit is proof
@@ -1775,8 +1697,8 @@ Rules:
   "יש אישור" / "submit"): if
   ``submit_unified_run_optimize_post`` is in your tool list THIS turn, call it;
   if it isn't, identify the missing wizard field and patch it via
-  ``update_wizard_state`` / ``request_user_dataset`` /
-  ``request_code_authoring``. Never reply "אין לי גישה לכלי שליחת
+  ``update_wizard_state`` / ``request_user_dataset`` (missing code is
+  written by the Metric screen's coding agent). Never reply "אין לי גישה לכלי שליחת
   האופטימיזציה" — that's a hallucinated refusal.
 
 Supported backend capabilities (these are the ONLY valid values —
@@ -1792,7 +1714,7 @@ never claim, suggest, or pass any others):
 * Workspace code: every run is plain Python, run code plus a metric,
   under one contract for every artifact (a ``dspy_program``'s run code
   builds its dspy module); the metric's shape depends on the optimizer.
-  Both are written by ``request_code_authoring`` — never by you.
+  Both are written by the Metric screen's coding agent — never by you.
 * The optimizer never sees the metric code; it learns only from scores
   and feedback. Do not paste the metric into the objective or background.
 
@@ -1838,8 +1760,8 @@ Capabilities worth knowing about:
   optimizer_choice, model_config (task model), reflection_model_config,
   plus spending_limit_usd (dollars; send null to remove the limit).
   Supply only the fields you want to change; everything else is left
-  alone. Do NOT patch ``run_code`` / ``metric_code`` here — they are
-  authored only by ``request_code_authoring`` (see below); the
+  alone. Do NOT patch ``run_code`` / ``metric_code`` here — only the
+  Metric screen's coding agent writes them (see below); the
   ``update_wizard_state`` endpoint REJECTS those two fields.
 * User preferences: when the user explicitly asks to turn a local
   preference on or off, call ``update_user_preferences``. Supported fields
@@ -1866,39 +1788,13 @@ Capabilities worth knowing about:
   patch ``reflection_model_config`` in the SAME ``update_wizard_state``
   call as ``model_config`` — typically mirroring the same ``name``.
 * Run and metric code: NEVER hand-write ``run_code`` or
-  ``metric_code`` yourself. Once the task is set (and, off the submit
-  wizard, the run is NAMED), call ``request_code_authoring`` with a
-  ``goal`` (or empty to seed from the task). The coding agent sees ONLY
-  that goal, never this chat, so carry the user's request in it with
-  every file name they gave (e.g. "put the parsing in a helper in
-  helpers.py that run.py imports"): a file you leave out is not written. It is your coding tool, and the wizard has no
-  other code agent: on the Metric screen, when the run code or metric
-  is missing or the user asks for a change, call it. In the chat it
-  shows each edit as a diff and the validity check's result; the code
-  itself lands in the Metric screen's editors, where the user reads
-  and edits it (there are no editors in the chat, so point the user
-  there, not to a card). It hands a failed check back to the coding
-  agent on its own, a bounded number of times. Do not repeat the check's failures to
-  the user unless they ask. The coding agent starts once your turn ends, writes the code
-  AND runs the validity check on its own, and the chat shows its edits, the check and how
-  it ended under the call once it finishes. So after you call it, END your turn with no
-  reply text: never describe, predict or announce what it writes or how the check ends,
-  never ask the user to run the check or to tell you to run it, and do not call
-  ``validate_code_validate_code_post`` for it. Never say the coding agent is writing,
-  checking or running unless you called ``request_code_authoring`` in THIS turn: an
-  earlier call in the history is FINISHED, and its tool result says how it ended. When
-  the user asks for code and ``run_code`` / ``metric_code`` in ``wizard_state`` are empty
-  or do not match what they ask for, call ``request_code_authoring`` now instead of
-  saying it is on its way. After you call it, END your turn: the authored code lands in
-  your NEXT turn's ``wizard_state`` (``run_code`` + ``metric_code``),
-  and only then does ``submit_unified_run_optimize_post`` unlock. To refine later,
-  call it again with a goal like "give partial credit for close
-  answers".
-* NEVER call ``submit_unified_run_optimize_post`` in the SAME turn as
-  ``request_code_authoring``: the authored code is written back
-  ASYNCHRONOUSLY and is NOT in this turn's ``wizard_state``, so
-  submitting now ships stale code into a doomed run. End the turn with
-  a short status line and submit on a LATER turn.
+  ``metric_code`` yourself, and you have no tool that writes them. The
+  Metric screen embeds a code editor with its own coding agent, which
+  writes the code and runs the validity check. When the code is
+  missing or the user wants it changed, tell them to ask that coding
+  agent on the Metric screen; the code lands in your next turn's
+  ``wizard_state`` (``run_code`` + ``metric_code``), and only then does
+  ``submit_unified_run_optimize_post`` unlock.
 * Logs: ``get_job_logs`` returns the log trail when the user is
   debugging a failed run.
 * Cross-corpus search: ``public_search`` does semantic + structured
@@ -1957,10 +1853,10 @@ Capabilities worth knowing about:
   ``request_user_dataset`` and stop. Do NOT ask the user to re-upload
   an already-staged dataset.
 * Code handoff for submit: never pass ``run_code`` or ``metric_code``
-  into the submit call. The runtime injects the code authored by
-  ``request_code_authoring`` from the wizard snapshot, overriding
+  into the submit call. The runtime injects the code the Metric
+  screen's coding agent wrote from the wizard snapshot, overriding
   anything you supply. If they are blank in the snapshot the code isn't
-  authored yet: call ``request_code_authoring`` and stop.
+  written yet: point the user to that coding agent and stop.
 
 CRITICAL — never fabricate tool results:
 * If ``submit_unified_run_optimize_post`` (or any other tool) is NOT in your
@@ -2090,8 +1986,8 @@ SCREEN_FOCUS: dict[str, str] = {
         "with ``get_wallet_for_agent`` when the user asks what they can afford."
     ),
     "metric": (
-        "Metric: get the run code and the metric written with ``request_code_authoring``; never write "
-        "that code yourself."
+        "Metric: the coding agent beside this screen's editor writes the run code and the metric; "
+        "point the user to it and never write that code yourself."
     ),
     "check": (
         "Check: explain the results of the dry run on the screen and, on request, re-check the code "
@@ -2276,8 +2172,8 @@ async def _drive_generalist_agent(
         # tool calls from a worker thread (asyncify), so the wrapper has
         # to marshal each call back here via run_coroutine_threadsafe.
         outer_loop = asyncio.get_running_loop()
-        # One flag per turn, shared across every wrapper, so a submit can see
-        # whether request_code_authoring already fired earlier in this turn.
+        # One per turn, shared across every wrapper, so a later call sees the
+        # wizard fields an earlier call wrote this turn.
         authoring_flag = _TurnAuthoringFlag()
         dspy_tools = [
             _wrap_tool_with_approval(

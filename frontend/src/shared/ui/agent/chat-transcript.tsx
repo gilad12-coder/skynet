@@ -69,7 +69,7 @@ export function ChatTranscript({
         if (currentUser) {
           result.push({ key: `t-${seq++}`, user: currentUser, agent: null });
         }
-        currentUser = { msg: m, index: idx };
+        currentUser = m.hidden ? null : { msg: m, index: idx };
       } else {
         result.push({ key: `t-${seq++}`, user: currentUser, agent: m });
         currentUser = null;

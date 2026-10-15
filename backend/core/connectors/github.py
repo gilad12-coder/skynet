@@ -33,6 +33,7 @@ TREE_TTL_SECONDS = 300.0
 BRANCH_PAGE_SIZE = 100
 BRANCH_LIMIT = 300
 REPO_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
+FILE_PATH_MAX = 1024
 
 _trees: dict[tuple[str, str, str], tuple[float, list[str] | None]] = {}
 _tree_locks: dict[tuple[str, str, str], threading.Lock] = {}
@@ -386,7 +387,7 @@ def file_at(token: str | None, full_name: str, ref: str, path: str, max_bytes: i
         token: Bearer token with read access to the repository; ``None`` for
             an anonymous read of a public repository.
         full_name: The repository as ``owner/name``.
-        ref: Commit id, branch or tag.
+        ref: Commit id, branch or tag; empty for the default branch.
         path: File path inside the repository.
         max_bytes: Files larger than this are reported but not read.
 
@@ -405,7 +406,7 @@ def file_at(token: str | None, full_name: str, ref: str, path: str, max_bytes: i
             _contents_url(owner, name, path.strip("/")),
             provider=PROVIDER,
             headers=_headers(token),
-            params={"ref": ref},
+            params={"ref": ref} if ref else None,
         )
     except DomainError as exc:
         if exc.code != "connectors.not_found":
@@ -423,6 +424,70 @@ def file_at(token: str | None, full_name: str, ref: str, path: str, max_bytes: i
     if len(content) > max_bytes:
         return {"content": None, "size": len(content), "missing": False, "too_large": True}
     return {"content": content, "size": len(content), "missing": False, "too_large": False}
+
+
+def clean_file_path(raw: str) -> str:
+    """Normalize a repository file path, refusing ones that leave the repository or enter ``.git``.
+
+    Args:
+        raw: The path the caller asked for.
+
+    Returns:
+        The ``/``-joined path without a trailing slash.
+
+    Raises:
+        DomainError: 400 ``connectors.invalid_ref`` when the path is empty,
+            too long, absolute, walks out with ``..`` or points into ``.git``.
+    """
+    path = raw.strip().replace("\\", "/").rstrip("/")
+    if not path or len(path) > FILE_PATH_MAX or path.startswith("/") or (len(path) > 1 and path[1] == ":"):
+        raise DomainError("connectors.invalid_ref", status=400)
+    parts = path.split("/")
+    if any(part in ("", ".", "..") for part in parts) or parts[0].lower() == ".git":
+        raise DomainError("connectors.invalid_ref", status=400)
+    return path
+
+
+def read_repo_file(token: str | None, full_name: str, ref: str, path: str, max_bytes: int) -> dict[str, Any]:
+    """Read one repository file for display, decoding text and flagging everything else.
+
+    Args:
+        token: Bearer token with read access to the repository; ``None`` for
+            an anonymous read of a public repository.
+        full_name: The repository as ``owner/name``.
+        ref: Commit id or branch; empty for the default branch.
+        path: File path inside the repository.
+        max_bytes: Files larger than this are reported but not read.
+
+    Returns:
+        ``{"path", "text": str | None, "binary", "too_large", "missing"}``;
+        ``binary`` marks content holding a NUL byte or invalid UTF-8, and
+        ``text`` is set only for a readable text file.
+
+    Raises:
+        DomainError: 400 for a bad path or repository name; GitHub's refusal
+            when the file cannot be read.
+    """
+    clean = clean_file_path(path)
+    fetched = file_at(token, full_name, ref.strip(), clean, max_bytes)
+    content: bytes | None = fetched["content"]
+    text = None
+    binary = False
+    if content is not None:
+        if b"\x00" in content:
+            binary = True
+        else:
+            try:
+                text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                binary = True
+    return {
+        "path": clean,
+        "text": text,
+        "binary": binary,
+        "too_large": fetched["too_large"],
+        "missing": fetched["missing"],
+    }
 
 
 def _contents_url(owner: str, repo: str, path: str) -> str:

@@ -11,7 +11,6 @@ Hidden from the public Scalar reference — wizard-internal flow.
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, cast
@@ -77,16 +76,6 @@ class ConversationMessage(BaseModel):
     # Token usage, cost and timing of the turn, from router_metadata.
     stats: dict[str, Any] | None = None
     created_at: datetime
-
-
-# The coding tool runs after the turn that called it is persisted, so its
-# finished state (edits, check verdict) is written onto that call afterwards;
-# a reloaded conversation then renders the same rows.
-class ToolCallOutcomeRequest(BaseModel):
-    outcome: dict[str, Any] = Field(..., description="The tool's finished state, stored as payload.outcome.")
-
-
-MAX_TOOL_OUTCOME_CHARS = 200_000
 
 
 class ConversationPatchRequest(BaseModel):
@@ -319,63 +308,6 @@ def create_agent_history_router(*, job_store) -> APIRouter:
             session.commit()
             session.refresh(row)
             return _row_to_summary(row, None)
-
-    @router.put(
-        "/agent/conversations/{conversation_id}/tool-calls/{tool_call_id}/outcome",
-        status_code=204,
-        summary="Record a tool call's finished state on its persisted turn",
-    )
-    def put_tool_call_outcome(
-        conversation_id: str,
-        tool_call_id: str,
-        req: ToolCallOutcomeRequest,
-        user: AuthenticatedUserDep,
-    ) -> None:
-        """Store ``outcome`` under the tool call's ``payload.outcome``.
-
-        Args:
-            conversation_id: UUID of the conversation holding the call.
-            tool_call_id: The call's id, as its ``tool_start`` event named it.
-            req: The finished state to store.
-            user: Authenticated caller; must own the conversation.
-
-        Raises:
-            DomainError: 404 when the conversation or call is unknown, 403
-                when the caller does not own it, 413 when the outcome is too big.
-        """
-        if len(json.dumps(req.outcome)) > MAX_TOOL_OUTCOME_CHARS:
-            raise DomainError("agent.conversation.tool_outcome_too_large", status=413)
-        with Session(job_store.engine) as session:
-            row = session.get(AgentConversationModel, conversation_id)
-            if row is None:
-                raise DomainError("agent.conversation.not_found", status=404)
-            if row.username != user.username:
-                raise DomainError("agent.conversation.forbidden", status=403)
-            msgs = (
-                session.query(AgentMessageModel)
-                .filter(
-                    AgentMessageModel.conversation_id == conversation_id,
-                    AgentMessageModel.role == "assistant",
-                )
-                .order_by(AgentMessageModel.id.desc())
-                .all()
-            )
-            for m in msgs:
-                calls = m.tool_calls
-                if not isinstance(calls, list):
-                    continue
-                if not any(isinstance(c, dict) and c.get("id") == tool_call_id for c in calls):
-                    continue
-                # A fresh list, so the JSON column registers the change.
-                m.tool_calls = [
-                    {**c, "payload": {**(c.get("payload") or {}), "outcome": req.outcome}}
-                    if isinstance(c, dict) and c.get("id") == tool_call_id
-                    else c
-                    for c in calls
-                ]
-                session.commit()
-                return
-            raise DomainError("agent.conversation.tool_call_not_found", status=404)
 
     @router.delete(
         "/agent/conversations/{conversation_id}",

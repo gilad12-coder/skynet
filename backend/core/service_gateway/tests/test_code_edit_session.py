@@ -14,6 +14,7 @@ import asyncio
 
 import pytest
 
+from core.models.unified import UnifiedAuthoringContext
 from core.service_gateway.agents import code as code_module
 from core.service_gateway.agents.code import (
     _CodeEditSession,
@@ -437,6 +438,77 @@ def test_delete_file_removes_extra_files_but_never_run_or_metric(
     assert "no file" in ws_session.delete_file("x", "ghost.py")
 
 
+def test_open_file_echoes_the_path_and_line(ws_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """open_file opens one row that ends ok with the file and its line, and changes nothing."""
+    before = (ws_session.run_code, ws_session.metric_code, ws_session.files)
+    assert ws_session.open_file("metric.py", 1) == "Opened metric.py:1."
+    assert [e["event"] for e in u_events] == ["tool_start", "tool_end"]
+    start, end = (e["data"] for e in u_events)
+    assert start["tool"] == end["tool"] == "open_file"
+    assert start["path"] == end["path"] == "metric.py"
+    assert end["id"] == start["id"]
+    assert end["status"] == "ok"
+    assert end["line"] == 1
+    assert (ws_session.run_code, ws_session.metric_code, ws_session.files) == before
+
+
+def test_open_file_rejects_a_file_not_in_the_workspace(ws_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """An unknown path closes the row as failed and lists the files that exist."""
+    observation = ws_session.open_file("ghost.py", 3)
+    assert "no file ghost.py" in observation
+    assert "notes.txt" in observation
+    assert "run.py" in observation
+    end = u_events[-1]["data"]
+    assert end["status"] == "error"
+    assert "line" not in end
+
+
+@pytest.mark.parametrize(
+    ("line", "expected", "observation"),
+    [(0, None, "Opened notes.txt."), (-4, None, "Opened notes.txt."), (99, 1, "Opened notes.txt:1.")],
+)
+def test_open_file_line_is_optional_and_clamped_to_the_file(
+    ws_session: _UnifiedEditSession, u_events: list[dict], line: int, expected: int | None, observation: str
+) -> None:
+    """No line (or a non-positive one) opens the top; a line past the end lands on the last line."""
+    assert ws_session.open_file(" notes.txt ", line) == observation
+    end = u_events[-1]["data"]
+    assert end["status"] == "ok"
+    assert end.get("line") == expected
+
+
+@pytest.fixture
+def repo_session(u_events: list[dict]) -> _UnifiedEditSession:
+    """Build a unified session for a repository run with two repository files."""
+    run_validator, metric_validator = _unified_validators(_unified())
+    return _UnifiedEditSession(
+        run_code=_RUN,
+        metric_code=_SCORE,
+        emit=u_events.append,
+        run_validator=run_validator,
+        metric_validator=metric_validator,
+        repo_files=["src/app.py", "README.md"],
+    )
+
+
+def test_open_file_opens_a_repository_file(repo_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """A repository path opens ok with the line asked for, which the editor clamps."""
+    assert repo_session.open_file("src/app.py", 40) == "Opened src/app.py:40."
+    end = u_events[-1]["data"]
+    assert end["status"] == "ok"
+    assert end["path"] == "src/app.py"
+    assert end["line"] == 40
+
+
+def test_open_file_rejects_a_path_in_neither_the_workspace_nor_the_repository(
+    repo_session: _UnifiedEditSession, u_events: list[dict]
+) -> None:
+    """A path the repository does not list is refused with the workspace's files."""
+    observation = repo_session.open_file("src/ghost.py", 2)
+    assert observation == "Open rejected — there is no file src/ghost.py. Files: metric.py, run.py."
+    assert u_events[-1]["data"]["status"] == "error"
+
+
 def test_verify_code_reports_each_file_and_opens_a_fix(ws_session: _UnifiedEditSession, u_events: list[dict]) -> None:
     """A failed check names the file, emits per-file results and allows one more write of it."""
     ws_session.write_file("add helper", "helpers.py", "x = helper\n")
@@ -561,9 +633,151 @@ def test_a_turn_that_edits_after_its_check_ends_with_a_check(monkeypatch) -> Non
         return result, events
 
     result, events = asyncio.run(turn())
-    order = [
-        e["event"] for e in events if e["event"] in {"file_replace", "verify_result", "signature_replace"}
-    ]
+    order = [e["event"] for e in events if e["event"] in {"file_replace", "verify_result", "signature_replace"}]
     assert order == ["file_replace", "verify_result", "signature_replace", "verify_result"]
     assert result["verification"]["ok"] is True
     assert "from helpers import helper" in result["signature_code"]
+
+
+_REPO_SCORE = (
+    "import subprocess\n\n\n"
+    "def score(repo_path, case=None):\n"
+    "    result = subprocess.run(['pytest', '-q'], cwd=repo_path, capture_output=True, text=True, timeout=600)\n"
+    "    return float(result.returncode == 0), {'feedback': result.stdout[-2000:]}\n"
+)
+
+
+def _repo_unified() -> dict:
+    """Build a repository run's authoring context as the router hands it over."""
+    return _unified(target="repo", data_mode="single", input_fields=[], expected_field=None, metric_has_model=True)
+
+
+def test_authoring_context_defaults_to_an_artifact_run() -> None:
+    """A context that names no target is an artifact run, so existing callers keep their contract."""
+    context = UnifiedAuthoringContext.model_validate({k: v for k, v in _unified().items() if k != "metric_has_model"})
+    assert context.target == "artifact"
+    assert UnifiedAuthoringContext.model_validate(_repo_unified()).target == "repo"
+
+
+def test_repo_contracts_describe_the_scorer_offline_and_without_run_code() -> None:
+    """A repository run gets no run code and an offline repository scorer, even with a metric model."""
+    run_contract, metric_contract = _unified_contracts(_repo_unified())
+    assert "NO run code" in run_contract
+    assert "score(repo_path, case=None)" in metric_contract
+    assert "subprocess" in metric_contract
+    assert "timeout" in metric_contract
+    assert "repo_files" in metric_contract
+    assert "Never raise" in metric_contract
+    assert "never import skynet" in metric_contract
+    assert "from skynet import llm` calls it" not in metric_contract
+    assert _unified_contracts(_unified(target="artifact")) == _unified_contracts(_unified())
+
+
+@pytest.mark.parametrize(
+    ("code", "ok"),
+    [
+        ("def score(repo_path):\n    return 1.0, {'feedback': 'ok'}\n", True),
+        ("def score(repo_path, case=None):\n    return 1.0, {'feedback': 'ok'}\n", True),
+        ("def score(repo_path, case):\n    return 1.0, {'feedback': 'ok'}\n", False),
+        ("def score():\n    return 1.0, {'feedback': 'ok'}\n", False),
+        ("def score(repo_path, case=None, extra=None):\n    return 1.0, {}\n", False),
+        ("def score(*args):\n    return 1.0, {}\n", False),
+        (_SCORE, False),
+        ("from skynet import llm\n\ndef score(repo_path):\n    return 1.0, {'feedback': llm('x')}\n", False),
+        ("def run(repo_path):\n    return 1.0\n", False),
+    ],
+)
+def test_repo_metric_validator_accepts_only_the_repository_signature(code: str, ok: bool) -> None:
+    """The repository scorer takes repo_path and an optional case, and never imports skynet."""
+    run_validator, metric_validator = _unified_validators(_repo_unified())
+    assert (metric_validator(code) == "") is ok
+    assert run_validator("") == ""
+
+
+def test_repo_verifier_checks_only_metric_py() -> None:
+    """The repository check reports metric.py alone, its contract and its lint."""
+    verify = code_module._unified_verifier(_repo_unified())
+    assert verify("", _REPO_SCORE, {}) == [{"path": "metric.py", "ok": True, "errors": [], "warnings": []}]
+    [wrong] = verify("", _SCORE, {})
+    assert wrong["path"] == "metric.py"
+    assert not wrong["ok"]
+    [lint] = verify("", "def score(repo_path):\n    return missing, {}\n", {})
+    assert any("F821" in error for error in lint["errors"])
+
+
+def test_repo_runs_get_only_the_scorer_tools(repo_session: _UnifiedEditSession) -> None:
+    """A repository run cannot write run code or other files; an artifact run keeps every tool."""
+    repo_tools = [t.__name__ for t in code_module._unified_tools(repo_session, repo=True)]
+    assert repo_tools == ["ask_user", "set_brief", "edit_metric", "verify_code", "open_file"]
+    artifact_tools = [t.__name__ for t in code_module._unified_tools(repo_session, repo=False)]
+    assert artifact_tools == [
+        "ask_user",
+        "set_brief",
+        "edit_run",
+        "edit_metric",
+        "write_file",
+        "delete_file",
+        "verify_code",
+        "open_file",
+    ]
+
+
+def test_a_repo_turn_uses_the_repository_assistant(monkeypatch) -> None:
+    """A repository turn runs the repository prompt with the scorer tools, and writes only metric.py."""
+    seen: dict = {}
+
+    class _Recording(_ScriptedReAct):
+        """Keep the signature the turn was built with."""
+
+        def __init__(self, signature: object, *, tools: list, max_iters: int) -> None:
+            """Record the signature and the tools.
+
+            Args:
+                signature: The turn's signature.
+                tools: The session's tool methods.
+                max_iters: Unused.
+            """
+            super().__init__(signature, tools=tools, max_iters=max_iters)
+            seen["signature"] = signature
+            seen["tools"] = list(self.tools)
+
+    monkeypatch.setattr(code_module, "ActingReActV2", _Recording)
+    monkeypatch.setattr(code_module, "ReactReplyStream", _NoReplyStream)
+
+    def streamify(react: _Recording, **kwargs: object):
+        """Script a turn that writes the scorer."""
+
+        async def program(**inputs: object):
+            """Write metric.py, then finish."""
+            seen["inputs"] = inputs
+            react.tools["edit_metric"]("run the tests", _REPO_SCORE)
+            yield code_module.dspy.Prediction(reply="Done.", termination_reason="submit")
+
+        return program
+
+    monkeypatch.setattr(code_module.dspy, "streamify", streamify)
+
+    async def turn() -> dict:
+        """Run the turn."""
+        return await code_module._run_unified_agent(
+            lm=code_module.dspy.LM("openai/gpt-4o-mini"),
+            unified={**_repo_unified(), "repo_files": ["tests/test_app.py"]},
+            user_message="Score it by its tests.",
+            chat_history_json="[]",
+            prior_run="",
+            prior_metric="",
+            prior_validation="",
+            initial_run="",
+            initial_metric="",
+            reply_language="English",
+            queue=asyncio.Queue(),
+        )
+
+    result = asyncio.run(turn())
+    assert seen["signature"] is code_module.RepoAssistant
+    assert seen["tools"] == ["ask_user", "set_brief", "edit_metric", "verify_code", "open_file"]
+    assert seen["inputs"]["repo_files"] == "tests/test_app.py"
+    assert result["signature_code"] == ""
+    assert result["metric_code"] == _REPO_SCORE.rstrip()
+    assert [v["path"] for v in result["verification"]["files"]] == ["metric.py"]
+    assert result["verification"]["ok"] is True

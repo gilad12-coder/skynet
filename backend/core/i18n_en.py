@@ -236,9 +236,8 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "webauthn.invalid_credential": "This passkey couldn't be verified.",
     "webauthn.not_found": "Passkey not found.",
     "wizard.code_via_authoring_only": (
-        "{field} cannot be set through update_wizard_state. Signature and "
-        "Metric code are authored only via request_code_authoring, which "
-        "validates the result before it reaches the wizard."
+        "{field} cannot be set through update_wizard_state. Run and metric "
+        "code are written only by the coding agent in the wizard's Metric step."
     ),
     "wizard.optimizer_unknown": (
         "'{name}' is not a recognized optimizer. Call get_registry_snapshot for "

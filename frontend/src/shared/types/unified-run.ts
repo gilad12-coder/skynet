@@ -313,4 +313,8 @@ export interface UnifiedAuthoringContext {
   optimizer: OptimizerChoice;
   metric_has_model?: boolean;
   focus?: "run" | "metric";
+  /** "repo" for a repository run: no run code, the agent writes only the repository scorer. */
+  target?: "artifact" | "repo";
+  /** A repository run's file paths, which the agent may open read-only. */
+  repo_files?: string[];
 }

@@ -179,30 +179,6 @@ export async function patchConversation(
   }
 }
 
-/**
- * Store a tool's finished state on its call in the persisted turn, so a
- * reopened conversation renders the same rows. Best-effort like the rest.
- */
-export async function putToolCallOutcome(
-  conversationId: string,
-  toolCallId: string,
-  outcome: object,
-): Promise<boolean> {
-  try {
-    const res = await fetchWithAuthRetry(
-      `${apiBase()}/agent/conversations/${encodeURIComponent(conversationId)}/tool-calls/${encodeURIComponent(toolCallId)}/outcome`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ outcome }),
-      },
-    );
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
 export async function deleteConversation(conversationId: string): Promise<boolean> {
   try {
     const res = await fetchWithAuthRetry(
