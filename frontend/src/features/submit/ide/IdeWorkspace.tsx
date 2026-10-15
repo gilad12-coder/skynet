@@ -62,6 +62,7 @@ function CheckResults({
   failed,
   emptyFile,
   guided,
+  stale,
   onOpen,
 }: {
   results: FileCheck[];
@@ -69,6 +70,8 @@ function CheckResults({
   /** The entry file that was empty, so the check was not sent. */
   emptyFile: string | null;
   guided: boolean;
+  /** The results predate the files on screen; said beside them. */
+  stale: boolean;
   onOpen: (path: string) => void;
 }) {
   if (emptyFile) {
@@ -85,36 +88,79 @@ function CheckResults({
       </p>
     );
   }
+  // A clean check is one line, so its arrival barely moves the editor.
+  const clean = results.every(({ console: result }) => result.errors.length === 0);
+  const staleNote = stale && (
+    <p className={cn("px-4 text-xs text-muted-foreground", clean ? "py-2" : "pt-2")}>
+      {v2Msg("submit.v2.metric.check.stale", guided)}
+    </p>
+  );
+  if (clean) {
+    return (
+      <div className="flex flex-wrap items-center text-xs">
+        <ul className="flex flex-wrap items-center">
+          {results.map(({ path, console: result }) => (
+            <li key={path} className="px-4 py-2">
+              <button
+                type="button"
+                onClick={() => onOpen(path)}
+                className="flex items-center gap-2 font-mono hover:underline"
+                dir="ltr"
+              >
+                {result.valid ? (
+                  <CheckCircle className="size-4 text-[var(--success)]" aria-hidden />
+                ) : (
+                  <XCircle className="size-4 text-destructive" aria-hidden />
+                )}
+                {path}
+                <span className="font-sans text-muted-foreground">
+                  {result.valid
+                    ? v2Msg("submit.v2.ide.check.passed", guided)
+                    : v2Msg("submit.v2.metric.files.errors", guided, {
+                        count: result.errors.length,
+                      })}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        {staleNote}
+      </div>
+    );
+  }
   return (
-    <ul className="max-h-48 divide-y divide-border/40 overflow-y-auto text-xs">
-      {results.map(({ path, console: result }) => (
-        <li key={path} className="px-4 py-2">
-          <button
-            type="button"
-            onClick={() => onOpen(path)}
-            className="flex items-center gap-2 font-mono hover:underline"
-            dir="ltr"
-          >
-            {result.valid ? (
-              <CheckCircle className="size-4 text-[var(--success)]" aria-hidden />
-            ) : (
-              <XCircle className="size-4 text-destructive" aria-hidden />
+    <>
+      {staleNote}
+      <ul className="max-h-48 divide-y divide-border/40 overflow-y-auto text-xs">
+        {results.map(({ path, console: result }) => (
+          <li key={path} className="px-4 py-2">
+            <button
+              type="button"
+              onClick={() => onOpen(path)}
+              className="flex items-center gap-2 font-mono hover:underline"
+              dir="ltr"
+            >
+              {result.valid ? (
+                <CheckCircle className="size-4 text-[var(--success)]" aria-hidden />
+              ) : (
+                <XCircle className="size-4 text-destructive" aria-hidden />
+              )}
+              {path}
+              <span className="font-sans text-muted-foreground">
+                {result.valid
+                  ? v2Msg("submit.v2.ide.check.passed", guided)
+                  : v2Msg("submit.v2.metric.files.errors", guided, { count: result.errors.length })}
+              </span>
+            </button>
+            {result.errors.length > 0 && (
+              <pre dir="ltr" className="mt-1 whitespace-pre-wrap ps-6 font-mono text-destructive">
+                {result.errors.join("\n\n")}
+              </pre>
             )}
-            {path}
-            <span className="font-sans text-muted-foreground">
-              {result.valid
-                ? v2Msg("submit.v2.ide.check.passed", guided)
-                : v2Msg("submit.v2.metric.files.errors", guided, { count: result.errors.length })}
-            </span>
-          </button>
-          {result.errors.length > 0 && (
-            <pre dir="ltr" className="mt-1 whitespace-pre-wrap ps-6 font-mono text-destructive">
-              {result.errors.join("\n\n")}
-            </pre>
-          )}
-        </li>
-      ))}
-    </ul>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -409,16 +455,12 @@ export function IdeWorkspace({
             resultsStale && checkIssue === null && "opacity-60",
           )}
         >
-          {resultsStale && checkIssue === null && (
-            <p className="px-4 pt-2 text-xs text-muted-foreground">
-              {v2Msg("submit.v2.metric.check.stale", guided)}
-            </p>
-          )}
           <CheckResults
             results={results}
             failed={checkIssue?.failed ?? false}
             emptyFile={checkIssue?.emptyFile ?? null}
             guided={guided}
+            stale={resultsStale && checkIssue === null}
             onOpen={(path) => void workbench?.openFile(path)}
           />
         </div>

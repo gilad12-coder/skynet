@@ -31,3 +31,22 @@ export function openTarget(
   if (line < 1) return { path: request.path };
   return { path: request.path, line: Math.min(line, text.split("\n").length) };
 }
+
+/**
+ * The first line where a file's text changed, for opening a file the agent wrote.
+ *
+ * Args:
+ *   before: The text before the change ("" for a new file).
+ *   after: The text after it.
+ *
+ * Returns:
+ *   The 1-based first differing line, or undefined when nothing changed.
+ */
+export function firstChangedLine(before: string, after: string): number | undefined {
+  if (before === after) return undefined;
+  const a = before.split("\n");
+  const b = after.split("\n");
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return Math.min(i, b.length - 1) + 1;
+}

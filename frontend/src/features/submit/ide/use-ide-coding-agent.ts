@@ -7,6 +7,7 @@ import type { ContractCheckResponse, UnifiedAuthoringContext } from "@/shared/ty
 import { v2Msg } from "../components/v2/ArtifactConfirmCard";
 import { workspaceKey, type AgentVerdict } from "./agent-verdict";
 import { kickoffFor } from "./kickoff";
+import { firstChangedLine } from "./open-file";
 
 const NO_COLUMNS: Record<string, never> = {};
 // The wizard checks the workspace with its own Check; the agent checks inside its turn with verify_code.
@@ -78,18 +79,30 @@ export function useIdeCodingAgent(options: {
   React.useLayoutEffect(() => {
     sinks.current = options;
   });
+  // The turn's last written file, and whether it opened one itself.
+  const wrote = React.useRef<string | null>(null);
+  const opened = React.useRef(false);
   const writeRun = React.useCallback((code: string) => {
+    wrote.current = "run.py";
     setAgentRun(code);
     sinks.current.setRunCode(code);
   }, []);
   const writeMetric = React.useCallback((code: string) => {
+    wrote.current = "metric.py";
     setAgentMetric(code);
     sinks.current.setMetricCode(code);
   }, []);
   const writeFile = React.useCallback(
-    (path: string, text: string | null) => sinks.current.setFile(path, text),
+    (path: string, text: string | null) => {
+      wrote.current = text === null ? null : path;
+      sinks.current.setFile(path, text);
+    },
     [],
   );
+  const openFile = React.useCallback((path: string, line?: number) => {
+    opened.current = true;
+    sinks.current.openFile(path, line);
+  }, []);
 
   const agent = useCodeAgent({
     columnRoles: NO_COLUMNS,
@@ -115,7 +128,7 @@ export function useIdeCodingAgent(options: {
     unified: context,
     files: files as Record<string, string>,
     setFile: writeFile,
-    onOpenFile: options.openFile,
+    onOpenFile: openFile,
     model,
     reasoningEffort: effort,
   });
@@ -169,11 +182,24 @@ export function useIdeCodingAgent(options: {
   // the toolbar and into the kickoff rule; a sandboxed Check (about a minute)
   // runs only when the turn changed files after verifying, or never verified.
   const wasBusy = React.useRef(false);
+  const before = React.useRef<Readonly<Record<string, string>>>({});
   React.useEffect(() => {
     const started = !wasBusy.current && busy;
     const finished = wasBusy.current && agent.status === "done";
     wasBusy.current = busy;
-    if (started) verified.current = null;
+    const texts: Record<string, string> = { ...files, "run.py": runCode, "metric.py": metricCode };
+    if (started) {
+      verified.current = null;
+      wrote.current = null;
+      opened.current = false;
+      before.current = texts;
+    }
+    // Models often skip open_file after writing, so the turn's last written
+    // file opens on its first changed line, the way the agent was told to.
+    if (finished && !opened.current && wrote.current) {
+      const path = wrote.current;
+      sinks.current.openFile(path, firstChangedLine(before.current[path] ?? "", texts[path] ?? ""));
+    }
     if (!finished || !context || !runCode.trim() || !metricCode.trim()) return;
     const seen = verified.current;
     if (seen && seen.key === key) {
@@ -181,7 +207,7 @@ export function useIdeCodingAgent(options: {
       return;
     }
     void check();
-  }, [busy, agent.status, context, runCode, metricCode, key, lastCheck, check]);
+  }, [busy, agent.status, context, runCode, metricCode, files, key, lastCheck, check]);
 
   return { agent, model, setModel, effort, setEffort, verdict };
 }
