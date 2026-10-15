@@ -16,15 +16,15 @@ import {
 } from "./collapse-rules";
 
 /**
- * The top edge of the nearest scrolling ancestor, so scroll-back works inside
- * a chat pane as well as on the page.
+ * The nearest scrolling ancestor, so scroll-back works inside a chat pane as
+ * well as on the page. `null` means the page itself scrolls.
  */
-function visibleTop(el: HTMLElement): number {
+function scrollPane(el: HTMLElement): HTMLElement | null {
   for (let node = el.parentElement; node; node = node.parentElement) {
     const { overflowY } = getComputedStyle(node);
-    if (overflowY === "auto" || overflowY === "scroll") return node.getBoundingClientRect().top;
+    if (overflowY === "auto" || overflowY === "scroll") return node;
   }
-  return 0;
+  return null;
 }
 
 interface CollapsibleMessageProps {
@@ -78,9 +78,14 @@ export function CollapsibleMessage({
     const root = rootRef.current;
     if (!root || !scrollBackRef.current) return;
     scrollBackRef.current = false;
-    if (needsScrollBack(root.getBoundingClientRect().top, visibleTop(root))) {
-      root.scrollIntoView({ block: "start", behavior: "auto" });
-    }
+    const pane = scrollPane(root);
+    const top = root.getBoundingClientRect().top;
+    const paneTop = pane ? pane.getBoundingClientRect().top : 0;
+    if (!needsScrollBack(top, paneTop)) return;
+    // scrollIntoView would also scroll overflow-hidden ancestors (the task
+    // interview's shell), hiding its header with no way to scroll it back.
+    if (pane) pane.scrollTop += top - paneTop;
+    else window.scrollBy(0, top);
   }, []);
 
   const toggle = () => {
