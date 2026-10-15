@@ -30,7 +30,7 @@ import { contractConsole, type ContractConsole } from "../lib/contract-console";
 import { blankEntryFile, diffWorkspace, workspaceTexts } from "../lib/ide-workspace";
 import { METRIC_FILE, RUN_FILE } from "../lib/wizard-v2";
 import { v2Msg } from "../components/v2/ArtifactConfirmCard";
-import { openTarget, type IdeOpenRequest } from "./open-file";
+import { pendingOpens, type IdeOpenRequest } from "./open-file";
 import { park, unpark } from "./park";
 import type { RepoSource } from "./repo-files";
 import { guardClippingAncestors } from "./scroll-guard";
@@ -182,7 +182,7 @@ export function IdeWorkspace({
   agentResults,
   resultsStale,
   repo,
-  openRequest,
+  openRequests,
   strip,
   sidePanel,
   guided,
@@ -202,8 +202,8 @@ export function IdeWorkspace({
   resultsStale: boolean;
   /** A repository run's checkout, shown read-only in the explorer. */
   repo: RepoSource | null;
-  /** The file the coding agent (or its transcript) last asked to show; a new request opens it again. */
-  openRequest: IdeOpenRequest | null;
+  /** Every file the coding agent (or its transcript) asked to show, oldest first; each new one opens. */
+  openRequests: readonly IdeOpenRequest[];
   /** Shown above the editor (the metric model row). */
   strip?: ReactNode;
   /** The end-side region: the coding agent's chat. */
@@ -314,11 +314,19 @@ export function IdeWorkspace({
 
   // After the load above, so a file the agent wrote in the same turn is
   // already in the IDE; the keyboard stays in the agent's composer.
+  // One after another, so the last file asked for ends up in front.
+  const opened = useRef(0);
+  const opening = useRef(Promise.resolve());
   useEffect(() => {
-    if (!workbench || !openRequest) return;
-    const target = openTarget(openRequest, latest.current);
-    if (target) void workbench.openFile(target.path, target.line, true);
-  }, [workbench, openRequest]);
+    if (!workbench) return;
+    const targets = pendingOpens(openRequests, opened.current, latest.current);
+    opened.current = openRequests.length;
+    for (const { path, line } of targets) {
+      opening.current = opening.current
+        .then(() => workbench.openFile(path, line, true))
+        .catch((error: unknown) => console.error("IDE failed to open a file", error));
+    }
+  }, [workbench, openRequests]);
   useEffect(() => () => workbench?.setRepo(null), [workbench]);
 
   const toggleFullScreen = useCallback(async () => {

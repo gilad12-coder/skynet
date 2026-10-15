@@ -1701,3 +1701,14 @@ table {
 [data-ide-host] .part.sidebar:focus-within .composite.title .title-actions {
   display: block;
 }
+/* On hover the actions take ~14 px more than the title leaves, so tighten
+   the header's left padding and the icons' padding to keep "WORKSPACE" whole. */
+[data-ide-host] .part.sidebar > .composite.title {
+  padding-left: 12px;
+}
+[data-ide-host] .part.sidebar > .composite.title .title-label {
+  flex-shrink: 0;
+}
+[data-ide-host] .part.sidebar > .composite.title .title-actions .action-label {
+  padding: 2px;
+}

@@ -132,9 +132,11 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   // against; its scorer is written by hand.
   const agentContext = repo || inputsInferring ? null : authoringContext;
   const onScreen = state.step === "metric" && page === 0;
-  const [openRequest, setOpenRequest] = React.useState<IdeOpenRequest | null>(null);
+  // Queued, not replaced: open_file calls batched into one render each open a tab.
+  const [openRequests, setOpenRequests] = React.useState<readonly IdeOpenRequest[]>([]);
   const openFile = React.useCallback(
-    (path: string, line?: number) => setOpenRequest(line ? { path, line } : { path }),
+    (path: string, line?: number) =>
+      setOpenRequests((prev) => [...prev, line ? { path, line } : { path }]),
     [],
   );
   const coding = useIdeCodingAgent({
@@ -206,7 +208,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           agentResults={repo ? null : agentResults}
           resultsStale={!repo && resultsStale}
           repo={repoFiles}
-          openRequest={openRequest}
+          openRequests={openRequests}
           guided={guided}
           strip={
             metricUsesModel ? (

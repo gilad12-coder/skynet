@@ -4,7 +4,7 @@
  * workspace opens it once the files it holds are current.
  */
 
-/** One request to open a file; each request is a new object, so the same file can be asked for again. */
+/** One request to open a file; each is queued, so the same file can be asked for again. */
 export interface IdeOpenRequest {
   path: string;
   /** 1-based; absent opens the file where it was. */
@@ -30,6 +30,27 @@ export function openTarget(
   const line = request.line !== undefined && Number.isFinite(request.line) ? Math.floor(request.line) : 0;
   if (line < 1) return { path: request.path };
   return { path: request.path, line: Math.min(line, text.split("\n").length) };
+}
+
+/**
+ * The queued requests not opened yet, resolved against the workspace, in the
+ * order they were made. Two open_file calls in one stream chunk reach the
+ * workspace in one render, so each must be kept, not just the last.
+ *
+ * Args:
+ *   requests: Every request made so far, oldest first.
+ *   handled: How many of them were already opened.
+ *   texts: Every workspace file, path to text.
+ *
+ * Returns:
+ *   The files to open now, in order; the last one ends up in front.
+ */
+export function pendingOpens(
+  requests: readonly IdeOpenRequest[],
+  handled: number,
+  texts: Readonly<Record<string, string>>,
+): IdeOpenRequest[] {
+  return requests.slice(handled).flatMap((request) => openTarget(request, texts) ?? []);
 }
 
 /**
