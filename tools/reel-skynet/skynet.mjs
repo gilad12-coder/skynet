@@ -1,0 +1,142 @@
+// Skynet helpers for reel flows (see ./SKILL.md). Each takes the reel `page`.
+import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
+
+export const TICKETS_CSV = fileURLToPath(new URL("./fixtures/tickets.csv", import.meta.url));
+
+const WORKBENCH = ".monaco-workbench";
+
+export const previewUrl = (pr) => `https://frontend-skynet-pr-${pr}.up.railway.app`;
+
+/** The backend that serves the frontend `origin`: Railway preview or local dev. */
+function apiFor(origin) {
+  return origin.includes("frontend-skynet-") ? origin.replace("frontend-skynet-", "backend-skynet-") : "http://localhost:8000";
+}
+
+function origin(page) {
+  const url = page.url();
+  if (!url.startsWith("http")) throw new Error("navigate to the app first, e.g. startReel({ url: previewUrl(715) + '/login' })");
+  return new URL(url).origin;
+}
+
+/**
+ * Wait until the latest backend, worker and frontend deploys of PR `pr` are SUCCESS.
+ * Read-only (railway deployment list). Returns { service: commitSha }.
+ */
+export async function waitForPreview(pr, { timeoutMin = 20 } = {}) {
+  const until = Date.now() + timeoutMin * 60_000;
+  for (;;) {
+    const shas = {};
+    const pending = [];
+    for (const svc of ["backend", "worker", "frontend"]) {
+      const out = execFileSync("railway", ["deployment", "list", "-e", `skynet-pr-${pr}`, "-s", svc, "--json", "--limit", "1"]);
+      const [latest] = JSON.parse(String(out));
+      if (!latest) throw new Error(`no ${svc} deployment in skynet-pr-${pr}`);
+      if (["FAILED", "CRASHED"].includes(latest.status)) throw new Error(`${svc} deploy ${latest.status}`);
+      if (latest.status !== "SUCCESS") pending.push(`${svc}=${latest.status}`);
+      shas[svc] = latest.meta?.commitHash;
+    }
+    if (!pending.length) return shas;
+    if (Date.now() > until) throw new Error(`preview not ready: ${pending.join(" ")}`);
+    console.log(`waiting for preview: ${pending.join(" ")}`);
+    await new Promise((r) => setTimeout(r, 30_000));
+  }
+}
+
+/** The commit the frontend was built from, read from the login page's "Source code" link. */
+export async function deployedSha(page) {
+  await page.goto(`${origin(page)}/login`, { waitUntil: "load" });
+  const href = await page.getByRole("link", { name: /^Source code/ }).getAttribute("href");
+  return href.match(/\/tree\/([0-9a-f]{7,40})/)?.[1] ?? null;
+}
+
+/**
+ * Register a throwaway account (recNNN-<random>@example.com, $10 starting credit),
+ * sign the page in, set English and skip the experience intake. Never buy credit.
+ * Returns { email, password }.
+ */
+export async function signup(page, { tag = "rec" } = {}) {
+  const base = origin(page);
+  const email = `${tag}-${randomBytes(5).toString("hex")}@example.com`;
+  const password = randomBytes(16).toString("hex");
+  const req = page.request;
+  const reg = await req.post(`${base}/api/register`, { data: { email, password, name: "Reel" } });
+  if (!reg.ok()) throw new Error(`register ${reg.status()}: ${await reg.text()}`);
+  const { csrfToken } = await (await req.get(`${base}/api/auth/csrf`)).json();
+  await req.post(`${base}/api/auth/callback/credentials`, {
+    form: { email, password, csrfToken, callbackUrl: `${base}/`, json: "true" },
+  });
+  const session = await (await req.get(`${base}/api/auth/session`)).json();
+  if (!session?.backendAccessToken) throw new Error("sign-in failed: no session after register");
+  // Expert level with the intake done, so no onboarding tour covers the wizard.
+  const lv = await req.patch(`${apiFor(base)}/account/experience`, {
+    headers: { Authorization: `Bearer ${session.backendAccessToken}` },
+    data: { level: "expert", intake_completed: true },
+  });
+  if (!lv.ok()) throw new Error(`experience ${lv.status()}`);
+  await page.context().addCookies([
+    { name: "NEXT_LOCALE", value: "en", url: base },
+    { name: "skynet_locale", value: "en", url: base },
+  ]);
+  console.log(`signup ${email}`);
+  return { email, password };
+}
+
+const next = async (page) => {
+  await page.getByRole("button", { name: /^Continue$/ }).click();
+  await page.waitForTimeout(1500);
+};
+
+/** Start a Manual prompt task in the wizard and upload `csvPath`; ends on the Inputs step. */
+export async function newManualTask(
+  page,
+  {
+    objective = "Classify customer support tickets into billing, technical or account.",
+    background = "Answer with exactly one lowercase word.",
+    prompt = "Read the support ticket and answer with one word: billing, technical or account.",
+    csvPath = TICKETS_CSV,
+  } = {},
+) {
+  await page.goto(`${origin(page)}/submit`, { waitUntil: "load", timeout: 90_000 });
+  const manual = page.getByText("Manual", { exact: true }).first();
+  await manual.waitFor({ timeout: 90_000 });
+  await manual.click();
+  await page.getByPlaceholder("What the optimized artifact should do well").fill(objective);
+  await page.getByPlaceholder("Context, constraints and what a good result looks like").fill(background);
+  await next(page);
+  await page.getByText("Prompt", { exact: true }).first().click();
+  await page.getByPlaceholder("Paste the current version, or let the assistant draft one").fill(prompt);
+  await next(page);
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByText(/^Upload a CSV/).first().click()]);
+  await chooser.setFiles(csvPath);
+  await page.getByText("How to read the data").waitFor({ timeout: 60_000 });
+  await page.waitForTimeout(2000);
+}
+
+/** Continue from the current wizard step to "Metric & run" (Code and metric visible). */
+export async function toMetricAndRun(page) {
+  const title = page.getByText("Code and metric", { exact: true });
+  for (let i = 0; i < 6 && !(await title.isVisible()); i++) await next(page);
+  await title.waitFor({ timeout: 30_000 });
+}
+
+/** Open the full-screen IDE from Metric & run and wait for the file explorer. Returns ms to boot. */
+export async function openIde(page) {
+  const t = Date.now();
+  await page.getByRole("button", { name: "Open IDE" }).click();
+  await page
+    .locator(`${WORKBENCH} .explorer-folders-view .monaco-list-row`, { hasText: "run.py" })
+    .first()
+    .waitFor({ timeout: 120_000 });
+  return Date.now() - t;
+}
+
+/** Close the IDE with its "Back to the wizard" button. The editor stays mounted, hidden, for a fast reopen. */
+export async function closeIde(page) {
+  await page.getByRole("button", { name: "Back to the wizard" }).click();
+  await page.locator(WORKBENCH).waitFor({ state: "hidden", timeout: 15_000 });
+}
+
+/** The IDE pop-up's header (toolbar with Check and Back to the wizard). */
+export const ideToolbar = (page) => page.locator('[aria-labelledby="ide-dialog-title"] header');
