@@ -114,10 +114,11 @@ export async function newManualTask(
   await page.waitForTimeout(2000);
 }
 
-/** The IDE: inline in Metric & run, or the full-screen pop-up (both carry this label). */
-export const ide = (page) => page.locator('[aria-labelledby="ide-workspace-title"]');
+/** The IDE: the inline section in Metric & run, or the full-screen pop-up, around the workbench host. */
+export const ide = (page) =>
+  page.locator("[data-ide-host]").locator('xpath=ancestor::*[self::section or @role="dialog"][1]');
 
-/** The IDE header: "Code and metric", the Check and Full screen / Exit full screen icon buttons. */
+/** The IDE header: the Check and Full screen / Exit full screen icon buttons. */
 export const ideToolbar = (page) => ide(page).locator("header");
 
 /** The coding agent's chat, docked on the right of the IDE (about 320px wide). */
@@ -131,9 +132,9 @@ export const agentInput = (page) => agentPanel(page).getByPlaceholder("Ask the c
  * IDE's file explorer lists run.py. Returns ms from arriving on the step to the explorer.
  */
 export async function toMetricAndRun(page) {
-  const title = page.getByText("Code and metric", { exact: true });
-  for (let i = 0; i < 6 && !(await title.isVisible()); i++) await next(page);
-  await title.waitFor({ timeout: 30_000 });
+  const host = page.locator("[data-ide-host]");
+  for (let i = 0; i < 6 && !(await host.isVisible()); i++) await next(page);
+  await host.waitFor({ timeout: 30_000 });
   const t = Date.now();
   await page
     .locator(`${WORKBENCH} .explorer-folders-view .monaco-list-row`, { hasText: "run.py" })
@@ -147,14 +148,14 @@ const ZOOM_SETTLE_MS = 220 + 200; // the IDE's zoom animation (ZOOM_MS) plus a r
 /** Full screen: the inline IDE grows into a pop-up over the page. Waits for the animation. */
 export async function enterFullScreen(page) {
   await ideToolbar(page).getByRole("button", { name: "Full screen", exact: true }).click();
-  await page.locator('[role="dialog"][aria-labelledby="ide-workspace-title"]').waitFor();
+  await page.locator('[role="dialog"]:has([data-ide-host])').waitFor();
   await page.waitForTimeout(ZOOM_SETTLE_MS);
 }
 
 /** Exit full screen: the pop-up shrinks back into the step. Waits for the animation. */
 export async function exitFullScreen(page) {
   await ideToolbar(page).getByRole("button", { name: "Exit full screen", exact: true }).click();
-  await page.locator('[role="dialog"][aria-labelledby="ide-workspace-title"]').waitFor({ state: "detached", timeout: 10_000 });
+  await page.locator('[role="dialog"]:has([data-ide-host])').waitFor({ state: "detached", timeout: 10_000 });
   await page.waitForTimeout(ZOOM_SETTLE_MS - 220);
 }
 

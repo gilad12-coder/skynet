@@ -28,7 +28,7 @@ file's absolute path, and replace the part after setup with what the PR must pro
 | `signup(page, { tag: "rec715" })` | Registers `rec715-<random>@example.com`, signs in, sets English, skips the intake. Every new account starts with $10 credit. |
 | `newManualTask(page, { prompt, csvPath })` | Wizard: Manual, objective, Prompt artifact, uploads the CSV (default `fixtures/tickets.csv`, 12 tickets). Ends on Inputs. |
 | `toMetricAndRun(page)` | Continues to Metric & run and waits for the inline IDE's explorer to list run.py. Returns boot ms. |
-| `ide(page)` / `ideToolbar(page)` | The IDE (inline section, or the full-screen dialog) / its header: "Code and metric", Check and Full screen icon buttons. |
+| `ide(page)` / `ideToolbar(page)` | The IDE (inline section, or the full-screen dialog) / its header: the Check and Full screen icon buttons. Found through the `[data-ide-host]` workbench host. |
 | `agentPanel(page)` / `agentInput(page)` | The coding agent chat docked on the right (~320px) / its "Ask the coding agent…" box. |
 | `waitForAgentIdle(page)` | Waits for a turn to start (up to 10 s) and then for its Stop button to go away. Use after arriving (kickoff) or sending. |
 | `askAgent(page, text)` | Types into the agent, sends, waits for idle. |
