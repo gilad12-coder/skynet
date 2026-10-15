@@ -3076,6 +3076,8 @@
   "shared.agent.run_code_prompt": "Aşağıdaki kod parçacığını ({language}) çalıştırın ve sonuçları döndürün:\n\n```{language}\n{code}\n```",
   "shared.agent.seconds_short": "sn",
   "shared.agent.send": "Gönder",
+  "shared.agent.show_less": "Daha az göster",
+  "shared.agent.show_more": "Daha fazla göster",
   "shared.agent.thinking": "Düşünüyor",
   "shared.agent.thought_briefly": "Kısaca düşündü",
   "shared.agent.thought_seconds": "{seconds} saniye düşündü",

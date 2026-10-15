@@ -3076,6 +3076,8 @@
   "shared.agent.run_code_prompt": "Führe das folgende Code-Snippet ({language}) aus und gib die Ergebnisse zurück:\n\n```{language}\n{code}\n```",
   "shared.agent.seconds_short": "s",
   "shared.agent.send": "Senden",
+  "shared.agent.show_less": "Weniger anzeigen",
+  "shared.agent.show_more": "Mehr anzeigen",
   "shared.agent.thinking": "Denkt nach",
   "shared.agent.thought_briefly": "Kurz nachgedacht",
   "shared.agent.thought_seconds": "{seconds} Sekunden nachgedacht",

@@ -3076,6 +3076,8 @@
   "shared.agent.run_code_prompt": "运行以下代码片段（{language}）并返回结果：\n\n```{language}\n{code}\n```",
   "shared.agent.seconds_short": "秒",
   "shared.agent.send": "发送",
+  "shared.agent.show_less": "收起",
+  "shared.agent.show_more": "显示更多",
   "shared.agent.thinking": "正在思考",
   "shared.agent.thought_briefly": "思考了片刻",
   "shared.agent.thought_seconds": "思考了 {seconds} 秒",

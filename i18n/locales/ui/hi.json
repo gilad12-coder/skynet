@@ -3076,6 +3076,8 @@
   "shared.agent.run_code_prompt": "निम्नलिखित कोड स्निपेट ({language}) चलाएँ और परिणाम लौटाएँ:\n\n```{language}\n{code}\n```",
   "shared.agent.seconds_short": "से",
   "shared.agent.send": "भेजें",
+  "shared.agent.show_less": "कम दिखाएँ",
+  "shared.agent.show_more": "और दिखाएँ",
   "shared.agent.thinking": "सोच रहे हैं",
   "shared.agent.thought_briefly": "पल भर सोचा",
   "shared.agent.thought_seconds": "{seconds} सेकंड तक सोचा",
