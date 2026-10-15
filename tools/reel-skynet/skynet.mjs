@@ -114,17 +114,27 @@ export async function newManualTask(
   await page.waitForTimeout(2000);
 }
 
-/** Continue from the current wizard step to "Metric & run" (Code and metric visible). */
+/** The IDE: inline in Metric & run, or the full-screen pop-up (both carry this label). */
+export const ide = (page) => page.locator('[aria-labelledby="ide-workspace-title"]');
+
+/** The IDE header: "Code and metric", the Check and Full screen / Exit full screen icon buttons. */
+export const ideToolbar = (page) => ide(page).locator("header");
+
+/** The coding agent's chat, docked on the right of the IDE (about 320px wide). */
+export const agentPanel = (page) => ide(page).locator("aside");
+
+/** The agent composer's textbox ("Ask the coding agent…"). */
+export const agentInput = (page) => agentPanel(page).getByPlaceholder("Ask the coding agent…");
+
+/**
+ * Continue from the current wizard step to "Metric & run" and wait until the inline
+ * IDE's file explorer lists run.py. Returns ms from arriving on the step to the explorer.
+ */
 export async function toMetricAndRun(page) {
   const title = page.getByText("Code and metric", { exact: true });
   for (let i = 0; i < 6 && !(await title.isVisible()); i++) await next(page);
   await title.waitFor({ timeout: 30_000 });
-}
-
-/** Open the full-screen IDE from Metric & run and wait for the file explorer. Returns ms to boot. */
-export async function openIde(page) {
   const t = Date.now();
-  await page.getByRole("button", { name: "Open IDE" }).click();
   await page
     .locator(`${WORKBENCH} .explorer-folders-view .monaco-list-row`, { hasText: "run.py" })
     .first()
@@ -132,11 +142,35 @@ export async function openIde(page) {
   return Date.now() - t;
 }
 
-/** Close the IDE with its "Back to the wizard" button. The editor stays mounted, hidden, for a fast reopen. */
-export async function closeIde(page) {
-  await page.getByRole("button", { name: "Back to the wizard" }).click();
-  await page.locator(WORKBENCH).waitFor({ state: "hidden", timeout: 15_000 });
+const ZOOM_SETTLE_MS = 220 + 200; // the IDE's zoom animation (ZOOM_MS) plus a relayout
+
+/** Full screen: the inline IDE grows into a pop-up over the page. Waits for the animation. */
+export async function enterFullScreen(page) {
+  await ideToolbar(page).getByRole("button", { name: "Full screen", exact: true }).click();
+  await page.locator('[role="dialog"][aria-labelledby="ide-workspace-title"]').waitFor();
+  await page.waitForTimeout(ZOOM_SETTLE_MS);
 }
 
-/** The IDE pop-up's header (toolbar with Check and Back to the wizard). */
-export const ideToolbar = (page) => page.locator('[aria-labelledby="ide-dialog-title"] header');
+/** Exit full screen: the pop-up shrinks back into the step. Waits for the animation. */
+export async function exitFullScreen(page) {
+  await ideToolbar(page).getByRole("button", { name: "Exit full screen", exact: true }).click();
+  await page.locator('[role="dialog"][aria-labelledby="ide-workspace-title"]').waitFor({ state: "detached", timeout: 10_000 });
+  await page.waitForTimeout(ZOOM_SETTLE_MS - 220);
+}
+
+/**
+ * Wait until the coding agent is not running a turn (its Stop button is gone).
+ * Gives a turn `startMs` to begin first, so call it right after sending or arriving.
+ */
+export async function waitForAgentIdle(page, { startMs = 10_000, timeout = 300_000 } = {}) {
+  const stop = agentPanel(page).getByRole("button", { name: "Stop", exact: true });
+  await stop.waitFor({ timeout: startMs }).catch(() => undefined);
+  await stop.waitFor({ state: "hidden", timeout });
+}
+
+/** Ask the coding agent something and wait for its reply to finish. */
+export async function askAgent(page, text, opts) {
+  await agentInput(page).fill(text);
+  await agentPanel(page).getByRole("button", { name: "Send", exact: true }).click();
+  await waitForAgentIdle(page, opts);
+}

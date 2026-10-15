@@ -1,15 +1,18 @@
-// Example reel flow: the IDE opens from Metric & run and closes cleanly.
+// Example reel flow: Metric & run is an inline IDE, the coding agent starts on its own,
+// and Full screen grows the IDE into a pop-up and back.
 //   PR=715 node ~/.agents/skills/reel/bin/reel.mjs run tools/reel-skynet/examples/ide-smoke.mjs --out <scratch>/ide-smoke
 import { startReel } from "reel";
 import {
-  closeIde,
+  agentPanel,
   deployedSha,
+  enterFullScreen,
+  exitFullScreen,
   ideToolbar,
   newManualTask,
-  openIde,
   previewUrl,
   signup,
   toMetricAndRun,
+  waitForAgentIdle,
   waitForPreview,
 } from "../skynet.mjs";
 
@@ -24,16 +27,22 @@ r.fast(6);
 r.mark("Setup: fresh account, a Manual prompt task and 12 tickets");
 await signup(page, { tag: `rec${pr}` });
 await newManualTask(page);
-await toMetricAndRun(page);
 
 r.normal();
-r.mark("Open IDE turns the workspace into a full-screen VS Code");
-console.log("boot ms", await openIde(page));
+r.mark("Metric & run is the IDE: explorer, editor and the coding agent");
+console.log("boot ms", await toMetricAndRun(page));
 await page.waitForTimeout(1500);
 await r.still("ide-toolbar", { locator: ideToolbar(page) });
-await r.hoverStill(ideToolbar(page).getByRole("button", { name: /^Check$/ }), "check-tooltip");
 
-r.mark("Back to the wizard returns to Metric & run");
-await closeIde(page);
+r.fast(4);
+r.mark("The coding agent writes run.py and metric.py on its own");
+await waitForAgentIdle(page);
+r.normal();
+await r.still("agent-reply", { locator: agentPanel(page) });
+
+r.mark("Full screen grows the IDE over the page, and back");
+await enterFullScreen(page);
 await page.waitForTimeout(1500);
-await r.still("wizard-after-close");
+await exitFullScreen(page);
+await page.waitForTimeout(1500);
+await r.still("after-full-screen");
