@@ -64,7 +64,7 @@ from ..language_models import (
     build_language_model,
     served_model_from,
 )
-from ..optimization.unified.contract import verify_workspace
+from ..optimization.unified.contract import FileVerification, ruff_findings, verify_workspace
 from ..react_compat import native_tool_calling_active
 from ..safe_exec import validate_metric_code, validate_signature_code
 from .acting_react import ActingReActV2
@@ -248,6 +248,8 @@ def _validate_metric_code(code: str) -> str:
 _METRIC_NAME = "score"
 _METRIC_MIN_ACCEPTED = 2
 _METRIC_MAX_REQUIRED = 2
+# A repository run's scorer, as blackbox/runner.py calls it.
+_REPO_METRIC_SIGNATURE = "score(repo_path, case=None)"
 
 
 def _parse_functions(code: str, label: str) -> tuple[dict[str, ast.FunctionDef], str, set[str]]:
@@ -339,6 +341,45 @@ def _validate_unified_metric_code(code: str, metric_has_model: bool) -> str:
         return f"metric error: the signature must be {METRIC_SIGNATURE}."
     if "skynet" in imported and not metric_has_model:
         return "metric error: no metric model is attached, so `from skynet import llm` is unavailable."
+    return ""
+
+
+def _validate_repo_metric_code(code: str) -> str:
+    """Statically check a repository run's scorer against ``score(repo_path, case=None)``.
+
+    The runner calls ``score(repo_path, case)`` when the function takes a
+    second positional and ``score(repo_path)`` otherwise, so it must require
+    exactly one and accept at most two.
+
+    Args:
+        code: Scorer source.
+
+    Returns:
+        An empty string when the code fits the contract, otherwise a short error message.
+    """
+    functions, error, imported = _parse_functions(code, "metric")
+    if error:
+        return error
+    fn = functions.get(_METRIC_NAME)
+    if fn is None:
+        return f"metric error: define {_REPO_METRIC_SIGNATURE}."
+    accepted, required, variadic = _positional_capacity(fn)
+    if required != 1 or accepted > 2 or variadic:
+        return f"metric error: the signature must be score(repo_path) or {_REPO_METRIC_SIGNATURE}."
+    if "skynet" in imported:
+        return "metric error: a repository scorer runs offline, so `from skynet import llm` is unavailable."
+    return ""
+
+
+def _accept_any_run_code(code: str) -> str:
+    """Accept any run code: a repository run has none, the optimizer edits the repository.
+
+    Args:
+        code: Ignored.
+
+    Returns:
+        Always an empty string.
+    """
     return ""
 
 
@@ -959,6 +1000,20 @@ _METRIC_LLM = """A metric model is attached: `from skynet import llm` calls it. 
 
 _METRIC_NO_LLM = """No metric model is attached, so the metric has NO llm helper: never import skynet or call llm(). Score with deterministic checks (exact match, contains, numeric tolerance, JSON fields, structure, length, similarity to the expected value)."""
 
+_REPO_RUN_CONTRACT = """This is a repository run: there is NO run code. The optimizer edits the repository itself, and each version it proposes is a checkout of that repository. You write exactly one thing, metric.py, the scorer that measures how good one checkout is. Never write run.py or any other file."""
+
+_REPO_METRIC_CONTRACT = (
+    """The scorer measures one version of the repository: a score AND feedback text.
+- Define score(repo_path) or """
+    + _REPO_METRIC_SIGNATURE
+    + """. repo_path is the version's checkout, already set up with its dependencies installed, and the scorer runs with it as the working directory. case is one case when the run has cases; declare it only when you use it.
+- Typically run the repository's tests or a benchmark with subprocess.run([...], cwd=repo_path, capture_output=True, text=True, timeout=<seconds>) and parse the result (pass/fail counts, a timing, a number the program prints). Find the tests and entry points in repo_files; you cannot read the files, so ask the user when the command or the output format is unclear.
+- Return (score, side_info): score is a float, higher is better, 0.0 to 1.0 by convention; side_info is a dict with "feedback": str saying WHY the version scored that (the failing tests, the error, the measured number), because the optimizer learns from it. To report each test or benchmark on its own, add "cases": {"<name>": {"score": float, "feedback": str}, ...}; the top-level score stays the run's score.
+- Never raise: catch every failure (a timeout, a crash, unparsable output) and return the lowest score with the error in the feedback.
+- The box is OFFLINE and has no model: never import skynet or call llm(), and never reach the network. The run's own secrets arrive as environment variables.
+- The scorer's source is never shown to the optimizer: it learns only from the scores and feedback, so put everything a better version needs to know into the feedback."""
+)
+
 
 def _unified_contracts(unified: dict[str, Any]) -> tuple[str, str]:
     """Spell out the exact run-code and metric contracts for a wizard setup.
@@ -969,8 +1024,11 @@ def _unified_contracts(unified: dict[str, Any]) -> tuple[str, str]:
     Returns:
         ``(run_contract, metric_contract)`` texts handed to the authors and the
         chat agent. Every artifact and every optimizer gets the same contract;
-        only whether a metric model is attached changes the metric's text.
+        only whether a metric model is attached changes the metric's text. A
+        repository run gets the repository scorer's contract instead.
     """
+    if _is_repo(unified):
+        return _REPO_RUN_CONTRACT, _REPO_METRIC_CONTRACT
     run_contract = f"{_DELIVERABLES}\n\n{_RUN_CONTRACT.format(entry=_RUN_ENTRY)}"
     metric_contract = "\n\n".join(
         [
@@ -980,6 +1038,11 @@ def _unified_contracts(unified: dict[str, Any]) -> tuple[str, str]:
         ]
     )
     return run_contract, metric_contract
+
+
+def _is_repo(unified: dict[str, Any]) -> bool:
+    """Return whether the authoring context is a repository run's."""
+    return unified.get("target") == "repo"
 
 
 class GenerateRunCode(dspy.Signature):
@@ -1096,6 +1159,11 @@ class UnifiedAssistant(dspy.Signature):
       file the request needs is written (a helpers.py AND the run.py that
       imports it), never between them; when it reports errors, fix exactly
       those files and call it again.
+    * ``open_file(path, line)`` — shows a file in the user's editor, cursor
+      on ``line``. Call it after you write or fix a file, on its most
+      relevant changed line, and when the user asks to see a file. It also
+      opens a path from ``repo_files`` read-only, to show the user part of
+      the repository; you cannot read or change those files.
     * ``finish`` — end the turn and answer in ``reply``.
 
     The workspace is a folder: run.py and metric.py always exist, and
@@ -1171,6 +1239,9 @@ class UnifiedAssistant(dspy.Signature):
     current_files: str = dspy.InputField(
         desc="JSON object of the workspace's other files, path to text; {} when there are none.",
     )
+    repo_files: str = dspy.InputField(
+        desc="A repository run's file paths, one per line, openable read-only; empty when there is none.",
+    )
     current_validation: str = dspy.InputField(
         desc="Latest check result for the run code and metric ('OK', an error, or empty when not run).",
     )
@@ -1189,6 +1260,95 @@ class UnifiedAssistant(dspy.Signature):
             "markdown, no code fences."
         ),
     )
+
+
+# A repository run's agent: the same fields as UnifiedAssistant, but there is
+# no run code, so only the scorer is written.
+RepoAssistant = UnifiedAssistant.with_instructions(
+    with_conduct("""Chat assistant attached to a repository optimization run's scorer editor.
+
+    The user is setting up an optimization run on a repository. The optimizer
+    edits the repository itself toward ``objective``; each version it
+    proposes is a checkout of the repository. There is NO run code:
+    ``current_run`` and ``initial_run`` are empty and stay empty.
+    ``current_metric`` is metric.py, the python scorer that measures one
+    checkout. The optimizer never sees the scorer's source, only its scores
+    and feedback. ``repo_files`` lists the repository's file paths.
+
+    ## What you own
+
+    metric.py is yours to write: the first draft comes from you, and after
+    that you change it when the user asks; the user can also edit it
+    directly. ``metric_contract`` states exactly what it must be. You never
+    write run.py or any other file.
+
+    ## Your tools
+
+    * ``ask_user(question, options_json)`` — shows the user ONE question
+      with clickable answers. Call ``finish`` right after it.
+    * ``set_brief(objective, background)`` — writes what you learned into
+      the job's Objective and Background fields.
+    * ``edit_metric(reason, new_code)`` — REWRITES metric.py, the scorer.
+    * ``verify_code()`` — checks metric.py: it parses, passes lint and fits
+      ``metric_contract``. Call it once after writing metric.py; when it
+      reports errors, fix exactly those and call it again.
+    * ``open_file(path, line)`` — shows a file in the user's editor, cursor
+      on ``line``. Call it on metric.py after you write or fix it, on its
+      most relevant changed line. It also opens a path from ``repo_files``
+      read-only, to show the user the tests or the entry point the scorer
+      runs; you cannot read or change those files.
+    * ``finish`` — end the turn and answer in ``reply``.
+
+    ## Rule 0: Pull out what the user knows about judging a version.
+
+    The optimization is only as good as the scorer, so when the user's
+    intent is unclear, ask ONE short, concrete question per turn, grounded
+    in what you already know and never one the context answers: which
+    command runs the tests or the benchmark, what output it prints, what
+    counts as better, which numbers or limits matter. Ask through
+    ``ask_user`` whenever a click can settle it: 2-4 options, each a
+    concrete, self-contained answer with a one-line description (never
+    "other"; the user can always type), then ``finish`` with ``reply``
+    holding the same question. An open question goes straight into
+    ``reply``. When an answer changes the goal, call ``set_brief`` with the
+    full updated text of the field that changed.
+
+    ## Rule 1: Edit only on request. Never edit just to answer.
+
+    Call ``edit_metric`` ONLY when the user's latest message is a direct
+    instruction to CHANGE, ADD, REMOVE, FIX, or REWRITE the scorer, or
+    answers a question you asked about how to judge a version. For
+    questions, explanations, opinions and small talk, answer in ``reply``.
+    If the user says "don't change anything" (or any variant), call
+    ``finish`` and answer only.
+
+    ## Rule 1a: Revert requests use ``initial_metric``.
+
+    If the user asks to REVERT, UNDO, RESTORE, or go back to the ORIGINAL
+    (any language), call ``edit_metric`` with the new code set VERBATIM to
+    ``initial_metric``. NEVER guess the original from the chat history.
+
+    ## Rule 2: Ground every reply in the actual code.
+
+    READ ``current_metric`` line by line and reference what you see: the
+    command it runs, what it parses, the score values and the feedback
+    strings. Do NOT answer abstractly.
+
+    ## Rule 3: The scorer satisfies its contract literally.
+
+    A new scorer has the exact function name, parameters and return value
+    ``metric_contract`` states, runs offline without ``llm``, and never
+    raises. When ``current_validation`` reports an error and the user asks
+    for a fix, fix exactly that error.
+
+    ## Reply format
+
+    Written in ``reply_language``; mirror the user's language only if
+    their message is clearly in another language. Keep python identifiers
+    and product terms in English. Plain prose, no markdown, no code
+    fences. 2-5 sentences for explanations, 1-2 for edit confirmations.
+    """)
+)
 
 
 class WorkflowAssistant(dspy.Signature):
@@ -2481,6 +2641,7 @@ class _CodeEditSession:
 _DRAFT_SOURCES = {"edit_run": "signature", "edit_metric": "metric"}
 WRITE_FILE_TOOL = "write_file"
 VERIFY_TOOL = "verify_code"
+OPEN_FILE_TOOL = "open_file"
 # What each streamed tool argument holds, and for ``write_file`` which
 # argument names the file its draft lands in.
 _UNIFIED_TOOL_DRAFTS = {**dict.fromkeys(_DRAFT_SOURCES, "new_code"), WRITE_FILE_TOOL: "content"}
@@ -2515,6 +2676,7 @@ class _UnifiedEditSession:
         metric_validator: Callable[[str], str],
         files: dict[str, str] | None = None,
         verifier: WorkspaceVerifier | None = None,
+        repo_files: list[str] | None = None,
     ) -> None:
         """Initialize the session with the workspace contents and the checks.
 
@@ -2528,7 +2690,10 @@ class _UnifiedEditSession:
             files: Path to text of every extra workspace file.
             verifier: Checks the whole workspace for ``verify_code``; ``None``
                 makes ``verify_code`` report that no check is available.
+            repo_files: A repository run's file paths, which ``open_file``
+                shows read-only; ``None`` when the run has no repository.
         """
+        self._repo_files = frozenset(repo_files or ())
         self._slots = {"run": run_code, "metric": metric_code}
         self._validators = {"run": run_validator, "metric": metric_validator}
         self._successful_edits: dict[str, int] = {"run": 0, "metric": 0}
@@ -2895,6 +3060,45 @@ class _UnifiedEditSession:
         self._emit({"event": "tool_end", "data": {"id": call_id, "tool": "delete_file", "status": "ok", "path": path}})
         return f"{path} deleted. Call {VERIFY_TOOL} if run.py imported it."
 
+    def open_file(self, path: str, line: int = 0) -> str:
+        """Open a file in the user's editor, with the cursor on ``line``.
+
+        Call it after you write or fix a file, pointing at the most relevant
+        changed line, and whenever the user asks to see a file. It changes
+        nothing. A path in ``repo_files`` opens that repository file
+        read-only, to show the user.
+
+        Args:
+            path: run.py, metric.py, an extra file's path, or a path in
+                ``repo_files``.
+            line: The 1-based line to show; 0 opens the file at its top.
+
+        Returns:
+            An observation string the ReAct agent reads back.
+        """
+        path = (path or "").strip()
+        texts = {**self._files, RUN_FILE: self._slots["run"], METRIC_FILE: self._slots["metric"]}
+        call_id = uuid.uuid4().hex[:8]
+        start: dict[str, Any] = {"id": call_id, "tool": OPEN_FILE_TOOL, "reason": "", "path": path}
+        self._emit({"event": "tool_start", "data": start})
+        repo = path not in texts and path in self._repo_files
+        if path not in texts and not repo:
+            self._emit({"event": "tool_end", "data": {**start, "status": "error"}})
+            return f"Open rejected — there is no file {path}. Files: {', '.join(sorted(texts))}."
+        try:
+            line = max(int(line or 0), 0)
+        except (TypeError, ValueError):
+            line = 0
+        # A line past the end still opens the file, on its last line. A
+        # repository file's text is read by the editor, which clamps it there.
+        if not repo:
+            line = min(line, max(texts[path].count("\n") + 1, 1))
+        end: dict[str, Any] = {**start, "status": "ok"}
+        if line:
+            end["line"] = line
+        self._emit({"event": "tool_end", "data": end})
+        return f"Opened {path}:{line}." if line else f"Opened {path}."
+
     def verify_code(self) -> str:
         """Check every workspace file without running it: run.py, metric.py and each extra file.
 
@@ -2948,6 +3152,28 @@ class _UnifiedEditSession:
         return "\n".join([*lines, verdict])
 
 
+def _verify_repo_scorer(run_code: str, metric_code: str, files: dict[str, str]) -> list[dict[str, Any]]:
+    """Check a repository run's metric.py alone: it parses, fits the scorer contract and passes lint.
+
+    Args:
+        run_code: Ignored; a repository run has no run code.
+        metric_code: The scorer's source.
+        files: Ignored; a repository run has no other workspace files.
+
+    Returns:
+        The one verdict, for metric.py, as plain data.
+    """
+    verdict = FileVerification(METRIC_FILE)
+    error = _validate_repo_metric_code(metric_code)
+    if error:
+        verdict.errors.append(f"{METRIC_FILE}: {error}")
+    if not _parse_functions(metric_code, "metric")[1]:
+        lint_errors, lint_warnings = ruff_findings(METRIC_FILE, metric_code)
+        verdict.errors.extend(lint_errors)
+        verdict.warnings.extend(lint_warnings)
+    return [verdict.as_dict()]
+
+
 def _unified_verifier(unified: dict[str, Any]) -> WorkspaceVerifier:
     """Bind :func:`verify_workspace` to the wizard's setup.
 
@@ -2957,6 +3183,8 @@ def _unified_verifier(unified: dict[str, Any]) -> WorkspaceVerifier:
     Returns:
         A verifier for :class:`_UnifiedEditSession`.
     """
+    if _is_repo(unified):
+        return _verify_repo_scorer
     task = unified.get("task") or {}
     kind = (task.get("artifact") or {}).get("kind") or "prompt"
     optimizer = resolve_optimizer(unified.get("optimizer") or "auto", kind)
@@ -3850,6 +4078,8 @@ def _unified_validators(unified: dict[str, Any]) -> tuple[Callable[[str], str], 
     Returns:
         ``(run_validator, metric_validator)``, each returning an error message or ``""``.
     """
+    if _is_repo(unified):
+        return _accept_any_run_code, _validate_repo_metric_code
     return (
         _validate_run_code,
         partial(_validate_unified_metric_code, metric_has_model=bool(unified.get("metric_has_model"))),
@@ -4021,6 +4251,30 @@ async def _run_unified_seed(
     return results
 
 
+def _unified_tools(session: _UnifiedEditSession, *, repo: bool) -> list[Callable[..., str]]:
+    """Pick the unified agent's tools for the run.
+
+    Args:
+        session: The turn's edit session.
+        repo: Whether this is a repository run, which has only metric.py to write.
+
+    Returns:
+        The bound tool methods the ReAct loop may call.
+    """
+    if repo:
+        return [session.ask_user, session.set_brief, session.edit_metric, session.verify_code, session.open_file]
+    return [
+        session.ask_user,
+        session.set_brief,
+        session.edit_run,
+        session.edit_metric,
+        session.write_file,
+        session.delete_file,
+        session.verify_code,
+        session.open_file,
+    ]
+
+
 async def _run_unified_agent(
     *,
     lm: dspy.LM,
@@ -4041,13 +4295,14 @@ async def _run_unified_agent(
 
     Tools are bound methods on a :class:`_UnifiedEditSession`
     (``ask_user`` / ``set_brief`` / ``edit_run`` / ``edit_metric`` /
-    ``write_file`` / ``delete_file`` / ``verify_code``) that emit
+    ``write_file`` / ``delete_file`` / ``verify_code`` / ``open_file``) that emit
     ``tool_start`` / ``signature_replace`` (run code), ``metric_replace``
     (metric), ``file_replace`` / ``file_delete`` (other files) or
     ``verify_result`` / ``tool_end`` thread-safely, and the ``reply`` streams
     as ``message_patch`` tokens. A turn that changed the workspace and did not
     check the result ends with a ``verify_code`` run of its own, so every
-    change is checked once.
+    change is checked once. A repository run (``target`` ``"repo"``) gets
+    :data:`RepoAssistant` and only the tools that write and check metric.py.
 
     Args:
         lm: Language model bound to the ReAct loop.
@@ -4081,19 +4336,13 @@ async def _run_unified_agent(
         metric_validator=metric_validator,
         files=prior_files,
         verifier=_unified_verifier(unified),
+        repo_files=unified.get("repo_files"),
     )
-    tools: list[Callable[..., str]] = [
-        session.ask_user,
-        session.set_brief,
-        session.edit_run,
-        session.edit_metric,
-        session.write_file,
-        session.delete_file,
-        session.verify_code,
-    ]
+    repo = _is_repo(unified)
+    tools = _unified_tools(session, repo=repo)
     # Both files edited with a validator-driven retry, a check, a fix and a
-    # second check, a brief and a question, before the reply.
-    react = ActingReActV2(UnifiedAssistant, tools=tools, max_iters=12)
+    # second check, a brief, a question and an opened file, before the reply.
+    react = ActingReActV2(RepoAssistant if repo else UnifiedAssistant, tools=tools, max_iters=13)
     attach_steering(react, steering)
     reply_stream = ReactReplyStream(
         react, "reply", lm, tool_drafts=_UNIFIED_TOOL_DRAFTS, tool_draft_keys=_UNIFIED_TOOL_DRAFT_KEYS
@@ -4106,6 +4355,7 @@ async def _run_unified_agent(
         "current_run": prior_run,
         "current_metric": prior_metric,
         "current_files": json.dumps(prior_files or {}, ensure_ascii=False),
+        "repo_files": "\n".join(unified.get("repo_files") or []),
         "current_validation": prior_validation or "",
         "initial_run": initial_run or prior_run,
         "initial_metric": initial_metric or prior_metric,
@@ -4364,7 +4614,9 @@ async def run_code_agent(
       extra workspace file written or deleted (unified chat mode).
     * ``verify_result`` — ``{id, ok, files: [{path, ok, errors, warnings}]}``,
       a ``verify_code`` row's per-file result (unified paths).
-    * ``tool_end`` — ``{id, tool, status}``, after the tool returns.
+    * ``tool_end`` — ``{id, tool, status}``, after the tool returns. An
+      ``open_file`` row carries ``path`` on both events and, when given, a
+      1-based ``line`` on its ``ok`` end, which opens the file in the editor.
     * ``message_patch`` — chat-mode reply token stream.
     * ``done`` — ``{signature_code, metric_code, assistant_message, model,
       served_model}``; the unified paths add ``files`` and ``verification``

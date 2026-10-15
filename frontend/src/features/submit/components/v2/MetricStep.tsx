@@ -1,52 +1,113 @@
 "use client";
 
 import * as React from "react";
-import {
-  AgentPanelDock,
-  isGeneralistAgentEnabled,
-  useWizardStateOptional,
-} from "@/features/agent-panel";
+import { isGeneralistAgentEnabled, useHideAgentPill } from "@/features/agent-panel";
+import { githubRepoFile, githubRepoTree } from "@/shared/lib/api";
 import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unified-run";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
 import { useContractCheck } from "../../hooks/use-contract-check";
+import { CodingAgentPanel } from "../../ide/CodingAgentPanel";
+import { workspaceKey } from "../../ide/agent-verdict";
+import { IdeWorkspace } from "../../ide/IdeWorkspace";
+import type { IdeOpenRequest } from "../../ide/open-file";
+import { indexRepoTree, repoFolderName, type RepoSource } from "../../ide/repo-files";
+import { useIdeCodingAgent } from "../../ide/use-ide-coding-agent";
 import { authoringCases } from "../../lib/inputs-mode";
-import { metricUsesModel as metricCallsModel } from "../../lib/scorer-dependencies";
-import { AuthoringShell } from "../steps/AuthoringShell";
+import { metricUsesModel as metricCallsModel, withScorerImports } from "../../lib/scorer-dependencies";
+import { METRIC_FILE, RUN_FILE, isSingleAnswerTask, repoIssue } from "../../lib/wizard-v2";
 import { v2Msg } from "./ArtifactConfirmCard";
-import { CodeWorkspace } from "./CodeWorkspace";
 import { ContractCheckScreen } from "./ContractCheckScreen";
 import { MetricModelRow } from "./MetricModelRow";
 import { RunOverview } from "./RunOverview";
 import { WizardScreen } from "./WizardScreen";
 
 const SAMPLE_CASE_LIMIT = 5;
-const NOT_WRITING = { run: false, metric: false, files: [] };
+// The backend's REPO_FILES_MAX: every path rides each agent turn's prompt.
+const REPO_PATHS_LIMIT = 2000;
+
+/** The app-wide agent launcher stays hidden while the IDE's own coding agent is on screen. */
+function HideAgentPill() {
+  useHideAgentPill();
+  return null;
+}
 
 /**
- * Step 4, three screens. First the code: the docked agent's coding tool
- * writes run.py, metric.py and any helper files into the workspace, and the
- * user can open and edit each one. Then the sandbox check, which runs the
+ * The repository's checkout for the IDE's explorer, read from GitHub at the
+ * run's commit (or branch) as the run will clone it.
+ *
+ * Args:
+ *   repository: The repository as `owner/name`.
+ *   ref: The commit or branch; empty for the default branch.
+ *
+ * Returns:
+ *   The tree, fetched now, and a reader that fetches each file when it is opened.
+ */
+function repoSource(repository: string, ref: string): RepoSource {
+  // The editor and the agent's open_file both read a file it opens; one fetch serves both.
+  const reads = new Map<string, ReturnType<RepoSource["read"]>>();
+  const fetchFile = async (path: string): ReturnType<RepoSource["read"]> => {
+    const file = await githubRepoFile(repository, ref, path);
+    if (file.text !== null) return { text: file.text };
+    return { issue: file.binary ? "binary" : file.too_large ? "too_large" : "missing" };
+  };
+  return {
+    // A repository run's workspace is run.py and metric.py, nothing else.
+    folder: repoFolderName(repository, new Set([RUN_FILE, METRIC_FILE])),
+    tree: githubRepoTree(repository, ref).then((tree) => indexRepoTree(tree.entries)),
+    read: (path) => {
+      let read = reads.get(path);
+      if (!read) {
+        read = fetchFile(path);
+        reads.set(path, read);
+        read.catch(() => reads.delete(path));
+      }
+      return read;
+    },
+  };
+}
+
+/**
+ * Step 4, three screens. First the code, in VS Code's workbench: the coding
+ * agent docked beside it writes run.py, metric.py and any helper files, and
+ * the user can open and edit each one. Then the sandbox check, which runs the
  * code on a few samples. Then the overview, which holds Run, so the run
  * button never covers the editors.
  */
 export function MetricStep({ page, onBack }: { page: number; onBack: () => void }) {
   const ctx = useWizardV2();
-  const { state, patchWorkspace, setWorkspaceFile, guided, optimizerCatalog, inputsInferring } =
-    ctx;
+  const { state, patchWorkspace, setWorkspaceFile, guided, inputsInferring } = ctx;
   const { task, inputs, optimizer, workspace } = state;
   const kind = task.artifactKind;
   const repo = Boolean(task.repo);
   const t = (key: string) => v2Msg(key, guided);
 
   const metricUsesModel = metricCallsModel(state);
-  const catalog =
-    optimizerCatalog?.artifact_kind === kind && optimizerCatalog.data_mode === inputs.mode
-      ? optimizerCatalog
-      : null;
-  const metricSignature = catalog?.metric_signature ?? null;
+
+  const repoDraft = task.repo && !repoIssue(task.repo) ? task.repo : null;
+  const repoName = repoDraft?.repository.trim() ?? "";
+  const repoRef = repoDraft ? repoDraft.commit.trim() || repoDraft.branch.trim() : "";
+  const repoFiles = React.useMemo(
+    () => (repoName ? repoSource(repoName, repoRef) : null),
+    [repoName, repoRef],
+  );
+
+  // The paths the agent may open read-only, once the tree has loaded.
+  const [repoPaths, setRepoPaths] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    setRepoPaths([]);
+    let live = true;
+    void repoFiles?.tree
+      .then((index) => live && setRepoPaths([...index.files].sort().slice(0, REPO_PATHS_LIMIT)))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [repoFiles]);
 
   const authoringContext = React.useMemo<UnifiedAuthoringContext | null>(() => {
-    if (!kind || !inputs.mode) return null;
+    // A repository run skips the Inputs step, so it may have no data mode.
+    const dataMode = inputs.mode ?? (repo ? "single" : null);
+    if (!kind || !dataMode) return null;
     const samples = authoringCases(
       {
         cases: inputs.cases,
@@ -62,17 +123,21 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
         background: task.background,
         artifact: { kind, starting_version: task.startingVersion ?? "" },
       },
-      data_mode: inputs.mode,
+      data_mode: dataMode,
       input_fields: inputs.inputFields,
       expected_field: inputs.expectedField,
       sample_cases: samples,
       optimizer: optimizer.choice,
       metric_has_model: metricUsesModel,
-      focus: "run",
+      focus: repo ? "metric" : "run",
+      ...(repo ? { target: "repo" as const } : {}),
+      ...(repoPaths.length > 0 ? { repo_files: repoPaths } : {}),
     };
   }, [
     kind,
+    repo,
     metricUsesModel,
+    repoPaths,
     task.objective,
     task.background,
     task.startingVersion,
@@ -97,94 +162,106 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     [setWorkspaceFile],
   );
 
-  // The docked agent's coding tool writes under this context, into these
-  // editors' code. Inference re-roles the columns when it answers, and the
-  // Inputs step stays mounted while it does, so code written earlier would
-  // target input fields the contract check and the run no longer pass. A
-  // repository run has no sample inputs to write against; its scorer is
-  // written by hand.
-  const wizardCtx = useWizardStateOptional();
-  const registerContext = wizardCtx?.setAuthoringContext;
-  const sharedContext = repo || inputsInferring ? null : authoringContext;
-  React.useEffect(() => {
-    registerContext?.(sharedContext);
-  }, [registerContext, sharedContext]);
-  React.useEffect(() => () => registerContext?.(null), [registerContext]);
-  const registerSink = wizardCtx?.setCodeSink;
-  React.useEffect(() => {
-    if (!registerSink) return;
-    registerSink((slot, code) => (slot === "run" ? setRunCode(code) : setMetricCode(code)));
-    return () => registerSink(null);
-  }, [registerSink, setRunCode, setMetricCode]);
-  const registerFileSink = wizardCtx?.setFileSink;
-  React.useEffect(() => {
-    if (!registerFileSink) return;
-    registerFileSink(setWorkspaceFile);
-    return () => registerFileSink(null);
-  }, [registerFileSink, setWorkspaceFile]);
-  // The coding agent reads the extra files from here, to send them with each turn.
-  const shareFiles = wizardCtx?.setWorkspaceFiles;
-  React.useEffect(() => {
-    shareFiles?.(workspace.files);
-  }, [shareFiles, workspace.files]);
-  React.useEffect(() => () => shareFiles?.({}), [shareFiles]);
-
-  const writing = wizardCtx?.codeWriting ?? NOT_WRITING;
-  // The wizard agent sits beside the editors; its coding tool writes the code.
-  const agentEnabled = isGeneralistAgentEnabled();
-  const agentShown = agentEnabled && state.step === "metric" && page === 0;
-  const { setAgentWriting } = ctx;
-  const agentStreaming = writing.run || writing.metric || writing.files.length > 0;
-  React.useEffect(() => {
-    setAgentWriting(agentStreaming);
-    return () => setAgentWriting(false);
-  }, [agentStreaming, setAgentWriting]);
-
   const contract = useContractCheck(ctx);
-  // Until a fresh sandboxed check exists, the editors' consoles show what the
-  // static check spotted while typing.
+  const lastCheckOk = contract.lastCheck && !contract.stale ? contract.lastCheck.ok : null;
+
+  // The coding agent writes under this context. Inference re-roles the
+  // columns when it answers, and the Inputs step stays mounted while it does,
+  // so code written earlier would target input fields the contract check and
+  // the run no longer pass. A repository run has no run code: the agent
+  // writes only its scorer, metric.py.
+  const agentContext = inputsInferring ? null : authoringContext;
+  const onScreen = state.step === "metric" && page === 0;
+  // Queued, not replaced: open_file calls batched into one render each open a tab.
+  const [openRequests, setOpenRequests] = React.useState<readonly IdeOpenRequest[]>([]);
+  const openFile = React.useCallback(
+    (path: string, line?: number) =>
+      setOpenRequests((prev) => [...prev, line ? { path, line } : { path }]),
+    [],
+  );
+  const coding = useIdeCodingAgent({
+    context: agentContext,
+    active: onScreen,
+    dataKnown: (authoringContext?.sample_cases?.length ?? 0) > 0 || isSingleAnswerTask(state),
+    runCode: workspace.runCode,
+    metricCode: workspace.metricCode,
+    files: workspace.files,
+    setRunCode,
+    setMetricCode,
+    setFile: setWorkspaceFile,
+    openFile,
+    lastCheck: contract.lastCheck,
+    lastCheckOk,
+    check: contract.check,
+    guided,
+  });
+  // The results strip: the agent's verify_code verdict while it is newer than
+  // the last Check, else that Check. Until either is fresh, a failing static
+  // check (what typing just broke) wins; a result older than the files is dimmed.
+  const filesKey = workspaceKey(workspace.runCode, workspace.metricCode, workspace.files);
+  const verdict = coding.verdict;
+  const verdictFresh = verdict?.key === filesKey;
   const staticFailed = contract.staticResult?.checks.some((item) => item.status === "failed");
-  const consoleResult =
-    staticFailed && (!contract.lastCheck || contract.stale)
-      ? contract.staticResult
-      : contract.lastCheck;
+  const showStatic =
+    staticFailed && !verdictFresh && (verdict !== null || !contract.lastCheck || contract.stale);
+  const consoleResult = showStatic ? contract.staticResult : contract.lastCheck;
+  const agentResults = !showStatic && verdict ? verdict.files : null;
+  const resultsStale = showStatic ? false : verdict ? !verdictFresh : contract.stale;
+
+  const { setAgentWriting } = ctx;
+  const agentBusy = coding.agent.status === "streaming";
+  React.useEffect(() => {
+    setAgentWriting(agentBusy);
+    return () => setAgentWriting(false);
+  }, [agentBusy, setAgentWriting]);
+
+  // The sandbox still injects `llm` for old scorers; making the import
+  // explicit as the user leaves the code keeps it honest about what it calls.
+  const metricCode = workspace.metricCode;
+  React.useEffect(() => {
+    if (page === 0) return;
+    const code = withScorerImports(metricCode);
+    if (code !== metricCode) setMetricCode(code);
+  }, [page, metricCode, setMetricCode]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <WizardScreen active={page === 0} className="flex flex-col overflow-hidden">
-        <AuthoringShell
-          value={agentEnabled ? "auto" : "manual"}
-          title={t("submit.v2.metric.title")}
-          description={t("submit.v2.metric.desc")}
-          sidePanel={agentShown ? <AgentPanelDock className="absolute inset-0" /> : null}
-        >
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <CodeWorkspace
-              runCode={workspace.runCode}
-              metricCode={workspace.metricCode}
-              files={workspace.files}
-              runEntry={catalog?.run_entry ?? null}
-              metricSignature={metricSignature}
-              onFileChange={setWorkspaceFile}
-              onFileDelete={deleteFile}
-              writing={writing}
+      {onScreen && isGeneralistAgentEnabled() && <HideAgentPill />}
+      {/* Clip, not hide: a hidden box still scrolls when the editor takes focus. */}
+      <WizardScreen active={page === 0} className="flex flex-col overflow-clip">
+        <IdeWorkspace
+          runCode={workspace.runCode}
+          metricCode={workspace.metricCode}
+          files={workspace.files}
+          onFileChange={setWorkspaceFile}
+          onFileDelete={deleteFile}
+          onCheck={repo ? null : contract.check}
+          checkResult={repo ? null : consoleResult}
+          agentResults={repo ? null : agentResults}
+          resultsStale={!repo && resultsStale}
+          repo={repoFiles}
+          openRequests={openRequests}
+          guided={guided}
+          strip={
+            metricUsesModel ? (
+              <MetricModelRow
+                mode={workspace.metricModelMode}
+                explicitModel={workspace.metricModel}
+                reflectionModel={optimizer.reflectionModel}
+                onChange={patchWorkspace}
+                guided={guided}
+              />
+            ) : null
+          }
+          sidePanel={
+            <CodingAgentPanel
+              coding={coding}
+              disabledReason={agentContext ? null : t("submit.v2.ide.agent.waiting")}
+              onOpenFile={openFile}
               guided={guided}
-              checkResult={consoleResult}
-              onCheck={contract.check}
-              repo={repo}
-            >
-              {metricUsesModel && (
-                <MetricModelRow
-                  mode={workspace.metricModelMode}
-                  explicitModel={workspace.metricModel}
-                  reflectionModel={optimizer.reflectionModel}
-                  onChange={patchWorkspace}
-                  guided={guided}
-                />
-              )}
-            </CodeWorkspace>
-          </div>
-        </AuthoringShell>
+            />
+          }
+        />
       </WizardScreen>
       {!repo && (
         <WizardScreen active={page === 1}>

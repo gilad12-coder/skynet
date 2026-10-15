@@ -1690,3 +1690,34 @@ table {
     background-position: -100% 0;
   }
 }
+
+/* The inline IDE's 190 px explorer can't fit its title and five header
+   actions, so the title truncated to "WORKS…". Show the actions only while
+   the explorer is hovered or focused, as VS Code does for view panes. */
+[data-ide-host] .part.sidebar .composite.title .title-actions {
+  display: none;
+}
+[data-ide-host] .part.sidebar:hover .composite.title .title-actions,
+[data-ide-host] .part.sidebar:focus-within .composite.title .title-actions {
+  display: block;
+}
+/* On hover the title and actions need ~14 px more than the 190 px bar has.
+   The icons are fixed at 16 px, so the room comes from the padding and the
+   gaps between icons, keeping "WORKSPACE" whole and the last icon unclipped. */
+[data-ide-host] .part.sidebar > .composite.title {
+  align-items: center;
+  padding-left: 12px;
+  padding-right: 4px;
+}
+[data-ide-host] .part.sidebar > .composite.title .title-label {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  flex-shrink: 0;
+}
+[data-ide-host] .part.sidebar > .composite.title .title-actions .action-item {
+  margin-right: 1px;
+}
+[data-ide-host] .part.sidebar > .composite.title .title-actions .action-item:last-child {
+  margin-right: 0;
+}

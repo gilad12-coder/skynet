@@ -101,11 +101,11 @@ class WizardUpdateRequest(BaseModel):
 
     run_code: str | None = Field(
         default=None,
-        description="Refused: workspace run code is written only through request_code_authoring.",
+        description="Refused: workspace run code is written only by the Metric & run step's coding agent.",
     )
     metric_code: str | None = Field(
         default=None,
-        description="Refused: metric code is written only through request_code_authoring.",
+        description="Refused: metric code is written only by the Metric & run step's coding agent.",
     )
 
 
@@ -203,7 +203,7 @@ def create_wizard_router() -> APIRouter:
         models and spending limit, and the workspace code. Supply only the
         fields you want to change — the rest are left untouched on the
         frontend. Workspace code (``run_code``, ``metric_code``) is refused
-        here; it is written through ``request_code_authoring``.
+        here; the Metric & run step's coding agent writes it.
 
         BATCHING — make ONE call per turn covering every field you intend
         to set together (``task_objective`` + ``artifact_kind`` +
@@ -226,10 +226,9 @@ def create_wizard_router() -> APIRouter:
         supplied = req.model_dump(by_alias=True, exclude_unset=True)
         patch: dict[str, Any] = {}
 
-        # Workspace code is authored ONLY via ``request_code_authoring``: the
-        # inline card runs the dedicated code agent, which validates and
-        # repairs the result before it lands in the wizard. Accepting it here
-        # would let the agent inject unvalidated code straight into the
+        # Workspace code is written ONLY by the Metric & run step's coding
+        # agent, which checks and repairs it in the workspace. Accepting it
+        # here would let the agent inject unchecked code straight into the
         # workspace, so the endpoint rejects it outright.
         for code_field in ("run_code", "metric_code"):
             if supplied.get(code_field) is not None:

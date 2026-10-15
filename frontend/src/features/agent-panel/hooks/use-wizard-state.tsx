@@ -8,7 +8,6 @@ import {
   type ArtifactKind,
   type DataMode,
   type OptimizerChoice,
-  type UnifiedAuthoringContext,
 } from "@/shared/types/unified-run";
 
 import type { ScreenNav, ScreenNavigator } from "../lib/screen-agent";
@@ -52,55 +51,7 @@ interface WizardStateContextValue {
   setScreenNavigator: (navigator: ScreenNavigator | null) => void;
   /** Move the wizard as a screen agent asked, through the frame's handlers. */
   navigateScreen: (nav: ScreenNav) => void;
-  /**
-   * The context the wizard's Metric step writes code under (its task, inputs
-   * and sample cases). The agent's coding tool authors against it while the
-   * wizard is on view; null when no Metric step is mounted or ready.
-   */
-  authoringContext: UnifiedAuthoringContext | null;
-  setAuthoringContext: (context: UnifiedAuthoringContext | null) => void;
-  /** Which wizard code the agent's coding tool is streaming in right now. */
-  codeWriting: CodeWriting;
-  setCodeWriting: (writing: CodeWriting) => void;
-  /**
-   * Write code straight into the Metric step's editors, the code's one home.
-   * Returns false when no Metric step is mounted to take it.
-   */
-  writeCode: (slot: CodeSlot, code: string) => boolean;
-  setCodeSink: (sink: CodeSink | null) => void;
-  /**
-   * The Metric step's extra workspace files (besides run.py and metric.py),
-   * path to text; empty when no Metric step is mounted.
-   */
-  workspaceFiles: Readonly<Record<string, string>>;
-  setWorkspaceFiles: (files: Readonly<Record<string, string>>) => void;
-  /**
-   * Write one extra workspace file, or delete it with null. Returns false
-   * when no Metric step is mounted to take it.
-   */
-  writeFile: (path: string, text: string | null) => boolean;
-  setFileSink: (sink: FileSink | null) => void;
 }
-
-/** The wizard's two fixed code slots: run.py and metric.py. */
-export type CodeSlot = "run" | "metric";
-
-/** Where the Metric step takes code written outside its own editors. */
-export type CodeSink = (slot: CodeSlot, code: string) => void;
-
-/** Where the Metric step takes an extra file written or deleted outside its editor. */
-export type FileSink = (path: string, text: string | null) => void;
-
-/** Which of the wizard's code the coding tool is writing. */
-export interface CodeWriting {
-  run: boolean;
-  metric: boolean;
-  /** Extra workspace files being written, by path. */
-  files: readonly string[];
-}
-
-const NOT_WRITING: CodeWriting = { run: false, metric: false, files: [] };
-const NO_FILES: Readonly<Record<string, string>> = {};
 
 const Ctx = React.createContext<WizardStateContextValue | null>(null);
 
@@ -126,49 +77,6 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
   const navigateScreen = React.useCallback((nav: ScreenNav) => {
     runScreenNav(nav, navigatorRef.current);
   }, []);
-  const [authoringContext, setAuthoringContext] = React.useState<UnifiedAuthoringContext | null>(
-    null,
-  );
-  // Streamed code skips the agent-patch channel: that channel names only the
-  // last patch's keys per render, so a final run-code write batched with a
-  // metric write never reached the editors and the stale draft won.
-  const codeSinkRef = React.useRef<CodeSink | null>(null);
-  const setCodeSink = React.useCallback((sink: CodeSink | null) => {
-    codeSinkRef.current = sink;
-  }, []);
-  const writeCode = React.useCallback((slot: CodeSlot, code: string) => {
-    const sink = codeSinkRef.current;
-    if (!sink) return false;
-    sink(slot, code);
-    return true;
-  }, []);
-  const fileSinkRef = React.useRef<FileSink | null>(null);
-  const setFileSink = React.useCallback((sink: FileSink | null) => {
-    fileSinkRef.current = sink;
-  }, []);
-  const writeFile = React.useCallback((path: string, text: string | null) => {
-    const sink = fileSinkRef.current;
-    if (!sink) return false;
-    sink(path, text);
-    return true;
-  }, []);
-  const [workspaceFiles, setWorkspaceFilesState] =
-    React.useState<Readonly<Record<string, string>>>(NO_FILES);
-  const setWorkspaceFiles = React.useCallback((files: Readonly<Record<string, string>>) => {
-    setWorkspaceFilesState(Object.keys(files).length === 0 ? NO_FILES : files);
-  }, []);
-  const [codeWriting, setCodeWritingState] = React.useState<CodeWriting>(NOT_WRITING);
-  const setCodeWriting = React.useCallback((next: CodeWriting) => {
-    setCodeWritingState((prev) =>
-      prev.run === next.run &&
-      prev.metric === next.metric &&
-      prev.files.length === next.files.length &&
-      prev.files.every((path, i) => path === next.files[i])
-        ? prev
-        : next,
-    );
-  }, []);
-
   const setField = React.useCallback<WizardStateContextValue["setField"]>(
     (key, value, source = "user") => {
       setState((prev) => {
@@ -273,16 +181,6 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       setScreenIssue,
       setScreenNavigator,
       navigateScreen,
-      authoringContext,
-      setAuthoringContext,
-      codeWriting,
-      setCodeWriting,
-      writeCode,
-      setCodeSink,
-      workspaceFiles,
-      setWorkspaceFiles,
-      writeFile,
-      setFileSink,
     }),
     [
       state,
@@ -297,15 +195,6 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       screenIssue,
       setScreenNavigator,
       navigateScreen,
-      authoringContext,
-      codeWriting,
-      setCodeWriting,
-      writeCode,
-      setCodeSink,
-      workspaceFiles,
-      setWorkspaceFiles,
-      writeFile,
-      setFileSink,
     ],
   );
 

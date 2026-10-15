@@ -391,6 +391,18 @@ def _github_picker_api(method: str, url: str, **kwargs: Any) -> httpx.Response:
         )
     if path == "/repos/octo/app/git/trees/HEAD":
         return _response(200, {"truncated": True, "tree": [{"path": "a.txt", "type": "blob"}]})
+    if path == "/repos/octo/app/contents/src/app.py":
+        assert kwargs["params"] == {"ref": "abc123"}
+        encoded = base64.b64encode(b"print('hi')\n").decode()
+        return _response(200, {"type": "file", "size": 12, "encoding": "base64", "content": encoded})
+    if path == "/repos/octo/app/contents/logo.png":
+        assert kwargs["params"] is None
+        encoded = base64.b64encode(b"\x89PNG\x00").decode()
+        return _response(200, {"type": "file", "size": 5, "encoding": "base64", "content": encoded})
+    if path == "/repos/octo/app/contents/data.bin":
+        return _response(200, {"type": "file", "size": 5 * 1024 * 1024, "encoding": "none", "content": ""})
+    if path == "/repos/octo/app/contents/gone.py":
+        return _response(404, {"message": "Not Found"})
     raise AssertionError(f"unexpected call {method} {url}")
 
 
@@ -456,6 +468,38 @@ def test_github_picker_tree_lists_files_and_folders() -> None:
 
 
 @pytest.mark.usefixtures("vault_key", "generic_oauth_off")
+def test_github_picker_file_reads_text_and_flags_the_rest() -> None:
+    """One file reads as text at a ref, and binary, oversized, missing and bad paths are flagged or refused."""
+    client, _ = _make_client()
+    with patch("core.connectors.transport.CLIENT.request", side_effect=_github_picker_api) as api:
+        client.put("/connectors/github/credentials", json={"fields": {"token": "ghp_secret"}})
+        text = client.get("/connectors/github/file", params={"repo": "octo/app", "ref": "abc123", "path": "src/app.py"})
+        binary = client.get("/connectors/github/file", params={"repo": "octo/app", "path": "logo.png"}).json()
+        large = client.get("/connectors/github/file", params={"repo": "octo/app", "path": "data.bin"}).json()
+        missing = client.get("/connectors/github/file", params={"repo": "octo/app", "path": "gone.py"}).json()
+        calls = api.call_count
+        refused = [
+            client.get("/connectors/github/file", params={"repo": "octo/app", "path": bad})
+            for bad in ("../etc/passwd", "/src/app.py", ".git/config")
+        ]
+        assert api.call_count == calls
+    assert text.status_code == 200, text.text
+    assert text.json() == {
+        "path": "src/app.py",
+        "text": "print('hi')\n",
+        "binary": False,
+        "too_large": False,
+        "missing": False,
+    }
+    assert binary == {"path": "logo.png", "text": None, "binary": True, "too_large": False, "missing": False}
+    assert large == {"path": "data.bin", "text": None, "binary": False, "too_large": True, "missing": False}
+    assert missing == {"path": "gone.py", "text": None, "binary": False, "too_large": False, "missing": True}
+    for response in refused:
+        assert response.status_code == 400
+        assert response.json()["code"] == "connectors.invalid_ref"
+
+
+@pytest.mark.usefixtures("vault_key", "generic_oauth_off")
 def test_github_picker_needs_a_linked_account() -> None:
     """Every picker route answers 409 before GitHub is linked."""
     client, _ = _make_client()
@@ -463,6 +507,7 @@ def test_github_picker_needs_a_linked_account() -> None:
         ("/connectors/github/repos", {}),
         ("/connectors/github/branches", {"repo": "octo/app"}),
         ("/connectors/github/tree", {"repo": "octo/app"}),
+        ("/connectors/github/file", {"repo": "octo/app", "path": "README.md"}),
     ):
         response = client.get(path, params=params)
         assert response.status_code == 409

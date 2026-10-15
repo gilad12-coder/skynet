@@ -30,7 +30,6 @@ export interface ToolRenderer {
 // get_/list_ tools read, anything else is a generic tool.
 const TOOL_KINDS: Record<string, ActivityKind> = {
   edit_code_optimizations_edit_code_post: "edit",
-  request_code_authoring: "edit",
   delete_job_optimizations: "act",
   bulk_delete_jobs_optimizations_bulk_delete_post: "act",
   rename_job_optimizations: "act",

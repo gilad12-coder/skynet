@@ -57,7 +57,6 @@ _READY: dict[str, Any] = {
 def test_empty_state_hides_dataset_and_submit_tools() -> None:
     """An empty wizard state hides dataset/code/submit tools, exposing only discovery."""
     allowed = tools_for(WizardState())
-    assert "request_code_authoring" not in allowed
     assert "validate_code_validate_code_post" not in allowed
     assert _SUBMIT not in allowed
     assert "list_models_for_agent" in allowed
@@ -80,34 +79,12 @@ def test_comparison_tool_is_not_exposed() -> None:
     assert "compare_jobs_optimizations_compare_post" not in tools_for(WizardState())
 
 
-def test_dataset_ready_unlocks_diagnostics_but_not_code_authoring() -> None:
-    """A staged dataset exposes the diagnostics; authoring waits for a named run with a task."""
+def test_dataset_ready_unlocks_diagnostics_but_not_submit() -> None:
+    """A staged dataset exposes the diagnostics but not submit."""
     allowed = tools_for(WizardState(dataset_ready=True))
     assert "validate_code_validate_code_post" in allowed
     assert "profile_datasets_profile_post" in allowed
-    assert "request_code_authoring" not in allowed
     assert _SUBMIT not in allowed
-
-
-def test_named_run_with_task_unlocks_code_authoring() -> None:
-    """Name plus objective, artifact kind and starting version opens code authoring."""
-    state = {k: _READY[k] for k in ("job_name", "task_objective", "artifact_kind", "starting_version")}
-    allowed = tools_for(cast(WizardState, state))
-    assert "request_code_authoring" in allowed
-    assert _SUBMIT not in allowed
-
-
-def test_wizard_screen_opens_code_authoring_without_a_run_name() -> None:
-    """On the submit wizard an unnamed run with a task still gets the coding tool.
-
-    The wizard never asks for a name, and since SKY-26 its Metric screen has no
-    code writer other than ``request_code_authoring``.
-    """
-    state = {k: _READY[k] for k in ("task_objective", "artifact_kind", "starting_version")}
-    assert "request_code_authoring" not in tools_for(cast(WizardState, state))
-    on_wizard = cast(WizardState, {**state, "wizard_screen": "metric"})
-    assert "request_code_authoring" in screen_tools(tools_for(on_wizard), on_wizard)
-    assert _SUBMIT not in tools_for(on_wizard)
 
 
 def test_full_readiness_unlocks_submit() -> None:
@@ -228,14 +205,6 @@ def test_screen_leaves_code_fields_to_the_tool_refusal() -> None:
     assert validate_wizard_screen("update_wizard_state", {"run_code": "x", "metric_code": "y"}, state) is None
 
 
-def test_screen_gates_code_authoring_to_the_metric_screen() -> None:
-    """Run and metric code are written only while the metric screen is on view."""
-    assert validate_wizard_screen("request_code_authoring", {"goal": ""}, WizardState(wizard_screen="metric")) is None
-    err = validate_wizard_screen("request_code_authoring", {"goal": ""}, WizardState(wizard_screen="budget"))
-    assert err is not None
-    assert "metric" in err
-
-
 @pytest.mark.asyncio
 async def test_wrap_refuses_off_screen_patch_without_calling_tool() -> None:
     """The wrapper turns an off-screen patch into an error observation."""
@@ -252,22 +221,6 @@ async def test_wrap_refuses_off_screen_patch_without_calling_tool() -> None:
     assert result.startswith("Not on screen")
     end = next(e for e in events if e["event"] == "tool_end")
     assert end["data"]["status"] == "error"
-
-
-@pytest.mark.asyncio
-async def test_wrap_refuses_code_authoring_off_the_metric_screen() -> None:
-    """``request_code_authoring`` never runs while another screen is on view."""
-    events: list[dict] = []
-    tool = _wrap_tool_with_approval(
-        _make_fake_tool("request_code_authoring", return_value="should not run"),
-        trust_mode="yolo",
-        registry=ApprovalRegistry(),
-        emit=events.append,
-        outer_loop=asyncio.get_running_loop(),
-        wizard_state=cast(WizardState, {**_READY, "wizard_screen": "source"}),
-    )
-    result = await tool.func._async_body(goal="")
-    assert result.startswith("Not on screen")
 
 
 def test_system_prompt_names_the_screen_rule() -> None:
@@ -375,20 +328,26 @@ def test_screen_snapshot_names_what_blocks_continue() -> None:
     ("screen", "kept"),
     [
         ("brief", {"update_wizard_state"}),
-        ("metric", {"request_code_authoring"}),
+        ("metric", {"validate_code_validate_code_post"}),
         ("budget", {"update_wizard_state", "get_wallet_for_agent"}),
         ("overview", {_SUBMIT, "get_wallet_for_agent"}),
     ],
 )
 def test_screen_tools_keep_only_the_screens_own_tools(screen: str, kept: set[str]) -> None:
     """A screen agent gets that screen's tools only; other screens' tools are gone."""
-    allowed = {"update_wizard_state", "request_code_authoring", "get_wallet_for_agent", "list_jobs", _SUBMIT}
+    allowed = {
+        "update_wizard_state",
+        "validate_code_validate_code_post",
+        "get_wallet_for_agent",
+        "list_jobs",
+        _SUBMIT,
+    }
     assert screen_tools(allowed, WizardState(wizard_screen=screen)) == kept
 
 
 def test_screen_tools_unchanged_without_a_screen() -> None:
     """With no ``wizard_screen`` every tool ``tools_for`` allows stays."""
-    allowed = {"update_wizard_state", "request_code_authoring", "list_jobs"}
+    allowed = {"update_wizard_state", "validate_code_validate_code_post", "list_jobs"}
     assert screen_tools(allowed, WizardState()) == allowed
 
 
@@ -453,17 +412,6 @@ async def test_continue_judges_this_turns_writes() -> None:
         "continue_to_next_screen"
     ].acall()
     assert result["screen_nav"] == {"action": "continue", "from": "brief"}
-
-
-@pytest.mark.asyncio
-async def test_continue_refused_in_a_turn_that_requested_code() -> None:
-    """A finished Metric screen still stays put in the turn the coding tool ran."""
-    turn = _TurnAuthoringFlag()
-    turn.authoring_requested = True
-    state = {**_READY, "wizard_screen": "metric"}
-    result = await _nav_tools(state, turn)["continue_to_next_screen"].acall()
-    assert isinstance(result, str)
-    assert "request_code_authoring" in result
 
 
 @pytest.mark.asyncio
@@ -972,42 +920,8 @@ def test_submit_arg_extractor_is_idempotent_on_repeat_feed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_submit_blocked_when_authoring_requested_same_turn() -> None:
-    """A submit that follows request_code_authoring in one turn is denied.
-
-    ``request_code_authoring`` writes its authored code back to the wizard
-    asynchronously, so the new run and metric code is not in this turn's snapshot.
-    The shared turn flag must cause the same-turn submit to short-circuit with
-    a denial observation rather than ship stale code into a doomed run.
-    """
-    flag = _TurnAuthoringFlag()
-    authoring, _ = _make_recording_tool("request_code_authoring")
-    submit, submit_seen = _make_recording_tool("submit_unified_run_optimize_post")
-    common = {
-        "trust_mode": "yolo",
-        "registry": ApprovalRegistry(),
-        "emit": lambda _e: None,
-        "outer_loop": asyncio.get_running_loop(),
-        "wizard_state": cast(WizardState, {}),
-        "authoring_flag": flag,
-    }
-    _wrap_tool_with_approval(authoring, **common)
-    _wrap_tool_with_approval(submit, **common)
-
-    await authoring.func._async_body(goal="fix the run code")
-    result = await submit.func._async_body(name="My run")
-
-    assert "Submit blocked" in result
-    assert submit_seen == {}
-
-
-@pytest.mark.asyncio
-async def test_submit_runs_when_no_authoring_this_turn() -> None:
-    """Submit runs normally when request_code_authoring did NOT fire this turn.
-
-    The happy path — submit on a later turn, once the authored code is in the
-    snapshot — must be unaffected by the same-turn backstop.
-    """
+async def test_submit_runs_through_the_wrapper() -> None:
+    """A submit with the turn state shared reaches the underlying tool."""
     flag = _TurnAuthoringFlag()
     submit, submit_seen = _make_recording_tool("submit_unified_run_optimize_post")
     _wrap_tool_with_approval(
@@ -1024,39 +938,10 @@ async def test_submit_runs_when_no_authoring_this_turn() -> None:
     assert submit_seen["name"] == "My run"
 
 
-def test_system_prompt_forbids_submit_in_authoring_turn() -> None:
-    """The system prompt must keep the never-submit-in-an-authoring-turn rule.
-
-    Guards against a future prompt edit silently dropping the ordering rule that
-    is the primary defense for this bug.
-    """
-    prompt = GENERALIST_SYSTEM_PROMPT or ""
-    assert "NEVER call ``submit_unified_run_optimize_post`` in the SAME turn as" in prompt
-    assert "request_code_authoring" in prompt
-
-
-def test_system_prompt_makes_code_authoring_the_wizard_coding_tool() -> None:
-    """The prompt must name ``request_code_authoring`` as the wizard's only code agent.
-
-    SKY-26 removed the Metric step's own coding panel, so the generalist is the
-    only way code gets written on that screen; dropping this would leave the
-    Metric screen with nothing that writes code.
-    """
-    prompt = GENERALIST_SYSTEM_PROMPT or ""
-    assert "the wizard has no\n  other code agent" in prompt
-    assert "hands a failed check back to the coding\n  agent" in prompt
-
-
-def test_system_prompt_points_code_review_to_the_metric_editors() -> None:
-    """The prompt must send the user to the Metric editors, not to a chat card.
-
-    The coding tool's chat rows show only diffs and the check; the editable
-    code lives in the Metric screen. Describing in-chat editors made the agent
-    tell users to "confirm the code in the card", which has no such control.
-    """
-    prompt = GENERALIST_SYSTEM_PROMPT or ""
-    assert "lands in the Metric screen's editors" in prompt
-    assert "editors the user can edit" not in prompt
+def test_system_prompt_sends_code_requests_to_the_metric_coding_agent() -> None:
+    """The prompt points code requests at the Metric screen's coding agent."""
+    prompt = " ".join((GENERALIST_SYSTEM_PROMPT or "").split())
+    assert "tell them to ask that coding agent on the Metric screen" in prompt
 
 
 def _approval_engine():
@@ -1520,31 +1405,3 @@ async def test_turn_offers_web_tools_when_firecrawl_is_configured(monkeypatch: p
     assert posted == [("/search", {"query": "dspy gepa", "limit": 5})]
     ends = [e["data"] for e in events if e["event"] == "tool_end"]
     assert [(e["tool"], e["status"]) for e in ends] == [("web_search", "ok")]
-
-
-def test_system_prompt_says_the_coding_tool_runs_the_check_itself() -> None:
-    """The prompt must stop the agent from announcing a run it cannot see.
-
-    The reply to a coding-tool turn is written before the coding agent starts,
-    so it said the code "is being written and checked" and never said how the
-    check ended. The chat reports that under the call instead.
-    """
-    prompt = " ".join((GENERALIST_SYSTEM_PROMPT or "").split())
-    assert "runs the validity check on its own" in prompt
-    assert "END your turn with no reply text" in prompt
-    assert "never ask the user to run the check" in prompt
-
-
-def test_system_prompt_never_claims_a_coding_run_it_did_not_start() -> None:
-    """A later turn must not say the coding agent is running unless it called it.
-
-    After a reload the agent replied "I already sent your request, it is
-    writing and checking them now" with empty editors, and nothing ran.
-    """
-    prompt = " ".join((GENERALIST_SYSTEM_PROMPT or "").split())
-    assert (
-        "Never say the coding agent is writing, checking or running unless you called "
-        "``request_code_authoring`` in THIS turn"
-    ) in prompt
-    assert "an earlier call in the history is FINISHED" in prompt
-    assert "are empty or do not match what they ask for, call ``request_code_authoring`` now" in prompt

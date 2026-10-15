@@ -17,7 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from ...storage.models import AgentConversationModel, AgentMessageModel, Base
+from ...storage.models import AgentConversationModel, Base
 from ...storage.remote import RemoteDBJobStore
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -138,52 +138,3 @@ def test_bulk_delete_empty_is_noop() -> None:
     resp = client.post("/agent/conversations/bulk-delete", json={"ids": []})
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"deleted": [], "skipped": []}
-
-
-def _seed_turn(store: _MemStore, conversation_id: str, tool_calls: list[dict]) -> None:
-    """Insert one assistant turn carrying ``tool_calls`` into a conversation.
-
-    Args:
-        store: The in-memory store to seed.
-        conversation_id: The owning conversation.
-        tool_calls: The turn's tool-call records.
-    """
-    with store._session_factory() as session:
-        session.add(
-            AgentMessageModel(conversation_id=conversation_id, role="assistant", content="", tool_calls=tool_calls)
-        )
-        session.commit()
-
-
-def test_tool_call_outcome_is_stored_on_the_call_and_reloads() -> None:
-    """The coding tool's finished state lands on its call, so a reload renders the same rows."""
-    client, store = _client(_ALICE)
-    _seed(store, ("c1", "alice"))
-    _seed_turn(
-        store,
-        "c1",
-        [
-            {"id": "t1", "tool": "request_code_authoring", "status": "done", "payload": {"result": {"goal": ""}}},
-            {"id": "t2", "tool": "other", "status": "done"},
-        ],
-    )
-    outcome = {"status": "done", "check": "passed", "edits": [{"file": "run", "before": "", "after": "x"}]}
-
-    resp = client.put("/agent/conversations/c1/tool-calls/t1/outcome", json={"outcome": outcome})
-
-    assert resp.status_code == 204
-    calls = client.get("/agent/conversations/c1").json()["messages"][0]["tool_calls"]
-    assert calls[0]["payload"] == {"result": {"goal": ""}, "outcome": outcome}
-    assert calls[1] == {"id": "t2", "tool": "other", "status": "done"}
-
-
-def test_tool_call_outcome_rejects_unknown_calls_and_other_users() -> None:
-    """Only the owner can record an outcome, and only on a call the thread holds."""
-    client, store = _client(_ALICE)
-    _seed(store, ("c1", "alice"), ("c2", "bob"))
-    _seed_turn(store, "c1", [{"id": "t1", "tool": "request_code_authoring", "status": "done"}])
-    body = {"outcome": {"status": "done"}}
-
-    assert client.put("/agent/conversations/c1/tool-calls/nope/outcome", json=body).status_code == 404
-    assert client.put("/agent/conversations/c2/tool-calls/t1/outcome", json=body).status_code == 403
-    assert client.put("/agent/conversations/zz/tool-calls/t1/outcome", json=body).status_code == 404

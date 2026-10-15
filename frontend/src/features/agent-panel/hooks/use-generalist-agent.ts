@@ -21,12 +21,6 @@ import { midTurnOf, SteerQueue, type MidTurnQueue } from "@/shared/ui/agent/stee
 import { agentSteerChannel, newSteerKey } from "@/shared/ui/agent/use-steer-queue";
 
 import { confirmGeneralistApproval, streamGeneralistAgent } from "../lib/stream";
-import {
-  outcomeHistoryResult,
-  parseAuthoringOutcome,
-  type AuthoringOutcome,
-} from "../lib/code-authoring";
-import { putToolCallOutcome } from "../lib/conversation-api";
 import type {
   ChatTurn,
   PendingApprovalPayload,
@@ -77,11 +71,6 @@ export interface GeneralistAgentState {
   activateConversation: (id: string) => boolean;
   /** Open a server-loaded conversation as the displayed session. */
   openConversation: (id: string, messages: AgentMessage[]) => void;
-  /**
-   * Keep a tool's finished state on its call in the displayed chat and on the
-   * persisted turn, for a tool that finishes after its turn ended.
-   */
-  recordToolOutcome: (callId: string, outcome: AuthoringOutcome) => void;
   /** Drop a conversation's session (aborting its stream) after deletion. */
   discardConversation: (id: string) => void;
   /** Conversation ids with a stream running or waiting in the queue. */
@@ -127,14 +116,10 @@ const SUBMIT_TOOLS: ReadonlySet<string> = new Set(["submit_unified_run_optimize_
 // bounds it again, this just keeps the request body small.
 const HISTORY_TOOL_RESULT_MAX_CHARS = 400;
 
-const CODE_AUTHORING_TOOL = "request_code_authoring";
-
 function historyToolCalls(m: AgentMessage): ChatTurn["tool_calls"] {
   const calls = (m.toolCalls ?? []).filter((c) => c.tool !== "submit" && c.status !== "running");
   if (m.role !== "assistant" || calls.length === 0) return undefined;
   return calls.map((c) => {
-    const outcome = c.tool === CODE_AUTHORING_TOOL ? parseAuthoringOutcome(c.payload?.outcome) : null;
-    if (outcome) return { tool: c.tool, status: "done", result: outcomeHistoryResult(outcome) };
     const result = c.payload?.result;
     return {
       tool: c.tool,
@@ -1035,29 +1020,6 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     [patchSession],
   );
 
-  const recordToolOutcome = React.useCallback(
-    (callId: string, outcome: AuthoringOutcome) => {
-      const key = activeKeyRef.current;
-      patchMessages(key, (prev) => {
-        const at = prev.findIndex((m) => m.toolCalls?.some((c) => c.id === callId));
-        const target = prev[at];
-        if (!target?.toolCalls) return prev;
-        const next = prev.slice();
-        next[at] = {
-          ...target,
-          toolCalls: target.toolCalls.map((c) =>
-            c.id === callId
-              ? { ...c, endedAt: outcome.endedAt, payload: { ...(c.payload ?? {}), outcome } }
-              : c,
-          ),
-        };
-        return next;
-      });
-      const conversationId = sessionsRef.current.get(key)?.conversationId;
-      if (conversationId) void putToolCallOutcome(conversationId, callId, outcome);
-    },
-    [patchMessages],
-  );
 
   const busyConversationIds = React.useMemo(() => {
     const out = new Set<string>();
@@ -1096,7 +1058,6 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     newSession,
     activateConversation,
     openConversation,
-    recordToolOutcome,
     discardConversation,
     busyConversationIds,
     backgroundBusyCount,
