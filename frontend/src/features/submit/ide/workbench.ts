@@ -11,7 +11,10 @@ import "@codingame/monaco-vscode-theme-defaults-default-extension";
 import { initialize, getService } from "@codingame/monaco-vscode-api";
 import type { IMonacoEnvironment } from "@codingame/monaco-vscode-api/vscode/vs/base/browser/browser";
 import { URI } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri";
-import { SyncDescriptor } from "@codingame/monaco-vscode-api/vscode/vs/platform/instantiation/common/descriptors";
+import {
+  InstantiationType,
+  registerSingleton,
+} from "@codingame/monaco-vscode-api/vscode/vs/platform/instantiation/common/extensions";
 import { Emitter, Event } from "@codingame/monaco-vscode-api/vscode/vs/base/common/event";
 import {
   Disposable,
@@ -191,12 +194,14 @@ class WorkspaceFsProvider
 
 // The workbench's parts splash saves a layout skeleton for the next boot and
 // fails to start without somewhere to keep it; the pop-up boots hidden, so
-// there is nothing to save.
+// there is nothing to save. Registered, not passed to `initialize`: its
+// overrides only replace services something already registered.
 class NoSplashStorage implements ISplashStorageService {
   declare readonly _serviceBrand: undefined;
 
   async saveWindowSplash(): Promise<void> {}
 }
+registerSingleton(ISplashStorageService, NoSplashStorage, InstantiationType.Delayed);
 
 // The explorer commands that delete or rename the selection. The provider
 // refuses run.py and metric.py too, but VS Code then reports the refusal as
@@ -308,7 +313,6 @@ async function boot(dark: boolean, describe: (issue: string) => string): Promise
       ...getSearchServiceOverride(),
       ...getExplorerServiceOverride(),
       ...getWorkbenchServiceOverride(),
-      [ISplashStorageService.toString()]: new SyncDescriptor(NoSplashStorage, [], true),
     },
     element,
     {
