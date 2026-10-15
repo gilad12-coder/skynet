@@ -2091,6 +2091,8 @@
   "shared.agent.run_code_prompt": "בדוק/בדקי את קטע הקוד הבא ({language}) והחזר/החזירי את התוצאות:\n\n```{language}\n{code}\n```",
   "shared.agent.seconds_short": "s",
   "shared.agent.send": "שלח/שלחי",
+  "shared.agent.show_less": "הצג/י פחות",
+  "shared.agent.show_more": "הצג/י עוד",
   "shared.agent.thinking": "חושב",
   "shared.agent.thought_briefly": "חשב לרגע",
   "shared.agent.thought_seconds": "חשב במשך {seconds} שניות",

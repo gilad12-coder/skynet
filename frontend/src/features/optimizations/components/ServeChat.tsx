@@ -9,7 +9,12 @@ import { Button } from "@/shared/ui/primitives/button";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import type { ServeInfoResponse, WorkflowNodeTrace } from "@/shared/types/api";
-import { autoResizeTextarea, Composer, MessageActions } from "@/shared/ui/agent";
+import {
+  autoResizeTextarea,
+  CollapsibleMessage,
+  Composer,
+  MessageActions,
+} from "@/shared/ui/agent";
 import {
   USER_BUBBLE_EDIT_CANCEL_CLASS,
   USER_BUBBLE_EDIT_SEND_CLASS,
@@ -141,20 +146,22 @@ export function ServeChat({
                     className="max-w-[92%] rounded-2xl rounded-br-sm bg-primary-fill px-4 py-3 text-sm text-primary-foreground sm:max-w-[80%]"
                     dir="ltr"
                   >
-                    {serveInfo.input_fields.map((k, i, arr) => (
-                      <div key={k} className="font-mono leading-relaxed">
-                        <span className="text-primary text-xs">
-                          {k}
-                          {msg("optimizations.serve.field_separator")}
-                        </span>
-                        <span className="whitespace-pre-wrap break-words">
-                          {run.inputs[k] ?? ""}
-                        </span>
-                        {i < arr.length - 1 && arr.length > 1 && (
-                          <div className="h-px bg-white/10 dark:bg-black/10 my-1.5" />
-                        )}
-                      </div>
-                    ))}
+                    <CollapsibleMessage>
+                      {serveInfo.input_fields.map((k, i, arr) => (
+                        <div key={k} className="font-mono leading-relaxed">
+                          <span className="text-primary text-xs">
+                            {k}
+                            {msg("optimizations.serve.field_separator")}
+                          </span>
+                          <span className="whitespace-pre-wrap break-words">
+                            {run.inputs[k] ?? ""}
+                          </span>
+                          {i < arr.length - 1 && arr.length > 1 && (
+                            <div className="h-px bg-white/10 dark:bg-black/10 my-1.5" />
+                          )}
+                        </div>
+                      ))}
+                    </CollapsibleMessage>
                   </div>
                   {!serveLoading && (
                     <Button

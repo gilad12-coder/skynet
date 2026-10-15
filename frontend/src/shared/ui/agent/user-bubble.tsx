@@ -14,6 +14,7 @@ import { autoResizeTextarea } from "./auto-resize";
 import { Textarea } from "@/shared/ui/primitives/textarea";
 import { MarkdownPreviewField } from "@/shared/ui/markdown-preview-field";
 
+import { CollapsibleMessage } from "./collapsible-message";
 import { PastedTextCard } from "./pasted-text-card";
 import { joinPastes, shouldAttachPaste, splitPastes, type SplitMessage } from "./pasted-text";
 
@@ -60,9 +61,11 @@ export function UserBubble({ content, onEdit, editable = true }: UserBubbleProps
             className="max-w-full rounded-[22px] rounded-es-[4px] bg-primary-fill text-primary-foreground px-4 py-2.5 text-sm leading-[1.45]"
             dir="auto"
           >
-            <React.Suspense fallback={<span className="whitespace-pre-wrap">{text}</span>}>
-              <MessageMarkdown content={text} />
-            </React.Suspense>
+            <CollapsibleMessage>
+              <React.Suspense fallback={<span className="whitespace-pre-wrap">{text}</span>}>
+                <MessageMarkdown content={text} />
+              </React.Suspense>
+            </CollapsibleMessage>
           </div>
         )}
       </div>

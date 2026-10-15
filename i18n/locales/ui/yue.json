@@ -2712,6 +2712,8 @@
   "shared.agent.run_code_prompt": "執行以下程式碼片段（{language}）並傳回結果：\n\n```{language}\n{code}\n```",
   "shared.agent.seconds_short": "秒",
   "shared.agent.send": "傳送",
+  "shared.agent.show_less": "顯示較少",
+  "shared.agent.show_more": "顯示更多",
   "shared.agent.thinking": "諗緊…",
   "shared.agent.thought_briefly": "諗咗一陣",
   "shared.agent.thought_seconds": "思考咗 {seconds} 秒",
