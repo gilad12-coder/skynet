@@ -10,18 +10,37 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { contractCheckMessage } from "@/shared/lib/i18n";
 import { Button } from "@/shared/ui/primitives/button";
-import { CheckCircle, CircleNotch, ListChecks, X, XCircle } from "@/shared/ui/icons";
-import type { ContractCheckResponse } from "@/shared/types/unified-run";
-import type { ContractConsole } from "../lib/contract-console";
+import {
+  ArrowsIn,
+  ArrowsOut,
+  CheckCircle,
+  CircleNotch,
+  ListChecks,
+  XCircle,
+} from "@/shared/ui/icons";
+import type { ContractCheckItem, ContractCheckResponse } from "@/shared/types/unified-run";
+import { contractConsole, type ContractConsole } from "../lib/contract-console";
 import { blankEntryFile, diffWorkspace, workspaceTexts } from "../lib/ide-workspace";
 import { METRIC_FILE, RUN_FILE } from "../lib/wizard-v2";
 import { v2Msg } from "../components/v2/ArtifactConfirmCard";
 import { park, unpark } from "./park";
+import type { RepoSource } from "./repo-files";
 import type { IdeWorkbench } from "./workbench";
 
 function isDark(): boolean {
   return document.documentElement.classList.contains("dark");
+}
+
+/** One failed check as a line under its file. */
+function checkLine(item: ContractCheckItem, guided: boolean): string {
+  const where =
+    item.sample_index != null
+      ? `${v2Msg("submit.v2.metric.check.sample_title", guided, { index: item.sample_index + 1 })}: `
+      : "";
+  const head = `${where}${contractCheckMessage(item)}`;
+  return item.detail ? `${head}\n${item.detail}` : head;
 }
 
 /** What the last Check found in one file. */
@@ -92,43 +111,58 @@ function CheckResults({
 }
 
 /**
- * The workspace in VS Code's workbench, full screen: explorer, tabs, search
- * and the command palette over the wizard's own files. Edits go straight into
- * the wizard's state, and the wizard's changes (the agent writing a file)
- * show up here, so closing the pop-up loses nothing.
+ * The Metric step's workspace as VS Code's workbench: explorer, tabs, search
+ * and the command palette over the wizard's own files, with the coding agent
+ * docked beside it. Full screen moves the page's one workbench into a
+ * pop-up and back, so nothing reloads. Edits go straight into the wizard's
+ * state, and the wizard's changes (the agent writing a file) show up here.
  */
-export function IdeDialog({
+export function IdeWorkspace({
   runCode,
   metricCode,
   files,
   onFileChange,
   onFileDelete,
   onCheck,
-  consoleFor,
-  onClose,
-  guided,
+  checkResult,
+  hint,
+  repo,
+  strip,
   sidePanel,
+  guided,
 }: {
   runCode: string;
   metricCode: string;
   files: Readonly<Record<string, string>>;
   onFileChange: (path: string, text: string) => void;
   onFileDelete: (path: string) => void;
-  onCheck: () => Promise<ContractCheckResponse | null>;
-  consoleFor: (result: ContractCheckResponse | null, path: string) => ContractConsole | null;
-  onClose: () => void;
-  guided: boolean;
+  /** Run Check; null for a repository run, whose scorer is checked when it is submitted. */
+  onCheck: (() => Promise<ContractCheckResponse | null>) | null;
+  /** The last Check (or the static check while it is fresher); each file gets its line. */
+  checkResult: ContractCheckResponse | null;
+  /** What the entry files must define, from the contract. */
+  hint: string | null;
+  /** A repository run's checkout, shown read-only in the explorer. */
+  repo: RepoSource | null;
+  /** Shown above the editor (the metric model row). */
+  strip?: ReactNode;
   /** The end-side region: the coding agent's chat. */
   sidePanel?: ReactNode;
+  guided: boolean;
 }) {
-  const host = useRef<HTMLDivElement>(null);
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [workbench, setWorkbench] = useState<IdeWorkbench | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [fullScreen, setFullScreen] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [check, setCheck] = useState<{
-    result: ContractCheckResponse | null;
+  // What the toolbar's own Check found that the wizard's result cannot say,
+  // until the next result (the agent's own Check, say) replaces it.
+  const [issue, setIssue] = useState<{
+    after: ContractCheckResponse | null;
     emptyFile?: string;
+    failed?: boolean;
   } | null>(null);
+  const checkIssue = issue && issue.after === checkResult ? issue : null;
 
   const texts = useMemo(
     () => workspaceTexts(runCode, metricCode, files),
@@ -145,7 +179,7 @@ export function IdeDialog({
 
   useEffect(() => {
     let cancelled = false;
-    // The workbench outlives this pop-up, so a refusal reads the current mode.
+    // The workbench outlives this step, so a refusal reads the current mode.
     const describe = (issue: string) => v2Msg(issue, sinks.current.guided);
     import("./workbench")
       .then(({ bootWorkbench }) => bootWorkbench(isDark(), describe))
@@ -162,8 +196,7 @@ export function IdeDialog({
   }, []);
 
   useEffect(() => {
-    const into = host.current;
-    if (!workbench || !into) return;
+    if (!workbench) return;
     workbench.load(latest.current);
     workbench.onEdit((next) => {
       const { writes, deletes } = diffWorkspace(latest.current, next);
@@ -173,33 +206,46 @@ export function IdeDialog({
       for (const [path, text] of writes) sinks.current.onFileChange(path, text);
       for (const path of deletes) sinks.current.onFileDelete(path);
     });
-    unpark(workbench.element, into);
-    workbench.layout();
-    const observer = new ResizeObserver(() => workbench.layout());
-    observer.observe(into);
     const theme = new MutationObserver(() => workbench.setDark(isDark()));
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     workbench.setDark(isDark());
     return () => {
-      observer.disconnect();
       theme.disconnect();
       workbench.onEdit(null);
-      // The workbench lives for the whole page (VS Code boots once), so it
-      // waits in the document, fully hidden, until the next open.
-      park(workbench.element, document.body);
     };
   }, [workbench]);
+
+  // Full screen renders a new host; the one workbench moves into it, and back.
+  useEffect(() => {
+    if (!workbench || !host) return;
+    unpark(workbench.element, host);
+    workbench.layout();
+    const observer = new ResizeObserver(() => workbench.layout());
+    observer.observe(host);
+    return () => {
+      observer.disconnect();
+      // VS Code boots once per page, so between hosts it waits in the
+      // document, fully hidden.
+      park(workbench.element, document.body);
+    };
+  }, [workbench, host]);
 
   useEffect(() => {
     workbench?.load(texts);
   }, [workbench, texts]);
 
-  const close = useCallback(async () => {
+  useEffect(() => {
+    workbench?.setRepo(repo);
+  }, [workbench, repo]);
+  useEffect(() => () => workbench?.setRepo(null), [workbench]);
+
+  const toggleFullScreen = useCallback(async () => {
     await workbench?.saveAll();
-    onClose();
-  }, [workbench, onClose]);
+    setFullScreen((open) => !open);
+  }, [workbench]);
 
   const runCheck = useCallback(async () => {
+    if (!onCheck) return;
     setChecking(true);
     try {
       await workbench?.saveAll();
@@ -207,83 +253,96 @@ export function IdeDialog({
         latest.current[RUN_FILE] ?? "",
         latest.current[METRIC_FILE] ?? "",
       );
-      setCheck(emptyFile ? { result: null, emptyFile } : { result: await onCheck() });
+      if (emptyFile) {
+        setIssue({ after: checkResult, emptyFile });
+        return;
+      }
+      setIssue(null);
+      if (!(await onCheck())) setIssue({ after: checkResult, failed: true });
     } finally {
       setChecking(false);
     }
-  }, [workbench, onCheck]);
+  }, [workbench, onCheck, checkResult]);
 
+  const extraPaths = useMemo(() => Object.keys(files).sort(), [files]);
   const results = useMemo<FileCheck[]>(() => {
-    if (!check?.result) return [];
+    if (!checkResult) return [];
     const out: FileCheck[] = [];
-    for (const path of [RUN_FILE, METRIC_FILE, ...Object.keys(files).sort()]) {
-      const result = consoleFor(check.result, path);
+    for (const path of [RUN_FILE, METRIC_FILE, ...extraPaths]) {
+      const result = contractConsole(checkResult, path, (item) => checkLine(item, guided), extraPaths);
       // The entry files always get a line; a helper file only when it has a problem.
       if (result && (path === RUN_FILE || path === METRIC_FILE || !result.valid))
         out.push({ path, console: result });
     }
     return out;
-  }, [check, consoleFor, files]);
+  }, [checkResult, extraPaths, guided]);
+  const showResults = checkIssue !== null || results.length > 0;
 
-  // On body, not in place: the wizard's card has a backdrop filter, which
-  // makes it the containing block of a fixed child, and the agent chat's own
-  // tooltips, popovers and drawer portal to body at z-index 50, so the pop-up
-  // takes the same layer and they open above it.
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="ide-dialog-title"
-      className="fixed inset-0 flex flex-col bg-background"
-      style={{ zIndex: 50 }}
-    >
-      <header className="flex shrink-0 items-center gap-2 border-b border-border/60 px-4 py-2">
-        <h2 id="ide-dialog-title" className="text-sm font-medium">
-          {v2Msg("submit.v2.ide.title", guided)}
+  const checkLabel = checking
+    ? v2Msg("submit.v2.metric.check.running", guided)
+    : v2Msg("submit.v2.metric.check.run", guided);
+  const fullScreenLabel = fullScreen
+    ? v2Msg("submit.v2.ide.exit_full_screen", guided)
+    : v2Msg("submit.v2.ide.full_screen", guided);
+
+  const body = (
+    <>
+      <header className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-2">
+        <h2 id="ide-workspace-title" className="shrink-0 text-sm font-medium">
+          {v2Msg("submit.v2.metric.title", guided)}
         </h2>
-        <div className="ms-auto flex items-center gap-2">
+        {hint && (
+          <p dir="ltr" title={hint} className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+            {hint}
+          </p>
+        )}
+        <div className="ms-auto flex shrink-0 items-center gap-1">
+          {onCheck && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={runCheck}
+              disabled={!workbench || checking}
+              aria-label={checkLabel}
+            >
+              {checking ? (
+                <CircleNotch className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <ListChecks className="size-4" aria-hidden />
+              )}
+            </Button>
+          )}
           <Button
             size="icon-sm"
             variant="ghost"
-            onClick={runCheck}
-            disabled={!workbench || checking}
-            aria-label={
-              checking
-                ? v2Msg("submit.v2.metric.check.running", guided)
-                : v2Msg("submit.v2.metric.check.run", guided)
-            }
+            onClick={toggleFullScreen}
+            disabled={!workbench}
+            aria-label={fullScreenLabel}
           >
-            {checking ? (
-              <CircleNotch className="size-4 animate-spin" aria-hidden />
+            {fullScreen ? (
+              <ArrowsIn className="size-4" aria-hidden />
             ) : (
-              <ListChecks className="size-4" aria-hidden />
+              <ArrowsOut className="size-4" aria-hidden />
             )}
-          </Button>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={close}
-            aria-label={v2Msg("submit.v2.ide.close", guided)}
-          >
-            <X className="size-4" aria-hidden />
           </Button>
         </div>
       </header>
-      {check && (
+      {showResults && (
         <div aria-live="polite" className="shrink-0 border-b border-border/60">
           <CheckResults
             results={results}
-            failed={!check.result}
-            emptyFile={check.emptyFile ?? null}
+            failed={checkIssue?.failed ?? false}
+            emptyFile={checkIssue?.emptyFile ?? null}
             guided={guided}
             onOpen={(path) => void workbench?.openFile(path)}
           />
         </div>
       )}
+      {strip && <div className="shrink-0 border-b border-border/60 px-4 py-2">{strip}</div>}
       <div className="flex min-h-0 flex-1">
         {/* VS Code lays out left to right whatever the page direction. */}
         <div dir="ltr" className="relative min-w-0 flex-1">
-          <div ref={host} className="absolute inset-0" />
+          <div ref={setHost} className="absolute inset-0" />
           {!workbench && (
             <p className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">
               {loadFailed
@@ -293,9 +352,34 @@ export function IdeDialog({
           )}
         </div>
         {sidePanel && (
-          <aside className="relative w-96 shrink-0 border-s border-border/60">{sidePanel}</aside>
+          <aside className="relative w-80 shrink-0 border-s border-border/60 xl:w-96">
+            {sidePanel}
+          </aside>
         )}
       </div>
+    </>
+  );
+
+  if (!fullScreen) {
+    return (
+      <section aria-labelledby="ide-workspace-title" className="flex h-full min-h-0 flex-col">
+        {body}
+      </section>
+    );
+  }
+  // On body, not in place: the wizard's card has a backdrop filter, which
+  // makes it the containing block of a fixed child, and the agent chat's own
+  // tooltips and popovers portal to body at z-index 50, so the pop-up takes
+  // the same layer and they open above it.
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="ide-workspace-title"
+      className="fixed inset-0 flex flex-col bg-background"
+      style={{ zIndex: 50 }}
+    >
+      {body}
     </div>,
     document.body,
   );

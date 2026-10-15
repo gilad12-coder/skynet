@@ -17,6 +17,7 @@ import { ThinkingSection } from "@/shared/ui/agent/thinking-section";
 
 import type { CodeAuthoringAgentState } from "../hooks/use-code-authoring-agent";
 import {
+  authoringToolRows,
   liveAuthoringView,
   outcomeAuthoringView,
   outcomeLine,
@@ -136,6 +137,86 @@ interface Step {
   kind: ActivityKind;
   status: ActivityStatus;
   row: React.ReactNode;
+}
+
+/** One of the coding agent's own tool calls, as its chat reports it. */
+export interface CodingCall {
+  id: string;
+  tool: string;
+  status: string;
+  startedAt: number;
+  path?: string;
+  prevCode?: string;
+  newCode?: string;
+  verification?: { ok: boolean; files: ReadonlyArray<{ path: string; ok: boolean; errors: string[] }> };
+}
+
+/** The workspace file an edit call writes, or null for a call that edits no file. */
+function editedFile(call: CodingCall): string | null {
+  if (call.tool === "edit_run" || call.tool === "edit_signature" || call.tool === "edit_seed") return "run.py";
+  if (call.tool === "edit_metric" || call.tool === "edit_scorer") return "metric.py";
+  return call.tool === "write_file" ? (call.path ?? null) : null;
+}
+
+/**
+ * One reply's tool calls from the coding agent's own chat, as the coding tool
+ * lists them: each edit with its diff, each deleted file and each check, in
+ * the order the agent made them.
+ *
+ * Args:
+ *   calls: The reply's tool calls.
+ */
+export function CodingCallRows({ calls }: { calls: readonly CodingCall[] }) {
+  const steps: Step[] = [];
+  for (const call of calls) {
+    const file = editedFile(call);
+    if (file && call.newCode !== undefined) {
+      steps.push({
+        key: `edit-${call.id}`,
+        kind: "edit",
+        status: "done",
+        row: <EditRow edit={{ file, before: call.prevCode ?? "", after: call.newCode, ts: call.startedAt }} />,
+      });
+    } else if (file && call.status === "running") {
+      steps.push({
+        key: `editing-${call.id}`,
+        kind: "edit",
+        status: "running",
+        row: (
+          <StepRow
+            icon={PencilSimple}
+            label={formatMsg("agent.coding_tool.editing", { file })}
+            status="running"
+          />
+        ),
+      });
+    } else if (call.tool === "delete_file" || call.tool === "verify_code") {
+      const { deletes, checks } = authoringToolRows([{ toolCalls: [call] }], 0);
+      for (const deleted of deletes) {
+        steps.push({
+          key: `delete-${call.id}`,
+          kind: "edit",
+          status: "done",
+          row: (
+            <StepRow
+              icon={Trash}
+              label={formatMsg("agent.coding_tool.deleted", { file: deleted.file })}
+              status="done"
+            />
+          ),
+        });
+      }
+      for (const check of checks) steps.push(checkStep(check));
+    }
+  }
+  if (steps.length === 0) return null;
+  return (
+    <ActivityGroup stayOpen steps={steps}>
+      {steps.map((step) => (
+        <React.Fragment key={step.key}>{step.row}</React.Fragment>
+      ))}
+    </ActivityGroup>
+  );
 }
 
 /** The thinking row and the steps, in the order they happened, under their summary line. */

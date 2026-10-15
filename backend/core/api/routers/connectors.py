@@ -38,6 +38,7 @@ from ..errors import DomainError
 from .dataset_library import SaveDatasetResponse, _summary, save_rows_gated
 
 SEARCH_LIMIT_MAX = 100
+GITHUB_FILE_MAX_BYTES = 1024 * 1024
 
 # Some providers resolve a folder's web link with its own API call (OneDrive),
 # so it runs beside the listing instead of after it.
@@ -210,6 +211,18 @@ class GithubTreeResponse(BaseModel):
 
     entries: list[GithubTreeEntry]
     truncated: bool = Field(default=False, description="GitHub listed only part of a very large tree.")
+
+
+class GithubFileResponse(BaseModel):
+    """One repository file's text, or why it has none."""
+
+    path: str
+    text: str | None = Field(
+        default=None, description="The file as UTF-8 text; empty for a binary, oversized or missing file."
+    )
+    binary: bool = Field(default=False, description="The content holds a NUL byte or is not valid UTF-8.")
+    too_large: bool = Field(default=False, description="The file is over the 1 MiB read cap.")
+    missing: bool = Field(default=False, description="No regular file exists at this path and ref.")
 
 
 def create_connectors_router(*, job_store) -> APIRouter:
@@ -631,12 +644,41 @@ def create_connectors_router(*, job_store) -> APIRouter:
         Args:
             user: Authenticated caller.
             repo: The repository as ``owner/name``.
-            branch: Branch name; empty for the default branch.
+            branch: Branch name or commit id; empty for the default branch.
 
         Returns:
             Every file and folder path, and whether GitHub truncated the tree.
         """
         return GithubTreeResponse(**github.repository_tree(_secret(user.username, github.PROVIDER), repo, branch))
+
+    @router.get(
+        "/connectors/github/file",
+        response_model=GithubFileResponse,
+        summary="Read one file of a GitHub repository at a branch or commit",
+    )
+    def github_repository_file(
+        user: Annotated[AuthenticatedUser, Depends(get_authenticated_user)],
+        repo: str = Query(min_length=3, max_length=201),
+        path: str = Query(min_length=1, max_length=github.FILE_PATH_MAX),
+        ref: str = Query(default="", max_length=255),
+    ) -> GithubFileResponse:
+        """Read one repository file for the read-only code view, opened lazily per file.
+
+        Args:
+            user: Authenticated caller.
+            repo: The repository as ``owner/name``.
+            path: File path inside the repository.
+            ref: Branch name or commit id; empty for the default branch.
+
+        Returns:
+            The file's text, or flags for a binary, oversized or missing file.
+
+        Raises:
+            DomainError: 400 ``connectors.invalid_ref`` for a path that is
+                absolute, walks out with ``..`` or points into ``.git``.
+        """
+        secret = _secret(user.username, github.PROVIDER)
+        return GithubFileResponse(**github.read_repo_file(secret.access_token, repo, ref, path, GITHUB_FILE_MAX_BYTES))
 
     @router.put(
         "/connectors/{provider}/credentials",

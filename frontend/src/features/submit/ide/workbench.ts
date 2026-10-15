@@ -2,7 +2,8 @@
  * VS Code's workbench, booted once per page into a container the IDE pop-up
  * borrows while it is open. Its `file://` scheme is the wizard's workspace,
  * through `WorkspaceFs`: the explorer, editors and search all read and write
- * the same files the wizard holds.
+ * the same files the wizard holds. A repository run's checkout shows beside
+ * them as one read-only folder, read from GitHub as files are opened.
  *
  * Client-only and heavy: the pop-up loads this module with a dynamic import.
  */
@@ -34,6 +35,7 @@ import getDialogsServiceOverride from "@codingame/monaco-vscode-dialogs-service-
 import getExplorerServiceOverride from "@codingame/monaco-vscode-explorer-service-override";
 import getFilesServiceOverride, {
   FileChangeType,
+  FilePermission,
   FileSystemProviderCapabilities,
   FileSystemProviderError,
   FileSystemProviderErrorCode,
@@ -67,6 +69,8 @@ import {
   type WorkspaceTexts,
 } from "../lib/ide-workspace";
 import { park } from "./park";
+import type { RepoIndex, RepoSource } from "./repo-files";
+import { SKYNET_DARK, SKYNET_LIGHT, registerSkynetThemes } from "./theme";
 
 /** What the pop-up drives the booted workbench with. */
 export interface IdeWorkbench {
@@ -81,10 +85,21 @@ export interface IdeWorkbench {
   /** Write every unsaved editor to the workspace. */
   saveAll(): Promise<void>;
   openFile(path: string): Promise<void>;
+  /** Show a repository's checkout as a read-only folder, or remove it with null. */
+  setRepo(source: RepoSource | null): void;
 }
 
 const ENCODER = new TextEncoder();
 const DECODER = new TextDecoder();
+
+const DIRECTORY: IStat = { type: FileType.Directory, ctime: 0, mtime: 0, size: 0 };
+
+/** The repository folder the explorer shows, with its tree once loaded and the files read so far. */
+interface MountedRepo {
+  source: RepoSource;
+  index: RepoIndex | null;
+  texts: Map<string, Promise<Uint8Array>>;
+}
 
 const FS_CODES: Record<WorkspaceFsError["code"], FileSystemProviderErrorCode> = {
   "not-found": FileSystemProviderErrorCode.FileNotFound,
@@ -110,6 +125,7 @@ class WorkspaceFsProvider
   readonly onDidChangeFile = this.changes.event;
   private readonly fs: WorkspaceFs;
   private readonly describe: (issue: string) => string;
+  private repo: MountedRepo | null = null;
 
   constructor(fs: WorkspaceFs, describe: (issue: string) => string) {
     super();
@@ -129,6 +145,52 @@ class WorkspaceFsProvider
         resource: URI.file(change.path ? `${IDE_ROOT}/${change.path}` : IDE_ROOT),
       })),
     );
+  }
+
+  setRepo(source: RepoSource | null): void {
+    const previous = this.repo?.source.folder;
+    this.repo = source ? { source, index: null, texts: new Map() } : null;
+    const mounted = this.repo;
+    if (mounted) {
+      void source?.tree
+        .then((index) => {
+          if (this.repo !== mounted) return;
+          mounted.index = index;
+          this.fire([{ kind: "changed", path: mounted.source.folder }]);
+        })
+        .catch((error: unknown) => console.error("Repository tree failed to load", error));
+    }
+    const changed: WorkspaceFsChange[] = [{ kind: "changed", path: "" }];
+    if (previous) changed.push({ kind: "deleted", path: previous });
+    this.fire(changed);
+  }
+
+  /** The repository-relative path of `path` ("" for its folder), or null outside it. */
+  private repoPath(path: string): string | null {
+    const folder = this.repo?.source.folder;
+    if (!folder) return null;
+    if (path === folder) return "";
+    return path.startsWith(`${folder}/`) ? path.slice(folder.length + 1) : null;
+  }
+
+  private async repoIndex(): Promise<RepoIndex> {
+    const mounted = this.repo;
+    if (!mounted) throw FileSystemProviderError.create("not found", FileSystemProviderErrorCode.FileNotFound);
+    return mounted.index ?? (await mounted.source.tree);
+  }
+
+  private readOnly(): never {
+    throw FileSystemProviderError.create(
+      this.describe("submit.v2.ide.repo.read_only"),
+      FileSystemProviderErrorCode.NoPermissions,
+    );
+  }
+
+  private refuseInRepo(...resources: URI[]): void {
+    for (const resource of resources) {
+      const path = workspacePathOf(resource.path);
+      if (path !== null && this.repoPath(path) !== null) this.readOnly();
+    }
   }
 
   private run<T>(fn: () => T): T {
@@ -153,7 +215,15 @@ class WorkspaceFsProvider
   }
 
   async stat(resource: URI): Promise<IStat> {
-    if (resource.path === "/") return { type: FileType.Directory, ctime: 0, mtime: 0, size: 0 };
+    if (resource.path === "/") return DIRECTORY;
+    const inRepo = this.repoPath(this.path(resource));
+    if (inRepo !== null) {
+      const index = await this.repoIndex();
+      const readonly = { permissions: FilePermission.Readonly };
+      if (inRepo === "" || index.children.has(inRepo)) return { ...DIRECTORY, ...readonly };
+      if (index.files.has(inRepo)) return { type: FileType.File, ctime: 0, mtime: 0, size: 0, ...readonly };
+      throw FileSystemProviderError.create("not found", FileSystemProviderErrorCode.FileNotFound);
+    }
     const stat = this.run(() => this.fs.stat(this.path(resource)));
     return {
       type: stat.kind === "file" ? FileType.File : FileType.Directory,
@@ -165,29 +235,58 @@ class WorkspaceFsProvider
 
   async readdir(resource: URI): Promise<Array<[string, FileType]>> {
     if (resource.path === "/") return [[IDE_ROOT.slice(1), FileType.Directory]];
-    return this.run(() => this.fs.readdir(this.path(resource))).map(([name, kind]) => [
-      name,
-      kind === "file" ? FileType.File : FileType.Directory,
-    ]);
+    const path = this.path(resource);
+    const inRepo = this.repoPath(path);
+    const asType = (kind: "file" | "dir"): FileType => (kind === "file" ? FileType.File : FileType.Directory);
+    if (inRepo !== null) {
+      const index = await this.repoIndex();
+      return (index.children.get(inRepo) ?? []).map(([name, kind]) => [name, asType(kind)]);
+    }
+    const entries = this.run(() => this.fs.readdir(path)).map(
+      ([name, kind]): [string, FileType] => [name, asType(kind === "file" ? "file" : "dir")],
+    );
+    const folder = this.repo?.source.folder;
+    return path === "" && folder ? [...entries, [folder, FileType.Directory]] : entries;
   }
 
   async readFile(resource: URI): Promise<Uint8Array> {
-    return ENCODER.encode(this.run(() => this.fs.read(this.path(resource))));
+    const path = this.path(resource);
+    const inRepo = this.repoPath(path);
+    const mounted = this.repo;
+    if (inRepo === null || !mounted) return ENCODER.encode(this.run(() => this.fs.read(path)));
+    // Each file is fetched once, when it is first opened; a failed read is tried again next time.
+    let text = mounted.texts.get(inRepo);
+    if (!text) {
+      text = mounted.source.read(inRepo).then((read) => {
+        if ("text" in read) return ENCODER.encode(read.text);
+        throw FileSystemProviderError.create(
+          this.describe(`submit.v2.ide.repo.${read.issue}`),
+          FileSystemProviderErrorCode.Unavailable,
+        );
+      });
+      mounted.texts.set(inRepo, text);
+      text.catch(() => mounted.texts.delete(inRepo));
+    }
+    return text;
   }
 
   async writeFile(resource: URI, content: Uint8Array, opts: IFileWriteOptions): Promise<void> {
+    this.refuseInRepo(resource);
     this.run(() => this.fs.write(this.path(resource), DECODER.decode(content), opts));
   }
 
   async mkdir(resource: URI): Promise<void> {
+    this.refuseInRepo(resource);
     this.run(() => this.fs.mkdir(this.path(resource)));
   }
 
   async delete(resource: URI, _opts: IFileDeleteOptions): Promise<void> {
+    this.refuseInRepo(resource);
     this.run(() => this.fs.delete(this.path(resource)));
   }
 
   async rename(from: URI, to: URI, opts: IFileOverwriteOptions): Promise<void> {
+    this.refuseInRepo(from, to);
     this.run(() => this.fs.rename(this.path(from), this.path(to), opts));
   }
 }
@@ -230,9 +329,11 @@ function guardFixedFiles(describe: (issue: string) => string): void {
   }
 }
 
-function settings(dark: boolean): string {
+function settings(dark: boolean, repoFolder: string | null): string {
   return JSON.stringify({
-    "workbench.colorTheme": dark ? "Default Dark Modern" : "Default Light Modern",
+    // Searching the repository would read every one of its files from GitHub.
+    "search.exclude": repoFolder ? { [`${repoFolder}/**`]: true } : {},
+    "workbench.colorTheme": dark ? SKYNET_DARK : SKYNET_LIGHT,
     // The wizard's state is the workspace, so an edit reaches it without a save.
     "files.autoSave": "afterDelay",
     "files.autoSaveDelay": 300,
@@ -297,7 +398,8 @@ async function boot(dark: boolean, describe: (issue: string) => string): Promise
   element.style.pointerEvents = "none";
   document.body.append(element);
 
-  await initUserConfiguration(settings(dark));
+  registerSkynetThemes();
+  await initUserConfiguration(settings(dark, null));
   await initialize(
     {
       ...getConfigurationServiceOverride(),
@@ -336,6 +438,7 @@ async function boot(dark: boolean, describe: (issue: string) => string): Promise
   const commandService = await getService(ICommandService);
   const editorService = await getService(IEditorService);
   let darkNow = dark;
+  let repoFolder: string | null = null;
 
   return {
     element,
@@ -346,7 +449,7 @@ async function boot(dark: boolean, describe: (issue: string) => string): Promise
     setDark: (next) => {
       if (next === darkNow) return;
       darkNow = next;
-      void updateUserConfiguration(settings(next));
+      void updateUserConfiguration(settings(next, repoFolder));
     },
     layout: () => layoutService.layout(),
     saveAll: async () => {
@@ -357,6 +460,12 @@ async function boot(dark: boolean, describe: (issue: string) => string): Promise
         resource: URI.file(`${IDE_ROOT}/${path}`),
         options: { pinned: true },
       });
+    },
+    setRepo: (source) => {
+      if ((source?.folder ?? null) === repoFolder && source !== null) return;
+      repoFolder = source?.folder ?? null;
+      provider?.setRepo(source);
+      void updateUserConfiguration(settings(darkNow, repoFolder));
     },
   };
 }

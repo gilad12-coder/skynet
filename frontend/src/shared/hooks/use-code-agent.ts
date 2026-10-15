@@ -136,6 +136,8 @@ interface AgentMessage {
   /** Concrete model selected by Auto Router, when the route was automatic. */
   servedModel?: string | null;
   stats?: TurnStats | null;
+  /** A turn the app sent on the user's behalf; the transcript leaves its bubble out. */
+  hidden?: boolean;
 }
 
 export interface CodeAgentState {
@@ -175,7 +177,8 @@ export interface CodeAgentState {
   reasoningEndedAt: number | null;
   goToSignatureVersion: (index: number) => void;
   goToMetricVersion: (index: number) => void;
-  send: (message: string) => void;
+  /** Send a chat turn; ``hidden`` sends it without a user bubble (a kickoff the app started). */
+  send: (message: string, options?: { hidden?: boolean }) => void;
   /** Messages sent while a turn runs: steered into it or queued after it. */
   midTurn: MidTurnQueue;
   editAndResend: (messageIndex: number, content: string) => void;
@@ -511,7 +514,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   }, []);
 
   const runAgent = React.useCallback(
-    (userMessage: string, history: AgentMessage[]) => {
+    (userMessage: string, history: AgentMessage[], hidden = false) => {
       const isChat = userMessage.length > 0;
       if (!(isChat ? canChat : hasRequiredContext)) return;
 
@@ -558,7 +561,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       if (isChat) {
         setMessages((m) => [
           ...m,
-          { role: "user", content: userMessage },
+          { role: "user", content: userMessage, ...(hidden ? { hidden } : {}) },
           { role: "assistant", content: "", toolCalls: [] },
         ]);
       } else {
@@ -1191,11 +1194,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   }, [runAgent]);
 
   const send = React.useCallback(
-    (message: string) => {
+    (message: string, options?: { hidden?: boolean }) => {
       const trimmed = message.trim();
       if (!trimmed) return;
       autoFixAttemptsRef.current = 0;
-      runAgent(trimmed, messages);
+      runAgent(trimmed, messages, options?.hidden ?? false);
     },
     [runAgent, messages],
   );
@@ -1223,7 +1226,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     const truncated = messages.slice(0, index);
     setMessages(truncated);
     autoFixAttemptsRef.current = 0;
-    runAgent(lastUser?.content ?? "", truncated);
+    runAgent(lastUser?.content ?? "", truncated, lastUser?.hidden ?? false);
   }, [messages, runAgent]);
 
   const goToSignatureVersion = React.useCallback(
