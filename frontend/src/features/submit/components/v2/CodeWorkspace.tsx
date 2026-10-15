@@ -113,6 +113,8 @@ export function CodeWorkspace({
   checkResult,
   onCheck,
   repo = false,
+  idePanel,
+  onIdeOpenChange,
   children,
 }: {
   runCode: string;
@@ -137,13 +139,25 @@ export function CodeWorkspace({
    * and no tree, and the scorer is checked on the server at submit.
    */
   repo?: boolean;
+  /** The IDE pop-up's side panel (the coding agent's chat). */
+  idePanel?: ReactNode;
+  /** Told when the IDE pop-up opens and closes, so the agent can move into it. */
+  onIdeOpenChange?: (open: boolean) => void;
   /** Rendered above the metric editor (the metric model row). */
   children?: ReactNode;
 }) {
   const extraPaths = useMemo(() => Object.keys(files).sort(), [files]);
   const paths = useMemo(() => [RUN_FILE, METRIC_FILE, ...extraPaths], [extraPaths]);
   const [chosen, setChosen] = useState<string>(repo ? METRIC_FILE : RUN_FILE);
-  const [ideOpen, setIdeOpen] = useState(false);
+  const [ideOpen, setIdeOpenState] = useState(false);
+  const setIdeOpen = useCallback(
+    (next: boolean) => {
+      setIdeOpenState(next);
+      onIdeOpenChange?.(next);
+    },
+    [onIdeOpenChange],
+  );
+  useEffect(() => () => onIdeOpenChange?.(false), [onIdeOpenChange]);
   const open = repo ? METRIC_FILE : paths.includes(chosen) ? chosen : RUN_FILE;
 
   const writingPaths = useMemo(
@@ -274,6 +288,7 @@ export function CodeWorkspace({
           consoleFor={consoleFor}
           onClose={() => setIdeOpen(false)}
           guided={guided}
+          sidePanel={idePanel}
         />
       )}
     </div>

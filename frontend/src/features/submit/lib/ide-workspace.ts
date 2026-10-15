@@ -264,13 +264,16 @@ export class WorkspaceFs {
     const issue = fixedFileIssue(path);
     if (issue) throw new WorkspaceFsError("refused", issue);
     const changes: WorkspaceFsChange[] = [];
+    let removedFile = false;
     if (this.files.delete(path)) {
       changes.push({ kind: "deleted", path });
+      removedFile = true;
     } else if (this.folders.has(path)) {
       for (const file of [...this.files.keys()]) {
         if (within(file, path)) {
           this.files.delete(file);
           changes.push({ kind: "deleted", path: file });
+          removedFile = true;
         }
       }
       for (const folder of [...this.folders]) {
@@ -282,10 +285,8 @@ export class WorkspaceFs {
     } else {
       throw new WorkspaceFsError("not-found");
     }
-    this.emit(
-      changes,
-      changes.some((change) => !this.folders.has(change.path)),
-    );
+    // Removing only empty folders leaves the wizard's files as they were.
+    this.emit(changes, removedFile);
   }
 
   rename(from: string, to: string, opts: { overwrite: boolean }): void {

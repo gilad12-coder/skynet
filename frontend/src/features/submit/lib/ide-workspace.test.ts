@@ -149,6 +149,14 @@ test("an empty folder lives in the IDE only until a file goes in it", () => {
   assert.ok("pkg/sub/m.py" in edits.at(-1)!);
 });
 
+test("deleting an empty folder leaves the wizard's files alone", () => {
+  const { fs, changes, edits } = setup();
+  fs.mkdir("empty");
+  fs.delete("empty");
+  assert.deepEqual(changes.at(-1), [{ kind: "deleted", path: "empty" }]);
+  assert.equal(edits.length, 0);
+});
+
 test("deleting a folder drops every file under it", () => {
   const { fs, edits } = setup(
     workspaceTexts("R", "M", { "lib/a.py": "A", "lib/deep/b.py": "B", "c.py": "C" }),

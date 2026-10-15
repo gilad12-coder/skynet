@@ -133,6 +133,10 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   // The wizard agent sits beside the editors; its coding tool writes the code.
   const agentEnabled = isGeneralistAgentEnabled();
   const agentShown = agentEnabled && state.step === "metric" && page === 0;
+  // The chat portals into the last dock that mounted and does not return to
+  // an earlier one, so the step's dock unmounts while the IDE pop-up holds the
+  // chat and mounts again (re-registering) when it closes.
+  const [ideOpen, setIdeOpen] = React.useState(false);
   const { setAgentWriting } = ctx;
   const agentStreaming = writing.run || writing.metric || writing.files.length > 0;
   React.useEffect(() => {
@@ -156,7 +160,9 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           value={agentEnabled ? "auto" : "manual"}
           title={t("submit.v2.metric.title")}
           description={t("submit.v2.metric.desc")}
-          sidePanel={agentShown ? <AgentPanelDock className="absolute inset-0" /> : null}
+          sidePanel={
+            agentShown && !ideOpen ? <AgentPanelDock className="absolute inset-0" /> : null
+          }
         >
           <div className="min-h-0 flex-1 overflow-y-auto">
             <CodeWorkspace
@@ -172,6 +178,8 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
               checkResult={consoleResult}
               onCheck={contract.check}
               repo={repo}
+              idePanel={agentShown ? <AgentPanelDock className="absolute inset-0" /> : undefined}
+              onIdeOpenChange={setIdeOpen}
             >
               {metricUsesModel && (
                 <MetricModelRow

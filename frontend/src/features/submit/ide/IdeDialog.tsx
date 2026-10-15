@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/shared/ui/primitives/button";
 import { CheckCircle, CircleNotch, X, XCircle } from "@/shared/ui/icons";
 import type { ContractCheckResponse } from "@/shared/types/unified-run";
@@ -122,7 +123,7 @@ export function IdeDialog({
   consoleFor: (result: ContractCheckResponse | null, path: string) => ContractConsole | null;
   onClose: () => void;
   guided: boolean;
-  /** The right-hand region; the IDE's agent panel goes here (SKY-48 v2). */
+  /** The end-side region: the coding agent's chat. */
   sidePanel?: ReactNode;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -220,13 +221,17 @@ export function IdeDialog({
     return out;
   }, [check, consoleFor, files]);
 
-  return (
+  // On body, not in place: the wizard's card has a backdrop filter, which
+  // makes it the containing block of a fixed child, and the agent chat's own
+  // tooltips, popovers and drawer portal to body at z-index 50, so the pop-up
+  // takes the same layer and they open above it.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="ide-dialog-title"
       className="fixed inset-0 flex flex-col bg-background"
-      style={{ zIndex: 60 }}
+      style={{ zIndex: 50 }}
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-border/60 px-4 py-2">
         <h2 id="ide-dialog-title" className="text-sm font-medium">
@@ -268,9 +273,10 @@ export function IdeDialog({
           )}
         </div>
         {sidePanel && (
-          <aside className="w-96 shrink-0 border-s border-border/60">{sidePanel}</aside>
+          <aside className="relative w-96 shrink-0 border-s border-border/60">{sidePanel}</aside>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
