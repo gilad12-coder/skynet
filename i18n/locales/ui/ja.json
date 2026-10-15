@@ -12,6 +12,7 @@
   "submit.v2.ide.error.fixed": "run.py と metric.py は実行のエントリーファイルなので、削除、名前の変更、移動はできません。",
   "submit.v2.ide.check.passed": "問題はありません",
   "submit.v2.ide.check.failed": "チェックが完了しませんでした。もう一度お試しください。",
+  "submit.v2.ide.check.empty": "{path} が空です。コードを書いてから、もう一度チェックしてください。",
   "submit.v2.metric.files.error.depth": "フォルダーは 3 階層までです。",
   "submit.v2.metric.files.error.exists": "同じ名前のファイルまたはフォルダーがすでにあります。",
   "submit.v2.metric.files.error.length": "120 文字以内の名前を入力してください。",

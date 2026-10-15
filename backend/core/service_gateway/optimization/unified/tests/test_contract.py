@@ -23,6 +23,7 @@ from ..contract import (
     verify_workspace,
     with_message_codes,
 )
+from ..service import unified_job_spec
 
 RUN_CODE = "def run(artifact, input):\n    return artifact + ':' + input['q']\n"
 BLACKBOX_METRIC = "def score(input, output, expected=None):\n    return float(output == expected), {'feedback': 'ok'}\n"
@@ -463,6 +464,35 @@ def test_sampled_check_runs_run_code_that_imports_a_helper_file() -> None:
 
     assert response.ok, [(c.key, c.detail) for c in response.checks]
     assert all(sample.score == 1.0 for sample in response.samples)
+
+
+PARSE = "def clean(text):\n    return text.strip()\n"
+
+
+@pytest.mark.parametrize(
+    ("run_import", "files"),
+    [
+        ("from lib.parse import clean", {"lib/parse.py": PARSE}),
+        ("from lib.parse import clean", {"lib/__init__.py": "", "lib/parse.py": PARSE}),
+        ("from parse import clean", {"parse.py": PARSE}),
+    ],
+)
+def test_sampled_check_imports_helpers_from_folders_and_the_root(run_import: str, files: dict[str, str]) -> None:
+    """A helper in a folder or at the workspace root imports in every sample, as in a real run."""
+    run_code = f"{run_import}\n\ndef run(artifact, input):\n    return clean(artifact + ':' + input['q'])\n"
+    response = _check(_payload(run_code=run_code, files=files))
+
+    assert response.ok, [(c.key, c.message, c.detail) for c in response.checks]
+    assert all(sample.score == 1.0 for sample in response.samples)
+
+
+def test_guest_round_trip_keeps_the_workspace_files() -> None:
+    """The JSON the image validates still carries every extra file the run and check write."""
+    payload = _payload(files={"lib/parse.py": PARSE})
+    guest = UnifiedRunRequest.model_validate(json.loads(payload.model_dump_json(by_alias=True)))
+
+    assert guest.workspace.files == {"lib/parse.py": PARSE}
+    assert unified_job_spec(guest, seed=0, task_lm=None).context["files"] == {"lib/parse.py": PARSE}
 
 
 def test_metric_cannot_import_candidate_files() -> None:

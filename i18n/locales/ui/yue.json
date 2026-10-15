@@ -12,6 +12,7 @@
   "submit.v2.ide.error.fixed": "run.py 同 metric.py 係執行嘅入口檔案，所以唔可以刪除、改名或者搬走。",
   "submit.v2.ide.check.passed": "冇問題",
   "submit.v2.ide.check.failed": "檢查未完成。再試吓。",
+  "submit.v2.ide.check.empty": "{path} 係空嘅。寫好之後再檢查多次。",
   "submit.v2.metric.files.error.depth": "最多用 3 層資料夾。",
   "submit.v2.metric.files.error.exists": "已經有同名嘅檔案或資料夾。",
   "submit.v2.metric.files.error.length": "請輸入唔超過 120 個字元嘅名稱。",

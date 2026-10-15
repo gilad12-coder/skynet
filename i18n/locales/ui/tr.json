@@ -12,6 +12,7 @@
   "submit.v2.ide.error.fixed": "run.py ve metric.py çalıştırmanın giriş dosyalarıdır; silinemez, yeniden adlandırılamaz veya taşınamaz.",
   "submit.v2.ide.check.passed": "Sorun yok",
   "submit.v2.ide.check.failed": "Kontrol tamamlanmadı. Yeniden deneyin.",
+  "submit.v2.ide.check.empty": "{path} boş. Önce yazın, sonra yeniden kontrol edin.",
   "submit.v2.metric.files.error.depth": "En fazla 3 klasör kullanın.",
   "submit.v2.metric.files.error.exists": "Bu adda bir dosya veya klasör zaten var.",
   "submit.v2.metric.files.error.length": "En fazla 120 karakterlik bir ad girin.",

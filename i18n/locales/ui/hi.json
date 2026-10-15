@@ -12,6 +12,7 @@
   "submit.v2.ide.error.fixed": "run.py और metric.py रन की एंट्री फ़ाइलें हैं, इसलिए इन्हें हटाया, नाम बदला या खिसकाया नहीं जा सकता।",
   "submit.v2.ide.check.passed": "कोई समस्या नहीं",
   "submit.v2.ide.check.failed": "जाँच पूरी नहीं हुई। फिर से कोशिश करें।",
+  "submit.v2.ide.check.empty": "{path} खाली है। इसे लिखें, फिर दोबारा जाँचें।",
   "submit.v2.metric.files.error.depth": "ज़्यादा से ज़्यादा 3 फ़ोल्डर इस्तेमाल करें।",
   "submit.v2.metric.files.error.exists": "इस नाम की फ़ाइल या फ़ोल्डर पहले से मौजूद है।",
   "submit.v2.metric.files.error.length": "120 वर्णों तक का नाम डालें।",

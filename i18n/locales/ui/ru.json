@@ -12,6 +12,7 @@
   "submit.v2.ide.error.fixed": "run.py и metric.py — входные файлы запуска, поэтому их нельзя удалить, переименовать или переместить.",
   "submit.v2.ide.check.passed": "Проблем нет",
   "submit.v2.ide.check.failed": "Проверка не завершилась. Попробуйте снова.",
+  "submit.v2.ide.check.empty": "Файл {path} пуст. Напишите код и запустите проверку снова.",
   "submit.v2.metric.files.error.depth": "Используйте не больше 3 папок.",
   "submit.v2.metric.files.error.exists": "Файл или папка с таким именем уже есть.",
   "submit.v2.metric.files.error.length": "Введите имя длиной до 120 символов.",

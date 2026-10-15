@@ -24,6 +24,17 @@ export const IDE_ROOT = "/workspace";
 /** Every workspace file, path to text, run.py and metric.py included. */
 export type WorkspaceTexts = Readonly<Record<string, string>>;
 
+/**
+ * The entry file that has no code yet, or null when both do. The API refuses a
+ * check with an empty run.py or metric.py, so the pop-up names the file
+ * instead of sending one.
+ */
+export function blankEntryFile(runCode: string, metricCode: string): string | null {
+  if (!runCode.trim()) return RUN_FILE;
+  if (!metricCode.trim()) return METRIC_FILE;
+  return null;
+}
+
 /** The wizard's workspace as one path-to-text map. */
 export function workspaceTexts(
   runCode: string,
@@ -64,6 +75,20 @@ export function workspacePathOf(fsPath: string): string | null {
 export function fixedFileIssue(from: string, to?: string): string | null {
   if (from === "" || FIXED.includes(from)) return FIXED_FILE_ISSUE;
   if (to !== undefined && (to === "" || FIXED.includes(to))) return FIXED_FILE_ISSUE;
+  return null;
+}
+
+/**
+ * Why an explorer delete or rename of these IDE paths is refused, as an i18n
+ * key, or null when it may go ahead. Checked before VS Code starts the edit:
+ * a refusal from the file system provider surfaces as uncaught page errors.
+ */
+export function explorerEditIssue(fsPaths: readonly string[]): string | null {
+  for (const fsPath of fsPaths) {
+    const path = workspacePathOf(fsPath);
+    const issue = path === null ? null : fixedFileIssue(path);
+    if (issue) return issue;
+  }
   return null;
 }
 

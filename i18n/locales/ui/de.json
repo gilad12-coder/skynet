@@ -12,6 +12,7 @@
   "submit.v2.ide.error.fixed": "run.py und metric.py sind die Einstiegsdateien des Laufs und können nicht gelöscht, umbenannt oder verschoben werden.",
   "submit.v2.ide.check.passed": "Keine Probleme",
   "submit.v2.ide.check.failed": "Die Prüfung wurde nicht abgeschlossen. Versuche es erneut.",
+  "submit.v2.ide.check.empty": "{path} ist leer. Schreib den Code und prüf dann erneut.",
   "submit.v2.metric.files.error.depth": "Höchstens 3 Ordner verwenden.",
   "submit.v2.metric.files.error.exists": "Eine Datei oder ein Ordner mit diesem Namen existiert bereits.",
   "submit.v2.metric.files.error.length": "Einen Namen mit bis zu 120 Zeichen eingeben.",

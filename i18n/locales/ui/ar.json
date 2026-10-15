@@ -12,6 +12,7 @@
   "submit.v2.ide.error.fixed": "run.py و metric.py هما ملفا الدخول للتشغيل، لذا لا يمكن حذفهما أو إعادة تسميتهما أو نقلهما.",
   "submit.v2.ide.check.passed": "لا توجد مشكلات",
   "submit.v2.ide.check.failed": "لم يكتمل الفحص. حاول مرة أخرى.",
+  "submit.v2.ide.check.empty": "الملف {path} فارغ. اكتبه، ثم تحقق مرة أخرى.",
   "submit.v2.metric.files.error.depth": "استخدم 3 مجلدات على الأكثر.",
   "submit.v2.metric.files.error.exists": "يوجد ملف أو مجلد بهذا الاسم بالفعل.",
   "submit.v2.metric.files.error.length": "أدخل اسمًا لا يتجاوز 120 حرفًا.",

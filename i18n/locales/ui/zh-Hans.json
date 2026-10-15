@@ -12,6 +12,7 @@
   "submit.v2.ide.error.fixed": "run.py 和 metric.py 是运行的入口文件，因此不能删除、重命名或移动。",
   "submit.v2.ide.check.passed": "没有问题",
   "submit.v2.ide.check.failed": "检查未完成。请重试。",
+  "submit.v2.ide.check.empty": "{path} 是空的。写好后再检查一次。",
   "submit.v2.metric.files.error.depth": "最多使用 3 层文件夹。",
   "submit.v2.metric.files.error.exists": "已存在同名的文件或文件夹。",
   "submit.v2.metric.files.error.length": "请输入不超过 120 个字符的名称。",

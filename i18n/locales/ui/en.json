@@ -4114,6 +4114,7 @@
   "submit.v2.ide.error.fixed": "run.py and metric.py are the run's entry files, so they can't be deleted, renamed or moved.",
   "submit.v2.ide.check.passed": "No problems",
   "submit.v2.ide.check.failed": "The check didn't finish. Try again.",
+  "submit.v2.ide.check.empty": "{path} is empty. Write it, then check again.",
   "submit.v2.metric.model.label": "Metric model",
   "submit.v2.metric.model.label.guided": "Model that scores results",
   "submit.v2.metric.model.desc": "Your metric calls llm(), so it needs a model. It uses the reflection model unless you pick another one.",

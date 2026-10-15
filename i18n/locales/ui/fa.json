@@ -12,6 +12,7 @@
   "submit.v2.ide.error.fixed": "run.py و metric.py فایل‌های ورودی اجرا هستند، بنابراین نمی‌توان آن‌ها را حذف، تغییر نام یا جابه‌جا کرد.",
   "submit.v2.ide.check.passed": "مشکلی نیست",
   "submit.v2.ide.check.failed": "بررسی تمام نشد. دوباره امتحان کنید.",
+  "submit.v2.ide.check.empty": "فایل {path} خالی است. آن را بنویسید و دوباره بررسی کنید.",
   "submit.v2.metric.files.error.depth": "حداکثر از 3 پوشه استفاده کنید.",
   "submit.v2.metric.files.error.exists": "فایل یا پوشه‌ای با این نام از قبل وجود دارد.",
   "submit.v2.metric.files.error.length": "نامی تا 120 نویسه وارد کنید.",

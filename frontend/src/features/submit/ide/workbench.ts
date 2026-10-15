@@ -17,7 +17,10 @@ import {
   Disposable,
   type IDisposable,
 } from "@codingame/monaco-vscode-api/vscode/vs/base/common/lifecycle";
+import { CommandsRegistry } from "@codingame/monaco-vscode-api/vscode/vs/platform/commands/common/commands";
 import { ICommandService } from "@codingame/monaco-vscode-api/vscode/vs/platform/commands/common/commands.service";
+import { INotificationService } from "@codingame/monaco-vscode-api/vscode/vs/platform/notification/common/notification.service";
+import { IExplorerService } from "@codingame/monaco-vscode-api/vscode/vs/workbench/contrib/files/browser/files.service";
 import { IEditorService } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/editor/common/editorService.service";
 import { IWorkbenchLayoutService } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/layout/browser/layoutService.service";
 import getConfigurationServiceOverride, {
@@ -54,11 +57,13 @@ import { workspacePathIssue } from "../lib/wizard-v2";
 import {
   IDE_ROOT,
   WorkspaceFs,
+  explorerEditIssue,
   WorkspaceFsError,
   workspacePathOf,
   type WorkspaceFsChange,
   type WorkspaceTexts,
 } from "../lib/ide-workspace";
+import { park } from "./park";
 
 /** What the pop-up drives the booted workbench with. */
 export interface IdeWorkbench {
@@ -193,6 +198,33 @@ class NoSplashStorage implements ISplashStorageService {
   async saveWindowSplash(): Promise<void> {}
 }
 
+// The explorer commands that delete or rename the selection. The provider
+// refuses run.py and metric.py too, but VS Code then reports the refusal as
+// uncaught errors, so these refuse first, with the same message.
+const GUARDED_EXPLORER_COMMANDS: ReadonlyArray<{ id: string; multi: boolean }> = [
+  { id: "renameFile", multi: false },
+  { id: "moveFileToTrash", multi: true },
+  { id: "deleteFile", multi: true },
+];
+
+function guardFixedFiles(describe: (issue: string) => string): void {
+  for (const { id, multi } of GUARDED_EXPLORER_COMMANDS) {
+    const original = CommandsRegistry.getCommand(id);
+    if (!original) continue;
+    // The registry runs the latest registration for an id.
+    CommandsRegistry.registerCommand(id, (accessor, ...args: unknown[]) => {
+      const stats = accessor.get(IExplorerService).getContext(multi);
+      const targets = (multi ? stats : stats.slice(0, 1)).map((stat) => stat.resource.path);
+      const issue = explorerEditIssue(targets);
+      if (issue) {
+        accessor.get(INotificationService).warn(describe(issue));
+        return;
+      }
+      return original.handler(accessor, ...args);
+    });
+  }
+}
+
 function settings(dark: boolean): string {
   return JSON.stringify({
     "workbench.colorTheme": dark ? "Default Dark Modern" : "Default Light Modern",
@@ -253,10 +285,11 @@ async function boot(dark: boolean, describe: (issue: string) => string): Promise
   element.style.width = "100%";
   element.style.height = "100%";
   // VS Code lays itself out against the container, so it must be in the
-  // document while it boots; it stays hidden until the pop-up moves it into place.
+  // document, with a size, while it boots; it is parked once booted.
   element.style.position = "fixed";
   element.style.inset = "0";
   element.style.visibility = "hidden";
+  element.style.pointerEvents = "none";
   document.body.append(element);
 
   await initUserConfiguration(settings(dark));
@@ -286,6 +319,14 @@ async function boot(dark: boolean, describe: (issue: string) => string): Promise
       },
     },
   );
+
+  guardFixedFiles(describe);
+
+  // A pop-up closed mid-boot never unparks it, and the editor's layers paint
+  // through `visibility: hidden`.
+  for (const prop of ["position", "inset", "visibility", "pointer-events"])
+    element.style.removeProperty(prop);
+  park(element, document.body);
 
   const layoutService = await getService(IWorkbenchLayoutService);
   const commandService = await getService(ICommandService);

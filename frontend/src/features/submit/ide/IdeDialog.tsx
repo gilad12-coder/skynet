@@ -14,29 +14,14 @@ import { Button } from "@/shared/ui/primitives/button";
 import { CheckCircle, CircleNotch, X, XCircle } from "@/shared/ui/icons";
 import type { ContractCheckResponse } from "@/shared/types/unified-run";
 import type { ContractConsole } from "../lib/contract-console";
-import { diffWorkspace, workspaceTexts } from "../lib/ide-workspace";
+import { blankEntryFile, diffWorkspace, workspaceTexts } from "../lib/ide-workspace";
 import { METRIC_FILE, RUN_FILE } from "../lib/wizard-v2";
 import { v2Msg } from "../components/v2/ArtifactConfirmCard";
+import { park, unpark } from "./park";
 import type { IdeWorkbench } from "./workbench";
 
 function isDark(): boolean {
   return document.documentElement.classList.contains("dark");
-}
-
-// The workbench lives for the whole page (VS Code boots once), so while the
-// pop-up is closed its element waits off screen, still in the document.
-function park(element: HTMLElement): void {
-  element.style.position = "fixed";
-  element.style.inset = "0";
-  element.style.visibility = "hidden";
-  element.style.pointerEvents = "none";
-  document.body.append(element);
-}
-
-function unpark(element: HTMLElement, into: HTMLElement): void {
-  for (const prop of ["position", "inset", "visibility", "pointer-events"])
-    element.style.removeProperty(prop);
-  into.append(element);
 }
 
 /** What the last Check found in one file. */
@@ -48,14 +33,24 @@ interface FileCheck {
 function CheckResults({
   results,
   failed,
+  emptyFile,
   guided,
   onOpen,
 }: {
   results: FileCheck[];
   failed: boolean;
+  /** The entry file that was empty, so the check was not sent. */
+  emptyFile: string | null;
   guided: boolean;
   onOpen: (path: string) => void;
 }) {
+  if (emptyFile) {
+    return (
+      <p className="px-4 py-2 text-xs text-destructive">
+        {v2Msg("submit.v2.ide.check.empty", guided, { path: emptyFile })}
+      </p>
+    );
+  }
   if (failed) {
     return (
       <p className="px-4 py-2 text-xs text-destructive">
@@ -130,7 +125,10 @@ export function IdeDialog({
   const [workbench, setWorkbench] = useState<IdeWorkbench | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [check, setCheck] = useState<{ result: ContractCheckResponse | null } | null>(null);
+  const [check, setCheck] = useState<{
+    result: ContractCheckResponse | null;
+    emptyFile?: string;
+  } | null>(null);
 
   const texts = useMemo(
     () => workspaceTexts(runCode, metricCode, files),
@@ -186,7 +184,9 @@ export function IdeDialog({
       observer.disconnect();
       theme.disconnect();
       workbench.onEdit(null);
-      park(workbench.element);
+      // The workbench lives for the whole page (VS Code boots once), so it
+      // waits in the document, fully hidden, until the next open.
+      park(workbench.element, document.body);
     };
   }, [workbench]);
 
@@ -203,7 +203,11 @@ export function IdeDialog({
     setChecking(true);
     try {
       await workbench?.saveAll();
-      setCheck({ result: await onCheck() });
+      const emptyFile = blankEntryFile(
+        latest.current[RUN_FILE] ?? "",
+        latest.current[METRIC_FILE] ?? "",
+      );
+      setCheck(emptyFile ? { result: null, emptyFile } : { result: await onCheck() });
     } finally {
       setChecking(false);
     }
@@ -255,6 +259,7 @@ export function IdeDialog({
           <CheckResults
             results={results}
             failed={!check.result}
+            emptyFile={check.emptyFile ?? null}
             guided={guided}
             onOpen={(path) => void workbench?.openFile(path)}
           />

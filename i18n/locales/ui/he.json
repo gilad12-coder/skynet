@@ -4114,6 +4114,7 @@
   "submit.v2.ide.error.fixed": "run.py ו-metric.py הם קובצי הכניסה של הריצה, ולכן אי אפשר למחוק אותם, לשנות את שמם או להעביר אותם.",
   "submit.v2.ide.check.passed": "אין בעיות",
   "submit.v2.ide.check.failed": "הבדיקה לא הסתיימה. אפשר לנסות שוב.",
+  "submit.v2.ide.check.empty": "הקובץ {path} ריק. אפשר לכתוב אותו ואז לבדוק שוב.",
   "submit.v2.metric.model.label": "מודל המדד",
   "submit.v2.metric.model.label.guided": "המודל שנותן ציונים",
   "submit.v2.metric.model.desc": "המדד שלכם קורא ל-llm(), ולכן הוא צריך מודל. הוא משתמש במודל הרפלקציה, אלא אם תבחרו מודל אחר.",

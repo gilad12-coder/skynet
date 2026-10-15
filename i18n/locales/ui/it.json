@@ -12,6 +12,7 @@
   "submit.v2.ide.error.fixed": "run.py e metric.py sono i file di ingresso dell'esecuzione, quindi non si possono eliminare, rinominare o spostare.",
   "submit.v2.ide.check.passed": "Nessun problema",
   "submit.v2.ide.check.failed": "Il controllo non è terminato. Riprova.",
+  "submit.v2.ide.check.empty": "{path} è vuoto. Scrivilo, poi controlla di nuovo.",
   "submit.v2.metric.files.error.depth": "Usa al massimo 3 cartelle.",
   "submit.v2.metric.files.error.exists": "Esiste già un file o una cartella con questo nome.",
   "submit.v2.metric.files.error.length": "Inserisci un nome di massimo 120 caratteri.",
