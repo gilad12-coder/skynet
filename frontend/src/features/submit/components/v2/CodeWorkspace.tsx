@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
+import { Button } from "@/shared/ui/primitives/button";
+import { ArrowsOut } from "@/shared/ui/icons";
 import { contractCheckMessage } from "@/shared/lib/i18n";
 import type { ContractCheckItem, ContractCheckResponse } from "@/shared/types/unified-run";
 import { contractConsole } from "../../lib/contract-console";
@@ -10,6 +13,11 @@ import { METRIC_FILE, RUN_FILE } from "../../lib/wizard-v2";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { WorkspaceTree } from "./WorkspaceTree";
+
+// The IDE pop-up and VS Code behind it load only when the pop-up opens.
+const IdeDialog = dynamic(() => import("../../ide/IdeDialog").then((module) => module.IdeDialog), {
+  ssr: false,
+});
 
 /** One failed check as a line in an editor's console. */
 function contractConsoleLine(item: ContractCheckItem, guided: boolean): string {
@@ -135,6 +143,7 @@ export function CodeWorkspace({
   const extraPaths = useMemo(() => Object.keys(files).sort(), [files]);
   const paths = useMemo(() => [RUN_FILE, METRIC_FILE, ...extraPaths], [extraPaths]);
   const [chosen, setChosen] = useState<string>(repo ? METRIC_FILE : RUN_FILE);
+  const [ideOpen, setIdeOpen] = useState(false);
   const open = repo ? METRIC_FILE : paths.includes(chosen) ? chosen : RUN_FILE;
 
   const writingPaths = useMemo(
@@ -226,7 +235,11 @@ export function CodeWorkspace({
   return (
     <div className="@container px-4 py-4 sm:px-6">
       <div className="flex flex-col gap-4 @2xl:flex-row @2xl:items-start">
-        <div className="@2xl:sticky @2xl:top-0 @2xl:w-48 @2xl:shrink-0">
+        <div className="space-y-2 @2xl:sticky @2xl:top-0 @2xl:w-48 @2xl:shrink-0">
+          <Button size="xs" variant="outline" className="w-full" onClick={() => setIdeOpen(true)}>
+            <ArrowsOut aria-hidden />
+            {v2Msg("submit.v2.ide.open", guided)}
+          </Button>
           <WorkspaceTree
             paths={paths}
             files={files}
@@ -247,6 +260,22 @@ export function CodeWorkspace({
         </div>
         <div className="min-w-0 flex-1">{editor}</div>
       </div>
+      {ideOpen && (
+        <IdeDialog
+          runCode={runCode}
+          metricCode={metricCode}
+          files={files}
+          onFileChange={onFileChange}
+          onFileDelete={(path) => {
+            if (open === path) setChosen(RUN_FILE);
+            onFileDelete(path);
+          }}
+          onCheck={onCheck}
+          consoleFor={consoleFor}
+          onClose={() => setIdeOpen(false)}
+          guided={guided}
+        />
+      )}
     </div>
   );
 }
