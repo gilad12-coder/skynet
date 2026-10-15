@@ -3,7 +3,8 @@
  *
  * It starts only on work the user did not do: entry files that are still
  * blank, or its own code whose last Check failed. Code the user wrote or
- * changed by hand is theirs, and code that passes needs nothing.
+ * changed by hand is theirs, and code that passes needs nothing. A
+ * repository run has no run code, so only its metric.py counts.
  */
 
 /** The turn the agent starts with: write the files, fix its failing code, or ask what it is missing. */
@@ -25,6 +26,8 @@ export interface KickoffInput {
   lastCheckOk: boolean | null;
   /** A turn is running already. */
   busy: boolean;
+  /** A repository run: the optimizer edits the repository, so there is no run.py to write. */
+  repo?: boolean;
 }
 
 /**
@@ -38,13 +41,28 @@ export interface KickoffInput {
  */
 export function kickoffFor(input: KickoffInput): Kickoff | null {
   if (!input.hasContext || input.busy) return null;
-  const { runCode, metricCode } = input;
+  const { metricCode, repo = false } = input;
+  const runCode = repo ? null : input.runCode;
   const handEdited =
-    (runCode.trim() !== "" && runCode !== input.agentRun) ||
+    (runCode !== null && runCode.trim() !== "" && runCode !== input.agentRun) ||
     (metricCode.trim() !== "" && metricCode !== input.agentMetric);
   if (handEdited) return null;
-  const blank = runCode.trim() === "" || metricCode.trim() === "";
+  const blank = runCode?.trim() === "" || metricCode.trim() === "";
   if (!blank && input.lastCheckOk !== false) return null;
-  if (!input.objective.trim() || !input.dataKnown) return "ask";
+  if (!input.objective.trim() || !(repo || input.dataKnown)) return "ask";
   return blank ? "write" : "fix";
+}
+
+/**
+ * The message key of a kickoff turn.
+ *
+ * Args:
+ *   kickoff: The turn to start.
+ *   repo: A repository run, whose turns talk about metric.py and the repository only.
+ *
+ * Returns:
+ *   The i18n key of the hidden message that starts the turn.
+ */
+export function kickoffKey(kickoff: Kickoff, repo: boolean): string {
+  return `submit.v2.ide.agent.kickoff.${repo ? `repo_${kickoff}` : kickoff}`;
 }

@@ -15,9 +15,9 @@ above each class, not in class bodies.
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from ..i18n_en import t_en
 from ..i18n_keys import I18nKey
@@ -32,6 +32,10 @@ from .common import ModelConfig, SplitFractions
 from .scorer_dependencies import ScorerDependencyLock
 
 UNIFIED_PAYLOAD_KIND = "unified_v1"
+# Every path rides each agent turn's prompt, so a repository's list is capped.
+REPO_FILES_MAX = 2000
+REPO_FILE_PATH_MAX = 1024
+
 ArtifactKind = Literal["prompt", "code", "dspy_program", "text"]
 DataMode = Literal["single", "pairs"]
 OptimizerChoice = Literal[
@@ -527,7 +531,11 @@ class InputsInferenceResponse(BaseModel):
 
 
 # What the code agent needs to write run code and a metric for a unified run.
-# ``focus`` names which of the two the user is working on.
+# ``focus`` names which of the two the user is working on. ``target`` is
+# ``"repo"`` for a repository run: the optimizer edits the repository itself,
+# so there is no run code and the agent writes only the repository scorer.
+# ``repo_files`` lists a repository run's file paths, which the agent may open
+# read-only.
 class UnifiedAuthoringContext(BaseModel):
     task: UnifiedTask
     data_mode: DataMode
@@ -537,6 +545,10 @@ class UnifiedAuthoringContext(BaseModel):
     optimizer: OptimizerChoice
     metric_has_model: bool = False
     focus: Literal["run", "metric"] = "run"
+    target: Literal["artifact", "repo"] = "artifact"
+    repo_files: list[Annotated[str, StringConstraints(min_length=1, max_length=REPO_FILE_PATH_MAX)]] = Field(
+        default_factory=list, max_length=REPO_FILES_MAX
+    )
 
 
 __all__ = [
@@ -550,6 +562,8 @@ __all__ = [
     "METRIC_FILE",
     "METRIC_SIGNATURE",
     "MIN_PAIRS_FOR_HELD_OUT",
+    "REPO_FILES_MAX",
+    "REPO_FILE_PATH_MAX",
     "RUN_ENTRY",
     "RUN_FILE",
     "UNIFIED_PAYLOAD_KIND",

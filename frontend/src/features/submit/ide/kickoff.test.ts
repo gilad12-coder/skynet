@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { kickoffFor, type KickoffInput } from "./kickoff.ts";
+import { kickoffFor, kickoffKey, type KickoffInput } from "./kickoff.ts";
 
 const BLANK: KickoffInput = {
   hasContext: true,
@@ -47,4 +47,29 @@ test("code the user wrote or changed by hand is left alone, even when it fails",
   assert.equal(kickoffFor({ ...BLANK, runCode: "r", metricCode: "m", lastCheckOk: false }), null);
   // One file blank, the other hand-written: still the user's work.
   assert.equal(kickoffFor({ ...BLANK, metricCode: "def score(): ..." }), null);
+});
+
+const REPO: KickoffInput = { ...BLANK, repo: true, dataKnown: false };
+
+test("a repository run writes its blank metric.py even with no data and no run.py", () => {
+  assert.equal(kickoffFor(REPO), "write");
+  assert.equal(kickoffFor({ ...REPO, objective: " " }), "ask");
+});
+
+test("a repository run counts only metric.py, so a written scorer is not blank", () => {
+  const own = { ...REPO, metricCode: "m", agentMetric: "m" };
+  assert.equal(kickoffFor(own), null);
+  assert.equal(kickoffFor({ ...own, lastCheckOk: false }), "fix");
+  assert.equal(kickoffFor({ ...own, runCode: "typed by hand" }), null);
+  assert.equal(kickoffFor({ ...own, runCode: "typed by hand", lastCheckOk: false }), "fix");
+});
+
+test("a repository run's hand-edited metric.py waits", () => {
+  assert.equal(kickoffFor({ ...REPO, metricCode: "mine", agentMetric: "m" }), null);
+});
+
+test("repository kickoffs use their own messages", () => {
+  assert.equal(kickoffKey("write", false), "submit.v2.ide.agent.kickoff.write");
+  assert.equal(kickoffKey("fix", true), "submit.v2.ide.agent.kickoff.repo_fix");
+  assert.equal(kickoffKey("ask", true), "submit.v2.ide.agent.kickoff.repo_ask");
 });

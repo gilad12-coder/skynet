@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { firstChangedLine, openTarget, pendingOpens } from "./open-file.ts";
+import { firstChangedLine, openTarget, pendingOpens, repoOpenTarget } from "./open-file.ts";
 
 const TEXTS = { "run.py": "a\nb\nc\n", "metric.py": "def metric():\n    return 1" };
 
@@ -41,4 +41,25 @@ test("every file asked for in one batch opens, in order", () => {
   ]);
   assert.deepEqual(pendingOpens(requests, 2, TEXTS), [{ path: "run.py", line: 2 }]);
   assert.deepEqual(pendingOpens(requests, 3, TEXTS), []);
+});
+
+test("with a repository, a path the workspace does not hold is left for the repository", () => {
+  const requests = [{ path: "run.py", line: 9 }, { path: "src/app.py", line: 3 }];
+  assert.deepEqual(pendingOpens(requests, 0, TEXTS, true), [
+    { path: "run.py", line: 4 },
+    { path: "src/app.py", line: 3, inRepo: true },
+  ]);
+  assert.deepEqual(pendingOpens(requests, 0, TEXTS), [{ path: "run.py", line: 4 }]);
+});
+
+test("a repository file opens under its folder, its line clamped once the text is known", () => {
+  assert.deepEqual(repoOpenTarget({ path: "src/app.py", line: 40 }, "demo", "a\nb"), {
+    path: "demo/src/app.py",
+    line: 2,
+  });
+  assert.deepEqual(repoOpenTarget({ path: "src/app.py", line: 1 }, "demo", "a\nb"), {
+    path: "demo/src/app.py",
+    line: 1,
+  });
+  assert.deepEqual(repoOpenTarget({ path: "logo.png", line: 4 }, "demo", null), { path: "demo/logo.png" });
 });

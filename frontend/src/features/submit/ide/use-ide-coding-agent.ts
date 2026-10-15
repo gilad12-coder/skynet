@@ -6,7 +6,7 @@ import type { ValidateCodeResponse } from "@/shared/types/api";
 import type { ContractCheckResponse, UnifiedAuthoringContext } from "@/shared/types/unified-run";
 import { v2Msg } from "../components/v2/ArtifactConfirmCard";
 import { workspaceKey, type AgentVerdict } from "./agent-verdict";
-import { kickoffFor } from "./kickoff";
+import { kickoffFor, kickoffKey } from "./kickoff";
 import { firstChangedLine } from "./open-file";
 
 const NO_COLUMNS: Record<string, never> = {};
@@ -32,9 +32,10 @@ export interface IdeCodingAgent {
  * the transcript does not show as the user's. A turn that ends on files its
  * own verify_code just passed or failed hands that verdict to the results
  * strip at once; only a turn that changed files after verifying runs Check.
+ * A repository run writes only metric.py and has no Check.
  *
  * Args:
- *   options.context: The authoring context, or null when the agent cannot write (a repository run).
+ *   options.context: The authoring context, or null when the agent cannot write yet.
  *   options.active: The step is on screen.
  *   options.dataKnown: The agent has sample cases, or the task needs none.
  *   options.runCode / metricCode / files: The workspace.
@@ -65,6 +66,7 @@ export function useIdeCodingAgent(options: {
   guided: boolean;
 }): IdeCodingAgent {
   const { context, active, dataKnown, runCode, metricCode, files, lastCheck, check, guided } = options;
+  const repo = context?.target === "repo";
   const [model, setModel] = React.useState<string | null>(null);
   const [effort, setEffort] = React.useState<string | null>(null);
   const [runEdited, setRunEdited] = React.useState(false);
@@ -170,13 +172,14 @@ export function useIdeCodingAgent(options: {
       agentMetric,
       lastCheckOk,
       busy,
+      repo,
     });
     if (!kickoff) return;
     const key = `${kickoff}\u0000${runCode}\u0000${metricCode}`;
     if (kicked.current === key) return;
     kicked.current = key;
-    send(v2Msg(`submit.v2.ide.agent.kickoff.${kickoff}`, guided), { hidden: true });
-  }, [active, context, dataKnown, runCode, metricCode, agentRun, agentMetric, lastCheckOk, busy, send, guided]);
+    send(v2Msg(kickoffKey(kickoff, repo), guided), { hidden: true });
+  }, [active, context, repo, dataKnown, runCode, metricCode, agentRun, agentMetric, lastCheckOk, busy, send, guided]);
 
   // After a turn, its own verify_code verdict on these exact files goes under
   // the toolbar and into the kickoff rule; a sandboxed Check (about a minute)
@@ -200,14 +203,14 @@ export function useIdeCodingAgent(options: {
       const path = wrote.current;
       sinks.current.openFile(path, firstChangedLine(before.current[path] ?? "", texts[path] ?? ""));
     }
-    if (!finished || !context || !runCode.trim() || !metricCode.trim()) return;
+    if (!finished || !context || (!repo && !runCode.trim()) || !metricCode.trim()) return;
     const seen = verified.current;
     if (seen && seen.key === key) {
       setTurnVerdict({ verdict: seen, after: lastCheck });
       return;
     }
-    void check();
-  }, [busy, agent.status, context, runCode, metricCode, files, key, lastCheck, check]);
+    if (!repo) void check();
+  }, [busy, agent.status, context, repo, runCode, metricCode, files, key, lastCheck, check]);
 
   return { agent, model, setModel, effort, setEffort, verdict };
 }

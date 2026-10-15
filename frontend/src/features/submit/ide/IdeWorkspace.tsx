@@ -30,12 +30,29 @@ import { contractConsole, type ContractConsole } from "../lib/contract-console";
 import { blankEntryFile, diffWorkspace, workspaceTexts } from "../lib/ide-workspace";
 import { METRIC_FILE, RUN_FILE } from "../lib/wizard-v2";
 import { v2Msg } from "../components/v2/ArtifactConfirmCard";
-import { pendingOpens, type IdeOpenRequest } from "./open-file";
+import { pendingOpens, repoOpenTarget, type IdeOpenRequest, type IdeOpenTarget } from "./open-file";
 import { park, unpark } from "./park";
 import type { RepoSource } from "./repo-files";
 import { guardClippingAncestors } from "./scroll-guard";
 import type { IdeWorkbench } from "./workbench";
 import { ZOOM_EASING, ZOOM_MS, prefersReducedMotion, zoomFrames } from "./zoom";
+
+/**
+ * Open one file in the editor, keeping the keyboard where it is. A repository
+ * file opens once its tree lists it, on a line clamped to its text.
+ *
+ * Args:
+ *   workbench: The booted workbench.
+ *   repo: The run's repository, or null.
+ *   target: The workspace file, or the repository path, to open.
+ */
+async function openIn(workbench: IdeWorkbench, repo: RepoSource | null, target: IdeOpenTarget): Promise<void> {
+  if (!target.inRepo) return workbench.openFile(target.path, target.line, true);
+  if (!repo || !(await repo.tree).files.has(target.path)) return;
+  const read = await repo.read(target.path);
+  const { path, line } = repoOpenTarget(target, repo.folder, "text" in read ? read.text : null);
+  await workbench.openFile(path, line, true);
+}
 
 function isDark(): boolean {
   return document.documentElement.classList.contains("dark");
@@ -319,14 +336,14 @@ export function IdeWorkspace({
   const opening = useRef(Promise.resolve());
   useEffect(() => {
     if (!workbench) return;
-    const targets = pendingOpens(openRequests, opened.current, latest.current);
+    const targets = pendingOpens(openRequests, opened.current, latest.current, repo !== null);
     opened.current = openRequests.length;
-    for (const { path, line } of targets) {
+    for (const target of targets) {
       opening.current = opening.current
-        .then(() => workbench.openFile(path, line, true))
+        .then(() => openIn(workbench, repo, target))
         .catch((error: unknown) => console.error("IDE failed to open a file", error));
     }
-  }, [workbench, openRequests]);
+  }, [workbench, openRequests, repo]);
   useEffect(() => () => workbench?.setRepo(null), [workbench]);
 
   const toggleFullScreen = useCallback(async () => {

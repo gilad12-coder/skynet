@@ -22,6 +22,8 @@ import { RunOverview } from "./RunOverview";
 import { WizardScreen } from "./WizardScreen";
 
 const SAMPLE_CASE_LIMIT = 5;
+// The backend's REPO_FILES_MAX: every path rides each agent turn's prompt.
+const REPO_PATHS_LIMIT = 2000;
 
 /** The app-wide agent launcher stays hidden while the IDE's own coding agent is on screen. */
 function HideAgentPill() {
@@ -41,14 +43,25 @@ function HideAgentPill() {
  *   The tree, fetched now, and a reader that fetches each file when it is opened.
  */
 function repoSource(repository: string, ref: string): RepoSource {
+  // The editor and the agent's open_file both read a file it opens; one fetch serves both.
+  const reads = new Map<string, ReturnType<RepoSource["read"]>>();
+  const fetchFile = async (path: string): ReturnType<RepoSource["read"]> => {
+    const file = await githubRepoFile(repository, ref, path);
+    if (file.text !== null) return { text: file.text };
+    return { issue: file.binary ? "binary" : file.too_large ? "too_large" : "missing" };
+  };
   return {
     // A repository run's workspace is run.py and metric.py, nothing else.
     folder: repoFolderName(repository, new Set([RUN_FILE, METRIC_FILE])),
     tree: githubRepoTree(repository, ref).then((tree) => indexRepoTree(tree.entries)),
-    read: async (path) => {
-      const file = await githubRepoFile(repository, ref, path);
-      if (file.text !== null) return { text: file.text };
-      return { issue: file.binary ? "binary" : file.too_large ? "too_large" : "missing" };
+    read: (path) => {
+      let read = reads.get(path);
+      if (!read) {
+        read = fetchFile(path);
+        reads.set(path, read);
+        read.catch(() => reads.delete(path));
+      }
+      return read;
     },
   };
 }
@@ -70,8 +83,31 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
 
   const metricUsesModel = metricCallsModel(state);
 
+  const repoDraft = task.repo && !repoIssue(task.repo) ? task.repo : null;
+  const repoName = repoDraft?.repository.trim() ?? "";
+  const repoRef = repoDraft ? repoDraft.commit.trim() || repoDraft.branch.trim() : "";
+  const repoFiles = React.useMemo(
+    () => (repoName ? repoSource(repoName, repoRef) : null),
+    [repoName, repoRef],
+  );
+
+  // The paths the agent may open read-only, once the tree has loaded.
+  const [repoPaths, setRepoPaths] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    setRepoPaths([]);
+    let live = true;
+    void repoFiles?.tree
+      .then((index) => live && setRepoPaths([...index.files].sort().slice(0, REPO_PATHS_LIMIT)))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [repoFiles]);
+
   const authoringContext = React.useMemo<UnifiedAuthoringContext | null>(() => {
-    if (!kind || !inputs.mode) return null;
+    // A repository run skips the Inputs step, so it may have no data mode.
+    const dataMode = inputs.mode ?? (repo ? "single" : null);
+    if (!kind || !dataMode) return null;
     const samples = authoringCases(
       {
         cases: inputs.cases,
@@ -87,17 +123,21 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
         background: task.background,
         artifact: { kind, starting_version: task.startingVersion ?? "" },
       },
-      data_mode: inputs.mode,
+      data_mode: dataMode,
       input_fields: inputs.inputFields,
       expected_field: inputs.expectedField,
       sample_cases: samples,
       optimizer: optimizer.choice,
       metric_has_model: metricUsesModel,
-      focus: "run",
+      focus: repo ? "metric" : "run",
+      ...(repo ? { target: "repo" as const } : {}),
+      ...(repoPaths.length > 0 ? { repo_files: repoPaths } : {}),
     };
   }, [
     kind,
+    repo,
     metricUsesModel,
+    repoPaths,
     task.objective,
     task.background,
     task.startingVersion,
@@ -128,9 +168,9 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   // The coding agent writes under this context. Inference re-roles the
   // columns when it answers, and the Inputs step stays mounted while it does,
   // so code written earlier would target input fields the contract check and
-  // the run no longer pass. A repository run has no sample inputs to write
-  // against; its scorer is written by hand.
-  const agentContext = repo || inputsInferring ? null : authoringContext;
+  // the run no longer pass. A repository run has no run code: the agent
+  // writes only its scorer, metric.py.
+  const agentContext = inputsInferring ? null : authoringContext;
   const onScreen = state.step === "metric" && page === 0;
   // Queued, not replaced: open_file calls batched into one render each open a tab.
   const [openRequests, setOpenRequests] = React.useState<readonly IdeOpenRequest[]>([]);
@@ -184,14 +224,6 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     if (code !== metricCode) setMetricCode(code);
   }, [page, metricCode, setMetricCode]);
 
-  const repoDraft = task.repo && !repoIssue(task.repo) ? task.repo : null;
-  const repoName = repoDraft?.repository.trim() ?? "";
-  const repoRef = repoDraft ? repoDraft.commit.trim() || repoDraft.branch.trim() : "";
-  const repoFiles = React.useMemo(
-    () => (repoName ? repoSource(repoName, repoRef) : null),
-    [repoName, repoRef],
-  );
-
   return (
     <div className="flex h-full min-h-0 flex-col">
       {onScreen && isGeneralistAgentEnabled() && <HideAgentPill />}
@@ -222,14 +254,12 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
             ) : null
           }
           sidePanel={
-            repo ? null : (
-              <CodingAgentPanel
-                coding={coding}
-                disabledReason={agentContext ? null : t("submit.v2.ide.agent.waiting")}
-                onOpenFile={openFile}
-                guided={guided}
-              />
-            )
+            <CodingAgentPanel
+              coding={coding}
+              disabledReason={agentContext ? null : t("submit.v2.ide.agent.waiting")}
+              onOpenFile={openFile}
+              guided={guided}
+            />
           }
         />
       </WizardScreen>
