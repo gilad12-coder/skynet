@@ -40,6 +40,7 @@
     "@codingame/monaco-vscode-textmate-service-override": "37.2.0",
     "@codingame/monaco-vscode-theme-defaults-default-extension": "37.2.0",
     "@codingame/monaco-vscode-theme-service-override": "37.2.0",
+    "@codingame/monaco-vscode-view-common-service-override": "37.2.0",
     "@codingame/monaco-vscode-workbench-service-override": "37.2.0",
     "@codingame/monaco-vscode-working-copy-service-override": "37.2.0",
     "@fontsource-variable/bricolage-grotesque": "^5.3.0",

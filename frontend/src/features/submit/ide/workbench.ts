@@ -11,6 +11,7 @@ import "@codingame/monaco-vscode-theme-defaults-default-extension";
 import { initialize, getService } from "@codingame/monaco-vscode-api";
 import type { IMonacoEnvironment } from "@codingame/monaco-vscode-api/vscode/vs/base/browser/browser";
 import { URI } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri";
+import { SyncDescriptor } from "@codingame/monaco-vscode-api/vscode/vs/platform/instantiation/common/descriptors";
 import { Emitter, Event } from "@codingame/monaco-vscode-api/vscode/vs/base/common/event";
 import {
   Disposable,
@@ -48,6 +49,7 @@ import getTextmateServiceOverride from "@codingame/monaco-vscode-textmate-servic
 import getThemeServiceOverride from "@codingame/monaco-vscode-theme-service-override";
 import getWorkbenchServiceOverride from "@codingame/monaco-vscode-workbench-service-override";
 import getWorkingCopyServiceOverride from "@codingame/monaco-vscode-working-copy-service-override";
+import { ISplashStorageService } from "@codingame/monaco-vscode-view-common-service-override/vscode/vs/workbench/contrib/splash/browser/splash.service";
 import { workspacePathIssue } from "../lib/wizard-v2";
 import {
   IDE_ROOT,
@@ -182,6 +184,15 @@ class WorkspaceFsProvider
   }
 }
 
+// The workbench's parts splash saves a layout skeleton for the next boot and
+// fails to start without somewhere to keep it; the pop-up boots hidden, so
+// there is nothing to save.
+class NoSplashStorage implements ISplashStorageService {
+  declare readonly _serviceBrand: undefined;
+
+  async saveWindowSplash(): Promise<void> {}
+}
+
 function settings(dark: boolean): string {
   return JSON.stringify({
     "workbench.colorTheme": dark ? "Default Dark Modern" : "Default Light Modern",
@@ -264,6 +275,7 @@ async function boot(dark: boolean, describe: (issue: string) => string): Promise
       ...getSearchServiceOverride(),
       ...getExplorerServiceOverride(),
       ...getWorkbenchServiceOverride(),
+      [ISplashStorageService.toString()]: new SyncDescriptor(NoSplashStorage, [], true),
     },
     element,
     {
