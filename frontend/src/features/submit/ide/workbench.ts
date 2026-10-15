@@ -85,7 +85,11 @@ export interface IdeWorkbench {
   layout(): void;
   /** Write every unsaved editor to the workspace. */
   saveAll(): Promise<void>;
-  openFile(path: string): Promise<void>;
+  /**
+   * Open a workspace file in its tab. With `line` (1-based), the cursor goes to
+   * its start and the line is centered; `preserveFocus` leaves the keyboard where it is.
+   */
+  openFile(path: string, line?: number, preserveFocus?: boolean): Promise<void>;
   /** Show a repository's checkout as a read-only folder, or remove it with null. */
   setRepo(source: RepoSource | null): void;
 }
@@ -466,10 +470,15 @@ async function boot(dark: boolean, describe: (issue: string) => string): Promise
     saveAll: async () => {
       await commandService.executeCommand("workbench.action.files.saveAll");
     },
-    openFile: async (path) => {
+    openFile: async (path, line, preserveFocus) => {
       await editorService.openEditor({
         resource: URI.file(`${IDE_ROOT}/${path}`),
-        options: { pinned: true },
+        // A selection is revealed centered by default.
+        options: {
+          pinned: true,
+          preserveFocus,
+          ...(line && { selection: { startLineNumber: line, startColumn: 1 } }),
+        },
       });
     },
     setRepo: (source) => {

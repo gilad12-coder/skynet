@@ -4180,6 +4180,7 @@
   "agent.coding_tool.editing": "Editing {file}",
   "agent.coding_tool.edited": "Edited {file}",
   "agent.coding_tool.deleted": "Deleted {file}",
+  "agent.coding_tool.opened": "Opened {file}",
   "agent.coding_tool.check.errors": "{count, plural, one {1 error} other {# errors}}",
   "shared.agent.activity.edit": "{count, plural, one {edited a file} other {edited files}}",
   "shared.agent.activity.act": "{count, plural, one {made a change} other {made changes}}",

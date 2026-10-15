@@ -14,6 +14,7 @@
   "submit.v2.ide.repo.read_only": "ملفات المستودع للقراءة فقط هنا: يستنسخ التشغيل المستودع عند الإيداع المحدد، لذا لن تصل إليه أي تعديلات تجريها هنا.",
   "submit.v2.ide.repo.too_large": "هذا الملف أكبر من أن يُفتح هنا.",
   "agent.coding_tool.deleted": "تم حذف {file}",
+  "agent.coding_tool.opened": "تم فتح {file}",
   "submit.v2.metric.files.error.chars": "استخدم الحروف والأرقام و_ . و- فقط، دون مجلدات . أو ..",
   "submit.v2.metric.files.error.count": "تتسع مساحة العمل لـ 20 ملفًا إضافيًا على الأكثر.",
   "submit.v2.ide.loading": "جارٍ تحميل المحرر…",

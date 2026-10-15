@@ -1096,6 +1096,9 @@ class UnifiedAssistant(dspy.Signature):
       file the request needs is written (a helpers.py AND the run.py that
       imports it), never between them; when it reports errors, fix exactly
       those files and call it again.
+    * ``open_file(path, line)`` — shows a file in the user's editor, cursor
+      on ``line``. Call it after you write or fix a file, on its most
+      relevant changed line, and when the user asks to see a file.
     * ``finish`` — end the turn and answer in ``reply``.
 
     The workspace is a folder: run.py and metric.py always exist, and
@@ -2481,6 +2484,7 @@ class _CodeEditSession:
 _DRAFT_SOURCES = {"edit_run": "signature", "edit_metric": "metric"}
 WRITE_FILE_TOOL = "write_file"
 VERIFY_TOOL = "verify_code"
+OPEN_FILE_TOOL = "open_file"
 # What each streamed tool argument holds, and for ``write_file`` which
 # argument names the file its draft lands in.
 _UNIFIED_TOOL_DRAFTS = {**dict.fromkeys(_DRAFT_SOURCES, "new_code"), WRITE_FILE_TOOL: "content"}
@@ -2894,6 +2898,40 @@ class _UnifiedEditSession:
         self._emit({"event": "file_delete", "data": {"path": path}})
         self._emit({"event": "tool_end", "data": {"id": call_id, "tool": "delete_file", "status": "ok", "path": path}})
         return f"{path} deleted. Call {VERIFY_TOOL} if run.py imported it."
+
+    def open_file(self, path: str, line: int = 0) -> str:
+        """Open a workspace file in the user's editor, with the cursor on ``line``.
+
+        Call it after you write or fix a file, pointing at the most relevant
+        changed line, and whenever the user asks to see a file. It changes
+        nothing.
+
+        Args:
+            path: run.py, metric.py or an extra file's path.
+            line: The 1-based line to show; 0 opens the file at its top.
+
+        Returns:
+            An observation string the ReAct agent reads back.
+        """
+        path = (path or "").strip()
+        texts = {**self._files, RUN_FILE: self._slots["run"], METRIC_FILE: self._slots["metric"]}
+        call_id = uuid.uuid4().hex[:8]
+        start: dict[str, Any] = {"id": call_id, "tool": OPEN_FILE_TOOL, "reason": "", "path": path}
+        self._emit({"event": "tool_start", "data": start})
+        if path not in texts:
+            self._emit({"event": "tool_end", "data": {**start, "status": "error"}})
+            return f"Open rejected — there is no file {path}. Files: {', '.join(sorted(texts))}."
+        try:
+            line = int(line or 0)
+        except (TypeError, ValueError):
+            line = 0
+        # A line past the end still opens the file, on its last line.
+        line = min(max(line, 0), max(texts[path].count("\n") + 1, 1))
+        end: dict[str, Any] = {**start, "status": "ok"}
+        if line:
+            end["line"] = line
+        self._emit({"event": "tool_end", "data": end})
+        return f"Opened {path}:{line}." if line else f"Opened {path}."
 
     def verify_code(self) -> str:
         """Check every workspace file without running it: run.py, metric.py and each extra file.
@@ -4041,7 +4079,7 @@ async def _run_unified_agent(
 
     Tools are bound methods on a :class:`_UnifiedEditSession`
     (``ask_user`` / ``set_brief`` / ``edit_run`` / ``edit_metric`` /
-    ``write_file`` / ``delete_file`` / ``verify_code``) that emit
+    ``write_file`` / ``delete_file`` / ``verify_code`` / ``open_file``) that emit
     ``tool_start`` / ``signature_replace`` (run code), ``metric_replace``
     (metric), ``file_replace`` / ``file_delete`` (other files) or
     ``verify_result`` / ``tool_end`` thread-safely, and the ``reply`` streams
@@ -4090,10 +4128,11 @@ async def _run_unified_agent(
         session.write_file,
         session.delete_file,
         session.verify_code,
+        session.open_file,
     ]
     # Both files edited with a validator-driven retry, a check, a fix and a
-    # second check, a brief and a question, before the reply.
-    react = ActingReActV2(UnifiedAssistant, tools=tools, max_iters=12)
+    # second check, a brief, a question and an opened file, before the reply.
+    react = ActingReActV2(UnifiedAssistant, tools=tools, max_iters=13)
     attach_steering(react, steering)
     reply_stream = ReactReplyStream(
         react, "reply", lm, tool_drafts=_UNIFIED_TOOL_DRAFTS, tool_draft_keys=_UNIFIED_TOOL_DRAFT_KEYS
@@ -4364,7 +4403,9 @@ async def run_code_agent(
       extra workspace file written or deleted (unified chat mode).
     * ``verify_result`` — ``{id, ok, files: [{path, ok, errors, warnings}]}``,
       a ``verify_code`` row's per-file result (unified paths).
-    * ``tool_end`` — ``{id, tool, status}``, after the tool returns.
+    * ``tool_end`` — ``{id, tool, status}``, after the tool returns. An
+      ``open_file`` row carries ``path`` on both events and, when given, a
+      1-based ``line`` on its ``ok`` end, which opens the file in the editor.
     * ``message_patch`` — chat-mode reply token stream.
     * ``done`` — ``{signature_code, metric_code, assistant_message, model,
       served_model}``; the unified paths add ``files`` and ``verification``

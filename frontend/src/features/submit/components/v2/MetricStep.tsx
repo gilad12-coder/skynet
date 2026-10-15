@@ -9,6 +9,7 @@ import { useContractCheck } from "../../hooks/use-contract-check";
 import { CodingAgentPanel } from "../../ide/CodingAgentPanel";
 import { workspaceKey } from "../../ide/agent-verdict";
 import { IdeWorkspace } from "../../ide/IdeWorkspace";
+import type { IdeOpenRequest } from "../../ide/open-file";
 import { indexRepoTree, repoFolderName, type RepoSource } from "../../ide/repo-files";
 import { useIdeCodingAgent } from "../../ide/use-ide-coding-agent";
 import { authoringCases } from "../../lib/inputs-mode";
@@ -139,6 +140,11 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   // against; its scorer is written by hand.
   const agentContext = repo || inputsInferring ? null : authoringContext;
   const onScreen = state.step === "metric" && page === 0;
+  const [openRequest, setOpenRequest] = React.useState<IdeOpenRequest | null>(null);
+  const openFile = React.useCallback(
+    (path: string, line?: number) => setOpenRequest(line ? { path, line } : { path }),
+    [],
+  );
   const coding = useIdeCodingAgent({
     context: agentContext,
     active: onScreen,
@@ -149,6 +155,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     setRunCode,
     setMetricCode,
     setFile: setWorkspaceFile,
+    openFile,
     lastCheck: contract.lastCheck,
     lastCheckOk,
     check: contract.check,
@@ -212,6 +219,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           resultsStale={!repo && resultsStale}
           hint={hint}
           repo={repoFiles}
+          openRequest={openRequest}
           guided={guided}
           strip={
             metricUsesModel ? (
@@ -229,6 +237,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
               <CodingAgentPanel
                 coding={coding}
                 disabledReason={agentContext ? null : t("submit.v2.ide.agent.waiting")}
+                onOpenFile={openFile}
                 guided={guided}
               />
             )

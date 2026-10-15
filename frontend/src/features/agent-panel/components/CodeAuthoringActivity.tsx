@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle, PencilSimple, Trash } from "@/shared/ui/icons";
+import { CheckCircle, FileCode, PencilSimple, Trash } from "@/shared/ui/icons";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
@@ -27,6 +27,8 @@ export interface CodingCall {
   status: string;
   startedAt: number;
   path?: string;
+  /** The 1-based line an open_file call showed. */
+  line?: number;
   prevCode?: string;
   newCode?: string;
   verification?: { ok: boolean; files: ReadonlyArray<{ path: string; ok: boolean; errors: string[] }> };
@@ -41,13 +43,20 @@ function editedFile(call: CodingCall): string | null {
 
 /**
  * One reply's tool calls from the coding agent's own chat, as the coding tool
- * lists them: each edit with its diff, each deleted file and each check, in
- * the order the agent made them.
+ * lists them: each edit with its diff, each deleted file, each check and each
+ * file it showed in the editor, in the order the agent made them.
  *
  * Args:
  *   calls: The reply's tool calls.
+ *   onOpenFile: Show a file in the editor again; without it an opened file's row only reports it.
  */
-export function CodingCallRows({ calls }: { calls: readonly CodingCall[] }) {
+export function CodingCallRows({
+  calls,
+  onOpenFile,
+}: {
+  calls: readonly CodingCall[];
+  onOpenFile?: (path: string, line?: number) => void;
+}) {
   const steps: Step[] = [];
   for (const call of calls) {
     const file = editedFile(call);
@@ -88,6 +97,21 @@ export function CodingCallRows({ calls }: { calls: readonly CodingCall[] }) {
         });
       }
       for (const check of checks) steps.push(checkStep(check));
+    } else if (call.tool === "open_file" && call.status === "done" && call.path) {
+      const { path, line } = call;
+      steps.push({
+        key: `open-${call.id}`,
+        kind: "read",
+        status: "done",
+        row: (
+          <StepRow
+            icon={FileCode}
+            label={formatMsg("agent.coding_tool.opened", { file: line ? `${path}:${line}` : path })}
+            status="done"
+            onSelect={onOpenFile && (() => onOpenFile(path, line))}
+          />
+        ),
+      });
     }
   }
   if (steps.length === 0) return null;

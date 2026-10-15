@@ -14,6 +14,7 @@
   "submit.v2.ide.repo.read_only": "Repository-Dateien sind hier schreibgeschützt: Der Lauf klont das Repository im gewählten Commit, Änderungen hier würden dort also nicht ankommen.",
   "submit.v2.ide.repo.too_large": "Diese Datei ist zu groß, um sie hier zu öffnen.",
   "agent.coding_tool.deleted": "{file} gelöscht",
+  "agent.coding_tool.opened": "{file} geöffnet",
   "submit.v2.metric.files.error.chars": "Nur Buchstaben, Ziffern, _ . und - verwenden, keine Ordner . oder ..",
   "submit.v2.metric.files.error.count": "Der Arbeitsbereich enthält höchstens 20 zusätzliche Dateien.",
   "submit.v2.ide.loading": "Editor wird geladen…",

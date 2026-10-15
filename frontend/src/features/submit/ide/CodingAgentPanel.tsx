@@ -17,8 +17,6 @@ import { EmptyState } from "@/shared/ui/empty-state";
 import { v2Msg } from "../components/v2/ArtifactConfirmCard";
 import type { IdeCodingAgent } from "./use-ide-coding-agent";
 
-const renderToolCall = (call: AgentToolCall) => <CodingCallRows calls={[call]} />;
-
 /**
  * The coding agent's own chat, docked in the IDE: the user talks to the
  * agent that edits the files, and each edit, deleted file and check it makes
@@ -27,18 +25,25 @@ const renderToolCall = (call: AgentToolCall) => <CodingCallRows calls={[call]} /
  * Args:
  *   coding: The agent and its composer model choice.
  *   disabledReason: Why the agent cannot write now, or null when it can.
+ *   onOpenFile: Show a file in the editor again, from a row of the agent's reply.
  *   guided: Guided copy.
  */
 export function CodingAgentPanel({
   coding,
   disabledReason,
+  onOpenFile,
   guided,
 }: {
   coding: IdeCodingAgent;
   disabledReason: string | null;
+  onOpenFile: (path: string, line?: number) => void;
   guided: boolean;
 }) {
   const { agent } = coding;
+  const renderToolCall = React.useCallback(
+    (call: AgentToolCall) => <CodingCallRows calls={[call]} onOpenFile={onOpenFile} />,
+    [onOpenFile],
+  );
   const [draft, setDraft] = React.useState("");
   const streaming = agent.status === "streaming";
   const disabled = disabledReason !== null;

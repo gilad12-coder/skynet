@@ -14,6 +14,7 @@
   "submit.v2.ide.repo.read_only": "Qui i file del repository sono di sola lettura: l'esecuzione clona il repository al commit scelto, quindi le modifiche fatte qui non gli arriverebbero.",
   "submit.v2.ide.repo.too_large": "Questo file è troppo grande per essere aperto qui.",
   "agent.coding_tool.deleted": "{file} eliminato",
+  "agent.coding_tool.opened": "{file} aperto",
   "submit.v2.metric.files.error.chars": "Usa solo lettere, cifre, _ . e -, senza cartelle . o ..",
   "submit.v2.metric.files.error.count": "L'area di lavoro contiene al massimo 20 file aggiuntivi.",
   "submit.v2.ide.loading": "Caricamento dell'editor…",

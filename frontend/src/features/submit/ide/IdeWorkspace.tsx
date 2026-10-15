@@ -30,6 +30,7 @@ import { contractConsole, type ContractConsole } from "../lib/contract-console";
 import { blankEntryFile, diffWorkspace, workspaceTexts } from "../lib/ide-workspace";
 import { METRIC_FILE, RUN_FILE } from "../lib/wizard-v2";
 import { v2Msg } from "../components/v2/ArtifactConfirmCard";
+import { openTarget, type IdeOpenRequest } from "./open-file";
 import { park, unpark } from "./park";
 import type { RepoSource } from "./repo-files";
 import { guardClippingAncestors } from "./scroll-guard";
@@ -136,6 +137,7 @@ export function IdeWorkspace({
   resultsStale,
   hint,
   repo,
+  openRequest,
   strip,
   sidePanel,
   guided,
@@ -157,6 +159,8 @@ export function IdeWorkspace({
   hint: string | null;
   /** A repository run's checkout, shown read-only in the explorer. */
   repo: RepoSource | null;
+  /** The file the coding agent (or its transcript) last asked to show; a new request opens it again. */
+  openRequest: IdeOpenRequest | null;
   /** Shown above the editor (the metric model row). */
   strip?: ReactNode;
   /** The end-side region: the coding agent's chat. */
@@ -264,6 +268,14 @@ export function IdeWorkspace({
   useEffect(() => {
     workbench?.setRepo(repo);
   }, [workbench, repo]);
+
+  // After the load above, so a file the agent wrote in the same turn is
+  // already in the IDE; the keyboard stays in the agent's composer.
+  useEffect(() => {
+    if (!workbench || !openRequest) return;
+    const target = openTarget(openRequest, latest.current);
+    if (target) void workbench.openFile(target.path, target.line, true);
+  }, [workbench, openRequest]);
   useEffect(() => () => workbench?.setRepo(null), [workbench]);
 
   const toggleFullScreen = useCallback(async () => {

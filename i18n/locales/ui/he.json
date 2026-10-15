@@ -4180,6 +4180,7 @@
   "agent.coding_tool.editing": "עורך את {file}",
   "agent.coding_tool.edited": "ערך את {file}",
   "agent.coding_tool.deleted": "מחק את {file}",
+  "agent.coding_tool.opened": "פתח את {file}",
   "agent.coding_tool.check.errors": "{count, plural, one {שגיאה אחת} other {# שגיאות}}",
   "shared.agent.activity.edit": "{count, plural, one {ערך קובץ} other {ערך קבצים}}",
   "shared.agent.activity.act": "{count, plural, one {ביצע שינוי} other {ביצע שינויים}}",

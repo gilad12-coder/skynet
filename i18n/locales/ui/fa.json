@@ -14,6 +14,7 @@
   "submit.v2.ide.repo.read_only": "فایل‌های مخزن اینجا فقط‌خواندنی هستند: اجرا مخزن را در کامیت انتخاب‌شده کلون می‌کند، بنابراین تغییرات اینجا به آن نمی‌رسد.",
   "submit.v2.ide.repo.too_large": "این فایل برای باز شدن در اینجا خیلی بزرگ است.",
   "agent.coding_tool.deleted": "{file} حذف شد",
+  "agent.coding_tool.opened": "{file} باز شد",
   "submit.v2.metric.files.error.chars": "فقط از حروف، ارقام، _ . و - استفاده کنید، بدون پوشه‌های . یا ..",
   "submit.v2.metric.files.error.count": "فضای کار حداکثر 20 فایل اضافی دارد.",
   "submit.v2.ide.loading": "در حال بارگذاری ویرایشگر…",

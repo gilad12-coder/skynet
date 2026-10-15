@@ -3560,6 +3560,7 @@ export type CodeAgentToolName =
   | "write_file"
   | "delete_file"
   | "verify_code"
+  | "open_file"
   | "edit_seed"
   | "edit_scorer"
   | "set_brief"
@@ -3578,6 +3579,7 @@ const CODE_AGENT_TOOLS = new Set<CodeAgentToolName>([
   "write_file",
   "delete_file",
   "verify_code",
+  "open_file",
   "edit_seed",
   "edit_scorer",
   "set_brief",
@@ -3594,7 +3596,7 @@ interface CodeAgentToolStart {
   id: string;
   tool: CodeAgentToolName;
   reason: string;
-  /** The file a write_file / delete_file call is about. */
+  /** The file a write_file / delete_file / open_file call is about. */
   path?: string;
 }
 
@@ -3603,6 +3605,8 @@ interface CodeAgentToolEnd {
   tool: CodeAgentToolName;
   status: string;
   path?: string;
+  /** The 1-based line an open_file call shows. */
+  line?: number;
 }
 
 /** A `verify_code` call's result: one verdict per workspace file. */
@@ -3778,6 +3782,7 @@ export async function streamCodeAgent(
           tool,
           status: String(data.status ?? "ok"),
           ...(typeof data.path === "string" && data.path && { path: data.path }),
+          ...(typeof data.line === "number" && data.line > 0 && { line: data.line }),
         });
       }
     } else if (event === "ask") {

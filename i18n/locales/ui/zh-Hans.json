@@ -14,6 +14,7 @@
   "submit.v2.ide.repo.read_only": "这里的仓库文件是只读的：运行时会在所选提交处克隆仓库，因此在这里所做的修改不会生效。",
   "submit.v2.ide.repo.too_large": "此文件过大，无法在这里打开。",
   "agent.coding_tool.deleted": "已删除 {file}",
+  "agent.coding_tool.opened": "已打开 {file}",
   "submit.v2.metric.files.error.chars": "只能使用字母、数字、_ . 和 -，不能有 . 或 .. 文件夹。",
   "submit.v2.metric.files.error.count": "工作区最多容纳 20 个额外文件。",
   "submit.v2.ide.loading": "正在加载编辑器…",

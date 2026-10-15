@@ -437,6 +437,45 @@ def test_delete_file_removes_extra_files_but_never_run_or_metric(
     assert "no file" in ws_session.delete_file("x", "ghost.py")
 
 
+def test_open_file_echoes_the_path_and_line(ws_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """open_file opens one row that ends ok with the file and its line, and changes nothing."""
+    before = (ws_session.run_code, ws_session.metric_code, ws_session.files)
+    assert ws_session.open_file("metric.py", 1) == "Opened metric.py:1."
+    assert [e["event"] for e in u_events] == ["tool_start", "tool_end"]
+    start, end = (e["data"] for e in u_events)
+    assert start["tool"] == end["tool"] == "open_file"
+    assert start["path"] == end["path"] == "metric.py"
+    assert end["id"] == start["id"]
+    assert end["status"] == "ok"
+    assert end["line"] == 1
+    assert (ws_session.run_code, ws_session.metric_code, ws_session.files) == before
+
+
+def test_open_file_rejects_a_file_not_in_the_workspace(ws_session: _UnifiedEditSession, u_events: list[dict]) -> None:
+    """An unknown path closes the row as failed and lists the files that exist."""
+    observation = ws_session.open_file("ghost.py", 3)
+    assert "no file ghost.py" in observation
+    assert "notes.txt" in observation
+    assert "run.py" in observation
+    end = u_events[-1]["data"]
+    assert end["status"] == "error"
+    assert "line" not in end
+
+
+@pytest.mark.parametrize(
+    ("line", "expected", "observation"),
+    [(0, None, "Opened notes.txt."), (-4, None, "Opened notes.txt."), (99, 1, "Opened notes.txt:1.")],
+)
+def test_open_file_line_is_optional_and_clamped_to_the_file(
+    ws_session: _UnifiedEditSession, u_events: list[dict], line: int, expected: int | None, observation: str
+) -> None:
+    """No line (or a non-positive one) opens the top; a line past the end lands on the last line."""
+    assert ws_session.open_file(" notes.txt ", line) == observation
+    end = u_events[-1]["data"]
+    assert end["status"] == "ok"
+    assert end.get("line") == expected
+
+
 def test_verify_code_reports_each_file_and_opens_a_fix(ws_session: _UnifiedEditSession, u_events: list[dict]) -> None:
     """A failed check names the file, emits per-file results and allows one more write of it."""
     ws_session.write_file("add helper", "helpers.py", "x = helper\n")

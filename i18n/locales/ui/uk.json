@@ -14,6 +14,7 @@
   "submit.v2.ide.repo.read_only": "Файли репозиторію тут доступні лише для читання: запуск клонує репозиторій на вибраному коміті, тож зміни тут до нього не дійдуть.",
   "submit.v2.ide.repo.too_large": "Цей файл завеликий, щоб відкрити його тут.",
   "agent.coding_tool.deleted": "{file} видалено",
+  "agent.coding_tool.opened": "{file} відкрито",
   "submit.v2.metric.files.error.chars": "Використовуйте лише літери, цифри, _ . і -, без папок . чи ..",
   "submit.v2.metric.files.error.count": "Робоча область містить щонайбільше 20 додаткових файлів.",
   "submit.v2.ide.loading": "Завантаження редактора…",

@@ -38,6 +38,7 @@ export interface IdeCodingAgent {
  *   options.dataKnown: The agent has sample cases, or the task needs none.
  *   options.runCode / metricCode / files: The workspace.
  *   options.setRunCode / setMetricCode / setFile: Write into the workspace.
+ *   options.openFile: Show a file in the editor (the agent's open_file).
  *   options.lastCheck: The last sandboxed Check, so an agent verdict knows what it supersedes.
  *   options.lastCheckOk: The last Check's verdict on exactly these files, or null.
  *   options.check: Run Check.
@@ -56,6 +57,7 @@ export function useIdeCodingAgent(options: {
   setRunCode: (code: string) => void;
   setMetricCode: (code: string) => void;
   setFile: (path: string, text: string | null) => void;
+  openFile: (path: string, line?: number) => void;
   lastCheck: ContractCheckResponse | null;
   lastCheckOk: boolean | null;
   check: () => Promise<ContractCheckResponse | null>;
@@ -113,6 +115,7 @@ export function useIdeCodingAgent(options: {
     unified: context,
     files: files as Record<string, string>,
     setFile: writeFile,
+    onOpenFile: options.openFile,
     model,
     reasoningEffort: effort,
   });

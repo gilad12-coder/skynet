@@ -14,6 +14,7 @@
   "submit.v2.ide.repo.read_only": "呢度嘅儲存庫檔案係唯讀：執行時會喺揀咗嘅 commit 複製儲存庫，所以喺呢度改咗都唔會去到嗰度。",
   "submit.v2.ide.repo.too_large": "呢個檔案太大，喺呢度打開唔到。",
   "agent.coding_tool.deleted": "已刪除 {file}",
+  "agent.coding_tool.opened": "已打開 {file}",
   "submit.v2.metric.files.error.chars": "只可以用字母、數字、_ . 同 -，唔可以有 . 或 .. 資料夾。",
   "submit.v2.metric.files.error.count": "工作區最多可以放 20 個額外檔案。",
   "submit.v2.ide.loading": "編輯器載入緊…",

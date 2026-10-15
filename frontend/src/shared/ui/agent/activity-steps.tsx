@@ -81,6 +81,8 @@ interface StepRowProps {
   errorLabel?: string;
   /** What the row opens to; a row without it does not open. */
   children?: React.ReactNode;
+  /** Makes a row with nothing to open a button that runs this, e.g. showing its file again. */
+  onSelect?: () => void;
 }
 
 /**
@@ -96,6 +98,7 @@ export function StepRow({
   marks,
   errorLabel,
   children,
+  onSelect,
 }: StepRowProps) {
   const [open, setOpen] = React.useState(false);
   const canOpen = children !== undefined && children !== null && children !== false;
@@ -129,6 +132,17 @@ export function StepRow({
   );
   const lineClass =
     "group flex w-full min-w-0 items-center gap-2 py-1 text-start text-[0.8125rem] text-muted-foreground";
+  if (!canOpen && onSelect) {
+    return (
+      <button
+        type="button"
+        onClick={onSelect}
+        className={cn(lineClass, "cursor-pointer transition-colors hover:text-foreground")}
+      >
+        {line}
+      </button>
+    );
+  }
   if (!canOpen) return <div className={lineClass}>{line}</div>;
   return (
     <div className="min-w-0">

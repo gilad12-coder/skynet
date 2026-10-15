@@ -14,6 +14,7 @@
   "submit.v2.ide.repo.read_only": "यहाँ रिपॉज़िटरी फ़ाइलें केवल पढ़ने के लिए हैं: रन चुने गए कमिट पर रिपॉज़िटरी को क्लोन करता है, इसलिए यहाँ किए गए बदलाव उस तक नहीं पहुँचेंगे।",
   "submit.v2.ide.repo.too_large": "यह फ़ाइल यहाँ खोलने के लिए बहुत बड़ी है।",
   "agent.coding_tool.deleted": "{file} हटाई गई",
+  "agent.coding_tool.opened": "{file} खोली गई",
   "submit.v2.metric.files.error.chars": "सिर्फ़ अक्षर, अंक, _ . और - इस्तेमाल करें, . या .. फ़ोल्डर नहीं।",
   "submit.v2.metric.files.error.count": "वर्कस्पेस में ज़्यादा से ज़्यादा 20 अतिरिक्त फ़ाइलें हो सकती हैं।",
   "submit.v2.ide.loading": "एडिटर लोड हो रहा है…",
