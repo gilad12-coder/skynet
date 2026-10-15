@@ -564,6 +564,24 @@ def test_history_marks_an_earlier_coding_call_finished_with_its_outcome() -> Non
     assert "It is not running now." in result
 
 
+def test_history_names_the_files_a_coding_run_deleted() -> None:
+    """A run that deleted workspace files says so, even when it wrote none."""
+    outcome = {"status": "done", "files": [], "deleted": ["old.py"], "check": "passed", "errors": []}
+    turns = [
+        ChatTurn(
+            role="assistant",
+            content="",
+            tool_calls=[
+                ChatToolCall(tool="request_code_authoring", status="done", result=json.dumps({"outcome": outcome}))
+            ],
+        ),
+    ]
+
+    result = history_for_agent(turns)[0]["tools"][0]["result"]
+
+    assert result.startswith("FINISHED: the coding agent deleted old.py, the validity check passed")
+
+
 def test_history_marks_an_unrecorded_coding_call_finished() -> None:
     """A coding call with no recorded outcome still reads as over, not under way."""
     turns = [

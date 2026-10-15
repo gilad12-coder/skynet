@@ -5,7 +5,16 @@
  */
 
 import type { RepositoryTreeEntry } from "@/shared/types/api";
+import {
+  ancestors,
+  sortTree,
+  treeBuilder,
+  treeRows,
+  type FileTreeRow,
+} from "../../../shared/ui/file-tree-model";
 import type { FilePatch } from "./repo-patch.ts";
+
+export { ancestors };
 
 export interface RepoNode {
   name: string;
@@ -22,18 +31,7 @@ export interface RepoNode {
   fileCount: number;
 }
 
-export interface RepoRow {
-  node: RepoNode;
-  depth: number;
-  expanded: boolean;
-}
-
-function sortChildren(node: RepoNode): void {
-  node.children.sort((a, b) =>
-    a.type !== b.type ? (a.type === "dir" ? -1 : 1) : a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
-  );
-  node.children.forEach(sortChildren);
-}
+export type RepoRow = FileTreeRow<RepoNode>;
 
 function countFiles(node: RepoNode): void {
   if (node.type === "file") {
@@ -48,36 +46,14 @@ function countFiles(node: RepoNode): void {
 
 /** Build the tree of the commit's entries plus every path the patch touches. */
 export function buildRepoTree(entries: RepositoryTreeEntry[], files: FilePatch[]): RepoNode {
-  const root: RepoNode = {
-    name: "",
-    path: "",
-    type: "dir",
+  const { root, ensure } = treeBuilder<RepoNode>((base) => ({
+    ...base,
     children: [],
     change: null,
     removed: false,
     changedCount: 0,
     fileCount: 0,
-  };
-  const byPath = new Map<string, RepoNode>([["", root]]);
-  const ensure = (path: string, type: "file" | "dir"): RepoNode => {
-    const existing = byPath.get(path);
-    if (existing) return existing;
-    const slash = path.lastIndexOf("/");
-    const parent = ensure(slash === -1 ? "" : path.slice(0, slash), "dir");
-    const node: RepoNode = {
-      name: path.slice(slash + 1),
-      path,
-      type,
-      children: [],
-      change: null,
-      removed: false,
-      changedCount: 0,
-      fileCount: 0,
-    };
-    parent.children.push(node);
-    byPath.set(path, node);
-    return node;
-  };
+  }));
   for (const entry of entries) {
     if (entry.path) ensure(entry.path, entry.type);
   }
@@ -91,7 +67,7 @@ export function buildRepoTree(entries: RepositoryTreeEntry[], files: FilePatch[]
       old.removed = true;
     }
   }
-  sortChildren(root);
+  sortTree(root);
   countFiles(root);
   return root;
 }
@@ -137,35 +113,7 @@ export function visibleRows(
   filter: string,
   scope: RepoScope = "all",
 ): RepoRow[] {
-  const needle = filter.trim().toLowerCase();
-  const rows: RepoRow[] = [];
-  const matches = new Map<RepoNode, boolean>();
-  const matching = (node: RepoNode): boolean => {
-    const cached = matches.get(node);
-    if (cached !== undefined) return cached;
-    const hit =
-      node.type === "file"
-        ? node.path.toLowerCase().includes(needle)
-        : node.children.some(matching);
-    matches.set(node, hit);
-    return hit;
-  };
-  const walk = (node: RepoNode, depth: number) => {
-    for (const child of node.children) {
-      if (!inScope(child, scope) || (needle && !matching(child))) continue;
-      const open = child.type === "dir" && (needle ? true : expanded.has(child.path));
-      rows.push({ node: child, depth, expanded: open });
-      if (open) walk(child, depth + 1);
-    }
-  };
-  walk(root, 0);
-  return rows;
-}
-
-/** Every folder above a path, nearest the root first. */
-export function ancestors(path: string): string[] {
-  const parts = path.split("/");
-  return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
+  return treeRows(root, expanded, filter, (node) => inScope(node, scope));
 }
 
 export type RepoFileKind = "markdown" | "html" | "python" | "json" | "code";

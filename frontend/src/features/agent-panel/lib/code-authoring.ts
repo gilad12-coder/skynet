@@ -22,7 +22,12 @@ const SAMPLE_CASE_LIMIT = 5;
 // the metric model; the schema still requires a reflection model, which the
 // panel may not have picked yet when the code is written.
 const STATIC_CHECK_REFLECTION_MODEL = { name: "static-check" };
-const RUN_KEYS: ReadonlySet<ContractCheckKey> = new Set(["workspace.run_signature", "workspace.run"]);
+// Extra files are imported by the run code only, so their failures sit with it.
+const RUN_KEYS: ReadonlySet<ContractCheckKey> = new Set([
+  "workspace.run_signature",
+  "workspace.run",
+  "workspace.files",
+]);
 
 /** The dataset the user confirmed in the panel, as far as authoring needs it. */
 export interface AuthoringDataset {
@@ -93,6 +98,7 @@ export function panelContractSpec(
   context: UnifiedAuthoringContext,
   runCode: string,
   metricCode: string,
+  files: Readonly<Record<string, string>> = {},
 ): UnifiedRunRequest {
   // Every sample case is built by ``sampleCases`` as an ``{input, expected}`` case.
   const cases = (context.sample_cases ?? []) as unknown as UnifiedCase[];
@@ -107,7 +113,11 @@ export function panelContractSpec(
     },
     optimizer: { choice: context.optimizer, budget: { max_scorer_runs: 200 } },
     models: { reflection_model: STATIC_CHECK_REFLECTION_MODEL, metric_model: null },
-    workspace: { run_code: runCode, metric_code: metricCode },
+    workspace: {
+      run_code: runCode,
+      metric_code: metricCode,
+      ...(Object.keys(files).length > 0 && { files: { ...files } }),
+    },
   };
 }
 
@@ -136,67 +146,6 @@ export function contractValidations(
   return { run: editorResult(run), metric: editorResult(metric) };
 }
 
-/** One time a failed check went back to the coding agent for a fix. */
-export interface AuthoringFixAttempt {
-  /** 1-based, counted per conversation. */
-  attempt: number;
-  /** What the check flagged on the agent's code. */
-  failures: string[];
-  /** What the agent did about it; null while its fix turn is still running. */
-  fix: { reply: string; runChanged: boolean; metricChanged: boolean } | null;
-}
-
-/** A fix the check asked for, before it is paired with the agent's reply. */
-export interface FixRecord {
-  attempt: number;
-  failures: string[];
-  runBefore: string;
-  metricBefore: string;
-  /** How many agent messages existed when the fix was asked for; null until sent. */
-  from: number | null;
-}
-
-/**
- * Pair each fix the check asked for with what the agent did about it.
- *
- * Args:
- *   fixes: The fixes asked for, oldest first.
- *   messages: The coding agent's chat.
- *   streaming: Whether a coding turn is running right now.
- *   runCode: The run code now.
- *   metricCode: The metric now.
- *
- * Returns:
- *   One attempt per fix; its ``fix`` stays null until the fix turn finished.
- */
-export function describeFixes(
-  fixes: readonly FixRecord[],
-  messages: ReadonlyArray<{ role: string; content: string }>,
-  streaming: boolean,
-  runCode: string,
-  metricCode: string,
-): AuthoringFixAttempt[] {
-  return fixes.map((f, i) => {
-    const base = { attempt: f.attempt, failures: f.failures };
-    const next = fixes[i + 1];
-    if (f.from === null || (!next && streaming)) return { ...base, fix: null };
-    const until = next?.from ?? messages.length;
-    const replies = messages.slice(f.from, until).filter((m) => m.role === "assistant");
-    if (replies.length === 0) return { ...base, fix: null };
-    return {
-      ...base,
-      fix: {
-        reply: replies
-          .map((m) => m.content.trim())
-          .filter(Boolean)
-          .join("\n\n"),
-        runChanged: (next ? next.runBefore : runCode) !== f.runBefore,
-        metricChanged: (next ? next.metricBefore : metricCode) !== f.metricBefore,
-      },
-    };
-  });
-}
-
 /**
  * The change a repeated ``request_code_authoring`` call asks the coding agent for.
  *
@@ -220,6 +169,33 @@ export function followUpAuthoringGoal(
   if (!alreadyRan) return null;
   const goal = typeof args.goal === "string" ? args.goal.trim() : "";
   return goal || null;
+}
+
+// A workspace path besides run.py / metric.py, as a goal names it ("helpers.py", "lib/parse.py").
+const EXTRA_FILE_IN_GOAL =
+  /(?:^|[\s`'"(])((?:[A-Za-z0-9_][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:py|txt|md|json|ya?ml|csv|toml|ini|cfg))\b/g;
+
+/**
+ * The goal of a first ``request_code_authoring`` call that the seed alone
+ * cannot meet, to send once the seed lands.
+ *
+ * The seed drafts only run.py and metric.py from the wizard's context and
+ * never reads the call's goal, so a first request for an extra file (a
+ * helpers.py run.py imports) was dropped while the chat said it was done.
+ *
+ * Args:
+ *   args: The tool call's arguments.
+ *
+ * Returns:
+ *   The goal when it names a workspace file other than run.py and metric.py,
+ *   else null.
+ */
+export function seedFollowUpGoal(args: Readonly<Record<string, unknown>>): string | null {
+  const goal = typeof args.goal === "string" ? args.goal.trim() : "";
+  for (const match of goal.matchAll(EXTRA_FILE_IN_GOAL)) {
+    if (match[1] !== "run.py" && match[1] !== "metric.py") return goal;
+  }
+  return null;
 }
 
 /**
@@ -246,21 +222,23 @@ export function latestToolCallId(
   return null;
 }
 
-/** One edit the coding agent made to the run code or the metric. */
+/** One edit the coding agent made to a workspace file. */
 export interface AuthoringEdit {
-  file: "run" | "metric";
+  /** The file's workspace path: run.py, metric.py or an extra file. */
+  file: string;
   before: string;
   after: string;
   ts: number;
 }
 
 /**
- * Turn the run code's and the metric's version histories into the edits that
- * made them, oldest first, as the transcript lists them.
+ * Turn each file's version history into the edits that made them, oldest
+ * first, as the transcript lists them.
  *
  * Args:
  *   runVersions: Each run code the agent landed, oldest first.
  *   metricVersions: Each metric the agent landed, oldest first.
+ *   fileVersions: Each extra file's versions the agent landed, by path.
  *
  * Returns:
  *   One edit per version that changed its code; the first version of a file
@@ -269,15 +247,18 @@ export interface AuthoringEdit {
 export function authoringEdits(
   runVersions: ReadonlyArray<{ code: string; ts: number }>,
   metricVersions: ReadonlyArray<{ code: string; ts: number }>,
+  fileVersions: Readonly<Record<string, ReadonlyArray<{ code: string; ts: number }>>> = {},
 ): AuthoringEdit[] {
-  const edits = (file: AuthoringEdit["file"], versions: typeof runVersions) =>
+  const edits = (file: string, versions: typeof runVersions) =>
     versions.flatMap((v, i) => {
       const before = versions[i - 1]?.code ?? "";
       return v.code === before ? [] : [{ file, before, after: v.code, ts: v.ts }];
     });
-  return [...edits("run", runVersions), ...edits("metric", metricVersions)].sort(
-    (a, b) => a.ts - b.ts,
-  );
+  return [
+    ...edits("run.py", runVersions),
+    ...edits("metric.py", metricVersions),
+    ...Object.entries(fileVersions).flatMap(([path, versions]) => edits(path, versions)),
+  ].sort((a, b) => a.ts - b.ts);
 }
 
 /**
@@ -310,21 +291,90 @@ export function authoringThinking(agent: {
   };
 }
 
+/** One file the coding agent deleted from the workspace. */
+export interface AuthoringDelete {
+  file: string;
+  ts: number;
+}
+
+/** One ``verify_code`` call: running, then passed or failed with each failing file's findings. */
+export interface AuthoringCheck {
+  id: string;
+  ts: number;
+  state: "running" | "passed" | "failed";
+  /** The files that failed and what the check found in each; an empty path is the whole workspace. */
+  failures: Array<{ path: string; errors: string[] }>;
+}
+
+type ToolCallLike = {
+  id: string;
+  tool: string;
+  status: string;
+  startedAt: number;
+  path?: string;
+  verification?: { ok: boolean; files: ReadonlyArray<{ path: string; ok: boolean; errors: string[] }> };
+};
+
+/**
+ * Read the coding agent's ``delete_file`` and ``verify_code`` calls as rows.
+ *
+ * Args:
+ *   messages: The coding agent's chat.
+ *   since: When this tool call started; earlier calls' rows are left out.
+ *
+ * Returns:
+ *   The files deleted and each check, oldest first.
+ */
+export function authoringToolRows(
+  messages: ReadonlyArray<{ toolCalls?: readonly ToolCallLike[] }>,
+  since: number,
+): { deletes: AuthoringDelete[]; checks: AuthoringCheck[] } {
+  const deletes: AuthoringDelete[] = [];
+  const checks: AuthoringCheck[] = [];
+  for (const call of messages.flatMap((m) => m.toolCalls ?? [])) {
+    if (call.startedAt < since) continue;
+    if (call.tool === "delete_file" && call.status === "done" && call.path) {
+      deletes.push({ file: call.path, ts: call.startedAt });
+    } else if (call.tool === "verify_code") {
+      const result = call.verification;
+      // A call that errored without a result is a failed check with nothing to list.
+      const state =
+        call.status === "running" || (!result && call.status !== "error")
+          ? "running"
+          : result?.ok
+            ? "passed"
+            : "failed";
+      checks.push({
+        id: call.id,
+        ts: call.startedAt,
+        state,
+        failures:
+          state === "failed"
+            ? (result?.files ?? []).filter((f) => !f.ok).map((f) => ({ path: f.path, errors: [...f.errors] }))
+            : [],
+      });
+    }
+  }
+  return { deletes, checks };
+}
+
 /**
  * A finished coding-tool run, kept on its tool call so a reopened conversation
- * shows the same rows (edits with their diffs, fixes, the check's verdict)
- * and the generalist reads how the run ended instead of its "now writing"
- * hand-off result.
+ * shows the same rows (edits with their diffs, deletes, each check) and the
+ * generalist reads how the run ended instead of its "now writing" hand-off
+ * result.
  */
 export interface AuthoringOutcome {
   /** How the run ended: finished, failed, or stopped by the user. */
   status: "done" | "error" | "stopped";
-  /** The validity check's verdict on the code the run left. */
+  /** The last ``verify_code`` verdict of the run. */
   check: "passed" | "failed" | "none";
-  /** What the check flagged, when it failed. */
+  /** What the last check flagged, when it failed. */
   errors: string[];
   edits: AuthoringEdit[];
-  fixes: AuthoringFixAttempt[];
+  deletes: AuthoringDelete[];
+  /** Every settled check, oldest first. Missing on outcomes stored before verify_code. */
+  checks: AuthoringCheck[];
   thinking: { reasoning: string; startedAt: number | null; endedAt: number | null } | null;
   /** The run's error message, when it failed. */
   error: string | null;
@@ -334,6 +384,9 @@ export interface AuthoringOutcome {
 
 // Kept inside the tool call's JSON, so a long reasoning trace is clipped.
 const OUTCOME_REASONING_MAX_CHARS = 20_000;
+
+const failureLines = (check: AuthoringCheck): string[] =>
+  check.failures.flatMap((f) => f.errors.map((e) => (f.path ? `${f.path}: ${e}` : e)));
 
 /**
  * Snapshot a settled coding run as the outcome its tool call keeps.
@@ -350,12 +403,10 @@ export function authoringOutcome(
   agent: {
     status: string;
     error: string | null;
-    checkStatus: string;
-    signatureValidation: { errors: string[] } | null;
-    metricValidation: { errors: string[] } | null;
     signatureVersions: ReadonlyArray<{ code: string; ts: number }>;
     metricVersions: ReadonlyArray<{ code: string; ts: number }>;
-    fixAttempts: readonly AuthoringFixAttempt[];
+    fileVersions?: Readonly<Record<string, ReadonlyArray<{ code: string; ts: number }>>>;
+    messages: ReadonlyArray<{ toolCalls?: readonly ToolCallLike[] }>;
     reasoning: string;
     reasoningStartedAt: number | null;
     reasoningEndedAt: number | null;
@@ -363,17 +414,19 @@ export function authoringOutcome(
   since: number,
   now: number,
 ): AuthoringOutcome {
-  const check =
-    agent.checkStatus === "passed" ? "passed" : agent.checkStatus === "failed" ? "failed" : "none";
+  const rows = authoringToolRows(agent.messages, since);
+  // A check the run was stopped in the middle of never reached a verdict.
+  const checks = rows.checks.filter((c) => c.state !== "running");
+  const last = checks.at(-1);
   return {
     status: agent.status === "error" ? "error" : agent.status === "done" ? "done" : "stopped",
-    check,
-    errors:
-      check === "failed"
-        ? [...(agent.signatureValidation?.errors ?? []), ...(agent.metricValidation?.errors ?? [])]
-        : [],
-    edits: authoringEdits(agent.signatureVersions, agent.metricVersions).filter((e) => e.ts >= since),
-    fixes: agent.fixAttempts.filter((f) => f.fix !== null),
+    check: last?.state === "passed" ? "passed" : last?.state === "failed" ? "failed" : "none",
+    errors: last?.state === "failed" ? failureLines(last) : [],
+    edits: authoringEdits(agent.signatureVersions, agent.metricVersions, agent.fileVersions).filter(
+      (e) => e.ts >= since,
+    ),
+    deletes: rows.deletes,
+    checks,
     thinking: agent.reasoning
       ? {
           reasoning: agent.reasoning.slice(0, OUTCOME_REASONING_MAX_CHARS),
@@ -389,6 +442,12 @@ export function authoringOutcome(
 const strings = (raw: unknown): string[] =>
   Array.isArray(raw) ? raw.filter((s): s is string => typeof s === "string") : [];
 const numOrNull = (raw: unknown): number | null => (typeof raw === "number" ? raw : null);
+const records = (raw: unknown): Array<Record<string, unknown>> =>
+  (Array.isArray(raw) ? raw : []).filter((r): r is Record<string, unknown> => !!r && typeof r === "object");
+// Outcomes stored before extra files named the two files "run" and "metric".
+const LEGACY_FILES: Readonly<Record<string, string>> = { run: "run.py", metric: "metric.py" };
+const filePath = (raw: unknown): string | null =>
+  typeof raw === "string" && raw ? (LEGACY_FILES[raw] ?? raw) : null;
 
 /**
  * Read an outcome back from a tool call's payload, which is stored JSON.
@@ -403,24 +462,26 @@ export function parseAuthoringOutcome(raw: unknown): AuthoringOutcome | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   if (typeof o.endedAt !== "number") return null;
-  const edits = (Array.isArray(o.edits) ? o.edits : []).flatMap((e: unknown): AuthoringEdit[] => {
-    const r = (e ?? {}) as Record<string, unknown>;
-    if ((r.file !== "run" && r.file !== "metric") || typeof r.after !== "string") return [];
-    return [{ file: r.file, before: typeof r.before === "string" ? r.before : "", after: r.after, ts: numOrNull(r.ts) ?? 0 }];
+  const edits = records(o.edits).flatMap((r): AuthoringEdit[] => {
+    const file = filePath(r.file);
+    if (!file || typeof r.after !== "string") return [];
+    return [{ file, before: typeof r.before === "string" ? r.before : "", after: r.after, ts: numOrNull(r.ts) ?? 0 }];
   });
-  const fixes = (Array.isArray(o.fixes) ? o.fixes : []).flatMap((f: unknown): AuthoringFixAttempt[] => {
-    const r = (f ?? {}) as Record<string, unknown>;
-    const fix = (r.fix ?? null) as Record<string, unknown> | null;
-    if (typeof r.attempt !== "number" || !fix) return [];
+  const deletes = records(o.deletes).flatMap((r): AuthoringDelete[] => {
+    const file = filePath(r.file);
+    return file ? [{ file, ts: numOrNull(r.ts) ?? 0 }] : [];
+  });
+  const checks = records(o.checks).flatMap((r): AuthoringCheck[] => {
+    if (r.state !== "passed" && r.state !== "failed") return [];
     return [
       {
-        attempt: r.attempt,
-        failures: strings(r.failures),
-        fix: {
-          reply: typeof fix.reply === "string" ? fix.reply : "",
-          runChanged: fix.runChanged === true,
-          metricChanged: fix.metricChanged === true,
-        },
+        id: typeof r.id === "string" ? r.id : "",
+        ts: numOrNull(r.ts) ?? 0,
+        state: r.state,
+        failures: records(r.failures).map((f) => ({
+          path: typeof f.path === "string" ? f.path : "",
+          errors: strings(f.errors),
+        })),
       },
     ];
   });
@@ -430,7 +491,8 @@ export function parseAuthoringOutcome(raw: unknown): AuthoringOutcome | null {
     check: o.check === "passed" || o.check === "failed" ? o.check : "none",
     errors: strings(o.errors),
     edits,
-    fixes,
+    deletes,
+    checks,
     thinking:
       t && typeof t.reasoning === "string" && t.reasoning
         ? { reasoning: t.reasoning, startedAt: numOrNull(t.startedAt), endedAt: numOrNull(t.endedAt) }
@@ -441,6 +503,13 @@ export function parseAuthoringOutcome(raw: unknown): AuthoringOutcome | null {
 }
 
 const HISTORY_ERROR_MAX_CHARS = 160;
+
+/** The files a run edited, run code first, then the metric, then extra files as first edited. */
+function editedFiles(edits: readonly AuthoringEdit[]): string[] {
+  const rank = (file: string) => (file === "run.py" ? 0 : file === "metric.py" ? 1 : 2);
+  const files = [...new Set(edits.map((e) => e.file))];
+  return files.sort((a, b) => rank(a) - rank(b));
+}
 
 /**
  * The tool result a finished coding call shows the generalist on later turns.
@@ -453,19 +522,20 @@ const HISTORY_ERROR_MAX_CHARS = 160;
  *   outcome: The call's recorded outcome.
  *
  * Returns:
- *   JSON with the files written (with line counts), the check and its errors.
+ *   JSON with the files written (with line counts), the files deleted, the
+ *   last check and its errors.
  */
 export function outcomeHistoryResult(outcome: AuthoringOutcome): string {
-  const files = (["run", "metric"] as const).flatMap((file) => {
+  const files = editedFiles(outcome.edits).map((file) => {
     const edits = outcome.edits.filter((e) => e.file === file);
-    if (edits.length === 0) return [];
     const { added, removed } = diffStats(lineDiff(edits[0]?.before ?? "", edits.at(-1)?.after ?? ""));
-    return [{ file: file === "run" ? "run.py" : "metric.py", added, removed }];
+    return { file, added, removed };
   });
   return JSON.stringify({
     outcome: {
       status: outcome.status,
       files,
+      ...(outcome.deletes.length > 0 && { deleted: outcome.deletes.map((d) => d.file) }),
       check: outcome.check,
       errors: outcome.errors.slice(0, 2).map((e) => e.slice(0, HISTORY_ERROR_MAX_CHARS)),
     },
@@ -473,24 +543,17 @@ export function outcomeHistoryResult(outcome: AuthoringOutcome): string {
 }
 
 /**
- * Whether a coding run is still going: writing, checking, or waiting on a fix.
+ * Whether a coding run is still going. The agent checks its own code with
+ * ``verify_code`` inside its turn, so the run is over once the turn is.
  *
  * Args:
- *   agent: The coding agent's status, its check, and the fixes it asked for.
+ *   agent: The coding agent's status.
  *
  * Returns:
- *   True until the run, its check and every fix it asked for settled.
+ *   True while the coding turn streams.
  */
-export function authoringBusy(agent: {
-  status: string;
-  checkStatus: string;
-  fixAttempts: readonly AuthoringFixAttempt[];
-}): boolean {
-  return (
-    agent.status === "streaming" ||
-    agent.checkStatus === "checking" ||
-    agent.fixAttempts.some((f) => f.fix === null)
-  );
+export function authoringBusy(agent: { status: string }): boolean {
+  return agent.status === "streaming";
 }
 
 /**
@@ -527,11 +590,10 @@ export function withAuthoringState<
 export interface AuthoringView {
   thinking: AgentThinking | null;
   edits: AuthoringEdit[];
+  deletes: AuthoringDelete[];
+  checks: AuthoringCheck[];
   /** Files whose code is reaching the editors right now. */
-  writing: Array<AuthoringEdit["file"]>;
-  fixes: AuthoringFixAttempt[];
-  check: "idle" | "checking" | "passed" | "failed";
-  errors: string[];
+  writing: string[];
 }
 
 /**
@@ -539,7 +601,7 @@ export interface AuthoringView {
  *
  * Args:
  *   agent: The live coding agent.
- *   since: When this tool call started; earlier calls' edits are left out.
+ *   since: When this tool call started; earlier calls' rows are left out.
  *
  * Returns:
  *   The view to render.
@@ -551,31 +613,34 @@ export function liveAuthoringView(
     metricStatus: string;
     signatureFlowing: boolean;
     metricFlowing: boolean;
+    writingFiles: readonly string[];
     reasoning: string;
     reasoningStartedAt: number | null;
     reasoningEndedAt: number | null;
     status: string;
     signatureVersions: ReadonlyArray<{ code: string; ts: number }>;
     metricVersions: ReadonlyArray<{ code: string; ts: number }>;
-    fixAttempts: AuthoringFixAttempt[];
-    checkStatus: AuthoringView["check"];
-    signatureValidation: { errors: string[] } | null;
-    metricValidation: { errors: string[] } | null;
+    fileVersions: Readonly<Record<string, ReadonlyArray<{ code: string; ts: number }>>>;
+    messages: ReadonlyArray<{ toolCalls?: readonly ToolCallLike[] }>;
   },
   since = 0,
 ): AuthoringView {
   // A lane is "writing" from the run's start; its row waits on its first chunk.
+  // An extra file is only listed once its first chunk arrived.
   const writing = [
-    !agent.isWorkflow && agent.signatureStatus === "writing" && agent.signatureFlowing ? "run" : null,
-    agent.metricStatus === "writing" && agent.metricFlowing ? "metric" : null,
-  ].filter((file): file is AuthoringEdit["file"] => file !== null);
+    !agent.isWorkflow && agent.signatureStatus === "writing" && agent.signatureFlowing ? "run.py" : null,
+    agent.metricStatus === "writing" && agent.metricFlowing ? "metric.py" : null,
+    ...(agent.isWorkflow ? [] : agent.writingFiles),
+  ].filter((file): file is string => file !== null);
+  const rows = agent.isWorkflow ? { deletes: [], checks: [] } : authoringToolRows(agent.messages, since);
   return {
     thinking: authoringThinking(agent),
-    edits: authoringEdits(agent.signatureVersions, agent.metricVersions).filter((e) => e.ts >= since),
+    edits: authoringEdits(agent.signatureVersions, agent.metricVersions, agent.fileVersions).filter(
+      (e) => e.ts >= since,
+    ),
+    deletes: rows.deletes,
+    checks: rows.checks,
     writing,
-    fixes: agent.isWorkflow ? [] : agent.fixAttempts,
-    check: agent.isWorkflow ? "idle" : agent.checkStatus,
-    errors: [...(agent.signatureValidation?.errors ?? []), ...(agent.metricValidation?.errors ?? [])],
   };
 }
 
@@ -589,17 +654,29 @@ export function liveAuthoringView(
  *   The view to render; identical to the live one the run ended with.
  */
 export function outcomeAuthoringView(outcome: AuthoringOutcome): AuthoringView {
+  // An outcome stored before verify_code keeps only the last verdict; it shows
+  // as one check after the edits.
+  const checks =
+    outcome.checks.length === 0 && outcome.check !== "none"
+      ? [
+          {
+            id: "check",
+            ts: outcome.endedAt,
+            state: outcome.check,
+            failures: outcome.errors.length > 0 ? [{ path: "", errors: outcome.errors }] : [],
+          },
+        ]
+      : outcome.checks;
   return {
     thinking: outcome.thinking ? { ...outcome.thinking, streaming: false } : null,
     edits: outcome.edits,
+    deletes: outcome.deletes,
+    checks,
     writing: [],
-    fixes: outcome.fixes,
-    check: outcome.check === "none" ? "idle" : outcome.check,
-    errors: outcome.errors,
   };
 }
 
-/** The closing line's message and the files it names, in run-then-metric order. */
+/** The closing line's message and the files it names, run code first. */
 export interface OutcomeLine {
   key:
     | "agent.coding_tool.outcome.passed"
@@ -607,25 +684,28 @@ export interface OutcomeLine {
     | "agent.coding_tool.outcome.unchecked"
     | "agent.coding_tool.outcome.stopped"
     | "agent.coding_tool.outcome.none";
-  files: Array<AuthoringEdit["file"]>;
+  files: string[];
 }
 
 /**
  * Pick the closing line a finished run gets after its turn's text: what it
- * wrote and how the check ended. The generalist's reply is written before the
- * run starts, so it cannot say this.
+ * wrote and how its last check ended. The generalist's reply is written
+ * before the run starts, so it cannot say this.
  *
  * Args:
  *   outcome: The run's stored outcome.
  *
  * Returns:
- *   The line, or null for a run that failed (its error row says why).
+ *   The line, or null for a run that failed (its error row says why) or one
+ *   that only deleted files (its rows say which).
  */
 export function outcomeLine(outcome: AuthoringOutcome): OutcomeLine | null {
   if (outcome.status === "error") return null;
   if (outcome.status === "stopped") return { key: "agent.coding_tool.outcome.stopped", files: [] };
-  const files = (["run", "metric"] as const).filter((file) => outcome.edits.some((e) => e.file === file));
-  if (files.length === 0) return { key: "agent.coding_tool.outcome.none", files };
+  const files = editedFiles(outcome.edits);
+  if (files.length === 0) {
+    return outcome.deletes.length > 0 ? null : { key: "agent.coding_tool.outcome.none", files };
+  }
   const key =
     outcome.check === "passed"
       ? "agent.coding_tool.outcome.passed"

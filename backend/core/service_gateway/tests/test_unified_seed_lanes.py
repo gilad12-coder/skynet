@@ -32,6 +32,16 @@ def _fake_streamify(*_args: Any, **_kwargs: Any) -> Any:
     return program
 
 
+@pytest.fixture(autouse=True)
+def _no_workspace_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip the closing ``verify_code`` check, which shells out to ruff.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(code, "_unified_verifier", lambda _u: lambda _r, _m, _f: [])
+
+
 @pytest.mark.asyncio
 async def test_each_lane_emits_artifact_done_when_it_finishes(monkeypatch: pytest.MonkeyPatch) -> None:
     """The fast run lane reports done before the slow metric lane does."""

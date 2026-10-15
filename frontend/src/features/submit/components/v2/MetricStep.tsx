@@ -20,18 +20,19 @@ import { RunOverview } from "./RunOverview";
 import { WizardScreen } from "./WizardScreen";
 
 const SAMPLE_CASE_LIMIT = 5;
-const NOT_WRITING = { run: false, metric: false };
+const NOT_WRITING = { run: false, metric: false, files: [] };
 
 /**
  * Step 4, three screens. First the code: the docked agent's coding tool
- * writes the run code and the metric into these editors, and the user can
- * edit either here or in the tool's card. Then the sandbox check, which runs
- * both on a few samples. Then the overview, which holds Run, so the run
+ * writes run.py, metric.py and any helper files into the workspace, and the
+ * user can open and edit each one. Then the sandbox check, which runs the
+ * code on a few samples. Then the overview, which holds Run, so the run
  * button never covers the editors.
  */
 export function MetricStep({ page, onBack }: { page: number; onBack: () => void }) {
   const ctx = useWizardV2();
-  const { state, patchWorkspace, guided, optimizerCatalog, inputsInferring } = ctx;
+  const { state, patchWorkspace, setWorkspaceFile, guided, optimizerCatalog, inputsInferring } =
+    ctx;
   const { task, inputs, optimizer, workspace } = state;
   const kind = task.artifactKind;
   const repo = Boolean(task.repo);
@@ -91,6 +92,10 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     (code: string) => patchWorkspace({ metricCode: code }),
     [patchWorkspace],
   );
+  const deleteFile = React.useCallback(
+    (path: string) => setWorkspaceFile(path, null),
+    [setWorkspaceFile],
+  );
 
   // The docked agent's coding tool writes under this context, into these
   // editors' code. Inference re-roles the columns when it answers, and the
@@ -111,13 +116,25 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     registerSink((slot, code) => (slot === "run" ? setRunCode(code) : setMetricCode(code)));
     return () => registerSink(null);
   }, [registerSink, setRunCode, setMetricCode]);
+  const registerFileSink = wizardCtx?.setFileSink;
+  React.useEffect(() => {
+    if (!registerFileSink) return;
+    registerFileSink(setWorkspaceFile);
+    return () => registerFileSink(null);
+  }, [registerFileSink, setWorkspaceFile]);
+  // The coding agent reads the extra files from here, to send them with each turn.
+  const shareFiles = wizardCtx?.setWorkspaceFiles;
+  React.useEffect(() => {
+    shareFiles?.(workspace.files);
+  }, [shareFiles, workspace.files]);
+  React.useEffect(() => () => shareFiles?.({}), [shareFiles]);
 
   const writing = wizardCtx?.codeWriting ?? NOT_WRITING;
   // The wizard agent sits beside the editors; its coding tool writes the code.
   const agentEnabled = isGeneralistAgentEnabled();
   const agentShown = agentEnabled && state.step === "metric" && page === 0;
   const { setAgentWriting } = ctx;
-  const agentStreaming = writing.run || writing.metric;
+  const agentStreaming = writing.run || writing.metric || writing.files.length > 0;
   React.useEffect(() => {
     setAgentWriting(agentStreaming);
     return () => setAgentWriting(false);
@@ -145,10 +162,11 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
             <CodeWorkspace
               runCode={workspace.runCode}
               metricCode={workspace.metricCode}
+              files={workspace.files}
               runEntry={catalog?.run_entry ?? null}
               metricSignature={metricSignature}
-              onRunCodeChange={setRunCode}
-              onMetricCodeChange={setMetricCode}
+              onFileChange={setWorkspaceFile}
+              onFileDelete={deleteFile}
               writing={writing}
               guided={guided}
               checkResult={consoleResult}

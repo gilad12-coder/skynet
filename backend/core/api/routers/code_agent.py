@@ -26,6 +26,7 @@ from ...models import (
     TaskInterviewRequest,
     UnifiedAuthoringContext,
 )
+from ...models.unified import workspace_files_error
 from ...service_gateway.agents.code import run_code_agent
 from ...service_gateway.agents.inputs_inference import infer_inputs
 from ...service_gateway.agents.intake_interview import MAX_REQUEST_TURNS, intake_turn_stream
@@ -283,6 +284,15 @@ class CodeAgentRequest(BaseModel):
             "``metric_*`` events); ``dataset_columns`` may then be empty."
         ),
     )
+    prior_files: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "The wizard workspace's files besides run.py and metric.py, "
+            "relative path → text (``unified`` only). The agent reads and "
+            "edits them with ``write_file`` / ``delete_file``; ``file_replace`` "
+            "/ ``file_delete`` events report its changes."
+        ),
+    )
     steer_key: str | None = Field(
         default=None,
         max_length=STEER_KEY_MAX_CHARS,
@@ -295,12 +305,18 @@ class CodeAgentRequest(BaseModel):
 
     @model_validator(mode="after")
     def _columns_or_unified(self) -> CodeAgentRequest:
-        """Reject an empty dataset unless the request is unified.
+        """Reject an empty dataset unless the request is unified, and unsafe workspace files.
 
         Returns:
             The validated request.
+
+        Raises:
+            ValueError: When ``prior_files`` has an unsafe path or is past the limits.
         """
         _require_columns_or_unified(self.dataset_columns, self.unified)
+        error = workspace_files_error(self.prior_files)
+        if error is not None:
+            raise ValueError(error)
         return self
 
 
@@ -395,8 +411,11 @@ class RequestCodeAuthoringRequest(BaseModel):
         default="",
         max_length=400,
         description=(
-            "Optional plain-language goal for the Signature/Metric (empty seeds "
-            "both from the dataset). Echoed back so the card can show it."
+            "What the user asked the code to do, in their words, keeping every file "
+            "name and structure they named (e.g. 'put the parsing in a helper in "
+            "helpers.py that run.py imports'); the coding agent receives it verbatim. "
+            "Empty seeds the run code and metric from the task. Echoed back so the "
+            "card can show it."
         ),
     )
 
@@ -571,6 +590,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             unified=req.unified.model_dump() if req.unified else None,
             steer_owner=current_user.username,
             steer_key=req.steer_key,
+            prior_files=req.prior_files,
         )
         metered = stream_with_llm_metering(
             source,

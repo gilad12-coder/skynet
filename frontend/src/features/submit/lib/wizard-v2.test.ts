@@ -19,6 +19,7 @@ const {
   QUESTION_INPUT_FIELD,
   WIZARD_V2_STEPS,
   contractSnapshot,
+  deleteWorkspaceFile,
   emptyRepoDraft,
   initialWizardV2State,
   isSingleAnswerTask,
@@ -31,6 +32,10 @@ const {
   withContractBudget,
   withLevel,
   withQuestionInputs,
+  workspaceFileText,
+  workspacePathIssue,
+  workspacePaths,
+  writeWorkspaceFile,
 } = await import("./wizard-v2.ts");
 const { stepPages } = await import("./wizard-pages.ts");
 
@@ -316,6 +321,58 @@ test("taskInterviewPatch keeps a rationale only from a turn that names the artif
     new Set(["objective", "artifactKind"]),
   );
   assert.deepEqual(handPicked, {});
+});
+
+test("run.py and metric.py write through to the run and metric code; others are extra files", () => {
+  const ws = initialWizardV2State().workspace;
+  assert.deepEqual(writeWorkspaceFile(ws, "run.py", "r"), { runCode: "r" });
+  assert.deepEqual(writeWorkspaceFile(ws, "metric.py", "m"), { metricCode: "m" });
+  const withHelper = { ...ws, ...writeWorkspaceFile(ws, "lib/helpers.py", "X = 1") };
+  assert.deepEqual(withHelper.files, { "lib/helpers.py": "X = 1" });
+  assert.deepEqual(workspacePaths(withHelper), ["run.py", "metric.py", "lib/helpers.py"]);
+  assert.equal(workspaceFileText(withHelper, "lib/helpers.py"), "X = 1");
+  assert.equal(workspaceFileText(withHelper, "missing.py"), null);
+});
+
+test("only extra files can be deleted", () => {
+  const ws = { ...initialWizardV2State().workspace, files: { "helpers.py": "X = 1" } };
+  assert.equal(deleteWorkspaceFile(ws, "run.py"), null);
+  assert.equal(deleteWorkspaceFile(ws, "metric.py"), null);
+  assert.equal(deleteWorkspaceFile(ws, "nope.py"), null);
+  assert.deepEqual(deleteWorkspaceFile(ws, "helpers.py"), { files: {} });
+});
+
+test("a new file's path must be relative, clean, a known suffix and free", () => {
+  const files = { "helpers.py": "", "lib/a.py": "" };
+  assert.equal(workspacePathIssue("utils.py", files), null);
+  assert.equal(workspacePathIssue("data/notes.md", files), null);
+  assert.equal(workspacePathIssue("", files), "submit.v2.metric.files.error.length");
+  assert.equal(workspacePathIssue("/etc/x.py", files), "submit.v2.metric.files.error.relative");
+  assert.equal(workspacePathIssue("C:x.py", files), "submit.v2.metric.files.error.relative");
+  assert.equal(workspacePathIssue("../x.py", files), "submit.v2.metric.files.error.chars");
+  assert.equal(workspacePathIssue("a/./x.py", files), "submit.v2.metric.files.error.chars");
+  assert.equal(workspacePathIssue(".env.py", files), "submit.v2.metric.files.error.chars");
+  assert.equal(workspacePathIssue("a/b/c/d/x.py", files), "submit.v2.metric.files.error.depth");
+  assert.equal(workspacePathIssue("run.py", files), "submit.v2.metric.files.error.reserved");
+  assert.equal(workspacePathIssue("x.exe", files), "submit.v2.metric.files.error.suffix");
+  assert.equal(workspacePathIssue("helpers.py", files), "submit.v2.metric.files.error.exists");
+  assert.equal(workspacePathIssue("lib", files), "submit.v2.metric.files.error.suffix");
+  assert.equal(workspacePathIssue("lib/a.py/b.py", files), "submit.v2.metric.files.error.exists");
+  const full = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`f${i}.py`, ""]));
+  assert.equal(workspacePathIssue("one_more.py", full), "submit.v2.metric.files.error.count");
+});
+
+test("extra files make the check stale, and a workspace without them keeps its old snapshot", () => {
+  const base = checkedState();
+  const snapshot = contractSnapshot(base);
+  assert.equal(
+    contractSnapshot({ ...base, workspace: { ...base.workspace, files: {} } }),
+    snapshot,
+  );
+  assert.notEqual(
+    contractSnapshot({ ...base, workspace: { ...base.workspace, files: { "h.py": "X = 1" } } }),
+    snapshot,
+  );
 });
 
 function textTask(objective = "Solve 2x + 3 = 7.", background = "Show the steps.") {

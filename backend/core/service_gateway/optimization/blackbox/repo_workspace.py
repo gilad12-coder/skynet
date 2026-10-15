@@ -29,6 +29,10 @@ PREPARED_DIR = f"{REPO_DIR}/prepared"
 PATCH_FILE = f"{REPO_DIR}/version.patch"
 _SETUP_TIMEOUT_SECONDS = 1_800.0
 _GIT_IDENTITY = "-c user.name=skynet -c user.email=skynet@localhost -c commit.gpgsign=false"
+# A commit may start ``git maintenance`` in the background (detached since
+# git 2.47), whose lock files come and go while ``cp -a`` walks ``.git`` and
+# fail the copy with "cannot stat .git/objects/maintenance.lock".
+_GIT_NO_MAINTENANCE = "-c maintenance.auto=false -c gc.auto=0"
 _PROBE_TIMEOUT_SECONDS = 120.0
 _PROBE_ATTEMPTS = 5
 _PROBE_OK = "skynet-network-closed"
@@ -213,7 +217,7 @@ class RepoWorkspace:
         files = " ".join(shlex.quote(part) for part in parts)
         result = session.run(
             f"set -e; mkdir -p {BASE_DIR}; cat {files} | base64 -d | tar -xzf - -C {BASE_DIR}; rm -f {files};"
-            f" cd {BASE_DIR}; git init -q; git add -A -f; git {_GIT_IDENTITY} commit -q --allow-empty -m base;"
+            f" cd {BASE_DIR}; git init -q; git add -A -f; git {_GIT_IDENTITY} {_GIT_NO_MAINTENANCE} commit -q --allow-empty -m base;"
             f" cd - >/dev/null; rm -rf {WORK_DIR} {PREPARED_DIR}; cp -a {BASE_DIR} {WORK_DIR}",
             timeout_seconds=_SETUP_TIMEOUT_SECONDS,
         )

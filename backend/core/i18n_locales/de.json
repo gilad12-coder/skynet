@@ -65,6 +65,8 @@
     "winningCandidate": "Gewinnerkandidat"
   },
   "messages": {
+    "contract.file_invalid": "Die Datei {path} ist ungültig: {error}",
+    "contract.files_unsupported": "DSPy-Optimierer führen nur run.py und metric.py aus. Verschiebe den Code der zusätzlichen Dateien nach run.py oder wähle einen anderen Optimierer.",
     "contract.metric_error": "Die Metrik ist bei Beispiel {index} fehlgeschlagen: {error}",
     "contract.metric_missing": "Der Metrikcode definiert nicht die Funktion, die dieser Optimierer aufruft.",
     "contract.metric_model_missing": "Die Metrik ruft ein Modell auf, wählen Sie daher ein Metrikmodell.",

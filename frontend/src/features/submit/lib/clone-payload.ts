@@ -170,6 +170,8 @@ function cloneUnified(payload: ClonePayload): Omit<CloneSlices, "meta"> {
   const workspaceSlice: Partial<WorkspaceSlice> = {
     runCode: typeof workspace.run_code === "string" ? workspace.run_code : "",
     metricCode: typeof workspace.metric_code === "string" ? workspace.metric_code : "",
+    // A payload stored before extra files existed has none.
+    files: extraFiles(workspace.files),
     // A metric model that is the reflection model was inherited, not picked.
     metricModelMode: metricModel && metricModel.name !== reflectionName ? "explicit" : "inherit",
     metricModel: metricModel && metricModel.name !== reflectionName ? metricModel : null,
@@ -183,6 +185,17 @@ function cloneUnified(payload: ClonePayload): Omit<CloneSlices, "meta"> {
     optimizer: optimizerSlice,
     workspace: workspaceSlice,
   };
+}
+
+/** The extra workspace files a payload carries: string text at paths other than run.py / metric.py. */
+function extraFiles(value: unknown): Record<string, string> {
+  const files: Record<string, string> = {};
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return files;
+  for (const [path, text] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof text === "string" && path && path !== "run.py" && path !== "metric.py")
+      files[path] = text;
+  }
+  return files;
 }
 
 const strings = (value: unknown): string[] =>

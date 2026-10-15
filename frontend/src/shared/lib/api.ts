@@ -37,6 +37,7 @@ import type {
   ContractCheckRequest,
   ContractCheckResponse,
   DataMode,
+  FileVerification,
   InputsInferenceRequest,
   InputsInferenceResponse,
   OptimizerCatalogResponse,
@@ -3490,6 +3491,8 @@ export interface CodeAgentRequest {
   prior_metric?: string;
   prior_signature_validation?: string;
   prior_metric_validation?: string;
+  // Unified authoring: the workspace's files besides run.py and metric.py.
+  prior_files?: Record<string, string>;
   initial_signature?: string;
   initial_metric?: string;
   // Workflow graph currently on the canvas. Non-null switches both agent
@@ -3521,6 +3524,9 @@ export type CodeAgentToolName =
   | "edit_signature"
   | "edit_run"
   | "edit_metric"
+  | "write_file"
+  | "delete_file"
+  | "verify_code"
   | "edit_seed"
   | "edit_scorer"
   | "set_brief"
@@ -3536,6 +3542,9 @@ const CODE_AGENT_TOOLS = new Set<CodeAgentToolName>([
   "edit_signature",
   "edit_run",
   "edit_metric",
+  "write_file",
+  "delete_file",
+  "verify_code",
   "edit_seed",
   "edit_scorer",
   "set_brief",
@@ -3552,12 +3561,47 @@ interface CodeAgentToolStart {
   id: string;
   tool: CodeAgentToolName;
   reason: string;
+  /** The file a write_file / delete_file call is about. */
+  path?: string;
 }
 
 interface CodeAgentToolEnd {
   id: string;
   tool: CodeAgentToolName;
   status: string;
+  path?: string;
+}
+
+/** A `verify_code` call's result: one verdict per workspace file. */
+export interface CodeAgentVerification {
+  id: string;
+  ok: boolean;
+  files: FileVerification[];
+}
+
+function parseVerification(data: unknown): CodeAgentVerification | null {
+  if (!data || typeof data !== "object") return null;
+  const raw = data as Record<string, unknown>;
+  const lines = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+  const files = (Array.isArray(raw.files) ? raw.files : [])
+    .filter((f): f is Record<string, unknown> => !!f && typeof f === "object")
+    .map((f) => ({
+      path: String(f.path ?? ""),
+      ok: f.ok === true,
+      errors: lines(f.errors),
+      warnings: lines(f.warnings),
+    }))
+    .filter((f) => f.path);
+  return { id: String(raw.id ?? ""), ok: raw.ok === true, files };
+}
+
+function parseFiles(data: unknown): Record<string, string> | undefined {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  return Object.fromEntries(
+    Object.entries(data as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
 }
 
 export interface AgentQuestion {
@@ -3580,7 +3624,13 @@ export interface CodeAgentHandlers {
   // Unified chat: the code an edit_run ("signature") / edit_metric ("metric")
   // call writes, while the model writes it; `reset` starts a new draft. The
   // finished, checked code still arrives on the matching *Replace.
-  onCodeDraft?: (ev: { source: string; chunk: string; reset: boolean }) => void;
+  // A write_file draft has `source` "file" and names its `path`.
+  onCodeDraft?: (ev: { source: string; chunk: string; reset: boolean; path?: string }) => void;
+  // Unified chat: an extra workspace file written or deleted.
+  onFileReplace?: (path: string, code: string) => void;
+  onFileDelete?: (path: string) => void;
+  // Unified: a verify_code call's per-file result.
+  onVerifyResult?: (result: CodeAgentVerification) => void;
   // Full-graph snapshot after a seed draft or a successful graph tool op;
   // changedNodeId (null for seed/removals) drives the canvas pulse.
   onWorkflowReplace?: (workflow: WorkflowSpec, changedNodeId: string | null) => void;
@@ -3611,6 +3661,10 @@ export interface CodeAgentHandlers {
     signatureValid?: boolean;
     metricValid?: boolean;
     validationError?: string | null;
+    /** Unified paths: the workspace's extra files after the turn. */
+    files?: Record<string, string>;
+    /** Unified paths: the turn's last verify_code result, or null when nothing was checked. */
+    verification?: CodeAgentVerification | null;
   }) => void;
   /** `code` is the server's error code when the request was refused (e.g. a quota). */
   onError: (message: string, code?: string) => void;
@@ -3652,7 +3706,16 @@ export async function streamCodeAgent(
         source: String(data.source ?? ""),
         chunk: String(data.chunk ?? ""),
         reset: Boolean(data.reset),
+        ...(typeof data.path === "string" && data.path && { path: data.path }),
       });
+    } else if (event === "file_replace") {
+      if (typeof data.path === "string" && data.path)
+        handlers.onFileReplace?.(data.path, String(data.code ?? ""));
+    } else if (event === "file_delete") {
+      if (typeof data.path === "string" && data.path) handlers.onFileDelete?.(data.path);
+    } else if (event === "verify_result") {
+      const result = parseVerification(data);
+      if (result) handlers.onVerifyResult?.(result);
     } else if (event === "signature_replace") {
       handlers.onSignatureReplace?.(String(data.code ?? ""));
     } else if (event === "metric_replace") {
@@ -3671,6 +3734,7 @@ export async function streamCodeAgent(
           id: String(data.id ?? ""),
           tool,
           reason: String(data.reason ?? ""),
+          ...(typeof data.path === "string" && data.path && { path: data.path }),
         });
       }
     } else if (event === "tool_end") {
@@ -3680,6 +3744,7 @@ export async function streamCodeAgent(
           id: String(data.id ?? ""),
           tool,
           status: String(data.status ?? "ok"),
+          ...(typeof data.path === "string" && data.path && { path: data.path }),
         });
       }
     } else if (event === "ask") {
@@ -3719,6 +3784,8 @@ export async function streamCodeAgent(
         signatureValid: data.signature_valid !== false,
         metricValid: data.metric_valid !== false,
         validationError: typeof data.validation_error === "string" ? data.validation_error : null,
+        ...("files" in data && { files: parseFiles(data.files) ?? {} }),
+        ...("verification" in data && { verification: parseVerification(data.verification) }),
       });
     } else if (event === "error") {
       handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.12")));

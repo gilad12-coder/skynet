@@ -38,6 +38,7 @@ import {
   followUpAuthoringGoal,
   latestToolCallId,
   parseAuthoringOutcome,
+  seedFollowUpGoal,
   withAuthoringState,
 } from "../lib/code-authoring";
 import { getConversation } from "../lib/conversation-api";
@@ -277,6 +278,8 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const [codeFollowUp, setCodeFollowUp] = React.useState<{ id: string; goal: string } | null>(
     null,
   );
+  // A first request's goal the seed cannot meet, sent once the seed lands.
+  const [afterSeed, setAfterSeed] = React.useState<string | null>(null);
   const handleToolStart = React.useCallback((ev: ToolStartPayload, ctx: SessionEventContext) => {
     // The code agent is a panel-scoped singleton tied to the visible chat; a
     // background chat requesting authoring must not hijack it mid-use.
@@ -286,6 +289,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       setCodeArmed(true);
       const goal = followUpAuthoringGoal(ev.arguments ?? {}, codeAgentRanRef.current);
       if (goal) setCodeFollowUp({ id: ev.id, goal });
+      else setAfterSeed(seedFollowUpGoal(ev.arguments ?? {}));
     }
   }, []);
 
@@ -473,6 +477,23 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     setCodeFollowUp(null);
     codeAgentSend(codeFollowUp.goal);
   }, [codeFollowUp, codeAgentSend]);
+  const codeAgentStatus = codeAgent.status;
+  const codeAgentHasCode = codeAgent.hasCode;
+  // The seed may not have started when the goal is queued, so "idle" means
+  // stopped only once the seed has streamed.
+  const seedStreamedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!afterSeed) {
+      seedStreamedRef.current = false;
+      return;
+    }
+    if (codeAgentStatus === "streaming") seedStreamedRef.current = true;
+    const stopped = codeAgentStatus === "idle" && seedStreamedRef.current;
+    if (codeAgentStatus === "error" || stopped) setAfterSeed(null);
+    if (codeAgentStatus !== "done" || !codeAgentHasCode) return;
+    setAfterSeed(null);
+    codeAgentSend(afterSeed);
+  }, [afterSeed, codeAgentStatus, codeAgentHasCode, codeAgentSend]);
 
   // Drop any prior authoring session when the conversation changes (new chat or
   // one loaded from history) so its code + timer don't leak across threads.
@@ -492,6 +513,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     if (prev === agent.conversationId) return;
     if (prev === null && agent.conversationId !== null) return;
     setCodeArmed(false);
+    setAfterSeed(null);
     handedOffRef.current = false;
     codeAgentReset();
   }, [agent.conversationId, codeAgentReset]);
@@ -733,8 +755,8 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     () => latestToolCallId(agent.messages, REQUEST_CODE_TOOL),
     [agent.messages],
   );
-  // The run is over only once its check and every fix it asked for settled.
-  const codeBusy = codeArmed && authoringBusy(codeAgent);
+  // The run is over once its turn is: the agent checks its code inside it.
+  const codeBusy = codeArmed && (authoringBusy(codeAgent) || afterSeed !== null);
   const liveCodeCall = React.useMemo(
     () =>
       agent.messages.flatMap((m) => m.toolCalls ?? []).find((c) => c.id === liveCodeCallId) ?? null,
@@ -755,14 +777,13 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       return;
     }
     if (busyForCallRef.current !== liveCodeCall.id) return;
-    // A user edit in the editors re-runs the check, so a new verdict is stored too.
     const key = [
       liveCodeCall.id,
       codeAgent.status,
-      codeAgent.checkStatus,
+      codeAgent.verification?.id ?? "",
       codeAgent.signatureVersions.length,
       codeAgent.metricVersions.length,
-      codeAgent.fixAttempts.length,
+      Object.values(codeAgent.fileVersions).reduce((n, versions) => n + versions.length, 0),
     ].join("|");
     if (recordedRef.current === key) return;
     recordedRef.current = key;

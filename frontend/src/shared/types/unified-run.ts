@@ -112,8 +112,12 @@ export interface UnifiedModels {
 }
 
 export interface UnifiedWorkspace {
+  /** `run.py`. */
   run_code: string;
+  /** `metric.py`. */
   metric_code: string;
+  /** Every other workspace file, relative path to text; only the run code can import them. */
+  files?: Record<string, string>;
   metric_timeout_seconds?: number;
   install_command?: string | null;
   dependency_lock?: ScorerDependencyLock | null;
@@ -180,6 +184,7 @@ export interface OptimizerCatalogResponse {
 
 export type ContractCheckKey =
   | "workspace.run_signature"
+  | "workspace.files"
   | "metric.signature"
   | "metric.model"
   | "workspace.run"
@@ -220,6 +225,23 @@ export interface ContractCheckResponse {
   fingerprint: string;
   /** Whether the metric calls a model, from the server's introspection; absent on older servers. */
   uses_llm?: boolean;
+  /** Each Python file's lint, so each file shows its own findings; absent on older servers. */
+  files?: WorkspaceFileLint[];
+}
+
+/** Lint lines are `"<path>:<line>:<col> <rule> <message>"`. */
+export interface WorkspaceFileLint {
+  path: string;
+  errors: string[];
+  warnings: string[];
+}
+
+/** One file's verdict from the coding agent's `verify_code` check. */
+export interface FileVerification {
+  path: string;
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
 }
 
 export interface UnifiedChatTurn {

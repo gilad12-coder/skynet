@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { CheckCircle, PencilSimple, WarningCircle } from "@/shared/ui/icons";
+import { CheckCircle, PencilSimple, Trash } from "@/shared/ui/icons";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
@@ -15,16 +15,13 @@ import { ActivityGroup, StepRow } from "@/shared/ui/agent/activity-steps";
 import { ChatErrorBanner } from "@/shared/ui/agent/chat-error-banner";
 import { ThinkingSection } from "@/shared/ui/agent/thinking-section";
 
-import {
-  MAX_AUTHORING_FIXES,
-  type CodeAuthoringAgentState,
-} from "../hooks/use-code-authoring-agent";
+import type { CodeAuthoringAgentState } from "../hooks/use-code-authoring-agent";
 import {
   liveAuthoringView,
   outcomeAuthoringView,
   outcomeLine,
+  type AuthoringCheck,
   type AuthoringEdit,
-  type AuthoringFixAttempt,
   type AuthoringOutcome,
   type AuthoringView,
 } from "../lib/code-authoring";
@@ -35,11 +32,6 @@ const WorkflowCanvas = dynamic(
   () => import("@/features/submit/workflow/WorkflowCanvas").then((m) => m.WorkflowCanvas),
   { ssr: false, loading: () => <Skeleton height={420} borderRadius={8} /> },
 );
-
-const FILE_NAMES: Record<AuthoringEdit["file"], string> = {
-  run: "run.py",
-  metric: "metric.py",
-};
 
 const ADDED_TONE = "text-[#5A7247] dark:text-[#adc899]";
 
@@ -53,9 +45,10 @@ interface CodeAuthoringActivityProps {
 /**
  * The coding tool in the generalist chat, as Codex shows a coding turn: the
  * thinking row, one row per edit ("Edited metric.py +12 −3") that opens to a
- * compact diff, one row per failed check the agent fixed, and the current
- * check's verdict, all under one summary line. The code itself is read and
- * edited in the wizard's Metric step, not here.
+ * compact diff, one row per deleted file, and one row per ``verify_code`` call
+ * (running, then passed or failed with each file's findings), in the order
+ * they happened, under one summary line. The code itself is read and edited
+ * in the wizard's Metric step, not here.
  */
 export function CodeAuthoringActivity({ agent, since = 0 }: CodeAuthoringActivityProps) {
   const streaming = agent.status === "streaming";
@@ -126,7 +119,7 @@ export function CodeAuthoringOutcome({ outcome }: { outcome: AuthoringOutcome | 
  *   outcome: The run's stored outcome.
  *
  * Returns:
- *   The sentence, or null for a run that failed (its error row says why).
+ *   The sentence, or null when the run's rows already say how it ended.
  */
 export function authoringOutcomeLine(outcome: AuthoringOutcome): string | null {
   const line = outcomeLine(outcome);
@@ -134,24 +127,46 @@ export function authoringOutcomeLine(outcome: AuthoringOutcome): string | null {
   if (line.key === "agent.coding_tool.outcome.stopped" || line.key === "agent.coding_tool.outcome.none") {
     return msg(line.key);
   }
-  const files = new Intl.ListFormat(getActiveIntlLocale(), { type: "conjunction" }).format(
-    line.files.map((file) => FILE_NAMES[file]),
-  );
+  const files = new Intl.ListFormat(getActiveIntlLocale(), { type: "conjunction" }).format(line.files);
   return formatMsg(line.key, { files });
 }
 
-/** The thinking row and the steps under their summary line. */
+interface Step {
+  key: string;
+  kind: ActivityKind;
+  status: ActivityStatus;
+  row: React.ReactNode;
+}
+
+/** The thinking row and the steps, in the order they happened, under their summary line. */
 function AuthoringRows({ view }: { view: AuthoringView }) {
-  const steps: Array<{ key: string; kind: ActivityKind; status: ActivityStatus; row: React.ReactNode }> =
-    [];
+  const timed: Array<Step & { ts: number }> = [];
   for (const edit of view.edits) {
-    steps.push({
+    timed.push({
       key: `edit-${edit.file}-${edit.ts}`,
       kind: "edit",
       status: "done",
+      ts: edit.ts,
       row: <EditRow edit={edit} />,
     });
   }
+  for (const deleted of view.deletes) {
+    timed.push({
+      key: `delete-${deleted.file}-${deleted.ts}`,
+      kind: "edit",
+      status: "done",
+      ts: deleted.ts,
+      row: (
+        <StepRow
+          icon={Trash}
+          label={formatMsg("agent.coding_tool.deleted", { file: deleted.file })}
+          status="done"
+        />
+      ),
+    });
+  }
+  for (const check of view.checks) timed.push({ ...checkStep(check), ts: check.ts });
+  const steps: Step[] = timed.sort((a, b) => a.ts - b.ts);
   for (const file of view.writing) {
     steps.push({
       key: `writing-${file}`,
@@ -160,22 +175,12 @@ function AuthoringRows({ view }: { view: AuthoringView }) {
       row: (
         <StepRow
           icon={PencilSimple}
-          label={formatMsg("agent.coding_tool.editing", { file: FILE_NAMES[file] })}
+          label={formatMsg("agent.coding_tool.editing", { file })}
           status="running"
         />
       ),
     });
   }
-  for (const attempt of view.fixes) {
-    steps.push({
-      key: `fix-${attempt.attempt}`,
-      kind: "check",
-      status: attempt.fix === null ? "running" : "done",
-      row: <FixRow attempt={attempt} />,
-    });
-  }
-  const check = checkStep(view);
-  if (check) steps.push(check);
 
   return (
     <>
@@ -192,14 +197,12 @@ function AuthoringRows({ view }: { view: AuthoringView }) {
   );
 }
 
-/** The validity check's verdict on the current code, as the last step. */
-function checkStep(
-  view: AuthoringView,
-): { key: string; kind: ActivityKind; status: ActivityStatus; row: React.ReactNode } | null {
-  if (view.check === "idle") return null;
-  if (view.check === "checking") {
+/** One ``verify_code`` call: checking, then passed, or failed with each file's findings. */
+function checkStep(check: AuthoringCheck): Step {
+  const key = `verify-${check.id}-${check.ts}`;
+  if (check.state === "running") {
     return {
-      key: "check",
+      key,
       kind: "check",
       status: "running",
       row: (
@@ -207,42 +210,49 @@ function checkStep(
       ),
     };
   }
-  if (view.check === "passed") {
+  if (check.state === "passed") {
     return {
-      key: "check",
+      key,
       kind: "check",
       status: "done",
       row: <StepRow icon={CheckCircle} label={msg("agent.coding_tool.check.passed")} status="done" />,
     };
   }
-  const errors = view.errors;
+  const count = check.failures.reduce((sum, file) => sum + file.errors.length, 0);
   return {
-    key: "check",
+    key,
     kind: "check",
     status: "error",
     row: (
       <StepRow
         icon={CheckCircle}
         label={msg("agent.coding_tool.check.failed")}
-        detail={
-          errors.length > 0 && formatMsg("agent.coding_tool.check.errors", { count: errors.length })
-        }
+        detail={count > 0 && formatMsg("agent.coding_tool.check.errors", { count })}
         status="error"
       >
-        {errors.length > 0 && <FailureList failures={errors} />}
+        {check.failures.map((file) => (
+          <div key={file.path}>
+            {file.path && (
+              <p dir="ltr" className="font-mono text-foreground/85">
+                {file.path}
+              </p>
+            )}
+            <FailureList failures={file.errors} />
+          </div>
+        ))}
       </StepRow>
     ),
   };
 }
 
-/** One edit to the run code or the metric, opening to its diff. */
+/** One edit to a workspace file, opening to its diff. */
 function EditRow({ edit }: { edit: AuthoringEdit }) {
   const lines = React.useMemo(() => lineDiff(edit.before, edit.after), [edit.before, edit.after]);
   const { added, removed } = diffStats(lines);
   return (
     <StepRow
       icon={PencilSimple}
-      label={formatMsg("agent.coding_tool.edited", { file: FILE_NAMES[edit.file] })}
+      label={formatMsg("agent.coding_tool.edited", { file: edit.file })}
       detail={
         <span dir="ltr" className="font-mono tabular-nums">
           <span className={ADDED_TONE}>+{added}</span>{" "}
@@ -287,52 +297,6 @@ function CompactDiff({ lines }: { lines: ReturnType<typeof lineDiff> }) {
         ),
       )}
     </pre>
-  );
-}
-
-/**
- * A failed check that went back to the agent: what it flagged, and what the
- * agent replied and changed.
- */
-function FixRow({ attempt }: { attempt: AuthoringFixAttempt }) {
-  const changed = [
-    attempt.fix?.runChanged ? FILE_NAMES.run : null,
-    attempt.fix?.metricChanged ? FILE_NAMES.metric : null,
-  ].filter((label): label is string => label !== null);
-  return (
-    <StepRow
-      icon={WarningCircle}
-      label={msg("agent.coding_tool.check.failed")}
-      detail={formatMsg("agent.coding_tool.fix.attempt", {
-        p1: attempt.attempt,
-        p2: MAX_AUTHORING_FIXES,
-      })}
-      status={attempt.fix === null ? "running" : "done"}
-    >
-      <div>
-        <p>{msg("agent.coding_tool.fix.failed")}</p>
-        <FailureList failures={attempt.failures} />
-      </div>
-      <div>
-        <p>{msg("agent.coding_tool.fix.fix")}</p>
-        {attempt.fix === null ? (
-          <p className="agent-shimmer-text">{msg("agent.coding_tool.fix.writing")}</p>
-        ) : (
-          <>
-            {attempt.fix.reply && (
-              <p dir="auto" className="line-clamp-4 whitespace-pre-line text-foreground/85">
-                {attempt.fix.reply}
-              </p>
-            )}
-            <p>
-              {changed.length > 0
-                ? formatMsg("agent.coding_tool.fix.changed", { p1: changed.join(", ") })
-                : msg("agent.coding_tool.fix.unchanged")}
-            </p>
-          </>
-        )}
-      </div>
-    </StepRow>
   );
 }
 

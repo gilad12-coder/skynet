@@ -14,6 +14,7 @@ above each class, not in class bodies.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -136,6 +137,80 @@ def optimizer_family(resolved: str) -> OptimizerFamily:
 RUN_ENTRY = "def run(artifact, input)"
 METRIC_SIGNATURE = "def score(input, output, expected=None)"
 
+# The workspace's two fixed files. Their text travels as ``run_code`` and
+# ``metric_code`` so payloads written before extra files existed stay valid;
+# ``UnifiedWorkspace.files`` holds every other file.
+RUN_FILE = "run.py"
+METRIC_FILE = "metric.py"
+WORKSPACE_FILE_MAX_COUNT = 20
+WORKSPACE_FILE_MAX_CHARS = 200_000
+WORKSPACE_FILES_MAX_TOTAL_CHARS = 500_000
+WORKSPACE_PATH_MAX_CHARS = 120
+WORKSPACE_PATH_MAX_DEPTH = 4
+WORKSPACE_FILE_SUFFIXES = (".py", ".txt", ".md", ".json", ".yaml", ".yml", ".csv", ".toml", ".ini", ".cfg")
+_PATH_SEGMENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+# ``skynet`` is the helper module the harness injects; a file under that
+# name would silently lose to it.
+_RESERVED_TOP_LEVEL = frozenset({RUN_FILE, METRIC_FILE, "skynet", "skynet.py"})
+
+
+def workspace_path_error(path: str) -> str | None:
+    """Explain why ``path`` cannot name an extra workspace file.
+
+    Args:
+        path: A file path as the user or the coding agent wrote it.
+
+    Returns:
+        A short English reason, or ``None`` when the path is acceptable:
+        relative, ``/``-separated, at most :data:`WORKSPACE_PATH_MAX_DEPTH`
+        segments of letters, digits, ``_``, ``-`` and ``.`` (none hidden or
+        ``..``), ending in a Python or text suffix, and not one of the fixed
+        files or the ``skynet`` helper.
+    """
+    if not path or len(path) > WORKSPACE_PATH_MAX_CHARS:
+        return f"the path must be 1-{WORKSPACE_PATH_MAX_CHARS} characters"
+    if path.startswith("/") or "\\" in path or ":" in path:
+        return "the path must be relative, with / between folders"
+    segments = path.split("/")
+    if len(segments) > WORKSPACE_PATH_MAX_DEPTH:
+        return f"the path may be at most {WORKSPACE_PATH_MAX_DEPTH} levels deep"
+    if any(segment in ("", ".", "..") or not _PATH_SEGMENT.fullmatch(segment) for segment in segments):
+        return "each part of the path may use letters, digits, _, - and . only, and no part may be empty or .."
+    if segments[0] in _RESERVED_TOP_LEVEL:
+        return f"{segments[0]} is reserved"
+    if not path.endswith(WORKSPACE_FILE_SUFFIXES):
+        return f"the file must end in one of {', '.join(WORKSPACE_FILE_SUFFIXES)}"
+    return None
+
+
+def workspace_files_error(files: dict[str, str]) -> str | None:
+    """Explain why a set of extra workspace files cannot be stored.
+
+    Args:
+        files: Path to text of every extra file.
+
+    Returns:
+        The first problem found, or ``None`` when every path is valid and the
+        files keep to the count and size limits.
+    """
+    if len(files) > WORKSPACE_FILE_MAX_COUNT:
+        return f"a workspace holds at most {WORKSPACE_FILE_MAX_COUNT} extra files"
+    total = 0
+    for path, text in files.items():
+        error = workspace_path_error(path)
+        if error is not None:
+            return f"{path}: {error}"
+        if len(text) > WORKSPACE_FILE_MAX_CHARS:
+            return f"{path}: a file may hold at most {WORKSPACE_FILE_MAX_CHARS} characters"
+        total += len(text)
+    if total > WORKSPACE_FILES_MAX_TOTAL_CHARS:
+        return f"the extra files may hold at most {WORKSPACE_FILES_MAX_TOTAL_CHARS} characters together"
+    prefixes = {"/".join(path.split("/")[:depth]) for path in files for depth in range(1, path.count("/") + 1)}
+    clash = sorted(prefixes & set(files))
+    if clash:
+        return f"{clash[0]} is both a file and a folder"
+    return None
+
 
 # One case. ``expected`` reaches the metric's ``expected`` argument as is.
 class UnifiedCase(BaseModel):
@@ -214,13 +289,32 @@ class UnifiedModels(BaseModel):
 
 
 # The workspace code. ``metric_code`` never reaches an optimizer: it travels
-# only here and in the engine Task's private context.
+# only here and in the engine Task's private context. ``run_code`` and
+# ``metric_code`` are ``run.py`` and ``metric.py``; ``files`` maps every other
+# file's relative path to its text. Only the run code can import them: the
+# harness puts them on the run child's path, never the metric's.
 class UnifiedWorkspace(BaseModel):
     run_code: str = Field(min_length=1, max_length=200_000)
     metric_code: str = Field(min_length=1, max_length=200_000)
+    files: dict[str, str] = Field(default_factory=dict)
     metric_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     install_command: str | None = None
     dependency_lock: ScorerDependencyLock | None = None
+
+    @model_validator(mode="after")
+    def _check_files(self) -> UnifiedWorkspace:
+        """Reject extra files with unsafe paths or past the size limits.
+
+        Returns:
+            The workspace unchanged.
+
+        Raises:
+            ValueError: With the first problem found.
+        """
+        error = workspace_files_error(self.files)
+        if error is not None:
+            raise ValueError(error)
+        return self
 
 
 # Submission payload for ``POST /optimize``.
@@ -306,6 +400,7 @@ class OptimizerCatalogResponse(BaseModel):
 
 ContractCheckKey = Literal[
     "workspace.run_signature",
+    "workspace.files",
     "metric.signature",
     "metric.model",
     "workspace.run",
@@ -341,8 +436,19 @@ class ContractCheckRequest(BaseModel):
     sample_count: int = Field(default=CONTRACT_SAMPLE_DEFAULT, ge=1, le=CONTRACT_SAMPLE_MAX)
 
 
+# One workspace file's lint from the static check: ruff's error rules
+# (undefined names, broken imports) as ``errors``, its other findings as
+# ``warnings``, each as ``"<path>:<line>:<col> <rule> <message>"``.
+class WorkspaceFileLint(BaseModel):
+    path: str
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 # ``fingerprint`` is the sha256 hex of the canonical JSON of the inputs the
 # check depends on, so the wizard can tell when a passing check went stale.
+# ``files`` is the static check's lint of each Python file that parses, so
+# each editor shows its own findings; lint never decides ``ok``.
 # ``uses_llm`` is whether the metric code calls ``llm``, so the wizard asks for
 # a metric model only when the metric needs one.
 class ContractCheckResponse(BaseModel):
@@ -352,6 +458,7 @@ class ContractCheckResponse(BaseModel):
     checks: list[ContractCheckItem]
     samples: list[ContractSample] = Field(default_factory=list)
     fingerprint: str
+    files: list[WorkspaceFileLint] = Field(default_factory=list)
 
 
 class UnifiedChatTurn(BaseModel):
@@ -440,10 +547,13 @@ __all__ = [
     "DSPY_OPTIMIZERS",
     "DSPY_OPTIMIZER_NAMES",
     "FEEDBACK_OPTIMIZERS",
+    "METRIC_FILE",
     "METRIC_SIGNATURE",
     "MIN_PAIRS_FOR_HELD_OUT",
     "RUN_ENTRY",
+    "RUN_FILE",
     "UNIFIED_PAYLOAD_KIND",
+    "WORKSPACE_FILE_MAX_COUNT",
     "ArtifactKind",
     "ContractCheckItem",
     "ContractCheckKey",
@@ -471,7 +581,10 @@ __all__ = [
     "UnifiedSplitCounts",
     "UnifiedTask",
     "UnifiedWorkspace",
+    "WorkspaceFileLint",
     "optimizer_family",
     "optimizers_for",
     "resolve_optimizer",
+    "workspace_files_error",
+    "workspace_path_error",
 ]

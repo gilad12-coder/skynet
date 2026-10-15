@@ -65,6 +65,8 @@
     "winningCandidate": "최우수 후보"
   },
   "messages": {
+    "contract.file_invalid": "{path} 파일이 올바르지 않습니다: {error}",
+    "contract.files_unsupported": "DSPy 옵티마이저는 run.py와 metric.py만 실행합니다. 추가 파일의 코드를 run.py로 옮기거나 다른 옵티마이저를 선택하세요.",
     "contract.metric_error": "샘플 {index}에서 메트릭이 실패했습니다: {error}",
     "contract.metric_missing": "메트릭 코드에 이 옵티마이저가 호출하는 함수가 정의되어 있지 않습니다.",
     "contract.metric_model_missing": "메트릭이 모델을 호출하므로 메트릭 모델을 선택하세요.",

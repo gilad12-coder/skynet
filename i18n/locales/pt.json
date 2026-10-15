@@ -65,6 +65,8 @@
     "winningCandidate": "candidato vencedor"
   },
   "messages": {
+    "contract.file_invalid": "O arquivo {path} não é válido: {error}",
+    "contract.files_unsupported": "Os otimizadores DSPy executam apenas run.py e metric.py. Mova o código dos arquivos extras para run.py ou escolha outro otimizador.",
     "contract.metric_error": "A métrica falhou na amostra {index}: {error}",
     "contract.metric_missing": "O código da métrica não define a função que este otimizador chama.",
     "contract.metric_model_missing": "A métrica chama um modelo, por isso escolha um modelo para a métrica.",

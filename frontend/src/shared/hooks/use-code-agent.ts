@@ -4,7 +4,12 @@ import * as React from "react";
 import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
-import { streamCodeAgent, type AgentQuestion, type CodeAgentToolName } from "@/shared/lib/api";
+import {
+  streamCodeAgent,
+  type AgentQuestion,
+  type CodeAgentToolName,
+  type CodeAgentVerification,
+} from "@/shared/lib/api";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import { liveLanesLast } from "@/shared/hooks/reasoning-order";
@@ -44,6 +49,10 @@ export interface AgentToolCall {
   endedAt: number | null;
   prevCode?: string;
   newCode?: string;
+  /** The workspace file a write_file / delete_file call is about. */
+  path?: string;
+  /** A verify_code call's per-file result, once it arrived. */
+  verification?: CodeAgentVerification;
 }
 
 // Per-index line diff — returns 1-based line numbers in `next` that differ
@@ -151,6 +160,12 @@ export interface CodeAgentState {
   question: AgentQuestion | null;
   signatureVersions: ArtifactVersion[];
   metricVersions: ArtifactVersion[];
+  /** Each extra workspace file's versions the agent wrote, by path. */
+  fileVersions: Record<string, ArtifactVersion[]>;
+  /** Extra workspace files the agent is writing right now. */
+  writingFiles: string[];
+  /** The last verify_code result, or null before any check. */
+  verification: CodeAgentVerification | null;
   signatureVersionIndex: number;
   metricVersionIndex: number;
   signatureFlashLines: number[];
@@ -210,6 +225,10 @@ export interface UseCodeAgentArgs {
   unified?: UnifiedAuthoringContext | null;
   /** Lands objective / background text the agent wrote. */
   onBrief?: (fields: { objective?: string; background?: string }) => void;
+  /** Unified: the workspace's files besides run.py and metric.py. */
+  files?: Record<string, string>;
+  /** Unified: write one extra file's text, or delete it with null. */
+  setFile?: (path: string, text: string | null) => void;
   // Catalog model id + effort the code author runs on (the composer's model
   // menu). Absent/`null` routes automatically. The agent panel forwards the
   // conversation's chosen model so code authoring follows the composer.
@@ -249,6 +268,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     reasoningEffort,
     unified = null,
     onBrief,
+    files,
+    setFile,
   } = args;
 
   const [status, setStatus] = React.useState<AgentStatus>("idle");
@@ -270,6 +291,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   const [question, setQuestion] = React.useState<AgentQuestion | null>(null);
   const [signatureVersions, setSignatureVersions] = React.useState<ArtifactVersion[]>([]);
   const [metricVersions, setMetricVersions] = React.useState<ArtifactVersion[]>([]);
+  const [fileVersions, setFileVersions] = React.useState<Record<string, ArtifactVersion[]>>({});
+  const [writingFiles, setWritingFiles] = React.useState<string[]>([]);
+  const [verification, setVerification] = React.useState<CodeAgentVerification | null>(null);
   const [signatureVersionIndex, setSignatureVersionIndex] = React.useState(-1);
   const [metricVersionIndex, setMetricVersionIndex] = React.useState(-1);
   const [signatureFlashLines, setSignatureFlashLines] = React.useState<number[]>([]);
@@ -318,6 +342,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     signatureValidation,
     metricValidation,
     workflowSpec,
+    files,
   });
   React.useEffect(() => {
     snapshotRef.current = {
@@ -326,8 +351,13 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       signatureValidation,
       metricValidation,
       workflowSpec,
+      files,
     };
-  }, [signatureCode, metricCode, signatureValidation, metricValidation, workflowSpec]);
+  }, [signatureCode, metricCode, signatureValidation, metricValidation, workflowSpec, files]);
+  const setFileRef = React.useRef(setFile);
+  React.useEffect(() => {
+    setFileRef.current = setFile;
+  }, [setFile]);
 
   // Revert support across the conversation (first graph ever seen).
   const initialWorkflowRef = React.useRef<WorkflowSpec | null>(null);
@@ -441,15 +471,40 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   );
 
   const pushSignatureVersion = React.useCallback((code: string) => {
+    // Stamp now, not in the updater: React runs it at render, after a check
+    // that started in the same batch, which then sorted above this edit.
+    const ts = Date.now();
     setSignatureVersions((prev) => {
-      const next = appendVersion(prev, code, Date.now());
+      const next = appendVersion(prev, code, ts);
       if (next !== prev) setSignatureVersionIndex(next.length - 1);
       return next;
     });
   }, []);
+  const pushFileVersion = React.useCallback((path: string, code: string, ts = Date.now()) => {
+    setFileVersions((prev) => {
+      const versions = prev[path] ?? [];
+      const next = appendVersion(versions, code, ts);
+      return next === versions ? prev : { ...prev, [path]: next };
+    });
+  }, []);
+  const updateToolCall = React.useCallback((id: string, patch: Partial<AgentToolCall>) => {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (!last || last.role !== "assistant" || !last.toolCalls?.some((t) => t.id === id)) return prev;
+      const next = prev.slice();
+      next[next.length - 1] = {
+        ...last,
+        toolCalls: last.toolCalls.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+      };
+      return next;
+    });
+  }, []);
   const pushMetricVersion = React.useCallback((code: string) => {
+    // Stamp now, not in the updater: React runs it at render, after a check
+    // that started in the same batch, which then sorted above this edit.
+    const ts = Date.now();
     setMetricVersions((prev) => {
-      const next = appendVersion(prev, code, Date.now());
+      const next = appendVersion(prev, code, ts);
       if (next !== prev) setMetricVersionIndex(next.length - 1);
       return next;
     });
@@ -537,9 +592,27 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
         if (source === "signature") setSignatureCode(lastSignatureCode);
         else setMetricCode(lastMetricCode);
       };
+      // Extra files: what each held before the agent's draft, so a write
+      // that never lands puts it back (null: the file did not exist).
+      const latestFiles: Record<string, string> = { ...(snapshot.files ?? {}) };
+      const fileBefore = new Map<string, string | null>();
+      const fileDraft = new Map<string, string>();
+      const stopWriting = (path: string) =>
+        setWritingFiles((prev) => (prev.includes(path) ? prev.filter((p) => p !== path) : prev));
+      const dropFileDraft = (path: string) => {
+        fileDraft.delete(path);
+        if (!fileBefore.has(path)) return;
+        setFileRef.current?.(path, fileBefore.get(path) ?? null);
+        fileBefore.delete(path);
+      };
+      const dropFileDrafts = () => {
+        for (const path of [...fileBefore.keys()]) dropFileDraft(path);
+        setWritingFiles([]);
+      };
       controller.signal.addEventListener("abort", () => {
         dropDraft("signature");
         dropDraft("metric");
+        dropFileDrafts();
       });
       const chatHistory = history
         .filter((m) => m.content.trim().length > 0)
@@ -618,6 +691,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           ...(model ? { model } : {}),
           ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
           ...(unified ? { unified } : {}),
+          ...(unified && Object.keys(latestFiles).length > 0 ? { prior_files: latestFiles } : {}),
           ...(steerKey ? { steer_key: steerKey } : {}),
         },
         {
@@ -741,7 +815,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           onToolStart: (ev) => {
             markReasoningDone();
             setStatusLabel(
-              ev.tool === "set_brief"
+              ev.tool === "verify_code"
+                ? msg("agent.coding_tool.check.checking")
+                : ev.tool === "write_file" || ev.tool === "delete_file"
+                  ? formatMsg("agent.coding_tool.editing", { file: ev.path ?? "" })
+                  : ev.tool === "set_brief"
                 ? unifiedMsg("submit.v2.metric.agent.writing_brief")
                 : isSeedTool(ev.tool)
                     ? unified
@@ -755,6 +833,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             );
             if (isSeedTool(ev.tool)) setSignatureStatus("writing");
             else if (isScorerTool(ev.tool)) setMetricStatus("writing");
+            else if (ev.tool === "write_file" && ev.path) {
+              const path = ev.path;
+              setWritingFiles((prev) => (prev.includes(path) ? prev : [...prev, path]));
+            }
             pushToolCall({
               id: ev.id,
               tool: ev.tool,
@@ -762,11 +844,18 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               status: "running",
               startedAt: Date.now(),
               endedAt: null,
+              ...(ev.path && { path: ev.path }),
             });
           },
-          onCodeDraft: ({ source, chunk, reset }) => {
+          onCodeDraft: ({ source, chunk, reset, path }) => {
             if (controller.signal.aborted) return;
-            if (source === "signature") {
+            if (source === "file" && path) {
+              if (!fileBefore.has(path)) fileBefore.set(path, latestFiles[path] ?? null);
+              const text = (reset ? "" : (fileDraft.get(path) ?? "")) + chunk;
+              fileDraft.set(path, text);
+              setFileRef.current?.(path, text);
+              setWritingFiles((prev) => (prev.includes(path) ? prev : [...prev, path]));
+            } else if (source === "signature") {
               setSignatureCode(drafts.write(source, chunk, reset));
               setSignatureStatus("writing");
               markFlowing("signature", true);
@@ -776,11 +865,52 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               markFlowing("metric", true);
             }
           },
+          onFileReplace: (path, code) => {
+            if (controller.signal.aborted) return;
+            markReasoningDone();
+            fileBefore.delete(path);
+            fileDraft.delete(path);
+            const prevCode = latestFiles[path] ?? "";
+            latestFiles[path] = code;
+            setFileRef.current?.(path, code);
+            // A file the user wrote or cloned is the base the agent's first
+            // version diffs against; stamped 0 so it is never counted as an edit.
+            if (prevCode) pushFileVersion(path, prevCode, 0);
+            pushFileVersion(path, code);
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              if (!last || last.role !== "assistant" || !last.toolCalls?.length) return prev;
+              const next = prev.slice();
+              next[next.length - 1] = {
+                ...last,
+                toolCalls: last.toolCalls.map((t) =>
+                  t.tool === "write_file" && t.path === path && t.status === "running"
+                    ? { ...t, prevCode, newCode: code }
+                    : t,
+                ),
+              };
+              return next;
+            });
+          },
+          onFileDelete: (path) => {
+            if (controller.signal.aborted) return;
+            delete latestFiles[path];
+            fileBefore.delete(path);
+            fileDraft.delete(path);
+            setFileRef.current?.(path, null);
+          },
+          onVerifyResult: (result) => {
+            if (controller.signal.aborted) return;
+            setVerification(result);
+            updateToolCall(result.id, { verification: result });
+          },
           onToolEnd: (ev) => {
             if (ev.status !== "ok") {
               if (isSeedTool(ev.tool)) dropDraft("signature");
               else if (isScorerTool(ev.tool)) dropDraft("metric");
+              else if (ev.tool === "write_file" && ev.path) dropFileDraft(ev.path);
             }
+            if (ev.tool === "write_file" && ev.path) stopWriting(ev.path);
             finishToolCall(ev.id, ev.status === "ok" ? "done" : "error");
             if (isSeedTool(ev.tool)) {
               setSignatureStatus("done");
@@ -842,6 +972,20 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             if (controller.signal.aborted) return;
             dropDraft("signature");
             dropDraft("metric");
+            dropFileDrafts();
+            if (result.files) {
+              // The server's files after the turn are the truth; the events
+              // above already landed them, so this only mends a missed one.
+              for (const [path, code] of Object.entries(result.files)) {
+                if (latestFiles[path] !== code) setFileRef.current?.(path, code);
+              }
+              for (const path of Object.keys(latestFiles)) {
+                if (!(path in result.files)) setFileRef.current?.(path, null);
+              }
+            }
+            if (result.verification !== undefined && result.verification !== null) {
+              setVerification(result.verification);
+            }
             // A chat turn that ends without a word is a failed turn, not a
             // finished one: the chat offers a retry instead of a bare "Done.".
             if (isChat && !result.assistant_message.trim() && !replyBufRef.current.trim()) {
@@ -1035,6 +1179,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       attachCodeToLatestRunningToolCall,
       pushSignatureVersion,
       pushMetricVersion,
+      pushFileVersion,
+      updateToolCall,
       steerStore,
       markFlowing,
     ],
@@ -1144,6 +1290,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     setReasoningEndedAt(null);
     setSignatureVersions([]);
     setMetricVersions([]);
+    setFileVersions({});
+    setWritingFiles([]);
+    setVerification(null);
     setSignatureVersionIndex(-1);
     setMetricVersionIndex(-1);
     setSignatureFlashLines([]);
@@ -1226,6 +1375,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     question,
     signatureVersions,
     metricVersions,
+    fileVersions,
+    writingFiles,
+    verification,
     signatureVersionIndex,
     metricVersionIndex,
     signatureFlashLines,

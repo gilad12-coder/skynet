@@ -238,3 +238,28 @@ test("a legacy Auto-mode run keeps the default engine", () => {
   });
   assert.equal(slices.optimizer.choice, undefined);
 });
+
+test("a clone restores the extra workspace files; an old payload has none", () => {
+  const base = {
+    payload_kind: "unified_v1",
+    task: { objective: "o", artifact: { kind: "prompt", starting_version: "s" } },
+    data: { mode: "single", cases: [{ input: {} }], input_fields: [] },
+    optimizer: { choice: "auto", budget: { max_scorer_runs: 10 } },
+    models: { reflection_model: { name: "m" } },
+  };
+  const withFiles = cloneToSlices("blackbox", {
+    ...base,
+    workspace: {
+      run_code: "from helpers import f",
+      metric_code: "def score(i, o): ...",
+      files: { "helpers.py": "def f(): ...", "run.py": "ignored", bad: 3 },
+    },
+  } as never);
+  assert.equal(withFiles.workspace.runCode, "from helpers import f");
+  assert.deepEqual(withFiles.workspace.files, { "helpers.py": "def f(): ..." });
+  const old = cloneToSlices("blackbox", {
+    ...base,
+    workspace: { run_code: "def run(a, i): ...", metric_code: "def score(i, o): ..." },
+  } as never);
+  assert.deepEqual(old.workspace.files, {});
+});

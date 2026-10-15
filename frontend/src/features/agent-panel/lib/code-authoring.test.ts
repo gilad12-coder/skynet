@@ -21,7 +21,7 @@ const {
   authoringEdits,
   authoringOutcome,
   authoringThinking,
-  describeFixes,
+  contractValidations,
   liveAuthoringView,
   outcomeAuthoringView,
   outcomeHistoryResult,
@@ -29,8 +29,10 @@ const {
   parseAuthoringOutcome,
   withAuthoringState,
   followUpAuthoringGoal,
+  seedFollowUpGoal,
   latestToolCallId,
   panelAuthoringContext,
+  panelContractSpec,
 } = await import("./code-authoring.ts");
 
 test("version histories become edits in the order they landed, skipping repeats", () => {
@@ -41,11 +43,28 @@ test("version histories become edits in the order they landed, skipping repeats"
   ];
   const metric = [{ code: "m", ts: 2 }];
   assert.deepEqual(authoringEdits(run, metric), [
-    { file: "run", before: "", after: "a", ts: 1 },
-    { file: "metric", before: "", after: "m", ts: 2 },
-    { file: "run", before: "a", after: "b", ts: 5 },
+    { file: "run.py", before: "", after: "a", ts: 1 },
+    { file: "metric.py", before: "", after: "m", ts: 2 },
+    { file: "run.py", before: "a", after: "b", ts: 5 },
   ]);
   assert.deepEqual(authoringEdits([], []), []);
+});
+
+test("an extra file's versions become edits named by its path", () => {
+  const edits = authoringEdits([{ code: "r", ts: 1 }], [], {
+    "helpers.py": [
+      { code: "def f(): ...", ts: 2 },
+      { code: "def f(): return 1", ts: 3 },
+    ],
+  });
+  assert.deepEqual(
+    edits.map((e) => [e.file, e.before, e.after]),
+    [
+      ["run.py", "", "r"],
+      ["helpers.py", "", "def f(): ..."],
+      ["helpers.py", "def f(): ...", "def f(): return 1"],
+    ],
+  );
 });
 
 test("a coding run that streams no reasoning shows no thinking row", () => {
@@ -107,60 +126,14 @@ test("only a repeated coding call with a goal becomes a follow-up", () => {
   assert.equal(followUpAuthoringGoal({}, true), null);
 });
 
-const fix1 = {
-  attempt: 1,
-  failures: ["The metric must return a number"],
-  runBefore: "run v1",
-  metricBefore: "metric v1",
-  from: 2,
-};
-
-test("a fix stays pending until its turn has sent and finished", () => {
-  const notSent = describeFixes([{ ...fix1, from: null }], [], false, "run v1", "metric v1");
-  assert.equal(notSent[0].fix, null);
-  const chat = [
-    { role: "user", content: "write it" },
-    { role: "assistant", content: "done" },
-    { role: "user", content: "fix it" },
-    { role: "assistant", content: "" },
-  ];
-  assert.equal(describeFixes([fix1], chat, true, "run v1", "metric v2")[0].fix, null);
-});
-
-test("a finished fix carries the agent's reply and which code it changed", () => {
-  const chat = [
-    { role: "user", content: "write it" },
-    { role: "assistant", content: "done" },
-    { role: "user", content: "fix it" },
-    { role: "assistant", content: " Returned a float score. " },
-  ];
-  const [attempt] = describeFixes([fix1], chat, false, "run v1", "metric v2");
-  assert.equal(attempt.attempt, 1);
-  assert.deepEqual(attempt.failures, ["The metric must return a number"]);
-  assert.deepEqual(attempt.fix, {
-    reply: "Returned a float score.",
-    runChanged: false,
-    metricChanged: true,
-  });
-});
-
-test("an earlier fix is measured against the code the next check saw", () => {
-  const fix2 = { ...fix1, attempt: 2, runBefore: "run v2", metricBefore: "metric v1", from: 4 };
-  const chat = [
-    { role: "user", content: "write it" },
-    { role: "assistant", content: "done" },
-    { role: "user", content: "fix it" },
-    { role: "assistant", content: "Fixed the run." },
-    { role: "user", content: "fix it" },
-    { role: "assistant", content: "Fixed the metric." },
-  ];
-  const [first, second] = describeFixes([fix1, fix2], chat, false, "run v2", "metric v2");
-  assert.deepEqual(first.fix, { reply: "Fixed the run.", runChanged: true, metricChanged: false });
-  assert.deepEqual(second.fix, {
-    reply: "Fixed the metric.",
-    runChanged: false,
-    metricChanged: true,
-  });
+test("a first coding call naming an extra file is sent after the seed", () => {
+  const goal = "Put the message-building in helpers.py that run.py imports";
+  assert.equal(seedFollowUpGoal({ goal }), goal);
+  assert.equal(seedFollowUpGoal({ goal: "Parse dates in `lib/dates.py`." }), "Parse dates in `lib/dates.py`.");
+  // The seed writes run.py and metric.py itself.
+  assert.equal(seedFollowUpGoal({ goal: "Write run.py and metric.py for ticket routing" }), null);
+  assert.equal(seedFollowUpGoal({ goal: "Score exact matches" }), null);
+  assert.equal(seedFollowUpGoal({}), null);
 });
 
 const dataset = {
@@ -187,18 +160,63 @@ test("panel sample cases carry no expected without an expected field", () => {
   assert.deepEqual(context?.sample_cases, [{ input: { message: "I was charged twice" } }]);
 });
 
+test("the static check spec carries the extra files only when there are some", () => {
+  const context = panelAuthoringContext(
+    { artifact_kind: "prompt", data_mode: "pairs", task_objective: "Route tickets" },
+    dataset,
+  );
+  assert.ok(context);
+  assert.equal(panelContractSpec(context, "run", "metric").workspace.files, undefined);
+  assert.deepEqual(
+    panelContractSpec(context, "run", "metric", { "helpers.py": "X = 1" }).workspace.files,
+    { "helpers.py": "X = 1" },
+  );
+});
+
+test("an extra file's failure lands with the run code, which imports it", () => {
+  const { run, metric } = contractValidations({
+    ok: false,
+    checks: [
+      { key: "workspace.files", status: "failed", message: "Syntax", detail: "helpers.py: bad" },
+      { key: "metric.signature", status: "failed", message: "Metric" },
+    ],
+  } as never);
+  assert.deepEqual(run.errors, ["Syntax helpers.py: bad"]);
+  assert.deepEqual(metric.errors, ["Metric"]);
+});
+
+const verifyCall = (
+  id: string,
+  startedAt: number,
+  verification?: { ok: boolean; files: Array<{ path: string; ok: boolean; errors: string[] }> },
+  status = "done",
+) => ({ id, tool: "verify_code", status, startedAt, verification });
+
 const settled = {
   status: "done",
   error: null,
-  checkStatus: "passed",
-  signatureValidation: null,
-  metricValidation: null,
   signatureVersions: [
     { code: "old", ts: 5 },
     { code: "a\nb", ts: 20 },
   ],
   metricVersions: [{ code: "m", ts: 30 }],
-  fixAttempts: [],
+  fileVersions: { "helpers.py": [{ code: "X = 1", ts: 35 }] },
+  messages: [
+    {
+      toolCalls: [
+        verifyCall("v0", 6, { ok: false, files: [{ path: "run.py", ok: false, errors: ["earlier"] }] }),
+        verifyCall("v1", 32, {
+          ok: false,
+          files: [
+            { path: "run.py", ok: true, errors: [] },
+            { path: "metric.py", ok: false, errors: ["must return a float"] },
+          ],
+        }),
+        { id: "d1", tool: "delete_file", status: "done", startedAt: 36, path: "old.py" },
+        verifyCall("v2", 40, { ok: true, files: [{ path: "metric.py", ok: true, errors: [] }] }),
+      ],
+    },
+  ],
   reasoning: "plan",
   reasoningStartedAt: 10,
   reasoningEndedAt: 15,
@@ -206,12 +224,21 @@ const settled = {
 
 test("a settled run's outcome survives the JSON round trip a reload takes", () => {
   const outcome = authoringOutcome(settled, 10, 99);
-  // Edits from an earlier call (ts 5) belong to that call's own rows.
+  // Edits and checks from an earlier call (ts 5, 6) belong to that call's own rows.
   assert.deepEqual(
     outcome.edits.map((e) => [e.file, e.before, e.after]),
     [
-      ["run", "old", "a\nb"],
-      ["metric", "", "m"],
+      ["run.py", "old", "a\nb"],
+      ["metric.py", "", "m"],
+      ["helpers.py", "", "X = 1"],
+    ],
+  );
+  assert.deepEqual(outcome.deletes, [{ file: "old.py", ts: 36 }]);
+  assert.deepEqual(
+    outcome.checks.map((c) => [c.id, c.state]),
+    [
+      ["v1", "failed"],
+      ["v2", "passed"],
     ],
   );
   assert.equal(outcome.check, "passed");
@@ -227,14 +254,79 @@ test("a settled run's outcome survives the JSON round trip a reload takes", () =
       metricStatus: "done",
       signatureFlowing: false,
       metricFlowing: false,
-      checkStatus: "passed",
+      writingFiles: [],
     },
     10,
   );
   const stored = outcomeAuthoringView(reloaded!);
   assert.deepEqual(stored.edits, live.edits);
-  assert.equal(stored.check, live.check);
+  assert.deepEqual(stored.deletes, live.deletes);
+  assert.deepEqual(stored.checks, live.checks);
   assert.equal(stored.thinking?.reasoning, live.thinking?.reasoning);
+});
+
+test("a failed check lists each failing file's findings and sets the outcome's verdict", () => {
+  const messages = [{ toolCalls: [settled.messages[0]!.toolCalls[1]!] }];
+  const failed = authoringOutcome({ ...settled, messages }, 10, 99);
+  assert.equal(failed.check, "failed");
+  assert.deepEqual(failed.checks[0]?.failures, [{ path: "metric.py", errors: ["must return a float"] }]);
+  assert.deepEqual(failed.errors, ["metric.py: must return a float"]);
+  assert.equal(authoringOutcome({ ...settled, messages: [] }, 10, 99).check, "none");
+  assert.equal(authoringOutcome({ ...settled, status: "idle" }, 10, 99).status, "stopped");
+});
+
+test("a check still running is shown live but never stored", () => {
+  const messages = [{ toolCalls: [verifyCall("v9", 50, undefined, "running")] }];
+  const view = liveAuthoringView(
+    {
+      ...settled,
+      messages,
+      isWorkflow: false,
+      signatureStatus: "done",
+      metricStatus: "done",
+      signatureFlowing: false,
+      metricFlowing: false,
+      writingFiles: [],
+    },
+    10,
+  );
+  assert.deepEqual(view.checks, [{ id: "v9", ts: 50, state: "running", failures: [] }]);
+  const stopped = authoringOutcome({ ...settled, status: "idle", messages }, 10, 99);
+  assert.deepEqual(stopped.checks, []);
+  assert.equal(stopped.check, "none");
+  // An errored check with no result is a failed one with nothing to list.
+  const errored = [{ toolCalls: [verifyCall("v8", 50, undefined, "error")] }];
+  assert.equal(authoringOutcome({ ...settled, messages: errored }, 10, 99).checks[0]?.state, "failed");
+});
+
+test("an outcome stored before extra files and verify_code still renders", () => {
+  const legacy = parseAuthoringOutcome({
+    status: "done",
+    check: "failed",
+    errors: ["must return a float"],
+    edits: [
+      { file: "run", before: "", after: "a", ts: 1 },
+      { file: "metric", before: "", after: "m", ts: 2 },
+    ],
+    fixes: [{ attempt: 1, failures: ["x"], fix: { reply: "", runChanged: true, metricChanged: false } }],
+    thinking: null,
+    error: null,
+    endedAt: 99,
+  });
+  assert.ok(legacy);
+  assert.deepEqual(
+    legacy.edits.map((e) => e.file),
+    ["run.py", "metric.py"],
+  );
+  assert.deepEqual(legacy.deletes, []);
+  assert.deepEqual(outcomeAuthoringView(legacy).checks, [
+    { id: "check", ts: 99, state: "failed", failures: [{ path: "", errors: ["must return a float"] }] },
+  ]);
+  assert.deepEqual(outcomeLine(legacy), {
+    key: "agent.coding_tool.outcome.failed",
+    files: ["run.py", "metric.py"],
+  });
+  assert.deepEqual(outcomeAuthoringView({ ...legacy, check: "none" }).checks, []);
 });
 
 test("a missing or malformed outcome parses to null, never to empty rows", () => {
@@ -243,17 +335,7 @@ test("a missing or malformed outcome parses to null, never to empty rows", () =>
   assert.equal(parseAuthoringOutcome("x"), null);
 });
 
-test("a failed check keeps its errors; a stopped run is not called done", () => {
-  const failed = authoringOutcome(
-    { ...settled, checkStatus: "failed", metricValidation: { errors: ["must return a float"] } },
-    10,
-    99,
-  );
-  assert.deepEqual(failed.errors, ["must return a float"]);
-  assert.equal(authoringOutcome({ ...settled, status: "idle" }, 10, 99).status, "stopped");
-});
-
-test("the generalist's history reads how the run ended, with line counts", () => {
+test("the generalist's history reads how the run ended, with line counts and deletes", () => {
   const result = JSON.parse(outcomeHistoryResult(authoringOutcome(settled, 10, 99)));
   assert.deepEqual(result, {
     outcome: {
@@ -261,7 +343,9 @@ test("the generalist's history reads how the run ended, with line counts", () =>
       files: [
         { file: "run.py", added: 2, removed: 1 },
         { file: "metric.py", added: 1, removed: 0 },
+        { file: "helpers.py", added: 1, removed: 0 },
       ],
+      deleted: ["old.py"],
       check: "passed",
       errors: [],
     },
@@ -269,22 +353,24 @@ test("the generalist's history reads how the run ended, with line counts", () =>
   assert.ok(!JSON.stringify(result).includes("now writing"));
 });
 
-test("the closing line says what was written and how the check ended", () => {
+test("the closing line says what was written and how the last check ended", () => {
   const passed = authoringOutcome(settled, 10, 99);
-  assert.deepEqual(outcomeLine(passed), { key: "agent.coding_tool.outcome.passed", files: ["run", "metric"] });
+  assert.deepEqual(outcomeLine(passed), {
+    key: "agent.coding_tool.outcome.passed",
+    files: ["run.py", "metric.py", "helpers.py"],
+  });
   assert.equal(outcomeLine({ ...passed, check: "failed" })?.key, "agent.coding_tool.outcome.failed");
   assert.equal(outcomeLine({ ...passed, check: "none" })?.key, "agent.coding_tool.outcome.unchecked");
   assert.equal(outcomeLine({ ...passed, status: "stopped" })?.key, "agent.coding_tool.outcome.stopped");
-  assert.equal(outcomeLine({ ...passed, edits: [] })?.key, "agent.coding_tool.outcome.none");
+  assert.equal(outcomeLine({ ...passed, edits: [], deletes: [] })?.key, "agent.coding_tool.outcome.none");
+  // A run that only deleted files says so in its rows, not as "changed no code".
+  assert.equal(outcomeLine({ ...passed, edits: [] }), null);
   assert.equal(outcomeLine({ ...passed, status: "error" }), null);
 });
 
-test("a run stays busy until its check and every fix it asked for settled", () => {
-  const idle = { status: "done", checkStatus: "passed", fixAttempts: [] };
-  assert.equal(authoringBusy(idle), false);
-  assert.equal(authoringBusy({ ...idle, status: "streaming" }), true);
-  assert.equal(authoringBusy({ ...idle, checkStatus: "checking" }), true);
-  assert.equal(authoringBusy({ ...idle, fixAttempts: [{ attempt: 1, failures: [], fix: null }] }), true);
+test("a run stays busy only while its turn streams", () => {
+  assert.equal(authoringBusy({ status: "done" }), false);
+  assert.equal(authoringBusy({ status: "streaming" }), true);
 });
 
 test("'Editing <file>' waits for that file's first chunk", () => {
@@ -296,10 +382,18 @@ test("'Editing <file>' waits for that file's first chunk", () => {
     metricStatus: "writing",
     signatureFlowing: false,
     metricFlowing: true,
-    checkStatus: "idle" as const,
+    writingFiles: [] as string[],
   };
-  assert.deepEqual(liveAuthoringView(base).writing, ["metric"]);
-  assert.deepEqual(liveAuthoringView({ ...base, signatureFlowing: true }).writing, ["run", "metric"]);
+  assert.deepEqual(liveAuthoringView(base).writing, ["metric.py"]);
+  assert.deepEqual(liveAuthoringView({ ...base, signatureFlowing: true }).writing, ["run.py", "metric.py"]);
+  assert.deepEqual(liveAuthoringView({ ...base, writingFiles: ["helpers.py"] }).writing, [
+    "metric.py",
+    "helpers.py",
+  ]);
+  // A workflow run edits a graph: no extra files, deletes or checks.
+  const workflow = liveAuthoringView({ ...base, isWorkflow: true, writingFiles: ["helpers.py"] });
+  assert.deepEqual(workflow.writing, ["metric.py"]);
+  assert.deepEqual([workflow.deletes, workflow.checks], [[], []]);
 });
 
 test("the running coding call keeps its turn live; a stored one ends where its run ended", () => {
