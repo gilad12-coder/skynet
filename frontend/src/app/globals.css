@@ -1690,3 +1690,14 @@ table {
     background-position: -100% 0;
   }
 }
+
+/* The inline IDE's 190 px explorer can't fit its title and five header
+   actions, so the title truncated to "WORKS…". Show the actions only while
+   the explorer is hovered or focused, as VS Code does for view panes. */
+[data-ide-host] .part.sidebar .composite.title .title-actions {
+  display: none;
+}
+[data-ide-host] .part.sidebar:hover .composite.title .title-actions,
+[data-ide-host] .part.sidebar:focus-within .composite.title .title-actions {
+  display: block;
+}

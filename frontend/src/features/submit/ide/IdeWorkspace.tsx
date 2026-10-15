@@ -181,7 +181,6 @@ export function IdeWorkspace({
   checkResult,
   agentResults,
   resultsStale,
-  hint,
   repo,
   openRequest,
   strip,
@@ -201,8 +200,6 @@ export function IdeWorkspace({
   agentResults: FileVerification[] | null;
   /** The shown results predate the files (or setup) on screen. */
   resultsStale: boolean;
-  /** What the entry files must define, from the contract. */
-  hint: string | null;
   /** A repository run's checkout, shown read-only in the explorer. */
   repo: RepoSource | null;
   /** The file the coding agent (or its transcript) last asked to show; a new request opens it again. */
@@ -408,14 +405,6 @@ export function IdeWorkspace({
   const body = (
     <>
       <header className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-2">
-        <h2 id="ide-workspace-title" className="shrink-0 text-sm font-medium">
-          {v2Msg("submit.v2.metric.title", guided)}
-        </h2>
-        {hint && (
-          <p dir="ltr" title={hint} className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-            {hint}
-          </p>
-        )}
         <div className="ms-auto flex shrink-0 items-center gap-1">
           {onCheck && (
             <Button
@@ -471,7 +460,7 @@ export function IdeWorkspace({
         <div dir="ltr" className="relative min-w-0 flex-1">
           {/* Clipped, so nothing VS Code positions past its edge makes the
               boxes around it scrollable. */}
-          <div ref={setHost} className="absolute inset-0 overflow-clip" />
+          <div ref={setHost} data-ide-host className="absolute inset-0 overflow-clip" />
           {!workbench && (
             <p className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">
               {loadFailed
@@ -493,7 +482,7 @@ export function IdeWorkspace({
     return (
       <section
         ref={slotRef}
-        aria-labelledby="ide-workspace-title"
+        aria-label={v2Msg("submit.v2.metric.title", guided)}
         className="flex h-full min-h-0 flex-col"
       >
         {body}
@@ -513,7 +502,7 @@ export function IdeWorkspace({
           ref={layerRef}
           role="dialog"
           aria-modal="true"
-          aria-labelledby="ide-workspace-title"
+          aria-label={v2Msg("submit.v2.metric.title", guided)}
           className="fixed inset-0 flex flex-col overflow-clip bg-background"
           style={{ zIndex: 50 }}
         >

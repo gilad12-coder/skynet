@@ -22,8 +22,6 @@ import { RunOverview } from "./RunOverview";
 import { WizardScreen } from "./WizardScreen";
 
 const SAMPLE_CASE_LIMIT = 5;
-// What the black-box runner calls on a repository run, with the checkout's path.
-const REPO_SCORER_SIGNATURE = "def score(repo_path, case=None) -> float | dict";
 
 /** The app-wide agent launcher stays hidden while the IDE's own coding agent is on screen. */
 function HideAgentPill() {
@@ -64,19 +62,13 @@ function repoSource(repository: string, ref: string): RepoSource {
  */
 export function MetricStep({ page, onBack }: { page: number; onBack: () => void }) {
   const ctx = useWizardV2();
-  const { state, patchWorkspace, setWorkspaceFile, guided, optimizerCatalog, inputsInferring } =
-    ctx;
+  const { state, patchWorkspace, setWorkspaceFile, guided, inputsInferring } = ctx;
   const { task, inputs, optimizer, workspace } = state;
   const kind = task.artifactKind;
   const repo = Boolean(task.repo);
   const t = (key: string) => v2Msg(key, guided);
 
   const metricUsesModel = metricCallsModel(state);
-  const catalog =
-    optimizerCatalog?.artifact_kind === kind && optimizerCatalog.data_mode === inputs.mode
-      ? optimizerCatalog
-      : null;
-  const metricSignature = catalog?.metric_signature ?? null;
 
   const authoringContext = React.useMemo<UnifiedAuthoringContext | null>(() => {
     if (!kind || !inputs.mode) return null;
@@ -198,10 +190,6 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     [repoName, repoRef],
   );
 
-  const hint = repo
-    ? `${REPO_SCORER_SIGNATURE}  ·  ${t("submit.v2.ide.repo.read_only")}`
-    : [catalog?.run_entry, metricSignature].filter(Boolean).join("  ·  ") || null;
-
   return (
     <div className="flex h-full min-h-0 flex-col">
       {onScreen && isGeneralistAgentEnabled() && <HideAgentPill />}
@@ -217,7 +205,6 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           checkResult={repo ? null : consoleResult}
           agentResults={repo ? null : agentResults}
           resultsStale={!repo && resultsStale}
-          hint={hint}
           repo={repoFiles}
           openRequest={openRequest}
           guided={guided}
