@@ -5,6 +5,7 @@ import { useCodeAgent, type CodeAgentState } from "@/shared/hooks/use-code-agent
 import type { ValidateCodeResponse } from "@/shared/types/api";
 import type { ContractCheckResponse, UnifiedAuthoringContext } from "@/shared/types/unified-run";
 import { v2Msg } from "../components/v2/ArtifactConfirmCard";
+import { workspaceKey, type AgentVerdict } from "./agent-verdict";
 import { kickoffFor } from "./kickoff";
 
 const NO_COLUMNS: Record<string, never> = {};
@@ -17,6 +18,8 @@ export interface IdeCodingAgent {
   setModel: (model: string | null) => void;
   effort: string | null;
   setEffort: (effort: string | null) => void;
+  /** The agent's last turn-ending verify_code verdict, newer than `lastCheck`; null otherwise. */
+  verdict: AgentVerdict | null;
 }
 
 /**
@@ -25,8 +28,9 @@ export interface IdeCodingAgent {
  *
  * When the step opens on work the user has not done (blank entry files, or
  * its own code that failed the last Check), it starts by itself with a turn
- * the transcript does not show as the user's. After each of its turns the
- * step runs Check, so the results under the toolbar match its code.
+ * the transcript does not show as the user's. A turn that ends on files its
+ * own verify_code just passed or failed hands that verdict to the results
+ * strip at once; only a turn that changed files after verifying runs Check.
  *
  * Args:
  *   options.context: The authoring context, or null when the agent cannot write (a repository run).
@@ -34,12 +38,13 @@ export interface IdeCodingAgent {
  *   options.dataKnown: The agent has sample cases, or the task needs none.
  *   options.runCode / metricCode / files: The workspace.
  *   options.setRunCode / setMetricCode / setFile: Write into the workspace.
+ *   options.lastCheck: The last sandboxed Check, so an agent verdict knows what it supersedes.
  *   options.lastCheckOk: The last Check's verdict on exactly these files, or null.
  *   options.check: Run Check.
  *   options.guided: Guided copy for the kickoff turns.
  *
  * Returns:
- *   The agent and its composer model choice.
+ *   The agent, its composer model choice, and its last verdict.
  */
 export function useIdeCodingAgent(options: {
   context: UnifiedAuthoringContext | null;
@@ -51,11 +56,12 @@ export function useIdeCodingAgent(options: {
   setRunCode: (code: string) => void;
   setMetricCode: (code: string) => void;
   setFile: (path: string, text: string | null) => void;
+  lastCheck: ContractCheckResponse | null;
   lastCheckOk: boolean | null;
   check: () => Promise<ContractCheckResponse | null>;
   guided: boolean;
 }): IdeCodingAgent {
-  const { context, active, dataKnown, runCode, metricCode, files, lastCheckOk, check, guided } = options;
+  const { context, active, dataKnown, runCode, metricCode, files, lastCheck, check, guided } = options;
   const [model, setModel] = React.useState<string | null>(null);
   const [effort, setEffort] = React.useState<string | null>(null);
   const [runEdited, setRunEdited] = React.useState(false);
@@ -111,6 +117,26 @@ export function useIdeCodingAgent(options: {
     reasoningEffort: effort,
   });
 
+  // verify_code's result, with the files it saw: the same render that
+  // commits the result already holds every write the turn made before it.
+  const key = workspaceKey(runCode, metricCode, files);
+  const verified = React.useRef<AgentVerdict | null>(null);
+  const verifiedId = React.useRef<string | null>(null);
+  const verification = agent.verification;
+  React.useEffect(() => {
+    // The turn's end repeats its last result; only a new call says what it saw.
+    if (!verification || verification.id === verifiedId.current) return;
+    verifiedId.current = verification.id;
+    verified.current = { ok: verification.ok, files: verification.files, key };
+  }, [verification, key]);
+  const [turnVerdict, setTurnVerdict] = React.useState<{
+    verdict: AgentVerdict;
+    after: ContractCheckResponse | null;
+  } | null>(null);
+  // A Check run since (the toolbar's, or the check screen's) supersedes it.
+  const verdict = turnVerdict && turnVerdict.after === lastCheck ? turnVerdict.verdict : null;
+  const lastCheckOk = verdict?.key === key ? verdict.ok : options.lastCheckOk;
+
   // One kickoff per workspace state: re-renders, re-entering the step and a
   // finished turn whose code still fails never start the same turn twice.
   const kicked = React.useRef<string | null>(null);
@@ -136,14 +162,23 @@ export function useIdeCodingAgent(options: {
     send(v2Msg(`submit.v2.ide.agent.kickoff.${kickoff}`, guided), { hidden: true });
   }, [active, context, dataKnown, runCode, metricCode, agentRun, agentMetric, lastCheckOk, busy, send, guided]);
 
-  // The agent's own verify_code result stays in its chat; Check after its
-  // turn puts the same verdict under the toolbar and into the kickoff rule.
+  // After a turn, its own verify_code verdict on these exact files goes under
+  // the toolbar and into the kickoff rule; a sandboxed Check (about a minute)
+  // runs only when the turn changed files after verifying, or never verified.
   const wasBusy = React.useRef(false);
   React.useEffect(() => {
+    const started = !wasBusy.current && busy;
     const finished = wasBusy.current && agent.status === "done";
     wasBusy.current = busy;
-    if (finished && context && runCode.trim() && metricCode.trim()) void check();
-  }, [busy, agent.status, context, runCode, metricCode, check]);
+    if (started) verified.current = null;
+    if (!finished || !context || !runCode.trim() || !metricCode.trim()) return;
+    const seen = verified.current;
+    if (seen && seen.key === key) {
+      setTurnVerdict({ verdict: seen, after: lastCheck });
+      return;
+    }
+    void check();
+  }, [busy, agent.status, context, runCode, metricCode, key, lastCheck, check]);
 
-  return { agent, model, setModel, effort, setEffort };
+  return { agent, model, setModel, effort, setEffort, verdict };
 }

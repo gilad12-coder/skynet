@@ -50,11 +50,11 @@ def test_model_config_prefixed_accepted(wizard_client: TestClient) -> None:
 
 @pytest.mark.parametrize("field", ["run_code", "metric_code"])
 def test_workspace_code_rejected(wizard_client: TestClient, field: str) -> None:
-    """Workspace code cannot be hand-patched — it must go through the authoring card."""
+    """Workspace code cannot be hand-patched — the Metric & run step's coding agent writes it."""
     resp = wizard_client.post("/wizard/update", json={field: "def run(artifact, input):\n    return input"})
 
     assert resp.status_code == 422
-    assert "request_code_authoring" in resp.json()["detail"]
+    assert field in resp.json()["detail"]
 
 
 def test_task_fields_round_trip(wizard_client: TestClient) -> None:

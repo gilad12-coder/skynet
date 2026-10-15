@@ -26,6 +26,7 @@ import { ICommandService } from "@codingame/monaco-vscode-api/vscode/vs/platform
 import { INotificationService } from "@codingame/monaco-vscode-api/vscode/vs/platform/notification/common/notification.service";
 import { IExplorerService } from "@codingame/monaco-vscode-api/vscode/vs/workbench/contrib/files/browser/files.service";
 import { IEditorService } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/editor/common/editorService.service";
+import { Parts } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/layout/browser/layoutService";
 import { IWorkbenchLayoutService } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/layout/browser/layoutService.service";
 import getConfigurationServiceOverride, {
   initUserConfiguration,
@@ -355,6 +356,11 @@ function workerFor(label: string): Worker {
   return new Worker(new URL("./workers/editor.worker.ts", import.meta.url), { type: "module" });
 }
 
+// VS Code boots its explorer at min(300, a quarter of the window): 300 px on a
+// laptop, which with the agent panel left the editor under 400 px. A handful
+// of short file names fits in this.
+const EXPLORER_WIDTH = 190;
+
 let booted: Promise<IdeWorkbench> | null = null;
 
 /**
@@ -428,13 +434,18 @@ async function boot(dark: boolean, describe: (issue: string) => string): Promise
 
   guardFixedFiles(describe);
 
+  const layoutService = await getService(IWorkbenchLayoutService);
+  // Sized while still laid out at the window's size; the grid keeps the
+  // explorer's width as the container resizes, so the editor takes the rest.
+  const sideBar = layoutService.getSize(Parts.SIDEBAR_PART);
+  layoutService.setSize(Parts.SIDEBAR_PART, { width: EXPLORER_WIDTH, height: sideBar.height });
+
   // A pop-up closed mid-boot never unparks it, and the editor's layers paint
   // through `visibility: hidden`.
   for (const prop of ["position", "inset", "visibility", "pointer-events"])
     element.style.removeProperty(prop);
   park(element, document.body);
 
-  const layoutService = await getService(IWorkbenchLayoutService);
   const commandService = await getService(ICommandService);
   const editorService = await getService(IEditorService);
   let darkNow = dark;

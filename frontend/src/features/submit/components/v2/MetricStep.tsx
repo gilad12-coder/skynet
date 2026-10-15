@@ -7,6 +7,7 @@ import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unifie
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
 import { useContractCheck } from "../../hooks/use-contract-check";
 import { CodingAgentPanel } from "../../ide/CodingAgentPanel";
+import { workspaceKey } from "../../ide/agent-verdict";
 import { IdeWorkspace } from "../../ide/IdeWorkspace";
 import { indexRepoTree, repoFolderName, type RepoSource } from "../../ide/repo-files";
 import { useIdeCodingAgent } from "../../ide/use-ide-coding-agent";
@@ -129,13 +130,6 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   );
 
   const contract = useContractCheck(ctx);
-  // Until a fresh sandboxed check exists, the results show what the static
-  // check spotted while typing.
-  const staticFailed = contract.staticResult?.checks.some((item) => item.status === "failed");
-  const consoleResult =
-    staticFailed && (!contract.lastCheck || contract.stale)
-      ? contract.staticResult
-      : contract.lastCheck;
   const lastCheckOk = contract.lastCheck && !contract.stale ? contract.lastCheck.ok : null;
 
   // The coding agent writes under this context. Inference re-roles the
@@ -155,10 +149,24 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     setRunCode,
     setMetricCode,
     setFile: setWorkspaceFile,
+    lastCheck: contract.lastCheck,
     lastCheckOk,
     check: contract.check,
     guided,
   });
+  // The results strip: the agent's verify_code verdict while it is newer than
+  // the last Check, else that Check. Until either is fresh, a failing static
+  // check (what typing just broke) wins; a result older than the files is dimmed.
+  const filesKey = workspaceKey(workspace.runCode, workspace.metricCode, workspace.files);
+  const verdict = coding.verdict;
+  const verdictFresh = verdict?.key === filesKey;
+  const staticFailed = contract.staticResult?.checks.some((item) => item.status === "failed");
+  const showStatic =
+    staticFailed && !verdictFresh && (verdict !== null || !contract.lastCheck || contract.stale);
+  const consoleResult = showStatic ? contract.staticResult : contract.lastCheck;
+  const agentResults = !showStatic && verdict ? verdict.files : null;
+  const resultsStale = showStatic ? false : verdict ? !verdictFresh : contract.stale;
+
   const { setAgentWriting } = ctx;
   const agentBusy = coding.agent.status === "streaming";
   React.useEffect(() => {
@@ -190,7 +198,8 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {onScreen && isGeneralistAgentEnabled() && <HideAgentPill />}
-      <WizardScreen active={page === 0} className="flex flex-col overflow-hidden">
+      {/* Clip, not hide: a hidden box still scrolls when the editor takes focus. */}
+      <WizardScreen active={page === 0} className="flex flex-col overflow-clip">
         <IdeWorkspace
           runCode={workspace.runCode}
           metricCode={workspace.metricCode}
@@ -199,6 +208,8 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           onFileDelete={deleteFile}
           onCheck={repo ? null : contract.check}
           checkResult={repo ? null : consoleResult}
+          agentResults={repo ? null : agentResults}
+          resultsStale={!repo && resultsStale}
           hint={hint}
           repo={repoFiles}
           guided={guided}

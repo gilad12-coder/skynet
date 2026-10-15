@@ -184,7 +184,10 @@ function UnifiedWizardFrame() {
   return (
     <div
       // Every step can hold its agent beside the form, so the frame stays wide.
-      className="mx-auto flex h-[calc(100dvh-var(--header-height)-3rem)] w-full min-w-0 max-w-6xl flex-col gap-4 md:-mt-4 md:gap-5"
+      // The Metric step holds the IDE, which needs the full width for its editor.
+      className={`mx-auto flex h-[calc(100dvh-var(--header-height)-3rem)] w-full min-w-0 flex-col gap-4 md:-mt-4 md:gap-5 ${
+        current === "metric" ? "max-w-screen-2xl" : "max-w-6xl"
+      }`}
     >
       <div className="shrink-0">
         <SubmitStepper w={stepper} locked={w.advancing} />

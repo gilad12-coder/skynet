@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { contractCheckMessage } from "@/shared/lib/i18n";
+import { cn } from "@/shared/lib/utils";
 import { Button } from "@/shared/ui/primitives/button";
 import {
   ArrowsIn,
@@ -20,14 +21,20 @@ import {
   ListChecks,
   XCircle,
 } from "@/shared/ui/icons";
-import type { ContractCheckItem, ContractCheckResponse } from "@/shared/types/unified-run";
+import type {
+  ContractCheckItem,
+  ContractCheckResponse,
+  FileVerification,
+} from "@/shared/types/unified-run";
 import { contractConsole, type ContractConsole } from "../lib/contract-console";
 import { blankEntryFile, diffWorkspace, workspaceTexts } from "../lib/ide-workspace";
 import { METRIC_FILE, RUN_FILE } from "../lib/wizard-v2";
 import { v2Msg } from "../components/v2/ArtifactConfirmCard";
 import { park, unpark } from "./park";
 import type { RepoSource } from "./repo-files";
+import { guardClippingAncestors } from "./scroll-guard";
 import type { IdeWorkbench } from "./workbench";
+import { ZOOM_EASING, ZOOM_MS, prefersReducedMotion, zoomFrames } from "./zoom";
 
 function isDark(): boolean {
   return document.documentElement.classList.contains("dark");
@@ -125,6 +132,8 @@ export function IdeWorkspace({
   onFileDelete,
   onCheck,
   checkResult,
+  agentResults,
+  resultsStale,
   hint,
   repo,
   strip,
@@ -140,6 +149,10 @@ export function IdeWorkspace({
   onCheck: (() => Promise<ContractCheckResponse | null>) | null;
   /** The last Check (or the static check while it is fresher); each file gets its line. */
   checkResult: ContractCheckResponse | null;
+  /** The coding agent's verify_code verdict per file; shown instead of `checkResult` when set. */
+  agentResults: FileVerification[] | null;
+  /** The shown results predate the files (or setup) on screen. */
+  resultsStale: boolean;
   /** What the entry files must define, from the contract. */
   hint: string | null;
   /** A repository run's checkout, shown read-only in the explorer. */
@@ -154,6 +167,12 @@ export function IdeWorkspace({
   const [workbench, setWorkbench] = useState<IdeWorkbench | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  // The inline slot (the section, or its placeholder while full screen) and
+  // the pop-up layer, for the grow and shrink between them.
+  const slotRef = useRef<HTMLElement | null>(null);
+  const layerRef = useRef<HTMLDivElement | null>(null);
+  const growFrom = useRef<DOMRect | null>(null);
   const [checking, setChecking] = useState(false);
   // What the toolbar's own Check found that the wizard's result cannot say,
   // until the next result (the agent's own Check, say) replaces it.
@@ -220,9 +239,17 @@ export function IdeWorkspace({
     if (!workbench || !host) return;
     unpark(workbench.element, host);
     workbench.layout();
-    const observer = new ResizeObserver(() => workbench.layout());
+    // Every size change of the host (the results strip appearing, the window,
+    // the move into the pop-up) re-lays VS Code out to it; a workbench left at
+    // its old size overflows the host. A hidden step measures 0 and is skipped:
+    // laying out at 0 squeezes the explorer to its minimum.
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry && entry.contentRect.width > 0 && entry.contentRect.height > 0) workbench.layout();
+    });
     observer.observe(host);
+    const releaseScroll = guardClippingAncestors(host);
     return () => {
+      releaseScroll();
       observer.disconnect();
       // VS Code boots once per page, so between hosts it waits in the
       // document, fully hidden.
@@ -241,8 +268,38 @@ export function IdeWorkspace({
 
   const toggleFullScreen = useCallback(async () => {
     await workbench?.saveAll();
-    setFullScreen((open) => !open);
-  }, [workbench]);
+    if (!fullScreen) {
+      growFrom.current = slotRef.current?.getBoundingClientRect() ?? null;
+      setFullScreen(true);
+      return;
+    }
+    const layer = layerRef.current;
+    const slot = slotRef.current?.getBoundingClientRect();
+    if (layer && slot && typeof layer.animate === "function" && !prefersReducedMotion()) {
+      setClosing(true);
+      const frames = zoomFrames(slot, window.innerWidth, window.innerHeight).reverse();
+      // Held at the slot until the layer unmounts, so it never flashes back to full.
+      const shrink = layer.animate(frames, { duration: ZOOM_MS, easing: ZOOM_EASING, fill: "forwards" });
+      await shrink.finished.catch(() => undefined);
+      setClosing(false);
+    }
+    setFullScreen(false);
+  }, [workbench, fullScreen]);
+
+  // The layer is laid out full size at once; only its clip grows from the slot.
+  useLayoutEffect(() => {
+    if (!fullScreen) return;
+    const from = growFrom.current;
+    growFrom.current = null;
+    const layer = layerRef.current;
+    if (!layer || !from || typeof layer.animate !== "function" || prefersReducedMotion()) return;
+    const grow = layer.animate(zoomFrames(from, window.innerWidth, window.innerHeight), {
+      duration: ZOOM_MS,
+      easing: ZOOM_EASING,
+    });
+    grow.finished.then(() => workbench?.layout()).catch(() => undefined);
+    return () => grow.cancel();
+  }, [fullScreen, workbench]);
 
   const runCheck = useCallback(async () => {
     if (!onCheck) return;
@@ -266,6 +323,11 @@ export function IdeWorkspace({
 
   const extraPaths = useMemo(() => Object.keys(files).sort(), [files]);
   const results = useMemo<FileCheck[]>(() => {
+    if (agentResults) {
+      return agentResults
+        .filter(({ path, ok }) => path === RUN_FILE || path === METRIC_FILE || !ok)
+        .map(({ path, ok, errors, warnings }) => ({ path, console: { valid: ok, errors, warnings } }));
+    }
     if (!checkResult) return [];
     const out: FileCheck[] = [];
     for (const path of [RUN_FILE, METRIC_FILE, ...extraPaths]) {
@@ -275,7 +337,7 @@ export function IdeWorkspace({
         out.push({ path, console: result });
     }
     return out;
-  }, [checkResult, extraPaths, guided]);
+  }, [agentResults, checkResult, extraPaths, guided]);
   const showResults = checkIssue !== null || results.length > 0;
 
   const checkLabel = checking
@@ -316,7 +378,7 @@ export function IdeWorkspace({
             size="icon-sm"
             variant="ghost"
             onClick={toggleFullScreen}
-            disabled={!workbench}
+            disabled={!workbench || closing}
             aria-label={fullScreenLabel}
           >
             {fullScreen ? (
@@ -328,7 +390,18 @@ export function IdeWorkspace({
         </div>
       </header>
       {showResults && (
-        <div aria-live="polite" className="shrink-0 border-b border-border/60">
+        <div
+          aria-live="polite"
+          className={cn(
+            "shrink-0 border-b border-border/60 transition-opacity",
+            resultsStale && checkIssue === null && "opacity-60",
+          )}
+        >
+          {resultsStale && checkIssue === null && (
+            <p className="px-4 pt-2 text-xs text-muted-foreground">
+              {v2Msg("submit.v2.metric.check.stale", guided)}
+            </p>
+          )}
           <CheckResults
             results={results}
             failed={checkIssue?.failed ?? false}
@@ -342,7 +415,9 @@ export function IdeWorkspace({
       <div className="flex min-h-0 flex-1">
         {/* VS Code lays out left to right whatever the page direction. */}
         <div dir="ltr" className="relative min-w-0 flex-1">
-          <div ref={setHost} className="absolute inset-0" />
+          {/* Clipped, so nothing VS Code positions past its edge makes the
+              boxes around it scrollable. */}
+          <div ref={setHost} className="absolute inset-0 overflow-clip" />
           {!workbench && (
             <p className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">
               {loadFailed
@@ -352,7 +427,7 @@ export function IdeWorkspace({
           )}
         </div>
         {sidePanel && (
-          <aside className="relative w-80 shrink-0 border-s border-border/60 xl:w-96">
+          <aside className="relative w-80 shrink-0 border-s border-border/60">
             {sidePanel}
           </aside>
         )}
@@ -362,7 +437,11 @@ export function IdeWorkspace({
 
   if (!fullScreen) {
     return (
-      <section aria-labelledby="ide-workspace-title" className="flex h-full min-h-0 flex-col">
+      <section
+        ref={slotRef}
+        aria-labelledby="ide-workspace-title"
+        className="flex h-full min-h-0 flex-col"
+      >
         {body}
       </section>
     );
@@ -371,16 +450,23 @@ export function IdeWorkspace({
   // makes it the containing block of a fixed child, and the agent chat's own
   // tooltips and popovers portal to body at z-index 50, so the pop-up takes
   // the same layer and they open above it.
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="ide-workspace-title"
-      className="fixed inset-0 flex flex-col bg-background"
-      style={{ zIndex: 50 }}
-    >
-      {body}
-    </div>,
-    document.body,
+  // The empty slot stays in the step, so Exit full screen knows where to shrink to.
+  return (
+    <>
+      <section ref={slotRef} aria-hidden className="h-full" />
+      {createPortal(
+        <div
+          ref={layerRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ide-workspace-title"
+          className="fixed inset-0 flex flex-col overflow-clip bg-background"
+          style={{ zIndex: 50 }}
+        >
+          {body}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
