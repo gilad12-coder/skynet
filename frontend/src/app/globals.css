@@ -1701,8 +1701,9 @@ table {
 [data-ide-host] .part.sidebar:focus-within .composite.title .title-actions {
   display: block;
 }
-/* On hover the actions take ~14 px more than the title leaves, so tighten
-   the header's left padding and the icons' padding to keep "WORKSPACE" whole. */
+/* On hover the title and actions need ~14 px more than the 190 px bar has.
+   The icons are fixed at 16 px, so the room comes from the padding and the
+   gaps between icons, keeping "WORKSPACE" whole and the last icon unclipped. */
 [data-ide-host] .part.sidebar > .composite.title {
   align-items: center;
   padding-left: 12px;
@@ -1714,6 +1715,9 @@ table {
   align-self: stretch;
   flex-shrink: 0;
 }
-[data-ide-host] .part.sidebar > .composite.title .title-actions .action-label {
-  padding: 1px;
+[data-ide-host] .part.sidebar > .composite.title .title-actions .action-item {
+  margin-right: 1px;
+}
+[data-ide-host] .part.sidebar > .composite.title .title-actions .action-item:last-child {
+  margin-right: 0;
 }
