@@ -418,6 +418,27 @@ def _needs_approval(tool_name: str, trust_mode: TrustMode) -> bool:
     return trust_mode == "ask" and tool_name in _SAFE_MUTATIONS
 
 
+# A screen agent's form writes land on the screen the user is looking at,
+# scoped to its fields, and editing the field undoes them. Asking first would
+# stall the wizard's proactive flow on every field it fills.
+_SCREEN_OWN_WRITES: frozenset[str] = frozenset({"update_wizard_state", "set_column_roles_datasets_column_roles_post"})
+
+
+def _screen_needs_approval(tool_name: str, trust_mode: TrustMode) -> bool:
+    """Decide whether a wizard screen agent's tool call must pause for confirmation.
+
+    Args:
+        tool_name: The MCP tool's registered name.
+        trust_mode: The caller's selected trust level.
+
+    Returns:
+        False for the screen's own form writes; otherwise :func:`_needs_approval`.
+    """
+    if tool_name in _SCREEN_OWN_WRITES:
+        return False
+    return _needs_approval(tool_name, trust_mode)
+
+
 class _TurnAuthoringFlag:
     """Turn-scoped state shared by the tool wrappers of one user turn.
 
@@ -1931,7 +1952,8 @@ How a turn works:
 * A ``User declined`` result means they refused that action: do not call
   that tool again this turn.
 * Write ``assistant_message`` and every user-facing tool argument in
-  ``reply_language``. Product terms stay in English.
+  ``reply_language``, even when tool results, notes or the data use
+  another language. Product terms stay in English.
 
 This screen:
 * {focus}
@@ -2180,6 +2202,7 @@ async def _drive_generalist_agent(
         # One per turn, shared across every wrapper, so a later call sees the
         # wizard fields an earlier call wrote this turn.
         authoring_flag = _TurnAuthoringFlag()
+        screen = wizard_state.get("wizard_screen") if "wizard_screen" in wizard_state else None
         dspy_tools = [
             _wrap_tool_with_approval(
                 scope_wizard_tool(dspy.Tool.from_mcp_tool(session, spec), wizard_state),
@@ -2190,6 +2213,7 @@ async def _drive_generalist_agent(
                 staged_dataset_id=staged_id,
                 wizard_state=wizard_state,
                 authoring_flag=authoring_flag,
+                needs_approval=_screen_needs_approval if screen is not None else None,
                 approval_owner=approval_owner,
             )
             for spec in listing.tools
@@ -2208,7 +2232,6 @@ async def _drive_generalist_agent(
             )
             for tool in build_web_tools()
         ]
-        screen = wizard_state.get("wizard_screen") if "wizard_screen" in wizard_state else None
         if screen is not None:
             dspy_tools += [
                 _wrap_tool_with_approval(

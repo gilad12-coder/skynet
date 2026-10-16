@@ -146,8 +146,8 @@ function UnifiedWizardFrame() {
     setScreenIssue?.(blockedText);
   }, [blockedText, setScreenIssue]);
   useEffect(() => {
-    setScreenNavigator?.({ forward, goToScreen });
-  }, [forward, goToScreen, setScreenNavigator]);
+    setScreenNavigator?.({ screen: visibleScreen, forward, goToScreen });
+  }, [visibleScreen, forward, goToScreen, setScreenNavigator]);
   useEffect(
     () => () => {
       setWizardScreen?.(null);

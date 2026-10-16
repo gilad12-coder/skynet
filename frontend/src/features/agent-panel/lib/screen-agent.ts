@@ -12,6 +12,8 @@ export type ScreenNav =
 
 /** What the wizard frame exposes so the agent can move it. */
 export interface ScreenNavigator {
+  /** The screen on view. */
+  screen: string;
   /** The Continue button's own handler. */
   forward: () => void;
   /** Jump back to an earlier screen. */
@@ -44,8 +46,12 @@ export function parseScreenNav(result: unknown): ScreenNav | null {
 /** Move the wizard as a screen agent asked, through the navigator's own handlers. */
 export function runScreenNav(nav: ScreenNav, navigator: ScreenNavigator | null): void {
   if (!navigator) return;
-  if (nav.action === "continue") navigator.forward();
-  else navigator.goToScreen(nav.screen);
+  if (nav.action === "continue") {
+    // The wizard may already have moved past the agent's screen by itself;
+    // continuing again would skip the next one unseen.
+    if (nav.from && nav.from !== navigator.screen) return;
+    navigator.forward();
+  } else navigator.goToScreen(nav.screen);
 }
 
 /**

@@ -25,6 +25,7 @@ from core.service_gateway.agents.generalist import (
     ApprovalRegistry,
     WizardState,
     _needs_approval,
+    _screen_needs_approval,
     _TurnAuthoringFlag,
     _wrap_tool_with_approval,
     approval_key,
@@ -562,6 +563,15 @@ def test_auto_safe_gates_only_destructive() -> None:
     assert _needs_approval("toggle_pin_job_optimizations", "auto_safe") is False
     assert _needs_approval("delete_job_optimizations", "auto_safe") is True
     assert _needs_approval("submit_unified_run_optimize_post", "auto_safe") is True
+
+
+def test_screen_agent_fills_its_own_screen_without_asking() -> None:
+    """A screen agent's form writes skip Ask; everything else keeps the usual gate."""
+    assert _screen_needs_approval("update_wizard_state", "ask") is False
+    assert _screen_needs_approval("set_column_roles_datasets_column_roles_post", "ask") is False
+    assert _screen_needs_approval("stage_sample_dataset_datasets_samples", "ask") is True
+    assert _screen_needs_approval("submit_unified_run_optimize_post", "ask") is True
+    assert _screen_needs_approval("delete_job_optimizations", "auto_safe") is True
 
 
 def _make_fake_tool(name: str, return_value: str = "ok") -> dspy.Tool:
