@@ -280,8 +280,16 @@ _FULL_SNAPSHOT: dict[str, Any] = {
 def test_screen_snapshot_keeps_screen_fields_and_read_only_extras(screen: str, expected: set[str]) -> None:
     """A screen sees its own fields plus the values it depends on, nothing else."""
     trimmed = screen_snapshot(cast(WizardState, {**_FULL_SNAPSHOT, "wizard_screen": screen}))
-    assert set(trimmed) == expected | {"wizard_screen"}
+    assert set(trimmed) == expected | {"wizard_screen", "job_name"}
     assert trimmed["wizard_screen"] == screen
+
+
+def test_screen_snapshot_shows_a_missing_run_name() -> None:
+    """Every screen sees ``job_name``, null when unset, since writes wait on it."""
+    unnamed = screen_snapshot(cast(WizardState, {"wizard_screen": "source", "task_objective": "Sort emails"}))
+    assert unnamed["job_name"] is None
+    named = screen_snapshot(cast(WizardState, {"wizard_screen": "source", "job_name": "Email sorter"}))
+    assert named["job_name"] == "Email sorter"
 
 
 def test_models_screen_sees_the_optimizer_read_only() -> None:

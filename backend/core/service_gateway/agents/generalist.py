@@ -1356,6 +1356,9 @@ def screen_snapshot(state: WizardState) -> dict[str, Any]:
         _SCREEN_FIELDS.get(screen, frozenset()) | _SCREEN_SNAPSHOT_EXTRAS.get(screen, frozenset()) | {"wizard_screen"}
     )
     snapshot = {key: value for key, value in state.items() if key in keep}
+    # Every wizard write is refused until the run has a name, and no screen
+    # shows it, so the agent must see when it is still missing.
+    snapshot["job_name"] = state.get("job_name") or None
     notes = earlier_screen_notes(state)
     if notes:
         snapshot["notes_from_earlier_screens"] = notes
@@ -2039,8 +2042,10 @@ This screen:
   they want there. When it belongs to a later screen, change nothing for
   it: save it with ``remember_for_later`` and say it will be handled there.
 * ``job_name``, ``job_description`` and ``is_private`` show on no screen.
-  Set them only when the user asks for them this turn, or when an "Out of
-  order" error says the run needs a name first.
+  Set them only when the user asks for them this turn, with one exception:
+  when ``job_name`` is null, every write is refused until the run has a
+  name, so put a short name drawn from the task into your first
+  ``update_wizard_state`` call, beside this screen's fields.
 * When the user says something a later screen needs (a budget, a model
   preference, "keep it cheap"), call ``remember_for_later`` with it.
 * When this screen is complete and the user wants to move on, call
