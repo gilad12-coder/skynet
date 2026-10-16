@@ -21,8 +21,10 @@ import { Segmented } from "@/shared/ui/segmented";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 
+import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
 import { useTaskInterview, type TaskInterviewState } from "../../hooks/use-task-interview";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
+import { taskAdvanceFrom } from "../../lib/auto-advance";
 import { emptyRepoDraft, taskIssue } from "../../lib/wizard-v2";
 import { AuthoringShell } from "../steps/AuthoringShell";
 import { ArtifactConfirmCard, v2Msg } from "./ArtifactConfirmCard";
@@ -44,6 +46,22 @@ export function TaskStep({ page }: { page: number }) {
   // Manual hides the interview; it never discards the transcript.
   const [assist, setAssist] = React.useState<"auto" | "manual">("auto");
   const interview = useTaskInterview(ctx, assist === "auto");
+
+  // Once the interview has what it needs, the wizard moves on by itself, but
+  // only on the first pass: a user who comes back to edit the task stays put.
+  const { advanceFrom } = useWizardAutoAdvance();
+  const advancePast = taskAdvanceFrom({
+    auto: assist === "auto",
+    firstPass: state.furthestStep === "task",
+    onStep: state.step === "task",
+    done: interview.done,
+    busy: interview.busy,
+    valid: taskIssue(task) === null,
+    page,
+  });
+  React.useEffect(() => {
+    if (advancePast) advanceFrom(advancePast);
+  }, [advancePast, advanceFrom]);
 
   return (
     <AuthoringShell

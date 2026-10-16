@@ -4,6 +4,7 @@ import * as React from "react";
 import { isGeneralistAgentEnabled, useHideAgentPill } from "@/features/agent-panel";
 import { githubRepoFile, githubRepoTree } from "@/shared/lib/api";
 import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unified-run";
+import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
 import { useContractCheck } from "../../hooks/use-contract-check";
 import { CodingAgentPanel } from "../../ide/CodingAgentPanel";
@@ -12,6 +13,7 @@ import { IdeWorkspace } from "../../ide/IdeWorkspace";
 import type { IdeOpenRequest } from "../../ide/open-file";
 import { indexRepoTree, repoFolderName, type RepoSource } from "../../ide/repo-files";
 import { useIdeCodingAgent } from "../../ide/use-ide-coding-agent";
+import { metricAdvanceFrom } from "../../lib/auto-advance";
 import { authoringCases } from "../../lib/inputs-mode";
 import { metricUsesModel as metricCallsModel, withScorerImports } from "../../lib/scorer-dependencies";
 import { METRIC_FILE, RUN_FILE, isSingleAnswerTask, repoIssue } from "../../lib/wizard-v2";
@@ -214,6 +216,40 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     setAgentWriting(agentBusy);
     return () => setAgentWriting(false);
   }, [agentBusy, setAgentWriting]);
+
+  // Code the agent just wrote moves the wizard on once it passes: from the
+  // editor to Check, and from a passing Check to the overview, where Run
+  // stays the user's. Only the files the agent left count (a hand edit stops
+  // it), and only until the overview was first reached.
+  const { advanceFrom } = useWizardAutoAdvance();
+  const overviewPage = repo ? 1 : 2;
+  const [overviewSeen, setOverviewSeen] = React.useState(false);
+  const [agentLeft, setAgentLeft] = React.useState<string | null>(null);
+  const filesKeyRef = React.useRef(filesKey);
+  React.useEffect(() => {
+    filesKeyRef.current = filesKey;
+  });
+  const { writtenTurns } = coding;
+  React.useEffect(() => {
+    if (writtenTurns > 0) setAgentLeft(filesKeyRef.current);
+  }, [writtenTurns]);
+  const onMetricStep = state.step === "metric";
+  React.useEffect(() => {
+    if (onMetricStep && page === overviewPage) setOverviewSeen(true);
+  }, [onMetricStep, page, overviewPage]);
+  const advancePast = metricAdvanceFrom({
+    onStep: onMetricStep,
+    overviewSeen,
+    busy: agentBusy,
+    agentLeftFiles: agentLeft === filesKey,
+    editorPassed: (verdictFresh && verdict?.ok === true) || lastCheckOk === true,
+    checkPassed: contract.lastCheck?.ok === true && !contract.stale,
+    repo,
+    page,
+  });
+  React.useEffect(() => {
+    if (advancePast) advanceFrom(advancePast);
+  }, [advancePast, advanceFrom]);
 
   // The sandbox still injects `llm` for old scorers; making the import
   // explicit as the user leaves the code keeps it honest about what it calls.

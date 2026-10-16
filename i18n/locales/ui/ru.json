@@ -1713,7 +1713,6 @@
   "auto.features.agent.panel.components.generalistpanel.3": "Агент",
   "auto.features.agent.panel.components.generalistpanel.4": "Что я умею",
   "auto.features.agent.panel.components.generalistpanel.6": "Нажмите, чтобы свернуть",
-  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "Я теперь на этом экране. Что здесь нужно сделать?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "Набор данных `{p1}` прикреплён ({p2} строк).\n\nСопоставление столбцов:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "Попробовать ещё раз",
   "auto.features.agent.panel.components.generalistpanel.history_button": "Прошлые беседы",

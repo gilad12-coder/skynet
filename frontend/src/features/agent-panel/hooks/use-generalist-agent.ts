@@ -53,7 +53,12 @@ export interface GeneralistAgentState {
   /** Reasoning-effort level for the chosen model; null runs its default. */
   reasoningEffort: string | null;
   setReasoningEffort: (effort: string | null) => void;
-  send: (message: string, wizardStateOverride?: WizardState) => void;
+  /** Send a chat turn; ``hidden`` sends it without a user bubble (a kickoff the app started). */
+  send: (
+    message: string,
+    wizardStateOverride?: WizardState,
+    options?: { hidden?: boolean },
+  ) => void;
   /** The displayed chat's messages sent mid-turn: steered into the running
    *  turn or queued to run after it. */
   midTurn: MidTurnQueue;
@@ -752,6 +757,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       history: AgentMessage[],
       wizardStateOverride?: WizardState,
       regenerate = false,
+      hidden = false,
     ) => {
       // A resend within the same session replaces its own in-flight or queued
       // turn — other sessions' streams are untouched.
@@ -790,7 +796,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           ...cur,
           messages: [
             ...history,
-            { role: "user", content: userMessage },
+            { role: "user", content: userMessage, ...(hidden ? { hidden } : {}) },
             { role: "assistant", content: "", toolCalls: [] },
           ],
           error: null,
@@ -814,7 +820,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
   );
 
   const send = React.useCallback(
-    (message: string, wizardStateOverride?: WizardState) => {
+    (message: string, wizardStateOverride?: WizardState, options?: { hidden?: boolean }) => {
       const trimmed = message.trim();
       if (!trimmed) return;
       const key = activeKeyRef.current;
@@ -826,7 +832,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         };
       }
       const history = sessionsRef.current.get(key)?.messages ?? [];
-      requestRun(key, trimmed, history, wizardStateOverride);
+      requestRun(key, trimmed, history, wizardStateOverride, false, options?.hidden ?? false);
     },
     [getRuntime, requestRun],
   );
@@ -873,7 +879,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     const lastUser = current[lastUserIndex];
     if (!lastUser) return;
     const truncated = current.slice(0, lastUserIndex);
-    requestRun(key, lastUser.content, truncated, undefined, true);
+    requestRun(key, lastUser.content, truncated, undefined, true, lastUser.hidden ?? false);
   }, [requestRun]);
 
   const stop = React.useCallback(() => {

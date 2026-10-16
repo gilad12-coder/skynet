@@ -1713,7 +1713,6 @@
   "auto.features.agent.panel.components.generalistpanel.3": "عامل",
   "auto.features.agent.panel.components.generalistpanel.4": "چه کارهایی می‌توانم انجام دهم",
   "auto.features.agent.panel.components.generalistpanel.6": "برای جمع کردن کلیک کنید",
-  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "الان در این صفحه هستم. اینجا به چه چیزی نیاز داریم؟",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "مجموعه‌داده‌ی `{p1}` پیوست شد ({p2} ردیف).\n\nنگاشت ستون‌ها:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "دوباره تلاش کنید",
   "auto.features.agent.panel.components.generalistpanel.history_button": "گفتگوهای پیشین",

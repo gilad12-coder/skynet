@@ -19,7 +19,7 @@ import { ChatTranscript } from "@/shared/ui/agent/chat-transcript";
 import { Composer } from "@/shared/ui/agent/composer";
 import { SkynetMark } from "@/shared/ui/skynet-mark";
 import { ComposerModelMenu } from "@/shared/ui/agent/composer-model-menu";
-import type { AgentToolCall } from "@/shared/ui/agent/types";
+import type { AgentMessage, AgentToolCall } from "@/shared/ui/agent/types";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { SubmitSplashOverlay, SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 import { cn } from "@/shared/lib/utils";
@@ -85,6 +85,18 @@ function extractOptimizationId(result: unknown): string | null {
     top.result && typeof top.result === "object" ? (top.result as Record<string, unknown>) : top;
   const candidate = inner.optimization_id ?? inner.id;
   return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
+}
+
+// Never shown, so not translated: the agent replies in the user's language
+// either way, and one fixed text lets a reopened chat recognize it.
+const SCREEN_KICKOFF =
+  "[The wizard opened this screen; I typed nothing.] If what you know is enough, fill this screen in and continue; otherwise ask me the one thing you need.";
+
+/** A reopened chat stores the wizard's kickoff as a user turn; it stays unshown. */
+function hideKickoffs(messages: AgentMessage[]): AgentMessage[] {
+  return messages.map((m) =>
+    m.role === "user" && m.content.trim() === SCREEN_KICKOFF ? { ...m, hidden: true } : m,
+  );
 }
 
 function getEffectiveMinWidth(): number {
@@ -160,12 +172,13 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       : { ...merged, wizard_screen: screen };
   })();
   // Each wizard screen has its own agent and its own chat. Moving to a
-  // screen resumes the chat held there, or opens a fresh one; an agent move
-  // (Continue / Back) leaves the next screen's agent its opening message.
+  // screen resumes the chat held there, or opens a fresh one whose agent
+  // starts by itself; an agent's Back leaves the earlier screen its request.
   const shownScreen = wizardCtx?.wizardScreen ?? null;
   const screenChatsRef = React.useRef(new Map<string, string>());
   const screenOpeningRef = React.useRef<string | null>(null);
   const shownScreenRef = React.useRef<string | null>(null);
+  const [kickoffScreen, setKickoffScreen] = React.useState<string | null>(null);
 
   // Agent-submit splash: a successful submit tool plays the same full-screen
   // banner the manual wizard button shows, then routes to the new job's
@@ -225,10 +238,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (Object.keys(patch).length > 0) wizardCtx.applyAgentPatch(patch);
       const nav = ev.status === "ok" ? parseScreenNav(ev.result) : null;
       if (nav) {
-        screenOpeningRef.current =
-          nav.action === "back" && nav.request
-            ? nav.request
-            : msg("auto.features.agent.panel.components.generalistpanel.screen_opened_note");
+        screenOpeningRef.current = nav.action === "back" && nav.request ? nav.request : null;
         wizardCtx.navigateScreen(nav);
       }
     },
@@ -297,7 +307,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (!agent.activateConversation(id)) {
         const detail = await getConversation(id);
         if (!detail) return;
-        agent.openConversation(id, detail.messages);
+        agent.openConversation(id, hideKickoffs(detail.messages));
       }
       store.setActiveId(id);
       store.markSeen(id);
@@ -347,23 +357,27 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     if (next.kind === "stay") return;
     const opening = screenOpeningRef.current;
     screenOpeningRef.current = null;
+    const sendOpening = () => {
+      if (opening) sendToAgent(opening, undefined, { hidden: true });
+    };
     if (next.kind === "fresh") {
       newSession();
       setActiveConversation(null);
-      if (opening) sendToAgent(opening);
+      if (opening) sendOpening();
+      else setKickoffScreen(shownScreen);
       return;
     }
     const id = next.conversationId;
     setActiveConversation(id);
     if (activateConversation(id)) {
-      if (opening) sendToAgent(opening);
+      sendOpening();
       return;
     }
     void getConversation(id).then((detail) => {
       if (shownScreenRef.current !== shownScreen) return;
-      if (detail) openConversation(id, detail.messages);
+      if (detail) openConversation(id, hideKickoffs(detail.messages));
       else newSession();
-      if (opening) sendToAgent(opening);
+      sendOpening();
     });
   }, [
     shownScreen,
@@ -373,6 +387,24 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     sendToAgent,
     setActiveConversation,
   ]);
+
+  // A fresh screen's agent opens the chat by itself: it fills the screen from
+  // what it already knows and continues, or asks the one thing it lacks. It
+  // waits for the chat to be on view (Manual hides it) and never talks over
+  // a chat that already started. A cloned run arrives filled in, so its
+  // agents wait for the user, as the task interview does.
+  const cloned = searchParams.has("clone");
+  const chatEmpty = agent.messages.length === 0 && agent.status === "idle";
+  React.useEffect(() => {
+    if (kickoffScreen === null) return;
+    if (kickoffScreen !== shownScreen || !chatEmpty || cloned) {
+      setKickoffScreen(null);
+      return;
+    }
+    if (!panelDock) return;
+    setKickoffScreen(null);
+    sendToAgent(SCREEN_KICKOFF, undefined, { hidden: true });
+  }, [kickoffScreen, shownScreen, chatEmpty, cloned, panelDock, sendToAgent]);
 
   // Deleting the conversation you're currently viewing must drop you back to a
   // clean slate — otherwise the panel keeps showing the just-deleted thread and

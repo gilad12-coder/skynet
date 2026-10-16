@@ -1713,7 +1713,6 @@
   "auto.features.agent.panel.components.generalistpanel.3": "Agente",
   "auto.features.agent.panel.components.generalistpanel.4": "Lo que puedo hacer",
   "auto.features.agent.panel.components.generalistpanel.6": "Haz clic para contraer",
-  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "Ya estoy en esta pantalla. ¿Qué necesitamos aquí?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "Conjunto de datos `{p1}` adjuntado ({p2} filas).\n\nMapeo de columnas:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "Inténtalo de nuevo",
   "auto.features.agent.panel.components.generalistpanel.history_button": "Conversaciones anteriores",

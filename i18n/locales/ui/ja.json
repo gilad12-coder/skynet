@@ -1713,7 +1713,6 @@
   "auto.features.agent.panel.components.generalistpanel.3": "エージェント",
   "auto.features.agent.panel.components.generalistpanel.4": "できること",
   "auto.features.agent.panel.components.generalistpanel.6": "クリックして折りたたむ",
-  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "この画面に移りました。ここでは何が必要ですか？",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "データセット `{p1}` を添付しました（{p2}行）。\n\n列マッピング:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "もう一度試す",
   "auto.features.agent.panel.components.generalistpanel.history_button": "過去の会話",

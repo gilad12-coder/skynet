@@ -1713,7 +1713,6 @@
   "auto.features.agent.panel.components.generalistpanel.3": "Агент",
   "auto.features.agent.panel.components.generalistpanel.4": "Що я вмію",
   "auto.features.agent.panel.components.generalistpanel.6": "Натисніть, щоб згорнути",
-  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "Я тепер на цьому екрані. Що тут потрібно зробити?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "Набір даних `{p1}` прикріплено ({p2} рядків).\n\nЗіставлення стовпців:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "Спробувати ще раз",
   "auto.features.agent.panel.components.generalistpanel.history_button": "Минулі розмови",
