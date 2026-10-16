@@ -26,6 +26,7 @@ from core.service_gateway.agents.generalist import (
     WizardState,
     _needs_approval,
     _screen_needs_approval,
+    _screen_problems,
     _TurnAuthoringFlag,
     _wrap_tool_with_approval,
     approval_key,
@@ -478,6 +479,24 @@ async def test_sample_listing_carries_the_reply_language() -> None:
     assert "Describe them in English" in result["note"]
     hebrew = note_sample_language(dspy.Tool(listing, name="list_sample_datasets_datasets_samples_get"), "Hebrew")
     assert "note" not in await hebrew.acall()
+
+
+@pytest.mark.parametrize(
+    ("patch", "blocked"),
+    [
+        ({"spending_limit_usd": 3}, True),
+        ({"spending_limit_usd": 3.7}, False),
+        ({"max_cost_cents": 300}, True),
+        ({"spending_limit_usd": None}, False),
+        ({}, False),
+    ],
+)
+def test_budget_screen_refuses_a_limit_below_the_estimate(patch: dict[str, Any], blocked: bool) -> None:
+    """Continue on the budget screen names the floor when the limit sits under it."""
+    problems = _screen_problems("budget", cast(WizardState, {"spending_floor_cents": 370, **patch}))
+    assert bool(problems) is blocked
+    if blocked:
+        assert "$3.70" in problems[0]
 
 
 def _wizard_tool() -> dspy.Tool:

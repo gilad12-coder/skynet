@@ -774,6 +774,10 @@ export function WizardV2Provider({
           if (typeof shared.run_code === "string") patchWorkspace({ runCode: shared.run_code });
           break;
         case "metric_code":
+          // A staged sample carries a DSPy metric from the older flow, not
+          // this workspace's scorer; pasting it would also read as a hand edit
+          // and keep the coding agent from writing the real one.
+          if (keys.includes("staged_dataset_id")) break;
           if (typeof shared.metric_code === "string")
             patchWorkspace({ metricCode: shared.metric_code });
           break;
@@ -815,6 +819,7 @@ export function WizardV2Provider({
       optimizer_choice: optimizer.choice,
       run_code: workspace.runCode || undefined,
       metric_code: workspace.metricCode || undefined,
+      spending_floor_cents: chargeable ? Math.ceil(chargeable.lowCents) : undefined,
     } as const;
     for (const key of Object.keys(outgoing) as Array<keyof typeof outgoing>) {
       const value = outgoing[key];
@@ -833,7 +838,7 @@ export function WizardV2Provider({
       handDataFlagRef.current = false;
       if (s.dataset_ready) wizardCtx.clearField("dataset_ready");
     }
-  }, [wizardCtx, state]);
+  }, [wizardCtx, state, chargeable]);
 
   const value: WizardV2Shell = {
     state,

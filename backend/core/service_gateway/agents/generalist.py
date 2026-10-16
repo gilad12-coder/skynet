@@ -919,6 +919,8 @@ class WizardState(TypedDict, total=False):
     model_configured: bool
     reflection_model_config: dict[str, Any]
     max_cost_cents: int | None
+    # The least the spending limit may be: the low end of the run's estimate.
+    spending_floor_cents: int | None
     run_code: str
     metric_code: str
     # The wizard screen on view (see ``_SCREEN_FIELDS``). Absent when the
@@ -1255,10 +1257,14 @@ def validate_wizard_screen(tool_name: str, kwargs: dict[str, Any], state: Wizard
 _SCREEN_SNAPSHOT_EXTRAS: dict[str, frozenset[str]] = {
     "artifact": frozenset({"task_objective"}),
     "source": frozenset({"task_objective", "artifact_kind", "dataset_ready", "input_fields", "expected_field"}),
-    "plan": frozenset({"task_objective", "artifact_kind", "data_mode", "model_configured", "max_cost_cents"}),
+    "plan": frozenset(
+        {"task_objective", "artifact_kind", "data_mode", "model_configured", "max_cost_cents", "spending_floor_cents"}
+    ),
     "optimizer": frozenset({"artifact_kind", "data_mode"}),
     "models": frozenset({"optimizer_choice", "model_configured"}),
-    "budget": frozenset({"optimizer_choice", "model_config", "reflection_model_config", "max_cost_cents"}),
+    "budget": frozenset(
+        {"optimizer_choice", "model_config", "reflection_model_config", "max_cost_cents", "spending_floor_cents"}
+    ),
     "metric": frozenset(
         {
             "task_objective",
@@ -1439,11 +1445,43 @@ def _screen_problems(screen: str, state: WizardState) -> list[str]:
         return ["data_mode must be set, and pairs need a dataset attached"]
     if screen in ("plan", "models") and not _model_ready(state):
         return ["reflection_model_config needs a model"]
+    if screen in ("plan", "budget"):
+        short = _limit_below_floor(state)
+        if short:
+            return [short]
     if screen == "metric" and not _code_ready(state):
         return ["the run code and the metric are not written yet (the coding agent in the Metric step writes them)"]
     if screen == "overview":
         return ["this is the last screen; submit the run instead"]
     return []
+
+
+def _limit_below_floor(state: WizardState) -> str | None:
+    """Say why the spending limit is too low for the run, if it is.
+
+    Args:
+        state: The wizard snapshot with this turn's writes merged in.
+
+    Returns:
+        An English line naming the floor, or None when the limit is unset,
+        uncapped, unknown against an estimate, or at least the floor.
+    """
+    floor = state.get("spending_floor_cents")
+    if not isinstance(floor, int | float) or floor <= 0:
+        return None
+    # This turn's write arrives in dollars; the turn-start snapshot holds cents.
+    patch = cast(dict[str, Any], state)
+    if "spending_limit_usd" in patch:
+        dollars = patch["spending_limit_usd"]
+        limit = None if dollars is None else round(float(dollars) * 100)
+    else:
+        limit = state.get("max_cost_cents")
+    if limit is None or limit >= floor:
+        return None
+    return (
+        f"the spending limit ${limit / 100:.2f} is below this run's estimated minimum ${floor / 100:.2f}; "
+        "set at least that, or ask the user to raise it"
+    )
 
 
 def _append_note(notes: list[dict[str, str]], screen: str, note: str) -> None:
@@ -2048,8 +2086,10 @@ SCREEN_FOCUS: dict[str, str] = {
         "from ``list_models_for_agent``, fitting the chosen optimizer."
     ),
     "budget": (
-        "Budget: set ``spending_limit_usd``, the most the run may spend, in US dollars; check the wallet "
-        "with ``get_wallet_for_agent`` when the user asks what they can afford."
+        "Budget: set ``spending_limit_usd``, the most the run may spend, in US dollars, never below "
+        "``spending_floor_cents`` (the low end of the run's estimate); if the user wants less, say the run "
+        "needs at least that. Check the wallet with ``get_wallet_for_agent`` when the user asks what they "
+        "can afford."
     ),
     "metric": (
         "Metric: the coding agent beside this screen's editor writes the run code and the metric; "

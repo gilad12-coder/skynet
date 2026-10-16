@@ -70,7 +70,12 @@ export function TaskStep({ page }: { page: number }) {
       title={t("submit.v2.task.title")}
       description={t("submit.v2.task.desc")}
       sidePanel={
-        <TaskInterviewPanel interview={interview} guided={guided} className="absolute inset-0" />
+        <TaskInterviewPanel
+          interview={interview}
+          guided={guided}
+          firstPass={state.furthestStep === "task"}
+          className="absolute inset-0"
+        />
       }
     >
       <WizardScreen
@@ -200,10 +205,14 @@ function TaskField({
 function TaskInterviewPanel({
   interview,
   guided,
+  firstPass,
   className,
 }: {
   interview: TaskInterviewState;
   guided: boolean;
+  // The "has what it needs" note announces the move on; once the user is
+  // past this step it would only be stale.
+  firstPass: boolean;
   className?: string;
 }) {
   const [draft, setDraft] = React.useState("");
@@ -271,7 +280,7 @@ function TaskInterviewPanel({
         </div>
       )}
 
-      {interview.done && !interview.busy && !interview.error && (
+      {firstPass && interview.done && !interview.busy && !interview.error && (
         <p className="border-t border-border/40 px-4 py-2.5 text-xs text-muted-foreground">
           {t("submit.v2.task.chat.done")}
         </p>
