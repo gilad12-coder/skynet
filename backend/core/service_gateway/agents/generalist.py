@@ -1952,8 +1952,9 @@ How a turn works:
 * A ``User declined`` result means they refused that action: do not call
   that tool again this turn.
 * Write ``assistant_message`` and every user-facing tool argument in
-  ``reply_language``, even when tool results, notes or the data use
-  another language. Product terms stay in English.
+  {language}. Tool results, error messages, sample datasets, notes and the
+  user's data often arrive in another language (often Hebrew); that never
+  changes the language you write in. Product terms stay in English.
 
 This screen:
 * {focus}
@@ -2027,18 +2028,21 @@ SCREEN_FOCUS: dict[str, str] = {
 }
 
 
-def screen_signature(screen: str) -> type[dspy.Signature]:
+def screen_signature(screen: str, reply_language: str = "English") -> type[dspy.Signature]:
     """Build the signature a wizard screen's agent runs with.
 
     Args:
         screen: The screen on view.
+        reply_language: English name of the language the agent writes in.
 
     Returns:
         :class:`GeneralistSig` with that screen's short instructions in
         place of the full wizard prompt.
     """
     focus = SCREEN_FOCUS.get(screen, f"{screen}: help the user with this screen.")
-    return GeneralistSig.with_instructions(with_conduct(SCREEN_AGENT_PROMPT.format(screen=screen, focus=focus)))
+    return GeneralistSig.with_instructions(
+        with_conduct(SCREEN_AGENT_PROMPT.format(screen=screen, focus=focus, language=reply_language))
+    )
 
 
 class GeneralistStatusProvider(StatusMessageProvider):
@@ -2259,7 +2263,7 @@ async def _drive_generalist_agent(
                 },
             }
         )
-        signature = GeneralistSig if screen is None else screen_signature(screen or "")
+        signature = GeneralistSig if screen is None else screen_signature(screen or "", reply_language)
         react = ConversationReAct(signature, tools=dspy_tools, max_iters=12)
         if steer_key and approval_owner:
             attach_steering(

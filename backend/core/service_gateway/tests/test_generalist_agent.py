@@ -456,6 +456,13 @@ def test_screen_signature_is_short_and_names_the_screen(screen: str) -> None:
     assert len(instructions) < len(GENERALIST_SYSTEM_PROMPT or "")
 
 
+def test_screen_signature_names_the_reply_language() -> None:
+    """The screen prompt names the language outright, so Hebrew tool results can't pull it."""
+    instructions = screen_signature("source", "English").instructions
+    assert "every user-facing tool argument in\n  English." in instructions
+    assert "often Hebrew" in instructions
+
+
 def _wizard_tool() -> dspy.Tool:
     """Build an ``update_wizard_state`` stand-in with a field per screen.
 
