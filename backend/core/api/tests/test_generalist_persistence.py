@@ -481,6 +481,24 @@ async def test_persist_on_done_writes_exactly_once(wrapper_engine: Engine) -> No
     assert rows[0].model == "test-model"
 
 
+async def test_turn_plan_is_saved_with_the_reply(wrapper_engine: Engine) -> None:
+    """The turn's plan is kept on its row so a reload still shows it; labels are not."""
+
+    async def _planned_turn() -> AsyncIterator[dict[str, Any]]:
+        """Emit a turn that shares a plan, labels a thought, then replies."""
+        yield {"event": "plan", "data": {"text": "I'll fill the inputs, then move on."}}
+        yield {"event": "thinking_summary", "data": {"index": 0, "text": "Picked pairs"}}
+        yield {"event": "message_patch", "data": {"chunk": "Done"}}
+        yield {"event": "done", "data": {"assistant_message": "Done", "model": "test-model"}}
+
+    events = await _drain(_planned_turn(), wrapper_engine)
+
+    assert [e["event"] for e in events if e["event"] in ("plan", "thinking_summary")] == ["plan", "thinking_summary"]
+    rows = _assistant_rows(wrapper_engine)
+    assert len(rows) == 1
+    assert rows[0].router_metadata == {"plan": "I'll fill the inputs, then move on."}
+
+
 async def test_retracted_preamble_is_not_salvaged_as_the_reply(wrapper_engine: Engine) -> None:
     """Text withdrawn by ``message_reset`` stays out of a turn persisted on teardown."""
 

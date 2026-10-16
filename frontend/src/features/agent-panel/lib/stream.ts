@@ -41,6 +41,10 @@ interface ConversationMetaPayload {
 
 export interface GeneralistAgentHandlers {
   onReasoningPatch?: (chunk: string) => void;
+  /** A one-line label for the turn's `index`-th stretch of reasoning. */
+  onThinkingSummary?: (ev: { index: number; text: string }) => void;
+  /** What the agent said it will do this turn. */
+  onPlan?: (text: string) => void;
   onToolStart?: (ev: ToolStartPayload) => void;
   onToolEnd?: (ev: ToolEndPayload) => void;
   onPendingApproval?: (ev: PendingApprovalPayload) => void;

@@ -10,6 +10,8 @@ export interface ThinkingSegment {
   endedAt: number | null;
   /** How many of the turn's tool calls had started when this segment began. */
   toolsBefore: number;
+  /** One line on what the segment worked out, written once it closed. */
+  summary?: string;
 }
 
 function openLast(segments: readonly ThinkingSegment[]): ThinkingSegment | null {
@@ -119,6 +121,43 @@ export function reopenThinking(
   const next = segments.slice();
   next[next.length - 1] = { ...last, endedAt: null };
   return next;
+}
+
+/**
+ * Put a summary on the turn's ``index``-th segment that got reasoning. A turn
+ * a steer split runs over several messages; the count spans all of them, as
+ * the backend's does.
+ *
+ * Args:
+ *   messages: The chat's messages.
+ *   from: Index of the turn's first message.
+ *   index: The segment's position among the turn's segments with reasoning.
+ *   summary: The one-line summary.
+ *
+ * Returns:
+ *   The updated messages; the same array when no such segment exists.
+ */
+export function summarizeThinking<M extends { thinkingSegments?: readonly ThinkingSegment[] }>(
+  messages: M[],
+  from: number,
+  index: number,
+  summary: string,
+): M[] {
+  let seen = 0;
+  for (let m = Math.max(0, from); m < messages.length; m++) {
+    const message = messages[m] as M;
+    const segments = message.thinkingSegments ?? [];
+    for (let s = 0; s < segments.length; s++) {
+      if (!segments[s]?.reasoning) continue;
+      if (seen++ !== index) continue;
+      const nextSegments = segments.slice();
+      nextSegments[s] = { ...(segments[s] as ThinkingSegment), summary };
+      const next = messages.slice();
+      next[m] = { ...message, thinkingSegments: nextSegments };
+      return next;
+    }
+  }
+  return messages;
 }
 
 /**

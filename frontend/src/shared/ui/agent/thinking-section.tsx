@@ -28,10 +28,10 @@ interface ThinkingSectionProps {
 }
 
 // Raw reasoning never shows on its own, as in Codex: the row reads
-// "Thinking" while the model reasons and "Thought for Ns" after, and the
-// text itself only opens on request.
+// "Thinking" while the model reasons and "<summary> · Thought for Ns" after,
+// and the text itself only opens on request.
 export function ThinkingSection({ thinking, compact = false }: ThinkingSectionProps) {
-  const { reasoning, startedAt, endedAt, streaming } = thinking;
+  const { reasoning, startedAt, endedAt, streaming, summary } = thinking;
   const isThinking = streaming && !endedAt && Boolean(startedAt);
   const [open, setOpen] = React.useState(false);
   const [nowTs, setNowTs] = React.useState(() => Date.now());
@@ -84,7 +84,19 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
         className="group flex w-full items-center gap-2 py-1 text-start text-[0.8125rem] text-muted-foreground transition-colors enabled:cursor-pointer enabled:hover:text-foreground"
       >
         <Brain className="size-3.5 shrink-0" aria-hidden />
-        <span className={cn("truncate", isThinking && "agent-shimmer-text")}>{label}</span>
+        {summary && !isThinking ? (
+          <>
+            <span dir="auto" className="min-w-0 truncate text-foreground/80">
+              {summary}
+            </span>
+            <span aria-hidden className="shrink-0">
+              ·
+            </span>
+            <span className="shrink-0">{label}</span>
+          </>
+        ) : (
+          <span className={cn("truncate", isThinking && "agent-shimmer-text")}>{label}</span>
+        )}
         {isThinking && !compact && (
           <span className="font-mono tabular-nums text-[0.6875rem] text-muted-foreground/60">
             {elapsedSec.toFixed(1)}

@@ -111,7 +111,8 @@ export function AgentBubble({
   // vanished once its reasoning-less thinking row dropped out.
   const hasActivity = hasThinking || (withHistory ? visibleToolCalls.length > 0 : stepCalls.length > 0);
 
-  if (!hasTools && !hasText && !hasActivity) return null;
+  const plan = msg.plan?.trim();
+  if (!hasTools && !hasText && !hasActivity && !plan) return null;
 
   // With a turn history, every call (cards too) sits in it in the order it
   // ran, so the whole turn reads top to bottom with the answer last, as in
@@ -131,6 +132,11 @@ export function AgentBubble({
   // cards and the answer sit straight on the panel at full width.
   return (
     <div className={cn("flex w-full min-w-0 flex-col gap-3", className)}>
+      {plan && (
+        <p dir="auto" className="text-sm leading-relaxed text-foreground/80">
+          {plan}
+        </p>
+      )}
       {inHistory && renderToolCall ? (
         <TurnActivity
           thinking={thinking}

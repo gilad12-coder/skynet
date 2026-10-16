@@ -48,6 +48,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from ...api.interview_model import interview_model_id
 from ...api.model_catalog import agent_model_id
 from ...config import settings
 from ...exceptions import ServiceError
@@ -64,7 +65,7 @@ from .code import ReactReplyStream, _agent_error_payload, _format_agent_error, _
 from .conduct import with_conduct
 from .constants import REASONING_FIELD
 from .conversation_react import AppendOnlyChatAdapter, ConversationReAct, history_from_turns
-from .steering import SteerInbox, attach_steering, get_steer_store
+from .steering import STEER_APPLIED_EVENT, SteerInbox, attach_steering, get_steer_store
 from .web_tools import build_web_tools
 
 logger = logging.getLogger(__name__)
@@ -1694,6 +1695,10 @@ How a turn works:
   ``submit`` call. A turn without ``submit`` renders as a blank bubble.
 * Call tools one at a time and read each result before the next call or
   the ``submit`` — never describe a result you have not seen.
+* When a turn will call any tool other than ``submit``, call
+  ``share_plan`` first, once: one or two short sentences in
+  ``reply_language`` on what you will do this turn. A turn that only
+  replies skips it.
 * Some calls show the user an approval card first. A ``User declined``
   result means they refused that action: do not call that tool again this
   turn. Carry on with what does not depend on it and say in the final
@@ -2028,6 +2033,9 @@ How a turn works:
 * Earlier turns of THIS screen's conversation precede the current one.
 * Call tools one at a time, read each result, and END every turn with a
   ``submit`` call; the user sees only ``submit(assistant_message=…)``.
+* When a turn will call any tool other than ``submit``, call
+  ``share_plan`` first, once: one or two short sentences on what you will
+  do this turn. A turn that only replies skips it.
 * A ``User declined`` result means they refused that action: do not call
   that tool again this turn.
 * Write ``assistant_message`` and every user-facing tool argument in
@@ -2238,6 +2246,239 @@ def _emit_to_queue_threadsafe(loop: asyncio.AbstractEventLoop, out_queue: asynci
     loop.call_soon_threadsafe(out_queue.put_nowait, ev)
 
 
+SHARE_PLAN_TOOL = "share_plan"
+_MAX_PLAN_CHARS = 300
+# Shorter reasoning reads fine as its own summary; a model call would cost
+# more than it says.
+_SUMMARY_MIN_CHARS = 40
+_SUMMARY_TIMEOUT_SECONDS = 4.0
+_SUMMARY_MAX_CHARS = 120
+# The tail of a long stretch says where the thinking landed, which is what
+# the row's one line should tell.
+_SUMMARY_INPUT_CHARS = 6000
+_SUMMARY_PROMPT = (
+    "You label an AI assistant's private reasoning for its user. Read the reasoning and write ONE line of "
+    "8 to 12 words, in {language}, on what the assistant worked out or decided, like 'Checked the task and "
+    "picked pairs as the input format'. No quotes, no ending period, no preamble."
+)
+
+
+def plan_tool(emit: Callable[[dict], None]) -> dspy.Tool:
+    """Build the tool the agent states its plan for the turn with.
+
+    The plan streams as its own ``plan`` event and shows above the turn's
+    activity, so it emits no ``tool_start`` and gets no tool row.
+
+    Args:
+        emit: The turn's SSE event emitter; safe to call from any thread.
+
+    Returns:
+        The ``share_plan`` tool.
+    """
+
+    def share_plan(plan: str) -> str:
+        """Show the user what this turn will do."""
+        text = " ".join(plan.split())[:_MAX_PLAN_CHARS]
+        if not text:
+            return "Empty plan: say in one or two sentences what you will do."
+        emit({"event": "plan", "data": {"text": text}})
+        return "The user sees your plan. Carry it out now."
+
+    return dspy.Tool(
+        share_plan,
+        name=SHARE_PLAN_TOOL,
+        desc="Show the user, before your first other tool call this turn, what you will do. Call it once per turn.",
+        arg_desc={
+            "plan": "One or two short sentences in reply_language, e.g. 'I'll fill in the inputs, then move on.'"
+        },
+    )
+
+
+def _build_summary_lm() -> Any:
+    """Build the small managed model that labels each stretch of thinking.
+
+    Returns:
+        A metered LM on the interview pick, with a timeout sized for a
+        label that is dropped when late.
+    """
+    config = apply_model_reasoning_config(
+        ModelConfig(name=interview_model_id(), base_url=settings.generalist_agent_base_url or None)
+    )
+    config.extra["timeout"] = _SUMMARY_TIMEOUT_SECONDS
+    config.extra["num_retries"] = 0
+    return build_language_model(config, disable_cache=True)
+
+
+def _summary_line(lm: Any, language: str, reasoning: str) -> str | None:
+    """Ask ``lm`` for a one-line label of ``reasoning``.
+
+    Args:
+        lm: The summary model.
+        language: English name of the language the label is written in.
+        reasoning: One stretch of the agent's reasoning.
+
+    Returns:
+        The cleaned label, or ``None`` when the model returned nothing usable.
+    """
+    outputs = lm(
+        messages=[
+            {"role": "system", "content": _SUMMARY_PROMPT.format(language=language)},
+            {"role": "user", "content": reasoning[-_SUMMARY_INPUT_CHARS:]},
+        ]
+    )
+    first = outputs[0] if outputs else ""
+    if isinstance(first, dict):
+        first = first.get("text") or ""
+    return _clean_summary(str(first or ""))
+
+
+def _clean_summary(text: str) -> str | None:
+    """Cut a label to one short line without wrapping quotes or a final period.
+
+    Args:
+        text: Raw label text.
+
+    Returns:
+        The line, or ``None`` when nothing is left.
+    """
+    line = " ".join(text.strip().splitlines()[0].split()) if text.strip() else ""
+    line = line.strip("\"'“”‘’").rstrip(".").strip()
+    if len(line) > _SUMMARY_MAX_CHARS:
+        line = line[: _SUMMARY_MAX_CHARS - 1].rstrip() + "…"
+    return line or None
+
+
+class ThinkingSummaries:
+    """Label each stretch of a turn's reasoning in one line, off the loop's path.
+
+    A stretch ends exactly where the panel ends a thinking row: at a tool
+    call, at the first reply token, or at a steered message. Index ``n`` of a
+    ``thinking_summary`` event is therefore the turn's ``n``-th row there.
+    """
+
+    def __init__(
+        self,
+        summarize: Callable[[str], Awaitable[str | None]],
+        publish: Callable[[dict], None],
+    ) -> None:
+        """Start a turn with no reasoning seen.
+
+        Args:
+            summarize: Returns the label for one stretch, or ``None``.
+            publish: Puts a ``thinking_summary`` event on the turn's stream.
+        """
+        self._summarize = summarize
+        self._publish = publish
+        self._open: list[str] | None = None
+        self._count = 0
+        self._replying = False
+        self._tasks: set[asyncio.Task] = set()
+
+    def observe(self, ev: dict) -> None:
+        """Track one streamed event of the turn.
+
+        Args:
+            ev: The ``{event, data}`` envelope about to reach the client.
+        """
+        name = ev.get("event")
+        data = ev.get("data") or {}
+        if name == "reasoning_patch":
+            chunk = data.get("chunk")
+            if isinstance(chunk, str) and chunk:
+                if self._open is None:
+                    self._open = []
+                self._open.append(chunk)
+        elif name == "tool_start":
+            self._close()
+        elif name == "message_patch" and not self._replying:
+            self._replying = True
+            self._close()
+        elif name == STEER_APPLIED_EVENT and str(data.get("text") or "").strip():
+            self._replying = False
+            self._close()
+
+    async def finish(self) -> None:
+        """Close the last stretch and wait for labels still being written."""
+        self._close()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+
+    def cancel(self) -> None:
+        """Drop labels still being written."""
+        for task in self._tasks:
+            task.cancel()
+
+    def _close(self) -> None:
+        """End the open stretch and label it."""
+        if self._open is None:
+            return
+        text = "".join(self._open)
+        self._open = None
+        index = self._count
+        self._count += 1
+        short = " ".join(text.split())
+        if len(short) < _SUMMARY_MIN_CHARS:
+            if short:
+                self._publish({"event": "thinking_summary", "data": {"index": index, "text": short}})
+            return
+        task = asyncio.create_task(self._label(index, text))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _label(self, index: int, text: str) -> None:
+        """Publish the label of stretch ``index``, or nothing when it fails or is late.
+
+        Args:
+            index: The stretch's position in the turn.
+            text: Its reasoning.
+        """
+        try:
+            line = await asyncio.wait_for(self._summarize(text), timeout=_SUMMARY_TIMEOUT_SECONDS)
+        except Exception:
+            logger.info("thinking summary %d skipped", index, exc_info=True)
+            return
+        if line:
+            self._publish({"event": "thinking_summary", "data": {"index": index, "text": line}})
+
+
+def _thinking_summaries(
+    language: str,
+    out_queue: asyncio.Queue[dict],
+    usage_sink: list | None,
+) -> ThinkingSummaries:
+    """Wire a turn's thinking labels to the summary model and the turn's stream.
+
+    The model is built on the first label the turn needs and joins
+    ``usage_sink``, so its calls are metered with the turn.
+
+    Args:
+        language: English name of the language labels are written in.
+        out_queue: The turn's event queue, owned by the running loop.
+        usage_sink: The turn's metered LMs, or ``None`` when unmetered.
+
+    Returns:
+        The turn's :class:`ThinkingSummaries`.
+    """
+    built: list[Any] = []
+
+    async def summarize(reasoning: str) -> str | None:
+        """Label one stretch of reasoning with the summary model.
+
+        Args:
+            reasoning: The stretch's text.
+
+        Returns:
+            The label, or ``None``.
+        """
+        if not built:
+            built.append(_build_summary_lm())
+            if usage_sink is not None:
+                usage_sink.append(built[0])
+        return await asyncio.to_thread(_summary_line, built[0], language, reasoning)
+
+    return ThinkingSummaries(summarize, out_queue.put_nowait)
+
+
 async def _drive_generalist_agent(
     *,
     mcp_url: str,
@@ -2345,6 +2586,7 @@ async def _drive_generalist_agent(
                 )
                 for tool in screen_nav_tools(wizard_state, authoring_flag)
             ]
+        dspy_tools.append(plan_tool(emit))
         # Snapshot the live tool surface for downstream training-ground
         # persistence (training_ground_SPEC.md §4). The persistence wrapper
         # consumes this event and writes the recorded values into
@@ -2435,6 +2677,9 @@ async def run_generalist_agent(
     chat primitives work unchanged:
 
     * ``reasoning_patch`` — per-token reasoning
+    * ``thinking_summary`` — ``{index, text}``, a one-line label of the
+      turn's ``index``-th stretch of reasoning
+    * ``plan`` — ``{text}``, what the agent said it will do this turn
     * ``tool_start`` / ``tool_end`` — wrap each MCP tool call
     * ``status_patch`` — human-readable progress around each tool call
     * ``message_patch`` — per-token assistant reply
@@ -2502,6 +2747,8 @@ async def run_generalist_agent(
     out_queue: asyncio.Queue[dict] = asyncio.Queue()
     loop = asyncio.get_running_loop()
     emit: Callable[[dict], None] = partial(_emit_to_queue_threadsafe, loop, out_queue)
+    reply_language = _reply_language(locale)
+    summaries = _thinking_summaries(reply_language, out_queue, usage_sink)
 
     drive_task = asyncio.create_task(
         _drive_generalist_agent(
@@ -2513,7 +2760,7 @@ async def run_generalist_agent(
             registry=registry,
             emit=emit,
             lm=lm,
-            reply_language=_reply_language(locale),
+            reply_language=reply_language,
             auth_header=auth_header,
             approval_owner=approval_owner,
             steer_key=steer_key,
@@ -2524,12 +2771,18 @@ async def run_generalist_agent(
             getter = asyncio.create_task(out_queue.get())
             done, _pending = await asyncio.wait({drive_task, getter}, return_when=asyncio.FIRST_COMPLETED)
             if getter in done:
-                yield getter.result()
+                ev = getter.result()
+                summaries.observe(ev)
+                yield ev
             else:
                 getter.cancel()
             if drive_task in done and out_queue.empty():
                 break
         reply = await drive_task
+        # Labels land before ``done``, which ends the client's stream.
+        await summaries.finish()
+        while not out_queue.empty():
+            yield out_queue.get_nowait()
         yield {
             "event": "done",
             "data": {
@@ -2549,3 +2802,4 @@ async def run_generalist_agent(
         # A closed stream arrives as GeneratorExit, a cancelled request as
         # CancelledError; either way the loop must not outlive the stream.
         drive_task.cancel()
+        summaries.cancel()

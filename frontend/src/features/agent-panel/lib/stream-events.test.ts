@@ -17,6 +17,8 @@ function recorder(): { calls: Call[]; handlers: GeneralistAgentHandlers } {
     calls,
     handlers: {
       onReasoningPatch: record("reasoning"),
+      onThinkingSummary: record("thinkingSummary"),
+      onPlan: record("plan"),
       onToolStart: record("toolStart"),
       onToolEnd: record("toolEnd"),
       onPendingApproval: record("pendingApproval"),
@@ -61,6 +63,20 @@ test("a reset retracts the streamed reply before the text is refiled as reasonin
     ["message", "Let me check."],
     ["messageReset"],
     ["reasoning", "Let me check.\n"],
+  ]);
+});
+
+test("a plan and thinking labels reach their handlers, blank ones never", () => {
+  const calls = dispatch([
+    ["plan", { text: " I'll fill the inputs. " }],
+    ["plan", { text: "  " }],
+    ["thinking_summary", { index: 1, text: "Picked pairs" }],
+    ["thinking_summary", { index: "1", text: "Picked pairs" }],
+    ["thinking_summary", { index: 2, text: "" }],
+  ]);
+  assert.deepEqual(calls, [
+    ["plan", "I'll fill the inputs."],
+    ["thinkingSummary", { index: 1, text: "Picked pairs" }],
   ]);
 });
 

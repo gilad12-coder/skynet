@@ -8,6 +8,7 @@ import {
   lastEventAt,
   reopenThinking,
   startThinking,
+  summarizeThinking,
   thoughtSeconds,
   type ThinkingSegment,
 } from "./thinking-segments.ts";
@@ -128,4 +129,24 @@ test("a card splits a burst of steps around it", () => {
     pieces.map((p) => (p.kind === "steps" ? p.steps.map((s) => s.index).join("") : p.kind)),
     ["0", "card", "2"],
   );
+});
+
+test("a summary lands on the turn's n-th segment with reasoning, across a steer's messages", () => {
+  const seg = (reasoning: string): ThinkingSegment => ({
+    reasoning,
+    startedAt: 0,
+    endedAt: 1,
+    toolsBefore: 0,
+  });
+  const messages = [
+    { thinkingSegments: [seg("an earlier turn")] },
+    { thinkingSegments: [seg("first"), seg("")] },
+    {},
+    { thinkingSegments: [seg("second")] },
+  ];
+  const once = summarizeThinking(messages, 1, 1, "Read the steer");
+  assert.equal(once[3]?.thinkingSegments?.[0]?.summary, "Read the steer");
+  assert.equal(once[1], messages[1]);
+  assert.equal(once[0]?.thinkingSegments?.[0]?.summary, undefined);
+  assert.equal(summarizeThinking(messages, 1, 2, "none"), messages);
 });

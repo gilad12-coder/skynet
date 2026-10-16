@@ -46,6 +46,7 @@ interface RawMessage {
   model?: string | null;
   served_model?: string | null;
   stats?: Record<string, unknown> | null;
+  plan?: string | null;
   created_at: string;
 }
 
@@ -77,6 +78,7 @@ function toMessage(raw: RawMessage): AgentMessage {
     model: raw.model ?? undefined,
     servedModel: raw.served_model ?? undefined,
     stats: parseTurnStats(raw.stats),
+    plan: typeof raw.plan === "string" && raw.plan.trim() ? raw.plan : undefined,
   };
 }
 

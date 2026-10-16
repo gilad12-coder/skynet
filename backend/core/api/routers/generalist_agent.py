@@ -440,6 +440,7 @@ async def _wrap_with_persistence(
     model_used: str | None = None
     served_model_used: str | None = None
     turn_stats: dict[str, Any] | None = None
+    plan: str | None = None
     allowed_tools: list[str] | None = None
     tool_schema_hashes: dict[str, str] | None = None
     wizard_state_after: dict[str, Any] = dict(wizard_state_before) if wizard_state_before else {}
@@ -471,7 +472,9 @@ async def _wrap_with_persistence(
                 allowed_tools=allowed_tools,
                 tool_schema_hashes=tool_schema_hashes,
                 router_metadata={
-                    key: value for key, value in (("served_model", served_model_used), ("stats", turn_stats)) if value
+                    key: value
+                    for key, value in (("served_model", served_model_used), ("stats", turn_stats), ("plan", plan))
+                    if value
                 }
                 or None,
             )
@@ -491,6 +494,10 @@ async def _wrap_with_persistence(
                 # The text so far prefaced a tool call; salvaging it on a
                 # dropped stream would persist narration as the reply.
                 assistant_buf.clear()
+            elif name == "plan":
+                raw_plan = data.get("text")
+                if isinstance(raw_plan, str) and raw_plan.strip():
+                    plan = raw_plan.strip()
             elif name == "turn_metadata":
                 raw_allowed = data.get("allowed_tools")
                 if isinstance(raw_allowed, list):

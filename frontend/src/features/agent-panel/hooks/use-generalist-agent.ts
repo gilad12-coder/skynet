@@ -12,6 +12,7 @@ import {
   lastEventAt,
   reopenThinking,
   startThinking,
+  summarizeThinking,
   type ThinkingSegment,
 } from "@/shared/lib/thinking-segments";
 
@@ -178,6 +179,8 @@ interface SessionRuntime {
   // ask the user to re-upload.
   persistentExtras: Partial<WizardState>;
   pendingRun: PendingRun | null;
+  /** Index of the running turn's first assistant message; a steer adds more after it. */
+  turnStart: number;
 }
 
 function blankSession(key: string): SessionView {
@@ -199,6 +202,7 @@ function blankRuntime(): SessionRuntime {
     replyBuf: "",
     persistentExtras: {},
     pendingRun: null,
+    turnStart: 0,
   };
 }
 
@@ -450,6 +454,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       const controller = new AbortController();
       rt.controller = controller;
       rt.replyBuf = "";
+      rt.turnStart = Math.max(0, (sessionsRef.current.get(key)?.messages.length ?? 1) - 1);
       streamingKeysRef.current.add(key);
 
       patchSession(key, {
@@ -508,7 +513,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
                 last.role === "assistant" &&
                 !last.content &&
                 !last.toolCalls?.length &&
-                !last.thinkingSegments?.length
+                !last.thinkingSegments?.length &&
+                !last.plan
                   ? prev.slice(0, -1)
                   : prev;
               return [
@@ -529,6 +535,20 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             patchThinking(key, (segments, toolCount, since) =>
               appendReasoning(segments, chunk, Date.now(), toolCount, since),
             );
+          },
+          onThinkingSummary: ({ index, text }) => {
+            if (controller.signal.aborted) return;
+            patchMessages(key, (prev) => summarizeThinking(prev, rt.turnStart, index, text));
+          },
+          onPlan: (text) => {
+            if (controller.signal.aborted) return;
+            patchMessages(key, (prev) => {
+              const last = prev[prev.length - 1];
+              if (!last || last.role !== "assistant") return prev;
+              const next = prev.slice();
+              next[next.length - 1] = { ...last, plan: text };
+              return next;
+            });
           },
           onToolStart: (ev) => {
             if (controller.signal.aborted) return;
