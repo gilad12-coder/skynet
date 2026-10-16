@@ -511,11 +511,16 @@ function RubricCard({
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   // Managed catalog for the model dialog's thinking detection and the chip's
   // vision badge — same source the submit wizard feeds it.
-  const [catalogModels, setCatalogModels] = useState<CatalogModel[] | null>(
-    cachedCatalog()?.models ?? null,
-  );
+  const [catalogModels, setCatalogModels] = useState<CatalogModel[] | null>(null);
   useEffect(() => {
     if (catalogModels) return;
+    // Read the localStorage-backed cache after mount, not in useState, so the
+    // first client render matches the server's.
+    const cached = cachedCatalog();
+    if (cached) {
+      setCatalogModels(cached.models);
+      return;
+    }
     let cancelled = false;
     getModelCatalog()
       .then((c) => {

@@ -89,13 +89,15 @@ export function ComposerModelMenu({
 }: ComposerModelMenuProps) {
   const savedValue = rawValue === RETIRED_AUTO_MODEL ? null : rawValue;
   const [open, setOpen] = React.useState(false);
-  const [catalog, setCatalog] = React.useState<ModelCatalogResponse | null>(
-    cachedCatalog() ?? null,
-  );
+  // Starts empty on server and client alike: the cache lives in localStorage,
+  // so seeding the first render from it would not match the SSR markup.
+  const [catalog, setCatalog] = React.useState<ModelCatalogResponse | null>(null);
   // The synchronous cache may be stale (served without a TTL so the menu is
   // never empty) — always adopt the revalidated catalog when it lands.
   React.useEffect(() => {
     let cancelled = false;
+    const cached = cachedCatalog();
+    if (cached) setCatalog(cached);
     getModelCatalog()
       .then((c) => {
         if (!cancelled) setCatalog(c);

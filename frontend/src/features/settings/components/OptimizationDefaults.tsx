@@ -44,11 +44,16 @@ export function OptimizationDefaults() {
   const { prefs, setPref } = useUserPrefs();
   const [editing, setEditing] = React.useState<ModelRole | null>(null);
   const { recentConfigs, saveToRecent, removeRecentConfig } = useRecentModelConfigs();
-  const [catalogModels, setCatalogModels] = React.useState<CatalogModel[] | null>(
-    cachedCatalog()?.models ?? null,
-  );
+  const [catalogModels, setCatalogModels] = React.useState<CatalogModel[] | null>(null);
   React.useEffect(() => {
     if (catalogModels) return;
+    // Read the localStorage-backed cache after mount, not in useState, so the
+    // first client render matches the server's.
+    const cached = cachedCatalog();
+    if (cached) {
+      setCatalogModels(cached.models);
+      return;
+    }
     let cancelled = false;
     getModelCatalog()
       .then((c) => {
