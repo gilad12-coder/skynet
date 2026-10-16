@@ -7,6 +7,7 @@ import {
   interleaveThinking,
   lastEventAt,
   reopenThinking,
+  parseThinkingRows,
   startThinking,
   summarizeThinking,
   thoughtSeconds,
@@ -149,4 +150,21 @@ test("a summary lands on the turn's n-th segment with reasoning, across a steer'
   assert.equal(once[1], messages[1]);
   assert.equal(once[0]?.thinkingSegments?.[0]?.summary, undefined);
   assert.equal(summarizeThinking(messages, 1, 2, "none"), messages);
+});
+
+test("saved thinking rows come back closed, malformed ones dropped", () => {
+  assert.deepEqual(
+    parseThinkingRows([
+      { reasoning: "Pairs fit.", startedAt: 1, endedAt: 4, toolsBefore: 0, summary: "Picked pairs" },
+      { reasoning: "", startedAt: 1, endedAt: 2, toolsBefore: 0 },
+      { reasoning: "No times", toolsBefore: "x" },
+      "junk",
+    ]),
+    [
+      { reasoning: "Pairs fit.", startedAt: 1, endedAt: 4, toolsBefore: 0, summary: "Picked pairs" },
+      { reasoning: "No times", startedAt: null, endedAt: 0, toolsBefore: 0 },
+    ],
+  );
+  assert.equal(parseThinkingRows(null), undefined);
+  assert.equal(parseThinkingRows([]), undefined);
 });

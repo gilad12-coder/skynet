@@ -124,6 +124,35 @@ export function reopenThinking(
 }
 
 /**
+ * Read the thinking rows saved with a turn, dropping any that are malformed.
+ *
+ * Args:
+ *   raw: The ``thinking`` value of a stored message.
+ *
+ * Returns:
+ *   The rows, closed, or undefined when there are none.
+ */
+export function parseThinkingRows(raw: unknown): ThinkingSegment[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const rows: ThinkingSegment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.reasoning !== "string" || !row.reasoning) continue;
+    const startedAt = typeof row.startedAt === "number" ? row.startedAt : null;
+    const endedAt = typeof row.endedAt === "number" ? row.endedAt : (startedAt ?? 0);
+    rows.push({
+      reasoning: row.reasoning,
+      startedAt,
+      endedAt,
+      toolsBefore: typeof row.toolsBefore === "number" ? row.toolsBefore : 0,
+      ...(typeof row.summary === "string" && row.summary.trim() ? { summary: row.summary } : {}),
+    });
+  }
+  return rows.length ? rows : undefined;
+}
+
+/**
  * Put a summary on the turn's ``index``-th segment that got reasoning. A turn
  * a steer split runs over several messages; the count spans all of them, as
  * the backend's does.

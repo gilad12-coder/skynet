@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 from ...service_gateway.agents.generalist import (
+    ThinkingTrail,
     TrustMode,
     WizardState,
     approval_key,
@@ -441,6 +442,7 @@ async def _wrap_with_persistence(
     served_model_used: str | None = None
     turn_stats: dict[str, Any] | None = None
     plan: str | None = None
+    thinking = ThinkingTrail()
     allowed_tools: list[str] | None = None
     tool_schema_hashes: dict[str, str] | None = None
     wizard_state_after: dict[str, Any] = dict(wizard_state_before) if wizard_state_before else {}
@@ -473,7 +475,12 @@ async def _wrap_with_persistence(
                 tool_schema_hashes=tool_schema_hashes,
                 router_metadata={
                     key: value
-                    for key, value in (("served_model", served_model_used), ("stats", turn_stats), ("plan", plan))
+                    for key, value in (
+                        ("served_model", served_model_used),
+                        ("stats", turn_stats),
+                        ("plan", plan),
+                        ("thinking", thinking.rows()),
+                    )
                     if value
                 }
                 or None,
@@ -486,6 +493,7 @@ async def _wrap_with_persistence(
         async for event in source:
             name = event.get("event")
             data = event.get("data") or {}
+            thinking.observe(event)
             if name == "message_patch":
                 chunk = data.get("chunk")
                 if isinstance(chunk, str):

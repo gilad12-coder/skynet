@@ -9,6 +9,7 @@ import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { thoughtSeconds } from "@/shared/lib/thinking-segments";
 
+import { RevealText } from "./reveal-text";
 import type { AgentThinking } from "./types";
 
 // Lazy for the same reason as in agent-bubble: the parser stays out of the
@@ -38,6 +39,9 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const stickToBottomRef = React.useRef(true);
   const reduce = useReducedMotion();
+  // A summary there on mount belongs to a reopened chat and shows at once;
+  // one that lands while the panel watches writes itself in.
+  const [summaryOnMount] = React.useState(summary);
 
   React.useEffect(() => {
     if (!isThinking) return;
@@ -68,6 +72,7 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
   const elapsedMs = startedAt ? (endedAt ?? nowTs) - startedAt : 0;
   const elapsedSec = Math.max(0, Math.round(elapsedMs / 100) / 10);
   const thought = thoughtSeconds(startedAt, endedAt ?? nowTs);
+  const showSummary = Boolean(summary) && !isThinking;
   const label = isThinking
     ? msg("shared.agent.thinking")
     : thought === null
@@ -84,19 +89,39 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
         className="group flex w-full items-center gap-2 py-1 text-start text-[0.8125rem] text-muted-foreground transition-colors enabled:cursor-pointer enabled:hover:text-foreground"
       >
         <Brain className="size-3.5 shrink-0" aria-hidden />
-        {summary && !isThinking ? (
+        {showSummary && summary && (
           <>
-            <span dir="auto" className="min-w-0 truncate text-foreground/80">
-              {summary}
-            </span>
-            <span aria-hidden className="shrink-0">
+            <RevealText
+              text={summary}
+              animate={summary !== summaryOnMount}
+              className="min-w-0 truncate text-foreground/80"
+            />
+            <motion.span
+              aria-hidden
+              className="shrink-0"
+              initial={reduce || summary === summaryOnMount ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.2 }}
+            >
               ·
-            </span>
-            <span className="shrink-0">{label}</span>
+            </motion.span>
           </>
-        ) : (
-          <span className={cn("truncate", isThinking && "agent-shimmer-text")}>{label}</span>
         )}
+        {/* "Thinking" fades into "Thought for Ns" instead of snapping, and
+            slides over when a summary lands in front of it. */}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={isThinking ? "thinking" : "thought"}
+            layout={reduce ? false : "position"}
+            initial={reduce ? false : { opacity: 0, filter: "blur(2px)" }}
+            animate={{ opacity: 1, filter: "blur(0px)" }}
+            exit={reduce ? undefined : { opacity: 0, filter: "blur(2px)" }}
+            transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+            className={cn(showSummary ? "shrink-0" : "truncate", isThinking && "agent-shimmer-text")}
+          >
+            {label}
+          </motion.span>
+        </AnimatePresence>
         {isThinking && !compact && (
           <span className="font-mono tabular-nums text-[0.6875rem] text-muted-foreground/60">
             {elapsedSec.toFixed(1)}

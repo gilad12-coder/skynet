@@ -24,6 +24,7 @@ from core.service_gateway.agents.generalist import (
     SCREEN_FOCUS,
     ApprovalRegistry,
     ThinkingSummaries,
+    ThinkingTrail,
     WizardState,
     _clean_summary,
     _needs_approval,
@@ -1641,3 +1642,21 @@ async def test_turn_meters_the_summary_model_once_per_long_stretch(monkeypatch: 
     assert {d["text"] for d in labels} == {"Picked pairs for the inputs"}
     assert _LabelLM.calls == 2
     assert sink.count(label_lm) == 1
+
+
+def test_thinking_trail_times_rows_from_the_previous_step() -> None:
+    """A row after a tool starts when the tool ended, and only closed rows take a summary."""
+    ticks = iter([1.0, 2.0, 2.0, 4.0, 5.0, 9.0])
+    trail = ThinkingTrail(clock=lambda: next(ticks))
+
+    trail.observe({"event": "reasoning_patch", "data": {"chunk": "first"}})
+    assert trail.observe({"event": "tool_start", "data": {}}) == (0, "first")
+    trail.observe({"event": "tool_end", "data": {}})
+    trail.observe({"event": "thinking_summary", "data": {"index": 1, "text": "too early"}})
+    trail.observe({"event": "reasoning_patch", "data": {"chunk": "second"}})
+    trail.observe({"event": "thinking_summary", "data": {"index": 0, "text": "Read the task"}})
+
+    assert trail.rows() == [
+        {"startedAt": 1000, "toolsBefore": 0, "reasoning": "first", "endedAt": 2000, "summary": "Read the task"},
+        {"startedAt": 4000, "toolsBefore": 1, "reasoning": "second", "endedAt": 9000},
+    ]

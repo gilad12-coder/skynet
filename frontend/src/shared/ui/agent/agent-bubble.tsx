@@ -2,10 +2,12 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import { cn } from "@/shared/lib/utils";
 import type { ActivityKind } from "@/shared/lib/activity-summary";
 
+import { RevealText } from "./reveal-text";
 import { ThinkingSection } from "./thinking-section";
 import { TurnActivity, type TurnThinking } from "./turn-activity";
 import { turnStart, visibleThinking } from "./turn-timing";
@@ -55,6 +57,10 @@ export function AgentBubble({
   afterContent,
   className,
 }: AgentBubbleProps) {
+  const reduce = useReducedMotion();
+  // A plan there on mount belongs to a reopened chat and shows at once; one
+  // that streams in opens its line smoothly and writes itself in.
+  const [planOnMount] = React.useState(msg.plan);
   const visibleToolCalls = React.useMemo<
     Array<{ call: AgentToolCall; isRetry: boolean; index: number }>
   >(() => {
@@ -132,11 +138,23 @@ export function AgentBubble({
   // cards and the answer sit straight on the panel at full width.
   return (
     <div className={cn("flex w-full min-w-0 flex-col gap-3", className)}>
-      {plan && (
-        <p dir="auto" className="text-sm leading-relaxed text-foreground/80">
-          {plan}
-        </p>
-      )}
+      <AnimatePresence initial={false}>
+        {plan && (
+          <motion.div
+            key="plan"
+            initial={reduce ? false : { height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
+            className="overflow-hidden"
+          >
+            <RevealText
+              text={plan}
+              animate={msg.plan !== planOnMount}
+              className="block text-sm leading-relaxed text-foreground/80"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
       {inHistory && renderToolCall ? (
         <TurnActivity
           thinking={thinking}

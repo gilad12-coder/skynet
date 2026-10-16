@@ -52,7 +52,6 @@ from ...api.interview_model import interview_model_id
 from ...api.model_catalog import agent_model_id
 from ...config import settings
 from ...exceptions import ServiceError
-from ...i18n import t
 from ...models import ModelConfig
 from ...storage.models import AgentApprovalModel
 from ..language_models import (
@@ -2147,34 +2146,27 @@ def screen_signature(screen: str, reply_language: str = "English") -> type[dspy.
 
 
 class GeneralistStatusProvider(StatusMessageProvider):
-    """Emit localized status messages around each tool call.
+    """Send no status lines around tool calls.
 
-    DSPy's streamify pipes these as ``status`` chunks; the SSE wrapper in
-    :func:`run_generalist_agent` forwards them as ``status_patch`` events.
+    The panel words its own status from ``tool_start`` / ``tool_end`` in the
+    viewer's language, while :func:`~core.i18n.t` only speaks Hebrew; DSPy's
+    default provider would send English ones instead of none.
     """
 
-    def tool_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> str:
-        """Return the localized status line shown just before a tool call.
+    def tool_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> None:
+        """Send no line before a tool call.
 
         Args:
             instance: The tool instance about to run.
             inputs: Keyword arguments the tool will be invoked with.
-
-        Returns:
-            Localized status text for the ``tool_start`` event.
         """
-        return t("agent.status.tool_start")
 
-    def tool_end_status_message(self, outputs: Any) -> str:
-        """Return the localized status line shown after a tool call settles.
+    def tool_end_status_message(self, outputs: Any) -> None:
+        """Send no line after a tool call.
 
         Args:
             outputs: The value returned by the completed tool call.
-
-        Returns:
-            Localized status text for the ``tool_end`` event.
         """
-        return t("agent.status.tool_end")
 
 
 def _history_from_chat(chat_history: list[dict]) -> dspy.History:
@@ -2349,13 +2341,107 @@ def _clean_summary(text: str) -> str | None:
     return line or None
 
 
-class ThinkingSummaries:
-    """Label each stretch of a turn's reasoning in one line, off the loop's path.
+_MAX_SAVED_REASONING_CHARS = 20000
 
-    A stretch ends exactly where the panel ends a thinking row: at a tool
-    call, at the first reply token, or at a steered message. Index ``n`` of a
-    ``thinking_summary`` event is therefore the turn's ``n``-th row there.
+
+class ThinkingTrail:
+    """Cut a turn's reasoning into the rows the panel shows, from the turn's events.
+
+    A row ends exactly where the panel ends one: at a tool call, at the first
+    reply token, or at a steered message; reasoning after that opens the next.
+    Row ``n`` here is therefore row ``n`` of the turn there, which is what a
+    ``thinking_summary`` index points at.
     """
+
+    def __init__(self, clock: Callable[[], float] = time.time) -> None:
+        """Start a turn with no reasoning seen.
+
+        Args:
+            clock: Wall-clock seconds; injectable for tests.
+        """
+        self._clock = clock
+        self._rows: list[dict[str, Any]] = []
+        self._open: dict[str, Any] | None = None
+        self._chunks: list[str] = []
+        self._tools = 0
+        self._replying = False
+        self._since: int | None = None
+
+    def _now(self) -> int:
+        """Return the clock in ms."""
+        return int(self._clock() * 1000)
+
+    def observe(self, ev: dict) -> tuple[int, str] | None:
+        """Track one event of the turn.
+
+        Args:
+            ev: The ``{event, data}`` envelope about to reach the client.
+
+        Returns:
+            ``(index, reasoning)`` of the row this event closed, else ``None``.
+        """
+        name = ev.get("event")
+        data = ev.get("data") or {}
+        if name == "reasoning_patch":
+            chunk = data.get("chunk")
+            if isinstance(chunk, str) and chunk:
+                if self._open is None:
+                    now = self._now()
+                    # As in the panel: thinking starts when the previous step
+                    # ended, since providers often send it in one late burst.
+                    started = self._since if self._since is not None and self._since < now else now
+                    self._open = {"startedAt": started, "toolsBefore": self._tools}
+                    self._chunks = []
+                self._chunks.append(chunk)
+            return None
+        if name == "tool_start":
+            closed = self.close()
+            self._tools += 1
+            self._since = self._now()
+            return closed
+        if name == "tool_end":
+            self._since = self._now()
+            return None
+        if name == "message_patch" and not self._replying:
+            self._replying = True
+            return self.close()
+        if name == STEER_APPLIED_EVENT and str(data.get("text") or "").strip():
+            self._replying = False
+            return self.close()
+        if name == "thinking_summary":
+            index, text = data.get("index"), data.get("text")
+            if isinstance(index, int) and 0 <= index < len(self._rows) and isinstance(text, str) and text.strip():
+                self._rows[index]["summary"] = text.strip()
+        return None
+
+    def close(self) -> tuple[int, str] | None:
+        """End the open row, as a tool call, prose or the turn's end does.
+
+        Returns:
+            ``(index, reasoning)`` of the closed row, or ``None`` when none was open.
+        """
+        if self._open is None:
+            return None
+        text = "".join(self._chunks)
+        now = self._now()
+        self._rows.append({**self._open, "reasoning": text[:_MAX_SAVED_REASONING_CHARS], "endedAt": now})
+        self._open = None
+        self._chunks = []
+        self._since = now
+        return len(self._rows) - 1, text
+
+    def rows(self) -> list[dict[str, Any]]:
+        """Return the turn's rows in the panel's ``ThinkingSegment`` shape, closing an open one.
+
+        Returns:
+            One ``{reasoning, startedAt, endedAt, toolsBefore, summary?}`` per row.
+        """
+        self.close()
+        return [dict(row) for row in self._rows]
+
+
+class ThinkingSummaries:
+    """Label each row of a turn's reasoning in one line, off the loop's path."""
 
     def __init__(
         self,
@@ -2365,42 +2451,25 @@ class ThinkingSummaries:
         """Start a turn with no reasoning seen.
 
         Args:
-            summarize: Returns the label for one stretch, or ``None``.
+            summarize: Returns the label for one row's reasoning, or ``None``.
             publish: Puts a ``thinking_summary`` event on the turn's stream.
         """
         self._summarize = summarize
         self._publish = publish
-        self._open: list[str] | None = None
-        self._count = 0
-        self._replying = False
+        self._trail = ThinkingTrail()
         self._tasks: set[asyncio.Task] = set()
 
     def observe(self, ev: dict) -> None:
-        """Track one streamed event of the turn.
+        """Track one streamed event of the turn and label the row it closes.
 
         Args:
             ev: The ``{event, data}`` envelope about to reach the client.
         """
-        name = ev.get("event")
-        data = ev.get("data") or {}
-        if name == "reasoning_patch":
-            chunk = data.get("chunk")
-            if isinstance(chunk, str) and chunk:
-                if self._open is None:
-                    self._open = []
-                self._open.append(chunk)
-        elif name == "tool_start":
-            self._close()
-        elif name == "message_patch" and not self._replying:
-            self._replying = True
-            self._close()
-        elif name == STEER_APPLIED_EVENT and str(data.get("text") or "").strip():
-            self._replying = False
-            self._close()
+        self._label_closed(self._trail.observe(ev))
 
     async def finish(self) -> None:
-        """Close the last stretch and wait for labels still being written."""
-        self._close()
+        """Close the last row and wait for labels still being written."""
+        self._label_closed(self._trail.close())
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
 
@@ -2409,14 +2478,15 @@ class ThinkingSummaries:
         for task in self._tasks:
             task.cancel()
 
-    def _close(self) -> None:
-        """End the open stretch and label it."""
-        if self._open is None:
+    def _label_closed(self, closed: tuple[int, str] | None) -> None:
+        """Label a row that just closed: short ones are their own label.
+
+        Args:
+            closed: ``(index, reasoning)`` of the row, or ``None``.
+        """
+        if closed is None:
             return
-        text = "".join(self._open)
-        self._open = None
-        index = self._count
-        self._count += 1
+        index, text = closed
         short = " ".join(text.split())
         if len(short) < _SUMMARY_MIN_CHARS:
             if short:

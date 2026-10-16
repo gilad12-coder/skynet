@@ -499,6 +499,32 @@ async def test_turn_plan_is_saved_with_the_reply(wrapper_engine: Engine) -> None
     assert rows[0].router_metadata == {"plan": "I'll fill the inputs, then move on."}
 
 
+async def test_turn_thinking_rows_are_saved_with_their_summaries(wrapper_engine: Engine) -> None:
+    """Each thinking row is kept in the panel's shape, so a reload shows the same rows and labels."""
+
+    async def _thinking_turn() -> AsyncIterator[dict[str, Any]]:
+        """Think, call a tool, think again, label both rows, then reply."""
+        yield {"event": "reasoning_patch", "data": {"chunk": "Pairs fit "}}
+        yield {"event": "reasoning_patch", "data": {"chunk": "this task."}}
+        yield {"event": "tool_start", "data": {"id": "t1", "tool": "update_wizard_state", "arguments": {}}}
+        yield {"event": "tool_end", "data": {"id": "t1", "status": "ok", "result": {}}}
+        yield {"event": "thinking_summary", "data": {"index": 0, "text": "Picked pairs"}}
+        yield {"event": "reasoning_patch", "data": {"chunk": "Now ask for data."}}
+        yield {"event": "message_patch", "data": {"chunk": "Upload it"}}
+        yield {"event": "thinking_summary", "data": {"index": 1, "text": "Asked for data"}}
+        yield {"event": "done", "data": {"assistant_message": "Upload it", "model": "test-model"}}
+
+    await _drain(_thinking_turn(), wrapper_engine)
+
+    rows = _assistant_rows(wrapper_engine)
+    thinking = (rows[0].router_metadata or {})["thinking"]
+    assert [(t["reasoning"], t["toolsBefore"], t["summary"]) for t in thinking] == [
+        ("Pairs fit this task.", 0, "Picked pairs"),
+        ("Now ask for data.", 1, "Asked for data"),
+    ]
+    assert all(t["startedAt"] <= t["endedAt"] for t in thinking)
+
+
 async def test_retracted_preamble_is_not_salvaged_as_the_reply(wrapper_engine: Engine) -> None:
     """Text withdrawn by ``message_reset`` stays out of a turn persisted on teardown."""
 
