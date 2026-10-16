@@ -2259,7 +2259,8 @@ _SUMMARY_INPUT_CHARS = 6000
 _SUMMARY_PROMPT = (
     "You label an AI assistant's private reasoning for its user. Read the reasoning and write ONE line of "
     "8 to 12 words, in {language}, on what the assistant worked out or decided, like 'Checked the task and "
-    "picked pairs as the input format'. No quotes, no ending period, no preamble."
+    "picked pairs as the input format'. Describe the work in the user's terms: never name a tool, function or "
+    "field (no snake_case words). No quotes, no ending period, no preamble."
 )
 
 
