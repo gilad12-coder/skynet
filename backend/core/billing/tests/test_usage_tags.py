@@ -6,6 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from core.billing.usage_tags import (
+    LEGACY_USAGE_TAGS_HEADER,
     TAG_KEYS,
     USAGE_TAGS_HEADER,
     current_tags,
@@ -58,6 +59,30 @@ def test_trusted_tags_override_guest_header() -> None:
     assert header_tags(headers) == {"candidate": "2", "case": "c1"}
     assert list(headers).count(USAGE_TAGS_HEADER) == 1
     assert "X-Skynet-Usage-Tags" not in headers
+
+
+def test_header_tags_reads_current_and_legacy_names() -> None:
+    """Both header spellings are read, and the current one wins when both arrive."""
+    assert USAGE_TAGS_HEADER == "x-app-usage-tags"
+    assert header_tags({"X-App-Usage-Tags": '{"case":"new"}'}) == {"case": "new"}
+    assert header_tags({LEGACY_USAGE_TAGS_HEADER: '{"case":"old"}'}) == {"case": "old"}
+    assert header_tags({LEGACY_USAGE_TAGS_HEADER: '{"case":"old"}', USAGE_TAGS_HEADER: '{"case":"new"}'}) == {
+        "case": "new"
+    }
+
+
+def test_with_tags_header_writes_the_merged_tags_under_both_names() -> None:
+    """Write one merged value under both spellings, so an older proxy or gateway still reads it."""
+    headers = with_tags_header(
+        {LEGACY_USAGE_TAGS_HEADER: '{"case":"c1"}', USAGE_TAGS_HEADER: '{"pair":"1"}'}, {"stage": "training"}
+    )
+    assert LEGACY_USAGE_TAGS_HEADER == "x-skynet-usage-tags"
+    assert sorted(headers) == sorted([USAGE_TAGS_HEADER, LEGACY_USAGE_TAGS_HEADER])
+    assert headers[USAGE_TAGS_HEADER] == headers[LEGACY_USAGE_TAGS_HEADER]
+    assert header_tags({LEGACY_USAGE_TAGS_HEADER: headers[LEGACY_USAGE_TAGS_HEADER]}) == {
+        "pair": "1",
+        "stage": "training",
+    }
 
 
 def test_lane_is_a_known_key() -> None:

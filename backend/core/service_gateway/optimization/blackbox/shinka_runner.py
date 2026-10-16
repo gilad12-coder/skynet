@@ -82,21 +82,21 @@ except ImportError:  # In the sandbox this file runs as a script beside its sibl
     repo_tree = _sibling_modules["repo_tree"]
     shinka_bundle = _sibling_modules["shinka_bundle"]
 
-_RPC_PREFIX = "SKYNET_NATIVE_RPC "
-_PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
+_RPC_PREFIX = "APP_NATIVE_RPC "
+_PROGRESS_PREFIX = "APP_NATIVE_PROGRESS "
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _TOKEN_NAMES = ("prompt_tokens", "completion_tokens")
 _LANGUAGE = "markdown"
 _LANGUAGE_EXT = "md"
 _BLOCK_START = "<!-- EVOLVE-BLOCK-START -->"
 _BLOCK_END = "<!-- EVOLVE-BLOCK-END -->"
-_PART_PREFIX = "<!-- SKYNET-PART "
+_PART_PREFIX = "<!-- APP-PART "
 _PART_SUFFIX = " -->"
-_PART_HEADER = re.compile(r"^<!-- SKYNET-PART (.+) -->$")
+_PART_HEADER = re.compile(r"^<!-- APP-PART (.+) -->$")
 _GENERATION = re.compile(r"(?:^|/)gen_(\d+)/")
 _FEEDBACK_CHARS = 8000
-# Mirrors usage_tags in the parent; this file runs without Skynet's code.
-_USAGE_TAGS_HEADER = "x-skynet-usage-tags"
+# Mirrors usage_tags in the parent; this file runs without the backend's code.
+_USAGE_TAGS_HEADER = "x-app-usage-tags"
 _CALLER_PROPOSER = "proposer"
 _KIND_MUTATION = "mutation"
 _KIND_META_NOTES = "meta_notes"
@@ -104,7 +104,7 @@ _KIND_NOVELTY_JUDGE = "novelty_judge"
 _KIND_EMBEDDING = "embedding"
 _AGENT_PROGRAM_FILE = "program.md"
 # Where the launch writes Pi's config inside a scratch directory; never part of a version.
-_AGENT_CONFIG_DIR = ".skynet"
+_AGENT_CONFIG_DIR = ".app"
 _AGENT_KEY_ENV = re.compile(r"[?&]api_key_env=([A-Za-z0-9_]+)$")
 _AGENT_NAME = re.compile(r"^\W*NAME\W*:[\s*_]*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
 _AGENT_DESCRIPTION = re.compile(r"^\W*DESCRIPTION\W*:[\s*_]*(.+)", re.MULTILINE | re.IGNORECASE | re.DOTALL)
@@ -115,7 +115,7 @@ _AGENT_FINISH = (
 _AGENT_TEXT_TASK = (
     f"# Task\nThe current program is the file `{_AGENT_PROGRAM_FILE}` in your working directory. Improve it so "
     "it scores higher by editing that file in place with your tools. Change only the text between the "
-    "EVOLVE-BLOCK markers, and keep every marker and every SKYNET-PART line exactly as it is. " + _AGENT_FINISH
+    "EVOLVE-BLOCK markers, and keep every marker and every APP-PART line exactly as it is. " + _AGENT_FINISH
 )
 _AGENT_REPO_TASK = (
     "# Task\nYour working directory is the repository as the current version holds it. Improve it so it "
@@ -125,7 +125,7 @@ _AGENT_REPO_TASK = (
 _TASK_SYSTEM_MESSAGE = (
     "You are an expert at improving text artifacts such as prompts, instructions and agent "
     "configurations. The program is a Markdown document; only the text between the "
-    "EVOLVE-BLOCK markers is evolved. Keep every marker and every SKYNET-PART line exactly as "
+    "EVOLVE-BLOCK markers is evolved. Keep every marker and every APP-PART line exactly as "
     "they are, and change only the text inside the blocks so that it scores higher."
 )
 _EVALUATE_TEMPLATE = '''"""Hand one ShinkaEvolve program to the Skynet runner and record its score."""

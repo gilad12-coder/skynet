@@ -77,6 +77,8 @@ export async function signup(page, { tag = "rec" } = {}) {
   if (!lv.ok()) throw new Error(`experience ${lv.status()}`);
   await page.context().addCookies([
     { name: "NEXT_LOCALE", value: "en", url: base },
+    { name: "app_locale", value: "en", url: base },
+    // Builds from before the internal rename only read the old cookie name.
     { name: "skynet_locale", value: "en", url: base },
   ]);
   console.log(`signup ${email}`);

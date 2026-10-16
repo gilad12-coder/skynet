@@ -44,9 +44,9 @@ except ImportError:  # In the sandbox this file runs as a script beside its sibl
     native_engines = _sibling_modules["native_engines"]
     repo_tree = _sibling_modules["repo_tree"]
 
-_RPC_PREFIX = "SKYNET_NATIVE_RPC "
-_PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
-_LOG_PREFIX = "SKYNET_NATIVE_LOG "
+_RPC_PREFIX = "APP_NATIVE_RPC "
+_PROGRESS_PREFIX = "APP_NATIVE_PROGRESS "
+_LOG_PREFIX = "APP_NATIVE_LOG "
 # Loggers that narrate every HTTP call at INFO; their warnings still stream.
 _QUIET_LOGGERS = ("httpx", "httpcore", "urllib3", "LiteLLM", "litellm", "openai", "anthropic")
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024

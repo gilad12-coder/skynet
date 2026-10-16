@@ -10,8 +10,8 @@
  * an empty id (the event is still sent, just unlinked).
  */
 
-const ANON_KEY = "skynet.telemetry.anon";
-const SESSION_KEY = "skynet.telemetry.session";
+const ANON_KEY = "app.telemetry.anon";
+const SESSION_KEY = "app.telemetry.session";
 
 /** Return a random UUID, falling back to a manual v4 where `crypto` is absent. */
 function uuid(): string {

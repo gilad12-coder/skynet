@@ -101,9 +101,9 @@ function oauthReturnUrl(): string {
 }
 
 /**
- * Oversized DRWN wordmark shared by every login state, so the SSO redirect
- * moment and the credential form read as the same place. It fills the column
- * width and morphs continuously as an ambient "alive" signal.
+ * Oversized DRWN wordmark shared by every login state, so the loading moment
+ * and the credential form read as the same place. It fills the column width
+ * and morphs continuously as an ambient "alive" signal.
  */
 function LoginHeader() {
   return (
@@ -134,7 +134,7 @@ interface ResetState {
 export function LoginView() {
   const router = useRouter();
   const prefersReduced = useReducedMotion();
-  const [mode, setMode] = useState<"loading" | "sso" | "ready">("loading");
+  const [mode, setMode] = useState<"loading" | "ready">("loading");
   const [authMode, setAuthMode] = useState<AuthMode>("signin");
   const [oauth, setOauth] = useState<{ google: boolean; github: boolean }>({
     google: false,
@@ -207,11 +207,6 @@ export function LoginView() {
     const loadProviders = () =>
       getProviders()
         .then((providers) => {
-          if (providers?.adfs) {
-            setMode("sso");
-            void signIn("adfs", { callbackUrl: postLoginTarget() });
-            return;
-          }
           setOauth({ google: !!providers?.google, github: !!providers?.github });
           setMode("ready");
         })
@@ -759,7 +754,7 @@ export function LoginView() {
     }
   }
 
-  const isWorking = mode === "loading" || mode === "sso";
+  const isWorking = mode === "loading";
   // OAuth and passkeys are sign-IN affordances only: "continue with Google"
   // or "sign in with a passkey" make no sense under the "create an account"
   // tab, so both show on the signin tab exclusively.

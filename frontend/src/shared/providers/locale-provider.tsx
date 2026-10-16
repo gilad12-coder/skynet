@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import {
+  LEGACY_LOCALE_COOKIE,
   LOCALE_COOKIE,
   LOCALE_COOKIE_MAX_AGE,
   LOCALE_RELOAD_EVENT,
@@ -56,7 +57,7 @@ export function LocaleProvider({
   // lazy useState initializer runs exactly once per mount (server + client),
   // ahead of children, without the re-render churn of an effect. The catalog
   // itself is not seeded here: the browser reads it lazily from the
-  // `window.__SKYNET_MESSAGES__` shim, and SSR of client components from the
+  // `window.__APP_MESSAGES__` shim, and SSR of client components from the
   // request global the layout publishes (see runtime-messages.ts).
   React.useState(() => {
     setClientLocale(initialLocale);
@@ -88,6 +89,7 @@ export function LocaleProvider({
 
   const resetToAuto = React.useCallback(() => {
     document.cookie = `${LOCALE_COOKIE}=;path=/;max-age=0;samesite=lax`;
+    document.cookie = `${LEGACY_LOCALE_COOKIE}=;path=/;max-age=0;samesite=lax`;
     window.dispatchEvent(new Event(LOCALE_RELOAD_EVENT));
     window.location.reload();
   }, []);

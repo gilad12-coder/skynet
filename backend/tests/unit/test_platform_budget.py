@@ -40,7 +40,7 @@ def test_budget_closes_at_the_cap_and_reopens_next_month(fake_redis: fakeredis.F
 
 def test_crossing_alerts_once(fake_redis: fakeredis.FakeStrictRedis, caplog: pytest.LogCaptureFixture) -> None:
     """Only the spend that crosses the cap logs the ERROR the alert handler forwards."""
-    caplog.set_level(logging.ERROR, logger="skynet.api.platform_budget")
+    caplog.set_level(logging.ERROR, logger="app.api.platform_budget")
     for _ in range(4):
         record_spend("groq", 4.0, 10.0, now=_JAN)
     assert len(caplog.records) == 1

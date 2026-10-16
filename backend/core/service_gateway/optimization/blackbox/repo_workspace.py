@@ -22,20 +22,20 @@ from pathlib import Path
 from .repo_tree import archive_chunks, patch_violations
 from .sandbox import CommandResult, OutputSink, SandboxRuntime, SandboxSession, SandboxSpec
 
-REPO_DIR = ".skynet-repo"
+REPO_DIR = ".app-repo"
 BASE_DIR = f"{REPO_DIR}/base"
 WORK_DIR = f"{REPO_DIR}/work"
 PREPARED_DIR = f"{REPO_DIR}/prepared"
 PATCH_FILE = f"{REPO_DIR}/version.patch"
 _SETUP_TIMEOUT_SECONDS = 1_800.0
-_GIT_IDENTITY = "-c user.name=skynet -c user.email=skynet@localhost -c commit.gpgsign=false"
+_GIT_IDENTITY = "-c user.name=app -c user.email=app@localhost -c commit.gpgsign=false"
 # A commit may start ``git maintenance`` in the background (detached since
 # git 2.47), whose lock files come and go while ``cp -a`` walks ``.git`` and
 # fail the copy with "cannot stat .git/objects/maintenance.lock".
 _GIT_NO_MAINTENANCE = "-c maintenance.auto=false -c gc.auto=0"
 _PROBE_TIMEOUT_SECONDS = 120.0
 _PROBE_ATTEMPTS = 5
-_PROBE_OK = "skynet-network-closed"
+_PROBE_OK = "app-network-closed"
 
 
 class RepoSetupError(RuntimeError):

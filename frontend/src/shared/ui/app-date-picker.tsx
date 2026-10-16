@@ -88,7 +88,7 @@ function buildMonthGrid(viewDate: Date): Array<Date | null> {
   return cells;
 }
 
-interface SkynetDatePickerProps {
+interface AppDatePickerProps {
   value: string | null;
   onChange: (next: string | null) => void;
   min?: string | null;
@@ -104,7 +104,7 @@ interface SkynetDatePickerProps {
  * active UI locale, the month-nav chevrons flip with writing direction, and
  * dates are surfaced as YYYY-MM-DD ISO strings so callers stay timezone-safe.
  */
-export function SkynetDatePicker({
+export function AppDatePicker({
   value,
   onChange,
   min,
@@ -112,7 +112,7 @@ export function SkynetDatePicker({
   placeholder,
   ariaLabel,
   className,
-}: SkynetDatePickerProps) {
+}: AppDatePickerProps) {
   const selectedDate = React.useMemo(() => parseISODate(value), [value]);
   const minDate = React.useMemo(() => parseISODate(min), [min]);
   const maxDate = React.useMemo(() => parseISODate(max), [max]);

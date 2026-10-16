@@ -32,10 +32,10 @@ def _payload(**overrides: Any) -> dict[str, Any]:
         "max_iterations": None,
         "shinka": BlackboxShinkaSettings().model_dump(),
         "shinka_models": [
-            {"model": "claude-test", "url": "https://gw.example/v1", "key_env": "SKYNET_SHINKA_KEY_0"},
-            {"model": "gpt-test", "url": "https://gw.example/v1", "key_env": "SKYNET_SHINKA_KEY_1"},
+            {"model": "claude-test", "url": "https://gw.example/v1", "key_env": "APP_SHINKA_KEY_0"},
+            {"model": "gpt-test", "url": "https://gw.example/v1", "key_env": "APP_SHINKA_KEY_1"},
         ],
-        "shinka_meta_key_env": "SKYNET_SHINKA_META_KEY",
+        "shinka_meta_key_env": "APP_SHINKA_META_KEY",
         "task": {"objective": "Be concise.", "background": ""},
         **overrides,
     }
@@ -113,12 +113,10 @@ def test_config_maps_every_setting_onto_upstream_fields(tmp_path: Path) -> None:
     evolution, database, runner = config["evolution"], config["database"], config["runner"]
 
     assert evolution["llm_models"] == [
-        "local/claude-test@https://gw.example/v1?api_key_env=SKYNET_SHINKA_KEY_0",
-        "local/gpt-test@https://gw.example/v1?api_key_env=SKYNET_SHINKA_KEY_1",
+        "local/claude-test@https://gw.example/v1?api_key_env=APP_SHINKA_KEY_0",
+        "local/gpt-test@https://gw.example/v1?api_key_env=APP_SHINKA_KEY_1",
     ]
-    assert evolution["meta_llm_models"] == [
-        "local/claude-test@https://gw.example/v1?api_key_env=SKYNET_SHINKA_META_KEY"
-    ]
+    assert evolution["meta_llm_models"] == ["local/claude-test@https://gw.example/v1?api_key_env=APP_SHINKA_META_KEY"]
     assert evolution["patch_types"] == ["diff", "full", "cross"]
     assert evolution["patch_type_probs"] == [0.5, 0.5, 0.0]
     assert evolution["llm_dynamic_selection"] == "ucb"
@@ -155,14 +153,14 @@ def test_config_wires_duplicate_rejection(tmp_path: Path) -> None:
     settings = BlackboxShinkaSettings(novelty=True, code_embed_sim_threshold=0.9, max_novelty_attempts=4)
     payload = _payload(
         shinka=settings.model_dump(),
-        shinka_embedding={"model": "openai/emb", "url": "https://gw.example/v1", "key_env": "SKYNET_SHINKA_EMBED_KEY"},
-        shinka_novelty_key_env="SKYNET_SHINKA_NOVELTY_KEY",
+        shinka_embedding={"model": "openai/emb", "url": "https://gw.example/v1", "key_env": "APP_SHINKA_EMBED_KEY"},
+        shinka_novelty_key_env="APP_SHINKA_NOVELTY_KEY",
     )
     evolution = shinka_runner.build_config(payload, str(tmp_path), 1)["evolution"]
 
-    assert evolution["embedding_model"] == "local/openai/emb@https://gw.example/v1?api_key_env=SKYNET_SHINKA_EMBED_KEY"
+    assert evolution["embedding_model"] == "local/openai/emb@https://gw.example/v1?api_key_env=APP_SHINKA_EMBED_KEY"
     assert evolution["novelty_llm_models"] == [
-        "local/claude-test@https://gw.example/v1?api_key_env=SKYNET_SHINKA_NOVELTY_KEY"
+        "local/claude-test@https://gw.example/v1?api_key_env=APP_SHINKA_NOVELTY_KEY"
     ]
     assert evolution["code_embed_sim_threshold"] == 0.9
     assert evolution["max_novelty_attempts"] == 4
@@ -175,8 +173,8 @@ def test_config_leaves_duplicate_rejection_off_by_default(tmp_path: Path) -> Non
         tmp_path: Results directory.
     """
     payload = _payload(
-        shinka_embedding={"model": "openai/emb", "url": "https://gw.example/v1", "key_env": "SKYNET_SHINKA_EMBED_KEY"},
-        shinka_novelty_key_env="SKYNET_SHINKA_NOVELTY_KEY",
+        shinka_embedding={"model": "openai/emb", "url": "https://gw.example/v1", "key_env": "APP_SHINKA_EMBED_KEY"},
+        shinka_novelty_key_env="APP_SHINKA_NOVELTY_KEY",
     )
     evolution = shinka_runner.build_config(payload, str(tmp_path), 1)["evolution"]
 
@@ -229,14 +227,14 @@ def test_model_names_route_through_the_gateway() -> None:
 
 def test_usage_kind_tells_meta_notes_from_mutations() -> None:
     """Tag the meta-notes route's calls apart from every mutation call, even on the same model."""
-    meta = "local/m@https://gw/v1?api_key_env=SKYNET_SHINKA_META_KEY"
-    mutation = "local/m@https://gw/v1?api_key_env=SKYNET_SHINKA_KEY_0"
+    meta = "local/m@https://gw/v1?api_key_env=APP_SHINKA_META_KEY"
+    mutation = "local/m@https://gw/v1?api_key_env=APP_SHINKA_KEY_0"
 
-    assert shinka_runner.usage_kind(meta, "SKYNET_SHINKA_META_KEY") == "meta_notes"
-    assert shinka_runner.usage_kind(mutation, "SKYNET_SHINKA_META_KEY") == "mutation"
-    judge = "local/m@https://gw/v1?api_key_env=SKYNET_SHINKA_NOVELTY_KEY"
-    assert shinka_runner.usage_kind(judge, "SKYNET_SHINKA_META_KEY", "SKYNET_SHINKA_NOVELTY_KEY") == "novelty_judge"
-    assert json.loads(shinka_runner.usage_header("mutation")["x-skynet-usage-tags"]) == {
+    assert shinka_runner.usage_kind(meta, "APP_SHINKA_META_KEY") == "meta_notes"
+    assert shinka_runner.usage_kind(mutation, "APP_SHINKA_META_KEY") == "mutation"
+    judge = "local/m@https://gw/v1?api_key_env=APP_SHINKA_NOVELTY_KEY"
+    assert shinka_runner.usage_kind(judge, "APP_SHINKA_META_KEY", "APP_SHINKA_NOVELTY_KEY") == "novelty_judge"
+    assert json.loads(shinka_runner.usage_header("mutation")["x-app-usage-tags"]) == {
         "caller": "proposer",
         "kind": "mutation",
     }
@@ -511,22 +509,22 @@ def test_repository_config_uses_the_file_aware_system_message(tmp_path: Path) ->
     assert config["max_patch_attempts"] == text["max_patch_attempts"] + shinka_bundle.OPEN_ROUNDS
 
 
-_EDITOR_MODEL = "local/claude-test@https://gw.example/v1?api_key_env=SKYNET_SHINKA_KEY_0"
+_EDITOR_MODEL = "local/claude-test@https://gw.example/v1?api_key_env=APP_SHINKA_KEY_0"
 
 
 def _editor_config() -> dict[str, Any]:
     """Build the ``shinka_editor`` payload block for one optimization model.
 
     Returns:
-        The block, with a launch reading ``SKYNET_SHINKA_KEY_0``.
+        The block, with a launch reading ``APP_SHINKA_KEY_0``.
     """
     launch = {
         "run_command": "pi",
-        "files": {".skynet/pi/models.json": "{}"},
+        "files": {".app/pi/models.json": "{}"},
         "env": {},
         "output_format": "pi",
         "model": "claude-test",
-        "key_env": "SKYNET_SHINKA_KEY_0",
+        "key_env": "APP_SHINKA_KEY_0",
         "price": {"input": 0.0, "output": 0.0},
     }
     return {"max_tool_calls": 7, "launches": [launch]}
@@ -691,7 +689,7 @@ def test_agent_editor_writes_a_text_version_from_the_agents_edits(tmp_path: Path
         tmp_path: Run folder.
         monkeypatch: Replaces the harness session and the route key.
     """
-    monkeypatch.setenv("SKYNET_SHINKA_KEY_0", "route-key")
+    monkeypatch.setenv("APP_SHINKA_KEY_0", "route-key")
     calls: list[dict[str, Any]] = []
 
     def edit(workspace: Path) -> None:

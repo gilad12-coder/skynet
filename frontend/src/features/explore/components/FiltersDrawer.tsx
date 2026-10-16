@@ -13,7 +13,7 @@ import { cn } from "@/shared/lib/utils";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { Button } from "@/shared/ui/primitives/button";
 import { Sheet, SheetContent, SheetTitle } from "@/shared/ui/primitives/sheet";
-import { SkynetDatePicker } from "@/shared/ui/skynet-date-picker";
+import { AppDatePicker } from "@/shared/ui/app-date-picker";
 import { CheckboxIndicator } from "@/shared/ui/select-checkbox";
 import { useIsWideViewport } from "../hooks/use-wide-viewport";
 import { pickerRows } from "../lib/facet-options";
@@ -867,7 +867,7 @@ function DateField({
             <span className="text-[11.5px] text-foreground/55">
               {msg("explore.filters.date.from")}
             </span>
-            <SkynetDatePicker
+            <AppDatePicker
               value={dateFrom}
               onChange={(next) => onChange(next, dateTo)}
               max={dateTo}
@@ -878,7 +878,7 @@ function DateField({
             <span className="text-[11.5px] text-foreground/55">
               {msg("explore.filters.date.to")}
             </span>
-            <SkynetDatePicker
+            <AppDatePicker
               value={dateTo}
               onChange={(next) => onChange(dateFrom, next)}
               min={dateFrom}

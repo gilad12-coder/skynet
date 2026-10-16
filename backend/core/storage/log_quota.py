@@ -59,7 +59,7 @@ def quota_full_entry() -> dict[str, Any]:
     """
     return {
         "level": "WARNING",
-        "logger": "skynet.storage",
+        "logger": "app.storage",
         "message": QUOTA_FULL_MESSAGE,
         "source": "host",
         "event": QUOTA_FULL_EVENT,

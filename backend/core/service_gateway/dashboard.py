@@ -820,8 +820,8 @@ def search_optimizations(
     query_vector: list[float] | None = None
 
     # The semantic branch references job_embeddings by name, so on a database
-    # where that table was never created (e.g. an airgap deploy without
-    # pgvector) it raises UndefinedTable -> 500 -- which the browser surfaces as
+    # where that table was never created (e.g. a Postgres
+    # without pgvector) it raises UndefinedTable -> 500 -- which the browser surfaces as
     # a CORS/"failed to load" error on /dashboard/search. The unembedded-job
     # probe only diverts scopes that have in-scope success rows, so an empty
     # "mine"/"shared" corpus would otherwise fall straight through to the broken

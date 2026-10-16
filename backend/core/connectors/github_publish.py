@@ -79,7 +79,7 @@ def push_version(
         RepoPublishError: When the clone, the patch or the push fails.
     """
     environment = git_auth_env(token)
-    workdir = Path(tempfile.mkdtemp(prefix="skynet-publish-"))
+    workdir = Path(tempfile.mkdtemp(prefix="app-publish-"))
     try:
         _git(["init", "--quiet"], workdir, environment)
         _git(["remote", "add", "origin", remote or f"{GITHUB_HOST}/{repository}.git"], workdir, environment)

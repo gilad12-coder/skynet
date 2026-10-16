@@ -40,7 +40,7 @@ import {
 } from "../lib/run-usage";
 import { LiveMarker } from "./LogsTab";
 
-const GROUPING_STORAGE_KEY = "skynet.usage.grouping";
+const GROUPING_STORAGE_KEY = "app.usage.grouping";
 // Shared by the summary strip and its skeleton. Seven columns wait for xl:
 // at lg the main column beside the sidebar is only about 780px wide (iPad
 // portrait), too narrow for seven money figures.

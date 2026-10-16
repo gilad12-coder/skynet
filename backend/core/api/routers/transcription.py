@@ -34,7 +34,7 @@ from ..errors import DomainError
 from ..platform_budget import budget_open, record_spend
 from ..rate_limit import RateLimiter, shared_redis_client
 
-logger = logging.getLogger("skynet.api.transcription")
+logger = logging.getLogger("app.api.transcription")
 
 _GROQ_BASE = "https://api.groq.com/openai/v1"
 _GROQ_MODEL = "whisper-large-v3-turbo"

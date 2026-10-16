@@ -27,7 +27,7 @@ from redis.exceptions import RedisError
 from ..config import settings
 from .rate_limit import shared_redis_client
 
-logger = logging.getLogger("skynet.api.platform_budget")
+logger = logging.getLogger("app.api.platform_budget")
 
 # Outlives the longest month so a counter is still readable on its last day.
 _COUNTER_TTL_SECONDS = 35 * 24 * 3600

@@ -26,7 +26,7 @@ from ..api.posthog import export_telemetry_events
 from ..config import settings
 from ..storage.models import TelemetryEventModel
 
-logger = logging.getLogger("skynet.telemetry")
+logger = logging.getLogger("app.telemetry")
 
 _SERVER_CONTEXT: dict[str, Any] = {"source": "server"}
 

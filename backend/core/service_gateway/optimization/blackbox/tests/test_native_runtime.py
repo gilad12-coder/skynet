@@ -101,7 +101,7 @@ class FakeSession:
         payload = json.loads(self.files["native_input.json"])
         request_id = "a" * 32
         request = {"id": request_id, "candidate": self.candidate, "example": {"id": "case"}}
-        line = f"SKYNET_NATIVE_RPC {payload['nonce']} {json.dumps(request)}\n"
+        line = f"APP_NATIVE_RPC {payload['nonce']} {json.dumps(request)}\n"
         sink = kwargs["on_output"]
         sink("stdout", "unrelated upstream log\n" + line[:17])
         sink("stdout", line[17:])
@@ -109,7 +109,7 @@ class FakeSession:
         response = json.loads(self.files[f"rpc/{request_id}.json"])
         if "score" in response:
             progress = {"candidate_id": 0, "candidate": self.candidate, "score": response["score"], "total_evals": 1}
-            sink("stdout", f"SKYNET_NATIVE_PROGRESS {payload['nonce']} {json.dumps(progress)}\n")
+            sink("stdout", f"APP_NATIVE_PROGRESS {payload['nonce']} {json.dumps(progress)}\n")
         document = {
             "best_candidate": self.candidate,
             "best_score": response.get("score"),
@@ -356,7 +356,7 @@ def test_native_transport_preserves_engine_choice_and_scores_once(
     assert json.loads(session.files["native_input.json"])["sandbox"] is False
     assert "test_set" not in json.loads(session.files["native_input.json"])["task"]
     assert "secret" not in session.files["native_input.json"]
-    assert session.calls[1][1]["env"]["ANTHROPIC_AUTH_TOKEN"] == "skynet-managed"
+    assert session.calls[1][1]["env"]["ANTHROPIC_AUTH_TOKEN"] == "app-managed"
     assert runtime.spec.inject_headers == {"gateway.example": {"Authorization": "Bearer secret"}}
     assert ctx.native_options.usage_by_model["claude-test"]["total_tokens"] == 13
     assert progress[0]["score"] == 0.75
@@ -538,7 +538,7 @@ def test_real_native_runner_unpacks_the_repository_for_its_engine(
     candidates = []
     try:
         for line in process.stdout:
-            if line.startswith("SKYNET_NATIVE_RPC testnonce "):
+            if line.startswith("APP_NATIVE_RPC testnonce "):
                 request = json.loads(line.split(" ", 2)[2])
                 candidates.append(request["candidate"])
                 response = {"score": 0.9 if "+a = 2" in request["candidate"] else 0.5, "info": {}}
@@ -828,7 +828,7 @@ def test_real_native_runner_drives_upstream_with_fake_cli(tmp_path: Path, engine
     requests = 0
     try:
         for line in process.stdout:
-            if not line.startswith("SKYNET_NATIVE_RPC testnonce "):
+            if not line.startswith("APP_NATIVE_RPC testnonce "):
                 continue
             request = json.loads(line.split(" ", 2)[2])
             score = 0.8 if request["candidate"] == "better" else float(request["example"]["id"] == "a")
@@ -968,14 +968,14 @@ def test_shinka_transport_routes_every_model_through_its_own_token(
     payload = json.loads(session.files["native_input.json"])
     assert payload["shinka"] == {"num_islands": 3}
     assert payload["shinka_models"] == [
-        {"model": "claude-test", "url": "https://gateway.example/v1", "key_env": "SKYNET_SHINKA_KEY_0"},
-        {"model": "gpt-test", "url": "https://gateway.example/v1", "key_env": "SKYNET_SHINKA_KEY_1"},
+        {"model": "claude-test", "url": "https://gateway.example/v1", "key_env": "APP_SHINKA_KEY_0"},
+        {"model": "gpt-test", "url": "https://gateway.example/v1", "key_env": "APP_SHINKA_KEY_1"},
     ]
-    assert payload["shinka_meta_key_env"] == "SKYNET_SHINKA_META_KEY"
+    assert payload["shinka_meta_key_env"] == "APP_SHINKA_META_KEY"
     assert "route-a" not in session.files["native_input.json"]
     env = session.calls[1][1]["env"]
-    assert (env["SKYNET_SHINKA_KEY_0"], env["SKYNET_SHINKA_KEY_1"]) == ("route-a", "route-b")
-    assert env["SKYNET_SHINKA_META_KEY"] == "route-a"
+    assert (env["APP_SHINKA_KEY_0"], env["APP_SHINKA_KEY_1"]) == ("route-a", "route-b")
+    assert env["APP_SHINKA_META_KEY"] == "route-a"
     assert env["SHINKA_PRICING_MODE"] == "offline"
     assert runtime.spec.inject_headers == {}
     assert session.calls[1][0].count("shinka_runner.py") == 1
@@ -1012,13 +1012,13 @@ def test_shinka_agent_editor_ships_a_tagged_pi_launch_per_model(
     payload = json.loads(session.files["native_input.json"])
     editor = payload["shinka_editor"]
     assert editor["max_tool_calls"] == 12
-    assert [launch["key_env"] for launch in editor["launches"]] == ["SKYNET_SHINKA_KEY_0", "SKYNET_SHINKA_KEY_1"]
+    assert [launch["key_env"] for launch in editor["launches"]] == ["APP_SHINKA_KEY_0", "APP_SHINKA_KEY_1"]
     launch = editor["launches"][0]
     assert launch["model"] == "claude-test"
     assert launch["output_format"] == "pi"
     assert "--tools read,grep,find,ls,edit,write" in launch["run_command"]
     assert "--no-extensions --no-skills --no-context-files" in launch["run_command"]
-    models = json.loads(launch["files"][".skynet/pi/models.json"])
+    models = json.loads(launch["files"][".app/pi/models.json"])
     provider = next(iter(models["providers"].values()))
     tags = json.loads(provider["headers"][USAGE_TAGS_HEADER])
     assert tags == {"caller": "proposer", "kind": "mutation"}
@@ -1067,12 +1067,12 @@ def test_shinka_novelty_hands_the_judge_and_embeddings_their_own_tokens(
     assert payload["shinka_embedding"] == {
         "model": "openai/text-embedding-3-small",
         "url": "https://gw.example/v1",
-        "key_env": "SKYNET_SHINKA_EMBED_KEY",
+        "key_env": "APP_SHINKA_EMBED_KEY",
     }
-    assert payload["shinka_novelty_key_env"] == "SKYNET_SHINKA_NOVELTY_KEY"
+    assert payload["shinka_novelty_key_env"] == "APP_SHINKA_NOVELTY_KEY"
     assert "route-emb" not in session.files["native_input.json"]
     env = session.calls[1][1]["env"]
-    assert (env["SKYNET_SHINKA_NOVELTY_KEY"], env["SKYNET_SHINKA_EMBED_KEY"]) == ("route-a", "route-emb")
+    assert (env["APP_SHINKA_NOVELTY_KEY"], env["APP_SHINKA_EMBED_KEY"]) == ("route-a", "route-emb")
 
 
 def test_shinka_ships_a_repository_checkout_with_its_bundle_helpers(
@@ -1226,9 +1226,9 @@ def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path
         f"#!{sys.executable}\n"
         "import json, os, pathlib, re, sys, urllib.request\n"
         "with (pathlib.Path.home()/'invocations.txt').open('a') as history: history.write(' '.join(sys.argv[1:7])+'\\n')\n"
-        "assert pathlib.Path(os.environ['SKYNET_PROMPT_FILE']).read_text()\n"
-        "assert os.environ['SKYNET_API_KEY'] == 'real-key' and os.environ['SKYNET_MODEL'] == 'claude-test'\n"
-        "assert pathlib.Path('AGENTS.md').read_text() and json.loads(pathlib.Path('.skynet/pi/models.json').read_text())\n"
+        "assert pathlib.Path(os.environ['APP_PROMPT_FILE']).read_text()\n"
+        "assert os.environ['APP_API_KEY'] == 'real-key' and os.environ['APP_MODEL'] == 'claude-test'\n"
+        "assert pathlib.Path('AGENTS.md').read_text() and json.loads(pathlib.Path('.app/pi/models.json').read_text())\n"
         "if pathlib.Path('eval.sh').exists():\n"
         " script=pathlib.Path('eval.sh').read_text(); url=re.search(r'SERVER_URL=\"([^\"]+)\"',script).group(1)\n"
         " request=urllib.request.Request(url+'/evaluate',data=json.dumps({'candidate':'better'}).encode(),"
@@ -1284,7 +1284,7 @@ def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path
     )
     try:
         for line in process.stdout:
-            if not line.startswith("SKYNET_NATIVE_RPC testnonce "):
+            if not line.startswith("APP_NATIVE_RPC testnonce "):
                 continue
             request = json.loads(line.split(" ", 2)[2])
             score = 0.8 if request["candidate"] == "better" else float(request["example"]["id"] == "a")
@@ -1304,7 +1304,7 @@ def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path
     assert result["usage_by_model"]["claude-test"]["total_tokens"] == 10
     assert result["usage_complete"] is True
     assert (tmp_path / harness_bridge.SHIM_DIR / "claude").exists()
-    assert harness_bridge.KEY_TOKEN not in next(tmp_path.rglob(".skynet/pi/models.json")).read_text()
+    assert harness_bridge.KEY_TOKEN not in next(tmp_path.rglob(".app/pi/models.json")).read_text()
     assert list((tmp_path / ".claude" / "projects").rglob("*.jsonl"))
 
 
@@ -1341,7 +1341,7 @@ def test_run_native_engine_serializes_the_proposer_without_the_gateway_key(
     assert list(payload["proposer"]["price"].values()) == list(model_token_costs("claude-test"))
     assert "secret" not in session.files["native_input.json"]
     assert harness_bridge.KEY_TOKEN in session.files["native_input.json"]
-    assert session.calls[1][1]["env"][harness_bridge.KEY_ENV] == "skynet-managed"
+    assert session.calls[1][1]["env"][harness_bridge.KEY_ENV] == "app-managed"
     assert "codex --version" in session.calls[0][0]
 
 
@@ -1416,9 +1416,9 @@ def test_mailbox_relays_case_scores_and_per_case_versions() -> None:
 
     mailbox.on_output(
         "stdout",
-        'SKYNET_NATIVE_PROGRESS nonce {"event": "case_scored", "candidate_id": 0, "example_id": "1", "score": 0.5, "total": 2}\n'
-        'SKYNET_NATIVE_PROGRESS nonce {"event": "case_scored", "candidate_id": true, "example_id": "0", "score": 1.0, "total": 2}\n'
-        'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 0, "candidate": "seed", "score": 0.75, "total_evals": 2, '
+        'APP_NATIVE_PROGRESS nonce {"event": "case_scored", "candidate_id": 0, "example_id": "1", "score": 0.5, "total": 2}\n'
+        'APP_NATIVE_PROGRESS nonce {"event": "case_scored", "candidate_id": true, "example_id": "0", "score": 1.0, "total": 2}\n'
+        'APP_NATIVE_PROGRESS nonce {"candidate_id": 0, "candidate": "seed", "score": 0.75, "total_evals": 2, '
         '"per_example": [["0", 1.0], ["1", 0.5], ["2", null]]}\n',
     )
 
@@ -1445,9 +1445,9 @@ def test_mailbox_relays_the_lineage_an_engine_reports() -> None:
 
     mailbox.on_output(
         "stdout",
-        'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 4, "candidate": "x", "score": 0.5, "total_evals": 1, '
+        'APP_NATIVE_PROGRESS nonce {"candidate_id": 4, "candidate": "x", "score": 0.5, "total_evals": 1, '
         '"parent_id": 1, "generation": 2}\n'
-        'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 5, "candidate": "y", "score": 0.5, "total_evals": 2, '
+        'APP_NATIVE_PROGRESS nonce {"candidate_id": 5, "candidate": "y", "score": 0.5, "total_evals": 2, '
         '"parent_id": null, "generation": true}\n',
     )
 
@@ -1470,11 +1470,11 @@ def test_a_versions_agent_tool_calls_reach_the_run_log(caplog: pytest.LogCapture
     with caplog.at_level(logging.INFO, logger=native_runtime.logger.name):
         mailbox.on_output(
             "stdout",
-            'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 1, "candidate": "x", "score": 0.5, "total_evals": 1, '
+            'APP_NATIVE_PROGRESS nonce {"candidate_id": 1, "candidate": "x", "score": 0.5, "total_evals": 1, '
             '"tool_calls": 12, "tool_cap_reached": false}\n'
-            'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 2, "candidate": "y", "score": 0.6, "total_evals": 2, '
+            'APP_NATIVE_PROGRESS nonce {"candidate_id": 2, "candidate": "y", "score": 0.6, "total_evals": 2, '
             '"tool_calls": 100, "tool_cap_reached": true}\n'
-            'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 3, "candidate": "z", "score": 0.7, "total_evals": 3}\n',
+            'APP_NATIVE_PROGRESS nonce {"candidate_id": 3, "candidate": "z", "score": 0.7, "total_evals": 3}\n',
         )
 
     lines = [record.getMessage() for record in caplog.records if "scored" in record.getMessage()]
@@ -1498,8 +1498,8 @@ def test_each_evaluation_runs_in_a_scope_of_the_candidate_and_case_the_child_nam
     request = {"candidate": "seed", "example": {"q": 1}, "candidate_id": 4, "case": "2"}
     mailbox.on_output(
         "stdout",
-        f"SKYNET_NATIVE_RPC nonce {json.dumps({**request, 'id': '0' * 32})}\n"
-        f"SKYNET_NATIVE_RPC nonce {json.dumps({**request, 'id': '1' * 32, 'candidate_id': True, 'case': [1]})}\n",
+        f"APP_NATIVE_RPC nonce {json.dumps({**request, 'id': '0' * 32})}\n"
+        f"APP_NATIVE_RPC nonce {json.dumps({**request, 'id': '1' * 32, 'candidate_id': True, 'case': [1]})}\n",
     )
     assert mailbox.error is None
     assert seen == [{"candidate": "4", "case": "2"}, {}]

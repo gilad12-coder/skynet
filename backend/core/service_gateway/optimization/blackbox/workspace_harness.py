@@ -1,7 +1,7 @@
 """In-sandbox harness for unified workspace code: the run code, then the metric.
 
 This file is shipped verbatim into the scorer sandbox as
-``skynet_workspace_harness.py``, next to ``skynet_runner.py``, whose gateway
+``app_workspace_harness.py``, next to ``app_runner.py``, whose gateway
 client, helper module and image wrapper it reuses. Like the runner it depends
 on the standard library alone (``dspy`` is imported only for a DSPy program)
 and stays valid Python 3.9.
@@ -37,8 +37,8 @@ expected value or the metric model's key, and a run-stage ``error`` is cut to
 one short line.
 
 The run and metric code arrive only inside the message stream and are never
-written to a file. ``python3 skynet_workspace_harness.py`` reads the stream from stdin;
-with ``--env`` it reads it from base64 chunks in ``SKYNET_WS_STREAM_<n>``
+written to a file. ``python3 app_workspace_harness.py`` reads the stream from stdin;
+with ``--env`` it reads it from base64 chunks in ``APP_WS_STREAM_<n>``
 environment variables, because the sandbox API runs one command at a time
 without stdin, and drops them from the environment before user code runs.
 Replies go to the original stdout prefixed with :data:`REPLY_PREFIX`; user
@@ -69,20 +69,20 @@ try:
     from . import runner as _runner
 except ImportError:
     try:
-        import skynet_runner as _runner  # type: ignore[no-redef]
+        import app_runner as _runner  # type: ignore[no-redef]
     except ImportError:
         # The run child is this file run as a script from the package
         # directory (tests, local runs), where the runner is ``runner.py``.
-        _spec = importlib.util.spec_from_file_location("skynet_runner", Path(__file__).resolve().parent / "runner.py")
+        _spec = importlib.util.spec_from_file_location("app_runner", Path(__file__).resolve().parent / "runner.py")
         _runner = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type,no-redef]
-        sys.modules["skynet_runner"] = _runner
+        sys.modules["app_runner"] = _runner
         _spec.loader.exec_module(_runner)  # type: ignore[union-attr]
 
-REPLY_PREFIX = "SKYNET_WS_REPLY "
-ENV_STREAM_PREFIX = "SKYNET_WS_STREAM_"
-ENV_STREAM_COUNT = "SKYNET_WS_STREAM_COUNT"
-ENV_TASK_API_KEY = "SKYNET_TASK_API_KEY"
-ENV_METRIC_API_KEY = "SKYNET_METRIC_API_KEY"
+REPLY_PREFIX = "APP_WS_REPLY "
+ENV_STREAM_PREFIX = "APP_WS_STREAM_"
+ENV_STREAM_COUNT = "APP_WS_STREAM_COUNT"
+ENV_TASK_API_KEY = "APP_TASK_API_KEY"
+ENV_METRIC_API_KEY = "APP_METRIC_API_KEY"
 RUN_FILENAME = "<run_code>"
 METRIC_FILENAME = "<metric_code>"
 DETAIL_MAX_CHARS = 4000
@@ -97,7 +97,7 @@ METRIC_ENTRY_NAME = "score"
 # When the run code holds several modules, the one under this name is the program.
 PROGRAM_NAME = "program"
 _USER_FILENAMES = (RUN_FILENAME, METRIC_FILENAME)
-FILES_DIR_PREFIX = "skynet_ws_files_"
+FILES_DIR_PREFIX = "app_ws_files_"
 # The run child's extra-files directory, so tracebacks name a helper file by
 # its workspace path. Set only inside a run child.
 _files_dir: str | None = None

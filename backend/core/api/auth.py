@@ -22,8 +22,10 @@ from .errors import DomainError
 from .monthly_active_users import enforce_monthly_active_user_limit
 
 _EXPECTED_ALGORITHM = "HS256"
-_EXPECTED_AUDIENCE = "skynet-backend"
-_EXPECTED_ISSUER = "skynet-frontend"
+# Both spellings verify so the frontend and backend can deploy in either order;
+# a token is still bound to this backend by the shared HMAC secret.
+_EXPECTED_AUDIENCES = frozenset({"app-backend", "skynet-backend"})
+_EXPECTED_ISSUERS = frozenset({"app-frontend", "skynet-frontend"})
 
 # Personal Access Token (PAT) — a long-lived, user-generated API credential
 # for programmatic backend access, distinct from the short-lived session JWT
@@ -105,7 +107,7 @@ def _verify_hs256(token: str, secret: str) -> dict[str, Any]:
     if not hmac.compare_digest(expected, actual):
         raise DomainError("auth.invalid_token", status=401)
     now = int(time.time())
-    if payload.get("aud") != _EXPECTED_AUDIENCE or payload.get("iss") != _EXPECTED_ISSUER:
+    if payload.get("aud") not in _EXPECTED_AUDIENCES or payload.get("iss") not in _EXPECTED_ISSUERS:
         raise DomainError("auth.invalid_token", status=401)
     exp = payload.get("exp")
     if not isinstance(exp, int) or exp < now:

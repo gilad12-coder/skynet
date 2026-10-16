@@ -214,7 +214,7 @@ def test_build_scorer_opens_the_configured_runtime_named_after_the_job(monkeypat
     output = json.dumps({"score": 0.5, "side_info": {"k": 1}, "error": None, "usage": []})
     runtime = FakeSandboxRuntime(
         lambda: FakeSandboxSession(
-            produces={"python3 skynet_runner.py calls/000001": {"calls/000001/output.json": output}}
+            produces={"python3 app_runner.py calls/000001": {"calls/000001/output.json": output}}
         )
     )
     monkeypatch.setattr(scorer_mod, "scorer_runtime_from_settings", lambda settings: runtime)
@@ -222,7 +222,7 @@ def test_build_scorer_opens_the_configured_runtime_named_after_the_job(monkeypat
     scorer = build_scorer(BlackboxScorer(metric_code="def score(c, case=None): return 0.5"), job_id="job-7")
 
     assert scorer("x", None) == (0.5, {"k": 1})
-    assert runtime.specs[0].name.startswith("skynet-scorer-job-7-")
+    assert runtime.specs[0].name.startswith("app-scorer-job-7-")
     assert runtime.specs[0].tags == {"skynet_job": "job-7"}
 
 

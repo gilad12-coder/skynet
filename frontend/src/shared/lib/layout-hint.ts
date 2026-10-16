@@ -8,7 +8,7 @@ import { useSyncExternalStore } from "react";
  * it survives a reload of the tab, and is gone with the tab.
  */
 
-const STORAGE_PREFIX = "skynet-layout:";
+const STORAGE_PREFIX = "app-layout:";
 const known = new Map<string, unknown>();
 
 export function rememberLayout(key: string, value: unknown): void {

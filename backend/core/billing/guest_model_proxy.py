@@ -13,10 +13,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from uuid import uuid4
 
-RELAY_URL_ENV = "SKYNET_BUDGET_RELAY_URL"
+RELAY_URL_ENV = "APP_BUDGET_RELAY_URL"
+GATEWAY_URL_ENV = "APP_GATEWAY_URL"
+# The pinned sandbox image predates the APP_* names and reads only these.
+_LEGACY_RELAY_URL_ENV = "SKYNET_BUDGET_RELAY_URL"
+_LEGACY_GATEWAY_URL_ENV = "SKYNET_GATEWAY_URL"
 _PRINT_LOCK = threading.Lock()
-# Mirrors usage_tags.USAGE_TAGS_HEADER: this file runs in the sandbox without Skynet's code.
-_TAGS_HEADER = "x-skynet-usage-tags"
+# Mirrors usage_tags.USAGE_TAGS_HEADERS: this file runs in the sandbox without the
+# backend's code, and an older image still sends the legacy header.
+_TAGS_HEADERS = frozenset({"x-app-usage-tags", "x-skynet-usage-tags"})
+_FORWARDED_HEADERS = frozenset({"authorization", "x-api-key", "anthropic-version", "anthropic-beta"}) | _TAGS_HEADERS
 
 
 def main() -> int:
@@ -56,11 +62,7 @@ def main() -> int:
                 "id": identity,
                 "path": self.path,
                 "body": base64.b64encode(self.rfile.read(length) if length else b"{}").decode(),
-                "headers": {
-                    key: value
-                    for key, value in self.headers.items()
-                    if key.lower() in {"authorization", "x-api-key", "anthropic-version", "anthropic-beta", _TAGS_HEADER}
-                },
+                "headers": {key: value for key, value in self.headers.items() if key.lower() in _FORWARDED_HEADERS},
             }
             with _PRINT_LOCK:
                 print(prefix + json.dumps(request, separators=(",", ":")), flush=True)
@@ -92,9 +94,11 @@ def main() -> int:
     environment = {
         **os.environ,
         RELAY_URL_ENV: f"{endpoint}/v1",
+        _LEGACY_RELAY_URL_ENV: f"{endpoint}/v1",
         "ANTHROPIC_BASE_URL": endpoint,
         "OPENAI_BASE_URL": f"{endpoint}/v1",
-        "SKYNET_GATEWAY_URL": f"{endpoint}/v1",
+        GATEWAY_URL_ENV: f"{endpoint}/v1",
+        _LEGACY_GATEWAY_URL_ENV: f"{endpoint}/v1",
     }
     try:
         return subprocess.run(sys.argv[2:], env=environment, check=False).returncode

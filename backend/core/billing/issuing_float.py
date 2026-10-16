@@ -38,7 +38,7 @@ from ..api.email_sender import email_configured, send_email
 from ..api.rate_limit import shared_redis_client
 from ..config import settings
 
-logger = logging.getLogger("skynet.billing.issuing_float")
+logger = logging.getLogger("app.billing.issuing_float")
 
 # Continues the 7421370000xx advisory-lock series (openrouter_float uses ...05).
 ISSUING_FUNDING_SWEEP_LOCK_KEY = 742137000006

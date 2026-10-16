@@ -328,7 +328,7 @@ def test_remote_runtime_streams_and_metered_mailbox_scrubs_protocol(gateway: Mod
     assert result.ok
     assert result.stdout.strip() == "OK"
     assert "private prompt" not in result.stdout
-    assert "SKYNET_MODEL_" not in "".join(output)
+    assert "APP_MODEL_" not in "".join(output)
     assert gateway.runtime.service.get(gateway.runtime.budget_id, "alice").setup_spent_cents == Decimal("0.1")
     assert "upstream-secret" not in json.dumps(protected)
 

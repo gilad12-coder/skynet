@@ -3261,7 +3261,6 @@
   "submit.modelpicker.purpose.all": "すべて",
   "submit.modelpicker.purpose.aria": "用途でモデルを絞り込む",
   "submit.modelpicker.purpose.multilingual": "多言語",
-  "submit.modelpicker.purpose.onprem": "オンプレミス",
   "submit.modelpicker.purpose.reasoning": "推論",
   "submit.modelpicker.purpose.vision": "ビジョン",
   "submit.modelpicker.zdr_unavailable": "「保持なし」のプライバシー設定では利用できない可能性があります",

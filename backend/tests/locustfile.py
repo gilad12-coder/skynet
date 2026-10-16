@@ -30,7 +30,7 @@ from locust import HttpUser, between, tag, task
 LOAD_TEST_MODEL = os.getenv("LOAD_TEST_MODEL", "openai/gpt-5.4-nano")
 
 
-class SkynetAPIUser(HttpUser):
+class AppAPIUser(HttpUser):
     """Simulates a data-scientist using the Skynet API.
 
     Read tasks run ~28x more often than write tasks. The single "submit and

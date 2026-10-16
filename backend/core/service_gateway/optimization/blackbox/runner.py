@@ -1,17 +1,17 @@
 """In-sandbox runner for python scorers: ``input.json`` → user code → ``output.json``.
 
-This file is shipped verbatim into every scorer sandbox as ``skynet_runner.py``
+This file is shipped verbatim into every scorer sandbox as ``app_runner.py``
 and executed there by the box's own interpreter, so it depends on the standard
 library alone and stays valid Python 3.9 (the default sandbox image's
 version). The backend imports the same module for the pieces it shares with
 the box — score normalization, entry-point discovery, the image wrapper — so
 the two sides cannot drift apart.
 
-Contract: ``python3 skynet_runner.py <call_dir>`` reads ``<call_dir>/input.json``::
+Contract: ``python3 app_runner.py <call_dir>`` reads ``<call_dir>/input.json``::
 
     {"candidate": ..., "case": ..., "gateway": {...} | null}
 
-The scorer source is written once per box to ``skynet_scorer_code.txt`` next
+The scorer source is written once per box to ``app_scorer_code.txt`` next
 to the runner, never into a call's input, so the per-call files carry only
 candidates and cases. A legacy input that still holds ``"code"`` wins over
 that file.
@@ -47,20 +47,24 @@ from pathlib import Path
 from typing import Any
 
 INPUT_FILE = "input.json"
-CODE_FILE = "skynet_scorer_code.txt"
+CODE_FILE = "app_scorer_code.txt"
 OUTPUT_FILE = "output.json"
 SCORER_FILENAME = "<scorer_code>"
 # Names the scorer namespace binds the model helper and the image wrapper to.
 LLM_HELPER_NAME = "llm"
 # The gateway key rides in the environment so it never touches the box filesystem.
-ENV_API_KEY = "SKYNET_API_KEY"
-ENV_BUDGET_RELAY_URL = "SKYNET_BUDGET_RELAY_URL"
+ENV_API_KEY = "APP_API_KEY"
+ENV_BUDGET_RELAY_URL = "APP_BUDGET_RELAY_URL"
+# This file runs alone in the box, without ``core.config``; boxes started by an
+# older control plane still carry only the pre-rename spellings.
+_LEGACY_ENV_PREFIX = "SKYNET_"
 IMAGE_HELPER_NAME = "Image"
 LOG_HELPER_NAME = "log"
 # Frames one ``log()`` event on stderr; the host turns each into a run-log line.
-EVENT_PREFIX = "SKYNET_SCORER_EVENT "
+EVENT_PREFIX = "APP_SCORER_EVENT "
 _EVENT_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 # The module scorer code imports those helpers from: ``from skynet import llm, Image``.
+# Saved user scorers import it by this name, so it stays as it is.
 HELPER_MODULE_NAME = "skynet"
 # Where Vercel's egress proxy leaves its CA when a network policy rewrites headers.
 PROXY_CA_PATH = "/usr/local/share/ca-certificates/vercel-proxy-ca.crt"
@@ -149,6 +153,18 @@ class Image:
         else:
             raise ScorerError("Image needs a url, a path or base64_data.")
         return {"type": "image_url", "image_url": {"url": url}}
+
+
+def env_value(name: str) -> str | None:
+    """Read an ``APP_*`` variable, falling back to its pre-rename ``SKYNET_*`` name.
+
+    Args:
+        name: Variable name starting with ``APP_``.
+
+    Returns:
+        The first non-empty value, or ``None`` when neither name is set.
+    """
+    return os.environ.get(name) or os.environ.get(_LEGACY_ENV_PREFIX + name[len("APP_") :]) or None
 
 
 def _data_url(data: bytes, media_type: str) -> str:
@@ -569,7 +585,7 @@ class GatewayClient:
             timeout_seconds: Per-request timeout.
             protected: Whether the trusted parent owns dispatch and retry coverage.
         """
-        relay = os.environ.get(ENV_BUDGET_RELAY_URL)
+        relay = env_value(ENV_BUDGET_RELAY_URL)
         self._url = (relay or url).rstrip("/") + "/chat/completions"
         self._protected = protected or bool(relay)
         self.control: dict[str, str] | None = None
@@ -711,7 +727,7 @@ def run_call(payload: dict[str, Any]) -> dict[str, Any]:
         llm = GatewayClient(
             str(gateway["url"]),
             str(gateway["model"]),
-            api_key=gateway.get("api_key") or os.environ.get(ENV_API_KEY),
+            api_key=gateway.get("api_key") or env_value(ENV_API_KEY),
             temperature=gateway.get("temperature"),
             max_tokens=gateway.get("max_tokens"),
             reasoning_effort=gateway.get("reasoning_effort"),
@@ -765,7 +781,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) != 1:
-        sys.stderr.write("usage: skynet_runner.py <call_dir>\n")
+        sys.stderr.write("usage: app_runner.py <call_dir>\n")
         return 2
     call_dir = Path(args[0])
     payload = json.loads((call_dir / INPUT_FILE).read_text(encoding="utf-8"))

@@ -53,7 +53,7 @@ from .sandbox_scorer import (
 
 logger = logging.getLogger(__name__)
 
-HARNESS_FILE = "skynet_workspace_harness.py"
+HARNESS_FILE = "app_workspace_harness.py"
 HARNESS_SOURCE = Path(workspace_harness.__file__).read_text(encoding="utf-8")
 _OPENROUTER_PREFIX = "openrouter/"
 SHAPE_MESSAGE_KEY = "contract.shape.blackbox"

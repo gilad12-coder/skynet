@@ -20,7 +20,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-# Lookup the in-package copy first (works for wheel installs and air-gap),
+# Lookup the in-package copy first (works for wheel installs),
 # and fall back to the repo-root canonical when running from a source tree
 # without the bundled copy. Module-level constant so import never blocks on
 # disk I/O — the catalog itself is read lazily by ``_catalog()``.

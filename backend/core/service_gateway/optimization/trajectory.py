@@ -217,7 +217,7 @@ _current_proposal_iteration: contextvars.ContextVar[int | None] = contextvars.Co
 )
 # DSPy's parallel evaluator copies dspy.context overrides into its worker
 # threads but not contextvars, so the iteration rides along there too.
-_ITERATION_SETTING = "skynet_proposal_iteration"
+_ITERATION_SETTING = "app_proposal_iteration"
 
 
 def current_proposal_iteration() -> int | None:

@@ -2,8 +2,8 @@
 
 A composer that names no model runs the catalog's best-value default (see
 :func:`default_model_id`), which moves with OpenRouter's live prices and
-benchmarks. Deployments whose catalog flags no default (air-gapped gateways)
-degrade to the engine's configured server default.
+benchmarks. When the catalog flags no default (for example a gateway with no live
+prices), the composer degrades to the engine's configured server default.
 """
 
 from __future__ import annotations

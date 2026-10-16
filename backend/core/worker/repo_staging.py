@@ -94,7 +94,7 @@ def stage_repository(
     )
     token = github_token(engine, username)
     commit = repo.get("commit") or resolve_commit(token, repo["repository"], repo.get("branch"))
-    workdir = Path(tempfile.mkdtemp(prefix="skynet-repo-"))
+    workdir = Path(tempfile.mkdtemp(prefix="app-repo-"))
     try:
         snapshot = fetch_snapshot(repo["repository"], commit, token, workdir)
     except BaseException:
@@ -323,6 +323,8 @@ def publish_improvement(
     if problems:
         outcome = {"error": f"The best version breaks the editing rules: {problems[0]}"}
     else:
+        # Users already have branches under this prefix in their repositories,
+        # so publishing keeps it rather than starting a second naming scheme.
         branch = f"skynet/optimize-{optimization_id[:12]}"
         run_url = f"{app_url.rstrip('/')}/optimizations/{optimization_id}"
         try:

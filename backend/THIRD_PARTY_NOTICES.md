@@ -35,8 +35,8 @@ ShinkaEvolve (`shinka-evolve==0.0.7`, Apache-2.0, Copyright Sakana AI) is
 installed unmodified from PyPI, with the pinned dependencies in
 `core/service_gateway/optimization/blackbox/shinka_requirements.txt`, into its
 own virtual environment at `/opt/shinka/venv` only in sandbox images built with
-`--build-arg INCLUDE_SHINKA_EVOLVE=1` (off by default, so backend/worker and
-air-gap images do not contain it); outside such an image, a run installs it into
+`--build-arg INCLUDE_SHINKA_EVOLVE=1` (off by default, so backend/worker
+images do not contain it); outside such an image, a run installs it into
 a private virtual environment inside the run's sandbox.
 When bundled, each package's license text is in its `dist-info` folder. Most are MIT, BSD or
 Apache-2.0; certifi and tqdm are MPL-2.0, `Levenshtein` and

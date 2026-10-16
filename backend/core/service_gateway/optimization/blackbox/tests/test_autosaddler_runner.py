@@ -15,7 +15,8 @@ from .. import autosaddler_runner, native_runtime, repo_tree
 
 # The runner needs the pinned upstream package on Python 3.12, which the
 # backend venv does not carry; point this at an interpreter that has it.
-_PYTHON_ENV = "SKYNET_AUTOSADDLER_PYTHON"
+_PYTHON_ENV = "APP_AUTOSADDLER_PYTHON"
+_LEGACY_PYTHON_ENV = "SKYNET_AUTOSADDLER_PYTHON"
 
 _WRAPPER = '''
 import importlib.util, json, sys, traceback
@@ -42,7 +43,7 @@ class ScriptedProvider:
             assert ".autosaddler/training_evidence.json" in request.spec.workspace_files
             components = json.loads((request.workspace / "candidate.json").read_text())
             output = {
-                "schema_version": "skynet-autosaddler-diagnosis/v1",
+                "schema_version": "app-autosaddler-diagnosis/v1",
                 "intent": "add vowels",
                 "diagnosis": "too few vowels",
                 "expected_effect": "higher density",
@@ -50,13 +51,13 @@ class ScriptedProvider:
             }
         elif kind == "evolve":
             output = {
-                "schema_version": "skynet-autosaddler-evolution/v1",
+                "schema_version": "app-autosaddler-evolution/v1",
                 "parent_ids": [context["candidate_ids"][-1]],
                 "component_sources": {},
                 "rationale": "continue from the newest accepted candidate",
             }
         else:
-            output = {"schema_version": "skynet-autosaddler-reflection/v1", "lessons": []}
+            output = {"schema_version": "app-autosaddler-reflection/v1", "lessons": []}
         with Path("sessions.log").open("a") as log:
             log.write(kind + "\\n")
         usage = Usage(input_tokens=5, output_tokens=3, model=self.config.model)
@@ -94,7 +95,7 @@ def _upstream_python() -> str | None:
     Returns:
         The interpreter path, or ``None`` when no candidate carries AutoSaddler on Python 3.12+.
     """
-    for candidate in (os.environ.get(_PYTHON_ENV), sys.executable):
+    for candidate in (os.environ.get(_PYTHON_ENV), os.environ.get(_LEGACY_PYTHON_ENV), sys.executable):
         if not candidate:
             continue
         probe = subprocess.run(
@@ -165,9 +166,9 @@ def test_runner_climbs_with_upstream_engine_and_reports_usage(tmp_path: Path) ->
     progress: list[dict[str, Any]] = []
     try:
         for line in process.stdout:
-            if line.startswith("SKYNET_NATIVE_PROGRESS testnonce "):
+            if line.startswith("APP_NATIVE_PROGRESS testnonce "):
                 progress.append(json.loads(line.split(" ", 2)[2]))
-            if not line.startswith("SKYNET_NATIVE_RPC testnonce "):
+            if not line.startswith("APP_NATIVE_RPC testnonce "):
                 continue
             request = json.loads(line.split(" ", 2)[2])
             scored.append((request["candidate"], request["example"]["id"]))
@@ -212,22 +213,22 @@ def test_runner_drives_upstream_through_a_configured_harness(tmp_path: Path) -> 
     agent = tmp_path / "agent.py"
     agent.write_text(
         "import json, os, pathlib\n"
-        "assert pathlib.Path('AGENTS.md').read_text() and pathlib.Path(os.environ['SKYNET_PROMPT_FILE']).read_text()\n"
+        "assert pathlib.Path('AGENTS.md').read_text() and pathlib.Path(os.environ['APP_PROMPT_FILE']).read_text()\n"
         "schema = pathlib.Path('.autosaddler/session_output_schema.json').read_text()\n"
         "context = json.loads(pathlib.Path('.autosaddler/session_context.json').read_text())\n"
         "if 'diagnosis' in schema:\n"
         "    kind = 'diagnose_patch'\n"
         "    components = json.loads(pathlib.Path('candidate.json').read_text())\n"
-        "    output = {'schema_version': 'skynet-autosaddler-diagnosis/v1', 'intent': 'add vowels',"
+        "    output = {'schema_version': 'app-autosaddler-diagnosis/v1', 'intent': 'add vowels',"
         " 'diagnosis': 'too few vowels', 'expected_effect': 'higher density',"
         " 'updates': {name: text + 'aaa' for name, text in components.items()}}\n"
         "elif 'evolution' in schema:\n"
         "    kind = 'evolve'\n"
-        "    output = {'schema_version': 'skynet-autosaddler-evolution/v1', 'parent_ids': [context['candidate_ids'][-1]],"
+        "    output = {'schema_version': 'app-autosaddler-evolution/v1', 'parent_ids': [context['candidate_ids'][-1]],"
         " 'component_sources': {}, 'rationale': 'continue'}\n"
         "else:\n"
         "    kind = 'reflect'\n"
-        "    output = {'schema_version': 'skynet-autosaddler-reflection/v1', 'lessons': []}\n"
+        "    output = {'schema_version': 'app-autosaddler-reflection/v1', 'lessons': []}\n"
         "pathlib.Path('.autosaddler/session_output.json').write_text(json.dumps(output))\n"
         "with (pathlib.Path.home() / 'sessions.log').open('a') as log: log.write(kind + '\\n')\n"
         "print('done')\n"
@@ -278,7 +279,7 @@ def test_runner_drives_upstream_through_a_configured_harness(tmp_path: Path) -> 
     )
     try:
         for line in process.stdout:
-            if not line.startswith("SKYNET_NATIVE_RPC testnonce "):
+            if not line.startswith("APP_NATIVE_RPC testnonce "):
                 continue
             request = json.loads(line.split(" ", 2)[2])
             response = {"score": _vowel_fraction(request["candidate"]), "info": {"feedback": "counted"}}
@@ -297,7 +298,7 @@ def test_runner_drives_upstream_through_a_configured_harness(tmp_path: Path) -> 
     assert "type: custom" in (tmp_path / "autosaddler-run" / "resolved_config.yaml").read_text()
     sessions = (tmp_path / "sessions.log").read_text().split()
     assert sessions.count("diagnose_patch") == 2
-    assert list((tmp_path / ".skynet-bridge").iterdir())
+    assert list((tmp_path / ".app-bridge").iterdir())
 
 
 def test_runner_evolves_repository_versions_scored_by_the_parent(tmp_path: Path) -> None:
@@ -327,15 +328,15 @@ def test_runner_evolves_repository_versions_scored_by_the_parent(tmp_path: Path)
         "    assert pathlib.Path('README.md').read_text() == 'hi\\n'\n"
         "    app = pathlib.Path('src/app.py')\n"
         "    app.write_text(app.read_text() + 'better\\n')\n"
-        "    output = {'schema_version': 'skynet-autosaddler-diagnosis/v1', 'intent': 'improve',"
+        "    output = {'schema_version': 'app-autosaddler-diagnosis/v1', 'intent': 'improve',"
         " 'diagnosis': 'not better yet', 'expected_effect': 'higher score', 'changed_paths': ['src/app.py']}\n"
         "elif 'evolution' in schema:\n"
         "    kind = 'evolve'\n"
-        "    output = {'schema_version': 'skynet-autosaddler-evolution/v1', 'parent_ids': [context['candidate_ids'][-1]],"
+        "    output = {'schema_version': 'app-autosaddler-evolution/v1', 'parent_ids': [context['candidate_ids'][-1]],"
         " 'component_sources': {}, 'rationale': 'continue'}\n"
         "else:\n"
         "    kind = 'reflect'\n"
-        "    output = {'schema_version': 'skynet-autosaddler-reflection/v1', 'lessons': []}\n"
+        "    output = {'schema_version': 'app-autosaddler-reflection/v1', 'lessons': []}\n"
         "pathlib.Path('.autosaddler/session_output.json').write_text(json.dumps(output))\n"
         "with (pathlib.Path.home() / 'sessions.log').open('a') as log: log.write(kind + '\\n')\n"
         "print('done')\n"
@@ -356,7 +357,7 @@ def test_runner_evolves_repository_versions_scored_by_the_parent(tmp_path: Path)
             "run_command": f'"{python}" "{agent}"',
             "instructions_file": "GUIDE.md",
             "output_format": "plain",
-            "files": {"harness.json": "__SKYNET_API_KEY__"},
+            "files": {"harness.json": "__APP_API_KEY__"},
             "env": {},
             "model": "claude-test",
             "price": {"input": 0.0, "output": 0.0},
@@ -379,7 +380,7 @@ def test_runner_evolves_repository_versions_scored_by_the_parent(tmp_path: Path)
         "PATH": "/usr/bin:/bin",
         "HOME": str(tmp_path),
         "PYTHONUNBUFFERED": "1",
-        "SKYNET_PROPOSER_API_KEY": "sk-secret-test",
+        "APP_PROPOSER_API_KEY": "sk-secret-test",
     }
     process = subprocess.Popen(
         [python, "autosaddler_runner.py", "input.json"],
@@ -392,7 +393,7 @@ def test_runner_evolves_repository_versions_scored_by_the_parent(tmp_path: Path)
     scored: list[str] = []
     try:
         for line in process.stdout:
-            if not line.startswith("SKYNET_NATIVE_RPC testnonce "):
+            if not line.startswith("APP_NATIVE_RPC testnonce "):
                 continue
             request = json.loads(line.split(" ", 2)[2])
             scored.append(request["candidate"])

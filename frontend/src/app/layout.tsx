@@ -25,6 +25,7 @@ import { msg } from "@/shared/lib/messages";
 import { getServerRuntimeEnv, serializeRuntimeEnv } from "@/shared/lib/runtime-env";
 import {
   DEFAULT_LOCALE,
+  LEGACY_LOCALE_COOKIE,
   LOCALE_COOKIE,
   dirForLocale,
   isLocale,
@@ -36,6 +37,7 @@ import { setServerMessages, type UiCatalog } from "@/shared/lib/runtime-messages
 import { buildActiveCatalog } from "@/shared/lib/messages.server";
 import { getSiteUrl } from "@/shared/lib/site-config";
 import { COLOR_THEME_INIT_SCRIPT } from "@/shared/lib/color-theme";
+import { LEGACY_NAMES_SCRIPT } from "@/shared/lib/legacy-names";
 import { auth } from "@/shared/lib/auth";
 import "@fontsource-variable/heebo/index.css";
 import "@fontsource-variable/onest/index.css";
@@ -53,7 +55,7 @@ import "@fontsource-variable/noto-sans-sc/index.css";
 import "react-toastify/dist/ReactToastify.css";
 import "./globals.css";
 
-// The layout injects window.__SKYNET_ENV__ from getServerRuntimeEnv() so one
+// The layout injects window.__APP_ENV__ from getServerRuntimeEnv() so one
 // built image can target any backend via the pod's runtime API_URL. That shim
 // only works when the layout renders per-request: statically prerendered, it
 // freezes the build-time default (localhost:8000, since API_URL isn't set in the
@@ -79,7 +81,8 @@ function ogLocale(locale: Locale): string {
  * cookie/header read per request.
  */
 const resolveRequestLocale = cache(async (): Promise<Locale> => {
-  const cookieLocale = (await cookies()).get(LOCALE_COOKIE)?.value;
+  const jar = await cookies();
+  const cookieLocale = jar.get(LOCALE_COOKIE)?.value ?? jar.get(LEGACY_LOCALE_COOKIE)?.value;
   if (isLocale(cookieLocale)) return cookieLocale;
   const detected = localeFromAcceptLanguage((await headers()).get("accept-language"));
   return detected ?? DEFAULT_LOCALE;
@@ -210,21 +213,24 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang={locale} dir={dirForLocale(locale)} translate="no" suppressHydrationWarning>
       <head>
         <meta name="google" content="notranslate" />
-        {/* First in <head>: sets the .dark class before anything paints, so a
-            dark-mode visitor never sees a light flash. */}
-        <script id="skynet-color-theme" dangerouslySetInnerHTML={{ __html: COLOR_THEME_INIT_SCRIPT }} />
+        {/* Ahead of every other script so the theme init below and any
+            module-load storage read already see the renamed keys. */}
+        <script id="app-legacy-names" dangerouslySetInnerHTML={{ __html: LEGACY_NAMES_SCRIPT }} />
+        {/* Sets the .dark class before anything paints, so a dark-mode visitor
+            never sees a light flash. */}
+        <script id="app-color-theme" dangerouslySetInnerHTML={{ __html: COLOR_THEME_INIT_SCRIPT }} />
         {/* Plain <script> tags, not next/script: `beforeInteractive` with inline
             children makes React 19 warn ("scripts inside components are never
             executed when rendering on the client"). These run straight from the
             server-rendered HTML during parse — exactly the pre-hydration timing
             the shims need — and the serializers escape `<` so a value can never
             close the tag. */}
-        <script id="skynet-locale" dangerouslySetInnerHTML={{ __html: serializeLocale(locale) }} />
+        <script id="app-locale" dangerouslySetInnerHTML={{ __html: serializeLocale(locale) }} />
         {/* The catalog shim is a client component so the ~300KB payload is not
             serialized a second time into the RSC Flight data (see MessagesShim). */}
         <MessagesShim locale={locale} />
         <script
-          id="skynet-runtime-env"
+          id="app-runtime-env"
           dangerouslySetInnerHTML={{ __html: serializeRuntimeEnv(runtimeEnv) }}
         />
         {apiOrigin && <link rel="dns-prefetch" href={apiOrigin} />}

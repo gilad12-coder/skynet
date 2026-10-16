@@ -131,7 +131,14 @@ export const DEFAULT_LOCALE: Locale = "en";
  * Cookie that persists the user's chosen locale. Read server-side in the
  * `force-dynamic` root layout and written client-side by the language switcher.
  */
-export const LOCALE_COOKIE = "skynet_locale";
+export const LOCALE_COOKIE = "app_locale";
+
+/**
+ * The cookie's pre-rename name. The server still reads it so a returning
+ * visitor's first page renders in their language before the client moves it to
+ * `LOCALE_COOKIE` (see legacy-names.ts).
+ */
+export const LEGACY_LOCALE_COOKIE = "skynet_locale";
 
 /** One year — a language choice is sticky until the user changes it again. */
 export const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -141,7 +148,7 @@ export const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
  * page, so in-memory state can settle itself first (e.g. a running interview
  * marks itself to restart in the new language).
  */
-export const LOCALE_RELOAD_EVENT = "skynet:locale-will-reload";
+export const LOCALE_RELOAD_EVENT = "app:locale-will-reload";
 
 /** Narrow an arbitrary value to a supported `Locale`. */
 export function isLocale(value: unknown): value is Locale {

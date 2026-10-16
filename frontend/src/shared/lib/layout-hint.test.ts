@@ -30,7 +30,7 @@ test("nothing remembered reads as undefined", () => {
 });
 
 test("an unreadable stored value reads as undefined", () => {
-  store.set("skynet-layout:bad", "{not json");
+  store.set("app-layout:bad", "{not json");
   assert.equal(layoutHint("bad"), undefined);
 });
 

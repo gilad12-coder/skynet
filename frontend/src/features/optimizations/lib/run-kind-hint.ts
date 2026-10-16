@@ -72,7 +72,7 @@ export function measureOverview(root: HTMLElement): RunShape["overview"] | undef
   return blocks.length ? { vw: window.innerWidth, blocks } : undefined;
 }
 
-const STORAGE_PREFIX = "skynet-run-kind:";
+const STORAGE_PREFIX = "app-run-kind:";
 const shapes = new Map<string, RunShape>();
 
 /** The storage key of a run's view: the pair view of a grid has its own shape. */

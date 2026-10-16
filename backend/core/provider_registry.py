@@ -27,8 +27,8 @@ from __future__ import annotations
 # bridge (``core.billing.byok_bridge``) resolves a model's prefix back to its
 # vault slug and injects the user's key + endpoint onto the ModelConfig, so the
 # provider — not OpenRouter — bills the tokens. Only LiteLLM-native, API-key
-# providers with a reachable verify endpoint belong here; self-hosted/on-prem or
-# other gateways remain reachable through the vault's custom ``api_base`` path,
+# providers with a reachable verify endpoint belong here; self-hosted or other
+# gateways remain reachable through the vault's custom ``api_base`` path,
 # which accepts any slug. Where a vault slug and its LiteLLM prefix differ (e.g.
 # ``google``/``gemini``), the bridge maps below pick it up with no new plumbing.
 BYOK_PROVIDER_SLUGS: tuple[tuple[str, str], ...] = (

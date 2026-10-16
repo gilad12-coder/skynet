@@ -261,7 +261,7 @@ test("a language change with everything answered comes back to the closing line"
 
 test("finishing or skipping clears the resume note", () => {
   prepareLanguageSwitch(emptyDraft(), "ar");
-  assert.ok(store.has("skynet.intake.resume"));
+  assert.ok(store.has("app.intake.resume"));
   clearIntakeDraft();
   assert.equal(store.size, 0);
   assert.equal(takeIntakeResume(), null);

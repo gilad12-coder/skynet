@@ -3261,7 +3261,6 @@
   "submit.modelpicker.purpose.all": "全部",
   "submit.modelpicker.purpose.aria": "按用途筛选模型",
   "submit.modelpicker.purpose.multilingual": "多语言",
-  "submit.modelpicker.purpose.onprem": "本地部署",
   "submit.modelpicker.purpose.reasoning": "推理",
   "submit.modelpicker.purpose.vision": "视觉",
   "submit.modelpicker.zdr_unavailable": "在你的零保留隐私设置下可能不可用",

@@ -11,7 +11,7 @@ import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { useLocale } from "@/shared/providers";
 import { getUsage, type BillingUsageEntry, type BillingUsageResponse } from "@/shared/lib/api";
-import { SkynetDatePicker, toISODate } from "@/shared/ui/skynet-date-picker";
+import { AppDatePicker, toISODate } from "@/shared/ui/app-date-picker";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { Segmented } from "@/shared/ui/segmented";
 import { PanelHeading } from "@/shared/ui/panel-heading";
@@ -466,7 +466,7 @@ export function UsageTab() {
       {range === "custom" && (
         <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[150px_auto_150px]">
           <div className="w-full sm:w-[150px]">
-            <SkynetDatePicker
+            <AppDatePicker
               value={customFrom}
               onChange={setCustomFrom}
               max={customTo ?? todayIso}
@@ -478,7 +478,7 @@ export function UsageTab() {
             –
           </span>
           <div className="w-full sm:w-[150px]">
-            <SkynetDatePicker
+            <AppDatePicker
               value={customTo}
               onChange={setCustomTo}
               min={customFrom}

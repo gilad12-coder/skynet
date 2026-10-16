@@ -316,8 +316,8 @@ def test_job_embeddings_relation_uses_real_table_when_present(monkeypatch) -> No
 def test_search_optimizations_forces_lexical_when_embeddings_table_absent(monkeypatch) -> None:
     """A semantic backend with no ``job_embeddings`` table must avoid ``_search_semantic``.
 
-    Regression: with ``SEARCH_BACKEND=semantic`` but the table never created (an
-    airgap deploy without pgvector), an owner/shared scope whose corpus has no
+    Regression: with ``SEARCH_BACKEND=semantic`` but the table never created (a
+    Postgres without pgvector), an owner/shared scope whose corpus has no
     unembedded success rows fell straight through to ``_search_semantic`` — which
     references ``job_embeddings`` by name and raised ``UndefinedTable`` -> 500,
     surfacing in the browser as "failed to load results" for the Mine / Shared

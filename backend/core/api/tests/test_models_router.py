@@ -82,7 +82,7 @@ def test_list_models_serializes_per_data_center_entries(models_client: TestClien
             value="openai/gpt-4o",
             label="gpt-4o",
             provider="openai",
-            data_center="On-prem gateway",
+            data_center="EU",
         ),
     ]
     providers = [
@@ -95,8 +95,8 @@ def test_list_models_serializes_per_data_center_entries(models_client: TestClien
         CatalogProvider(
             slug="openai",
             label="OpenAI",
-            data_center="On-prem gateway",
-            default_base_url="https://llm.internal/v1",
+            data_center="EU",
+            default_base_url="https://eu.api.openai.com/v1",
             has_env_key=True,
         ),
     ]
@@ -108,10 +108,10 @@ def test_list_models_serializes_per_data_center_entries(models_client: TestClien
     assert resp.status_code == 200
     body = resp.json()
     dcs = sorted((p.get("data_center") or "") for p in body["providers"] if p["slug"] == "openai")
-    assert dcs == ["", "On-prem gateway"]
-    on_prem = next(p for p in body["providers"] if p["slug"] == "openai" and p.get("data_center") == "On-prem gateway")
-    assert on_prem["default_base_url"] == "https://llm.internal/v1"
-    assert any(m.get("data_center") == "On-prem gateway" for m in body["models"])
+    assert dcs == ["", "EU"]
+    regional = next(p for p in body["providers"] if p["slug"] == "openai" and p.get("data_center") == "EU")
+    assert regional["default_base_url"] == "https://eu.api.openai.com/v1"
+    assert any(m.get("data_center") == "EU" for m in body["models"])
 
 
 def test_list_models_empty_catalog_returns_empty_lists(models_client: TestClient) -> None:

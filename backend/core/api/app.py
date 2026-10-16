@@ -8,7 +8,7 @@ This module now contains *only* the app-lifecycle concerns:
 * Consistent JSON error response shape
 * Two "infra" endpoints that reference the worker directly: ``/health``
   and ``/queue``
-* Scalar API reference mounted at ``/scalar`` with air-gapped static assets
+* Scalar API reference mounted at ``/scalar`` with bundled static assets
 
 Every other route has been extracted into ``backend/core/api/routers/``
 and wired up via ``app.include_router``. See ``AGENTS.md`` for the
@@ -180,12 +180,12 @@ _SCALAR_PUBLIC_PATHS = frozenset(
     }
 )
 
-# Custom CSS for Scalar that (a) hides UI chrome we don't want in an
-# air-gapped deployment, (b) renders the Skynet logo next to the API
+# Custom CSS for Scalar that (a) hides UI chrome that calls out to
+# Scalar's hosted services, (b) renders the Skynet logo next to the API
 # title, and (c) retints the reference in the same warm beige/brown
 # palette as the main app (see frontend/src/app/globals.css light mode).
 _SCALAR_CUSTOM_CSS = """
-/* Hide Generate/Connect MCP sidebar block — no-op in air-gapped mode */
+/* Hide Generate/Connect MCP sidebar block — needs Scalar's hosted service */
 .scalar-mcp-layer { display: none !important; }
 
 /* Hide all toolbar popover buttons (Share, Deploy, Configure, Developer Tools).
@@ -264,7 +264,7 @@ _SCALAR_CUSTOM_CSS = """
   z-index: 40;
 }
 
-.skynet-toolbar-brand {
+.app-toolbar-brand {
   position: absolute;
   left: 16px;
   top: 50%;
@@ -282,29 +282,29 @@ _SCALAR_CUSTOM_CSS = """
   transition: background-color 140ms ease;
   overflow: visible;
 }
-.skynet-toolbar-brand:hover { background: #f0ebe4; }
-.skynet-toolbar-brand:focus-visible {
+.app-toolbar-brand:hover { background: #f0ebe4; }
+.app-toolbar-brand:focus-visible {
   outline: 2px solid #3D2E22;
   outline-offset: 2px;
 }
 
-.skynet-toolbar-brand .skynet-toolbar-icon {
+.app-toolbar-brand .app-toolbar-icon {
   flex-shrink: 0;
   display: block;
 }
-.skynet-toolbar-brand .skynet-wordmark {
+.app-toolbar-brand .app-wordmark {
   flex-shrink: 0;
 }
-.skynet-wordmark { color: #3D2E22; user-select: none; }
-.skynet-wordmark svg { overflow: visible; }
+.app-wordmark { color: #3D2E22; user-select: none; }
+.app-wordmark svg { overflow: visible; }
 
 /* When the sidebar is open, the brand moves into the sidebar header */
-html[data-skynet-sidebar="visible"] .skynet-toolbar-brand {
+html[data-app-sidebar="visible"] .app-toolbar-brand {
   display: none;
 }
 
 /* ── Sidebar header (only shown while sidebar is visible) ─────────── */
-.skynet-sidebar-header {
+.app-sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -312,11 +312,11 @@ html[data-skynet-sidebar="visible"] .skynet-toolbar-brand {
   border-bottom: 1px solid #ddd6cc;
   flex-shrink: 0;
 }
-html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
+html[data-app-sidebar="hidden"] .app-sidebar-header {
   display: none;
 }
 
-.skynet-sidebar-home {
+.app-sidebar-home {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -326,13 +326,13 @@ html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
   text-decoration: none;
   transition: background-color 120ms ease;
 }
-.skynet-sidebar-home:hover { background: #ede7dd; }
-.skynet-sidebar-home:focus-visible {
+.app-sidebar-home:hover { background: #ede7dd; }
+.app-sidebar-home:focus-visible {
   outline: 2px solid #3D2E22;
   outline-offset: 2px;
 }
 
-.skynet-sidebar-close {
+.app-sidebar-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -346,8 +346,8 @@ html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
   border-radius: 8px;
   transition: background-color 120ms ease;
 }
-.skynet-sidebar-close:hover { background: #ede7dd; }
-.skynet-sidebar-close:focus-visible {
+.app-sidebar-close:hover { background: #ede7dd; }
+.app-sidebar-close:focus-visible {
   outline: 2px solid #3D2E22;
   outline-offset: 2px;
 }
@@ -366,11 +366,11 @@ html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
       transform 320ms cubic-bezier(0.4, 0, 0.2, 1),
       opacity 220ms ease;
   }
-  html[data-skynet-sidebar="hidden"] .references-layout {
+  html[data-app-sidebar="hidden"] .references-layout {
     grid-template-columns: 0px minmax(0, 1fr) !important;
     overflow: hidden;
   }
-  html[data-skynet-sidebar="hidden"] .t-doc__sidebar {
+  html[data-app-sidebar="hidden"] .t-doc__sidebar {
     transform: translateX(-100%);
     opacity: 0;
     pointer-events: none;
@@ -417,7 +417,7 @@ html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
    We animate that expansion with a slide-in from the left. The desktop
    .t-doc__sidebar stays hidden on mobile (Tailwind's `hidden` class). */
 @media (max-width: 1023px) {
-  .skynet-toolbar-brand { display: none !important; }
+  .app-toolbar-brand { display: none !important; }
 
   .t-doc__header {
     transform-origin: left top;
@@ -433,11 +433,11 @@ html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
 
   /* When open, slide in from left */
   .references-sidebar-mobile-open .t-doc__header {
-    animation: skynet-slide-in 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
+    animation: app-slide-in 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
   }
 }
 
-@keyframes skynet-slide-in {
+@keyframes app-slide-in {
   from {
     transform: translateX(-40px);
     opacity: 0;

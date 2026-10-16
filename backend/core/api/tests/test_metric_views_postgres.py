@@ -1,6 +1,6 @@
 """Exercise the north-star metric views against an explicitly supplied disposable PostgreSQL database.
 
-Skipped unless ``SKYNET_BUDGET_TEST_DB_URL`` points at Postgres, like
+Skipped unless ``APP_BUDGET_TEST_DB_URL`` points at Postgres, like
 ``test_budgets_postgres.py``. Each test runs in its own schema with only the
 ``users``, ``jobs`` and ``telemetry_events`` tables, seeds a two-week story and
 reads it back through the views the migration creates.
@@ -9,7 +9,6 @@ reads it back through the views the migration creates.
 from __future__ import annotations
 
 import importlib.util
-import os
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -24,12 +23,13 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session
 
 from core.api.routers.telemetry import METRIC_VIEW_DDL, read_north_star
+from core.config import app_env
 from core.storage.models import Base, JobModel, TelemetryEventModel, UserModel
 
-TEST_DB_URL = os.environ.get("SKYNET_BUDGET_TEST_DB_URL")
+TEST_DB_URL = app_env("APP_BUDGET_TEST_DB_URL")
 pytestmark = pytest.mark.skipif(
     not TEST_DB_URL or not TEST_DB_URL.startswith("postgresql"),
-    reason="Set SKYNET_BUDGET_TEST_DB_URL to an explicitly disposable PostgreSQL database.",
+    reason="Set APP_BUDGET_TEST_DB_URL to an explicitly disposable PostgreSQL database.",
 )
 
 _MIGRATION = Path(__file__).resolve().parents[3] / "alembic" / "versions" / "d1e2f3a4b5c6_add_metric_views.py"

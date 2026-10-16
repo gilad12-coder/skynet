@@ -1,4 +1,4 @@
-"""Logging and metrics setup for on-prem deployments.
+"""Logging and metrics setup for the API process.
 
 Three concerns live here:
 
@@ -12,7 +12,7 @@ Three concerns live here:
 * :func:`install_metrics` mounts a Prometheus-compatible ``/metrics``
   endpoint via ``prometheus-fastapi-instrumentator``. The dependency is
   imported lazily so the backend still boots in environments where the
-  wheel hasn't been mirrored to the local artifactory yet.
+  wheel isn't installed.
 
 * :func:`install_request_id_middleware` adds a tiny ASGI middleware that
   reads the inbound ``X-Request-ID`` header (or generates a UUID4),

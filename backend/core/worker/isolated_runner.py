@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from core.billing.signals import BudgetReached
+from core.config import app_env
 from core.constants import OPTIMIZATION_TYPE_BLACKBOX
 from core.models.unified import UNIFIED_PAYLOAD_KIND
 from core.service_gateway.optimization.blackbox import preflight as blackbox_preflight
@@ -28,6 +29,7 @@ from core.worker.preflight import run_dspy_preflight
 from core.worker.sandbox_protocol import SANDBOX_PROTOCOL
 from core.worker.subprocess_runner import run_service_in_subprocess
 
+# Shared with the pinned sandbox image's own backend copy; renaming breaks older images.
 EVENT_PREFIX = "SKYNET_JOB_EVENT "
 INCOMPATIBLE_IMAGE_MESSAGE = "The sandbox image speaks an older protocol than this worker; rebuild the sandbox image."
 _CHECKPOINT_PATH = re.compile(r"(?:(?:pair_\d+|gepa)/)?gepa_state\.bin\Z")
@@ -147,12 +149,12 @@ def main() -> None:
         return
     tools_route = document["payload"].pop("_skynet_tools_route", None)
     if tools_route is not None:
-        if not os.environ.get("SKYNET_BUDGET_RELAY_URL"):
+        if not app_env("APP_BUDGET_RELAY_URL"):
             raise RuntimeError("The protected tool roster requires its isolated mailbox relay.")
-        os.environ["SKYNET_TOOL_RELAY_TOKEN"] = str(tools_route["token"])
+        os.environ["APP_TOOL_RELAY_TOKEN"] = str(tools_route["token"])
     packages_route = document["payload"].pop("_skynet_packages_route", None)
     if packages_route is not None:
-        os.environ["SKYNET_PACKAGE_RELAY_TOKEN"] = str(packages_route["token"])
+        os.environ["APP_PACKAGE_RELAY_TOKEN"] = str(packages_route["token"])
     preflight = document["payload"].pop("_preflight", None)
     interaction = document["payload"].pop("_interaction", None)
     directory = Path(document["payload"].get("_gepa_log_dir") or "checkpoints")

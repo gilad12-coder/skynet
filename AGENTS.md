@@ -126,8 +126,8 @@ environment. Six things broke that once; keep them true:
 - **Dependency management**: `uv` is authoritative for backend development and
   CI; compiled `requirements*.txt` files support the pip/Docker paths. The
   frontend uses npm and a committed lockfile.
-- **Deployment**: backend containers, Helm manifests, a LiteLLM gateway, and a
-  pinned Vercel Container Registry sandbox image.
+- **Deployment**: Railway backend/worker/frontend containers, a LiteLLM
+  gateway, and a pinned Vercel Container Registry sandbox image.
 
 ## Project layout
 
@@ -208,11 +208,10 @@ environment. Six things broke that once; keep them true:
 │       └── types/                App-wide ambient/shared TypeScript declarations
 │
 ├── deploy/
-│   ├── helm/skynet/             Kubernetes chart and environment values
 │   └── litellm/                 Gateway image, config, callbacks, and local stack
 ├── docs/                        Auth, Stripe, and upstream-optimizer guides
 ├── i18n/                        Locale source catalogs, schema, and glossary
-├── scripts/                     i18n generation, air-gap migration, sample data
+├── scripts/                     i18n generation, sample data
 ├── data/                        Repository datasets/fixtures
 ├── submission-wizard-implementation-spec.md
 ├── Justfile                     Canonical local task shortcuts
@@ -282,11 +281,8 @@ stable and preview Docker build paths.
 
 - There is no auth-off mode. Hosted deployments support backend-verified local
   accounts plus optional Google and GitHub OAuth.
-- Setting `AUTH_SSO_ISSUER`, `AUTH_SSO_CLIENT_ID`, and
-  `AUTH_SSO_CLIENT_SECRET` switches the frontend to the single on-prem OIDC/ADFS
-  path.
 - The frontend and backend share `BACKEND_AUTH_SECRET`; backend identity is the
-  user's email across local, OAuth, and SSO providers.
+  user's email across local and OAuth providers.
 - See both `.env.example` files before changing auth.
 
 ## Internationalization and direction

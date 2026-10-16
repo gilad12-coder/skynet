@@ -1187,7 +1187,7 @@ def test_protected_evaluate_examples_never_executes_metric_side_effects_in_api_p
         monkeypatch: Pytest environment cleanup helper.
     """
     marker = tmp_path / "metric-ran-in-api.txt"
-    env_name = "SKYNET_PROTECTED_METRIC_RAN_IN_API"
+    env_name = "APP_PROTECTED_METRIC_RAN_IN_API"
     monkeypatch.delenv(env_name, raising=False)
     metric_code = "\n".join(
         [

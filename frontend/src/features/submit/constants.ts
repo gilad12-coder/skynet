@@ -28,7 +28,7 @@ const STAGE_LABELS: Record<WizardStageId, () => string> = {
 export const WIZARD_STAGES: ReadonlyArray<{ id: WizardStageId; label: () => string }> =
   WIZARD_STAGE_ORDER.map((id) => ({ id, label: STAGE_LABELS[id] }));
 
-export const RECENT_KEY = "skynet:recent-model-configs";
+export const RECENT_KEY = "app:recent-model-configs";
 export const MAX_RECENT = 5;
 
 /** RTL: forward = slide from left, backward = slide from right. */

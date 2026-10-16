@@ -59,7 +59,7 @@ import { readServerSentEvents, type ServerSentEvent } from "@/shared/lib/sse";
 import { streamResumableTurn } from "@/shared/lib/resumable-turn";
 
 // Resolve the runtime API base lazily on every call. Capturing it once at
-// module load races the injected `window.__SKYNET_ENV__` script: the framework
+// module load races the injected `window.__APP_ENV__` script: the framework
 // chunks execute (and evaluate this module) before that inline `<head>` script
 // runs, so a module-scope const freezes the build-time `localhost:8000`
 // fallback and every request hits the wrong origin. Reading at call time always

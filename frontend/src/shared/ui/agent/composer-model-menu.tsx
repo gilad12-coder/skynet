@@ -44,8 +44,8 @@ interface ComposerModelMenuProps {
 // still carry it, and the backend runs the default for it like for null.
 const RETIRED_AUTO_MODEL = "auto:intelligent";
 
-// Caps the fallback list when the catalog flags no featured models (an
-// on-prem gateway whose listing carries no release dates or benchmarks).
+// Caps the fallback list when the catalog flags no featured models (a
+// listing that carries no release dates or benchmarks).
 const FALLBACK_LIST_CAP = 50;
 
 function effortHint(level: string | null): string {

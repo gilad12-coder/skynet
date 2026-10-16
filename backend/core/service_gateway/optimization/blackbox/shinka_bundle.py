@@ -30,8 +30,8 @@ try:
 except ImportError:  # In the sandbox the runner loads ``repo_tree`` as a top-level sibling first.
     import repo_tree
 
-BUNDLE_HEAD = "<!-- SKYNET-BUNDLE: the files this version changes, each after its SKYNET-FILE line -->"
-_FILE_LINE = re.compile(r"^<!-- SKYNET-FILE (\{.*\}) -->$")
+BUNDLE_HEAD = "<!-- APP-BUNDLE: the files this version changes, each after its APP-FILE line -->"
+_FILE_LINE = re.compile(r"^<!-- APP-FILE (\{.*\}) -->$")
 _FILE_BLOCK = re.compile(r'<FILE\s+path\s*=\s*"([^"\n]+)"\s*>\n?(.*?)\n?</FILE>', re.DOTALL)
 _OPEN_REQUEST = re.compile(r"<OPEN>\s*(.*?)\s*</OPEN>", re.DOTALL)
 # Upstream's SEARCH/REPLACE grammar, so its models' habits carry over.
@@ -123,7 +123,7 @@ def encode_bundle(files: Mapping[str, str]) -> str:
     for path in sorted(files):
         pieces = files[path].split("\n")
         header = json.dumps({"path": path, "lines": len(pieces)}, ensure_ascii=True).replace(">", "\\u003e")
-        lines.append(f"<!-- SKYNET-FILE {header} -->")
+        lines.append(f"<!-- APP-FILE {header} -->")
         lines.extend(pieces)
     return "\n".join(lines) + "\n"
 

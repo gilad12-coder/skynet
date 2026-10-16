@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shlex
 import sys
 import threading
@@ -34,7 +33,7 @@ from ....billing.model_gateway import ROUTE_KEY
 from ....billing.operation_pricing import UnpricedOperationError
 from ....billing.runtime import UsagePendingError
 from ....billing.signals import BudgetReached
-from ....config import Settings, settings
+from ....config import Settings, app_env, settings
 from ....exceptions import ServiceError
 from ....models.common import ModelConfig
 from ...language_models import usage_by_model_from_history
@@ -54,7 +53,7 @@ from .sandbox import (
 
 logger = logging.getLogger(__name__)
 
-RUNNER_FILE = "skynet_runner.py"
+RUNNER_FILE = "app_runner.py"
 RUNNER_SOURCE = Path(runner.__file__).read_text(encoding="utf-8")
 CALLS_DIR = "calls"
 _DEFAULT_PROBE_TIMEOUT_SECONDS = 45.0
@@ -62,7 +61,7 @@ _DEFAULT_PROBE_TIMEOUT_SECONDS = 45.0
 _PROBE_LIFETIME_ALLOWANCE_SECONDS = 120.0
 # apt plus a few wheels finish in about a minute; a stalled mirror must not eat the box's lifetime.
 _INSTALL_TIMEOUT_SECONDS = 600.0
-DEPENDENCIES_DIR = ".skynet-dependencies"
+DEPENDENCIES_DIR = ".app-dependencies"
 _DEPENDENCIES_TIMEOUT_SECONDS = 300.0
 _STDERR_TAIL_CHARS = 2_000
 _OPENROUTER_PREFIX = "openrouter/"
@@ -257,7 +256,7 @@ def _sandbox_name(job_id: str | None) -> str | None:
     """
     if not job_id:
         return None
-    return unique_sandbox_name(f"skynet-scorer-{job_id}")
+    return unique_sandbox_name(f"app-scorer-{job_id}")
 
 
 def _raise_control(result: Mapping[str, Any]) -> None:
@@ -329,8 +328,8 @@ class SandboxPythonScorer:
             dict(dependency_route)
             if dependency_route is not None
             else {
-                "url": os.environ.get("SKYNET_BUDGET_RELAY_URL", ""),
-                "token": os.environ.get("SKYNET_PACKAGE_RELAY_TOKEN", ""),
+                "url": app_env("APP_BUDGET_RELAY_URL", ""),
+                "token": app_env("APP_PACKAGE_RELAY_TOKEN", ""),
             }
         )
         self._runtime = runtime
@@ -479,7 +478,7 @@ class SandboxPythonScorer:
                 f"python3 {RUNNER_FILE} {shlex.quote(call_dir)}",
                 env={
                     **({ENV_API_KEY: self._env_key} if self._env_key else {}),
-                    **({"PYTHONPATH": ".skynet-dependencies/site"} if self._dependency_lock is not None else {}),
+                    **({"PYTHONPATH": f"{DEPENDENCIES_DIR}/site"} if self._dependency_lock is not None else {}),
                     # The protected image has no display or GPU; PyOpenGL-based renderers
                     # (pyrender and friends) would otherwise try to open an X display.
                     **({"PYOPENGL_PLATFORM": "osmesa"} if self._protected else {}),
@@ -607,7 +606,7 @@ class SandboxPythonScorer:
         roots = {
             root
             for root in package_setup._candidate_roots(candidate)
-            if root not in sys.stdlib_module_names and root != "skynet"
+            if root not in sys.stdlib_module_names and root != runner.HELPER_MODULE_NAME
         } - self._covered
         if not roots:
             return None

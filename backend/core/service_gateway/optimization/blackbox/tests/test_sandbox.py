@@ -250,8 +250,8 @@ def test_run_wraps_in_timeout_and_flags_timeouts() -> None:
 
     wrapped = box.runs[0]["args"][1]
     assert box.runs[0]["args"][0] == "-lc"
-    assert wrapped.startswith("timeout --signal=KILL 5s bash -lc 'sleep 99' > /tmp/.skynet-output-")
-    assert "; echo $? > /tmp/.skynet-exit-" in wrapped
+    assert wrapped.startswith("timeout --signal=KILL 5s bash -lc 'sleep 99' > /tmp/.app-output-")
+    assert "; echo $? > /tmp/.app-exit-" in wrapped
     assert box.runs[0]["kill_after"] == 5 + KILL_GRACE_SECONDS
     assert result.timed_out is True
     assert result.exit_code == 124
@@ -276,7 +276,7 @@ def test_run_without_timeout_has_no_kill_timer() -> None:
 
     result = session.run("echo hi")
 
-    assert box.runs[0]["args"][1].startswith("bash -lc 'echo hi' > /tmp/.skynet-output-")
+    assert box.runs[0]["args"][1].startswith("bash -lc 'echo hi' > /tmp/.app-output-")
     assert box.runs[0]["kill_after"] is None
     assert result.timed_out is False
     assert result.exit_code == 124

@@ -6,7 +6,6 @@ Builds ``dspy.LM`` instances from ``ModelConfig`` while filtering out
 
 import contextlib
 import logging
-import os
 import threading
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
@@ -21,7 +20,7 @@ from ..billing.model_gateway import ROUTE_KEY, raise_gateway_stop
 from ..billing.pricing import ModelUsage
 from ..billing.runtime import UsagePendingError
 from ..billing.signals import BudgetReached
-from ..config import settings
+from ..config import app_env, settings
 from ..exceptions import InfrastructureInterruptionError, ServiceError
 from ..models import ModelConfig
 
@@ -30,7 +29,7 @@ try:
 except ImportError:  # pragma: no cover - depends on litellm internals
     CustomStreamWrapper = None
 
-logger = logging.getLogger("skynet.service_gateway.language_models")
+logger = logging.getLogger("app.service_gateway.language_models")
 
 _DEFAULT_REASONING_MAX_TOKENS = 4000
 """Floor on ``max_tokens`` for chat-style replies. Below this a reasoning model
@@ -587,7 +586,7 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
             lm_kwargs["extra_body"] = merged
     if isinstance(budget_route, dict):
         lm_kwargs["model"] = f"litellm_proxy/{budget_route['model']}"
-        lm_kwargs["base_url"] = os.environ.get("SKYNET_BUDGET_RELAY_URL", budget_route["url"])
+        lm_kwargs["base_url"] = app_env("APP_BUDGET_RELAY_URL", budget_route["url"])
         lm_kwargs["api_key"] = budget_route["token"]
         lm_kwargs.pop("api_base", None)
     try:
@@ -877,6 +876,7 @@ def usage_by_model_from_history(*language_models: object) -> dict[str, tuple[int
     return {model: (in_out[0], in_out[1]) for model, in_out in by_model.items()}
 
 
+# Shared with deploy/litellm/custom_callbacks.py, which patches the same handler.
 _SERVED_MODEL_PATCH_FLAG = "_skynet_served_model_patch"
 
 

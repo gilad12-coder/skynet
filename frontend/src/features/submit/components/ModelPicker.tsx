@@ -3,7 +3,15 @@
 import { MicroPill } from "@/shared/ui/model-chip";
 import * as React from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { Check, CaretDown, Eye, Gauge, MagnifyingGlass, ShieldCheck, Warning } from "@/shared/ui/icons";
+import {
+  Check,
+  CaretDown,
+  Eye,
+  Gauge,
+  MagnifyingGlass,
+  ShieldCheck,
+  Warning,
+} from "@/shared/ui/icons";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
@@ -48,7 +56,7 @@ interface ModelPickerProps {
   byokProviders?: string[];
 }
 
-type ModelPurpose = "all" | "vision" | "reasoning" | "multilingual" | "onprem";
+type ModelPurpose = "all" | "vision" | "reasoning" | "multilingual";
 
 // Model families with a first-class multilingual focus. The catalog is dynamic
 // (whatever OpenRouter serves) and carries no per-model purpose metadata, so
@@ -59,9 +67,6 @@ const PURPOSE_PREDICATES: Record<Exclude<ModelPurpose, "all">, (m: CatalogModel)
   vision: (m) => Boolean(m.supports_vision),
   reasoning: (m) => Boolean(m.supports_thinking),
   multilingual: (m) => MULTILINGUAL_FAMILIES.some((f) => m.value.toLowerCase().includes(f)),
-  // The backend labels internal-gateway endpoints "On-prem gateway" in
-  // data_center — the only signal that a model is served in-house.
-  onprem: (m) => (m.data_center ?? "").toLowerCase().includes("on-prem"),
 };
 
 const PURPOSE_LABEL_KEYS: Record<ModelPurpose, MessageKey> = {
@@ -69,7 +74,6 @@ const PURPOSE_LABEL_KEYS: Record<ModelPurpose, MessageKey> = {
   vision: "submit.modelpicker.purpose.vision",
   reasoning: "submit.modelpicker.purpose.reasoning",
   multilingual: "submit.modelpicker.purpose.multilingual",
-  onprem: "submit.modelpicker.purpose.onprem",
 };
 
 const RANKINGS: ModelRanking[] = ["best_value", "smartest", "fastest"];
@@ -135,7 +139,9 @@ function RowIconTip({
 }
 
 const seconds = (ms: number | null | undefined) =>
-  ms ? msg("submit.modelpicker.speed.seconds", { s: number(ms / 1000, 2) }) : msg("submit.modelpicker.speed.unknown");
+  ms
+    ? msg("submit.modelpicker.speed.seconds", { s: number(ms / 1000, 2) })
+    : msg("submit.modelpicker.speed.unknown");
 
 /** Time to first token and output speed for one row. */
 function SpeedTip({ model }: { model: CatalogModel }) {
@@ -143,9 +149,14 @@ function SpeedTip({ model }: { model: CatalogModel }) {
     ? msg("submit.modelpicker.stat.speed", { tps: number(model.throughput_tps, 0) })
     : msg("submit.modelpicker.speed.unknown");
   return (
-    <RowIconTip label={msg("submit.modelpicker.speed_label")} icon={<Gauge className="size-3.5" aria-hidden="true" />}>
+    <RowIconTip
+      label={msg("submit.modelpicker.speed_label")}
+      icon={<Gauge className="size-3.5" aria-hidden="true" />}
+    >
       <span className="block font-medium">{msg("submit.modelpicker.speed_label")}</span>
-      <span className="block">{msg("submit.modelpicker.speed.ttft", { value: seconds(model.ttft_ms) })}</span>
+      <span className="block">
+        {msg("submit.modelpicker.speed.ttft", { value: seconds(model.ttft_ms) })}
+      </span>
       <span className="block">{msg("submit.modelpicker.speed.throughput", { value: tps })}</span>
       <span className="mt-1 block opacity-70">{msg("submit.modelpicker.speed.source")}</span>
     </RowIconTip>
@@ -172,15 +183,23 @@ function ScoreTip({ model }: { model: CatalogModel }) {
             {score}
           </a>
         ) : (
-          <span tabIndex={0} aria-label={msg("submit.modelpicker.score_aria", { score })} className={chip}>
+          <span
+            tabIndex={0}
+            aria-label={msg("submit.modelpicker.score_aria", { score })}
+            className={chip}
+          >
             {score}
           </span>
         )}
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-64 leading-relaxed" dir={getActiveDir()}>
-        <span className="block font-medium">{msg("submit.modelpicker.score_tip_title", { score })}</span>
+        <span className="block font-medium">
+          {msg("submit.modelpicker.score_tip_title", { score })}
+        </span>
         <span className="block">{msg("submit.modelpicker.score_tip")}</span>
-        {url && <span className="mt-1 block opacity-70">{msg("submit.modelpicker.score_tip_link")}</span>}
+        {url && (
+          <span className="mt-1 block opacity-70">{msg("submit.modelpicker.score_tip_link")}</span>
+        )}
       </TooltipContent>
     </Tooltip>
   );
@@ -192,7 +211,9 @@ function ModelStats({ model }: { model: CatalogModel }) {
   return (
     <span className="flex flex-wrap gap-x-2 text-[0.6875rem] text-muted-foreground">
       <span title={msg("submit.modelpicker.stat.price_title")}>
-        {msg("submit.modelpicker.stat.price", { price: number(model.input_cost_per_token * 1e6, 2) })}
+        {msg("submit.modelpicker.stat.price", {
+          price: number(model.input_cost_per_token * 1e6, 2),
+        })}
       </span>
     </span>
   );
@@ -295,7 +316,7 @@ export function ModelPicker({
   }, [activeCatalog, byokMode, byokProviderSet, providerFilter]);
 
   // Purpose chips render only for categories the current catalog actually
-  // has — a deploy with no on-prem gateway never shows an empty "On-prem".
+  // has, so a catalog with no vision models never shows an empty "Vision".
   const [purpose, setPurpose] = React.useState<ModelPurpose>("all");
   const purposeOptions = React.useMemo(() => {
     const present = (Object.keys(PURPOSE_PREDICATES) as Array<Exclude<ModelPurpose, "all">>).filter(
@@ -320,8 +341,8 @@ export function ModelPicker({
   const prefersReduced = useReducedMotion();
   const groups = React.useMemo(() => rankModels(filtered, ranking), [filtered, ranking]);
 
-  // A provider can fan out across data centers (a public API plus an on-prem
-  // gateway), so each row names the endpoint it resolves through.
+  // A provider can fan out across data centers, so each row names the
+  // endpoint it resolves through.
   const providerLabel = React.useCallback(
     (m: CatalogModel): string => {
       const base = activeCatalog?.providers.find((p) => p.slug === m.provider)?.label ?? m.provider;
@@ -460,7 +481,9 @@ export function ModelPicker({
                   layoutId="model-picker-ranking-active"
                   className="absolute inset-0 rounded-md bg-primary-fill"
                   transition={
-                    prefersReduced ? { duration: 0 } : { type: "spring", stiffness: 350, damping: 28 }
+                    prefersReduced
+                      ? { duration: 0 }
+                      : { type: "spring", stiffness: 350, damping: 28 }
                   }
                 />
               )}
@@ -550,7 +573,9 @@ export function ModelPicker({
                       label={msg("settings.model_privacy.zdr.label")}
                       icon={<ShieldCheck className="size-3.5" aria-hidden="true" />}
                     >
-                      <span className="block font-medium">{msg("submit.modelpicker.zdr_tip_title")}</span>
+                      <span className="block font-medium">
+                        {msg("submit.modelpicker.zdr_tip_title")}
+                      </span>
                       <span className="block">{msg("submit.modelpicker.zdr_tip")}</span>
                     </RowIconTip>
                   )}

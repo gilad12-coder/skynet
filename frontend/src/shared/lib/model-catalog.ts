@@ -2,10 +2,10 @@ import type { CatalogModel, ModelCatalogResponse } from "@/shared/types/api";
 import { getByokModels } from "@/shared/lib/api";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 
-// Resolve lazily — a module-load const races the injected window.__SKYNET_ENV__
+// Resolve lazily — a module-load const races the injected window.__APP_ENV__
 // and freezes the build-time localhost fallback. See shared/lib/api.ts.
 const apiBase = () => getRuntimeEnv().apiUrl;
-const LS_KEY = "skynet:model-catalog";
+const LS_KEY = "app:model-catalog";
 
 const EMPTY_CATALOG: ModelCatalogResponse = { providers: [], models: [] };
 

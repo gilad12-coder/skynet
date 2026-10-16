@@ -413,7 +413,7 @@ class SandboxAgentScorer:
         failed = False
         try:
             files = {
-                f".skynet/readiness-{index}.sh": command
+                f".app/readiness-{index}.sh": command
                 for index, command in enumerate(
                     (self._launch.run_command, self._target.setup_command, self._target.install_command)
                 )
@@ -784,4 +784,4 @@ class SandboxAgentScorer:
 
     def _sandbox_name(self) -> str:
         """Return a fresh sandbox name that carries the job id."""
-        return unique_sandbox_name(f"skynet-{self._job_id or 'blackbox'}")
+        return unique_sandbox_name(f"app-{self._job_id or 'blackbox'}")

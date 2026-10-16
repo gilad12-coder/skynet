@@ -9,7 +9,9 @@ import { createHmac, timingSafeEqual } from "crypto";
  * link into someone else's account.
  */
 
-export const ACCOUNT_LINK_COOKIE = "skynet-account-link";
+export const ACCOUNT_LINK_COOKIE = "app-account-link";
+/** Pre-rename name, still honoured so a link started before a deploy completes. */
+export const LEGACY_ACCOUNT_LINK_COOKIE = "skynet-account-link";
 export const ACCOUNT_LINK_TTL_SECONDS = 600;
 export const LINKABLE_PROVIDERS = new Set(["google", "github"]);
 

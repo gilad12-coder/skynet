@@ -38,7 +38,7 @@ from core.billing.service import StripeBillingService
 from core.config import settings
 from core.storage.models import Base, BillingCustomerModel
 
-_MONITOR_LOGGER = "skynet.billing.openrouter_float"
+_MONITOR_LOGGER = "app.billing.openrouter_float"
 
 
 @pytest.fixture

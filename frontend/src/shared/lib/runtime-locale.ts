@@ -6,7 +6,7 @@
  * active locale has to be ambient rather than threaded. The two runtimes need
  * different mechanisms:
  *
- * - **Client**: a module-level variable seeded from the `window.__SKYNET_LOCALE__`
+ * - **Client**: a module-level variable seeded from the `window.__APP_LOCALE__`
  *   shim the layout injects before hydration. The browser is single-threaded,
  *   so a mutable module global is race-free; the switcher updates it in place.
  * - **Server**: a per-request slot held by React's `cache()`, which returns a
@@ -29,7 +29,7 @@ import {
 
 declare global {
   interface Window {
-    __SKYNET_LOCALE__?: Locale;
+    __APP_LOCALE__?: Locale;
   }
 }
 
@@ -78,7 +78,7 @@ export function setClientLocale(locale: Locale): void {
  *   never set because the provider only runs client-side): the per-request
  *   `cache()` slot the root layout pins.
  * - **Client first paint** before the provider mounts: seed from the injected
- *   `window.__SKYNET_LOCALE__` shim.
+ *   `window.__APP_LOCALE__` shim.
  *
  * Caveat: `clientLocale` is a module global, so under concurrent SSR of mixed
  * locales a client-component render could briefly observe another request's
@@ -90,7 +90,7 @@ export function getActiveLocale(): Locale {
   if (typeof window === "undefined") {
     return getServerLocaleSlot().current;
   }
-  const injected = window.__SKYNET_LOCALE__;
+  const injected = window.__APP_LOCALE__;
   clientLocale = isLocale(injected) ? injected : DEFAULT_LOCALE;
   return clientLocale;
 }
@@ -115,12 +115,12 @@ export function getActiveIntlLocale(): string {
 }
 
 /**
- * Inline `<script>` body that sets `window.__SKYNET_LOCALE__` before hydration,
+ * Inline `<script>` body that sets `window.__APP_LOCALE__` before hydration,
  * so the first client render resolves messages in the request's locale. The
  * value is a single quoted token, so the XSS surface of `runtime-env.ts` (where
  * values can be arbitrary URLs) does not apply — `JSON.stringify` of a known
  * locale literal is sufficient.
  */
 export function serializeLocale(locale: Locale): string {
-  return `window.__SKYNET_LOCALE__=${JSON.stringify(locale)};`;
+  return `window.__APP_LOCALE__=${JSON.stringify(locale)};`;
 }

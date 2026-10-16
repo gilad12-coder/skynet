@@ -57,7 +57,7 @@ AUTORESEARCH_VERSION = "1"
 PROMPTS_DIR = Path(__file__).with_name("upstream_prompts")
 # Mirrors core.run_log.RECORD_ATTR: this module runs in the sandbox without Skynet's code.
 RUN_LOG_ATTR = "run_log"
-run_log = logging.getLogger("skynet.engine")
+run_log = logging.getLogger("app.engine")
 
 
 def log_event(
@@ -408,7 +408,8 @@ class ProposerOutcome:
 # flag follow upstream; the scorer/metric names keep any path or key the
 # parent's scorer uses out of the agent's reach.
 _PROPOSER_ENV_DROP = frozenset({"CLAUDECODE", "ANTHROPIC_API_KEY"})
-_PROPOSER_ENV_DROP_PREFIXES = ("SKYNET_SCORER", "SKYNET_METRIC")
+# The legacy spellings stay listed: an older control plane may still set them.
+_PROPOSER_ENV_DROP_PREFIXES = ("APP_SCORER", "APP_METRIC", "SKYNET_SCORER", "SKYNET_METRIC")
 
 
 def proposer_environment(environ: dict[str, str]) -> dict[str, str]:
