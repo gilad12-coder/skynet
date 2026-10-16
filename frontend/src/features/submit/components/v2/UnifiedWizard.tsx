@@ -243,10 +243,16 @@ function UnifiedWizardFrame() {
 }
 
 /** The one submission wizard: Task, Inputs, Optimizer, Metric, then Run. */
-export function UnifiedWizard({ folderId = null }: { folderId?: string | null }) {
+export function UnifiedWizard({
+  accountId,
+  folderId = null,
+}: {
+  accountId: string;
+  folderId?: string | null;
+}) {
   return (
     <ExecutionBudgetProvider>
-      <WizardV2Provider folderId={folderId}>
+      <WizardV2Provider accountId={accountId} folderId={folderId}>
         <UnifiedWizardFrame />
       </WizardV2Provider>
     </ExecutionBudgetProvider>

@@ -61,6 +61,7 @@ import { inputsFromRoles, rowsToCases, singleInputCase, type Row } from "../lib/
 import { prepareModelConfig } from "../lib/model-config";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import { repoRunRequest } from "../lib/repo-run";
+import { WIZARD_SESSION_KEY, decodeWizardSession, encodeWizardSession } from "../lib/session-state";
 import { metricUsesModel } from "../lib/scorer-dependencies";
 import { computeStepIssue, hasModel, runBlockedReason as blockedReason } from "../lib/step-issue";
 import { canEnterStep, canMoveForward } from "../lib/wizard-steps";
@@ -177,18 +178,49 @@ function inputsFromRows(
   };
 }
 
+function readWizardSession(): string | null {
+  try {
+    return window.sessionStorage.getItem(WIZARD_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function forgetWizardSession() {
+  try {
+    window.sessionStorage.removeItem(WIZARD_SESSION_KEY);
+  } catch {}
+}
+
 const Ctx = createContext<WizardV2Shell | null>(null);
 
 /** Holds the one wizard's state, its navigation rules and the submit flow. */
 export function WizardV2Provider({
+  accountId,
   folderId = null,
   children,
 }: {
+  accountId: string;
   folderId?: string | null;
   children: ReactNode;
 }) {
   const level = useExperienceLevel();
+  const searchParams = useSearchParams();
+  // A reload reopens the tab's setup where it was left; a clone always starts
+  // from its source run instead.
+  const [restored] = useState(() => {
+    if (searchParams.has("clone")) {
+      forgetWizardSession();
+      return null;
+    }
+    return decodeWizardSession(
+      readWizardSession(),
+      accountId,
+      WIZARD_V2_STEPS as readonly string[],
+    );
+  });
   const [stored, dispatch] = useReducer(reducer, undefined, () => {
+    if (restored) return restored;
     const initial = initialWizardV2State(level, readPref("optimizerMaxRuns"));
     return { ...initial, meta: { ...initial.meta, folderId } };
   });
@@ -196,7 +228,6 @@ export function WizardV2Provider({
   // matches the question.
   const state = useMemo(() => withQuestionInputs(stored), [stored]);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { data: session } = useSession();
   const guided = level === "guided";
   const modelCatalog = useModelCatalog();
@@ -367,6 +398,15 @@ export function WizardV2Provider({
     },
     [budget, patchOptimizer],
   );
+  // The server budget is per page load, so a restored limit is set on it again.
+  useEffect(() => {
+    if (!restored) return;
+    if (restored.optimizer.budgetUncapped) budget.setBudgetUncapped(true);
+    else if (restored.optimizer.maxCostCents != null) {
+      budget.setMaxCostCents(restored.optimizer.maxCostCents);
+    }
+    // Runs once, for the setup read at mount.
+  }, []);
 
   const username = session?.user?.name ?? "";
   const buildPayload = useCallback((): UnifiedRunRequest | null => {
@@ -460,6 +500,7 @@ export function WizardV2Provider({
   // A submitted run opens on its page once the splash has played.
   const openSubmitted = async (optimizationId: string) => {
     submittedRef.current = true;
+    forgetWizardSession();
     await fileNewRun(optimizationId, state.meta.folderId);
     const jobUrl = `/optimizations/${optimizationId}`;
     setSubmitPhase("splash");
@@ -602,7 +643,7 @@ export function WizardV2Provider({
   // and reflection models once. A cloned run brings its own models, and
   // anything set before the catalog arrives (an agent write, a user pick)
   // blocks the preset for good.
-  const presetDone = useRef(searchParams.has("clone"));
+  const presetDone = useRef(searchParams.has("clone") || restored !== null);
   useEffect(() => {
     if (presetDone.current || !modelCatalog) return;
     presetDone.current = true;
@@ -621,7 +662,7 @@ export function WizardV2Provider({
 
   // The Settings default engine applies once the task and inputs say which
   // engines fit; a cloned run or an engine set earlier keeps its choice.
-  const enginePresetDone = useRef(searchParams.has("clone"));
+  const enginePresetDone = useRef(searchParams.has("clone") || restored !== null);
   useEffect(() => {
     if (enginePresetDone.current || !kind || !mode) return;
     enginePresetDone.current = true;
@@ -656,6 +697,16 @@ export function WizardV2Provider({
       .catch(() => toast.error(msg("submit.clone.failed")));
     // Runs once per mount; a later ?clone= change remounts the page.
   }, []);
+
+  useEffect(() => {
+    if (submittedRef.current) return;
+    try {
+      window.sessionStorage.setItem(WIZARD_SESSION_KEY, encodeWizardSession(accountId, stored));
+    } catch {}
+  }, [accountId, stored]);
+  // Leaving the page inside the app ends the setup; only a reload, which runs
+  // no cleanup, finds it again.
+  useEffect(() => forgetWizardSession, []);
 
   // A table the agent panel staged reaches the wizard by event while it is
   // open, or through the session key when it mounts later.

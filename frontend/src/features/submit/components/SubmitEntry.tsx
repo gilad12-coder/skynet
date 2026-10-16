@@ -36,5 +36,5 @@ export function SubmitEntry() {
 
   if (accountId === null) return null;
   // Keyed by account so a sign-in switch never carries one user's setup to another.
-  return <UnifiedWizard key={accountId} folderId={folderId} />;
+  return <UnifiedWizard key={accountId} accountId={accountId} folderId={folderId} />;
 }
