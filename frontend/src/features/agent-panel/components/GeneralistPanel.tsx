@@ -269,6 +269,14 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     onConversationMeta: handleConversationMeta,
   });
   const streaming = agent.status === "streaming";
+  // Each conversation on view gets fresh turn components, so one chat's
+  // timers and "already shown" text never carry into another. A new chat
+  // getting its id from its first turn is still the same chat.
+  const [chatView, setChatView] = React.useState({ id: agent.conversationId, key: 0 });
+  if (chatView.id !== agent.conversationId) {
+    const sameChat = chatView.id === null && streaming;
+    setChatView({ id: agent.conversationId, key: sameChat ? chatView.key : chatView.key + 1 });
+  }
   // Any conversation still streaming or waiting its turn keeps the user's
   // notification pending; it fires once they have all settled.
   useCompletionNotification(
@@ -805,6 +813,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
         ]}
       >
         <ChatTranscript
+          key={chatView.key}
           messages={agent.messages}
           streaming={streaming}
           editAndResend={agent.editAndResend}

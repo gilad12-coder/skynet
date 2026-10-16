@@ -1487,12 +1487,23 @@ def test_share_plan_streams_a_plan_event_and_no_tool_row() -> None:
     events: list[dict] = []
     tool = plan_tool(events.append)
 
+    assert tool.func(plan="   ").startswith("Empty plan")
     result = tool.func(plan="  I'll fill the inputs,\n then move on.  ")
 
     assert events == [{"event": "plan", "data": {"text": "I'll fill the inputs, then move on."}}]
     assert "Carry it out" in result
-    assert tool.func(plan="   ").startswith("Empty plan")
-    assert len(events) == 1
+
+
+def test_share_plan_keeps_the_first_plan_of_a_turn() -> None:
+    """A second plan in one turn is refused, so the shown plan never changes mid-turn."""
+    events: list[dict] = []
+    tool = plan_tool(events.append)
+
+    tool.func(plan="Fill the inputs.")
+    second = tool.func(plan="Actually, pick the optimizer.")
+
+    assert [e["data"]["text"] for e in events] == ["Fill the inputs."]
+    assert "already shown" in second
 
 
 @pytest.mark.parametrize(

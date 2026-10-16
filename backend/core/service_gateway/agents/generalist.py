@@ -2243,7 +2243,11 @@ _MAX_PLAN_CHARS = 300
 # Shorter reasoning reads fine as its own summary; a model call would cost
 # more than it says.
 _SUMMARY_MIN_CHARS = 40
-_SUMMARY_TIMEOUT_SECONDS = 4.0
+# The first label of a turn pays the model's cold start, which often runs
+# past 4s; a late label still lands on its row while the turn streams.
+_SUMMARY_TIMEOUT_SECONDS = 10.0
+# How long the turn's end waits for labels still being written.
+_SUMMARY_FINISH_GRACE_SECONDS = 3.0
 _SUMMARY_MAX_CHARS = 120
 # The tail of a long stretch says where the thinking landed, which is what
 # the row's one line should tell.
@@ -2252,7 +2256,8 @@ _SUMMARY_PROMPT = (
     "You label an AI assistant's private reasoning for its user. Read the reasoning and write ONE line of "
     "8 to 12 words, in {language}, on what the assistant worked out or decided, like 'Checked the task and "
     "picked pairs as the input format'. Describe the work in the user's terms: never name a tool, function or "
-    "field (no snake_case words). No quotes, no ending period, no preamble."
+    "field, not even in plain words (no 'update wizard state', 'list datasets', 'request upload'); say what it "
+    "means for the user's setup instead. No quotes, no ending period, no preamble."
 )
 
 
@@ -2269,11 +2274,16 @@ def plan_tool(emit: Callable[[dict], None]) -> dspy.Tool:
         The ``share_plan`` tool.
     """
 
+    shared: list[str] = []
+
     def share_plan(plan: str) -> str:
         """Show the user what this turn will do."""
+        if shared:
+            return "Your plan is already shown; a turn has one. Carry it out now."
         text = " ".join(plan.split())[:_MAX_PLAN_CHARS]
         if not text:
             return "Empty plan: say in one or two sentences what you will do."
+        shared.append(text)
         emit({"event": "plan", "data": {"text": text}})
         return "The user sees your plan. Carry it out now."
 
@@ -2468,10 +2478,10 @@ class ThinkingSummaries:
         self._label_closed(self._trail.observe(ev))
 
     async def finish(self) -> None:
-        """Close the last row and wait for labels still being written."""
+        """Close the last row and wait briefly for labels still being written."""
         self._label_closed(self._trail.close())
         if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+            await asyncio.wait(set(self._tasks), timeout=_SUMMARY_FINISH_GRACE_SECONDS)
 
     def cancel(self) -> None:
         """Drop labels still being written."""

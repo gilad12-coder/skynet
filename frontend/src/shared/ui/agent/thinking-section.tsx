@@ -86,7 +86,7 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
         onClick={() => setOpen((v) => !v)}
         disabled={!reasoning}
         aria-expanded={open}
-        className="group flex w-full items-center gap-2 py-1 text-start text-[0.8125rem] text-muted-foreground transition-colors enabled:cursor-pointer enabled:hover:text-foreground"
+        className="group relative flex w-full items-center gap-2 py-1 text-start text-[0.8125rem] text-muted-foreground transition-colors enabled:cursor-pointer enabled:hover:text-foreground"
       >
         <Brain className="size-3.5 shrink-0" aria-hidden />
         {showSummary && summary && (
@@ -109,7 +109,9 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
         )}
         {/* "Thinking" fades into "Thought for Ns" instead of snapping, and
             slides over when a summary lands in front of it. */}
-        <AnimatePresence mode="wait" initial={false}>
+        {/* popLayout lets the new label fade in while the old one fades out,
+            so the row is never left with only its icon. */}
+        <AnimatePresence mode="popLayout" initial={false}>
           <motion.span
             key={isThinking ? "thinking" : "thought"}
             layout={reduce ? false : "position"}
@@ -117,7 +119,10 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
             animate={{ opacity: 1, filter: "blur(0px)" }}
             exit={reduce ? undefined : { opacity: 0, filter: "blur(2px)" }}
             transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
-            className={cn(showSummary ? "shrink-0" : "truncate", isThinking && "agent-shimmer-text")}
+            className={cn(
+              showSummary ? "shrink-0" : "truncate",
+              isThinking && "agent-shimmer-text",
+            )}
           >
             {label}
           </motion.span>
