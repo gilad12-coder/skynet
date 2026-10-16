@@ -797,6 +797,7 @@ export function WizardV2Provider({
   }, [agentPulseTick]);
 
   // Local edits go back so the agent sees the form it is talking about.
+  const handDataFlagRef = useRef(false);
   useEffect(() => {
     if (!wizardCtx) return;
     const s = wizardCtx.state;
@@ -821,6 +822,17 @@ export function WizardV2Provider({
       if (value === undefined) wizardCtx.clearField(key);
       else wizardCtx.setField(key, value, "user");
     }
+    // A table loaded by hand lives only in the browser, with no staged id,
+    // so the agent learns it is there from the flag. Only a flag set here is
+    // cleared here: the panel sets its own when it stages a dataset.
+    const handData = inputs.cases.length > 0;
+    if (handData && !s.dataset_ready) {
+      wizardCtx.setField("dataset_ready", true, "user");
+      handDataFlagRef.current = true;
+    } else if (!handData && handDataFlagRef.current) {
+      handDataFlagRef.current = false;
+      if (s.dataset_ready) wizardCtx.clearField("dataset_ready");
+    }
   }, [wizardCtx, state]);
 
   const value: WizardV2Shell = {
@@ -839,7 +851,9 @@ export function WizardV2Provider({
     patchMeta,
     resolvedOptimizer,
     optimizerCatalog:
-      optimizerCatalog && optimizerCatalog.artifact_kind === kind && optimizerCatalog.data_mode === mode
+      optimizerCatalog &&
+      optimizerCatalog.artifact_kind === kind &&
+      optimizerCatalog.data_mode === mode
         ? optimizerCatalog
         : null,
     optimizerCatalogLoading,
