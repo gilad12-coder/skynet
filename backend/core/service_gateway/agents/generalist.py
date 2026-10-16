@@ -2051,7 +2051,8 @@ This screen:
   back with a request. Be proactive. When this screen's values, the
   read-only values and the notes are enough, fill the screen with its
   tools now (sensible defaults count: ``auto`` for the optimizer, the
-  recommended models), then call ``continue_to_next_screen`` and reply in
+  recommended models; never the spending limit, which only the user
+  sets), then call ``continue_to_next_screen`` and reply in
   one short sentence with what you set. When only the user can supply
   something (their data, a choice no default settles), ask that one
   question in one or two short sentences and stop. On a request, act on
@@ -2060,6 +2061,14 @@ This screen:
   memory: call ``list_models_for_agent``.
 """
 # One line per screen: what that screen's agent is for.
+# How much to spend is the user's call, never a default the agent picks.
+_ASK_FOR_BUDGET = (
+    "``spending_limit_usd`` is the most the run may spend, in US dollars, and only the user decides it. "
+    "Unless the user already named an amount (in this chat or in ``notes_from_earlier_screens``), ask how "
+    "much they want to spend: give the minimum (``spending_floor_cents``, the low end of the run's "
+    "estimate) and their balance from ``get_wallet_for_agent``, and wait for the answer before setting it "
+    "or continuing. Never set it below that minimum; if the user wants less, say the run needs at least that."
+)
 SCREEN_FOCUS: dict[str, str] = {
     "brief": (
         "Brief: get what the run should improve, in the user's words, into ``task_objective``, and any "
@@ -2074,8 +2083,8 @@ SCREEN_FOCUS: dict[str, str] = {
         "pairs, get a dataset attached with ``request_user_dataset`` or a sample or library dataset."
     ),
     "plan": (
-        "Plan: choose ``optimizer_choice`` (``auto`` unless the user names one), the task and reflection "
-        "models from ``list_models_for_agent``, and ``spending_limit_usd`` if the user wants a cap."
+        "Plan: choose ``optimizer_choice`` (``auto`` unless the user names one) and the task and reflection "
+        "models from ``list_models_for_agent``. " + _ASK_FOR_BUDGET
     ),
     "optimizer": (
         "Optimizer: choose ``optimizer_choice``; ``auto`` is right unless the user names one, and "
@@ -2085,12 +2094,7 @@ SCREEN_FOCUS: dict[str, str] = {
         "Models: choose ``reflection_model_config`` (always needed) and ``model_config`` (the task model) "
         "from ``list_models_for_agent``, fitting the chosen optimizer."
     ),
-    "budget": (
-        "Budget: set ``spending_limit_usd``, the most the run may spend, in US dollars, never below "
-        "``spending_floor_cents`` (the low end of the run's estimate); if the user wants less, say the run "
-        "needs at least that. Check the wallet with ``get_wallet_for_agent`` when the user asks what they "
-        "can afford."
-    ),
+    "budget": ("Budget: " + _ASK_FOR_BUDGET),
     "metric": (
         "Metric: the coding agent beside this screen's editor writes the run code and the metric; "
         "point the user to it and never write that code yourself."

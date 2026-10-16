@@ -499,6 +499,15 @@ def test_budget_screen_refuses_a_limit_below_the_estimate(patch: dict[str, Any],
         assert "$3.70" in problems[0]
 
 
+@pytest.mark.parametrize("screen", ["plan", "budget"])
+def test_spending_screens_ask_the_user_for_the_limit(screen: str) -> None:
+    """Both screens that hold the spending limit tell the agent to ask, not pick one."""
+    focus = SCREEN_FOCUS[screen]
+    assert "only the user decides it" in focus
+    assert "spending_floor_cents" in focus
+    assert "wait for the answer" in focus
+
+
 def _wizard_tool() -> dspy.Tool:
     """Build an ``update_wizard_state`` stand-in with a field per screen.
 
