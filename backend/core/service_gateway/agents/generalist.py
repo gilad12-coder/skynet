@@ -2044,8 +2044,10 @@ This screen:
 * When the user says something a later screen needs (a budget, a model
   preference, "keep it cheap"), call ``remember_for_later`` with it.
 * When this screen is complete and the user wants to move on, call
-  ``continue_to_next_screen`` as your last tool. If it is refused, tell
-  the user what is missing.
+  ``continue_to_next_screen`` as your last tool. Answering the question
+  you asked to finish this screen counts as wanting to move on; do not
+  ask again whether to continue. If it is refused, tell the user what is
+  missing.
 * The first turn of this conversation opens the screen: the wizard just
   moved here (the user typed nothing), or a later screen sent the user
   back with a request. Be proactive. When this screen's values, the
@@ -2067,7 +2069,11 @@ _ASK_FOR_BUDGET = (
     "Unless the user already named an amount (in this chat or in ``notes_from_earlier_screens``), ask how "
     "much they want to spend: give the minimum (``spending_floor_cents``, the low end of the run's "
     "estimate) and their balance from ``get_wallet_for_agent``, and wait for the answer before setting it "
-    "or continuing. Never set it below that minimum; if the user wants less, say the run needs at least that."
+    "or continuing. If you changed models or the optimizer in this turn, the minimum you were given is out "
+    "of date: point to the estimate on the screen instead of quoting a number. Never set it below that "
+    "minimum; if the user wants less, say the run needs at least that. Once the user names an amount at or "
+    "above the minimum, set it and call ``continue_to_next_screen`` in the same turn; do not ask whether to "
+    "continue."
 )
 SCREEN_FOCUS: dict[str, str] = {
     "brief": (

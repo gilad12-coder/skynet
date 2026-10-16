@@ -506,6 +506,7 @@ def test_spending_screens_ask_the_user_for_the_limit(screen: str) -> None:
     assert "only the user decides it" in focus
     assert "spending_floor_cents" in focus
     assert "wait for the answer" in focus
+    assert "do not ask whether to continue" in focus
 
 
 def _wizard_tool() -> dspy.Tool:
