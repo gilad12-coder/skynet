@@ -29,6 +29,7 @@ from core.service_gateway.agents.generalist import (
     _TurnAuthoringFlag,
     _wrap_tool_with_approval,
     approval_key,
+    note_sample_language,
     scope_wizard_tool,
     screen_nav_tools,
     screen_signature,
@@ -461,6 +462,22 @@ def test_screen_signature_names_the_reply_language() -> None:
     instructions = screen_signature("source", "English").instructions
     assert "every user-facing tool argument in\n  English." in instructions
     assert "often Hebrew" in instructions
+
+
+@pytest.mark.asyncio
+async def test_sample_listing_carries_the_reply_language() -> None:
+    """Listing the Hebrew samples reminds the agent which language to write in."""
+
+    async def listing() -> dict:
+        """Return a one-sample catalog."""
+        return {"samples": [{"sample_id": "sentiment-he"}]}
+
+    tool = note_sample_language(dspy.Tool(listing, name="list_sample_datasets_datasets_samples_get"), "English")
+    result = await tool.acall()
+    assert result["samples"] == {"samples": [{"sample_id": "sentiment-he"}]}
+    assert "Describe them in English" in result["note"]
+    hebrew = note_sample_language(dspy.Tool(listing, name="list_sample_datasets_datasets_samples_get"), "Hebrew")
+    assert "note" not in await hebrew.acall()
 
 
 def _wizard_tool() -> dspy.Tool:

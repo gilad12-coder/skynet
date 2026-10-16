@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import threading
@@ -1576,6 +1577,43 @@ def scope_wizard_tool(tool: dspy.Tool, state: WizardState) -> dspy.Tool:
     return tool
 
 
+SAMPLE_LIST_TOOL = "list_sample_datasets_datasets_samples_get"
+
+
+def note_sample_language(tool: dspy.Tool, reply_language: str) -> dspy.Tool:
+    """Attach a reply-language note to the bundled-samples listing.
+
+    The samples are Hebrew datasets with Hebrew names, and an agent that
+    lists them tends to answer in Hebrew whatever the user's language.
+
+    Args:
+        tool: An MCP tool about to be offered to the agent.
+        reply_language: English name of the language the agent writes in.
+
+    Returns:
+        ``tool``, with its result wrapped in place when it lists the samples.
+    """
+    if tool.name != SAMPLE_LIST_TOOL or reply_language == "Hebrew":
+        return tool
+    original = tool.func
+
+    async def listed(*args: Any, **kwargs: Any) -> Any:
+        """Run the listing and return it beside the language note."""
+        result = original(*args, **kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return {
+            "samples": result,
+            "note": (
+                f"These bundled samples are Hebrew-language datasets. Describe them in {reply_language}, "
+                "translating their names, and suggest one only when the user wants a demo or works in Hebrew."
+            ),
+        }
+
+    tool.func = listed
+    return tool
+
+
 # The agent's instructions: the turn protocol (tools, then one ``submit``) as
 # well as the product rules. :class:`GeneralistSig` carries them as its
 # docstring; the constant exists so tests can assert on the text directly.
@@ -2209,7 +2247,9 @@ async def _drive_generalist_agent(
         screen = wizard_state.get("wizard_screen") if "wizard_screen" in wizard_state else None
         dspy_tools = [
             _wrap_tool_with_approval(
-                scope_wizard_tool(dspy.Tool.from_mcp_tool(session, spec), wizard_state),
+                note_sample_language(
+                    scope_wizard_tool(dspy.Tool.from_mcp_tool(session, spec), wizard_state), reply_language
+                ),
                 trust_mode=trust_mode,
                 registry=registry,
                 emit=emit,
