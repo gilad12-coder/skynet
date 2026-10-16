@@ -25,9 +25,12 @@ from core.service_gateway.agents.generalist import (
     ApprovalRegistry,
     WizardState,
     _needs_approval,
+    _screen_needs_approval,
+    _screen_problems,
     _TurnAuthoringFlag,
     _wrap_tool_with_approval,
     approval_key,
+    note_sample_language,
     scope_wizard_tool,
     screen_nav_tools,
     screen_signature,
@@ -277,8 +280,16 @@ _FULL_SNAPSHOT: dict[str, Any] = {
 def test_screen_snapshot_keeps_screen_fields_and_read_only_extras(screen: str, expected: set[str]) -> None:
     """A screen sees its own fields plus the values it depends on, nothing else."""
     trimmed = screen_snapshot(cast(WizardState, {**_FULL_SNAPSHOT, "wizard_screen": screen}))
-    assert set(trimmed) == expected | {"wizard_screen"}
+    assert set(trimmed) == expected | {"wizard_screen", "job_name"}
     assert trimmed["wizard_screen"] == screen
+
+
+def test_screen_snapshot_shows_a_missing_run_name() -> None:
+    """Every screen sees ``job_name``, null when unset, since writes wait on it."""
+    unnamed = screen_snapshot(cast(WizardState, {"wizard_screen": "source", "task_objective": "Sort emails"}))
+    assert unnamed["job_name"] is None
+    named = screen_snapshot(cast(WizardState, {"wizard_screen": "source", "job_name": "Email sorter"}))
+    assert named["job_name"] == "Email sorter"
 
 
 def test_models_screen_sees_the_optimizer_read_only() -> None:
@@ -455,6 +466,57 @@ def test_screen_signature_is_short_and_names_the_screen(screen: str) -> None:
     assert len(instructions) < len(GENERALIST_SYSTEM_PROMPT or "")
 
 
+def test_screen_signature_names_the_reply_language() -> None:
+    """The screen prompt names the language outright, so Hebrew tool results can't pull it."""
+    instructions = screen_signature("source", "English").instructions
+    assert "every user-facing tool argument in\n  English." in instructions
+    assert "often Hebrew" in instructions
+
+
+@pytest.mark.asyncio
+async def test_sample_listing_carries_the_reply_language() -> None:
+    """Listing the Hebrew samples reminds the agent which language to write in."""
+
+    async def listing() -> dict:
+        """Return a one-sample catalog."""
+        return {"samples": [{"sample_id": "sentiment-he"}]}
+
+    tool = note_sample_language(dspy.Tool(listing, name="list_sample_datasets_datasets_samples_get"), "English")
+    result = await tool.acall()
+    assert result["samples"] == {"samples": [{"sample_id": "sentiment-he"}]}
+    assert "Describe them in English" in result["note"]
+    hebrew = note_sample_language(dspy.Tool(listing, name="list_sample_datasets_datasets_samples_get"), "Hebrew")
+    assert "note" not in await hebrew.acall()
+
+
+@pytest.mark.parametrize(
+    ("patch", "blocked"),
+    [
+        ({"spending_limit_usd": 3}, True),
+        ({"spending_limit_usd": 3.7}, False),
+        ({"max_cost_cents": 300}, True),
+        ({"spending_limit_usd": None}, False),
+        ({}, False),
+    ],
+)
+def test_budget_screen_refuses_a_limit_below_the_estimate(patch: dict[str, Any], blocked: bool) -> None:
+    """Continue on the budget screen names the floor when the limit sits under it."""
+    problems = _screen_problems("budget", cast(WizardState, {"spending_floor_cents": 370, **patch}))
+    assert bool(problems) is blocked
+    if blocked:
+        assert "$3.70" in problems[0]
+
+
+@pytest.mark.parametrize("screen", ["plan", "budget"])
+def test_spending_screens_ask_the_user_for_the_limit(screen: str) -> None:
+    """Both screens that hold the spending limit tell the agent to ask, not pick one."""
+    focus = SCREEN_FOCUS[screen]
+    assert "only the user decides it" in focus
+    assert "spending_floor_cents" in focus
+    assert "wait for the answer" in focus
+    assert "do not ask whether to continue" in focus
+
+
 def _wizard_tool() -> dspy.Tool:
     """Build an ``update_wizard_state`` stand-in with a field per screen.
 
@@ -562,6 +624,15 @@ def test_auto_safe_gates_only_destructive() -> None:
     assert _needs_approval("toggle_pin_job_optimizations", "auto_safe") is False
     assert _needs_approval("delete_job_optimizations", "auto_safe") is True
     assert _needs_approval("submit_unified_run_optimize_post", "auto_safe") is True
+
+
+def test_screen_agent_fills_its_own_screen_without_asking() -> None:
+    """A screen agent's form writes skip Ask; everything else keeps the usual gate."""
+    assert _screen_needs_approval("update_wizard_state", "ask") is False
+    assert _screen_needs_approval("set_column_roles_datasets_column_roles_post", "ask") is False
+    assert _screen_needs_approval("stage_sample_dataset_datasets_samples", "ask") is True
+    assert _screen_needs_approval("submit_unified_run_optimize_post", "ask") is True
+    assert _screen_needs_approval("delete_job_optimizations", "auto_safe") is True
 
 
 def _make_fake_tool(name: str, return_value: str = "ok") -> dspy.Tool:

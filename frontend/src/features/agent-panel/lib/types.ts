@@ -52,6 +52,8 @@ export interface WizardState {
   reflection_model_config?: Record<string, unknown>;
   /** The run's spending limit in cents; null = no cap. */
   max_cost_cents?: number | null;
+  /** The least the spending limit may be: the low end of the run's estimate, in cents. */
+  spending_floor_cents?: number;
   run_code?: string;
   metric_code?: string;
   /** The wizard screen on view; the agent may edit only the fields on it. */

@@ -21,6 +21,8 @@ export interface IdeCodingAgent {
   setEffort: (effort: string | null) => void;
   /** The agent's last turn-ending verify_code verdict, newer than `lastCheck`; null otherwise. */
   verdict: AgentVerdict | null;
+  /** Counts finished turns that wrote into the workspace. */
+  writtenTurns: number;
 }
 
 /**
@@ -83,19 +85,24 @@ export function useIdeCodingAgent(options: {
   });
   // The turn's last written file, and whether it opened one itself.
   const wrote = React.useRef<string | null>(null);
+  const wroteAny = React.useRef(false);
+  const [writtenTurns, setWrittenTurns] = React.useState(0);
   const opened = React.useRef(false);
   const writeRun = React.useCallback((code: string) => {
+    wroteAny.current = true;
     wrote.current = "run.py";
     setAgentRun(code);
     sinks.current.setRunCode(code);
   }, []);
   const writeMetric = React.useCallback((code: string) => {
+    wroteAny.current = true;
     wrote.current = "metric.py";
     setAgentMetric(code);
     sinks.current.setMetricCode(code);
   }, []);
   const writeFile = React.useCallback(
     (path: string, text: string | null) => {
+      wroteAny.current = true;
       wrote.current = text === null ? null : path;
       sinks.current.setFile(path, text);
     },
@@ -194,8 +201,13 @@ export function useIdeCodingAgent(options: {
     if (started) {
       verified.current = null;
       wrote.current = null;
+      wroteAny.current = false;
       opened.current = false;
       before.current = texts;
+    }
+    if (finished && wroteAny.current) {
+      wroteAny.current = false;
+      setWrittenTurns((n) => n + 1);
     }
     // Models often skip open_file after writing, so the turn's last written
     // file opens on its first changed line, the way the agent was told to.
@@ -212,5 +224,5 @@ export function useIdeCodingAgent(options: {
     if (!repo) void check();
   }, [busy, agent.status, context, repo, runCode, metricCode, files, key, lastCheck, check]);
 
-  return { agent, model, setModel, effort, setEffort, verdict };
+  return { agent, model, setModel, effort, setEffort, verdict, writtenTurns };
 }

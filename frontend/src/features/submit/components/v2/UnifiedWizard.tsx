@@ -7,6 +7,7 @@ import { useHideAgentPill, useWizardStateOptional } from "@/features/agent-panel
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 import { slideVariants } from "../../constants";
+import { WizardAutoAdvanceContext, useAutoAdvanceDriver } from "../../hooks/use-auto-advance";
 import { ExecutionBudgetProvider } from "../../hooks/use-execution-budget";
 import { WizardV2Provider, useWizardV2Shell, v2Text } from "../../hooks/use-unified-wizard";
 import { limitContinueBlock } from "../../lib/budget-limit";
@@ -92,6 +93,11 @@ function UnifiedWizardFrame() {
     if (next) setPages((p) => ({ ...p, [next]: 0 }));
     goNext();
   }, [forwardOpen, page, pageCount, current, steps, position, goNext]);
+  const autoAdvance = useAutoAdvanceDriver(
+    visibleScreen,
+    forwardOpen && !advancing && !submitting,
+    forward,
+  );
 
   const back = useCallback(() => {
     if (page > 0) {
@@ -140,8 +146,8 @@ function UnifiedWizardFrame() {
     setScreenIssue?.(blockedText);
   }, [blockedText, setScreenIssue]);
   useEffect(() => {
-    setScreenNavigator?.({ forward, goToScreen });
-  }, [forward, goToScreen, setScreenNavigator]);
+    setScreenNavigator?.({ screen: visibleScreen, forward, goToScreen });
+  }, [visibleScreen, forward, goToScreen, setScreenNavigator]);
   useEffect(
     () => () => {
       setWizardScreen?.(null);
@@ -197,24 +203,26 @@ function UnifiedWizardFrame() {
         className="relative min-h-0 flex-1 overflow-hidden pt-[10px]"
         data-tutorial="submit-wizard"
       >
-        {WIZARD_V2_STEPS.filter(mounted).map((step) => {
-          const active = step === current;
-          return (
-            <motion.div
-              key={step}
-              hidden={!active}
-              className="h-full"
-              data-tutorial={active ? `wizard-stage-${step}` : undefined}
-              custom={direction}
-              variants={slideVariants}
-              initial="enter"
-              animate={active ? "center" : "enter"}
-              transition={{ duration: active ? 0.1 : 0 }}
-            >
-              {STEP_VIEWS[step](Math.min(pages[step], stepPages(step, w.state).length - 1), back)}
-            </motion.div>
-          );
-        })}
+        <WizardAutoAdvanceContext.Provider value={autoAdvance}>
+          {WIZARD_V2_STEPS.filter(mounted).map((step) => {
+            const active = step === current;
+            return (
+              <motion.div
+                key={step}
+                hidden={!active}
+                className="h-full"
+                data-tutorial={active ? `wizard-stage-${step}` : undefined}
+                custom={direction}
+                variants={slideVariants}
+                initial="enter"
+                animate={active ? "center" : "enter"}
+                transition={{ duration: active ? 0.1 : 0 }}
+              >
+                {STEP_VIEWS[step](Math.min(pages[step], stepPages(step, w.state).length - 1), back)}
+              </motion.div>
+            );
+          })}
+        </WizardAutoAdvanceContext.Provider>
       </div>
 
       <div className="shrink-0">

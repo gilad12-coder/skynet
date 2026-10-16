@@ -1713,7 +1713,6 @@
   "auto.features.agent.panel.components.generalistpanel.3": "Ajan",
   "auto.features.agent.panel.components.generalistpanel.4": "Neler yapabilirim",
   "auto.features.agent.panel.components.generalistpanel.6": "Daraltmak için tıklayın",
-  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "Artık bu ekrandayım. Burada neye ihtiyacımız var?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "`{p1}` veri kümesi eklendi ({p2} satır).\n\nSütun eşlemesi:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "Tekrar dene",
   "auto.features.agent.panel.components.generalistpanel.history_button": "Geçmiş konuşmalar",

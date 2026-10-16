@@ -259,7 +259,6 @@
   "auto.features.agent.panel.components.generalistpanel.3": "סוכן",
   "auto.features.agent.panel.components.generalistpanel.4": "מה אני יודע לעשות",
   "auto.features.agent.panel.components.generalistpanel.6": "לחץ/י לכיווץ",
-  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "עברתי למסך הזה. במה צריך לטפל כאן?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "הדאטאסט `{p1}` צורף ({p2} שורות).\n\nמיפוי עמודות:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "נסה/נסי שוב",
   "auto.features.agent.panel.components.generalistpanel.history_button": "שיחות קודמות",

@@ -21,8 +21,10 @@ import { Segmented } from "@/shared/ui/segmented";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 
+import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
 import { useTaskInterview, type TaskInterviewState } from "../../hooks/use-task-interview";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
+import { taskAdvanceFrom } from "../../lib/auto-advance";
 import { emptyRepoDraft, taskIssue } from "../../lib/wizard-v2";
 import { AuthoringShell } from "../steps/AuthoringShell";
 import { ArtifactConfirmCard, v2Msg } from "./ArtifactConfirmCard";
@@ -45,6 +47,22 @@ export function TaskStep({ page }: { page: number }) {
   const [assist, setAssist] = React.useState<"auto" | "manual">("auto");
   const interview = useTaskInterview(ctx, assist === "auto");
 
+  // Once the interview has what it needs, the wizard moves on by itself, but
+  // only on the first pass: a user who comes back to edit the task stays put.
+  const { advanceFrom } = useWizardAutoAdvance();
+  const advancePast = taskAdvanceFrom({
+    auto: assist === "auto",
+    firstPass: state.furthestStep === "task",
+    onStep: state.step === "task",
+    done: interview.done,
+    busy: interview.busy,
+    valid: taskIssue(task) === null,
+    page,
+  });
+  React.useEffect(() => {
+    if (advancePast) advanceFrom(advancePast);
+  }, [advancePast, advanceFrom]);
+
   return (
     <AuthoringShell
       value={assist}
@@ -52,7 +70,12 @@ export function TaskStep({ page }: { page: number }) {
       title={t("submit.v2.task.title")}
       description={t("submit.v2.task.desc")}
       sidePanel={
-        <TaskInterviewPanel interview={interview} guided={guided} className="absolute inset-0" />
+        <TaskInterviewPanel
+          interview={interview}
+          guided={guided}
+          firstPass={state.furthestStep === "task"}
+          className="absolute inset-0"
+        />
       }
     >
       <WizardScreen
@@ -182,10 +205,14 @@ function TaskField({
 function TaskInterviewPanel({
   interview,
   guided,
+  firstPass,
   className,
 }: {
   interview: TaskInterviewState;
   guided: boolean;
+  // The "has what it needs" note announces the move on; once the user is
+  // past this step it would only be stale.
+  firstPass: boolean;
   className?: string;
 }) {
   const [draft, setDraft] = React.useState("");
@@ -253,7 +280,7 @@ function TaskInterviewPanel({
         </div>
       )}
 
-      {interview.done && !interview.busy && !interview.error && (
+      {firstPass && interview.done && !interview.busy && !interview.error && (
         <p className="border-t border-border/40 px-4 py-2.5 text-xs text-muted-foreground">
           {t("submit.v2.task.chat.done")}
         </p>

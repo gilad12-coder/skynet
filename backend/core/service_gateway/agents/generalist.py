@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import threading
@@ -416,6 +417,27 @@ def _needs_approval(tool_name: str, trust_mode: TrustMode) -> bool:
     if tool_name in _DESTRUCTIVE_TOOLS:
         return True
     return trust_mode == "ask" and tool_name in _SAFE_MUTATIONS
+
+
+# A screen agent's form writes land on the screen the user is looking at,
+# scoped to its fields, and editing the field undoes them. Asking first would
+# stall the wizard's proactive flow on every field it fills.
+_SCREEN_OWN_WRITES: frozenset[str] = frozenset({"update_wizard_state", "set_column_roles_datasets_column_roles_post"})
+
+
+def _screen_needs_approval(tool_name: str, trust_mode: TrustMode) -> bool:
+    """Decide whether a wizard screen agent's tool call must pause for confirmation.
+
+    Args:
+        tool_name: The MCP tool's registered name.
+        trust_mode: The caller's selected trust level.
+
+    Returns:
+        False for the screen's own form writes; otherwise :func:`_needs_approval`.
+    """
+    if tool_name in _SCREEN_OWN_WRITES:
+        return False
+    return _needs_approval(tool_name, trust_mode)
 
 
 class _TurnAuthoringFlag:
@@ -897,6 +919,8 @@ class WizardState(TypedDict, total=False):
     model_configured: bool
     reflection_model_config: dict[str, Any]
     max_cost_cents: int | None
+    # The least the spending limit may be: the low end of the run's estimate.
+    spending_floor_cents: int | None
     run_code: str
     metric_code: str
     # The wizard screen on view (see ``_SCREEN_FIELDS``). Absent when the
@@ -1233,10 +1257,14 @@ def validate_wizard_screen(tool_name: str, kwargs: dict[str, Any], state: Wizard
 _SCREEN_SNAPSHOT_EXTRAS: dict[str, frozenset[str]] = {
     "artifact": frozenset({"task_objective"}),
     "source": frozenset({"task_objective", "artifact_kind", "dataset_ready", "input_fields", "expected_field"}),
-    "plan": frozenset({"task_objective", "artifact_kind", "data_mode", "model_configured", "max_cost_cents"}),
+    "plan": frozenset(
+        {"task_objective", "artifact_kind", "data_mode", "model_configured", "max_cost_cents", "spending_floor_cents"}
+    ),
     "optimizer": frozenset({"artifact_kind", "data_mode"}),
     "models": frozenset({"optimizer_choice", "model_configured"}),
-    "budget": frozenset({"optimizer_choice", "model_config", "reflection_model_config", "max_cost_cents"}),
+    "budget": frozenset(
+        {"optimizer_choice", "model_config", "reflection_model_config", "max_cost_cents", "spending_floor_cents"}
+    ),
     "metric": frozenset(
         {
             "task_objective",
@@ -1328,6 +1356,9 @@ def screen_snapshot(state: WizardState) -> dict[str, Any]:
         _SCREEN_FIELDS.get(screen, frozenset()) | _SCREEN_SNAPSHOT_EXTRAS.get(screen, frozenset()) | {"wizard_screen"}
     )
     snapshot = {key: value for key, value in state.items() if key in keep}
+    # Every wizard write is refused until the run has a name, and no screen
+    # shows it, so the agent must see when it is still missing.
+    snapshot["job_name"] = state.get("job_name") or None
     notes = earlier_screen_notes(state)
     if notes:
         snapshot["notes_from_earlier_screens"] = notes
@@ -1417,11 +1448,43 @@ def _screen_problems(screen: str, state: WizardState) -> list[str]:
         return ["data_mode must be set, and pairs need a dataset attached"]
     if screen in ("plan", "models") and not _model_ready(state):
         return ["reflection_model_config needs a model"]
+    if screen in ("plan", "budget"):
+        short = _limit_below_floor(state)
+        if short:
+            return [short]
     if screen == "metric" and not _code_ready(state):
         return ["the run code and the metric are not written yet (the coding agent in the Metric step writes them)"]
     if screen == "overview":
         return ["this is the last screen; submit the run instead"]
     return []
+
+
+def _limit_below_floor(state: WizardState) -> str | None:
+    """Say why the spending limit is too low for the run, if it is.
+
+    Args:
+        state: The wizard snapshot with this turn's writes merged in.
+
+    Returns:
+        An English line naming the floor, or None when the limit is unset,
+        uncapped, unknown against an estimate, or at least the floor.
+    """
+    floor = state.get("spending_floor_cents")
+    if not isinstance(floor, int | float) or floor <= 0:
+        return None
+    # This turn's write arrives in dollars; the turn-start snapshot holds cents.
+    patch = cast(dict[str, Any], state)
+    if "spending_limit_usd" in patch:
+        dollars = patch["spending_limit_usd"]
+        limit = None if dollars is None else round(float(dollars) * 100)
+    else:
+        limit = state.get("max_cost_cents")
+    if limit is None or limit >= floor:
+        return None
+    return (
+        f"the spending limit ${limit / 100:.2f} is below this run's estimated minimum ${floor / 100:.2f}; "
+        "set at least that, or ask the user to raise it"
+    )
 
 
 def _append_note(notes: list[dict[str, str]], screen: str, note: str) -> None:
@@ -1552,6 +1615,43 @@ def scope_wizard_tool(tool: dspy.Tool, state: WizardState) -> dspy.Tool:
         f"{tool.desc or ''}\n\nThe user is on the {screen or 'none'!r} screen: set only {fields} "
         f"(plus {', '.join(sorted(_SCREENLESS_FIELDS))}, which show on no screen)."
     ).strip()
+    return tool
+
+
+SAMPLE_LIST_TOOL = "list_sample_datasets_datasets_samples_get"
+
+
+def note_sample_language(tool: dspy.Tool, reply_language: str) -> dspy.Tool:
+    """Attach a reply-language note to the bundled-samples listing.
+
+    The samples are Hebrew datasets with Hebrew names, and an agent that
+    lists them tends to answer in Hebrew whatever the user's language.
+
+    Args:
+        tool: An MCP tool about to be offered to the agent.
+        reply_language: English name of the language the agent writes in.
+
+    Returns:
+        ``tool``, with its result wrapped in place when it lists the samples.
+    """
+    if tool.name != SAMPLE_LIST_TOOL or reply_language == "Hebrew":
+        return tool
+    original = tool.func
+
+    async def listed(*args: Any, **kwargs: Any) -> Any:
+        """Run the listing and return it beside the language note."""
+        result = original(*args, **kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return {
+            "samples": result,
+            "note": (
+                f"These bundled samples are Hebrew-language datasets. Describe them in {reply_language}, "
+                "translating their names, and suggest one only when the user wants a demo or works in Hebrew."
+            ),
+        }
+
+    tool.func = listed
     return tool
 
 
@@ -1693,13 +1793,13 @@ Rules:
     • Call it AT MOST ONCE per turn and REUSE that result for the rest
       of the turn. Do not re-call it to look up a second model — the
       first response already lists the matches.
-* When the user asks to submit in any language (e.g. "תגיש" / "תשלח" /
-  "יש אישור" / "submit"): if
+* When the user asks to submit in any language (e.g. "submit", "send it",
+  "approved", or the same in Hebrew): if
   ``submit_unified_run_optimize_post`` is in your tool list THIS turn, call it;
   if it isn't, identify the missing wizard field and patch it via
   ``update_wizard_state`` / ``request_user_dataset`` (missing code is
-  written by the Metric screen's coding agent). Never reply "אין לי גישה לכלי שליחת
-  האופטימיזציה" — that's a hallucinated refusal.
+  written by the Metric screen's coding agent). Never reply that you have no
+  access to the submit tool — that's a hallucinated refusal.
 
 Supported backend capabilities (these are the ONLY valid values —
 never claim, suggest, or pass any others):
@@ -1931,7 +2031,9 @@ How a turn works:
 * A ``User declined`` result means they refused that action: do not call
   that tool again this turn.
 * Write ``assistant_message`` and every user-facing tool argument in
-  ``reply_language``. Product terms stay in English.
+  {language}. Tool results, error messages, sample datasets, notes and the
+  user's data often arrive in another language (often Hebrew); that never
+  changes the language you write in. Product terms stay in English.
 
 This screen:
 * {focus}
@@ -1940,22 +2042,44 @@ This screen:
   they want there. When it belongs to a later screen, change nothing for
   it: save it with ``remember_for_later`` and say it will be handled there.
 * ``job_name``, ``job_description`` and ``is_private`` show on no screen.
-  Set them only when the user asks for them this turn, or when an "Out of
-  order" error says the run needs a name first.
+  Set them only when the user asks for them this turn, with one exception:
+  when ``job_name`` is null, every write is refused until the run has a
+  name, so put a short name drawn from the task into your first
+  ``update_wizard_state`` call, beside this screen's fields.
 * When the user says something a later screen needs (a budget, a model
   preference, "keep it cheap"), call ``remember_for_later`` with it.
 * When this screen is complete and the user wants to move on, call
-  ``continue_to_next_screen`` as your last tool. If it is refused, tell
-  the user what is missing.
+  ``continue_to_next_screen`` as your last tool. Answering the question
+  you asked to finish this screen counts as wanting to move on; do not
+  ask again whether to continue. If it is refused, tell the user what is
+  missing.
 * The first turn of this conversation opens the screen: the wizard just
-  moved here, or a later screen sent the user back with a request. Reply
-  in one or two short sentences: what this screen is for and the one
-  question it needs answered, or act on the request. Use the notes; do not
-  ask again for what they already say.
+  moved here (the user typed nothing), or a later screen sent the user
+  back with a request. Be proactive. When this screen's values, the
+  read-only values and the notes are enough, fill the screen with its
+  tools now (sensible defaults count: ``auto`` for the optimizer, the
+  recommended models; never the spending limit, which only the user
+  sets), then call ``continue_to_next_screen`` and reply in
+  one short sentence with what you set. When only the user can supply
+  something (their data, a choice no default settles), ask that one
+  question in one or two short sentences and stop. On a request, act on
+  it. Use the notes; do not ask again for what they already say.
 * Never invent the user's task, text or data. Never list model names from
   memory: call ``list_models_for_agent``.
 """
 # One line per screen: what that screen's agent is for.
+# How much to spend is the user's call, never a default the agent picks.
+_ASK_FOR_BUDGET = (
+    "``spending_limit_usd`` is the most the run may spend, in US dollars, and only the user decides it. "
+    "Unless the user already named an amount (in this chat or in ``notes_from_earlier_screens``), ask how "
+    "much they want to spend: give the minimum (``spending_floor_cents``, the low end of the run's "
+    "estimate) and their balance from ``get_wallet_for_agent``, and wait for the answer before setting it "
+    "or continuing. If you changed models or the optimizer in this turn, the minimum you were given is out "
+    "of date: point to the estimate on the screen instead of quoting a number. Never set it below that "
+    "minimum; if the user wants less, say the run needs at least that. Once the user names an amount at or "
+    "above the minimum, set it and call ``continue_to_next_screen`` in the same turn; do not ask whether to "
+    "continue."
+)
 SCREEN_FOCUS: dict[str, str] = {
     "brief": (
         "Brief: get what the run should improve, in the user's words, into ``task_objective``, and any "
@@ -1970,8 +2094,8 @@ SCREEN_FOCUS: dict[str, str] = {
         "pairs, get a dataset attached with ``request_user_dataset`` or a sample or library dataset."
     ),
     "plan": (
-        "Plan: choose ``optimizer_choice`` (``auto`` unless the user names one), the task and reflection "
-        "models from ``list_models_for_agent``, and ``spending_limit_usd`` if the user wants a cap."
+        "Plan: choose ``optimizer_choice`` (``auto`` unless the user names one) and the task and reflection "
+        "models from ``list_models_for_agent``. " + _ASK_FOR_BUDGET
     ),
     "optimizer": (
         "Optimizer: choose ``optimizer_choice``; ``auto`` is right unless the user names one, and "
@@ -1981,10 +2105,7 @@ SCREEN_FOCUS: dict[str, str] = {
         "Models: choose ``reflection_model_config`` (always needed) and ``model_config`` (the task model) "
         "from ``list_models_for_agent``, fitting the chosen optimizer."
     ),
-    "budget": (
-        "Budget: set ``spending_limit_usd``, the most the run may spend, in US dollars; check the wallet "
-        "with ``get_wallet_for_agent`` when the user asks what they can afford."
-    ),
+    "budget": ("Budget: " + _ASK_FOR_BUDGET),
     "metric": (
         "Metric: the coding agent beside this screen's editor writes the run code and the metric; "
         "point the user to it and never write that code yourself."
@@ -2000,18 +2121,21 @@ SCREEN_FOCUS: dict[str, str] = {
 }
 
 
-def screen_signature(screen: str) -> type[dspy.Signature]:
+def screen_signature(screen: str, reply_language: str = "English") -> type[dspy.Signature]:
     """Build the signature a wizard screen's agent runs with.
 
     Args:
         screen: The screen on view.
+        reply_language: English name of the language the agent writes in.
 
     Returns:
         :class:`GeneralistSig` with that screen's short instructions in
         place of the full wizard prompt.
     """
     focus = SCREEN_FOCUS.get(screen, f"{screen}: help the user with this screen.")
-    return GeneralistSig.with_instructions(with_conduct(SCREEN_AGENT_PROMPT.format(screen=screen, focus=focus)))
+    return GeneralistSig.with_instructions(
+        with_conduct(SCREEN_AGENT_PROMPT.format(screen=screen, focus=focus, language=reply_language))
+    )
 
 
 class GeneralistStatusProvider(StatusMessageProvider):
@@ -2175,9 +2299,12 @@ async def _drive_generalist_agent(
         # One per turn, shared across every wrapper, so a later call sees the
         # wizard fields an earlier call wrote this turn.
         authoring_flag = _TurnAuthoringFlag()
+        screen = wizard_state.get("wizard_screen") if "wizard_screen" in wizard_state else None
         dspy_tools = [
             _wrap_tool_with_approval(
-                scope_wizard_tool(dspy.Tool.from_mcp_tool(session, spec), wizard_state),
+                note_sample_language(
+                    scope_wizard_tool(dspy.Tool.from_mcp_tool(session, spec), wizard_state), reply_language
+                ),
                 trust_mode=trust_mode,
                 registry=registry,
                 emit=emit,
@@ -2185,6 +2312,7 @@ async def _drive_generalist_agent(
                 staged_dataset_id=staged_id,
                 wizard_state=wizard_state,
                 authoring_flag=authoring_flag,
+                needs_approval=_screen_needs_approval if screen is not None else None,
                 approval_owner=approval_owner,
             )
             for spec in listing.tools
@@ -2203,7 +2331,6 @@ async def _drive_generalist_agent(
             )
             for tool in build_web_tools()
         ]
-        screen = wizard_state.get("wizard_screen") if "wizard_screen" in wizard_state else None
         if screen is not None:
             dspy_tools += [
                 _wrap_tool_with_approval(
@@ -2231,7 +2358,7 @@ async def _drive_generalist_agent(
                 },
             }
         )
-        signature = GeneralistSig if screen is None else screen_signature(screen or "")
+        signature = GeneralistSig if screen is None else screen_signature(screen or "", reply_language)
         react = ConversationReAct(signature, tools=dspy_tools, max_iters=12)
         if steer_key and approval_owner:
             attach_steering(

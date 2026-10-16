@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
@@ -201,8 +201,13 @@ function ReadyBudgetCard({
   // Until the user edits it, an unset limit follows the estimate's low end,
   // never below a minimum the server reports; a restored limit is kept as is.
   const startingLimit = Math.max(1, Math.ceil(bracket.lowCents), minimum ?? 0);
+  // Only a limit this card filled in follows the estimate: one the agent
+  // wrote is kept, and if it sits under the estimate the field says so.
+  const autoLimitRef = useRef<number | null>(null);
   useEffect(() => {
     if (limitEdited || budgetUncapped || maxCostCents === startingLimit) return;
+    if (maxCostCents != null && maxCostCents !== autoLimitRef.current) return;
+    autoLimitRef.current = startingLimit;
     setMaxCostCents(startingLimit);
   }, [limitEdited, startingLimit, maxCostCents, budgetUncapped, setMaxCostCents]);
   const minimumMessage =

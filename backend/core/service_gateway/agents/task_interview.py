@@ -61,7 +61,8 @@ class TaskInterviewTurnSig(dspy.Signature):
     starting version. Never ask what the ``draft_*`` fields, the sample cases
     or the transcript already answer. When you know enough, or the
     question-count note says the limit is reached, set ``done`` to true and
-    write a one-sentence summary inviting the user to confirm the card.
+    write a one-sentence summary of the draft; the wizard then moves on to
+    the next step by itself, so do not ask the user to confirm anything.
 
     Prefer buttons: for every question a click can settle, offer 2-4
     options in ``options_json``, each a short pickable answer (<= 6 words)

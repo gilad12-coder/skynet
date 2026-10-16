@@ -18,18 +18,21 @@ export function GeneralistAgentShell({
 }: {
   // Only the shown step hosts the chat: visited steps stay mounted, hidden.
   active: boolean;
-  children: React.ReactNode;
+  // A function child gets the switch's value; without the agent it is Manual.
+  children: React.ReactNode | ((assist: "auto" | "manual") => React.ReactNode);
 }) {
   const [assist, setAssist] = React.useState<"auto" | "manual">("auto");
+  const render = (value: "auto" | "manual") =>
+    typeof children === "function" ? children(value) : children;
   if (!isGeneralistAgentEnabled())
-    return <div className="flex h-full min-h-0 flex-col">{children}</div>;
+    return <div className="flex h-full min-h-0 flex-col">{render("manual")}</div>;
   return (
     <AuthoringShell
       value={assist}
       onChange={setAssist}
       sidePanel={active ? <AgentPanelDock className="absolute inset-0" /> : null}
     >
-      {children}
+      {render(assist)}
     </AuthoringShell>
   );
 }

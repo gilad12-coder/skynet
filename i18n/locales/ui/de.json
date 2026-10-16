@@ -1713,7 +1713,6 @@
   "auto.features.agent.panel.components.generalistpanel.3": "Agent",
   "auto.features.agent.panel.components.generalistpanel.4": "Was ich kann",
   "auto.features.agent.panel.components.generalistpanel.6": "Zum Einklappen klicken",
-  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "Ich bin jetzt auf diesem Bildschirm. Was brauchen wir hier?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "Datensatz `{p1}` angehängt ({p2} Zeilen).\n\nSpaltenzuordnung:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "Erneut versuchen",
   "auto.features.agent.panel.components.generalistpanel.history_button": "Frühere Konversationen",

@@ -1713,7 +1713,6 @@
   "auto.features.agent.panel.components.generalistpanel.3": "에이전트",
   "auto.features.agent.panel.components.generalistpanel.4": "할 수 있는 작업",
   "auto.features.agent.panel.components.generalistpanel.6": "클릭하여 접기",
-  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "이제 이 화면에 있어요. 여기서 무엇이 필요할까요?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "데이터셋 `{p1}`이(가) 첨부되었습니다 ({p2}행).\n\n열 매핑:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "다시 시도",
   "auto.features.agent.panel.components.generalistpanel.history_button": "지난 대화",

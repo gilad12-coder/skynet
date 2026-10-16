@@ -774,6 +774,10 @@ export function WizardV2Provider({
           if (typeof shared.run_code === "string") patchWorkspace({ runCode: shared.run_code });
           break;
         case "metric_code":
+          // A staged sample carries a DSPy metric from the older flow, not
+          // this workspace's scorer; pasting it would also read as a hand edit
+          // and keep the coding agent from writing the real one.
+          if (keys.includes("staged_dataset_id")) break;
           if (typeof shared.metric_code === "string")
             patchWorkspace({ metricCode: shared.metric_code });
           break;
@@ -797,6 +801,7 @@ export function WizardV2Provider({
   }, [agentPulseTick]);
 
   // Local edits go back so the agent sees the form it is talking about.
+  const handDataFlagRef = useRef(false);
   useEffect(() => {
     if (!wizardCtx) return;
     const s = wizardCtx.state;
@@ -814,6 +819,7 @@ export function WizardV2Provider({
       optimizer_choice: optimizer.choice,
       run_code: workspace.runCode || undefined,
       metric_code: workspace.metricCode || undefined,
+      spending_floor_cents: chargeable ? Math.ceil(chargeable.lowCents) : undefined,
     } as const;
     for (const key of Object.keys(outgoing) as Array<keyof typeof outgoing>) {
       const value = outgoing[key];
@@ -821,7 +827,18 @@ export function WizardV2Provider({
       if (value === undefined) wizardCtx.clearField(key);
       else wizardCtx.setField(key, value, "user");
     }
-  }, [wizardCtx, state]);
+    // A table loaded by hand lives only in the browser, with no staged id,
+    // so the agent learns it is there from the flag. Only a flag set here is
+    // cleared here: the panel sets its own when it stages a dataset.
+    const handData = inputs.cases.length > 0;
+    if (handData && !s.dataset_ready) {
+      wizardCtx.setField("dataset_ready", true, "user");
+      handDataFlagRef.current = true;
+    } else if (!handData && handDataFlagRef.current) {
+      handDataFlagRef.current = false;
+      if (s.dataset_ready) wizardCtx.clearField("dataset_ready");
+    }
+  }, [wizardCtx, state, chargeable]);
 
   const value: WizardV2Shell = {
     state,
@@ -839,7 +856,9 @@ export function WizardV2Provider({
     patchMeta,
     resolvedOptimizer,
     optimizerCatalog:
-      optimizerCatalog && optimizerCatalog.artifact_kind === kind && optimizerCatalog.data_mode === mode
+      optimizerCatalog &&
+      optimizerCatalog.artifact_kind === kind &&
+      optimizerCatalog.data_mode === mode
         ? optimizerCatalog
         : null,
     optimizerCatalogLoading,

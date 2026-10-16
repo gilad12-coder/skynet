@@ -1713,7 +1713,6 @@
   "auto.features.agent.panel.components.generalistpanel.3": "एजेंट",
   "auto.features.agent.panel.components.generalistpanel.4": "मैं क्या कर सकता हूँ",
   "auto.features.agent.panel.components.generalistpanel.6": "संक्षिप्त करने के लिए क्लिक करें",
-  "auto.features.agent.panel.components.generalistpanel.screen_opened_note": "मैं अब इस स्क्रीन पर हूँ। यहाँ हमें क्या चाहिए?",
   "auto.features.agent.panel.components.generalistpanel.dataset_note": "डेटासेट `{p1}` संलग्न ({p2} पंक्तियाँ)।\n\nकॉलम मैपिंग:\n{p3}",
   "auto.features.agent.panel.components.generalistpanel.error_retry": "फिर से प्रयास करें",
   "auto.features.agent.panel.components.generalistpanel.history_button": "पिछली बातचीतें",
