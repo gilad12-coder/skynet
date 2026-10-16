@@ -83,6 +83,39 @@ def test_get_authenticated_user_accepts_valid_signed_token(monkeypatch: pytest.M
     assert user.groups == ("skynet-admins",)
 
 
+@pytest.mark.parametrize(
+    ("audience", "issuer"),
+    [
+        ("skynet-backend", "skynet-frontend"),
+        ("app-backend", "app-frontend"),
+        ("app-backend", "skynet-frontend"),
+        ("skynet-backend", "app-frontend"),
+    ],
+)
+def test_get_authenticated_user_accepts_both_audience_and_issuer_spellings(
+    monkeypatch: pytest.MonkeyPatch, audience: str, issuer: str
+) -> None:
+    """Tokens minted with the pre-rename or the neutral ``aud``/``iss`` both verify."""
+    monkeypatch.setattr(auth_mod.settings, "backend_auth_secret", SecretStr("test-secret"))
+    token = _sign(_payload(aud=audience, iss=issuer))
+
+    assert get_authenticated_user(_NO_REQUEST, f"Bearer {token}").username == "alice@example.com"
+
+
+@pytest.mark.parametrize(("audience", "issuer"), [("other-backend", "app-frontend"), ("app-backend", "other")])
+def test_get_authenticated_user_rejects_a_foreign_audience_or_issuer(
+    monkeypatch: pytest.MonkeyPatch, audience: str, issuer: str
+) -> None:
+    """A correctly signed token for another audience or issuer is rejected."""
+    monkeypatch.setattr(auth_mod.settings, "backend_auth_secret", SecretStr("test-secret"))
+    token = _sign(_payload(aud=audience, iss=issuer))
+
+    with pytest.raises(HTTPException) as exc:
+        get_authenticated_user(_NO_REQUEST, f"Bearer {token}")
+
+    assert exc.value.status_code == 401
+
+
 def test_get_authenticated_user_rejects_missing_token() -> None:
     """A missing Authorization header is rejected."""
     with pytest.raises(HTTPException) as exc:

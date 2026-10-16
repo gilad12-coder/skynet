@@ -1033,7 +1033,7 @@ def _run_job(
         reflection_lm=reflection_lm,
         native_options=native_options,
         proposer_token_budget_usd=token_budget,
-        run_dir=gepa_log_dir_path or tempfile.mkdtemp(prefix=f"skynet-blackbox-{artifact_id}-"),
+        run_dir=gepa_log_dir_path or tempfile.mkdtemp(prefix=f"app-blackbox-{artifact_id}-"),
         seed=job.seed or 0,
         stop_at_score=job.budget.stop_at_score,
         max_iterations=job.budget.max_iterations,

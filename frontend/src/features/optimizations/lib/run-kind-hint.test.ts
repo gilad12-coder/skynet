@@ -34,12 +34,12 @@ test("a remembered shape merges and survives a reload of the module cache", () =
 });
 
 test("a hint stored as a bare kind still reads", () => {
-  store.set("skynet-run-kind:r2", "grid_search");
+  store.set("app-run-kind:r2", "grid_search");
   assert.equal(hint.runKindHint("r2"), "grid_search");
 });
 
 test("an unreadable hint is ignored", () => {
-  store.set("skynet-run-kind:r3", "{broken");
+  store.set("app-run-kind:r3", "{broken");
   assert.equal(hint.runKindHint("r3"), undefined);
   assert.equal(hint.runShapeHint(undefined), undefined);
 });

@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from core.config import Settings
+from core.config import Settings, app_env, legacy_env_name, with_legacy_env
 
 _SETTINGS_ENV_VARS = (
     "REMOTE_DB_URL",
@@ -30,6 +30,7 @@ _SETTINGS_ENV_VARS = (
     "DB_POOL_MAX_OVERFLOW",
     "DB_POOL_RECYCLE",
     "DB_PGBOUNCER_TRANSACTION_MODE",
+    "APP_CODE_VERSION",
     "SKYNET_CODE_VERSION",
     "ARTIFACTS_DIR",
     "LOGS_DIR",
@@ -234,12 +235,68 @@ def test_settings_env_override_db_pool_config(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_settings_code_version_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``SKYNET_CODE_VERSION`` provides the cached build version."""
+    """``APP_CODE_VERSION`` provides the cached build version over the legacy name."""
+    monkeypatch.setenv("APP_CODE_VERSION", "abcdef123456")
+    monkeypatch.setenv("SKYNET_CODE_VERSION", "fedcba654321")
+
+    s = Settings(_env_file=None)
+
+    assert s.code_version == "abcdef123456"
+
+
+def test_settings_code_version_falls_back_to_legacy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The legacy ``SKYNET_CODE_VERSION`` still works when the new name is unset."""
     monkeypatch.setenv("SKYNET_CODE_VERSION", "abcdef123456")
 
     s = Settings(_env_file=None)
 
     assert s.code_version == "abcdef123456"
+
+
+def test_app_env_prefers_new_name() -> None:
+    """The ``APP_*`` name wins when both spellings are set."""
+    assert app_env("APP_X", environ={"APP_X": "new", "SKYNET_X": "old"}) == "new"
+
+
+def test_app_env_falls_back_to_legacy_name() -> None:
+    """The ``SKYNET_*`` name is used when the new one is absent or blank."""
+    assert app_env("APP_X", environ={"SKYNET_X": "old"}) == "old"
+    assert app_env("APP_X", environ={"APP_X": "", "SKYNET_X": "old"}) == "old"
+
+
+def test_app_env_returns_default_when_neither_is_set() -> None:
+    """Neither spelling set yields the default."""
+    assert app_env("APP_X", environ={}) is None
+    assert app_env("APP_X", "fallback", environ={}) == "fallback"
+
+
+def test_app_env_reads_process_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without an explicit mapping the helper reads ``os.environ``."""
+    monkeypatch.delenv("APP_ENV_PROBE", raising=False)
+    monkeypatch.setenv("SKYNET_ENV_PROBE", "old")
+
+    assert app_env("APP_ENV_PROBE") == "old"
+
+
+def test_legacy_env_name_rejects_other_prefixes() -> None:
+    """Only ``APP_*`` names have a legacy spelling."""
+    assert legacy_env_name("APP_MODEL") == "SKYNET_MODEL"
+    with pytest.raises(ValueError):
+        legacy_env_name("OPENAI_BASE_URL")
+
+
+def test_with_legacy_env_copies_new_names_only() -> None:
+    """Child environments carry both spellings of every ``APP_*`` entry."""
+    assert with_legacy_env({"APP_MODEL": "m", "PATH": "/bin"}) == {
+        "APP_MODEL": "m",
+        "SKYNET_MODEL": "m",
+        "PATH": "/bin",
+    }
+
+
+def test_with_legacy_env_overwrites_a_stale_legacy_value() -> None:
+    """The new value wins, so code reading either spelling sees the same thing."""
+    assert with_legacy_env({"SKYNET_GATEWAY_URL": "stale", "APP_GATEWAY_URL": "relay"})["SKYNET_GATEWAY_URL"] == "relay"
 
 
 def test_settings_env_override_port(monkeypatch: pytest.MonkeyPatch) -> None:

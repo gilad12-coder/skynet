@@ -124,7 +124,7 @@ services:
       WORKER_ENABLED: "0"
       LOG_LEVEL: WARNING
       LOG_FORMAT: text
-      SKYNET_CODE_VERSION: loadtest
+      APP_CODE_VERSION: loadtest
       SEARCH_BACKEND: "semantic"
       EMBEDDINGS_BASE_URL: http://mock-lm:9000/v1
       EMBEDDINGS_MODEL: mock-embedding
@@ -174,7 +174,7 @@ services:
       WORKER_POLL_INTERVAL: "1.0"
       LOG_LEVEL: WARNING
       LOG_FORMAT: text
-      SKYNET_CODE_VERSION: loadtest
+      APP_CODE_VERSION: loadtest
       SEARCH_BACKEND: "semantic"
       EMBEDDINGS_BASE_URL: http://mock-lm:9000/v1
       EMBEDDINGS_MODEL: mock-embedding

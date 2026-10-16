@@ -155,7 +155,7 @@ def test_forwarded_records_keep_their_level_and_source_and_lose_secrets(captured
     sandbox_log.forward(
         {
             "level": "ERROR",
-            "logger": "skynet.engine",
+            "logger": "app.engine",
             "message": f"leaked {secret}",
             "source": "proposer",
             "fields": {"nested": [f"also {secret}"], secret: 1},

@@ -5,7 +5,7 @@ import { kickoffOpening } from "@/shared/lib/agent-kickoff";
 import { msg } from "@/shared/lib/messages";
 import type { AssistPrediction, DatasetSpec, TaggerConfig } from "./types";
 
-// Resolve lazily — a module-load const races the injected window.__SKYNET_ENV__
+// Resolve lazily — a module-load const races the injected window.__APP_ENV__
 // and freezes the build-time localhost fallback. See shared/lib/api.ts.
 const apiBase = () => getRuntimeEnv().apiUrl;
 

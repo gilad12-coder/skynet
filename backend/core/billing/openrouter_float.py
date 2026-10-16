@@ -40,7 +40,7 @@ from ..api.email_sender import email_configured, send_email
 from ..api.rate_limit import shared_redis_client
 from ..config import settings
 
-logger = logging.getLogger("skynet.billing.openrouter_float")
+logger = logging.getLogger("app.billing.openrouter_float")
 
 OPENROUTER_CREDITS_URL = "https://openrouter.ai/api/v1/credits"
 OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"

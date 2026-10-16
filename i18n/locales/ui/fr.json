@@ -3261,7 +3261,6 @@
   "submit.modelpicker.purpose.all": "Tous",
   "submit.modelpicker.purpose.aria": "Filtrer les modèles par usage",
   "submit.modelpicker.purpose.multilingual": "Multilingue",
-  "submit.modelpicker.purpose.onprem": "On-prem",
   "submit.modelpicker.purpose.reasoning": "Raisonnement",
   "submit.modelpicker.purpose.vision": "Vision",
   "submit.modelpicker.zdr_unavailable": "Probablement indisponible avec votre paramètre « Aucune conservation »",

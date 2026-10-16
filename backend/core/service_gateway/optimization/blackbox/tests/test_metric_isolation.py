@@ -107,7 +107,7 @@ def test_proposer_environment_drops_scorer_variables() -> None:
     env = native_engines.proposer_environment(
         {
             "PATH": "/bin",
-            "SKYNET_API_KEY": "route",
+            "APP_API_KEY": "route",
             "SKYNET_SCORER_DIR": "/private/scorer",
             "SKYNET_METRIC_PATH": "/private/metric.py",
             "CLAUDECODE": "1",
@@ -115,7 +115,7 @@ def test_proposer_environment_drops_scorer_variables() -> None:
         }
     )
 
-    assert env == {"PATH": "/bin", "SKYNET_API_KEY": "route"}
+    assert env == {"PATH": "/bin", "APP_API_KEY": "route"}
 
 
 @pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="Directory modes do not bind root.")

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -18,6 +17,7 @@ from sqlalchemy import Engine, create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 from core.billing.budgets import BudgetConflictError, BudgetInFlightError, BudgetService
+from core.config import app_env
 from core.storage.models import (
     Base,
     BillingCustomerModel,
@@ -30,10 +30,10 @@ from core.storage.models import (
 )
 from core.storage.preflights import PreflightStore, WizardPreflightModel
 
-TEST_DB_URL = os.environ.get("SKYNET_BUDGET_TEST_DB_URL")
+TEST_DB_URL = app_env("APP_BUDGET_TEST_DB_URL")
 pytestmark = pytest.mark.skipif(
     not TEST_DB_URL or not TEST_DB_URL.startswith("postgresql"),
-    reason="Set SKYNET_BUDGET_TEST_DB_URL to an explicitly disposable PostgreSQL database.",
+    reason="Set APP_BUDGET_TEST_DB_URL to an explicitly disposable PostgreSQL database.",
 )
 
 

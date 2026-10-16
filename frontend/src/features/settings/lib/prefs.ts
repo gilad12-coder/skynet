@@ -80,18 +80,18 @@ export function parseAgentPreferencePatch(value: unknown): AgentPreferencePatch 
 }
 
 export const PREF_KEYS: Record<keyof UserPrefs, string> = {
-  wizardCodeAssist: "skynet.prefs.wizard.code-assist",
-  wizardSplitMode: "skynet.prefs.wizard.split-mode",
-  agentTrustMode: "skynet.prefs.agent.trust-mode",
-  taggerAssist: "skynet.prefs.tagger.assist",
-  composerModel: "skynet.prefs.composer.model",
-  composerEffort: "skynet.prefs.composer.effort",
-  dictationEnabled: "skynet.prefs.composer.dictation",
-  taggerAssistModel: "skynet.prefs.tagger.assist-model",
-  optimizerEngine: "skynet.prefs.optimizer.engine",
-  optimizerTaskModel: "skynet.prefs.optimizer.task-model",
-  optimizerReflectionModel: "skynet.prefs.optimizer.reflection-model",
-  optimizerMaxRuns: "skynet.prefs.optimizer.max-runs",
+  wizardCodeAssist: "app.prefs.wizard.code-assist",
+  wizardSplitMode: "app.prefs.wizard.split-mode",
+  agentTrustMode: "app.prefs.agent.trust-mode",
+  taggerAssist: "app.prefs.tagger.assist",
+  composerModel: "app.prefs.composer.model",
+  composerEffort: "app.prefs.composer.effort",
+  dictationEnabled: "app.prefs.composer.dictation",
+  taggerAssistModel: "app.prefs.tagger.assist-model",
+  optimizerEngine: "app.prefs.optimizer.engine",
+  optimizerTaskModel: "app.prefs.optimizer.task-model",
+  optimizerReflectionModel: "app.prefs.optimizer.reflection-model",
+  optimizerMaxRuns: "app.prefs.optimizer.max-runs",
 };
 
 export const DEFAULT_PREFS: UserPrefs = {

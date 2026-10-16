@@ -38,12 +38,12 @@ from ....billing.operation_pricing import json_fingerprint
 from ....billing.runtime import BudgetRuntime
 from ....billing.signals import BudgetReached
 from ....billing.vercel_usage import SANDBOX_NETWORK_BYTES_CAP, VercelUsageReservation
-from ....config import Settings
+from ....config import Settings, app_env, with_legacy_env
 from ....exceptions import ServiceError
 from .sandbox_log import logged_command
 
-# The SDK is a declared dependency, but an air-gap build vendored from an
-# older requirements file must degrade to "agent targets unavailable", not
+# The SDK is a declared dependency, but an image built from an older
+# requirements file must degrade to "agent targets unavailable", not
 # fail to import the worker.
 try:
     from vercel import api as vercel_api
@@ -80,13 +80,15 @@ _VERCEL_KILL_TIMER_CEILING_SECONDS = 18_000
 # Client-side last resort past ``kill_after`` before declaring the process lost.
 _POLL_DEADLINE_SLACK_SECONDS = 60.0
 # Where a command's wrapper records its exit code for the poll to find.
-_EXIT_FILE_PREFIX = "/tmp/.skynet-exit-"
+_EXIT_FILE_PREFIX = "/tmp/.app-exit-"
 # A detached command's output is redirected here and read back while it runs.
-_OUTPUT_FILE_PREFIX = "/tmp/.skynet-output-"
+_OUTPUT_FILE_PREFIX = "/tmp/.app-output-"
 # Called with the stream name (``stdout``/``stderr``) and each new piece of output.
 OutputSink = Callable[[str, str], None]
 _BRIEF_COMMAND_CHARS = 80
 # Every sandbox carries this tag so stragglers from a crashed worker can be found and destroyed.
+# Both tags are stored on live Vercel sandboxes and queried by the straggler sweep;
+# renaming them would hide boxes created before the rename.
 SANDBOX_TAG = {"skynet": "blackbox"}
 JOB_TAG = "skynet_job"
 _STOPPABLE_STATUSES = frozenset({"pending", "running"})
@@ -100,14 +102,14 @@ _CREDENTIALS_MISSING = "Agent sandboxes are not configured: set VERCEL_TOKEN, VE
 # so its HTTPS calls verify the same way — never the worker's secrets.
 _LOCAL_ENV_PASSTHROUGH = ("SSL_CERT_FILE", "SSL_CERT_DIR")
 _LOCAL_KILLED_EXIT_CODE = 137
-_BUDGET_RELAY_ENV = "SKYNET_BUDGET_RELAY_URL"
-_TOOL_RELAY_ENV = "SKYNET_TOOL_RELAY_TOKEN"
-_RELAY_ENDPOINT_ENVS = ("OPENAI_BASE_URL", "SKYNET_GATEWAY_URL")
+_BUDGET_RELAY_ENV = "APP_BUDGET_RELAY_URL"
+_TOOL_RELAY_ENV = "APP_TOOL_RELAY_TOKEN"
+_RELAY_ENDPOINT_ENVS = ("OPENAI_BASE_URL", "APP_GATEWAY_URL")
 # A custom network policy denies every host it does not list; this entry keeps the
 # network open, so only the header injection distinguishes it from ``allow-all``.
 _ANY_HOST = "*"
 # Scorer workspaces live under their own root, apart from proposer workspaces
-# (``skynet-sandbox-*`` in the shared temp directory), so a proposer cannot find
+# (``app-sandbox-*`` in the shared temp directory), so a proposer cannot find
 # metric code by listing its parent directory. Owner write+search only: the
 # root cannot be listed without first changing its mode. Under one uid that is
 # a speed bump, not a boundary; separate boxes are the real boundary.
@@ -231,7 +233,7 @@ class VercelCredentials:
 
 
 _RUNTIME_OVERRIDE: contextvars.ContextVar[SandboxRuntime | None] = contextvars.ContextVar(
-    "skynet_sandbox_runtime", default=None
+    "app_sandbox_runtime", default=None
 )
 
 
@@ -662,6 +664,8 @@ class VercelSandboxRuntime:
             first_ms = min(lifetime_ms, COVERAGE_SLICE_SECONDS * 1000)
             if not spec.operation_key:
                 raise ServiceError("A protected sandbox requires a stable operation identity.")
+            # The name is the box's idempotency key in Vercel and in its usage
+            # reservation, so it keeps the pre-rename prefix.
             name = (
                 name
                 or "skynet-"
@@ -807,7 +811,7 @@ def _contained_environment(environment: Mapping[str, str], relay: str) -> dict[s
     result["ANTHROPIC_BASE_URL"] = relay.removesuffix("/v1")
     for name in _RELAY_ENDPOINT_ENVS:
         result[name] = relay
-    return result
+    return with_legacy_env(result)
 
 
 def _private_root() -> Path:
@@ -846,7 +850,7 @@ class LocalSubprocessSession:
         if spec.private:
             self._dir = Path(tempfile.mkdtemp(prefix=f"{uuid.uuid4().hex}-", dir=_private_root())).resolve()
         else:
-            self._dir = Path(tempfile.mkdtemp(prefix="skynet-sandbox-")).resolve()
+            self._dir = Path(tempfile.mkdtemp(prefix="app-sandbox-")).resolve()
         self._protected_relay = protected_relay
         self.log_owner = spec.tags.get(JOB_TAG)
         (self._dir / "tmp").mkdir()
@@ -1035,13 +1039,13 @@ class ContainedSubprocessRuntime:
         Raises:
             ServiceError: When the outer supervisor did not install its model mailbox.
         """
-        relay = os.environ.get(_BUDGET_RELAY_ENV)
+        relay = app_env(_BUDGET_RELAY_ENV)
         if not relay:
             raise ServiceError("Contained execution requires the protected model mailbox.")
         environment = _contained_environment(spec.env, relay)
-        tool_token = os.environ.get(_TOOL_RELAY_ENV)
+        tool_token = app_env(_TOOL_RELAY_ENV)
         if tool_token:
-            environment[_TOOL_RELAY_ENV] = tool_token
+            environment.update(with_legacy_env({_TOOL_RELAY_ENV: tool_token}))
         return LocalSubprocessSession(replace(spec, env=environment), protected_relay=relay)
 
 

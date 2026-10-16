@@ -10,7 +10,7 @@ import { useSyncExternalStore } from "react";
 /** "scrubber" / "plain" = the candidate tree with / without the generation scrubber. */
 export type TrajectoryView = "climb" | "scrubber" | "plain" | "none";
 
-const STORAGE_PREFIX = "skynet-climb-view:";
+const STORAGE_PREFIX = "app-climb-view:";
 const VIEWS: readonly string[] = ["climb", "scrubber", "plain", "none"];
 const known = new Map<string, TrajectoryView>();
 

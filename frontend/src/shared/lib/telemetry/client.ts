@@ -22,7 +22,7 @@ const FLUSH_INTERVAL_MS = 10_000;
 // Hard cap so a tab that goes offline can't grow the queue without bound; the
 // oldest events are dropped first (telemetry is lossy by design).
 const MAX_QUEUE = 200;
-const OPT_OUT_KEY = "skynet.telemetry.optout";
+const OPT_OUT_KEY = "app.telemetry.optout";
 
 interface QueuedEvent {
   name: string;

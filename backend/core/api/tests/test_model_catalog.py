@@ -78,7 +78,7 @@ def test_catalog_provider_stores_env_var_and_url() -> None:
     p = CatalogProvider(
         slug="openai",
         label="OpenAI",
-        data_center="On-prem gateway",
+        data_center="EU",
         env_var="OPENAI_API_KEY",
         default_base_url="https://api.openai.com/v1",
         has_env_key=True,
@@ -86,7 +86,7 @@ def test_catalog_provider_stores_env_var_and_url() -> None:
     assert p.env_var == "OPENAI_API_KEY"
     assert p.default_base_url == "https://api.openai.com/v1"
     assert p.has_env_key is True
-    assert p.data_center == "On-prem gateway"
+    assert p.data_center == "EU"
 
 
 def test_model_catalog_response_empty_lists() -> None:
@@ -314,7 +314,7 @@ def test_single_endpoint_provider_has_none_data_center(monkeypatch: pytest.Monke
     """A provider with one endpoint emits exactly one entry, ``data_center=None``.
 
     Preserves the historical single-DC wire shape so existing clients keep
-    working when no on-prem gateway is configured.
+    working.
     """
     centers = _provider_data_centers("openrouter")
     assert len(centers) == 1
@@ -348,11 +348,11 @@ def test_platform_catalog_is_openrouter_only(monkeypatch: pytest.MonkeyPatch) ->
     """Non-OpenRouter providers never reach the hosted catalog.
 
     Other providers' keys may exist for non-LLM features (OpenAI powers
-    Whisper dictation) and an on-prem gateway may be configured — neither
-    may leak chat models into the platform-billed menu.
+    Whisper dictation) and agent or embedding gateways may be configured —
+    none may leak chat models into the platform-billed menu.
     """
     monkeypatch.setattr(settings, "code_agent_base_url", "https://llm.internal/v1")
-    monkeypatch.setattr(settings, "embeddings_base_url", "")
+    monkeypatch.setattr(settings, "embeddings_base_url", "https://embed.internal/v1")
 
     fake_cost: dict = {
         "gpt-4o": {
@@ -394,14 +394,13 @@ def test_platform_catalog_is_openrouter_only(monkeypatch: pytest.MonkeyPatch) ->
     assert {p.slug for p in result.providers} == {"openrouter"}
 
 
-def test_on_prem_falls_back_to_embeddings_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``EMBEDDINGS_BASE_URL`` is used as the on-prem DC when no agent URL is set."""
-    monkeypatch.setattr(settings, "code_agent_base_url", "")
+def test_configured_gateways_add_no_data_center(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agent and embedding base URLs never surface as an extra provider endpoint."""
+    monkeypatch.setattr(settings, "code_agent_base_url", "https://llm.internal/v1")
     monkeypatch.setattr(settings, "embeddings_base_url", "https://embed.internal/v1")
 
     centers = _provider_data_centers("openai")
-    on_prem = next(c for c in centers if c.label == "On-prem gateway")
-    assert on_prem.base_url == "https://embed.internal/v1"
+    assert [(c.label, c.base_url) for c in centers] == [(None, "https://api.openai.com/v1")]
 
 
 def test_get_catalog_adds_probe_only_models_with_metadata(monkeypatch: pytest.MonkeyPatch) -> None:

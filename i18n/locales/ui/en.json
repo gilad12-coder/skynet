@@ -2169,7 +2169,6 @@
   "submit.modelpicker.purpose.all": "All",
   "submit.modelpicker.purpose.aria": "Filter models by purpose",
   "submit.modelpicker.purpose.multilingual": "Multilingual",
-  "submit.modelpicker.purpose.onprem": "On-prem",
   "submit.modelpicker.purpose.reasoning": "Reasoning",
   "submit.modelpicker.purpose.vision": "Vision",
   "submit.modelpicker.zdr_unavailable": "Likely unavailable under your zero-retention privacy setting",

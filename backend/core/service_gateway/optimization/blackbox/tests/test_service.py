@@ -431,11 +431,11 @@ def test_agent_target_runs_every_scorer_call_in_its_own_sandbox(
 
     assert len({spec.name for spec in runtime.specs}) == len(runtime.specs)
     spec = runtime.specs[0]
-    assert spec.name.startswith("skynet-agent-1-")
+    assert spec.name.startswith("app-agent-1-")
     assert spec.tags == {"skynet_job": "agent-1"}
-    assert spec.env["SKYNET_MODEL"] == "m"
-    assert spec.env["SKYNET_GATEWAY_URL"] == "https://gw.example/v1"
-    assert spec.env["SKYNET_API_KEY"] == "secret-key"
+    assert spec.env["APP_MODEL"] == "m"
+    assert spec.env["APP_GATEWAY_URL"] == "https://gw.example/v1"
+    assert spec.env["APP_API_KEY"] == "secret-key"
     assert spec.lifetime_seconds == 60 + 600 + 15
 
     # The default fake answers ``done`` (two vowels of four) for every run, so

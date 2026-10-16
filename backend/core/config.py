@@ -7,8 +7,10 @@ validates environment variables at startup and provides typed access.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+from collections.abc import Mapping
 from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Literal
@@ -22,18 +24,73 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # With CODE_AGENT_MODEL / GENERALIST_AGENT_MODEL unset, both agents follow
 # the model catalog's best-value default (see
 # ``model_catalog.agent_model_id``). This id only runs until the boot-time
-# catalog build lands, or when the catalog flags no default.
-#
-# TODO: On-prem / air-gap — set CODE_AGENT_MODEL / GENERALIST_AGENT_MODEL to
-# whatever LiteLLM identifier your internal gateway exposes (e.g.
-# "openai/<model>") and point CODE_AGENT_BASE_URL / GENERALIST_AGENT_BASE_URL
-# at the gateway via env. Requires OPENROUTER_API_KEY otherwise.
+# catalog build lands, or when the catalog flags no default. Requires
+# OPENROUTER_API_KEY.
 DEFAULT_AGENT_MODEL_ID = "openrouter/z-ai/glm-5.3-flash"
 
 # Vercel's API refuses any sandbox timeout above 24 hours (raised from five in
 # June 2026, Pro and Enterprise only), so a larger configured ceiling can never
 # be admitted and would fail at creation.
 VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 86_400
+
+# Deployments (and the pinned sandbox image) still set the pre-rename
+# ``SKYNET_*`` variables, so every ``APP_*`` read falls back to its old name.
+ENV_PREFIX = "APP_"
+LEGACY_ENV_PREFIX = "SKYNET_"
+
+
+def legacy_env_name(name: str) -> str:
+    """Return the pre-rename ``SKYNET_*`` spelling of an ``APP_*`` variable.
+
+    Args:
+        name: Variable name starting with ``APP_``.
+
+    Returns:
+        The same name with ``SKYNET_`` in place of ``APP_``.
+
+    Raises:
+        ValueError: When ``name`` does not start with ``APP_``.
+    """
+    if not name.startswith(ENV_PREFIX):
+        raise ValueError(f"{name!r} is not an {ENV_PREFIX}* variable")
+    return LEGACY_ENV_PREFIX + name.removeprefix(ENV_PREFIX)
+
+
+def app_env(name: str, default: str | None = None, environ: Mapping[str, str] | None = None) -> str | None:
+    """Read an ``APP_*`` variable, falling back to its ``SKYNET_*`` name.
+
+    An empty value counts as unset, so a blank new name never hides a real old one.
+
+    Args:
+        name: Variable name starting with ``APP_``.
+        default: Value returned when neither name is set.
+        environ: Mapping to read instead of ``os.environ``.
+
+    Returns:
+        The new name's value, else the old name's, else ``default``.
+    """
+    source = os.environ if environ is None else environ
+    return source.get(name) or source.get(legacy_env_name(name)) or default
+
+
+def with_legacy_env(environment: Mapping[str, str]) -> dict[str, str]:
+    """Copy each ``APP_*`` entry under its ``SKYNET_*`` name as well.
+
+    For environments handed to code that may predate the rename, such as the
+    pinned sandbox image or a user's own command. The new value overwrites a
+    stale legacy one, so both spellings always agree.
+
+    Args:
+        environment: Child-process environment using the new names.
+
+    Returns:
+        A new mapping carrying both spellings of every ``APP_*`` variable.
+    """
+    result = dict(environment)
+    for name, value in environment.items():
+        if name.startswith(ENV_PREFIX):
+            result[legacy_env_name(name)] = value
+    return result
 
 
 # Keyed on the raw CSV rather than cached on the instance: tests monkeypatch
@@ -742,10 +799,10 @@ class Settings(BaseSettings):
         description="Disable driver features incompatible with PgBouncer transaction pooling",
         alias="DB_PGBOUNCER_TRANSACTION_MODE",
     )
-    skynet_code_version: str = Field(
+    app_code_version: str = Field(
         default="",
         description="Build git SHA used to keep queued jobs on compatible workers",
-        alias="SKYNET_CODE_VERSION",
+        validation_alias=AliasChoices("APP_CODE_VERSION", "SKYNET_CODE_VERSION"),
     )
     require_code_version: bool = Field(
         default=False,
@@ -768,11 +825,10 @@ class Settings(BaseSettings):
         alias="ALLOWED_ORIGINS",
     )
 
-    # Air-gap deploys legitimately probe internal LiteLLM gateways on RFC1918
-    # ranges, but the default has to fail closed: an unauthenticated caller
-    # otherwise gets a /v1/models scan of the deploy network (incl. cloud
-    # metadata services). Operators flip this on once their gateway address
-    # range is well-defined.
+    # A local stack (docker-compose service names resolve to RFC1918 addresses)
+    # may need to reach private gateways and MCP tools, but the default has to
+    # fail closed: an unauthenticated caller otherwise gets a /v1/models scan of
+    # the deploy network (incl. cloud metadata services).
     discover_allow_private: bool = Field(
         default=False,
         description=(
@@ -909,16 +965,12 @@ class Settings(BaseSettings):
         default="",
         description=(
             "LiteLLM model id used by the submit-wizard code agent. Empty "
-            "follows the model catalog's best-value default; override via "
-            "CODE_AGENT_MODEL for on-prem deployments."
+            "follows the model catalog's best-value default."
         ),
     )
-    # TODO: On-prem / air-gap — set CODE_AGENT_BASE_URL to your internal
-    # OpenAI-compatible gateway (e.g. https://llm.your-company.com/v1) so the
-    # agent stops trying to reach the public OpenRouter endpoint.
     code_agent_base_url: str = Field(
         default="",
-        description="Optional custom base URL for the code agent LM (e.g. internal OpenAI-compatible gateway)",
+        description="Optional custom base URL for the code agent LM (an OpenAI-compatible gateway)",
     )
 
     generalist_agent_mcp_url: str = Field(
@@ -936,12 +988,9 @@ class Settings(BaseSettings):
             "panel). Empty follows the model catalog's best-value default."
         ),
     )
-    # TODO: On-prem / air-gap — set GENERALIST_AGENT_BASE_URL to your internal
-    # OpenAI-compatible gateway. The default empty string lets LiteLLM choose
-    # the public OpenRouter endpoint, which an air-gapped host cannot reach.
     generalist_agent_base_url: str = Field(
         default="",
-        description="Optional custom base URL for the generalist agent LM (e.g. internal OpenAI-compatible gateway)",
+        description="Optional custom base URL for the generalist agent LM (an OpenAI-compatible gateway)",
     )
 
     interview_agent_model: str = Field(
@@ -967,13 +1016,11 @@ class Settings(BaseSettings):
             "Optional custom base URL for the tagging-assist LM. Empty falls back to generalist_agent_base_url."
         ),
     )
-    # TODO: On-prem / air-gap — point this at an internal OpenAI-compatible
-    # embeddings endpoint (usually the same gateway family as CODE_AGENT_BASE_URL).
     # The backend sends POST {base_url}/embeddings with {model, input}; no model
     # weights are bundled in this repo.
     embeddings_base_url: str = Field(
         default="",
-        description="Internal OpenAI-compatible embedding API base URL, e.g. https://llm.internal/v1",
+        description="OpenAI-compatible embedding API base URL, e.g. https://llm.example.com/v1",
     )
     embeddings_model: str = Field(
         default="jina-embeddings-v4",
@@ -1003,10 +1050,6 @@ class Settings(BaseSettings):
             "Must match the schema; changing requires a migration."
         ),
     )
-    # TODO: On-prem / air-gap — leave EMBEDDINGS_SUMMARY_MODEL empty so the
-    # pipeline reuses code_agent_model (which already points at your internal
-    # gateway). Setting this to a public-provider id would route summarisation
-    # calls outside the air-gap.
     embeddings_summary_model: str = Field(
         default="",
         description=(
@@ -1035,8 +1078,8 @@ class Settings(BaseSettings):
             "Explore search engine — the single knob that also decides which "
             "Postgres extension (if any) the deployment requires:\n"
             "  lexical  (default): vanilla Postgres, no extension. ILIKE substring "
-            "search. The safe choice for an air-gapped database that can't add "
-            "extensions — neither the migrate Job nor the app runs CREATE EXTENSION.\n"
+            "search. The safe choice for a database that can't add extensions — "
+            "neither the migrate Job nor the app runs CREATE EXTENSION.\n"
             "  bm25: requires the pg_search extension. Ranks lexical search with "
             "BM25 relevance; degrades to ILIKE when pg_search is absent.\n"
             "  semantic: requires the pgvector extension. Embedding (vector) "
@@ -1390,8 +1433,9 @@ class Settings(BaseSettings):
     def code_version(self) -> str:
         """Return the build version used for job-claim compatibility checks.
 
-        Resolution order: ``SKYNET_CODE_VERSION`` env, then a local git lookup,
-        then the literal ``"unknown"``. With ``REQUIRE_CODE_VERSION=true``,
+        Resolution order: ``APP_CODE_VERSION`` env (or the legacy
+        ``SKYNET_CODE_VERSION``), then a local git lookup, then the literal
+        ``"unknown"``. With ``REQUIRE_CODE_VERSION=true``,
         falling through to ``"unknown"`` raises — production builds must bake
         the SHA into the image so staged rollouts don't have multiple pods
         claiming each other's ``"unknown"``-tagged work.
@@ -1400,7 +1444,7 @@ class Settings(BaseSettings):
             RuntimeError: When the fallback resolves to ``"unknown"`` and
                 ``require_code_version`` is enabled.
         """
-        configured = self.skynet_code_version.strip()
+        configured = self.app_code_version.strip()
         if configured:
             return configured[:40]
         try:
@@ -1419,7 +1463,7 @@ class Settings(BaseSettings):
             return resolved[:40]
         if self.require_code_version:
             raise RuntimeError(
-                "SKYNET_CODE_VERSION is unset and no git checkout is available — "
+                "APP_CODE_VERSION is unset and no git checkout is available — "
                 "set REQUIRE_CODE_VERSION=false for local dev, or bake the SHA "
                 "into the image (Dockerfile passes GIT_SHA build arg).",
             )

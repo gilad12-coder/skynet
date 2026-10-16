@@ -71,7 +71,7 @@ import {
 } from "../lib/ide-workspace";
 import { park } from "./park";
 import type { RepoIndex, RepoSource } from "./repo-files";
-import { SKYNET_DARK, SKYNET_LIGHT, registerSkynetThemes } from "./theme";
+import { APP_DARK_THEME, APP_LIGHT_THEME, registerAppThemes } from "./theme";
 
 /** What the pop-up drives the booted workbench with. */
 export interface IdeWorkbench {
@@ -338,7 +338,7 @@ function settings(dark: boolean, repoFolder: string | null): string {
   return JSON.stringify({
     // Searching the repository would read every one of its files from GitHub.
     "search.exclude": repoFolder ? { [`${repoFolder}/**`]: true } : {},
-    "workbench.colorTheme": dark ? SKYNET_DARK : SKYNET_LIGHT,
+    "workbench.colorTheme": dark ? APP_DARK_THEME : APP_LIGHT_THEME,
     // The wizard's state is the workspace, so an edit reaches it without a save.
     "files.autoSave": "afterDelay",
     "files.autoSaveDelay": 300,
@@ -408,7 +408,7 @@ async function boot(dark: boolean, describe: (issue: string) => string): Promise
   element.style.pointerEvents = "none";
   document.body.append(element);
 
-  registerSkynetThemes();
+  registerAppThemes();
   await initUserConfiguration(settings(dark, null));
   await initialize(
     {

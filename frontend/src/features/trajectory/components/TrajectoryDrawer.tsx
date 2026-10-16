@@ -98,7 +98,7 @@ const PARETO_FAIL = "#a85a3b";
 const PARETO_PASS_BG = "rgba(138, 154, 91, 0.28)";
 const PARETO_FAIL_BG = "rgba(168, 90, 59, 0.22)";
 
-const DIFF_VIEW_KEY = "skynet:trajectory:prompt-view";
+const DIFF_VIEW_KEY = "app:trajectory:prompt-view";
 
 // Per-node map of tool name → optimized description, derived from the selected
 // candidate's own ReAct overlay (see deriveToolDescriptions). Lets the shared

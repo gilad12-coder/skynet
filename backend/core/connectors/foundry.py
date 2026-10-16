@@ -51,7 +51,8 @@ def _check_public(hostname: str, port: int) -> None:
 
     The hostname is user-supplied and the server calls it with the user's
     token, so a private or metadata address would turn the connector into an
-    SSRF probe. Air-gapped stacks reuse the ``discover_allow_private`` opt-in.
+    SSRF probe. A local stack reaching a private address opts in with
+    ``discover_allow_private``.
 
     Args:
         hostname: The stack's hostname.

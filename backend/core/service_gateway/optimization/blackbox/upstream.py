@@ -29,7 +29,9 @@ AUTOSADDLER_SOURCE = f"git+https://github.com/microsoft/AutoSaddler@{AUTOSADDLER
 SHINKA_VERSION = "0.0.7"
 SHINKA_SOURCE = f"shinka-evolve=={SHINKA_VERSION}"
 META_HARNESS_SOURCE = f"https://github.com/stanford-iris-lab/meta-harness@{META_HARNESS_REVISION}"
-# AutoResearch is Skynet's own engine, so its provenance is a version, not an upstream pin.
+# AutoResearch is the app's own engine, so its provenance is a version, not an
+# upstream pin. The label is stored with each run's engine provenance, so it keeps
+# its pre-rename prefix.
 AUTORESEARCH_SOURCE = f"skynet:autoresearch@{AUTORESEARCH_VERSION}"
 AUTO_ENGINES = ("gepa", "autoresearch", "meta_harness", "autosaddler", "shinka_evolve")
 
@@ -183,10 +185,10 @@ def reflection_endpoint(ctx: EngineContext) -> Iterator[dict[str, Any]]:
                 if ctx.check_budget is not None:
                     ctx.check_budget()
                 response = {
-                    "id": "skynet-reflection",
+                    "id": "app-reflection",
                     "object": "chat.completion",
                     "created": 0,
-                    "model": "skynet-reflection",
+                    "model": "app-reflection",
                     "choices": [
                         {"index": 0, "message": {"role": "assistant", "content": answer}, "finish_reason": "stop"}
                     ],

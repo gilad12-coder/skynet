@@ -120,10 +120,10 @@ const SIDEBAR_COLLAPSED_WIDTH = 64;
 // threshold lacked, so it flickered between the icon rail and the min width.
 const SIDEBAR_COLLAPSE_AT = 150;
 const SIDEBAR_EXPAND_AT = 196;
-const SIDEBAR_WIDTH_STORAGE_KEY = "skynet.sidebar.width";
-const SIDEBAR_COLLAPSED_STORAGE_KEY = "skynet.sidebar.collapsed";
-const SIDEBAR_VIEW_STORAGE_KEY = "skynet.sidebar.view";
-const FOLDERS_EXPANDED_STORAGE_KEY = "skynet.sidebar.folders.expanded";
+const SIDEBAR_WIDTH_STORAGE_KEY = "app.sidebar.width";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "app.sidebar.collapsed";
+const SIDEBAR_VIEW_STORAGE_KEY = "app.sidebar.view";
+const FOLDERS_EXPANDED_STORAGE_KEY = "app.sidebar.folders.expanded";
 const DESKTOP_MQ = "(min-width: 768px)";
 
 /** Clamp a candidate sidebar width to the resizable range, rounded to a whole px. */

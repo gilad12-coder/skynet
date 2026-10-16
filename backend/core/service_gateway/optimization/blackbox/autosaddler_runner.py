@@ -1,12 +1,12 @@
 """Sandbox-side runner that drives the pinned upstream AutoSaddler v2 engine.
 
-This file is copied verbatim into an isolated sandbox next to the Skynet
-plugin assets. It imports no Skynet application code; the parent owns the
-scorer and its cases. Everything Skynet contributes is expressed through
+This file is copied verbatim into an isolated sandbox next to the app
+plugin assets. It imports no backend application code; the parent owns the
+scorer and its cases. Everything the app contributes is expressed through
 the upstream ports: a scenario whose evaluator scores candidates through the
 parent-owned budget over the same filesystem mailbox the other native engines
 use, an evidence builder that surfaces the scorer's per-case feedback, and a
-prompt pack composed from the upstream methodology plus the Skynet plugin.
+prompt pack composed from the upstream methodology plus the app plugin.
 The engine loop, policies and run store are upstream's own.
 
 The prompt-pack wiring and plugin prompts are adapted from microsoft/AutoSaddler
@@ -72,18 +72,18 @@ except ImportError:  # In the sandbox this file runs as a script beside its sibl
     harness_bridge = _sibling_modules["harness_bridge"]
     repo_tree = _sibling_modules["repo_tree"]
 
-_RPC_PREFIX = "SKYNET_NATIVE_RPC "
-_PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
+_RPC_PREFIX = "APP_NATIVE_RPC "
+_PROGRESS_PREFIX = "APP_NATIVE_PROGRESS "
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _PROC_ROOT = Path("/proc")
 _TOKEN_NAMES = ("prompt_tokens", "completion_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
-_PLUGIN_NAME = "skynet"
+_PLUGIN_NAME = "app"
 _PLUGIN_ROOT = Path(__file__).resolve().parent / "autosaddler_plugin"
 _SINGLE_COMPONENT = "candidate"
-_EVIDENCE_SCHEMA = "skynet-autosaddler-evidence/v1"
-_DIAGNOSIS_SCHEMA = "skynet-autosaddler-diagnosis/v1"
-_EVOLUTION_SCHEMA = "skynet-autosaddler-evolution/v1"
-_REFLECTION_SCHEMA = "skynet-autosaddler-reflection/v1"
+_EVIDENCE_SCHEMA = "app-autosaddler-evidence/v1"
+_DIAGNOSIS_SCHEMA = "app-autosaddler-diagnosis/v1"
+_EVOLUTION_SCHEMA = "app-autosaddler-evolution/v1"
+_REFLECTION_SCHEMA = "app-autosaddler-reflection/v1"
 _SESSION_CONTEXT_PATH = ".autosaddler/session_context.json"
 _TRAINING_EVIDENCE_PATH = ".autosaddler/training_evidence.json"
 _PROMPT_ASSETS_PATH = ".autosaddler/prompt_assets.json"
@@ -95,7 +95,7 @@ _HARNESS_CAPABILITY_TOOLS = dict.fromkeys(
     ("read_workspace", "edit_workspace", "run_commands", "load_skills", "network"), ()
 )
 _HARNESS_SKILL_DIRECTORY = ".agents/skills"
-_GIT_IDENTITY = ("-c", "user.name=skynet", "-c", "user.email=skynet@localhost", "-c", "commit.gpgsign=false")
+_GIT_IDENTITY = ("-c", "user.name=app", "-c", "user.email=app@localhost", "-c", "commit.gpgsign=false")
 # Repository runs read their prompts and skills from this plugin subfolder.
 _REPO_ASSETS = "repo/"
 
@@ -186,7 +186,7 @@ class EvaluatorMailbox:
 
 
 def candidate_value(components: Mapping[str, str]) -> str | dict[str, str]:
-    """Return the Skynet candidate shape encoded by a component map.
+    """Return the app candidate shape encoded by a component map.
 
     Args:
         components: Upstream frozen-key component mapping.
@@ -200,7 +200,7 @@ def candidate_value(components: Mapping[str, str]) -> str | dict[str, str]:
 
 
 def baseline_components(seed: Any) -> dict[str, str]:
-    """Encode the Skynet seed as an upstream component map.
+    """Encode the app seed as an upstream component map.
 
     Args:
         seed: Seed text or named parts from the task.
@@ -222,7 +222,7 @@ def visible_examples(cases: Sequence[Any] | None) -> list[Any]:
     """Return the examples both upstream splits score, one ``None`` when there are no cases.
 
     Upstream diagnoses on a training split and confirms each patch on a
-    development split. Skynet confirms a patch by re-running the same scorer,
+    development split. The app confirms a patch by re-running the same scorer,
     so both splits hold the same examples; without cases the scorer runs once
     per candidate with ``case=None``.
 
@@ -252,7 +252,7 @@ def _case_id(split: str, index: int, example: Any) -> str:
 
 
 def build_cases(split: str, examples: Sequence[Any]) -> tuple[Any, ...]:
-    """Wrap Skynet examples as upstream cases that carry the raw example payload.
+    """Wrap app examples as upstream cases that carry the raw example payload.
 
     Args:
         split: Upstream split name.
@@ -395,7 +395,7 @@ def repo_space(repo: Mapping[str, Any], seed_patch: Any, run_dir: Path, proposer
     return space, base
 
 
-class SkynetEvaluator:
+class AppEvaluator:
     """Score upstream candidates through the parent scorer, case by case."""
 
     def __init__(
@@ -513,7 +513,7 @@ class SkynetEvaluator:
             observations=tuple(sorted(observations, key=lambda item: (item.case_id, item.repetition))),
             artifact_dir=as_domain.ArtifactRef(
                 uri=context.artifact_dir.relative_to(self.store_run_dir).as_posix(),
-                kind="skynet-evaluation-directory",
+                kind="app-evaluation-directory",
             ),
         )
         if context.purpose == "development":
@@ -527,7 +527,7 @@ class SkynetEvaluator:
 
         Args:
             candidate_id: Upstream candidate identity.
-            value: Skynet candidate shape sent to the scorer.
+            value: App candidate shape sent to the scorer.
             case: Case to score.
             repetition: Repetition index.
             context: Upstream evaluation context.
@@ -595,7 +595,7 @@ class SkynetEvaluator:
 
         Args:
             candidate_id: Upstream candidate identity.
-            value: Skynet candidate shape.
+            value: App candidate shape.
             score: Mean development score, if every case produced one.
             observations: The evaluation's per-case observations.
 
@@ -626,7 +626,7 @@ class SkynetEvaluator:
             raise TargetReached(f"Development score {score} reached the target {self.stop_at_score}.")
 
 
-class SkynetEvidenceBuilder:
+class AppEvidenceBuilder:
     """Turn a training evaluation into the scorer feedback the agent diagnoses from."""
 
     def __init__(self, store: Any, cases: Mapping[str, Any]) -> None:
@@ -652,7 +652,7 @@ class SkynetEvidenceBuilder:
             ValueError: When evidence is requested for a non-training split.
         """
         if evaluation.split != "train":
-            raise ValueError("Skynet evidence is built from the training split only")
+            raise ValueError("App evidence is built from the training split only")
         case_records = []
         for case_id in evaluation.requested_case_ids:
             observations = [item for item in evaluation.observations if item.case_id == case_id]
@@ -683,7 +683,7 @@ class SkynetEvidenceBuilder:
                 "purpose": evaluation.purpose,
                 "case_records": case_records,
             },
-            kind="skynet-training-evidence",
+            kind="app-training-evidence",
         )
 
 
@@ -817,7 +817,7 @@ def _strings(value: Any, label: str) -> tuple[str, ...]:
         TypeError: When the value is not a non-empty list of strings.
     """
     if not isinstance(value, list) or not value or any(not isinstance(item, str) for item in value):
-        raise TypeError(f"Skynet prompt context {label} must be a non-empty list of strings")
+        raise TypeError(f"App prompt context {label} must be a non-empty list of strings")
     return tuple(value)
 
 
@@ -866,7 +866,7 @@ def _shared_asset(relative_path: str, asset_id: str) -> Any:
 
 
 def _plugin_asset(relative_path: str, asset_id: str) -> Any:
-    """Load one Skynet plugin asset.
+    """Load one app plugin asset.
 
     Args:
         relative_path: Path below the plugin directory.
@@ -884,7 +884,7 @@ def _plugin_asset(relative_path: str, asset_id: str) -> Any:
 
 
 def resolved_assets(kind: str, skill_paths: Mapping[str, str | None], prefix: str = "") -> Any:
-    """Compose upstream methodology with the Skynet plugin for one session kind.
+    """Compose upstream methodology with the app plugin for one session kind.
 
     Args:
         kind: Upstream session kind.
@@ -935,7 +935,7 @@ _ANALYSIS_SKILLS: dict[str, str | None] = {"history-analysis": None}
 
 
 def composition_record(prefix: str = "") -> Any:
-    """Record every prompt composition the Skynet plugin can produce.
+    """Record every prompt composition the app plugin can produce.
 
     Args:
         prefix: Plugin subfolder holding this run's prompts, empty for text candidates.
@@ -953,8 +953,8 @@ def composition_record(prefix: str = "") -> Any:
     )
 
 
-class SkynetPromptPack:
-    """Render upstream sessions with the Skynet objective and candidate schema."""
+class AppPromptPack:
+    """Render upstream sessions with the app objective and candidate schema."""
 
     def __init__(
         self,
@@ -1021,7 +1021,7 @@ class SkynetPromptPack:
             schema = _reflection_schema()
             skill_paths = _ANALYSIS_SKILLS
         else:
-            raise ValueError(f"Unknown Skynet session kind: {kind}")
+            raise ValueError(f"Unknown app session kind: {kind}")
         resolved = resolved_assets(kind, skill_paths, self.prefix)
         workspace_files[_PROMPT_ASSETS_PATH] = (
             as_domain.canonical_json(
@@ -1065,18 +1065,18 @@ class SkynetPromptPack:
             ValueError: When the evidence drifted or carries the wrong schema.
         """
         if not isinstance(artifact, Mapping) or not isinstance(artifact.get("uri"), str):
-            raise TypeError("Skynet diagnosis context requires an evidence artifact")
+            raise TypeError("App diagnosis context requires an evidence artifact")
         payload = (self.store.run_dir / artifact["uri"]).read_bytes()
         if as_domain.sha256_digest(payload) != artifact.get("sha256"):
-            raise ValueError("Skynet training evidence digest drift")
+            raise ValueError("App training evidence digest drift")
         value = json.loads(payload)
         if not isinstance(value, dict) or value.get("schema_version") != _EVIDENCE_SCHEMA:
-            raise ValueError("Skynet training evidence schema is invalid")
+            raise ValueError("App training evidence schema is invalid")
         return payload.decode("utf-8")
 
 
 class HarnessTransport:
-    """Run one rendered AutoSaddler session through a Skynet agent harness."""
+    """Run one rendered AutoSaddler session through an app agent harness."""
 
     def __init__(self, proposer: dict[str, Any], model: str) -> None:
         """Remember the launch to replay for every session.
@@ -1191,7 +1191,7 @@ class UsageTrackingProvider:
 
 
 def record_usage(destination: dict[str, dict[str, int]], usage: Any, model: str) -> None:
-    """Fold one upstream usage record into Skynet's per-model token counters.
+    """Fold one upstream usage record into the app's per-model token counters.
 
     Args:
         destination: Per-model cumulative usage.
@@ -1290,7 +1290,7 @@ def _json_finite(value: Any) -> Any:
     return value
 
 
-def _incumbent(store: Any, evaluator: SkynetEvaluator, seed: Any) -> dict[str, Any]:
+def _incumbent(store: Any, evaluator: AppEvaluator, seed: Any) -> dict[str, Any]:
     """Recover the candidate to report when the run stops before selecting.
 
     Args:
@@ -1341,7 +1341,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     train_cases = build_cases("train", examples)
     development_cases = build_cases("development", examples)
     run_dir = Path("autosaddler-run").resolve()
-    store = LocalRunStore(run_dir=run_dir, run_id=f"skynet-{payload['nonce'][:12]}")
+    store = LocalRunStore(run_dir=run_dir, run_id=f"app-{payload['nonce'][:12]}")
     if repo is None:
         components = baseline_components(task.get("seed_candidate"))
         harness_space: Any = ComponentMapHarnessSpace(
@@ -1358,13 +1358,13 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         readonly_paths = tuple(str(path) for path in repo["readonly_paths"])
     prefix = "" if repo is None else _REPO_ASSETS
     mailbox = EvaluatorMailbox(payload["nonce"], timeout)
-    evaluator = SkynetEvaluator(
+    evaluator = AppEvaluator(
         mailbox=mailbox,
         harness_space=harness_space,
         store_run_dir=run_dir,
         max_concurrency=int(payload.get("max_concurrency", 1)),
         stop_at_score=payload.get("stop_at_score"),
-        fingerprint=as_domain.sha256_digest(as_domain.canonical_json({"evaluator": "skynet-parent-scorer"})),
+        fingerprint=as_domain.sha256_digest(as_domain.canonical_json({"evaluator": "app-parent-scorer"})),
         development_case_ids=[case.case_id for case in development_cases],
         repo_base=repo_base,
     )
@@ -1373,8 +1373,8 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         version="1",
         harness_space=harness_space,
         evaluator=evaluator,
-        evidence_builder=SkynetEvidenceBuilder(store, {case.case_id: case for case in train_cases}),
-        prompt_pack=SkynetPromptPack(
+        evidence_builder=AppEvidenceBuilder(store, {case.case_id: case for case in train_cases}),
+        prompt_pack=AppPromptPack(
             store=store,
             component_names=component_names,
             objective=task.get("objective"),
@@ -1388,7 +1388,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             **as_assets.prompt_source_entities(plugin_root=_PLUGIN_ROOT, plugin_name=_PLUGIN_NAME),
             "resolved/prompts/compositions.json": composition_record(prefix),
             "resolved/scenario_runtime.json": {
-                "schema_version": "skynet-autosaddler-scenario/v1",
+                "schema_version": "app-autosaddler-scenario/v1",
                 "components": list(component_names),
                 "train_case_ids": [case.case_id for case in train_cases],
                 "development_case_ids": [case.case_id for case in development_cases],
@@ -1407,7 +1407,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     )
     store.initialize(
         resolved_config={
-            "schema_version": "skynet-autosaddler-run/v1",
+            "schema_version": "app-autosaddler-run/v1",
             "engine": "autosaddler",
             "source": payload.get("source"),
             "provider": {"type": proposer["harness"], "model": model},

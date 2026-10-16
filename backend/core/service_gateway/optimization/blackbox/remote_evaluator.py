@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
@@ -10,6 +9,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from ....billing.model_gateway import raise_gateway_stop
+from ....config import app_env
 from ....exceptions import ServiceError
 
 
@@ -50,7 +50,7 @@ class RemoteEvaluatorClient:
         Returns:
             Original JSON value for the existing score normalizer.
         """
-        base = os.environ.get("SKYNET_BUDGET_RELAY_URL", self._route["url"]).rstrip("/")
+        base = str(app_env("APP_BUDGET_RELAY_URL", self._route["url"])).rstrip("/")
         try:
             with httpx.Client(timeout=self._timeout, trust_env=False, follow_redirects=False) as client:
                 response = client.post(

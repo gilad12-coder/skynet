@@ -62,7 +62,7 @@ class CatalogModel(BaseModel):
         default=None,
         description=(
             "Data-center label this model resolves through when the provider "
-            "exposes more than one endpoint (e.g. an on-prem gateway). "
+            "exposes more than one endpoint. "
             "``None`` for single-endpoint providers."
         ),
     )
@@ -204,8 +204,7 @@ class CatalogProvider(BaseModel):
 
     A provider with a single endpoint emits one entry with
     ``data_center=None``. A provider that fans out across several endpoints
-    (e.g. a public API plus an on-prem OpenAI-compatible gateway) emits one
-    entry per data center, each with a distinct ``default_base_url`` and a
+    emits one entry per data center, each with a distinct ``default_base_url`` and a
     populated ``data_center`` label.
     """
 
@@ -228,8 +227,8 @@ class _DataCenter(BaseModel):
     """One reachable endpoint for a provider.
 
     ``label`` is ``None`` for a provider's sole/native endpoint (renders as
-    just the provider name) and a short human string for additional centers
-    such as an on-prem gateway. ``models_url`` is the OpenAI-compatible
+    just the provider name) and a short human string for any additional
+    center. ``models_url`` is the OpenAI-compatible
     ``/models`` probe target, or ``None`` to fall back to LiteLLM's API-key
     heuristic.
     """
@@ -243,8 +242,7 @@ class _DataCenter(BaseModel):
 # Each provider declares one or more data centers. Historically every
 # provider had exactly one endpoint; that maps to a single ``_DataCenter``
 # with ``label=None`` so existing single-DC behaviour (and the
-# ``data_center=None`` wire shape) is preserved. The on-prem gateway is
-# appended at runtime by ``_provider_data_centers`` when configured.
+# ``data_center=None`` wire shape) is preserved.
 #
 # A ``models_url`` of ``None`` skips the live probe and falls back to
 # LiteLLM's API-key heuristic — used for providers with bespoke auth
@@ -466,8 +464,6 @@ _PROVIDER_META: dict[str, tuple[str, list[_DataCenter]]] = {
     "ollama": ("Ollama (self-hosted)", [_DataCenter(base_url="http://localhost:11434")]),
 }
 
-_ON_PREM_DC_LABEL = "On-prem gateway"
-
 # The platform brokers every LLM call through OpenRouter, so the hosted
 # catalog lists only its models — other providers' keys may exist for
 # non-LLM features (OpenAI powers Whisper dictation) without their chat
@@ -570,48 +566,16 @@ _featured_scores: dict[str, float] = {}
 _BYOK_CATALOG_PROVIDERS: frozenset[str] = BYOK_CATALOG_PREFIXES
 
 
-def _on_prem_base_url() -> str | None:
-    """Return the configured internal OpenAI-compatible gateway URL, if any.
-
-    Prefers ``code_agent_base_url`` (the submit-wizard agent gateway) and
-    falls back to ``embeddings_base_url`` since on-prem deployments commonly
-    point both at the same internal gateway family.
-
-    Returns:
-        The configured internal base URL, or ``None`` when neither
-        ``CODE_AGENT_BASE_URL`` nor ``EMBEDDINGS_BASE_URL`` is set.
-    """
-    return settings.code_agent_base_url.strip() or settings.embeddings_base_url.strip() or None
-
-
 def _provider_data_centers(provider_slug: str) -> list[_DataCenter]:
-    """Return the data centers for ``provider_slug`` including the on-prem one.
-
-    The configured on-prem gateway is OpenAI-compatible, so it is surfaced as
-    an extra data center on the ``openai`` provider (its native ``/models``
-    shape matches). All other providers return their static endpoint list
-    unchanged.
+    """Return the data centers for ``provider_slug``.
 
     Args:
         provider_slug: LiteLLM provider key (e.g. ``"openai"``).
 
     Returns:
-        The provider's data centers, with the on-prem gateway appended when
-        configured and applicable to this provider.
+        A copy of the provider's static endpoint list.
     """
-    centers = list(_PROVIDER_META[provider_slug][1])
-    if provider_slug == "openai":
-        on_prem = _on_prem_base_url()
-        if on_prem:
-            centers.append(
-                _DataCenter(
-                    label=_ON_PREM_DC_LABEL,
-                    base_url=on_prem,
-                    models_url=f"{on_prem.rstrip('/')}/models",
-                    env_var="OPENAI_API_KEY",
-                )
-            )
-    return centers
+    return list(_PROVIDER_META[provider_slug][1])
 
 
 def _make_label(model_id: str) -> str:
@@ -1347,8 +1311,7 @@ def _probe_all_providers() -> dict[tuple[str, str | None], dict[str, dict] | Non
     """Probe every configured data center in parallel, capped at 8 workers.
 
     Each ``(provider, data center)`` pair is probed independently since they
-    are distinct endpoints that may serve different model sets (e.g. an
-    on-prem gateway exposes only locally-deployed models).
+    are distinct endpoints that may serve different model sets.
 
     Returns:
         A mapping of ``(provider_slug, data_center_label)`` to a dict of

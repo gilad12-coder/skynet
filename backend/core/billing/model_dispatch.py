@@ -23,7 +23,7 @@ from .responses_adapter import price_responses_request, responses_failure, respo
 from .runtime import BudgetRuntime, PaidResult
 from .usage_tags import header_tags
 
-MODEL_ATTEMPT_HEADER = "x-skynet-model-attempt-id"
+MODEL_ATTEMPT_HEADER = "x-app-model-attempt-id"
 
 logger = logging.getLogger(__name__)
 

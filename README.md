@@ -52,7 +52,7 @@ frontend/   Next.js (App Router) · Tailwind v4 · shadcn/radix · SSE streaming
 backend/    FastAPI · SQLAlchemy + Alembic (boot-time migrations) · DSPy 3.3
             └─ worker: multi-pod job fleet over Postgres (SELECT … FOR UPDATE
                SKIP LOCKED leases, orphan recovery, resumable GEPA checkpoints)
-deploy/     litellm proxy (compose) · helm chart for Kubernetes
+deploy/     litellm proxy (compose)
 i18n/       Hebrew base catalog + 23 overlay locales → generated typed catalogs
 docs/       operator guides (Stripe setup, design briefs)
 ```
@@ -81,7 +81,7 @@ WORKER_CONCURRENCY=4                           # parallel background jobs
 # STRIPE_SECRET_KEY=...
 ```
 
-See `backend/.env.example` for the full annotated list (agents' models, tagger assist models, notifications, air-gap gateways, and more).
+See `backend/.env.example` for the full annotated list (agents' models, tagger assist models, notifications, and more).
 
 ### Frontend (`frontend/.env.local`)
 
@@ -89,8 +89,8 @@ See `backend/.env.example` for the full annotated list (agents' models, tagger a
 NEXT_PUBLIC_API_URL=http://localhost:8000
 AUTH_SECRET=generate-with-openssl-rand-base64-32
 
-# Without SSO configured, the login page offers email/password signup.
-# ADFS/OIDC SSO and Google/GitHub OAuth: see frontend/.env.example.
+# The login page offers email/password signup.
+# Google/GitHub OAuth: see frontend/.env.example.
 ```
 
 ## Serving optimized programs
@@ -110,7 +110,6 @@ The job detail page includes a built-in inference playground and a program expor
 ## Deployment
 
 - **Anywhere with Postgres** — the backend migrates its own schema at boot and the worker fleet scales horizontally via DB-lease job claims (no external queue).
-- **Kubernetes** — Helm chart in `deploy/helm`.
 - **Docker** — `cd backend && docker compose up --build` starts API + Postgres.
 - **Billing** — optional; set the Stripe keys in `backend/.env.example` to enable balance top-ups and metered usage.
 

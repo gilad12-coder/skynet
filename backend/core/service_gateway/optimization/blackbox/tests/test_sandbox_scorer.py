@@ -70,7 +70,7 @@ class _RunnerSession(FakeSandboxSession):
         """Execute a runner invocation against the callback.
 
         Args:
-            command: ``python3 skynet_runner.py <call_dir>``.
+            command: ``python3 app_runner.py <call_dir>``.
             env: Per-call environment.
             timeout_seconds: Per-call timeout.
 
@@ -217,14 +217,14 @@ def test_sandbox_scorer_installs_the_runner_once_and_runs_one_call_per_directory
     scorer.close()
 
     [spec] = runtime.specs
-    assert spec.name.startswith("skynet-scorer-job-1-")
+    assert spec.name.startswith("app-scorer-job-1-")
     assert spec.tags == {"skynet_job": "job-1"}
     assert spec.lifetime_seconds == 2_700
     assert spec.inject_headers == {}
     [box] = runtime.sessions
     assert box.files[RUNNER_FILE] == RUNNER_SOURCE
     assert box.commands == [f"python3 {RUNNER_FILE} {CALLS_DIR}/000001", f"python3 {RUNNER_FILE} {CALLS_DIR}/000002"]
-    assert box.envs == [{"SKYNET_API_KEY": "k"}, {"SKYNET_API_KEY": "k"}]
+    assert box.envs == [{"APP_API_KEY": "k"}, {"APP_API_KEY": "k"}]
     assert box.timeouts == [7.5, 7.5]
     assert box.payloads[1]["candidate"] == "hello"
     assert box.payloads[1]["case"] == {"input": "x"}

@@ -112,7 +112,7 @@ class BestOfNEngine:
                         engine=self.name,
                         max_evals=sampling.remaining,
                         stop_at_score=ctx.stop_at_score,
-                        engine_config={"model": "openai/skynet-reflection", "lm_kwargs": connection},
+                        engine_config={"model": "openai/app-reflection", "lm_kwargs": connection},
                     )
                 )
                 result = engine.run(upstream.task, upstream)

@@ -27,7 +27,7 @@ from ..service_gateway.language_models import (
 from .pricing import ModelUsage, combine_usages, fallback_priced_usages, usages_from_breakdown
 from .service import StripeBillingService, run_cost_cents
 
-logger = logging.getLogger("skynet.billing.metering")
+logger = logging.getLogger("app.billing.metering")
 
 
 def _normalize_model_key(model: str) -> str:

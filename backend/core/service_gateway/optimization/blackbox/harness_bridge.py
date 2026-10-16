@@ -32,13 +32,17 @@ from typing import Any
 
 Usage = dict[str, int]
 
-CONFIG_ENV = "SKYNET_PROPOSER_CONFIG"
-KEY_ENV = "SKYNET_API_KEY"
+CONFIG_ENV = "APP_PROPOSER_CONFIG"
+KEY_ENV = "APP_API_KEY"
 # The serialized launch travels through the sandbox input file, so the gateway
 # key is replaced by this token and only restored from the process environment.
-KEY_TOKEN = "__SKYNET_API_KEY__"
-SHIM_DIR = ".local/skynet-bin"
-SESSIONS_DIR = ".skynet-bridge"
+KEY_TOKEN = "__APP_API_KEY__"
+# This file runs alone in the sandbox, without ``core.config``; saved custom
+# harnesses and older callers still use these pre-rename spellings.
+_LEGACY_PREFIX = "SKYNET_"
+_LEGACY_KEY_TOKEN = "__SKYNET_API_KEY__"
+SHIM_DIR = ".local/app-bin"
+SESSIONS_DIR = ".app-bridge"
 _SLUG_RE = re.compile(r"[^A-Za-z0-9-]")
 _USAGE_KEYS = ("input_tokens", "output_tokens")
 # The instruction file every harness reads on start, pointing it at the skills
@@ -53,6 +57,32 @@ _RESUME_NOTE = (
     "\n\n---\n\nA previous session already worked on this task in this directory. Its files and progress are "
     "still here; continue from the current workspace state.\n\n"
 )
+
+
+def _env(name: str, default: str = "") -> str:
+    """Read an ``APP_*`` variable, falling back to its pre-rename ``SKYNET_*`` name.
+
+    Args:
+        name: Variable name starting with ``APP_``.
+        default: Value returned when neither name is set.
+
+    Returns:
+        The first non-empty value found, else ``default``.
+    """
+    return os.environ.get(name) or os.environ.get(_LEGACY_PREFIX + name.removeprefix("APP_")) or default
+
+
+def _with_key(text: str, api_key: str) -> str:
+    """Restore the gateway key in place of either key token.
+
+    Args:
+        text: A launch command, file or environment value.
+        api_key: The route key.
+
+    Returns:
+        ``text`` with every key token replaced.
+    """
+    return text.replace(KEY_TOKEN, api_key).replace(_LEGACY_KEY_TOKEN, api_key)
 
 
 def _json_lines(stdout: str) -> Iterator[dict[str, Any]]:
@@ -417,7 +447,7 @@ def run_session(
         timeout_seconds: Kill the harness after this many seconds.
         extra_env: Environment overrides layered on top of the launch env.
         api_key: Route key substituted for the launch's key token; defaults
-            to the proposer key in ``SKYNET_API_KEY``.
+            to the proposer key in ``APP_API_KEY``.
 
     Returns:
         The parsed answer, raw transcript, usage and exit status.
@@ -425,11 +455,11 @@ def run_session(
     workspace.mkdir(parents=True, exist_ok=True)
     session_dir.mkdir(parents=True, exist_ok=True)
     if api_key is None:
-        api_key = os.environ.get(KEY_ENV, "")
+        api_key = _env(KEY_ENV)
     for relative_path, content in (proposer.get("files") or {}).items():
         target = contained_path(workspace, relative_path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content.replace(KEY_TOKEN, api_key), encoding="utf-8")
+        target.write_text(_with_key(content, api_key), encoding="utf-8")
     instructions = proposer.get("instructions_file")
     if instructions and instructions != "CLAUDE.md":
         pointer = contained_path(workspace, instructions)
@@ -440,18 +470,21 @@ def run_session(
     prompt_file.write_text(prompt, encoding="utf-8")
     env = {
         **os.environ,
-        **{name: value.replace(KEY_TOKEN, api_key) for name, value in (proposer.get("env") or {}).items()},
+        **{name: _with_key(value, api_key) for name, value in (proposer.get("env") or {}).items()},
         **(extra_env or {}),
-        "SKYNET_MODEL": model,
-        "SKYNET_PROMPT_FILE": str(prompt_file),
-        "SKYNET_ANSWER_FILE": str(session_dir / f"answer-{attempt}.txt"),
     }
+    for name, value in (
+        ("MODEL", model),
+        ("PROMPT_FILE", str(prompt_file)),
+        ("ANSWER_FILE", str(session_dir / f"answer-{attempt}.txt")),
+    ):
+        env[f"APP_{name}"] = env[_LEGACY_PREFIX + name] = value
     shell = shutil.which("bash") or "/bin/sh"
     started = time.monotonic()
     stderr_file = session_dir / f"run-{attempt}.stderr"
     with stderr_file.open("w", encoding="utf-8") as stderr:
         process = subprocess.Popen(
-            [shell, "-c", proposer["run_command"].replace(KEY_TOKEN, api_key)],
+            [shell, "-c", _with_key(proposer["run_command"], api_key)],
             cwd=workspace,
             env=env,
             stdin=subprocess.DEVNULL,
@@ -712,14 +745,14 @@ def main(argv: list[str]) -> int:
         return 1
     if unknown:
         print(f"claude bridge: ignoring unsupported arguments {unknown}", file=sys.stderr)
-    config_path = os.environ.get(CONFIG_ENV)
+    config_path = _env(CONFIG_ENV)
     if not config_path:
         print(f"claude bridge: {CONFIG_ENV} is not set", file=sys.stderr)
         return 1
     proposer = json.loads(Path(config_path).read_text(encoding="utf-8"))
     resumed = args.resume or args.r
     session_id = args.session_id or resumed or uuid.uuid4().hex
-    model = args.model or str(proposer.get("model") or os.environ.get("SKYNET_MODEL") or "")
+    model = args.model or str(proposer.get("model") or _env("APP_MODEL"))
     workspace = Path.cwd()
     session_dir = Path.home() / SESSIONS_DIR / session_id
     session_dir.mkdir(parents=True, exist_ok=True)

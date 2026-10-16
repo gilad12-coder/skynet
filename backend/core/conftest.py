@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import zlib
 
 import pytest
 
 from core.api import interview_model
 from core.billing import openrouter_prices
+from core.config import app_env
 
 
 @pytest.fixture(autouse=True)
@@ -33,9 +33,10 @@ def _offline_interview_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Keep only this CI shard's test files when ``SKYNET_TEST_SHARD`` is set.
+    """Keep only this CI shard's test files when ``APP_TEST_SHARD`` is set.
 
-    CI splits ``core/`` across parallel jobs with ``SKYNET_TEST_SHARD=i/n``.
+    CI splits ``core/`` across parallel jobs with ``APP_TEST_SHARD=i/n``
+    (``SKYNET_TEST_SHARD`` is still read).
     Whole files land on one shard, by a stable hash of their path, so module
     fixtures still run once per file.
 
@@ -43,7 +44,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         config: The pytest config, used to report deselected tests.
         items: The collected tests, filtered in place.
     """
-    spec = os.environ.get("SKYNET_TEST_SHARD")
+    spec = app_env("APP_TEST_SHARD")
     if not spec:
         return
     index, total = (int(part) for part in spec.split("/"))

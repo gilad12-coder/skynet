@@ -360,7 +360,7 @@ export function parseDraft(raw: string | null): IntakeDraft | null {
  * The draft survives a reload mid-setup (the language switch makes one);
  * finishing, skipping or rerunning the setup from Settings clears it.
  */
-const DRAFT_KEY = "skynet.intake.draft";
+const DRAFT_KEY = "app.intake.draft";
 
 export function readIntakeDraft(): IntakeDraft | null {
   try {
@@ -398,7 +398,7 @@ export function clearIntakeDraft(): void {
  * locale). The setup leaves this note first so it reopens on the next
  * question in the new language instead of asking the language again.
  */
-const RESUME_KEY = "skynet.intake.resume";
+const RESUME_KEY = "app.intake.resume";
 
 export interface IntakeResume {
   /** The next open question, or the closing screen when nothing is left. */

@@ -3261,7 +3261,6 @@
   "submit.modelpicker.purpose.all": "전체",
   "submit.modelpicker.purpose.aria": "용도별로 모델 필터링",
   "submit.modelpicker.purpose.multilingual": "다국어",
-  "submit.modelpicker.purpose.onprem": "온프레미스",
   "submit.modelpicker.purpose.reasoning": "추론",
   "submit.modelpicker.purpose.vision": "비전",
   "submit.modelpicker.zdr_unavailable": "'보관 없음' 개인정보 설정에서는 사용할 수 없을 가능성이 높습니다",

@@ -62,11 +62,13 @@ _FACTORY_PATHS = {"miprov2": "dspy.MIPROv2", "bootstrapfewshot": "dspy.Bootstrap
 # state as JSON next to the per-predictor instructions.
 DSPY_STATE_KEY = workspace_harness.DSPY_STATE_KEY
 # The case's expected value as it was, next to the label fields a DSPy demo
-# reads, so ``score`` gets exactly what the sandbox harness hands it.
+# reads, so ``score`` gets exactly what the sandbox harness hands it. This key
+# and ``RUN_OUTPUT_KEY`` keep their pre-rename names: demos copy example and
+# prediction fields into saved program state, which later runs load again.
 EXPECTED_KEY = "_skynet_expected"
 # Holds what ``run`` returned when it is not a ``dspy.Prediction``.
 RUN_OUTPUT_KEY = "_skynet_output"
-_ACTIVE_PROGRAM: contextvars.ContextVar[Any] = contextvars.ContextVar("skynet_active_program", default=None)
+_ACTIVE_PROGRAM: contextvars.ContextVar[Any] = contextvars.ContextVar("app_active_program", default=None)
 
 
 def program_state(program: dspy.Module) -> str:
@@ -253,7 +255,7 @@ def load_run_program(run_code: str, helpers: types.ModuleType | None = None) -> 
             builds no module-level ``dspy.Module`` (or several, none named
             ``program``).
     """
-    namespace: dict[str, Any] = {"dspy": dspy, "__name__": "skynet_run"}
+    namespace: dict[str, Any] = {"dspy": dspy, "__name__": "app_run"}
     with bound_helpers(helpers):
         try:
             # exec: user run code, inside the per-job worker that already runs in
@@ -330,7 +332,7 @@ def load_score(metric_code: str) -> Callable[..., Any]:
     Raises:
         ServiceError: When the code does not compile or defines no ``score``.
     """
-    namespace: dict[str, Any] = {"dspy": dspy, "__name__": "skynet_metric"}
+    namespace: dict[str, Any] = {"dspy": dspy, "__name__": "app_metric"}
     try:
         # exec: user metric code, in the same per-job worker as the run code.
         exec(compile(metric_code, "<metric_code>", "exec", dont_inherit=True), namespace)

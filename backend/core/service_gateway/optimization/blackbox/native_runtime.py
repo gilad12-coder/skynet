@@ -7,7 +7,6 @@ import io
 import json
 import logging
 import math
-import os
 import re
 import shlex
 import sys
@@ -26,7 +25,7 @@ from ....billing.model_gateway import raise_gateway_stop
 from ....billing.pricing import model_token_costs
 from ....billing.runtime import UsagePendingError
 from ....billing.usage_tags import CALLER_PROPOSER, KIND_MUTATION, USAGE_TAGS_HEADER, encode_tags, usage_scope
-from ....config import Settings, settings
+from ....config import Settings, app_env, settings, with_legacy_env
 from ....exceptions import ServiceError
 from ....models.blackbox import BLACKBOX_HARNESS_CODEX, BLACKBOX_HARNESS_PI, BlackboxProposer, BlackboxTarget
 from ..budget_stop import BudgetReached
@@ -69,11 +68,14 @@ _INPUT_FILE = "native_input.json"
 _RESULT_FILE = "native_result.json"
 _ARTIFACT_FILE = "native_artifacts.tar.gz.b64"
 _INSTALL_ALLOWANCE = 600.0
+# Sent where the network edge injects the real gateway key; nothing reads its value.
+_INJECTED_KEY_PLACEHOLDER = "app-managed"
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
-_RPC_PREFIX = "SKYNET_NATIVE_RPC "
-_LOG_PREFIX = "SKYNET_NATIVE_LOG "
+_RPC_PREFIX = "APP_NATIVE_RPC "
+_PROGRESS_PREFIX = "APP_NATIVE_PROGRESS "
+_LOG_PREFIX = "APP_NATIVE_LOG "
 _UUID = re.compile(r"^[0-9a-f]{32}$")
 # The only task fields a native box may receive; Task.context, valset and the
 # test split stay with the parent so no proposer can read the metric.
@@ -102,14 +104,14 @@ _SHINKA_REQUIREMENTS_FILE = "shinka_requirements.txt"
 _SHINKA_BUNDLE_FILE = "shinka_bundle.py"
 # Each ShinkaEvolve model route's token reaches the guest in its own variable,
 # named by position; the meta-notes model reads its own so its calls are told apart.
-SHINKA_KEY_ENV = "SKYNET_SHINKA_KEY_{index}"
-SHINKA_META_KEY_ENV = "SKYNET_SHINKA_META_KEY"
+SHINKA_KEY_ENV = "APP_SHINKA_KEY_{index}"
+SHINKA_META_KEY_ENV = "APP_SHINKA_META_KEY"
 # The protected image bakes ShinkaEvolve into its own venv (backend/Dockerfile),
 # because its pinned closure conflicts with the backend's own dependencies.
 SHINKA_IMAGE_PYTHON = "/opt/shinka/venv/bin/python"
 # Duplicate rejection's judge and embeddings read their own variables too.
-SHINKA_NOVELTY_KEY_ENV = "SKYNET_SHINKA_NOVELTY_KEY"
-SHINKA_EMBED_KEY_ENV = "SKYNET_SHINKA_EMBED_KEY"
+SHINKA_NOVELTY_KEY_ENV = "APP_SHINKA_NOVELTY_KEY"
+SHINKA_EMBED_KEY_ENV = "APP_SHINKA_EMBED_KEY"
 _BRIDGE_FILE = "harness_bridge.py"
 _ENGINES_FILE = "native_engines.py"
 _REPO_TREE_FILE = "repo_tree.py"
@@ -445,7 +447,7 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
         SandboxSpec(
             lifetime_seconds=lifetime,
             network_disabled=True,
-            name=unique_sandbox_name("skynet-native-readiness"),
+            name=unique_sandbox_name("app-native-readiness"),
             env={"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
         )
     )
@@ -577,7 +579,7 @@ class _EvaluatorMailbox:
                 line, self._buffer = self._buffer.split("\n", 1)
                 framed = (
                     f"{_RPC_PREFIX}{self.nonce} ",
-                    f"SKYNET_NATIVE_PROGRESS {self.nonce} ",
+                    f"{_PROGRESS_PREFIX}{self.nonce} ",
                     f"{_LOG_PREFIX}{self.nonce} ",
                 )
                 if not line.startswith(framed):
@@ -1016,7 +1018,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     source = None if own_venv else _source_archive()
     upstream_source, upstream_revision = _UPSTREAMS[engine_id]
     runner_file = _SHINKA_RUNNER_FILE if shinka else _AUTOSADDLER_RUNNER_FILE if own_venv else _RUNNER_FILE
-    relay = os.environ.get("SKYNET_BUDGET_RELAY_URL")
+    relay = app_env("APP_BUDGET_RELAY_URL")
     proposer = options.proposer
     editor = _shinka_editor(options, relay) if shinka and (options.shinka or {}).get("editor") == "agent" else None
     launch = build_launch(
@@ -1037,7 +1039,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     spec = SandboxSpec(
         lifetime_seconds=lifetime,
         env={"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
-        name=unique_sandbox_name(f"skynet-{engine_id}"),
+        name=unique_sandbox_name(f"app-{engine_id}"),
         inject_headers=headers,
     )
     session = runtime.open(spec)
@@ -1132,12 +1134,12 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             raise ServiceError(f"Native optimizer runtime setup failed: {detail}")
         env = {
             "ANTHROPIC_BASE_URL": (relay or options.gateway.url).removesuffix("/v1"),
-            "ANTHROPIC_AUTH_TOKEN": "skynet-managed" if headers else options.gateway.api_key,
-            harness_bridge.KEY_ENV: "skynet-managed" if headers else options.gateway.api_key,
+            "ANTHROPIC_AUTH_TOKEN": _INJECTED_KEY_PLACEHOLDER if headers else options.gateway.api_key,
+            harness_bridge.KEY_ENV: _INJECTED_KEY_PLACEHOLDER if headers else options.gateway.api_key,
             "DISABLE_AUTOUPDATER": "1",
             "CI": "1",
             "NO_COLOR": "1",
-            **({"SKYNET_BUDGET_RELAY_URL": relay} if relay else {}),
+            **(with_legacy_env({"APP_BUDGET_RELAY_URL": relay}) if relay else {}),
         }
         if shinka:
             env.update(

@@ -17,7 +17,10 @@ import threading
 from collections.abc import Iterator, Mapping
 from typing import Any
 
-USAGE_TAGS_HEADER = "x-skynet-usage-tags"
+USAGE_TAGS_HEADER = "x-app-usage-tags"
+# Still sent by the pinned sandbox image and older clients; read, never written.
+LEGACY_USAGE_TAGS_HEADER = "x-skynet-usage-tags"
+USAGE_TAGS_HEADERS = frozenset({USAGE_TAGS_HEADER, LEGACY_USAGE_TAGS_HEADER})
 TAG_KEYS = ("stage", "pair", "candidate", "case", "caller", "kind", "lane")
 # ``caller`` values: which optimizer drove an optimization-route call.
 CALLER_PROPOSER = "proposer"
@@ -92,16 +95,18 @@ def parse_tags(header: str | None) -> dict[str, str]:
 def header_tags(headers: Mapping[str, str] | None) -> dict[str, str]:
     """Read the tags header from a header mapping of any case.
 
+    The current header wins over the legacy one when a request carries both.
+
     Args:
         headers: Request headers.
 
     Returns:
         The cleaned tags.
     """
-    for name, value in (headers or {}).items():
-        if name.lower() == USAGE_TAGS_HEADER:
-            return parse_tags(value)
-    return {}
+    found = {name.lower(): value for name, value in (headers or {}).items() if name.lower() in USAGE_TAGS_HEADERS}
+    if USAGE_TAGS_HEADER in found:
+        return parse_tags(found[USAGE_TAGS_HEADER])
+    return parse_tags(found.get(LEGACY_USAGE_TAGS_HEADER))
 
 
 def current_tags() -> dict[str, str]:
@@ -169,12 +174,17 @@ def with_tags_header(headers: Mapping[str, str] | None, tags: Mapping[str, Any])
         tags: Tags that take precedence over the existing header's.
 
     Returns:
-        A new header mapping; unchanged apart from the tags header.
+        A new header mapping; unchanged apart from the tags header, which is
+        written under both its current and its pre-rename name.
     """
-    result = {name: value for name, value in (headers or {}).items() if name.lower() != USAGE_TAGS_HEADER}
+    result = {name: value for name, value in (headers or {}).items() if name.lower() not in USAGE_TAGS_HEADERS}
     encoded = encode_tags({**header_tags(headers), **clean_tags(tags)})
     if encoded:
+        # The DSPy guest runs the pinned image's backend copy while the parent
+        # ships the model proxy, so either side may be the older one; an older
+        # proxy forwards and an older gateway reads only the legacy name.
         result[USAGE_TAGS_HEADER] = encoded
+        result[LEGACY_USAGE_TAGS_HEADER] = encoded
     return result
 
 

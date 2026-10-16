@@ -286,7 +286,7 @@ def test_protected_serve_metadata_never_executes_signature_side_effects_in_api_p
         monkeypatch: Pytest environment cleanup helper.
     """
     marker = tmp_path / "signature-ran-in-api.txt"
-    env_name = "SKYNET_PROTECTED_SIGNATURE_RAN_IN_API"
+    env_name = "APP_PROTECTED_SIGNATURE_RAN_IN_API"
     monkeypatch.delenv(env_name, raising=False)
     signature_code = "\n".join(
         [

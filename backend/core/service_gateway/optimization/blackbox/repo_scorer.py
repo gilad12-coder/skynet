@@ -30,7 +30,7 @@ from .sandbox_scorer import RUNNER_SOURCE
 CASES_KEY = "cases"
 # The guest names no real endpoint: its requests reach only the parent relay.
 REPO_SCORER_URL = "https://scoped-evaluator.invalid/score"
-RUNNER_PATH = f"{REPO_DIR}/skynet_runner.py"
+RUNNER_PATH = f"{REPO_DIR}/app_runner.py"
 CALLS_DIR = f"{REPO_DIR}/calls"
 # The guest waits for the version's checkout and the scorer together; copying a
 # prepared tree with its installed dependencies can take a while, so its relay

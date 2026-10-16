@@ -24,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import random
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -39,7 +38,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from core.billing.model_gateway import raise_gateway_stop
-from core.config import Settings
+from core.config import Settings, app_env
 from core.constants import (
     DETAIL_BASELINE,
     DETAIL_OPTIMIZED,
@@ -86,7 +85,7 @@ GEPA's public API does not accept an ``auto`` enum; we resolve it here so the
 budget stays ergonomic. Numbers are operator-tunable via an explicit
 ``max_metric_calls`` for any campaign that doesn't fit the table."""
 
-_TOOL_SEVERITY_ATTR = "_skynet_severity"
+_TOOL_SEVERITY_ATTR = "_app_severity"
 
 
 def _severity_from_annotations(annotations: Any) -> str | None:
@@ -156,9 +155,9 @@ def _list_live_tools(mcp_url: str, auth_header: str | None) -> list[dspy.Tool]:
         List of dspy.Tool objects, one per MCP-exposed tool, each carrying its
         derived approval severity.
     """
-    relay_token = os.environ.get("SKYNET_TOOL_RELAY_TOKEN")
+    relay_token = app_env("APP_TOOL_RELAY_TOKEN")
     if relay_token:
-        mcp_url = f"{os.environ['SKYNET_BUDGET_RELAY_URL'].rstrip('/')}/_mcp"
+        mcp_url = f"{_relay_url().rstrip('/')}/_mcp"
         auth_header = f"Bearer {relay_token}"
     headers = {"Authorization": auth_header} if auth_header else None
     try:
@@ -176,9 +175,24 @@ def _list_live_tools(mcp_url: str, auth_header: str | None) -> list[dspy.Tool]:
 
 def _raise_tool_budget_stop() -> None:
     """Restore authoritative budget stops before ReAct can treat them as tool observations."""
-    token = os.environ.get("SKYNET_TOOL_RELAY_TOKEN")
+    token = app_env("APP_TOOL_RELAY_TOKEN")
     if token:
-        raise_gateway_stop({"url": os.environ["SKYNET_BUDGET_RELAY_URL"], "token": token})
+        raise_gateway_stop({"url": _relay_url(), "token": token})
+
+
+def _relay_url() -> str:
+    """Return the sandbox's budget relay URL.
+
+    Returns:
+        The relay URL from ``APP_BUDGET_RELAY_URL`` or its legacy name.
+
+    Raises:
+        KeyError: Neither name is set although a relay token is.
+    """
+    url = app_env("APP_BUDGET_RELAY_URL")
+    if url is None:
+        raise KeyError("APP_BUDGET_RELAY_URL")
+    return url
 
 
 async def _list_live_tool_specs(mcp_url: str, headers: dict[str, str] | None) -> list[Any]:

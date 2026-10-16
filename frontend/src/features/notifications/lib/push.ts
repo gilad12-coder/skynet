@@ -14,7 +14,7 @@ import {
 import { vapidKeyBytes, type PushPermission, type PushSubscribeResult } from "./push-state";
 
 const WORKER_URL = "/sw.js";
-const DECLINED_KEY = "skynet.push.declined";
+const DECLINED_KEY = "app.push.declined";
 
 /** Whether this browser can do web push at all (secure context, SW, PushManager). */
 export function pushSupported(): boolean {

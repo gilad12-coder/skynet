@@ -16,8 +16,9 @@ import lightModern from "@codingame/monaco-vscode-theme-defaults-default-extensi
 import lightPlus from "@codingame/monaco-vscode-theme-defaults-default-extension/resources/light_plus.json";
 import lightVs from "@codingame/monaco-vscode-theme-defaults-default-extension/resources/light_vs.json";
 
-export const SKYNET_LIGHT = "Skynet Light";
-export const SKYNET_DARK = "Skynet Dark";
+// The values are the names shown in the IDE's theme picker, so they carry the brand.
+export const APP_LIGHT_THEME = "Skynet Light";
+export const APP_DARK_THEME = "Skynet Dark";
 
 /** The design tokens a theme is drawn from, as hex. */
 interface Tokens {
@@ -281,25 +282,25 @@ function jsonUrl(value: unknown): string {
  * the workbench then loads them with the default themes, so the
  * `workbench.colorTheme` setting resolves to them on its first read.
  */
-export function registerSkynetThemes(): void {
+export function registerAppThemes(): void {
   const manifest: IExtensionManifest = {
-    name: "skynet-themes",
-    publisher: "skynet",
+    name: "app-themes",
+    publisher: "app",
     version: "1.0.0",
     engines: { vscode: "*" },
     contributes: {
       themes: [
         {
-          id: SKYNET_LIGHT,
-          label: SKYNET_LIGHT,
+          id: APP_LIGHT_THEME,
+          label: APP_LIGHT_THEME,
           uiTheme: "vs",
-          path: "./themes/skynet-light.json",
+          path: "./themes/app-light.json",
         },
         {
-          id: SKYNET_DARK,
-          label: SKYNET_DARK,
+          id: APP_DARK_THEME,
+          label: APP_DARK_THEME,
           uiTheme: "vs-dark",
-          path: "./themes/skynet-dark.json",
+          path: "./themes/app-dark.json",
         },
       ],
     },
@@ -318,13 +319,13 @@ export function registerSkynetThemes(): void {
     "themes/light_modern.json": lightModern,
     "themes/light_plus.json": lightPlus,
     "themes/light_vs.json": lightVs,
-    "themes/skynet-light.json": {
-      name: SKYNET_LIGHT,
+    "themes/app-light.json": {
+      name: APP_LIGHT_THEME,
       include: "./light_modern.json",
       colors: colors(LIGHT),
     },
-    "themes/skynet-dark.json": {
-      name: SKYNET_DARK,
+    "themes/app-dark.json": {
+      name: APP_DARK_THEME,
       include: "./dark_modern.json",
       colors: colors(DARK),
     },

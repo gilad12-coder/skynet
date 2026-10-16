@@ -2217,7 +2217,7 @@ class BackgroundWorker:
         """
         job = self._job_store.get_job(optimization_id)
         payload = job.get("payload") or {}
-        base = Path(tempfile.gettempdir()) / "skynet-gepa" / f"{optimization_id}-g{job.get('execution_generation', 0)}"
+        base = Path(tempfile.gettempdir()) / "app-gepa" / f"{optimization_id}-g{job.get('execution_generation', 0)}"
         shutil.rmtree(base, ignore_errors=True)
         base.mkdir(parents=True, exist_ok=True)
         checkpoint = self._job_store.get_gepa_checkpoint(optimization_id)

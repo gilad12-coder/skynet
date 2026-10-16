@@ -1,5 +1,4 @@
-ARG REGISTRY_PREFIX=docker.io
-FROM ${REGISTRY_PREFIX}/python:3.11-slim
+FROM docker.io/python:3.11-slim
 
 WORKDIR /app
 

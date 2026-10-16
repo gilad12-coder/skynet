@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 import re
 import secrets
 import threading
@@ -17,7 +16,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
+from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, app_env
 from ..exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
 from .budgets import BudgetError, BudgetInsufficientError
 from .credential_safety import scrub_model_config
@@ -42,7 +41,7 @@ from .protected_credentials import (
 from .remote_evaluator import RemoteEvaluatorBroker, RemoteEvaluatorTransportError
 from .runtime import BudgetRuntime, ProviderFailedError, UsagePendingError
 from .signals import BudgetReached
-from .usage_tags import USAGE_TAGS_HEADER
+from .usage_tags import USAGE_TAGS_HEADERS
 
 ROUTE_KEY = "_skynet_budget_route"
 # Key, inside the first optimization model's route, of the embeddings route
@@ -155,7 +154,7 @@ def raise_gateway_stop(route: Mapping[str, Any]) -> None:
         BudgetReached: When the authoritative parent stopped admission for budget.
         UsagePendingError: When the authority is closed for another accounting reason.
     """
-    url = f"{os.environ.get('SKYNET_BUDGET_RELAY_URL', str(route['url'])).rstrip('/')}/_budget/state"
+    url = f"{app_env('APP_BUDGET_RELAY_URL', str(route['url'])).rstrip('/')}/_budget/state"
     for attempt in range(_BUDGET_STATE_ATTEMPTS):
         try:
             response = httpx.get(
@@ -307,7 +306,7 @@ class ModelGateway:
                             protocol_headers={
                                 name: value
                                 for name, value in self.headers.items()
-                                if name.lower() in {"anthropic-version", "anthropic-beta", USAGE_TAGS_HEADER}
+                                if name.lower() in {"anthropic-version", "anthropic-beta"} | USAGE_TAGS_HEADERS
                             },
                         )
                     )

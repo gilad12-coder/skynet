@@ -20,11 +20,11 @@ from pathlib import Path
 REPO_SNAPSHOT_KEY = "_repo_snapshot"
 # Uploads are text and capped at 16 MiB per request: 9 MiB of bytes is 12 MiB of base64.
 ARCHIVE_CHUNK_BYTES = 9 * 1024 * 1024
-_GIT_IDENTITY = ["-c", "user.name=skynet", "-c", "user.email=skynet@localhost", "-c", "commit.gpgsign=false"]
+_GIT_IDENTITY = ["-c", "user.name=app", "-c", "user.email=app@localhost", "-c", "commit.gpgsign=false"]
 
 # The shipped tree's commit. Versions diff against this ref rather than HEAD,
 # so an agent that commits in its checkout cannot hide those edits.
-BASE_REF = "refs/skynet/base"
+BASE_REF = "refs/app/base"
 # A version travels as one sandbox file, and uploads cap each file at 16 MiB.
 MAX_PATCH_BYTES = 8 * 1024 * 1024
 

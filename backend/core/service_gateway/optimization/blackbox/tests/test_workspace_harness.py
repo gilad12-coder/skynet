@@ -249,7 +249,7 @@ def test_candidate_probes_reach_neither_metric_source_nor_expected(tmp_path: Pat
     metric_marker, gold_marker = "METRIC_SOURCE_MARKER_93", "GOLD_LABEL_MARKER_77"
     metric = f"# {metric_marker}\nKEY = '{metric_marker}'\n" + BLACKBOX_METRIC
     harness_dir = Path(workspace_harness.__file__).parent
-    for target, source in (("skynet_workspace_harness.py", "workspace_harness.py"), ("skynet_runner.py", "runner.py")):
+    for target, source in (("app_workspace_harness.py", "workspace_harness.py"), ("app_runner.py", "runner.py")):
         (tmp_path / target).write_text((harness_dir / source).read_text(encoding="utf-8"), encoding="utf-8")
     dump = tmp_path / "dump.txt"
     init = {
@@ -262,7 +262,7 @@ def test_candidate_probes_reach_neither_metric_source_nor_expected(tmp_path: Pat
     env = {"PATH": "/usr/bin:/bin", **encode_stream([init, call])}
 
     result = subprocess.run(
-        [sys.executable, "skynet_workspace_harness.py", "--env"],
+        [sys.executable, "app_workspace_harness.py", "--env"],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -319,17 +319,15 @@ def test_env_stream_round_trips_and_the_code_never_touches_disk(tmp_path: Path) 
     secret = "SECRET_METRIC_MARKER_51"
     metric = f"# {secret}\n" + BLACKBOX_METRIC
     harness_dir = Path(workspace_harness.__file__).parent
-    (tmp_path / "skynet_workspace_harness.py").write_text(
+    (tmp_path / "app_workspace_harness.py").write_text(
         (harness_dir / "workspace_harness.py").read_text(encoding="utf-8"), encoding="utf-8"
     )
-    (tmp_path / "skynet_runner.py").write_text(
-        (harness_dir / "runner.py").read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    (tmp_path / "app_runner.py").write_text((harness_dir / "runner.py").read_text(encoding="utf-8"), encoding="utf-8")
     init = {"run_code": RUN_CODE, "metric_code": metric, "gateways": {}}
     env = {"PATH": "/usr/bin:/bin", **encode_stream([init, {"candidate": "a", "case": _case("y", "y")}])}
 
     result = subprocess.run(
-        [sys.executable, "skynet_workspace_harness.py", "--env"],
+        [sys.executable, "app_workspace_harness.py", "--env"],
         cwd=tmp_path,
         env=env,
         capture_output=True,

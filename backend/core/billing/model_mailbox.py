@@ -59,8 +59,8 @@ class ModelMailbox:
         nonce = secrets.token_hex(16)
         # Captured here: requests are answered on pool threads, where the caller's scope is gone.
         host_tags = current_tags()
-        directory = f".skynet-model-{nonce}"
-        prefix = f"SKYNET_MODEL_{nonce}:"
+        directory = f".app-model-{nonce}"
+        prefix = f"APP_MODEL_{nonce}:"
         source_path = f"{directory}/proxy.py"
         config_path = f"{directory}/config.json"
         response_directory = f"{directory}/responses"

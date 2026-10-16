@@ -28,7 +28,7 @@ import {
   type ListConversationsParams,
 } from "../lib/conversation-api";
 
-const LAST_SEEN_STORAGE_KEY = "skynet.agent.conversations.lastSeen";
+const LAST_SEEN_STORAGE_KEY = "app.agent.conversations.lastSeen";
 
 type LastSeenMap = Record<string, string>;
 

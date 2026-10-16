@@ -3261,7 +3261,6 @@
   "submit.modelpicker.purpose.all": "Усі",
   "submit.modelpicker.purpose.aria": "Фільтрувати моделі за призначенням",
   "submit.modelpicker.purpose.multilingual": "Багатомовні",
-  "submit.modelpicker.purpose.onprem": "Локальні (On-prem)",
   "submit.modelpicker.purpose.reasoning": "Міркування",
   "submit.modelpicker.purpose.vision": "Зображення",
   "submit.modelpicker.zdr_unavailable": "Імовірно, недоступна з налаштуванням «Без зберігання»",

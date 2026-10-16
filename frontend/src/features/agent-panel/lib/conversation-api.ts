@@ -11,7 +11,7 @@ import { parseTurnStats } from "@/shared/ui/agent/turn-stats";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { fetchWithAuthRetry } from "@/shared/lib/api";
 
-// Resolve lazily — a module-load const races the injected window.__SKYNET_ENV__
+// Resolve lazily — a module-load const races the injected window.__APP_ENV__
 // and freezes the build-time localhost fallback. See shared/lib/api.ts.
 const apiBase = () => getRuntimeEnv().apiUrl;
 

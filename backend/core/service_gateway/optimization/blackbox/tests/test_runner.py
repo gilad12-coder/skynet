@@ -401,7 +401,7 @@ def test_run_call_binds_llm_to_the_gateway_with_the_key_from_the_environment(
 
 
 def test_run_call_prefers_a_key_in_the_payload_over_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An explicit ``api_key`` in the gateway section wins over ``SKYNET_API_KEY``."""
+    """An explicit ``api_key`` in the gateway section wins over ``APP_API_KEY``."""
     monkeypatch.setenv(runner.ENV_API_KEY, "env-key")
     with FakeGateway() as gateway:
         run_call(
@@ -428,7 +428,7 @@ def test_run_call_reports_usage_even_when_the_scorer_fails_after_calling_llm() -
 
 @pytest.mark.parametrize("interpreter", _INTERPRETERS)
 def test_main_runs_the_file_contract_end_to_end(tmp_path: Path, interpreter: str) -> None:
-    """``python3 skynet_runner.py <call_dir>`` turns ``input.json`` into ``output.json`` on every supported interpreter.
+    """``python3 app_runner.py <call_dir>`` turns ``input.json`` into ``output.json`` on every supported interpreter.
 
     Args:
         tmp_path: Pytest fixture.
@@ -503,3 +503,14 @@ def test_scorer_code_imports_log_from_skynet() -> None:
         "from skynet import log\ndef score(c, case=None):\n    return 1.0, 'ok'\n", helpers={"log": log}
     )
     assert fn("x") == (1.0, "ok")
+
+
+def test_env_value_prefers_the_new_name_and_falls_back_to_the_legacy_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read ``APP_*`` first, then the pre-rename ``SKYNET_*`` spelling an older caller sets."""
+    monkeypatch.delenv("APP_API_KEY", raising=False)
+    monkeypatch.delenv("SKYNET_API_KEY", raising=False)
+    assert runner.env_value("APP_API_KEY") is None
+    monkeypatch.setenv("SKYNET_API_KEY", "old")
+    assert runner.env_value("APP_API_KEY") == "old"
+    monkeypatch.setenv("APP_API_KEY", "new")
+    assert runner.env_value("APP_API_KEY") == "new"

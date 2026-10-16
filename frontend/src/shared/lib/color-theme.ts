@@ -11,7 +11,7 @@ export const COLOR_THEMES = ["system", "light", "dark"] as const;
 export type ColorTheme = (typeof COLOR_THEMES)[number];
 export type ResolvedColorTheme = Exclude<ColorTheme, "system">;
 
-export const COLOR_THEME_STORAGE_KEY = "skynet.prefs.color-theme";
+export const COLOR_THEME_STORAGE_KEY = "app.prefs.color-theme";
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 // The former Gray theme became Dark; a choice saved under the old name keeps it.
 const LEGACY_DARK = "gray";

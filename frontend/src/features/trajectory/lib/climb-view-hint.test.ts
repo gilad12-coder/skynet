@@ -14,13 +14,13 @@ const { rememberTrajectoryView, trajectoryViewHint } = await import("./climb-vie
 test("each trajectory view is remembered per key", () => {
   rememberTrajectoryView("r1", "plain");
   rememberTrajectoryView("r1#pair", "none");
-  assert.equal(store.get("skynet-climb-view:r1"), "plain");
+  assert.equal(store.get("app-climb-view:r1"), "plain");
   assert.equal(trajectoryViewHint("r1#pair"), "none");
 });
 
 test("the climb flag stored before views existed reads as the climb chart", () => {
-  store.set("skynet-climb-view:old", "1");
+  store.set("app-climb-view:old", "1");
   assert.equal(trajectoryViewHint("old"), "climb");
-  store.set("skynet-climb-view:junk", "tree");
+  store.set("app-climb-view:junk", "tree");
   assert.equal(trajectoryViewHint("junk"), undefined);
 });

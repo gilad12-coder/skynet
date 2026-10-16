@@ -1,14 +1,14 @@
 """Tests for boot-time Alembic version sync (:func:`sync_migration_head`).
 
 The non-Postgres no-op guard runs in ordinary (SQLite) CI. The adopt-vs-upgrade
-behaviour needs a real Postgres and is gated on ``SKYNET_TEST_DB_URL`` — a
+behaviour needs a real Postgres and is gated on ``APP_TEST_DB_URL`` — a
 dedicated opt-in, **never** ``REMOTE_DB_URL``, because these cases wipe the
 target (``DROP SCHEMA public CASCADE``) and ``tests/conftest.py`` loads
 ``backend/.env`` into the environment: a developer's ordinary config must not
 be able to unlock a wipe of their local database. Point it at a throwaway
 database to exercise the live cases::
 
-    SKYNET_TEST_DB_URL=postgresql://postgres:test@localhost:5432/testdb \
+    APP_TEST_DB_URL=postgresql://postgres:test@localhost:5432/testdb \
         pytest backend/core/storage/tests/test_migrate.py
 
 Without that env var the live-DB cases are skipped, so unit-test CI is unaffected.
@@ -17,7 +17,6 @@ Without that env var the live-DB cases are skipped, so unit-test CI is unaffecte
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -29,6 +28,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from alembic import command
+from core.config import app_env
 from core.storage import remote
 from core.storage.migrate import stamp_if_unadopted, sync_migration_head, upgrade_if_adopted
 from core.storage.models import (
@@ -46,11 +46,11 @@ _HEAD = ScriptDirectory.from_config(Config(str(_BACKEND_DIR / "alembic.ini"))).g
 _PRE_500 = "f2b3c4d5e6a7"
 # The schema state just before credits were renamed to cents (#502).
 _PRE_CENTS_RENAME = "c3e5a7b9d1f2"
-TEST_DB_URL = os.environ.get("SKYNET_TEST_DB_URL")
+TEST_DB_URL = app_env("APP_TEST_DB_URL")
 
 _needs_pg = pytest.mark.skipif(
     not TEST_DB_URL or not TEST_DB_URL.startswith("postgresql"),
-    reason="SKYNET_TEST_DB_URL not set to a postgresql:// URL — skipping live-DB migration tests.",
+    reason="APP_TEST_DB_URL not set to a postgresql:// URL — skipping live-DB migration tests.",
 )
 
 
@@ -110,7 +110,7 @@ def fresh_pg() -> Iterator[Engine]:
     """Yield an engine over a freshly wiped ``public`` schema of the live target.
 
     Guards against catastrophe: this fixture ``DROP SCHEMA public CASCADE``s, so it
-    refuses any non-local host — a stray ``SKYNET_TEST_DB_URL`` pointing at a managed
+    refuses any non-local host — a stray ``APP_TEST_DB_URL`` pointing at a managed
     Postgres (e.g. a proxy domain) skips instead of wiping real data.
     """
     host = make_url(TEST_DB_URL or "").host

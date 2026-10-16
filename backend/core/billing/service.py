@@ -46,7 +46,7 @@ from .openrouter_float import check_float
 from .plans import PAST_DUE_STATUS, PLAN_FREE, PLAN_PRO, is_pro_status
 from .pricing import PLATFORM_FEE_FRACTION, ModelUsage, cents_for_cost_usd, cents_for_usage, raw_cost_usd
 
-logger = logging.getLogger("skynet.billing.service")
+logger = logging.getLogger("app.billing.service")
 
 # Cents granted per one-time pack. Mirrors the frontend TOP_UP_PACKS catalog;
 # the dollar price lives in Stripe (the price id), the cents granted live here.
