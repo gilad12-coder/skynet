@@ -93,10 +93,12 @@ function UnifiedWizardFrame() {
     if (next) setPages((p) => ({ ...p, [next]: 0 }));
     goNext();
   }, [forwardOpen, page, pageCount, current, steps, position, goNext]);
+  const [reopenedScreen] = useState(() => (w.restored ? visibleScreen : null));
   const autoAdvance = useAutoAdvanceDriver(
     visibleScreen,
     forwardOpen && !advancing && !submitting,
     forward,
+    reopenedScreen,
   );
 
   const back = useCallback(() => {

@@ -98,6 +98,8 @@ export interface WizardV2Shell extends WizardV2Context {
   submitPhase: SubmitPhase;
   /** The pre-submit check is running; Run and Back hold still meanwhile. */
   advancing: boolean;
+  /** The setup came back from a reload of this tab. */
+  restored: boolean;
 }
 
 type SliceName = "task" | "inputs" | "optimizer" | "workspace" | "meta";
@@ -892,6 +894,7 @@ export function WizardV2Provider({
   }, [wizardCtx, state, chargeable]);
 
   const value: WizardV2Shell = {
+    restored: restored !== null,
     state,
     goTo,
     goNext,
