@@ -55,6 +55,14 @@ interface WizardStateContextValue {
    */
   reopenedScreen: string | null;
   setReopenedScreen: (screen: string | null) => void;
+  /**
+   * The wizard on view came back from the tab's saved session. Fixed at the
+   * wizard's mount, so unlike ``reopenedScreen`` it still reads true after
+   * the wizard moves off the reopened screen — the agent panel loads lazily
+   * and may only look once that move already happened.
+   */
+  restoredSetup: boolean;
+  setRestoredSetup: (restored: boolean) => void;
   /** Move the wizard as a screen agent asked, through the frame's handlers. */
   navigateScreen: (nav: ScreenNav) => void;
 }
@@ -75,6 +83,7 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
   const [wizardScreen, setWizardScreen] = React.useState<string | null>(null);
   const [screenIssue, setScreenIssue] = React.useState<string | null>(null);
   const [reopenedScreen, setReopenedScreen] = React.useState<string | null>(null);
+  const [restoredSetup, setRestoredSetup] = React.useState(false);
   // A ref, not state: the frame re-registers on every render that changes its
   // handlers, and the agent reads it only when a move arrives.
   const navigatorRef = React.useRef<ScreenNavigator | null>(null);
@@ -190,6 +199,8 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       navigateScreen,
       reopenedScreen,
       setReopenedScreen,
+      restoredSetup,
+      setRestoredSetup,
     }),
     [
       state,
@@ -205,6 +216,7 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       setScreenNavigator,
       navigateScreen,
       reopenedScreen,
+      restoredSetup,
     ],
   );
 

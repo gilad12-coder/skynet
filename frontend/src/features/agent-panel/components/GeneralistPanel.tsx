@@ -372,6 +372,10 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   React.useEffect(() => {
     reopenedScreenRef.current = reopenedScreen;
   }, [reopenedScreen]);
+  const restoredSetupRef = React.useRef(wizardCtx?.restoredSetup ?? false);
+  React.useEffect(() => {
+    restoredSetupRef.current = wizardCtx?.restoredSetup ?? false;
+  }, [wizardCtx?.restoredSetup]);
   React.useEffect(() => {
     conversationIdRef.current = agent.conversationId;
   }, [agent.conversationId]);
@@ -383,8 +387,11 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     shownScreenRef.current = shownScreen;
     if (from === null && screenChatsRef.current.size === 0) {
       // A reload that reopened the setup brings each screen's chat back
-      // with it; any other setup starts with none.
-      if (shownScreen === reopenedScreenRef.current) {
+      // with it; any other setup starts with none. Gate on the wizard's
+      // restored flag rather than the reopened screen: this panel's chunk
+      // loads lazily, so the wizard may already have moved off that screen
+      // (clearing it) before this effect first runs.
+      if (restoredSetupRef.current) {
         let saved: string | null = null;
         try {
           saved = window.sessionStorage.getItem(SCREEN_CHATS_KEY);
