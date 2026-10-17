@@ -26,7 +26,7 @@ import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 
 import { centsToBudgetText, parseBudgetInput } from "@/shared/lib/budget-input";
-import { limitContinueBlock } from "../lib/budget-limit";
+import { budgetShortfall } from "../lib/budget-limit";
 import { chargeableBracket, type CostBracket } from "../lib/cost-bracket";
 import type { WizardV2Context } from "../lib/wizard-v2";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
@@ -74,6 +74,13 @@ const BUDGET_STEP_CENTS = 100;
 /** Why Continue holds while the spending limit sits under the estimate's low end. */
 export function belowEstimateMessage(neededCents: number): string {
   return formatMsg("submit.budget.error.below_estimate", {
+    amount: formatCentsUsd(neededCents, getActiveIntlLocale()),
+  });
+}
+
+/** Why Continue holds while the account's balance can't fund the run's opening hold. */
+export function shortBalanceMessage(neededCents: number): string {
+  return formatMsg("submit.budget.error.balance", {
     amount: formatCentsUsd(neededCents, getActiveIntlLocale()),
   });
 }
@@ -214,11 +221,12 @@ function ReadyBudgetCard({
     minimum == null
       ? null
       : formatMsg("submit.budget.minimum_total", { amount: formatCentsUsd(minimum, locale) });
-  const limitNeeded =
+  const limitShort =
     parsed.kind === "value"
-      ? limitContinueBlock("budget", costBracket, w.tokenSource, {
+      ? budgetShortfall(costBracket, w.tokenSource, {
           uncapped: budgetUncapped,
           limit: parsed.value,
+          balance: null,
         })
       : null;
   const fieldError =
@@ -230,8 +238,8 @@ function ReadyBudgetCard({
           ? msg("submit.budget.error.below_one")
           : parsed.kind === "value" && minimum != null && parsed.value < minimum
             ? minimumMessage
-            : limitNeeded != null
-              ? belowEstimateMessage(limitNeeded)
+            : limitShort != null
+              ? belowEstimateMessage(limitShort.needed)
               : null;
   const fieldHint = fieldError == null && parsed.kind === "empty" ? minimumMessage : null;
   const fieldMessage = fieldError ?? fieldHint;

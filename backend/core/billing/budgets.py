@@ -85,6 +85,18 @@ class AccountFundsError(BudgetInsufficientError):
 class BudgetInFlightError(BudgetError):
     """Wait for already-covered work before deciding whether funding is exhausted."""
 
+    def __init__(self, message: str, *, scope_units: int | None = None, room_units: int | None = None) -> None:
+        """Keep the limit arithmetic so a caller can tell whether waiting could help.
+
+        Args:
+            message: Internal diagnostic for logs and focused tests.
+            scope_units: Coverage the refused operation needs.
+            room_units: The limit's unspent units, reserved work included.
+        """
+        super().__init__(message)
+        self.scope_units = scope_units
+        self.room_units = room_units
+
 
 class BudgetUnreconciledError(BudgetInFlightError):
     """Keep old-generation work covered until its actual usage is established."""
@@ -183,7 +195,7 @@ def _total(value: int) -> int:
     return value
 
 
-def _usd(cents: int) -> str:
+def usd_text(cents: int) -> str:
     """Write whole cents as dollars, the unit the wizard shows the limit in."""
     return f"${cents / 100:,.2f}"
 
@@ -214,11 +226,13 @@ def _admit(
         remaining = budget.total_cents * CENT_SCALE - budget.settled_units
         if scope > remaining:
             raise BudgetInsufficientError(
-                f"The next operation needs up to {_usd(ceil_cents(scope))}, but only "
-                f"{_usd(max(remaining, 0) // CENT_SCALE)} of the {_usd(budget.total_cents)} limit remain."
+                f"The next operation needs up to {usd_text(ceil_cents(scope))}, but only "
+                f"{usd_text(max(remaining, 0) // CENT_SCALE)} of the {usd_text(budget.total_cents)} limit remain."
             )
         if scope > remaining - budget.reserved_units:
-            raise BudgetInFlightError("Covered work must settle before this operation can fit.")
+            raise BudgetInFlightError(
+                "Covered work must settle before this operation can fit.", scope_units=scope, room_units=remaining
+            )
     held = account_committed_cents(session, username)
     wallet_balance = int(wallet.balance_cents) + int(wallet.grant_remaining or 0)
     hold_delta = (

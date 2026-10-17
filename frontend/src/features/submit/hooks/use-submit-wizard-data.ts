@@ -96,15 +96,24 @@ export function useModelCatalog() {
 }
 
 const callHoldCache = new Map<string, number | null>();
+let boxHoldCache: number | null = null;
+
+export interface ModelCallHolds {
+  /** One call's hold per model, keyed by `callHoldKey`. */
+  holds: ReadonlyMap<string, number>;
+  /** What the boxes hold before the first model call; null until it loads. */
+  boxHoldCents: number | null;
+}
 
 /**
- * The server's one-call hold for each named model, keyed by `callHoldKey`.
- * Prices load once per model and token source; an unpriced model, or one
- * still loading, is absent so the local estimate stands in for it.
+ * The server's one-call hold for each named model, keyed by `callHoldKey`,
+ * and the boxes' hold that comes before any call. Prices load once per
+ * model and token source; an unpriced model, or one still loading, is absent
+ * so the local estimate stands in for it.
  */
 export function useModelCallHolds(
   models: ReadonlyArray<{ name: string; token_source?: "managed" | "byok" }>,
-): ReadonlyMap<string, number> {
+): ModelCallHolds {
   const wanted = [
     ...new Set(
       models
@@ -127,9 +136,10 @@ export function useModelCallHolds(
       } as const;
     });
     getModelCallHolds(request, controller.signal)
-      .then(({ holds }) => {
+      .then(({ holds, box_hold_cents }) => {
         for (const hold of holds)
           callHoldCache.set(callHoldKey(hold.name, hold.token_source), hold.cents);
+        if (typeof box_hold_cents === "number") boxHoldCache = box_hold_cents;
         setLoaded((count) => count + 1);
       })
       .catch(() => {});
@@ -138,12 +148,13 @@ export function useModelCallHolds(
 
   return useMemo(() => {
     const holds = new Map<string, number>();
-    if (!signature) return holds;
-    for (const key of signature.split("\n")) {
-      const cents = callHoldCache.get(key);
-      if (typeof cents === "number") holds.set(key, cents);
+    if (signature) {
+      for (const key of signature.split("\n")) {
+        const cents = callHoldCache.get(key);
+        if (typeof cents === "number") holds.set(key, cents);
+      }
     }
-    return holds;
+    return { holds, boxHoldCents: boxHoldCache };
     // `loaded` re-reads the module cache once a fetch lands.
   }, [signature, loaded]);
 }

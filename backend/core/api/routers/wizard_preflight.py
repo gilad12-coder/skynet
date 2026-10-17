@@ -31,6 +31,7 @@ from ...models.unified import (
 )
 from ...service_gateway.optimization.unified.contract import (
     contract_fingerprint,
+    in_locale,
     static_contract_check,
     with_message_codes,
 )
@@ -147,7 +148,7 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             The static checks; ``samples`` is always empty.
         """
         enforce_submission_rate(user.username)
-        return static_contract_check(request.spec)
+        return in_locale(static_contract_check(request.spec), request.locale)
 
     @router.post("/optimizations/contract-check", response_model=ContractCheckResponse)
     def contract_check(request: ContractCheckRequest, user: AuthenticatedUserDep) -> ContractCheckResponse:
@@ -163,13 +164,28 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             user: Authenticated owner whose budget pays for the check.
 
         Returns:
-            Every check item and the scored samples.
+            Every check item and the scored samples, worded in the request's locale.
 
         Raises:
             HTTPException: 402 when the spec names no execution budget, or the
                 budget errors ``run_preflight`` raises.
         """
         enforce_submission_rate(user.username)
+        return in_locale(_sandboxed_check(request, user), request.locale)
+
+    def _sandboxed_check(request: ContractCheckRequest, user: AuthenticatedUser) -> ContractCheckResponse:
+        """Run the static check, then the sampled one under the spec's budget.
+
+        Args:
+            request: The unified spec and how many samples to score.
+            user: Authenticated owner whose budget pays for the check.
+
+        Returns:
+            Every check item and the scored samples, in the Hebrew base.
+
+        Raises:
+            HTTPException: 402 when the spec names no execution budget.
+        """
         spec = request.spec
         static = static_contract_check(spec)
         if not static.ok:

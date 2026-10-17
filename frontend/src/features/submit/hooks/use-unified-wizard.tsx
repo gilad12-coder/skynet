@@ -381,15 +381,16 @@ export function WizardV2Provider({
     ...(state.optimizer.choice === "shinka_evolve" ? state.optimizer.extraReflectionModels : []),
     metricModel,
   ].filter(hasModel);
-  const callHolds = useModelCallHolds(submittedModels);
+  const { holds: callHolds, boxHoldCents } = useModelCallHolds(submittedModels);
   const costBracket = useMemo(
     () =>
       projectUnifiedCostBracket(state, optimizerCatalog, {
         models: modelCatalog?.models ?? null,
         pricing,
         callHolds,
+        boxHoldCents,
       }),
-    [state, optimizerCatalog, modelCatalog, pricing, callHolds],
+    [state, optimizerCatalog, modelCatalog, pricing, callHolds, boxHoldCents],
   );
   const tokenSource = aggregateTokenSource(submittedModels);
   const chargeable = costBracket ? chargeableBracket(costBracket, tokenSource) : null;
@@ -398,7 +399,7 @@ export function WizardV2Provider({
     const bracket = projectUnifiedCostBracket(
       { ...state, optimizer: { ...state.optimizer, choice } },
       optimizerCatalog,
-      { models: modelCatalog?.models ?? null, pricing, callHolds },
+      { models: modelCatalog?.models ?? null, pricing, callHolds, boxHoldCents },
     );
     return bracket ? chargeableBracket(bracket, tokenSource) : null;
   };

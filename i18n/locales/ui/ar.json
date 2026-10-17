@@ -3710,6 +3710,7 @@
   "submit.budget.error.fraction": "تصل دقّة المبالغ إلى السنت — استخدم منزلتين عشريتين كحد أقصى.",
   "submit.budget.error.below_one": "يجب ألا يقل الحد عن 0.01 دولار.",
   "submit.budget.error.below_estimate": "يحتاج التشغيل إلى {amount} على الأقل. ارفع الحد للمتابعة.",
+  "submit.budget.error.balance": "رصيدك لا يغطي الحد الأدنى لهذا التشغيل وهو {amount}. أضف رصيدًا للمتابعة.",
   "submit.budget.estimate_preliminary": "تقدير أولي",
   "submit.budget.estimate_preliminary_note": "يتحدّث كلما أضفت حالات واخترت نماذج.",
   "submit.budget.estimate_note": "الحد الأعلى يفترض مطالبات ومخرجات طويلة في كل استدعاء، وليس تشغيلًا نموذجيًا.",

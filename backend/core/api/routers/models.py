@@ -20,6 +20,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from dataclasses import fields
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
@@ -30,8 +31,10 @@ from pydantic import BaseModel, Field
 
 from ...billing.openrouter_quotes import fetch_endpoint_prices, price_text_request, resolve_model_slug
 from ...billing.operation_pricing import ChargePolicy, UnpricedOperationError
+from ...billing.vercel_usage import sandbox_hold_cents
 from ...config import settings
 from ...service_gateway.optimization.blackbox.runner import DEFAULT_MAX_TOKENS
+from ...service_gateway.optimization.blackbox.sandbox import COVERAGE_SLICE_SECONDS, SandboxSpec
 from ..artificial_analysis import with_artificial_analysis_links
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..interview_model import with_interview_default
@@ -319,6 +322,26 @@ class CallHoldsResponse(BaseModel):
     """Response payload for POST /models/call-holds."""
 
     holds: list[CallHold]
+    box_hold_cents: float = Field(
+        description="Charged cents the sandboxes a setup check or run opens hold before its first model call.",
+    )
+
+
+# A setup check, like a run's first step, opens an outer box and then a
+# workspace box inside it before any model call, and each funds its first
+# coverage slice up front; those holds stay until the boxes close.
+_BOXES_BEFORE_FIRST_CALL = 2
+
+
+def box_hold_cents() -> Decimal:
+    """Price what a check's or run's boxes hold before its first model call.
+
+    Returns:
+        Charged cents for two deny-all boxes of the default size, each funded
+        for its first coverage slice.
+    """
+    vcpus = next(field.default for field in fields(SandboxSpec) if field.name == "vcpus")
+    return _BOXES_BEFORE_FIRST_CALL * sandbox_hold_cents(lifetime_ms=COVERAGE_SLICE_SECONDS * 1000, vcpus=vcpus)
 
 
 # Endpoint prices move rarely, and the wizard re-asks on every model change.
@@ -467,8 +490,9 @@ def create_models_router(*, http_client: Callable[[], httpx.Client] | None = Non
     def model_call_holds(payload: CallHoldsRequest, current_user: AuthenticatedUserDep) -> CallHoldsResponse:
         """Return the charged cents one call of each model reserves before it is sent.
 
-        A spending limit under this hold refuses the run at its first model
-        call, so the wizard holds Continue until the limit covers it.
+        A spending limit under this hold plus the boxes' holds refuses the run
+        at its first model call, so the wizard holds Continue until the limit
+        covers both.
 
         Args:
             payload: The run's model roles and their token sources.
@@ -497,6 +521,6 @@ def create_models_router(*, http_client: Callable[[], httpx.Client] | None = Non
                         cents=None if cents is None else float(cents),
                     )
                 )
-        return CallHoldsResponse(holds=holds)
+        return CallHoldsResponse(holds=holds, box_hold_cents=float(box_hold_cents()))
 
     return router

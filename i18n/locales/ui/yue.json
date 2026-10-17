@@ -3710,6 +3710,7 @@
   "submit.budget.error.fraction": "金額最細到仙 — 最多用兩位小數。",
   "submit.budget.error.below_one": "上限最少要 $0.01。",
   "submit.budget.error.below_estimate": "呢次運行最少要 {amount}。加高上限先可以繼續。",
+  "submit.budget.error.balance": "你嘅結餘唔夠呢次運行最少要嘅 {amount}。增值先可以繼續。",
   "submit.budget.estimate_preliminary": "初步估算",
   "submit.budget.estimate_preliminary_note": "隨住你加入案例同揀模型而更新。",
   "submit.budget.estimate_note": "上限值假設每次調用都用長嘅提示同輸出，唔係典型嘅運行。",

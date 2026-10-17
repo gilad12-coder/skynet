@@ -3710,6 +3710,7 @@
   "submit.budget.error.fraction": "Beträge gehen bis auf den Cent — verwende höchstens zwei Dezimalstellen.",
   "submit.budget.error.below_one": "Das Limit muss mindestens $0.01 betragen.",
   "submit.budget.error.below_estimate": "Der Lauf braucht mindestens {amount}. Erhöhe das Limit, um fortzufahren.",
+  "submit.budget.error.balance": "Dein Guthaben deckt das Minimum dieses Laufs von {amount} nicht. Füge Guthaben hinzu, um fortzufahren.",
   "submit.budget.estimate_preliminary": "Vorläufige Schätzung",
   "submit.budget.estimate_preliminary_note": "Wird aktualisiert, sobald du Fälle hinzufügst und Modelle wählst.",
   "submit.budget.estimate_note": "Das obere Ende geht von langen Prompts und Ausgaben bei jedem Aufruf aus, nicht von einem typischen Lauf.",

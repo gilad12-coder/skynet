@@ -3710,6 +3710,7 @@
   "submit.budget.error.fraction": "Les montants vont jusqu'au centime — utilisez au maximum deux décimales.",
   "submit.budget.error.below_one": "Le plafond doit être d'au moins 0,01 $.",
   "submit.budget.error.below_estimate": "L’exécution nécessite au moins {amount}. Augmentez la limite pour continuer.",
+  "submit.budget.error.balance": "Votre solde ne couvre pas le minimum de cette exécution, {amount}. Ajoutez des fonds pour continuer.",
   "submit.budget.estimate_preliminary": "Estimation préliminaire",
   "submit.budget.estimate_preliminary_note": "Se met à jour à mesure que vous ajoutez des cas et choisissez des modèles.",
   "submit.budget.estimate_note": "La borne haute suppose des prompts et des sorties longs à chaque appel, pas une exécution typique.",

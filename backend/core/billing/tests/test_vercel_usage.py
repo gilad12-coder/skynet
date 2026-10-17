@@ -312,8 +312,10 @@ def test_real_sdk_stop_metrics_are_preserved_and_settled_once(
     runtime = _runtime(database)
     requests = _mock_provider(monkeypatch, runtime)
     sandbox = _sandbox_runtime(runtime).open(_spec())
+    assert list(runtime._pinned.values()) == [cent_units(quote_vercel_sandbox(CREATE).maximum.total)]
     sandbox.close()
     sandbox.close()
+    assert runtime._pinned == {}
     assert [request.method for request in requests] == ["POST", "POST", "DELETE"]
     snapshot = runtime.service.get(runtime.budget_id, "alice")
     assert snapshot.reserved_cents == 0
@@ -386,6 +388,7 @@ def test_lost_creation_response_is_pending_and_never_repeated(
         sandbox_runtime.open(_spec())
     with pytest.raises(UsagePendingError, match="already dispatched"):
         sandbox_runtime.open(_spec())
+    assert len(runtime._pinned) == 1
     assert len(requests) == 1
     assert runtime.service.get(runtime.budget_id, "alice").pending_operations == 1
 
@@ -399,6 +402,7 @@ def test_refused_creation_releases_the_hold_and_admits_the_next_attempt(
     sandbox_runtime = _sandbox_runtime(runtime)
     with pytest.raises(SandboxApiError, match="86400000"):
         sandbox_runtime.open(_spec())
+    assert runtime._pinned == {}
     assert [request.method for request in requests] == ["POST"]
     snapshot = runtime.service.get(runtime.budget_id, "alice")
     assert snapshot.pending_operations == 0
@@ -467,6 +471,9 @@ def test_protected_box_is_funded_one_slice_at_a_time_up_to_its_lifetime(
     time.sleep(0.2)
     assert _extensions(requests) == [1_000, 1_000]
     assert runtime.service.get(runtime.budget_id, "alice").reserved_cents > first
+    assert list(runtime._pinned.values()) == [
+        cent_units(runtime.service.get(runtime.budget_id, "alice").reserved_cents)
+    ]
     sandbox.close()
     snapshot = runtime.service.get(runtime.budget_id, "alice")
     assert snapshot.reserved_cents == 0

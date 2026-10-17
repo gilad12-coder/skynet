@@ -134,6 +134,10 @@ BALANCE_FIELD = "balance"
 # A runtime reports a budget stop only by its type name; these rebuild it.
 _BUDGET_STOPS = {stop.__name__: stop for stop in (BudgetInsufficientError, AccountFundsError)}
 
+# The browser waits on the check's response, and the connection is cut after
+# about five minutes; covered work still unsettled by then reads as pending.
+SETUP_WAIT_SECONDS = 90
+
 
 def _check(key: str, status: str, message: str | None = None, field: str | None = None) -> dict[str, Any]:
     """Build one scoped readiness result without inventing a score."""
@@ -496,6 +500,7 @@ def _perform_preflight(
                 budget_id=snapshot.id,
                 generation=snapshot.generation,
                 phase="setup",
+                wait_timeout=SETUP_WAIT_SECONDS,
             )
         )
         # The box's hold is priced on its whole lifetime, so a check gets the

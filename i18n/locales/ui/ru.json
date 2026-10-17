@@ -3710,6 +3710,7 @@
   "submit.budget.error.fraction": "Суммы указываются с точностью до цента — используйте не более двух знаков после запятой.",
   "submit.budget.error.below_one": "Лимит должен быть не менее $0.01.",
   "submit.budget.error.below_estimate": "Для запуска нужно не меньше {amount}. Увеличьте лимит, чтобы продолжить.",
+  "submit.budget.error.balance": "Баланса не хватает на минимум для этого запуска — {amount}. Пополните баланс, чтобы продолжить.",
   "submit.budget.estimate_preliminary": "Предварительная оценка",
   "submit.budget.estimate_preliminary_note": "Обновляется по мере добавления примеров и выбора моделей.",
   "submit.budget.estimate_note": "Верхняя граница предполагает длинные промпты и ответы при каждом вызове, а не типичный запуск.",

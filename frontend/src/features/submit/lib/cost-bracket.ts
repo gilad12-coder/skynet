@@ -100,6 +100,8 @@ export interface CostBracketInput {
   pricing?: Pick<PricingTerms, "usageMarkup" | "byokFeeFraction">;
   /** Economy mode sends managed calls through the provider's half-price Batch API. */
   economyMode?: boolean;
+  /** The server's hold for the boxes a check or run opens before its first model call. */
+  boxHoldCents?: number | null;
 }
 
 export interface ProjectedModelRole {
@@ -203,6 +205,8 @@ export interface CostBracket {
   expectedRuntimeSessions: number;
   /** Charged cents the dearest single model call reserves before it runs; 0 when unknown. */
   modelCallHoldCents: number;
+  /** Charged cents the boxes hold before the first model call; 0 when unknown. */
+  boxHoldCents?: number;
   trace: CostBracketTrace;
 }
 
@@ -334,6 +338,7 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     pricing = DEFAULT_PRICING_TERMS,
     economyMode = false,
   } = input;
+  const boxHoldCents = Math.ceil(Math.max(0, input.boxHoldCents ?? 0));
   const budget = resolveMetricCalls(autoLevel, maxFullEvals, maxMetricCalls);
   const calls = budget.calls;
   // Larger datasets mean longer prompts and more baseline/eval rollouts; fold in
@@ -382,7 +387,7 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
   const lowCents = Math.max(
     1,
     managedModelLowCents + byokModelLowCents + runtimeEstimate.low,
-    runtimeHold(runtime) + modelCallHoldCents,
+    Math.max(runtimeHold(runtime), boxHoldCents) + modelCallHoldCents,
   );
   const highCents = Math.max(
     lowCents,
@@ -426,6 +431,7 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     runtimeBillingBasis: runtime?.billingBasis ?? null,
     expectedRuntimeSessions: runtime?.expectedSessions ?? 0,
     modelCallHoldCents,
+    boxHoldCents,
     trace: {
       metricCalls: calls,
       metricCallSource: budget.source,
@@ -509,11 +515,14 @@ export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): 
 
 /**
  * Cents the run's execution environment holds the moment it starts: the
- * cost of its whole lifetime, released as the run settles. A spending limit
+ * cost of its whole lifetime, released as the run settles, and never less
+ * than what its boxes hold before the first model call. A spending limit
  * below this cannot start the run at all, however small the usage estimate.
  */
 export function runtimeStartHold(bracket: CostBracket): number {
-  return bracket.runtimeBillingBasis === "at_cost" ? Math.ceil(bracket.runtimeSessionHighCents) : 0;
+  const session =
+    bracket.runtimeBillingBasis === "at_cost" ? Math.ceil(bracket.runtimeSessionHighCents) : 0;
+  return Math.max(session, bracket.boxHoldCents ?? 0);
 }
 
 /** Collapse per-model sources to the conservative job-level billing stamp. */
@@ -580,6 +589,8 @@ export interface UnifiedCostBracketOptions {
   pricing?: Pick<PricingTerms, "usageMarkup" | "byokFeeFraction">;
   /** The server's one-call holds, keyed by `callHoldKey`. */
   callHolds?: ReadonlyMap<string, number> | null;
+  /** The server's hold for the boxes opened before the first model call. */
+  boxHoldCents?: number | null;
 }
 
 /** The key a model's one-call hold is looked up by: the same model costs less on a BYOK key. */
@@ -683,6 +694,7 @@ export function projectUnifiedCostBracket(
       runtime: options.runtime,
       pricing,
       economyMode: meta.economyMode,
+      boxHoldCents: options.boxHoldCents,
     });
   }
 
@@ -714,5 +726,6 @@ export function projectUnifiedCostBracket(
     pricing,
     // Coding-agent proposers stream their calls, which never batch.
     economyMode: meta.economyMode && !nativeProposer,
+    boxHoldCents: options.boxHoldCents,
   });
 }

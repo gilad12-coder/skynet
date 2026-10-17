@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
@@ -29,7 +30,7 @@ from core.billing.budgets import (
 )
 from core.billing.operation_pricing import OperationCharge, OperationQuote
 from core.billing.pricing import ModelUsage
-from core.billing.runtime import BudgetRuntime, generation_operation_key
+from core.billing.runtime import BudgetRuntime, UsagePendingError, generation_operation_key
 from core.billing.service import StripeBillingService, committed_spend_cents, legacy_job_committed_cents
 from core.config import settings
 from core.storage.models import (
@@ -786,3 +787,80 @@ def test_new_account_without_wallet_row_funds_budget_only_in_preview(
     assert budget.total_cents == 100
     with Session(engine) as session:
         assert session.get(BillingCustomerModel, "carol").grant_remaining == 1000
+
+
+def _setup_runtime(service: BudgetService, budget_id: str, *, phase: str = "setup", wait: float = 600) -> BudgetRuntime:
+    """Bind a runtime whose default wait would hang a test that wrongly waits."""
+    return BudgetRuntime(service, username="alice", budget_id=budget_id, generation=0, phase=phase, wait_timeout=wait)
+
+
+def _quote(cents: int) -> OperationQuote:
+    """Bound one deterministic operation at ``cents``."""
+    return OperationQuote(
+        request_fingerprint=f"op-{cents}",
+        maximum=OperationCharge(total=Decimal(cents), wallet=Decimal(cents)),
+        price_snapshot={"version": "fixture-v1"},
+    )
+
+
+def test_in_flight_refusal_carries_the_limit_arithmetic(engine: Engine) -> None:
+    """A wait-for-room refusal says how much the work needs and how much of the limit is unspent."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 40, idempotency_key="arithmetic")
+    _reserve(service, budget.id, "box", cost_kind="sandbox", max_cents=10)
+    with pytest.raises(BudgetInFlightError) as refused:
+        _reserve(service, budget.id, "call", max_cents=35)
+
+    assert refused.value.scope_units == cent_units(35)
+    assert refused.value.room_units == cent_units(40)
+
+
+def test_setup_check_refuses_at_once_when_only_its_own_boxes_hold_the_room(engine: Engine) -> None:
+    """A check's open boxes never release while it waits, so it refuses instead of hanging."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 40, idempotency_key="own-boxes")
+    runtime = _setup_runtime(service, budget.id)
+    box = runtime.reserve(_quote(10), operation_key="box", cost_kind="sandbox", role="runtime")
+    runtime.pin(box.id, cent_units(box.max_cents))
+
+    started = time.monotonic()
+    with pytest.raises(BudgetInsufficientError, match=r"needs up to \$0\.35, but this check's sandboxes hold \$0\.10"):
+        runtime.reserve(_quote(35), operation_key="call", cost_kind="model")
+    assert time.monotonic() - started < 5
+
+
+def test_setup_check_waits_for_room_held_by_other_work(engine: Engine) -> None:
+    """Coverage the check did not open may settle, so the check waits for it."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 40, idempotency_key="other-work")
+    _reserve(service, budget.id, "other", cost_kind="sandbox", max_cents=10)
+    runtime = _setup_runtime(service, budget.id, wait=0)
+
+    with pytest.raises(UsagePendingError):
+        runtime.reserve(_quote(35), operation_key="call", cost_kind="model")
+
+
+def test_setup_check_waits_again_once_its_box_is_unpinned(engine: Engine) -> None:
+    """A box that settled no longer counts against the room the check waits for."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 40, idempotency_key="unpinned")
+    runtime = _setup_runtime(service, budget.id, wait=0)
+    box = runtime.reserve(_quote(10), operation_key="box", cost_kind="sandbox", role="runtime")
+    runtime.pin(box.id, cent_units(box.max_cents))
+    runtime.unpin(box.id)
+
+    with pytest.raises(UsagePendingError):
+        runtime.reserve(_quote(35), operation_key="call", cost_kind="model")
+
+
+def test_run_lanes_wait_for_each_other_even_with_pinned_boxes(engine: Engine) -> None:
+    """A run's lanes release each other's coverage, so a run never refuses early."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 40, idempotency_key="run-lanes")
+    service.attach_to_job(budget.id, "alice", "lanes-job", expected_revision=budget.revision)
+    runtime = _setup_runtime(service, budget.id, phase="run", wait=0)
+    box = runtime.reserve(_quote(10), operation_key="box", cost_kind="sandbox", role="runtime")
+    runtime.pin(box.id, cent_units(box.max_cents))
+
+    with pytest.raises(UsagePendingError):
+        runtime.reserve(_quote(35), operation_key="call", cost_kind="model")

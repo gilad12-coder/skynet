@@ -3710,6 +3710,7 @@
   "submit.budget.error.fraction": "금액은 센트 단위까지 가능합니다 — 소수점 이하 두 자리까지 사용하세요.",
   "submit.budget.error.below_one": "한도는 최소 $0.01 이상이어야 합니다.",
   "submit.budget.error.below_estimate": "이 실행에는 최소 {amount}이(가) 필요합니다. 계속하려면 한도를 올리세요.",
+  "submit.budget.error.balance": "잔액이 이 실행의 최소 금액 {amount}에 미치지 못합니다. 계속하려면 충전하세요.",
   "submit.budget.estimate_preliminary": "예비 추정치",
   "submit.budget.estimate_preliminary_note": "케이스를 추가하고 모델을 선택하면 업데이트됩니다.",
   "submit.budget.estimate_note": "상한은 모든 호출에서 긴 프롬프트와 출력을 가정한 값이며, 일반적인 실행이 아닙니다.",

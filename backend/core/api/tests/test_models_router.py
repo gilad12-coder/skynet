@@ -13,7 +13,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ...billing.operation_pricing import ChargePolicy
+from ...billing.vercel_usage import sandbox_hold_cents
 from ...service_gateway.optimization.blackbox.runner import DEFAULT_MAX_TOKENS
+from ...service_gateway.optimization.blackbox.sandbox import COVERAGE_SLICE_SECONDS
 from ..model_catalog import CatalogModel, CatalogProvider, ModelCatalogResponse
 from ..routers.models import _validate_discover_url, create_models_router
 from .conftest import bypass_auth
@@ -286,3 +288,13 @@ def test_call_holds_reuse_a_recent_price() -> None:
         client.post("/models/call-holds", json={"models": [{"name": _PRICED_MODEL}]})
 
     assert seen == [f"/api/v1/models/{_PRICED_MODEL}/endpoints"]
+
+
+def test_call_holds_report_the_boxes_open_before_the_first_call() -> None:
+    """The boxes' hold is two deny-all boxes, each funded for its first coverage slice."""
+    resp = _holds_client([]).post("/models/call-holds", json={"models": []})
+
+    assert resp.status_code == 200
+    slice_cents = sandbox_hold_cents(lifetime_ms=COVERAGE_SLICE_SECONDS * 1000, vcpus=2)
+    assert resp.json()["box_hold_cents"] == float(2 * slice_cents)
+    assert resp.json()["box_hold_cents"] > 0

@@ -55,6 +55,7 @@ import { reportHandledError } from "@/shared/lib/report-error";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
 import type { RunUsage } from "@/shared/types/run-usage";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
+import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import { readServerSentEvents, type ServerSentEvent } from "@/shared/lib/sse";
 import { streamResumableTurn } from "@/shared/lib/resumable-turn";
 
@@ -454,10 +455,12 @@ export function getOptimizerCatalog(kind: ArtifactKind, mode: DataMode, signal?:
   return request<OptimizerCatalogResponse>(`/optimizers?${query}`, { signal });
 }
 
+// The server words each check's `message` in this locale for API readers;
+// the wizard itself renders `message_code`.
 export function runContractCheck(req: ContractCheckRequest, signal?: AbortSignal) {
   return request<ContractCheckResponse>("/optimizations/contract-check", {
     method: "POST",
-    body: JSON.stringify(req),
+    body: JSON.stringify({ ...req, locale: getActiveLocale() }),
     signal,
   });
 }
@@ -465,7 +468,7 @@ export function runContractCheck(req: ContractCheckRequest, signal?: AbortSignal
 export function staticContractCheck(req: ContractCheckRequest, signal?: AbortSignal) {
   return request<ContractCheckResponse>("/optimizations/contract-check/static", {
     method: "POST",
-    body: JSON.stringify(req),
+    body: JSON.stringify({ ...req, locale: getActiveLocale() }),
     signal,
   });
 }
@@ -496,7 +499,7 @@ export function getModelCallHolds(
   models: Array<{ name: string; token_source: "managed" | "byok" }>,
   signal?: AbortSignal,
 ) {
-  return request<{ holds: ModelCallHold[] }>("/models/call-holds", {
+  return request<{ holds: ModelCallHold[]; box_hold_cents: number }>("/models/call-holds", {
     method: "POST",
     body: JSON.stringify({ models }),
     signal,

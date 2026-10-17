@@ -3710,6 +3710,7 @@
   "submit.budget.error.fraction": "Суми враховуються до цента — використовуйте не більше двох знаків після коми.",
   "submit.budget.error.below_one": "Ліміт має бути щонайменше $0.01.",
   "submit.budget.error.below_estimate": "Для запуску потрібно щонайменше {amount}. Збільште ліміт, щоб продовжити.",
+  "submit.budget.error.balance": "Балансу не вистачає на мінімум для цього запуску — {amount}. Поповніть баланс, щоб продовжити.",
   "submit.budget.estimate_preliminary": "Попередня оцінка",
   "submit.budget.estimate_preliminary_note": "Оновлюється, коли ви додаєте приклади та обираєте моделі.",
   "submit.budget.estimate_note": "Верхня межа передбачає довгі промпти й відповіді на кожен виклик, а не типовий запуск.",

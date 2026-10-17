@@ -3710,6 +3710,7 @@
   "submit.budget.error.fraction": "Los importes se indican hasta el céntimo: usa como máximo dos decimales.",
   "submit.budget.error.below_one": "El límite debe ser de al menos $0.01.",
   "submit.budget.error.below_estimate": "La ejecución necesita al menos {amount}. Sube el límite para continuar.",
+  "submit.budget.error.balance": "Tu saldo no cubre el mínimo de esta ejecución, {amount}. Añade fondos para continuar.",
   "submit.budget.estimate_preliminary": "Estimación preliminar",
   "submit.budget.estimate_preliminary_note": "Se actualiza a medida que añades casos y eliges modelos.",
   "submit.budget.estimate_note": "El extremo alto supone prompts y salidas largos en cada llamada, no una ejecución típica.",

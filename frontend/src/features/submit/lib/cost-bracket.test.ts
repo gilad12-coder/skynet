@@ -438,6 +438,19 @@ test("the server's one-call hold raises the low end past the local estimate", ()
   // The hold is per token source: a BYOK price never stands in for a managed call.
   assert.equal(byokOnly.modelCallHoldCents, local.modelCallHoldCents);
 });
+
+test("the boxes' hold comes before the first call, so the low end covers both", () => {
+  const state = unifiedState({ choice: "gepa" });
+  const bracket = projectUnifiedCostBracket(state, null, {
+    models: unifiedModels,
+    callHolds: new Map([[callHoldKey("pricey", "managed"), 134.15]]),
+    boxHoldCents: 18.08,
+  });
+  assert.ok(bracket);
+  assert.equal(bracket.boxHoldCents, 19);
+  assert.equal(runtimeStartHold(bracket), 19);
+  assert.equal(chargeableBracket(bracket, "managed").lowCents, 19 + 135);
+});
 test("the unified projection's resolver matches the shared one for every allowed choice", () => {
   for (const kind of ["prompt", "code", "dspy_program", "text"] as const)
     for (const mode of ["single", "pairs"] as const)

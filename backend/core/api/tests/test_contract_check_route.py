@@ -13,7 +13,7 @@ from core.api import preflight_execution
 from core.api.auth import AuthenticatedUser, get_authenticated_user
 from core.api.routers import wizard_preflight
 from core.billing.budgets import AccountFundsError, BudgetInsufficientError
-from core.i18n import t
+from core.i18n import t, t_locale
 from core.worker.failure_events import failure_event
 
 RUN_CODE = "def run(artifact, input):\n    return artifact\n"
@@ -390,3 +390,39 @@ def test_unified_check_reports_model_routes_beside_the_optimizer(
     assert [check["key"] for check in result["checks"]] == keys
     assert started == ["preflight-setup-1"]
     assert gateway.dispatched == (["route-token"] if scope == "execution" else [])
+
+
+def test_static_route_words_its_messages_in_the_request_locale(calls: list[Any]) -> None:
+    """An English caller reads English messages; a caller naming no locale keeps the Hebrew base."""
+    with _client() as client:
+        english = client.post("/optimizations/contract-check/static", json={"spec": _spec(), "locale": "en"}).json()
+        base = client.post("/optimizations/contract-check/static", json={"spec": _spec()}).json()
+
+    coded = [item for item in english["checks"] if item["message_code"]]
+    assert coded
+    for item in coded:
+        assert item["message"] == t_locale("en", item["message_code"], **item["message_params"])
+    passed = next(item for item in base["checks"] if item["message_code"] == "contract.passed")
+    assert passed["message"] == t("contract.passed")
+    assert t_locale("en", "contract.passed") != t("contract.passed")
+
+
+def test_sandbox_route_words_a_budget_refusal_in_the_request_locale(
+    calls: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sampled check's own items follow the request locale too."""
+    monkeypatch.setattr(
+        wizard_preflight,
+        "run_preflight",
+        lambda request, user, store: SimpleNamespace(
+            status="failed",
+            checks=[SimpleNamespace(key="budget", status="failed", message=SPENT)],
+            workflow_result={},
+        ),
+    )
+    with _client() as client:
+        body = client.post("/optimizations/contract-check", json={"spec": _spec(), "locale": "en"}).json()
+
+    [refusal] = [item for item in body["checks"] if item["key"] == "workspace.run"]
+    assert refusal["message_code"] == "submit.unified.contract_budget"
+    assert refusal["message"] == t_locale("en", "submit.unified.contract_budget", error=SPENT)
