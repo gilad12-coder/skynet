@@ -146,24 +146,7 @@ function UnifiedWizardFrame() {
       return;
     }
     if (shortfall !== null) {
-      const message = shortfallMessage(shortfall);
-      toast.error(
-        shortfall.kind === "balance" ? (
-          <span className="flex items-center justify-between gap-3">
-            <span>{message}</span>
-            <button
-              type="button"
-              className="shrink-0 cursor-pointer font-semibold underline underline-offset-2"
-              onClick={() => openTo("billing")}
-            >
-              {msg("billing.action.add_funds")}
-            </button>
-          </span>
-        ) : (
-          message
-        ),
-        { toastId: SHORTFALL_TOAST_ID },
-      );
+      toast.error(shortfallMessage(shortfall), { toastId: SHORTFALL_TOAST_ID });
       return;
     }
     if (page < pageCount - 1) {
