@@ -92,7 +92,7 @@ export function TurnActivity({
   const pieces = interleaveThinking([], steps);
   const hasCards = pieces.some((piece) => piece.kind === "card");
   const hasHistory = Boolean(plan) || pieces.length > 0;
-  const toolRunning = steps.some(({ call }) => call.status === "running");
+  const toolRunning = useSettled(steps.some(({ call }) => call.status === "running"));
   const showThinking = streaming && !answering && !toolRunning;
 
   const renderPiece = (piece: (typeof pieces)[number]) =>
@@ -103,6 +103,7 @@ export function TurnActivity({
     ) : piece.kind === "steps" ? (
       <ActivityGroup
         key={`steps-${piece.steps[0]?.call.id}`}
+        autoOpen={false}
         steps={piece.steps.map(({ call }) => ({
           kind: stepKind?.(call) ?? "tool",
           status: call.status,
@@ -171,6 +172,24 @@ export function TurnActivity({
       {thinkingLine && <div className="pt-1">{thinkingLine}</div>}
     </div>
   );
+}
+
+// Most wizard tools answer in tens of ms; swapping the "Thinking" line out
+// for each of them made it blink and the turn jump.
+const TOOL_SETTLE_MS = 300;
+
+/** ``value`` once it has been true for a moment; false at once. */
+function useSettled(value: boolean): boolean {
+  const [settled, setSettled] = React.useState(false);
+  React.useEffect(() => {
+    if (!value) {
+      setSettled(false);
+      return;
+    }
+    const id = setTimeout(() => setSettled(true), TOOL_SETTLE_MS);
+    return () => clearTimeout(id);
+  }, [value]);
+  return value && settled;
 }
 
 /** The one line naming what the agent is thinking about, shimmering while it does. */

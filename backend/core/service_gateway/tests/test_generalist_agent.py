@@ -1626,11 +1626,12 @@ async def test_thinking_summaries_label_each_row_the_panel_shows() -> None:
     ]
 
 
-async def test_a_long_open_row_is_labelled_while_it_is_written() -> None:
-    """An open row gets labels from its reasoning so far, never after its closing label."""
+async def test_a_long_open_row_is_labelled_while_it_is_written(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An open row is labelled on a timer, even when its reasoning went quiet, never after its closing label."""
+    monkeypatch.setattr(generalist_module, "_LIVE_SUMMARY_FIRST_SECONDS", 0.02)
+    monkeypatch.setattr(generalist_module, "_LIVE_SUMMARY_EVERY_SECONDS", 0.02)
     published: list[dict] = []
     asked: list[str] = []
-    now = [0.0]
     release = asyncio.Event()
 
     async def summarize(text: str) -> str | None:
@@ -1647,35 +1648,29 @@ async def test_a_long_open_row_is_labelled_while_it_is_written() -> None:
             await release.wait()
         return f"label {len(asked)}"
 
-    summaries = ThinkingSummaries(summarize, published.append, clock=lambda: now[0])
+    summaries = ThinkingSummaries(summarize, published.append)
     summaries.observe({"event": "reasoning_patch", "data": {"chunk": _LONG}})
-    now[0] = 1.0
-    summaries.observe({"event": "reasoning_patch", "data": {"chunk": " more"}})
     await asyncio.sleep(0)
     assert asked == []
 
-    now[0] = 2.5
-    summaries.observe({"event": "reasoning_patch", "data": {"chunk": " again"}})
-    await asyncio.sleep(0)
-    assert asked == [_LONG + " more again"]
+    await asyncio.sleep(0.05)
+    assert asked == [_LONG]
     assert published == [{"event": "thinking_summary", "data": {"index": 0, "text": "label 1"}}]
 
-    now[0] = 3.0
-    summaries.observe({"event": "reasoning_patch", "data": {"chunk": " x"}})
-    await asyncio.sleep(0)
-    assert len(asked) == 1
+    await asyncio.sleep(0.05)
+    assert len(asked) == 1, "unchanged reasoning is not labelled twice"
 
-    now[0] = 7.0
-    summaries.observe({"event": "reasoning_patch", "data": {"chunk": " y"}})
-    await asyncio.sleep(0)
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": " more"}})
+    await asyncio.sleep(0.05)
+    assert len(asked) == 2
     summaries.observe({"event": "tool_start", "data": {"id": "t1"}})
     release.set()
     while await summaries.next_label():
         pass
-    await asyncio.sleep(0)
+    await asyncio.sleep(0.05)
 
     assert [e["data"]["text"] for e in published] == ["label 1", "label 3"]
-    assert asked[1] == asked[2]
+    assert asked[1] == asked[2] == _LONG + " more"
 
 
 async def test_failed_or_slow_summaries_fall_back_to_the_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:

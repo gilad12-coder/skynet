@@ -2588,26 +2588,22 @@ class ThinkingSummaries:
         self,
         summarize: Callable[[str], Awaitable[str | None]],
         publish: Callable[[dict], None],
-        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         """Start a turn with no reasoning seen.
 
         Args:
             summarize: Returns the label for one row's reasoning, or ``None``.
             publish: Puts a ``thinking_summary`` event on the turn's stream.
-            clock: Monotonic seconds, for when a row still open gets a label; injectable for tests.
         """
         self._summarize = summarize
         self._publish = publish
-        self._clock = clock
         self._trail = ThinkingTrail()
         self._tasks: set[asyncio.Task] = set()
         self._live: asyncio.Task | None = None
         self._live_index: int | None = None
-        self._live_due = 0.0
 
     def observe(self, ev: dict) -> None:
-        """Track one streamed event of the turn, label the row it closes, and relabel a long open one.
+        """Track one streamed event of the turn, label the row it closes, and watch the row it opens.
 
         Args:
             ev: The ``{event, data}`` envelope about to reach the client.
@@ -2616,8 +2612,11 @@ class ThinkingSummaries:
         if closed is not None:
             self._drop_live()
         self._label_closed(closed)
-        if ev.get("event") == "reasoning_patch":
-            self._label_open()
+        row = self._trail.open_row()
+        if row is not None and row[0] != self._live_index:
+            self._drop_live()
+            self._live_index = row[0]
+            self._live = asyncio.create_task(self._label_live(row[0]))
 
     def close(self) -> None:
         """Close the last row, as the turn's end does, and start its label."""
@@ -2642,48 +2641,37 @@ class ThinkingSummaries:
             task.cancel()
 
     def _drop_live(self) -> None:
-        """Stop the open row's label: the row's closing label replaces it."""
+        """Stop labelling the open row: its closing label replaces the live ones."""
         if self._live is not None:
             self._live.cancel()
         self._live = None
         self._live_index = None
 
-    def _label_open(self) -> None:
-        """Label the open row while it is still written, as Codex's heading tracks the model's thinking.
+    async def _label_live(self, index: int) -> None:
+        """Label open row ``index`` while it is written, as Codex's heading tracks the model's thinking.
 
-        The first label lands once the row has thought for a while, then one
-        more each interval while it goes on, one call at a time.
-        """
-        row = self._trail.open_row()
-        if row is None:
-            return
-        index, text = row
-        now = self._clock()
-        if index != self._live_index:
-            self._drop_live()
-            self._live_index = index
-            self._live_due = now + _LIVE_SUMMARY_FIRST_SECONDS
-            return
-        if now < self._live_due or len(" ".join(text.split())) < _SUMMARY_MIN_CHARS:
-            return
-        if self._live is not None and not self._live.done():
-            return
-        self._live_due = now + _LIVE_SUMMARY_EVERY_SECONDS
-        self._live = asyncio.create_task(self._label_live(index, text))
-
-    async def _label_live(self, index: int, text: str) -> None:
-        """Publish a label for open row ``index`` unless the row closed meanwhile.
+        Runs on a timer, not on reasoning events: providers often send a
+        stretch's reasoning in one burst and then go quiet for seconds.
 
         Args:
             index: The open row's position in the turn.
-            text: Its reasoning so far.
         """
-        line = await self._attempt(index, text)
-        row = self._trail.open_row()
-        # A closed row gets its own label from all of its reasoning; a late
-        # live one must not land after it and overwrite it.
-        if line and row is not None and row[0] == index:
-            self._publish({"event": "thinking_summary", "data": {"index": index, "text": line}})
+        await asyncio.sleep(_LIVE_SUMMARY_FIRST_SECONDS)
+        labelled = ""
+        while True:
+            row = self._trail.open_row()
+            if row is None or row[0] != index:
+                return
+            text = row[1]
+            if text != labelled and len(" ".join(text.split())) >= _SUMMARY_MIN_CHARS:
+                labelled = text
+                line = await self._attempt(index, text)
+                row = self._trail.open_row()
+                # A closed row gets its own label from all of its reasoning; a
+                # late live one must not land after it and overwrite it.
+                if line and row is not None and row[0] == index:
+                    self._publish({"event": "thinking_summary", "data": {"index": index, "text": line}})
+            await asyncio.sleep(_LIVE_SUMMARY_EVERY_SECONDS)
 
     def _label_closed(self, closed: tuple[int, str] | None) -> None:
         """Label a row that just closed: short ones are their own label.

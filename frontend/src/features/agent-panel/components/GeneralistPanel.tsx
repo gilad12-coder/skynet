@@ -34,7 +34,13 @@ import { useGeneralistPanelState } from "../hooks/use-panel-state";
 import { getConversation } from "../lib/conversation-api";
 import { TRUST_MODE_HUE, useTrustMode } from "../hooks/use-trust-mode";
 import { extractWizardPatch, useWizardStateOptional } from "../hooks/use-wizard-state";
-import { parseScreenNav, switchScreenChat } from "../lib/screen-agent";
+import {
+  SCREEN_CHATS_KEY,
+  decodeScreenChats,
+  encodeScreenChats,
+  parseScreenNav,
+  switchScreenChat,
+} from "../lib/screen-agent";
 import type { ToolEndPayload, WizardState } from "../lib/types";
 import { stageDatasetForAgent } from "@/shared/lib/api";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
@@ -179,6 +185,13 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const screenOpeningRef = React.useRef<string | null>(null);
   const shownScreenRef = React.useRef<string | null>(null);
   const [kickoffScreen, setKickoffScreen] = React.useState<string | null>(null);
+  const keepScreenChats = React.useCallback(() => {
+    try {
+      window.sessionStorage.setItem(SCREEN_CHATS_KEY, encodeScreenChats(screenChatsRef.current));
+    } catch {
+      // Storage full or blocked: a reload then starts the screen's chat fresh.
+    }
+  }, []);
 
   // Agent-submit splash: a successful submit tool plays the same full-screen
   // banner the manual wizard button shows, then routes to the new job's
@@ -251,14 +264,17 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     (id: string, title: string, ctx: SessionEventContext) => {
       store.upsertFromMeta(id, title);
       if (!ctx.isActive) return;
-      if (shownScreenRef.current) screenChatsRef.current.set(shownScreenRef.current, id);
+      if (shownScreenRef.current) {
+        screenChatsRef.current.set(shownScreenRef.current, id);
+        keepScreenChats();
+      }
       store.setActiveId(id);
       // The user is actively in this conversation — every new turn is "seen"
       // by definition. Without this, the row would render as unread the
       // moment the server bumps its updated_at.
       store.markSeen(id);
     },
-    [store],
+    [store, keepScreenChats],
   );
 
   const { openTo: openSettingsTo } = useSettingsModal();
@@ -338,10 +354,13 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   }, [searchParams, setOpen, handlePickConversation, router]);
 
   const handleNewConversation = React.useCallback(() => {
-    if (shownScreenRef.current) screenChatsRef.current.delete(shownScreenRef.current);
+    if (shownScreenRef.current) {
+      screenChatsRef.current.delete(shownScreenRef.current);
+      keepScreenChats();
+    }
     agent.newSession();
     store.setActiveId(null);
-  }, [agent, store]);
+  }, [agent, store, keepScreenChats]);
 
   // Swap the chat when the screen on view changes. Off the wizard the chat
   // on view stays put. The conversation id is read through a ref so a turn
@@ -362,12 +381,26 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     if (shownScreen === null) return;
     const from = shownScreenRef.current;
     shownScreenRef.current = shownScreen;
+    if (from === null && screenChatsRef.current.size === 0) {
+      // A reload that reopened the setup brings each screen's chat back
+      // with it; any other setup starts with none.
+      if (shownScreen === reopenedScreenRef.current) {
+        let saved: string | null = null;
+        try {
+          saved = window.sessionStorage.getItem(SCREEN_CHATS_KEY);
+        } catch {
+          // Blocked storage: the screens start fresh.
+        }
+        screenChatsRef.current = decodeScreenChats(saved);
+      } else keepScreenChats();
+    }
     const next = switchScreenChat(
       screenChatsRef.current,
       from,
       conversationIdRef.current,
       shownScreen,
     );
+    keepScreenChats();
     if (next.kind === "stay") return;
     const opening = screenOpeningRef.current;
     screenOpeningRef.current = null;
@@ -400,6 +433,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     newSession,
     sendToAgent,
     setActiveConversation,
+    keepScreenChats,
   ]);
 
   // A fresh screen's agent opens the chat by itself: it fills the screen from
@@ -712,11 +746,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
                 </PopoverContent>
               </Popover>
             </div>
-            {agent.statusLabel && (
-              <div className="text-[0.6875rem] text-muted-foreground truncate">
-                {agent.statusLabel}
-              </div>
-            )}
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">

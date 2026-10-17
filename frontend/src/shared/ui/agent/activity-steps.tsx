@@ -175,6 +175,12 @@ interface ActivityGroupProps {
    * history does; only the reader's click folds them.
    */
   stayOpen?: boolean;
+  /**
+   * Opens by itself while a step runs. Off, the summary line shimmers
+   * instead, as Codex's folded groups do, so a quick tool doesn't flash the
+   * rows open and shut.
+   */
+  autoOpen?: boolean;
 }
 
 /**
@@ -183,11 +189,19 @@ interface ActivityGroupProps {
  * to the rows; it stays open while the burst is live (or, with ``stayOpen``,
  * after it too) unless the reader closes it. A burst of one step is just its row.
  */
-export function ActivityGroup({ steps, children, live = false, stayOpen = false }: ActivityGroupProps) {
+export function ActivityGroup({
+  steps,
+  children,
+  live = false,
+  stayOpen = false,
+  autoOpen = true,
+}: ActivityGroupProps) {
   const [choice, setChoice] = React.useState<boolean | null>(null);
   const summary = summarizeActivity(steps);
   if (steps.length <= 1 || !summary.lead) return <div className="flex flex-col">{children}</div>;
-  const open = activityGroupOpen(choice, { live, running: summary.running, stayOpen });
+  const open = autoOpen
+    ? activityGroupOpen(choice, { live, running: summary.running, stayOpen })
+    : (choice ?? false);
   const LeadIcon = ACTIVITY_ICONS[summary.lead];
   const label = joinSummary(
     summary.parts.map(({ kind, count }) => formatMsg(SUMMARY_KEYS[kind], { count })),
