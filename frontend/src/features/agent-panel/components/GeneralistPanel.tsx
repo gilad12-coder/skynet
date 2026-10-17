@@ -339,6 +339,12 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   // on view stays put. The conversation id is read through a ref so a turn
   // landing mid-switch cannot re-run this for the same screen.
   const conversationIdRef = React.useRef(agent.conversationId);
+  const reopenedScreen = wizardCtx?.reopenedScreen ?? null;
+  const reopenedScreenRef = React.useRef(reopenedScreen);
+  // Declared before the screen-switch effect, so it is current when that runs.
+  React.useEffect(() => {
+    reopenedScreenRef.current = reopenedScreen;
+  }, [reopenedScreen]);
   React.useEffect(() => {
     conversationIdRef.current = agent.conversationId;
   }, [agent.conversationId]);
@@ -364,7 +370,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       newSession();
       setActiveConversation(null);
       if (opening) sendOpening();
-      else setKickoffScreen(shownScreen);
+      else if (shownScreen !== reopenedScreenRef.current) setKickoffScreen(shownScreen);
       return;
     }
     const id = next.conversationId;

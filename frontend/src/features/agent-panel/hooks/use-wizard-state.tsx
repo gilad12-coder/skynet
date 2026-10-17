@@ -49,6 +49,12 @@ interface WizardStateContextValue {
   setScreenIssue: (issue: string | null) => void;
   /** The wizard frame registers its own Continue / Back handlers here. */
   setScreenNavigator: (navigator: ScreenNavigator | null) => void;
+  /**
+   * The screen a reload reopened, until the user leaves it. Its agent does
+   * not open the chat by itself: the screen was filled before the reload.
+   */
+  reopenedScreen: string | null;
+  setReopenedScreen: (screen: string | null) => void;
   /** Move the wizard as a screen agent asked, through the frame's handlers. */
   navigateScreen: (nav: ScreenNav) => void;
 }
@@ -68,6 +74,7 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
   const agentWrittenRef = React.useRef<Set<string>>(new Set());
   const [wizardScreen, setWizardScreen] = React.useState<string | null>(null);
   const [screenIssue, setScreenIssue] = React.useState<string | null>(null);
+  const [reopenedScreen, setReopenedScreen] = React.useState<string | null>(null);
   // A ref, not state: the frame re-registers on every render that changes its
   // handlers, and the agent reads it only when a move arrives.
   const navigatorRef = React.useRef<ScreenNavigator | null>(null);
@@ -181,6 +188,8 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       setScreenIssue,
       setScreenNavigator,
       navigateScreen,
+      reopenedScreen,
+      setReopenedScreen,
     }),
     [
       state,
@@ -195,6 +204,7 @@ export function WizardStateProvider({ children }: { children: React.ReactNode })
       screenIssue,
       setScreenNavigator,
       navigateScreen,
+      reopenedScreen,
     ],
   );
 

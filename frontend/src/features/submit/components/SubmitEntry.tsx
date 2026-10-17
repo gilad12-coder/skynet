@@ -30,11 +30,15 @@ export function SubmitEntry() {
   const { data: session, status } = useSession();
   const accountId = status === "loading" ? null : sessionIdentity(session) || null;
 
+  // The wizard reads this tab's saved setup as it mounts, which the server
+  // render cannot see; mounting after hydration keeps both renders equal.
+  const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     clearRetiredDrafts();
+    setHydrated(true);
   }, []);
 
-  if (accountId === null) return null;
+  if (accountId === null || !hydrated) return null;
   // Keyed by account so a sign-in switch never carries one user's setup to another.
-  return <UnifiedWizard key={accountId} folderId={folderId} />;
+  return <UnifiedWizard key={accountId} accountId={accountId} folderId={folderId} />;
 }

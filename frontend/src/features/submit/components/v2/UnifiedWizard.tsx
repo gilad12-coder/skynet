@@ -93,10 +93,13 @@ function UnifiedWizardFrame() {
     if (next) setPages((p) => ({ ...p, [next]: 0 }));
     goNext();
   }, [forwardOpen, page, pageCount, current, steps, position, goNext]);
+  const [reopenedScreen, setReopenedScreen] = useState(() => (w.restored ? visibleScreen : null));
+  if (reopenedScreen !== null && reopenedScreen !== visibleScreen) setReopenedScreen(null);
   const autoAdvance = useAutoAdvanceDriver(
     visibleScreen,
     forwardOpen && !advancing && !submitting,
     forward,
+    reopenedScreen,
   );
 
   const back = useCallback(() => {
@@ -139,6 +142,10 @@ function UnifiedWizardFrame() {
       : limitNeeded !== null
         ? belowEstimateMessage(limitNeeded)
         : null;
+  const shareReopenedScreen = wizardCtx?.setReopenedScreen;
+  useEffect(() => {
+    shareReopenedScreen?.(reopenedScreen);
+  }, [reopenedScreen, shareReopenedScreen]);
   useEffect(() => {
     setWizardScreen?.(visibleScreen);
   }, [visibleScreen, setWizardScreen]);
@@ -243,10 +250,16 @@ function UnifiedWizardFrame() {
 }
 
 /** The one submission wizard: Task, Inputs, Optimizer, Metric, then Run. */
-export function UnifiedWizard({ folderId = null }: { folderId?: string | null }) {
+export function UnifiedWizard({
+  accountId,
+  folderId = null,
+}: {
+  accountId: string;
+  folderId?: string | null;
+}) {
   return (
     <ExecutionBudgetProvider>
-      <WizardV2Provider folderId={folderId}>
+      <WizardV2Provider accountId={accountId} folderId={folderId}>
         <UnifiedWizardFrame />
       </WizardV2Provider>
     </ExecutionBudgetProvider>
