@@ -235,6 +235,26 @@ export function thoughtSeconds(startedAt: number | null, endedAt: number): numbe
   return seconds > 0 ? seconds : null;
 }
 
+/**
+ * Split a thinking row's label into its heading and its sentence. Labels are
+ * written as Codex writes them, `heading\nsentence`; older ones are one
+ * sentence with no heading.
+ *
+ * Args:
+ *   summary: The stored label.
+ *
+ * Returns:
+ *   The heading, when there is one, and the sentence.
+ */
+export function splitSummary(summary: string): { heading?: string; detail: string } {
+  const at = summary.indexOf("\n");
+  if (at < 0) return { detail: summary };
+  const heading = summary.slice(0, at).trim();
+  const detail = summary.slice(at + 1).trim();
+  if (!heading || !detail) return { detail: heading || detail };
+  return { heading, detail };
+}
+
 export type ActivityPiece<S, T> =
   | { kind: "thinking"; segment: S }
   | { kind: "steps"; steps: T[] }

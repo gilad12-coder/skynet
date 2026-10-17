@@ -7,7 +7,7 @@ import { Brain, CaretRight } from "@/shared/ui/icons";
 
 import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import { thoughtSeconds } from "@/shared/lib/thinking-segments";
+import { splitSummary, thoughtSeconds } from "@/shared/lib/thinking-segments";
 
 import { RevealText } from "./reveal-text";
 import type { AgentThinking } from "./types";
@@ -73,6 +73,7 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
   const elapsedSec = Math.max(0, Math.round(elapsedMs / 100) / 10);
   const thought = thoughtSeconds(startedAt, endedAt ?? nowTs);
   const showSummary = Boolean(summary) && !isThinking;
+  const { heading, detail } = splitSummary(summary ?? "");
   const label = isThinking
     ? msg("shared.agent.thinking")
     : thought === null
@@ -93,7 +94,9 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
         {showSummary && summary && (
           <>
             <RevealText
-              text={summary}
+              text={detail}
+              lead={heading}
+              leadClassName="font-medium text-foreground"
               animate={summary !== summaryOnMount}
               className="min-w-0 break-words text-foreground/80"
             />

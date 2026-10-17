@@ -1511,14 +1511,27 @@ def test_share_plan_keeps_the_first_plan_of_a_turn() -> None:
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ('"Your rows are pairs.\nEach one gets an answer."', "Your rows are pairs. Each one gets an answer."),
-        ("- One. Two. Three.", "One. Two."),
+        (
+            "Matching columns to inputs\nThe question column is the input. The answer is the output.",
+            "Matching columns to inputs\nThe question column is the input.",
+        ),
+        (
+            '**Checking the budget**\n\n"Five dollars covers a short run."',
+            "Checking the budget\nFive dollars covers a short run.",
+        ),
+        ("**Reading the rows:** Each row is one ticket.", "Reading the rows\nEach row is one ticket."),
+        ("- One. Two. Three.", "One."),
+        ("Reading the rows", "Reading the rows"),
+        (
+            "This line is far too long to be a heading at all\nso it joins the sentence.",
+            "This line is far too long to be a heading at all so it joins the sentence.",
+        ),
         ("   ", None),
         ("x" * 300, "x" * 300),
     ],
 )
 def test_clean_summary_keeps_whole_sentences(raw: str, expected: str | None) -> None:
-    """A label is unquoted, flattened to its first two sentences, and never cut mid-sentence."""
+    """A label becomes a heading line and one whole sentence, unquoted and never cut mid-sentence."""
     assert _clean_summary(raw) == expected
 
 

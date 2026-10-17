@@ -8,6 +8,7 @@ import {
   lastEventAt,
   reopenThinking,
   parseThinkingRows,
+  splitSummary,
   startThinking,
   summarizeThinking,
   thoughtSeconds,
@@ -167,4 +168,13 @@ test("saved thinking rows come back closed, malformed ones dropped", () => {
   );
   assert.equal(parseThinkingRows(null), undefined);
   assert.equal(parseThinkingRows([]), undefined);
+});
+
+test("a label splits into its heading and sentence; an old one-line label has no heading", () => {
+  assert.deepEqual(splitSummary("Matching columns\nThe question column is the input."), {
+    heading: "Matching columns",
+    detail: "The question column is the input.",
+  });
+  assert.deepEqual(splitSummary("Your rows are pairs."), { detail: "Your rows are pairs." });
+  assert.deepEqual(splitSummary("Matching columns\n"), { detail: "Matching columns" });
 });

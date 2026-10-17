@@ -2261,22 +2261,22 @@ _FALLBACK_SUMMARY_CHARS = 240
 # The tail of a long stretch says where the thinking landed, which is what
 # the row's label should tell.
 _SUMMARY_INPUT_CHARS = 6000
+# Modeled on Codex's reasoning summaries: a short heading naming the step the
+# assistant is on, then one sentence of detail. Naming the step, rather than a
+# conclusion, keeps the label true when the reasoning has not settled anything.
 _SUMMARY_PROMPT = (
-    "You tell a user, in {language}, what an AI assistant just worked out while helping them set up an "
-    "optimization. Read its private reasoning and write one or two short sentences (at most 30 words) on the "
-    "outcome: what it found, chose or concluded about the user's task, data or setup, like 'Your examples are "
-    "question and answer pairs, so each row gets one input and one expected output.' Write about the user's "
-    "work, not the assistant's process: no 'planned to', 'decided to share a plan', 'will call', 'next step'. "
-    "Never write 'I', 'me' or 'we': the assistant is never the speaker, so 'I'll treat the question column as "
-    "input' becomes 'The question column is the input'. Do not tell the user to do something the assistant "
-    "does itself (naming the run, searching models, filling fields); ask something of the user only when the "
-    "reasoning says it needs the user. The assistant's own limits or mistakes are not the user's business. "
-    "Never name a tool, function or field, not even in plain words (no 'update wizard state', 'list datasets', "
-    "'request upload'), model ids or code. State only what the reasoning settles as fact; leave out claims it "
-    "is unsure of and never guess at settings it does not mention. Plain sentences only: no quotes, lists, "
-    "headings or preamble."
+    "Summarize, in {language}, the step an AI assistant is working on, from its private reasoning while it "
+    "helps a user set up an optimization. Write exactly two lines. Line 1: a heading of 2 to 6 words naming "
+    "the step, starting with a verb in its -ing form in English or the natural equivalent in {language}, like "
+    "'Matching columns to inputs'. Line 2: one sentence of at most 25 words on what the step looks at or "
+    "works out about the user's task, data or setup, like 'The question column becomes the input and the "
+    "answer column the expected output.' Never write 'I', 'me' or 'we'. Never name tools, functions, fields, "
+    "model ids or code. Say only what the reasoning says; never guess. No quotes, lists or preamble."
 )
 _SENTENCE_END = re.compile(r"(?<=[.!?。！？])\s+")
+# Stored labels put the heading on its own first line, which the row shows bold.
+_HEADING_BREAK = "\n"
+_MAX_HEADING_WORDS = 8
 
 
 def plan_tool(emit: Callable[[dict], None]) -> dspy.Tool:
@@ -2389,10 +2389,25 @@ def _summary_line(lm: Any, language: str, reasoning: str) -> str | None:
     return _clean_summary(str(first or ""))
 
 
-def _clean_summary(text: str) -> str | None:
-    """Flatten a label to its first whole sentences, without wrapping quotes.
+def _plain(text: str) -> str:
+    """Strip markdown marks, wrapping quotes and extra spaces from a label part.
 
-    Whole sentences only: a label is never cut mid-sentence.
+    Args:
+        text: Raw label text.
+
+    Returns:
+        The text on one line.
+    """
+    flat = " ".join(text.replace("**", " ").replace("__", " ").split())
+    return flat.lstrip("-*•# ").strip("\"'“”‘’").strip()
+
+
+def _clean_summary(text: str) -> str | None:
+    """Turn a raw label into ``heading\\nsentence``, or one plain sentence.
+
+    The heading is the first line, or a bold lead on a single line. A heading
+    too long to be one is read as the sentence. The sentence keeps only its
+    first whole sentence, so a label is never cut mid-sentence.
 
     Args:
         text: Raw label text.
@@ -2400,11 +2415,25 @@ def _clean_summary(text: str) -> str | None:
     Returns:
         The label, or ``None`` when nothing is left.
     """
-    flat = " ".join(line.strip().lstrip("-*•#").strip() for line in text.splitlines())
-    flat = " ".join(flat.split()).strip("\"'“”‘’").strip()
-    if not flat:
+    raw = text.strip()
+    lines = [line for line in raw.splitlines() if _plain(line)]
+    if not lines:
         return None
-    return " ".join(_SENTENCE_END.split(flat)[:_SUMMARY_MAX_SENTENCES])
+    bold = re.match(r"\s*\*\*(.+?)\*\*[:.\s]*(.*)", lines[0])
+    if len(lines) > 1:
+        heading, rest = lines[0], " ".join(lines[1:])
+    elif bold and bold.group(2).strip():
+        heading, rest = bold.group(1), bold.group(2)
+    else:
+        heading, rest = "", lines[0]
+    heading = _plain(heading).rstrip(".:：。")
+    if len(heading.split()) > _MAX_HEADING_WORDS:
+        heading, rest = "", f"{heading} {rest}"
+    detail = _plain(rest)
+    detail = _SENTENCE_END.split(detail)[0] if detail else ""
+    if not detail:
+        return heading or None
+    return f"{heading}{_HEADING_BREAK}{detail}" if heading else detail
 
 
 def fallback_summary(reasoning: str) -> str | None:
