@@ -797,7 +797,7 @@ export function Sidebar() {
                     title={msg(
                       renderedTab === "shared" ? "sidebar.shared.empty" : "sidebar.mine.empty",
                     )}
-                    className="px-4 py-10"
+                    className="px-1 py-10 [&_p]:text-balance"
                   />
                 )}
               </motion.div>
