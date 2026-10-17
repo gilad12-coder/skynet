@@ -108,6 +108,8 @@ export interface ProjectedModelRole {
   tokenSource: TokenSourceMode;
   /** Fraction or multiple of the base per-evaluation token projection used by this role. */
   tokenShare: number;
+  /** The server's charged hold for one call of this model, when it has priced it. */
+  callHoldCents?: number | null;
 }
 
 export interface RuntimeCostProjection {
@@ -283,9 +285,10 @@ function runtimeHold(runtime: RuntimeCostProjection | null | undefined): number 
 /**
  * Charged cents one call of the dearest role reserves before it is sent. The
  * backend bounds a call's input by the model's whole context window, so a
- * single call can hold far more than a whole run's expected usage; this is
- * that bound at the plain input rate, a floor under what the server reserves.
- * A role whose model has no known context window contributes nothing.
+ * single call can hold far more than a whole run's expected usage. The
+ * server's own price for that hold wins when it is known; otherwise this is
+ * that bound at the plain input rate, a floor under what the server reserves
+ * (it also counts cache-write rates). A role with neither contributes nothing.
  */
 function modelCallHold(
   roles: ProjectedModelRole[],
@@ -294,6 +297,8 @@ function modelCallHold(
 ): number {
   let hold = 0;
   for (const role of roles) {
+    if (typeof role.callHoldCents === "number" && role.callHoldCents > 0)
+      hold = Math.max(hold, Math.ceil(role.callHoldCents));
     const context = role.model?.max_input_tokens;
     if (typeof context !== "number" || !(context > 0)) continue;
     const usage = {
@@ -573,6 +578,13 @@ export interface UnifiedCostBracketOptions {
   models?: readonly CatalogModel[] | null;
   runtime?: RuntimeCostProjection | null;
   pricing?: Pick<PricingTerms, "usageMarkup" | "byokFeeFraction">;
+  /** The server's one-call holds, keyed by `callHoldKey`. */
+  callHolds?: ReadonlyMap<string, number> | null;
+}
+
+/** The key a model's one-call hold is looked up by: the same model costs less on a BYOK key. */
+export function callHoldKey(name: string, tokenSource: TokenSourceMode): string {
+  return `${tokenSource}:${name}`;
 }
 
 /** Mirrors `MIN_PAIRS_FOR_HELD_OUT`: fewer pairs than this get no test split. */
@@ -607,7 +619,8 @@ function finalScoredCases(state: WizardV2State): number {
   if (inputs.mode !== "pairs") return 1;
   const total = inputs.cases.length > 0 ? inputs.cases.length : inputs.rowCount;
   if (total <= 0) return 0;
-  if (total < UNIFIED_MIN_PAIRS_FOR_HELD_OUT) return Math.max(1, Math.round(total * inputs.split.val));
+  if (total < UNIFIED_MIN_PAIRS_FOR_HELD_OUT)
+    return Math.max(1, Math.round(total * inputs.split.val));
   const held = Math.round(total * (inputs.split.val + inputs.split.test));
   return Math.max(1, Math.min(total, held));
 }
@@ -637,10 +650,12 @@ export function projectUnifiedCostBracket(
     role: ProjectedModelRole["role"],
     config: ModelConfig | null,
     tokenShare: number,
-  ): ProjectedModelRole[] =>
-    config?.name.trim()
-      ? [{ role, model: findModel(config), tokenSource: config.token_source ?? "managed", tokenShare }]
-      : [];
+  ): ProjectedModelRole[] => {
+    if (!config?.name.trim()) return [];
+    const tokenSource = config.token_source ?? "managed";
+    const callHoldCents = options.callHolds?.get(callHoldKey(config.name, tokenSource)) ?? null;
+    return [{ role, model: findModel(config), tokenSource, tokenShare, callHoldCents }];
+  };
   const metricModel = !metricUsesModel(state)
     ? null
     : workspace.metricModelMode === "inherit"

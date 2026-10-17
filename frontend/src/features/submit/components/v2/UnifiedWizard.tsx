@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
+import { toast } from "react-toastify";
 
 import { useHideAgentPill, useWizardStateOptional } from "@/features/agent-panel";
 import { useSettingsModal } from "@/features/settings";
@@ -37,6 +38,9 @@ const FIRST_PAGES: Record<WizardStepId, number> = { task: 0, inputs: 0, optimize
 
 // The screens that set the spending limit, as `limitContinueBlock` knows them.
 const LIMIT_SCREENS = ["budget", "plan"] as const;
+
+// One toast per short limit, however often Continue is pressed.
+const LIMIT_TOAST_ID = "submit-limit-below-estimate";
 
 const RUN_FAILURE_TEXT = {
   limit: "submit.run.failure.limit",
@@ -95,8 +99,13 @@ function UnifiedWizardFrame() {
   });
   const inputsOpen = canMoveForward(current, w.stepIssue("inputs"));
   const forwardOpen = inputsOpen && limitNeeded === null;
+  // Continue stays clickable under a short limit so the press can say why it holds.
   const forward = useCallback(() => {
-    if (!forwardOpen) return;
+    if (!inputsOpen) return;
+    if (limitNeeded !== null) {
+      toast.error(belowEstimateMessage(limitNeeded), { toastId: LIMIT_TOAST_ID });
+      return;
+    }
     if (page < pageCount - 1) {
       setPages((p) => ({ ...p, [current]: page + 1 }));
       return;
@@ -104,7 +113,7 @@ function UnifiedWizardFrame() {
     const next = steps[position + 1];
     if (next) setPages((p) => ({ ...p, [next]: 0 }));
     goNext();
-  }, [forwardOpen, page, pageCount, current, steps, position, goNext]);
+  }, [inputsOpen, limitNeeded, page, pageCount, current, steps, position, goNext]);
   const [reopenedScreen, setReopenedScreen] = useState(() => (w.restored ? visibleScreen : null));
   if (reopenedScreen !== null && reopenedScreen !== visibleScreen) setReopenedScreen(null);
   const autoAdvance = useAutoAdvanceDriver(
@@ -271,7 +280,7 @@ function UnifiedWizardFrame() {
           onBack={back}
           onNext={forward}
           backDisabled={position === 0 && page === 0}
-          nextDisabled={!forwardOpen}
+          nextDisabled={!inputsOpen}
           showSubmit={lastScreen}
           screen={{ index: page, count: pageCount }}
           runFailure={runFailure}

@@ -98,7 +98,7 @@ import {
   writeWorkspaceFile,
 } from "../lib/wizard-v2";
 import { useExecutionBudget } from "./use-execution-budget";
-import { useModelCatalog } from "./use-submit-wizard-data";
+import { useModelCallHolds, useModelCatalog } from "./use-submit-wizard-data";
 import { useWizardPreflight } from "./use-wizard-preflight";
 
 export type SubmitPhase = "idle" | "sending" | "splash" | "done";
@@ -373,14 +373,6 @@ export function WizardV2Provider({
     [state, optimizerCatalog, agentWriting],
   );
 
-  const costBracket = useMemo(
-    () =>
-      projectUnifiedCostBracket(state, optimizerCatalog, {
-        models: modelCatalog?.models ?? null,
-        pricing,
-      }),
-    [state, optimizerCatalog, modelCatalog, pricing],
-  );
   const metricCallsModel = metricUsesModel(state);
   const metricModel = metricCallsModel ? resolvedMetricModel(state) : null;
   const submittedModels = [
@@ -389,6 +381,16 @@ export function WizardV2Provider({
     ...(state.optimizer.choice === "shinka_evolve" ? state.optimizer.extraReflectionModels : []),
     metricModel,
   ].filter(hasModel);
+  const callHolds = useModelCallHolds(submittedModels);
+  const costBracket = useMemo(
+    () =>
+      projectUnifiedCostBracket(state, optimizerCatalog, {
+        models: modelCatalog?.models ?? null,
+        pricing,
+        callHolds,
+      }),
+    [state, optimizerCatalog, modelCatalog, pricing, callHolds],
+  );
   const tokenSource = aggregateTokenSource(submittedModels);
   const chargeable = costBracket ? chargeableBracket(costBracket, tokenSource) : null;
   // What the run would cost with another engine, everything else unchanged.
@@ -396,7 +398,7 @@ export function WizardV2Provider({
     const bracket = projectUnifiedCostBracket(
       { ...state, optimizer: { ...state.optimizer, choice } },
       optimizerCatalog,
-      { models: modelCatalog?.models ?? null, pricing },
+      { models: modelCatalog?.models ?? null, pricing, callHolds },
     );
     return bracket ? chargeableBracket(bracket, tokenSource) : null;
   };
@@ -610,8 +612,7 @@ export function WizardV2Provider({
         toast.info(msg(preflightPendingMessageKey(checked)));
         checked = null;
       } else if (checked.status !== "succeeded" || !preflightMayAdvance(checked, "execution")) {
-        const failure = checked.checks.find((check) => check.status === "failed");
-        toast.error(failure?.message ?? msg("submit.preflight.failed"));
+        // The box under Run states the failure and keeps it; a toast would repeat it.
         setRunFailure(runFailureFromCheck(identity, checked));
         checked = null;
       } else {
@@ -624,7 +625,6 @@ export function WizardV2Provider({
       const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
       if (mountedRef.current && !(error instanceof Error && error.name === "AbortError")) {
         const shown = message.startsWith("budget.") ? msg(message as MessageKey) : message;
-        toast.error(shown);
         setRunFailure(runFailureFromError(identity, shown));
       }
       checked = null;

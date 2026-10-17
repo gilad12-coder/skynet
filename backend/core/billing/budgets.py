@@ -183,6 +183,11 @@ def _total(value: int) -> int:
     return value
 
 
+def _usd(cents: int) -> str:
+    """Write whole cents as dollars, the unit the wizard shows the limit in."""
+    return f"${cents / 100:,.2f}"
+
+
 def _admit(
     session: Session,
     wallet: BillingCustomerModel,
@@ -209,8 +214,8 @@ def _admit(
         remaining = budget.total_cents * CENT_SCALE - budget.settled_units
         if scope > remaining:
             raise BudgetInsufficientError(
-                f"The next operation needs up to {ceil_cents(scope)} cents, but only "
-                f"{max(remaining, 0) // CENT_SCALE} of the {budget.total_cents}-cent limit remain."
+                f"The next operation needs up to {_usd(ceil_cents(scope))}, but only "
+                f"{_usd(max(remaining, 0) // CENT_SCALE)} of the {_usd(budget.total_cents)} limit remain."
             )
         if scope > remaining - budget.reserved_units:
             raise BudgetInFlightError("Covered work must settle before this operation can fit.")

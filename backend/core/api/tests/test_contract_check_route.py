@@ -199,7 +199,7 @@ def test_sandbox_route_gives_an_older_images_items_their_message_codes(
     assert {item["message_code"] for item in body["checks"] if item["sample_index"] is None} == {"contract.passed"}
 
 
-SPENT = "The next operation needs up to 135 cents, but only 53 of the 53-cent limit remain."
+SPENT = "The next operation needs up to $1.35, but only $0.53 of the $0.53 limit remain."
 
 
 @pytest.mark.parametrize(
@@ -303,7 +303,7 @@ def test_unified_guest_failure_after_a_refused_call_is_a_budget_error(
     monkeypatch.setattr(preflight_execution, "run_vercel_dspy", guest)
     gateway = SimpleNamespace(budget_refusal=BudgetInsufficientError(refusal) if refusal else None)
 
-    with pytest.raises(raised, match="135 cents" if refusal else "does not match"):
+    with pytest.raises(raised, match=r"\$1\.35" if refusal else "does not match"):
         preflight_execution._verify_unified(gateway, {}, scope="evaluation", identity="setup-1")
 
 
@@ -350,7 +350,7 @@ def test_unified_execution_check_refuses_a_limit_below_one_call_before_the_sandb
     started = _sandbox_recorder(monkeypatch)
     gateway = _RouteGateway(BudgetInsufficientError(SPENT))
 
-    with pytest.raises(BudgetInsufficientError, match="135 cents"):
+    with pytest.raises(BudgetInsufficientError, match=r"\$1\.35"):
         preflight_execution._verify_unified(gateway, _spec(budget=False), scope="execution", identity="setup-1")
 
     assert gateway.dispatched == ["route-token"]

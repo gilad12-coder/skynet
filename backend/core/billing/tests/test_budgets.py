@@ -417,6 +417,15 @@ def test_contention_differs_from_exhaustion(engine: Engine) -> None:
     assert _reserve(service, budget.id, "second", max_cents=10).state == "reserved"
 
 
+def test_limit_refusal_states_its_amounts_in_dollars(engine: Engine) -> None:
+    """The wizard shows the limit in dollars, so the refusal it relays does too."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 20, idempotency_key="draft")
+    with pytest.raises(BudgetInsufficientError) as refused:
+        _reserve(service, budget.id, "oversize", max_cents=21)
+    assert str(refused.value) == "The next operation needs up to $0.21, but only $0.20 of the $0.20 limit remain."
+
+
 def test_wallet_holds_span_budgets_and_protect_against_legacy_debits(engine: Engine) -> None:
     """Keep covered funding unavailable to other drafts and older interactive surfaces."""
     service = BudgetService(engine=engine)

@@ -3,8 +3,7 @@ import { test } from "node:test";
 
 import { currentRunFailure, runFailureFromCheck, runFailureFromError } from "./run-failure.ts";
 
-const SPENT =
-  "The next operation needs up to 797 cents, but only 498 of the 500-cent limit remain.";
+const SPENT = "The next operation needs up to $7.97, but only $4.98 of the $5.00 limit remain.";
 
 test("a check the limit refused is a limit failure with the server's words", () => {
   const failure = runFailureFromCheck("setup-a", {

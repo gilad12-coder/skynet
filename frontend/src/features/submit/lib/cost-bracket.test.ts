@@ -28,6 +28,7 @@ registerHooks({
 });
 
 const {
+  callHoldKey,
   chargeableBracket,
   defaultCeilingForBracket,
   defaultCeilingTrace,
@@ -86,7 +87,12 @@ test("prices repeated model selections as separate physical roles", () => {
 test("economy mode halves only the managed model share", () => {
   const roles = [
     { role: "task" as const, model: expensive, tokenSource: "managed" as const, tokenShare: 1 },
-    { role: "optimization" as const, model: expensive, tokenSource: "byok" as const, tokenShare: 1 },
+    {
+      role: "optimization" as const,
+      model: expensive,
+      tokenSource: "byok" as const,
+      tokenShare: 1,
+    },
   ];
   const standard = projectCostBracket({ ...base, maxMetricCalls: "1000", modelRoles: roles });
   const economy = projectCostBracket({
@@ -415,6 +421,23 @@ function unifiedState(patch: {
 
 const unifiedModels = [model("cheap", 1e-7, 4e-7), model("pricey", 3e-6, 1.5e-5)];
 
+test("the server's one-call hold raises the low end past the local estimate", () => {
+  const state = unifiedState({ choice: "gepa" });
+  const local = projectUnifiedCostBracket(state, null, { models: unifiedModels });
+  const priced = projectUnifiedCostBracket(state, null, {
+    models: unifiedModels,
+    callHolds: new Map([[callHoldKey("pricey", "managed"), 1932.4]]),
+  });
+  const byokOnly = projectUnifiedCostBracket(state, null, {
+    models: unifiedModels,
+    callHolds: new Map([[callHoldKey("pricey", "byok"), 1932.4]]),
+  });
+  assert.ok(local && priced && byokOnly);
+  assert.equal(priced.modelCallHoldCents, 1933);
+  assert.equal(chargeableBracket(priced, "managed").lowCents, 1933);
+  // The hold is per token source: a BYOK price never stands in for a managed call.
+  assert.equal(byokOnly.modelCallHoldCents, local.modelCallHoldCents);
+});
 test("the unified projection's resolver matches the shared one for every allowed choice", () => {
   for (const kind of ["prompt", "code", "dspy_program", "text"] as const)
     for (const mode of ["single", "pairs"] as const)
