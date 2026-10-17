@@ -2263,9 +2263,14 @@ _SUMMARY_PROMPT = (
     "outcome: what it found, chose or concluded about the user's task, data or setup, like 'Your examples are "
     "question and answer pairs, so each row gets one input and one expected output.' Write about the user's "
     "work, not the assistant's process: no 'planned to', 'decided to share a plan', 'will call', 'next step'. "
+    "Never write 'I', 'me' or 'we': the assistant is never the speaker, so 'I'll treat the question column as "
+    "input' becomes 'The question column is the input'. Do not tell the user to do something the assistant "
+    "does itself (naming the run, searching models, filling fields); ask something of the user only when the "
+    "reasoning says it needs the user. The assistant's own limits or mistakes are not the user's business. "
     "Never name a tool, function or field, not even in plain words (no 'update wizard state', 'list datasets', "
-    "'request upload'), model ids or code. State only what the reasoning says is so; never guess at settings "
-    "it does not mention. Plain sentences only: no quotes, lists, headings or preamble."
+    "'request upload'), model ids or code. State only what the reasoning settles as fact; leave out claims it "
+    "is unsure of and never guess at settings it does not mention. Plain sentences only: no quotes, lists, "
+    "headings or preamble."
 )
 _SENTENCE_END = re.compile(r"(?<=[.!?。！？])\s+")
 
