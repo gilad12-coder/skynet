@@ -226,19 +226,29 @@ async def stream_with_llm_metering(
 
     Yields:
         The upstream events; a ``done`` event gains a ``stats`` block with the
-        turn's token usage, cost and timing.
+        turn's token usage, cost and timing. When model calls made after
+        ``done`` (late thinking labels) changed the usage, one last
+        ``turn_stats`` event carries the full block, so the shown cost is
+        what gets debited.
     """
     started = time.monotonic()
     first_token_at: float | None = None
+    done_stats: dict[str, Any] | None = None
     try:
         async for event in source:
             name = event.get("event")
             if name == "message_patch" and first_token_at is None:
                 first_token_at = time.monotonic()
             elif name == "done" and isinstance(event.get("data"), dict):
-                stats = _turn_stats(usage_sink, token_source, started, first_token_at)
-                event = {**event, "data": {**event["data"], "stats": stats}}
+                done_stats = _turn_stats(usage_sink, token_source, started, first_token_at)
+                event = {**event, "data": {**event["data"], "stats": done_stats}}
             yield event
+        if done_stats is not None:
+            final = _turn_stats(usage_sink, token_source, started, first_token_at)
+            usage = ("input_tokens", "output_tokens", "cents")
+            if any(final[key] != done_stats[key] for key in usage):
+                # Timings stay as of ``done``: the reply was over by then.
+                yield {"event": "turn_stats", "data": {"stats": {**done_stats, **{k: final[k] for k in usage}}}}
     finally:
         engine = getattr(job_store, "engine", None)
         if engine is not None and usage_sink:

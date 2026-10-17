@@ -534,13 +534,31 @@ async def test_a_label_written_after_done_reaches_the_saved_turn(wrapper_engine:
         yield {"event": "message_patch", "data": {"chunk": "Upload it"}}
         yield {"event": "done", "data": {"assistant_message": "Upload it", "model": "test-model"}}
         yield {"event": "thinking_summary", "data": {"index": 0, "text": "Asked for the data"}}
+        yield {"event": "turn_stats", "data": {"stats": {"cents": 3, "input_tokens": 10}}}
 
     events = await _drain(_late_label_turn(), wrapper_engine)
 
-    assert events[-1]["event"] == "thinking_summary"
+    assert [e["event"] for e in events][-2:] == ["thinking_summary", "turn_stats"]
     rows = _assistant_rows(wrapper_engine)
     assert len(rows) == 1
-    assert [t.get("summary") for t in (rows[0].router_metadata or {})["thinking"]] == ["Asked for the data"]
+    metadata = rows[0].router_metadata or {}
+    assert [t.get("summary") for t in metadata["thinking"]] == ["Asked for the data"]
+    assert metadata["stats"] == {"cents": 3, "input_tokens": 10}
+
+
+async def test_a_row_whose_label_never_came_is_saved_with_one_from_its_reasoning(wrapper_engine: Engine) -> None:
+    """A stream dropped before the last label arrived still saves a label for every row."""
+
+    async def _unlabelled_turn() -> AsyncIterator[dict[str, Any]]:
+        """Think at length, reply and finish; no label ever arrives."""
+        yield {"event": "reasoning_patch", "data": {"chunk": "The user has support tickets. They need answers."}}
+        yield {"event": "message_patch", "data": {"chunk": "Upload it"}}
+        yield {"event": "done", "data": {"assistant_message": "Upload it", "model": "test-model"}}
+
+    await _drain(_unlabelled_turn(), wrapper_engine)
+
+    thinking = (_assistant_rows(wrapper_engine)[0].router_metadata or {})["thinking"]
+    assert [t["summary"] for t in thinking] == ["The user has support tickets. They need answers."]
 
 
 async def test_retracted_preamble_is_not_salvaged_as_the_reply(wrapper_engine: Engine) -> None:

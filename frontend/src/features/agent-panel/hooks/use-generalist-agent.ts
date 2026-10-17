@@ -454,6 +454,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       rt.turnStart = Math.max(0, (sessionsRef.current.get(key)?.messages.length ?? 1) - 1);
       // Labels can land after `done`, when the next turn may have moved rt on.
       const turnStart = rt.turnStart;
+      // The reply `done` landed on; stats that arrive after it belong there.
+      let replyAt: number | null = null;
       streamingKeysRef.current.add(key);
 
       patchSession(key, {
@@ -655,7 +657,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
                   ? ""
                   : msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.5"));
               const next = prev.slice();
-              next[next.length - 1] = {
+              replyAt = next.length - 1;
+              next[replyAt] = {
                 ...last,
                 content: reply || fallback,
                 model: result.model,
@@ -665,6 +668,19 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
               return next;
             });
             releaseSlot();
+          },
+          onTurnStats: (raw) => {
+            if (controller.signal.aborted) return;
+            const stats = parseTurnStats(raw);
+            if (!stats) return;
+            patchMessages(key, (prev) => {
+              const at = replyAt;
+              const reply = at === null ? undefined : prev[at];
+              if (at === null || !reply || reply.role !== "assistant") return prev;
+              const next = prev.slice();
+              next[at] = { ...reply, stats };
+              return next;
+            });
           },
           onError: (message, code) => {
             if (controller.signal.aborted) return;

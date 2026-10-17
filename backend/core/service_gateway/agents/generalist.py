@@ -32,6 +32,7 @@ import hashlib
 import inspect
 import json
 import logging
+import re
 import threading
 import time
 import uuid
@@ -2244,19 +2245,28 @@ _MAX_PLAN_CHARS = 300
 # more than it says.
 _SUMMARY_MIN_CHARS = 40
 # Labels often take 3-5s, so the last rows of a turn are labelled after its
-# ``done``: the stream stays open for them, never longer than this.
-_SUMMARY_TIMEOUT_SECONDS = 10.0
-_SUMMARY_MAX_CHARS = 120
+# ``done``: the stream stays open for them, never longer than this. A row the
+# model has not labelled by then gets a label cut from its own reasoning, so
+# no row is left without one.
+_SUMMARY_TIMEOUT_SECONDS = 8.0
+# One in eight calls stalls for the whole timeout, so a second call starts
+# when the first is slower than a label usually takes, and the first answer wins.
+_SUMMARY_HEDGE_SECONDS = 2.5
+_SUMMARY_MAX_SENTENCES = 2
+_FALLBACK_SUMMARY_CHARS = 240
 # The tail of a long stretch says where the thinking landed, which is what
-# the row's one line should tell.
+# the row's label should tell.
 _SUMMARY_INPUT_CHARS = 6000
 _SUMMARY_PROMPT = (
-    "You label an AI assistant's private reasoning for its user. Read the reasoning and write ONE line of "
-    "8 to 12 words, in {language}, on what the assistant worked out or decided, like 'Checked the task and "
-    "picked pairs as the input format'. Describe the work in the user's terms: never name a tool, function or "
-    "field, not even in plain words (no 'update wizard state', 'list datasets', 'request upload'); say what it "
-    "means for the user's setup instead. No quotes, no ending period, no preamble."
+    "You tell a user, in {language}, what an AI assistant just worked out while helping them set up an "
+    "optimization. Read its private reasoning and write one or two short sentences (at most 30 words) on the "
+    "outcome: what it found, chose or concluded about the user's task, data or setup, like 'Your examples are "
+    "question and answer pairs, so each row gets one input and one expected output.' Write about the user's "
+    "work, not the assistant's process: no 'planned to', 'decided to share a plan', 'will call', 'next step'. "
+    "Never name a tool, function or field, not even in plain words (no 'update wizard state', 'list datasets', "
+    "'request upload'). Plain sentences only: no quotes, lists, headings or preamble."
 )
+_SENTENCE_END = re.compile(r"(?<=[.!?。！？])\s+")
 
 
 def plan_tool(emit: Callable[[dict], None]) -> dspy.Tool:
@@ -2334,19 +2344,52 @@ def _summary_line(lm: Any, language: str, reasoning: str) -> str | None:
 
 
 def _clean_summary(text: str) -> str | None:
-    """Cut a label to one short line without wrapping quotes or a final period.
+    """Flatten a label to its first whole sentences, without wrapping quotes.
+
+    Whole sentences only: a label is never cut mid-sentence.
 
     Args:
         text: Raw label text.
 
     Returns:
-        The line, or ``None`` when nothing is left.
+        The label, or ``None`` when nothing is left.
     """
-    line = " ".join(text.strip().splitlines()[0].split()) if text.strip() else ""
-    line = line.strip("\"'“”‘’").rstrip(".").strip()
-    if len(line) > _SUMMARY_MAX_CHARS:
-        line = line[: _SUMMARY_MAX_CHARS - 1].rstrip() + "…"
-    return line or None
+    flat = " ".join(line.strip().lstrip("-*•#").strip() for line in text.splitlines())
+    flat = " ".join(flat.split()).strip("\"'“”‘’").strip()
+    if not flat:
+        return None
+    return " ".join(_SENTENCE_END.split(flat)[:_SUMMARY_MAX_SENTENCES])
+
+
+def fallback_summary(reasoning: str) -> str | None:
+    """Label a row from its own reasoning, for when the model gives no label in time.
+
+    Keeps the opening sentences, which state what the stretch is about, and
+    only whole ones, so the label is never cut off.
+
+    Args:
+        reasoning: One row's reasoning.
+
+    Returns:
+        The opening sentences, or ``None`` when the reasoning is empty.
+    """
+    flat = " ".join(reasoning.split())
+    if not flat:
+        return None
+    sentences = _SENTENCE_END.split(flat)
+    first = sentences[0]
+    if len(first) > _FALLBACK_SUMMARY_CHARS:
+        # Reasoning with no sentence break for this long is one run-on
+        # thought; its first clause still says what it is about.
+        head = first[:_FALLBACK_SUMMARY_CHARS]
+        cut = max(head.rfind(", "), head.rfind("; "))
+        return head[:cut] if cut > 0 else head.rsplit(" ", 1)[0]
+    kept = [first]
+    for sentence in sentences[1:_SUMMARY_MAX_SENTENCES]:
+        if len(" ".join([*kept, sentence])) > _FALLBACK_SUMMARY_CHARS:
+            break
+        kept.append(sentence)
+    return " ".join(kept)
 
 
 _MAX_SAVED_REASONING_CHARS = 20000
@@ -2514,22 +2557,74 @@ class ThinkingSummaries:
         task.add_done_callback(self._tasks.discard)
 
     async def _label(self, index: int, text: str) -> None:
-        """Publish the label of stretch ``index``, or nothing when it fails or is late.
+        """Publish the label of stretch ``index``, cut from its reasoning when the model gives none.
 
         Args:
             index: The stretch's position in the turn.
             text: Its reasoning.
         """
         try:
-            line = await asyncio.wait_for(self._summarize(text), timeout=_SUMMARY_TIMEOUT_SECONDS)
+            line = await self._hedged(index, text)
         except asyncio.CancelledError:
             logger.info("thinking summary %d dropped with its stream", index)
             raise
-        except Exception:
-            logger.info("thinking summary %d skipped", index, exc_info=True)
-            return
+        if not line:
+            logger.info("thinking summary %d fell back to its reasoning", index)
+            line = fallback_summary(text)
         if line:
             self._publish({"event": "thinking_summary", "data": {"index": index, "text": line}})
+
+    async def _hedged(self, index: int, text: str) -> str | None:
+        """Ask for a label, and once more when the first call is slow or fails; the first label wins.
+
+        Args:
+            index: The stretch's position in the turn, for logs.
+            text: Its reasoning.
+
+        Returns:
+            The label, or ``None`` when no call gave one within the timeout.
+        """
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        hedge_at = started + _SUMMARY_HEDGE_SECONDS
+        deadline = started + _SUMMARY_TIMEOUT_SECONDS
+        calls = 0
+        pending: set[asyncio.Future] = set()
+        try:
+            while True:
+                now = loop.time()
+                if now >= deadline:
+                    return None
+                if calls < 2 and (calls == 0 or now >= hedge_at or not pending):
+                    pending.add(asyncio.ensure_future(self._attempt(index, text)))
+                    calls += 1
+                    continue
+                if not pending:
+                    return None
+                until = hedge_at if calls < 2 else deadline
+                done, pending = await asyncio.wait(pending, timeout=until - now, return_when=asyncio.FIRST_COMPLETED)
+                for call in done:
+                    if call.result():
+                        return call.result()
+        finally:
+            for call in pending:
+                call.cancel()
+
+    async def _attempt(self, index: int, text: str) -> str | None:
+        """Make one label call; a failure is logged and gives no label.
+
+        Args:
+            index: The stretch's position in the turn, for logs.
+            text: Its reasoning.
+
+        Returns:
+            The label, or ``None``.
+        """
+        try:
+            return await self._summarize(text)
+        except Exception:
+            logger.info("thinking summary %d call failed", index, exc_info=True)
+            return None
 
 
 def _thinking_summaries(
@@ -2768,8 +2863,8 @@ async def run_generalist_agent(
     chat primitives work unchanged:
 
     * ``reasoning_patch`` — per-token reasoning
-    * ``thinking_summary`` — ``{index, text}``, a one-line label of the
-      turn's ``index``-th stretch of reasoning
+    * ``thinking_summary`` — ``{index, text}``, a one- or two-sentence label
+      of the turn's ``index``-th stretch of reasoning
     * ``plan`` — ``{text}``, what the agent said it will do this turn
     * ``tool_start`` / ``tool_end`` — wrap each MCP tool call
     * ``status_patch`` — human-readable progress around each tool call

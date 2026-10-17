@@ -86,15 +86,16 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
         onClick={() => setOpen((v) => !v)}
         disabled={!reasoning}
         aria-expanded={open}
-        className="group relative flex w-full items-center gap-2 py-1 text-start text-[0.8125rem] text-muted-foreground transition-colors enabled:cursor-pointer enabled:hover:text-foreground"
+        className="group relative flex w-full items-start gap-2 py-1 text-start text-[0.8125rem] leading-5 text-muted-foreground transition-colors enabled:cursor-pointer enabled:hover:text-foreground"
       >
-        <Brain className="size-3.5 shrink-0" aria-hidden />
+        {/* Rows align to the first line: a summary wraps in full, never cut. */}
+        <Brain className="mt-[3px] size-3.5 shrink-0" aria-hidden />
         {showSummary && summary && (
           <>
             <RevealText
               text={summary}
               animate={summary !== summaryOnMount}
-              className="min-w-0 truncate text-foreground/80"
+              className="min-w-0 break-words text-foreground/80"
             />
             <motion.span
               aria-hidden
@@ -136,7 +137,7 @@ export function ThinkingSection({ thinking, compact = false }: ThinkingSectionPr
         {reasoning && (
           <CaretRight
             className={cn(
-              "size-3 shrink-0 transition-[transform,opacity] duration-150",
+              "mt-1 size-3 shrink-0 transition-[transform,opacity] duration-150",
               open ? "rotate-90" : "rtl:-scale-x-100 opacity-0 group-hover:opacity-100",
             )}
             aria-hidden

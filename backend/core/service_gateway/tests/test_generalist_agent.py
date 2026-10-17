@@ -33,6 +33,7 @@ from core.service_gateway.agents.generalist import (
     _TurnAuthoringFlag,
     _wrap_tool_with_approval,
     approval_key,
+    fallback_summary,
     note_sample_language,
     plan_tool,
     scope_wizard_tool,
@@ -1509,14 +1510,32 @@ def test_share_plan_keeps_the_first_plan_of_a_turn() -> None:
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ('"Checked the task and picked pairs."\nExtra line', "Checked the task and picked pairs"),
+        ('"Your rows are pairs.\nEach one gets an answer."', "Your rows are pairs. Each one gets an answer."),
+        ("- One. Two. Three.", "One. Two."),
         ("   ", None),
-        ("x" * 300, "x" * 119 + "…"),
+        ("x" * 300, "x" * 300),
     ],
 )
-def test_clean_summary_keeps_one_short_line(raw: str, expected: str | None) -> None:
-    """A label is one line, unquoted, with no final period and a length cap."""
+def test_clean_summary_keeps_whole_sentences(raw: str, expected: str | None) -> None:
+    """A label is unquoted, flattened to its first two sentences, and never cut mid-sentence."""
     assert _clean_summary(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("reasoning", "expected"),
+    [
+        (
+            "The user wants support answers.  So pairs fit. Then the optimizer.",
+            "The user wants support answers. So pairs fit.",
+        ),
+        ("", None),
+        ("word " * 80, ("word " * 48).strip()),
+        ("a, " * 100, ", ".join(["a"] * 80)),
+    ],
+)
+def test_fallback_summary_keeps_the_opening_sentences(reasoning: str, expected: str | None) -> None:
+    """A fallback label is the reasoning's opening sentences, cut only at a clause or word."""
+    assert fallback_summary(reasoning) == expected
 
 
 _LONG = "Looking at the task, the user wants support answers, so pairs fit best here."
@@ -1566,9 +1585,10 @@ async def test_thinking_summaries_label_each_row_the_panel_shows() -> None:
     ]
 
 
-async def test_failed_or_slow_summaries_publish_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A label that errors or misses the timeout leaves the row unlabeled."""
-    monkeypatch.setattr(generalist_module, "_SUMMARY_TIMEOUT_SECONDS", 0.01)
+async def test_failed_or_slow_summaries_fall_back_to_the_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A label that errors or misses the timeout is cut from the row's own reasoning, so no row is unlabeled."""
+    monkeypatch.setattr(generalist_module, "_SUMMARY_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(generalist_module, "_SUMMARY_HEDGE_SECONDS", 0.01)
     published: list[dict] = []
 
     async def summarize(text: str) -> str | None:
@@ -1596,7 +1616,41 @@ async def test_failed_or_slow_summaries_publish_nothing(monkeypatch: pytest.Monk
     while await summaries.next_label():
         pass
 
-    assert published == []
+    assert sorted((e["data"]["index"], e["data"]["text"]) for e in published) == [
+        (0, fallback_summary("A" + _LONG)),
+        (1, fallback_summary("B" + _LONG)),
+    ]
+
+
+async def test_a_slow_summary_is_hedged_and_the_first_label_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A first call slower than the hedge delay starts a second one, whose label is published."""
+    monkeypatch.setattr(generalist_module, "_SUMMARY_HEDGE_SECONDS", 0.01)
+    published: list[dict] = []
+    calls: list[int] = []
+
+    async def summarize(text: str) -> str | None:
+        """Stall on the first call, answer at once on the second.
+
+        Args:
+            text: The stretch's reasoning.
+
+        Returns:
+            The label.
+        """
+        calls.append(len(calls))
+        if len(calls) == 1:
+            await asyncio.sleep(5)
+            return "too late"
+        return "Your rows are pairs."
+
+    summaries = ThinkingSummaries(summarize, published.append)
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": _LONG}})
+    summaries.close()
+    while await summaries.next_label():
+        pass
+
+    assert len(calls) == 2
+    assert [e["data"]["text"] for e in published] == ["Your rows are pairs."]
 
 
 async def test_turn_meters_the_summary_model_once_per_long_stretch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1655,7 +1709,7 @@ async def test_turn_meters_the_summary_model_once_per_long_stretch(monkeypatch: 
     assert set(names[names.index("done") + 1 :]) <= {"thinking_summary"}
     labels = [e["data"] for e in events if e["event"] == "thinking_summary"]
     assert sorted(d["index"] for d in labels) == [0, 1]
-    assert {d["text"] for d in labels} == {"Picked pairs for the inputs"}
+    assert {d["text"] for d in labels} == {"Picked pairs for the inputs."}
     assert _LabelLM.calls == 2
     assert sink.count(label_lm) == 1
 

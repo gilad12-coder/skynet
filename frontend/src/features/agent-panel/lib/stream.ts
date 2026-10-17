@@ -41,7 +41,7 @@ interface ConversationMetaPayload {
 
 export interface GeneralistAgentHandlers {
   onReasoningPatch?: (chunk: string) => void;
-  /** A one-line label for the turn's `index`-th stretch of reasoning. */
+  /** A one- or two-sentence label for the turn's `index`-th stretch of reasoning. */
   onThinkingSummary?: (ev: { index: number; text: string }) => void;
   /** What the agent said it will do this turn. */
   onPlan?: (text: string) => void;
@@ -62,6 +62,8 @@ export interface GeneralistAgentHandlers {
     /** Raw `stats` block; read it with `parseTurnStats`. */
     stats: unknown;
   }) => void;
+  /** The turn's final `stats`, sent after `done` when later model calls changed its cost. */
+  onTurnStats?: (stats: unknown) => void;
   onError: (message: string, code?: string) => void;
   signal?: AbortSignal;
 }

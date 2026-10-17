@@ -27,6 +27,7 @@ function recorder(): { calls: Call[]; handlers: GeneralistAgentHandlers } {
       onMessageReset: record("messageReset"),
       onConversationMeta: record("conversationMeta"),
       onDone: record("done"),
+      onTurnStats: record("turnStats"),
       onError: record("error"),
     },
   };
@@ -78,6 +79,14 @@ test("a plan and thinking labels reach their handlers, blank ones never", () => 
     ["plan", "I'll fill the inputs."],
     ["thinkingSummary", { index: 1, text: "Picked pairs" }],
   ]);
+});
+
+test("stats sent after done reach their handler, an empty block never", () => {
+  const calls = dispatch([
+    ["turn_stats", { stats: { cents: 3 } }],
+    ["turn_stats", {}],
+  ]);
+  assert.deepEqual(calls, [["turnStats", { cents: 3 }]]);
 });
 
 test("tool events carry their fields and default the missing ones", () => {

@@ -34,6 +34,7 @@ from ...service_gateway.agents.generalist import (
     TrustMode,
     WizardState,
     approval_key,
+    fallback_summary,
     get_approval_registry,
     run_generalist_agent,
 )
@@ -398,20 +399,42 @@ def _persist_assistant_turn(
     return message_id
 
 
-def _save_thinking_rows(job_store, message_id: int, rows: list[dict[str, Any]]) -> None:
-    """Replace a saved turn's thinking rows, for labels written after its ``done``.
+def _save_late_metadata(job_store, message_id: int, updates: dict[str, Any]) -> None:
+    """Replace keys of a saved turn's metadata, for labels and stats that arrived after its ``done``.
 
     Args:
         job_store: Job-store instance whose engine backs the DB session.
-        message_id: The assistant message the rows belong to.
-        rows: The turn's rows, labels included.
+        message_id: The assistant message the metadata belongs to.
+        updates: The keys to replace, e.g. ``thinking`` and ``stats``.
     """
     with Session(job_store.engine) as session:
         message = session.get(AgentMessageModel, message_id)
         if message is None:
             return
-        message.router_metadata = {**(message.router_metadata or {}), "thinking": rows}
+        message.router_metadata = {**(message.router_metadata or {}), **updates}
         session.commit()
+
+
+def _labelled(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give every row without a label one cut from its reasoning.
+
+    A stream dropped before its last labels arrived would otherwise save
+    rows that reopen without one.
+
+    Args:
+        rows: The turn's thinking rows.
+
+    Returns:
+        The rows, each with a ``summary`` when its reasoning has any text.
+    """
+    out = []
+    for row in rows:
+        if not row.get("summary"):
+            label = fallback_summary(str(row.get("reasoning") or ""))
+            if label:
+                row = {**row, "summary": label}
+        out.append(row)
+    return out
 
 
 async def _wrap_with_persistence(
@@ -469,6 +492,7 @@ async def _wrap_with_persistence(
     persisted = False
     saved_message_id: int | None = None
     late_labels = False
+    late_stats: dict[str, Any] | None = None
 
     async def _do_persist(content: str) -> None:
         """Write the accumulated turn exactly once; never raise.
@@ -501,7 +525,7 @@ async def _wrap_with_persistence(
                         ("served_model", served_model_used),
                         ("stats", turn_stats),
                         ("plan", plan),
-                        ("thinking", thinking.rows()),
+                        ("thinking", _labelled(thinking.rows())),
                     )
                     if value
                 }
@@ -581,13 +605,20 @@ async def _wrap_with_persistence(
                 await _do_persist(content)
             elif name == "thinking_summary" and persisted:
                 late_labels = True
+            elif name == "turn_stats" and persisted and isinstance(data.get("stats"), dict):
+                late_stats = data["stats"]
             yield event
     finally:
-        if late_labels and saved_message_id is not None and job_store is not None:
+        late: dict[str, Any] = {}
+        if late_labels:
+            late["thinking"] = _labelled(thinking.rows())
+        if late_stats:
+            late["stats"] = late_stats
+        if late and saved_message_id is not None and job_store is not None:
             try:
-                await asyncio.to_thread(_save_thinking_rows, job_store, saved_message_id, thinking.rows())
+                await asyncio.to_thread(_save_late_metadata, job_store, saved_message_id, late)
             except Exception:
-                logger.exception("Failed to save late thinking labels")
+                logger.exception("Failed to save the turn's late labels and stats")
         # The frontend tears down the SSE stream the moment ``submit_job_run_post``
         # succeeds, so ``done`` often never arrives and the wrapped generator is
         # closed (GeneratorExit / CancelledError). Salvage the turn here when it
