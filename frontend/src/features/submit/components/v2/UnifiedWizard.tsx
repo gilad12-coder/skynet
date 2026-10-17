@@ -40,8 +40,7 @@ const FIRST_PAGES: Record<WizardStepId, number> = { task: 0, inputs: 0, optimize
 // The screens that set the spending limit, as `budgetContinueBlock` knows them.
 const LIMIT_SCREENS = ["budget", "plan"] as const;
 
-// One toast per shortfall, however often Continue is pressed. It opens at the
-// top because the default corner sits over Continue itself.
+// One toast per shortfall, however often Continue is pressed.
 const SHORTFALL_TOAST_ID = "submit-budget-shortfall";
 
 function shortfallMessage(shortfall: BudgetShortfall): string {
@@ -131,10 +130,21 @@ function UnifiedWizardFrame() {
   );
   const { openTo } = useSettingsModal();
   const inputsOpen = canMoveForward(current, w.stepIssue("inputs"));
-  const forwardOpen = inputsOpen && shortfall === null;
+  // Until every model's one-call hold has loaded, the floor reads low and a
+  // run the account can't fund would pass; a press made meanwhile waits.
+  const pricing =
+    !w.costSettled &&
+    (beforeMetric || (LIMIT_SCREENS as readonly string[]).includes(visibleScreen));
+  const forwardOpen = inputsOpen && shortfall === null && !pricing;
+  const [waitingOn, setWaitingOn] = useState<string | null>(null);
+  if (waitingOn !== null && waitingOn !== visibleScreen) setWaitingOn(null);
   // Continue stays clickable under a shortfall so the press can say why it holds.
   const forward = useCallback(() => {
     if (!inputsOpen) return;
+    if (pricing) {
+      setWaitingOn(visibleScreen);
+      return;
+    }
     if (shortfall !== null) {
       const message = shortfallMessage(shortfall);
       toast.error(
@@ -163,7 +173,24 @@ function UnifiedWizardFrame() {
     const next = steps[position + 1];
     if (next) setPages((p) => ({ ...p, [next]: 0 }));
     goNext();
-  }, [inputsOpen, shortfall, openTo, page, pageCount, current, steps, position, goNext]);
+  }, [
+    inputsOpen,
+    pricing,
+    visibleScreen,
+    shortfall,
+    openTo,
+    page,
+    pageCount,
+    current,
+    steps,
+    position,
+    goNext,
+  ]);
+  useEffect(() => {
+    if (waitingOn === null || pricing) return;
+    setWaitingOn(null);
+    forward();
+  }, [waitingOn, pricing, forward]);
   const [reopenedScreen, setReopenedScreen] = useState(() => (w.restored ? visibleScreen : null));
   if (reopenedScreen !== null && reopenedScreen !== visibleScreen) setReopenedScreen(null);
   const autoAdvance = useAutoAdvanceDriver(
@@ -272,11 +299,12 @@ function UnifiedWizardFrame() {
     return () => window.removeEventListener("keydown", onKey);
   }, [forward, back, advancing, submitting, lastScreen]);
 
+  const metricHeld = runShort || !w.costSettled;
   const reachable = (step: WizardStepId) =>
     WIZARD_STAGE[step] <= WIZARD_STAGE[current] ||
-    (shortfall === null && !(runShort && WIZARD_STAGE[step] >= WIZARD_STAGE.metric));
+    (shortfall === null && !(metricHeld && WIZARD_STAGE[step] >= WIZARD_STAGE.metric));
   const stepper =
-    shortfall === null && !runShort
+    shortfall === null && !metricHeld
       ? w
       : {
           ...w,

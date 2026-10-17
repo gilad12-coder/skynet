@@ -594,6 +594,8 @@ export interface WizardV2Context {
   submitting: boolean;
   // TotalBudgetCard BudgetContext fields.
   costBracket: CostBracket | null;
+  /** Every model's one-call hold has loaded (or failed to), so the bracket's floor is final. */
+  costSettled: boolean;
   /** The charged estimate with another engine picked, everything else unchanged. */
   estimateFor(choice: OptimizerChoice): { lowCents: number; highCents: number } | null;
   suggestedCeiling: number | null;

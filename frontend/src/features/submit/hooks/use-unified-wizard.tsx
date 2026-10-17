@@ -381,7 +381,11 @@ export function WizardV2Provider({
     ...(state.optimizer.choice === "shinka_evolve" ? state.optimizer.extraReflectionModels : []),
     metricModel,
   ].filter(hasModel);
-  const { holds: callHolds, boxHoldCents } = useModelCallHolds(submittedModels);
+  const {
+    holds: callHolds,
+    boxHoldCents,
+    settled: costSettled,
+  } = useModelCallHolds(submittedModels);
   const costBracket = useMemo(
     () =>
       projectUnifiedCostBracket(state, optimizerCatalog, {
@@ -951,6 +955,7 @@ export function WizardV2Provider({
     submit,
     submitting: submitPhase !== "idle",
     costBracket,
+    costSettled,
     estimateFor,
     suggestedCeiling,
     tokenSource,

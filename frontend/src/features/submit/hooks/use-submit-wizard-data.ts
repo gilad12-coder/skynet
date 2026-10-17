@@ -103,6 +103,8 @@ export interface ModelCallHolds {
   holds: ReadonlyMap<string, number>;
   /** What the boxes hold before the first model call; null until it loads. */
   boxHoldCents: number | null;
+  /** Every named model's hold has loaded, or the request failed and the local estimate stands. */
+  settled: boolean;
 }
 
 /**
@@ -123,6 +125,7 @@ export function useModelCallHolds(
   ].sort();
   const signature = wanted.join("\n");
   const [loaded, setLoaded] = useState(0);
+  const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
     const missing = signature ? signature.split("\n").filter((key) => !callHoldCache.has(key)) : [];
@@ -142,19 +145,24 @@ export function useModelCallHolds(
         if (typeof box_hold_cents === "number") boxHoldCache = box_hold_cents;
         setLoaded((count) => count + 1);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!controller.signal.aborted) setFailed(signature);
+      });
     return () => controller.abort();
   }, [signature]);
 
   return useMemo(() => {
     const holds = new Map<string, number>();
-    if (signature) {
-      for (const key of signature.split("\n")) {
-        const cents = callHoldCache.get(key);
-        if (typeof cents === "number") holds.set(key, cents);
-      }
+    const keys = signature ? signature.split("\n") : [];
+    for (const key of keys) {
+      const cents = callHoldCache.get(key);
+      if (typeof cents === "number") holds.set(key, cents);
     }
-    return { holds, boxHoldCents: boxHoldCache };
+    const settled =
+      keys.length === 0 ||
+      failed === signature ||
+      (boxHoldCache !== null && keys.every((key) => callHoldCache.has(key)));
+    return { holds, boxHoldCents: boxHoldCache, settled };
     // `loaded` re-reads the module cache once a fetch lands.
-  }, [signature, loaded]);
+  }, [signature, loaded, failed]);
 }
