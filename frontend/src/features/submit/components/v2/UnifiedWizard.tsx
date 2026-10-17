@@ -93,7 +93,8 @@ function UnifiedWizardFrame() {
     if (next) setPages((p) => ({ ...p, [next]: 0 }));
     goNext();
   }, [forwardOpen, page, pageCount, current, steps, position, goNext]);
-  const [reopenedScreen] = useState(() => (w.restored ? visibleScreen : null));
+  const [reopenedScreen, setReopenedScreen] = useState(() => (w.restored ? visibleScreen : null));
+  if (reopenedScreen !== null && reopenedScreen !== visibleScreen) setReopenedScreen(null);
   const autoAdvance = useAutoAdvanceDriver(
     visibleScreen,
     forwardOpen && !advancing && !submitting,
@@ -141,6 +142,10 @@ function UnifiedWizardFrame() {
       : limitNeeded !== null
         ? belowEstimateMessage(limitNeeded)
         : null;
+  const shareReopenedScreen = wizardCtx?.setReopenedScreen;
+  useEffect(() => {
+    shareReopenedScreen?.(reopenedScreen);
+  }, [reopenedScreen, shareReopenedScreen]);
   useEffect(() => {
     setWizardScreen?.(visibleScreen);
   }, [visibleScreen, setWizardScreen]);
