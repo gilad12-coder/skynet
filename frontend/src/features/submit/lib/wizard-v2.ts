@@ -90,10 +90,16 @@ export interface InputsSlice {
   rationale: string;
 }
 
+export type ModelRole = "taskModel" | "reflectionModel";
+const MODEL_ROLES: readonly ModelRole[] = ["taskModel", "reflectionModel"];
+const NOT_FOLLOWING: Record<ModelRole, boolean> = { taskModel: false, reflectionModel: false };
+
 export interface OptimizerSlice {
   choice: OptimizerChoice;
   taskModel: ModelConfig | null;
   reflectionModel: ModelConfig | null;
+  /** Roles nobody picked a model for; they move with the Settings defaults. */
+  followsDefaults: Record<ModelRole, boolean>;
   extraReflectionModels: ModelConfig[];
   budget: BlackboxBudget;
   maxCostCents: number | null;
@@ -174,6 +180,7 @@ export function initialWizardV2State(
       choice: "auto",
       taskModel: null,
       reflectionModel: null,
+      followsDefaults: { taskModel: true, reflectionModel: true },
       extraReflectionModels: [],
       // Mirrors the backend BlackboxBudget defaults.
       budget: { max_scorer_runs: maxScorerRuns ?? 200, max_iterations: null, stop_at_score: null },
@@ -353,19 +360,15 @@ export function withLevel(
 }
 
 /**
- * The task and reflection models a new wizard starts with: each role's
- * default from Settings, else the catalog's pick: the best-value default for
- * the task model, the strongest model (else that default) for reflection.
- * Returns null once either model holds anything, so a user's pick, a cloned
- * run or an agent-set model is never overwritten.
+ * The models the defaults name for each role: the Settings default, else the
+ * catalog's pick: the best-value default for the task model, the strongest
+ * model (else that default) for reflection. A role with neither is null.
  */
-export function presetModels(
-  optimizer: Pick<OptimizerSlice, "taskModel" | "reflectionModel">,
-  defaults: { taskModel: ModelConfig | null; reflectionModel: ModelConfig | null },
+export function defaultModels(
+  prefs: Record<ModelRole, ModelConfig | null>,
   catalogDefault: string | null | undefined,
   catalogStrongest?: string | null,
-): Pick<OptimizerSlice, "taskModel" | "reflectionModel"> | null {
-  if (optimizer.taskModel !== null || optimizer.reflectionModel !== null) return null;
+): Record<ModelRole, ModelConfig | null> {
   const pick = (
     pref: ModelConfig | null,
     automatic: string | null | undefined,
@@ -373,9 +376,48 @@ export function presetModels(
     if (pref && hasModel(pref)) return pref;
     return automatic ? { name: automatic, token_source: "managed" } : null;
   };
-  const taskModel = pick(defaults.taskModel, catalogDefault);
-  const reflectionModel = pick(defaults.reflectionModel, catalogStrongest || catalogDefault);
-  return taskModel || reflectionModel ? { taskModel, reflectionModel } : null;
+  return {
+    taskModel: pick(prefs.taskModel, catalogDefault),
+    reflectionModel: pick(prefs.reflectionModel, catalogStrongest || catalogDefault),
+  };
+}
+
+const sameModel = (a: ModelConfig | null, b: ModelConfig | null): boolean =>
+  JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * The optimizer with every role that still follows the defaults set to
+ * them. A role someone picked keeps its model, and a role the defaults can't
+ * name yet keeps what it has. Returns the same object when nothing changes.
+ */
+export function withDefaultModels(
+  optimizer: OptimizerSlice,
+  defaults: Record<ModelRole, ModelConfig | null>,
+): OptimizerSlice {
+  let next = optimizer;
+  for (const role of MODEL_ROLES) {
+    const model = defaults[role];
+    // A setup kept from before roles were tracked has no flags; it keeps its models.
+    if (!optimizer.followsDefaults?.[role] || !model || sameModel(optimizer[role], model)) continue;
+    next = { ...next, [role]: model };
+  }
+  return next;
+}
+
+/**
+ * The optimizer after a patch. A model role the patch writes was picked (by
+ * the user, the setup agent or a cloned run), so it stops following the
+ * defaults.
+ */
+export function withOptimizerPatch(
+  optimizer: OptimizerSlice,
+  patch: Partial<OptimizerSlice>,
+): OptimizerSlice {
+  const picked = MODEL_ROLES.filter((role) => role in patch);
+  if (picked.length === 0) return { ...optimizer, ...patch };
+  const follows = { ...NOT_FOLLOWING, ...optimizer.followsDefaults };
+  for (const role of picked) follows[role] = false;
+  return { ...optimizer, ...patch, followsDefaults: follows };
 }
 
 /**

@@ -23,7 +23,7 @@ import {
   type ExperienceLevel,
 } from "@/features/experience";
 import { offerRunDoneNotifications } from "@/features/notifications";
-import { readPref } from "@/features/settings";
+import { readPref, useUserPrefs } from "@/features/settings";
 import {
   getJob,
   getOptimizationPayload,
@@ -79,10 +79,10 @@ import { createStepViewTracker } from "../lib/wizard-telemetry";
 import {
   WIZARD_V2_STEPS,
   contractSnapshot,
+  defaultModels,
   deleteWorkspaceFile,
   initialWizardV2State,
   presetEngine,
-  presetModels,
   resolvedMetricModel,
   type InputsSlice,
   type MetaSlice,
@@ -93,9 +93,12 @@ import {
   type WizardV2State,
   type WorkspaceSlice,
   wizardSteps,
+  withDefaultModels,
   withLevel,
+  withOptimizerPatch,
   withQuestionInputs,
   writeWorkspaceFile,
+  type ModelRole,
 } from "../lib/wizard-v2";
 import { useExecutionBudget } from "./use-execution-budget";
 import { useModelCallHolds, useModelCatalog } from "./use-submit-wizard-data";
@@ -122,7 +125,8 @@ type Action =
   // writes to two files streamed in one tick both survive.
   | { type: "file"; path: string; text: string | null }
   | { type: "go"; step: WizardStepId }
-  | { type: "level"; level: ExperienceLevel; optimizerBlocked: boolean };
+  | { type: "level"; level: ExperienceLevel; optimizerBlocked: boolean }
+  | { type: "defaultModels"; models: Record<ModelRole, ModelConfig | null> };
 
 const stepIndex = (step: WizardStepId) => WIZARD_V2_STEPS.indexOf(step);
 
@@ -142,6 +146,13 @@ function reducer(state: WizardV2State, action: Action): WizardV2State {
         ? deleteWorkspaceFile(state.workspace, action.path)
         : writeWorkspaceFile(state.workspace, action.path, action.text);
     return patch ? { ...state, workspace: { ...state.workspace, ...patch } } : state;
+  }
+  if (action.type === "defaultModels") {
+    const optimizer = withDefaultModels(state.optimizer, action.models);
+    return optimizer === state.optimizer ? state : { ...state, optimizer };
+  }
+  if (action.slice === "optimizer") {
+    return { ...state, optimizer: withOptimizerPatch(state.optimizer, action.patch) };
   }
   return { ...state, [action.slice]: { ...state[action.slice], ...action.patch } };
 }
@@ -670,26 +681,27 @@ export function WizardV2Provider({
     [],
   );
 
-  // The Settings defaults (else the catalog's default model) preset the task
-  // and reflection models once. A cloned run brings its own models, and
-  // anything set before the catalog arrives (an agent write, a user pick)
-  // blocks the preset for good.
-  const presetDone = useRef(searchParams.has("clone") || restored !== null);
+  // Roles nobody picked a model for take the Settings defaults (else the
+  // catalog's pick) when the catalog arrives, when a kept setup reopens and
+  // whenever Settings change. A cloned run brings its own models.
+  const { prefs } = useUserPrefs();
+  const cloning = searchParams.has("clone");
   useEffect(() => {
-    if (presetDone.current || !modelCatalog) return;
-    presetDone.current = true;
-    const preset = presetModels(
-      state.optimizer,
-      {
-        taskModel: readPref("optimizerTaskModel"),
-        reflectionModel: readPref("optimizerReflectionModel"),
-      },
-      modelCatalog.models.find((model) => model.is_default)?.value,
-      modelCatalog.models.find((model) => model.is_strongest)?.value,
-    );
-    if (preset) patchOptimizer(preset);
-    // Runs once, when the catalog first arrives; the models are read from that render.
-  }, [modelCatalog]);
+    if (cloning || !modelCatalog) return;
+    dispatch({
+      type: "defaultModels",
+      models: defaultModels(
+        {
+          taskModel: readPref("optimizerTaskModel"),
+          reflectionModel: readPref("optimizerReflectionModel"),
+        },
+        modelCatalog.models.find((model) => model.is_default)?.value,
+        modelCatalog.models.find((model) => model.is_strongest)?.value,
+      ),
+    });
+    // The context prefs only signal a change; readPref holds the stored value
+    // even before the provider has loaded it.
+  }, [cloning, modelCatalog, prefs.optimizerTaskModel, prefs.optimizerReflectionModel]);
 
   // The Settings default engine applies once the task and inputs say which
   // engines fit; a cloned run or an engine set earlier keeps its choice.
