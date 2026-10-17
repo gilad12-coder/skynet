@@ -11,7 +11,7 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { readServerSentEvents } from "@/shared/lib/sse";
 import { dispatchGeneralistEvent } from "./stream-events";
-import { fetchWithAuthRetry } from "@/shared/lib/api";
+import { announceWalletChange, fetchWithAuthRetry } from "@/shared/lib/api";
 
 // Resolve lazily — a module-load const races the injected window.__APP_ENV__
 // and freezes the build-time localhost fallback. See shared/lib/api.ts.
@@ -119,6 +119,9 @@ export async function streamGeneralistAgent(
         err instanceof Error ? err.message : msg("auto.features.agent.panel.lib.stream.literal.3"),
       );
     }
+  } finally {
+    // The turn is debited as its stream closes on the server.
+    announceWalletChange();
   }
 }
 

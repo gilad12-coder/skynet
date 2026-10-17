@@ -222,6 +222,13 @@ const INSUFFICIENT_FUNDS_CODE = I18N_KEY.BILLING_INSUFFICIENT_FUNDS;
 /** Browser event the central error path fires when a submit hits the balance gate. */
 export const INSUFFICIENT_FUNDS_EVENT = "billing-insufficient-credits";
 
+/** Browser event fired after work that debits the wallet, such as an agent turn, so the balance re-reads. */
+export const WALLET_CHANGED_EVENT = "wallet-changed";
+
+/** Fire {@link WALLET_CHANGED_EVENT}. */
+export function announceWalletChange(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(WALLET_CHANGED_EVENT));
+}
 /** Browser event fired when storage usage changes, such as a delete or a full quota, so the meter re-reads usage. */
 export const STORAGE_CHANGED_EVENT = "storage-changed";
 
@@ -3865,6 +3872,7 @@ export async function streamCodeAgent(
     onEvent: processEvent,
     signal: handlers.signal,
   });
+  if (result.status !== "failed" || result.started) announceWalletChange();
   if (result.status !== "failed") return;
   if (result.response) {
     const res = result.response;

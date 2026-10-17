@@ -152,7 +152,7 @@ function UnifiedWizardFrame() {
         ) : (
           message
         ),
-        { toastId: SHORTFALL_TOAST_ID, position: "top-center" },
+        { toastId: SHORTFALL_TOAST_ID },
       );
       return;
     }
