@@ -3855,6 +3855,7 @@
   "submit.preflight.execution": "بررسی‌های اجرا",
   "submit.preflight.failed": "بررسی‌های تنظیمات نیاز به توجه دارند.",
   "submit.run.failure.limit": "سقف هزینه برای شروع خیلی پایین است. یک فراخوانی مدل می‌تواند بیش از باقی‌ماندهٔ آن را رزرو کند.",
+  "submit.run.failure.balance": "موجودی حساب شما هزینهٔ فراخوانی بعدی مدل را پوشش نمی‌دهد، پس چیزی شروع نشد.",
   "submit.run.failure.other": "بررسی تنظیمات ناموفق بود، بنابراین چیزی شروع نشد.",
   "submit.run.failure.raise_limit": "افزایش سقف",
   "submit.preflight.idle": "با ادامه، بررسی‌های لازم تنظیمات انجام می‌شود.",

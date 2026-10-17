@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 
 import { useHideAgentPill, useWizardStateOptional } from "@/features/agent-panel";
+import { useSettingsModal } from "@/features/settings";
 import { msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
@@ -12,6 +13,7 @@ import { WizardAutoAdvanceContext, useAutoAdvanceDriver } from "../../hooks/use-
 import { ExecutionBudgetProvider } from "../../hooks/use-execution-budget";
 import { WizardV2Provider, useWizardV2Shell, v2Text } from "../../hooks/use-unified-wizard";
 import { limitContinueBlock } from "../../lib/budget-limit";
+import type { RunFailureCause } from "../../lib/run-failure";
 import { stepPages } from "../../lib/wizard-pages";
 import { WIZARD_V2_STEPS, type WizardStepId } from "../../lib/wizard-v2";
 import { WIZARD_STAGE, canMoveForward } from "../../lib/wizard-steps";
@@ -35,6 +37,12 @@ const FIRST_PAGES: Record<WizardStepId, number> = { task: 0, inputs: 0, optimize
 
 // The screens that set the spending limit, as `limitContinueBlock` knows them.
 const LIMIT_SCREENS = ["budget", "plan"] as const;
+
+const RUN_FAILURE_TEXT = {
+  limit: "submit.run.failure.limit",
+  balance: "submit.run.failure.balance",
+  other: "submit.run.failure.other",
+} as const satisfies Record<RunFailureCause, string>;
 
 // Arrow keys page the wizard only when they have no job where focus sits:
 // fields, editors, radio groups, tabs, menus and open dialogs keep them.
@@ -136,13 +144,17 @@ function UnifiedWizardFrame() {
   const limitScreen = LIMIT_SCREENS.find((screen) =>
     steps.some((step) => (stepPages(step, w.state) as readonly string[]).includes(screen)),
   );
+  const { openTo } = useSettingsModal();
+  const failureCause = w.runFailure?.cause;
   const runFailure: RunFailureNotice | null = w.runFailure && {
-    text: msg(w.runFailure.limit ? "submit.run.failure.limit" : "submit.run.failure.other"),
+    text: msg(RUN_FAILURE_TEXT[w.runFailure.cause]),
     detail: w.runFailure.detail,
     action:
-      w.runFailure.limit && limitScreen
-        ? { label: msg("submit.run.failure.raise_limit"), onClick: () => goToScreen(limitScreen) }
-        : undefined,
+      failureCause === "balance"
+        ? { label: msg("billing.action.add_funds"), onClick: () => openTo("billing") }
+        : failureCause === "limit" && limitScreen
+          ? { label: msg("submit.run.failure.raise_limit"), onClick: () => goToScreen(limitScreen) }
+          : undefined,
   };
 
   // The agent edits only the screen on view, so it is told which one that

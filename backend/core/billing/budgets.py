@@ -78,6 +78,10 @@ class BudgetInsufficientError(BudgetError):
     """Report work that cannot fit even after outstanding holds are released."""
 
 
+class AccountFundsError(BudgetInsufficientError):
+    """Report work the account's balance cannot fund, whatever the spending limit allows."""
+
+
 class BudgetInFlightError(BudgetError):
     """Wait for already-covered work before deciding whether funding is exhausted."""
 
@@ -221,7 +225,7 @@ def _admit(
         after_release = ceil_cents(budget.wallet_settled_units + charge) - budget.billed_cents
         if after_release <= wallet_balance:
             raise BudgetInFlightError("Other covered work currently holds the required wallet funds.")
-        raise BudgetInsufficientError("The account cannot fund the next operation.")
+        raise AccountFundsError("The account cannot fund the next operation.")
 
 
 class BudgetService:
@@ -280,7 +284,7 @@ class BudgetService:
             session.flush()
             wallet = session.get(BillingCustomerModel, username, with_for_update=True)
         if wallet is None:
-            raise BudgetInsufficientError("The account has no funded wallet.")
+            raise AccountFundsError("The account has no funded wallet.")
         StripeBillingService(engine=self._engine)._resolve_grant(wallet, datetime.now(UTC))
         return wallet
 
@@ -472,7 +476,7 @@ class BudgetService:
                     raise BudgetConflictError("Creation key was already used with a different total.")
                 return self._snapshot(session, budget, wallet)
             if wallet.balance_cents + int(wallet.grant_remaining or 0) <= account_committed_cents(session, username):
-                raise BudgetInsufficientError("The account has no available funds.")
+                raise AccountFundsError("The account has no available funds.")
             now = datetime.now(UTC)
             budget = ExecutionBudgetModel(
                 id=str(uuid4()),
@@ -630,7 +634,7 @@ class BudgetService:
             if widening and wallet.balance_cents + int(wallet.grant_remaining or 0) <= account_committed_cents(
                 session, username
             ):
-                raise BudgetInsufficientError("The account has no available funds for additional work.")
+                raise AccountFundsError("The account has no available funds for additional work.")
             if total != budget.total_cents or uncapped != budget.uncapped:
                 budget.total_cents = total
                 budget.uncapped = uncapped

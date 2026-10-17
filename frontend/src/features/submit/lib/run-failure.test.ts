@@ -13,14 +13,30 @@ test("a check the limit refused is a limit failure with the server's words", () 
       { key: "budget", status: "failed", message: SPENT },
     ],
   });
-  assert.deepEqual(failure, { identity: "setup-a", limit: true, detail: SPENT });
+  assert.deepEqual(failure, { identity: "setup-a", cause: "limit", detail: SPENT });
 });
 
-test("any other failed check is not a limit failure", () => {
+test("a budget check the account balance refused is a balance failure, not a limit one", () => {
   const failure = runFailureFromCheck("setup-a", {
-    checks: [{ key: "model.optimization", status: "failed", message: "HTTP 404" }],
+    checks: [
+      {
+        key: "budget",
+        status: "failed",
+        message: "The account cannot fund the next operation.",
+        field: "balance",
+      },
+    ],
   });
-  assert.deepEqual(failure, { identity: "setup-a", limit: false, detail: "HTTP 404" });
+  assert.equal(failure.cause, "balance");
+});
+
+test("any other failed check is not a budget failure", () => {
+  const failure = runFailureFromCheck("setup-a", {
+    checks: [
+      { key: "model.optimization", status: "failed", message: "HTTP 404", field: "balance" },
+    ],
+  });
+  assert.deepEqual(failure, { identity: "setup-a", cause: "other", detail: "HTTP 404" });
 });
 
 test("a failure with no message keeps no detail", () => {
@@ -32,10 +48,10 @@ test("a failure with no message keeps no detail", () => {
   assert.equal(runFailureFromError("s", "  ").detail, null);
 });
 
-test("a request that failed outright is never read as the limit", () => {
+test("a request that failed outright is never read as the budget", () => {
   assert.deepEqual(runFailureFromError("setup-a", "Network down"), {
     identity: "setup-a",
-    limit: false,
+    cause: "other",
     detail: "Network down",
   });
 });

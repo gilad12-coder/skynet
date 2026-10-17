@@ -3855,6 +3855,7 @@
   "submit.preflight.execution": "執行檢查",
   "submit.preflight.failed": "設定檢查需要跟進。",
   "submit.run.failure.limit": "支出上限太低，開始唔到。一次模型呼叫可能會預留多過上限剩低嘅金額。",
+  "submit.run.failure.balance": "你個賬戶餘額唔夠支付下一次模型呼叫，所以乜都未開始。",
   "submit.run.failure.other": "設定檢查失敗咗，所以乜都冇開始。",
   "submit.run.failure.raise_limit": "提高上限",
   "submit.preflight.idle": "繼續會執行所需嘅設定檢查。",

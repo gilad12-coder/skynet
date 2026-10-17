@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from core.billing.budget_amounts import cent_units
 from core.billing.budgets import (
+    AccountFundsError,
     BudgetBoundExceededError,
     BudgetConflictError,
     BudgetFencedError,
@@ -665,7 +666,7 @@ def test_uncapped_budget_admits_past_its_total_until_the_account_runs_dry(engine
     _reserve(service, budget.id, key="first", max_cents=30)
     _reserve(service, budget.id, key="second", max_cents=15)
     assert service.get(budget.id, "alice").available_cents == 5
-    with pytest.raises(BudgetInsufficientError, match="cannot fund"):
+    with pytest.raises(AccountFundsError, match="cannot fund"):
         _reserve(service, budget.id, key="third", max_cents=60)
 
 

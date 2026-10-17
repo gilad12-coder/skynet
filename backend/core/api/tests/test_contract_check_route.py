@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from core.api import preflight_execution
 from core.api.auth import AuthenticatedUser, get_authenticated_user
 from core.api.routers import wizard_preflight
-from core.billing.budgets import BudgetInsufficientError
+from core.billing.budgets import AccountFundsError, BudgetInsufficientError
 from core.i18n import t
 from core.worker.failure_events import failure_event
 
@@ -226,17 +226,22 @@ def test_sandbox_route_tells_a_spent_budget_from_a_code_mismatch(
 
 
 @pytest.mark.parametrize(
-    ("error", "key"),
-    [(BudgetInsufficientError(SPENT), "budget"), (RuntimeError(SPENT), "setup")],
+    ("error", "key", "field"),
+    [
+        (BudgetInsufficientError(SPENT), "budget", None),
+        (AccountFundsError("The account cannot fund the next operation."), "budget", "balance"),
+        (RuntimeError(SPENT), "setup", None),
+    ],
 )
 def test_preflight_reports_a_reservation_over_the_limit_as_a_budget_check(
-    monkeypatch: pytest.MonkeyPatch, error: Exception, key: str
+    monkeypatch: pytest.MonkeyPatch, error: Exception, key: str, field: str | None
 ) -> None:
-    """A runtime stopped by the check's limit fails the ``budget`` check; any other failure stays ``setup``.
+    """A runtime stopped by the budget fails the ``budget`` check; any other failure stays ``setup``.
 
     The sandbox supervisor reports every failure as an error event, so this
     drives the real ``_verify_anything`` through that event rather than
-    raising past it.
+    raising past it. A stop the account balance caused names the balance, so
+    the wizard does not offer to raise a limit that was never the problem.
     """
 
     class _Gateway:
@@ -281,7 +286,8 @@ def test_preflight_reports_a_reservation_over_the_limit_as_a_budget_check(
     )
 
     assert status == "failed"
-    assert result["checks"] == [{"key": key, "status": "failed", "message": SPENT}]
+    expected = {"key": key, "status": "failed", "message": str(error)}
+    assert result["checks"] == [{**expected, "field": field} if field else expected]
 
 
 @pytest.mark.parametrize(("refusal", "raised"), [(SPENT, BudgetInsufficientError), (None, ValueError)])
@@ -295,7 +301,7 @@ def test_unified_guest_failure_after_a_refused_call_is_a_budget_error(
         events.put({"type": "error", "error": "The code does not match", "traceback": ""})
 
     monkeypatch.setattr(preflight_execution, "run_vercel_dspy", guest)
-    gateway = SimpleNamespace(budget_refusal=refusal)
+    gateway = SimpleNamespace(budget_refusal=BudgetInsufficientError(refusal) if refusal else None)
 
     with pytest.raises(raised, match="135 cents" if refusal else "does not match"):
         preflight_execution._verify_unified(gateway, {}, scope="evaluation", identity="setup-1")

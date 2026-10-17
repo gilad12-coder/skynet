@@ -192,9 +192,10 @@ class ModelGateway:
             timeout: Physical provider request timeout, excluding hidden retries.
         """
         self.runtime = runtime
-        # The guest only sees a 402 for a call the limit could not cover, so the
-        # parent keeps the reason to tell a spent budget from a code failure.
-        self.budget_refusal: str | None = None
+        # The guest only sees a 402 for a call the budget could not cover, so the
+        # parent keeps the refusal to tell a spent budget from a code failure,
+        # and its type to tell the limit from the account balance.
+        self.budget_refusal: BudgetInsufficientError | None = None
         self._client = httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False)
         self._routes: dict[str, OpenRouterDispatcher] = {}
         self._sandbox: SandboxControl | None = None
@@ -561,7 +562,7 @@ class ModelGateway:
                 protocol_headers=headers,
             )
         except BudgetInsufficientError as error:
-            self.budget_refusal = str(error)
+            self.budget_refusal = error
             raise
 
     def _budget_state(self) -> dict[str, Any]:

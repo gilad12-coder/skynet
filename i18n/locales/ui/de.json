@@ -3855,6 +3855,7 @@
   "submit.preflight.execution": "Ausführungsprüfungen",
   "submit.preflight.failed": "Die Konfigurationsprüfungen erfordern deine Aufmerksamkeit.",
   "submit.run.failure.limit": "Das Ausgabenlimit ist zu niedrig zum Starten. Ein einzelner Modellaufruf kann mehr reservieren, als davon übrig ist.",
+  "submit.run.failure.balance": "Ihr Kontoguthaben reicht nicht für den nächsten Modellaufruf, daher wurde nichts gestartet.",
   "submit.run.failure.other": "Die Konfigurationsprüfung ist fehlgeschlagen, daher wurde nichts gestartet.",
   "submit.run.failure.raise_limit": "Limit erhöhen",
   "submit.preflight.idle": "Beim Fortfahren werden die erforderlichen Konfigurationsprüfungen ausgeführt.",

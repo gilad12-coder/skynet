@@ -3333,6 +3333,7 @@
   "submit.preflight.execution": "בדיקות ההרצה",
   "submit.preflight.failed": "נדרש טיפול בבדיקות ההגדרות.",
   "submit.run.failure.limit": "מגבלת ההוצאה נמוכה מדי כדי להתחיל. קריאה אחת למודל יכולה לשריין יותר ממה שנשאר ממנה.",
+  "submit.run.failure.balance": "יתרת החשבון לא מכסה את הקריאה הבאה למודל, ולכן שום דבר לא התחיל.",
   "submit.run.failure.other": "בדיקת ההגדרות נכשלה, ולכן שום דבר לא התחיל.",
   "submit.run.failure.raise_limit": "הגדלת המגבלה",
   "submit.preflight.idle": "לחיצה על המשך מריצה את בדיקות ההגדרות הרלוונטיות.",

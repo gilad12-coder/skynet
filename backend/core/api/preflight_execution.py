@@ -10,7 +10,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from ..billing import ProviderKeyVault, payload_uses_token_source
-from ..billing.budgets import BudgetConflictError, BudgetError, BudgetInsufficientError, BudgetService
+from ..billing.budgets import (
+    AccountFundsError,
+    BudgetConflictError,
+    BudgetError,
+    BudgetInsufficientError,
+    BudgetService,
+)
 from ..billing.model_dispatch import ModelHTTPResult
 from ..billing.model_gateway import ModelGateway
 from ..billing.protected_credentials import (
@@ -122,6 +128,11 @@ def _canonical_execution_payload(request: WizardPreflightRequest, username: str)
 
 
 BUDGET_CHECK_KEY = "budget"
+# A failed budget check names the balance as what to fix when the account,
+# not the spending limit, refused the work: raising the limit cannot help then.
+BALANCE_FIELD = "balance"
+# A runtime reports a budget stop only by its type name; these rebuild it.
+_BUDGET_STOPS = {stop.__name__: stop for stop in (BudgetInsufficientError, AccountFundsError)}
 
 
 def _check(key: str, status: str, message: str | None = None, field: str | None = None) -> dict[str, Any]:
@@ -324,7 +335,8 @@ class _Events:
             The guest's terminal preflight result.
 
         Raises:
-            BudgetInsufficientError: When the spending limit stopped the runtime.
+            BudgetInsufficientError: When the spending limit or the account
+                balance stopped the runtime.
             ValueError: For any other runtime failure, or when no result came back.
         """
         # ``run_vercel_dspy`` turns every exception into an error event, so the
@@ -333,10 +345,11 @@ class _Events:
         # call the limit refused only reaches the guest as a 402, which its
         # client raises under its own type, so the gateway's record of the
         # refusal decides that case.
-        if self.error_type == BudgetInsufficientError.__name__:
-            raise BudgetInsufficientError(self.error or "The spending limit cannot cover setup.")
+        stop = _BUDGET_STOPS.get(self.error_type or "")
+        if stop is not None:
+            raise stop(self.error or "The spending limit cannot cover setup.")
         if self.error and gateway.budget_refusal is not None:
-            raise BudgetInsufficientError(gateway.budget_refusal)
+            raise gateway.budget_refusal
         if self.error or self.result is None:
             raise ValueError(self.error or "The runtime did not return setup evidence.")
         return self.result
@@ -542,7 +555,8 @@ def _perform_preflight(
             ),
         )
     except BudgetInsufficientError as error:
-        result = {"checks": [_check(BUDGET_CHECK_KEY, "failed", str(error))]}
+        field = BALANCE_FIELD if isinstance(error, AccountFundsError) else None
+        result = {"checks": [_check(BUDGET_CHECK_KEY, "failed", str(error), field)]}
     except Exception as error:
         result = {"checks": [_check("setup", "failed", str(error))]}
     finally:

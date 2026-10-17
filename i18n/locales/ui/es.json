@@ -3855,6 +3855,7 @@
   "submit.preflight.execution": "Comprobaciones de ejecución",
   "submit.preflight.failed": "Las comprobaciones de configuración requieren atención.",
   "submit.run.failure.limit": "El límite de gasto es demasiado bajo para empezar. Una sola llamada al modelo puede reservar más de lo que queda.",
+  "submit.run.failure.balance": "El saldo de tu cuenta no cubre la próxima llamada al modelo, así que no se inició nada.",
   "submit.run.failure.other": "La comprobación de configuración falló, así que no se inició nada.",
   "submit.run.failure.raise_limit": "Subir el límite",
   "submit.preflight.idle": "Al continuar se ejecutan las comprobaciones pertinentes de la configuración.",

@@ -3855,6 +3855,7 @@
   "submit.preflight.execution": "निष्पादन की जाँच",
   "submit.preflight.failed": "सेटअप की जाँच पर ध्यान देने की ज़रूरत है।",
   "submit.run.failure.limit": "शुरू करने के लिए खर्च सीमा बहुत कम है। मॉडल की एक कॉल उसकी बची हुई राशि से ज़्यादा रोक सकती है।",
+  "submit.run.failure.balance": "आपके खाते की शेष राशि अगली मॉडल कॉल का खर्च नहीं उठा सकती, इसलिए कुछ भी शुरू नहीं हुआ।",
   "submit.run.failure.other": "सेटअप की जाँच विफल रही, इसलिए कुछ भी शुरू नहीं हुआ।",
   "submit.run.failure.raise_limit": "सीमा बढ़ाएँ",
   "submit.preflight.idle": "आगे बढ़ने पर ज़रूरी सेटअप जाँच चलती हैं।",
