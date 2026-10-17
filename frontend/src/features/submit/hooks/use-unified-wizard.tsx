@@ -17,7 +17,11 @@ import { toast } from "react-toastify";
 
 import { useWizardStateOptional } from "@/features/agent-panel";
 import { formatBudgetUsd, usePricingTerms } from "@/features/billing";
-import { useExperienceLevel, type ExperienceLevel } from "@/features/experience";
+import {
+  useExperienceLevel,
+  useExperienceOptional,
+  type ExperienceLevel,
+} from "@/features/experience";
 import { offerRunDoneNotifications } from "@/features/notifications";
 import { readPref } from "@/features/settings";
 import {
@@ -207,6 +211,7 @@ export function WizardV2Provider({
   children: ReactNode;
 }) {
   const level = useExperienceLevel();
+  const levelLoaded = useExperienceOptional()?.loaded ?? true;
   const searchParams = useSearchParams();
   // A reload reopens the tab's setup where it was left; a clone always starts
   // from its source run instead.
@@ -294,8 +299,13 @@ export function WizardV2Provider({
   const optimizerBlocked =
     Boolean(kind && mode) && computeStepIssue(state, "optimizer", optimizerCatalog) !== null;
   const steps = useMemo(() => wizardSteps(state, optimizerBlocked), [state, optimizerBlocked]);
+  // Until the account's level loads it reads as the Guided placeholder, and
+  // applying that would move a reopened Standard setup off the Optimizer step
+  // Guided skips; the real level arriving next never moves it back.
   // Reads the blocked flag of the render the level changed in.
-  useEffect(() => dispatch({ type: "level", level, optimizerBlocked }), [level]);
+  useEffect(() => {
+    if (levelLoaded) dispatch({ type: "level", level, optimizerBlocked });
+  }, [level, levelLoaded]);
 
   // The tracker drops repeats, so a re-render or a level change on the same
   // step (and StrictMode's double effect) reports nothing.
