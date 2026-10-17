@@ -24,13 +24,15 @@ const {
   initialWizardV2State,
   isSingleAnswerTask,
   optimizerModelsReady,
+  defaultModels,
   presetEngine,
-  presetModels,
   taskInterviewPatch,
   taskIssue,
   wizardSteps,
   withContractBudget,
+  withDefaultModels,
   withLevel,
+  withOptimizerPatch,
   withQuestionInputs,
   workspaceFileText,
   workspacePathIssue,
@@ -112,9 +114,8 @@ test("a new wizard starts at Guided on Auto, with the Settings scorer runs or 20
 
 const noDefaults = { taskModel: null, reflectionModel: null };
 
-test("without Settings defaults the catalog default presets both models", () => {
-  const preset = presetModels(initialWizardV2State().optimizer, noDefaults, "openai/gpt-default");
-  assert.deepEqual(preset, {
+test("without Settings defaults the catalog default names both models", () => {
+  assert.deepEqual(defaultModels(noDefaults, "openai/gpt-default"), {
     taskModel: { name: "openai/gpt-default", token_source: "managed" },
     reflectionModel: { name: "openai/gpt-default", token_source: "managed" },
   });
@@ -122,64 +123,111 @@ test("without Settings defaults the catalog default presets both models", () => 
 
 test("the Settings default models win over the catalog default, role by role", () => {
   const mine = { name: "anthropic/claude-x", token_source: "managed" as const };
-  const preset = presetModels(
-    initialWizardV2State().optimizer,
-    { taskModel: mine, reflectionModel: { name: "" } },
-    "openai/gpt-default",
-  );
-  assert.deepEqual(preset, {
-    taskModel: mine,
-    reflectionModel: { name: "openai/gpt-default", token_source: "managed" },
-  });
   assert.deepEqual(
-    presetModels(
-      initialWizardV2State().optimizer,
-      { taskModel: mine, reflectionModel: mine },
-      null,
-    ),
-    { taskModel: mine, reflectionModel: mine },
+    defaultModels({ taskModel: mine, reflectionModel: { name: "" } }, "openai/gpt-default"),
+    {
+      taskModel: mine,
+      reflectionModel: { name: "openai/gpt-default", token_source: "managed" },
+    },
   );
+  assert.deepEqual(defaultModels({ taskModel: mine, reflectionModel: mine }, null), {
+    taskModel: mine,
+    reflectionModel: mine,
+  });
 });
 
-test("an Automatic model resolves to whatever the catalog default is when the wizard opens", () => {
-  const fresh = initialWizardV2State().optimizer;
+test("an Automatic model resolves to whatever the catalog default is now", () => {
   const automatic = { taskModel: null, reflectionModel: { name: "" } };
-  assert.deepEqual(presetModels(fresh, automatic, "openai/gpt-old")?.taskModel, {
-    name: "openai/gpt-old",
-    token_source: "managed",
-  });
-  const later = presetModels(fresh, automatic, "anthropic/claude-new");
-  assert.equal(later?.taskModel?.name, "anthropic/claude-new");
-  assert.equal(later?.reflectionModel?.name, "anthropic/claude-new");
+  assert.equal(defaultModels(automatic, "openai/gpt-old").taskModel?.name, "openai/gpt-old");
+  const later = defaultModels(automatic, "anthropic/claude-new");
+  assert.equal(later.taskModel?.name, "anthropic/claude-new");
+  assert.equal(later.reflectionModel?.name, "anthropic/claude-new");
 });
 
 test("reflection Automatic runs the strongest model while the task model stays on best value", () => {
-  const fresh = initialWizardV2State().optimizer;
-  const preset = presetModels(fresh, noDefaults, "openai/gpt-value", "anthropic/claude-strong");
-  assert.equal(preset?.taskModel?.name, "openai/gpt-value");
-  assert.equal(preset?.reflectionModel?.name, "anthropic/claude-strong");
+  const models = defaultModels(noDefaults, "openai/gpt-value", "anthropic/claude-strong");
+  assert.equal(models.taskModel?.name, "openai/gpt-value");
+  assert.equal(models.reflectionModel?.name, "anthropic/claude-strong");
   assert.equal(
-    presetModels(fresh, noDefaults, "openai/gpt-value", null)?.reflectionModel?.name,
+    defaultModels(noDefaults, "openai/gpt-value", null).reflectionModel?.name,
     "openai/gpt-value",
   );
+  assert.deepEqual(defaultModels(noDefaults, null), noDefaults);
 });
 
-test("the preset never overwrites a model someone already set, and needs some default", () => {
-  const empty = initialWizardV2State().optimizer;
-  const picked = { name: "anthropic/claude-x", token_source: "managed" as const };
-  const prefs = { taskModel: picked, reflectionModel: picked };
-  assert.equal(
-    presetModels({ ...empty, reflectionModel: picked }, prefs, "openai/gpt-default"),
-    null,
-  );
-  assert.equal(
-    presetModels({ ...empty, taskModel: picked }, noDefaults, "openai/gpt-default"),
-    null,
-  );
-  assert.equal(presetModels(empty, noDefaults, null), null);
-  assert.equal(presetModels(empty, noDefaults, undefined), null);
+const strong = { name: "anthropic/claude-opus", token_source: "managed" as const };
+const haiku = { name: "anthropic/claude-haiku", token_source: "managed" as const };
+const value = { name: "openai/gpt-value", token_source: "managed" as const };
+
+test("a new setup takes the defaults and follows them when Settings change", () => {
+  const fresh = initialWizardV2State().optimizer;
+  const first = withDefaultModels(fresh, { taskModel: value, reflectionModel: strong });
+  assert.deepEqual(first.taskModel, value);
+  assert.deepEqual(first.reflectionModel, strong);
+
+  const changed = withDefaultModels(first, { taskModel: value, reflectionModel: haiku });
+  assert.deepEqual(changed.reflectionModel, haiku);
+  assert.deepEqual(changed.taskModel, value);
+  assert.deepEqual(changed.followsDefaults, { taskModel: true, reflectionModel: true });
 });
 
+test("a reopened setup follows defaults that changed while it was kept", () => {
+  const kept = withDefaultModels(initialWizardV2State().optimizer, {
+    taskModel: value,
+    reflectionModel: strong,
+  });
+  const reopened = JSON.parse(JSON.stringify(kept)) as typeof kept;
+  assert.deepEqual(
+    withDefaultModels(reopened, { taskModel: value, reflectionModel: haiku }).reflectionModel,
+    haiku,
+  );
+});
+
+test("a model someone picked stays when the defaults change, role by role", () => {
+  const preset = withDefaultModels(initialWizardV2State().optimizer, {
+    taskModel: value,
+    reflectionModel: strong,
+  });
+  const picked = withOptimizerPatch(preset, { reflectionModel: strong });
+  assert.deepEqual(picked.followsDefaults, { taskModel: true, reflectionModel: false });
+
+  const changed = withDefaultModels(picked, { taskModel: haiku, reflectionModel: haiku });
+  assert.deepEqual(changed.reflectionModel, strong);
+  assert.deepEqual(changed.taskModel, haiku);
+
+  const removed = withOptimizerPatch(changed, { taskModel: null });
+  assert.equal(
+    withDefaultModels(removed, { taskModel: value, reflectionModel: haiku }).taskModel,
+    null,
+  );
+});
+
+test("a patch that names no model keeps both roles following", () => {
+  const preset = withDefaultModels(initialWizardV2State().optimizer, {
+    taskModel: value,
+    reflectionModel: strong,
+  });
+  const patched = withOptimizerPatch(preset, { choice: "gepa", maxCostCents: 100 });
+  assert.deepEqual(patched.followsDefaults, { taskModel: true, reflectionModel: true });
+  assert.equal(patched.choice, "gepa");
+});
+
+test("unchanged defaults, a role with no default and an untracked setup leave the models alone", () => {
+  const preset = withDefaultModels(initialWizardV2State().optimizer, {
+    taskModel: value,
+    reflectionModel: strong,
+  });
+  assert.equal(withDefaultModels(preset, { taskModel: value, reflectionModel: strong }), preset);
+  assert.equal(withDefaultModels(preset, noDefaults), preset);
+
+  const { followsDefaults: _, ...untracked } = preset;
+  const old = untracked as typeof preset;
+  assert.equal(withDefaultModels(old, { taskModel: haiku, reflectionModel: haiku }), old);
+  assert.deepEqual(withOptimizerPatch(old, { taskModel: haiku }).followsDefaults, {
+    taskModel: false,
+    reflectionModel: false,
+  });
+});
 test("the Settings default engine applies only from Auto and only when it fits the task", () => {
   assert.equal(presetEngine("auto", "gepa", "prompt", "pairs"), "gepa");
   assert.equal(presetEngine("auto", "dspy_gepa", "prompt", "pairs"), null);
