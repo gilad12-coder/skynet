@@ -169,6 +169,10 @@ _SAFE_MUTATIONS: frozenset[str] = frozenset(
 # stream hangs forever with a spinning tool pill. Long enough for a human who
 # stepped away; on expiry the tool is treated as declined.
 APPROVAL_TIMEOUT_SECONDS = 900.0
+# The MCP client waits forever for a tool reply by default, so one call that
+# never answers holds the whole turn open and it is never saved. A failed call
+# reaches the agent as a tool error it can work around.
+MCP_CALL_TIMEOUT_SECONDS = 120.0
 
 
 # How often the awaiting stream checks the durable store for a decision that
@@ -2216,7 +2220,7 @@ async def _mcp_session(
     headers = {"Authorization": auth_header} if auth_header else None
     async with (
         streamablehttp_client(mcp_url, headers=headers) as (read, write, _),
-        ClientSession(read, write) as session,
+        ClientSession(read, write, read_timeout_seconds=timedelta(seconds=MCP_CALL_TIMEOUT_SECONDS)) as session,
     ):
         await session.initialize()
         yield session

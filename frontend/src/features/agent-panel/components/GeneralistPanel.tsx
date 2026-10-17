@@ -406,19 +406,22 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   // what it already knows and continues, or asks the one thing it lacks. It
   // waits for the chat to be on view (Manual hides it) and never talks over
   // a chat that already started. A cloned run arrives filled in, so its
-  // agents wait for the user, as the task interview does.
+  // agents wait for the user, as the task interview does. It also waits for
+  // the screen left behind to finish its turn: two turns running tool calls
+  // at once left one of them hanging on a call that never returned.
   const cloned = searchParams.has("clone");
   const chatEmpty = agent.messages.length === 0 && agent.status === "idle";
+  const backgroundBusy = agent.backgroundBusyCount > 0;
   React.useEffect(() => {
     if (kickoffScreen === null) return;
     if (kickoffScreen !== shownScreen || !chatEmpty || cloned) {
       setKickoffScreen(null);
       return;
     }
-    if (!panelDock) return;
+    if (!panelDock || backgroundBusy) return;
     setKickoffScreen(null);
     sendToAgent(SCREEN_KICKOFF, undefined, { hidden: true });
-  }, [kickoffScreen, shownScreen, chatEmpty, cloned, panelDock, sendToAgent]);
+  }, [kickoffScreen, shownScreen, chatEmpty, cloned, panelDock, backgroundBusy, sendToAgent]);
 
   // Deleting the conversation you're currently viewing must drop you back to a
   // clean slate — otherwise the panel keeps showing the just-deleted thread and

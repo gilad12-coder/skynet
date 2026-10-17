@@ -1758,3 +1758,35 @@ def test_thinking_trail_times_rows_from_the_previous_step() -> None:
         {"startedAt": 1000, "toolsBefore": 0, "reasoning": "first", "endedAt": 2000, "summary": "Read the task"},
         {"startedAt": 4000, "toolsBefore": 1, "reasoning": "second", "endedAt": 9000},
     ]
+
+
+def test_mcp_session_bounds_each_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tool call that never answers times out instead of holding the turn open."""
+    seen: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def fake_transport(url: str, headers: dict[str, str] | None = None) -> AsyncIterator[tuple[Any, Any, Any]]:
+        yield (None, None, None)
+
+    class FakeSession:
+        def __init__(self, read: Any, write: Any, **kwargs: Any) -> None:
+            seen.update(kwargs)
+
+        async def __aenter__(self) -> FakeSession:
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+    monkeypatch.setattr(generalist_module, "streamablehttp_client", fake_transport)
+    monkeypatch.setattr(generalist_module, "ClientSession", FakeSession)
+
+    async def run() -> None:
+        async with generalist_module._mcp_session("http://mcp"):
+            pass
+
+    asyncio.run(run())
+    assert seen["read_timeout_seconds"].total_seconds() == generalist_module.MCP_CALL_TIMEOUT_SECONDS
