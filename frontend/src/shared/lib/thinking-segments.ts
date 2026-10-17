@@ -255,6 +255,34 @@ export function splitSummary(summary: string): { heading?: string; detail: strin
   return { heading, detail };
 }
 
+const BOLD_HEADING = /^\s*\*\*([^*\n]+)\*\*\s*$/gm;
+
+/**
+ * The heading the live "Thinking" line shows, as Codex picks it: the newest
+ * one the turn has, searching back from its latest segment. A segment's own
+ * reasoning wins when the model writes `**Heading**` lines into it; its
+ * label's heading comes next.
+ *
+ * Args:
+ *   segments: The turn's thinking segments, oldest first.
+ *
+ * Returns:
+ *   The heading, or null when no segment has one yet.
+ */
+export function latestHeading(
+  segments: ReadonlyArray<{ reasoning: string; summary?: string }>,
+): string | null {
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const segment = segments[i];
+    if (!segment) continue;
+    const bold = [...segment.reasoning.matchAll(BOLD_HEADING)].at(-1)?.[1]?.trim();
+    if (bold) return bold;
+    const heading = segment.summary ? splitSummary(segment.summary).heading : undefined;
+    if (heading) return heading;
+  }
+  return null;
+}
+
 export type ActivityPiece<S, T> =
   | { kind: "thinking"; segment: S }
   | { kind: "steps"; steps: T[] }

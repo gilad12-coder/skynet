@@ -2257,6 +2257,11 @@ _SUMMARY_TIMEOUT_SECONDS = 8.0
 # when the first is slower than a label usually takes, and the first answer wins.
 _SUMMARY_HEDGE_SECONDS = 2.5
 _SUMMARY_MAX_SENTENCES = 2
+# While a row is still open, the panel's "Thinking" line shows the heading of
+# a label written from the reasoning so far, as Codex's does: the first once
+# the row has run this long, then a fresh one at most this often.
+_LIVE_SUMMARY_FIRST_SECONDS = 2.0
+_LIVE_SUMMARY_EVERY_SECONDS = 4.0
 _FALLBACK_SUMMARY_CHARS = 240
 # The tail of a long stretch says where the thinking landed, which is what
 # the row's label should tell.
@@ -2556,6 +2561,16 @@ class ThinkingTrail:
         self._since = now
         return len(self._rows) - 1, text
 
+    def open_row(self) -> tuple[int, str] | None:
+        """Return the row still being written, if any.
+
+        Returns:
+            ``(index, reasoning so far)`` of the open row, or ``None``.
+        """
+        if self._open is None:
+            return None
+        return len(self._rows), "".join(self._chunks)
+
     def rows(self) -> list[dict[str, Any]]:
         """Return the turn's rows in the panel's ``ThinkingSegment`` shape, closing an open one.
 
@@ -2573,28 +2588,40 @@ class ThinkingSummaries:
         self,
         summarize: Callable[[str], Awaitable[str | None]],
         publish: Callable[[dict], None],
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         """Start a turn with no reasoning seen.
 
         Args:
             summarize: Returns the label for one row's reasoning, or ``None``.
             publish: Puts a ``thinking_summary`` event on the turn's stream.
+            clock: Monotonic seconds, for when a row still open gets a label; injectable for tests.
         """
         self._summarize = summarize
         self._publish = publish
+        self._clock = clock
         self._trail = ThinkingTrail()
         self._tasks: set[asyncio.Task] = set()
+        self._live: asyncio.Task | None = None
+        self._live_index: int | None = None
+        self._live_due = 0.0
 
     def observe(self, ev: dict) -> None:
-        """Track one streamed event of the turn and label the row it closes.
+        """Track one streamed event of the turn, label the row it closes, and relabel a long open one.
 
         Args:
             ev: The ``{event, data}`` envelope about to reach the client.
         """
-        self._label_closed(self._trail.observe(ev))
+        closed = self._trail.observe(ev)
+        if closed is not None:
+            self._drop_live()
+        self._label_closed(closed)
+        if ev.get("event") == "reasoning_patch":
+            self._label_open()
 
     def close(self) -> None:
         """Close the last row, as the turn's end does, and start its label."""
+        self._drop_live()
         self._label_closed(self._trail.close())
 
     async def next_label(self) -> bool:
@@ -2610,8 +2637,53 @@ class ThinkingSummaries:
 
     def cancel(self) -> None:
         """Drop labels still being written."""
+        self._drop_live()
         for task in self._tasks:
             task.cancel()
+
+    def _drop_live(self) -> None:
+        """Stop the open row's label: the row's closing label replaces it."""
+        if self._live is not None:
+            self._live.cancel()
+        self._live = None
+        self._live_index = None
+
+    def _label_open(self) -> None:
+        """Label the open row while it is still written, as Codex's heading tracks the model's thinking.
+
+        The first label lands once the row has thought for a while, then one
+        more each interval while it goes on, one call at a time.
+        """
+        row = self._trail.open_row()
+        if row is None:
+            return
+        index, text = row
+        now = self._clock()
+        if index != self._live_index:
+            self._drop_live()
+            self._live_index = index
+            self._live_due = now + _LIVE_SUMMARY_FIRST_SECONDS
+            return
+        if now < self._live_due or len(" ".join(text.split())) < _SUMMARY_MIN_CHARS:
+            return
+        if self._live is not None and not self._live.done():
+            return
+        self._live_due = now + _LIVE_SUMMARY_EVERY_SECONDS
+        self._live = asyncio.create_task(self._label_live(index, text))
+
+    async def _label_live(self, index: int, text: str) -> None:
+        """Publish a label for open row ``index`` unless the row closed meanwhile.
+
+        Args:
+            index: The open row's position in the turn.
+            text: Its reasoning so far.
+        """
+        line = await self._attempt(index, text)
+        row = self._trail.open_row()
+        # A closed row gets its own label from all of its reasoning; a late
+        # live one must not land after it and overwrite it.
+        if line and row is not None and row[0] == index:
+            self._publish({"event": "thinking_summary", "data": {"index": index, "text": line}})
 
     def _label_closed(self, closed: tuple[int, str] | None) -> None:
         """Label a row that just closed: short ones are their own label.
@@ -2938,8 +3010,9 @@ async def run_generalist_agent(
     chat primitives work unchanged:
 
     * ``reasoning_patch`` — per-token reasoning
-    * ``thinking_summary`` — ``{index, text}``, a one- or two-sentence label
-      of the turn's ``index``-th stretch of reasoning
+    * ``thinking_summary`` — ``{index, text}``, a heading-and-sentence label
+      of the turn's ``index``-th stretch of reasoning; a long stretch gets
+      fresh ones while it is still open, and its closing label replaces them
     * ``plan`` — ``{text}``, what the agent said it will do this turn
     * ``tool_start`` / ``tool_end`` — wrap each MCP tool call
     * ``status_patch`` — human-readable progress around each tool call

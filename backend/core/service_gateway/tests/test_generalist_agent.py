@@ -1626,6 +1626,58 @@ async def test_thinking_summaries_label_each_row_the_panel_shows() -> None:
     ]
 
 
+async def test_a_long_open_row_is_labelled_while_it_is_written() -> None:
+    """An open row gets labels from its reasoning so far, never after its closing label."""
+    published: list[dict] = []
+    asked: list[str] = []
+    now = [0.0]
+    release = asyncio.Event()
+
+    async def summarize(text: str) -> str | None:
+        """Label the reasoning so far; the second call waits until released.
+
+        Args:
+            text: The stretch's reasoning.
+
+        Returns:
+            The label.
+        """
+        asked.append(text)
+        if len(asked) == 2:
+            await release.wait()
+        return f"label {len(asked)}"
+
+    summaries = ThinkingSummaries(summarize, published.append, clock=lambda: now[0])
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": _LONG}})
+    now[0] = 1.0
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": " more"}})
+    await asyncio.sleep(0)
+    assert asked == []
+
+    now[0] = 2.5
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": " again"}})
+    await asyncio.sleep(0)
+    assert asked == [_LONG + " more again"]
+    assert published == [{"event": "thinking_summary", "data": {"index": 0, "text": "label 1"}}]
+
+    now[0] = 3.0
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": " x"}})
+    await asyncio.sleep(0)
+    assert len(asked) == 1
+
+    now[0] = 7.0
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": " y"}})
+    await asyncio.sleep(0)
+    summaries.observe({"event": "tool_start", "data": {"id": "t1"}})
+    release.set()
+    while await summaries.next_label():
+        pass
+    await asyncio.sleep(0)
+
+    assert [e["data"]["text"] for e in published] == ["label 1", "label 3"]
+    assert asked[1] == asked[2]
+
+
 async def test_failed_or_slow_summaries_fall_back_to_the_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
     """A label that errors or misses the timeout is cut from the row's own reasoning, so no row is unlabeled."""
     monkeypatch.setattr(generalist_module, "_SUMMARY_TIMEOUT_SECONDS", 0.05)
