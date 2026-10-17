@@ -61,6 +61,12 @@ import { inputsFromRoles, rowsToCases, singleInputCase, type Row } from "../lib/
 import { prepareModelConfig } from "../lib/model-config";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import { repoRunRequest } from "../lib/repo-run";
+import {
+  currentRunFailure,
+  runFailureFromCheck,
+  runFailureFromError,
+  type RunFailure,
+} from "../lib/run-failure";
 import { WIZARD_SESSION_KEY, decodeWizardSession, encodeWizardSession } from "../lib/session-state";
 import { metricUsesModel } from "../lib/scorer-dependencies";
 import { computeStepIssue, hasModel, runBlockedReason as blockedReason } from "../lib/step-issue";
@@ -100,6 +106,8 @@ export interface WizardV2Shell extends WizardV2Context {
   advancing: boolean;
   /** The setup came back from a reload of this tab. */
   restored: boolean;
+  /** Why the last Run click on this exact setup did not start a run. */
+  runFailure: RunFailure | null;
 }
 
 type SliceName = "task" | "inputs" | "optimizer" | "workspace" | "meta";
@@ -318,6 +326,7 @@ export function WizardV2Provider({
 
   const [submitPhase, setSubmitPhase] = useState<SubmitPhase>("idle");
   const [advancing, setAdvancing] = useState(false);
+  const [runFailure, setRunFailure] = useState<RunFailure | null>(null);
   const busy = advancing || submitPhase !== "idle";
 
   const goTo = useCallback(
@@ -580,6 +589,8 @@ export function WizardV2Provider({
     }
     submittingRef.current = true;
     setAdvancing(true);
+    setRunFailure(null);
+    const identity = preflight.identity;
     let checked: WizardPreflightResponse | null = null;
     try {
       checked =
@@ -591,6 +602,7 @@ export function WizardV2Provider({
       } else if (checked.status !== "succeeded" || !preflightMayAdvance(checked, "execution")) {
         const failure = checked.checks.find((check) => check.status === "failed");
         toast.error(failure?.message ?? msg("submit.preflight.failed"));
+        setRunFailure(runFailureFromCheck(identity, checked));
         checked = null;
       } else {
         const locale = getActiveIntlLocale();
@@ -601,7 +613,9 @@ export function WizardV2Provider({
     } catch (error) {
       const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
       if (mountedRef.current && !(error instanceof Error && error.name === "AbortError")) {
-        toast.error(message.startsWith("budget.") ? msg(message as MessageKey) : message);
+        const shown = message.startsWith("budget.") ? msg(message as MessageKey) : message;
+        toast.error(shown);
+        setRunFailure(runFailureFromError(identity, shown));
       }
       checked = null;
     } finally {
@@ -936,6 +950,7 @@ export function WizardV2Provider({
     guided,
     submitPhase,
     advancing,
+    runFailure: currentRunFailure(runFailure, preflight.identity),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

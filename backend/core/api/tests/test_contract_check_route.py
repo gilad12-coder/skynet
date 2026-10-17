@@ -299,3 +299,88 @@ def test_unified_guest_failure_after_a_refused_call_is_a_budget_error(
 
     with pytest.raises(raised, match="135 cents" if refusal else "does not match"):
         preflight_execution._verify_unified(gateway, {}, scope="evaluation", identity="setup-1")
+
+
+class _RouteGateway:
+    """Answer the model route checks of a unified run without any paid transport."""
+
+    budget_refusal = None
+
+    def __init__(self, outcome: Exception | int) -> None:
+        """Keep the refusal to raise, or the HTTP status to answer, for every route check."""
+        self.outcome = outcome
+        self.dispatched: list[str] = []
+
+    def model_routes(self) -> list[dict[str, str]]:
+        """List the one route the spec configures."""
+        return [{"role": "optimization", "model": "openrouter/task", "token": "route-token"}]
+
+    def dispatch_guest(self, token: str, path: str, body: dict[str, Any], headers: dict[str, str]) -> Any:
+        """Refuse the call as the ledger does, or answer it with the configured status."""
+        self.dispatched.append(token)
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        return SimpleNamespace(status=self.outcome, content=b'{"error": {"message": "no such model"}}')
+
+
+def _sandbox_recorder(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Replace the outer sandbox with one that records its start and answers a ready contract."""
+    started: list[str] = []
+
+    def guest(payload: dict[str, Any], artifact_id: str, events: Any, start_method: str) -> None:
+        """Report the contract and optimizer checks the guest verifier returns."""
+        started.append(artifact_id)
+        checks = [{"key": "metric.contract", "status": "succeeded"}, {"key": "optimizer", "status": "succeeded"}]
+        events.put({"type": "preflight_result", "result": {"checks": checks}})
+
+    monkeypatch.setattr(preflight_execution, "run_vercel_dspy", guest)
+    return started
+
+
+def test_unified_execution_check_refuses_a_limit_below_one_call_before_the_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A limit that cannot hold one model call fails at once instead of after the contract check."""
+    started = _sandbox_recorder(monkeypatch)
+    gateway = _RouteGateway(BudgetInsufficientError(SPENT))
+
+    with pytest.raises(BudgetInsufficientError, match="135 cents"):
+        preflight_execution._verify_unified(gateway, _spec(budget=False), scope="execution", identity="setup-1")
+
+    assert gateway.dispatched == ["route-token"]
+    assert started == []
+
+
+def test_unified_execution_check_stops_at_a_rejected_model_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model the provider rejects ends the check with that route's failure, without opening the sandbox."""
+    started = _sandbox_recorder(monkeypatch)
+
+    result = preflight_execution._verify_unified(
+        _RouteGateway(404), _spec(budget=False), scope="execution", identity="setup-1"
+    )
+
+    [check] = result["checks"]
+    assert (check["key"], check["status"], check["field"]) == ("model.optimization", "failed", "optimization")
+    assert "HTTP 404: no such model" in check["message"]
+    assert started == []
+
+
+@pytest.mark.parametrize(
+    ("scope", "keys"),
+    [
+        ("execution", ["metric.contract", "model.optimization", "optimizer"]),
+        ("evaluation", ["metric.contract", "optimizer"]),
+    ],
+)
+def test_unified_check_reports_model_routes_beside_the_optimizer(
+    monkeypatch: pytest.MonkeyPatch, scope: str, keys: list[str]
+) -> None:
+    """Passing route checks sit before the optimizer check; an evaluation check never probes the models."""
+    started = _sandbox_recorder(monkeypatch)
+    gateway = _RouteGateway(200)
+
+    result = preflight_execution._verify_unified(gateway, _spec(budget=False), scope=scope, identity="setup-1")
+
+    assert [check["key"] for check in result["checks"]] == keys
+    assert started == ["preflight-setup-1"]
+    assert gateway.dispatched == (["route-token"] if scope == "execution" else [])

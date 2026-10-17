@@ -245,7 +245,7 @@ def _verify_anything(gateway: ModelGateway, payload: dict[str, Any], *, scope: s
 
 
 def _verify_unified(gateway: ModelGateway, payload: dict[str, Any], *, scope: str, identity: str) -> dict[str, Any]:
-    """Run a unified run's contract check, and its engine readiness in execution scope, in the outer sandbox.
+    """Run a unified run's model route checks in execution scope, then its contract check in the outer sandbox.
 
     The guest runs ``verify_unified_in_sandbox``; its contract check scores
     train and validation samples only.
@@ -258,8 +258,25 @@ def _verify_unified(gateway: ModelGateway, payload: dict[str, Any], *, scope: st
 
     Returns:
         Real checks, including ``metric.contract``, and the contract outcome
-        under ``workflow_result``.
+        under ``workflow_result``. In execution scope a failed model route
+        returns its checks alone, without starting the sandbox.
+
+    Raises:
+        BudgetInsufficientError: When the limit cannot hold one model route's
+            check call; in execution scope this comes before the sandbox opens.
     """
+    route_checks: list[dict[str, Any]] = []
+    if scope == "execution":
+        # Each route check holds a whole worst-case call, which a run needs too,
+        # so a limit that cannot fund one is refused here in seconds rather
+        # than after the minute-long contract check in the sandbox.
+        public = {key: value for key, value in payload.items() if not key.startswith("_")}
+        typed = UnifiedRunRequest.model_validate(public)
+        resolved = resolve_optimizer(typed.optimizer.choice, typed.task.artifact.kind)
+        native = resolved == "auto" or resolved in NATIVE_ENGINES - {BLACKBOX_ENGINE_SHINKA_EVOLVE}
+        route_checks = _verify_model_routes(gateway, native=native)
+        if any(check["status"] == "failed" for check in route_checks):
+            return {"checks": route_checks}
     report_preflight_phase("sandbox")
     events = _Events()
     protected = {
@@ -270,14 +287,11 @@ def _verify_unified(gateway: ModelGateway, payload: dict[str, Any], *, scope: st
     }
     run_vercel_dspy(protected, f"preflight-{identity}", events, "spawn")
     result = events.evidence(gateway)
-    optimizer_ready = any(check.get("key") == "optimizer" for check in result["checks"])
-    if scope == "execution" and optimizer_ready:
-        public = {key: value for key, value in payload.items() if not key.startswith("_")}
-        typed = UnifiedRunRequest.model_validate(public)
-        resolved = resolve_optimizer(typed.optimizer.choice, typed.task.artifact.kind)
-        native = resolved == "auto" or resolved in NATIVE_ENGINES - {BLACKBOX_ENGINE_SHINKA_EVOLVE}
-        optimizer_index = next(index for index, check in enumerate(result["checks"]) if check.get("key") == "optimizer")
-        result["checks"][optimizer_index:optimizer_index] = _verify_model_routes(gateway, native=native)
+    optimizer_index = next(
+        (index for index, check in enumerate(result["checks"]) if check.get("key") == "optimizer"),
+        len(result["checks"]),
+    )
+    result["checks"][optimizer_index:optimizer_index] = route_checks
     return result
 
 
