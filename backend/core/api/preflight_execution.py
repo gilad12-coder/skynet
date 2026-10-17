@@ -10,7 +10,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from ..billing import ProviderKeyVault, payload_uses_token_source
-from ..billing.budgets import BudgetConflictError, BudgetError, BudgetInsufficientError, BudgetService
+from ..billing.budgets import (
+    AccountFundsError,
+    BudgetConflictError,
+    BudgetError,
+    BudgetInsufficientError,
+    BudgetService,
+)
 from ..billing.model_dispatch import ModelHTTPResult
 from ..billing.model_gateway import ModelGateway
 from ..billing.protected_credentials import (
@@ -122,6 +128,15 @@ def _canonical_execution_payload(request: WizardPreflightRequest, username: str)
 
 
 BUDGET_CHECK_KEY = "budget"
+# A failed budget check names the balance as what to fix when the account,
+# not the spending limit, refused the work: raising the limit cannot help then.
+BALANCE_FIELD = "balance"
+# A runtime reports a budget stop only by its type name; these rebuild it.
+_BUDGET_STOPS = {stop.__name__: stop for stop in (BudgetInsufficientError, AccountFundsError)}
+
+# The browser waits on the check's response, and the connection is cut after
+# about five minutes; covered work still unsettled by then reads as pending.
+SETUP_WAIT_SECONDS = 90
 
 
 def _check(key: str, status: str, message: str | None = None, field: str | None = None) -> dict[str, Any]:
@@ -245,7 +260,7 @@ def _verify_anything(gateway: ModelGateway, payload: dict[str, Any], *, scope: s
 
 
 def _verify_unified(gateway: ModelGateway, payload: dict[str, Any], *, scope: str, identity: str) -> dict[str, Any]:
-    """Run a unified run's contract check, and its engine readiness in execution scope, in the outer sandbox.
+    """Run a unified run's model route checks in execution scope, then its contract check in the outer sandbox.
 
     The guest runs ``verify_unified_in_sandbox``; its contract check scores
     train and validation samples only.
@@ -258,8 +273,25 @@ def _verify_unified(gateway: ModelGateway, payload: dict[str, Any], *, scope: st
 
     Returns:
         Real checks, including ``metric.contract``, and the contract outcome
-        under ``workflow_result``.
+        under ``workflow_result``. In execution scope a failed model route
+        returns its checks alone, without starting the sandbox.
+
+    Raises:
+        BudgetInsufficientError: When the limit cannot hold one model route's
+            check call; in execution scope this comes before the sandbox opens.
     """
+    route_checks: list[dict[str, Any]] = []
+    if scope == "execution":
+        # Each route check holds a whole worst-case call, which a run needs too,
+        # so a limit that cannot fund one is refused here in seconds rather
+        # than after the minute-long contract check in the sandbox.
+        public = {key: value for key, value in payload.items() if not key.startswith("_")}
+        typed = UnifiedRunRequest.model_validate(public)
+        resolved = resolve_optimizer(typed.optimizer.choice, typed.task.artifact.kind)
+        native = resolved == "auto" or resolved in NATIVE_ENGINES - {BLACKBOX_ENGINE_SHINKA_EVOLVE}
+        route_checks = _verify_model_routes(gateway, native=native)
+        if any(check["status"] == "failed" for check in route_checks):
+            return {"checks": route_checks}
     report_preflight_phase("sandbox")
     events = _Events()
     protected = {
@@ -270,14 +302,11 @@ def _verify_unified(gateway: ModelGateway, payload: dict[str, Any], *, scope: st
     }
     run_vercel_dspy(protected, f"preflight-{identity}", events, "spawn")
     result = events.evidence(gateway)
-    optimizer_ready = any(check.get("key") == "optimizer" for check in result["checks"])
-    if scope == "execution" and optimizer_ready:
-        public = {key: value for key, value in payload.items() if not key.startswith("_")}
-        typed = UnifiedRunRequest.model_validate(public)
-        resolved = resolve_optimizer(typed.optimizer.choice, typed.task.artifact.kind)
-        native = resolved == "auto" or resolved in NATIVE_ENGINES - {BLACKBOX_ENGINE_SHINKA_EVOLVE}
-        optimizer_index = next(index for index, check in enumerate(result["checks"]) if check.get("key") == "optimizer")
-        result["checks"][optimizer_index:optimizer_index] = _verify_model_routes(gateway, native=native)
+    optimizer_index = next(
+        (index for index, check in enumerate(result["checks"]) if check.get("key") == "optimizer"),
+        len(result["checks"]),
+    )
+    result["checks"][optimizer_index:optimizer_index] = route_checks
     return result
 
 
@@ -310,7 +339,8 @@ class _Events:
             The guest's terminal preflight result.
 
         Raises:
-            BudgetInsufficientError: When the spending limit stopped the runtime.
+            BudgetInsufficientError: When the spending limit or the account
+                balance stopped the runtime.
             ValueError: For any other runtime failure, or when no result came back.
         """
         # ``run_vercel_dspy`` turns every exception into an error event, so the
@@ -319,10 +349,11 @@ class _Events:
         # call the limit refused only reaches the guest as a 402, which its
         # client raises under its own type, so the gateway's record of the
         # refusal decides that case.
-        if self.error_type == BudgetInsufficientError.__name__:
-            raise BudgetInsufficientError(self.error or "The spending limit cannot cover setup.")
+        stop = _BUDGET_STOPS.get(self.error_type or "")
+        if stop is not None:
+            raise stop(self.error or "The spending limit cannot cover setup.")
         if self.error and gateway.budget_refusal is not None:
-            raise BudgetInsufficientError(gateway.budget_refusal)
+            raise gateway.budget_refusal
         if self.error or self.result is None:
             raise ValueError(self.error or "The runtime did not return setup evidence.")
         return self.result
@@ -469,6 +500,7 @@ def _perform_preflight(
                 budget_id=snapshot.id,
                 generation=snapshot.generation,
                 phase="setup",
+                wait_timeout=SETUP_WAIT_SECONDS,
             )
         )
         # The box's hold is priced on its whole lifetime, so a check gets the
@@ -528,7 +560,8 @@ def _perform_preflight(
             ),
         )
     except BudgetInsufficientError as error:
-        result = {"checks": [_check(BUDGET_CHECK_KEY, "failed", str(error))]}
+        field = BALANCE_FIELD if isinstance(error, AccountFundsError) else None
+        result = {"checks": [_check(BUDGET_CHECK_KEY, "failed", str(error), field)]}
     except Exception as error:
         result = {"checks": [_check("setup", "failed", str(error))]}
     finally:

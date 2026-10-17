@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
+from .budget_amounts import cent_units
 from .budgets import BudgetError
 from .operation_pricing import (
     ChargePolicy,
@@ -160,6 +161,43 @@ def _network_cap(request: Mapping[str, Any]) -> int:
     )
 
 
+def _maximum_usd(lifetime_ms: int, vcpus: int, network_cap: int) -> Decimal:
+    """Bound a box's provider cost in every supported region.
+
+    Args:
+        lifetime_ms: Funded lifetime.
+        vcpus: CPU allocation; memory follows at 2 GiB per vCPU.
+        network_cap: Billable transfer in bytes, 0 for a deny-all box.
+
+    Returns:
+        The most the box can cost in USD.
+    """
+    # Python SDK 0.4.0 cannot select a region. Cover every currently supported
+    # region and settle against the region in the final provider receipt.
+    max_cpu = max(rates[0] for rates in _REGIONAL_RATES.values())
+    max_memory = max(rates[1] for rates in _REGIONAL_RATES.values())
+    return (
+        _CREATION_USD
+        + Decimal(lifetime_ms * vcpus) * max_cpu / _MS_PER_HOUR
+        + Decimal(_memory_ms(lifetime_ms) * vcpus * 2) * max_memory / _MS_PER_HOUR
+        + Decimal(network_cap) * _NETWORK_GB_USD / _BYTES_PER_GB
+    )
+
+
+def sandbox_hold_cents(*, lifetime_ms: int, vcpus: int, network_cap: int = 0) -> Decimal:
+    """Price the charged cents a box of this shape reserves when it opens.
+
+    Args:
+        lifetime_ms: Funded lifetime.
+        vcpus: CPU allocation.
+        network_cap: Billable transfer in bytes, 0 for a deny-all box.
+
+    Returns:
+        The box's coverage in charged cents.
+    """
+    return ChargePolicy("sandbox").convert(_maximum_usd(lifetime_ms, vcpus, network_cap)).total
+
+
 def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
     """Price an immutable sandbox before allocating any provider resources.
 
@@ -189,16 +227,7 @@ def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
     if not _IMMUTABLE_IMAGE.fullmatch(str(request.get("image", ""))):
         raise UnpricedOperationError("Protected Vercel runs require an immutable prebuilt image digest.")
     network_cap = _network_cap(request)
-    # Python SDK 0.4.0 cannot select a region. Cover every currently supported
-    # region and settle against the region in the final provider receipt.
-    max_cpu = max(rates[0] for rates in _REGIONAL_RATES.values())
-    max_memory = max(rates[1] for rates in _REGIONAL_RATES.values())
-    maximum = (
-        _CREATION_USD
-        + Decimal(lifetime_ms * vcpus) * max_cpu / _MS_PER_HOUR
-        + Decimal(_memory_ms(lifetime_ms) * vcpus * 2) * max_memory / _MS_PER_HOUR
-        + Decimal(network_cap) * _NETWORK_GB_USD / _BYTES_PER_GB
-    )
+    maximum = _maximum_usd(lifetime_ms, vcpus, network_cap)
     return operation_quote(
         request,
         maximum,
@@ -372,6 +401,7 @@ class VercelUsageReservation:
         self.operation = runtime.reserve(self.quote, operation_key=operation_key, cost_kind="sandbox", role="runtime")
         if self.operation.state == "settled":
             raise OperationCompletedError("This sandbox operation already completed; retrieve its saved result.")
+        runtime.pin(self.operation.id, cent_units(self.operation.max_cents))
         claimed = runtime.service.mark_dispatched(self.operation.id, runtime.username)
         if not claimed.dispatch_claimed:
             raise UsagePendingError("This sandbox was already dispatched; reconcile its exact session.")
@@ -447,13 +477,14 @@ class VercelUsageReservation:
         if lifetime_ms <= self.lifetime_ms:
             raise ValueError("An extension must lengthen the funded lifetime.")
         quote = quote_vercel_sandbox({**self.request, "lifetime_ms": lifetime_ms})
-        self.runtime.extend(
+        extended = self.runtime.extend(
             self.operation.id,
             quote,
             evidence_key=f"vercel-extend:{lifetime_ms}",
             evidence={"provider": "vercel", "lifetime_ms": lifetime_ms, "request": quote.request_fingerprint},
             deadline=deadline,
         )
+        self.runtime.pin(self.operation.id, cent_units(extended.max_cents))
         self.lifetime_ms = lifetime_ms
 
     def confirm_extended(self, session: Any) -> None:
@@ -509,6 +540,7 @@ class VercelUsageReservation:
                         "message": str(error)[:1000],
                     },
                 )
+                self.runtime.unpin(self.operation.id)
                 return
             except BudgetError:
                 pass
@@ -537,6 +569,7 @@ class VercelUsageReservation:
                 actual_wallet_cents=charge.wallet,
                 evidence={"provider": "vercel", "source": _SCHEMA_URL, "session": session, "provider_usd": str(usd)},
             )
+            self.runtime.unpin(self.operation.id)
         except BaseException:
             self.pending()
             raise

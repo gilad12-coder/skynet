@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ....i18n import t
+from ....i18n import t, t_locale
 from ....models.unified import (
     DSPY_OPTIMIZERS,
     METRIC_FILE,
@@ -540,6 +540,27 @@ def with_message_codes(response: ContractCheckResponse, static: ContractCheckRes
             item = item.model_copy(update={"message_code": code, "message_params": params})
         samples.append(item)
     return response.model_copy(update={"checks": [*static.checks, *samples]})
+
+
+def in_locale(response: ContractCheckResponse, locale: str | None) -> ContractCheckResponse:
+    """Render each coded item's message in the caller's locale.
+
+    Args:
+        response: A contract check whose items carry Hebrew-base messages.
+        locale: The caller's locale tag; None keeps the Hebrew base.
+
+    Returns:
+        The response with every coded message in ``locale``.
+    """
+    if not locale:
+        return response
+    checks = [
+        item
+        if item.message_code is None
+        else item.model_copy(update={"message": t_locale(locale, item.message_code, **item.message_params)})
+        for item in response.checks
+    ]
+    return response.model_copy(update={"checks": checks})
 
 
 def validate_unified_payload(payload: UnifiedRunRequest) -> None:

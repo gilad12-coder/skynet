@@ -78,8 +78,24 @@ class BudgetInsufficientError(BudgetError):
     """Report work that cannot fit even after outstanding holds are released."""
 
 
+class AccountFundsError(BudgetInsufficientError):
+    """Report work the account's balance cannot fund, whatever the spending limit allows."""
+
+
 class BudgetInFlightError(BudgetError):
     """Wait for already-covered work before deciding whether funding is exhausted."""
+
+    def __init__(self, message: str, *, scope_units: int | None = None, room_units: int | None = None) -> None:
+        """Keep the limit arithmetic so a caller can tell whether waiting could help.
+
+        Args:
+            message: Internal diagnostic for logs and focused tests.
+            scope_units: Coverage the refused operation needs.
+            room_units: The limit's unspent units, reserved work included.
+        """
+        super().__init__(message)
+        self.scope_units = scope_units
+        self.room_units = room_units
 
 
 class BudgetUnreconciledError(BudgetInFlightError):
@@ -179,6 +195,11 @@ def _total(value: int) -> int:
     return value
 
 
+def usd_text(cents: int) -> str:
+    """Write whole cents as dollars, the unit the wizard shows the limit in."""
+    return f"${cents / 100:,.2f}"
+
+
 def _admit(
     session: Session,
     wallet: BillingCustomerModel,
@@ -205,11 +226,13 @@ def _admit(
         remaining = budget.total_cents * CENT_SCALE - budget.settled_units
         if scope > remaining:
             raise BudgetInsufficientError(
-                f"The next operation needs up to {ceil_cents(scope)} cents, but only "
-                f"{max(remaining, 0) // CENT_SCALE} of the {budget.total_cents}-cent limit remain."
+                f"The next operation needs up to {usd_text(ceil_cents(scope))}, but only "
+                f"{usd_text(max(remaining, 0) // CENT_SCALE)} of the {usd_text(budget.total_cents)} limit remain."
             )
         if scope > remaining - budget.reserved_units:
-            raise BudgetInFlightError("Covered work must settle before this operation can fit.")
+            raise BudgetInFlightError(
+                "Covered work must settle before this operation can fit.", scope_units=scope, room_units=remaining
+            )
     held = account_committed_cents(session, username)
     wallet_balance = int(wallet.balance_cents) + int(wallet.grant_remaining or 0)
     hold_delta = (
@@ -221,7 +244,7 @@ def _admit(
         after_release = ceil_cents(budget.wallet_settled_units + charge) - budget.billed_cents
         if after_release <= wallet_balance:
             raise BudgetInFlightError("Other covered work currently holds the required wallet funds.")
-        raise BudgetInsufficientError("The account cannot fund the next operation.")
+        raise AccountFundsError("The account cannot fund the next operation.")
 
 
 class BudgetService:
@@ -280,7 +303,7 @@ class BudgetService:
             session.flush()
             wallet = session.get(BillingCustomerModel, username, with_for_update=True)
         if wallet is None:
-            raise BudgetInsufficientError("The account has no funded wallet.")
+            raise AccountFundsError("The account has no funded wallet.")
         StripeBillingService(engine=self._engine)._resolve_grant(wallet, datetime.now(UTC))
         return wallet
 
@@ -472,7 +495,7 @@ class BudgetService:
                     raise BudgetConflictError("Creation key was already used with a different total.")
                 return self._snapshot(session, budget, wallet)
             if wallet.balance_cents + int(wallet.grant_remaining or 0) <= account_committed_cents(session, username):
-                raise BudgetInsufficientError("The account has no available funds.")
+                raise AccountFundsError("The account has no available funds.")
             now = datetime.now(UTC)
             budget = ExecutionBudgetModel(
                 id=str(uuid4()),
@@ -630,7 +653,7 @@ class BudgetService:
             if widening and wallet.balance_cents + int(wallet.grant_remaining or 0) <= account_committed_cents(
                 session, username
             ):
-                raise BudgetInsufficientError("The account has no available funds for additional work.")
+                raise AccountFundsError("The account has no available funds for additional work.")
             if total != budget.total_cents or uncapped != budget.uncapped:
                 budget.total_cents = total
                 budget.uncapped = uncapped

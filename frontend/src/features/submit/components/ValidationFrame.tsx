@@ -87,11 +87,12 @@ const checkStateKeys: Record<PreflightCheck["status"], MessageKey> = {
 // The steps a check walks through, in order. A step the server skips drops
 // out of "up next" as soon as a later one starts.
 // The unified run checks its code contract (metric.contract) in the evaluator
-// step, after the sandbox is up and before the models are probed.
+// step, after the sandbox is up. Before a run, the models are probed first, so
+// a limit that cannot fund one call fails before the sandbox opens.
 const PLAN: Record<PreflightWorkflow, Record<PreflightScope, readonly ValidationPhase[]>> = {
   unified: {
     evaluation: ["budget", "sandbox", "evaluator", "usage"],
-    execution: ["budget", "sandbox", "evaluator", "models", "usage"],
+    execution: ["budget", "models", "sandbox", "evaluator", "usage"],
   },
 };
 

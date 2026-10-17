@@ -412,9 +412,9 @@ ContractCheckKey = Literal[
 ]
 
 
-# ``message`` is the Hebrew-base rendering; ``message_code`` and
-# ``message_params`` are the i18n code and placeholders the client renders in
-# its own locale, since the check can run in a worker with no request locale.
+# ``message`` is rendered in the request's ``locale`` (the Hebrew base when it
+# names none); ``message_code`` and ``message_params`` are the i18n code and
+# placeholders the client renders in its own locale.
 # ``detail`` is the exact error text, trimmed to frames from the user's own code.
 class ContractCheckItem(BaseModel):
     key: ContractCheckKey
@@ -438,6 +438,7 @@ class ContractSample(BaseModel):
 class ContractCheckRequest(BaseModel):
     spec: UnifiedRunRequest
     sample_count: int = Field(default=CONTRACT_SAMPLE_DEFAULT, ge=1, le=CONTRACT_SAMPLE_MAX)
+    locale: str | None = Field(default=None, max_length=35)
 
 
 # One workspace file's lint from the static check: ruff's error rules

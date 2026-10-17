@@ -1,6 +1,6 @@
 import type { TokenSourceMode } from "@/features/billing";
 
-import { chargeableBracket, runtimeStartHold, type CostBracket } from "./cost-bracket";
+import { chargeableBracket, type CostBracket } from "./cost-bracket";
 
 export interface BudgetChoice {
   uncapped: boolean;
@@ -13,54 +13,52 @@ export interface BudgetChoice {
 export interface BudgetShortfall {
   /** Which figure falls short: the spending limit, or the account's balance. */
   kind: "limit" | "balance";
-  /** The least that figure has to be. */
+  /** The least that figure has to be, in whole cents. */
   needed: number;
 }
 
 /**
  * The least a spending limit can be: the low end of the projected usage,
- * which starts at the hold the run's box takes the moment it opens.
+ * which starts at what the run holds the moment it starts (its box and its
+ * dearest single model call).
  */
 export function limitFloor(bracket: CostBracket, mode: TokenSourceMode): number {
   return chargeableBracket(bracket, mode).lowCents;
 }
 
 /**
- * Why the budget step cannot be left yet, or null when it can. A limit under
- * the floor would be refused at the run's first step or almost surely stop it
- * early; without a limit the account has to cover the opening hold instead.
- * An unset limit is left to stage validation, and a balance that has not
- * loaded to the server.
+ * Why the run cannot start as set, or null when it can. A limit under the
+ * floor is refused at the first model call; the account has to fund that
+ * same opening hold whether or not the run is capped. An unset limit is left
+ * to stage validation, and a balance that has not loaded to the server.
  */
 export function budgetShortfall(
   bracket: CostBracket,
   mode: TokenSourceMode,
   { uncapped, limit, balance }: BudgetChoice,
 ): BudgetShortfall | null {
-  if (uncapped) {
-    const hold = runtimeStartHold(bracket);
-    return balance != null && balance < hold ? { kind: "balance", needed: hold } : null;
-  }
-  const floor = limitFloor(bracket, mode);
-  return limit != null && limit < floor ? { kind: "limit", needed: floor } : null;
+  const needed = Math.ceil(limitFloor(bracket, mode));
+  if (!uncapped && limit != null && limit < needed) return { kind: "limit", needed };
+  if (balance != null && balance < needed) return { kind: "balance", needed };
+  return null;
 }
 
 /** The wizard screens that set the spending limit. */
 const LIMIT_SCREENS: ReadonlySet<string> = new Set(["budget", "plan"]);
 
 /**
- * Cents the spending limit has to reach before Continue may leave `screen`,
- * or null when it may. Only the screens that set the limit hold Continue; a
- * limit under the estimate's low end would only stop the run at its first
- * model call. No limit, or no estimate yet, holds nothing.
+ * What holds Continue on `screen`, or null when nothing does. The screens
+ * that set the limit hold it, and so does `gate`, the last screen before the
+ * metric step: past it the user would write code and run checks for a run
+ * that cannot start. No estimate yet holds nothing.
  */
-export function limitContinueBlock(
+export function budgetContinueBlock(
   screen: string,
   bracket: CostBracket | null,
   mode: TokenSourceMode,
-  { uncapped, limit }: Pick<BudgetChoice, "uncapped" | "limit">,
-): number | null {
-  if (!LIMIT_SCREENS.has(screen) || !bracket || uncapped) return null;
-  const shortfall = budgetShortfall(bracket, mode, { uncapped, limit, balance: null });
-  return shortfall ? Math.ceil(shortfall.needed) : null;
+  choice: BudgetChoice,
+  gate = false,
+): BudgetShortfall | null {
+  if (!bracket || (!gate && !LIMIT_SCREENS.has(screen))) return null;
+  return budgetShortfall(bracket, mode, choice);
 }

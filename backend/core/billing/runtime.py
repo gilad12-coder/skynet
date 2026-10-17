@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Generic, TypeVar
 
+from .budget_amounts import CENT_SCALE, ceil_cents
 from .budgets import (
     BudgetConflictError,
     BudgetFencedError,
@@ -17,6 +18,7 @@ from .budgets import (
     BudgetService,
     BudgetUnreconciledError,
     OperationSnapshot,
+    usd_text,
 )
 from .operation_pricing import ChargePolicy, OperationQuote, json_fingerprint
 from .signals import BudgetStopLatch
@@ -114,6 +116,53 @@ class BudgetRuntime:
         self.stop = stop or BudgetStopLatch()
         self.wait_timeout = wait_timeout
         self._changed = threading.Condition()
+        self._pinned: dict[str, int] = {}
+
+    def pin(self, operation_id: str, units: int) -> None:
+        """Record sandbox coverage that stays held until the work that opened it ends.
+
+        Args:
+            operation_id: The sandbox's admitted operation.
+            units: Its current coverage in cent units.
+        """
+        with self._changed:
+            self._pinned[operation_id] = units
+
+    def unpin(self, operation_id: str) -> None:
+        """Forget a sandbox's coverage once it settled or was released.
+
+        Args:
+            operation_id: The sandbox's admitted operation.
+        """
+        with self._changed:
+            self._pinned.pop(operation_id, None)
+            self._changed.notify_all()
+
+    def _wait_cannot_help(self, error: BudgetInFlightError) -> BudgetInsufficientError | None:
+        """Refuse a setup operation that only this check's own open sandboxes keep out.
+
+        A setup check runs its samples one at a time inside sandboxes it opened
+        itself, and those stay open while it waits, so their coverage can never
+        make room. A run's lanes do release each other's coverage, so only the
+        setup phase gives up early.
+
+        Args:
+            error: The admission refusal, with its limit arithmetic when it has one.
+
+        Returns:
+            The refusal to raise instead of waiting, or None when waiting may help.
+        """
+        if self.phase != "setup" or error.scope_units is None or error.room_units is None:
+            return None
+        with self._changed:
+            pinned = sum(self._pinned.values())
+        if error.scope_units <= error.room_units - pinned:
+            return None
+        return BudgetInsufficientError(
+            f"The next operation needs up to {usd_text(ceil_cents(error.scope_units))}, but this check's "
+            f"sandboxes hold {usd_text(ceil_cents(pinned))} of the "
+            f"{usd_text(max(error.room_units, 0) // CENT_SCALE)} that remain."
+        )
 
     def check_admission(self) -> None:
         """Fence unpaid control calls against the same cancellation and recovery authority.
@@ -181,6 +230,9 @@ class BudgetRuntime:
                     "Previous work is awaiting confirmed usage; its coverage is retained."
                 ) from error
             except BudgetInFlightError as error:
+                refusal = self._wait_cannot_help(error)
+                if refusal is not None:
+                    raise refusal from error
                 if time.monotonic() >= deadline:
                     raise UsagePendingError(
                         "Covered work has not settled; no overlapping work was admitted."
@@ -230,6 +282,9 @@ class BudgetRuntime:
                     evidence=evidence,
                 )
             except BudgetInFlightError as error:
+                refusal = self._wait_cannot_help(error)
+                if refusal is not None:
+                    raise refusal from error
                 if time.monotonic() >= deadline:
                     raise UsagePendingError("Covered work has not settled; the sandbox was not extended.") from error
                 with self._changed:

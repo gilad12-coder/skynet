@@ -27,7 +27,7 @@ registerHooks({
 });
 
 const { projectCostBracket, runtimeCostProjection } = await import("./cost-bracket.ts");
-const { budgetShortfall, limitContinueBlock, limitFloor } = await import(budgetLimitUrl);
+const { budgetContinueBlock, budgetShortfall, limitFloor } = await import(budgetLimitUrl);
 
 const cheap = {
   value: "cheap",
@@ -66,36 +66,58 @@ test("the limit floor is the low end of the estimate, which starts at the openin
 });
 
 test("a capped run falls short under the floor and is clear at it", () => {
-  const floor = limitFloor(bracket, "managed");
+  const needed = Math.ceil(limitFloor(bracket, "managed"));
   const capped = (limit: number | null) =>
-    budgetShortfall(bracket, "managed", { uncapped: false, limit, balance: 5 });
+    budgetShortfall(bracket, "managed", { uncapped: false, limit, balance: null });
 
-  assert.deepEqual(capped(floor - 1), { kind: "limit", needed: floor });
-  assert.equal(capped(floor), null);
+  assert.deepEqual(capped(needed - 1), { kind: "limit", needed });
+  assert.equal(capped(needed), null);
   assert.equal(capped(null), null);
 });
 
-test("an uncapped run falls short while the balance cannot cover the opening hold", () => {
-  const uncapped = (balance: number | null) =>
-    budgetShortfall(bracket, "managed", { uncapped: true, limit: 1, balance });
+test("the balance has to fund the same floor, capped or not", () => {
+  const needed = Math.ceil(limitFloor(bracket, "managed"));
+  const short = (uncapped: boolean, balance: number | null) =>
+    budgetShortfall(bracket, "managed", { uncapped, limit: needed + 500, balance });
 
-  assert.deepEqual(uncapped(235), { kind: "balance", needed: 236 });
-  assert.equal(uncapped(236), null);
-  assert.equal(uncapped(null), null);
+  assert.deepEqual(short(true, needed - 1), { kind: "balance", needed });
+  assert.deepEqual(short(false, needed - 1), { kind: "balance", needed });
+  assert.equal(short(true, needed), null);
+  assert.equal(short(false, null), null);
 });
 
-test("Continue on the budget screen is held below the estimate's low end and open at or above it", () => {
+test("a short limit is named before a short balance", () => {
   const needed = Math.ceil(limitFloor(bracket, "managed"));
-  const block = (limit: number | null, screen = "budget", uncapped = false) =>
-    limitContinueBlock(screen, bracket, "managed", { uncapped, limit });
 
-  assert.equal(block(needed - 1), needed);
-  assert.equal(block(100), needed);
-  assert.equal(block(needed), null);
-  assert.equal(block(needed + 500), null);
-  assert.equal(block(100, "plan"), needed);
-  assert.equal(block(100, "metric"), null);
-  assert.equal(block(100, "budget", true), null);
-  assert.equal(block(null), null);
-  assert.equal(limitContinueBlock("budget", null, "managed", { uncapped: false, limit: 1 }), null);
+  assert.deepEqual(
+    budgetShortfall(bracket, "managed", { uncapped: false, limit: 100, balance: 0 }),
+    { kind: "limit", needed },
+  );
+});
+
+test("Continue holds on the limit screens and at the gate, and nowhere else", () => {
+  const needed = Math.ceil(limitFloor(bracket, "managed"));
+  const block = (screen: string, choice: object, gate = false) =>
+    budgetContinueBlock(
+      screen,
+      bracket,
+      "managed",
+      { uncapped: false, limit: null, balance: null, ...choice },
+      gate,
+    );
+
+  assert.deepEqual(block("budget", { limit: 100 }), { kind: "limit", needed });
+  assert.deepEqual(block("plan", { limit: 100 }), { kind: "limit", needed });
+  assert.equal(block("budget", { limit: needed }), null);
+  assert.equal(block("models", { limit: 100 }), null);
+  assert.deepEqual(block("models", { limit: 100 }, true), { kind: "limit", needed });
+  assert.deepEqual(block("cases", { uncapped: true, balance: 5 }, true), {
+    kind: "balance",
+    needed,
+  });
+  assert.equal(block("budget", { uncapped: true }), null);
+  assert.equal(
+    budgetContinueBlock("budget", null, "managed", { uncapped: false, limit: 1, balance: 0 }, true),
+    null,
+  );
 });

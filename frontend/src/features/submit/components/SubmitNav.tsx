@@ -1,6 +1,6 @@
 "use client";
 
-import { CaretLeft, CaretRight, CaretDown, CircleNotch } from "@/shared/ui/icons";
+import { CaretLeft, CaretRight, CaretDown, CircleNotch, Warning } from "@/shared/ui/icons";
 import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/shared/ui/primitives/button";
 import { TERMS } from "@/shared/lib/terms";
@@ -19,6 +19,14 @@ type NavContext = Pick<
   runDisabledReason?: string | null;
 };
 
+/** Why the last Run click did not start a run, kept on screen until the setup changes. */
+export interface RunFailureNotice {
+  text: string;
+  /** The server's own account of the failure. */
+  detail: string | null;
+  action?: { label: string; onClick: () => void };
+}
+
 interface SubmitNavProps {
   w: NavContext;
   onBack?: () => void;
@@ -30,6 +38,38 @@ interface SubmitNavProps {
   showSubmit?: boolean;
   /** Where the user is among the current step's screens; shown as dots. */
   screen?: { index: number; count: number };
+  runFailure?: RunFailureNotice | null;
+}
+
+function RunFailureBox({ failure }: { failure: RunFailureNotice }) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-col gap-2 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+    >
+      <div className="min-w-0 space-y-1">
+        <p className="flex items-start gap-2 font-medium text-destructive">
+          <Warning className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <span>{failure.text}</span>
+        </p>
+        {failure.detail && (
+          <p className="break-words ps-6 text-xs text-muted-foreground" dir="auto">
+            {failure.detail}
+          </p>
+        )}
+      </div>
+      {failure.action && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={failure.action.onClick}
+          className="shrink-0 self-start sm:self-center"
+        >
+          {failure.action.label}
+        </Button>
+      )}
+    </div>
+  );
 }
 
 function ScreenDots({ index, count }: { index: number; count: number }) {
@@ -61,6 +101,7 @@ export function SubmitNav({
   nextDisabled,
   showSubmit,
   screen,
+  runFailure,
 }: SubmitNavProps) {
   const reducedMotion = useReducedMotion();
   const { goPrev, goNext, submit, submitting, advancing } = w;
@@ -122,49 +163,52 @@ export function SubmitNav({
   }
 
   return (
-    <div className="flex items-stretch gap-3">
-      {backButton}
-      <motion.button
-        type="button"
-        onClick={onSubmit ?? (() => void submit())}
-        disabled={submitting || advancing || runDisabledReason !== null}
-        aria-busy={submitting || advancing || undefined}
-        aria-disabled={runDisabledReason !== null || undefined}
-        title={runDisabledReason ?? undefined}
-        data-tutorial="submit-button"
-        data-telemetry="submit-run"
-        animate={runDisabledReason || reducedMotion ? { scale: 1 } : { scale: [1, 1.01, 1] }}
-        transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
-        className="group relative min-w-0 flex-1 rounded-2xl bg-primary-fill text-primary-foreground font-semibold text-base pt-5 pb-7 cursor-pointer transition-all duration-300 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
-      >
-        {submitting || advancing ? (
-          <span className="flex items-center justify-center gap-2">
-            <CircleNotch className="size-5 animate-spin motion-reduce:animate-none" />
-            {advancing
-              ? msg("submit.nav.validating")
-              : msg("auto.features.submit.components.submitnav.3")}
-          </span>
-        ) : (
-          <div className="flex flex-col items-center gap-4">
-            <span className="flex flex-col items-center gap-1">
-              <span>
-                {msg("auto.features.submit.components.submitnav.4")}
-                {TERMS.optimization}
-              </span>
-              {runDisabledReason && (
-                <span className="text-xs font-normal text-primary-foreground/90" dir="auto">
-                  {runDisabledReason}
-                </span>
-              )}
+    <div className="flex flex-col gap-3">
+      {runFailure && !submitting && !advancing && <RunFailureBox failure={runFailure} />}
+      <div className="flex items-stretch gap-3">
+        {backButton}
+        <motion.button
+          type="button"
+          onClick={onSubmit ?? (() => void submit())}
+          disabled={submitting || advancing || runDisabledReason !== null}
+          aria-busy={submitting || advancing || undefined}
+          aria-disabled={runDisabledReason !== null || undefined}
+          title={runDisabledReason ?? undefined}
+          data-tutorial="submit-button"
+          data-telemetry="submit-run"
+          animate={runDisabledReason || reducedMotion ? { scale: 1 } : { scale: [1, 1.01, 1] }}
+          transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
+          className="group relative min-w-0 flex-1 rounded-2xl bg-primary-fill text-primary-foreground font-semibold text-base pt-5 pb-7 cursor-pointer transition-all duration-300 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {submitting || advancing ? (
+            <span className="flex items-center justify-center gap-2">
+              <CircleNotch className="size-5 animate-spin motion-reduce:animate-none" />
+              {advancing
+                ? msg("submit.nav.validating")
+                : msg("auto.features.submit.components.submitnav.3")}
             </span>
-            <div className="flex flex-col items-center -space-y-7 h-0 overflow-visible opacity-70 group-hover:opacity-100 transition-opacity duration-200 [&>svg]:animate-[cascadeDown_1s_ease-in-out_infinite] group-hover:[&>svg]:animate-[cascadeDownHyper_0.5s_ease-out_infinite] motion-reduce:[&>svg]:animate-none motion-reduce:group-hover:[&>svg]:animate-none">
-              <CaretDown className="size-10 [animation-delay:0s] group-hover:[animation-delay:0s]" />
-              <CaretDown className="size-10 [animation-delay:0.15s] group-hover:[animation-delay:0.08s]" />
-              <CaretDown className="size-10 [animation-delay:0.3s] group-hover:[animation-delay:0.16s]" />
+          ) : (
+            <div className="flex flex-col items-center gap-4">
+              <span className="flex flex-col items-center gap-1">
+                <span>
+                  {msg("auto.features.submit.components.submitnav.4")}
+                  {TERMS.optimization}
+                </span>
+                {runDisabledReason && (
+                  <span className="text-xs font-normal text-primary-foreground/90" dir="auto">
+                    {runDisabledReason}
+                  </span>
+                )}
+              </span>
+              <div className="flex flex-col items-center -space-y-7 h-0 overflow-visible opacity-70 group-hover:opacity-100 transition-opacity duration-200 [&>svg]:animate-[cascadeDown_1s_ease-in-out_infinite] group-hover:[&>svg]:animate-[cascadeDownHyper_0.5s_ease-out_infinite] motion-reduce:[&>svg]:animate-none motion-reduce:group-hover:[&>svg]:animate-none">
+                <CaretDown className="size-10 [animation-delay:0s] group-hover:[animation-delay:0s]" />
+                <CaretDown className="size-10 [animation-delay:0.15s] group-hover:[animation-delay:0.08s]" />
+                <CaretDown className="size-10 [animation-delay:0.3s] group-hover:[animation-delay:0.16s]" />
+              </div>
             </div>
-          </div>
-        )}
-      </motion.button>
+          )}
+        </motion.button>
+      </div>
     </div>
   );
 }

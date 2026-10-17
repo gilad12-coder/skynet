@@ -1,23 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
+import { toast } from "react-toastify";
 
 import { useHideAgentPill, useWizardStateOptional } from "@/features/agent-panel";
+import { useBalance } from "@/features/billing";
+import { useSettingsModal } from "@/features/settings";
+import { msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 import { slideVariants } from "../../constants";
 import { WizardAutoAdvanceContext, useAutoAdvanceDriver } from "../../hooks/use-auto-advance";
 import { ExecutionBudgetProvider } from "../../hooks/use-execution-budget";
 import { WizardV2Provider, useWizardV2Shell, v2Text } from "../../hooks/use-unified-wizard";
-import { limitContinueBlock } from "../../lib/budget-limit";
+import { budgetContinueBlock, budgetShortfall, type BudgetShortfall } from "../../lib/budget-limit";
+import type { RunFailureCause } from "../../lib/run-failure";
 import { stepPages } from "../../lib/wizard-pages";
 import { WIZARD_V2_STEPS, type WizardStepId } from "../../lib/wizard-v2";
 import { WIZARD_STAGE, canMoveForward } from "../../lib/wizard-steps";
-import { SubmitNav } from "../SubmitNav";
+import { SubmitNav, type RunFailureNotice } from "../SubmitNav";
 import { SubmitSplash } from "../SubmitSplash";
 import { SubmitStepper } from "../SubmitStepper";
-import { belowEstimateMessage } from "../TotalBudgetCard";
+import { belowEstimateMessage, shortBalanceMessage } from "../TotalBudgetCard";
 import { InputsStep } from "./InputsStep";
 import { MetricStep } from "./MetricStep";
 import { OptimizerStep } from "./OptimizerStep";
@@ -31,6 +36,24 @@ const STEP_VIEWS: Record<WizardStepId, (page: number, back: () => void) => React
 };
 
 const FIRST_PAGES: Record<WizardStepId, number> = { task: 0, inputs: 0, optimizer: 0, metric: 0 };
+
+// The screens that set the spending limit, as `budgetContinueBlock` knows them.
+const LIMIT_SCREENS = ["budget", "plan"] as const;
+
+// One toast per shortfall, however often Continue is pressed.
+const SHORTFALL_TOAST_ID = "submit-budget-shortfall";
+
+function shortfallMessage(shortfall: BudgetShortfall): string {
+  return shortfall.kind === "balance"
+    ? shortBalanceMessage(shortfall.needed)
+    : belowEstimateMessage(shortfall.needed);
+}
+
+const RUN_FAILURE_TEXT = {
+  limit: "submit.run.failure.limit",
+  balance: "submit.run.failure.balance",
+  other: "submit.run.failure.other",
+} as const satisfies Record<RunFailureCause, string>;
 
 // Arrow keys page the wizard only when they have no job where focus sits:
 // fields, editors, radio groups, tabs, menus and open dialogs keep them.
@@ -75,16 +98,57 @@ function UnifiedWizardFrame() {
   const lastScreen = position === steps.length - 1 && page === pageCount - 1;
   const { goNext, goPrev, advancing, submitting } = w;
   const visibleScreen = stepPages(current, w.state)[page] ?? "";
-  // A limit under the estimate's low end would only stop the run at its first
-  // model call, so the screen that sets it keeps Continue (the agent's too).
-  const limitNeeded = limitContinueBlock(visibleScreen, w.costBracket, w.tokenSource, {
-    uncapped: w.budgetUncapped,
-    limit: w.maxCostCents,
-  });
+  const { totalCents, available: balanceKnown } = useBalance();
+  const { costBracket, tokenSource, budgetUncapped, maxCostCents } = w;
+  const balance = balanceKnown ? totalCents : null;
+  // A run its limit or balance can't open would only fail at its first model
+  // call, so Continue holds (the agent's too) on the screen that sets the
+  // limit and on the last one before the metric step's editor and checks.
+  const beforeMetric = steps[position + 1] === "metric" && page === pageCount - 1;
+  const shortfall = useMemo(
+    () =>
+      budgetContinueBlock(
+        visibleScreen,
+        costBracket,
+        tokenSource,
+        { uncapped: budgetUncapped, limit: maxCostCents, balance },
+        beforeMetric,
+      ),
+    [visibleScreen, costBracket, tokenSource, budgetUncapped, maxCostCents, balance, beforeMetric],
+  );
+  // The stepper holds too: no step past a held Continue, and never the
+  // metric step while the run can't start, from wherever the user stands.
+  const runShort = useMemo(
+    () =>
+      costBracket != null &&
+      budgetShortfall(costBracket, tokenSource, {
+        uncapped: budgetUncapped,
+        limit: maxCostCents,
+        balance,
+      }) !== null,
+    [costBracket, tokenSource, budgetUncapped, maxCostCents, balance],
+  );
+  const { openTo } = useSettingsModal();
   const inputsOpen = canMoveForward(current, w.stepIssue("inputs"));
-  const forwardOpen = inputsOpen && limitNeeded === null;
+  // Until every model's one-call hold has loaded, the floor reads low and a
+  // run the account can't fund would pass; a press made meanwhile waits.
+  const pricing =
+    !w.costSettled &&
+    (beforeMetric || (LIMIT_SCREENS as readonly string[]).includes(visibleScreen));
+  const forwardOpen = inputsOpen && shortfall === null && !pricing;
+  const [waitingOn, setWaitingOn] = useState<string | null>(null);
+  if (waitingOn !== null && waitingOn !== visibleScreen) setWaitingOn(null);
+  // Continue stays clickable under a shortfall so the press can say why it holds.
   const forward = useCallback(() => {
-    if (!forwardOpen) return;
+    if (!inputsOpen) return;
+    if (pricing) {
+      setWaitingOn(visibleScreen);
+      return;
+    }
+    if (shortfall !== null) {
+      toast.error(shortfallMessage(shortfall), { toastId: SHORTFALL_TOAST_ID });
+      return;
+    }
     if (page < pageCount - 1) {
       setPages((p) => ({ ...p, [current]: page + 1 }));
       return;
@@ -92,7 +156,24 @@ function UnifiedWizardFrame() {
     const next = steps[position + 1];
     if (next) setPages((p) => ({ ...p, [next]: 0 }));
     goNext();
-  }, [forwardOpen, page, pageCount, current, steps, position, goNext]);
+  }, [
+    inputsOpen,
+    pricing,
+    visibleScreen,
+    shortfall,
+    openTo,
+    page,
+    pageCount,
+    current,
+    steps,
+    position,
+    goNext,
+  ]);
+  useEffect(() => {
+    if (waitingOn === null || pricing) return;
+    setWaitingOn(null);
+    forward();
+  }, [waitingOn, pricing, forward]);
   const [reopenedScreen, setReopenedScreen] = useState(() => (w.restored ? visibleScreen : null));
   if (reopenedScreen !== null && reopenedScreen !== visibleScreen) setReopenedScreen(null);
   const autoAdvance = useAutoAdvanceDriver(
@@ -128,6 +209,22 @@ function UnifiedWizardFrame() {
     [steps, position, current, page, goTo, w.state],
   );
 
+  // Guided's flow skips the screen that sets the limit, so its notice has no button.
+  const limitScreen = LIMIT_SCREENS.find((screen) =>
+    steps.some((step) => (stepPages(step, w.state) as readonly string[]).includes(screen)),
+  );
+  const failureCause = w.runFailure?.cause;
+  const runFailure: RunFailureNotice | null = w.runFailure && {
+    text: msg(RUN_FAILURE_TEXT[w.runFailure.cause]),
+    detail: w.runFailure.detail,
+    action:
+      failureCause === "balance"
+        ? { label: msg("billing.action.add_funds"), onClick: () => openTo("billing") }
+        : failureCause === "limit" && limitScreen
+          ? { label: msg("submit.run.failure.raise_limit"), onClick: () => goToScreen(limitScreen) }
+          : undefined,
+  };
+
   // The agent edits only the screen on view, so it is told which one that
   // is; unmounting the wizard clears it and leaves the agent unscoped. Its
   // Continue runs this frame's own ``forward``, the button's handler.
@@ -139,8 +236,8 @@ function UnifiedWizardFrame() {
   const blockedText =
     !inputsOpen && blockedIssue
       ? v2Text(blockedIssue, w.guided)
-      : limitNeeded !== null
-        ? belowEstimateMessage(limitNeeded)
+      : shortfall !== null
+        ? shortfallMessage(shortfall)
         : null;
   const shareReopenedScreen = wizardCtx?.setReopenedScreen;
   useEffect(() => {
@@ -185,16 +282,18 @@ function UnifiedWizardFrame() {
     return () => window.removeEventListener("keydown", onKey);
   }, [forward, back, advancing, submitting, lastScreen]);
 
-  // The stepper's later steps hold too, so the limit can't be skipped past.
+  const metricHeld = runShort || !w.costSettled;
+  const reachable = (step: WizardStepId) =>
+    WIZARD_STAGE[step] <= WIZARD_STAGE[current] ||
+    (shortfall === null && !(metricHeld && WIZARD_STAGE[step] >= WIZARD_STAGE.metric));
   const stepper =
-    limitNeeded === null
+    shortfall === null && !metricHeld
       ? w
       : {
           ...w,
-          canEnter: (step: WizardStepId) =>
-            WIZARD_STAGE[step] <= WIZARD_STAGE[current] && w.canEnter(step),
+          canEnter: (step: WizardStepId) => reachable(step) && w.canEnter(step),
           goTo: (step: WizardStepId) => {
-            if (WIZARD_STAGE[step] <= WIZARD_STAGE[current]) w.goTo(step);
+            if (reachable(step)) w.goTo(step);
           },
         };
 
@@ -242,9 +341,10 @@ function UnifiedWizardFrame() {
           onBack={back}
           onNext={forward}
           backDisabled={position === 0 && page === 0}
-          nextDisabled={!forwardOpen}
+          nextDisabled={!inputsOpen}
           showSubmit={lastScreen}
           screen={{ index: page, count: pageCount }}
+          runFailure={runFailure}
         />
       </div>
 

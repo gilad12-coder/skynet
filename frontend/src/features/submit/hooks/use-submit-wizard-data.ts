@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { getModelCallHolds } from "@/shared/lib/api";
 import { getModelCatalog, cachedCatalog } from "@/shared/lib/model-catalog";
 import type { ModelCatalogResponse, ModelConfig } from "@/shared/types/api";
 import { MAX_RECENT, RECENT_KEY } from "../constants";
+import { callHoldKey } from "../lib/cost-bracket";
 
 export function useRecentModelConfigs() {
   // Initial state must be empty: this hook is client-only but Next.js still
@@ -91,4 +93,76 @@ export function useModelCatalog() {
   }, [catalog]);
 
   return catalog;
+}
+
+const callHoldCache = new Map<string, number | null>();
+let boxHoldCache: number | null = null;
+
+export interface ModelCallHolds {
+  /** One call's hold per model, keyed by `callHoldKey`. */
+  holds: ReadonlyMap<string, number>;
+  /** What the boxes hold before the first model call; null until it loads. */
+  boxHoldCents: number | null;
+  /** Every named model's hold has loaded, or the request failed and the local estimate stands. */
+  settled: boolean;
+}
+
+/**
+ * The server's one-call hold for each named model, keyed by `callHoldKey`,
+ * and the boxes' hold that comes before any call. Prices load once per
+ * model and token source; an unpriced model, or one still loading, is absent
+ * so the local estimate stands in for it.
+ */
+export function useModelCallHolds(
+  models: ReadonlyArray<{ name: string; token_source?: "managed" | "byok" }>,
+): ModelCallHolds {
+  const wanted = [
+    ...new Set(
+      models
+        .filter((model) => model.name.trim())
+        .map((model) => callHoldKey(model.name, model.token_source ?? "managed")),
+    ),
+  ].sort();
+  const signature = wanted.join("\n");
+  const [loaded, setLoaded] = useState(0);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  useEffect(() => {
+    const missing = signature ? signature.split("\n").filter((key) => !callHoldCache.has(key)) : [];
+    if (missing.length === 0) return;
+    const controller = new AbortController();
+    const request = missing.map((key) => {
+      const [source, ...name] = key.split(":");
+      return {
+        name: name.join(":"),
+        token_source: source === "byok" ? "byok" : "managed",
+      } as const;
+    });
+    getModelCallHolds(request, controller.signal)
+      .then(({ holds, box_hold_cents }) => {
+        for (const hold of holds)
+          callHoldCache.set(callHoldKey(hold.name, hold.token_source), hold.cents);
+        if (typeof box_hold_cents === "number") boxHoldCache = box_hold_cents;
+        setLoaded((count) => count + 1);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setFailed(signature);
+      });
+    return () => controller.abort();
+  }, [signature]);
+
+  return useMemo(() => {
+    const holds = new Map<string, number>();
+    const keys = signature ? signature.split("\n") : [];
+    for (const key of keys) {
+      const cents = callHoldCache.get(key);
+      if (typeof cents === "number") holds.set(key, cents);
+    }
+    const settled =
+      keys.length === 0 ||
+      failed === signature ||
+      (boxHoldCache !== null && keys.every((key) => callHoldCache.has(key)));
+    return { holds, boxHoldCents: boxHoldCache, settled };
+    // `loaded` re-reads the module cache once a fetch lands.
+  }, [signature, loaded, failed]);
 }

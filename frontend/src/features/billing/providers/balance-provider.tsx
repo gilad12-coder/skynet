@@ -4,7 +4,7 @@ import * as React from "react";
 import { useSession } from "next-auth/react";
 import { toast } from "react-toastify";
 import { msg } from "@/shared/lib/messages";
-import { getWallet, type BillingWalletResponse } from "@/shared/lib/api";
+import { getWallet, WALLET_CHANGED_EVENT, type BillingWalletResponse } from "@/shared/lib/api";
 import {
   DEFAULT_PRICING_TERMS,
   EMPTY_WALLET,
@@ -140,6 +140,24 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }
   }, [sessionStatus, refresh]);
+
+  // Agent turns debit the wallet as their stream closes. Re-read it without
+  // `loading` so the chip moves to the new balance instead of flashing a
+  // skeleton; a failed re-read keeps the last balance.
+  React.useEffect(() => {
+    if (sessionStatus !== "authenticated") return;
+    const reread = () => {
+      void getWallet()
+        .then((r) => {
+          setWallet((prev) => applyWalletResponse(prev, r));
+          setAvailable(true);
+          setLoadError(false);
+        })
+        .catch(() => {});
+    };
+    window.addEventListener(WALLET_CHANGED_EVENT, reread);
+    return () => window.removeEventListener(WALLET_CHANGED_EVENT, reread);
+  }, [sessionStatus]);
 
   // Post-checkout sync [FG-3]: Stripe webhooks aren't instant, so on a success
   // return we poll the wallet (without toggling `loading`, to avoid wiping the

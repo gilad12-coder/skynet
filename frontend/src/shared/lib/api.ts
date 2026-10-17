@@ -55,6 +55,7 @@ import { reportHandledError } from "@/shared/lib/report-error";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
 import type { RunUsage } from "@/shared/types/run-usage";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
+import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import { readServerSentEvents, type ServerSentEvent } from "@/shared/lib/sse";
 import { streamResumableTurn } from "@/shared/lib/resumable-turn";
 
@@ -221,6 +222,13 @@ const INSUFFICIENT_FUNDS_CODE = I18N_KEY.BILLING_INSUFFICIENT_FUNDS;
 /** Browser event the central error path fires when a submit hits the balance gate. */
 export const INSUFFICIENT_FUNDS_EVENT = "billing-insufficient-credits";
 
+/** Browser event fired after work that debits the wallet, such as an agent turn, so the balance re-reads. */
+export const WALLET_CHANGED_EVENT = "wallet-changed";
+
+/** Fire {@link WALLET_CHANGED_EVENT}. */
+export function announceWalletChange(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(WALLET_CHANGED_EVENT));
+}
 /** Browser event fired when storage usage changes, such as a delete or a full quota, so the meter re-reads usage. */
 export const STORAGE_CHANGED_EVENT = "storage-changed";
 
@@ -454,10 +462,12 @@ export function getOptimizerCatalog(kind: ArtifactKind, mode: DataMode, signal?:
   return request<OptimizerCatalogResponse>(`/optimizers?${query}`, { signal });
 }
 
+// The server words each check's `message` in this locale for API readers;
+// the wizard itself renders `message_code`.
 export function runContractCheck(req: ContractCheckRequest, signal?: AbortSignal) {
   return request<ContractCheckResponse>("/optimizations/contract-check", {
     method: "POST",
-    body: JSON.stringify(req),
+    body: JSON.stringify({ ...req, locale: getActiveLocale() }),
     signal,
   });
 }
@@ -465,7 +475,7 @@ export function runContractCheck(req: ContractCheckRequest, signal?: AbortSignal
 export function staticContractCheck(req: ContractCheckRequest, signal?: AbortSignal) {
   return request<ContractCheckResponse>("/optimizations/contract-check/static", {
     method: "POST",
-    body: JSON.stringify(req),
+    body: JSON.stringify({ ...req, locale: getActiveLocale() }),
     signal,
   });
 }
@@ -483,6 +493,24 @@ export function getExecutionRuntimes(hasImageInputs: boolean, signal?: AbortSign
     `/execution-runtimes?has_image_inputs=${hasImageInputs}`,
     { signal },
   );
+}
+
+/** Charged cents one call of a model reserves before it is sent; null when unpriced. */
+export interface ModelCallHold {
+  name: string;
+  token_source: "managed" | "byok";
+  cents: number | null;
+}
+
+export function getModelCallHolds(
+  models: Array<{ name: string; token_source: "managed" | "byok" }>,
+  signal?: AbortSignal,
+) {
+  return request<{ holds: ModelCallHold[]; box_hold_cents: number }>("/models/call-holds", {
+    method: "POST",
+    body: JSON.stringify({ models }),
+    signal,
+  });
 }
 
 export async function runWizardPreflight(
@@ -3844,6 +3872,7 @@ export async function streamCodeAgent(
     onEvent: processEvent,
     signal: handlers.signal,
   });
+  if (result.status !== "failed" || result.started) announceWalletChange();
   if (result.status !== "failed") return;
   if (result.response) {
     const res = result.response;

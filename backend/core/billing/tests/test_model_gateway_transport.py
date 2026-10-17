@@ -684,4 +684,4 @@ def test_guest_call_the_limit_refuses_is_remembered(gateway: ModelGateway) -> No
     finally:
         del gateway._routes["fixture-token"]
 
-    assert gateway.budget_refusal == "The next operation needs up to 135 cents."
+    assert str(gateway.budget_refusal) == "The next operation needs up to 135 cents."

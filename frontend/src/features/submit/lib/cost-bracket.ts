@@ -100,6 +100,8 @@ export interface CostBracketInput {
   pricing?: Pick<PricingTerms, "usageMarkup" | "byokFeeFraction">;
   /** Economy mode sends managed calls through the provider's half-price Batch API. */
   economyMode?: boolean;
+  /** The server's hold for the boxes a check or run opens before its first model call. */
+  boxHoldCents?: number | null;
 }
 
 export interface ProjectedModelRole {
@@ -108,6 +110,8 @@ export interface ProjectedModelRole {
   tokenSource: TokenSourceMode;
   /** Fraction or multiple of the base per-evaluation token projection used by this role. */
   tokenShare: number;
+  /** The server's charged hold for one call of this model, when it has priced it. */
+  callHoldCents?: number | null;
 }
 
 export interface RuntimeCostProjection {
@@ -201,6 +205,8 @@ export interface CostBracket {
   expectedRuntimeSessions: number;
   /** Charged cents the dearest single model call reserves before it runs; 0 when unknown. */
   modelCallHoldCents: number;
+  /** Charged cents the boxes hold before the first model call; 0 when unknown. */
+  boxHoldCents?: number;
   trace: CostBracketTrace;
 }
 
@@ -283,9 +289,10 @@ function runtimeHold(runtime: RuntimeCostProjection | null | undefined): number 
 /**
  * Charged cents one call of the dearest role reserves before it is sent. The
  * backend bounds a call's input by the model's whole context window, so a
- * single call can hold far more than a whole run's expected usage; this is
- * that bound at the plain input rate, a floor under what the server reserves.
- * A role whose model has no known context window contributes nothing.
+ * single call can hold far more than a whole run's expected usage. The
+ * server's own price for that hold wins when it is known; otherwise this is
+ * that bound at the plain input rate, a floor under what the server reserves
+ * (it also counts cache-write rates). A role with neither contributes nothing.
  */
 function modelCallHold(
   roles: ProjectedModelRole[],
@@ -294,6 +301,8 @@ function modelCallHold(
 ): number {
   let hold = 0;
   for (const role of roles) {
+    if (typeof role.callHoldCents === "number" && role.callHoldCents > 0)
+      hold = Math.max(hold, Math.ceil(role.callHoldCents));
     const context = role.model?.max_input_tokens;
     if (typeof context !== "number" || !(context > 0)) continue;
     const usage = {
@@ -329,6 +338,7 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     pricing = DEFAULT_PRICING_TERMS,
     economyMode = false,
   } = input;
+  const boxHoldCents = Math.ceil(Math.max(0, input.boxHoldCents ?? 0));
   const budget = resolveMetricCalls(autoLevel, maxFullEvals, maxMetricCalls);
   const calls = budget.calls;
   // Larger datasets mean longer prompts and more baseline/eval rollouts; fold in
@@ -377,7 +387,7 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
   const lowCents = Math.max(
     1,
     managedModelLowCents + byokModelLowCents + runtimeEstimate.low,
-    runtimeHold(runtime) + modelCallHoldCents,
+    Math.max(runtimeHold(runtime), boxHoldCents) + modelCallHoldCents,
   );
   const highCents = Math.max(
     lowCents,
@@ -421,6 +431,7 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     runtimeBillingBasis: runtime?.billingBasis ?? null,
     expectedRuntimeSessions: runtime?.expectedSessions ?? 0,
     modelCallHoldCents,
+    boxHoldCents,
     trace: {
       metricCalls: calls,
       metricCallSource: budget.source,
@@ -504,11 +515,14 @@ export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): 
 
 /**
  * Cents the run's execution environment holds the moment it starts: the
- * cost of its whole lifetime, released as the run settles. A spending limit
+ * cost of its whole lifetime, released as the run settles, and never less
+ * than what its boxes hold before the first model call. A spending limit
  * below this cannot start the run at all, however small the usage estimate.
  */
 export function runtimeStartHold(bracket: CostBracket): number {
-  return bracket.runtimeBillingBasis === "at_cost" ? Math.ceil(bracket.runtimeSessionHighCents) : 0;
+  const session =
+    bracket.runtimeBillingBasis === "at_cost" ? Math.ceil(bracket.runtimeSessionHighCents) : 0;
+  return Math.max(session, bracket.boxHoldCents ?? 0);
 }
 
 /** Collapse per-model sources to the conservative job-level billing stamp. */
@@ -573,6 +587,15 @@ export interface UnifiedCostBracketOptions {
   models?: readonly CatalogModel[] | null;
   runtime?: RuntimeCostProjection | null;
   pricing?: Pick<PricingTerms, "usageMarkup" | "byokFeeFraction">;
+  /** The server's one-call holds, keyed by `callHoldKey`. */
+  callHolds?: ReadonlyMap<string, number> | null;
+  /** The server's hold for the boxes opened before the first model call. */
+  boxHoldCents?: number | null;
+}
+
+/** The key a model's one-call hold is looked up by: the same model costs less on a BYOK key. */
+export function callHoldKey(name: string, tokenSource: TokenSourceMode): string {
+  return `${tokenSource}:${name}`;
 }
 
 /** Mirrors `MIN_PAIRS_FOR_HELD_OUT`: fewer pairs than this get no test split. */
@@ -607,7 +630,8 @@ function finalScoredCases(state: WizardV2State): number {
   if (inputs.mode !== "pairs") return 1;
   const total = inputs.cases.length > 0 ? inputs.cases.length : inputs.rowCount;
   if (total <= 0) return 0;
-  if (total < UNIFIED_MIN_PAIRS_FOR_HELD_OUT) return Math.max(1, Math.round(total * inputs.split.val));
+  if (total < UNIFIED_MIN_PAIRS_FOR_HELD_OUT)
+    return Math.max(1, Math.round(total * inputs.split.val));
   const held = Math.round(total * (inputs.split.val + inputs.split.test));
   return Math.max(1, Math.min(total, held));
 }
@@ -637,10 +661,12 @@ export function projectUnifiedCostBracket(
     role: ProjectedModelRole["role"],
     config: ModelConfig | null,
     tokenShare: number,
-  ): ProjectedModelRole[] =>
-    config?.name.trim()
-      ? [{ role, model: findModel(config), tokenSource: config.token_source ?? "managed", tokenShare }]
-      : [];
+  ): ProjectedModelRole[] => {
+    if (!config?.name.trim()) return [];
+    const tokenSource = config.token_source ?? "managed";
+    const callHoldCents = options.callHolds?.get(callHoldKey(config.name, tokenSource)) ?? null;
+    return [{ role, model: findModel(config), tokenSource, tokenShare, callHoldCents }];
+  };
   const metricModel = !metricUsesModel(state)
     ? null
     : workspace.metricModelMode === "inherit"
@@ -668,6 +694,7 @@ export function projectUnifiedCostBracket(
       runtime: options.runtime,
       pricing,
       economyMode: meta.economyMode,
+      boxHoldCents: options.boxHoldCents,
     });
   }
 
@@ -699,5 +726,6 @@ export function projectUnifiedCostBracket(
     pricing,
     // Coding-agent proposers stream their calls, which never batch.
     economyMode: meta.economyMode && !nativeProposer,
+    boxHoldCents: options.boxHoldCents,
   });
 }
