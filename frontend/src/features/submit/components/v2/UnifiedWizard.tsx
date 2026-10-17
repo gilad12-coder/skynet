@@ -146,6 +146,10 @@ function UnifiedWizardFrame() {
   useEffect(() => {
     shareReopenedScreen?.(reopenedScreen);
   }, [reopenedScreen, shareReopenedScreen]);
+  const shareRestoredSetup = wizardCtx?.setRestoredSetup;
+  useEffect(() => {
+    shareRestoredSetup?.(w.restored);
+  }, [shareRestoredSetup, w.restored]);
   useEffect(() => {
     setWizardScreen?.(visibleScreen);
   }, [visibleScreen, setWizardScreen]);

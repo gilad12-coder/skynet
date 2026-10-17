@@ -74,3 +74,36 @@ export function switchScreenChat(
   const held = chats.get(to);
   return held ? { kind: "resume", conversationId: held } : { kind: "fresh" };
 }
+
+/**
+ * Where each screen's chat id is kept for the tab, so a reload that reopens
+ * the setup reopens each screen's chat with it.
+ */
+export const SCREEN_CHATS_KEY = "skynet.agent.screen-chats.v1";
+
+/**
+ * Read back the screen-to-chat map kept for the tab.
+ *
+ * @param raw The stored text, or null.
+ * @returns The map; empty when missing or malformed.
+ */
+export function decodeScreenChats(raw: string | null): Map<string, string> {
+  const chats = new Map<string, string>();
+  if (!raw) return chats;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return chats;
+  }
+  if (!isRecord(parsed)) return chats;
+  for (const [screen, id] of Object.entries(parsed)) {
+    if (typeof id === "string" && id) chats.set(screen, id);
+  }
+  return chats;
+}
+
+/** Serialize the screen-to-chat map for the tab's session storage. */
+export function encodeScreenChats(chats: ReadonlyMap<string, string>): string {
+  return JSON.stringify(Object.fromEntries(chats));
+}

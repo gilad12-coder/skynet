@@ -12,6 +12,7 @@ import {
   lastEventAt,
   reopenThinking,
   startThinking,
+  summarizeThinking,
   type ThinkingSegment,
 } from "@/shared/lib/thinking-segments";
 
@@ -178,6 +179,8 @@ interface SessionRuntime {
   // ask the user to re-upload.
   persistentExtras: Partial<WizardState>;
   pendingRun: PendingRun | null;
+  /** Index of the running turn's first assistant message; a steer adds more after it. */
+  turnStart: number;
 }
 
 function blankSession(key: string): SessionView {
@@ -199,6 +202,7 @@ function blankRuntime(): SessionRuntime {
     replyBuf: "",
     persistentExtras: {},
     pendingRun: null,
+    turnStart: 0,
   };
 }
 
@@ -303,15 +307,12 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
 
   // The ref is updated synchronously with every commit so stream callbacks and
   // same-tick sends always read post-mutation state, never a stale render.
-  const commit = React.useCallback(
-    (mutate: (draft: Map<string, SessionView>) => void) => {
-      const next = new Map(sessionsRef.current);
-      mutate(next);
-      sessionsRef.current = next;
-      setSessions(next);
-    },
-    [],
-  );
+  const commit = React.useCallback((mutate: (draft: Map<string, SessionView>) => void) => {
+    const next = new Map(sessionsRef.current);
+    mutate(next);
+    sessionsRef.current = next;
+    setSessions(next);
+  }, []);
 
   const patchSession = React.useCallback(
     (key: string, patch: Partial<SessionView>) => {
@@ -450,6 +451,11 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       const controller = new AbortController();
       rt.controller = controller;
       rt.replyBuf = "";
+      rt.turnStart = Math.max(0, (sessionsRef.current.get(key)?.messages.length ?? 1) - 1);
+      // Labels can land after `done`, when the next turn may have moved rt on.
+      const turnStart = rt.turnStart;
+      // The reply `done` landed on; stats that arrive after it belong there.
+      let replyAt: number | null = null;
       streamingKeysRef.current.add(key);
 
       patchSession(key, {
@@ -508,7 +514,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
                 last.role === "assistant" &&
                 !last.content &&
                 !last.toolCalls?.length &&
-                !last.thinkingSegments?.length
+                !last.thinkingSegments?.length &&
+                !last.plan
                   ? prev.slice(0, -1)
                   : prev;
               return [
@@ -522,13 +529,31 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             if (controller.signal.aborted) return;
             if (!ev.conversation_id) return;
             patchSession(key, { conversationId: ev.conversation_id });
-            callbacksRef.current.onConversationMeta?.(ev.conversation_id, ev.title, eventContext(key));
+            callbacksRef.current.onConversationMeta?.(
+              ev.conversation_id,
+              ev.title,
+              eventContext(key),
+            );
           },
           onReasoningPatch: (chunk) => {
             if (controller.signal.aborted) return;
             patchThinking(key, (segments, toolCount, since) =>
               appendReasoning(segments, chunk, Date.now(), toolCount, since),
             );
+          },
+          onThinkingSummary: ({ index, text }) => {
+            if (controller.signal.aborted) return;
+            patchMessages(key, (prev) => summarizeThinking(prev, turnStart, index, text));
+          },
+          onPlan: (text) => {
+            if (controller.signal.aborted) return;
+            patchMessages(key, (prev) => {
+              const last = prev[prev.length - 1];
+              if (!last || last.role !== "assistant") return prev;
+              const next = prev.slice();
+              next[next.length - 1] = { ...last, plan: text };
+              return next;
+            });
           },
           onToolStart: (ev) => {
             if (controller.signal.aborted) return;
@@ -632,7 +657,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
                   ? ""
                   : msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.5"));
               const next = prev.slice();
-              next[next.length - 1] = {
+              replyAt = next.length - 1;
+              next[replyAt] = {
                 ...last,
                 content: reply || fallback,
                 model: result.model,
@@ -642,6 +668,19 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
               return next;
             });
             releaseSlot();
+          },
+          onTurnStats: (raw) => {
+            if (controller.signal.aborted) return;
+            const stats = parseTurnStats(raw);
+            if (!stats) return;
+            patchMessages(key, (prev) => {
+              const at = replyAt;
+              const reply = at === null ? undefined : prev[at];
+              if (at === null || !reply || reply.role !== "assistant") return prev;
+              const next = prev.slice();
+              next[at] = { ...reply, stats };
+              return next;
+            });
           },
           onError: (message, code) => {
             if (controller.signal.aborted) return;
@@ -676,9 +715,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
               next[next.length - 1] = {
                 ...last,
                 toolCalls: last.toolCalls?.map((t) =>
-                  t.status === "running"
-                    ? { ...t, status: "error", endedAt: Date.now() }
-                    : t,
+                  t.status === "running" ? { ...t, status: "error", endedAt: Date.now() } : t,
                 ),
               };
               return next;
@@ -769,7 +806,11 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         .filter((m) => m.content.trim().length > 0)
         .map((m) => {
           const toolCalls = historyToolCalls(m);
-          return { role: m.role, content: m.content, ...(toolCalls ? { tool_calls: toolCalls } : {}) };
+          return {
+            role: m.role,
+            content: m.content,
+            ...(toolCalls ? { tool_calls: toolCalls } : {}),
+          };
         });
       // Merge order: snapshot (from wizardCtx if mounted) <- sticky extras
       // (accumulated across turns from panel-side derivations like
@@ -1025,7 +1066,6 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     },
     [patchSession],
   );
-
 
   const busyConversationIds = React.useMemo(() => {
     const out = new Set<string>();

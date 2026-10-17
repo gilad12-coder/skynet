@@ -30,9 +30,11 @@ from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 from ...service_gateway.agents.generalist import (
+    ThinkingTrail,
     TrustMode,
     WizardState,
     approval_key,
+    fallback_summary,
     get_approval_registry,
     run_generalist_agent,
 )
@@ -345,7 +347,7 @@ def _persist_assistant_turn(
     allowed_tools: list[str] | None = None,
     tool_schema_hashes: dict[str, str] | None = None,
     router_metadata: dict[str, Any] | None = None,
-) -> None:
+) -> int:
     """Insert the assistant's completed turn (with tool-call payloads).
 
     Called once, from the SSE wrapper, when the upstream ``done`` event fires.
@@ -365,32 +367,74 @@ def _persist_assistant_turn(
         tool_schema_hashes: ``{tool_name: sha256(schema_json)}`` snapshot.
         router_metadata: OpenRouter upstream id + served-by host + latency.
             ``None`` until the runtime captures it (see spec §4).
+
+    Returns:
+        The new message's id.
     """
     now = datetime.now(UTC)
     with Session(job_store.engine) as session:
-        session.add(
-            AgentMessageModel(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=content,
-                tool_calls=tool_calls or None,
-                model=model,
-                wizard_state_before=wizard_state_before,
-                wizard_state_after=wizard_state_after,
-                allowed_tools=allowed_tools,
-                tool_schema_hashes=tool_schema_hashes,
-                router_metadata=router_metadata,
-                created_at=now,
-            )
+        message = AgentMessageModel(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=content,
+            tool_calls=tool_calls or None,
+            model=model,
+            wizard_state_before=wizard_state_before,
+            wizard_state_after=wizard_state_after,
+            allowed_tools=allowed_tools,
+            tool_schema_hashes=tool_schema_hashes,
+            router_metadata=router_metadata,
+            created_at=now,
         )
+        session.add(message)
         row = session.get(AgentConversationModel, conversation_id)
         if row is not None:
             row.updated_at = cast(Any, now)
         session.commit()
+        message_id = message.id
     # Refresh the haystack embedding so the next search hit reflects the
     # turn we just persisted. Runs on a daemon thread and is best-effort —
     # the startup backfill heals any failures on the next deploy.
     queue_conversation_embed(conversation_id, engine=job_store.engine)
+    return message_id
+
+
+def _save_late_metadata(job_store, message_id: int, updates: dict[str, Any]) -> None:
+    """Replace keys of a saved turn's metadata, for labels and stats that arrived after its ``done``.
+
+    Args:
+        job_store: Job-store instance whose engine backs the DB session.
+        message_id: The assistant message the metadata belongs to.
+        updates: The keys to replace, e.g. ``thinking`` and ``stats``.
+    """
+    with Session(job_store.engine) as session:
+        message = session.get(AgentMessageModel, message_id)
+        if message is None:
+            return
+        message.router_metadata = {**(message.router_metadata or {}), **updates}
+        session.commit()
+
+
+def _labelled(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give every row without a label one cut from its reasoning.
+
+    A stream dropped before its last labels arrived would otherwise save
+    rows that reopen without one.
+
+    Args:
+        rows: The turn's thinking rows.
+
+    Returns:
+        The rows, each with a ``summary`` when its reasoning has any text.
+    """
+    out = []
+    for row in rows:
+        if not row.get("summary"):
+            label = fallback_summary(str(row.get("reasoning") or ""))
+            if label:
+                row = {**row, "summary": label}
+        out.append(row)
+    return out
 
 
 async def _wrap_with_persistence(
@@ -440,10 +484,15 @@ async def _wrap_with_persistence(
     model_used: str | None = None
     served_model_used: str | None = None
     turn_stats: dict[str, Any] | None = None
+    plan: str | None = None
+    thinking = ThinkingTrail()
     allowed_tools: list[str] | None = None
     tool_schema_hashes: dict[str, str] | None = None
     wizard_state_after: dict[str, Any] = dict(wizard_state_before) if wizard_state_before else {}
     persisted = False
+    saved_message_id: int | None = None
+    late_labels = False
+    late_stats: dict[str, Any] | None = None
 
     async def _do_persist(content: str) -> None:
         """Write the accumulated turn exactly once; never raise.
@@ -454,12 +503,12 @@ async def _wrap_with_persistence(
         Args:
             content: Final assistant message text for the row.
         """
-        nonlocal persisted
+        nonlocal persisted, saved_message_id
         if persisted or not (conversation_id and job_store is not None):
             return
         ordered_tools = [tool_calls[tid] for tid in tool_order if tid in tool_calls]
         try:
-            await asyncio.to_thread(
+            saved_message_id = await asyncio.to_thread(
                 _persist_assistant_turn,
                 job_store,
                 conversation_id,
@@ -471,7 +520,14 @@ async def _wrap_with_persistence(
                 allowed_tools=allowed_tools,
                 tool_schema_hashes=tool_schema_hashes,
                 router_metadata={
-                    key: value for key, value in (("served_model", served_model_used), ("stats", turn_stats)) if value
+                    key: value
+                    for key, value in (
+                        ("served_model", served_model_used),
+                        ("stats", turn_stats),
+                        ("plan", plan),
+                        ("thinking", _labelled(thinking.rows())),
+                    )
+                    if value
                 }
                 or None,
             )
@@ -483,6 +539,7 @@ async def _wrap_with_persistence(
         async for event in source:
             name = event.get("event")
             data = event.get("data") or {}
+            thinking.observe(event)
             if name == "message_patch":
                 chunk = data.get("chunk")
                 if isinstance(chunk, str):
@@ -491,6 +548,10 @@ async def _wrap_with_persistence(
                 # The text so far prefaced a tool call; salvaging it on a
                 # dropped stream would persist narration as the reply.
                 assistant_buf.clear()
+            elif name == "plan":
+                raw_plan = data.get("text")
+                if isinstance(raw_plan, str) and raw_plan.strip():
+                    plan = raw_plan.strip()
             elif name == "turn_metadata":
                 raw_allowed = data.get("allowed_tools")
                 if isinstance(raw_allowed, list):
@@ -542,8 +603,22 @@ async def _wrap_with_persistence(
                 raw_stats = data.get("stats")
                 turn_stats = raw_stats if isinstance(raw_stats, dict) else None
                 await _do_persist(content)
+            elif name == "thinking_summary" and persisted:
+                late_labels = True
+            elif name == "turn_stats" and persisted and isinstance(data.get("stats"), dict):
+                late_stats = data["stats"]
             yield event
     finally:
+        late: dict[str, Any] = {}
+        if late_labels:
+            late["thinking"] = _labelled(thinking.rows())
+        if late_stats:
+            late["stats"] = late_stats
+        if late and saved_message_id is not None and job_store is not None:
+            try:
+                await asyncio.to_thread(_save_late_metadata, job_store, saved_message_id, late)
+            except Exception:
+                logger.exception("Failed to save the turn's late labels and stats")
         # The frontend tears down the SSE stream the moment ``submit_job_run_post``
         # succeeds, so ``done`` often never arrives and the wrapped generator is
         # closed (GeneratorExit / CancelledError). Salvage the turn here when it

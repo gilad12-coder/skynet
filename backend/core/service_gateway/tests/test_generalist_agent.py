@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any, cast
 
 import dspy
@@ -23,14 +24,19 @@ from core.service_gateway.agents.generalist import (
     GENERALIST_SYSTEM_PROMPT,
     SCREEN_FOCUS,
     ApprovalRegistry,
+    ThinkingSummaries,
+    ThinkingTrail,
     WizardState,
+    _clean_summary,
     _needs_approval,
     _screen_needs_approval,
     _screen_problems,
     _TurnAuthoringFlag,
     _wrap_tool_with_approval,
     approval_key,
+    fallback_summary,
     note_sample_language,
+    plan_tool,
     scope_wizard_tool,
     screen_nav_tools,
     screen_signature,
@@ -1362,11 +1368,11 @@ async def test_turn_replays_history_natively_and_streams_the_submit(monkeypatch:
     assert first[4]["tool_calls"][0]["function"]["name"] == "submit"
     assert "which models?" in first[-1]["content"]
     assert "hello" not in first[1]["content"]
-    assert [t["function"]["name"] for t in lm.requests[0]["tools"]] == ["list_models_for_agent", "submit"]
+    assert [t["function"]["name"] for t in lm.requests[0]["tools"]] == ["list_models_for_agent", "share_plan", "submit"]
     # The second request only appends to the first: the cacheable prefix holds.
     assert lm.requests[1]["messages"][: len(first)] == first
     assert events[0]["event"] == "turn_metadata"
-    assert events[0]["data"]["allowed_tools"] == ["list_models_for_agent"]
+    assert events[0]["data"]["allowed_tools"] == ["list_models_for_agent", "share_plan"]
     assert [e["event"] for e in events if e["event"] in ("tool_start", "tool_end")] == ["tool_start", "tool_end"]
 
 
@@ -1472,7 +1478,375 @@ async def test_turn_offers_web_tools_when_firecrawl_is_configured(monkeypatch: p
     )
 
     assert reply == "found it"
-    assert events[0]["data"]["allowed_tools"] == sorted(web_tools.WEB_TOOLS)
+    assert events[0]["data"]["allowed_tools"] == sorted({*web_tools.WEB_TOOLS, "share_plan"})
     assert posted == [("/search", {"query": "dspy gepa", "limit": 5})]
     ends = [e["data"] for e in events if e["event"] == "tool_end"]
     assert [(e["tool"], e["status"]) for e in ends] == [("web_search", "ok")]
+
+
+def test_share_plan_streams_a_plan_event_and_no_tool_row() -> None:
+    """The plan reaches the panel as its own event, trimmed to one line."""
+    events: list[dict] = []
+    tool = plan_tool(events.append)
+
+    assert tool.func(plan="   ").startswith("Empty plan")
+    result = tool.func(plan="  I'll fill the inputs,\n then move on.  ")
+
+    assert events == [{"event": "plan", "data": {"text": "I'll fill the inputs, then move on."}}]
+    assert "Carry it out" in result
+
+
+def test_share_plan_keeps_the_first_plan_of_a_turn() -> None:
+    """A second plan in one turn is refused, so the shown plan never changes mid-turn."""
+    events: list[dict] = []
+    tool = plan_tool(events.append)
+
+    tool.func(plan="Fill the inputs.")
+    second = tool.func(plan="Actually, pick the optimizer.")
+
+    assert [e["data"]["text"] for e in events] == ["Fill the inputs."]
+    assert "already shown" in second
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "Matching columns to inputs\nThe question column is the input. The answer is the output.",
+            "Matching columns to inputs\nThe question column is the input.",
+        ),
+        (
+            '**Checking the budget**\n\n"Five dollars covers a short run."',
+            "Checking the budget\nFive dollars covers a short run.",
+        ),
+        ("**Reading the rows:** Each row is one ticket.", "Reading the rows\nEach row is one ticket."),
+        ("- One. Two. Three.", "One."),
+        ("Reading the rows", "Reading the rows"),
+        (
+            "This line is far too long to be a heading at all\nso it joins the sentence.",
+            "This line is far too long to be a heading at all so it joins the sentence.",
+        ),
+        ("   ", None),
+        ("x" * 300, "x" * 300),
+    ],
+)
+def test_clean_summary_keeps_whole_sentences(raw: str, expected: str | None) -> None:
+    """A label becomes a heading line and one whole sentence, unquoted and never cut mid-sentence."""
+    assert _clean_summary(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("reasoning", "expected"),
+    [
+        (
+            "The user wants support answers.  So pairs fit. Then the optimizer.",
+            "The user wants support answers. So pairs fit.",
+        ),
+        ("", None),
+        ("word " * 80, ("word " * 48).strip()),
+        ("a, " * 100, ", ".join(["a"] * 80)),
+    ],
+)
+def test_fallback_summary_keeps_the_opening_sentences(reasoning: str, expected: str | None) -> None:
+    """A fallback label is the reasoning's opening sentences, cut only at a clause or word."""
+    assert fallback_summary(reasoning) == expected
+
+
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        ({"reasoning_mandatory": True, "reasoning_efforts": ["none", "low", "high"]}, {"reasoning_effort": "low"}),
+        ({"reasoning_efforts": ["none", "low"]}, {"reasoning_effort": "none"}),
+        (
+            {"reasoning_default_enabled": True, "reasoning_efforts": []},
+            {"extra_body": {"reasoning": {"enabled": False}}},
+        ),
+        ({"reasoning_efforts": []}, {}),
+    ],
+)
+def test_summary_model_answers_without_thinking(
+    monkeypatch: pytest.MonkeyPatch, row: dict[str, Any], expected: dict[str, Any]
+) -> None:
+    """The label model is asked not to think, at the weakest level a model that always thinks allows."""
+    entry = SimpleNamespace(
+        value="m", reasoning_mandatory=False, reasoning_default_enabled=False, reasoning_efforts=None
+    )
+    for key, value in row.items():
+        setattr(entry, key, value)
+    monkeypatch.setattr(generalist_module, "catalog_snapshot", lambda: SimpleNamespace(models=[entry]))
+
+    assert generalist_module._no_thinking_extra("m") == expected
+    assert generalist_module._no_thinking_extra("unknown") == {}
+
+
+_LONG = "Looking at the task, the user wants support answers, so pairs fit best here."
+
+
+async def test_thinking_summaries_label_each_row_the_panel_shows() -> None:
+    """Stretches end where the panel's rows end, short ones are their own label, and indexes match."""
+    published: list[dict] = []
+    asked: list[str] = []
+
+    async def summarize(text: str) -> str | None:
+        """Return a canned label and record what was asked.
+
+        Args:
+            text: The stretch's reasoning.
+
+        Returns:
+            The label.
+        """
+        asked.append(text)
+        return f"label {len(asked)}"
+
+    summaries = ThinkingSummaries(summarize, published.append)
+    for ev in [
+        {"event": "reasoning_patch", "data": {"chunk": _LONG[:30]}},
+        {"event": "reasoning_patch", "data": {"chunk": _LONG[30:]}},
+        {"event": "tool_start", "data": {"id": "t1"}},
+        {"event": "tool_start", "data": {"id": "t2"}},
+        {"event": "reasoning_patch", "data": {"chunk": "Fine."}},
+        {"event": "message_patch", "data": {"chunk": "Hi"}},
+        {"event": "reasoning_patch", "data": {"chunk": _LONG}},
+        {"event": "message_patch", "data": {"chunk": " there"}},
+        {"event": "steer_applied", "data": {"ids": ["s1"], "text": "also this"}},
+        {"event": "reasoning_patch", "data": {"chunk": _LONG}},
+    ]:
+        summaries.observe(ev)
+    summaries.close()
+    while await summaries.next_label():
+        pass
+
+    assert asked == [_LONG, _LONG, _LONG]
+    assert sorted((e["data"]["index"], e["data"]["text"]) for e in published) == [
+        (0, "label 1"),
+        (1, "Fine."),
+        (2, "label 2"),
+        (3, "label 3"),
+    ]
+
+
+async def test_a_long_open_row_is_labelled_while_it_is_written(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An open row is labelled on a timer, even when its reasoning went quiet, never after its closing label."""
+    monkeypatch.setattr(generalist_module, "_LIVE_SUMMARY_FIRST_SECONDS", 0.02)
+    monkeypatch.setattr(generalist_module, "_LIVE_SUMMARY_EVERY_SECONDS", 0.02)
+    published: list[dict] = []
+    asked: list[str] = []
+    release = asyncio.Event()
+
+    async def summarize(text: str) -> str | None:
+        """Label the reasoning so far; the second call waits until released.
+
+        Args:
+            text: The stretch's reasoning.
+
+        Returns:
+            The label.
+        """
+        asked.append(text)
+        if len(asked) == 2:
+            await release.wait()
+        return f"label {len(asked)}"
+
+    summaries = ThinkingSummaries(summarize, published.append)
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": _LONG}})
+    await asyncio.sleep(0)
+    assert asked == []
+
+    await asyncio.sleep(0.05)
+    assert asked == [_LONG]
+    assert published == [{"event": "thinking_summary", "data": {"index": 0, "text": "label 1"}}]
+
+    await asyncio.sleep(0.05)
+    assert len(asked) == 1, "unchanged reasoning is not labelled twice"
+
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": " more"}})
+    await asyncio.sleep(0.05)
+    assert len(asked) == 2
+    summaries.observe({"event": "tool_start", "data": {"id": "t1"}})
+    release.set()
+    while await summaries.next_label():
+        pass
+    await asyncio.sleep(0.05)
+
+    assert [e["data"]["text"] for e in published] == ["label 1", "label 3"]
+    assert asked[1] == asked[2] == _LONG + " more"
+
+
+async def test_failed_or_slow_summaries_fall_back_to_the_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A label that errors or misses the timeout is cut from the row's own reasoning, so no row is unlabeled."""
+    monkeypatch.setattr(generalist_module, "_SUMMARY_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(generalist_module, "_SUMMARY_HEDGE_SECONDS", 0.01)
+    published: list[dict] = []
+
+    async def summarize(text: str) -> str | None:
+        """Fail on the first stretch and stall on the second.
+
+        Args:
+            text: The stretch's reasoning.
+
+        Returns:
+            Never returns in time.
+
+        Raises:
+            RuntimeError: On the first stretch.
+        """
+        if text.startswith("A"):
+            raise RuntimeError("gateway down")
+        await asyncio.sleep(1)
+        return "too late"
+
+    summaries = ThinkingSummaries(summarize, published.append)
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": "A" + _LONG}})
+    summaries.observe({"event": "tool_start", "data": {}})
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": "B" + _LONG}})
+    summaries.close()
+    while await summaries.next_label():
+        pass
+
+    assert sorted((e["data"]["index"], e["data"]["text"]) for e in published) == [
+        (0, fallback_summary("A" + _LONG)),
+        (1, fallback_summary("B" + _LONG)),
+    ]
+
+
+async def test_a_slow_summary_is_hedged_and_the_first_label_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A first call slower than the hedge delay starts a second one, whose label is published."""
+    monkeypatch.setattr(generalist_module, "_SUMMARY_HEDGE_SECONDS", 0.01)
+    published: list[dict] = []
+    calls: list[int] = []
+
+    async def summarize(text: str) -> str | None:
+        """Stall on the first call, answer at once on the second.
+
+        Args:
+            text: The stretch's reasoning.
+
+        Returns:
+            The label.
+        """
+        calls.append(len(calls))
+        if len(calls) == 1:
+            await asyncio.sleep(5)
+            return "too late"
+        return "Your rows are pairs."
+
+    summaries = ThinkingSummaries(summarize, published.append)
+    summaries.observe({"event": "reasoning_patch", "data": {"chunk": _LONG}})
+    summaries.close()
+    while await summaries.next_label():
+        pass
+
+    assert len(calls) == 2
+    assert [e["data"]["text"] for e in published] == ["Your rows are pairs."]
+
+
+async def test_turn_meters_the_summary_model_once_per_long_stretch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every label reaches the stream, the last ones after ``done``, and the model is metered once."""
+
+    class _LabelLM:
+        """Stands in for the summary model."""
+
+        calls = 0
+
+        def __call__(self, messages: list[dict]) -> list[str]:
+            """Return one label.
+
+            Args:
+                messages: The label prompt.
+
+            Returns:
+                The model's outputs.
+            """
+            _LabelLM.calls += 1
+            assert "English" in messages[0]["content"]
+            return ["Picked pairs for the inputs."]
+
+    label_lm = _LabelLM()
+
+    async def fake_drive(*, emit: Any, **_kwargs: Any) -> str:
+        """Stream two long stretches around a tool call, then reply.
+
+        Args:
+            emit: The turn's emitter.
+
+        Returns:
+            The reply.
+        """
+        emit({"event": "reasoning_patch", "data": {"chunk": _LONG}})
+        emit({"event": "tool_start", "data": {"id": "t1", "tool": "x"}})
+        emit({"event": "reasoning_patch", "data": {"chunk": _LONG}})
+        await asyncio.sleep(0)
+        return "ok"
+
+    monkeypatch.setattr(generalist_module, "_drive_generalist_agent", fake_drive)
+    monkeypatch.setattr(generalist_module, "_build_generalist_lm", object)
+    monkeypatch.setattr(generalist_module, "_build_summary_lm", lambda: label_lm)
+    monkeypatch.setattr(generalist_module, "served_model_from", lambda lm: None)
+    sink: list = []
+
+    events = [
+        ev
+        async for ev in generalist_module.run_generalist_agent(
+            wizard_state=WizardState(), chat_history=[], user_message="go", locale="en", usage_sink=sink
+        )
+    ]
+
+    names = [e["event"] for e in events]
+    assert names.count("done") == 1
+    assert set(names[names.index("done") + 1 :]) <= {"thinking_summary"}
+    labels = [e["data"] for e in events if e["event"] == "thinking_summary"]
+    assert sorted(d["index"] for d in labels) == [0, 1]
+    assert {d["text"] for d in labels} == {"Picked pairs for the inputs."}
+    assert _LabelLM.calls == 2
+    assert sink.count(label_lm) == 1
+
+
+def test_thinking_trail_times_rows_from_the_previous_step() -> None:
+    """A row after a tool starts when the tool ended, and only closed rows take a summary."""
+    ticks = iter([1.0, 2.0, 2.0, 4.0, 5.0, 9.0])
+    trail = ThinkingTrail(clock=lambda: next(ticks))
+
+    trail.observe({"event": "reasoning_patch", "data": {"chunk": "first"}})
+    assert trail.observe({"event": "tool_start", "data": {}}) == (0, "first")
+    trail.observe({"event": "tool_end", "data": {}})
+    trail.observe({"event": "thinking_summary", "data": {"index": 1, "text": "too early"}})
+    trail.observe({"event": "reasoning_patch", "data": {"chunk": "second"}})
+    trail.observe({"event": "thinking_summary", "data": {"index": 0, "text": "Read the task"}})
+
+    assert trail.rows() == [
+        {"startedAt": 1000, "toolsBefore": 0, "reasoning": "first", "endedAt": 2000, "summary": "Read the task"},
+        {"startedAt": 4000, "toolsBefore": 1, "reasoning": "second", "endedAt": 9000},
+    ]
+
+
+def test_mcp_session_bounds_each_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tool call that never answers times out instead of holding the turn open."""
+    seen: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def fake_transport(url: str, headers: dict[str, str] | None = None) -> AsyncIterator[tuple[Any, Any, Any]]:
+        yield (None, None, None)
+
+    class FakeSession:
+        def __init__(self, read: Any, write: Any, **kwargs: Any) -> None:
+            seen.update(kwargs)
+
+        async def __aenter__(self) -> FakeSession:
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+    monkeypatch.setattr(generalist_module, "streamablehttp_client", fake_transport)
+    monkeypatch.setattr(generalist_module, "ClientSession", FakeSession)
+
+    async def run() -> None:
+        async with generalist_module._mcp_session("http://mcp"):
+            pass
+
+    asyncio.run(run())
+    assert seen["read_timeout_seconds"].total_seconds() == generalist_module.MCP_CALL_TIMEOUT_SECONDS

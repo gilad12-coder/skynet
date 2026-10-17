@@ -17,6 +17,8 @@ function recorder(): { calls: Call[]; handlers: GeneralistAgentHandlers } {
     calls,
     handlers: {
       onReasoningPatch: record("reasoning"),
+      onThinkingSummary: record("thinkingSummary"),
+      onPlan: record("plan"),
       onToolStart: record("toolStart"),
       onToolEnd: record("toolEnd"),
       onPendingApproval: record("pendingApproval"),
@@ -25,6 +27,7 @@ function recorder(): { calls: Call[]; handlers: GeneralistAgentHandlers } {
       onMessageReset: record("messageReset"),
       onConversationMeta: record("conversationMeta"),
       onDone: record("done"),
+      onTurnStats: record("turnStats"),
       onError: record("error"),
     },
   };
@@ -62,6 +65,28 @@ test("a reset retracts the streamed reply before the text is refiled as reasonin
     ["messageReset"],
     ["reasoning", "Let me check.\n"],
   ]);
+});
+
+test("a plan and thinking labels reach their handlers, blank ones never", () => {
+  const calls = dispatch([
+    ["plan", { text: " I'll fill the inputs. " }],
+    ["plan", { text: "  " }],
+    ["thinking_summary", { index: 1, text: "Picked pairs" }],
+    ["thinking_summary", { index: "1", text: "Picked pairs" }],
+    ["thinking_summary", { index: 2, text: "" }],
+  ]);
+  assert.deepEqual(calls, [
+    ["plan", "I'll fill the inputs."],
+    ["thinkingSummary", { index: 1, text: "Picked pairs" }],
+  ]);
+});
+
+test("stats sent after done reach their handler, an empty block never", () => {
+  const calls = dispatch([
+    ["turn_stats", { stats: { cents: 3 } }],
+    ["turn_stats", {}],
+  ]);
+  assert.deepEqual(calls, [["turnStats", { cents: 3 }]]);
 });
 
 test("tool events carry their fields and default the missing ones", () => {

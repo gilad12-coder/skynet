@@ -8,6 +8,7 @@
 
 import type { AgentMessage, AgentToolCall } from "@/shared/ui/agent/types";
 import { parseTurnStats } from "@/shared/ui/agent/turn-stats";
+import { parseThinkingRows } from "@/shared/lib/thinking-segments";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { fetchWithAuthRetry } from "@/shared/lib/api";
 
@@ -46,6 +47,8 @@ interface RawMessage {
   model?: string | null;
   served_model?: string | null;
   stats?: Record<string, unknown> | null;
+  plan?: string | null;
+  thinking?: unknown;
   created_at: string;
 }
 
@@ -77,6 +80,8 @@ function toMessage(raw: RawMessage): AgentMessage {
     model: raw.model ?? undefined,
     servedModel: raw.served_model ?? undefined,
     stats: parseTurnStats(raw.stats),
+    plan: typeof raw.plan === "string" && raw.plan.trim() ? raw.plan : undefined,
+    thinkingSegments: parseThinkingRows(raw.thinking),
   };
 }
 

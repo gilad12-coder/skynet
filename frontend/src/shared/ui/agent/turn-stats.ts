@@ -11,6 +11,7 @@ export function parseTurnStats(raw: unknown): TurnStats | null {
   return {
     inputTokens: num(r.input_tokens),
     outputTokens: num(r.output_tokens),
+    replyOutputTokens: num(r.reply_output_tokens),
     cents: num(r.cents),
     durationMs: num(r.duration_ms),
     ttftMs: num(r.ttft_ms),
@@ -30,10 +31,15 @@ const MIN_GENERATION_MS = 1000;
  * is long enough to be meaningful, otherwise the total time.
  */
 export function outputTokensPerSecond(
-  stats: Pick<TurnStats, "outputTokens" | "durationMs" | "ttftMs"> | null | undefined,
+  stats:
+    | Pick<TurnStats, "outputTokens" | "replyOutputTokens" | "durationMs" | "ttftMs">
+    | null
+    | undefined,
 ): number | null {
-  if (!stats?.outputTokens || !stats.durationMs || stats.durationMs <= 0) return null;
+  // Side calls such as thinking labels ran beside the reply, not in its window.
+  const tokens = stats?.replyOutputTokens ?? stats?.outputTokens;
+  if (!tokens || !stats?.durationMs || stats.durationMs <= 0) return null;
   const generationMs = stats.durationMs - (stats.ttftMs ?? 0);
   const windowMs = generationMs >= MIN_GENERATION_MS ? generationMs : stats.durationMs;
-  return stats.outputTokens / (windowMs / 1000);
+  return tokens / (windowMs / 1000);
 }

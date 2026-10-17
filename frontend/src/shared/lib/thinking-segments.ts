@@ -10,6 +10,8 @@ export interface ThinkingSegment {
   endedAt: number | null;
   /** How many of the turn's tool calls had started when this segment began. */
   toolsBefore: number;
+  /** One line on what the segment worked out, written once it closed. */
+  summary?: string;
 }
 
 function openLast(segments: readonly ThinkingSegment[]): ThinkingSegment | null {
@@ -122,6 +124,72 @@ export function reopenThinking(
 }
 
 /**
+ * Read the thinking rows saved with a turn, dropping any that are malformed.
+ *
+ * Args:
+ *   raw: The ``thinking`` value of a stored message.
+ *
+ * Returns:
+ *   The rows, closed, or undefined when there are none.
+ */
+export function parseThinkingRows(raw: unknown): ThinkingSegment[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const rows: ThinkingSegment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.reasoning !== "string" || !row.reasoning) continue;
+    const startedAt = typeof row.startedAt === "number" ? row.startedAt : null;
+    const endedAt = typeof row.endedAt === "number" ? row.endedAt : (startedAt ?? 0);
+    rows.push({
+      reasoning: row.reasoning,
+      startedAt,
+      endedAt,
+      toolsBefore: typeof row.toolsBefore === "number" ? row.toolsBefore : 0,
+      ...(typeof row.summary === "string" && row.summary.trim() ? { summary: row.summary } : {}),
+    });
+  }
+  return rows.length ? rows : undefined;
+}
+
+/**
+ * Put a summary on the turn's ``index``-th segment that got reasoning. A turn
+ * a steer split runs over several messages; the count spans all of them, as
+ * the backend's does.
+ *
+ * Args:
+ *   messages: The chat's messages.
+ *   from: Index of the turn's first message.
+ *   index: The segment's position among the turn's segments with reasoning.
+ *   summary: The one-line summary.
+ *
+ * Returns:
+ *   The updated messages; the same array when no such segment exists.
+ */
+export function summarizeThinking<M extends { thinkingSegments?: readonly ThinkingSegment[] }>(
+  messages: M[],
+  from: number,
+  index: number,
+  summary: string,
+): M[] {
+  let seen = 0;
+  for (let m = Math.max(0, from); m < messages.length; m++) {
+    const message = messages[m] as M;
+    const segments = message.thinkingSegments ?? [];
+    for (let s = 0; s < segments.length; s++) {
+      if (!segments[s]?.reasoning) continue;
+      if (seen++ !== index) continue;
+      const nextSegments = segments.slice();
+      nextSegments[s] = { ...(segments[s] as ThinkingSegment), summary };
+      const next = messages.slice();
+      next[m] = { ...message, thinkingSegments: nextSegments };
+      return next;
+    }
+  }
+  return messages;
+}
+
+/**
  * When the turn's latest event ended: the last tool call to finish (or start,
  * while it runs) or the last closed thinking segment.
  *
@@ -165,6 +233,54 @@ export function thoughtSeconds(startedAt: number | null, endedAt: number): numbe
   if (startedAt === null) return null;
   const seconds = Math.round((endedAt - startedAt) / 100) / 10;
   return seconds > 0 ? seconds : null;
+}
+
+/**
+ * Split a thinking row's label into its heading and its sentence. Labels are
+ * written as Codex writes them, `heading\nsentence`; older ones are one
+ * sentence with no heading.
+ *
+ * Args:
+ *   summary: The stored label.
+ *
+ * Returns:
+ *   The heading, when there is one, and the sentence.
+ */
+export function splitSummary(summary: string): { heading?: string; detail: string } {
+  const at = summary.indexOf("\n");
+  if (at < 0) return { detail: summary };
+  const heading = summary.slice(0, at).trim();
+  const detail = summary.slice(at + 1).trim();
+  if (!heading || !detail) return { detail: heading || detail };
+  return { heading, detail };
+}
+
+const BOLD_HEADING = /^\s*\*\*([^*\n]+)\*\*\s*$/gm;
+
+/**
+ * The heading the live "Thinking" line shows, as Codex picks it: the newest
+ * one the turn has, searching back from its latest segment. A segment's own
+ * reasoning wins when the model writes `**Heading**` lines into it; its
+ * label's heading comes next.
+ *
+ * Args:
+ *   segments: The turn's thinking segments, oldest first.
+ *
+ * Returns:
+ *   The heading, or null when no segment has one yet.
+ */
+export function latestHeading(
+  segments: ReadonlyArray<{ reasoning: string; summary?: string }>,
+): string | null {
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const segment = segments[i];
+    if (!segment) continue;
+    const bold = [...segment.reasoning.matchAll(BOLD_HEADING)].at(-1)?.[1]?.trim();
+    if (bold) return bold;
+    const heading = segment.summary ? splitSummary(segment.summary).heading : undefined;
+    if (heading) return heading;
+  }
+  return null;
 }
 
 export type ActivityPiece<S, T> =

@@ -6,8 +6,12 @@ import {
   closeThinking,
   interleaveThinking,
   lastEventAt,
+  latestHeading,
   reopenThinking,
+  parseThinkingRows,
+  splitSummary,
   startThinking,
+  summarizeThinking,
   thoughtSeconds,
   type ThinkingSegment,
 } from "./thinking-segments.ts";
@@ -127,5 +131,68 @@ test("a card splits a burst of steps around it", () => {
   assert.deepEqual(
     pieces.map((p) => (p.kind === "steps" ? p.steps.map((s) => s.index).join("") : p.kind)),
     ["0", "card", "2"],
+  );
+});
+
+test("a summary lands on the turn's n-th segment with reasoning, across a steer's messages", () => {
+  const seg = (reasoning: string): ThinkingSegment => ({
+    reasoning,
+    startedAt: 0,
+    endedAt: 1,
+    toolsBefore: 0,
+  });
+  const messages = [
+    { thinkingSegments: [seg("an earlier turn")] },
+    { thinkingSegments: [seg("first"), seg("")] },
+    {},
+    { thinkingSegments: [seg("second")] },
+  ];
+  const once = summarizeThinking(messages, 1, 1, "Read the steer");
+  assert.equal(once[3]?.thinkingSegments?.[0]?.summary, "Read the steer");
+  assert.equal(once[1], messages[1]);
+  assert.equal(once[0]?.thinkingSegments?.[0]?.summary, undefined);
+  assert.equal(summarizeThinking(messages, 1, 2, "none"), messages);
+});
+
+test("saved thinking rows come back closed, malformed ones dropped", () => {
+  assert.deepEqual(
+    parseThinkingRows([
+      { reasoning: "Pairs fit.", startedAt: 1, endedAt: 4, toolsBefore: 0, summary: "Picked pairs" },
+      { reasoning: "", startedAt: 1, endedAt: 2, toolsBefore: 0 },
+      { reasoning: "No times", toolsBefore: "x" },
+      "junk",
+    ]),
+    [
+      { reasoning: "Pairs fit.", startedAt: 1, endedAt: 4, toolsBefore: 0, summary: "Picked pairs" },
+      { reasoning: "No times", startedAt: null, endedAt: 0, toolsBefore: 0 },
+    ],
+  );
+  assert.equal(parseThinkingRows(null), undefined);
+  assert.equal(parseThinkingRows([]), undefined);
+});
+
+test("a label splits into its heading and sentence; an old one-line label has no heading", () => {
+  assert.deepEqual(splitSummary("Matching columns\nThe question column is the input."), {
+    heading: "Matching columns",
+    detail: "The question column is the input.",
+  });
+  assert.deepEqual(splitSummary("Your rows are pairs."), { detail: "Your rows are pairs." });
+  assert.deepEqual(splitSummary("Matching columns\n"), { detail: "Matching columns" });
+});
+
+test("the live heading is the newest one, from bold reasoning lines before labels", () => {
+  const seg = (reasoning: string, summary?: string) => ({ reasoning, summary });
+  assert.equal(latestHeading([]), null);
+  assert.equal(latestHeading([seg("plain", "Your rows are pairs.")]), null);
+  assert.equal(
+    latestHeading([seg("a", "Matching columns\nThe question column is the input."), seg("b")]),
+    "Matching columns",
+  );
+  assert.equal(
+    latestHeading([
+      seg("x", "Old step\nDone."),
+      seg("**Reading rows**\nSome text\n**Picking a metric**\nMore", "Labelled\nLater."),
+    ]),
+    "Picking a metric",
   );
 });

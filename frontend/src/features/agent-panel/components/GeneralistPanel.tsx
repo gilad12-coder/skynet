@@ -34,7 +34,13 @@ import { useGeneralistPanelState } from "../hooks/use-panel-state";
 import { getConversation } from "../lib/conversation-api";
 import { TRUST_MODE_HUE, useTrustMode } from "../hooks/use-trust-mode";
 import { extractWizardPatch, useWizardStateOptional } from "../hooks/use-wizard-state";
-import { parseScreenNav, switchScreenChat } from "../lib/screen-agent";
+import {
+  SCREEN_CHATS_KEY,
+  decodeScreenChats,
+  encodeScreenChats,
+  parseScreenNav,
+  switchScreenChat,
+} from "../lib/screen-agent";
 import type { ToolEndPayload, WizardState } from "../lib/types";
 import { stageDatasetForAgent } from "@/shared/lib/api";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
@@ -179,6 +185,13 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const screenOpeningRef = React.useRef<string | null>(null);
   const shownScreenRef = React.useRef<string | null>(null);
   const [kickoffScreen, setKickoffScreen] = React.useState<string | null>(null);
+  const keepScreenChats = React.useCallback(() => {
+    try {
+      window.sessionStorage.setItem(SCREEN_CHATS_KEY, encodeScreenChats(screenChatsRef.current));
+    } catch {
+      // Storage full or blocked: a reload then starts the screen's chat fresh.
+    }
+  }, []);
 
   // Agent-submit splash: a successful submit tool plays the same full-screen
   // banner the manual wizard button shows, then routes to the new job's
@@ -251,14 +264,17 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     (id: string, title: string, ctx: SessionEventContext) => {
       store.upsertFromMeta(id, title);
       if (!ctx.isActive) return;
-      if (shownScreenRef.current) screenChatsRef.current.set(shownScreenRef.current, id);
+      if (shownScreenRef.current) {
+        screenChatsRef.current.set(shownScreenRef.current, id);
+        keepScreenChats();
+      }
       store.setActiveId(id);
       // The user is actively in this conversation — every new turn is "seen"
       // by definition. Without this, the row would render as unread the
       // moment the server bumps its updated_at.
       store.markSeen(id);
     },
-    [store],
+    [store, keepScreenChats],
   );
 
   const { openTo: openSettingsTo } = useSettingsModal();
@@ -269,6 +285,14 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     onConversationMeta: handleConversationMeta,
   });
   const streaming = agent.status === "streaming";
+  // Each conversation on view gets fresh turn components, so one chat's
+  // timers and "already shown" text never carry into another. A new chat
+  // getting its id from its first turn is still the same chat.
+  const [chatView, setChatView] = React.useState({ id: agent.conversationId, key: 0 });
+  if (chatView.id !== agent.conversationId) {
+    const sameChat = chatView.id === null && streaming;
+    setChatView({ id: agent.conversationId, key: sameChat ? chatView.key : chatView.key + 1 });
+  }
   // Any conversation still streaming or waiting its turn keeps the user's
   // notification pending; it fires once they have all settled.
   useCompletionNotification(
@@ -330,10 +354,13 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   }, [searchParams, setOpen, handlePickConversation, router]);
 
   const handleNewConversation = React.useCallback(() => {
-    if (shownScreenRef.current) screenChatsRef.current.delete(shownScreenRef.current);
+    if (shownScreenRef.current) {
+      screenChatsRef.current.delete(shownScreenRef.current);
+      keepScreenChats();
+    }
     agent.newSession();
     store.setActiveId(null);
-  }, [agent, store]);
+  }, [agent, store, keepScreenChats]);
 
   // Swap the chat when the screen on view changes. Off the wizard the chat
   // on view stays put. The conversation id is read through a ref so a turn
@@ -345,6 +372,10 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   React.useEffect(() => {
     reopenedScreenRef.current = reopenedScreen;
   }, [reopenedScreen]);
+  const restoredSetupRef = React.useRef(wizardCtx?.restoredSetup ?? false);
+  React.useEffect(() => {
+    restoredSetupRef.current = wizardCtx?.restoredSetup ?? false;
+  }, [wizardCtx?.restoredSetup]);
   React.useEffect(() => {
     conversationIdRef.current = agent.conversationId;
   }, [agent.conversationId]);
@@ -354,12 +385,29 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     if (shownScreen === null) return;
     const from = shownScreenRef.current;
     shownScreenRef.current = shownScreen;
+    if (from === null && screenChatsRef.current.size === 0) {
+      // A reload that reopened the setup brings each screen's chat back
+      // with it; any other setup starts with none. Gate on the wizard's
+      // restored flag rather than the reopened screen: this panel's chunk
+      // loads lazily, so the wizard may already have moved off that screen
+      // (clearing it) before this effect first runs.
+      if (restoredSetupRef.current) {
+        let saved: string | null = null;
+        try {
+          saved = window.sessionStorage.getItem(SCREEN_CHATS_KEY);
+        } catch {
+          // Blocked storage: the screens start fresh.
+        }
+        screenChatsRef.current = decodeScreenChats(saved);
+      } else keepScreenChats();
+    }
     const next = switchScreenChat(
       screenChatsRef.current,
       from,
       conversationIdRef.current,
       shownScreen,
     );
+    keepScreenChats();
     if (next.kind === "stay") return;
     const opening = screenOpeningRef.current;
     screenOpeningRef.current = null;
@@ -392,25 +440,29 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     newSession,
     sendToAgent,
     setActiveConversation,
+    keepScreenChats,
   ]);
 
   // A fresh screen's agent opens the chat by itself: it fills the screen from
   // what it already knows and continues, or asks the one thing it lacks. It
   // waits for the chat to be on view (Manual hides it) and never talks over
   // a chat that already started. A cloned run arrives filled in, so its
-  // agents wait for the user, as the task interview does.
+  // agents wait for the user, as the task interview does. It also waits for
+  // the screen left behind to finish its turn: two turns running tool calls
+  // at once left one of them hanging on a call that never returned.
   const cloned = searchParams.has("clone");
   const chatEmpty = agent.messages.length === 0 && agent.status === "idle";
+  const backgroundBusy = agent.backgroundBusyCount > 0;
   React.useEffect(() => {
     if (kickoffScreen === null) return;
     if (kickoffScreen !== shownScreen || !chatEmpty || cloned) {
       setKickoffScreen(null);
       return;
     }
-    if (!panelDock) return;
+    if (!panelDock || backgroundBusy) return;
     setKickoffScreen(null);
     sendToAgent(SCREEN_KICKOFF, undefined, { hidden: true });
-  }, [kickoffScreen, shownScreen, chatEmpty, cloned, panelDock, sendToAgent]);
+  }, [kickoffScreen, shownScreen, chatEmpty, cloned, panelDock, backgroundBusy, sendToAgent]);
 
   // Deleting the conversation you're currently viewing must drop you back to a
   // clean slate — otherwise the panel keeps showing the just-deleted thread and
@@ -701,11 +753,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
                 </PopoverContent>
               </Popover>
             </div>
-            {agent.statusLabel && (
-              <div className="text-[0.6875rem] text-muted-foreground truncate">
-                {agent.statusLabel}
-              </div>
-            )}
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -805,6 +852,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
         ]}
       >
         <ChatTranscript
+          key={chatView.key}
           messages={agent.messages}
           streaming={streaming}
           editAndResend={agent.editAndResend}

@@ -226,19 +226,29 @@ async def stream_with_llm_metering(
 
     Yields:
         The upstream events; a ``done`` event gains a ``stats`` block with the
-        turn's token usage, cost and timing.
+        turn's token usage, cost and timing. When model calls made after
+        ``done`` (late thinking labels) changed the usage, one last
+        ``turn_stats`` event carries the full block, so the shown cost is
+        what gets debited.
     """
     started = time.monotonic()
     first_token_at: float | None = None
+    done_stats: dict[str, Any] | None = None
     try:
         async for event in source:
             name = event.get("event")
             if name == "message_patch" and first_token_at is None:
                 first_token_at = time.monotonic()
             elif name == "done" and isinstance(event.get("data"), dict):
-                stats = _turn_stats(usage_sink, token_source, started, first_token_at)
-                event = {**event, "data": {**event["data"], "stats": stats}}
+                done_stats = _turn_stats(usage_sink, token_source, started, first_token_at)
+                event = {**event, "data": {**event["data"], "stats": done_stats}}
             yield event
+        if done_stats is not None:
+            final = _turn_stats(usage_sink, token_source, started, first_token_at)
+            usage = ("input_tokens", "output_tokens", "cents")
+            if any(final[key] != done_stats[key] for key in usage):
+                # Timings stay as of ``done``: the reply was over by then.
+                yield {"event": "turn_stats", "data": {"stats": {**done_stats, **{k: final[k] for k in usage}}}}
     finally:
         engine = getattr(job_store, "engine", None)
         if engine is not None and usage_sink:
@@ -271,14 +281,19 @@ def _turn_stats(
 
     Returns:
         Token counts (``None`` when untracked), cents and millisecond timings.
+        ``reply_output_tokens`` leaves out LMs marked ``side_call`` (such as
+        thinking labels), which run beside the reply and would inflate its speed.
     """
     now = time.monotonic()
     breakdown = usage_by_model_from_history(*usage_sink) if usage_sink else None
     input_tokens = sum(pair[0] for pair in breakdown.values()) if breakdown else None
     output_tokens = sum(pair[1] for pair in breakdown.values()) if breakdown else None
+    reply_lms = [lm for lm in usage_sink if not getattr(lm, "side_call", False)]
+    reply_breakdown = usage_by_model_from_history(*reply_lms) if reply_lms else None
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
+        "reply_output_tokens": sum(pair[1] for pair in reply_breakdown.values()) if reply_breakdown else None,
         "cents": estimate_run_cents(usage_sink, token_source) if breakdown else None,
         "duration_ms": round((now - started) * 1000),
         "ttft_ms": round((first_token_at - started) * 1000) if first_token_at is not None else None,

@@ -35,12 +35,16 @@ export interface AgentMessage {
    * prose, kept on the message so it streams live and earlier turns still show it.
    */
   thinkingSegments?: readonly ThinkingSegment[];
+  /** What the agent said it would do this turn, shown above its activity. */
+  plan?: string | null;
 }
 
 /** Token usage, cost and timing of one agent turn, as the backend measured it. */
 export interface TurnStats {
   inputTokens: number | null;
   outputTokens: number | null;
+  /** Output tokens of the reply alone, without side calls such as thinking labels. */
+  replyOutputTokens?: number | null;
   /** Billed cost in US cents. */
   cents: number | null;
   durationMs: number | null;
@@ -50,6 +54,8 @@ export interface TurnStats {
 
 export interface AgentThinking {
   reasoning: string;
+  /** One line on what this stretch of thinking worked out. */
+  summary?: string;
   startedAt: number | null;
   endedAt: number | null;
   streaming: boolean;

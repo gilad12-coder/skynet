@@ -15,6 +15,17 @@ export function dispatchGeneralistEvent(
     case "reasoning_patch":
       handlers.onReasoningPatch?.(String(data.chunk ?? ""));
       break;
+    case "thinking_summary": {
+      const text = String(data.text ?? "").trim();
+      if (typeof data.index === "number" && text)
+        handlers.onThinkingSummary?.({ index: data.index, text });
+      break;
+    }
+    case "plan": {
+      const text = String(data.text ?? "").trim();
+      if (text) handlers.onPlan?.(text);
+      break;
+    }
     case "tool_start":
       handlers.onToolStart?.({
         id: String(data.id ?? ""),
@@ -78,6 +89,9 @@ export function dispatchGeneralistEvent(
       });
       break;
     }
+    case "turn_stats":
+      if (data.stats) handlers.onTurnStats?.(data.stats);
+      break;
     case "error":
       handlers.onError(
         String(data.error ?? unknownError()),
@@ -85,5 +99,4 @@ export function dispatchGeneralistEvent(
       );
       break;
   }
-
 }

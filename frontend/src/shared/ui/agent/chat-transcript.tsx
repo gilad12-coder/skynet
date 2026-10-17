@@ -150,7 +150,9 @@ export function ChatTranscript({
           pairThinking &&
             (pairThinking.reasoning || (pairThinking.streaming && pairThinking.startedAt)),
         );
+    // A turn with a history shows Codex's own "Thinking" line from the start.
     const isWaitingFirstToken =
+      !(renderToolCall && isStepCall) &&
       isStreamingThisPair &&
       agentText.length === 0 &&
       !(agentMsg?.toolCalls?.length ?? 0) &&

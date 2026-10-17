@@ -295,7 +295,7 @@ class RequestUserInferenceRequest(BaseModel):
     prompt: str = Field(
         default="",
         max_length=400,
-        description="Short Hebrew sentence explaining why inference is being offered.",
+        description="Short sentence, in the user's reply language, explaining why inference is being offered.",
     )
 
 
