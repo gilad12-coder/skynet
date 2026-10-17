@@ -281,14 +281,19 @@ def _turn_stats(
 
     Returns:
         Token counts (``None`` when untracked), cents and millisecond timings.
+        ``reply_output_tokens`` leaves out LMs marked ``side_call`` (such as
+        thinking labels), which run beside the reply and would inflate its speed.
     """
     now = time.monotonic()
     breakdown = usage_by_model_from_history(*usage_sink) if usage_sink else None
     input_tokens = sum(pair[0] for pair in breakdown.values()) if breakdown else None
     output_tokens = sum(pair[1] for pair in breakdown.values()) if breakdown else None
+    reply_lms = [lm for lm in usage_sink if not getattr(lm, "side_call", False)]
+    reply_breakdown = usage_by_model_from_history(*reply_lms) if reply_lms else None
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
+        "reply_output_tokens": sum(pair[1] for pair in reply_breakdown.values()) if reply_breakdown else None,
         "cents": estimate_run_cents(usage_sink, token_source) if breakdown else None,
         "duration_ms": round((now - started) * 1000),
         "ttft_ms": round((first_token_at - started) * 1000) if first_token_at is not None else None,

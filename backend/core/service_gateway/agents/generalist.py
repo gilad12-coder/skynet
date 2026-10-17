@@ -50,7 +50,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from ...api.interview_model import interview_model_id
-from ...api.model_catalog import agent_model_id
+from ...api.model_catalog import agent_model_id, catalog_snapshot
 from ...config import settings
 from ...exceptions import ServiceError
 from ...models import ModelConfig
@@ -2264,7 +2264,8 @@ _SUMMARY_PROMPT = (
     "question and answer pairs, so each row gets one input and one expected output.' Write about the user's "
     "work, not the assistant's process: no 'planned to', 'decided to share a plan', 'will call', 'next step'. "
     "Never name a tool, function or field, not even in plain words (no 'update wizard state', 'list datasets', "
-    "'request upload'). Plain sentences only: no quotes, lists, headings or preamble."
+    "'request upload'), model ids or code. State only what the reasoning says is so; never guess at settings "
+    "it does not mention. Plain sentences only: no quotes, lists, headings or preamble."
 )
 _SENTENCE_END = re.compile(r"(?<=[.!?。！？])\s+")
 
@@ -2305,19 +2306,55 @@ def plan_tool(emit: Callable[[dict], None]) -> dspy.Tool:
     )
 
 
+def _no_thinking_extra(model: str) -> dict[str, Any]:
+    """Return the request extras that keep ``model`` from thinking before it answers.
+
+    A label is a sentence or two; a model that thinks first spends hundreds
+    of tokens and seconds on it, and misses the label's timeout.
+
+    Args:
+        model: Catalog model id.
+
+    Returns:
+        ``reasoning_effort`` at the weakest level for a model that always
+        thinks, a disabled ``reasoning`` body for one that may, else nothing.
+    """
+    snapshot = catalog_snapshot()
+    entry = next((m for m in snapshot.models if m.value == model), None) if snapshot is not None else None
+    if entry is None:
+        return {}
+    efforts = entry.reasoning_efforts or []
+    if entry.reasoning_mandatory:
+        weakest = next((e for e in efforts if e != "none"), None)
+        return {"reasoning_effort": weakest} if weakest else {}
+    if "none" in efforts:
+        return {"reasoning_effort": "none"}
+    if entry.reasoning_default_enabled or efforts:
+        return {"extra_body": {"reasoning": {"enabled": False}}}
+    return {}
+
+
 def _build_summary_lm() -> Any:
     """Build the small managed model that labels each stretch of thinking.
 
     Returns:
-        A metered LM on the interview pick, with a timeout sized for a
-        label that is dropped when late.
+        A metered LM on the interview pick, thinking off, with a timeout
+        sized for a label that falls back when late. It is marked as a
+        side call, so its tokens stay out of the reply's speed.
     """
+    model = interview_model_id()
     config = apply_model_reasoning_config(
-        ModelConfig(name=interview_model_id(), base_url=settings.generalist_agent_base_url or None)
+        ModelConfig(
+            name=model,
+            base_url=settings.generalist_agent_base_url or None,
+            extra=_no_thinking_extra(model),
+        )
     )
     config.extra["timeout"] = _SUMMARY_TIMEOUT_SECONDS
     config.extra["num_retries"] = 0
-    return build_language_model(config, disable_cache=True)
+    lm = build_language_model(config, disable_cache=True)
+    lm.side_call = True
+    return lm
 
 
 def _summary_line(lm: Any, language: str, reasoning: str) -> str | None:

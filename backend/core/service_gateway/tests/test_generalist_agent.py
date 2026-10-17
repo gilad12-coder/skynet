@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any, cast
 
 import dspy
@@ -1536,6 +1537,33 @@ def test_clean_summary_keeps_whole_sentences(raw: str, expected: str | None) -> 
 def test_fallback_summary_keeps_the_opening_sentences(reasoning: str, expected: str | None) -> None:
     """A fallback label is the reasoning's opening sentences, cut only at a clause or word."""
     assert fallback_summary(reasoning) == expected
+
+
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        ({"reasoning_mandatory": True, "reasoning_efforts": ["none", "low", "high"]}, {"reasoning_effort": "low"}),
+        ({"reasoning_efforts": ["none", "low"]}, {"reasoning_effort": "none"}),
+        (
+            {"reasoning_default_enabled": True, "reasoning_efforts": []},
+            {"extra_body": {"reasoning": {"enabled": False}}},
+        ),
+        ({"reasoning_efforts": []}, {}),
+    ],
+)
+def test_summary_model_answers_without_thinking(
+    monkeypatch: pytest.MonkeyPatch, row: dict[str, Any], expected: dict[str, Any]
+) -> None:
+    """The label model is asked not to think, at the weakest level a model that always thinks allows."""
+    entry = SimpleNamespace(
+        value="m", reasoning_mandatory=False, reasoning_default_enabled=False, reasoning_efforts=None
+    )
+    for key, value in row.items():
+        setattr(entry, key, value)
+    monkeypatch.setattr(generalist_module, "catalog_snapshot", lambda: SimpleNamespace(models=[entry]))
+
+    assert generalist_module._no_thinking_extra("m") == expected
+    assert generalist_module._no_thinking_extra("unknown") == {}
 
 
 _LONG = "Looking at the task, the user wants support answers, so pairs fit best here."

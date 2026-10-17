@@ -43,6 +43,8 @@ export interface AgentMessage {
 export interface TurnStats {
   inputTokens: number | null;
   outputTokens: number | null;
+  /** Output tokens of the reply alone, without side calls such as thinking labels. */
+  replyOutputTokens?: number | null;
   /** Billed cost in US cents. */
   cents: number | null;
   durationMs: number | null;

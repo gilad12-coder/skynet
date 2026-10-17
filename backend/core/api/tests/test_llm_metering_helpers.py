@@ -250,6 +250,7 @@ async def test_stream_with_llm_metering_sends_stats_for_calls_after_done(engine:
     done, final = events[0]["data"]["stats"], events[-1]["data"]["stats"]
     assert (final["input_tokens"], final["output_tokens"]) == (1_300, 320)
     assert final["duration_ms"] == done["duration_ms"]
+    assert final["reply_output_tokens"] == done["reply_output_tokens"] == 300
     assert [e["event"] for e in await run(late=False)] == ["done"]
 
 

@@ -28,6 +28,16 @@ test("uses total time when ttft is unknown", () => {
   assert.equal(rate, 100);
 });
 
+test("counts the reply's own tokens, not side calls", () => {
+  const rate = outputTokensPerSecond({
+    outputTokens: 5_000,
+    replyOutputTokens: 1_000,
+    durationMs: 12_000,
+    ttftMs: 2_000,
+  });
+  assert.equal(rate, 100);
+});
+
 test("returns null without output tokens or a duration", () => {
   assert.equal(outputTokensPerSecond({ outputTokens: 0, durationMs: 5_000, ttftMs: 1_000 }), null);
   assert.equal(outputTokensPerSecond({ outputTokens: 10, durationMs: null, ttftMs: null }), null);
