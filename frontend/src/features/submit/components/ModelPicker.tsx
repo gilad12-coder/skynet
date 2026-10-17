@@ -56,26 +56,6 @@ interface ModelPickerProps {
   byokProviders?: string[];
 }
 
-type ModelPurpose = "all" | "vision" | "reasoning" | "multilingual";
-
-// Model families with a first-class multilingual focus. The catalog is dynamic
-// (whatever OpenRouter serves) and carries no per-model purpose metadata, so
-// this id heuristic is the categorization lever — extend the list as needed.
-const MULTILINGUAL_FAMILIES = ["qwen", "glm", "aya", "command", "gemma", "mistral"];
-
-const PURPOSE_PREDICATES: Record<Exclude<ModelPurpose, "all">, (m: CatalogModel) => boolean> = {
-  vision: (m) => Boolean(m.supports_vision),
-  reasoning: (m) => Boolean(m.supports_thinking),
-  multilingual: (m) => MULTILINGUAL_FAMILIES.some((f) => m.value.toLowerCase().includes(f)),
-};
-
-const PURPOSE_LABEL_KEYS: Record<ModelPurpose, MessageKey> = {
-  all: "submit.modelpicker.purpose.all",
-  vision: "submit.modelpicker.purpose.vision",
-  reasoning: "submit.modelpicker.purpose.reasoning",
-  multilingual: "submit.modelpicker.purpose.multilingual",
-};
-
 const RANKINGS: ModelRanking[] = ["best_value", "smartest", "fastest"];
 
 const RANKING_LABEL_KEYS: Record<ModelRanking, MessageKey> = {
@@ -315,27 +295,16 @@ export function ModelPicker({
       : staticModels;
   }, [activeCatalog, byokMode, byokProviderSet, providerFilter]);
 
-  // Purpose chips render only for categories the current catalog actually
-  // has, so a catalog with no vision models never shows an empty "Vision".
-  const [purpose, setPurpose] = React.useState<ModelPurpose>("all");
-  const purposeOptions = React.useMemo(() => {
-    const present = (Object.keys(PURPOSE_PREDICATES) as Array<Exclude<ModelPurpose, "all">>).filter(
-      (p) => allModels.some(PURPOSE_PREDICATES[p]),
-    );
-    return present.length > 0 ? (["all", ...present] as ModelPurpose[]) : [];
-  }, [allModels]);
-
   const filtered = React.useMemo(() => {
-    const byPurpose = purpose === "all" ? allModels : allModels.filter(PURPOSE_PREDICATES[purpose]);
     const q = query.trim().toLowerCase();
-    if (!q) return byPurpose;
-    return byPurpose.filter(
+    if (!q) return allModels;
+    return allModels.filter(
       (m) =>
         m.value.toLowerCase().includes(q) ||
         m.label.toLowerCase().includes(q) ||
         !!m.display_name?.toLowerCase().includes(q),
     );
-  }, [allModels, purpose, query]);
+  }, [allModels, query]);
 
   const [ranking, setRanking] = React.useState<ModelRanking>("best_value");
   const prefersReduced = useReducedMotion();
@@ -431,32 +400,6 @@ export function ModelPicker({
           />
         </div>
 
-        {purposeOptions.length > 1 && (
-          <div
-            role="group"
-            aria-label={msg("submit.modelpicker.purpose.aria")}
-            className="flex shrink-0 flex-wrap gap-1 border-b border-border/50 px-3 py-2"
-          >
-            {purposeOptions.map((p) => (
-              <button
-                key={p}
-                type="button"
-                role="radio"
-                aria-checked={purpose === p}
-                onClick={() => setPurpose(p)}
-                className={cn(
-                  "min-h-[44px] cursor-pointer rounded-full border px-2 py-0.5 text-[0.6875rem] font-medium transition-colors duration-150 lg:min-h-0",
-                  purpose === p
-                    ? "border-foreground/25 bg-accent text-foreground"
-                    : "border-border/50 text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {msg(PURPOSE_LABEL_KEYS[p])}
-              </button>
-            ))}
-          </div>
-        )}
-
         <div
           role="tablist"
           aria-label={msg("submit.modelpicker.tabs.aria")}
@@ -492,10 +435,10 @@ export function ModelPicker({
           ))}
         </div>
 
-        {/* Keyed so a new tab or purpose starts at the top: each list is
-            sorted best-first, and a kept scroll offset hid the best models. */}
+        {/* Keyed so a new tab starts at the top: each list is sorted
+            best-first, and a kept scroll offset hid the best models. */}
         <motion.div
-          key={`${ranking}-${purpose}`}
+          key={ranking}
           initial={prefersReduced ? false : { opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.18, ease: "easeOut" }}
