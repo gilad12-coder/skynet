@@ -2243,11 +2243,9 @@ _MAX_PLAN_CHARS = 300
 # Shorter reasoning reads fine as its own summary; a model call would cost
 # more than it says.
 _SUMMARY_MIN_CHARS = 40
-# The first label of a turn pays the model's cold start, which often runs
-# past 4s; a late label still lands on its row while the turn streams.
+# Labels often take 3-5s, so the last rows of a turn are labelled after its
+# ``done``: the stream stays open for them, never longer than this.
 _SUMMARY_TIMEOUT_SECONDS = 10.0
-# How long the turn's end waits for labels still being written.
-_SUMMARY_FINISH_GRACE_SECONDS = 3.0
 _SUMMARY_MAX_CHARS = 120
 # The tail of a long stretch says where the thinking landed, which is what
 # the row's one line should tell.
@@ -2477,11 +2475,20 @@ class ThinkingSummaries:
         """
         self._label_closed(self._trail.observe(ev))
 
-    async def finish(self) -> None:
-        """Close the last row and wait briefly for labels still being written."""
+    def close(self) -> None:
+        """Close the last row, as the turn's end does, and start its label."""
         self._label_closed(self._trail.close())
-        if self._tasks:
-            await asyncio.wait(set(self._tasks), timeout=_SUMMARY_FINISH_GRACE_SECONDS)
+
+    async def next_label(self) -> bool:
+        """Wait until another label is written or dropped.
+
+        Returns:
+            False once no label is still being written.
+        """
+        if not self._tasks:
+            return False
+        await asyncio.wait(set(self._tasks), return_when=asyncio.FIRST_COMPLETED)
+        return True
 
     def cancel(self) -> None:
         """Drop labels still being written."""
@@ -2515,6 +2522,9 @@ class ThinkingSummaries:
         """
         try:
             line = await asyncio.wait_for(self._summarize(text), timeout=_SUMMARY_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            logger.info("thinking summary %d dropped with its stream", index)
+            raise
         except Exception:
             logger.info("thinking summary %d skipped", index, exc_info=True)
             return
@@ -2860,8 +2870,7 @@ async def run_generalist_agent(
             if drive_task in done and out_queue.empty():
                 break
         reply = await drive_task
-        # Labels land before ``done``, which ends the client's stream.
-        await summaries.finish()
+        summaries.close()
         while not out_queue.empty():
             yield out_queue.get_nowait()
         yield {
@@ -2874,6 +2883,17 @@ async def run_generalist_agent(
                 "served_model": served_model_from(lm),
             },
         }
+        # The client keeps reading after ``done``, so the last rows' labels
+        # still land on them; nothing else is sent once the turn is done.
+        while await summaries.next_label():
+            while not out_queue.empty():
+                ev = out_queue.get_nowait()
+                if ev.get("event") == "thinking_summary":
+                    yield ev
+        while not out_queue.empty():
+            ev = out_queue.get_nowait()
+            if ev.get("event") == "thinking_summary":
+                yield ev
     except ServiceError as exc:
         yield {"event": "error", "data": {"error": str(exc)}}
     except Exception as exc:

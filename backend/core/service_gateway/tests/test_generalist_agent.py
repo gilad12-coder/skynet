@@ -1553,7 +1553,9 @@ async def test_thinking_summaries_label_each_row_the_panel_shows() -> None:
         {"event": "reasoning_patch", "data": {"chunk": _LONG}},
     ]:
         summaries.observe(ev)
-    await summaries.finish()
+    summaries.close()
+    while await summaries.next_label():
+        pass
 
     assert asked == [_LONG, _LONG, _LONG]
     assert sorted((e["data"]["index"], e["data"]["text"]) for e in published) == [
@@ -1590,13 +1592,15 @@ async def test_failed_or_slow_summaries_publish_nothing(monkeypatch: pytest.Monk
     summaries.observe({"event": "reasoning_patch", "data": {"chunk": "A" + _LONG}})
     summaries.observe({"event": "tool_start", "data": {}})
     summaries.observe({"event": "reasoning_patch", "data": {"chunk": "B" + _LONG}})
-    await summaries.finish()
+    summaries.close()
+    while await summaries.next_label():
+        pass
 
     assert published == []
 
 
 async def test_turn_meters_the_summary_model_once_per_long_stretch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Labels stream before ``done`` and their model joins the turn's metered LMs once."""
+    """Every label reaches the stream, the last ones after ``done``, and the model is metered once."""
 
     class _LabelLM:
         """Stands in for the summary model."""
@@ -1647,7 +1651,8 @@ async def test_turn_meters_the_summary_model_once_per_long_stretch(monkeypatch: 
     ]
 
     names = [e["event"] for e in events]
-    assert names[-1] == "done"
+    assert names.count("done") == 1
+    assert set(names[names.index("done") + 1 :]) <= {"thinking_summary"}
     labels = [e["data"] for e in events if e["event"] == "thinking_summary"]
     assert sorted(d["index"] for d in labels) == [0, 1]
     assert {d["text"] for d in labels} == {"Picked pairs for the inputs"}

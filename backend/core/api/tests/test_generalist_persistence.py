@@ -525,6 +525,24 @@ async def test_turn_thinking_rows_are_saved_with_their_summaries(wrapper_engine:
     assert all(t["startedAt"] <= t["endedAt"] for t in thinking)
 
 
+async def test_a_label_written_after_done_reaches_the_saved_turn(wrapper_engine: Engine) -> None:
+    """The last row is often labelled after ``done``; the saved turn still gets the label, once."""
+
+    async def _late_label_turn() -> AsyncIterator[dict[str, Any]]:
+        """Think, reply, finish, then label the row."""
+        yield {"event": "reasoning_patch", "data": {"chunk": "Ask for the data."}}
+        yield {"event": "message_patch", "data": {"chunk": "Upload it"}}
+        yield {"event": "done", "data": {"assistant_message": "Upload it", "model": "test-model"}}
+        yield {"event": "thinking_summary", "data": {"index": 0, "text": "Asked for the data"}}
+
+    events = await _drain(_late_label_turn(), wrapper_engine)
+
+    assert events[-1]["event"] == "thinking_summary"
+    rows = _assistant_rows(wrapper_engine)
+    assert len(rows) == 1
+    assert [t.get("summary") for t in (rows[0].router_metadata or {})["thinking"]] == ["Asked for the data"]
+
+
 async def test_retracted_preamble_is_not_salvaged_as_the_reply(wrapper_engine: Engine) -> None:
     """Text withdrawn by ``message_reset`` stays out of a turn persisted on teardown."""
 

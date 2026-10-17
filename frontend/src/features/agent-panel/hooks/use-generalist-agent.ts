@@ -307,15 +307,12 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
 
   // The ref is updated synchronously with every commit so stream callbacks and
   // same-tick sends always read post-mutation state, never a stale render.
-  const commit = React.useCallback(
-    (mutate: (draft: Map<string, SessionView>) => void) => {
-      const next = new Map(sessionsRef.current);
-      mutate(next);
-      sessionsRef.current = next;
-      setSessions(next);
-    },
-    [],
-  );
+  const commit = React.useCallback((mutate: (draft: Map<string, SessionView>) => void) => {
+    const next = new Map(sessionsRef.current);
+    mutate(next);
+    sessionsRef.current = next;
+    setSessions(next);
+  }, []);
 
   const patchSession = React.useCallback(
     (key: string, patch: Partial<SessionView>) => {
@@ -455,6 +452,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       rt.controller = controller;
       rt.replyBuf = "";
       rt.turnStart = Math.max(0, (sessionsRef.current.get(key)?.messages.length ?? 1) - 1);
+      // Labels can land after `done`, when the next turn may have moved rt on.
+      const turnStart = rt.turnStart;
       streamingKeysRef.current.add(key);
 
       patchSession(key, {
@@ -528,7 +527,11 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             if (controller.signal.aborted) return;
             if (!ev.conversation_id) return;
             patchSession(key, { conversationId: ev.conversation_id });
-            callbacksRef.current.onConversationMeta?.(ev.conversation_id, ev.title, eventContext(key));
+            callbacksRef.current.onConversationMeta?.(
+              ev.conversation_id,
+              ev.title,
+              eventContext(key),
+            );
           },
           onReasoningPatch: (chunk) => {
             if (controller.signal.aborted) return;
@@ -538,7 +541,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           },
           onThinkingSummary: ({ index, text }) => {
             if (controller.signal.aborted) return;
-            patchMessages(key, (prev) => summarizeThinking(prev, rt.turnStart, index, text));
+            patchMessages(key, (prev) => summarizeThinking(prev, turnStart, index, text));
           },
           onPlan: (text) => {
             if (controller.signal.aborted) return;
@@ -696,9 +699,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
               next[next.length - 1] = {
                 ...last,
                 toolCalls: last.toolCalls?.map((t) =>
-                  t.status === "running"
-                    ? { ...t, status: "error", endedAt: Date.now() }
-                    : t,
+                  t.status === "running" ? { ...t, status: "error", endedAt: Date.now() } : t,
                 ),
               };
               return next;
@@ -789,7 +790,11 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         .filter((m) => m.content.trim().length > 0)
         .map((m) => {
           const toolCalls = historyToolCalls(m);
-          return { role: m.role, content: m.content, ...(toolCalls ? { tool_calls: toolCalls } : {}) };
+          return {
+            role: m.role,
+            content: m.content,
+            ...(toolCalls ? { tool_calls: toolCalls } : {}),
+          };
         });
       // Merge order: snapshot (from wizardCtx if mounted) <- sticky extras
       // (accumulated across turns from panel-side derivations like
@@ -1045,7 +1050,6 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     },
     [patchSession],
   );
-
 
   const busyConversationIds = React.useMemo(() => {
     const out = new Set<string>();

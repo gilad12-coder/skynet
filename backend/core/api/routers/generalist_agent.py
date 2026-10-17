@@ -346,7 +346,7 @@ def _persist_assistant_turn(
     allowed_tools: list[str] | None = None,
     tool_schema_hashes: dict[str, str] | None = None,
     router_metadata: dict[str, Any] | None = None,
-) -> None:
+) -> int:
     """Insert the assistant's completed turn (with tool-call payloads).
 
     Called once, from the SSE wrapper, when the upstream ``done`` event fires.
@@ -366,32 +366,52 @@ def _persist_assistant_turn(
         tool_schema_hashes: ``{tool_name: sha256(schema_json)}`` snapshot.
         router_metadata: OpenRouter upstream id + served-by host + latency.
             ``None`` until the runtime captures it (see spec §4).
+
+    Returns:
+        The new message's id.
     """
     now = datetime.now(UTC)
     with Session(job_store.engine) as session:
-        session.add(
-            AgentMessageModel(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=content,
-                tool_calls=tool_calls or None,
-                model=model,
-                wizard_state_before=wizard_state_before,
-                wizard_state_after=wizard_state_after,
-                allowed_tools=allowed_tools,
-                tool_schema_hashes=tool_schema_hashes,
-                router_metadata=router_metadata,
-                created_at=now,
-            )
+        message = AgentMessageModel(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=content,
+            tool_calls=tool_calls or None,
+            model=model,
+            wizard_state_before=wizard_state_before,
+            wizard_state_after=wizard_state_after,
+            allowed_tools=allowed_tools,
+            tool_schema_hashes=tool_schema_hashes,
+            router_metadata=router_metadata,
+            created_at=now,
         )
+        session.add(message)
         row = session.get(AgentConversationModel, conversation_id)
         if row is not None:
             row.updated_at = cast(Any, now)
         session.commit()
+        message_id = message.id
     # Refresh the haystack embedding so the next search hit reflects the
     # turn we just persisted. Runs on a daemon thread and is best-effort —
     # the startup backfill heals any failures on the next deploy.
     queue_conversation_embed(conversation_id, engine=job_store.engine)
+    return message_id
+
+
+def _save_thinking_rows(job_store, message_id: int, rows: list[dict[str, Any]]) -> None:
+    """Replace a saved turn's thinking rows, for labels written after its ``done``.
+
+    Args:
+        job_store: Job-store instance whose engine backs the DB session.
+        message_id: The assistant message the rows belong to.
+        rows: The turn's rows, labels included.
+    """
+    with Session(job_store.engine) as session:
+        message = session.get(AgentMessageModel, message_id)
+        if message is None:
+            return
+        message.router_metadata = {**(message.router_metadata or {}), "thinking": rows}
+        session.commit()
 
 
 async def _wrap_with_persistence(
@@ -447,6 +467,8 @@ async def _wrap_with_persistence(
     tool_schema_hashes: dict[str, str] | None = None
     wizard_state_after: dict[str, Any] = dict(wizard_state_before) if wizard_state_before else {}
     persisted = False
+    saved_message_id: int | None = None
+    late_labels = False
 
     async def _do_persist(content: str) -> None:
         """Write the accumulated turn exactly once; never raise.
@@ -457,12 +479,12 @@ async def _wrap_with_persistence(
         Args:
             content: Final assistant message text for the row.
         """
-        nonlocal persisted
+        nonlocal persisted, saved_message_id
         if persisted or not (conversation_id and job_store is not None):
             return
         ordered_tools = [tool_calls[tid] for tid in tool_order if tid in tool_calls]
         try:
-            await asyncio.to_thread(
+            saved_message_id = await asyncio.to_thread(
                 _persist_assistant_turn,
                 job_store,
                 conversation_id,
@@ -557,8 +579,15 @@ async def _wrap_with_persistence(
                 raw_stats = data.get("stats")
                 turn_stats = raw_stats if isinstance(raw_stats, dict) else None
                 await _do_persist(content)
+            elif name == "thinking_summary" and persisted:
+                late_labels = True
             yield event
     finally:
+        if late_labels and saved_message_id is not None and job_store is not None:
+            try:
+                await asyncio.to_thread(_save_thinking_rows, job_store, saved_message_id, thinking.rows())
+            except Exception:
+                logger.exception("Failed to save late thinking labels")
         # The frontend tears down the SSE stream the moment ``submit_job_run_post``
         # succeeds, so ``done`` often never arrives and the wrapped generator is
         # closed (GeneratorExit / CancelledError). Salvage the turn here when it
