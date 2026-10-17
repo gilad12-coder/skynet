@@ -1,7 +1,8 @@
 """Routes for the model catalog and live discovery. [INTERNAL]
 
 ``GET /models`` returns the curated catalog. ``POST /models/discover`` probes
-an OpenAI-compatible endpoint for its available models.
+an OpenAI-compatible endpoint for its available models. ``POST
+/models/call-holds`` prices the reservation one call of each model takes.
 
 All endpoints are hidden from the public Scalar reference (none are in
 ``_SCALAR_PUBLIC_PATHS``) — devs hitting ``/run`` directly pass model
@@ -14,15 +15,23 @@ import http.client
 import ipaddress
 import json as _json
 import socket
+import threading
+import time
 import urllib.error
 import urllib.request
-from typing import Annotated, Any
+from collections.abc import Callable
+from decimal import Decimal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from ...billing.openrouter_quotes import fetch_endpoint_prices, price_text_request, resolve_model_slug
+from ...billing.operation_pricing import ChargePolicy, UnpricedOperationError
 from ...config import settings
+from ...service_gateway.optimization.blackbox.runner import DEFAULT_MAX_TOKENS
 from ..artificial_analysis import with_artificial_analysis_links
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..interview_model import with_interview_default
@@ -282,14 +291,81 @@ def _catalog_to_agent_entry(model: CatalogModel) -> AgentModelEntry:
     )
 
 
-def create_models_router() -> APIRouter:
+class CallHoldModel(BaseModel):
+    """One model role whose single-call reservation the wizard needs."""
+
+    name: str = Field(min_length=1, max_length=200)
+    token_source: Literal["managed", "byok"] = "managed"
+
+
+class CallHoldsRequest(BaseModel):
+    """Request payload for POST /models/call-holds."""
+
+    models: list[CallHoldModel] = Field(max_length=16)
+
+
+class CallHold(BaseModel):
+    """The charged cents one call of a model reserves before it is sent."""
+
+    name: str
+    token_source: Literal["managed", "byok"]
+    cents: float | None = Field(
+        default=None,
+        description="Charged cents one call reserves; null when the model has no verified pricing.",
+    )
+
+
+class CallHoldsResponse(BaseModel):
+    """Response payload for POST /models/call-holds."""
+
+    holds: list[CallHold]
+
+
+# Endpoint prices move rarely, and the wizard re-asks on every model change.
+_CALL_HOLD_TTL_SECONDS = 300.0
+
+
+def call_hold_cents(name: str, token_source: str, *, client: httpx.Client) -> Decimal | None:
+    """Price one model call the way the gateway reserves it before dispatch.
+
+    The gateway bounds a call's input by the endpoint's whole context window
+    and its output by the sandbox ``llm()`` cap, so a single call can need far
+    more than a run's expected usage. Pricing a stand-in body through the same
+    ``price_text_request`` keeps the wizard's limit floor equal to that hold.
+
+    Args:
+        name: The model as the wizard names it, optionally ``openrouter/``-prefixed.
+        token_source: ``managed`` for platform-paid calls, ``byok`` for the caller's key.
+        client: HTTP client for the public OpenRouter catalog.
+
+    Returns:
+        The hold in charged cents, or ``None`` when the model has no verified pricing.
+    """
+    try:
+        slug = resolve_model_slug(name, client=client)
+        catalog = fetch_endpoint_prices(slug, client=client)
+        body = {"model": slug, "messages": [{"role": "user", "content": ""}], "max_tokens": DEFAULT_MAX_TOKENS}
+        policy = ChargePolicy("byok_model" if token_source == "byok" else "managed_model")
+        return price_text_request(body, catalog, policy).quote.maximum.total
+    except (UnpricedOperationError, httpx.HTTPError, ValueError):
+        return None
+
+
+def create_models_router(*, http_client: Callable[[], httpx.Client] | None = None) -> APIRouter:
     """Build the models router.
+
+    Args:
+        http_client: Factory for the client that reads OpenRouter prices; tests
+            pass one over a mock transport.
 
     Returns:
         A FastAPI ``APIRouter`` exposing ``/models``, ``/models/for-agent``,
-        and ``/models/discover``.
+        ``/models/discover`` and ``/models/call-holds``.
     """
     router = APIRouter()
+    make_client = http_client or (lambda: httpx.Client(timeout=10, follow_redirects=False, trust_env=False))
+    hold_cache: dict[tuple[str, str], tuple[float, Decimal | None]] = {}
+    hold_lock = threading.Lock()
 
     @router.get(
         "/models",
@@ -382,5 +458,45 @@ def create_models_router() -> APIRouter:
             error message when the endpoint is unreachable.
         """
         return discover_models_at_endpoint(payload.base_url, payload.api_key)
+
+    @router.post(
+        "/models/call-holds",
+        response_model=CallHoldsResponse,
+        summary="Price the reservation one call of each model takes",
+    )
+    def model_call_holds(payload: CallHoldsRequest, current_user: AuthenticatedUserDep) -> CallHoldsResponse:
+        """Return the charged cents one call of each model reserves before it is sent.
+
+        A spending limit under this hold refuses the run at its first model
+        call, so the wizard holds Continue until the limit covers it.
+
+        Args:
+            payload: The run's model roles and their token sources.
+            current_user: The authenticated caller (required; each price is an
+                outbound catalog read).
+
+        Returns:
+            One hold per requested model, ``cents`` null when it is unpriced.
+        """
+        now = time.monotonic()
+        holds: list[CallHold] = []
+        with make_client() as client:
+            for model in payload.models:
+                key = (model.name, model.token_source)
+                with hold_lock:
+                    cached = hold_cache.get(key)
+                if cached is None or now - cached[0] > _CALL_HOLD_TTL_SECONDS:
+                    cached = (now, call_hold_cents(model.name, model.token_source, client=client))
+                    with hold_lock:
+                        hold_cache[key] = cached
+                cents = cached[1]
+                holds.append(
+                    CallHold(
+                        name=model.name,
+                        token_source=model.token_source,
+                        cents=None if cents is None else float(cents),
+                    )
+                )
+        return CallHoldsResponse(holds=holds)
 
     return router

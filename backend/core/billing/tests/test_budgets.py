@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from core.billing.budget_amounts import cent_units
 from core.billing.budgets import (
+    AccountFundsError,
     BudgetBoundExceededError,
     BudgetConflictError,
     BudgetFencedError,
@@ -416,6 +417,15 @@ def test_contention_differs_from_exhaustion(engine: Engine) -> None:
     assert _reserve(service, budget.id, "second", max_cents=10).state == "reserved"
 
 
+def test_limit_refusal_states_its_amounts_in_dollars(engine: Engine) -> None:
+    """The wizard shows the limit in dollars, so the refusal it relays does too."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 20, idempotency_key="draft")
+    with pytest.raises(BudgetInsufficientError) as refused:
+        _reserve(service, budget.id, "oversize", max_cents=21)
+    assert str(refused.value) == "The next operation needs up to $0.21, but only $0.20 of the $0.20 limit remain."
+
+
 def test_wallet_holds_span_budgets_and_protect_against_legacy_debits(engine: Engine) -> None:
     """Keep covered funding unavailable to other drafts and older interactive surfaces."""
     service = BudgetService(engine=engine)
@@ -665,7 +675,7 @@ def test_uncapped_budget_admits_past_its_total_until_the_account_runs_dry(engine
     _reserve(service, budget.id, key="first", max_cents=30)
     _reserve(service, budget.id, key="second", max_cents=15)
     assert service.get(budget.id, "alice").available_cents == 5
-    with pytest.raises(BudgetInsufficientError, match="cannot fund"):
+    with pytest.raises(AccountFundsError, match="cannot fund"):
         _reserve(service, budget.id, key="third", max_cents=60)
 
 

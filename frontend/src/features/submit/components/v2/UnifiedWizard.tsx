@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
+import { toast } from "react-toastify";
 
 import { useHideAgentPill, useWizardStateOptional } from "@/features/agent-panel";
+import { useSettingsModal } from "@/features/settings";
+import { msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 import { slideVariants } from "../../constants";
@@ -11,10 +14,11 @@ import { WizardAutoAdvanceContext, useAutoAdvanceDriver } from "../../hooks/use-
 import { ExecutionBudgetProvider } from "../../hooks/use-execution-budget";
 import { WizardV2Provider, useWizardV2Shell, v2Text } from "../../hooks/use-unified-wizard";
 import { limitContinueBlock } from "../../lib/budget-limit";
+import type { RunFailureCause } from "../../lib/run-failure";
 import { stepPages } from "../../lib/wizard-pages";
 import { WIZARD_V2_STEPS, type WizardStepId } from "../../lib/wizard-v2";
 import { WIZARD_STAGE, canMoveForward } from "../../lib/wizard-steps";
-import { SubmitNav } from "../SubmitNav";
+import { SubmitNav, type RunFailureNotice } from "../SubmitNav";
 import { SubmitSplash } from "../SubmitSplash";
 import { SubmitStepper } from "../SubmitStepper";
 import { belowEstimateMessage } from "../TotalBudgetCard";
@@ -31,6 +35,18 @@ const STEP_VIEWS: Record<WizardStepId, (page: number, back: () => void) => React
 };
 
 const FIRST_PAGES: Record<WizardStepId, number> = { task: 0, inputs: 0, optimizer: 0, metric: 0 };
+
+// The screens that set the spending limit, as `limitContinueBlock` knows them.
+const LIMIT_SCREENS = ["budget", "plan"] as const;
+
+// One toast per short limit, however often Continue is pressed.
+const LIMIT_TOAST_ID = "submit-limit-below-estimate";
+
+const RUN_FAILURE_TEXT = {
+  limit: "submit.run.failure.limit",
+  balance: "submit.run.failure.balance",
+  other: "submit.run.failure.other",
+} as const satisfies Record<RunFailureCause, string>;
 
 // Arrow keys page the wizard only when they have no job where focus sits:
 // fields, editors, radio groups, tabs, menus and open dialogs keep them.
@@ -83,8 +99,13 @@ function UnifiedWizardFrame() {
   });
   const inputsOpen = canMoveForward(current, w.stepIssue("inputs"));
   const forwardOpen = inputsOpen && limitNeeded === null;
+  // Continue stays clickable under a short limit so the press can say why it holds.
   const forward = useCallback(() => {
-    if (!forwardOpen) return;
+    if (!inputsOpen) return;
+    if (limitNeeded !== null) {
+      toast.error(belowEstimateMessage(limitNeeded), { toastId: LIMIT_TOAST_ID });
+      return;
+    }
     if (page < pageCount - 1) {
       setPages((p) => ({ ...p, [current]: page + 1 }));
       return;
@@ -92,7 +113,7 @@ function UnifiedWizardFrame() {
     const next = steps[position + 1];
     if (next) setPages((p) => ({ ...p, [next]: 0 }));
     goNext();
-  }, [forwardOpen, page, pageCount, current, steps, position, goNext]);
+  }, [inputsOpen, limitNeeded, page, pageCount, current, steps, position, goNext]);
   const [reopenedScreen, setReopenedScreen] = useState(() => (w.restored ? visibleScreen : null));
   if (reopenedScreen !== null && reopenedScreen !== visibleScreen) setReopenedScreen(null);
   const autoAdvance = useAutoAdvanceDriver(
@@ -127,6 +148,23 @@ function UnifiedWizardFrame() {
     },
     [steps, position, current, page, goTo, w.state],
   );
+
+  // Guided's flow skips the screen that sets the limit, so its notice has no button.
+  const limitScreen = LIMIT_SCREENS.find((screen) =>
+    steps.some((step) => (stepPages(step, w.state) as readonly string[]).includes(screen)),
+  );
+  const { openTo } = useSettingsModal();
+  const failureCause = w.runFailure?.cause;
+  const runFailure: RunFailureNotice | null = w.runFailure && {
+    text: msg(RUN_FAILURE_TEXT[w.runFailure.cause]),
+    detail: w.runFailure.detail,
+    action:
+      failureCause === "balance"
+        ? { label: msg("billing.action.add_funds"), onClick: () => openTo("billing") }
+        : failureCause === "limit" && limitScreen
+          ? { label: msg("submit.run.failure.raise_limit"), onClick: () => goToScreen(limitScreen) }
+          : undefined,
+  };
 
   // The agent edits only the screen on view, so it is told which one that
   // is; unmounting the wizard clears it and leaves the agent unscoped. Its
@@ -242,9 +280,10 @@ function UnifiedWizardFrame() {
           onBack={back}
           onNext={forward}
           backDisabled={position === 0 && page === 0}
-          nextDisabled={!forwardOpen}
+          nextDisabled={!inputsOpen}
           showSubmit={lastScreen}
           screen={{ index: page, count: pageCount }}
+          runFailure={runFailure}
         />
       </div>
 

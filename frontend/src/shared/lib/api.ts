@@ -485,6 +485,24 @@ export function getExecutionRuntimes(hasImageInputs: boolean, signal?: AbortSign
   );
 }
 
+/** Charged cents one call of a model reserves before it is sent; null when unpriced. */
+export interface ModelCallHold {
+  name: string;
+  token_source: "managed" | "byok";
+  cents: number | null;
+}
+
+export function getModelCallHolds(
+  models: Array<{ name: string; token_source: "managed" | "byok" }>,
+  signal?: AbortSignal,
+) {
+  return request<{ holds: ModelCallHold[] }>("/models/call-holds", {
+    method: "POST",
+    body: JSON.stringify({ models }),
+    signal,
+  });
+}
+
 export async function runWizardPreflight(
   payload: WizardPreflightRequest,
   signal?: AbortSignal,

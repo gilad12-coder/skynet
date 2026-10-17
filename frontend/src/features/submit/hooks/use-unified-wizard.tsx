@@ -65,6 +65,12 @@ import { inputsFromRoles, rowsToCases, singleInputCase, type Row } from "../lib/
 import { prepareModelConfig } from "../lib/model-config";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import { repoRunRequest } from "../lib/repo-run";
+import {
+  currentRunFailure,
+  runFailureFromCheck,
+  runFailureFromError,
+  type RunFailure,
+} from "../lib/run-failure";
 import { WIZARD_SESSION_KEY, decodeWizardSession, encodeWizardSession } from "../lib/session-state";
 import { metricUsesModel } from "../lib/scorer-dependencies";
 import { computeStepIssue, hasModel, runBlockedReason as blockedReason } from "../lib/step-issue";
@@ -92,7 +98,7 @@ import {
   writeWorkspaceFile,
 } from "../lib/wizard-v2";
 import { useExecutionBudget } from "./use-execution-budget";
-import { useModelCatalog } from "./use-submit-wizard-data";
+import { useModelCallHolds, useModelCatalog } from "./use-submit-wizard-data";
 import { useWizardPreflight } from "./use-wizard-preflight";
 
 export type SubmitPhase = "idle" | "sending" | "splash" | "done";
@@ -104,6 +110,8 @@ export interface WizardV2Shell extends WizardV2Context {
   advancing: boolean;
   /** The setup came back from a reload of this tab. */
   restored: boolean;
+  /** Why the last Run click on this exact setup did not start a run. */
+  runFailure: RunFailure | null;
 }
 
 type SliceName = "task" | "inputs" | "optimizer" | "workspace" | "meta";
@@ -328,6 +336,7 @@ export function WizardV2Provider({
 
   const [submitPhase, setSubmitPhase] = useState<SubmitPhase>("idle");
   const [advancing, setAdvancing] = useState(false);
+  const [runFailure, setRunFailure] = useState<RunFailure | null>(null);
   const busy = advancing || submitPhase !== "idle";
 
   const goTo = useCallback(
@@ -364,14 +373,6 @@ export function WizardV2Provider({
     [state, optimizerCatalog, agentWriting],
   );
 
-  const costBracket = useMemo(
-    () =>
-      projectUnifiedCostBracket(state, optimizerCatalog, {
-        models: modelCatalog?.models ?? null,
-        pricing,
-      }),
-    [state, optimizerCatalog, modelCatalog, pricing],
-  );
   const metricCallsModel = metricUsesModel(state);
   const metricModel = metricCallsModel ? resolvedMetricModel(state) : null;
   const submittedModels = [
@@ -380,6 +381,16 @@ export function WizardV2Provider({
     ...(state.optimizer.choice === "shinka_evolve" ? state.optimizer.extraReflectionModels : []),
     metricModel,
   ].filter(hasModel);
+  const callHolds = useModelCallHolds(submittedModels);
+  const costBracket = useMemo(
+    () =>
+      projectUnifiedCostBracket(state, optimizerCatalog, {
+        models: modelCatalog?.models ?? null,
+        pricing,
+        callHolds,
+      }),
+    [state, optimizerCatalog, modelCatalog, pricing, callHolds],
+  );
   const tokenSource = aggregateTokenSource(submittedModels);
   const chargeable = costBracket ? chargeableBracket(costBracket, tokenSource) : null;
   // What the run would cost with another engine, everything else unchanged.
@@ -387,7 +398,7 @@ export function WizardV2Provider({
     const bracket = projectUnifiedCostBracket(
       { ...state, optimizer: { ...state.optimizer, choice } },
       optimizerCatalog,
-      { models: modelCatalog?.models ?? null, pricing },
+      { models: modelCatalog?.models ?? null, pricing, callHolds },
     );
     return bracket ? chargeableBracket(bracket, tokenSource) : null;
   };
@@ -590,6 +601,8 @@ export function WizardV2Provider({
     }
     submittingRef.current = true;
     setAdvancing(true);
+    setRunFailure(null);
+    const identity = preflight.identity;
     let checked: WizardPreflightResponse | null = null;
     try {
       checked =
@@ -599,8 +612,8 @@ export function WizardV2Provider({
         toast.info(msg(preflightPendingMessageKey(checked)));
         checked = null;
       } else if (checked.status !== "succeeded" || !preflightMayAdvance(checked, "execution")) {
-        const failure = checked.checks.find((check) => check.status === "failed");
-        toast.error(failure?.message ?? msg("submit.preflight.failed"));
+        // The box under Run states the failure and keeps it; a toast would repeat it.
+        setRunFailure(runFailureFromCheck(identity, checked));
         checked = null;
       } else {
         const locale = getActiveIntlLocale();
@@ -611,7 +624,8 @@ export function WizardV2Provider({
     } catch (error) {
       const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
       if (mountedRef.current && !(error instanceof Error && error.name === "AbortError")) {
-        toast.error(message.startsWith("budget.") ? msg(message as MessageKey) : message);
+        const shown = message.startsWith("budget.") ? msg(message as MessageKey) : message;
+        setRunFailure(runFailureFromError(identity, shown));
       }
       checked = null;
     } finally {
@@ -946,6 +960,7 @@ export function WizardV2Provider({
     guided,
     submitPhase,
     advancing,
+    runFailure: currentRunFailure(runFailure, preflight.identity),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
