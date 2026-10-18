@@ -69,6 +69,7 @@ import importlib.util
 import inspect
 import json
 import linecache
+import math
 import os
 import secrets
 import shutil
@@ -553,7 +554,7 @@ def reward_spec(raw: Any) -> dict[str, Any]:
     parsed: dict[str, float] = {}
     for name in REWARD_COMPONENTS:
         value = weights.get(name)
-        if not _is_number(value) or isinstance(value, bool) or float(value) < 0:
+        if not _is_number(value) or isinstance(value, bool) or not 0 <= float(value) < float("inf"):
             raise RewardSpecError(f"REWARD_SPEC['weights']['{name}'] must be a number of 0 or more")
         parsed[name] = float(value)
     total = sum(parsed.values())
@@ -608,9 +609,10 @@ def blend_reward(
     unavailable: list[str] = []
     accuracy_reference = spec["accuracy"].get("reference")
     unit = spec["accuracy"].get("unit") or ""
-    if accuracy is None or not _is_number(accuracy):
+    if accuracy is None or not _is_number(accuracy) or not math.isfinite(accuracy):
+        # A NaN would make the whole total NaN (an output of "nan,nan" parses as a point).
         unavailable.append("accuracy")
-        accuracy_u, accuracy_text = 0.0, "no accuracy value (missing or unreadable output): scored 0"
+        accuracy, accuracy_u, accuracy_text = None, 0.0, "no accuracy value (missing or unreadable output): scored 0"
     elif accuracy_reference is not None:
         accuracy_u = reference_utility(float(accuracy), accuracy_reference)
         accuracy_text = f"error {float(accuracy):g} {unit} (reference {accuracy_reference:g} {unit})".replace("  ", " ")

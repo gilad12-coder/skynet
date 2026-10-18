@@ -98,6 +98,22 @@ def test_an_empty_fast_cheap_response_is_scored_not_excluded() -> None:
     assert "missing" in side_info["feedback"]
 
 
+@pytest.mark.parametrize("accuracy", [float("nan"), float("inf"), float("-inf")])
+def test_a_non_finite_accuracy_is_unavailable_never_a_nan_total(accuracy: float) -> None:
+    """A NaN or infinite accuracy (an output of "nan,nan") scores accuracy 0, as the setup preview does."""
+    score, side_info = blend_reward(SPEC, accuracy, _observed())
+
+    assert score == pytest.approx(blend_reward(SPEC, None, _observed())[0])
+    assert side_info["reward"]["unavailable"] == ["accuracy"]
+    assert side_info["reward"]["raw"]["accuracy"] is None
+
+
+def test_an_infinite_weight_is_refused() -> None:
+    """A weight of ``1e400`` would make every weight NaN; the spec is refused as the preview refuses it."""
+    with pytest.raises(RewardSpecError):
+        reward_spec({**CFCA_SPEC, "weights": {"accuracy": float("inf"), "speed": 1, "cost": 1}})
+
+
 def test_unavailable_time_or_cost_scores_that_component_zero_and_says_so() -> None:
     """An unmeasured time or an unpriced call never looks free or instant."""
     _, no_time = blend_reward(SPEC, 0.0, _observed(None, 0.001))

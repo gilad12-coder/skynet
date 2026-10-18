@@ -873,6 +873,21 @@ def test_final_run_averages_named_scores_over_cases() -> None:
     assert run.named["accuracy"].feedback == "Case 1: case 1 acc\nCase 2: case 2 acc"
 
 
+def test_a_failed_case_counts_as_zero_in_every_named_score() -> None:
+    """A case whose run failed lowers each part's mean as it lowers the total, instead of vanishing."""
+
+    def scorer(candidate: Candidate, case: Any) -> tuple[float, dict[str, Any]]:
+        """Fail the first case before the metric; score the second on accuracy."""
+        if case["n"] == 1:
+            return 0.0, {"error": "TimeoutError: the run timed out"}
+        return 0.8, {"feedback": "ok", "scores": {"accuracy": {"score": 0.8, "feedback": "close"}}}
+
+    run = service_mod._final_run(scorer, "v", [{"n": 1}, {"n": 2}], label="optimized version", phase=PHASE_FINAL)
+
+    assert run.score == pytest.approx(0.4)
+    assert run.named["accuracy"].score == pytest.approx(0.4)
+
+
 def test_final_run_keeps_each_cases_observation_for_both_versions() -> None:
     """A scorer that measures its runs gives each case result the baseline's and the winner's observation."""
 
