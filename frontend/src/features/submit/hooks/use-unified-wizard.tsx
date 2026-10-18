@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -428,7 +429,10 @@ export function WizardV2Provider({
     [budget, patchOptimizer],
   );
   // The server budget is per page load, so a restored limit is set on it again.
-  useEffect(() => {
+  // A layout effect, so the limit is in place before any screen's own effect
+  // runs: a reload that reopens the check screen starts the check at once, and
+  // a check started before this would find no limit and fail as invalid.
+  useLayoutEffect(() => {
     if (!restored) return;
     if (restored.optimizer.budgetUncapped) budget.setBudgetUncapped(true);
     else if (restored.optimizer.maxCostCents != null) {
