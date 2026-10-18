@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Coins, Stack } from "@/shared/ui/icons";
+import { Coins, Stack, Wallet } from "@/shared/ui/icons";
+import { ProgressBar } from "@/shared/ui/progress-bar";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
@@ -27,6 +28,7 @@ import { getRunUsage } from "@/shared/lib/api";
 import { formatBudgetUsd, formatCentsUsd } from "@/features/billing";
 import type { OptimizationStatusResponse } from "@/shared/types/api";
 import { cn } from "@/shared/lib/utils";
+import { budgetPaceLine } from "../lib/budget-pace";
 import { isBudgetPause, isBudgetStop } from "../lib/run-lifecycle";
 import {
   availableGroupings,
@@ -255,6 +257,53 @@ function Summary({
         <p className="col-span-full text-xs text-[#9a6a10] dark:text-[#e7b466]">{msg("usage_tab.budget_stopped")}</p>
       )}
     </dl>
+  );
+}
+
+/**
+ * The live budget block: what the run has spent against its limit and, once
+ * the first scorer runs have priced a call, how far the rest of the limit goes.
+ */
+function BudgetPace({ job, spentCents }: { job: OptimizationStatusResponse; spentCents: number }) {
+  const locale = getActiveIntlLocale();
+  const budget = job.execution_budget;
+  const pace = budgetPaceLine(job.latest_metrics ?? {});
+  if (!budget && !pace) return null;
+  const spent = formatCentsUsd(spentCents, locale);
+  const capped = budget != null && !budget.uncapped;
+  return (
+    <section
+      aria-label={msg("usage_tab.pace.title")}
+      className="space-y-2 rounded-xl border border-border/50 bg-card px-4 py-3.5"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Wallet className="size-3.5 shrink-0" aria-hidden="true" />
+          {msg("usage_tab.pace.title")}
+        </span>
+        {budget && (
+          <span className="text-sm tabular-nums text-foreground" dir="auto">
+            {capped
+              ? formatMsg("usage_tab.pace.spent_of_limit", {
+                  spent,
+                  limit: formatBudgetUsd(String(budget.total_cents), locale),
+                })
+              : formatMsg("usage_tab.pace.spent_uncapped", { spent })}
+          </span>
+        )}
+      </div>
+      {capped && <ProgressBar value={spentCents} max={budget.total_cents} />}
+      {pace && (
+        <p className="text-xs text-muted-foreground" dir="auto" aria-live="polite">
+          {pace.kind === "calibrating"
+            ? msg("usage_tab.pace.calibrating")
+            : formatMsg(
+                pace.kind === "iterations" ? "usage_tab.pace.iterations" : "usage_tab.pace.evaluations",
+                { count: pace.count },
+              )}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -491,6 +540,7 @@ export function UsageTab({
   return (
     <FadeIn>
       <div className="space-y-4">
+        {running && <BudgetPace job={job} spentCents={total.chargedCents} />}
         <Summary job={job} usage={usage} running={running} splitCost={splitCost} />
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3 overflow-x-auto no-scrollbar">

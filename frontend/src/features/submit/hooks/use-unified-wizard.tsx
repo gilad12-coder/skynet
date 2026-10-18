@@ -54,12 +54,7 @@ import { SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 
 import { emptyModelConfig } from "../constants";
 import { cloneToSlices } from "../lib/clone-payload";
-import {
-  aggregateTokenSource,
-  chargeableBracket,
-  defaultCeilingForBracket,
-  projectUnifiedCostBracket,
-} from "../lib/cost-bracket";
+import { aggregateTokenSource, callHoldKey, runFloor as computeRunFloor } from "../lib/run-floor";
 import { fileNewRun } from "../lib/file-new-run";
 import { inputsFromRoles, rowsToCases, singleInputCase, type Row } from "../lib/inputs-mode";
 import { prepareModelConfig } from "../lib/model-config";
@@ -397,28 +392,18 @@ export function WizardV2Provider({
     boxHoldCents,
     settled: costSettled,
   } = useModelCallHolds(submittedModels);
-  const costBracket = useMemo(
-    () =>
-      projectUnifiedCostBracket(state, optimizerCatalog, {
-        models: modelCatalog?.models ?? null,
-        pricing,
-        callHolds,
-        boxHoldCents,
-      }),
-    [state, optimizerCatalog, modelCatalog, pricing, callHolds, boxHoldCents],
-  );
   const tokenSource = aggregateTokenSource(submittedModels);
-  const chargeable = costBracket ? chargeableBracket(costBracket, tokenSource) : null;
-  // What the run would cost with another engine, everything else unchanged.
-  const estimateFor = (choice: OptimizerChoice) => {
-    const bracket = projectUnifiedCostBracket(
-      { ...state, optimizer: { ...state.optimizer, choice } },
-      optimizerCatalog,
-      { models: modelCatalog?.models ?? null, pricing, callHolds, boxHoldCents },
-    );
-    return bracket ? chargeableBracket(bracket, tokenSource) : null;
-  };
-  const suggestedCeiling = chargeable ? defaultCeilingForBracket(chargeable) : null;
+  // The floor waits for the server's box hold, since the boxes are most of it.
+  const runFloor =
+    boxHoldCents == null
+      ? null
+      : computeRunFloor({
+          boxHoldCents,
+          callHoldCents: submittedModels.map(
+            (model) =>
+              callHolds.get(callHoldKey(model.name, model.token_source ?? "managed")) ?? null,
+          ),
+        });
 
   // The spending limit lives on the server budget, like the slice mirror the
   // payload reads; both move together so neither drifts.
@@ -500,10 +485,8 @@ export function WizardV2Provider({
       is_private: meta.isPrivate,
       ...(meta.economyMode && { economy_mode: true }),
       max_cost_cents: budgetUncapped ? undefined : (maxCostCents ?? undefined),
-      estimated_cents_low: chargeable?.lowCents,
-      estimated_cents_high: chargeable?.highCents,
     };
-  }, [state, username, tokenSource, budgetUncapped, maxCostCents, chargeable]);
+  }, [state, username, tokenSource, budgetUncapped, maxCostCents]);
 
   // The preflight hook keys its evidence on the payload; an incomplete setup
   // has none yet and is never run, so an empty stand-in only names the slot.
@@ -567,7 +550,6 @@ export function WizardV2Provider({
       username,
       tokenSource,
       maxCostCents: budgetUncapped ? null : maxCostCents,
-      estimate: chargeable,
     });
     if (runBlockedReason || !request) {
       toast.error(v2Text(runBlockedReason ?? "submit.v2.metric.issue.metric_code", guided));
@@ -913,7 +895,7 @@ export function WizardV2Provider({
       optimizer_choice: optimizer.choice,
       run_code: workspace.runCode || undefined,
       metric_code: workspace.metricCode || undefined,
-      spending_floor_cents: chargeable ? Math.ceil(chargeable.lowCents) : undefined,
+      spending_floor_cents: runFloor?.floorCents,
     } as const;
     for (const key of Object.keys(outgoing) as Array<keyof typeof outgoing>) {
       const value = outgoing[key];
@@ -932,7 +914,7 @@ export function WizardV2Provider({
       handDataFlagRef.current = false;
       if (s.dataset_ready) wizardCtx.clearField("dataset_ready");
     }
-  }, [wizardCtx, state, chargeable]);
+  }, [wizardCtx, state, runFloor]);
 
   const value: WizardV2Shell = {
     restored: restored !== null,
@@ -966,10 +948,8 @@ export function WizardV2Provider({
     ensureBudget,
     submit,
     submitting: submitPhase !== "idle",
-    costBracket,
+    runFloor,
     costSettled,
-    estimateFor,
-    suggestedCeiling,
     tokenSource,
     maxCostCents,
     setMaxCostCents,

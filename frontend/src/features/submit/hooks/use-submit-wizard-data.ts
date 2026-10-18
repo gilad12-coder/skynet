@@ -5,7 +5,7 @@ import { getModelCallHolds } from "@/shared/lib/api";
 import { getModelCatalog, cachedCatalog } from "@/shared/lib/model-catalog";
 import type { ModelCatalogResponse, ModelConfig } from "@/shared/types/api";
 import { MAX_RECENT, RECENT_KEY } from "../constants";
-import { callHoldKey } from "../lib/cost-bracket";
+import { callHoldKey } from "../lib/run-floor";
 
 export function useRecentModelConfigs() {
   // Initial state must be empty: this hook is client-only but Next.js still
@@ -103,15 +103,14 @@ export interface ModelCallHolds {
   holds: ReadonlyMap<string, number>;
   /** What the boxes hold before the first model call; null until it loads. */
   boxHoldCents: number | null;
-  /** Every named model's hold has loaded, or the request failed and the local estimate stands. */
+  /** The box hold and every named model's hold have loaded, or the request failed. */
   settled: boolean;
 }
 
 /**
  * The server's one-call hold for each named model, keyed by `callHoldKey`,
  * and the boxes' hold that comes before any call. Prices load once per
- * model and token source; an unpriced model, or one still loading, is absent
- * so the local estimate stands in for it.
+ * model and token source; an unpriced model, or one still loading, is absent.
  */
 export function useModelCallHolds(
   models: ReadonlyArray<{ name: string; token_source?: "managed" | "byok" }>,
@@ -129,7 +128,8 @@ export function useModelCallHolds(
 
   useEffect(() => {
     const missing = signature ? signature.split("\n").filter((key) => !callHoldCache.has(key)) : [];
-    if (missing.length === 0) return;
+    // The box hold is the floor's base, so it loads even before any model is named.
+    if (missing.length === 0 && boxHoldCache !== null) return;
     const controller = new AbortController();
     const request = missing.map((key) => {
       const [source, ...name] = key.split(":");
@@ -159,7 +159,6 @@ export function useModelCallHolds(
       if (typeof cents === "number") holds.set(key, cents);
     }
     const settled =
-      keys.length === 0 ||
       failed === signature ||
       (boxHoldCache !== null && keys.every((key) => callHoldCache.has(key)));
     return { holds, boxHoldCents: boxHoldCache, settled };

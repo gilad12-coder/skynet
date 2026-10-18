@@ -27,6 +27,7 @@ from ..billing.protected_credentials import (
 )
 from ..billing.protected_execution import bind_protected_sandbox
 from ..billing.runtime import BudgetRuntime, UsagePendingError
+from ..billing.signals import BudgetReached
 from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..config import settings
 from ..constants import OPTIMIZATION_TYPE_BLACKBOX, TOKEN_SOURCE_MANAGED
@@ -40,7 +41,7 @@ from ..models.unified import (
     resolve_optimizer,
 )
 from ..service_gateway.optimization.blackbox.native_runtime import NATIVE_ENGINES
-from ..service_gateway.optimization.blackbox.preflight import preflight_lifetime_seconds
+from ..service_gateway.optimization.blackbox.preflight import preflight_lifetime_seconds, verify_unified_in_sandbox
 from ..storage.preflights import PreflightStore
 from ..worker.repo_staging import (
     StagedRepository,
@@ -259,11 +260,52 @@ def _verify_anything(gateway: ModelGateway, payload: dict[str, Any], *, scope: s
     return result
 
 
-def _verify_unified(gateway: ModelGateway, payload: dict[str, Any], *, scope: str, identity: str) -> dict[str, Any]:
-    """Run a unified run's model route checks in execution scope, then its contract check in the outer sandbox.
+def _verify_unified_direct(gateway: ModelGateway, payload: dict[str, Any], *, identity: str) -> dict[str, Any]:
+    """Run the evaluation-scope contract check in the parent, against one parent-owned box.
 
-    The guest runs ``verify_unified_in_sandbox``; its contract check scores
-    train and validation samples only.
+    The guest path boots a whole optimizer interpreter in the outer sandbox
+    before the workspace harness — which the parent ships into the box anyway —
+    ever runs; that boot alone cost the Check tens of seconds. Only the
+    orchestration moves to the parent here: the user's code still runs inside
+    the protected box, metered through the same mailbox and budget.
+
+    Args:
+        gateway: Shared setup model and sandbox authority, already funded for
+            its own box.
+        payload: Canonical protected unified request.
+        identity: Stable preflight evidence identity, naming the workspace box.
+
+    Returns:
+        The same checks and ``workflow_result`` the guest path produced.
+
+    Raises:
+        BudgetInsufficientError: When the spending limit stopped the check.
+    """
+    report_preflight_phase("sandbox")
+    try:
+        return verify_unified_in_sandbox(
+            payload,
+            "evaluation",
+            identity=identity,
+            runtime=gateway.parent_sandbox_runtime(),
+            on_ready=lambda: report_preflight_phase("evaluator"),
+        )
+    except BudgetReached as error:
+        raise BudgetInsufficientError(str(error) or "The spending limit cannot cover setup.") from error
+    except Exception as error:
+        # A guest-era parity rule: when the limit refused one of the check's
+        # model calls, the failure is the budget's, not the code's.
+        if gateway.budget_refusal is not None:
+            raise BudgetInsufficientError(gateway.budget_refusal) from error
+        raise
+
+
+def _verify_unified(gateway: ModelGateway, payload: dict[str, Any], *, scope: str, identity: str) -> dict[str, Any]:
+    """Run a unified run's contract check, and its engine readiness in execution scope.
+
+    The contract check scores train and validation samples only. In evaluation
+    scope it runs in the parent against one parent-owned box; execution scope
+    keeps the guest, whose image runs the engines it probes.
 
     Args:
         gateway: Shared setup model and sandbox authority.
@@ -280,18 +322,18 @@ def _verify_unified(gateway: ModelGateway, payload: dict[str, Any], *, scope: st
         BudgetInsufficientError: When the limit cannot hold one model route's
             check call; in execution scope this comes before the sandbox opens.
     """
-    route_checks: list[dict[str, Any]] = []
-    if scope == "execution":
-        # Each route check holds a whole worst-case call, which a run needs too,
-        # so a limit that cannot fund one is refused here in seconds rather
-        # than after the minute-long contract check in the sandbox.
-        public = {key: value for key, value in payload.items() if not key.startswith("_")}
-        typed = UnifiedRunRequest.model_validate(public)
-        resolved = resolve_optimizer(typed.optimizer.choice, typed.task.artifact.kind)
-        native = resolved == "auto" or resolved in NATIVE_ENGINES - {BLACKBOX_ENGINE_SHINKA_EVOLVE}
-        route_checks = _verify_model_routes(gateway, native=native)
-        if any(check["status"] == "failed" for check in route_checks):
-            return {"checks": route_checks}
+    if scope == "evaluation":
+        return _verify_unified_direct(gateway, payload, identity=identity)
+    # Each route check holds a whole worst-case call, which a run needs too,
+    # so a limit that cannot fund one is refused here in seconds rather
+    # than after the minute-long contract check in the sandbox.
+    public = {key: value for key, value in payload.items() if not key.startswith("_")}
+    typed = UnifiedRunRequest.model_validate(public)
+    resolved = resolve_optimizer(typed.optimizer.choice, typed.task.artifact.kind)
+    native = resolved == "auto" or resolved in NATIVE_ENGINES - {BLACKBOX_ENGINE_SHINKA_EVOLVE}
+    route_checks = _verify_model_routes(gateway, native=native)
+    if any(check["status"] == "failed" for check in route_checks):
+        return {"checks": route_checks}
     report_preflight_phase("sandbox")
     events = _Events()
     protected = {
@@ -517,6 +559,9 @@ def _perform_preflight(
                 PACKAGE_REGISTRY_HOSTS if request.workflow == "anything" and is_repo_payload(payload) else ()
             ),
         )
+        if request.workflow == "unified" and request.scope == "evaluation":
+            # The contract check runs in the parent's own box, without a guest.
+            gateway.fund_parent_sandbox(())
         protected = gateway.protect_payload(
             payload,
             managed_key=settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else "",

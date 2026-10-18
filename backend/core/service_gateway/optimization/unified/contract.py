@@ -22,6 +22,7 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -669,11 +670,13 @@ def run_contract_check(
     job_id: str | None = None,
     lifetime_seconds: float | None = None,
     dependency_route: dict[str, str] | None = None,
+    on_ready: Callable[[], None] | None = None,
 ) -> ContractCheckResponse:
     """Run the starting version through the code and metric on a few samples, in the sandbox.
 
     The samples come from train then validation, never test. The static
-    checks run first; when they fail, nothing is executed.
+    checks run first; when they fail, nothing is executed. The box warms up
+    before the samples fan out into it together.
 
     Args:
         payload: The unified run; its cases must be inline.
@@ -684,6 +687,7 @@ def run_contract_check(
         job_id: Names the box, when known.
         lifetime_seconds: Requested box lifetime; the configured ceiling when unset.
         dependency_route: The protected package relay pinned dependencies install through.
+        on_ready: Called once the box is warm and scoring starts, for progress reporting.
 
     Returns:
         Every check item and the scored samples; ``ok`` only when all passed.
@@ -715,8 +719,14 @@ def run_contract_check(
     )
     samples: list[ContractSample] = []
     try:
-        for index, case in enumerate(contract_samples(splits, sample_count)):
-            probe = scorer.run(payload.task.artifact.starting_version, case)
+        cases = list(contract_samples(splits, sample_count))
+        if cases:
+            # No box opens for an empty draw: the scorer warms lazily otherwise.
+            scorer.warm()
+            if on_ready is not None:
+                on_ready()
+        probes = scorer.run_many(payload.task.artifact.starting_version, cases)
+        for index, (case, probe) in enumerate(zip(cases, probes, strict=True)):
             checks.extend(_sample_items(index, probe))
             feedback = probe.side_info.get("feedback")
             samples.append(

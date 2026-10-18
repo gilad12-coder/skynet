@@ -28,7 +28,7 @@ import {
   type UnifiedRunRequest,
 } from "@/shared/types/unified-run";
 import type { TokenSourceMode } from "@/features/billing";
-import type { CostBracket } from "./cost-bracket";
+import type { RunFloor } from "./run-floor";
 
 export type WizardStepId = "task" | "inputs" | "optimizer" | "metric";
 export const WIZARD_V2_STEPS: readonly WizardStepId[] = ["task", "inputs", "optimizer", "metric"];
@@ -635,13 +635,11 @@ export interface WizardV2Context {
   submit(): Promise<void>;
   submitting: boolean;
   // TotalBudgetCard BudgetContext fields.
-  costBracket: CostBracket | null;
-  /** Every model's one-call hold has loaded (or failed to), so the bracket's floor is final. */
+  /** The least the spending limit can be; null until the server's box hold loads. */
+  runFloor: RunFloor | null;
+  /** Every model's one-call hold has loaded (or failed to), so the floor is final. */
   costSettled: boolean;
-  /** The charged estimate with another engine picked, everything else unchanged. */
-  estimateFor(choice: OptimizerChoice): { lowCents: number; highCents: number } | null;
-  suggestedCeiling: number | null;
-  /** Who pays the run's model tokens, which sets the estimate the limit is held to. */
+  /** Who pays the run's model tokens. */
   tokenSource: TokenSourceMode;
   maxCostCents: number | null;
   setMaxCostCents(v: number | null): void;

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import time
+from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any
 
@@ -323,6 +324,7 @@ def verify_unified_in_sandbox(
     *,
     identity: str | None = None,
     runtime: SandboxRuntime | None = None,
+    on_ready: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Run a unified run's contract check, and in execution scope its engine readiness, in one outer sandbox.
 
@@ -333,8 +335,9 @@ def verify_unified_in_sandbox(
         payload: Protected unified request containing opaque parent capabilities.
         scope: ``evaluation`` or ``execution`` readiness.
         identity: Stable preflight evidence identity, naming the workspace box.
-        runtime: Contained command runtime bound to the outer sandbox; the
-            configured scorer runtime when unset.
+        runtime: Contained command runtime bound to the outer sandbox, or the
+            trusted parent's own box runtime; the configured scorer runtime when unset.
+        on_ready: Called once the workspace box is warm and scoring starts.
 
     Returns:
         ``{"checks": [...], "workflow_result": {"contract": ContractCheckResponse}}`` with the
@@ -363,6 +366,7 @@ def verify_unified_in_sandbox(
                 job_id=identity,
                 lifetime_seconds=samples * typed.workspace.metric_timeout_seconds + _SCORER_BOX_OVERHEAD_SECONDS,
                 dependency_route=payload.get("_skynet_packages_route"),
+                on_ready=on_ready,
             )
         except UsagePendingError:
             checks.append(_check("usage", "pending", "Sandbox usage is awaiting confirmation."))

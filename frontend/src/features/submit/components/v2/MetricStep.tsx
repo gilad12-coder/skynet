@@ -3,6 +3,7 @@
 import * as React from "react";
 import { isGeneralistAgentEnabled, useHideAgentPill } from "@/features/agent-panel";
 import { githubRepoFile, githubRepoTree } from "@/shared/lib/api";
+import { msg } from "@/shared/lib/messages";
 import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unified-run";
 import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
@@ -14,6 +15,7 @@ import type { IdeOpenRequest } from "../../ide/open-file";
 import { indexRepoTree, repoFolderName, type RepoSource } from "../../ide/repo-files";
 import { useIdeCodingAgent } from "../../ide/use-ide-coding-agent";
 import { metricAdvanceFrom } from "../../lib/auto-advance";
+import { activeContractPhase } from "../../lib/contract-validation";
 import { authoringCases } from "../../lib/inputs-mode";
 import { metricUsesModel as metricCallsModel, withScorerImports } from "../../lib/scorer-dependencies";
 import { METRIC_FILE, RUN_FILE, isSingleAnswerTask, repoIssue } from "../../lib/wizard-v2";
@@ -166,6 +168,19 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
 
   const contract = useContractCheck(ctx);
   const lastCheckOk = contract.lastCheck && !contract.stale ? contract.lastCheck.ok : null;
+  // The running Check names its step beside the IDE's spinner, as the check
+  // screen's rows do.
+  const contractPhase = activeContractPhase(contract.timing, contract.checking);
+  const checkPhaseLabel =
+    contractPhase === null
+      ? null
+      : msg(
+          contractPhase === "sandbox"
+            ? "submit.validation.progress.sandbox"
+            : contractPhase === "evaluator"
+              ? "submit.validation.progress.evaluator"
+              : "submit.validation.progress.budget",
+        );
 
   // The coding agent writes under this context. Inference re-roles the
   // columns when it answers, and the Inputs step stays mounted while it does,
@@ -272,6 +287,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           onFileChange={setWorkspaceFile}
           onFileDelete={deleteFile}
           onCheck={repo ? null : contract.check}
+          checkPhase={checkPhaseLabel}
           checkResult={repo ? null : consoleResult}
           agentResults={repo ? null : agentResults}
           resultsStale={!repo && resultsStale}

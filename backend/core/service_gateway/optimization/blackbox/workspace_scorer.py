@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import shlex
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -139,12 +140,14 @@ def shape_message() -> str:
 
 
 class WorkspaceScorer(SandboxPythonScorer):
-    """Run code plus metric in one sandbox; calls are serialized.
+    """Run code plus metric in one sandbox; engine calls are serialized.
 
     The box, install command, pinned dependencies, reopen-on-failure and
     protected stops are those of :class:`SandboxPythonScorer`; only what one
-    call runs differs. ``usage`` is the task model's ledger (the model every
-    call uses); ``ledgers`` holds every ledger the run must bill.
+    call runs differs. ``run_many`` is the exception to serialization: the
+    contract check's samples fan out inside the one box. ``usage`` is the task
+    model's ledger (the model every call uses); ``ledgers`` holds every ledger
+    the run must bill.
     """
 
     def __init__(
@@ -263,6 +266,15 @@ class WorkspaceScorer(SandboxPythonScorer):
             return 0.0, sanitize_side_info({"error": probe.error or "ValueError: the metric returned no score"})
         return probe.score, revive_images(probe.side_info)
 
+    def warm(self) -> None:
+        """Open the box and install the runner before the first sample is scored.
+
+        Splitting this from the calls lets a caller report boot and scoring as
+        separate progress steps instead of one silent wait.
+        """
+        with self._lock:
+            self._open()
+
     def run(self, candidate: Candidate, case: Any = None) -> WorkspaceProbe:  # type: ignore[override]
         """Run the code and the metric on one case and report user-code failures as data.
 
@@ -276,22 +288,69 @@ class WorkspaceScorer(SandboxPythonScorer):
         Raises:
             ServiceError: When the box could not run the harness at all.
         """
-        message = {"candidate": candidate, "case": case_document(case)}
-        started = time.perf_counter()
         with self._lock:
             blocked = self._extend(candidate)
             if blocked is not None:
                 return WorkspaceProbe(score=None, side_info={}, error=f"ImportError: {blocked}", stage="run")
-            try:
-                reply = self._invoke(message)
-            except (ServiceError, BudgetError, UsagePendingError):
+            return self._probe(candidate, case)
+
+    def run_many(self, candidate: Candidate, cases: list[Any]) -> list[WorkspaceProbe]:
+        """Score one candidate on several cases concurrently, in the same box.
+
+        The contract check's few samples are independent; fanning them out
+        turns one boxed call per sample into one round of waiting. The box is
+        opened once, up front, and each case keeps ``run``'s failure policy.
+
+        Args:
+            candidate: The version to score.
+            cases: The cases, scored in one fan-out.
+
+        Returns:
+            One probe per case, in the cases' order.
+
+        Raises:
+            ServiceError: When the box could not run the harness at all.
+        """
+        if not cases:
+            return []
+        with self._lock:
+            blocked = self._extend(candidate)
+            if blocked is not None:
+                return [
+                    WorkspaceProbe(score=None, side_info={}, error=f"ImportError: {blocked}", stage="run")
+                    for _ in cases
+                ]
+            self._open()
+        if len(cases) == 1:
+            return [self._probe(candidate, cases[0])]
+        with ThreadPoolExecutor(max_workers=len(cases), thread_name_prefix="workspace-check") as pool:
+            return list(pool.map(lambda case: self._probe(candidate, case), cases))
+
+    def _probe(self, candidate: Candidate, case: Any) -> WorkspaceProbe:
+        """Score one case in the open box, applying ``run``'s failure policy.
+
+        Args:
+            candidate: The version to score.
+            case: The case to score it on.
+
+        Returns:
+            The score, side info and output preview, or the failure with its stage.
+
+        Raises:
+            ServiceError: When the box could not run the harness at all.
+        """
+        message = {"candidate": candidate, "case": case_document(case)}
+        started = time.perf_counter()
+        try:
+            reply = self._invoke(message)
+        except (ServiceError, BudgetError, UsagePendingError):
+            raise
+        except Exception:
+            if self._protected:
                 raise
-            except Exception:
-                if self._protected:
-                    raise
-                logger.warning("workspace sandbox failed; reopening", exc_info=True)
-                self._discard()
-                reply = self._invoke(message)
+            logger.warning("workspace sandbox failed; reopening", exc_info=True)
+            self._discard()
+            reply = self._invoke(message)
         _raise_control(reply)
         by_model = self._record(reply.get("usage") or {})
         raw_score = reply.get("score")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from decimal import Decimal
 from typing import Any
@@ -67,14 +68,15 @@ DEEPSEEK_PRICING = {
 }
 
 
-def _catalog(pricing: dict[str, Any]) -> dict[str, Any]:
+def _catalog(pricing: dict[str, Any], *, context: int = 1000) -> dict[str, Any]:
     """Wrap one endpoint's published pricing in the catalog shape the quote reads.
 
     Args:
         pricing: Endpoint pricing as published by the OpenRouter endpoints API.
+        context: The endpoint's context window in tokens.
 
     Returns:
-        Catalog for the fixture model with a single endpoint of 1,000 context tokens.
+        Catalog for the fixture model with a single endpoint.
     """
     return {
         "id": "fixture/text",
@@ -82,7 +84,7 @@ def _catalog(pricing: dict[str, Any]) -> dict[str, Any]:
             {
                 "tag": "fixture",
                 "provider_name": "Fixture",
-                "context_length": 1000,
+                "context_length": context,
                 "max_completion_tokens": 1000,
                 "pricing": pricing,
             }
@@ -94,7 +96,7 @@ def _catalog(pricing: dict[str, Any]) -> dict[str, Any]:
     ("pricing", "maximum_provider_usd"),
     [
         pytest.param(GEMINI_PRICING, "0.00147", id="audio-and-web-search-unreachable"),
-        pytest.param(CLAUDE_PRICING, "0.0149625", id="long-context-override-and-1h-cache"),
+        pytest.param(CLAUDE_PRICING, "0.0055125", id="unreachable-long-context-override-and-unrequested-1h-cache"),
         pytest.param(DEEPSEEK_PRICING, "0.0006762", id="scheduled-overrides"),
     ],
 )
@@ -111,10 +113,107 @@ def test_published_price_shapes_bound_text_requests(pricing: dict[str, Any], max
 
 
 def test_override_rates_raise_the_routing_caps() -> None:
-    """Send OpenRouter the highest override rate as the per-token cap so a surcharge cannot exceed the hold."""
-    priced = price_text_request(REQUEST, _catalog(CLAUDE_PRICING), POLICY)
+    """Send OpenRouter the highest reachable override rate as the per-token cap so a surcharge cannot exceed the hold."""
+    request = {**REQUEST, "messages": [{"role": "user", "content": "x" * 200_000}]}
+    priced = price_text_request(request, _catalog(CLAUDE_PRICING, context=1_000_000), POLICY)
     assert priced.body["provider"]["max_price"]["prompt"] == 6
     assert priced.body["provider"]["max_price"]["completion"] == 22.5
+
+
+def _body_bytes(request: dict[str, Any]) -> int:
+    """Measure a request the way the quote does.
+
+    Args:
+        request: Request body before routing is added.
+
+    Returns:
+        Compact UTF-8 JSON size in bytes.
+    """
+    return len(json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def test_input_is_bounded_by_the_request_bytes_not_the_context_window() -> None:
+    """A short prompt on a million-token endpoint holds its bytes plus the wrapper allowance, not the window."""
+    pricing = {"prompt": "0.000001", "completion": "0.000002"}
+    priced = price_text_request(REQUEST, _catalog(pricing, context=1_000_000), POLICY)
+    input_tokens = _body_bytes(REQUEST) + 2048
+    expected = (input_tokens * Decimal("0.000001") + 100 * Decimal("0.000002")) * Decimal("1.05")
+    assert Decimal(priced.quote.price_snapshot["maximum_provider_usd"]) == expected
+    assert priced.quote.price_snapshot["input_bound_tokens"] == input_tokens
+    assert priced.quote.price_snapshot["endpoints"][0]["input_tokens"] == input_tokens
+
+
+def test_hebrew_text_is_bounded_by_its_utf8_bytes() -> None:
+    """Multi-byte text counts every byte, so a non-Latin prompt cannot slip under its own token count."""
+    request = {**REQUEST, "messages": [{"role": "user", "content": "שלום עולם" * 100}]}
+    priced = price_text_request(request, _catalog({"prompt": "0.000001", "completion": "0"}, context=1_000_000), POLICY)
+    assert priced.quote.price_snapshot["input_bound_tokens"] == _body_bytes(request) + 2048
+    assert _body_bytes(request) > len("שלום עולם".encode()) * 100 > len("שלום עולם") * 100
+
+
+def test_each_input_image_adds_a_full_image_of_tokens() -> None:
+    """An image URL is a few bytes but bills thousands of tokens, so each one adds its own allowance."""
+    request = {
+        **REQUEST,
+        "messages": [
+            {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "https://x.test/a.png"}}]}
+        ],
+    }
+    pricing = {"prompt": "0.000001", "completion": "0", "image": "0"}
+    priced = price_text_request(request, _catalog(pricing, context=1_000_000), POLICY)
+    assert priced.quote.price_snapshot["input_bound_tokens"] == _body_bytes(request) + 2048 + 8192
+
+
+def test_the_one_hour_cache_rate_applies_only_when_a_breakpoint_asks_for_it() -> None:
+    """A default ephemeral breakpoint holds the five-minute write rate; a 1h ttl holds the dearer one."""
+    pricing = {
+        "prompt": "0.000003",
+        "completion": "0",
+        "input_cache_write": "0.00000375",
+        "input_cache_write_1h": "0.000006",
+    }
+    catalog = _catalog(pricing, context=1_000_000)
+
+    def hold(control: dict[str, str]) -> Decimal:
+        """Price one cached message under the given breakpoint."""
+        content = [{"type": "text", "text": "cached", "cache_control": control}]
+        request = {**REQUEST, "messages": [{"role": "user", "content": content}]}
+        tokens = _body_bytes(request) + 2048
+        priced = Decimal(price_text_request(request, catalog, POLICY).quote.price_snapshot["maximum_provider_usd"])
+        return priced / Decimal("1.05") / tokens
+
+    assert hold({"type": "ephemeral"}) == Decimal("0.00000375")
+    assert hold({"type": "ephemeral", "ttl": "1h"}) == Decimal("0.000006")
+
+
+FAST_CATALOG = {
+    "id": "fixture/text",
+    "endpoints": [
+        {
+            "tag": "anthropic",
+            "provider_name": "Anthropic",
+            "context_length": 1000,
+            "pricing": {"prompt": "0.000004", "completion": "0.00002"},
+        },
+        {
+            "tag": "anthropic/fast",
+            "provider_name": "Anthropic",
+            "context_length": 1000,
+            "pricing": {"prompt": "0.000008", "completion": "0.00004"},
+        },
+    ],
+}
+
+
+def test_fast_endpoints_stay_out_of_the_hold_unless_routing_names_them() -> None:
+    """A fast variant bills double, so it is neither priced nor routable unless the caller picks its tag."""
+    default = price_text_request(REQUEST, FAST_CATALOG, POLICY)
+    assert default.body["provider"]["only"] == ["anthropic"]
+    assert default.body["provider"]["max_price"]["prompt"] == 4
+
+    chosen = price_text_request({**REQUEST, "provider": {"only": ["anthropic/fast"]}}, FAST_CATALOG, POLICY)
+    assert chosen.body["provider"]["only"] == ["anthropic/fast"]
+    assert chosen.body["provider"]["max_price"]["prompt"] == 8
 
 
 @pytest.mark.parametrize(
