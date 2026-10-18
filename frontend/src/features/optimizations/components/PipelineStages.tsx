@@ -154,7 +154,7 @@ function ElapsedChip({ seconds, className }: { seconds: number; className?: stri
   return (
     <span
       className={cn(
-        "inline-flex h-4 items-center rounded-full border border-border/70 bg-background px-1.5 font-mono text-[0.625rem] leading-none tabular-nums text-foreground/80",
+        "inline-flex h-4 items-center rounded-md border border-border/70 bg-background px-1.5 font-mono text-[0.625rem] leading-none tabular-nums text-foreground/80",
         className,
       )}
       title={msg("pipeline.stage.elapsed")}
@@ -169,7 +169,7 @@ function StatusText({ state, text }: { state: StageState; text: string }) {
   return (
     <span
       className={cn(
-        "text-[0.625rem] uppercase tracking-[0.08em]",
+        "text-[0.625rem] uppercase tracking-[0.08em] rtl:tracking-normal",
         state === "stopped" ? "text-destructive" : "text-muted-foreground",
       )}
     >

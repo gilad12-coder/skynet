@@ -193,9 +193,9 @@ export function TrajectoryPanel({
 
   return (
     <FadeIn delay={0.12}>
-      <Card className="relative overflow-hidden shadow-[0_1px_3px_rgba(28,22,18,0.04),inset_0_1px_0_rgba(255,255,255,0.5)] dark:shadow-none">
+      <Card className="relative overflow-hidden">
         <div
-          className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-overview-gold/40 to-transparent"
+          className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-primary-fill/40 to-transparent"
           aria-hidden="true"
         />
         <CardHeader className="flex flex-row items-start justify-between gap-3">
@@ -211,14 +211,14 @@ export function TrajectoryPanel({
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground/80 shadow-xs backdrop-blur"
+              className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider rtl:tracking-normal text-muted-foreground/80 backdrop-blur"
             >
               <PingDot size="sm" />
               <span className="tabular-nums">{candidates.length}</span>
               <span>{TERMS.candidatePlural}</span>
             </motion.div>
           ) : (
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider rtl:tracking-normal text-muted-foreground">
               <span className="tabular-nums">{candidates.length}</span> {TERMS.candidatePlural}
             </span>
           )}

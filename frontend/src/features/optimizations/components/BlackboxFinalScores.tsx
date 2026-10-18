@@ -57,7 +57,7 @@ export function VersionFeedback({ sideInfo }: { sideInfo: Record<string, unknown
       aria-label={msg("optimization.blackbox.versions.feedback")}
       className="@container rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5"
     >
-      <h3 className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground">
+      <h3 className="text-[0.6875rem] font-medium tracking-wide rtl:tracking-normal text-muted-foreground">
         {msg("optimization.blackbox.versions.feedback")}
       </h3>
 

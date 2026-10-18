@@ -225,7 +225,7 @@ function GridOverviewImpl({
             onClick={qualityPair ? () => setPairFilter(qualityPair.pair_index) : undefined}
           >
             <div className="flex items-center justify-center gap-1.5 mb-1">
-              <Trophy className="size-3 text-overview-gold" />
+              <Trophy className="size-3 text-primary" />
               <p className="text-[0.625rem] text-muted-foreground">
                 {msg("auto.features.optimizations.components.gridoverview.7")}
               </p>
@@ -275,7 +275,7 @@ function GridOverviewImpl({
         <FadeIn delay={0.1}>
           {pairFilter != null && (
             <div className="flex items-center gap-2 flex-wrap mb-3">
-              <span className="group inline-flex items-center gap-1.5 rounded-lg bg-primary/[0.06] border border-primary/10 pe-1 ps-2.5 py-1 transition-all duration-150 hover:bg-primary/[0.1] hover:border-primary/20">
+              <span className="group inline-flex items-center gap-1.5 rounded-lg border on-primary pe-1 ps-2.5 py-1 transition-all duration-150 hover:bg-primary-fill/[0.1] hover:border-primary-fill/20">
                 <span className="font-mono text-[0.6875rem] font-medium text-primary/80" dir="ltr">
                   {selectedPair ? pairLabel(selectedPair) : "—"}
                 </span>
@@ -752,7 +752,7 @@ function GridOverviewImpl({
                             content={({ active, payload, label }) => {
                               if (!active || !payload?.length) return null;
                               return (
-                                <div className="rounded-xl border border-border/60 bg-background/95 backdrop-blur-sm p-3 shadow-lg">
+                                <div className="rounded-xl border border-border/60 bg-background/95 backdrop-blur-sm p-3 shadow-[var(--shadow-float)]">
                                   {label && (
                                     <p className="font-semibold mb-1.5 text-foreground text-xs">
                                       {label}
@@ -789,11 +789,7 @@ function GridOverviewImpl({
                             {pairRespTimeFiltered.map((entry, i) => (
                               <Cell
                                 key={i}
-                                fill={
-                                  entry.isBest
-                                    ? "var(--color-overview-gold)"
-                                    : "var(--color-chart-4)"
-                                }
+                                fill={entry.isBest ? "var(--color-chart-1)" : "var(--color-chart-4)"}
                               />
                             ))}
                           </Bar>
@@ -818,11 +814,11 @@ function GridOverviewImpl({
           return (
             <div
               key={pr.pair_index}
-              className={`group relative rounded-xl border p-4 transition-colors duration-200 hover:shadow-sm ${
+              className={`group relative rounded-xl border p-4 transition-colors duration-200 ${
                 pr.error
                   ? "border-destructive/30 bg-destructive/[0.02] hover:border-destructive/50"
                   : isOverall
-                    ? "border-primary/40 bg-primary/[0.03] hover:border-primary/60"
+                    ? "on-primary"
                     : "border-border/50 bg-card/80 hover:border-border"
               }`}
             >
@@ -834,10 +830,10 @@ function GridOverviewImpl({
                 onClick={() => onPairSelect(pr.pair_index)}
                 aria-label={formatMsg("optimizations.grid.open_pair", { pair: pairLabel(pr) })}
                 title={pairLabel(pr)}
-                className="absolute inset-0 cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-overview-gold/45"
+                className="absolute inset-0 cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
               />
               <div className="pointer-events-none relative flex items-center gap-3">
-                {isOverall && <Crown className="size-4 text-overview-gold shrink-0" />}
+                {isOverall && <Crown className="size-4 text-primary shrink-0" />}
                 {pr.error && <XCircle className="size-4 text-destructive shrink-0" />}
 
                 <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -920,7 +916,7 @@ function GridOverviewImpl({
                 <ProgressBar
                   value={barRatio * 100}
                   size="sm"
-                  color={isOverall ? "var(--color-chart-1)" : "var(--color-overview-gold)"}
+                  color={isOverall ? "var(--color-chart-1)" : "var(--color-chart-3)"}
                   className="pointer-events-none relative mt-2.5"
                   fillClassName={isOverall ? "opacity-60" : "opacity-30"}
                 />

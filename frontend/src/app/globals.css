@@ -274,7 +274,6 @@
   --tree-winner-badge-ink: #ffffff;
   --tree-ghost-fill: #e8e1d8;
   --tree-grid: oklch(0.91 0.006 50);
-  --tree-grid-axis: oklch(0.94 0.005 50);
   --trust-ask: #3d6db0;
   --trust-auto-safe: #2e7d4f;
   --trust-yolo: #c03a3a;
@@ -303,27 +302,6 @@
   /* Hover/glow tints and the dim behind overlays. */
   --gold-tint: rgba(180, 82, 31, 0.1);
   --spotlight-dim: rgba(28, 22, 18, 0.56);
-
-  /* Run Overview palette: the warm cream look of the finished-run page as it
-     shipped on 2026-10-09. Dark mode maps each onto the closest theme token. */
-  --overview-surface: #fbf9f4;
-  --overview-line: #e3dcd0;
-  --overview-ink: #1c1612;
-  --overview-quiet: #a89680;
-  --overview-quiet-hover: #7c6350;
-  --overview-faint: #bfb3a3;
-  --overview-gold: #c8a882;
-  --overview-card-line: #ddd4c8;
-  --overview-strip-from: #faf8f5;
-  --overview-strip-to: #f5f1ec;
-  --overview-danger-strong: #7a2a1e;
-  --overview-danger-text: #8a3326;
-  /* Candidate tree and climb chart inks; .run-overview-classic re-points them. */
-  --tree-line: var(--muted-foreground);
-  --tree-ink: var(--foreground);
-  --tree-node-fill: var(--card);
-  --tree-halo: var(--background);
-  --tree-progress: var(--primary);
 }
 
 /* ════════════════════════════════════════════
@@ -414,7 +392,6 @@
   --tree-winner-badge-ink: #2a1f08;
   --tree-ghost-fill: #382f28;
   --tree-grid: rgba(255, 255, 255, 0.07);
-  --tree-grid-axis: rgba(255, 255, 255, 0.045);
   --trust-ask: #7ba3dd;
   --trust-auto-safe: #7fbf8e;
   --trust-yolo: #e8706a;
@@ -444,19 +421,6 @@
   /* The page is already near-black, so the tour's dim goes deeper still to
      read as a dim. */
   --spotlight-dim: rgba(0, 0, 0, 0.62);
-
-  --overview-surface: var(--card);
-  --overview-line: var(--border);
-  --overview-ink: var(--foreground);
-  --overview-quiet: var(--muted-foreground);
-  --overview-quiet-hover: var(--text-2);
-  --overview-faint: var(--text-3);
-  --overview-gold: var(--primary);
-  --overview-card-line: var(--border);
-  --overview-strip-from: color-mix(in srgb, var(--muted) 40%, transparent);
-  --overview-strip-to: color-mix(in srgb, var(--muted) 40%, transparent);
-  --overview-danger-strong: #ffb1a0;
-  --overview-danger-text: #ffa997;
 }
 
 /* ════════════════════════════════════════════
@@ -502,18 +466,6 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-border-subtle: var(--border-subtle);
-  --color-overview-surface: var(--overview-surface);
-  --color-overview-line: var(--overview-line);
-  --color-overview-ink: var(--overview-ink);
-  --color-overview-quiet: var(--overview-quiet);
-  --color-overview-quiet-hover: var(--overview-quiet-hover);
-  --color-overview-faint: var(--overview-faint);
-  --color-overview-gold: var(--overview-gold);
-  --color-overview-card-line: var(--overview-card-line);
-  --color-overview-strip-from: var(--overview-strip-from);
-  --color-overview-strip-to: var(--overview-strip-to);
-  --color-overview-danger-strong: var(--overview-danger-strong);
-  --color-overview-danger-text: var(--overview-danger-text);
 }
 
 /* ════════════════════════════════════════════
@@ -814,7 +766,8 @@ h3 {
 [data-settings-text-buttons] [data-slot="button"][data-accent]:not([data-size^="icon"]) {
   @apply border-transparent bg-primary-fill text-primary-foreground;
 }
-[data-settings-text-buttons] [data-slot="button"][data-accent]:not([data-size^="icon"]):hover {
+[data-settings-text-buttons]
+  [data-slot="button"][data-accent]:not([data-size^="icon"]):hover {
   @apply bg-primary-hover text-primary-foreground;
 }
 [data-settings-text-buttons]
@@ -1115,12 +1068,7 @@ code,
 /* Spotlight radial glow on hover (follows mouse) */
 /* Gradient headings */
 h1 {
-  background: linear-gradient(
-    135deg,
-    var(--foreground) 0%,
-    var(--foreground) 50%,
-    var(--text-2) 100%
-  );
+  background: linear-gradient(135deg, var(--foreground) 0%, var(--foreground) 50%, var(--text-2) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -1167,6 +1115,7 @@ button[data-slot="button"][data-variant="default"] {
 aside {
   backdrop-filter: blur(16px);
 }
+
 
 /* ════════════════════════════════════════════
    3D PERSPECTIVE EFFECTS
@@ -1360,16 +1309,8 @@ aside {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background-image: linear-gradient(
-      to right,
-      color-mix(in srgb, var(--border) 4%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in srgb, var(--border) 4%, transparent) 1px,
-      transparent 1px
-    );
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--border) 4%, transparent) 1px, transparent 1px);
   background-size: 48px 48px;
   mask-image: linear-gradient(180deg, transparent 0%, black 10%, black 90%, transparent 100%);
   -webkit-mask-image: linear-gradient(
@@ -1777,125 +1718,4 @@ table {
 }
 [data-ide-host] .part.sidebar > .composite.title .title-actions .action-item:last-child {
   margin-right: 0;
-}
-
-/* ════════════════════════════════════════════
-   RUN OVERVIEW — the 2026-10-09 finished-run look
-   In Light, .run-overview-classic brings back that day's palette and card
-   depth (gradient, soft shadow, cursor spotlight, top highlight) for the
-   Overview tab and the failure banner, while the rest of the app keeps the
-   current flat theme. Dark mode leaves the theme tokens untouched.
-   ════════════════════════════════════════════ */
-:root:not(.dark) .run-overview-classic {
-  --background: #faf8f5;
-  --primary: #3d2e22;
-  --primary-foreground: #faf8f5;
-  --primary-hover: #2a1f16;
-  --primary-fill: #3d2e22;
-  --secondary: #f0ebe4;
-  --secondary-foreground: #2a1f17;
-  --muted: #f0ebe4;
-  --muted-foreground: #8c7a6b;
-  --accent: #ede7dd;
-  --accent-foreground: #2a1f17;
-  --accent-muted: rgba(61, 46, 34, 0.04);
-  --destructive: #b04030;
-  --border: #ddd6cc;
-  --input: #ddd6cc;
-  --ring: #3d2e22;
-  --surface-2: #faf8f5;
-  --surface-3: #f0ebe4;
-  --border-subtle: #e5ddd4;
-  --text-2: #5c4d40;
-  --text-3: #a69585;
-  --blue: #7c6350;
-  --blue-light: rgba(124, 99, 80, 0.08);
-  --danger: #c02a1a;
-  --danger-dim: rgba(192, 42, 26, 0.1);
-  --danger-border: rgba(192, 42, 26, 0.25);
-  --success: #1a7a3a;
-  --success-dim: rgba(26, 122, 58, 0.1);
-  --success-border: rgba(26, 122, 58, 0.25);
-  --warning: #9a6a10;
-  --warning-dim: rgba(154, 106, 16, 0.1);
-  --warning-border: rgba(154, 106, 16, 0.25);
-  --shadow-sm: 0 1px 2px rgba(28, 22, 18, 0.05);
-  --shadow-card: 0 1px 3px rgba(28, 22, 18, 0.06), 0 1px 2px rgba(28, 22, 18, 0.04);
-  --shadow-hover: 0 4px 6px rgba(28, 22, 18, 0.07), 0 2px 4px rgba(28, 22, 18, 0.04);
-  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.55);
-  --chart-1: #3d2e22;
-  --chart-2: #7c6350;
-  --chart-3: #a69585;
-  --chart-4: #c8b9a8;
-  --chart-5: #e5ddd4;
-  --gradient-progress: linear-gradient(90deg, #c8a882, #a68b6b, #d4b896);
-  --skeleton-base: #ebe4d8;
-  /* Custom properties inherit their computed value, so tokens :root derives
-     from others (var(--primary) and friends) must be re-declared here. */
-  --tree-line: #7c6350;
-  --tree-ink: #1c1612;
-  --tree-node-fill: #fdfaf4;
-  --tree-halo: #faf8f5;
-  --tree-progress: #7c6350;
-  --tree-pass: #7c8b5a;
-  --tree-fail: #b26b4a;
-  --tree-ghost-fill: #e8e0d3;
-  --tree-winner-badge-ink: #fbf4df;
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-muted-foreground: var(--muted-foreground);
-}
-/* Unlayered so they beat Card's own bg-card/border utilities, which the
-   overview never overrides per card. */
-:root:not(.dark) .run-overview-classic [data-slot="card"] {
-  @apply bg-transparent bg-gradient-to-b from-white/95 to-[#f8f4ef] border-[#ddd4c8]/50;
-}
-/* The resting shadow sits in a layer so a card's own shadow utility wins, as
-   it did when the shadow was a Card class. */
-@layer components {
-  :root:not(.dark) .run-overview-classic [data-slot="card"] {
-    @apply shadow-[0_1px_3px_rgba(28,22,18,0.03),0_4px_16px_rgba(28,22,18,0.025)];
-  }
-}
-:root:not(.dark) .run-overview-classic [data-slot="card"]:hover {
-  box-shadow:
-    0 4px 12px rgba(28, 22, 18, 0.06),
-    0 12px 32px rgba(28, 22, 18, 0.04);
-  border-color: #c8b9a8;
-}
-.run-overview-classic [data-slot="card"]::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0;
-  transition: opacity 0.4s ease;
-  background: radial-gradient(
-    400px circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%),
-    color-mix(in srgb, var(--overview-gold) 6%, transparent),
-    transparent 60%
-  );
-}
-.run-overview-classic [data-slot="card"]:hover::before {
-  opacity: 1;
-}
-:root:not(.dark) .run-overview-classic [data-slot="card"]::after {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  height: 1px;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(to left, transparent, rgba(255, 255, 255, 0.5), transparent);
-}
-@media (hover: none) {
-  :root:not(.dark) .run-overview-classic [data-slot="card"]:hover {
-    box-shadow: var(--shadow-card);
-  }
 }

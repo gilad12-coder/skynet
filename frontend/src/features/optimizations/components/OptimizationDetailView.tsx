@@ -1170,7 +1170,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     <div className="space-y-6 pb-12">
       {sharedTier && <RunAccessBanner tier={sharedTier} owner={sharedByOwner} />}
       <FadeIn delay={0.1}>
-        <div className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5">
+        <div className="rounded-xl border border-border/40 bg-card p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
             <div className="space-y-2 min-w-0 sm:flex-1">
               <div className="flex flex-col items-start gap-1.5">
@@ -1384,12 +1384,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
       {job.status === "failed" && !isPairContext && (job.message || (metrics.error as string)) && (
         <FadeIn delay={0.15}>
-          <div className="run-overview-classic rounded-xl border border-destructive/20 bg-gradient-to-br from-destructive/[0.05] to-destructive/[0.015] p-5 shadow-[0_1px_3px_rgba(176,64,48,0.07)] dark:shadow-none">
+          <div className="rounded-xl border border-destructive/20 bg-destructive/[0.04] p-5">
             <div className="flex items-center gap-3">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
                 <XCircle className="size-5" />
               </span>
-              <p className="min-w-0 flex-1 text-sm font-semibold text-overview-danger-strong">
+              <p className="min-w-0 flex-1 text-sm font-semibold text-[#7A2A1E] dark:text-[#ffb1a0]">
                 {msg("auto.app.optimizations.id.page.6")}
               </p>
             </div>
@@ -1397,22 +1397,22 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               <div className="flex items-start gap-2" dir="ltr">
                 <div className="min-w-0 flex-1">
                   <pre
-                    className="text-xs text-overview-danger-text whitespace-pre-wrap break-words font-mono leading-relaxed"
+                    className="text-xs text-[#8A3326] dark:text-[#ffa997] whitespace-pre-wrap break-words font-mono leading-relaxed"
                     dir="ltr"
                   >
                     {linkifyMessage(
                       job.message ?? "",
-                      "underline decoration-destructive/40 underline-offset-2 hover:text-overview-danger-strong transition-colors",
+                      "underline decoration-destructive/40 underline-offset-2 hover:text-[#7A2A1E] dark:hover:text-[#ffb1a0] transition-colors",
                     )}
                   </pre>
                   {typeof metrics.error === "string" && !job.message?.includes(metrics.error) && (
                     <pre
-                      className="text-xs text-overview-danger-text whitespace-pre-wrap break-words font-mono leading-relaxed mt-2 border-t border-destructive/15 pt-2"
+                      className="text-xs text-[#8A3326] dark:text-[#ffa997] whitespace-pre-wrap break-words font-mono leading-relaxed mt-2 border-t border-destructive/15 pt-2"
                       dir="ltr"
                     >
                       {linkifyMessage(
                         String(metrics.error),
-                        "underline decoration-destructive/40 underline-offset-2 hover:text-overview-danger-strong transition-colors",
+                        "underline decoration-destructive/40 underline-offset-2 hover:text-[#7A2A1E] dark:hover:text-[#ffb1a0] transition-colors",
                       )}
                     </pre>
                   )}
@@ -1435,7 +1435,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
       {isPairContext && activePair.error && (
         <FadeIn delay={0.05}>
-          <div className="run-overview-classic rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
             <div className="text-sm font-medium text-destructive mb-1">
               {msg("auto.features.optimizations.components.pairdetailview.3")}
             </div>

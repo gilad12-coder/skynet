@@ -35,22 +35,21 @@ function render(fixture: Fixture): string {
   return renderToStaticMarkup(<TooltipProvider>{inner}</TooltipProvider>);
 }
 
-// The 2026-10-09 score-card treatment: plain baseline card, primary-tinted
-// gradient for the optimized score, stone gradient for a non-negative change.
+// The score cards keep the current theme's colours: plain baseline card, the
+// on-primary optimized card, a muted card for a non-negative change.
 const BASELINE_CARD = "rounded-xl border border-border/50 bg-card p-6 text-center";
-const OPTIMIZED_CARD = "border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10";
-const IMPROVEMENT_CARD = "border-stone-400/50 bg-gradient-to-br from-stone-100/50 to-stone-200/30";
+const OPTIMIZED_CARD = "rounded-xl border on-primary p-6 text-center";
+const IMPROVEMENT_CARD = "border-border bg-muted/50";
 
 void describe("finished-run Overview fixtures", () => {
   for (const fixture of OVERVIEW_FIXTURES) {
-    void it(`${fixture.name} renders the 2026-10-09 Overview`, () => {
+    void it(`${fixture.name} renders the Overview`, () => {
       const html = render(fixture);
       const { expect } = fixture;
 
       assert.ok(!html.includes("optimization.result."), "no Guided result card copy");
 
       if (!expect.grid) {
-        assert.ok(html.includes("run-overview-classic"), "scoped classic palette wrapper");
         assert.ok(html.includes("data-stage-tracker"), "pipeline stages");
       }
 
@@ -66,6 +65,7 @@ void describe("finished-run Overview fixtures", () => {
         expect.lmStats,
         "LM call count card",
       );
+      assert.ok(!html.includes("run-overview-classic"), "no scoped 10-09 palette");
       assert.equal(
         html.includes("optimization.blackbox.stats.scorer_runs"),
         expect.blackboxStats,

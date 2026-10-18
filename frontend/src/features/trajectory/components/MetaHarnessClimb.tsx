@@ -39,24 +39,24 @@ import { usePinchZoom } from "../lib/pinch-zoom";
 import { displayCandidateId } from "../lib/types";
 
 // The palette mirrors TrajectoryTree so a climb and a tree read as one family.
-const EDGE_STROKE = "color-mix(in srgb, var(--tree-line) 42%, transparent)";
-const NODE_CORE_FILL = "var(--tree-node-fill)";
-const NODE_CORE_STROKE = "color-mix(in srgb, var(--tree-ink) 16%, transparent)";
-const NODE_CORE_STROKE_HOVER = "color-mix(in srgb, var(--tree-ink) 42%, transparent)";
-const NODE_CORE_STROKE_SELECTED = "var(--tree-ink)";
+const EDGE_STROKE = "color-mix(in srgb, var(--muted-foreground) 42%, transparent)";
+const NODE_CORE_FILL = "var(--card)";
+const NODE_CORE_STROKE = "color-mix(in srgb, var(--foreground) 16%, transparent)";
+const NODE_CORE_STROKE_HOVER = "color-mix(in srgb, var(--foreground) 42%, transparent)";
+const NODE_CORE_STROKE_SELECTED = "var(--foreground)";
 const IMPROVED_FILL = "var(--tree-pass)";
 const REGRESSED_FILL = "var(--tree-fail)";
-const SCORE_TRACK_STROKE = "color-mix(in srgb, var(--tree-line) 14%, transparent)";
-const PENDING_STROKE = "color-mix(in srgb, var(--tree-line) 60%, transparent)";
-const PENDING_PROGRESS = "var(--tree-progress)";
+const SCORE_TRACK_STROKE = "color-mix(in srgb, var(--muted-foreground) 14%, transparent)";
+const PENDING_STROKE = "color-mix(in srgb, var(--muted-foreground) 60%, transparent)";
+const PENDING_PROGRESS = "var(--primary)";
 const WINNER_INDICATOR = "var(--tree-winner)";
 const WINNER_HALO = "var(--tree-winner-halo)";
 const WINNER_FILL = "var(--tree-winner-fill)";
 const WINNER_BADGE_FILL = "var(--tree-winner)";
 const WINNER_BADGE_INK = "var(--tree-winner-badge-ink)";
-const LABEL_HALO = "color-mix(in srgb, var(--tree-halo) 90%, transparent)";
+const LABEL_HALO = "color-mix(in srgb, var(--background) 90%, transparent)";
 const GRID_LINE_COLOR = "var(--tree-grid)";
-const AXIS_INK = "color-mix(in srgb, var(--tree-ink) 55%, transparent)";
+const AXIS_INK = "color-mix(in srgb, var(--foreground) 55%, transparent)";
 const SURFACE_GRADIENT = "radial-gradient(ellipse at 50% 0%, var(--muted), var(--background) 70%)";
 // Room under the plot for the legend that floats over the chart's bottom edge.
 // A coarse pointer (any iPad, even with a trackpad attached) grows every legend
@@ -435,7 +435,7 @@ export function MetaHarnessClimb({
       className={
         isMaximized
           ? "fixed inset-0 z-50 h-dvh w-screen overflow-hidden border-0"
-          : "relative w-full overflow-hidden rounded-xl border border-overview-card-line/60"
+          : "relative w-full overflow-hidden rounded-xl border border-border/60"
       }
       style={
         isMaximized
@@ -551,7 +551,7 @@ export function MetaHarnessClimb({
       </CanvasControlGroup>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3">
-        <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] text-muted-foreground/80 shadow-xs backdrop-blur">
+        <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] text-muted-foreground/80 backdrop-blur">
           <LegendToggle
             pressed={layers.improved}
             onToggle={() => toggleLayer("improved")}
@@ -602,7 +602,7 @@ export function MetaHarnessClimb({
       <>
         <div
           aria-hidden
-          className="w-full rounded-xl border border-overview-card-line/60 opacity-40"
+          className="w-full rounded-xl border border-border/60 opacity-40"
           style={{ height: PLOT_HEIGHT_PX + legendRoom, background: SURFACE_GRADIENT }}
         />
         {createPortal(body, document.body)}
@@ -815,7 +815,7 @@ const ClimbContent = memo(function ClimbContent({
                       fontFamily="var(--font-mono, monospace)"
                       fontSize="13"
                       fontWeight={700}
-                      fill={winnerShown ? "var(--tree-winner-number)" : "var(--tree-ink)"}
+                      fill={winnerShown ? "var(--tree-winner-number)" : "var(--foreground)"}
                       pointerEvents="none"
                     >
                       {displayCandidateId(point.id)}
@@ -839,7 +839,7 @@ const ClimbContent = memo(function ClimbContent({
                     fontFamily="var(--font-mono, monospace)"
                     fontSize="10.5"
                     fontWeight={600}
-                    fill="color-mix(in srgb, var(--tree-ink) 72%, transparent)"
+                    fill="color-mix(in srgb, var(--foreground) 72%, transparent)"
                     stroke={LABEL_HALO}
                     strokeWidth={2.5}
                     strokeLinejoin="round"
@@ -946,7 +946,7 @@ const ClimbContent = memo(function ClimbContent({
               fontFamily="var(--font-mono, monospace)"
               fontSize="10.5"
               fontWeight={700}
-              fill="var(--tree-ink)"
+              fill="var(--foreground)"
               pointerEvents="none"
               style={{ fontVariantNumeric: "tabular-nums" }}
             >
@@ -959,7 +959,7 @@ const ClimbContent = memo(function ClimbContent({
               fontFamily="var(--font-mono, monospace)"
               fontSize="10.5"
               fontWeight={600}
-              fill="color-mix(in srgb, var(--tree-ink) 72%, transparent)"
+              fill="color-mix(in srgb, var(--foreground) 72%, transparent)"
               stroke={LABEL_HALO}
               strokeWidth={2.5}
               strokeLinejoin="round"

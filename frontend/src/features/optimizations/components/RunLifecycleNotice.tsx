@@ -139,7 +139,7 @@ export function RunLifecycleNotice({
 
   return (
     <section
-      className="space-y-2 rounded-xl border border-overview-gold/45 bg-overview-gold/10 p-4"
+      className="space-y-2 rounded-xl border on-primary p-4"
       role="status"
     >
       <div className="flex items-start gap-2">
