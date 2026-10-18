@@ -23,7 +23,7 @@ import { cn } from "@/shared/lib/utils";
 
 import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
 import { useTaskInterview, type TaskInterviewState } from "../../hooks/use-task-interview";
-import { useWizardV2 } from "../../hooks/use-unified-wizard";
+import { useWizardV2, useWizardV2Shell } from "../../hooks/use-unified-wizard";
 import { taskAdvanceFrom } from "../../lib/auto-advance";
 import { emptyRepoDraft, taskIssue } from "../../lib/wizard-v2";
 import { AuthoringShell } from "../steps/AuthoringShell";
@@ -43,7 +43,10 @@ export function TaskStep({ page }: { page: number }) {
   const task = state.task;
   const t = (key: string) => v2Msg(key, guided);
 
-  const interview = useTaskInterview(ctx, true);
+  // A clone's opening turn waits for its source run, so the agent restates
+  // that goal instead of asking for one the draft is about to hold.
+  const { cloneLoading } = useWizardV2Shell();
+  const interview = useTaskInterview(ctx, !cloneLoading);
 
   // Once the interview has what it needs, the wizard moves on by itself, but
   // only on the first pass: a user who comes back to edit the task stays put.
