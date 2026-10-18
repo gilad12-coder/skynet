@@ -24,26 +24,42 @@ Prerequisites: Python 3.11, Node 20+ (22.6+ to run the frontend unit tests), Pos
 
 ```bash
 git clone https://github.com/gilad12-coder/skynet.git && cd skynet
+just install-agent
+```
 
-# 1. Database
-createdb skynet
+`just install-agent` runs the setup script (the same as `just setup`), then starts Claude Code with `/install`.
+`just setup` installs the backend and frontend deps and creates
+`backend/.env` and `frontend/.env.local` with fresh auth secrets. It also checks
+Postgres and LiteLLM, runs the migrations and checks i18n. It never overwrites
+an existing env file and never prints a secret. The agent reads the log in
+`.claude/logs/`, fixes known issues, runs the unit tests and tells you which
+secrets to enter. `just install-hil` does the same, but asks you before each
+choice. Without Claude Code, run `just setup` and follow
+`.claude/commands/install.md`.
 
-# 2. Configure
-cp backend/.env.example backend/.env        # set REMOTE_DB_URL + model keys
-cp frontend/.env.example frontend/.env.local
+Then start the app:
 
-# 3. Model gateway (routes all LLM traffic; holds provider keys)
-cd deploy/litellm && docker compose up -d && cd ../..
-
-# 4. Install + run
-just install
+```bash
 just backend    # FastAPI on :8000 — migrations apply automatically at boot
 just frontend   # Next.js on :3000
 ```
 
+<details>
+<summary>Manual install</summary>
+
+```bash
+createdb skynet
+cp backend/.env.example backend/.env        # set REMOTE_DB_URL + model keys
+cp frontend/.env.example frontend/.env.local
+cd deploy/litellm && docker compose up -d && cd ../..   # model gateway
+just install
+```
+
+</details>
+
 Open http://localhost:3000. The API reference lives at http://localhost:8000/scalar.
 
-Useful recipes: `just test`, `just lint`, `just check-i18n`, `just --list` for everything.
+Useful recipes: `just test`, `just lint`, `just check-i18n`, `just maintain` (health report), `just --list` for everything.
 
 ## Architecture
 
