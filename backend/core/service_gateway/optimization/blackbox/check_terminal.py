@@ -112,11 +112,6 @@ class CheckTerminalRecorder:
         self._truncated: set[str] = set()
         self._secrets: list[str] = []
 
-    def __len__(self) -> int:
-        """Return how many events the transcript holds."""
-        with self._lock:
-            return len(self._events)
-
     def redact(self, values: Iterable[str]) -> None:
         """Add values that must never reach the transcript, whatever command prints them.
 

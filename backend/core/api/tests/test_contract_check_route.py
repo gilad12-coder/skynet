@@ -553,3 +553,23 @@ def test_stream_route_streams_the_live_transcript_and_returns_it_with_the_result
     assert '"note": "box_ready"' in body
     result = json.loads(body.split("event: result\ndata: ", 1)[1].split("\n", 1)[0])
     assert result["terminal"]["events"][0]["note"] == "box_ready"
+
+
+def test_preflight_records_onto_the_streaming_routes_empty_recorder(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A unified check keeps the route's still-empty live recorder instead of starting a silent one."""
+    seen: list[Any] = []
+    monkeypatch.setattr(
+        preflight_execution, "_run_preflight", lambda request, user, job_store, terminal: seen.append(terminal)
+    )
+    live: list[dict[str, Any]] = []
+    recorder = check_terminal.CheckTerminalRecorder(emit=live.append)
+    request = preflight_execution.WizardPreflightRequest(
+        scope="evaluation", workflow="unified", payload={}, execution_budget_id="b", execution_budget_revision=1
+    )
+
+    with check_terminal.recording(recorder):
+        preflight_execution.run_preflight(request, SimpleNamespace(username="u"), job_store=None)
+    seen[0].note("box_ready", seconds=1.0)
+
+    assert seen == [recorder]
+    assert [event["note"] for event in live] == ["box_ready"]

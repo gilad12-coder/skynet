@@ -419,7 +419,9 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
     """
     terminal = None
     if request.workflow == "unified" and request.scope == "evaluation":
-        terminal = check_terminal.current_recorder() or check_terminal.CheckTerminalRecorder()
+        terminal = check_terminal.current_recorder()
+        if terminal is None:
+            terminal = check_terminal.CheckTerminalRecorder()
     with check_terminal.recording(terminal):
         return _run_preflight(request, user, job_store, terminal)
 
