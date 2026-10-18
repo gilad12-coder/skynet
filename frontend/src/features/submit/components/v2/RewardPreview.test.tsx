@@ -77,5 +77,6 @@ void describe("RewardPreview", () => {
   void it("keeps numbers left to right in Hebrew", () => {
     const html = render(GEOCODING_METRIC, "he");
     assert.match(html, /<bdi dir="ltr"[^>]*>[^<]*→[^<]*<\/bdi>/);
+    assert.match(html, /<bdi>[^<]*\$[^<]*<\/bdi> → <bdi>[^<]*\$[^<]*<\/bdi>/);
   });
 });

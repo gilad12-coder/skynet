@@ -148,9 +148,17 @@ export function RewardPreview({ read }: { read: RewardSpecRead }) {
                     {REWARD_COMPONENTS.map((component) => (
                       <td key={component} className={`${td} tabular-nums`}>
                         <bdi dir="ltr">
-                          {c.before && c.change?.component === component
-                            ? `${rawValue(spec, component, c.before, f)} → ${rawValue(spec, component, c.inputs, f)}`
-                            : rawValue(spec, component, c.inputs, f)}
+                          {/* Hebrew currency output carries RLM marks; isolate each side
+                              so a "before → after" pair keeps its order. */}
+                          {c.before && c.change?.component === component ? (
+                            <>
+                              <bdi>{rawValue(spec, component, c.before, f)}</bdi>
+                              {" → "}
+                              <bdi>{rawValue(spec, component, c.inputs, f)}</bdi>
+                            </>
+                          ) : (
+                            rawValue(spec, component, c.inputs, f)
+                          )}
                         </bdi>
                       </td>
                     ))}
