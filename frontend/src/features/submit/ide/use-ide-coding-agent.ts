@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useCodeAgent, type CodeAgentState } from "@/shared/hooks/use-code-agent";
+import { useCodeAgent, type AgentMessage, type CodeAgentState } from "@/shared/hooks/use-code-agent";
 import type { ValidateCodeResponse } from "@/shared/types/api";
 import type { ContractCheckResponse, UnifiedAuthoringContext } from "@/shared/types/unified-run";
 import { v2Msg } from "../components/v2/ArtifactConfirmCard";
@@ -47,6 +47,7 @@ export interface IdeCodingAgent {
  *   options.lastCheckOk: The last Check's verdict on exactly these files, or null.
  *   options.check: Run Check.
  *   options.guided: Guided copy for the kickoff turns.
+ *   options.initialMessages: The chat a reload brings back.
  *
  * Returns:
  *   The agent, its composer model choice, and its last verdict.
@@ -66,6 +67,7 @@ export function useIdeCodingAgent(options: {
   lastCheckOk: boolean | null;
   check: () => Promise<ContractCheckResponse | null>;
   guided: boolean;
+  initialMessages?: AgentMessage[];
 }): IdeCodingAgent {
   const { context, active, dataKnown, runCode, metricCode, files, lastCheck, check, guided } = options;
   const repo = context?.target === "repo";
@@ -140,6 +142,7 @@ export function useIdeCodingAgent(options: {
     onOpenFile: openFile,
     model,
     reasoningEffort: effort,
+    initialMessages: options.initialMessages,
   });
 
   // verify_code's result, with the files it saw: the same render that

@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -67,7 +68,12 @@ import {
   runFailureFromError,
   type RunFailure,
 } from "../lib/run-failure";
-import { WIZARD_SESSION_KEY, decodeWizardSession, encodeWizardSession } from "../lib/session-state";
+import {
+  WIZARD_SESSION_KEY,
+  WIZARD_VIEW_KEYS,
+  decodeWizardSession,
+  encodeWizardSession,
+} from "../lib/session-state";
 import { metricUsesModel } from "../lib/scorer-dependencies";
 import { computeStepIssue, hasModel, runBlockedReason as blockedReason } from "../lib/step-issue";
 import { canEnterStep, canMoveForward } from "../lib/wizard-steps";
@@ -209,7 +215,7 @@ function readWizardSession(): string | null {
 
 function forgetWizardSession() {
   try {
-    window.sessionStorage.removeItem(WIZARD_SESSION_KEY);
+    for (const key of [WIZARD_SESSION_KEY, ...WIZARD_VIEW_KEYS]) window.sessionStorage.removeItem(key);
   } catch {}
 }
 
@@ -424,7 +430,10 @@ export function WizardV2Provider({
     [budget, patchOptimizer],
   );
   // The server budget is per page load, so a restored limit is set on it again.
-  useEffect(() => {
+  // A layout effect, so the limit is in place before any screen's own effect
+  // runs: a reload that reopens the check screen starts the check at once, and
+  // a check started before this would find no limit and fail as invalid.
+  useLayoutEffect(() => {
     if (restored) restoreSavedLimit(restored.optimizer, { budget, patchSaved: patchOptimizer });
     // Runs once, for the setup read at mount.
   }, []);
