@@ -108,6 +108,14 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
       const result = await runContractCheck(
         { spec: withContractBudget(spec, budget), sample_count: SANDBOX_SAMPLE_COUNT },
         controller.signal,
+        (phase) => {
+          // The server's own steps; anything else (or a repeat) moves nothing.
+          const stamp = phase === "sandbox" ? "sandboxAt" : phase === "evaluator" ? "evaluatorAt" : null;
+          if (!stamp) return;
+          setTiming((current) =>
+            current && !current[stamp] ? { ...current, [stamp]: Date.now() } : current,
+          );
+        },
       );
       if (controller.signal.aborted) return null;
       patchWorkspace({ lastCheck: result, lastCheckSnapshot: checkedSnapshot });

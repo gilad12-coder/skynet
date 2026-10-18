@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from core.api import preflight_execution
 from core.api.auth import AuthenticatedUser, get_authenticated_user
+from core.api.preflight_progress import progress_observer
 from core.api.routers import wizard_preflight
 from core.billing.budgets import AccountFundsError, BudgetInsufficientError
 from core.i18n import t, t_locale
@@ -301,10 +302,59 @@ def test_unified_guest_failure_after_a_refused_call_is_a_budget_error(
         events.put({"type": "error", "error": "The code does not match", "traceback": ""})
 
     monkeypatch.setattr(preflight_execution, "run_vercel_dspy", guest)
-    gateway = SimpleNamespace(budget_refusal=BudgetInsufficientError(refusal) if refusal else None)
+    gateway = _RouteGateway(200)
+    gateway.budget_refusal = BudgetInsufficientError(refusal) if refusal else None
+
+    with pytest.raises(raised, match=r"\$1\.35" if refusal else "does not match"):
+        preflight_execution._verify_unified(gateway, _spec(budget=False), scope="execution", identity="setup-1")
+
+
+@pytest.mark.parametrize(("refusal", "raised"), [(SPENT, BudgetInsufficientError), (None, ValueError)])
+def test_unified_direct_failure_after_a_refused_call_is_a_budget_error(
+    monkeypatch: pytest.MonkeyPatch, refusal: str | None, raised: type[Exception]
+) -> None:
+    """An evaluation-scope check that failed after the limit refused a model call reports the budget."""
+
+    def check(payload: dict[str, Any], scope: str, **kwargs: Any) -> dict[str, Any]:
+        """Fail the way a sample stopped by the limit does."""
+        raise ValueError("The code does not match")
+
+    monkeypatch.setattr(preflight_execution, "verify_unified_in_sandbox", check)
+    gateway = SimpleNamespace(budget_refusal=refusal, parent_sandbox_runtime=object)
 
     with pytest.raises(raised, match=r"\$1\.35" if refusal else "does not match"):
         preflight_execution._verify_unified(gateway, {}, scope="evaluation", identity="setup-1")
+
+
+def test_unified_direct_check_uses_the_parent_box_and_reports_its_phases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Evaluation scope opens the parent's box directly and reports ``sandbox`` then ``evaluator``."""
+    runtime = object()
+    seen: dict[str, Any] = {}
+
+    def check(payload: dict[str, Any], scope: str, **kwargs: Any) -> dict[str, Any]:
+        """Record the runtime, emit the warm-box phase and answer with checks."""
+        seen.update(kwargs)
+        kwargs["on_ready"]()
+        return {"checks": [], "workflow_result": {"contract": {"ok": True}}}
+
+    monkeypatch.setattr(preflight_execution, "verify_unified_in_sandbox", check)
+    phases: list[str] = []
+    token = progress_observer.set(phases.append)
+    try:
+        result = preflight_execution._verify_unified(
+            SimpleNamespace(budget_refusal=None, parent_sandbox_runtime=lambda: runtime),
+            {"spec": True},
+            scope="evaluation",
+            identity="setup-1",
+        )
+    finally:
+        progress_observer.reset(token)
+
+    assert (seen["runtime"], seen["identity"]) == (runtime, "setup-1")
+    assert phases == ["sandbox", "evaluator"]
+    assert result["workflow_result"]["contract"]["ok"] is True
 
 
 class _RouteGateway:
@@ -371,25 +421,62 @@ def test_unified_execution_check_stops_at_a_rejected_model_route(monkeypatch: py
     assert started == []
 
 
-@pytest.mark.parametrize(
-    ("scope", "keys"),
-    [
-        ("execution", ["metric.contract", "model.optimization", "optimizer"]),
-        ("evaluation", ["metric.contract", "optimizer"]),
-    ],
-)
-def test_unified_check_reports_model_routes_beside_the_optimizer(
-    monkeypatch: pytest.MonkeyPatch, scope: str, keys: list[str]
+def test_unified_execution_check_reports_model_routes_beside_the_optimizer(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Passing route checks sit before the optimizer check; an evaluation check never probes the models."""
+    """Passing route checks sit before the optimizer check in execution scope."""
     started = _sandbox_recorder(monkeypatch)
     gateway = _RouteGateway(200)
 
-    result = preflight_execution._verify_unified(gateway, _spec(budget=False), scope=scope, identity="setup-1")
+    result = preflight_execution._verify_unified(gateway, _spec(budget=False), scope="execution", identity="setup-1")
 
-    assert [check["key"] for check in result["checks"]] == keys
+    assert [check["key"] for check in result["checks"]] == ["metric.contract", "model.optimization", "optimizer"]
     assert started == ["preflight-setup-1"]
-    assert gateway.dispatched == (["route-token"] if scope == "execution" else [])
+    assert gateway.dispatched == ["route-token"]
+
+
+def test_unified_evaluation_check_never_probes_the_models_or_the_guest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Evaluation scope runs the parent-direct contract check: no route probes, no guest sandbox."""
+    started = _sandbox_recorder(monkeypatch)
+    gateway = _RouteGateway(200)
+    gateway.parent_sandbox_runtime = object
+
+    def check(payload: dict[str, Any], scope: str, **kwargs: Any) -> dict[str, Any]:
+        """Answer the contract and optimizer checks the workspace box returns."""
+        return {"checks": [{"key": "metric.contract", "status": "succeeded"}, {"key": "optimizer", "status": "succeeded"}]}
+
+    monkeypatch.setattr(preflight_execution, "verify_unified_in_sandbox", check)
+
+    result = preflight_execution._verify_unified(gateway, _spec(budget=False), scope="evaluation", identity="setup-1")
+
+    assert [check["key"] for check in result["checks"]] == ["metric.contract", "optimizer"]
+    assert started == []
+    assert gateway.dispatched == []
+
+
+def test_stream_route_emits_phases_then_the_result(calls: list[Any]) -> None:
+    """The streaming route delivers phase events and the same contract the plain route returns."""
+    with _client() as client:
+        response = client.post("/optimizations/contract-check/stream", json={"spec": _spec()})
+
+    assert response.status_code == 200
+    body = response.text
+    assert "event: result\n" in body
+    assert '"ok": true' in body
+    [request] = calls
+    assert (request.scope, request.workflow) == ("evaluation", "unified")
+
+
+def test_stream_route_reports_a_missing_budget_as_an_error_event(calls: list[Any]) -> None:
+    """A refused check ends the stream with an ``error`` event, not a bare HTTP status."""
+    with _client() as client:
+        response = client.post("/optimizations/contract-check/stream", json={"spec": _spec(budget=False)})
+
+    assert response.status_code == 200
+    assert "event: error\n" in response.text
+    assert calls == []
 
 
 def test_static_route_words_its_messages_in_the_request_locale(calls: list[Any]) -> None:

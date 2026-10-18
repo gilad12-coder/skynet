@@ -92,6 +92,7 @@ def _check(payload: UnifiedRunRequest, **kwargs: Any) -> Any:
             gateway=GatewayConfig(url=gw.url, api_key="k"),
             protected=False,
             runtime=LocalSubprocessRuntime(),
+            **kwargs,
         )
 
 
@@ -276,6 +277,38 @@ def test_sampled_check_passes_and_reports_each_sample() -> None:
     assert [sample.index for sample in response.samples] == [0, 1]
     assert all(sample.score == 1.0 for sample in response.samples)
     assert {check.key for check in response.checks if check.sample_index == 0} == {"workspace.run", "metric.shape"}
+
+
+def test_sampled_check_fires_on_ready_once_after_the_box_warms() -> None:
+    """The progress hook fires exactly once, between the warm-up and the samples."""
+    ready: list[str] = []
+    response = _check(_payload(), on_ready=lambda: ready.append("ready"))
+
+    assert response.ok
+    assert ready == ["ready"]
+
+
+def test_sampled_check_never_fires_on_ready_without_samples() -> None:
+    """A spec whose cases all land in the held-out test split opens no box and fires no hook."""
+    payload = UnifiedRunRequest.model_validate(
+        {
+            "task": {"objective": "o", "artifact": {"kind": "prompt", "starting_version": "p"}},
+            "data": {
+                "mode": "pairs",
+                "cases": [{"input": {"q": str(i)}, "expected": f"p:{i}"} for i in range(6)],
+                "input_fields": ["q"],
+                "split": {"train": 0.0, "val": 0.0, "test": 1.0},
+            },
+            "optimizer": {"choice": "best_of_n"},
+            "models": {"reflection_model": {"name": "openrouter/task"}},
+            "workspace": {"run_code": RUN_CODE, "metric_code": BLACKBOX_METRIC},
+        }
+    )
+    ready: list[str] = []
+    response = _check(payload, on_ready=lambda: ready.append("ready"))
+
+    assert response.samples == []
+    assert ready == []
 
 
 def test_blackbox_score_returning_a_bare_float_fails_the_shape() -> None:
