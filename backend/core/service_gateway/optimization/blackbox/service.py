@@ -441,6 +441,9 @@ class FinalRun:
     # Per case ``(score, feedback)``; empty when the run has no cases.
     cases: list[tuple[float, str]] = field(default_factory=list)
     runs: int = 0
+    # Per case, the trusted observation of the run stage (time, model calls,
+    # service cost); ``None`` where the scorer does not measure one.
+    observations: list[dict[str, Any] | None] = field(default_factory=list)
 
 
 def _mean_named_scores(side_infos: list[dict[str, Any]]) -> dict[str, BlackboxNamedScore]:
@@ -505,24 +508,29 @@ def _final_run(
             it returns no feedback.
     """
     targets: list[Any] = cases or [None]
+    observed = getattr(scorer, "score_observed", None)
 
-    def score_case(numbered: tuple[int, Any]) -> tuple[float, dict[str, Any]]:
+    def score_case(numbered: tuple[int, Any]) -> tuple[float, dict[str, Any], dict[str, Any] | None]:
         """Score ``candidate`` on one case and log the result.
 
         Args:
             numbered: The case's 1-based position and the case itself.
 
         Returns:
-            The score and side information for that case.
+            The score, side information and trusted observation for that case.
         """
         position, case = numbered
         stage = STAGE_BASELINE if phase == PHASE_BASELINE else STAGE_EVALUATION
         index = str(case_offset + position - 1)
+        observation: dict[str, Any] | None = None
         with run_scope(phase, index), usage_scope(stage=stage, case=index if cases else None):
-            score, side_info = scorer(candidate, case)
+            if callable(observed):
+                score, side_info, observation = observed(candidate, case)
+            else:
+                score, side_info = scorer(candidate, case)
         # Per-case heartbeats at DEBUG surface only in the Logs tab's verbose view.
         logger.debug("%s final run %d/%d score=%.3f", label, position, len(targets), score)
-        return score, side_info
+        return score, side_info, observation
 
     started = time.perf_counter()
     try:
@@ -539,16 +547,17 @@ def _final_run(
         raise ServiceError(f"scorer failed on the {label}: {exc}") from exc
     except Exception as exc:
         raise ServiceError(f"scorer failed on the {label}: {type(exc).__name__}: {exc}") from exc
-    side_infos = [side_info for _, side_info in scored]
+    side_infos = [side_info for _, side_info, _ in scored]
     feedbacks = [str(side_info.get(FEEDBACK_KEY) or "") for side_info in side_infos]
-    mean = sum(score for score, _ in scored) / len(scored)
+    mean = sum(score for score, _, _ in scored) / len(scored)
     logger.info("%s scored %.3f over %d run(s) in %.0fs", label, mean, len(scored), time.perf_counter() - started)
     return FinalRun(
         score=mean,
         feedback=None if cases else feedbacks[0],
         named=_mean_named_scores(side_infos),
-        cases=[(score, feedback) for (score, _), feedback in zip(scored, feedbacks, strict=True)] if cases else [],
+        cases=[(score, feedback) for (score, _, _), feedback in zip(scored, feedbacks, strict=True)] if cases else [],
         runs=len(scored),
+        observations=[observation for _, _, observation in scored] if cases else [],
     )
 
 
@@ -567,6 +576,8 @@ def _case_results(baseline: FinalRun | None, best: FinalRun | None) -> list[Blac
     for index in range(count):
         before = baseline.cases[index] if baseline and index < len(baseline.cases) else None
         after = best.cases[index] if best and index < len(best.cases) else None
+        before_observed = baseline.observations[index] if baseline and index < len(baseline.observations) else None
+        after_observed = best.observations[index] if best and index < len(best.observations) else None
         rows.append(
             BlackboxCaseResult(
                 index=index,
@@ -574,6 +585,8 @@ def _case_results(baseline: FinalRun | None, best: FinalRun | None) -> list[Blac
                 best_score=after[0] if after else None,
                 baseline_feedback=before[1] if before else None,
                 best_feedback=after[1] if after else None,
+                baseline_observation=before_observed,
+                best_observation=after_observed,
             )
         )
     return rows

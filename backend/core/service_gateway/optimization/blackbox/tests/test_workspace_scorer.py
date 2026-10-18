@@ -208,6 +208,42 @@ def test_run_and_metric_call_their_own_models_and_both_are_billed() -> None:
     assert billed == {"openrouter/task": (3, 1), "openrouter/judge-model": (3, 1)}
 
 
+def test_probe_carries_the_harness_observation_with_queue_and_evaluation_time() -> None:
+    """The scorer adds the box wait and the whole boxed call to the harness's run-stage timing and cost."""
+    run_code = "from skynet import llm\ndef run(artifact, input):\n    return llm(artifact, input['q'])\n"
+    metric = "def score(input, output):\n    return 1.0, {'feedback': 'ok'}\n"
+    with FakeGateway(reply="generated", cost=0.003) as gw:
+        scorer = build_workspace_scorer(
+            _payload(run_code=run_code, metric_code=metric),
+            GatewayConfig(url=gw.url, api_key="k"),
+            protected=False,
+            runtime=LocalSubprocessRuntime(),
+        )
+        try:
+            probe = scorer.run("prompt", {"input": {"q": "1"}})
+            score, side_info, observed = scorer.score_observed("prompt", {"input": {"q": "2"}})
+        finally:
+            scorer.close()
+
+    assert probe.observation is not None
+    timing = probe.observation["timing"]
+    assert timing["queue_ms"] >= 0
+    assert timing["evaluation_ms"] >= timing["task_ms"] > 0
+    assert probe.observation["cost"] == {
+        "unit": "USD",
+        "basis": "provider_usage",
+        "coverage": "llm",
+        "unpriced_calls": 0,
+        "reason": None,
+        "status": "metered",
+        "usd": 0.003,
+    }
+    assert probe.observation["conditions"]["task_model"] == "task"
+    assert (score, side_info["feedback"]) == (1.0, "ok")
+    assert observed is not None
+    assert observed["task_calls"] == 1
+
+
 def test_build_rejects_unrouted_models_when_protected() -> None:
     """A protected box needs opaque routes for every model."""
     with pytest.raises(Exception, match="opaque"):

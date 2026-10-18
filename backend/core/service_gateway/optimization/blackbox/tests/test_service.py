@@ -869,6 +869,40 @@ def test_final_run_averages_named_scores_over_cases() -> None:
     assert run.named["accuracy"].feedback == "Case 1: case 1 acc\nCase 2: case 2 acc"
 
 
+def test_final_run_keeps_each_cases_observation_for_both_versions() -> None:
+    """A scorer that measures its runs gives each case result the baseline's and the winner's observation."""
+
+    class ObservedScorer:
+        """Scores every case 1.0 and reports a time that depends on the version."""
+
+        def __call__(self, candidate: Candidate, case: Any) -> tuple[float, dict[str, Any]]:
+            """Score without an observation (the optimizer's path)."""
+            return 1.0, {"feedback": "ok"}
+
+        def score_observed(self, candidate: Candidate, case: Any) -> tuple[float, dict[str, Any], dict[str, Any]]:
+            """Score and report this run's time."""
+            return 1.0, {"feedback": "ok"}, {"timing": {"task_ms": 100.0 if candidate == "slow" else 10.0}}
+
+    scorer = ObservedScorer()
+    cases = [{"n": 1}, {"n": 2}]
+    baseline = service_mod._final_run(scorer, "slow", cases, label="starting point", phase=PHASE_BASELINE)
+    best = service_mod._final_run(scorer, "fast", cases, label="optimized version", phase=PHASE_FINAL, concurrency=2)
+    rows = service_mod._case_results(baseline, best)
+
+    assert [row.baseline_observation["timing"]["task_ms"] for row in rows if row.baseline_observation] == [100.0] * 2
+    assert [row.best_observation["timing"]["task_ms"] for row in rows if row.best_observation] == [10.0] * 2
+
+
+def test_final_run_without_observations_leaves_them_empty() -> None:
+    """A plain scorer function gives case results with no observation, as before."""
+    run = service_mod._final_run(
+        lambda c, case: (0.5, {"feedback": "f"}), "v", [{"n": 1}], label="x", phase=PHASE_FINAL
+    )
+
+    assert run.observations == [None]
+    assert service_mod._case_results(run, run)[0].best_observation is None
+
+
 def test_version_history_shows_the_validation_score_and_keeps_the_running_mean() -> None:
     """A version the engine scored on the validation set shows that score; the running mean rides along."""
     server = EvalServer(vowel_scorer, max_evals=4)
