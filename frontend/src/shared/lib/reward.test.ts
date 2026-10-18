@@ -80,8 +80,14 @@ test("criterion 1: each one-change improvement raises the total, on both sides o
     const own = pairs.filter((c) => c.change?.component === component);
     assert.equal(own.length, 2, component);
     const ref = component === "accuracy" ? 1 : component === "speed" ? 2000 : 0.002;
-    assert.ok(own.some((c) => c.change!.from > ref && c.change!.to > ref), `${component} above`);
-    assert.ok(own.some((c) => c.change!.from < ref && c.change!.to < ref), `${component} below`);
+    assert.ok(
+      own.some((c) => c.change!.from > ref && c.change!.to > ref),
+      `${component} above`,
+    );
+    assert.ok(
+      own.some((c) => c.change!.from < ref && c.change!.to < ref),
+      `${component} below`,
+    );
     for (const c of own) {
       assert.ok(scoreReward(s, c.inputs).total > scoreReward(s, c.before!).total, component);
     }

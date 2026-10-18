@@ -72,6 +72,17 @@ void describe("RunOverview", () => {
     }
   });
 
+  void it("adds a reward tab when the metric declares REWARD_SPEC", () => {
+    const state = initialWizardV2State("expert");
+    state.workspace.metricCode =
+      "REWARD_SPEC = {'weights': {'accuracy': 1, 'speed': 1, 'cost': 1}, 'speed': {'reference': 500}, 'cost': {'reference': 0.01}}\n";
+    const html = render(state);
+    assert.equal(html.match(/role="tab"/g)?.length, 5);
+    assert.match(html, /submit\.v2\.overview\.tab\.reward</);
+    state.workspace.metricCode = "def score(example, output):\n    return 1.0\n";
+    assert.doesNotMatch(render(state), /submit\.v2\.overview\.tab\.reward</);
+  });
+
   void it("drops the data tab for a repository run", () => {
     const state = initialWizardV2State("expert");
     state.task.repo = {

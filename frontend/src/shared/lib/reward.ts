@@ -257,7 +257,8 @@ export function rewardPreviewCases(spec: RewardSpec): PreviewCase[] {
     from: number,
     to: number,
   ): PreviewCase => {
-    const key = component === "accuracy" ? "accuracy" : component === "speed" ? "timeMs" : "costUsd";
+    const key =
+      component === "accuracy" ? "accuracy" : component === "speed" ? "timeMs" : "costUsd";
     return {
       kind,
       change: { component, from, to },
