@@ -130,7 +130,7 @@ function composeReasoning(sections: ReasoningSections, live: ReadonlySet<string>
     .join("\n\n");
 }
 
-interface AgentMessage {
+export interface AgentMessage {
   role: "assistant" | "user";
   content: string;
   toolCalls?: AgentToolCall[];
@@ -241,6 +241,8 @@ export interface UseCodeAgentArgs {
   // conversation's chosen model so code authoring follows the composer.
   model?: string | null;
   reasoningEffort?: string | null;
+  /** The chat a reload brings back; read once, on mount. */
+  initialMessages?: AgentMessage[];
 }
 
 const DAILY_LIMIT_CODE = "wizard_agent.daily_limit_reached";
@@ -278,6 +280,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     files,
     setFile,
     onOpenFile,
+    initialMessages,
   } = args;
 
   const [status, setStatus] = React.useState<AgentStatus>("idle");
@@ -293,7 +296,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   const markFlowing = React.useCallback((source: "signature" | "metric", on: boolean) => {
     setFlowing((prev) => (prev[source] === on ? prev : { ...prev, [source]: on }));
   }, []);
-  const [messages, setMessages] = React.useState<AgentMessage[]>([]);
+  const [messages, setMessages] = React.useState<AgentMessage[]>(() => initialMessages ?? []);
   const [error, setError] = React.useState<string | null>(null);
   const [limitReached, setLimitReached] = React.useState(false);
   const [question, setQuestion] = React.useState<AgentQuestion | null>(null);

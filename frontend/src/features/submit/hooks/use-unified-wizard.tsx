@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -53,6 +54,7 @@ import type { ColumnRole } from "@/shared/ui/column-role-row";
 import { SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 
 import { emptyModelConfig } from "../constants";
+import { restoreSavedLimit } from "../lib/budget-limit";
 import { cloneToSlices } from "../lib/clone-payload";
 import { aggregateTokenSource, callHoldKey, runFloor as computeRunFloor } from "../lib/run-floor";
 import { fileNewRun } from "../lib/file-new-run";
@@ -66,7 +68,12 @@ import {
   runFailureFromError,
   type RunFailure,
 } from "../lib/run-failure";
-import { WIZARD_SESSION_KEY, decodeWizardSession, encodeWizardSession } from "../lib/session-state";
+import {
+  WIZARD_SESSION_KEY,
+  WIZARD_VIEW_KEYS,
+  decodeWizardSession,
+  encodeWizardSession,
+} from "../lib/session-state";
 import { metricUsesModel } from "../lib/scorer-dependencies";
 import { computeStepIssue, hasModel, runBlockedReason as blockedReason } from "../lib/step-issue";
 import { canEnterStep, canMoveForward } from "../lib/wizard-steps";
@@ -208,7 +215,7 @@ function readWizardSession(): string | null {
 
 function forgetWizardSession() {
   try {
-    window.sessionStorage.removeItem(WIZARD_SESSION_KEY);
+    for (const key of [WIZARD_SESSION_KEY, ...WIZARD_VIEW_KEYS]) window.sessionStorage.removeItem(key);
   } catch {}
 }
 
@@ -423,12 +430,11 @@ export function WizardV2Provider({
     [budget, patchOptimizer],
   );
   // The server budget is per page load, so a restored limit is set on it again.
-  useEffect(() => {
-    if (!restored) return;
-    if (restored.optimizer.budgetUncapped) budget.setBudgetUncapped(true);
-    else if (restored.optimizer.maxCostCents != null) {
-      budget.setMaxCostCents(restored.optimizer.maxCostCents);
-    }
+  // A layout effect, so the limit is in place before any screen's own effect
+  // runs: a reload that reopens the check screen starts the check at once, and
+  // a check started before this would find no limit and fail as invalid.
+  useLayoutEffect(() => {
+    if (restored) restoreSavedLimit(restored.optimizer, { budget, patchSaved: patchOptimizer });
     // Runs once, for the setup read at mount.
   }, []);
 
