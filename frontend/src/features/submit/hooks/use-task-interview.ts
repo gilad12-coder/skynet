@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useSearchParams } from "next/navigation";
 
 import { readPref } from "@/features/settings";
 import { useAgentKickoff } from "@/shared/hooks/use-agent-kickoff";
@@ -188,12 +187,10 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
   );
 
   // The opening question fires once, while the transcript is empty; a
-  // restart re-arms it. A cloned run arrives with its task already filled, so
-  // the agent waits for the user instead of opening by itself.
-  const cloned = useSearchParams().has("clone");
-  const [openingSkipped, setOpeningSkipped] = React.useState(cloned);
+  // restart re-arms it. A cloned run opens too: the agent sees the filled
+  // draft and asks what to change instead of starting from nothing.
   const { rearm } = useAgentKickoff(
-    enabled && !openingSkipped && turns.length === 0 ? "task-interview-opening" : null,
+    enabled && turns.length === 0 ? "task-interview-opening" : null,
     React.useCallback(() => runTurn([]), [runTurn]),
   );
 
@@ -231,7 +228,6 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
     setDone(false);
     setServed({});
     patchTask({ transcript: [] });
-    setOpeningSkipped(false);
     rearm();
   }, [clearStream, patchTask, rearm]);
 

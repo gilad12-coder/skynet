@@ -264,12 +264,20 @@ def interview_model_id() -> str:
     Never blocks: a stale or missing pick starts a background refresh and the
     caller gets the last pick meanwhile.
 
+    Every composer must show and run one default, so the catalog's
+    best-value default wins over the fast pick whenever the catalog flags one.
+
     Returns:
-        ``INTERVIEW_AGENT_MODEL`` when set, else the measured pick, else the
-        cheapest small featured model, else the agent default.
+        ``INTERVIEW_AGENT_MODEL`` when set, else the catalog's best-value
+        default, else the measured pick, else the cheapest small featured
+        model, else the agent default.
     """
     if settings.interview_agent_model.strip():
         return settings.interview_agent_model.strip()
+    snapshot = catalog_snapshot()
+    default = next((m.value for m in snapshot.models if m.is_default), None) if snapshot is not None else None
+    if default:
+        return default
     with _lock:
         pick, stale = _pick, time.monotonic() - _picked_at >= _STATS_TTL_SECONDS
     if pick is None or stale:
