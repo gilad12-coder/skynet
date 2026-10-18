@@ -196,6 +196,7 @@ def preflight_document(row: WizardPreflightModel) -> dict[str, Any]:
         **({"scorer_result": row.result["scorer_result"]} if "scorer_result" in row.result else {}),
         **({"workflow_result": row.result["workflow_result"]} if "workflow_result" in row.result else {}),
         **({"interaction_result": row.result["interaction_result"]} if "interaction_result" in row.result else {}),
+        **({"terminal": row.result["terminal"]} if isinstance(row.result.get("terminal"), dict) else {}),
     }
 
 

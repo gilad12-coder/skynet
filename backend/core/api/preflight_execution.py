@@ -40,6 +40,7 @@ from ..models.unified import (
     UnifiedRunRequest,
     resolve_optimizer,
 )
+from ..service_gateway.optimization.blackbox import check_terminal
 from ..service_gateway.optimization.blackbox.native_runtime import NATIVE_ENGINES
 from ..service_gateway.optimization.blackbox.preflight import preflight_lifetime_seconds, verify_unified_in_sandbox
 from ..storage.preflights import PreflightStore
@@ -107,6 +108,7 @@ class WizardPreflightResponse(BaseModel):
     budget: ExecutionBudgetResponse
     scorer_result: dict[str, Any] | None = None
     workflow_result: dict[str, Any] | None = None
+    terminal: dict[str, Any] | None = None
 
 
 def _canonical_execution_payload(request: WizardPreflightRequest, username: str) -> dict[str, Any]:
@@ -404,10 +406,39 @@ class _Events:
 def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) -> WizardPreflightResponse:
     """Run canonical setup inputs under a shared authority for wizard and API callers.
 
+    A unified contract check records a live terminal transcript, stored with
+    its evidence so a deduplicated check replays it.
+
     Args:
         request: Canonical current inputs with explicit budget and scope.
         user: Authenticated owner, resolved before dispatch.
         job_store: Authoritative ledger and evidence storage.
+
+    Returns:
+        Durable scoped checks and current budget state.
+    """
+    terminal = None
+    if request.workflow == "unified" and request.scope == "evaluation":
+        terminal = check_terminal.current_recorder()
+        if terminal is None:
+            terminal = check_terminal.CheckTerminalRecorder()
+    with check_terminal.recording(terminal):
+        return _run_preflight(request, user, job_store, terminal)
+
+
+def _run_preflight(
+    request: WizardPreflightRequest,
+    user: Any,
+    job_store: Any,
+    terminal: check_terminal.CheckTerminalRecorder | None,
+) -> WizardPreflightResponse:
+    """Claim, run and record one setup attempt, or return the evidence it duplicates.
+
+    Args:
+        request: Canonical current inputs with explicit budget and scope.
+        user: Authenticated owner, resolved before dispatch.
+        job_store: Authoritative ledger and evidence storage.
+        terminal: The check's live transcript, if this attempt records one.
 
     Returns:
         Durable scoped checks and current budget state.
@@ -448,7 +479,13 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
     except BudgetError as error:
         raise budget_http_error(error) from error
     if claim.token is None:
-        return WizardPreflightResponse.model_validate({**claim.document, "budget": budget_response(snapshot)})
+        document = claim.document
+        if isinstance(document.get("terminal"), dict):
+            document = {**document, "terminal": {**document["terminal"], "reused": True}}
+        return WizardPreflightResponse.model_validate({**document, "budget": budget_response(snapshot)})
+    if terminal is not None:
+        terminal.redact(check_terminal.secret_values(request.payload))
+        terminal.note("budget_ready", available_cents=int(snapshot.available_cents))
     try:
         with evidence.heartbeat(claim.document["id"], claim_token=claim.token):
             source = request.payload
@@ -469,6 +506,8 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
                 vault=ProviderKeyVault(engine=job_store.engine),
                 default_token_source=str(parent_payload.get("token_source") or "managed"),
             )
+            if terminal is not None:
+                terminal.redact(check_terminal.secret_values(parent_payload))
             parent_request = request.model_copy(update={"payload": parent_payload})
             status, result = _perform_preflight(
                 parent_request,
@@ -486,6 +525,8 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
                     result,
                     "Provider or sandbox usage is still awaiting final confirmation.",
                 )
+            if terminal is not None:
+                result = {**result, "terminal": terminal.snapshot()}
             document = evidence.finish(claim.document["id"], claim_token=claim.token, status=status, result=result)
     except BudgetError as error:
         raise budget_http_error(error) from error
@@ -569,6 +610,11 @@ def _perform_preflight(
         )
         if request.workflow == "unified":
             strip_unified_model_aliases(protected)
+        terminal = check_terminal.current_recorder()
+        if terminal is not None:
+            terminal.redact(check_terminal.secret_values(protected))
+            if settings.openrouter_api_key is not None:
+                terminal.redact([settings.openrouter_api_key.get_secret_value()])
         # The ledger keys the run's sandbox hold by this identity, and a settled
         # or released hold from an earlier run would block a new dispatch under
         # the same key, so every run of the row carries its own number.

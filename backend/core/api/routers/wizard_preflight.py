@@ -29,6 +29,7 @@ from ...models.unified import (
     UnifiedRunRequest,
     resolve_optimizer,
 )
+from ...service_gateway.optimization.blackbox.check_terminal import CheckTerminalRecorder, recording
 from ...service_gateway.optimization.unified.contract import (
     contract_fingerprint,
     in_locale,
@@ -199,7 +200,8 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
         )
         contract = (result.workflow_result or {}).get("contract")
         if isinstance(contract, dict):
-            return with_message_codes(ContractCheckResponse.model_validate(contract), static)
+            checked = with_message_codes(ContractCheckResponse.model_validate(contract), static)
+            return checked.model_copy(update={"terminal": result.terminal})
         failure = next((check for check in result.checks if check.status != "succeeded"), None)
         error = failure.message if failure is not None and failure.message else result.status
         # A spent budget is not a code mismatch; it is fixed by raising the limit.
@@ -226,6 +228,7 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
                 ),
             ],
             fingerprint=contract_fingerprint(spec),
+            terminal=result.terminal,
         )
 
     @router.post("/optimizations/contract-check", response_model=ContractCheckResponse)
@@ -255,7 +258,8 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             user: Authenticated owner whose budget pays for the check.
 
         Returns:
-            An event stream of ``phase`` events, then one ``result`` or ``error``.
+            An event stream of ``phase`` and ``terminal`` events, then one
+            ``result`` or ``error``.
         """
         events: Queue[dict[str, Any] | None] = Queue()
 
@@ -263,11 +267,16 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             """Queue a public execution phase for this request."""
             events.put({"event": "phase", "data": {"phase": value}})
 
+        def terminal(event: dict[str, Any]) -> None:
+            """Queue one live, already-redacted line of the check's sandbox transcript."""
+            events.put({"event": "terminal", "data": event})
+
         def execute() -> None:
             """Finish admitted work even if the viewer disconnects, preserving its billing evidence."""
             token = progress_observer.set(phase)
             try:
-                result = _run_contract_check(request, user)
+                with recording(CheckTerminalRecorder(emit=terminal)):
+                    result = _run_contract_check(request, user)
                 events.put({"event": "result", "data": result.model_dump(mode="json")})
             except HTTPException as error:
                 events.put({"event": "error", "data": {"detail": error.detail}})

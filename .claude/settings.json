@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "Setup": [
+      {
+        "matcher": "init",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent/init.sh",
+            "timeout": 900
+          }
+        ]
+      },
+      {
+        "matcher": "maintenance",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent/maintain.sh",
+            "timeout": 900
+          }
+        ]
+      }
+    ]
+  }
+}
