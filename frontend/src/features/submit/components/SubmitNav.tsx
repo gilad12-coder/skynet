@@ -1,6 +1,6 @@
 "use client";
 
-import { CaretLeft, CaretRight, CaretDown, CircleNotch, Warning } from "@/shared/ui/icons";
+import { CaretLeft, CaretRight, CircleNotch, Warning } from "@/shared/ui/icons";
 import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/shared/ui/primitives/button";
 import { TERMS } from "@/shared/lib/terms";
@@ -178,37 +178,28 @@ export function SubmitNav({
           data-telemetry="submit-run"
           animate={runDisabledReason || reducedMotion ? { scale: 1 } : { scale: [1, 1.01, 1] }}
           transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
-          className="group relative min-w-0 flex-1 rounded-2xl bg-primary-fill text-primary-foreground font-semibold text-base pt-5 pb-7 cursor-pointer transition-all duration-300 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+          className="min-h-[44px] lg:min-h-0 lg:h-9 min-w-0 flex-1 inline-flex items-center justify-center gap-2 rounded-md bg-primary-fill px-4 text-sm font-semibold text-primary-foreground cursor-pointer transition-colors duration-200 hover:bg-primary-hover active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {submitting || advancing ? (
-            <span className="flex items-center justify-center gap-2">
-              <CircleNotch className="size-5 animate-spin motion-reduce:animate-none" />
+            <>
+              <CircleNotch className="size-4 animate-spin motion-reduce:animate-none" />
               {advancing
                 ? msg("submit.nav.validating")
                 : msg("auto.features.submit.components.submitnav.3")}
-            </span>
+            </>
           ) : (
-            <div className="flex flex-col items-center gap-4">
-              <span className="flex flex-col items-center gap-1">
-                <span>
-                  {msg("auto.features.submit.components.submitnav.4")}
-                  {TERMS.optimization}
-                </span>
-                {runDisabledReason && (
-                  <span className="text-xs font-normal text-primary-foreground/90" dir="auto">
-                    {runDisabledReason}
-                  </span>
-                )}
-              </span>
-              <div className="flex flex-col items-center -space-y-7 h-0 overflow-visible opacity-70 group-hover:opacity-100 transition-opacity duration-200 [&>svg]:animate-[cascadeDown_1s_ease-in-out_infinite] group-hover:[&>svg]:animate-[cascadeDownHyper_0.5s_ease-out_infinite] motion-reduce:[&>svg]:animate-none motion-reduce:group-hover:[&>svg]:animate-none">
-                <CaretDown className="size-10 [animation-delay:0s] group-hover:[animation-delay:0s]" />
-                <CaretDown className="size-10 [animation-delay:0.15s] group-hover:[animation-delay:0.08s]" />
-                <CaretDown className="size-10 [animation-delay:0.3s] group-hover:[animation-delay:0.16s]" />
-              </div>
-            </div>
+            <>
+              {msg("auto.features.submit.components.submitnav.4")}
+              {TERMS.optimization}
+            </>
           )}
         </motion.button>
       </div>
+      {runDisabledReason && !submitting && !advancing && (
+        <p className="text-end text-xs text-muted-foreground" dir="auto">
+          {runDisabledReason}
+        </p>
+      )}
     </div>
   );
 }

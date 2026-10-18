@@ -476,7 +476,14 @@ export function NotificationBell({ className }: { className?: string }) {
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       <PopoverContent
         align="end"
-        className="flex h-[min(32rem,var(--radix-popover-content-available-height))] w-[380px] flex-col overflow-hidden p-0"
+        // Focus the panel, not its first button: that button's tooltip would
+        // open on the focus the moment the panel opens.
+        tabIndex={-1}
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          (e.target as HTMLElement | null)?.focus({ preventScroll: true });
+        }}
+        className="flex h-[min(32rem,var(--radix-popover-content-available-height))] w-[380px] flex-col overflow-hidden p-0 outline-none"
       >
         {body}
       </PopoverContent>
