@@ -10,6 +10,7 @@ import {
   formatUsd,
   formatResetDate,
   EMPTY_WALLET,
+  topUpFor,
   type WalletBalance,
 } from "./wallet.ts";
 
@@ -74,4 +75,17 @@ test("formatBudgetUsd renders a decimal cent string in dollars", () => {
 
 test("formatResetDate renders the reset date in the given locale", () => {
   assert.match(formatResetDate("2026-07-01T12:00:00Z", "en-US"), /2026/);
+});
+
+test("topUpFor picks the smallest pack that covers the gap", () => {
+  assert.deepEqual(topUpFor(1), { packId: "starter" });
+  assert.deepEqual(topUpFor(500), { packId: "starter" });
+  assert.deepEqual(topUpFor(501), { packId: "plus" });
+  assert.deepEqual(topUpFor(5000), { packId: "pro" });
+});
+
+test("topUpFor falls back to a whole-dollar custom amount past the largest pack", () => {
+  assert.deepEqual(topUpFor(5001), { cents: 5100 });
+  assert.deepEqual(topUpFor(12_345), { cents: 12_400 });
+  assert.deepEqual(topUpFor(10_000_000), { cents: 100_000 });
 });

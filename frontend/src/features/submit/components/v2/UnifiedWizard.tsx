@@ -22,6 +22,7 @@ import { WIZARD_STAGE, canMoveForward } from "../../lib/wizard-steps";
 import { SubmitNav, type RunFailureNotice } from "../SubmitNav";
 import { SubmitSplash } from "../SubmitSplash";
 import { SubmitStepper } from "../SubmitStepper";
+import { RUN_SHORTFALL_ID } from "../RunShortfall";
 import { belowFloorMessage, shortBalanceMessage } from "../TotalBudgetCard";
 import { InputsStep } from "./InputsStep";
 import { MetricStep } from "./MetricStep";
@@ -146,7 +147,15 @@ function UnifiedWizardFrame() {
       return;
     }
     if (shortfall !== null) {
-      toast.error(shortfallMessage(shortfall), { toastId: SHORTFALL_TOAST_ID });
+      // The budget screen shows the shortfall itself; a toast would only
+      // cover Continue. Screens without it (Guided's last before Metric) toast.
+      const panel = document.getElementById(RUN_SHORTFALL_ID);
+      if (panel && panel.offsetParent !== null) {
+        panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        panel.focus({ preventScroll: true });
+      } else {
+        toast.error(shortfallMessage(shortfall), { toastId: SHORTFALL_TOAST_ID });
+      }
       return;
     }
     if (page < pageCount - 1) {

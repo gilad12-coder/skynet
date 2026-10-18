@@ -211,6 +211,17 @@ export const TOP_UP_PACKS: TopUpPack[] = [
   { id: "pro", cents: 5000, usd: 50 },
 ];
 
+/**
+ * The top-up that first covers `gapCents`: the smallest pack that does, or a
+ * custom amount in whole dollars (never under the custom floor) when none does.
+ */
+export function topUpFor(gapCents: number): { packId: string } | { cents: number } {
+  const pack = TOP_UP_PACKS.find((p) => p.cents >= gapCents);
+  if (pack) return { packId: pack.id };
+  const cents = Math.ceil(gapCents / 100) * 100;
+  return { cents: Math.min(CUSTOM_CENTS_MAX, Math.max(CUSTOM_CENTS_MIN, cents)) };
+}
+
 /** Truthful zero-value seed used until the billing API returns real data. */
 export const EMPTY_WALLET: WalletBalance = {
   paidBalanceCents: 0,

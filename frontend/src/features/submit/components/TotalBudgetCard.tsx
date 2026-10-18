@@ -16,7 +16,12 @@ import {
   Wallet,
   WarningCircle,
 } from "@/shared/ui/icons";
-import { formatBudgetUsd, formatCentsUsd, type TokenSourceMode } from "@/features/billing";
+import {
+  formatBudgetUsd,
+  formatCentsUsd,
+  useBalance,
+  type TokenSourceMode,
+} from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
@@ -27,6 +32,7 @@ import { startingLimitCents } from "../lib/run-floor";
 import type { WizardV2Context } from "../lib/wizard-v2";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
 import { Segmented } from "@/shared/ui/segmented";
+import { RunShortfall } from "./RunShortfall";
 import { StepCard } from "./blackbox/shared";
 
 /**
@@ -86,6 +92,7 @@ const isZero = (amount: string) => !/[1-9]/.test(amount);
 export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSourceMode }) {
   const { runFloor, maxCostCents, setMaxCostCents, budgetUncapped, setBudgetUncapped } = w;
   const { budget, budgetBusy, budgetError, minimumTotalCents } = useExecutionBudget();
+  const { totalCents: balanceCents, available: balanceKnown } = useBalance();
   const locale = getActiveIntlLocale();
   const [limitEdited, setLimitEdited] = useState(maxCostCents != null);
 
@@ -148,6 +155,21 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
           balance: null,
         })
       : null;
+  // The same check Continue holds on, so the card shows the shortfall before
+  // the press: what the run needs, against the limit and the balance.
+  const runShort =
+    floorCents != null
+      ? budgetShortfall(floorCents, {
+          uncapped: budgetUncapped,
+          limit: parsed.kind === "value" ? parsed.value : null,
+          balance: balanceKnown ? balanceCents : null,
+        })
+      : null;
+  const raiseLimit = (cents: number) => {
+    setLimitEdited(true);
+    setMaxCostCents(cents);
+    setText(centsToBudgetText(cents, locale));
+  };
   const fieldError =
     parsed.kind === "invalid"
       ? formatMsg("submit.budget.error.invalid", { suggested })
@@ -161,7 +183,11 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
               ? belowFloorMessage(limitShort.needed)
               : null;
   const fieldHint = fieldError == null && parsed.kind === "empty" ? minimumMessage : null;
-  const fieldMessage = fieldError ?? fieldHint;
+  // Under the floor the shortfall panel says why; the field only turns red.
+  const fieldMessage =
+    runShort?.kind === "limit" && fieldError === belowFloorMessage(runShort.needed)
+      ? null
+      : (fieldError ?? fieldHint);
 
   const spent = budget ? sumDecimals(budget.setup_spent_cents, budget.run_spent_cents) : null;
   const showLedger = !budgetUncapped && budget != null && spent != null;
@@ -288,6 +314,15 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
             </p>
           )}
         </div>
+      )}
+
+      {runShort && (
+        <RunShortfall
+          shortfall={runShort}
+          limitCents={budgetUncapped || parsed.kind !== "value" ? null : parsed.value}
+          balanceCents={balanceCents}
+          onRaiseLimit={raiseLimit}
+        />
       )}
 
       {(showLedger || showStatus) && (

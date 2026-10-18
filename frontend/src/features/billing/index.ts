@@ -1,7 +1,7 @@
 export { BalanceProvider, useBalance, usePricingTerms } from "./providers/balance-provider";
 export { ByokKeysProvider, useByokKeys } from "./providers/byok-provider";
 export { BalanceChip } from "./components/BalanceChip";
-export { WalletTab } from "./components/WalletTab";
+export { AddFundsControls, WalletTab } from "./components/WalletTab";
 export { UsageTab } from "./components/UsageTab";
 export { ByokKeysSection } from "./components/ByokKeysSection";
 export { InsufficientFundsModalHost } from "./components/InsufficientFundsModalHost";
