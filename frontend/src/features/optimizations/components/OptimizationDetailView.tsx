@@ -31,7 +31,13 @@ import {
 import { toast } from "react-toastify";
 
 import { Button } from "@/shared/ui/primitives/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/primitives/tabs";
+import {
+  Tabs,
+  TabsContent,
+  TabsLineIndicator,
+  TabsList,
+  TabsTrigger,
+} from "@/shared/ui/primitives/tabs";
 import { PingDot } from "@/shared/ui/ping-dot";
 import { markRecentSession } from "@/shared/lib/recent-session";
 import { FadeIn } from "@/shared/ui/motion";
@@ -1473,7 +1479,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
       {(() => {
         const tabCls =
-          "relative min-h-[44px] shrink-0 flex-none px-2.5 sm:px-4 py-2.5 rounded-none border-b-2 border-transparent data-[state=active]:border-transparent data-[state=active]:border-b-primary data-[state=active]:text-foreground data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-all duration-200 text-xs sm:text-sm";
+          "relative min-h-[44px] shrink-0 flex-none px-2.5 sm:px-4 py-2.5 rounded-none border-b-2 border-transparent data-[state=active]:border-transparent data-[state=active]:border-b-primary group-data-[sliding]/tabs-list:data-[state=active]:border-b-transparent data-[state=active]:text-foreground data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-all duration-200 text-xs sm:text-sm";
+        // Each panel eases in on a tab switch; fill-mode none drops the
+        // transform once done, so fixed-position children (full-screen tree)
+        // anchor to the viewport again.
+        const tabPanelCls =
+          "animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none";
         // Pair view pings the trajectory/logs tabs only while the pair itself
         // is still running, matching the standalone run's behaviour exactly.
         const pingActive = isPairContext
@@ -1530,7 +1541,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             />
             <TabsList
               variant="line"
-              className="w-full justify-start gap-0 overflow-x-auto border-b border-border/50 pb-0 no-scrollbar"
+              className="relative w-full justify-start gap-0 overflow-x-auto border-b border-border/50 pb-0 no-scrollbar"
             >
               <TabsTrigger value="overview" className={tabCls}>
                 <TrendUp className="size-3.5" />
@@ -1587,9 +1598,14 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   {msg("auto.app.optimizations.id.page.19")}
                 </TabsTrigger>
               )}
+              <TabsLineIndicator value={activeDetailTab} />
             </TabsList>
 
-            <TabsContent ref={overviewRef} value="overview" className="space-y-6 mt-4">
+            <TabsContent
+              ref={overviewRef}
+              value="overview"
+              className={`${tabPanelCls} space-y-6 mt-4`}
+            >
               <OverviewTab
                 job={effectiveJob ?? job}
                 isActive={isActive}
@@ -1603,7 +1619,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             </TabsContent>
 
             {showPlaygroundTab && (
-              <TabsContent value="playground" className="space-y-4 mt-4">
+              <TabsContent value="playground" className={`${tabPanelCls} space-y-4 mt-4`}>
                 {!isShare && job.optimization_type === "grid_search" && !isPairContext ? (
                   <GridServeTab job={job} />
                 ) : !isShare &&
@@ -1637,7 +1653,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             )}
 
             {showDataTab && !isPhone && (
-              <TabsContent value="data">
+              <TabsContent value="data" className={tabPanelCls}>
                 <DataTab
                   job={job}
                   pairIndex={isPairContext ? activePair.pair_index : undefined}
@@ -1648,7 +1664,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             )}
 
             {showBestVersionTab && job.blackbox_result && (
-              <TabsContent value="best" className="mt-4">
+              <TabsContent value="best" className={`${tabPanelCls} mt-4`}>
                 <BestVersionTab
                   result={job.blackbox_result}
                   jobName={job.name}
@@ -1659,7 +1675,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             )}
 
             {!isPhone && showCodeTab && (
-              <TabsContent value="code" className="space-y-6 mt-4">
+              <TabsContent value="code" className={`${tabPanelCls} space-y-6 mt-4`}>
                 <CodeTab
                   signatureCode={signatureCode ?? ""}
                   metricCode={metricCode ?? ""}
@@ -1670,7 +1686,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             )}
 
             {showArtifactTab && (
-              <TabsContent value="artifact" className="space-y-6 mt-4">
+              <TabsContent value="artifact" className={`${tabPanelCls} space-y-6 mt-4`}>
                 <ArtifactTab
                   job={job}
                   activePair={activePair}
@@ -1686,7 +1702,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             )}
 
             {showLogsTab && (
-              <TabsContent value="logs">
+              <TabsContent value="logs" className={tabPanelCls}>
                 <LogsTab
                   logs={isPairContext ? pairFilteredLogs : (jobLogs ?? [])}
                   liveStatus={logStreamStatus}
@@ -1695,13 +1711,13 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             )}
 
             {showUsageTab && (
-              <TabsContent value="usage" className="mt-4">
+              <TabsContent value="usage" className={`${tabPanelCls} mt-4`}>
                 <UsageTab job={job} pairIndex={isPairContext ? activePair.pair_index : null} />
               </TabsContent>
             )}
 
             {!isPhone && (
-              <TabsContent value="config" className="mt-4">
+              <TabsContent value="config" className={`${tabPanelCls} mt-4`}>
                 <ConfigTab job={job} payload={payload} activePair={activePair ?? undefined} />
               </TabsContent>
             )}

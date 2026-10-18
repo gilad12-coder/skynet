@@ -72,6 +72,56 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
   );
 }
 
+/**
+ * Underline that slides to the active trigger of a `variant="line"` list.
+ * Render it as the last child of a `relative` TabsList and pass the active
+ * value so it re-measures on every switch. Positions come from offsetLeft,
+ * which is physical, so the bar lands on the right tab in RTL too. Until
+ * the first measure the list has no `data-sliding`, so triggers keep their
+ * own underline (the server render and the no-JS case).
+ */
+function TabsLineIndicator({ value, className }: { value: string; className?: string }) {
+  const ref = React.useRef<HTMLSpanElement>(null);
+  const [box, setBox] = React.useState<{ left: number; width: number } | null>(null);
+
+  React.useLayoutEffect(() => {
+    const list = ref.current?.parentElement;
+    if (!list) return;
+    const measure = () => {
+      const active = list.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
+      if (!active) return setBox(null);
+      setBox((prev) =>
+        prev && prev.left === active.offsetLeft && prev.width === active.offsetWidth
+          ? prev
+          : { left: active.offsetLeft, width: active.offsetWidth },
+      );
+    };
+    measure();
+    list.setAttribute("data-sliding", "");
+    const ro = new ResizeObserver(measure);
+    ro.observe(list);
+    list.querySelectorAll('[role="tab"]').forEach((tab) => ro.observe(tab));
+    void document.fonts?.ready.then(measure);
+    return () => {
+      ro.disconnect();
+      list.removeAttribute("data-sliding");
+    };
+  }, [value]);
+
+  return (
+    <span
+      ref={ref}
+      aria-hidden="true"
+      className={cn(
+        "pointer-events-none absolute bottom-0 h-0.5 rounded-full bg-primary transition-[left,width] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none",
+        !box && "hidden",
+        className,
+      )}
+      style={box ? { left: box.left, width: box.width } : undefined}
+    />
+  );
+}
+
 function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {
   return (
     <TabsPrimitive.Content
@@ -88,6 +138,7 @@ export {
   TabsList,
   TabsTrigger,
   TabsContent,
+  TabsLineIndicator,
   SLIDING_PILL_TABS_LIST_CLASS,
   SLIDING_PILL_TABS_INDICATOR_CLASS,
   SLIDING_PILL_TABS_TRIGGER_CLASS,
