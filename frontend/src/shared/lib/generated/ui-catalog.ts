@@ -3394,7 +3394,20 @@ export type MessageKey =
   | "submit.v2.optimizer.unavailable.guided"
   | "submit.v2.overview.cases"
   | "submit.v2.overview.desc"
+  | "submit.v2.overview.no"
+  | "submit.v2.overview.row.expected_column"
+  | "submit.v2.overview.row.input_columns"
+  | "submit.v2.overview.row.name"
+  | "submit.v2.overview.row.shuffle"
+  | "submit.v2.overview.row.source"
+  | "submit.v2.overview.row.split"
+  | "submit.v2.overview.tab.budget"
+  | "submit.v2.overview.tab.data"
+  | "submit.v2.overview.tab.general"
+  | "submit.v2.overview.tab.models"
+  | "submit.v2.overview.tabs_label"
   | "submit.v2.overview.title"
+  | "submit.v2.overview.yes"
   | "submit.v2.repo.check_on_submit"
   | "submit.v2.repo.commit_label"
   | "submit.v2.repo.commit_placeholder"
@@ -7516,7 +7529,20 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.v2.optimizer.unavailable.guided": "לא זמין כרגע.",
   "submit.v2.overview.cases": "{count} קלטים שהוקלדו",
   "submit.v2.overview.desc": "בדקו את ההגדרות, ואז התחילו את האופטימיזציה.",
+  "submit.v2.overview.no": "לא",
+  "submit.v2.overview.row.expected_column": "עמודת הפלט הצפוי",
+  "submit.v2.overview.row.input_columns": "עמודות קלט",
+  "submit.v2.overview.row.name": "שם ההרצה",
+  "submit.v2.overview.row.shuffle": "ערבוב שורות",
+  "submit.v2.overview.row.source": "מקור",
+  "submit.v2.overview.row.split": "חלוקה",
+  "submit.v2.overview.tab.budget": "תקציב",
+  "submit.v2.overview.tab.data": "נתונים",
+  "submit.v2.overview.tab.general": "כללי",
+  "submit.v2.overview.tab.models": "מודלים",
+  "submit.v2.overview.tabs_label": "סיכום ההרצה",
   "submit.v2.overview.title": "מוכן להרצה",
+  "submit.v2.overview.yes": "כן",
   "submit.v2.repo.check_on_submit": "נבדק מול המאגר כשמתחילים את ההרצה",
   "submit.v2.repo.commit_label": "קומיט",
   "submit.v2.repo.commit_placeholder": "האחרון בענף",
@@ -19922,7 +19948,20 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.v2.optimizer.unavailable.guided": "Not available right now.",
   "submit.v2.overview.cases": "{count} typed inputs",
   "submit.v2.overview.desc": "Check the setup, then start the optimization.",
+  "submit.v2.overview.no": "No",
+  "submit.v2.overview.row.expected_column": "Expected output column",
+  "submit.v2.overview.row.input_columns": "Input columns",
+  "submit.v2.overview.row.name": "Run name",
+  "submit.v2.overview.row.shuffle": "Shuffle rows",
+  "submit.v2.overview.row.source": "Source",
+  "submit.v2.overview.row.split": "Split",
+  "submit.v2.overview.tab.budget": "Budget",
+  "submit.v2.overview.tab.data": "Data",
+  "submit.v2.overview.tab.general": "General",
+  "submit.v2.overview.tab.models": "Models",
+  "submit.v2.overview.tabs_label": "Run summary",
   "submit.v2.overview.title": "Ready to run",
+  "submit.v2.overview.yes": "Yes",
   "submit.v2.repo.check_on_submit": "Checked against the repository when you start the run",
   "submit.v2.repo.commit_label": "Commit",
   "submit.v2.repo.commit_placeholder": "Latest on the branch",
