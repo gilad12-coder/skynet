@@ -2484,6 +2484,7 @@
   "auto.shared.lib.api.literal.8": "프로그램 실행 중 오류",
   "auto.shared.lib.api.literal.9": "프로그램 실행 중 오류",
   "auto.shared.lib.api.template.1": "서버 오류: {p1}",
+  "shared.api.route_missing": "서버가 이 단계를 지원하지 않습니다({method} {path}). 앱과 서버의 버전이 다릅니다. 서버를 업데이트한 후 다시 시도하세요.",
   "auto.shared.lib.api.template.3": "서버 오류: {p1}",
   "auto.shared.lib.api.template.4": "서버 오류: {p1}",
   "auto.shared.lib.api.template.5": "서버 오류: {p1}",

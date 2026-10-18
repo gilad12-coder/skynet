@@ -1,6 +1,6 @@
 "use client";
 
-import { CaretLeft, CaretRight, CircleNotch, Warning } from "@/shared/ui/icons";
+import { CaretLeft, CaretRight, CircleNotch, RocketLaunch, Warning } from "@/shared/ui/icons";
 import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/shared/ui/primitives/button";
 import { TERMS } from "@/shared/lib/terms";
@@ -15,7 +15,7 @@ type NavContext = Pick<
   "state" | "goPrev" | "goNext" | "submit" | "submitting" | "advancing"
 > & {
   // Why the run cannot start right now (a failing or stale contract check);
-  // the button stays visible so the reason stays visible with it.
+  // the button stays visible and shows the reason as its tooltip.
   runDisabledReason?: string | null;
 };
 
@@ -189,17 +189,13 @@ export function SubmitNav({
             </>
           ) : (
             <>
+              <RocketLaunch className="size-4" aria-hidden />
               {msg("auto.features.submit.components.submitnav.4")}
               {TERMS.optimization}
             </>
           )}
         </motion.button>
       </div>
-      {runDisabledReason && !submitting && !advancing && (
-        <p className="text-end text-xs text-muted-foreground" dir="auto">
-          {runDisabledReason}
-        </p>
-      )}
     </div>
   );
 }

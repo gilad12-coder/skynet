@@ -2484,6 +2484,7 @@
   "auto.shared.lib.api.literal.8": "Ошибка при запуске программы",
   "auto.shared.lib.api.literal.9": "Ошибка при запуске программы",
   "auto.shared.lib.api.template.1": "Ошибка сервера: {p1}",
+  "shared.api.route_missing": "Сервер не поддерживает этот шаг ({method} {path}). Приложение и сервер работают на разных версиях. Обновите сервер и повторите попытку.",
   "auto.shared.lib.api.template.3": "Ошибка сервера: {p1}",
   "auto.shared.lib.api.template.4": "Ошибка сервера: {p1}",
   "auto.shared.lib.api.template.5": "Ошибка сервера: {p1}",

@@ -1067,6 +1067,7 @@
   "auto.shared.lib.api.literal.8": "שגיאה בהרצת התוכנית",
   "auto.shared.lib.api.literal.9": "שגיאה בהרצת התוכנית",
   "auto.shared.lib.api.template.1": "שגיאת שרת: {p1}",
+  "shared.api.route_missing": "השרת לא תומך בשלב הזה ({method} {path}). האפליקציה והשרת מריצים גרסאות שונות. עדכנו את השרת ונסו שוב.",
   "auto.shared.lib.api.template.3": "שגיאת שרת: {p1}",
   "auto.shared.lib.api.template.4": "שגיאת שרת: {p1}",
   "auto.shared.lib.api.template.5": "שגיאת שרת: {p1}",

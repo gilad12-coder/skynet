@@ -2484,6 +2484,7 @@
   "auto.shared.lib.api.literal.8": "प्रोग्राम चलाने में त्रुटि",
   "auto.shared.lib.api.literal.9": "प्रोग्राम चलाने में त्रुटि",
   "auto.shared.lib.api.template.1": "सर्वर त्रुटि: {p1}",
+  "shared.api.route_missing": "सर्वर इस चरण का समर्थन नहीं करता ({method} {path})। ऐप और सर्वर अलग-अलग संस्करण चला रहे हैं। सर्वर अपडेट करें, फिर दोबारा कोशिश करें।",
   "auto.shared.lib.api.template.3": "सर्वर त्रुटि: {p1}",
   "auto.shared.lib.api.template.4": "सर्वर त्रुटि: {p1}",
   "auto.shared.lib.api.template.5": "सर्वर त्रुटि: {p1}",

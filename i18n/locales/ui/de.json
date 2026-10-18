@@ -2484,6 +2484,7 @@
   "auto.shared.lib.api.literal.8": "Fehler beim Ausführen des Programms",
   "auto.shared.lib.api.literal.9": "Fehler beim Ausführen des Programms",
   "auto.shared.lib.api.template.1": "Serverfehler: {p1}",
+  "shared.api.route_missing": "Der Server unterstützt diesen Schritt nicht ({method} {path}). App und Server laufen in verschiedenen Versionen. Aktualisiere den Server und versuche es erneut.",
   "auto.shared.lib.api.template.3": "Serverfehler: {p1}",
   "auto.shared.lib.api.template.4": "Serverfehler: {p1}",
   "auto.shared.lib.api.template.5": "Serverfehler: {p1}",

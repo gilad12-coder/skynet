@@ -2484,6 +2484,7 @@
   "auto.shared.lib.api.literal.8": "プログラムの実行中にエラーが発生しました",
   "auto.shared.lib.api.literal.9": "プログラムの実行中にエラーが発生しました",
   "auto.shared.lib.api.template.1": "サーバーエラー: {p1}",
+  "shared.api.route_missing": "サーバーはこの手順に対応していません（{method} {path}）。アプリとサーバーのバージョンが異なります。サーバーを更新してから、もう一度お試しください。",
   "auto.shared.lib.api.template.3": "サーバーエラー: {p1}",
   "auto.shared.lib.api.template.4": "サーバーエラー: {p1}",
   "auto.shared.lib.api.template.5": "サーバーエラー: {p1}",

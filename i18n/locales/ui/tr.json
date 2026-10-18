@@ -2484,6 +2484,7 @@
   "auto.shared.lib.api.literal.8": "Program çalıştırılırken hata oluştu",
   "auto.shared.lib.api.literal.9": "Program çalıştırılırken hata oluştu",
   "auto.shared.lib.api.template.1": "Sunucu hatası: {p1}",
+  "shared.api.route_missing": "Sunucu bu adımı desteklemiyor ({method} {path}). Uygulama ve sunucu farklı sürümler çalıştırıyor. Sunucuyu güncelleyin ve tekrar deneyin.",
   "auto.shared.lib.api.template.3": "Sunucu hatası: {p1}",
   "auto.shared.lib.api.template.4": "Sunucu hatası: {p1}",
   "auto.shared.lib.api.template.5": "Sunucu hatası: {p1}",

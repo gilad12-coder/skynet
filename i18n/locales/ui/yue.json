@@ -1949,6 +1949,7 @@
   "auto.shared.lib.api.literal.4": "無法連接到伺服器。請確認伺服器正在運行。",
   "auto.shared.lib.api.literal.7": "無法連線至伺服器。請確保伺服器運作緊。",
   "auto.shared.lib.api.template.1": "伺服器錯誤：{p1}",
+  "shared.api.route_missing": "伺服器唔支援呢個步驟（{method} {path}）。應用程式同伺服器嘅版本唔同。請更新伺服器，然後再試。",
   "auto.shared.lib.api.template.3": "伺服器錯誤：{p1}",
   "auto.shared.lib.api.template.4": "伺服器錯誤：{p1}",
   "auto.shared.lib.api.template.5": "伺服器錯誤：{p1}",

@@ -2484,6 +2484,7 @@
   "auto.shared.lib.api.literal.8": "خطأ في تشغيل البرنامج",
   "auto.shared.lib.api.literal.9": "خطأ في تشغيل البرنامج",
   "auto.shared.lib.api.template.1": "خطأ في الخادم: {p1}",
+  "shared.api.route_missing": "الخادم لا يدعم هذه الخطوة ({method} {path}). التطبيق والخادم يعملان بإصدارين مختلفين. حدّث الخادم، ثم حاول مرة أخرى.",
   "auto.shared.lib.api.template.3": "خطأ في الخادم: {p1}",
   "auto.shared.lib.api.template.4": "خطأ في الخادم: {p1}",
   "auto.shared.lib.api.template.5": "خطأ في الخادم: {p1}",

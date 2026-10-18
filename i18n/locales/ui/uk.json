@@ -2484,6 +2484,7 @@
   "auto.shared.lib.api.literal.8": "Помилка виконання програми",
   "auto.shared.lib.api.literal.9": "Помилка виконання програми",
   "auto.shared.lib.api.template.1": "Помилка сервера: {p1}",
+  "shared.api.route_missing": "Сервер не підтримує цей крок ({method} {path}). Застосунок і сервер працюють на різних версіях. Оновіть сервер і спробуйте ще раз.",
   "auto.shared.lib.api.template.3": "Помилка сервера: {p1}",
   "auto.shared.lib.api.template.4": "Помилка сервера: {p1}",
   "auto.shared.lib.api.template.5": "Помилка сервера: {p1}",

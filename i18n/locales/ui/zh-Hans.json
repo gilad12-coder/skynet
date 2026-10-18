@@ -2484,6 +2484,7 @@
   "auto.shared.lib.api.literal.8": "运行程序时出错",
   "auto.shared.lib.api.literal.9": "运行程序时出错",
   "auto.shared.lib.api.template.1": "服务器错误：{p1}",
+  "shared.api.route_missing": "服务器不支持此步骤（{method} {path}）。应用和服务器的版本不同。请更新服务器，然后重试。",
   "auto.shared.lib.api.template.3": "服务器错误：{p1}",
   "auto.shared.lib.api.template.4": "服务器错误：{p1}",
   "auto.shared.lib.api.template.5": "服务器错误：{p1}",

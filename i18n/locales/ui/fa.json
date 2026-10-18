@@ -2484,6 +2484,7 @@
   "auto.shared.lib.api.literal.8": "خطا در اجرای برنامه",
   "auto.shared.lib.api.literal.9": "خطا در اجرای برنامه",
   "auto.shared.lib.api.template.1": "خطای سرور: {p1}",
+  "shared.api.route_missing": "سرور از این مرحله پشتیبانی نمی‌کند ({method} {path}). برنامه و سرور نسخه‌های متفاوتی دارند. سرور را به‌روز کنید و دوباره تلاش کنید.",
   "auto.shared.lib.api.template.3": "خطای سرور: {p1}",
   "auto.shared.lib.api.template.4": "خطای سرور: {p1}",
   "auto.shared.lib.api.template.5": "خطای سرور: {p1}",

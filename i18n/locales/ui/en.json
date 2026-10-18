@@ -1070,6 +1070,7 @@
   "auto.shared.lib.api.literal.8": "Error running the program",
   "auto.shared.lib.api.literal.9": "Error running the program",
   "auto.shared.lib.api.template.1": "Server error: {p1}",
+  "shared.api.route_missing": "The server does not support this step ({method} {path}). The app and the server run different versions. Update the server, then try again.",
   "auto.shared.lib.api.template.3": "Server error: {p1}",
   "auto.shared.lib.api.template.4": "Server error: {p1}",
   "auto.shared.lib.api.template.5": "Server error: {p1}",

@@ -2484,6 +2484,7 @@
   "auto.shared.lib.api.literal.8": "Errore durante l'esecuzione del programma",
   "auto.shared.lib.api.literal.9": "Errore durante l'esecuzione del programma",
   "auto.shared.lib.api.template.1": "Errore del server: {p1}",
+  "shared.api.route_missing": "Il server non supporta questo passaggio ({method} {path}). L'app e il server usano versioni diverse. Aggiorna il server e riprova.",
   "auto.shared.lib.api.template.3": "Errore del server: {p1}",
   "auto.shared.lib.api.template.4": "Errore del server: {p1}",
   "auto.shared.lib.api.template.5": "Errore del server: {p1}",
