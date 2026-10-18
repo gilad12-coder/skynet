@@ -133,7 +133,8 @@ export function decodeTaskAssist(raw: string | null): "auto" | "manual" {
 
 /**
  * Read back the coding agent's saved chat, or none when it is missing or
- * malformed.
+ * malformed. A tool call still running when its turn was stopped comes back
+ * as failed: nothing will finish it after the reload.
  *
  * Args:
  *   raw: The stored text, or null.
@@ -155,5 +156,15 @@ export function decodeCodingChat(raw: string | null): AgentMessage[] {
     const { role, content } = item as Record<string, unknown>;
     return (role === "user" || role === "assistant") && typeof content === "string";
   });
-  return valid ? (parsed as AgentMessage[]) : [];
+  if (!valid) return [];
+  return (parsed as AgentMessage[]).map((message) =>
+    message.toolCalls?.some((call) => call.status === "running")
+      ? {
+          ...message,
+          toolCalls: message.toolCalls.map((call) =>
+            call.status === "running" ? { ...call, status: "error" as const } : call,
+          ),
+        }
+      : message,
+  );
 }

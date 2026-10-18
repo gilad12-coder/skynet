@@ -50,3 +50,21 @@ test("the coding agent's chat comes back whole, and a broken one starts fresh", 
   assert.deepEqual(decodeCodingChat(JSON.stringify({ role: "user" })), []);
   assert.deepEqual(decodeCodingChat(JSON.stringify([{ role: "system", content: "x" }])), []);
 });
+
+test("a tool call a stopped turn left running comes back failed, not spinning", () => {
+  const chat = [
+    {
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        { id: "1", tool: "write_file", status: "done" },
+        { id: "2", tool: "verify_code", status: "running" },
+      ],
+    },
+  ];
+  const [message] = decodeCodingChat(JSON.stringify(chat));
+  assert.deepEqual(
+    message?.toolCalls?.map((call) => call.status),
+    ["done", "error"],
+  );
+});
