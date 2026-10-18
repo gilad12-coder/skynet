@@ -43,6 +43,14 @@ TRANSCRIPT_VERSION = 1
 LINE_MAX_CHARS = 500
 PHASE_MAX_OUTPUT_CHARS = 24_000
 MAX_EVENTS = 4_000
+# The event cap counts output lines only. Command, exit, sample and note
+# events drive the UI's lanes and row progress, so they get their own room and
+# are never crowded out by a chatty scorer.
+STRUCTURAL_EVENT_HEADROOM = 1_000
+# A line without a newline (a \r progress bar, one huge JSON blob) is held
+# only this far; past the line budget it would be clipped anyway, and the
+# margin keeps a secret near the cut whole until the scrubber has seen it.
+PENDING_MAX_CHARS = LINE_MAX_CHARS * 4
 # Shorter values (ports, flags, "1") are not secrets, and redacting them would mangle ordinary text.
 _SECRET_MIN_CHARS = 8
 _REDACTED = "[redacted]"
@@ -121,6 +129,7 @@ class CheckTerminalRecorder:
         self._commands: dict[int, _Command] = {}
         self._phase_chars = dict.fromkeys(PHASES, 0)
         self._truncated: set[str] = set()
+        self._output_events = 0
         self._secrets: list[str] = []
 
     def redact(self, values: Iterable[str]) -> None:
@@ -209,7 +218,8 @@ class CheckTerminalRecorder:
             return
         with self._lock:
             buffered = command.pending.get(stream, "") + text
-            *lines, command.pending[stream] = buffered.split("\n")
+            *lines, rest = buffered.split("\n")
+            command.pending[stream] = rest[:PENDING_MAX_CHARS]
         for line in lines:
             self._line(command_id, command, stream, line)
 
@@ -321,12 +331,15 @@ class CheckTerminalRecorder:
         phase = command.phase
         with self._lock:
             spent = self._phase_chars[phase] + len(line)
-            over = spent > PHASE_MAX_OUTPUT_CHARS
+            # Once a phase is marked truncated it stays closed, so no shorter
+            # line slips in after the "output capped" note.
+            over = phase in self._truncated or spent > PHASE_MAX_OUTPUT_CHARS or self._output_events >= MAX_EVENTS
             first_over = over and phase not in self._truncated
             if over:
                 self._truncated.add(phase)
             else:
                 self._phase_chars[phase] = spent
+                self._output_events += 1
         if first_over:
             self._append({"kind": "note", "note": "output_truncated"}, phase=phase, sample=command.sample)
         if over:
@@ -355,7 +368,7 @@ class CheckTerminalRecorder:
             sample: The evaluator sample it belongs to, if any.
         """
         with self._lock:
-            if len(self._events) >= MAX_EVENTS:
+            if len(self._events) >= MAX_EVENTS + STRUCTURAL_EVENT_HEADROOM:
                 return
             record = {"t": int((time.monotonic() - self._started) * 1000), "phase": phase or self._phase, **event}
             if sample is not None:

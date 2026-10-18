@@ -108,6 +108,51 @@ def test_each_phase_has_a_bounded_output_budget() -> None:
     assert snapshot["truncated"] == ["sandbox"]
 
 
+def test_the_event_cap_never_drops_sample_or_exit_events() -> None:
+    """A flood of short lines spends the output cap, but sample and exit events still arrive."""
+    recorder = CheckTerminalRecorder()
+    recorder.sample_started(0, 1)
+    command_id = recorder.command_started("seq 5000", scrub=lambda text: text, sample=0)
+    recorder.command_output(command_id, "stdout", "1\n" * (check_terminal.MAX_EVENTS + 1000))
+    recorder.command_finished(command_id, exit_code=0)
+    recorder.sample_finished(0, 1, score=1.0)
+
+    events = recorder.snapshot()["events"]
+    assert sum(event["kind"] == "output" for event in events) == check_terminal.MAX_EVENTS
+    assert [event["kind"] for event in events[-2:]] == ["exit", "sample"]
+    assert events[-1]["state"] == "done"
+    assert recorder.snapshot()["truncated"] == ["evaluator"]
+
+
+def test_no_output_follows_the_truncation_note() -> None:
+    """A shorter line that would still fit the phase budget is dropped once the phase is truncated."""
+    recorder = CheckTerminalRecorder()
+    recorder.set_phase("sandbox")
+    command_id = recorder.command_started("chatty", scrub=lambda text: text)
+    filler = "x" * (check_terminal.LINE_MAX_CHARS - 10)
+    lines = check_terminal.PHASE_MAX_OUTPUT_CHARS // len(filler)
+    recorder.command_output(command_id, "stdout", (filler + "\n") * lines)
+    recorder.command_output(command_id, "stdout", "y" * check_terminal.LINE_MAX_CHARS + "\nafter\n")
+    recorder.command_finished(command_id, exit_code=0)
+
+    kinds = [event.get("note") or event.get("text") for event in recorder.snapshot()["events"]]
+    assert "output_truncated" in kinds
+    assert "after" not in kinds
+
+
+def test_a_line_without_a_newline_is_held_only_to_its_budget() -> None:
+    """Output that never ends its line (a progress bar) keeps a bounded buffer and is still clipped."""
+    recorder = CheckTerminalRecorder()
+    command_id = recorder.command_started("progress", scrub=lambda text: text)
+    for _ in range(200):
+        recorder.command_output(command_id, "stdout", "#" * 1000)
+    assert len(recorder._commands[command_id].pending["stdout"]) <= check_terminal.PENDING_MAX_CHARS
+    recorder.command_finished(command_id, exit_code=0)
+
+    outputs = [event["text"] for event in recorder.snapshot()["events"] if event["kind"] == "output"]
+    assert outputs == ["#" * check_terminal.LINE_MAX_CHARS + "…"]
+
+
 def test_run_many_reports_each_sample_and_pins_its_commands_to_it() -> None:
     """Concurrent samples report their own start and outcome, and their commands carry the sample index."""
     recorder = CheckTerminalRecorder()
