@@ -279,6 +279,17 @@ def test_sampled_check_passes_and_reports_each_sample() -> None:
     assert {check.key for check in response.checks if check.sample_index == 0} == {"workspace.run", "metric.shape"}
 
 
+def test_each_sample_carries_the_trusted_observation() -> None:
+    """The Run check shows each sample's measured time and cost, as the run itself sees them."""
+    response = _check(_payload())
+
+    for sample in response.samples:
+        assert sample.observation is not None
+        assert sample.observation["timing"]["task_ms"] is not None
+        assert sample.observation["timing"]["evaluation_ms"] >= sample.observation["timing"]["task_ms"]
+        assert sample.observation["cost"]["status"] == "none"
+
+
 def test_sampled_check_fires_on_ready_once_after_the_box_warms() -> None:
     """The progress hook fires exactly once, between the warm-up and the samples."""
     ready: list[str] = []

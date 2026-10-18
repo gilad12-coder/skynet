@@ -24,6 +24,18 @@ with ``{"output_preview", "score", "side_info", "usage"}`` or
 ``{"error", "stage": "run" | "metric" | "shape", "detail", "usage"}``.
 ``error`` is ``"<Type>: <message>"`` and is all an optimizer may ever see;
 ``detail`` adds the user-code frames for the person who wrote the code.
+Every reply to a call that reached the run stage also carries
+``"observation"`` (see :func:`build_observation`).
+
+Trusted observations: this process, not the run child, measures each
+evaluation. The run child's task-model calls go through :class:`TaskRelay`, a
+loopback endpoint here that forwards each attempt to the real gateway and
+records its status, tokens, provider cost and time; the child never holds the
+task key or the upstream address. The run time starts when the child says it
+loaded the run code (:data:`RUN_STARTED_MARKER`, the first one counts) and
+ends when its last reply arrives. The metric reads the result through
+``from skynet import observation, service_cost`` before it returns its score,
+so nothing the run code or the candidate prints or returns can change it.
 
 The run code and the candidate never share a process with the metric: each
 call runs them in a fresh child interpreter (``--run-child``) that receives
@@ -60,8 +72,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import traceback
+import urllib.error
+import urllib.request
 from collections.abc import Callable, Iterable
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -103,10 +120,31 @@ FILES_DIR_PREFIX = "app_ws_files_"
 _files_dir: str | None = None
 _NUMBER_TYPES = (bool, int, float)
 _PR_SET_DUMPABLE = 4
+# The run child prints this on its real stdout right before it calls ``run``.
+RUN_STARTED_MARKER = "APP_WS_RUN_STARTED"
+OBSERVATION_VERSION = 1
+OBSERVATION_HELPER_NAME = "observation"
+SERVICE_COST_HELPER_NAME = "service_cost"
+# What the run time covers: from the loaded run code calling ``run`` to its
+# reply, model waits and retries included; interpreter start and loading the
+# run code are ``setup_ms``, the metric is ``metric_ms``.
+TIMING_BOUNDARY = "run_call"
+COST_BASIS = "provider_usage"
+# Only model calls made through ``llm`` are metered; other services the run
+# code reaches are inside the run time but not in the cost.
+COST_COVERAGE = "llm"
+COST_METERED = "metered"
+COST_UNAVAILABLE = "unavailable"
+COST_NONE = "none"
+_RELAY_ENV_NAMES = (_runner.ENV_BUDGET_RELAY_URL, "SKYNET_" + _runner.ENV_BUDGET_RELAY_URL[len("APP_") :])
 
 
 class ShapeError(Exception):
     """The metric returned a value other than ``(score, side_info)``."""
+
+
+class ServiceCostUnavailableError(Exception):
+    """The current evaluation's service cost is not known, so it cannot be scored on."""
 
 
 def user_detail(exc: BaseException) -> str:
@@ -314,11 +352,12 @@ def _client(gateway: Any, key_env: str) -> Any:
     )
 
 
-def _helpers(client: Any) -> Any:
+def _helpers(client: Any, extra: dict[str, Any] | None = None) -> Any:
     """Build the ``skynet`` module one piece of user code imports from.
 
     Args:
         client: The model this code's ``llm`` calls, or ``None``.
+        extra: More helpers for this code only (the metric's observation helpers).
 
     Returns:
         The helper module.
@@ -328,8 +367,257 @@ def _helpers(client: Any) -> Any:
             _runner.LLM_HELPER_NAME: client if client is not None else _runner.missing_llm,
             _runner.IMAGE_HELPER_NAME: _runner.Image,
             _runner.LOG_HELPER_NAME: _runner.log,
+            **(extra or {}),
         }
     )
+
+
+def _milliseconds(seconds: float) -> float:
+    """Return a duration in milliseconds, rounded to a tenth."""
+    return round(max(0.0, seconds) * 1000, 1)
+
+
+def _count(value: Any) -> int | None:
+    """Return a non-negative token count, or ``None`` when the value is not one."""
+    return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
+
+
+def metered_cost(usage: Any) -> float | None:
+    """Return the provider's full charge for one response, as the protected gateway bills it.
+
+    Args:
+        usage: The response's ``usage`` block.
+
+    Returns:
+        The charge in USD, or ``None`` when the response does not state all of it.
+    """
+    if not isinstance(usage, dict):
+        return None
+    cost = usage.get("cost")
+    if not isinstance(cost, (int, float)) or isinstance(cost, bool) or cost < 0:
+        return None
+    details = usage.get("cost_details")
+    upstream = details.get("upstream_inference_cost") if isinstance(details, dict) else None
+    byok = usage.get("is_byok")
+    if byok is True:
+        # A bring-your-own-key charge is the fee only; the provider bills the rest upstream.
+        return float(cost) + float(upstream) if isinstance(upstream, (int, float)) and upstream >= 0 else None
+    if byok is False or upstream in (None, 0):
+        return float(cost)
+    return None
+
+
+def attempt_record(role: str, status: int, seconds: float, body: bytes) -> dict[str, Any]:
+    """Describe one model attempt from what the gateway answered.
+
+    Args:
+        role: ``"task"`` or ``"metric"``.
+        status: The HTTP status, or 0 when the gateway could not be reached.
+        seconds: How long the attempt took.
+        body: The response body.
+
+    Returns:
+        The attempt: status, success, time, tokens and cost. A failed attempt
+        without a usage block cost nothing (the provider refused it before
+        anything billable existed); any other attempt without a stated cost
+        has ``cost_usd`` ``None``.
+    """
+    try:
+        payload = json.loads(body.decode("utf-8")) if body else None
+    except ValueError:
+        payload = None
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    ok = 200 <= status < 300
+    cost = metered_cost(usage)
+    if cost is None and not ok and not isinstance(usage, dict):
+        cost = 0.0
+    return {
+        "role": role,
+        "status": status,
+        "ok": ok,
+        "ms": _milliseconds(seconds),
+        "prompt_tokens": _count(usage.get("prompt_tokens")) if isinstance(usage, dict) else None,
+        "completion_tokens": _count(usage.get("completion_tokens")) if isinstance(usage, dict) else None,
+        "total_tokens": _count(usage.get("total_tokens")) if isinstance(usage, dict) else None,
+        "cost_usd": cost,
+    }
+
+
+def cost_summary(calls: list[dict[str, Any]]) -> dict[str, Any]:
+    """Total the metered cost of an evaluation's task-model attempts.
+
+    Args:
+        calls: The attempts, as :func:`attempt_record` describes them.
+
+    Returns:
+        ``unit``, ``status`` (``metered``, ``unavailable`` or ``none``), ``usd``
+        (``None`` unless every attempt has a cost), ``basis``, ``coverage``,
+        ``unpriced_calls`` and a ``reason`` when the cost is not known.
+    """
+    unpriced = sum(1 for call in calls if call.get("cost_usd") is None)
+    summary: dict[str, Any] = {
+        "unit": "USD",
+        "basis": COST_BASIS,
+        "coverage": COST_COVERAGE,
+        "unpriced_calls": unpriced,
+        "reason": None,
+    }
+    if not calls:
+        return {**summary, "status": COST_NONE, "usd": 0.0}
+    if unpriced:
+        reason = (
+            f"{unpriced} of {len(calls)} task-model call(s) returned no provider cost, "
+            "so this response's service cost is not known"
+        )
+        return {**summary, "status": COST_UNAVAILABLE, "usd": None, "reason": reason}
+    return {**summary, "status": COST_METERED, "usd": round(sum(float(call["cost_usd"]) for call in calls), 10)}
+
+
+def build_observation(
+    *,
+    calls: list[dict[str, Any]],
+    setup_seconds: float | None,
+    task_seconds: float | None,
+    conditions: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the trusted observation of one evaluation's run stage.
+
+    Args:
+        calls: The task-model attempts the relay carried, in order.
+        setup_seconds: Interpreter start and run-code load, measured here.
+        task_seconds: The run call itself, measured here; ``None`` when ``run`` never started.
+        conditions: The task model and its settings, the same for every version.
+
+    Returns:
+        ``version``, ``timing`` (milliseconds), ``calls``, call counts,
+        ``cost`` (see :func:`cost_summary`) and ``conditions``.
+    """
+    return {
+        "version": OBSERVATION_VERSION,
+        "timing": {
+            "unit": "ms",
+            "boundary": TIMING_BOUNDARY,
+            "task_ms": None if task_seconds is None else _milliseconds(task_seconds),
+            "setup_ms": None if setup_seconds is None else _milliseconds(setup_seconds),
+            "model_ms": round(sum(float(call.get("ms") or 0.0) for call in calls), 1),
+        },
+        "calls": [dict(call) for call in calls],
+        "task_calls": len(calls),
+        "failed_calls": sum(1 for call in calls if not call.get("ok")),
+        "cost": cost_summary(calls),
+        "conditions": dict(conditions),
+    }
+
+
+class TaskRelay:
+    """Loopback endpoint in the metric process that carries the run child's model calls.
+
+    The child is given only this address. Each attempt it sends is forwarded
+    to the real gateway with the task key and recorded here, so retries count
+    toward the evaluation that made them and the child cannot report its own
+    usage. One relay serves one evaluation, which keeps concurrent
+    evaluations apart.
+    """
+
+    def __init__(self, gateway: dict[str, Any], *, protected: bool) -> None:
+        """Bind to a free loopback port without serving yet.
+
+        Args:
+            gateway: The task model's runner-shaped gateway section.
+            protected: Whether the trusted parent owns dispatch, so an
+                unreachable gateway is reported as pending usage.
+        """
+        upstream = next((value for value in (os.environ.get(name) for name in _RELAY_ENV_NAMES) if value), None)
+        self.upstream = (upstream or str(gateway["url"])).rstrip("/")
+        self.api_key = gateway.get("api_key") or os.environ.get(ENV_TASK_API_KEY)
+        self.timeout_seconds = float(gateway.get("timeout_seconds") or 120.0)
+        self.protected = protected
+        self.calls: list[dict[str, Any]] = []
+        self._lock = threading.Lock()
+        self._ssl = _runner._ssl_context()
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), _RelayHandler)
+        self._server.daemon_threads = True
+        self._server.relay = self  # type: ignore[attr-defined]
+        self._thread = threading.Thread(target=self._server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+
+    @property
+    def url(self) -> str:
+        """The base URL the run child posts chat completions to."""
+        return f"http://127.0.0.1:{self._server.server_address[1]}"
+
+    def __enter__(self) -> TaskRelay:
+        """Start serving."""
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        """Stop serving."""
+        self._server.shutdown()
+        self._server.server_close()
+
+    def forward(self, path: str, body: bytes) -> tuple[int, str, bytes]:
+        """Send one attempt to the gateway and record it.
+
+        Args:
+            path: The request path under the gateway's base URL (``/chat/completions``).
+            body: The child's JSON request body.
+
+        Returns:
+            The status, content type and body to give the child.
+        """
+        request = urllib.request.Request(
+            self.upstream + path,
+            data=body,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        if self.api_key:
+            request.add_header("Authorization", f"Bearer {self.api_key}")
+        started = time.perf_counter()
+        content_type = "application/json"
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds, context=self._ssl) as response:
+                status, data = int(response.status), response.read()
+                content_type = response.headers.get("Content-Type") or content_type
+        except urllib.error.HTTPError as exc:
+            status, data = int(exc.code), exc.read()
+            content_type = exc.headers.get("Content-Type") or content_type
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            seconds = time.perf_counter() - started
+            with self._lock:
+                self.calls.append(attempt_record("task", 0, seconds, b""))
+            # The child maps this code to the same pending-usage stop it raised before the relay existed.
+            code = "provider_unavailable" if self.protected else "gateway_unreachable"
+            message = json.dumps({"error": {"code": code, "message": f"the model gateway is unreachable: {exc}"}})
+            return 502, "application/json", message.encode("utf-8")
+        seconds = time.perf_counter() - started
+        with self._lock:
+            self.calls.append(attempt_record("task", status, seconds, data))
+        return status, content_type, data
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        """Return a copy of the attempts recorded so far."""
+        with self._lock:
+            return [dict(call) for call in self.calls]
+
+
+class _RelayHandler(BaseHTTPRequestHandler):
+    """Hands every chat-completions POST to the owning :class:`TaskRelay`."""
+
+    def do_POST(self) -> None:
+        """Forward the request to the gateway; every path counts, chat completions or not."""
+        relay: TaskRelay = self.server.relay  # type: ignore[attr-defined]
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length) if length > 0 else b""
+        status, content_type, data = relay.forward(self.path, body)
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        """Keep access-log lines out of the user's output."""
 
 
 def _load(code: str, filename: str, module: Any) -> dict[str, Any]:
@@ -413,6 +701,9 @@ class RunStage:
         self.program: Any = None
         self.program_lm: Any = None
         self.namespace = _load(str(message.get("run_code") or ""), RUN_FILENAME, _helpers(self.task_llm))
+        if self.kind == ARTIFACT_KIND_DSPY_PROGRAM:
+            # Imported here, before the run time starts, so a version is not timed on loading DSPy.
+            importlib.import_module("dspy")
 
     def run(self, candidate: Any, inputs: dict[str, Any]) -> Any:
         """Produce the output for one case with the candidate applied.
@@ -475,11 +766,12 @@ def write_files(files: dict[str, Any]) -> str:
     return root
 
 
-def run_child(message: dict[str, Any]) -> dict[str, Any]:
+def run_child(message: dict[str, Any], on_started: Callable[[], None] | None = None) -> dict[str, Any]:
     """Run one case's run stage; the body of the ``--run-child`` process.
 
     Args:
         message: ``{"run_code", "files", "artifact_kind", "gateway", "candidate", "inputs"}``.
+        on_started: Called once the run code is loaded, right before ``run``.
 
     Returns:
         ``{"output", "prediction", "output_preview", "usage"}``, or
@@ -494,6 +786,8 @@ def run_child(message: dict[str, Any]) -> dict[str, Any]:
             _files_dir = os.path.realpath(write_files(dict(files)))
             sys.path.insert(0, _files_dir)
         stage = RunStage(message)
+        if on_started is not None:
+            on_started()
         output = stage.run(message.get("candidate"), dict(message.get("inputs") or {}))
         plain, is_prediction = _plain_output(output)
         reply = {"output": plain, "prediction": is_prediction, "output_preview": preview(output)}
@@ -511,13 +805,27 @@ def run_child(message: dict[str, Any]) -> dict[str, Any]:
     return reply
 
 
-def _child_env() -> dict[str, str]:
-    """Return the run child's environment: no message stream, no metric key."""
-    return {
+def _child_env(relay_url: str | None = None) -> dict[str, str]:
+    """Return the run child's environment: no message stream and no model key.
+
+    Args:
+        relay_url: The evaluation's :class:`TaskRelay`; it replaces any
+            budget mailbox address, so every ``llm`` call goes through it.
+
+    Returns:
+        The environment.
+    """
+    env = {
         name: value
         for name, value in os.environ.items()
-        if not name.startswith(ENV_STREAM_PREFIX) and name not in (ENV_STREAM_COUNT, ENV_METRIC_API_KEY)
+        if not name.startswith(ENV_STREAM_PREFIX)
+        and name not in (ENV_STREAM_COUNT, ENV_METRIC_API_KEY, ENV_TASK_API_KEY)
     }
+    if relay_url is not None:
+        for name in _RELAY_ENV_NAMES:
+            if name in env:
+                env[name] = relay_url
+    return env
 
 
 def _entry(namespace: dict[str, Any], name: str) -> Callable[..., Any]:
@@ -542,6 +850,13 @@ def _entry(namespace: dict[str, Any], name: str) -> Callable[..., Any]:
     return fn
 
 
+def _usage_entry(call: dict[str, Any]) -> dict[str, Any] | None:
+    """Return one relayed attempt's token usage in the ledger's shape, or ``None`` without tokens."""
+    if call.get("prompt_tokens") is None and call.get("completion_tokens") is None and call.get("total_tokens") is None:
+        return None
+    return {key: call.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
+
+
 class Workspace:
     """One loaded workspace: the metric here, the run code in a child per call."""
 
@@ -557,7 +872,11 @@ class Workspace:
         self.files = dict(init.get("files") or {})
         self.task_gateway = gateways.get("task")
         self.metric_llm = _client(gateways.get("metric"), ENV_METRIC_API_KEY)
-        self.metric_module = _helpers(self.metric_llm)
+        self._observation: dict[str, Any] | None = None
+        self.metric_module = _helpers(
+            self.metric_llm,
+            {OBSERVATION_HELPER_NAME: self.observation, SERVICE_COST_HELPER_NAME: self.service_cost},
+        )
         self.load_error: dict[str, Any] | None = None
         self.metric_ns: dict[str, Any] = {}
         stage = "run"
@@ -581,40 +900,131 @@ class Workspace:
         """Point ``import skynet`` at the helpers of the code about to run."""
         sys.modules[_runner.HELPER_MODULE_NAME] = module
 
+    def observation(self) -> dict[str, Any]:
+        """Return the current evaluation's trusted observation; the metric's ``observation()``.
+
+        Returns:
+            A copy of the observation (see :func:`build_observation`).
+
+        Raises:
+            RuntimeError: When called outside an evaluation.
+        """
+        if self._observation is None:
+            raise RuntimeError("observation() is only available while score() runs")
+        return json.loads(json.dumps(self._observation))
+
+    def service_cost(self) -> float:
+        """Return the current response's metered task-model cost in USD; the metric's ``service_cost()``.
+
+        Returns:
+            The cost; 0.0 when the run code made no model call.
+
+        Raises:
+            ServiceCostUnavailableError: When any call's cost is not known, so a
+                cost-based metric cannot score a free-looking response.
+        """
+        cost = self.observation()["cost"]
+        if cost["usd"] is None:
+            raise ServiceCostUnavailableError(str(cost.get("reason") or "the service cost is not known"))
+        return float(cost["usd"])
+
+    def _conditions(self) -> dict[str, Any]:
+        """Return the declared execution conditions every version runs under."""
+        gateway = self.task_gateway if isinstance(self.task_gateway, dict) else {}
+        return {
+            "task_model": gateway.get("model"),
+            "temperature": gateway.get("temperature"),
+            "max_tokens": gateway.get("max_tokens"),
+            "reasoning_effort": gateway.get("reasoning_effort"),
+            "timeout_seconds": gateway.get("timeout_seconds"),
+            "protected": bool(gateway.get("protected")),
+            "artifact_kind": self.kind,
+        }
+
     def _run(self, candidate: Any, inputs: dict[str, Any]) -> dict[str, Any]:
-        """Run the run stage for one case in a fresh child interpreter.
+        """Run the run stage for one case in a fresh child interpreter, through a fresh relay.
 
         Args:
             candidate: The version under optimization.
             inputs: The case's input fields; the expected value never goes to the child.
 
         Returns:
-            The child's reply (see :func:`run_child`).
+            The child's reply (see :func:`run_child`), with ``usage`` and
+            ``observation`` replaced by what this process measured.
+        """
+        if not isinstance(self.task_gateway, dict):
+            return self._spawn(candidate, inputs, None, None)
+        protected = bool(self.task_gateway.get("protected")) or any(os.environ.get(n) for n in _RELAY_ENV_NAMES)
+        with TaskRelay(self.task_gateway, protected=protected) as relay:
+            gateway = {**self.task_gateway, "url": relay.url, "api_key": None, "protected": protected}
+            return self._spawn(candidate, inputs, gateway, relay)
+
+    def _spawn(
+        self, candidate: Any, inputs: dict[str, Any], gateway: dict[str, Any] | None, relay: TaskRelay | None
+    ) -> dict[str, Any]:
+        """Start the run child, time it from here and collect its reply.
+
+        Args:
+            candidate: The version under optimization.
+            inputs: The case's input fields.
+            gateway: The child's task gateway (the relay), if there is a task model.
+            relay: The relay recording the child's model calls, if any.
+
+        Returns:
+            The child's reply with trusted ``usage`` and ``observation``.
         """
         message = {
             "run_code": self.run_code,
             "files": self.files,
             "artifact_kind": self.kind,
-            "gateway": self.task_gateway,
+            "gateway": gateway,
             "candidate": candidate,
             "inputs": inputs,
         }
-        result = subprocess.run(
+        data = json.dumps(message, default=_runner.side_info_json_default)
+        spawned = time.perf_counter()
+        process = subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve()), RUN_CHILD_FLAG],
-            input=json.dumps(message, default=_runner.side_info_json_default),
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            env=_child_env(),
+            env=_child_env(relay.url if relay is not None else None),
             text=True,
-            check=False,
         )
-        replies = parse_replies(result.stdout or "")
+        started: float | None = None
+        replied: float | None = None
+        lines: list[str] = []
+        if process.stdin is not None:
+            with contextlib.suppress(BrokenPipeError):
+                process.stdin.write(data)
+                process.stdin.close()
+        for line in process.stdout or ():
+            now = time.perf_counter()
+            # Only the first marker counts: candidate code runs after it and can only add later ones.
+            if started is None and line.rstrip("\n") == RUN_STARTED_MARKER:
+                started = now
+            elif line.startswith(REPLY_PREFIX):
+                replied = now
+            lines.append(line)
+        process.wait()
+        ended = replied if replied is not None else time.perf_counter()
+        calls = relay.snapshot() if relay is not None else []
+        observation = build_observation(
+            calls=calls,
+            setup_seconds=(started if started is not None else ended) - spawned,
+            task_seconds=None if started is None else ended - started,
+            conditions=self._conditions(),
+        )
+        replies = parse_replies("".join(lines))
         if not replies:
-            return {
-                "error": f"RuntimeError: the run code exited with status {result.returncode} without a result",
-                "detail": f"the run process exited with status {result.returncode}",
-                "usage": [],
+            reply: dict[str, Any] = {
+                "error": f"RuntimeError: the run code exited with status {process.returncode} without a result",
+                "detail": f"the run process exited with status {process.returncode}",
             }
-        return replies[-1]
+        else:
+            reply = dict(replies[-1])
+        reply["usage"] = [_usage_entry(call) for call in calls if _usage_entry(call) is not None]
+        reply["observation"] = observation
+        return reply
 
     def _metric(self, inputs: dict[str, Any], output: Any, expected: Any) -> Any:
         """Call ``score(input, output, expected=None)``.
@@ -663,6 +1073,7 @@ class Workspace:
         expected = case.get("expected") if isinstance(case, dict) else None
         ran = self._run(message.get("candidate"), inputs)
         task_usage = list(ran.get("usage") or [])
+        observation = ran.get("observation")
         if isinstance(ran.get("control"), dict):
             return {"control": ran["control"], "usage": self._usage(task_usage)}
         if ran.get("error") is not None:
@@ -671,12 +1082,16 @@ class Workspace:
                 "stage": "run",
                 "detail": str(ran.get("detail") or "")[-DETAIL_MAX_CHARS:],
                 "usage": self._usage(task_usage),
+                "observation": observation,
             }
         output = ran.get("output")
         if ran.get("prediction"):
             output = importlib.import_module("dspy").Prediction(**(output or {}))
         reply: dict[str, Any] = {"output_preview": ran.get("output_preview")}
         stage = "metric"
+        metric_calls_before = len(self.metric_llm.usage) if self.metric_llm is not None else 0
+        self._observation = observation
+        metric_started = time.perf_counter()
         try:
             self._bind(self.metric_module)
             raw = self._metric(inputs, output, expected)
@@ -689,8 +1104,15 @@ class Workspace:
             reply.update(error=str(exc), stage="shape", detail=str(exc))
         except BaseException as exc:  # user code is arbitrary — any failure is reported, not raised
             reply.update(error=error_text(exc), stage=stage, detail=user_detail(exc))
+        finally:
+            self._observation = None
         if self.metric_llm is not None and self.metric_llm.control is not None:
             reply = {"control": self.metric_llm.control}
+        if isinstance(observation, dict) and "control" not in reply:
+            metric_calls = len(self.metric_llm.usage) - metric_calls_before if self.metric_llm is not None else 0
+            # Grading is kept apart from the response's own time and cost.
+            observation["grading"] = {"ms": _milliseconds(time.perf_counter() - metric_started), "calls": metric_calls}
+            reply["observation"] = observation
         reply["usage"] = self._usage(task_usage)
         return reply
 
@@ -786,7 +1208,13 @@ def main(argv: list[str] | None = None) -> int:
     # User prints must never be mistaken for replies.
     sys.stdout = sys.stderr
     if RUN_CHILD_FLAG in args:
-        reply = run_child(json.loads(sys.stdin.read()))
+
+        def started() -> None:
+            """Tell the metric process that ``run`` starts now."""
+            out.write(RUN_STARTED_MARKER + "\n")
+            out.flush()
+
+        reply = run_child(json.loads(sys.stdin.read()), started)
         out.write(REPLY_PREFIX + json.dumps(reply, default=_runner.side_info_json_default) + "\n")
         out.flush()
         return 0

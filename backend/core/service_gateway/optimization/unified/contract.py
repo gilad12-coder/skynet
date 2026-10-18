@@ -737,6 +737,7 @@ def run_contract_check(
                     score=probe.score,
                     feedback_preview=feedback[:PREVIEW_CHARS] if isinstance(feedback, str) and feedback else None,
                     duration_ms=probe.duration_ms,
+                    observation=probe.observation,
                 )
             )
     finally:

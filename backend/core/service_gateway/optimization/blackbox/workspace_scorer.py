@@ -11,6 +11,11 @@ the task model while the run code runs and to the metric model while the
 metric runs; both models' usage is billed through :class:`ScorerUsage`
 ledgers.
 
+Each probe also carries the harness's trusted observation of the run stage
+(task time, model attempts, metered service cost), to which this side adds
+the time the call waited for the box (``queue_ms``) and the whole boxed call
+(``evaluation_ms``); see :mod:`.workspace_harness`.
+
 What reaches the optimizer is a score and side info. A user-code failure
 becomes ``(0.0, {"error": "<Type>: <message>"})`` with no source or
 traceback; a metric that does not return ``(score, side_info)`` stops the
@@ -77,6 +82,7 @@ class WorkspaceProbe:
     output_preview: str | None = None
     duration_ms: int = 0
     usage_by_model: dict[str, tuple[int, int]] = field(default_factory=dict)
+    observation: dict[str, Any] | None = None
 
 
 def workspace_gateway(config: ModelConfig, gateway: GatewayConfig | None) -> ScorerGateway:
@@ -257,14 +263,34 @@ class WorkspaceScorer(SandboxPythonScorer):
         Raises:
             ScorerAbortError: When ``score`` did not return ``(score, side_info)``.
         """
+        score, side_info, _ = self.score_observed(candidate, case)
+        return score, side_info
+
+    def score_observed(self, candidate: Candidate, case: Any = None) -> tuple[float, SideInfo, dict[str, Any] | None]:
+        """Score ``candidate`` on ``case`` and keep the evaluation's trusted observation.
+
+        The final runs use this to keep each case's time and cost for the
+        baseline and the selected version.
+
+        Args:
+            candidate: The version to score.
+            case: The case, a :class:`UnifiedCase` or its mapping.
+
+        Returns:
+            The score and side info as ``__call__`` returns them, and the observation, if any.
+
+        Raises:
+            ScorerAbortError: When ``score`` did not return ``(score, side_info)``.
+        """
         probe = self.run(candidate, case)
         if probe.stage == "shape":
             raise ScorerAbortError(f"{shape_message()} ({probe.error})")
         if probe.error is not None or probe.score is None:
             # In-process engines (GEPA, best-of-n, Auto) hand this straight to a
             # reflection LM, so it gets the same one-line cut native engines get.
-            return 0.0, sanitize_side_info({"error": probe.error or "ValueError: the metric returned no score"})
-        return probe.score, revive_images(probe.side_info)
+            error = sanitize_side_info({"error": probe.error or "ValueError: the metric returned no score"})
+            return 0.0, error, probe.observation
+        return probe.score, revive_images(probe.side_info), probe.observation
 
     def warm(self) -> None:
         """Open the box and install the runner before the first sample is scored.
@@ -288,11 +314,13 @@ class WorkspaceScorer(SandboxPythonScorer):
         Raises:
             ServiceError: When the box could not run the harness at all.
         """
+        waiting = time.perf_counter()
         with self._lock:
+            queued = time.perf_counter() - waiting
             blocked = self._extend(candidate)
             if blocked is not None:
                 return WorkspaceProbe(score=None, side_info={}, error=f"ImportError: {blocked}", stage="run")
-            return self._probe(candidate, case)
+            return self._probe(candidate, case, queued_seconds=queued)
 
     def run_many(self, candidate: Candidate, cases: list[Any]) -> list[WorkspaceProbe]:
         """Score one candidate on several cases concurrently, in the same box.
@@ -376,12 +404,13 @@ class WorkspaceScorer(SandboxPythonScorer):
         )
         return probe
 
-    def _probe(self, candidate: Candidate, case: Any) -> WorkspaceProbe:
+    def _probe(self, candidate: Candidate, case: Any, *, queued_seconds: float = 0.0) -> WorkspaceProbe:
         """Score one case in the open box, applying ``run``'s failure policy.
 
         Args:
             candidate: The version to score.
             case: The case to score it on.
+            queued_seconds: How long the call waited for the box before this.
 
         Returns:
             The score, side info and output preview, or the failure with its stage.
@@ -404,6 +433,12 @@ class WorkspaceScorer(SandboxPythonScorer):
         _raise_control(reply)
         by_model = self._record(reply.get("usage") or {})
         raw_score = reply.get("score")
+        elapsed = time.perf_counter() - started
+        observation = reply.get("observation")
+        if isinstance(observation, dict):
+            timing = observation.setdefault("timing", {})
+            timing["queue_ms"] = round(queued_seconds * 1000, 1)
+            timing["evaluation_ms"] = round(elapsed * 1000, 1)
         return WorkspaceProbe(
             score=float(raw_score) if raw_score is not None and reply.get("error") is None else None,
             side_info=dict(reply.get("side_info") or {}),
@@ -411,8 +446,9 @@ class WorkspaceScorer(SandboxPythonScorer):
             stage=reply.get("stage"),
             detail=reply.get("detail"),
             output_preview=reply.get("output_preview"),
-            duration_ms=int((time.perf_counter() - started) * 1000),
+            duration_ms=int(elapsed * 1000),
             usage_by_model=by_model,
+            observation=observation if isinstance(observation, dict) else None,
         )
 
     def check_ready(self) -> dict[str, Any]:
