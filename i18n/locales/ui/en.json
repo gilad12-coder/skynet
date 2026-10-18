@@ -917,8 +917,6 @@
   "auto.features.submit.components.steps.basicsstep.template.3": "{p1} model pairs to find the best combination",
   "auto.features.submit.components.steps.codestep.2": "Signature",
   "auto.features.submit.components.steps.codestep.3": "Metric",
-  "auto.features.submit.components.steps.codestep.7": "Auto",
-  "auto.features.submit.components.steps.codestep.8": "Manual",
   "auto.features.submit.components.steps.codestep.literal.1": "Set the column roles first (input and output)",
   "auto.features.submit.components.steps.codestep.template.1": "Upload a {p1} first",
   "auto.features.submit.components.steps.codestep.template.2": "The agent wrote the code based on your {p1}. You can request a change in the chat or switch to manual mode.",

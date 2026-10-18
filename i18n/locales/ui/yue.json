@@ -1800,8 +1800,6 @@
   "auto.features.submit.components.steps.basicsstep.template.3": "{p1} 個模型配對，以搵出最佳組合",
   "auto.features.submit.components.steps.codestep.2": "Signature",
   "auto.features.submit.components.steps.codestep.3": "指標",
-  "auto.features.submit.components.steps.codestep.7": "自動",
-  "auto.features.submit.components.steps.codestep.8": "手動",
   "auto.features.submit.components.steps.codestep.literal.1": "請先設定欄位角色（輸入同輸出）",
   "auto.features.submit.components.steps.codestep.template.1": "請先上載 {p1}",
   "auto.features.submit.components.steps.codestep.template.2": "Agent 已經根據你嘅 {p1} 編寫咗程式碼。你可以在對話中要求修改，或者切換至手動模式。",

@@ -2333,8 +2333,6 @@
   "auto.features.submit.components.steps.basicsstep.template.3": "सर्वोत्तम संयोजन खोजने के लिए {p1} मॉडल जोड़ियाँ",
   "auto.features.submit.components.steps.codestep.2": "सिग्नेचर",
   "auto.features.submit.components.steps.codestep.3": "मीट्रिक",
-  "auto.features.submit.components.steps.codestep.7": "ऑटो",
-  "auto.features.submit.components.steps.codestep.8": "मैन्युअल",
   "auto.features.submit.components.steps.codestep.literal.1": "पहले कॉलम की भूमिकाएँ सेट करें (इनपुट और आउटपुट)",
   "auto.features.submit.components.steps.codestep.template.1": "पहले एक {p1} अपलोड करें",
   "auto.features.submit.components.steps.codestep.template.2": "एजेंट ने आपके {p1} के आधार पर कोड लिखा। आप चैट में बदलाव का अनुरोध कर सकते हैं या मैन्युअल मोड पर स्विच कर सकते हैं।",

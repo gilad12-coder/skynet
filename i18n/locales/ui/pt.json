@@ -2333,8 +2333,6 @@
   "auto.features.submit.components.steps.basicsstep.template.3": "{p1} pares de modelos para encontrar a melhor combinação",
   "auto.features.submit.components.steps.codestep.2": "Assinatura",
   "auto.features.submit.components.steps.codestep.3": "Métrica",
-  "auto.features.submit.components.steps.codestep.7": "Automático",
-  "auto.features.submit.components.steps.codestep.8": "Manual",
   "auto.features.submit.components.steps.codestep.literal.1": "Defina primeiro os papéis das colunas (entrada e saída)",
   "auto.features.submit.components.steps.codestep.template.1": "Carregue primeiro um {p1}",
   "auto.features.submit.components.steps.codestep.template.2": "O agente escreveu o código com base no seu {p1}. Pode solicitar uma alteração no chat ou mudar para o modo manual.",

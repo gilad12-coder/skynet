@@ -17,7 +17,7 @@ export function GeneralistAgentShell({
 }: {
   // Only the shown step hosts the chat: visited steps stay mounted, hidden.
   active: boolean;
-  // A function child gets the switch's value; without the agent it is Manual.
+  // A function child gets "auto" with the agent beside it, else "manual".
   children: React.ReactNode | ((assist: "auto" | "manual") => React.ReactNode);
 }) {
   const render = (value: "auto" | "manual") =>

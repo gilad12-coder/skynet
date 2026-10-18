@@ -2333,8 +2333,6 @@
   "auto.features.submit.components.steps.basicsstep.template.3": "{p1} 个模型组合，以找出最佳组合",
   "auto.features.submit.components.steps.codestep.2": "签名",
   "auto.features.submit.components.steps.codestep.3": "指标",
-  "auto.features.submit.components.steps.codestep.7": "自动",
-  "auto.features.submit.components.steps.codestep.8": "手动",
   "auto.features.submit.components.steps.codestep.literal.1": "请先设置列的角色（输入列和输出列）",
   "auto.features.submit.components.steps.codestep.template.1": "请先上传 {p1}",
   "auto.features.submit.components.steps.codestep.template.2": "智能体已根据你的 {p1} 编写了代码。你可以在聊天中请求修改，或切换到手动模式。",

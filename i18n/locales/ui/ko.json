@@ -2333,8 +2333,6 @@
   "auto.features.submit.components.steps.basicsstep.template.3": "최적의 조합을 찾기 위한 {p1}개 모델 페어",
   "auto.features.submit.components.steps.codestep.2": "시그니처",
   "auto.features.submit.components.steps.codestep.3": "메트릭",
-  "auto.features.submit.components.steps.codestep.7": "자동",
-  "auto.features.submit.components.steps.codestep.8": "수동",
   "auto.features.submit.components.steps.codestep.literal.1": "먼저 열 역할을 설정하세요(입력 및 출력)",
   "auto.features.submit.components.steps.codestep.template.1": "먼저 {p1}을(를) 업로드하세요",
   "auto.features.submit.components.steps.codestep.template.2": "에이전트가 {p1}을(를) 기반으로 코드를 작성했습니다. 채팅에서 변경을 요청하거나 수동 모드로 전환할 수 있습니다.",

@@ -2333,8 +2333,6 @@
   "auto.features.submit.components.steps.basicsstep.template.3": "{p1} Modellpaare, um die beste Kombination zu finden",
   "auto.features.submit.components.steps.codestep.2": "Signatur",
   "auto.features.submit.components.steps.codestep.3": "Metrik",
-  "auto.features.submit.components.steps.codestep.7": "Auto",
-  "auto.features.submit.components.steps.codestep.8": "Manuell",
   "auto.features.submit.components.steps.codestep.literal.1": "Zuerst die Spaltenrollen festlegen (Eingabe und Ausgabe)",
   "auto.features.submit.components.steps.codestep.template.1": "Zuerst {p1} hochladen",
   "auto.features.submit.components.steps.codestep.template.2": "Der Agent hat den Code auf Basis von {p1} geschrieben. Du kannst im Chat eine Änderung anfordern oder in den manuellen Modus wechseln.",

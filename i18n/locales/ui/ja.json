@@ -2333,8 +2333,6 @@
   "auto.features.submit.components.steps.basicsstep.template.3": "最良の組み合わせを見つけるために {p1} 個のモデルペア",
   "auto.features.submit.components.steps.codestep.2": "シグネチャ",
   "auto.features.submit.components.steps.codestep.3": "メトリック",
-  "auto.features.submit.components.steps.codestep.7": "自動",
-  "auto.features.submit.components.steps.codestep.8": "手動",
   "auto.features.submit.components.steps.codestep.literal.1": "先に列の役割（入力と出力）を設定してください",
   "auto.features.submit.components.steps.codestep.template.1": "先に{p1}をアップロードしてください",
   "auto.features.submit.components.steps.codestep.template.2": "エージェントがあなたの{p1}に基づいてコードを記述しました。チャットで変更をリクエストするか、手動モードに切り替えることができます。",

@@ -914,8 +914,6 @@
   "auto.features.submit.components.steps.basicsstep.template.3": "{p1} זוגות מודלים למציאת השילוב הטוב ביותר",
   "auto.features.submit.components.steps.codestep.2": "פרומפט (Signature)",
   "auto.features.submit.components.steps.codestep.3": "פונקציית מדידה",
-  "auto.features.submit.components.steps.codestep.7": "אוטומטי",
-  "auto.features.submit.components.steps.codestep.8": "ידני",
   "auto.features.submit.components.steps.codestep.literal.1": "הגדר/הגדירי קודם את תפקידי העמודות (קלט ופלט)",
   "auto.features.submit.components.steps.codestep.template.1": "העלה/העלי {p1} תחילה",
   "auto.features.submit.components.steps.codestep.template.2": "הסוכן כתב את הקוד לפי ה{p1} שלך. אפשר לבקש שינוי בצ'אט או לעבור למצב ידני.",
