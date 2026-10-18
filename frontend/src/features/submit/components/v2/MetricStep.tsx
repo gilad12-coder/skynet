@@ -14,6 +14,7 @@ import { useContractCheck } from "../../hooks/use-contract-check";
 import { CodingAgentPanel } from "../../ide/CodingAgentPanel";
 import { workspaceKey } from "../../ide/agent-verdict";
 import { IdeWorkspace } from "../../ide/IdeWorkspace";
+import { stopsHiddenTurn } from "../../ide/kickoff";
 import type { IdeOpenRequest } from "../../ide/open-file";
 import { indexRepoTree, repoFolderName, type RepoSource } from "../../ide/repo-files";
 import { useIdeCodingAgent } from "../../ide/use-ide-coding-agent";
@@ -283,6 +284,12 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     setAgentWriting(agentBusy);
     return () => setAgentWriting(false);
   }, [agentBusy, setAgentWriting]);
+  // The kickoff turn that started in Auto keeps streaming after a switch to
+  // Manual or the builder, and its writes would replace the user's rewards.
+  const stopAgent = coding.agent.stop;
+  React.useEffect(() => {
+    if (stopsHiddenTurn(mode === "auto", agentBusy)) stopAgent();
+  }, [mode, agentBusy, stopAgent]);
 
   // Code the agent just wrote moves the wizard on once it passes: from the
   // editor to Check, and from a passing Check to the overview, where Run

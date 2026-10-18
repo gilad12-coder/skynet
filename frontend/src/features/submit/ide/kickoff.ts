@@ -66,3 +66,21 @@ export function kickoffFor(input: KickoffInput): Kickoff | null {
 export function kickoffKey(kickoff: Kickoff, repo: boolean): string {
   return `submit.v2.ide.agent.kickoff.${repo ? `repo_${kickoff}` : kickoff}`;
 }
+
+/**
+ * Decide whether a running agent turn must stop because the user left Auto.
+ *
+ * Manual and the builder hide the agent's panel, so the user can neither see
+ * nor stop a turn that is still running. That turn would still write run.py
+ * and metric.py, and replace the code or rewards the user is making.
+ *
+ * Args:
+ *   auto: The metric is written in Auto mode, where the agent's panel shows.
+ *   busy: A turn is running.
+ *
+ * Returns:
+ *   True when the running turn must stop.
+ */
+export function stopsHiddenTurn(auto: boolean, busy: boolean): boolean {
+  return busy && !auto;
+}
