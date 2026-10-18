@@ -19,6 +19,36 @@ default:
 install:
     cd backend && {{ if pkg == "uv" { "uv sync --extra dev" } else { 'pip install -e ".[dev]"' } }}
 
+# Steps: deps, env files, Postgres/LiteLLM checks, migrations, i18n check.
+# Log: .claude/logs/init-latest.log
+# Deterministic install for a fresh clone or worktree (safe to run again)
+setup:
+    bash scripts/agent/init.sh
+
+# `claude --init-only` runs the Setup hook (init); /install does the rest.
+# Other harnesses: run `just setup`, then follow .claude/commands/install.md.
+# Install, then an agent checks the log, fixes known issues and reports
+install-agent:
+    claude --init-only
+    claude "/install"
+
+# Install with an agent that asks you before each choice
+install-hil:
+    claude --init-only
+    claude "/install-hil"
+
+# Covers advisories, Dependabot, outdated deps, Alembic heads, worktrees,
+# Docker and leftover files. Log: .claude/logs/maintain-latest.log
+# Health report for the codebase (report only)
+maintain:
+    bash scripts/agent/maintain.sh
+
+# Other harnesses: run `just maintain`, then follow .claude/commands/maintain.md.
+# Health report, then an agent explains it and proposes fixes as a PR
+maintain-agent:
+    -bash scripts/agent/maintain.sh
+    claude "/maintain"
+
 backend:
     cd backend && {{_run}}python main.py
 
