@@ -22,7 +22,7 @@ import { WIZARD_STAGE, canMoveForward } from "../../lib/wizard-steps";
 import { SubmitNav, type RunFailureNotice } from "../SubmitNav";
 import { SubmitSplash } from "../SubmitSplash";
 import { SubmitStepper } from "../SubmitStepper";
-import { belowEstimateMessage, shortBalanceMessage } from "../TotalBudgetCard";
+import { belowFloorMessage, shortBalanceMessage } from "../TotalBudgetCard";
 import { InputsStep } from "./InputsStep";
 import { MetricStep } from "./MetricStep";
 import { OptimizerStep } from "./OptimizerStep";
@@ -46,7 +46,7 @@ const SHORTFALL_TOAST_ID = "submit-budget-shortfall";
 function shortfallMessage(shortfall: BudgetShortfall): string {
   return shortfall.kind === "balance"
     ? shortBalanceMessage(shortfall.needed)
-    : belowEstimateMessage(shortfall.needed);
+    : belowFloorMessage(shortfall.needed);
 }
 
 const RUN_FAILURE_TEXT = {
@@ -99,7 +99,8 @@ function UnifiedWizardFrame() {
   const { goNext, goPrev, advancing, submitting } = w;
   const visibleScreen = stepPages(current, w.state)[page] ?? "";
   const { totalCents, available: balanceKnown } = useBalance();
-  const { costBracket, tokenSource, budgetUncapped, maxCostCents } = w;
+  const { runFloor, budgetUncapped, maxCostCents } = w;
+  const floorCents = runFloor?.floorCents ?? null;
   const balance = balanceKnown ? totalCents : null;
   // A run its limit or balance can't open would only fail at its first model
   // call, so Continue holds (the agent's too) on the screen that sets the
@@ -109,24 +110,23 @@ function UnifiedWizardFrame() {
     () =>
       budgetContinueBlock(
         visibleScreen,
-        costBracket,
-        tokenSource,
+        floorCents,
         { uncapped: budgetUncapped, limit: maxCostCents, balance },
         beforeMetric,
       ),
-    [visibleScreen, costBracket, tokenSource, budgetUncapped, maxCostCents, balance, beforeMetric],
+    [visibleScreen, floorCents, budgetUncapped, maxCostCents, balance, beforeMetric],
   );
   // The stepper holds too: no step past a held Continue, and never the
   // metric step while the run can't start, from wherever the user stands.
   const runShort = useMemo(
     () =>
-      costBracket != null &&
-      budgetShortfall(costBracket, tokenSource, {
+      floorCents != null &&
+      budgetShortfall(floorCents, {
         uncapped: budgetUncapped,
         limit: maxCostCents,
         balance,
       }) !== null,
-    [costBracket, tokenSource, budgetUncapped, maxCostCents, balance],
+    [floorCents, budgetUncapped, maxCostCents, balance],
   );
   const { openTo } = useSettingsModal();
   const inputsOpen = canMoveForward(current, w.stepIssue("inputs"));

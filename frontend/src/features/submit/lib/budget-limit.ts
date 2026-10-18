@@ -1,7 +1,3 @@
-import type { TokenSourceMode } from "@/features/billing";
-
-import { chargeableBracket, type CostBracket } from "./cost-bracket";
-
 export interface BudgetChoice {
   uncapped: boolean;
   /** The spending limit, or null while it is unset. */
@@ -18,26 +14,17 @@ export interface BudgetShortfall {
 }
 
 /**
- * The least a spending limit can be: the low end of the projected usage,
- * which starts at what the run holds the moment it starts (its box and its
- * dearest single model call).
- */
-export function limitFloor(bracket: CostBracket, mode: TokenSourceMode): number {
-  return chargeableBracket(bracket, mode).lowCents;
-}
-
-/**
  * Why the run cannot start as set, or null when it can. A limit under the
- * floor is refused at the first model call; the account has to fund that
- * same opening hold whether or not the run is capped. An unset limit is left
- * to stage validation, and a balance that has not loaded to the server.
+ * floor (`runFloor`) cannot open the run's boxes and fund its first calls;
+ * the account has to fund that same floor whether or not the run is capped.
+ * An unset limit is left to stage validation, and a balance that has not
+ * loaded to the server.
  */
 export function budgetShortfall(
-  bracket: CostBracket,
-  mode: TokenSourceMode,
+  floorCents: number,
   { uncapped, limit, balance }: BudgetChoice,
 ): BudgetShortfall | null {
-  const needed = Math.ceil(limitFloor(bracket, mode));
+  const needed = Math.ceil(floorCents);
   if (!uncapped && limit != null && limit < needed) return { kind: "limit", needed };
   if (balance != null && balance < needed) return { kind: "balance", needed };
   return null;
@@ -50,15 +37,14 @@ const LIMIT_SCREENS: ReadonlySet<string> = new Set(["budget", "plan"]);
  * What holds Continue on `screen`, or null when nothing does. The screens
  * that set the limit hold it, and so does `gate`, the last screen before the
  * metric step: past it the user would write code and run checks for a run
- * that cannot start. No estimate yet holds nothing.
+ * that cannot start. No floor yet holds nothing.
  */
 export function budgetContinueBlock(
   screen: string,
-  bracket: CostBracket | null,
-  mode: TokenSourceMode,
+  floorCents: number | null,
   choice: BudgetChoice,
   gate = false,
 ): BudgetShortfall | null {
-  if (!bracket || (!gate && !LIMIT_SCREENS.has(screen))) return null;
-  return budgetShortfall(bracket, mode, choice);
+  if (floorCents == null || (!gate && !LIMIT_SCREENS.has(screen))) return null;
+  return budgetShortfall(floorCents, choice);
 }
