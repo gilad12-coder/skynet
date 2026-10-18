@@ -78,5 +78,7 @@ void describe("RewardPreview", () => {
     const html = render(GEOCODING_METRIC, "he");
     assert.match(html, /<bdi dir="ltr"[^>]*>[^<]*→[^<]*<\/bdi>/);
     assert.match(html, /<bdi>[^<]*\$[^<]*<\/bdi> → <bdi>[^<]*\$[^<]*<\/bdi>/);
+    const single = html.match(/data-case="reference"[\s\S]*?<\/tr>/)?.[0] ?? "";
+    assert.match(single, /<bdi dir="ltr"><bdi>[^<]*\$[^<]*<\/bdi><\/bdi>/);
   });
 });
