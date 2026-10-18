@@ -36,6 +36,7 @@ import {
 } from "../lib/meta-harness";
 import { displayCandidateId, displayCaseId } from "../lib/types";
 import { AgentRunTranscript } from "./AgentRunTranscript";
+import { slidingPillStyle, Stat } from "./run-stat";
 
 const POLL_MS = 2000;
 
@@ -46,16 +47,6 @@ const TAB_LABELS: Record<RunTab, MessageKey> = {
   transcript: "agent_run.tab.transcript",
   check: "agent_run.tab.check",
 };
-
-// The list pads 4px around its triggers and gaps them by 4px, so each trigger
-// takes an equal share of what is left; the pill mirrors the active one.
-function slidingPillStyle(index: number, count: number): CSSProperties {
-  const share = `((100% - ${8 + 4 * (count - 1)}px) / ${count})`;
-  return {
-    width: `calc${share}`,
-    insetInlineStart: `calc(4px + ${index} * (${share} + 4px))`,
-  };
-}
 
 interface RunOutcome {
   status: string;
@@ -95,37 +86,6 @@ function tokensOf(usage: Record<string, unknown>): number | null {
   const output = usage.output_tokens;
   if (typeof input !== "number" && typeof output !== "number") return null;
   return (typeof input === "number" ? input : 0) + (typeof output === "number" ? output : 0);
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-  dir,
-}: {
-  label: string;
-  value: string;
-  tone?: "ok" | "bad";
-  dir?: "ltr";
-}) {
-  return (
-    <div className="flex-1 min-w-0 px-2.5 py-1.5 border-s border-border/30 first:border-s-0">
-      <div className="text-[0.625rem] font-semibold uppercase tracking-wider text-muted-foreground truncate">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "mt-0.5 font-mono text-[13px] font-medium tabular-nums leading-tight truncate",
-          tone === "ok" && "text-[#5f6f2f] dark:text-[#b4c785]",
-          tone === "bad" && "text-[#a85a3b] dark:text-[#fba584]",
-        )}
-        title={value}
-        dir={dir}
-      >
-        {value}
-      </div>
-    </div>
-  );
 }
 
 function AnswerTab({ record }: { record: BlackboxAgentRunResponse }) {
@@ -243,7 +203,9 @@ function RunBody({ optimizationId, run }: { optimizationId: string; run: AgentRu
       </SheetHeader>
       <div className="flex min-h-0 flex-1 flex-col px-4 pb-6 pt-3">
         {failed ? (
-          <p className="text-[11px] text-[#a85a3b] dark:text-[#fba584]">{msg("agent_run.error.load")}</p>
+          <p className="text-[11px] text-[#a85a3b] dark:text-[#fba584]">
+            {msg("agent_run.error.load")}
+          </p>
         ) : (
           // The tab row is known before the record arrives, so it renders from
           // the start and only the tab body waits: nothing shifts on load.

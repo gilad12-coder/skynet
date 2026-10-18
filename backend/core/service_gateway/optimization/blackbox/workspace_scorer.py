@@ -36,7 +36,7 @@ from ....exceptions import ServiceError
 from ....i18n import t
 from ....models.common import ModelConfig
 from ....models.unified import UnifiedCase, UnifiedRunRequest
-from . import sandbox_log, workspace_harness
+from . import check_terminal, sandbox_log, workspace_harness
 from .harness import GatewayConfig
 from .native_runtime import sanitize_side_info
 from .protocol import Candidate, ScorerAbortError, SideInfo
@@ -321,10 +321,60 @@ class WorkspaceScorer(SandboxPythonScorer):
                     for _ in cases
                 ]
             self._open()
+        terminal = check_terminal.current_recorder()
         if len(cases) == 1:
-            return [self._probe(candidate, cases[0])]
+            return [self._sample(candidate, cases[0], 0, 1, terminal)]
         with ThreadPoolExecutor(max_workers=len(cases), thread_name_prefix="workspace-check") as pool:
-            return list(pool.map(lambda case: self._probe(candidate, case), cases))
+            return list(
+                pool.map(
+                    lambda indexed: self._sample(candidate, indexed[1], indexed[0], len(cases), terminal),
+                    enumerate(cases),
+                )
+            )
+
+    def _sample(
+        self,
+        candidate: Candidate,
+        case: Any,
+        index: int,
+        total: int,
+        terminal: check_terminal.CheckTerminalRecorder | None,
+    ) -> WorkspaceProbe:
+        """Score one of ``run_many``'s cases, reporting it to the Check's live transcript.
+
+        The recorder is handed over explicitly: a pool thread does not inherit
+        the caller's context.
+
+        Args:
+            candidate: The version to score.
+            case: The case to score it on.
+            index: The case's position in the fan-out.
+            total: How many cases the fan-out scores.
+            terminal: The check's recorder, if one is recording.
+
+        Returns:
+            The case's probe.
+
+        Raises:
+            ServiceError: When the box could not run the harness at all.
+        """
+        if terminal is None:
+            return self._probe(candidate, case)
+        terminal.sample_started(index, total)
+        with check_terminal.recording(terminal), check_terminal.sample_scope(index):
+            try:
+                probe = self._probe(candidate, case)
+            except Exception as error:
+                terminal.sample_finished(index, total, error=f"{type(error).__name__}: {error}")
+                raise
+        terminal.sample_finished(
+            index,
+            total,
+            score=probe.score,
+            error=probe.error,
+            duration_ms=probe.duration_ms,
+        )
+        return probe
 
     def _probe(self, candidate: Candidate, case: Any) -> WorkspaceProbe:
         """Score one case in the open box, applying ``run``'s failure policy.

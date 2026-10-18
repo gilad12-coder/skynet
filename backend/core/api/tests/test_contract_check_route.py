@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -15,6 +16,7 @@ from core.api.preflight_progress import progress_observer
 from core.api.routers import wizard_preflight
 from core.billing.budgets import AccountFundsError, BudgetInsufficientError
 from core.i18n import t, t_locale
+from core.service_gateway.optimization.blackbox import check_terminal
 from core.worker.failure_events import failure_event
 
 RUN_CODE = "def run(artifact, input):\n    return artifact\n"
@@ -49,6 +51,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
         """Record the request and answer with an in-box contract result."""
         recorded.append(request)
         return SimpleNamespace(
+            terminal=None,
             status="succeeded",
             checks=[],
             workflow_result={
@@ -183,7 +186,9 @@ def test_sandbox_route_gives_an_older_images_items_their_message_codes(
     monkeypatch.setattr(
         wizard_preflight,
         "run_preflight",
-        lambda request, user, store: SimpleNamespace(status="failed", checks=[], workflow_result={"contract": legacy}),
+        lambda request, user, store: SimpleNamespace(
+            terminal=None, status="failed", checks=[], workflow_result={"contract": legacy}
+        ),
     )
     with _client() as client:
         body = client.post("/optimizations/contract-check", json={"spec": _spec()}).json()
@@ -215,7 +220,9 @@ def test_sandbox_route_tells_a_spent_budget_from_a_code_mismatch(
     monkeypatch.setattr(
         wizard_preflight,
         "run_preflight",
-        lambda request, user, store: SimpleNamespace(status="failed", checks=[failed], workflow_result=None),
+        lambda request, user, store: SimpleNamespace(
+            terminal=None, status="failed", checks=[failed], workflow_result=None
+        ),
     )
     with _client() as client:
         body = client.post("/optimizations/contract-check", json={"spec": _spec()}).json()
@@ -445,7 +452,9 @@ def test_unified_evaluation_check_never_probes_the_models_or_the_guest(
 
     def check(payload: dict[str, Any], scope: str, **kwargs: Any) -> dict[str, Any]:
         """Answer the contract and optimizer checks the workspace box returns."""
-        return {"checks": [{"key": "metric.contract", "status": "succeeded"}, {"key": "optimizer", "status": "succeeded"}]}
+        return {
+            "checks": [{"key": "metric.contract", "status": "succeeded"}, {"key": "optimizer", "status": "succeeded"}]
+        }
 
     monkeypatch.setattr(preflight_execution, "verify_unified_in_sandbox", check)
 
@@ -505,6 +514,7 @@ def test_sandbox_route_words_a_budget_refusal_in_the_request_locale(
             status="failed",
             checks=[SimpleNamespace(key="budget", status="failed", message=SPENT)],
             workflow_result={},
+            terminal=None,
         ),
     )
     with _client() as client:
@@ -513,3 +523,33 @@ def test_sandbox_route_words_a_budget_refusal_in_the_request_locale(
     [refusal] = [item for item in body["checks"] if item["key"] == "workspace.run"]
     assert refusal["message_code"] == "submit.unified.contract_budget"
     assert refusal["message"] == t_locale("en", "submit.unified.contract_budget", error=SPENT)
+
+
+def test_stream_route_streams_the_live_transcript_and_returns_it_with_the_result(
+    calls: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each transcript event reaches the viewer as a ``terminal`` event before the result carries the whole log."""
+
+    def run(request: Any, user: Any, store: Any) -> Any:
+        """Record a note on the check's live transcript, then answer with it stored."""
+        recorder = check_terminal.current_recorder()
+        assert recorder is not None
+        recorder.note("box_ready", seconds=1.5)
+        return SimpleNamespace(
+            status="succeeded",
+            checks=[],
+            terminal=recorder.snapshot(),
+            workflow_result={
+                "contract": {"ok": True, "optimizer_resolved": "best_of_n", "checks": [], "fingerprint": "f"}
+            },
+        )
+
+    monkeypatch.setattr(wizard_preflight, "run_preflight", run)
+    with _client() as client:
+        body = client.post("/optimizations/contract-check/stream", json={"spec": _spec()}).text
+
+    terminal_at = body.index("event: terminal\n")
+    assert terminal_at < body.index("event: result\n")
+    assert '"note": "box_ready"' in body
+    result = json.loads(body.split("event: result\ndata: ", 1)[1].split("\n", 1)[0])
+    assert result["terminal"]["events"][0]["note"] == "box_ready"

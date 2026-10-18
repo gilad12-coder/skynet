@@ -42,6 +42,7 @@ function state(overrides: Partial<ContractCheckState>): ContractCheckState {
     checking: false,
     error: null,
     timing: null,
+    terminal: null,
     canCheck: true,
     check: async () => null,
     ...overrides,
