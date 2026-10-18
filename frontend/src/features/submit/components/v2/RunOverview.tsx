@@ -122,7 +122,7 @@ export function RunOverview({
   const metricModel =
     workspace.metricModelMode === "explicit" && workspace.metricModel
       ? workspace.metricModel.name
-      : t("submit.v2.metric.model.inherit");
+      : null;
   const limit = optimizer.budgetUncapped
     ? msg("submit.budget.uncapped_short" as MessageKey)
     : optimizer.maxCostCents != null
@@ -218,14 +218,14 @@ export function RunOverview({
         {tabs[index] === "general" && (
           <>
             <Row label={t("submit.v2.task.objective_label")}>
-              <span className="line-clamp-4 whitespace-pre-wrap break-words" dir="auto">
-                {task.objective}
+              <span className="line-clamp-4 whitespace-pre-wrap break-words">
+                <bdi>{task.objective}</bdi>
               </span>
             </Row>
             {task.background.trim() && (
               <Row label={t("submit.v2.task.background_label")}>
-                <span className="line-clamp-4 whitespace-pre-wrap break-words" dir="auto">
-                  {task.background}
+                <span className="line-clamp-4 whitespace-pre-wrap break-words">
+                  <bdi>{task.background}</bdi>
                 </span>
               </Row>
             )}
@@ -312,7 +312,11 @@ export function RunOverview({
             </Row>
             {!task.repo && (
               <Row label={t("submit.v2.metric.model.label")}>
-                <ModelName name={metricModel} />
+                {metricModel ? (
+                  <ModelName name={metricModel} />
+                ) : (
+                  t("submit.v2.metric.model.inherit")
+                )}
               </Row>
             )}
           </>
