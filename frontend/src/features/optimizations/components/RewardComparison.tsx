@@ -3,6 +3,12 @@
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { Trophy } from "@/shared/ui/icons";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/shared/ui/primitives/tooltip";
 import { rewardFormatters, rewardPartLabel } from "@/shared/lib/reward-format";
 import {
   readRewardSpec,
@@ -18,6 +24,8 @@ type Better = "higher" | "lower";
 interface ComparisonRow {
   key: string;
   label: string;
+  /** The metric's own words for this part, from `REWARD_SPEC`. */
+  meaning?: string;
   baseline: number | null;
   best: number | null;
   better: Better;
@@ -61,6 +69,7 @@ export function RewardComparison({
 }) {
   const read = readRewardSpec(metricCode);
   if (read.kind !== "spec") return null;
+  const { spec } = read;
   const f = rewardFormatters();
   const cases = result.case_results ?? [];
   const baselineObs = summarizeObservations(cases.map((c) => c.baseline_observation));
@@ -73,6 +82,7 @@ export function RewardComparison({
     {
       key: "accuracy",
       label: rewardPartLabel("accuracy"),
+      meaning: spec.accuracy.meaning,
       baseline: part(result.baseline_named_scores, "accuracy"),
       best: part(result.best_named_scores, "accuracy"),
       better: "higher",
@@ -81,6 +91,7 @@ export function RewardComparison({
     {
       key: "mean_ms",
       label: msg("optimization.reward.mean_time"),
+      meaning: spec.speed.meaning,
       baseline: baselineObs.meanMs,
       best: bestObs.meanMs,
       better: "lower",
@@ -89,6 +100,7 @@ export function RewardComparison({
     {
       key: "cost",
       label: msg("optimization.reward.cost_per_response"),
+      meaning: spec.cost.meaning,
       baseline: baselineObs.meanCostUsd,
       best: bestObs.meanCostUsd,
       better: "lower",
@@ -120,57 +132,76 @@ export function RewardComparison({
         <Trophy className="size-4 shrink-0 text-primary" aria-hidden="true" />
         {msg("optimization.reward.title")}
       </h3>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[26rem] text-xs">
-          <thead>
-            <tr className="border-b border-border/60">
-              <th scope="col" className={th}>
-                {msg("optimization.logged_metrics.metric_col")}
-              </th>
-              <th scope="col" className={th}>
-                {msg("optimization.logged_metrics.baseline_col")}
-              </th>
-              <th scope="col" className={th}>
-                {msg("optimization.reward.selected_col")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const loss = isLoss(row);
-              return (
-                <tr
-                  key={row.key}
-                  data-row={row.key}
-                  data-loss={loss ? "true" : undefined}
-                  className={cn(
-                    "border-b border-border/30 last:border-b-0",
-                    row.strong && "font-semibold",
-                  )}
-                >
-                  <th
-                    scope="row"
-                    className={cn(td, "text-start font-normal", row.strong && "font-semibold")}
-                  >
-                    {row.label}
-                  </th>
-                  <td className={td}>
-                    <bdi dir="ltr">{row.format(row.baseline)}</bdi>
-                  </td>
-                  <td className={cn(td, loss && "text-[var(--danger)]")}>
-                    <bdi dir="ltr">{row.format(row.best)}</bdi>
-                    {loss && (
-                      <span className="ms-1.5 text-[0.6875rem] font-medium">
-                        {msg("optimization.reward.worse")}
-                      </span>
+      <TooltipProvider>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[26rem] text-xs">
+            <thead>
+              <tr className="border-b border-border/60">
+                <th scope="col" className={th}>
+                  {msg("optimization.logged_metrics.metric_col")}
+                </th>
+                <th scope="col" className={th}>
+                  {msg("optimization.logged_metrics.baseline_col")}
+                </th>
+                <th scope="col" className={th}>
+                  {msg("optimization.reward.selected_col")}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const loss = isLoss(row);
+                return (
+                  <tr
+                    key={row.key}
+                    data-row={row.key}
+                    data-loss={loss ? "true" : undefined}
+                    className={cn(
+                      "border-b border-border/30 last:border-b-0",
+                      row.strong && "font-semibold",
                     )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                  >
+                    <th
+                      scope="row"
+                      className={cn(td, "text-start font-normal", row.strong && "font-semibold")}
+                    >
+                      {row.meaning ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              tabIndex={0}
+                              data-meaning={row.key}
+                              className="cursor-help underline decoration-muted-foreground/50 decoration-dotted underline-offset-2"
+                            >
+                              {row.label}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            <bdi>{row.meaning}</bdi>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        row.label
+                      )}
+                    </th>
+                    <td className={td}>
+                      <bdi dir="ltr">{row.format(row.baseline)}</bdi>
+                    </td>
+                    <td className={cn(td, loss && "text-[var(--danger)]")}>
+                      <bdi dir="ltr">{row.format(row.best)}</bdi>
+                      {loss && (
+                        <span className="ms-1.5 text-[0.6875rem] font-medium">
+                          {msg("optimization.reward.worse")}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </TooltipProvider>
       {losses.length > 0 && (
         <p role="note" className="text-xs text-[var(--danger)]">
           {formatMsg("optimization.reward.losses", {

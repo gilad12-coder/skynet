@@ -104,6 +104,13 @@ void describe("RewardComparison", () => {
     assert.equal(savedMetricCode({ scorer: { metric_code: "b" } }), "b");
     assert.equal(savedMetricCode(undefined), null);
   });
+
+  void it("puts a part's meaning in a tooltip on its name", () => {
+    const html = render(<RewardComparison result={result()} metricCode={METRIC} />);
+    assert.match(html, /data-meaning="accuracy"/);
+    // The fixture gives speed and cost no meaning, so those rows stay plain.
+    assert.doesNotMatch(html, /data-meaning="(mean_ms|cost|total)"/);
+  });
 });
 
 void describe("HeldOutNotice", () => {
