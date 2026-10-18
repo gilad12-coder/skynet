@@ -38,7 +38,6 @@ import {
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import type { ScorePoint } from "../lib/extract-scores";
-import { InfoCard } from "./ui-primitives";
 import { PipelineStages, computeStageTimestamps } from "./PipelineStages";
 import { MetaHarnessPanel, TrajectoryPanel, climbEngineOf } from "@/features/trajectory";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -417,33 +416,6 @@ function OverviewTabImpl({
             skippedStages={skippedStages}
             hintKey={runShapeKey(job.optimization_id, isPairContext)}
           />
-        </FadeIn>
-      )}
-
-      {bbResult && (
-        <FadeIn delay={0.1}>
-          <div className="grid grid-cols-2 gap-2.5">
-            <InfoCard
-              label={
-                <HelpTip text={tip("blackbox.stats.scorer_runs")}>
-                  {msg("optimization.blackbox.stats.scorer_runs")}
-                </HelpTip>
-              }
-              value={String(bbResult.total_scorer_runs)}
-              icon={<Gauge className="size-3.5" />}
-            />
-            <InfoCard
-              label={
-                <HelpTip text={tip("blackbox.stats.runtime")}>
-                  {msg("optimization.blackbox.stats.runtime")}
-                </HelpTip>
-              }
-              // The header clock counts the whole run (clone, baseline, wrap-up), not
-              // just the engine's search, so the card reads the same number.
-              value={formatDuration(job.elapsed_seconds ?? bbResult.runtime_seconds)}
-              icon={<Timer className="size-3.5" />}
-            />
-          </div>
         </FadeIn>
       )}
 
