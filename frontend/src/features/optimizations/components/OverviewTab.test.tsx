@@ -60,10 +60,9 @@ void describe("finished-run Overview fixtures", () => {
       const loggedRows = html.match(/<th scope="row"/g)?.length ?? 0;
       assert.equal(loggedRows, expect.loggedMetricRows, "logged-metric rows");
 
-      assert.equal(
-        html.includes("auto.features.optimizations.components.overviewtab.1<"),
-        expect.lmStats,
-        "LM call count card",
+      assert.ok(
+        !html.includes("auto.features.optimizations.components.overviewtab.1<"),
+        "no LM call count card",
       );
       assert.ok(!html.includes("run-overview-classic"), "no scoped 10-09 palette");
       assert.equal(

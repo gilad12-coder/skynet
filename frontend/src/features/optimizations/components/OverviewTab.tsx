@@ -4,7 +4,7 @@ import { ProgressBar } from "@/shared/ui/progress-bar";
 import { PingDot } from "@/shared/ui/ping-dot";
 import { memo, useMemo, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { ChatText, Gauge, Hourglass, Timer, TrendUp } from "@/shared/ui/icons";
+import { Gauge, Hourglass, Timer, TrendUp } from "@/shared/ui/icons";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import {
   Table,
@@ -20,7 +20,6 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { blackboxBaselineScore, blackboxBestScore } from "@/shared/lib/blackbox-scores";
 import type {
   BlackboxStrategy,
-  LMActivity,
   OptimizationPayloadResponse,
   OptimizationStatusResponse,
   PairResult,
@@ -269,7 +268,6 @@ function OverviewTabImpl({
     !activePair?.error;
   const fmtScore = isBlackbox ? formatBlackboxScore : formatPercent;
   const fmtDelta = isBlackbox ? formatBlackboxDelta : formatImprovement;
-  const lmActivity: LMActivity | null = (runResult?.lm_activity as LMActivity | undefined) ?? null;
 
   // Named scores the metric logged via log_metrics, macro-averaged server-side
   // over the test split. Optimized-first union so the returned program's
@@ -447,44 +445,6 @@ function OverviewTabImpl({
           </div>
         </FadeIn>
       )}
-
-      {renderRunBlocks &&
-        runResult &&
-        !lmActivity &&
-        (runResult.num_lm_calls != null || runResult.avg_response_time_ms != null) && (
-          <FadeIn delay={0.1}>
-            <div className="grid grid-cols-2 gap-2.5">
-              {runResult.num_lm_calls != null && (
-                <InfoCard
-                  label={
-                    <HelpTip text={tip("lm.calls_count")}>
-                      {msg("auto.features.optimizations.components.overviewtab.1")}
-                    </HelpTip>
-                  }
-                  value={formatMsg(
-                    "auto.features.optimizations.components.overviewtab.template.6",
-                    { p1: runResult.num_lm_calls },
-                  )}
-                  icon={<ChatText className="size-3.5" />}
-                />
-              )}
-              {runResult.avg_response_time_ms != null && (
-                <InfoCard
-                  label={
-                    <HelpTip text={tip("lm.avg_response_time")}>
-                      {msg("auto.features.optimizations.components.overviewtab.2")}
-                    </HelpTip>
-                  }
-                  value={formatMsg(
-                    "auto.features.optimizations.components.overviewtab.template.7",
-                    { p1: (runResult.avg_response_time_ms / 1000).toFixed(1) },
-                  )}
-                  icon={<Timer className="size-3.5" />}
-                />
-              )}
-            </div>
-          </FadeIn>
-        )}
 
       {renderRunBlocks && showScoreCards && (
         <div>

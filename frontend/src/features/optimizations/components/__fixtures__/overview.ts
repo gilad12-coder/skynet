@@ -23,7 +23,6 @@ export interface OverviewFixture {
     loggedMetricRows: number;
     climb: boolean;
     grid: boolean;
-    lmStats: boolean;
     blackboxStats: boolean;
   };
 }
@@ -227,10 +226,9 @@ const finished = {
   loggedMetricRows: 0,
   climb: false,
   grid: false,
-  lmStats: true,
   blackboxStats: false,
 };
-const blackboxFinished = { ...finished, lmStats: false, blackboxStats: true };
+const blackboxFinished = { ...finished, blackboxStats: true };
 
 function pair(index: number, overrides: Partial<PairResult> = {}): PairResult {
   return {
@@ -310,7 +308,7 @@ export const OVERVIEW_FIXTURES: OverviewFixture[] = [
     job: dspyJob({ num_lm_calls: null, avg_response_time_ms: null }),
     payload: null,
     scorePoints: SCORE_SERIES,
-    expect: { ...finished, lmStats: false },
+    expect: finished,
   },
   {
     name: "dspy-failed",
@@ -322,14 +320,14 @@ export const OVERVIEW_FIXTURES: OverviewFixture[] = [
     }),
     payload: null,
     scorePoints: [],
-    expect: { ...finished, scoreCards: false, lmStats: false },
+    expect: { ...finished, scoreCards: false },
   },
   {
     name: "dspy-cancelled",
     job: dspyJob(null, { status: "cancelled", progress_events: DSPY_EVENTS.slice(0, 2), logs: [] }),
     payload: null,
     scorePoints: [],
-    expect: { ...finished, scoreCards: false, lmStats: false },
+    expect: { ...finished, scoreCards: false },
   },
   {
     name: "oa-gepa-prompt",
@@ -479,7 +477,7 @@ export const OVERVIEW_FIXTURES: OverviewFixture[] = [
     }),
     payload: null,
     scorePoints: [],
-    expect: { ...finished, scoreCards: false, lmStats: false, grid: true },
+    expect: { ...finished, scoreCards: false, grid: true },
   },
 ];
 
