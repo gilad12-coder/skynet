@@ -4,7 +4,11 @@ import * as React from "react";
 import { msg, type MessageKey } from "@/shared/lib/messages";
 import { runContractCheck, staticContractCheck } from "@/shared/lib/api";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
-import type { ContractCheckResponse } from "@/shared/types/unified-run";
+import type {
+  CheckTerminalEvent,
+  CheckTerminalLog,
+  ContractCheckResponse,
+} from "@/shared/types/unified-run";
 import type { ContractCheckTiming } from "../lib/contract-validation";
 import { contractSnapshot, withContractBudget, type WizardV2Context } from "../lib/wizard-v2";
 import { contractFailure } from "../lib/wizard-telemetry";
@@ -12,6 +16,9 @@ import { contractFailure } from "../lib/wizard-telemetry";
 // Typing pauses this long before the static (no-sandbox) check runs.
 const STATIC_DEBOUNCE_MS = 700;
 const SANDBOX_SAMPLE_COUNT = 3;
+// Streamed log lines are applied in batches this far apart, so a chatty
+// install does not re-render the screen once per line.
+const TERMINAL_FLUSH_MS = 120;
 
 export interface ContractCheckState {
   /** Signature/shape result for the code as typed; never gates Run. */
@@ -25,6 +32,8 @@ export interface ContractCheckState {
   error: string | null;
   /** When the latest sandboxed check started and reached each step, for the check screen. */
   timing: ContractCheckTiming | null;
+  /** The latest sandboxed check's terminal log: streamed while it runs, the stored one once it ends. */
+  terminal: CheckTerminalLog | null;
   /** False while the setup cannot build a payload yet. */
   canCheck: boolean;
   /** Runs the sandboxed check; resolves to its result, or null when it did not finish. */
@@ -55,6 +64,7 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
   const [checking, setChecking] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [timing, setTiming] = React.useState<ContractCheckTiming | null>(null);
+  const [terminal, setTerminal] = React.useState<CheckTerminalLog | null>(null);
   const checkAbortRef = React.useRef<AbortController | null>(null);
 
   const canCheck = buildPayload() !== null;
@@ -101,6 +111,16 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
     setChecking(true);
     setError(null);
     setTiming({ startedAt: Date.now() });
+    setTerminal({ version: 1, events: [], truncated: [] });
+    let pending: CheckTerminalEvent[] = [];
+    let flushTimer: number | null = null;
+    const flush = () => {
+      flushTimer = null;
+      const batch = pending;
+      pending = [];
+      if (batch.length === 0 || controller.signal.aborted) return;
+      setTerminal((current) => current && { ...current, events: [...current.events, ...batch] });
+    };
     try {
       const budget = await ensureBudget();
       if (controller.signal.aborted) return null;
@@ -110,15 +130,27 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
         controller.signal,
         (phase) => {
           // The server's own steps; anything else (or a repeat) moves nothing.
-          const stamp = phase === "sandbox" ? "sandboxAt" : phase === "evaluator" ? "evaluatorAt" : null;
+          const stamp =
+            phase === "sandbox" ? "sandboxAt" : phase === "evaluator" ? "evaluatorAt" : null;
           if (!stamp) return;
           setTiming((current) =>
             current && !current[stamp] ? { ...current, [stamp]: Date.now() } : current,
           );
         },
+        (event) => {
+          pending.push(event);
+          flushTimer ??= window.setTimeout(flush, TERMINAL_FLUSH_MS);
+        },
       );
       if (controller.signal.aborted) return null;
-      patchWorkspace({ lastCheck: result, lastCheckSnapshot: checkedSnapshot });
+      if (flushTimer !== null) window.clearTimeout(flushTimer);
+      flushTimer = null;
+      pending = [];
+      // The stored log is the whole one (and, for a reused check, the only
+      // one); the draft keeps the result without it, so it stays small.
+      const { terminal: stored, ...kept } = result;
+      setTerminal((current) => stored ?? current);
+      patchWorkspace({ lastCheck: kept, lastCheckSnapshot: checkedSnapshot });
       const failure = contractFailure(result);
       if (failure) track(TelemetryEvent.SetupCheckFailed, { ...failure });
       return result;
@@ -129,6 +161,10 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
       }
       return null;
     } finally {
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
+        flush();
+      }
       if (checkAbortRef.current === controller) {
         checkAbortRef.current = null;
         setChecking(false);
@@ -145,6 +181,7 @@ export function useContractCheck(ctx: WizardV2Context): ContractCheckState {
     checking,
     error,
     timing,
+    terminal,
     canCheck,
     check,
   };

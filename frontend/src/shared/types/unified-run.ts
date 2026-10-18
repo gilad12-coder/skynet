@@ -227,6 +227,55 @@ export interface ContractCheckResponse {
   uses_llm?: boolean;
   /** Each Python file's lint, so each file shows its own findings; absent on older servers. */
   files?: WorkspaceFileLint[];
+  /** The sandboxed check's redacted terminal log; absent on the static check and older servers. */
+  terminal?: CheckTerminalLog | null;
+}
+
+/** A Check row the terminal log files its events under. */
+export type CheckTerminalPhase = "budget" | "sandbox" | "evaluator";
+
+interface CheckTerminalEventBase {
+  /** Milliseconds since the check started. */
+  t: number;
+  phase: CheckTerminalPhase;
+  /** Zero-based evaluator sample the event belongs to. */
+  sample?: number;
+}
+
+/**
+ * One line of the Check's live log. Output is already redacted and clipped by
+ * the server; `note` codes are worded by the client.
+ */
+export type CheckTerminalEvent = CheckTerminalEventBase &
+  (
+    | { kind: "note"; note: string; params?: Record<string, string | number> }
+    | { kind: "command"; id: number; label: string }
+    | { kind: "output"; id: number; stream: "stdout" | "stderr" | "log"; text: string }
+    | {
+        kind: "exit";
+        id: number;
+        duration_ms: number;
+        exit_code?: number;
+        timed_out?: boolean;
+        error?: string;
+      }
+    | {
+        kind: "sample";
+        total: number;
+        state: "running" | "done" | "failed";
+        score?: number;
+        error?: string;
+        duration_ms?: number;
+      }
+  );
+
+export interface CheckTerminalLog {
+  version: number;
+  events: CheckTerminalEvent[];
+  /** Phases whose output hit the server's cap. */
+  truncated: CheckTerminalPhase[];
+  /** Set when an identical earlier check answered, so this is its stored log. */
+  reused?: boolean;
 }
 
 /** Lint lines are `"<path>:<line>:<col> <rule> <message>"`. */
