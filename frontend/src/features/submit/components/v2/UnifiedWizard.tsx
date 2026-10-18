@@ -16,6 +16,12 @@ import { ExecutionBudgetProvider } from "../../hooks/use-execution-budget";
 import { WizardV2Provider, useWizardV2Shell, v2Text } from "../../hooks/use-unified-wizard";
 import { budgetContinueBlock, budgetShortfall, type BudgetShortfall } from "../../lib/budget-limit";
 import type { RunFailureCause } from "../../lib/run-failure";
+import {
+  WIZARD_SCREEN_KEY,
+  keepSessionValue,
+  readSessionValue,
+  reopenedPage,
+} from "../../lib/session-state";
 import { stepPages } from "../../lib/wizard-pages";
 import { WIZARD_V2_STEPS, type WizardStepId } from "../../lib/wizard-v2";
 import { WIZARD_STAGE, canMoveForward } from "../../lib/wizard-steps";
@@ -92,12 +98,24 @@ function UnifiedWizardFrame() {
   const runDisabledReason = w.runBlockedReason ? v2Text(w.runBlockedReason, w.guided) : null;
 
   // Each step is a run of screens; the arrows walk them, then cross steps.
-  const [pages, setPages] = useState(FIRST_PAGES);
+  // A reload reopens the screen it was left on, not just its step.
+  const [pages, setPages] = useState(() =>
+    w.restored
+      ? {
+          ...FIRST_PAGES,
+          [current]: reopenedPage(
+            stepPages(current, w.state),
+            readSessionValue(WIZARD_SCREEN_KEY),
+          ),
+        }
+      : FIRST_PAGES,
+  );
   const pageCount = stepPages(current, w.state).length;
   const page = Math.min(pages[current], pageCount - 1);
   const lastScreen = position === steps.length - 1 && page === pageCount - 1;
   const { goNext, goPrev, advancing, submitting } = w;
   const visibleScreen = stepPages(current, w.state)[page] ?? "";
+  useEffect(() => keepSessionValue(WIZARD_SCREEN_KEY, visibleScreen), [visibleScreen]);
   const { totalCents, available: balanceKnown } = useBalance();
   const { runFloor, budgetUncapped, maxCostCents } = w;
   const floorCents = runFloor?.floorCents ?? null;

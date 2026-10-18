@@ -6,7 +6,7 @@ import { githubRepoFile, githubRepoTree } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
 import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unified-run";
 import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
-import { useWizardV2 } from "../../hooks/use-unified-wizard";
+import { useWizardV2, useWizardV2Shell } from "../../hooks/use-unified-wizard";
 import { useContractCheck } from "../../hooks/use-contract-check";
 import { CodingAgentPanel } from "../../ide/CodingAgentPanel";
 import { workspaceKey } from "../../ide/agent-verdict";
@@ -17,6 +17,12 @@ import { useIdeCodingAgent } from "../../ide/use-ide-coding-agent";
 import { metricAdvanceFrom } from "../../lib/auto-advance";
 import { activeContractPhase } from "../../lib/contract-validation";
 import { authoringCases } from "../../lib/inputs-mode";
+import {
+  WIZARD_CODING_CHAT_KEY,
+  decodeCodingChat,
+  keepSessionValue,
+  readSessionValue,
+} from "../../lib/session-state";
 import { metricUsesModel as metricCallsModel, withScorerImports } from "../../lib/scorer-dependencies";
 import { METRIC_FILE, RUN_FILE, isSingleAnswerTask, repoIssue } from "../../lib/wizard-v2";
 import { v2Msg } from "./ArtifactConfirmCard";
@@ -196,6 +202,11 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
       setOpenRequests((prev) => [...prev, line ? { path, line } : { path }]),
     [],
   );
+  // A reload brings the chat back; the setup's answers came back with it.
+  const { restored } = useWizardV2Shell();
+  const [savedChat] = React.useState(() =>
+    restored ? decodeCodingChat(readSessionValue(WIZARD_CODING_CHAT_KEY)) : [],
+  );
   const coding = useIdeCodingAgent({
     context: agentContext,
     active: onScreen,
@@ -211,6 +222,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     lastCheckOk,
     check: contract.check,
     guided,
+    initialMessages: savedChat,
   });
   // The results strip: the agent's verify_code verdict while it is newer than
   // the last Check, else that Check. Until either is fresh, a failing static
@@ -227,6 +239,12 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
 
   const { setAgentWriting } = ctx;
   const agentBusy = coding.agent.status === "streaming";
+  // Kept between turns only: a turn cut off mid-stream would come back with
+  // tool calls that spin forever.
+  const chat = coding.agent.messages;
+  React.useEffect(() => {
+    if (!agentBusy) keepSessionValue(WIZARD_CODING_CHAT_KEY, JSON.stringify(chat));
+  }, [agentBusy, chat]);
   React.useEffect(() => {
     setAgentWriting(agentBusy);
     return () => setAgentWriting(false);

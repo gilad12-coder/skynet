@@ -23,8 +23,14 @@ import { cn } from "@/shared/lib/utils";
 
 import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
 import { useTaskInterview, type TaskInterviewState } from "../../hooks/use-task-interview";
-import { useWizardV2 } from "../../hooks/use-unified-wizard";
+import { useWizardV2, useWizardV2Shell } from "../../hooks/use-unified-wizard";
 import { taskAdvanceFrom } from "../../lib/auto-advance";
+import {
+  WIZARD_TASK_ASSIST_KEY,
+  decodeTaskAssist,
+  keepSessionValue,
+  readSessionValue,
+} from "../../lib/session-state";
 import { emptyRepoDraft, taskIssue } from "../../lib/wizard-v2";
 import { AuthoringShell } from "../steps/AuthoringShell";
 import { ArtifactConfirmCard, v2Msg } from "./ArtifactConfirmCard";
@@ -44,7 +50,12 @@ export function TaskStep({ page }: { page: number }) {
   const t = (key: string) => v2Msg(key, guided);
 
   // Manual hides the interview; it never discards the transcript.
-  const [assist, setAssist] = React.useState<"auto" | "manual">("auto");
+  // A reload keeps the choice, as it keeps the answers.
+  const { restored } = useWizardV2Shell();
+  const [assist, setAssist] = React.useState<"auto" | "manual">(() =>
+    restored ? decodeTaskAssist(readSessionValue(WIZARD_TASK_ASSIST_KEY)) : "auto",
+  );
+  React.useEffect(() => keepSessionValue(WIZARD_TASK_ASSIST_KEY, assist), [assist]);
   const interview = useTaskInterview(ctx, assist === "auto");
 
   // Once the interview has what it needs, the wizard moves on by itself, but
