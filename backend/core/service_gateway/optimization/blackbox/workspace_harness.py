@@ -68,6 +68,7 @@ import inspect
 import json
 import linecache
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -533,6 +534,9 @@ class TaskRelay:
         self.timeout_seconds = float(gateway.get("timeout_seconds") or 120.0)
         self.protected = protected
         self.calls: list[dict[str, Any]] = []
+        # Concurrent evaluations share the box's loopback: only the child given
+        # this secret path can spend through (and be billed by) this relay.
+        self.prefix = "/" + secrets.token_urlsafe(16)
         self._lock = threading.Lock()
         self._ssl = _runner._ssl_context()
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _RelayHandler)
@@ -543,7 +547,7 @@ class TaskRelay:
     @property
     def url(self) -> str:
         """The base URL the run child posts chat completions to."""
-        return f"http://127.0.0.1:{self._server.server_address[1]}"
+        return f"http://127.0.0.1:{self._server.server_address[1]}{self.prefix}"
 
     def __enter__(self) -> TaskRelay:
         """Start serving."""
@@ -605,11 +609,16 @@ class _RelayHandler(BaseHTTPRequestHandler):
     """Hands every chat-completions POST to the owning :class:`TaskRelay`."""
 
     def do_POST(self) -> None:
-        """Forward the request to the gateway; every path counts, chat completions or not."""
+        """Forward a request under the relay's secret path to the gateway; refuse any other."""
         relay: TaskRelay = self.server.relay  # type: ignore[attr-defined]
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length > 0 else b""
-        status, content_type, data = relay.forward(self.path, body)
+        if not self.path.startswith(relay.prefix + "/"):
+            # Also keeps the forwarded URL on the gateway's host: a path such as
+            # ``@other.host/x`` appended to the base URL would change the host.
+            status, content_type, data = 404, "application/json", b'{"error": {"code": "not_found"}}'
+        else:
+            status, content_type, data = relay.forward(self.path[len(relay.prefix) :], body)
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))

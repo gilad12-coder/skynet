@@ -6,6 +6,8 @@ import io
 import json
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -520,6 +522,29 @@ def test_the_run_child_holds_no_model_key_or_upstream_address() -> None:
     assert gw.url not in reply["output_preview"]
     assert reply["output_preview"].endswith("NoneNone")
     assert authorization == ["Bearer task-key"]
+
+
+def test_the_relay_refuses_a_request_outside_its_secret_path() -> None:
+    """Another evaluation's child cannot spend through this relay, nor point it at another host."""
+    with FakeGateway(reply="answer", cost=TASK_COST) as gw:
+        with workspace_harness.TaskRelay({"url": gw.url, "api_key": "task-key"}, protected=False) as relay:
+            base = relay.url.rsplit("/", 1)[0]
+            refused = []
+            for path in ("/chat/completions", "@127.0.0.1:1/chat/completions", "/other/chat/completions"):
+                request = urllib.request.Request(base + path if path.startswith("/") else base + "/" + path, data=b"{}")
+                with pytest.raises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(request, timeout=5)
+                refused.append(caught.value.code)
+            with urllib.request.urlopen(
+                urllib.request.Request(relay.url + "/chat/completions", data=b'{"model": "task"}')
+            ):
+                pass
+            calls = relay.snapshot()
+        reached = len(gw.requests)
+
+    assert refused == [404, 404, 404]
+    assert reached == 1
+    assert len(calls) == 1
 
 
 def test_task_and_metric_calls_are_kept_apart() -> None:
