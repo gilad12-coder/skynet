@@ -58,7 +58,7 @@ test("no spec reads as none, and a spec the harness would refuse reads as invali
   }
 });
 
-test("criterion 6: mean and p95 time and mean cost come from each response's observation", () => {
+test("criterion 6: mean time and mean cost come from each response's observation", () => {
   const observations = [
     ...Array.from({ length: 19 }, () => ({ timing: { task_ms: 100 }, cost: { usd: 0.001 } })),
     { timing: { task_ms: 2000 }, cost: { usd: null, status: "unpriced", reason: "no price" } },
@@ -69,20 +69,12 @@ test("criterion 6: mean and p95 time and mean cost come from each response's obs
   assert.equal(summary.priced, 19);
   assert.equal(summary.unpriced, 1);
   assert.equal(summary.meanMs, (19 * 100 + 2000) / 20);
-  assert.equal(summary.p95Ms, 100);
   assert.ok(Math.abs(summary.meanCostUsd! - 0.001) < 1e-12);
-  const tail = summarizeObservations([
-    ...Array.from({ length: 18 }, () => ({ timing: { task_ms: 100 } })),
-    { timing: { task_ms: 900 } },
-    { timing: { task_ms: 1000 } },
-  ]);
-  assert.equal(tail.p95Ms, 900);
   assert.deepEqual(summarizeObservations([]), {
     timed: 0,
     priced: 0,
     unpriced: 0,
     meanMs: null,
-    p95Ms: null,
     meanCostUsd: null,
   });
 });

@@ -71,23 +71,14 @@ const row = (html: string, key: string) =>
   new RegExp(`<tr[^>]*data-row="${key}"[^>]*>[\\s\\S]*?</tr>`).exec(html)?.[0] ?? "";
 
 void describe("RewardComparison", () => {
-  void it("compares accuracy, mean and p95 time, cost, contributions and total", () => {
+  void it("shows only accuracy, mean time, cost and total", () => {
     const html = render(<RewardComparison result={result()} metricCode={METRIC} />);
-    for (const key of [
-      "accuracy",
-      "mean_ms",
-      "p95_ms",
-      "cost",
-      "contribution_accuracy",
-      "contribution_speed",
-      "contribution_cost",
-      "total",
-    ]) {
-      assert.ok(row(html, key), key);
-    }
-    // Mean and p95 time come from each response's own observation.
+    const keys = [...html.matchAll(/data-row="([^"]+)"/g)].map((m) => m[1]);
+    assert.deepEqual(keys, ["accuracy", "mean_ms", "cost", "total"]);
+    assert.match(html, /optimization\.reward\.title/);
+    assert.doesNotMatch(html, /optimization\.reward\.desc/);
+    // Mean time comes from each response's own observation.
     assert.match(row(html, "mean_ms"), /2,100 ms[\s\S]*1,250 ms/);
-    assert.match(row(html, "p95_ms"), /2,200[\s\S]*1,500/);
     // Only the priced response counts toward the mean cost; the other is named.
     assert.match(row(html, "cost"), /\$0\.001[\s\S]*\$0\.002/);
     assert.match(html, /optimization\.reward\.unpriced/);
@@ -97,7 +88,6 @@ void describe("RewardComparison", () => {
     const html = render(<RewardComparison result={result()} metricCode={METRIC} />);
     assert.doesNotMatch(row(html, "total"), /data-loss/);
     assert.match(row(html, "cost"), /data-loss="true"/);
-    assert.match(row(html, "contribution_cost"), /data-loss="true"/);
     assert.doesNotMatch(row(html, "mean_ms"), /data-loss/);
     assert.match(html, /optimization\.reward\.losses/);
   });

@@ -183,18 +183,10 @@ export interface ObservationSummary {
   /** Responses with an observation but no price. */
   unpriced: number;
   meanMs: number | null;
-  p95Ms: number | null;
   meanCostUsd: number | null;
 }
 
-/** Nearest-rank percentile of `values` (already measured, any order). */
-export function percentile(values: number[], fraction: number): number | null {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.max(0, Math.ceil(fraction * sorted.length) - 1)] ?? null;
-}
-
-/** Mean and p95 time and mean cost per response, from each response's own observation. */
+/** Mean time and mean cost per response, from each response's own observation. */
 export function summarizeObservations(
   observations: Array<ResponseObservation | null | undefined>,
 ): ObservationSummary {
@@ -216,7 +208,6 @@ export function summarizeObservations(
     priced: costs.length,
     unpriced,
     meanMs: mean(times),
-    p95Ms: percentile(times, 0.95),
     meanCostUsd: mean(costs),
   };
 }

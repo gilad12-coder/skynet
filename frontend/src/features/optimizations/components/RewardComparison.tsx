@@ -2,9 +2,9 @@
 
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
+import { Trophy } from "@/shared/ui/icons";
 import { rewardFormatters, rewardPartLabel } from "@/shared/lib/reward-format";
 import {
-  REWARD_COMPONENTS,
   readRewardSpec,
   summarizeObservations,
   type RewardComponent,
@@ -46,7 +46,7 @@ export function savedMetricCode(payload: unknown): string | null {
 }
 
 /**
- * The baseline and the selected version on accuracy, speed and cost (SKY-69).
+ * The reward breakdown of the baseline and the selected version (SKY-69).
  *
  * Time and cost come from each final-run response's trusted observation; the
  * parts and the total come from the run's own scores. A part where the
@@ -61,7 +61,6 @@ export function RewardComparison({
 }) {
   const read = readRewardSpec(metricCode);
   if (read.kind !== "spec") return null;
-  const { spec } = read;
   const f = rewardFormatters();
   const cases = result.case_results ?? [];
   const baselineObs = summarizeObservations(cases.map((c) => c.baseline_observation));
@@ -70,8 +69,6 @@ export function RewardComparison({
     const value = named?.[name]?.score;
     return typeof value === "number" ? value : null;
   };
-  const contribution = (value: number | null, name: RewardComponent) =>
-    value == null ? null : value * spec.weights[name];
   const rows: ComparisonRow[] = [
     {
       key: "accuracy",
@@ -90,14 +87,6 @@ export function RewardComparison({
       format: f.ms,
     },
     {
-      key: "p95_ms",
-      label: msg("optimization.reward.p95_time"),
-      baseline: baselineObs.p95Ms,
-      best: bestObs.p95Ms,
-      better: "lower",
-      format: f.ms,
-    },
-    {
       key: "cost",
       label: msg("optimization.reward.cost_per_response"),
       baseline: baselineObs.meanCostUsd,
@@ -105,19 +94,6 @@ export function RewardComparison({
       better: "lower",
       format: f.usd,
     },
-    ...REWARD_COMPONENTS.map(
-      (name): ComparisonRow => ({
-        key: `contribution_${name}`,
-        label: formatMsg("optimization.reward.contribution", {
-          part: rewardPartLabel(name),
-          weight: f.pct(spec.weights[name]),
-        }),
-        baseline: contribution(part(result.baseline_named_scores, name), name),
-        best: contribution(part(result.best_named_scores, name), name),
-        better: "higher",
-        format: f.score,
-      }),
-    ),
     {
       key: "total",
       label: msg("optimization.reward.total"),
@@ -137,12 +113,13 @@ export function RewardComparison({
       aria-labelledby="reward-comparison-title"
       className="space-y-2 rounded-xl border border-border bg-card px-4 py-3.5"
     >
-      <h3 id="reward-comparison-title" className="text-sm font-medium text-foreground">
+      <h3
+        id="reward-comparison-title"
+        className="flex items-center gap-2 text-sm font-medium text-foreground"
+      >
+        <Trophy className="size-4 shrink-0 text-primary" aria-hidden="true" />
         {msg("optimization.reward.title")}
       </h3>
-      <p className="text-xs text-muted-foreground">
-        {formatMsg("optimization.reward.desc", { count: cases.length })}
-      </p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[26rem] text-xs">
           <thead>
