@@ -16,13 +16,15 @@ export function InfoCard({
   icon?: ReactNode;
 }) {
   return (
-    <div
-      className="group relative rounded-lg border border-border bg-card px-3.5 py-3 transition-[border-color,box-shadow] duration-200 hover:border-primary-fill/55"
+    <motion.div
+      whileHover={{ y: -1 }}
+      transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+      className="group relative rounded-lg border border-overview-line bg-overview-surface px-3.5 py-3 transition-[border-color,box-shadow] duration-200 hover:border-overview-gold/55 hover:shadow-[0_2px_8px_-2px_rgba(124,99,80,0.1)] dark:hover:shadow-none"
     >
       <div className="flex items-center gap-1.5 mb-1.5">
         {icon && (
           <span
-            className="shrink-0 inline-flex items-center justify-center size-3.5 text-muted-foreground transition-colors duration-200 group-hover:text-[var(--text-2)]"
+            className="shrink-0 inline-flex items-center justify-center size-3.5 text-overview-quiet transition-colors duration-200 group-hover:text-overview-quiet-hover"
             aria-hidden="true"
           >
             {icon}
@@ -33,9 +35,9 @@ export function InfoCard({
         </p>
       </div>
       <p className="text-sm font-semibold text-foreground truncate">
-        {value ?? <span className="text-[#BFB3A3] font-normal">—</span>}
+        {value ?? <span className="text-overview-faint font-normal">—</span>}
       </p>
-    </div>
+    </motion.div>
   );
 }
 

@@ -121,7 +121,6 @@ function OverviewTabImpl({
   onPairSelect,
   onPairDeleted,
   payload,
-  resultCard,
 }: {
   job: OptimizationStatusResponse;
   isActive: boolean;
@@ -133,8 +132,6 @@ function OverviewTabImpl({
   // The submitted payload: a black-box run's recipe and cases tell the
   // candidate tree what a candidate is and whether per-case scores exist.
   payload?: OptimizationPayloadResponse | null;
-  // Standard level leads a finished run's Overview with its result card.
-  resultCard?: ReactNode;
 }) {
   const metrics = job.latest_metrics ?? {};
   const isPairContext = activePair != null;
@@ -317,9 +314,7 @@ function OverviewTabImpl({
   })();
 
   return (
-    <>
-      {resultCard}
-
+    <div className="run-overview-classic space-y-6">
       {renderRunBlocks && job.status !== "stopped" && job.recovery?.state !== "recovering" && (
         <FadeIn>
           <p className="text-sm text-muted-foreground">
@@ -381,26 +376,26 @@ function OverviewTabImpl({
 
           return (
             <FadeIn>
-              <div className="rounded-xl border border-border bg-card px-4 py-3.5">
+              <div className="rounded-xl border border-overview-line bg-overview-surface px-4 py-3.5">
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-overview-ink">
                     <PingDot size="sm" />
                     {isBlackbox
                       ? msg("optimization.progress.blackbox")
                       : msg("optimization.progress.gepa")}
                   </span>
                   <span dir="ltr" className="flex items-baseline gap-1.5 font-mono tabular-nums">
-                    <span className="text-sm font-semibold text-foreground">
+                    <span className="text-sm font-semibold text-overview-ink">
                       {tqdmPercent.toFixed(0)}%
                     </span>
-                    <span className="text-[0.6875rem] text-muted-foreground">
+                    <span className="text-[0.6875rem] text-overview-quiet">
                       {tqdmN ?? 0}/{tqdmTotal ?? "?"}
                     </span>
                   </span>
                 </div>
                 <ProgressBar value={tqdmPercent} className="mt-2" />
                 {stats.length > 0 && (
-                  <div className="mt-3.5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-border/70 pt-3.5 sm:grid-cols-3">
+                  <div className="mt-3.5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-overview-line/70 pt-3.5 sm:grid-cols-3">
                     {stats.map((s) => (
                       <LiveStat key={s.key} icon={s.icon} label={s.label} value={s.value} />
                     ))}
@@ -439,7 +434,11 @@ function OverviewTabImpl({
               icon={<Gauge className="size-3.5" />}
             />
             <InfoCard
-              label={msg("optimization.blackbox.stats.runtime")}
+              label={
+                <HelpTip text={tip("blackbox.stats.runtime")}>
+                  {msg("optimization.blackbox.stats.runtime")}
+                </HelpTip>
+              }
               // The header clock counts the whole run (clone, baseline, wrap-up), not
               // just the engine's search, so the card reads the same number.
               value={formatDuration(job.elapsed_seconds ?? bbResult.runtime_seconds)}
@@ -457,7 +456,11 @@ function OverviewTabImpl({
             <div className="grid grid-cols-2 gap-2.5">
               {runResult.num_lm_calls != null && (
                 <InfoCard
-                  label={msg("auto.features.optimizations.components.overviewtab.1")}
+                  label={
+                    <HelpTip text={tip("lm.calls_count")}>
+                      {msg("auto.features.optimizations.components.overviewtab.1")}
+                    </HelpTip>
+                  }
                   value={formatMsg(
                     "auto.features.optimizations.components.overviewtab.template.6",
                     { p1: runResult.num_lm_calls },
@@ -467,7 +470,11 @@ function OverviewTabImpl({
               )}
               {runResult.avg_response_time_ms != null && (
                 <InfoCard
-                  label={msg("auto.features.optimizations.components.overviewtab.2")}
+                  label={
+                    <HelpTip text={tip("lm.avg_response_time")}>
+                      {msg("auto.features.optimizations.components.overviewtab.2")}
+                    </HelpTip>
+                  }
                   value={formatMsg(
                     "auto.features.optimizations.components.overviewtab.template.7",
                     { p1: (runResult.avg_response_time_ms / 1000).toFixed(1) },
@@ -493,7 +500,7 @@ function OverviewTabImpl({
               </TiltCard>
             </StaggerItem>
             <StaggerItem>
-              <TiltCard className="rounded-xl border on-primary p-6 text-center">
+              <TiltCard className="rounded-xl border border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10 p-6 text-center shadow-[0_0_20px_rgba(var(--primary),0.08)]">
                 <p className="text-[0.6875rem] text-muted-foreground mb-2 font-medium tracking-wide">
                   <HelpTip text={tip(isBlackbox ? "blackbox.score.optimized" : "score.optimized")}>
                     {TERMS.optimizedScore}
@@ -506,10 +513,14 @@ function OverviewTabImpl({
             </StaggerItem>
             <StaggerItem>
               <TiltCard
-                className={`rounded-xl border p-6 text-center ${(displayImprovement ?? 0) >= 0 ? "border-border bg-muted/50" : "border-[var(--danger-border)] bg-[var(--danger-dim)]"}`}
+                className={`rounded-xl border p-6 text-center ${(displayImprovement ?? 0) >= 0 ? "border-stone-400/50 bg-gradient-to-br from-stone-100/50 to-stone-200/30 dark:border-border dark:from-muted/60 dark:to-muted/30" : "border-[var(--danger-border)] bg-[var(--danger-dim)]"}`}
               >
                 <p className="text-[0.6875rem] text-muted-foreground mb-2 font-medium tracking-wide">
-                  {msg("auto.features.optimizations.components.overviewtab.3")}
+                  <HelpTip
+                    text={tip(isBlackbox ? "blackbox.score.improvement" : "score.improvement")}
+                  >
+                    {msg("auto.features.optimizations.components.overviewtab.3")}
+                  </HelpTip>
                 </p>
                 <p
                   className={`text-3xl font-mono font-bold tabular-nums ${(displayImprovement ?? 0) >= 0 ? "text-stone-600 dark:text-stone-300" : "text-[var(--danger)]"}`}
@@ -524,7 +535,7 @@ function OverviewTabImpl({
 
       {renderRunBlocks && loggedMetricNames.length > 0 && (
         <FadeIn delay={0.1}>
-          <div className="rounded-xl border border-border bg-card px-4 py-3.5">
+          <div className="rounded-xl border border-overview-line bg-overview-surface px-4 py-3.5">
             {/* Semantic table so screen readers announce each value with its
                 column header. Columns use logical alignment and the table
                 follows the page direction — baseline stays on the reading
@@ -555,7 +566,9 @@ function OverviewTabImpl({
                     </HelpTip>
                   </TableHead>
                   <TableHead className="h-auto px-0 pb-1.5 ps-4 text-end text-[0.6875rem] font-medium text-muted-foreground/70">
-                    {msg("optimization.logged_metrics.change_col")}
+                    <HelpTip text={tip("score.improvement")}>
+                      {msg("optimization.logged_metrics.change_col")}
+                    </HelpTip>
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -640,17 +653,21 @@ function OverviewTabImpl({
 
       {renderRunBlocks && scorePoints.length > 1 && (
         <FadeIn delay={0.1}>
-          <Card className="relative overflow-hidden">
+          <Card className="relative overflow-hidden shadow-[0_1px_3px_rgba(28,22,18,0.04),inset_0_1px_0_rgba(255,255,255,0.5)] dark:shadow-none">
             <div
-              className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-primary-fill/40 to-transparent"
+              className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-overview-gold/40 to-transparent"
               aria-hidden="true"
             />
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <TrendUp className="size-4" aria-hidden="true" />
-                <span className="font-bold tracking-tight">
-                  {msg("auto.features.optimizations.components.overviewtab.4")}
-                </span>
+                <HelpTip
+                  text={tip(isBlackbox ? "blackbox.score.progression" : "score.progression")}
+                >
+                  <span className="font-bold tracking-tight">
+                    {msg("auto.features.optimizations.components.overviewtab.4")}
+                  </span>
+                </HelpTip>
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -671,7 +688,7 @@ function OverviewTabImpl({
       {renderGridAgg && job.grid_result && activePairIndex === null && (
         <GridOverview job={job} onPairSelect={onPairSelect} onPairDeleted={onPairDeleted} />
       )}
-    </>
+    </div>
   );
 }
 

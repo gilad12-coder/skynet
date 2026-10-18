@@ -96,10 +96,6 @@ export const StaggerItem = React.memo(function StaggerItem({
   );
 });
 
-/**
- * A card wrapper that is optionally clickable. The UI is flat, so it no longer
- * tilts or lifts on hover; the name stays for its call sites.
- */
 export function TiltCard({
   children,
   className,
@@ -109,6 +105,28 @@ export function TiltCard({
   className?: string;
   onClick?: () => void;
 }) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const shouldReduceMotion = useReducedMotion();
+
+  const handleMouseMove = React.useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (shouldReduceMotion) return;
+      const el = ref.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width - 0.5;
+      const y = (e.clientY - rect.top) / rect.height - 0.5;
+      el.style.transform = `perspective(800px) rotateY(${x * 6}deg) rotateX(${-y * 6}deg) translateY(-2px)`;
+    },
+    [shouldReduceMotion],
+  );
+
+  const handleMouseLeave = React.useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.transform = "perspective(800px) rotateY(0deg) rotateX(0deg) translateY(0)";
+  }, []);
+
   const interactive = onClick != null;
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -123,11 +141,18 @@ export function TiltCard({
 
   return (
     <div
+      ref={ref}
       className={`${className ?? ""}${interactive ? " cursor-pointer" : ""}`}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
       onClick={onClick}
       onKeyDown={interactive ? handleKeyDown : undefined}
       role={interactive ? "button" : undefined}
       tabIndex={interactive ? 0 : undefined}
+      style={{
+        transition: "transform 400ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+        willChange: shouldReduceMotion ? undefined : "transform",
+      }}
     >
       {children}
     </div>

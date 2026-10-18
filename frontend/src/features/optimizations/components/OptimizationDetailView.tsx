@@ -105,7 +105,6 @@ import { UsageTab } from "./UsageTab";
 import { ReactServeChat } from "./ReactServeChat";
 import { ReactServeApi } from "./ReactServeApi";
 import { RunPlayground } from "./RunPlayground";
-import { RunResultCard, resultArtifactText, runResultScores } from "./RunResultCard";
 import { linkifyMessage } from "@/shared/lib/linkify";
 import { useStreamWithPollFallback } from "@/shared/hooks/use-stream-with-poll-fallback";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
@@ -345,9 +344,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const surfaceLevel = useExperienceLevel();
   const levelTabGate = detailTabGate(surfaceLevel);
   const linkedDetailTab = requestedDetailTab(searchParams.get("tab"));
-  // Guided opens a finished run on its result card alone; a deep link to a
-  // tab skips straight to the tabbed page.
-  const [showGuidedDetails, setShowGuidedDetails] = useState(() => searchParams.has("tab"));
 
   // Public read-only share view: seed from props; never call authed endpoints.
   const skipNetwork = isShare;
@@ -1166,37 +1162,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   // Usage reads the run's billing records, which only an authenticated viewer can fetch.
   const showUsageTab = !skipNetwork;
 
-  const resultArtifact =
-    !isShare &&
-    !isPairContext &&
-    surfaceLevel !== "expert" &&
-    job.status === "success" &&
-    job.optimization_type !== "grid_search"
-      ? resultArtifactText({
-          job,
-          optimizedPrompt,
-          reactOverlay,
-          optimizedModuleSrc,
-          optimizedNodes,
-        })
-      : "";
-  const resultCard = resultArtifact ? (
-    <RunResultCard
-      scores={runResultScores(job)}
-      artifactText={resultArtifact}
-      onTryIt={
-        showPlaygroundTab
-          ? () => {
-              setShowGuidedDetails(true);
-              setDetailTab("playground");
-            }
-          : undefined
-      }
-      onSeeDetails={surfaceLevel === "guided" ? () => setShowGuidedDetails(true) : undefined}
-    />
-  ) : null;
-  const guidedResultOnly = surfaceLevel === "guided" && resultCard != null && !showGuidedDetails;
-
   const pairCount = effectiveJob?.grid_result?.pair_results.length ?? 0;
   const isBestPair =
     isPairContext && effectiveJob?.grid_result?.best_pair?.pair_index === activePair.pair_index;
@@ -1205,7 +1170,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     <div className="space-y-6 pb-12">
       {sharedTier && <RunAccessBanner tier={sharedTier} owner={sharedByOwner} />}
       <FadeIn delay={0.1}>
-        <div className="rounded-xl border border-border/40 bg-card p-4 sm:p-5">
+        <div className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
             <div className="space-y-2 min-w-0 sm:flex-1">
               <div className="flex flex-col items-start gap-1.5">
@@ -1290,9 +1255,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      onClick={() =>
-                        router.push(`/submit?clone=${job.optimization_id}`)
-                      }
+                      onClick={() => router.push(`/submit?clone=${job.optimization_id}`)}
                       aria-label={msg("auto.app.optimizations.id.page.literal.4")}
                     >
                       <Copy className="size-4" />
@@ -1421,12 +1384,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
       {job.status === "failed" && !isPairContext && (job.message || (metrics.error as string)) && (
         <FadeIn delay={0.15}>
-          <div className="rounded-xl border border-destructive/20 bg-destructive/[0.04] p-5">
+          <div className="run-overview-classic rounded-xl border border-destructive/20 bg-gradient-to-br from-destructive/[0.05] to-destructive/[0.015] p-5 shadow-[0_1px_3px_rgba(176,64,48,0.07)] dark:shadow-none">
             <div className="flex items-center gap-3">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
                 <XCircle className="size-5" />
               </span>
-              <p className="min-w-0 flex-1 text-sm font-semibold text-[#7A2A1E] dark:text-[#ffb1a0]">
+              <p className="min-w-0 flex-1 text-sm font-semibold text-overview-danger-strong">
                 {msg("auto.app.optimizations.id.page.6")}
               </p>
             </div>
@@ -1434,22 +1397,22 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               <div className="flex items-start gap-2" dir="ltr">
                 <div className="min-w-0 flex-1">
                   <pre
-                    className="text-xs text-[#8A3326] dark:text-[#ffa997] whitespace-pre-wrap break-words font-mono leading-relaxed"
+                    className="text-xs text-overview-danger-text whitespace-pre-wrap break-words font-mono leading-relaxed"
                     dir="ltr"
                   >
                     {linkifyMessage(
                       job.message ?? "",
-                      "underline decoration-destructive/40 underline-offset-2 hover:text-[#7A2A1E] dark:hover:text-[#ffb1a0] transition-colors",
+                      "underline decoration-destructive/40 underline-offset-2 hover:text-overview-danger-strong transition-colors",
                     )}
                   </pre>
                   {typeof metrics.error === "string" && !job.message?.includes(metrics.error) && (
                     <pre
-                      className="text-xs text-[#8A3326] dark:text-[#ffa997] whitespace-pre-wrap break-words font-mono leading-relaxed mt-2 border-t border-destructive/15 pt-2"
+                      className="text-xs text-overview-danger-text whitespace-pre-wrap break-words font-mono leading-relaxed mt-2 border-t border-destructive/15 pt-2"
                       dir="ltr"
                     >
                       {linkifyMessage(
                         String(metrics.error),
-                        "underline decoration-destructive/40 underline-offset-2 hover:text-[#7A2A1E] dark:hover:text-[#ffb1a0] transition-colors",
+                        "underline decoration-destructive/40 underline-offset-2 hover:text-overview-danger-strong transition-colors",
                       )}
                     </pre>
                   )}
@@ -1472,7 +1435,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
       {isPairContext && activePair.error && (
         <FadeIn delay={0.05}>
-          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+          <div className="run-overview-classic rounded-xl border border-destructive/30 bg-destructive/5 p-4">
             <div className="text-sm font-medium text-destructive mb-1">
               {msg("auto.features.optimizations.components.pairdetailview.3")}
             </div>
@@ -1508,10 +1471,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           </FadeIn>
         )}
 
-      {guidedResultOnly && resultCard}
-
       {(() => {
-        if (guidedResultOnly) return null;
         const tabCls =
           "relative min-h-[44px] shrink-0 flex-none px-2.5 sm:px-4 py-2.5 rounded-none border-b-2 border-transparent data-[state=active]:border-transparent data-[state=active]:border-b-primary data-[state=active]:text-foreground data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-all duration-200 text-xs sm:text-sm";
         // Pair view pings the trajectory/logs tabs only while the pair itself
@@ -1638,7 +1598,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 onPairSelect={handlePairSelect}
                 onPairDeleted={handlePairDeleted}
                 payload={payload}
-                resultCard={surfaceLevel === "standard" ? resultCard : null}
               />
             </TabsContent>
 

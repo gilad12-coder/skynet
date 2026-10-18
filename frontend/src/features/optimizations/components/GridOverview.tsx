@@ -32,6 +32,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives
 import { Button } from "@/shared/ui/primitives/button";
 import { Dialog, DialogContent, DialogFooter } from "@/shared/ui/primitives/dialog";
 import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { FadeIn, StaggerContainer, StaggerItem, TiltCard } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import type { OptimizationStatusResponse, PairResult } from "@/shared/types/api";
@@ -224,7 +225,7 @@ function GridOverviewImpl({
             onClick={qualityPair ? () => setPairFilter(qualityPair.pair_index) : undefined}
           >
             <div className="flex items-center justify-center gap-1.5 mb-1">
-              <Trophy className="size-3 text-primary" />
+              <Trophy className="size-3 text-overview-gold" />
               <p className="text-[0.625rem] text-muted-foreground">
                 {msg("auto.features.optimizations.components.gridoverview.7")}
               </p>
@@ -274,11 +275,8 @@ function GridOverviewImpl({
         <FadeIn delay={0.1}>
           {pairFilter != null && (
             <div className="flex items-center gap-2 flex-wrap mb-3">
-              <span className="group inline-flex items-center gap-1.5 rounded-lg border on-primary pe-1 ps-2.5 py-1 transition-all duration-150 hover:bg-primary-fill/[0.1] hover:border-primary-fill/20">
-                <span
-                  className="font-mono text-[0.6875rem] font-medium text-primary/80"
-                  dir="ltr"
-                >
+              <span className="group inline-flex items-center gap-1.5 rounded-lg bg-primary/[0.06] border border-primary/10 pe-1 ps-2.5 py-1 transition-all duration-150 hover:bg-primary/[0.1] hover:border-primary/20">
+                <span className="font-mono text-[0.6875rem] font-medium text-primary/80" dir="ltr">
                   {selectedPair ? pairLabel(selectedPair) : "—"}
                 </span>
                 <button
@@ -423,7 +421,9 @@ function GridOverviewImpl({
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">
-                      {msg("auto.features.optimizations.components.gridoverview.10")}
+                      <HelpTip text={tip("grid.score_comparison")}>
+                        {msg("auto.features.optimizations.components.gridoverview.10")}
+                      </HelpTip>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
@@ -558,7 +558,9 @@ function GridOverviewImpl({
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">
-                      {msg("auto.features.optimizations.components.gridoverview.11")}
+                      <HelpTip text={tip("grid.quality_speed_combined")}>
+                        {msg("auto.features.optimizations.components.gridoverview.11")}
+                      </HelpTip>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
@@ -750,7 +752,7 @@ function GridOverviewImpl({
                             content={({ active, payload, label }) => {
                               if (!active || !payload?.length) return null;
                               return (
-                                <div className="rounded-xl border border-border/60 bg-background/95 backdrop-blur-sm p-3 shadow-[var(--shadow-float)]">
+                                <div className="rounded-xl border border-border/60 bg-background/95 backdrop-blur-sm p-3 shadow-lg">
                                   {label && (
                                     <p className="font-semibold mb-1.5 text-foreground text-xs">
                                       {label}
@@ -787,7 +789,11 @@ function GridOverviewImpl({
                             {pairRespTimeFiltered.map((entry, i) => (
                               <Cell
                                 key={i}
-                                fill={entry.isBest ? "var(--color-chart-1)" : "var(--color-chart-4)"}
+                                fill={
+                                  entry.isBest
+                                    ? "var(--color-overview-gold)"
+                                    : "var(--color-chart-4)"
+                                }
                               />
                             ))}
                           </Bar>
@@ -809,17 +815,14 @@ function GridOverviewImpl({
           const isSpeed = scoring.speedWinner === pr.pair_index;
           const s = scoring.byIndex[pr.pair_index];
           const barRatio = s?.quality ?? 0;
-          // A failed pair offers Resume only when it crashed mid-run (has a
-          // checkpoint); new grid searches are no longer submitted, so there is
-          // no restart-from-a-clone path.
           return (
             <div
               key={pr.pair_index}
-              className={`group relative rounded-xl border p-4 transition-colors duration-200 ${
+              className={`group relative rounded-xl border p-4 transition-colors duration-200 hover:shadow-sm ${
                 pr.error
                   ? "border-destructive/30 bg-destructive/[0.02] hover:border-destructive/50"
                   : isOverall
-                    ? "on-primary"
+                    ? "border-primary/40 bg-primary/[0.03] hover:border-primary/60"
                     : "border-border/50 bg-card/80 hover:border-border"
               }`}
             >
@@ -831,10 +834,10 @@ function GridOverviewImpl({
                 onClick={() => onPairSelect(pr.pair_index)}
                 aria-label={formatMsg("optimizations.grid.open_pair", { pair: pairLabel(pr) })}
                 title={pairLabel(pr)}
-                className="absolute inset-0 cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+                className="absolute inset-0 cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-overview-gold/45"
               />
               <div className="pointer-events-none relative flex items-center gap-3">
-                {isOverall && <Crown className="size-4 text-primary shrink-0" />}
+                {isOverall && <Crown className="size-4 text-overview-gold shrink-0" />}
                 {pr.error && <XCircle className="size-4 text-destructive shrink-0" />}
 
                 <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -891,19 +894,24 @@ function GridOverviewImpl({
                   </span>
                 )}
 
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  autoTooltip={false}
-                  className="pointer-events-auto shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  aria-label={msg("auto.features.optimizations.components.gridoverview.literal.29")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPendingDelete(pr);
-                  }}
+                <TooltipButton
+                  tooltip={msg("auto.features.optimizations.components.gridoverview.18")}
                 >
-                  <Trash className="size-3.5" />
-                </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="pointer-events-auto shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={msg(
+                      "auto.features.optimizations.components.gridoverview.literal.29",
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingDelete(pr);
+                    }}
+                  >
+                    <Trash className="size-3.5" />
+                  </Button>
+                </TooltipButton>
 
                 <OpenIcon className="size-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors shrink-0" />
               </div>
@@ -912,7 +920,7 @@ function GridOverviewImpl({
                 <ProgressBar
                   value={barRatio * 100}
                   size="sm"
-                  color={isOverall ? "var(--color-chart-1)" : "var(--color-chart-3)"}
+                  color={isOverall ? "var(--color-chart-1)" : "var(--color-overview-gold)"}
                   className="pointer-events-none relative mt-2.5"
                   fillClassName={isOverall ? "opacity-60" : "opacity-30"}
                 />

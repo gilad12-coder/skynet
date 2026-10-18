@@ -69,7 +69,7 @@ export function PairSelectionStrip({
     <>
       <FadeIn>
         <div
-          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary-fill/30 bg-muted/40 p-3"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-overview-gold/30 bg-gradient-to-l from-overview-strip-from to-overview-strip-to p-3"
           onKeyDown={(event) => {
             const step = arrowPageStep(event, rtl);
             if (step === 0) return;
@@ -83,9 +83,9 @@ export function PairSelectionStrip({
               onClick={onBack}
               label={msg("auto.features.optimizations.components.pairdetailview.1")}
             />
-            <span aria-hidden="true" className="h-4 w-px bg-primary-fill/30" />
+            <span aria-hidden="true" className="h-4 w-px bg-overview-gold/30" />
             <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-              {isBest && <Crown className="size-3.5 text-primary" />}
+              {isBest && <Crown className="size-3.5 text-overview-gold" />}
               <span className="text-sm font-semibold text-foreground truncate">
                 {activePair.generation_model.split("/").pop()}
               </span>
@@ -112,18 +112,21 @@ export function PairSelectionStrip({
               </TooltipButton>
             )}
             {jobTerminal && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                autoTooltip={false}
-                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => setDeleteOpen(true)}
-                aria-label={msg("auto.features.optimizations.components.gridoverview.literal.29")}
+              <TooltipButton
+                tooltip={msg("auto.features.optimizations.components.gridoverview.18")}
               >
-                <Trash className="size-4" />
-              </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => setDeleteOpen(true)}
+                  aria-label={msg("auto.features.optimizations.components.gridoverview.literal.29")}
+                >
+                  <Trash className="size-4" />
+                </Button>
+              </TooltipButton>
             )}
-            <span className="mx-1 h-5 w-px bg-primary-fill/30" />
+            <span className="mx-1 h-5 w-px bg-overview-gold/30" />
             <Button
               variant="outline"
               size="icon-sm"

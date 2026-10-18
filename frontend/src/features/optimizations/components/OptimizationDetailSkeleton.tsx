@@ -280,7 +280,7 @@ export function OptimizationDetailSkeleton({
           </Ghost>
         </div>
       )}
-      <div className="rounded-xl border border-border/40 bg-card p-4 sm:p-5">
+      <div className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
           <div className="min-w-0 space-y-2 sm:flex-1">
             <div className="flex flex-col items-start gap-1.5">
@@ -353,10 +353,10 @@ export function OptimizationDetailSkeleton({
       </div>
 
       {pair && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary-fill/30 bg-muted/40 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-overview-gold/30 bg-gradient-to-l from-overview-strip-from to-overview-strip-to p-3">
           <div className="flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-3">
             <Skeleton width={64} height={14} />
-            <span aria-hidden="true" className="h-4 w-px bg-primary-fill/30" />
+            <span aria-hidden="true" className="h-4 w-px bg-overview-gold/30" />
             <Skeleton width={160} height={14} />
           </div>
           <div className="flex w-full items-center justify-end gap-1 sm:w-auto sm:shrink-0">

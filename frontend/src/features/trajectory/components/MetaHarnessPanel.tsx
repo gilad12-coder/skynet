@@ -234,9 +234,9 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
 
   return (
     <FadeIn delay={0.12}>
-      <Card className="relative overflow-hidden">
+      <Card className="relative overflow-hidden shadow-[0_1px_3px_rgba(28,22,18,0.04),inset_0_1px_0_rgba(255,255,255,0.5)] dark:shadow-none">
         <div
-          className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-primary-fill/40 to-transparent"
+          className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-overview-gold/40 to-transparent"
           aria-hidden="true"
         />
         <CardHeader className="flex flex-row items-start justify-between gap-3">
@@ -252,7 +252,7 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground/80 backdrop-blur"
+              className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground/80 shadow-xs backdrop-blur"
             >
               <PingDot size="sm" />
               <span className="tabular-nums">{versionCount}</span>
