@@ -578,6 +578,32 @@ def _enforce_byok_connections(job_store, username: str, model_configs: list[Mode
             raise DomainError("billing.byok_model_not_served", status=400, model=name, provider=provider)
 
 
+def rows_to_cases(rows: list[dict], *, input_fields: list[str], expected_field: str | None) -> list[dict]:
+    """Map table rows onto unified cases with the run's agreed case schema.
+
+    Args:
+        rows: Table rows keyed by column name.
+        input_fields: Columns that form each case's input; empty means every column.
+        expected_field: Column holding the expected answer, if any.
+
+    Returns:
+        One ``{"input", "expected"}`` case per row.
+    """
+    cases = []
+    # Same shape as the wizard's inline ``rowsToCases`` (inputs-mode.ts):
+    # ``expected`` keyed by the field name, which DSPy metrics read as
+    # ``gold.<field>``, so a by-reference submit and its inline twin match.
+    for row in rows:
+        fields = input_fields or list(row)
+        cases.append(
+            {
+                "input": {field: row.get(field) for field in fields if field != expected_field},
+                "expected": {expected_field: row.get(expected_field)} if expected_field else None,
+            }
+        )
+    return cases
+
+
 def _materialize_unified_cases(payload: UnifiedRunRequest, *, job_store, username: str) -> None:
     """Inline a staged dataset into ``payload.data.cases`` as unified cases.
 
@@ -611,19 +637,7 @@ def _materialize_unified_cases(payload: UnifiedRunRequest, *, job_store, usernam
                 status=400,
                 staged_dataset_id=staged_id,
             )
-        expected_field = data.expected_field
-        cases = []
-        # Same shape as the wizard's inline ``rowsToCases`` (inputs-mode.ts):
-        # ``expected`` keyed by the field name, which DSPy metrics read as
-        # ``gold.<field>``, so a by-reference submit and its inline twin match.
-        for row in rows:
-            fields = data.input_fields or list(row)
-            cases.append(
-                {
-                    "input": {field: row.get(field) for field in fields if field != expected_field},
-                    "expected": {expected_field: row.get(expected_field)} if expected_field else None,
-                }
-            )
+        cases = rows_to_cases(rows, input_fields=data.input_fields, expected_field=data.expected_field)
     else:
         cases = [case.model_dump(mode="json") for case in data.cases]
     try:
@@ -769,6 +783,122 @@ def _optimizer_option(
     )
 
 
+def submit_unified_payload(
+    payload: UnifiedRunRequest,
+    *,
+    service,
+    job_store,
+    current_user: AuthenticatedUser,
+    idempotency_key: str | None,
+) -> OptimizationSubmissionResponse:
+    """Admit, fund, verify and enqueue one unified run for an authenticated owner.
+
+    The ``/optimize`` route and a continuous-optimization cycle share this one
+    path, so a scheduled run gets the same preflight, protected budget and
+    replay protection as a wizard submission.
+
+    Args:
+        payload: The unified request, mutated in place.
+        service: Optimization service handed to the in-process worker.
+        job_store: Job store that persists the submission.
+        current_user: Owner of the new run.
+        idempotency_key: Optional dedup key; a repeat returns the original.
+
+    Returns:
+        An ``OptimizationSubmissionResponse`` for the new or replayed run.
+
+    Raises:
+        DomainError: 400 (unknown staged dataset), 402 (no balance), 409
+            (quota or stale setup evidence), 422 (workspace code does not
+            fit the optimizer).
+    """
+    payload.username = current_user.username
+    # Resolved before the replay key is derived so a by-reference submit
+    # and its inline twin hash to the same request.
+    _materialize_unified_cases(payload, job_store=job_store, username=payload.username)
+
+    replay_keys = resolve_submission_replay_keys(
+        payload,
+        username=payload.username,
+        workflow=UNIFIED_WORKFLOW,
+        supplied_key=idempotency_key,
+    )
+    normalized_key = replay_keys.job
+    if normalized_key:
+        existing_id = job_store.find_job_by_idempotency_key(payload.username, normalized_key)
+        if existing_id:
+            cached = _existing_submission_response(job_store, existing_id)
+            if cached is not None:
+                logger.info(
+                    "Idempotent unified retry hit: returning existing %s for user=%s",
+                    existing_id,
+                    payload.username,
+                )
+                return cached
+
+    _enforce_submission_admission(job_store, payload.username)
+
+    _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
+    _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
+    if payload.execution_budget_id is None:
+        _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
+    _enforce_byok_connections(job_store, payload.username, _model_configs)
+
+    try:
+        validate_unified_payload(payload)
+    except ValueError as exc:
+        raise DomainError(_UNIFIED_CONTRACT_FAILED, status=422, error=str(exc)) from exc
+    # Seeded before the budget step, which would otherwise default the
+    # seed from the budget id and break split reproducibility.
+    _default_unified_seed(payload)
+
+    _ensure_api_budget(
+        payload,
+        job_store,
+        UNIFIED_WORKFLOW,
+        replay_keys.budget,
+        current_user,
+        recover_existing=replay_keys.synthesized,
+    )
+    verified = _protected_submission(payload, job_store, UNIFIED_WORKFLOW)
+
+    optimization_id = str(uuid4())
+    overview = _unified_overview(payload, token_sources_by_model=_token_sources_by_model)
+
+    # Same single-serialization pattern as the other submit routes: the
+    # dump copies every case, so it is built once after the last mutation.
+    payload_dump = _persistable_payload(payload, job_store)
+    enforce_job_quota(job_store, payload.username)
+    enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
+
+    _create_submission_job(job_store, optimization_id, payload, normalized_key, verified)
+    payload_dump["execution_budget_generation"] = payload.execution_budget_generation
+    overview.update(_execution_overview(payload))
+    job_store.set_payload_overview(optimization_id, overview)
+
+    _persist_and_signal_job(job_store, service, optimization_id, payload_dump)
+
+    optimizer_name = overview[PAYLOAD_OVERVIEW_OPTIMIZER_NAME]
+    logger.info(
+        "Enqueued unified run %s: artifact=%s optimizer=%s mode=%s",
+        optimization_id,
+        payload.task.artifact.kind,
+        optimizer_name,
+        payload.data.mode,
+    )
+
+    return OptimizationSubmissionResponse(
+        optimization_id=optimization_id,
+        optimization_type=cast(OptimizationType, OPTIMIZATION_TYPE_BLACKBOX),
+        status=OptimizationStatus.pending,
+        created_at=datetime.now(UTC),
+        name=payload.name,
+        username=payload.username,
+        module_name=BLACKBOX_MODULE_NAME,
+        optimizer_name=optimizer_name,
+    )
+
+
 def create_submissions_router(*, service, job_store) -> APIRouter:
     """Build the submissions router.
 
@@ -816,90 +946,12 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                 (quota or stale setup evidence), 422 (workspace code does not
                 fit the optimizer).
         """
-        payload.username = current_user.username
-        # Resolved before the replay key is derived so a by-reference submit
-        # and its inline twin hash to the same request.
-        _materialize_unified_cases(payload, job_store=job_store, username=payload.username)
-
-        replay_keys = resolve_submission_replay_keys(
+        return submit_unified_payload(
             payload,
-            username=payload.username,
-            workflow=UNIFIED_WORKFLOW,
-            supplied_key=idempotency_key,
-        )
-        normalized_key = replay_keys.job
-        if normalized_key:
-            existing_id = job_store.find_job_by_idempotency_key(payload.username, normalized_key)
-            if existing_id:
-                cached = _existing_submission_response(job_store, existing_id)
-                if cached is not None:
-                    logger.info(
-                        "Idempotent unified retry hit: returning existing %s for user=%s",
-                        existing_id,
-                        payload.username,
-                    )
-                    return cached
-
-        _enforce_submission_admission(job_store, payload.username)
-
-        _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-        _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
-        if payload.execution_budget_id is None:
-            _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
-        _enforce_byok_connections(job_store, payload.username, _model_configs)
-
-        try:
-            validate_unified_payload(payload)
-        except ValueError as exc:
-            raise DomainError(_UNIFIED_CONTRACT_FAILED, status=422, error=str(exc)) from exc
-        # Seeded before the budget step, which would otherwise default the
-        # seed from the budget id and break split reproducibility.
-        _default_unified_seed(payload)
-
-        _ensure_api_budget(
-            payload,
-            job_store,
-            UNIFIED_WORKFLOW,
-            replay_keys.budget,
-            current_user,
-            recover_existing=replay_keys.synthesized,
-        )
-        verified = _protected_submission(payload, job_store, UNIFIED_WORKFLOW)
-
-        optimization_id = str(uuid4())
-        overview = _unified_overview(payload, token_sources_by_model=_token_sources_by_model)
-
-        # Same single-serialization pattern as the other submit routes: the
-        # dump copies every case, so it is built once after the last mutation.
-        payload_dump = _persistable_payload(payload, job_store)
-        enforce_job_quota(job_store, payload.username)
-        enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
-
-        _create_submission_job(job_store, optimization_id, payload, normalized_key, verified)
-        payload_dump["execution_budget_generation"] = payload.execution_budget_generation
-        overview.update(_execution_overview(payload))
-        job_store.set_payload_overview(optimization_id, overview)
-
-        _persist_and_signal_job(job_store, service, optimization_id, payload_dump)
-
-        optimizer_name = overview[PAYLOAD_OVERVIEW_OPTIMIZER_NAME]
-        logger.info(
-            "Enqueued unified run %s: artifact=%s optimizer=%s mode=%s",
-            optimization_id,
-            payload.task.artifact.kind,
-            optimizer_name,
-            payload.data.mode,
-        )
-
-        return OptimizationSubmissionResponse(
-            optimization_id=optimization_id,
-            optimization_type=cast(OptimizationType, OPTIMIZATION_TYPE_BLACKBOX),
-            status=OptimizationStatus.pending,
-            created_at=datetime.now(UTC),
-            name=payload.name,
-            username=payload.username,
-            module_name=BLACKBOX_MODULE_NAME,
-            optimizer_name=optimizer_name,
+            service=service,
+            job_store=job_store,
+            current_user=current_user,
+            idempotency_key=idempotency_key,
         )
 
     @router.post(

@@ -1419,6 +1419,70 @@ export type MessageKey =
   | "connectors.toast.failed"
   | "connectors.toast.provider_connected"
   | "connectors.toast.provider_disconnected"
+  | "continuous_tab.action_failed"
+  | "continuous_tab.allowance"
+  | "continuous_tab.allowance_resets"
+  | "continuous_tab.approve"
+  | "continuous_tab.changed"
+  | "continuous_tab.cycle.approved"
+  | "continuous_tab.cycle.awaiting_review"
+  | "continuous_tab.cycle.checking"
+  | "continuous_tab.cycle.failed"
+  | "continuous_tab.cycle.optimizing"
+  | "continuous_tab.cycle.paused"
+  | "continuous_tab.cycle.regressed"
+  | "continuous_tab.cycle.rejected"
+  | "continuous_tab.cycle.skipped"
+  | "continuous_tab.cycle_budget.help"
+  | "continuous_tab.cycle_budget.label"
+  | "continuous_tab.cycle_budget.value"
+  | "continuous_tab.enable.description"
+  | "continuous_tab.enable.no_auto_deploy"
+  | "continuous_tab.enable.submit"
+  | "continuous_tab.enable.title"
+  | "continuous_tab.form.bad_amount"
+  | "continuous_tab.form.budget_over_limit"
+  | "continuous_tab.form.need_permission"
+  | "continuous_tab.form.need_source"
+  | "continuous_tab.history"
+  | "continuous_tab.history_empty"
+  | "continuous_tab.incumbent"
+  | "continuous_tab.limit.help"
+  | "continuous_tab.limit.label"
+  | "continuous_tab.load_error"
+  | "continuous_tab.next_check"
+  | "continuous_tab.not_eligible.description"
+  | "continuous_tab.not_eligible.title"
+  | "continuous_tab.open_run"
+  | "continuous_tab.pause"
+  | "continuous_tab.paused.allowance"
+  | "continuous_tab.paused.funds"
+  | "continuous_tab.paused.user"
+  | "continuous_tab.permit.data"
+  | "continuous_tab.permit.label"
+  | "continuous_tab.permit.models"
+  | "continuous_tab.permit.optimizers"
+  | "continuous_tab.reject"
+  | "continuous_tab.resume"
+  | "continuous_tab.schedule.daily"
+  | "continuous_tab.schedule.label"
+  | "continuous_tab.schedule.weekly"
+  | "continuous_tab.scores"
+  | "continuous_tab.source.label"
+  | "continuous_tab.source.none"
+  | "continuous_tab.source.provider"
+  | "continuous_tab.source.ref"
+  | "continuous_tab.source.ref_placeholder"
+  | "continuous_tab.spent"
+  | "continuous_tab.stage.description"
+  | "continuous_tab.stage.optimizer"
+  | "continuous_tab.stage.submit"
+  | "continuous_tab.stage.task_model"
+  | "continuous_tab.stage.title"
+  | "continuous_tab.status.active"
+  | "continuous_tab.status.paused"
+  | "continuous_tab.summary"
+  | "continuous_tab.title"
   | "dashboard.admin.chart.runs"
   | "dashboard.admin.chart.users"
   | "dashboard.admin.col.calls"
@@ -5574,6 +5638,70 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "connectors.toast.failed": "משהו השתבש. נסו שוב.",
   "connectors.toast.provider_connected": "{provider} חובר",
   "connectors.toast.provider_disconnected": "{provider} נותק",
+  "continuous_tab.action_failed": "הפעולה נכשלה. נסו שוב.",
+  "continuous_tab.allowance": "החודש: {used} מתוך {limit}",
+  "continuous_tab.allowance_resets": "מתאפס ב-{when}",
+  "continuous_tab.approve": "אישור והחלפה",
+  "continuous_tab.changed": "השתנה: {changes}",
+  "continuous_tab.cycle.approved": "אושרה",
+  "continuous_tab.cycle.awaiting_review": "ממתינה לאישור",
+  "continuous_tab.cycle.checking": "בבדיקה",
+  "continuous_tab.cycle.failed": "נכשלה",
+  "continuous_tab.cycle.optimizing": "בהרצה",
+  "continuous_tab.cycle.paused": "הושהתה",
+  "continuous_tab.cycle.regressed": "לא השתפרה",
+  "continuous_tab.cycle.rejected": "נדחתה",
+  "continuous_tab.cycle.skipped": "דולגה",
+  "continuous_tab.cycle_budget.help": "כל הרצה שמתחילה משריינת את הסכום הזה מראש.",
+  "continuous_tab.cycle_budget.label": "תקציב לכל הרצה (USD)",
+  "continuous_tab.cycle_budget.value": "כל הרצה משריינת {amount}.",
+  "continuous_tab.enable.description": "נבדוק את הקלטים לפי לוח הזמנים. הרצה חדשה תתחיל רק כשקלט מותר משתנה, ובתוך המגבלה החודשית.",
+  "continuous_tab.enable.no_auto_deploy": "גרסה חדשה לא מחליפה את הנוכחית לבד. אתם מאשרים כל החלפה.",
+  "continuous_tab.enable.submit": "הפעלה",
+  "continuous_tab.enable.title": "שמרו על הגרסה הזאת מעודכנת",
+  "continuous_tab.form.bad_amount": "הזינו סכומים חיוביים בדולרים.",
+  "continuous_tab.form.budget_over_limit": "התקציב להרצה גבוה מהמגבלה החודשית.",
+  "continuous_tab.form.need_permission": "בחרו לפחות קלט אחד שמותר לרענן.",
+  "continuous_tab.form.need_source": "כדי לרענן נתונים, בחרו מקור ומיקום.",
+  "continuous_tab.history": "היסטוריית בדיקות",
+  "continuous_tab.history_empty": "עוד לא היו בדיקות.",
+  "continuous_tab.incumbent": "הגרסה הנוכחית:",
+  "continuous_tab.limit.help": "לא נשריין יותר מזה בחודש קלנדרי. אף פעם לא נקנה יתרה בשבילכם.",
+  "continuous_tab.limit.label": "מגבלה חודשית (USD)",
+  "continuous_tab.load_error": "לא הצלחנו לטעון את התוכנית הרציפה.",
+  "continuous_tab.next_check": "הבדיקה הבאה: {when}",
+  "continuous_tab.not_eligible.description": "אפשר להפעיל אותה רק על הרצה משלכם שהסתיימה בהצלחה.",
+  "continuous_tab.not_eligible.title": "אי אפשר להפעיל כאן אופטימיזציה רציפה",
+  "continuous_tab.open_run": "פתיחת ההרצה",
+  "continuous_tab.pause": "השהיה",
+  "continuous_tab.paused.allowance": "המגבלה החודשית נוצלה. הבדיקות ימשיכו בחודש הבא.",
+  "continuous_tab.paused.funds": "אין מספיק יתרה בארנק. הוסיפו יתרה כדי שהבדיקות ימשיכו.",
+  "continuous_tab.paused.user": "השהיתם את התוכנית. היא לא תמשיך עד שתחדשו אותה.",
+  "continuous_tab.permit.data": "נתונים מהמקור המחובר",
+  "continuous_tab.permit.label": "מה מותר לרענן",
+  "continuous_tab.permit.models": "מודלים",
+  "continuous_tab.permit.optimizers": "אופטימייזרים",
+  "continuous_tab.reject": "דחייה",
+  "continuous_tab.resume": "חידוש",
+  "continuous_tab.schedule.daily": "יומי",
+  "continuous_tab.schedule.label": "תדירות בדיקה",
+  "continuous_tab.schedule.weekly": "שבועי",
+  "continuous_tab.scores": "נוכחית {incumbent} · חדשה {candidate}",
+  "continuous_tab.source.label": "מקור הנתונים",
+  "continuous_tab.source.none": "אין מקור מחובר. חברו מקור בהגדרות, תחת חיבורים.",
+  "continuous_tab.source.provider": "ספק",
+  "continuous_tab.source.ref": "מיקום במקור",
+  "continuous_tab.source.ref_placeholder": "owner/dataset/config/split",
+  "continuous_tab.spent": "חויב {amount}",
+  "continuous_tab.stage.description": "השינוי ייכנס בבדיקה הבאה ויפעיל הרצה חדשה.",
+  "continuous_tab.stage.optimizer": "אופטימייזר",
+  "continuous_tab.stage.submit": "שמירת השינוי",
+  "continuous_tab.stage.task_model": "מודל המשימה",
+  "continuous_tab.stage.title": "שינוי לבדיקה הבאה",
+  "continuous_tab.status.active": "פעילה",
+  "continuous_tab.status.paused": "מושהית",
+  "continuous_tab.summary": "בדיקה {schedule}. מותר לרענן: {changes}.",
+  "continuous_tab.title": "אופטימיזציה רציפה",
   "dashboard.admin.chart.runs": "ריצות ליום",
   "dashboard.admin.chart.users": "אנשים",
   "dashboard.admin.col.calls": "קריאות",
@@ -18079,6 +18207,70 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "connectors.toast.failed": "Something went wrong. Try again.",
   "connectors.toast.provider_connected": "{provider} connected",
   "connectors.toast.provider_disconnected": "{provider} disconnected",
+  "continuous_tab.action_failed": "The action failed. Try again.",
+  "continuous_tab.allowance": "This month: {used} of {limit}",
+  "continuous_tab.allowance_resets": "Resets on {when}",
+  "continuous_tab.approve": "Approve and replace",
+  "continuous_tab.changed": "Changed: {changes}",
+  "continuous_tab.cycle.approved": "Approved",
+  "continuous_tab.cycle.awaiting_review": "Awaits review",
+  "continuous_tab.cycle.checking": "Checking",
+  "continuous_tab.cycle.failed": "Failed",
+  "continuous_tab.cycle.optimizing": "Running",
+  "continuous_tab.cycle.paused": "Paused",
+  "continuous_tab.cycle.regressed": "No gain",
+  "continuous_tab.cycle.rejected": "Rejected",
+  "continuous_tab.cycle.skipped": "Skipped",
+  "continuous_tab.cycle_budget.help": "Each run that starts reserves this amount first.",
+  "continuous_tab.cycle_budget.label": "Budget per run (USD)",
+  "continuous_tab.cycle_budget.value": "Each run reserves {amount}.",
+  "continuous_tab.enable.description": "We check the inputs on a schedule. A fresh run starts only when a permitted input changes, and only within the monthly limit.",
+  "continuous_tab.enable.no_auto_deploy": "A new candidate never replaces the current version on its own. You approve each change.",
+  "continuous_tab.enable.submit": "Turn on",
+  "continuous_tab.enable.title": "Keep this version up to date",
+  "continuous_tab.form.bad_amount": "Enter positive amounts in dollars.",
+  "continuous_tab.form.budget_over_limit": "The budget per run is higher than the monthly limit.",
+  "continuous_tab.form.need_permission": "Choose at least one input that may refresh.",
+  "continuous_tab.form.need_source": "To refresh data, choose a source and a location.",
+  "continuous_tab.history": "Check history",
+  "continuous_tab.history_empty": "No checks yet.",
+  "continuous_tab.incumbent": "Current version:",
+  "continuous_tab.limit.help": "We never reserve more than this in a calendar month. We never buy credit for you.",
+  "continuous_tab.limit.label": "Monthly limit (USD)",
+  "continuous_tab.load_error": "We could not load the continuous plan.",
+  "continuous_tab.next_check": "Next check: {when}",
+  "continuous_tab.not_eligible.description": "You can turn it on only for your own run that finished successfully.",
+  "continuous_tab.not_eligible.title": "Continuous optimization is not available here",
+  "continuous_tab.open_run": "Open the run",
+  "continuous_tab.pause": "Pause",
+  "continuous_tab.paused.allowance": "The monthly limit is spent. Checks continue next month.",
+  "continuous_tab.paused.funds": "The wallet balance is too low. Add credit so checks can continue.",
+  "continuous_tab.paused.user": "You paused the plan. It stays paused until you resume it.",
+  "continuous_tab.permit.data": "Data from the connected source",
+  "continuous_tab.permit.label": "What may refresh",
+  "continuous_tab.permit.models": "Models",
+  "continuous_tab.permit.optimizers": "Optimizers",
+  "continuous_tab.reject": "Reject",
+  "continuous_tab.resume": "Resume",
+  "continuous_tab.schedule.daily": "Daily",
+  "continuous_tab.schedule.label": "Check schedule",
+  "continuous_tab.schedule.weekly": "Weekly",
+  "continuous_tab.scores": "Current {incumbent} · New {candidate}",
+  "continuous_tab.source.label": "Data source",
+  "continuous_tab.source.none": "No source is connected. Connect one in Settings, under Connections.",
+  "continuous_tab.source.provider": "Provider",
+  "continuous_tab.source.ref": "Location in the source",
+  "continuous_tab.source.ref_placeholder": "owner/dataset/config/split",
+  "continuous_tab.spent": "Charged {amount}",
+  "continuous_tab.stage.description": "The change applies at the next check and starts a fresh run.",
+  "continuous_tab.stage.optimizer": "Optimizer",
+  "continuous_tab.stage.submit": "Save the change",
+  "continuous_tab.stage.task_model": "Task model",
+  "continuous_tab.stage.title": "Change for the next check",
+  "continuous_tab.status.active": "Active",
+  "continuous_tab.status.paused": "Paused",
+  "continuous_tab.summary": "{schedule} check. May refresh: {changes}.",
+  "continuous_tab.title": "Continuous",
   "dashboard.admin.chart.runs": "Runs per day",
   "dashboard.admin.chart.users": "People",
   "dashboard.admin.col.calls": "Calls",

@@ -27,6 +27,7 @@ import {
   Package,
   Cube,
   Coins,
+  Repeat,
 } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 
@@ -102,6 +103,7 @@ import { RunCostChip } from "./RunCostChip";
 import { BestVersionTab } from "./BestVersionTab";
 import { GridServeTab } from "./GridServeTab";
 import { UsageTab } from "./UsageTab";
+import { ContinuousTab } from "./ContinuousTab";
 import { ReactServeChat } from "./ReactServeChat";
 import { ReactServeApi } from "./ReactServeApi";
 import { RunPlayground } from "./RunPlayground";
@@ -1161,6 +1163,10 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const showConfigTab = levelShowsTab("config");
   // Usage reads the run's billing records, which only an authenticated viewer can fetch.
   const showUsageTab = !skipNetwork;
+  // Continuous optimization starts from the owner's own successful black-box
+  // run; the backend still decides whether this run can carry a plan.
+  const showContinuousTab =
+    !skipNetwork && !isPairContext && jobIsBlackbox && job.status === "success";
 
   const pairCount = effectiveJob?.grid_result?.pair_results.length ?? 0;
   const isBestPair =
@@ -1507,7 +1513,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   Number(showCodeTab) +
                   Number(showArtifactTab) +
                   Number(showLogsTab) +
-                  Number(showUsageTab),
+                  Number(showUsageTab) +
+                  Number(showContinuousTab),
                 phoneTabs:
                   1 +
                   Number(showPlaygroundTab) +
@@ -1524,6 +1531,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   ...(showArtifactTab ? ["artifact"] : []),
                   ...(showLogsTab ? ["logs"] : []),
                   ...(showUsageTab ? ["usage"] : []),
+                  ...(showContinuousTab ? ["continuous"] : []),
                   ...(showConfigTab ? ["config"] : []),
                 ],
               }}
@@ -1579,6 +1587,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   <Coins className="size-3.5" />
                   {msg("usage_tab.title")}
                   {pingActive && <PingDot className="ms-1" />}
+                </TabsTrigger>
+              )}
+              {!isPhone && showContinuousTab && (
+                <TabsTrigger value="continuous" className={tabCls}>
+                  <Repeat className="size-3.5" />
+                  {msg("continuous_tab.title")}
                 </TabsTrigger>
               )}
               {!isPhone && showConfigTab && (
@@ -1697,6 +1711,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             {showUsageTab && (
               <TabsContent value="usage" className="mt-4">
                 <UsageTab job={job} pairIndex={isPairContext ? activePair.pair_index : null} />
+              </TabsContent>
+            )}
+
+            {!isPhone && showContinuousTab && (
+              <TabsContent value="continuous">
+                <ContinuousTab optimizationId={job.optimization_id} />
               </TabsContent>
             )}
 

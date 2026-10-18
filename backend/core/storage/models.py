@@ -1800,3 +1800,78 @@ class RunFolderItemModel(Base):
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class ContinuousPlanModel(Base):
+    """A schedule that keeps one successful run improving with fresh, linked runs.
+
+    ``source_optimization_id`` is the run the plan was enabled from and
+    ``incumbent_optimization_id`` the version the customer approved last.
+    ``permitted`` names the inputs that may refresh without a setup change, and
+    ``baseline_snapshot`` holds the inputs of the last reviewed cycle, so a check
+    with no permitted change records a skip instead of a run. ``pause_reason``
+    keeps a customer's pause apart from an allowance or funds pause, because a
+    monthly reset may lift only the latter.
+    """
+
+    __tablename__ = "continuous_plans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    source_optimization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    incumbent_optimization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    pause_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    schedule: Mapped[str] = mapped_column(String(16), nullable=False)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    permitted: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    source: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
+    pending_inputs: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    baseline_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    monthly_limit_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    cycle_budget_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    __table_args__ = (UniqueConstraint("source_optimization_id", name="uq_continuous_plans_source_optimization_id"),)
+
+
+class ContinuousCycleModel(Base):
+    """One scheduled check of a continuous plan and the fresh run it started, if any.
+
+    ``slot`` is the scheduled time the check claimed. The unique
+    ``(plan_id, slot)`` pair is what stops overlapping checks, retries and
+    several workers from recording the same check twice. ``month`` is the
+    ``YYYY-MM`` allowance the cycle's spend counts against, kept after the
+    month rolls over.
+    """
+
+    __tablename__ = "continuous_cycles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    plan_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    slot: Mapped[str] = mapped_column(String(40), nullable=False)
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    changes: Mapped[list[str]] = mapped_column(JSON_STORE, nullable=False, default=list)
+    detail_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    detail_params: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
+    optimization_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    execution_budget_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    incumbent_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    candidate_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spent_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    __table_args__ = (UniqueConstraint("plan_id", "slot", name="uq_continuous_cycles_plan_slot"),)
