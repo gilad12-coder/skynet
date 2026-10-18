@@ -9,6 +9,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { setClientLocale } from "@/shared/lib/runtime-locale";
+import { TooltipProvider } from "@/shared/ui/primitives/tooltip";
 import type { ContractCheckState } from "../../hooks/use-contract-check";
 import { initialWizardV2State, type WizardV2State } from "../../lib/wizard-v2";
 
@@ -37,7 +38,11 @@ const cc: ContractCheckState = {
 
 function render(state: WizardV2State): string {
   setClientLocale("en");
-  return renderToStaticMarkup(<RunOverview state={state} cc={cc} guided={false} />);
+  return renderToStaticMarkup(
+    <TooltipProvider>
+      <RunOverview state={state} cc={cc} guided={false} />
+    </TooltipProvider>,
+  );
 }
 
 void describe("RunOverview", () => {
@@ -54,6 +59,16 @@ void describe("RunOverview", () => {
     assert.match(html, /Classify support tickets/);
     // The contract check gates Submit, so it shows on every tab.
     assert.match(html, /submit\.v2\.metric\.check\.needed/);
+    // Each tab carries its icon, as the old summary step did.
+    assert.equal(html.match(/role="tab"[^>]*>\s*<svg/g)?.length, 4);
+    // General restores the old summary's optimizer, visibility and billing rows.
+    for (const key of [
+      "submit.v2.stage.optimizer",
+      "submit.basics.privacy.label",
+      "submit.budget.billing_source",
+    ]) {
+      assert.match(html, new RegExp(key.replace(/\./g, "\\.")));
+    }
   });
 
   void it("drops the data tab for a repository run", () => {
