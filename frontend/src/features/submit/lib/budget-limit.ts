@@ -48,3 +48,35 @@ export function budgetContinueBlock(
   if (floorCents == null || (!gate && !LIMIT_SCREENS.has(screen))) return null;
   return budgetShortfall(floorCents, choice);
 }
+
+/** A saved setup's spending limit: the draft slice fields a reload restores. */
+export interface SavedLimit {
+  maxCostCents: number | null;
+  budgetUncapped: boolean;
+}
+
+/** Where a restored limit is written back. */
+export interface LimitTargets {
+  /** The page-load server budget the run enforces. */
+  budget: {
+    setMaxCostCents: (cents: number | null) => void;
+    setBudgetUncapped: (uncapped: boolean) => void;
+  };
+  /** The draft slice the next reload reads. */
+  patchSaved: (patch: Partial<SavedLimit>) => void;
+}
+
+/**
+ * Put a reloaded setup's saved limit back on the server budget and on the
+ * draft. The limit card's mount effect runs before the wizard's and fills its
+ * default into both while the page-load budget is still unset, so restoring
+ * only the budget would show the saved limit but save the default, and the
+ * next reload would read the default.
+ */
+export function restoreSavedLimit(saved: SavedLimit, { budget, patchSaved }: LimitTargets): void {
+  if (saved.budgetUncapped) budget.setBudgetUncapped(true);
+  else if (saved.maxCostCents != null) {
+    budget.setMaxCostCents(saved.maxCostCents);
+    patchSaved({ maxCostCents: saved.maxCostCents });
+  }
+}
