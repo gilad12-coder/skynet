@@ -678,6 +678,38 @@ def test_failed_cycle_run_keeps_the_incumbent(env: _Env) -> None:
     assert env.plan().incumbent_optimization_id == source_id
 
 
+def test_a_rejected_staged_optimizer_fails_the_cycle_without_wedging_the_plan(env: _Env) -> None:
+    """A staged optimizer the run contract refuses fails that check and leaves later checks free."""
+    source_id = _incumbent(env)
+    plan = _enable(env, source_id, permitted={"data": False, "models": False, "optimizers": True}, source=None)
+    staged = env.client.post(f"/continuous/{plan['id']}/inputs", json={"optimizer": "mipro"})
+    assert staged.status_code == 200, staged.text
+    jobs_before = env.count(JobModel)
+
+    env.sweep(_due(env))
+    env.sweep(_due(env))
+
+    cycles = env.cycles()
+    assert [cycle.status for cycle in cycles] == ["failed", "failed"]
+    assert all(cycle.detail_code == "continuous.run_rejected" and cycle.detail_params["reason"] for cycle in cycles)
+    assert env.count(JobModel) == jobs_before
+
+
+def test_a_deleted_incumbent_fails_the_cycle_without_wedging_the_plan(env: _Env) -> None:
+    """A check whose incumbent run is gone records why instead of staying in ``checking``."""
+    source_id = _incumbent(env)
+    _enable(env, source_id)
+    env.rows = _cases(["B"] * 10)
+    env.store.delete_job(source_id)
+
+    env.sweep(_due(env))
+    env.sweep(_due(env))
+
+    cycles = env.cycles()
+    assert [cycle.status for cycle in cycles] == ["failed", "failed"]
+    assert cycles[0].detail_params["reason"] == "the incumbent run was deleted"
+
+
 def test_candidate_waits_for_explicit_approval(env: _Env) -> None:
     """A validated candidate stays in review until the customer approves or rejects it."""
     source_id = _incumbent(env)

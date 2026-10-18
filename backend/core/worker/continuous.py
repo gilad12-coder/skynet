@@ -438,6 +438,9 @@ def _pause(plan: ContinuousPlanModel, reason: str) -> None:
         plan: The plan.
         reason: ``user``, ``allowance`` or ``funds``.
     """
+    if plan.pause_reason == PAUSE_USER and reason != PAUSE_USER:
+        # Only the customer lifts their own pause, so a funds or allowance pause never replaces it.
+        return
     plan.status = PLAN_PAUSED
     plan.pause_reason = reason
     plan.updated_at = datetime.now(UTC)
@@ -470,7 +473,8 @@ def process_cycle(
         cycle = session.get(ContinuousCycleModel, cycle_id)
         if cycle is None or cycle.status != CYCLE_CHECKING:
             return
-        plan = session.get(ContinuousPlanModel, cycle.plan_id)
+        # Locked so a customer's pause committed meanwhile is not overwritten by this check's outcome.
+        plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
         if plan is None:
             return
         if plan.status == PLAN_PAUSED and plan.pause_reason == PAUSE_USER:
@@ -488,7 +492,14 @@ def process_cycle(
             code = "continuous.skip_busy" if busy == CYCLE_OPTIMIZING else "continuous.skip_review_pending"
             _finish_cycle(session, cycle, CYCLE_SKIPPED, code)
             return
-        incumbent = _incumbent(job_store, plan.incumbent_optimization_id)
+        try:
+            incumbent = _incumbent(job_store, plan.incumbent_optimization_id)
+        except KeyError:
+            # Uncaught, the cycle would stay ``checking`` and hold back every later check.
+            _finish_cycle(
+                session, cycle, CYCLE_FAILED, "continuous.run_rejected", reason="the incumbent run was deleted"
+            )
+            return
         try:
             snapshot, cases = resolve_snapshot(plan, incumbent["payload"], job_store=job_store, fetch_rows=fetch_rows)
         except SourceError as error:
@@ -518,7 +529,13 @@ def process_cycle(
                 ContinuousCycleModel.plan_id == plan.id, ContinuousCycleModel.optimization_id.is_not(None)
             )
         ).all()
-        payload = _cycle_payload(plan, incumbent, cases, snapshot, len(started) + 1)
+        try:
+            payload = _cycle_payload(plan, incumbent, cases, snapshot, len(started) + 1)
+        except ValidationError as error:
+            # A staged model or optimizer the run contract rejects fails this cycle instead of wedging the plan.
+            reason = "; ".join(str(item.get("msg")) for item in error.errors())
+            _finish_cycle(session, cycle, CYCLE_FAILED, "continuous.run_rejected", reason=reason)
+            return
         key = f"continuous:{cycle.id}"
         budget_key = resolve_submission_replay_keys(
             payload, username=plan.username, workflow=UNIFIED_WORKFLOW, supplied_key=key
@@ -539,7 +556,7 @@ def process_cycle(
         budget = BudgetService(engine=engine).find_by_creation_key(plan_username, budget_key) if budget_key else None
         with Session(engine) as session, session.begin():
             cycle = session.get(ContinuousCycleModel, cycle_id)
-            plan = session.get(ContinuousPlanModel, cycle.plan_id)
+            plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
             cycle.execution_budget_id = budget.id if budget else None
             cycle.spent_cents = _billed_cents(job_store, cycle.execution_budget_id, plan_username)
             if error.code in {"billing.insufficient_funds", "budget.insufficient"}:
