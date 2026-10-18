@@ -964,8 +964,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
   const signatureCode = (payload?.payload?.signature_code as string) ?? null;
   const blackboxScorer = payload?.payload?.scorer as { metric_code?: string } | undefined;
+  const blackboxWorkspace = payload?.payload?.workspace as { metric_code?: string } | undefined;
   const metricCode =
-    (payload?.payload?.metric_code as string) ?? blackboxScorer?.metric_code ?? null;
+    (payload?.payload?.metric_code as string) ??
+    blackboxWorkspace?.metric_code ??
+    blackboxScorer?.metric_code ??
+    null;
   const workflowSpec = (payload?.payload?.workflow as WorkflowSpec | undefined) ?? null;
 
   const payloadRecipe = payload?.payload?.recipe as string | undefined;
