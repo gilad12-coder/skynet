@@ -464,6 +464,7 @@ class ContractCheckResponse(BaseModel):
     samples: list[ContractSample] = Field(default_factory=list)
     fingerprint: str
     files: list[WorkspaceFileLint] = Field(default_factory=list)
+    terminal: dict[str, Any] | None = None
 
 
 class UnifiedChatTurn(BaseModel):
