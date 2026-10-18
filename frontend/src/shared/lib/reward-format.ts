@@ -3,7 +3,7 @@
  * reward (SKY-69), shared by the setup preview and the run results.
  */
 import { msg, type MessageKey } from "@/shared/lib/messages";
-import type { RewardComponent } from "@/shared/lib/reward";
+import type { RewardComponent, RewardSpec } from "@/shared/lib/reward";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 const DASH = "—";
@@ -43,4 +43,9 @@ export function rewardFormatters() {
 /** The translated name of one reward part. */
 export function rewardPartLabel(component: RewardComponent): string {
   return msg(`submit.v2.reward.part.${component}` as MessageKey);
+}
+
+/** The metric's own name for a part, else the built-in label. */
+export function rewardPartName(spec: RewardSpec, component: RewardComponent): string {
+  return spec[component].name || rewardPartLabel(component);
 }

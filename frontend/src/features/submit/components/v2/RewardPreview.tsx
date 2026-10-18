@@ -1,7 +1,7 @@
 "use client";
 
 import { msg } from "@/shared/lib/messages";
-import { rewardFormatters, rewardPartLabel } from "@/shared/lib/reward-format";
+import { rewardFormatters, rewardPartName } from "@/shared/lib/reward-format";
 import { REWARD_COMPONENTS, type RewardComponent, type RewardSpecRead } from "@/shared/lib/reward";
 
 const DASH = "—";
@@ -67,7 +67,7 @@ export function RewardPreview({ read }: { read: RewardSpecRead }) {
             {REWARD_COMPONENTS.map((component) => (
               <tr key={component} className="border-b border-border/30 last:border-b-0">
                 <th scope="row" className={`${td} text-start font-medium`}>
-                  {rewardPartLabel(component)}
+                  {rewardPartName(spec, component)}
                 </th>
                 <td className={td}>
                   <bdi>{spec[component].meaning || DASH}</bdi>

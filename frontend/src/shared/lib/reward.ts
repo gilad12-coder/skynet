@@ -14,6 +14,8 @@ export type RewardComponent = "accuracy" | "speed" | "cost";
 export const REWARD_COMPONENTS: readonly RewardComponent[] = ["accuracy", "speed", "cost"];
 
 export interface RewardComponentSpec {
+  /** The metric's own name for this part; empty when the spec gives none. */
+  name: string;
   meaning: string;
   unit: string;
   /** The value that scores half; `null` for an accuracy given as a 0-1 score. */
@@ -135,6 +137,7 @@ export function rewardSpecFrom(raw: unknown): RewardSpec | null {
     const checked = reference === null ? null : positive(reference);
     if (reference !== null && checked === null) return null;
     return {
+      name: typeof entry.name === "string" ? entry.name.trim() : "",
       meaning: typeof entry.meaning === "string" ? entry.meaning : "",
       unit: typeof entry.unit === "string" ? entry.unit : "",
       reference: checked,

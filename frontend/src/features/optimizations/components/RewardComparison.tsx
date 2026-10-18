@@ -9,7 +9,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/shared/ui/primitives/tooltip";
-import { rewardFormatters, rewardPartLabel } from "@/shared/lib/reward-format";
+import { rewardFormatters, rewardPartName } from "@/shared/lib/reward-format";
 import {
   readRewardSpec,
   summarizeObservations,
@@ -81,7 +81,7 @@ export function RewardComparison({
   const rows: ComparisonRow[] = [
     {
       key: "accuracy",
-      label: rewardPartLabel("accuracy"),
+      label: rewardPartName(spec, "accuracy"),
       meaning: spec.accuracy.meaning,
       baseline: part(result.baseline_named_scores, "accuracy"),
       best: part(result.best_named_scores, "accuracy"),
@@ -90,7 +90,7 @@ export function RewardComparison({
     },
     {
       key: "mean_ms",
-      label: msg("optimization.reward.mean_time"),
+      label: spec.speed.name || msg("optimization.reward.mean_time"),
       meaning: spec.speed.meaning,
       baseline: baselineObs.meanMs,
       best: bestObs.meanMs,
@@ -99,7 +99,7 @@ export function RewardComparison({
     },
     {
       key: "cost",
-      label: msg("optimization.reward.cost_per_response"),
+      label: spec.cost.name || msg("optimization.reward.cost_per_response"),
       meaning: spec.cost.meaning,
       baseline: baselineObs.meanCostUsd,
       best: bestObs.meanCostUsd,

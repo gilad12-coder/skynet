@@ -17,7 +17,7 @@ const { HeldOutNotice, RewardComparison, savedMetricCode } = await import("./Rew
 
 const METRIC = `REWARD_SPEC = {
     "weights": {"accuracy": 0.35, "speed": 0.35, "cost": 0.30},
-    "accuracy": {"meaning": "Distance", "unit": "km", "reference": 1.0},
+    "accuracy": {"name": "Distance error", "meaning": "Distance", "unit": "km", "reference": 1.0},
     "speed": {"reference": 2000}, "cost": {"reference": 0.002},
 }
 `;
@@ -110,6 +110,13 @@ void describe("RewardComparison", () => {
     assert.match(html, /data-meaning="accuracy"/);
     // The fixture gives speed and cost no meaning, so those rows stay plain.
     assert.doesNotMatch(html, /data-meaning="(mean_ms|cost|total)"/);
+  });
+
+  void it("names a part in the metric's words, else the built-in label", () => {
+    const html = render(<RewardComparison result={result()} metricCode={METRIC} />);
+    assert.match(row(html, "accuracy"), /Distance error/);
+    // The fixture gives speed no name, so the row keeps the built-in label.
+    assert.match(row(html, "mean_ms"), /optimization\.reward\.mean_time|Mean time/);
   });
 });
 
