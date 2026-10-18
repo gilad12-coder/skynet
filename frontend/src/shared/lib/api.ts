@@ -34,6 +34,7 @@ import type {
 } from "@/shared/types/api";
 import type {
   ArtifactKind,
+  CheckTerminalEvent,
   ContractCheckRequest,
   ContractCheckResponse,
   DataMode,
@@ -468,6 +469,7 @@ export async function runContractCheck(
   req: ContractCheckRequest,
   signal?: AbortSignal,
   onPhase?: (phase: string) => void,
+  onTerminal?: (event: CheckTerminalEvent) => void,
 ): Promise<ContractCheckResponse> {
   if (!onPhase)
     return request<ContractCheckResponse>("/optimizations/contract-check", {
@@ -486,6 +488,7 @@ export async function runContractCheck(
   let result: ContractCheckResponse | undefined;
   await readServerSentEvents(response.body, ({ event, data }) => {
     if (event === "phase" && typeof data.phase === "string") onPhase(data.phase);
+    if (event === "terminal") onTerminal?.(data as unknown as CheckTerminalEvent);
     if (event === "result") result = data as unknown as ContractCheckResponse;
     if (event === "error")
       throw new Error(parseErrorMessage(JSON.stringify(data)) ?? msg("submit.preflight.failed"));
