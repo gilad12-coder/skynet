@@ -54,6 +54,7 @@ import type { ColumnRole } from "@/shared/ui/column-role-row";
 import { SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 
 import { emptyModelConfig } from "../constants";
+import { restoreSavedLimit } from "../lib/budget-limit";
 import { cloneToSlices } from "../lib/clone-payload";
 import { aggregateTokenSource, callHoldKey, runFloor as computeRunFloor } from "../lib/run-floor";
 import { fileNewRun } from "../lib/file-new-run";
@@ -433,11 +434,7 @@ export function WizardV2Provider({
   // runs: a reload that reopens the check screen starts the check at once, and
   // a check started before this would find no limit and fail as invalid.
   useLayoutEffect(() => {
-    if (!restored) return;
-    if (restored.optimizer.budgetUncapped) budget.setBudgetUncapped(true);
-    else if (restored.optimizer.maxCostCents != null) {
-      budget.setMaxCostCents(restored.optimizer.maxCostCents);
-    }
+    if (restored) restoreSavedLimit(restored.optimizer, { budget, patchSaved: patchOptimizer });
     // Runs once, for the setup read at mount.
   }, []);
 

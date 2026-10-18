@@ -50,3 +50,38 @@ test("missing, broken or older setups are ignored", () => {
     null,
   );
 });
+
+test("a saved spending limit survives any number of reloads", async () => {
+  const { restoreSavedLimit } = await import("./budget-limit.ts");
+  const AUTO_DEFAULT = 52;
+  let raw = encodeWizardSession("a@x.io", {
+    ...initialWizardV2State("guided"),
+    step: "optimizer" as const,
+    furthestStep: "optimizer" as const,
+    optimizer: { ...initialWizardV2State("guided").optimizer, maxCostCents: 150 },
+  });
+  for (let reload = 1; reload <= 3; reload += 1) {
+    const restored = decodeWizardSession(raw, "a@x.io", STEPS);
+    assert.ok(restored);
+    let draft = restored;
+    const patchSaved = (patch: Partial<typeof draft.optimizer>) => {
+      draft = { ...draft, optimizer: { ...draft.optimizer, ...patch } };
+    };
+    // The page-load budget starts unset, so the limit card's mount effect,
+    // which runs before the wizard's, fills its default into both first.
+    let serverLimit: number | null = AUTO_DEFAULT;
+    patchSaved({ maxCostCents: AUTO_DEFAULT });
+    restoreSavedLimit(restored.optimizer, {
+      budget: {
+        setMaxCostCents: (cents) => {
+          serverLimit = cents;
+        },
+        setBudgetUncapped: () => {},
+      },
+      patchSaved,
+    });
+    assert.equal(serverLimit, 150, `reload ${reload}: the limit shown`);
+    assert.equal(draft.optimizer.maxCostCents, 150, `reload ${reload}: the limit saved`);
+    raw = encodeWizardSession("a@x.io", draft);
+  }
+});
