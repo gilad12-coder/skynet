@@ -10,10 +10,8 @@ import {
   Flag,
   Hourglass,
   Info,
-  ListChecks,
   Lock,
   Minus,
-  Play,
   Plus,
   Wallet,
   WarningCircle,
@@ -25,11 +23,9 @@ import { cn } from "@/shared/lib/utils";
 
 import { centsToBudgetText, parseBudgetInput } from "@/shared/lib/budget-input";
 import { budgetShortfall } from "../lib/budget-limit";
-import { startingLimitCents, type RunFloor } from "../lib/run-floor";
+import { startingLimitCents } from "../lib/run-floor";
 import type { WizardV2Context } from "../lib/wizard-v2";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
-import { Disclosure } from "./Disclosure";
-import { Figure, type CalcSection } from "./Figure";
 import { Segmented } from "@/shared/ui/segmented";
 import { StepCard } from "./blackbox/shared";
 
@@ -40,9 +36,6 @@ import { StepCard } from "./blackbox/shared";
  * card names the least the limit can be (what the run's boxes hold before
  * the first model call, plus spare for its first calls), and once the
  * budget exists, the server's ledger for it.
- *
- * Every figure on the card is a trigger: it opens a layer over the card that
- * walks through the calculation behind that number.
  *
  * The limit can also be switched off: the run then draws on the account
  * balance until it finishes, and stops in place if that balance runs out. Each
@@ -94,7 +87,6 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
   const { runFloor, maxCostCents, setMaxCostCents, budgetUncapped, setBudgetUncapped } = w;
   const { budget, budgetBusy, budgetError, minimumTotalCents } = useExecutionBudget();
   const locale = getActiveIntlLocale();
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [limitEdited, setLimitEdited] = useState(maxCostCents != null);
 
   // The field is typed in dollars; the wizard state stays in cents. The field
@@ -171,79 +163,7 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
   const fieldHint = fieldError == null && parsed.kind === "empty" ? minimumMessage : null;
   const fieldMessage = fieldError ?? fieldHint;
 
-  const floorSections: CalcSection[] = runFloor ? floorCalculation(runFloor, dollars) : [];
-
-  // The ledger figures are the server's; their layers show how they add up.
   const spent = budget ? sumDecimals(budget.setup_spent_cents, budget.run_spent_cents) : null;
-  const ledgerNote = msg("submit.budget.calc.ledger_note");
-  const ledgerSteps = budget
-    ? {
-        setup: {
-          label: msg("submit.budget.setup_spent"),
-          value: ledgerAmount(budget.setup_spent_cents),
-        },
-        run: {
-          label: msg("submit.budget.run_spent"),
-          value: ledgerAmount(budget.run_spent_cents),
-        },
-        reserved: {
-          label: msg("submit.budget.reserved"),
-          value: ledgerAmount(budget.reserved_cents),
-        },
-      }
-    : null;
-  const remainingSections: CalcSection[] =
-    budget && ledgerSteps
-      ? [
-          {
-            steps: [
-              {
-                label: msg("submit.budget.label"),
-                value: budget.uncapped
-                  ? msg("submit.budget.uncapped_short")
-                  : formatCentsUsd(budget.total_cents, locale),
-              },
-              ledgerSteps.setup,
-              ledgerSteps.run,
-              ledgerSteps.reserved,
-              {
-                label: msg("submit.budget.remaining"),
-                formula: msg("submit.budget.calc.ledger_formula"),
-                value: ledgerAmount(budget.available_cents),
-                result: true,
-              },
-            ],
-            note: ledgerNote,
-          },
-        ]
-      : [];
-  const spentSections: CalcSection[] =
-    spent != null && ledgerSteps
-      ? [
-          {
-            steps: [
-              ledgerSteps.setup,
-              ledgerSteps.run,
-              {
-                label: msg("submit.budget.spent"),
-                formula: msg("submit.budget.calc.spent_formula"),
-                value: ledgerAmount(spent),
-                result: true,
-              },
-            ],
-            note: ledgerNote,
-          },
-        ]
-      : [];
-  const reservedSections: CalcSection[] = ledgerSteps
-    ? [
-        {
-          steps: [{ ...ledgerSteps.reserved, formula: msg("submit.budget.reserved_tip") }],
-          note: ledgerNote,
-        },
-      ]
-    : [];
-
   const showLedger = !budgetUncapped && budget != null && spent != null;
   const pendingTotal =
     budget != null &&
@@ -336,12 +256,12 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
                     </span>
                     {msg("submit.budget.floor")}
                   </span>
-                  <Figure
-                    label={msg("submit.budget.floor")}
-                    value={dollars(runFloor.floorCents)}
-                    sections={floorSections}
-                    className="self-start text-[13px] text-primary sm:self-auto sm:text-end"
-                  />
+                  <span
+                    dir="auto"
+                    className="self-start text-[13px] font-medium tabular-nums text-primary sm:self-auto sm:text-end"
+                  >
+                    {dollars(runFloor.floorCents)}
+                  </span>
                 </div>
                 <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">
                   {msg("submit.budget.floor_note")}
@@ -378,14 +298,12 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
                 icon={Wallet}
                 label={msg("submit.budget.remaining")}
                 value={ledgerAmount(budget.available_cents)}
-                sections={remainingSections}
               />
               {!isZero(spent) && (
                 <Row
                   icon={ClockCounterClockwise}
                   label={msg("submit.budget.spent")}
                   value={ledgerAmount(spent)}
-                  sections={spentSections}
                 />
               )}
               {!isZero(budget.reserved_cents) && (
@@ -394,7 +312,6 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
                   label={msg("submit.budget.reserved")}
                   tip={msg("submit.budget.reserved_tip")}
                   value={ledgerAmount(budget.reserved_cents)}
-                  sections={reservedSections}
                 />
               )}
             </dl>
@@ -423,72 +340,13 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
         </div>
       )}
 
-      {!budgetUncapped && (
-        <Disclosure
-          id="totalBudgetDetails"
-          label={msg("submit.budget.details.summary")}
-          open={detailsOpen}
-          onOpenChange={setDetailsOpen}
-        >
-          <div className="space-y-3">
-            <dl>
-              {budget && !isZero(budget.setup_spent_cents) && (
-                <Row
-                  icon={ListChecks}
-                  label={msg("submit.budget.setup_spent")}
-                  value={ledgerAmount(budget.setup_spent_cents)}
-                  sections={spentSections}
-                />
-              )}
-              {budget && !isZero(budget.run_spent_cents) && (
-                <Row
-                  icon={Play}
-                  label={msg("submit.budget.run_spent")}
-                  value={ledgerAmount(budget.run_spent_cents)}
-                  sections={spentSections}
-                />
-              )}
-            </dl>
-            <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
-              <p dir="auto">{msg("submit.budget.details.how")}</p>
-              <p dir="auto">{msg("submit.budget.details.reservation")}</p>
-              {mode === "byok" && <p dir="auto">{msg("submit.budget.byok_note")}</p>}
-            </div>
-          </div>
-        </Disclosure>
+      {!budgetUncapped && mode === "byok" && (
+        <p className="text-xs leading-relaxed text-muted-foreground" dir="auto">
+          {msg("submit.budget.byok_note")}
+        </p>
       )}
     </StepCard>
   );
-}
-
-/** The floor as a sum: the boxes' opening holds plus spare for the first calls. */
-function floorCalculation(floor: RunFloor, dollars: (cents: number) => string): CalcSection[] {
-  return [
-    {
-      steps: [
-        {
-          label: msg("submit.budget.calc.floor_boxes"),
-          value: dollars(floor.boxHoldCents),
-          why: msg("submit.budget.calc.floor_boxes_why"),
-        },
-        {
-          label: msg("submit.budget.calc.floor_spare"),
-          value: dollars(floor.spareCents),
-          why: msg("submit.budget.calc.floor_spare_why"),
-        },
-        {
-          label: msg("submit.budget.floor"),
-          equation: [
-            { value: dollars(floor.boxHoldCents), caption: msg("submit.budget.calc.term.runtime") },
-            { op: "+" },
-            { value: dollars(floor.spareCents), caption: msg("submit.budget.calc.term.spare") },
-          ],
-          value: dollars(floor.floorCents),
-          result: true,
-        },
-      ],
-    },
-  ];
 }
 
 /** One hairline row in the summary step's style: small icon, muted label, value at the end. */
@@ -497,14 +355,11 @@ function Row({
   label,
   value,
   tip,
-  sections,
 }: {
   icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
   tip?: string;
-  /** When given, the value opens these steps in a layer over the card. */
-  sections?: CalcSection[];
 }) {
   const name = (
     <span className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -518,11 +373,7 @@ function Row({
     <div className="flex items-center justify-between gap-3 border-b border-border/40 py-2.5">
       <dt className="min-w-0">{tip ? <HelpTip text={tip}>{name}</HelpTip> : name}</dt>
       <dd className={cn(valueClass, "flex justify-end")}>
-        {sections && sections.length > 0 ? (
-          <Figure label={label} value={value} sections={sections} className="text-sm" />
-        ) : (
-          <span dir="auto">{value}</span>
-        )}
+        <span dir="auto">{value}</span>
       </dd>
     </div>
   );
