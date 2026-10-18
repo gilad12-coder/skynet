@@ -44,9 +44,8 @@ export interface CheckTerminalPhaseState {
   /** The row's own label, as the Check screen words it. */
   label: string;
   status: CheckTerminalPhaseStatus;
-  /** Wall-clock span of the row, as the Check screen times it. */
-  startedAt?: number;
-  finishedAt?: number;
+  /** How long the row has run, as the Check screen times it (ticking while it runs). */
+  elapsedMs?: number;
 }
 
 const STATUS_KEYS: Record<CheckTerminalPhaseStatus, MessageKey> = {
@@ -233,16 +232,7 @@ function PhaseLog({
   const doneSamples = lanes.filter(
     (lane) => lane.state === "done" || lane.state === "failed",
   ).length;
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!running) return;
-    const timer = setInterval(() => setNow(Date.now()), 250);
-    return () => clearInterval(timer);
-  }, [running]);
-  const elapsedMs =
-    phase.startedAt === undefined
-      ? undefined
-      : Math.max(0, (phase.finishedAt ?? (running ? now : phase.startedAt)) - phase.startedAt);
+  const elapsedMs = phase.elapsedMs;
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [stuck, setStuck] = useState(true);
