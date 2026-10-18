@@ -8,6 +8,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import { useSettingsModal, useUserPrefs } from "@/features/settings";
 import { updateModelPrivacy, type InterviewOption } from "@/shared/lib/api";
 import { msg, type MessageKey } from "@/shared/lib/messages";
+import { APP_NAME } from "@/shared/lib/brand";
 import {
   FULL_TRANSLATION_LOCALES,
   LOCALE_REGISTRY,
@@ -137,8 +138,8 @@ type Finale = "none" | "splash" | "out";
  * strings these screens need are kept here rather than in a locale file.
  */
 const ENGLISH_ENTRY: Partial<Record<MessageKey, string>> = {
-  "experience.intake.entrance.title": "New to DRWN? Let's get you set up.",
-  "experience.intake.language.title": "Which language should DRWN speak?",
+  "experience.intake.entrance.title": `New to ${APP_NAME}? Let's get you set up.`,
+  "experience.intake.language.title": `Which language should ${APP_NAME} speak?`,
   "experience.intake.language.hint": "The app and the assistant both switch to it.",
   "experience.intake.skip": "Skip setup",
   "experience.intake.next": "Continue",

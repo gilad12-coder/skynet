@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from ...brand import APP_NAME
 from ...config import settings
 from ...notifications.email_render import render_account_email
 from ...storage.models import UserIdentityModel, UserModel
@@ -316,7 +317,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         "/auth/register",
         response_model=AccountInfo,
         status_code=201,
-        summary="Create a Skynet-native email/password account",
+        summary=f"Create a {APP_NAME}-native email/password account",
     )
     def register(
         body: RegisterRequest,

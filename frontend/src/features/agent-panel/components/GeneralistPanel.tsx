@@ -17,7 +17,7 @@ import { AgentThread } from "@/shared/ui/agent/agent-thread";
 import { ChatErrorBanner } from "@/shared/ui/agent/chat-error-banner";
 import { ChatTranscript } from "@/shared/ui/agent/chat-transcript";
 import { Composer } from "@/shared/ui/agent/composer";
-import { SkynetMark } from "@/shared/ui/skynet-mark";
+import { AppMark } from "@/shared/ui/app-mark";
 import { ComposerModelMenu } from "@/shared/ui/agent/composer-model-menu";
 import type { AgentMessage, AgentToolCall } from "@/shared/ui/agent/types";
 import { EmptyState } from "@/shared/ui/empty-state";
@@ -709,7 +709,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
 
   const emptyState = (
     <EmptyState
-      icon={SkynetMark}
+      icon={AppMark}
       variant="compact"
       title={msg("auto.features.agent.panel.components.generalistpanel.1")}
     />
@@ -720,7 +720,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       <div className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-2.5 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className="inline-flex size-6 shrink-0 overflow-hidden rounded-full bg-secondary">
-            <SkynetMark className="size-full" aria-hidden="true" />
+            <AppMark className="size-full" aria-hidden="true" />
           </span>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 leading-tight">

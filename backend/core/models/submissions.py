@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+from ..brand import APP_NAME
 from .common import ColumnMapping, ModelConfig, OptimizationStatus, OptimizationType, SplitFractions
 from .results import ModelTokenUsage
 from .serve import WorkflowNodeTrace
@@ -110,8 +111,8 @@ class _OptimizationRequestBase(BaseModel):
     token_source: Literal["managed", "byok"] = Field(
         default="managed",
         description=(
-            "How model calls are billed: 'managed' charges the marked-up provider cost to the Skynet balance; "
-            "'byok' sends calls through the user's provider key and charges only Skynet's platform fee to "
+            f"How model calls are billed: 'managed' charges the marked-up provider cost to the {APP_NAME} balance; "
+            f"'byok' sends calls through the user's provider key and charges only {APP_NAME}'s platform fee to "
             "the balance. Billable sandbox usage is charged at marked-up provider cost in both modes."
         ),
     )

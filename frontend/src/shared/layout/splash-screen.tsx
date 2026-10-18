@@ -10,14 +10,14 @@ const MORPH_MS = 1500;
 const CONTENT_FADE_MS = 200;
 const BACKDROP_FADE_MS = 100;
 // The letters' variant cross-fade takes 300 ms, so they stop morphing that long
-// before the fade and read as a clean DRWN when it starts.
+// before the fade and read cleanly when it starts.
 const LETTERS_SETTLE_MS = MORPH_MS - 300;
 const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 
 /**
- * App-load splash: the DRWN letters morphing at the centre of the screen, with
+ * App-load splash: the wordmark letters morphing at the centre of the screen, with
  * the evolution morph playing just above them, held until the figure lands on
- * the human. The content fades before the backdrop so the page's own DRWN title
+ * the human. The content fades before the backdrop so the page's own title
  * never shows through next to the splash letters. Reduced motion shows the
  * still human and letters and skips the hold.
  */
@@ -78,12 +78,16 @@ export function SplashScreen() {
           width={300}
           className="absolute bottom-full left-1/2 mb-2 hidden -translate-x-1/2 motion-reduce:block"
         />
-        <AnimatedWordmark
-          size={72}
-          autoMorph
-          autoMorphDuration={LETTERS_SETTLE_MS}
-          morphSpeed={120}
-        />
+        {/* 72px-tall letters, narrowed on phones so the six-letter name never
+            touches the screen edges. */}
+        <div className="w-[min(86vw,372px)]">
+          <AnimatedWordmark
+            fluid
+            autoMorph
+            autoMorphDuration={LETTERS_SETTLE_MS}
+            morphSpeed={120}
+          />
+        </div>
       </div>
     </div>
   );

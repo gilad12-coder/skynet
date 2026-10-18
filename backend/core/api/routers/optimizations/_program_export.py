@@ -18,6 +18,7 @@ import zipfile
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
+from ....brand import APP_NAME
 from ....constants import (
     PAYLOAD_OVERVIEW_MODEL_NAME,
     PAYLOAD_OVERVIEW_MODULE_KWARGS,
@@ -31,13 +32,13 @@ from ....models import ProgramArtifact
 EXPORT_FORMAT_VERSION = 1
 
 # The export is the customer's content under the Terms, and the loader is
-# Skynet's own code, so a blanket grant here keeps the AGPL off their program.
-_LICENSE_TXT = """This export was produced by Skynet from your task, data and settings.
+# the service's own code, so a blanket grant here keeps the AGPL off their program.
+_LICENSE_TXT = f"""This export was produced by {APP_NAME} from your task, data and settings.
 
 You own the program state, signature, workflow, prompts and optimized modules
-in this archive. Skynet claims no rights in them.
+in this archive. {APP_NAME} claims no rights in them.
 
-load_program.py and README.md are provided by Skynet, and you may use, copy,
+load_program.py and README.md are provided by {APP_NAME}, and you may use, copy,
 modify and distribute them for any purpose without restriction. They come
 with no warranty of any kind.
 
@@ -541,7 +542,7 @@ def _build_readme(metadata: dict[str, Any]) -> str:
     lines = [
         "# Exported DSPy program",
         "",
-        f"Optimization `{metadata.get('optimization_id')}`, exported from Skynet.",
+        f"Optimization `{metadata.get('optimization_id')}`, exported from {APP_NAME}.",
         "",
         "This is the actual compiled program — not a hosted endpoint. You run it",
         "yourself with plain `dspy` and your own LM key. Nothing here calls back",

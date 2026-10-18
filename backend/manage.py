@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Skynet management CLI.
+"""Backend management CLI.
 
 Usage:
     python manage.py setup    — First-time database setup
@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 from alembic import command
+from core.brand import APP_NAME
 from core.config import settings
 from core.registry import ServiceRegistry
 from core.service_gateway.embedding_pipeline import reembed_all_embeddings
@@ -68,7 +69,7 @@ def cmd_setup() -> None:
     """
     url = _get_db_url()
     masked = url.split("@")[-1] if "@" in url else url
-    print(f"\n🔧 Skynet Setup — {masked}\n")
+    print(f"\n🔧 {APP_NAME} Setup — {masked}\n")
 
     cmd_check()
 
@@ -113,7 +114,7 @@ def cmd_shell() -> None:
     store = RemoteDBJobStore(url)
     registry = ServiceRegistry()
 
-    banner = "Skynet shell — available objects:\n  settings, store (JobStore), registry (ServiceRegistry)\n"
+    banner = f"{APP_NAME} shell — available objects:\n  settings, store (JobStore), registry (ServiceRegistry)\n"
     code.interact(
         banner=banner,
         local={
@@ -145,7 +146,7 @@ def cmd_reembed() -> None:
 def main() -> None:
     """Parse the command-line argument and dispatch to the chosen subcommand."""
     parser = argparse.ArgumentParser(
-        description="Skynet management CLI",
+        description=f"{APP_NAME} management CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Commands:\n"

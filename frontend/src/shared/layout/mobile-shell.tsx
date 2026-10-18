@@ -11,6 +11,7 @@ import { useLocale } from "@/shared/providers";
 import { dirForLocale } from "@/shared/lib/locale";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
+import { APP_NAME } from "@/shared/lib/brand";
 import { JobsStreamProvider } from "@/shared/hooks/use-jobs-stream";
 import {
   AgentPillDock,
@@ -82,7 +83,7 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
           className="text-sm font-bold uppercase tracking-[0.14em] text-foreground"
           style={{ fontFamily: "var(--font-ui)" }}
         >
-          DRWN
+          {APP_NAME}
         </Link>
         <div className="flex items-center gap-1">
           <GlobalSearch />

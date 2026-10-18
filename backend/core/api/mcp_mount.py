@@ -36,6 +36,8 @@ from fastmcp.server.providers.openapi.components import (
 from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
 from mcp.types import ToolAnnotations
 
+from ..brand import APP_NAME
+
 if TYPE_CHECKING:
     from fastapi import FastAPI
     from fastmcp.utilities.openapi.models import HTTPRoute
@@ -238,7 +240,7 @@ def mount_mcp_on_app(app: FastAPI) -> None:
     # everything else EXCLUDE so it never appears in the MCP surface.
     mcp = FastMCP.from_fastapi(
         app=app,
-        name="Skynet",
+        name=APP_NAME,
         route_maps=[
             RouteMap(tags={AGENT_TAG}, mcp_type=MCPType.TOOL),
             RouteMap(mcp_type=MCPType.EXCLUDE),

@@ -1,4 +1,4 @@
-"""FastAPI application factory for Skynet.
+"""FastAPI application factory for the backend API.
 
 This module now contains *only* the app-lifecycle concerns:
 
@@ -53,6 +53,7 @@ from ..billing import (
     warn_if_local_key_uncapped,
 )
 from ..billing.data_policy import configure_data_policy
+from ..brand import APP_NAME
 from ..config import settings
 from ..connectors.registry import oauth_config_problems
 from ..error_reporting import capture_exception
@@ -882,7 +883,7 @@ def create_app(
                 loop_lag_monitor.stop()
 
     app = FastAPI(
-        title="Skynet",
+        title=APP_NAME,
         lifespan=lifespan,
         openapi_tags=_OPENAPI_TAGS,
         servers=[{"url": "/", "description": "This server"}],
@@ -892,7 +893,7 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         description=(
-            "Backend API for **Skynet** — a platform for submitting, "
+            f"Backend API for **{APP_NAME}** — a platform for submitting, "
             "comparing, and serving optimized language-model "
             "programs. Submit optimization runs or grid searches, stream "
             "live progress and metrics, inspect per-example baselines vs. "

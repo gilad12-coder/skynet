@@ -13,6 +13,7 @@ from typing import Any
 
 from ..billing.runtime import UsagePendingError
 from ..billing.signals import BudgetReached
+from ..brand import APP_NAME
 from ..exceptions import InfrastructureInterruptionError
 from ..service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
 from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY, archive_chunks
@@ -27,7 +28,9 @@ logger = logging.getLogger(__name__)
 CHECKPOINT_EVENT = "checkpoint_file"
 _CHECKPOINT_PATH = re.compile(r"(?:(?:pair_\d+|gepa)/)?gepa_state\.bin\Z")
 BROKEN_IMAGE_MESSAGE = "The sandbox image cannot start its optimizer; rebuild the sandbox image."
-OUTDATED_IMAGE_MESSAGE = "The sandbox image is older than this version of Skynet; rebuild and re-pin the sandbox image."
+OUTDATED_IMAGE_MESSAGE = (
+    f"The sandbox image is older than this version of {APP_NAME}; rebuild and re-pin the sandbox image."
+)
 PROTOCOL_PROBE = (
     'PYTHONPATH=/app python3 -c "from core.worker.sandbox_protocol import SANDBOX_PROTOCOL; print(SANDBOX_PROTOCOL)"'
 )

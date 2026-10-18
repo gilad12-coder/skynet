@@ -42,6 +42,7 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
+from ...brand import APP_NAME
 from ...config import settings
 from ...notifications.email_render import render_account_email
 from ...storage.models import UserIdentityModel, UserModel, WebAuthnChallengeModel, WebAuthnCredentialModel
@@ -71,7 +72,7 @@ from .accounts import (
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
-_RP_NAME = "Skynet"
+_RP_NAME = APP_NAME
 _CHALLENGE_TTL = timedelta(minutes=5)
 _NICKNAME_MAX = 64
 _DEV_ORIGINS = ("http://localhost:3000", "http://localhost:3002")

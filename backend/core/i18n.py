@@ -1,4 +1,4 @@
-"""Backend facade over the shared Skynet i18n catalog.
+"""Backend facade over the shared i18n catalog.
 
 The canonical catalog lives at ``i18n/locales/he.json`` in the repo root, and
 ``scripts/generate_i18n.py`` copies it into ``backend/core/i18n_locales/he.json``
@@ -20,6 +20,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from core.brand import APP_NAME
+
 # Lookup the in-package copy first (works for wheel installs),
 # and fall back to the repo-root canonical when running from a source tree
 # without the bundled copy. Module-level constant so import never blocks on
@@ -28,6 +30,9 @@ _PACKAGE_CATALOG = Path(__file__).resolve().parent / "i18n_locales" / "he.json"
 _REPO_CATALOG = Path(__file__).resolve().parents[2] / "i18n" / "locales" / "he.json"
 CATALOG_PATH = _PACKAGE_CATALOG if _PACKAGE_CATALOG.is_file() else _REPO_CATALOG
 TERM_PATTERN = re.compile(r"{term\.([A-Za-z0-9_]+)}")
+# The app's name comes from i18n/brand.json rather than the catalogs, so every
+# locale resolves {term.appName} to the same untranslated brand.
+_BRAND_TERMS: dict[str, str] = {"appName": APP_NAME}
 
 _TERM_KEYS: dict[str, str] = {
     "TERM_OPTIMIZATION": "optimization",
@@ -138,6 +143,8 @@ def term(key: str) -> str:
         The Hebrew term string from the catalog, or ``key`` itself when the
         catalog has no entry.
     """
+    if key in _BRAND_TERMS:
+        return _BRAND_TERMS[key]
     value = _terms().get(key)
     return value if isinstance(value, str) else key
 
@@ -277,7 +284,10 @@ def t_locale(locale: str | None, key: str, /, **params: Any) -> str:
         return None
 
     template = lookup("messages", key) or key
-    template = TERM_PATTERN.sub(lambda match: lookup("terms", match.group(1)) or match.group(1), template)
+    template = TERM_PATTERN.sub(
+        lambda match: _BRAND_TERMS.get(match.group(1)) or lookup("terms", match.group(1)) or match.group(1),
+        template,
+    )
     if params:
         try:
             return template.format(**params)

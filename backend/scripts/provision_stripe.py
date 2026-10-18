@@ -14,19 +14,21 @@ import sys
 
 import stripe
 
+from core.brand import APP_NAME
 from core.config import settings
 
 # (lookup_key, display name, unit amount in cents). The cents each pack grants
 # live in core.billing.service.PACK_CENTS — Stripe only holds the dollar price.
 _PACKS: list[tuple[str, str, int]] = [
-    ("skynet_pack_starter", "Skynet top-up — Starter", 500),
-    ("skynet_pack_plus", "Skynet top-up — Plus", 2000),
-    ("skynet_pack_pro", "Skynet top-up — Pro", 5000),
+    ("skynet_pack_starter", f"{APP_NAME} top-up — Starter", 500),
+    ("skynet_pack_plus", f"{APP_NAME} top-up — Plus", 2000),
+    ("skynet_pack_pro", f"{APP_NAME} top-up — Pro", 5000),
 ]
 
-# The Skynet Pro platform plan: a monthly recurring price. Its limits live in
-# core.config (pro_* settings) and core.billing.plans.
-_PRO_MONTHLY: tuple[str, str, int] = ("skynet_pro_monthly", "Skynet Pro", 900)
+# The Pro platform plan: a monthly recurring price. Its limits live in
+# core.config (pro_* settings) and core.billing.plans. Lookup keys are stable
+# Stripe identifiers, so they keep their original spelling across renames.
+_PRO_MONTHLY: tuple[str, str, int] = ("skynet_pro_monthly", f"{APP_NAME} Pro", 900)
 
 
 def _find_price(lookup_key: str) -> str | None:
@@ -84,7 +86,7 @@ def main() -> int:
     print("Provisioning top-up packs ...")
     pack_ids = {key: _ensure_price(key, name, amount) for key, name, amount in _PACKS}
 
-    print("Provisioning the Skynet Pro plan ...")
+    print(f"Provisioning the {APP_NAME} Pro plan ...")
     pro_key, pro_name, pro_amount = _PRO_MONTHLY
     pro_price_id = _ensure_price(pro_key, pro_name, pro_amount, monthly=True)
 

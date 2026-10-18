@@ -18,8 +18,8 @@
     "email.event.new_best.reason": "Vous recevez des courriels quand une exécution obtient un nouveau meilleur score.",
     "email.event.stuck.reason": "Vous recevez des courriels quand une exécution cesse de progresser.",
     "email.event.shared.reason": "Vous recevez des courriels quand quelqu'un partage une exécution avec vous.",
-    "email.account.verification.subject": "Confirmez votre adresse de courriel Skynet",
-    "email.account.verification.ignore": "Si vous n'avez pas créé de compte Skynet, vous pouvez ignorer ce courriel.",
+    "email.account.verification.subject": "Confirmez votre adresse de courriel {term.appName}",
+    "email.account.verification.ignore": "Si vous n'avez pas créé de compte {term.appName}, vous pouvez ignorer ce courriel.",
     "email.account.password_reset.ignore": "Si vous n'avez pas demandé à réinitialiser votre mot de passe, vous pouvez ignorer ce courriel.",
     "email.account.sign_in.ignore": "Si vous n'avez pas essayé de vous connecter, vous pouvez ignorer ce courriel."
   }

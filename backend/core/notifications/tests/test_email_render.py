@@ -7,6 +7,7 @@ import re
 
 import pytest
 
+from ...brand import APP_NAME
 from ...i18n import locale_chain, t_locale
 from .. import email_render
 from ..email_render import (
@@ -22,7 +23,7 @@ from ..email_render import (
 ALL_FACTS = {"score": 0.8125, "delta": 0.031, "spent": 3.2, "limit": 10, "duration": 4380}
 
 FINISHED_EN_TEXT = (
-    "SKYNET\n"
+    f"{APP_NAME.upper()}\n"
     "\n"
     "Support triage finished\n"
     "\n"
@@ -81,7 +82,7 @@ def test_every_event_renders_html_and_text(event_type: str, locale: str) -> None
     assert '<meta name="color-scheme" content="light dark">' in html
     assert "prefers-color-scheme:dark" in html
     assert "Heebo" not in html
-    assert text.startswith("SKYNET\n")
+    assert text.startswith(f"{APP_NAME.upper()}\n")
     assert f"{button}: https://app.example/optimizations/abc" in text
     assert reason in text
     assert settings in text
@@ -216,9 +217,23 @@ def test_account_email_english_text_matches_the_original_wording() -> None:
     _, _, text = render_account_email("password_reset", "en", "123456")
 
     assert text == (
-        "Your Skynet password-reset code is 123456. It expires in 30 minutes.\n\n"
+        f"Your {APP_NAME} password-reset code is 123456. It expires in 30 minutes.\n\n"
         "If you didn't ask to reset your password, you can ignore this email.\n"
     )
+
+
+@pytest.mark.parametrize("locale", ["en", "he", "ja", "fr-CA", "pt-BR"])
+def test_account_email_subjects_name_the_app(locale: str) -> None:
+    """Every account email subject resolves {term.appName} to the brand constant.
+
+    Args:
+        locale: Recipient locale under test.
+    """
+    for kind in ACCOUNT_EMAIL_KINDS:
+        subject, html, text = render_account_email(kind, locale, "482913")
+
+        assert APP_NAME in subject
+        assert "{term." not in subject + html + text
 
 
 def test_render_email_html_without_optional_parts() -> None:
