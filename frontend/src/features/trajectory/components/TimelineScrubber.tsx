@@ -112,12 +112,14 @@ export function TimelineScrubber({
   const steps = useMemo(() => Array.from({ length: max + 1 }, (_, i) => i), [max]);
 
   return (
+    // The extra end padding keeps the last step clear of the fixed Agent pill
+    // (bottom-4 end-4), which otherwise covers it when the slider scrolls to the bottom.
     <div
-      className="rounded-xl border border-border/40 bg-background/70 px-4 pt-3 pb-4"
+      className="rounded-xl border border-border/40 bg-background/70 ps-4 pe-24 pt-3 pb-4"
       dir={isRtl ? "rtl" : "ltr"}
     >
       <div className="mb-3 flex items-center justify-between gap-3">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="text-[10px] font-semibold uppercase tracking-wider rtl:tracking-normal text-muted-foreground">
           {label}
         </span>
       </div>

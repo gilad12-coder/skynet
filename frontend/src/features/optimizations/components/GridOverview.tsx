@@ -32,6 +32,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives
 import { Button } from "@/shared/ui/primitives/button";
 import { Dialog, DialogContent, DialogFooter } from "@/shared/ui/primitives/dialog";
 import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { FadeIn, StaggerContainer, StaggerItem, TiltCard } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import type { OptimizationStatusResponse, PairResult } from "@/shared/types/api";
@@ -275,10 +276,7 @@ function GridOverviewImpl({
           {pairFilter != null && (
             <div className="flex items-center gap-2 flex-wrap mb-3">
               <span className="group inline-flex items-center gap-1.5 rounded-lg border on-primary pe-1 ps-2.5 py-1 transition-all duration-150 hover:bg-primary-fill/[0.1] hover:border-primary-fill/20">
-                <span
-                  className="font-mono text-[0.6875rem] font-medium text-primary/80"
-                  dir="ltr"
-                >
+                <span className="font-mono text-[0.6875rem] font-medium text-primary/80" dir="ltr">
                   {selectedPair ? pairLabel(selectedPair) : "—"}
                 </span>
                 <button
@@ -423,7 +421,9 @@ function GridOverviewImpl({
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">
-                      {msg("auto.features.optimizations.components.gridoverview.10")}
+                      <HelpTip text={tip("grid.score_comparison")}>
+                        {msg("auto.features.optimizations.components.gridoverview.10")}
+                      </HelpTip>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
@@ -558,7 +558,9 @@ function GridOverviewImpl({
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">
-                      {msg("auto.features.optimizations.components.gridoverview.11")}
+                      <HelpTip text={tip("grid.quality_speed_combined")}>
+                        {msg("auto.features.optimizations.components.gridoverview.11")}
+                      </HelpTip>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
@@ -809,9 +811,6 @@ function GridOverviewImpl({
           const isSpeed = scoring.speedWinner === pr.pair_index;
           const s = scoring.byIndex[pr.pair_index];
           const barRatio = s?.quality ?? 0;
-          // A failed pair offers Resume only when it crashed mid-run (has a
-          // checkpoint); new grid searches are no longer submitted, so there is
-          // no restart-from-a-clone path.
           return (
             <div
               key={pr.pair_index}
@@ -891,19 +890,24 @@ function GridOverviewImpl({
                   </span>
                 )}
 
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  autoTooltip={false}
-                  className="pointer-events-auto shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  aria-label={msg("auto.features.optimizations.components.gridoverview.literal.29")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPendingDelete(pr);
-                  }}
+                <TooltipButton
+                  tooltip={msg("auto.features.optimizations.components.gridoverview.18")}
                 >
-                  <Trash className="size-3.5" />
-                </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="pointer-events-auto shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={msg(
+                      "auto.features.optimizations.components.gridoverview.literal.29",
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingDelete(pr);
+                    }}
+                  >
+                    <Trash className="size-3.5" />
+                  </Button>
+                </TooltipButton>
 
                 <OpenIcon className="size-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors shrink-0" />
               </div>

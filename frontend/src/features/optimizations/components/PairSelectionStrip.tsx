@@ -112,16 +112,19 @@ export function PairSelectionStrip({
               </TooltipButton>
             )}
             {jobTerminal && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                autoTooltip={false}
-                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => setDeleteOpen(true)}
-                aria-label={msg("auto.features.optimizations.components.gridoverview.literal.29")}
+              <TooltipButton
+                tooltip={msg("auto.features.optimizations.components.gridoverview.18")}
               >
-                <Trash className="size-4" />
-              </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => setDeleteOpen(true)}
+                  aria-label={msg("auto.features.optimizations.components.gridoverview.literal.29")}
+                >
+                  <Trash className="size-4" />
+                </Button>
+              </TooltipButton>
             )}
             <span className="mx-1 h-5 w-px bg-primary-fill/30" />
             <Button

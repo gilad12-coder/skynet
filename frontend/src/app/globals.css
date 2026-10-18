@@ -274,7 +274,6 @@
   --tree-winner-badge-ink: #ffffff;
   --tree-ghost-fill: #e8e1d8;
   --tree-grid: oklch(0.91 0.006 50);
-  --tree-grid-axis: oklch(0.94 0.005 50);
   --trust-ask: #3d6db0;
   --trust-auto-safe: #2e7d4f;
   --trust-yolo: #c03a3a;
@@ -393,7 +392,6 @@
   --tree-winner-badge-ink: #2a1f08;
   --tree-ghost-fill: #382f28;
   --tree-grid: rgba(255, 255, 255, 0.07);
-  --tree-grid-axis: rgba(255, 255, 255, 0.045);
   --trust-ask: #7ba3dd;
   --trust-auto-safe: #7fbf8e;
   --trust-yolo: #e8706a;

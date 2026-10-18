@@ -169,7 +169,7 @@ function StatusText({ state, text }: { state: StageState; text: string }) {
   return (
     <span
       className={cn(
-        "text-[0.625rem] uppercase tracking-[0.08em]",
+        "text-[0.625rem] uppercase tracking-[0.08em] rtl:tracking-normal",
         state === "stopped" ? "text-destructive" : "text-muted-foreground",
       )}
     >

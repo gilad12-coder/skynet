@@ -64,8 +64,6 @@ const CONTAINER_HEIGHT_PX = 560;
 // rather than shared to avoid cross-feature coupling for two tiny constants.
 const GRID_STEP = 44;
 const GRID_LINE_COLOR = "var(--tree-grid)";
-const GRID_AXIS_COLOR = "var(--tree-grid-axis)";
-const AXIS_PADDING_PX = 48;
 // Direct color values — using `hsl(var(--muted))` is invalid because the
 // CSS variables hold hex colors, not h s l components, so the gradient gets
 // silently dropped and the maximized overlay becomes transparent.
@@ -536,8 +534,6 @@ export function TrajectoryTree({
   const transform = `translate(${view.tx}, ${view.ty}) scale(${view.k})`;
 
   const gridScreenStep = GRID_STEP * view.k;
-  const axisCx = (size.w / 2) * view.k + view.tx;
-  const axisCy = (size.h / 2) * view.k + view.ty;
 
   const treeBody = (
     <div
@@ -591,22 +587,6 @@ export function TrajectoryTree({
               </pattern>
             </defs>
             <rect width={size.w} height={size.h} fill="url(#trajectory-grid)" />
-            <line
-              x1={axisCx}
-              y1={AXIS_PADDING_PX}
-              x2={axisCx}
-              y2={Math.max(size.h - AXIS_PADDING_PX, AXIS_PADDING_PX)}
-              stroke={GRID_AXIS_COLOR}
-              strokeWidth={1}
-            />
-            <line
-              x1={AXIS_PADDING_PX}
-              y1={axisCy}
-              x2={Math.max(size.w - AXIS_PADDING_PX, AXIS_PADDING_PX)}
-              y2={axisCy}
-              stroke={GRID_AXIS_COLOR}
-              strokeWidth={1}
-            />
           </>
         ) : null}
         <g transform={transform}>
@@ -710,7 +690,7 @@ export function TrajectoryTree({
             onToggle={() => toggleLayer("winner")}
             swatch={
               <span
-                className="inline-flex items-center justify-center rounded-sm px-1.5 py-0.5 text-[8px] font-semibold leading-none tracking-wider"
+                className="inline-flex items-center justify-center rounded-sm px-1.5 py-0.5 text-[8px] font-semibold leading-none tracking-wider rtl:tracking-normal"
                 style={{
                   background: WINNER_BADGE_FILL,
                   color: WINNER_BADGE_INK,

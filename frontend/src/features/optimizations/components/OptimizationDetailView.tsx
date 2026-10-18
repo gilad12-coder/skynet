@@ -105,7 +105,6 @@ import { UsageTab } from "./UsageTab";
 import { ReactServeChat } from "./ReactServeChat";
 import { ReactServeApi } from "./ReactServeApi";
 import { RunPlayground } from "./RunPlayground";
-import { RunResultCard, resultArtifactText, runResultScores } from "./RunResultCard";
 import { linkifyMessage } from "@/shared/lib/linkify";
 import { useStreamWithPollFallback } from "@/shared/hooks/use-stream-with-poll-fallback";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
@@ -345,9 +344,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const surfaceLevel = useExperienceLevel();
   const levelTabGate = detailTabGate(surfaceLevel);
   const linkedDetailTab = requestedDetailTab(searchParams.get("tab"));
-  // Guided opens a finished run on its result card alone; a deep link to a
-  // tab skips straight to the tabbed page.
-  const [showGuidedDetails, setShowGuidedDetails] = useState(() => searchParams.has("tab"));
 
   // Public read-only share view: seed from props; never call authed endpoints.
   const skipNetwork = isShare;
@@ -1166,37 +1162,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   // Usage reads the run's billing records, which only an authenticated viewer can fetch.
   const showUsageTab = !skipNetwork;
 
-  const resultArtifact =
-    !isShare &&
-    !isPairContext &&
-    surfaceLevel !== "expert" &&
-    job.status === "success" &&
-    job.optimization_type !== "grid_search"
-      ? resultArtifactText({
-          job,
-          optimizedPrompt,
-          reactOverlay,
-          optimizedModuleSrc,
-          optimizedNodes,
-        })
-      : "";
-  const resultCard = resultArtifact ? (
-    <RunResultCard
-      scores={runResultScores(job)}
-      artifactText={resultArtifact}
-      onTryIt={
-        showPlaygroundTab
-          ? () => {
-              setShowGuidedDetails(true);
-              setDetailTab("playground");
-            }
-          : undefined
-      }
-      onSeeDetails={surfaceLevel === "guided" ? () => setShowGuidedDetails(true) : undefined}
-    />
-  ) : null;
-  const guidedResultOnly = surfaceLevel === "guided" && resultCard != null && !showGuidedDetails;
-
   const pairCount = effectiveJob?.grid_result?.pair_results.length ?? 0;
   const isBestPair =
     isPairContext && effectiveJob?.grid_result?.best_pair?.pair_index === activePair.pair_index;
@@ -1290,9 +1255,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      onClick={() =>
-                        router.push(`/submit?clone=${job.optimization_id}`)
-                      }
+                      onClick={() => router.push(`/submit?clone=${job.optimization_id}`)}
                       aria-label={msg("auto.app.optimizations.id.page.literal.4")}
                     >
                       <Copy className="size-4" />
@@ -1508,10 +1471,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           </FadeIn>
         )}
 
-      {guidedResultOnly && resultCard}
-
       {(() => {
-        if (guidedResultOnly) return null;
         const tabCls =
           "relative min-h-[44px] shrink-0 flex-none px-2.5 sm:px-4 py-2.5 rounded-none border-b-2 border-transparent data-[state=active]:border-transparent data-[state=active]:border-b-primary data-[state=active]:text-foreground data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-all duration-200 text-xs sm:text-sm";
         // Pair view pings the trajectory/logs tabs only while the pair itself
@@ -1639,7 +1599,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 onPairSelect={handlePairSelect}
                 onPairDeleted={handlePairDeleted}
                 payload={payload}
-                resultCard={surfaceLevel === "standard" ? resultCard : null}
               />
             </TabsContent>
 

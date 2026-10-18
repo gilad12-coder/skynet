@@ -16,7 +16,9 @@ export function InfoCard({
   icon?: ReactNode;
 }) {
   return (
-    <div
+    <motion.div
+      whileHover={{ y: -1 }}
+      transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
       className="group relative rounded-lg border border-border bg-card px-3.5 py-3 transition-[border-color,box-shadow] duration-200 hover:border-primary-fill/55"
     >
       <div className="flex items-center gap-1.5 mb-1.5">
@@ -28,14 +30,14 @@ export function InfoCard({
             {icon}
           </span>
         )}
-        <p className="truncate text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+        <p className="truncate text-[0.625rem] font-semibold uppercase tracking-[0.14em] rtl:tracking-normal text-muted-foreground/70">
           {label}
         </p>
       </div>
       <p className="text-sm font-semibold text-foreground truncate">
         {value ?? <span className="text-[#BFB3A3] font-normal">—</span>}
       </p>
-    </div>
+    </motion.div>
   );
 }
 
@@ -71,7 +73,7 @@ export function LangPicker<T extends string>({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="-mx-1.5 -my-0.5 flex min-h-[44px] items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold tracking-wide text-[var(--text-2)] transition-colors hover:bg-black/5 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
+        className="-mx-1.5 -my-0.5 flex min-h-[44px] items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold tracking-wide rtl:tracking-normal text-[var(--text-2)] transition-colors hover:bg-black/5 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
         aria-haspopup="listbox"
         aria-expanded={open}
       >
@@ -98,7 +100,7 @@ export function LangPicker<T extends string>({
                     onChange(k);
                     setOpen(false);
                   }}
-                  className={`flex min-h-[44px] w-full items-center justify-between px-3 py-1.5 text-start text-[0.6875rem] font-semibold tracking-wide transition-colors cursor-pointer ${k === value ? "bg-primary-fill/8 text-primary" : "text-[var(--text-2)] hover:bg-black/5"}`}
+                  className={`flex min-h-[44px] w-full items-center justify-between px-3 py-1.5 text-start text-[0.6875rem] font-semibold tracking-wide rtl:tracking-normal transition-colors cursor-pointer ${k === value ? "bg-primary-fill/8 text-primary" : "text-[var(--text-2)] hover:bg-black/5"}`}
                   role="option"
                   aria-selected={k === value}
                 >

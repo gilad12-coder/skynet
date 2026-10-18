@@ -211,14 +211,14 @@ export function TrajectoryPanel({
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground/80 backdrop-blur"
+              className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider rtl:tracking-normal text-muted-foreground/80 backdrop-blur"
             >
               <PingDot size="sm" />
               <span className="tabular-nums">{candidates.length}</span>
               <span>{TERMS.candidatePlural}</span>
             </motion.div>
           ) : (
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider rtl:tracking-normal text-muted-foreground">
               <span className="tabular-nums">{candidates.length}</span> {TERMS.candidatePlural}
             </span>
           )}
