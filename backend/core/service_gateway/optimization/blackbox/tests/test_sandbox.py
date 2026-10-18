@@ -295,8 +295,8 @@ def test_run_uses_a_fresh_exit_file_per_command() -> None:
 
 
 def test_run_polls_the_exit_file_with_growing_delays(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A slow command is watched with doubling sleeps until its exit file lands, then its logs are read."""
-    box = _FakeBox(returncode=0, stdout="out", stderr="err", polls_to_finish=3)
+    """A slow, silent command is watched with doubling sleeps until its exit file lands."""
+    box = _FakeBox(returncode=0, polls_to_finish=3)
     session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
     clock = _FakeTime()
     monkeypatch.setattr(sandbox_mod, "time", clock)
@@ -304,17 +304,16 @@ def test_run_polls_the_exit_file_with_growing_delays(monkeypatch: pytest.MonkeyP
     result = session.run("make things")
 
     assert box.fs.polls == 3
-    assert clock.sleeps == [1.0, 2.0, 4.0]
+    assert clock.sleeps == [0.5, 1.0, 2.0]
     assert result.exit_code == 0
-    assert result.stdout == "out"
-    assert result.stderr == "err"
 
 
 def test_run_streams_output_as_the_files_grow(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each poll forwards whatever the box has written since the last one, in order."""
     box = _FakeBox(returncode=0, polls_to_finish=3)
     session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
-    monkeypatch.setattr(sandbox_mod, "time", _FakeTime())
+    clock = _FakeTime()
+    monkeypatch.setattr(sandbox_mod, "time", clock)
     chunks = ["one\n", "two\n", "three\n"]
     stored_read = box.fs.read_text
 
@@ -330,6 +329,9 @@ def test_run_streams_output_as_the_files_grow(monkeypatch: pytest.MonkeyPatch) -
     result = session.run("chatty", on_output=lambda stream, text: seen.append((stream, text)))
 
     assert seen == [("stdout", "one\n"), ("stdout", "two\n"), ("stdout", "three\n")]
+    # Output moved on every poll, so the backoff never left the floor: a chatty
+    # command is usually waiting on the answer only the next poll can deliver.
+    assert clock.sleeps == [0.5, 0.5, 0.5]
     assert result.stdout == "one\ntwo\nthree\n"
     assert result.exit_code == 0
 
@@ -360,7 +362,15 @@ def test_run_waits_for_the_exit_code_to_be_written(monkeypatch: pytest.MonkeyPat
     session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
     monkeypatch.setattr(sandbox_mod, "time", _FakeTime())
     reads: list[str] = ["", "3\n"]
-    monkeypatch.setattr(box.fs, "read_text", lambda path, cwd=None: reads.pop(0))
+    stored_read = box.fs.read_text
+
+    def read_text(path: str, cwd: str | None = None) -> str:
+        """Answer the exit file slowly; the output files read through."""
+        if ".app-exit-" in path:
+            return reads.pop(0)
+        return stored_read(path, cwd)
+
+    monkeypatch.setattr(box.fs, "read_text", read_text)
 
     result = session.run("exit 3")
 

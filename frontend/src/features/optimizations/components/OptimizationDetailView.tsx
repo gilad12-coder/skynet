@@ -1578,6 +1578,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 <TabsTrigger value="usage" className={tabCls}>
                   <Coins className="size-3.5" />
                   {msg("usage_tab.title")}
+                  {pingActive && <PingDot className="ms-1" />}
                 </TabsTrigger>
               )}
               {!isPhone && showConfigTab && (

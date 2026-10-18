@@ -13,7 +13,6 @@ export interface RepoRunOptions {
   username: string;
   tokenSource: "managed" | "byok";
   maxCostCents: number | null;
-  estimate: { lowCents: number; highCents: number } | null;
 }
 
 const hasModel = (config: ModelConfig | null): config is ModelConfig =>
@@ -22,7 +21,7 @@ const hasModel = (config: ModelConfig | null): config is ModelConfig =>
 /** The repository run request, or null while the wizard cannot run it yet. */
 export function repoRunRequest(
   state: WizardV2State,
-  { username, tokenSource, maxCostCents, estimate }: RepoRunOptions,
+  { username, tokenSource, maxCostCents }: RepoRunOptions,
 ): BlackboxRunRequest | null {
   const { task, optimizer, workspace, meta } = state;
   const repo = task.repo;
@@ -69,7 +68,5 @@ export function repoRunRequest(
     is_private: meta.isPrivate,
     ...(meta.economyMode && { economy_mode: true }),
     max_cost_cents: maxCostCents ?? undefined,
-    estimated_cents_low: estimate?.lowCents,
-    estimated_cents_high: estimate?.highCents,
   };
 }

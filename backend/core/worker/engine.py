@@ -68,7 +68,7 @@ from ..constants import (
     TOKEN_SOURCE_MANAGED,
 )
 from ..exceptions import INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
-from ..i18n import CANCELLATION_REASON, PAUSE_REASON, SAMPLE_DATASETS
+from ..i18n import CANCELLATION_REASON, SAMPLE_DATASETS
 from ..models import BlackboxRunRequest, RunRequest, UnifiedRunRequest
 from ..models.results import TerminalOutcome, result_scores
 from ..notifications import notify_job_completed
@@ -84,11 +84,12 @@ from ..storage import JobStore
 from ..telemetry import record_server_event
 from ..telemetry.run_outcome import completed_properties, failed_properties
 from .budget_probe import (
-    STOP_REASON_BUDGET_PROJECTED,
+    STOP_REASON_BUDGET_REACHED,
+    budget_pace,
+    calls_per_iteration,
+    done_calls_from_progress,
+    pace_metrics,
     planned_calls_from_progress,
-    probe_ready,
-    project_total_cents,
-    projection_evidence,
 )
 from .checkpoint_compat import (
     checkpoint_manifest,
@@ -1003,6 +1004,7 @@ class BackgroundWorker:
                         checkpoint_tracker=checkpoint_tracker,
                         usage_tracker=usage_tracker,
                         run_watcher=run_watcher,
+                        budget_gateway=budget_gateway,
                     )
                     if drained_result is not None:
                         result_dict = drained_result
@@ -1018,14 +1020,6 @@ class BackgroundWorker:
                         )
                     if gepa_dir is not None:
                         self._persist_gepa_checkpoint(optimization_id, gepa_dir, checkpoint_tracker)
-                        if budget_gateway is not None:
-                            self._pause_if_over_projection(
-                                optimization_id,
-                                budget_gateway,
-                                checkpoint_tracker,
-                                execution_generation,
-                                run_watcher=run_watcher,
-                            )
                     if run_watcher is not None and budget_gateway is not None and run_watcher.spend_check_due():
                         self._observe_run_spend(optimization_id, run_watcher, budget_gateway)
 
@@ -1585,86 +1579,55 @@ class BackgroundWorker:
                 if event is not None:
                     event.set()
 
-    def _pause_if_over_projection(
+    def _pace_run_budget(
         self,
         optimization_id: str,
         gateway: ModelGateway,
         tracker: dict[str, Any],
-        generation: int | None,
-        *,
-        run_watcher: RunNotificationWatcher | None = None,
-    ) -> None:
-        """Pause a run whose measured burn projects past its spending limit.
+        done_calls: int,
+    ) -> dict[str, Any]:
+        """Price the run's next round from its own spend and stop it when the budget cannot cover it.
 
-        Evaluated once per newly persisted checkpoint, so a pause always has a
-        checkpoint to resume from. The cents settled so far are scaled to the
-        optimizer's planned evaluation count; a projection above the limit
-        closes paid admission, parks the row as ``paused`` with the projection
-        as evidence, and unwinds the run exactly like a user pause, so raising
-        the limit continues from the checkpoint instead of the hard stop at the
-        limit discarding the remaining work. A run without a spending limit is
-        never probed; it draws on the account until the ledger cannot fund the
-        next operation.
+        Called on each optimizer bar tick. Admission closes with
+        ``budget_reached``, so the optimizer's next paid call is refused,
+        it unwinds through ``BudgetReached`` and keeps its best version, and
+        the run ends as a clean budget stop rather than a failure. A run without
+        a spending limit is never stopped here; it draws on the account until
+        the ledger cannot fund the next operation.
 
         Args:
             optimization_id: The running job.
             gateway: Trusted parent transport whose runtime owns the budget.
-            tracker: Checkpoint cursor holding the planned count reported by
-                the optimizer and the metric calls of the last saved state.
-            generation: Worker epoch allowed to publish the pause.
-            run_watcher: The run's in-run email watcher, told the run now
-                waits for the owner to raise the limit.
+            tracker: Run cursor holding the planned count and the last saved
+                state's iteration and metric calls.
+            done_calls: Scorer runs completed so far.
 
-        Raises:
-            CancellationError: After the pause is published, to unwind the run.
+        Returns:
+            Live estimate fields for the progress event.
         """
-        planned = tracker.get("planned_calls")
-        done = tracker.get(-1, {}).get("metric_calls")
-        if planned is None or done is None or done == tracker.get("_probed_calls"):
-            return
-        tracker["_probed_calls"] = done
-        if not probe_ready(done, planned):
-            return
+        if done_calls == tracker.get("_paced_calls"):
+            return tracker.get("_pace", {})
         runtime = gateway.runtime
         snapshot = runtime.service.get(runtime.budget_id, runtime.username)
-        if snapshot.uncapped:
-            return
-        projected = project_total_cents(snapshot.setup_spent_cents, snapshot.run_spent_cents, done, planned)
-        if projected <= snapshot.total_cents:
-            return
-        logger.info(
-            "Optimization %s: %s/%s evaluations project %s cents against a %s-cent limit; pausing",
-            optimization_id,
-            done,
-            planned,
-            projected,
-            snapshot.total_cents,
+        pace = budget_pace(
+            snapshot,
+            done_calls=done_calls,
+            planned_calls=tracker.get("planned_calls"),
+            iteration_calls=calls_per_iteration(tracker.get(-1)),
         )
-        runtime.service.stop_admission(runtime.budget_id, runtime.username, reason=STOP_REASON_BUDGET_PROJECTED)
-        existing = (self._job_store.get_job(optimization_id) or {}).get("terminal_evidence") or {}
-        fields = {
-            "status": "paused",
-            "message": PAUSE_REASON,
-            "completed_at": datetime.now(UTC).isoformat(),
-            "stop_reason": STOP_REASON_BUDGET_PROJECTED,
-            "terminal_evidence": {
-                **existing,
-                "budget_projection": projection_evidence(
-                    snapshot, done_calls=done, planned_calls=planned, projected_cents=projected
-                ),
-            },
-        }
-        cas = getattr(self._job_store, "update_job_if_status", None)
-        if callable(cas):
-            fence = {} if generation is None else {"expected_generation": generation}
-            cas(optimization_id, ("running", "validating"), **fence, **fields)
-        else:
-            self._job_store.update_job(optimization_id, **fields)
-        if run_watcher is not None:
-            run_watcher.notify_needs_input(
-                float(snapshot.setup_spent_cents + snapshot.run_spent_cents), snapshot.total_cents
+        if pace.stop and snapshot.state == "attached" and not tracker.get("_budget_stopped"):
+            tracker["_budget_stopped"] = True
+            logger.info(
+                "Optimization %s: %s cents left cannot fund another %s-call round at %s cents per call; stopping",
+                optimization_id,
+                snapshot.available_cents,
+                pace.calls_per_iteration,
+                pace.cents_per_call,
             )
-        raise CancellationError()
+            runtime.service.stop_admission(runtime.budget_id, runtime.username, reason=STOP_REASON_BUDGET_REACHED)
+        tracker["_paced_calls"] = done_calls
+        tracker["_pace"] = pace_metrics(pace)
+        return tracker["_pace"]
 
     def _observe_run_spend(
         self, optimization_id: str, run_watcher: RunNotificationWatcher, gateway: ModelGateway
@@ -2028,6 +1991,7 @@ class BackgroundWorker:
         checkpoint_tracker: dict[str, Any] | None = None,
         usage_tracker: dict[str, Any] | None = None,
         run_watcher: RunNotificationWatcher | None = None,
+        budget_gateway: ModelGateway | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, int]:
         """Drain all pending events from the subprocess queue, routing each by type.
 
@@ -2050,6 +2014,9 @@ class BackgroundWorker:
                 so a run that ends without a result can still be billed.
             run_watcher: The run's in-run email watcher, fed each persisted
                 progress event.
+            budget_gateway: The run's trusted transport; when set, each
+                optimizer bar tick is priced against the budget and carries
+                the live estimate.
 
         Returns:
             ``(result_dict, error_dict, drained_count)`` — the first two may be
@@ -2084,6 +2051,17 @@ class BackgroundWorker:
                         planned_calls = planned_calls_from_progress(metrics)
                         if planned_calls is not None:
                             checkpoint_tracker["planned_calls"] = planned_calls
+                        done_calls = done_calls_from_progress(metrics)
+                        if budget_gateway is not None and done_calls is not None:
+                            try:
+                                metrics = {
+                                    **metrics,
+                                    **self._pace_run_budget(
+                                        optimization_id, budget_gateway, checkpoint_tracker, done_calls
+                                    ),
+                                }
+                            except Exception:
+                                logger.exception("Optimization %s: budget pace check failed", optimization_id)
                         incumbent = evaluated_incumbent_from_progress(
                             event.get("event"),
                             metrics,

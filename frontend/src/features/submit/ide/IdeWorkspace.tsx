@@ -195,6 +195,7 @@ export function IdeWorkspace({
   onFileChange,
   onFileDelete,
   onCheck,
+  checkPhase,
   checkResult,
   agentResults,
   resultsStale,
@@ -211,6 +212,8 @@ export function IdeWorkspace({
   onFileDelete: (path: string) => void;
   /** Run Check; null for a repository run, whose scorer is checked when it is submitted. */
   onCheck: (() => Promise<ContractCheckResponse | null>) | null;
+  /** The step the running Check stands in, said beside its spinner. */
+  checkPhase?: string | null;
   /** The last Check (or the static check while it is fresher); each file gets its line. */
   checkResult: ContractCheckResponse | null;
   /** The coding agent's verify_code verdict per file; shown instead of `checkResult` when set. */
@@ -431,6 +434,11 @@ export function IdeWorkspace({
     <>
       <header className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-2">
         <div className="ms-auto flex shrink-0 items-center gap-1">
+          {onCheck && checking && checkPhase && (
+            <span className="text-xs text-muted-foreground" aria-live="polite">
+              {checkPhase}
+            </span>
+          )}
           {onCheck && (
             <Button
               size="icon-sm"

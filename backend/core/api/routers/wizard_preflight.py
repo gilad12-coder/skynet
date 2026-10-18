@@ -150,14 +150,8 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
         enforce_submission_rate(user.username)
         return in_locale(static_contract_check(request.spec), request.locale)
 
-    @router.post("/optimizations/contract-check", response_model=ContractCheckResponse)
-    def contract_check(request: ContractCheckRequest, user: AuthenticatedUserDep) -> ContractCheckResponse:
-        """Run the starting version through the code and metric on a few samples, in the sandbox.
-
-        The check runs as an evaluation-scope setup check under the spec's
-        execution budget, so it is billed, deduplicated and sandboxed exactly
-        like ``/wizard/preflight``. A contract mismatch is a 200 with
-        ``ok=false``; only auth, billing and quota failures are 4xx.
+    def _run_contract_check(request: ContractCheckRequest, user: AuthenticatedUser) -> ContractCheckResponse:
+        """Run the sandboxed contract check shared by the plain and streaming routes.
 
         Args:
             request: The unified spec and how many samples to score.
@@ -232,6 +226,79 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
                 ),
             ],
             fingerprint=contract_fingerprint(spec),
+        )
+
+    @router.post("/optimizations/contract-check", response_model=ContractCheckResponse)
+    def contract_check(request: ContractCheckRequest, user: AuthenticatedUserDep) -> ContractCheckResponse:
+        """Run the starting version through the code and metric on a few samples, in the sandbox.
+
+        The check runs as an evaluation-scope setup check under the spec's
+        execution budget, so it is billed, deduplicated and sandboxed exactly
+        like ``/wizard/preflight``. A contract mismatch is a 200 with
+        ``ok=false``; only auth, billing and quota failures are 4xx.
+
+        Args:
+            request: The unified spec and how many samples to score.
+            user: Authenticated owner whose budget pays for the check.
+
+        Returns:
+            Every check item and the scored samples.
+        """
+        return _run_contract_check(request, user)
+
+    @router.post("/optimizations/contract-check/stream", include_in_schema=False)
+    def contract_check_stream(request: ContractCheckRequest, user: AuthenticatedUserDep) -> StreamingResponse:
+        """Stream the check's real phases, then the same result the plain route returns.
+
+        Args:
+            request: The unified spec and how many samples to score.
+            user: Authenticated owner whose budget pays for the check.
+
+        Returns:
+            An event stream of ``phase`` events, then one ``result`` or ``error``.
+        """
+        events: Queue[dict[str, Any] | None] = Queue()
+
+        def phase(value: str) -> None:
+            """Queue a public execution phase for this request."""
+            events.put({"event": "phase", "data": {"phase": value}})
+
+        def execute() -> None:
+            """Finish admitted work even if the viewer disconnects, preserving its billing evidence."""
+            token = progress_observer.set(phase)
+            try:
+                result = _run_contract_check(request, user)
+                events.put({"event": "result", "data": result.model_dump(mode="json")})
+            except HTTPException as error:
+                events.put({"event": "error", "data": {"detail": error.detail}})
+            except RequestValidationError:
+                events.put({"event": "error", "data": {"detail": "The setup configuration is invalid."}})
+            except Exception:
+                events.put(
+                    {
+                        "event": "error",
+                        "data": {"detail": "The workspace check could not finish. Try again."},
+                    }
+                )
+            finally:
+                progress_observer.reset(token)
+                events.put(None)
+
+        def stream() -> Iterator[str]:
+            """Yield phase events and keep the connection alive during long provider calls."""
+            Thread(target=execute, daemon=True, name="contract-check").start()
+            while True:
+                try:
+                    event = events.get(timeout=10)
+                except Empty:
+                    yield ": waiting\n\n"
+                    continue
+                if event is None:
+                    break
+                yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
+
+        return StreamingResponse(
+            stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
         )
 
     return router
