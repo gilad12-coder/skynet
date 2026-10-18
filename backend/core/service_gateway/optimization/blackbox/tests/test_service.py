@@ -31,6 +31,7 @@ from core.models.blackbox import (
     BlackboxRunRequest,
 )
 from core.models.results import ModelTokenUsage
+from core.models.unified import UnifiedCase, UnifiedRunRequest
 
 from .. import autoresearch as autoresearch_mod
 from .. import autosaddler as autosaddler_mod
@@ -43,8 +44,10 @@ from ..auto import LaneOutcome
 from ..harness import GatewayConfig
 from ..native_runtime import NativeOptions
 from ..protocol import Candidate, EngineContext, EvalServer, Result, Task, candidate_key
+from ..sandbox import LocalSubprocessRuntime
 from ..sandbox_scorer import ScorerGateway
 from ..service import run_blackbox_optimization, validate_blackbox_payload
+from ..workspace_scorer import build_workspace_scorer
 from .mocks import (
     AGENT_OUTPUT_SCORER_CODE,
     VOWEL_SCORER_CODE,
@@ -53,6 +56,7 @@ from .mocks import (
     FakeSandboxRuntime,
     vowel_scorer,
 )
+from .test_reward import GEOCODE_METRIC
 
 _CASES = [{"target": "aeiou", "i": i} for i in range(10)]
 
@@ -1175,3 +1179,58 @@ def test_engine_catalog_for_a_repository_offers_every_engine_but_not_auto() -> N
     assert catalog.auto_available is False
     assert catalog.auto_unavailable_reason
     assert all(entry.unavailable_reason for entry in catalog.engines if not entry.available)
+
+
+GEOCODE_SLOW_RUN = (
+    "import time\n"
+    "from skynet import llm\n"
+    "def run(artifact, input):\n"
+    "    if 'slowly' in artifact:\n"
+    "        time.sleep(0.15)\n"
+    "    return llm(artifact, input['message'])\n"
+)
+
+
+def test_geocoding_final_runs_keep_raw_observations_for_both_versions() -> None:
+    """Baseline and winner run the same cases under one gateway; each case keeps raw time, cost and components."""
+    payload = UnifiedRunRequest.model_validate(
+        {
+            "task": {"objective": "geocode", "artifact": {"kind": "prompt", "starting_version": "Think slowly."}},
+            "data": {
+                "mode": "pairs",
+                "cases": [
+                    {"input": {"message": "Tel Aviv"}, "expected": {"coordinates": "32.0853,34.7818"}},
+                    {"input": {"message": "Springfield"}, "expected": {"coordinates": "42.1,-72.59|32.0853,34.7818"}},
+                ],
+                "input_fields": ["message"],
+            },
+            "optimizer": {"choice": "best_of_n"},
+            "models": {"reflection_model": {"name": "openrouter/task"}},
+            "workspace": {"run_code": GEOCODE_SLOW_RUN, "metric_code": GEOCODE_METRIC, "metric_timeout_seconds": 30},
+        }
+    )
+    cases = [UnifiedCase.model_validate(case) for case in payload.data.cases]
+    with FakeGateway("32.0853,34.7818", cost=0.0004) as gateway:
+        scorer = build_workspace_scorer(
+            payload, GatewayConfig(url=gateway.url, api_key="k"), protected=False, runtime=LocalSubprocessRuntime()
+        )
+        try:
+            baseline = service_mod._final_run(
+                scorer, "Think slowly.", cases, label="starting point", phase=PHASE_BASELINE
+            )
+            best = service_mod._final_run(scorer, "Answer.", cases, label="optimized version", phase=PHASE_FINAL)
+        finally:
+            scorer.close()
+    rows = service_mod._case_results(baseline, best)
+
+    assert len(rows) == 2
+    for row in rows:
+        assert row.baseline_observation["timing"]["task_ms"] >= 150
+        assert row.best_observation["timing"]["task_ms"] < row.baseline_observation["timing"]["task_ms"]
+        for observed in (row.baseline_observation, row.best_observation):
+            assert observed["cost"]["usd"] == pytest.approx(0.0004)
+            assert observed["conditions"] == rows[0].baseline_observation["conditions"]
+    assert set(best.named) == {"accuracy", "speed", "cost"}
+    assert best.named["accuracy"].score == pytest.approx(1.0)
+    assert best.named["speed"].score > baseline.named["speed"].score
+    assert best.score > baseline.score

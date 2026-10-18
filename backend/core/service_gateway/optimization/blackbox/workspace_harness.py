@@ -36,6 +36,8 @@ loaded the run code (:data:`RUN_STARTED_MARKER`, the first one counts) and
 ends when its last reply arrives. The metric reads the result through
 ``from skynet import observation, service_cost`` before it returns its score,
 so nothing the run code or the candidate prints or returns can change it.
+``from skynet import reward`` blends accuracy with that time and cost under the
+metric's fixed ``REWARD_SPEC`` (see :func:`blend_reward`).
 
 The run code and the candidate never share a process with the metric: each
 call runs them in a fresh child interpreter (``--run-child``) that receives
@@ -137,6 +139,9 @@ COST_COVERAGE = "llm"
 COST_METERED = "metered"
 COST_UNAVAILABLE = "unavailable"
 COST_NONE = "none"
+REWARD_HELPER_NAME = "reward"
+REWARD_FORMULA = "weighted_reference_utility_v1"
+REWARD_COMPONENTS = ("accuracy", "speed", "cost")
 _RELAY_ENV_NAMES = (_runner.ENV_BUDGET_RELAY_URL, "SKYNET_" + _runner.ENV_BUDGET_RELAY_URL[len("APP_") :])
 
 
@@ -146,6 +151,10 @@ class ShapeError(Exception):
 
 class ServiceCostUnavailableError(Exception):
     """The current evaluation's service cost is not known, so it cannot be scored on."""
+
+
+class RewardSpecError(ValueError):
+    """The metric's ``REWARD_SPEC`` does not define a usable accuracy, speed and cost reward."""
 
 
 def user_detail(exc: BaseException) -> str:
@@ -508,6 +517,143 @@ def build_observation(
         "cost": cost_summary(calls),
         "conditions": dict(conditions),
     }
+
+
+def _positive(value: Any, where: str) -> float:
+    """Return ``value`` as a positive finite float or raise a :class:`RewardSpecError`."""
+    if not _is_number(value) or isinstance(value, bool) or not 0 < float(value) < float("inf"):
+        raise RewardSpecError(f"{where} must be a positive number")
+    return float(value)
+
+
+def reward_spec(raw: Any) -> dict[str, Any]:
+    """Validate a metric's ``REWARD_SPEC`` and return it with weights that sum to 1.
+
+    The spec is plain data, so the setup review and the run read the same
+    fixed weights, units and reference scales.
+
+    Args:
+        raw: ``{"weights": {"accuracy", "speed", "cost"}, "accuracy": {...},
+            "speed": {"reference": ms, ...}, "cost": {"reference": usd, ...}}``.
+            ``accuracy.reference`` is optional: with it the metric passes an
+            error (lower is better, such as a distance), without it a score
+            from 0 to 1.
+
+    Returns:
+        The spec, each component a mapping and the weights normalized.
+
+    Raises:
+        RewardSpecError: When a weight, a reference or a component is missing or invalid.
+    """
+    if not isinstance(raw, dict):
+        raise RewardSpecError("REWARD_SPEC must be a dict")
+    weights = raw.get("weights")
+    if not isinstance(weights, dict):
+        raise RewardSpecError("REWARD_SPEC['weights'] must map accuracy, speed and cost to weights")
+    parsed: dict[str, float] = {}
+    for name in REWARD_COMPONENTS:
+        value = weights.get(name)
+        if not _is_number(value) or isinstance(value, bool) or float(value) < 0:
+            raise RewardSpecError(f"REWARD_SPEC['weights']['{name}'] must be a number of 0 or more")
+        parsed[name] = float(value)
+    total = sum(parsed.values())
+    if total <= 0:
+        raise RewardSpecError("REWARD_SPEC['weights'] must not all be 0")
+    spec: dict[str, Any] = {"formula": REWARD_FORMULA, "weights": {k: v / total for k, v in parsed.items()}}
+    for name in REWARD_COMPONENTS:
+        component = raw.get(name) or {}
+        if not isinstance(component, dict):
+            raise RewardSpecError(f"REWARD_SPEC['{name}'] must be a dict")
+        spec[name] = dict(component)
+    for name in ("speed", "cost"):
+        spec[name]["reference"] = _positive(spec[name].get("reference"), f"REWARD_SPEC['{name}']['reference']")
+    if spec["accuracy"].get("reference") is not None:
+        spec["accuracy"]["reference"] = _positive(spec["accuracy"]["reference"], "REWARD_SPEC['accuracy']['reference']")
+    return spec
+
+
+def reference_utility(value: float, reference: float) -> float:
+    """Turn a cost-like measurement (0 or more, lower is better) into a utility in (0, 1].
+
+    ``reference / (reference + value)``: 1 at 0, 0.5 at the reference, and
+    strictly falling everywhere, so every saving counts on both sides of the
+    reference and nothing plateaus or cuts off.
+    """
+    return reference / (reference + max(float(value), 0.0))
+
+
+def blend_reward(
+    spec: dict[str, Any], accuracy: float | None, observation: dict[str, Any] | None, accuracy_feedback: str = ""
+) -> tuple[float, dict[str, Any]]:
+    """Score one response on accuracy, speed and cost under a fixed reward spec.
+
+    Each response is scored on its own measurements and the spec's fixed
+    references only, so no other candidate can change its score. A missing
+    accuracy value or an unavailable time or cost scores that component 0
+    and says so in the feedback; it is never left out.
+
+    Args:
+        spec: A spec from :func:`reward_spec`.
+        accuracy: The error (with ``accuracy.reference``) or the 0-1 score; ``None`` when the output has none.
+        observation: The trusted observation of the run (see :func:`build_observation`).
+        accuracy_feedback: The metric's own words on accuracy.
+
+    Returns:
+        ``(score, side_info)``: the weighted total; ``feedback`` (each
+        component with its raw value), ``scores`` (one 0-1 utility per
+        component) and ``reward`` (raw values,
+        components, weights, contributions and what was unavailable).
+    """
+    weights = spec["weights"]
+    unavailable: list[str] = []
+    accuracy_reference = spec["accuracy"].get("reference")
+    unit = spec["accuracy"].get("unit") or ""
+    if accuracy is None or not _is_number(accuracy):
+        unavailable.append("accuracy")
+        accuracy_u, accuracy_text = 0.0, "no accuracy value (missing or unreadable output): scored 0"
+    elif accuracy_reference is not None:
+        accuracy_u = reference_utility(float(accuracy), accuracy_reference)
+        accuracy_text = f"error {float(accuracy):g} {unit} (reference {accuracy_reference:g} {unit})".replace("  ", " ")
+    else:
+        accuracy_u = min(max(float(accuracy), 0.0), 1.0)
+        accuracy_text = f"accuracy {accuracy_u:.3f}"
+    timing = (observation or {}).get("timing") or {}
+    time_ms = timing.get("task_ms")
+    if not _is_number(time_ms):
+        unavailable.append("speed")
+        time_ms, speed_u, speed_text = None, 0.0, "response time unavailable: scored 0"
+    else:
+        speed_u = reference_utility(float(time_ms), spec["speed"]["reference"])
+        speed_text = f"{float(time_ms):.0f} ms (reference {spec['speed']['reference']:g} ms)"
+    cost = (observation or {}).get("cost") or {}
+    cost_usd = cost.get("usd")
+    if not _is_number(cost_usd):
+        unavailable.append("cost")
+        reason = cost.get("reason") or "no trusted cost"
+        cost_usd, cost_u, cost_text = None, 0.0, f"service cost unavailable ({reason}): scored 0"
+    else:
+        cost_u = reference_utility(float(cost_usd), spec["cost"]["reference"])
+        cost_text = f"${float(cost_usd):.6f} (reference ${spec['cost']['reference']:g})"
+    components = {"accuracy": accuracy_u, "speed": speed_u, "cost": cost_u}
+    contributions = {name: weights[name] * components[name] for name in REWARD_COMPONENTS}
+    score = sum(contributions.values())
+    if accuracy_feedback:
+        accuracy_text = f"{accuracy_text}; {accuracy_feedback}"
+    texts = {"accuracy": accuracy_text, "speed": speed_text, "cost": cost_text}
+    feedback = "; ".join(f"{name} {components[name]:.3f}: {texts[name]}" for name in REWARD_COMPONENTS)
+    side_info = {
+        "feedback": f"reward {score:.3f}; {feedback}",
+        "scores": dict(components),
+        "reward": {
+            "formula": spec["formula"],
+            "raw": {"accuracy": accuracy, "time_ms": time_ms, "cost_usd": cost_usd},
+            "components": components,
+            "weights": dict(weights),
+            "contributions": contributions,
+            "unavailable": unavailable,
+        },
+    }
+    return score, side_info
 
 
 class TaskRelay:
@@ -884,7 +1030,11 @@ class Workspace:
         self._observation: dict[str, Any] | None = None
         self.metric_module = _helpers(
             self.metric_llm,
-            {OBSERVATION_HELPER_NAME: self.observation, SERVICE_COST_HELPER_NAME: self.service_cost},
+            {
+                OBSERVATION_HELPER_NAME: self.observation,
+                SERVICE_COST_HELPER_NAME: self.service_cost,
+                REWARD_HELPER_NAME: self.reward,
+            },
         )
         self.load_error: dict[str, Any] | None = None
         self.metric_ns: dict[str, Any] = {}
@@ -936,6 +1086,26 @@ class Workspace:
         if cost["usd"] is None:
             raise ServiceCostUnavailableError(str(cost.get("reason") or "the service cost is not known"))
         return float(cost["usd"])
+
+    def reward(self, spec: Any, accuracy: float | None, feedback: str = "") -> tuple[float, dict[str, Any]]:
+        """Score the current response on accuracy, speed and cost; the metric's ``reward()``.
+
+        Time and cost come from the trusted observation, never from the
+        output, so the run code cannot make itself look fast or cheap.
+
+        Args:
+            spec: The metric's ``REWARD_SPEC`` (see :func:`reward_spec`).
+            accuracy: The accuracy error or 0-1 score; ``None`` when the output has none.
+            feedback: The metric's own words on accuracy.
+
+        Returns:
+            ``(score, side_info)`` ready for ``score`` to return (see :func:`blend_reward`).
+
+        Raises:
+            RewardSpecError: When ``spec`` is invalid.
+            RuntimeError: When called outside an evaluation.
+        """
+        return blend_reward(reward_spec(spec), accuracy, self.observation(), feedback)
 
     def _conditions(self) -> dict[str, Any]:
         """Return the declared execution conditions every version runs under."""

@@ -233,6 +233,12 @@ def test_validate_run_code(code: str, fragment: str) -> None:
             "no metric model",
         ),
         ("from skynet import llm\n\ndef score(input, output, expected=None):\n    return 1, {}\n", True, ""),
+        # The trusted observation and reward helpers need no metric model; llm in reach does.
+        ("from skynet import reward, observation\n\ndef score(input, output):\n    return 1, {}\n", False, ""),
+        ("from skynet import service_cost\n\ndef score(input, output):\n    return 1, {}\n", False, ""),
+        ("from skynet import reward, llm\n\ndef score(input, output):\n    return 1, {}\n", False, "no metric model"),
+        ("import skynet\n\ndef score(input, output):\n    return 1, {}\n", False, "no metric model"),
+        ("from skynet import *\n\ndef score(input, output):\n    return 1, {}\n", False, "no metric model"),
     ],
 )
 def test_validate_unified_metric_code(code: str, has_model: bool, fragment: str) -> None:
@@ -263,6 +269,25 @@ def test_metric_contract_offers_llm_only_with_a_model(has_model: bool) -> None:
     """The llm helper is described only when a metric model is attached."""
     _, metric_contract = _unified_contracts(_unified(metric_has_model=has_model))
     assert ("`from skynet import llm` calls it" in metric_contract) is has_model
+
+
+@pytest.mark.parametrize("has_model", [True, False])
+def test_metric_contract_teaches_the_trusted_reward(has_model: bool) -> None:
+    """Speed and cost goals go through ``reward`` and a fixed REWARD_SPEC, never the output."""
+    _, metric_contract = _unified_contracts(_unified(metric_has_model=has_model))
+    assert "from skynet import reward` (it needs no metric model)" in metric_contract
+    assert "never read time or cost from the output" in metric_contract
+    assert 'REWARD_SPEC = {"weights": {"accuracy"' in metric_contract
+    assert "no cutoff, plateau, accuracy floor or time limit" in metric_contract
+    assert "Never drop a case" in metric_contract
+
+
+def test_repository_scorer_gets_no_reward_helper() -> None:
+    """A repository scorer runs offline with no observation, so it is not offered ``reward``."""
+    _, metric_contract = _unified_contracts(
+        _unified(target="repo", data_mode="single", input_fields=[], expected_field=None)
+    )
+    assert "REWARD_SPEC" not in metric_contract
 
 
 def test_run_contract_is_identical_for_every_artifact_kind() -> None:
