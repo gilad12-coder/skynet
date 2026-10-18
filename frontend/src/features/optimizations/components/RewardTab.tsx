@@ -1,6 +1,5 @@
 "use client";
 
-import { msg } from "@/shared/lib/messages";
 import { readRewardSpec } from "@/shared/lib/reward";
 import { readRewardRules } from "@/shared/lib/reward-rules-code";
 import { RewardBuilder } from "@/shared/ui/reward/reward-builder";
@@ -28,18 +27,16 @@ export function runSamples(payload: unknown): { expectedField: string; samples: 
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
   const expectedField = typeof data.expected_field === "string" ? data.expected_field : "expected";
   const cases = Array.isArray(data.cases) ? data.cases : [];
-  const samples = cases
-    .slice(0, SAMPLE_LIMIT)
-    .flatMap((c): RewardSample[] =>
-      isRecord(c)
-        ? [
-            {
-              input: isRecord(c.input) ? c.input : {},
-              expected: isRecord(c.expected) ? c.expected : null,
-            },
-          ]
-        : [],
-    );
+  const samples = cases.slice(0, SAMPLE_LIMIT).flatMap((c): RewardSample[] =>
+    isRecord(c)
+      ? [
+          {
+            input: isRecord(c.input) ? c.input : {},
+            expected: isRecord(c.expected) ? c.expected : null,
+          },
+        ]
+      : [],
+  );
   return { expectedField, samples };
 }
 
@@ -81,15 +78,9 @@ export function RewardTab({
               tryIt={false}
             />
           </div>
-          <section
-            aria-labelledby="reward-tab-try-it"
-            className="space-y-3 rounded-xl border border-border bg-card p-4"
-          >
-            <h3 id="reward-tab-try-it" className="text-sm font-semibold">
-              {msg("reward_builder.try.title")}
-            </h3>
+          <div className="rounded-xl border border-border bg-card p-4">
             <RewardTryIt build={rules.build} expectedField={expectedField} samples={samples} />
-          </section>
+          </div>
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card px-4 py-3.5">

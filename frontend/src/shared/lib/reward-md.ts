@@ -71,6 +71,17 @@ const DOUBLE_ESCAPES: Record<string, string> = {
   "\\": "\\",
   '"': '"',
   "/": "/",
+  b: "\b",
+  f: "\f",
+};
+
+const DOUBLE_WRITE: Record<string, string> = {
+  "\\": "\\\\",
+  '"': '\\"',
+  "\n": "\\n",
+  "\t": "\\t",
+  "\r": "\\r",
+  "\0": "\\0",
 };
 
 /** Parse one flow value from `text` at `start`. */
@@ -268,9 +279,12 @@ export function yamlFlow(value: unknown): string {
   if (value === null || value === undefined) return "null";
   if (typeof value === "boolean" || typeof value === "number") return String(value);
   if (typeof value === "string") {
-    return PLAIN_SAFE.test(value) && typeof resolvePlain(value) === "string"
-      ? value
-      : `'${value.replace(/'/g, "''")}'`;
+    if (PLAIN_SAFE.test(value) && typeof resolvePlain(value) === "string") return value;
+    // A line break inside single quotes would split the line the reader parses.
+    if (/[\n\r\t\0]/.test(value)) {
+      return `"${value.replace(/[\\"\n\t\r\0]/g, (c) => DOUBLE_WRITE[c] ?? c)}"`;
+    }
+    return `'${value.replace(/'/g, "''")}'`;
   }
   if (Array.isArray(value)) return `[${value.map(yamlFlow).join(", ")}]`;
   const entries = Object.entries(value as Record<string, unknown>).filter(

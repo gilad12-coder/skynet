@@ -7,6 +7,7 @@ import {
   bundledRewards,
   customReward,
   extractText,
+  firstNumber,
   scoreBuild,
   scoreRule,
   uniqueName,
@@ -120,6 +121,27 @@ test("buildIssues finds what would break the metric", () => {
     buildIssues(build).map((i) => i.code),
     ["bad_pattern", "bad_name", "bad_pattern", "duplicate_name"],
   );
+});
+
+test("buildIssues refuses regex syntax Python reads differently", () => {
+  const base = customReward("regex", "answer");
+  const issues = (pattern: string) =>
+    buildIssues({
+      rewards: [
+        { ...base, rule: base.rule.type === "regex" ? { ...base.rule, pattern } : base.rule },
+      ],
+      speed: { weight: 0, reference: 1 },
+      cost: { weight: 0, reference: 1 },
+    }).map((i) => i.code);
+  for (const pattern of ["(?<x>a)", "(?P<x>a)", "a\\Z", "\\Aa", "a{,3}"]) {
+    assert.deepEqual(issues(pattern), ["bad_pattern"], pattern);
+  }
+  assert.deepEqual(issues("(?<=a)b(?!c)"), []);
+});
+
+test("firstNumber reads ASCII digits only, as the run does", () => {
+  assert.equal(firstNumber("۳"), null);
+  assert.equal(firstNumber("x 1,080.5"), 1080.5);
 });
 
 test("uniqueName adds a number when the name is taken", () => {

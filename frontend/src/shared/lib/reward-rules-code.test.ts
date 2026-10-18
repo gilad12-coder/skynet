@@ -51,6 +51,8 @@ const CASES: Array<[string, Record<string, unknown> | null]> = [
   ["nothing", { answer: "Paris" }],
   ["x".repeat(600), null],
   ["  PARIS  ", { answer: "paris" }],
+  ["۳", { answer: "3" }],
+  ["<answer>NaN</answer>", { answer: 3 }],
 ];
 
 test("the golden fixture is what the builder writes", () => {
@@ -106,4 +108,32 @@ test("the Python evaluator scores like the TS one", () => {
     assert.ok(Math.abs(value - ts[i]!) < 1e-9, `case ${i}: ${value} vs ${ts[i]}`),
   );
   assert.ok(new Set(ts).size > 3, "the cases cover different scores");
+});
+
+test("the run reads float, non-dict and structured values as Try it does", () => {
+  const build = fixtureBuild();
+  const dir = mkdtempSync(join(tmpdir(), "reward-parity-"));
+  mkdirSync(join(dir, "skynet"));
+  writeFileSync(
+    join(dir, "skynet", "__init__.py"),
+    "def reward(spec, accuracy, feedback=''):\n    return accuracy\n",
+  );
+  writeFileSync(join(dir, "metric.py"), buildToMetricCode(build));
+  // Python-only values: a JSONL float, an expected that is not a dict, and a
+  // structured output, each next to the reply and expected Try it would see.
+  const script =
+    "import json, sys\nsys.path.insert(0, sys.argv[1])\nimport metric\n" +
+    "print(json.dumps([metric.score({}, '3', {'answer': 3.0}), " +
+    "metric.score({}, '4', 'not a dict'), " +
+    "metric.score({}, {'value': 3}, {'answer': 3})]))\n";
+  const out = execFileSync("python3", ["-I", "-c", script, dir], { encoding: "utf8" });
+  const python = JSON.parse(out) as number[];
+  const ts = [
+    scoreBuild(build, "3", { answer: 3 }).accuracy,
+    scoreBuild(build, "4", null).accuracy,
+    scoreBuild(build, '{"value":3}', { answer: 3 }).accuracy,
+  ];
+  python.forEach((value, i) =>
+    assert.ok(Math.abs(value - ts[i]!) < 1e-9, `case ${i}: ${value} vs ${ts[i]}`),
+  );
 });

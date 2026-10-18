@@ -237,6 +237,11 @@ export function ruleRange(rule: RewardRule): { min: number; max: number } {
   return { min: Math.min(...scores), max: Math.max(...scores) };
 }
 
+// Syntax JavaScript and Python read differently: named groups, \A/\Z/\z
+// anchors and `{,n}`. A pattern using them would score one way in Try it
+// and another in the run.
+const UNPORTABLE = /\(\?P|\(\?<(?![=!])|\\[AZz]|\{,/;
+
 function regex(pattern: string, anchored = false): RegExp | null {
   try {
     // Python's re.S | re.M, as Unsloth compiles a pattern. The lookarounds
@@ -279,7 +284,7 @@ function normalize(text: string, ops: readonly NormalizeOp[]): string {
   return out;
 }
 
-const NUMBER = /-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/;
+const NUMBER = /-?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?/;
 
 /** The first number in `text`, commas dropped; `null` when it has none. */
 export function firstNumber(text: string): number | null {
@@ -448,10 +453,19 @@ export function buildIssues(build: RewardBuild): BuildIssue[] {
     const patterns =
       rule.type === "regex"
         ? [rule.pattern]
-        : "extract" in rule && rule.extract && "regex" in rule.extract
-          ? [rule.extract.regex]
-          : [];
-    if (patterns.some((p) => !p || regex(p) === null)) issues.push({ code: "bad_pattern", name });
+        : [
+            ...("extract" in rule && rule.extract && "regex" in rule.extract
+              ? [rule.extract.regex]
+              : []),
+            ...("reference_extract" in rule &&
+            rule.reference_extract &&
+            "regex" in rule.reference_extract
+              ? [rule.reference_extract.regex]
+              : []),
+          ];
+    if (patterns.some((p) => !p || UNPORTABLE.test(p) || regex(p) === null)) {
+      issues.push({ code: "bad_pattern", name });
+    }
     if (rule.type === "numeric" && rule.bands.length === 0) issues.push({ code: "no_bands", name });
   }
   for (const part of ["speed", "cost"] as const) {

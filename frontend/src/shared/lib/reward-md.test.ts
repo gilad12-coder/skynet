@@ -115,6 +115,18 @@ test("every bundled and custom reward round-trips through REWARD.md", () => {
   }
 });
 
+test("text with line breaks round-trips through REWARD.md", () => {
+  const entry = customReward("exact_match", "answer");
+  if (entry.rule.type !== "exact_match") return;
+  entry.rule.extract = { between: ["<answer>\n", "\n</answer>"] };
+  entry.description = "Line one\nLine 'two' with \"quotes\" and \\";
+  const read = rewardFromMarkdown(rewardToMarkdown(entry), "answer");
+  assert.ok(read.ok);
+  if (!read.ok) return;
+  assert.deepEqual(read.entry.rule, entry.rule);
+  assert.equal(read.entry.description, entry.description);
+});
+
 test("defaults follow Unsloth: compare_to, normalize, missing scores", () => {
   const read = rewardFromMarkdown("---\nname: x\n---\ntype: exact_match\n", "label");
   assert.ok(read.ok);

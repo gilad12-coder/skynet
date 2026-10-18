@@ -293,10 +293,10 @@ function ImportDialog({
     }
     setErrors(failed);
     if (entries.length > 0) onImport(entries);
-    if (failed.length === 0) {
-      setText("");
-      onClose();
-    }
+    // What imported is in the build now; only the failures stay to retry,
+    // so a second Import does not add the good ones again.
+    if (failed.length === 0 || entries.length > 0) setText("");
+    if (failed.length === 0) onClose();
   };
 
   return (

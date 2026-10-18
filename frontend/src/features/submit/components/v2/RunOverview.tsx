@@ -594,7 +594,7 @@ export function RunOverview({
                 <div>
                   <dt className="sr-only">{t("submit.v2.overview.tab.reward")}</dt>
                   <dd>
-                    {built?.kind === "build" ? (
+                    {built?.kind === "build" && reward.kind === "spec" ? (
                       <RewardRecap build={built.build} />
                     ) : (
                       <RewardPreview read={reward} />

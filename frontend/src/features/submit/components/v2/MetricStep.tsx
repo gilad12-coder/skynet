@@ -241,7 +241,9 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   );
   const coding = useIdeCodingAgent({
     context: agentContext,
-    active: onScreen,
+    // Manual and the builder are the user's own code: a hidden agent turn
+    // would rewrite their files and move the wizard on without them.
+    active: onScreen && mode === "auto",
     dataKnown: (authoringContext?.sample_cases?.length ?? 0) > 0 || isSingleAnswerTask(state),
     runCode: workspace.runCode,
     metricCode: workspace.metricCode,
@@ -303,7 +305,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     if (onMetricStep && page === overviewPage) setOverviewSeen(true);
   }, [onMetricStep, page, overviewPage]);
   const advancePast = metricAdvanceFrom({
-    onStep: onMetricStep,
+    onStep: onMetricStep && mode === "auto",
     overviewSeen,
     busy: agentBusy,
     agentLeftFiles: agentLeft === filesKey,

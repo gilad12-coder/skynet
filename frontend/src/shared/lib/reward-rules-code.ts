@@ -52,7 +52,9 @@ export function toPyLiteral(value: unknown, indent = 0): string {
     .join("\n")}\n${end}}`;
 }
 
-const EVALUATOR = String.raw`_NUMBER = r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
+const EVALUATOR = String.raw`_NUMBER = r"-?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?"
+# A rule's pattern reads \d, \w and \b as JavaScript does, so Try it agrees.
+_PATTERN_FLAGS = re.S | re.M | re.A
 
 
 def _extract(text, extract):
@@ -67,7 +69,7 @@ def _extract(text, extract):
         end = text.find(end_tag, start)
         return None if end < 0 else text[start:end]
     try:
-        found = re.search(extract["regex"], text, re.S | re.M)
+        found = re.search(extract["regex"], text, _PATTERN_FLAGS)
     except re.error:
         return None
     if not found:
@@ -75,8 +77,27 @@ def _extract(text, extract):
     return (found.group(1) or "") if found.re.groups else found.group(0)
 
 
+def _plain(value):
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, list):
+        return [_plain(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _plain(item) for key, item in value.items()}
+    return value
+
+
+def _as_text(value):
+    # JSON.stringify writes 3.0 as 3, so Try it and the run compare the same text.
+    return json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
+
+
 def _expected_text(value):
-    return value if isinstance(value, str) else json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+    return value if isinstance(value, str) else _as_text(value)
+
+
+def _no_constant(name):
+    raise ValueError(name)
 
 
 def _normalize(text, ops):
@@ -127,9 +148,9 @@ def _raw_score(rule, text, expected):
     if kind == "regex":
         try:
             if rule["mode"] == "fullmatch":
-                found = re.fullmatch(rule["pattern"], text.strip(), re.S | re.M)
+                found = re.fullmatch(rule["pattern"], text.strip(), _PATTERN_FLAGS)
             else:
-                found = re.search(rule["pattern"], text, re.S | re.M)
+                found = re.search(rule["pattern"], text, _PATTERN_FLAGS)
         except re.error:
             return rule["score"]["miss"], "bad pattern"
         return (rule["score"]["match"], "match") if found else (rule["score"]["miss"], "no match")
@@ -143,7 +164,7 @@ def _raw_score(rule, text, expected):
         if answer is None:
             return rule["score"]["miss"], "no answer found"
         try:
-            value = json.loads(answer)
+            value = json.loads(answer, parse_constant=_no_constant)
         except ValueError:
             return rule["score"]["miss"], "not valid JSON"
         if _json_type(value) != rule["schema"]["type"]:
@@ -153,7 +174,7 @@ def _raw_score(rule, text, expected):
                 if key not in value:
                     return rule["score"]["miss"], f"missing key {key}"
         return rule["score"]["match"], "match"
-    raw = (expected or {}).get(rule["compare_to"])
+    raw = (expected if isinstance(expected, dict) else {}).get(rule["compare_to"])
     reference = None if raw is None else _extract(_expected_text(raw), rule.get("reference_extract"))
     if reference is None:
         return rule["missing"], "no expected value"
@@ -193,7 +214,14 @@ def rule_accuracy(text, expected):
 
 
 def score(input, output, expected=None):
-    text = "" if output is None else str(output)
+    if output is None:
+        text = ""
+    elif isinstance(output, str):
+        text = output
+    elif isinstance(output, (dict, list)):
+        text = _as_text(output)
+    else:
+        text = str(output)
     accuracy, feedback = rule_accuracy(text, expected)
     return reward(REWARD_SPEC, accuracy, feedback)
 `;
