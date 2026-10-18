@@ -172,7 +172,10 @@ export function AddFundsControls({ inPlace }: { inPlace?: AddFundsInPlace } = {}
     <div
       role="group"
       aria-label={msg("billing.plans.topup.pack_aria")}
-      className="relative flex w-full max-w-full flex-wrap items-center gap-0.5 rounded-lg bg-muted p-0.5 sm:w-auto sm:flex-nowrap"
+      className={cn(
+        "relative flex w-full max-w-full flex-wrap items-center gap-0.5 rounded-lg bg-muted p-0.5 sm:w-auto sm:flex-nowrap",
+        inPlace && "sm:w-fit",
+      )}
     >
       {TOP_UP_PACKS.map((p) => {
         const active = p.id === selection;
