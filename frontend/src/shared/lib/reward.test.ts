@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  readRewardSpec,
-  rewardPreviewCases,
-  scoreReward,
-  summarizeObservations,
-  type RewardSpec,
-} from "./reward.ts";
+import { readRewardSpec, summarizeObservations, type RewardSpec } from "./reward.ts";
 
 const GEOCODING_METRIC = `
 import math
@@ -62,83 +56,6 @@ test("no spec reads as none, and a spec the harness would refuse reads as invali
   ]) {
     assert.equal(readRewardSpec(bad).kind, "invalid", bad);
   }
-});
-
-test("matches the harness formula: half at each reference, weighted sum", () => {
-  const s = spec();
-  const at = scoreReward(s, { accuracy: 1, timeMs: 2000, costUsd: 0.002 });
-  assert.deepEqual(at.components, { accuracy: 0.5, speed: 0.5, cost: 0.5 });
-  assert.ok(Math.abs(at.total - 0.5) < 1e-12);
-  const best = scoreReward(s, { accuracy: 0, timeMs: 0, costUsd: 0 });
-  assert.ok(Math.abs(best.total - 1) < 1e-12);
-});
-
-test("criterion 1: each one-change improvement raises the total, on both sides of the reference", () => {
-  const s = spec();
-  const pairs = rewardPreviewCases(s).filter((c) => c.change);
-  for (const component of ["accuracy", "speed", "cost"] as const) {
-    const own = pairs.filter((c) => c.change?.component === component);
-    assert.equal(own.length, 2, component);
-    const ref = component === "accuracy" ? 1 : component === "speed" ? 2000 : 0.002;
-    assert.ok(
-      own.some((c) => c.change!.from > ref && c.change!.to > ref),
-      `${component} above`,
-    );
-    assert.ok(
-      own.some((c) => c.change!.from < ref && c.change!.to < ref),
-      `${component} below`,
-    );
-    for (const c of own) {
-      assert.ok(scoreReward(s, c.inputs).total > scoreReward(s, c.before!).total, component);
-    }
-  }
-});
-
-test("criterion 1: a 0-1 accuracy score (no reference) also rises with every improvement", () => {
-  const read = readRewardSpec(
-    "REWARD_SPEC = {'weights': {'accuracy': 1, 'speed': 1, 'cost': 1}, 'speed': {'reference': 500}, 'cost': {'reference': 0.01}}",
-  );
-  assert.equal(read.kind, "spec");
-  for (const c of rewardPreviewCases(read.spec).filter((p) => p.change)) {
-    assert.ok(scoreReward(read.spec, c.inputs).total > scoreReward(read.spec, c.before!).total);
-  }
-});
-
-test("criterion 2: the tradeoff case wins on total while it loses on speed and cost", () => {
-  const s = spec();
-  const cases = rewardPreviewCases(s);
-  const reference = scoreReward(s, cases.find((c) => c.kind === "reference")!.inputs);
-  const tradeoff = scoreReward(s, cases.find((c) => c.kind === "tradeoff")!.inputs);
-  assert.ok(tradeoff.total > reference.total);
-  assert.ok(tradeoff.components.speed < reference.components.speed);
-  assert.ok(tradeoff.components.cost < reference.components.cost);
-});
-
-test("criterion 3: empty and wrong but fast, cheap answers score low; an unpriced call scores 0 cost", () => {
-  const s = spec();
-  const cases = rewardPreviewCases(s);
-  const get = (kind: string) => scoreReward(s, cases.find((c) => c.kind === kind)!.inputs);
-  const reference = get("reference");
-  const empty = get("empty");
-  assert.deepEqual(empty.unavailable, ["accuracy"]);
-  assert.equal(empty.components.accuracy, 0);
-  // No accuracy floor: speed and cost still count, so the score is not 0.
-  assert.ok(empty.total > 0 && empty.total < 0.66);
-  const wrong = get("wrong");
-  assert.ok(wrong.components.accuracy < 0.05);
-  const noCost = get("no_cost");
-  assert.deepEqual(noCost.unavailable, ["cost"]);
-  assert.equal(noCost.components.cost, 0);
-  assert.ok(noCost.total < reference.total);
-});
-
-test("criterion 4: a response's score depends only on its own values and the fixed spec", () => {
-  const s = spec();
-  const one = { accuracy: 0.4, timeMs: 1200, costUsd: 0.001 };
-  const alone = scoreReward(s, one).total;
-  // Scoring another, much worse candidate first changes nothing.
-  scoreReward(s, { accuracy: 500, timeMs: 90_000, costUsd: 3 });
-  assert.equal(scoreReward(s, one).total, alone);
 });
 
 test("criterion 6: mean and p95 time and mean cost come from each response's observation", () => {

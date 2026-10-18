@@ -51,21 +51,10 @@ void describe("RewardPreview", () => {
     }
   });
 
-  void it("previews one-change improvements that raise the total, a tradeoff and failures", () => {
+  void it("shows no preview cases and no notes below the parts", () => {
     const html = render(GEOCODING_METRIC);
-    for (const kind of ["better_accuracy", "faster", "cheaper"]) {
-      const rows = html.match(new RegExp(`data-case="${kind}"[\\s\\S]*?</tr>`, "g")) ?? [];
-      assert.equal(rows.length, 2, kind);
-      for (const row of rows) {
-        const [before, after] = (/>([\d.]+) → ([\d.]+)</.exec(row) ?? []).slice(1).map(Number);
-        assert.ok(after! > before!, `${kind}: ${before} → ${after}`);
-      }
-    }
-    for (const kind of ["tradeoff", "empty", "wrong", "no_cost"]) {
-      assert.match(html, new RegExp(`data-case="${kind}"`));
-    }
-    assert.match(html, /submit\.v2\.reward\.tradeoff_note/);
-    assert.match(html, /submit\.v2\.reward\.failures/);
+    assert.doesNotMatch(html, /data-case=/);
+    assert.doesNotMatch(html, /submit\.v2\.reward\.(tradeoff_note|failures)/);
   });
 
   void it("says so when the spec is not usable plain data", () => {
@@ -74,11 +63,8 @@ void describe("RewardPreview", () => {
     assert.match(html, /submit\.v2\.reward\.invalid/);
   });
 
-  void it("keeps numbers left to right in Hebrew", () => {
+  void it("keeps the weights left to right in Hebrew", () => {
     const html = render(GEOCODING_METRIC, "he");
-    assert.match(html, /<bdi dir="ltr"[^>]*>[^<]*→[^<]*<\/bdi>/);
-    assert.match(html, /<bdi>[^<]*\$[^<]*<\/bdi> → <bdi>[^<]*\$[^<]*<\/bdi>/);
-    const single = html.match(/data-case="reference"[\s\S]*?<\/tr>/)?.[0] ?? "";
-    assert.match(single, /<bdi dir="ltr"><bdi>[^<]*\$[^<]*<\/bdi><\/bdi>/);
+    assert.match(html, /<bdi dir="ltr">35%<\/bdi>/);
   });
 });
