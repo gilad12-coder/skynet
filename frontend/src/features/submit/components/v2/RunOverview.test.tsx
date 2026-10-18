@@ -32,6 +32,7 @@ const cc: ContractCheckState = {
   checking: false,
   error: null,
   timing: null,
+  terminal: null,
   canCheck: true,
   check: async () => null,
 };
