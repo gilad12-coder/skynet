@@ -19,7 +19,7 @@ self.addEventListener("push", (event) => {
   } catch {
     data = { title: event.data ? event.data.text() : "" };
   }
-  const title = typeof data.title === "string" && data.title ? data.title : "DRWN";
+  const title = typeof data.title === "string" && data.title ? data.title : "Skynet";
   const options = {
     body: typeof data.body === "string" ? data.body : "",
     icon: "/notification-icon.png",

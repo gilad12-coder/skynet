@@ -1,5 +1,5 @@
 /**
- * Skynet's light and dark colour themes for the IDE's VS Code workbench,
+ * The app's light and dark colour themes for the IDE's VS Code workbench,
  * built from the app's design tokens (`app/globals.css`). Only the
  * workbench's colours change: syntax colours come from the default Modern
  * themes each one includes.
@@ -15,10 +15,11 @@ import darkVs from "@codingame/monaco-vscode-theme-defaults-default-extension/re
 import lightModern from "@codingame/monaco-vscode-theme-defaults-default-extension/resources/light_modern.json";
 import lightPlus from "@codingame/monaco-vscode-theme-defaults-default-extension/resources/light_plus.json";
 import lightVs from "@codingame/monaco-vscode-theme-defaults-default-extension/resources/light_vs.json";
+import { APP_NAME } from "@/shared/lib/brand";
 
 // The values are the names shown in the IDE's theme picker, so they carry the brand.
-export const APP_LIGHT_THEME = "Skynet Light";
-export const APP_DARK_THEME = "Skynet Dark";
+export const APP_LIGHT_THEME = `${APP_NAME} Light`;
+export const APP_DARK_THEME = `${APP_NAME} Dark`;
 
 /** The design tokens a theme is drawn from, as hex. */
 interface Tokens {

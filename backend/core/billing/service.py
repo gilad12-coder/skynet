@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from ..api.alerts import send_alert
 from ..api.errors import DomainError
+from ..brand import APP_NAME
 from ..config import settings
 from ..constants import (
     TOKEN_SOURCE_BYOK,
@@ -1014,7 +1015,7 @@ class StripeBillingService:
             "price_data": {
                 "currency": "usd",
                 "unit_amount": cents,
-                "product_data": {"name": f"Skynet balance top-up · ${cents / 100:.2f}"},
+                "product_data": {"name": f"{APP_NAME} balance top-up · ${cents / 100:.2f}"},
             },
             "quantity": 1,
         }

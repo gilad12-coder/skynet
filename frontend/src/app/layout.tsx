@@ -22,6 +22,7 @@ import { PreflightNotifications } from "@/features/submit";
 import { BalanceProvider, ByokKeysProvider, InsufficientFundsModalHost } from "@/features/billing";
 import { AppSkeletonTheme } from "@/shared/ui/skeleton";
 import { msg } from "@/shared/lib/messages";
+import { APP_NAME } from "@/shared/lib/brand";
 import { getServerRuntimeEnv, serializeRuntimeEnv } from "@/shared/lib/runtime-env";
 import {
   DEFAULT_LOCALE,
@@ -64,7 +65,7 @@ import "./globals.css";
 export const dynamic = "force-dynamic";
 
 const siteUrl = getSiteUrl();
-const siteName = "DRWN";
+const siteName = APP_NAME;
 
 /** OpenGraph wants `language_TERRITORY`; the locale tag's hyphen maps to it. */
 function ogLocale(locale: Locale): string {

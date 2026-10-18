@@ -19,6 +19,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from ...brand import APP_NAME
 from ...config import settings
 from ...storage.models import UserIdentityModel, UserModel
 from ..errors import DomainError
@@ -228,7 +229,7 @@ def test_password_policy_rejects_each_rule() -> None:
         validate_password("password123", "alice@example.com")
     assert common.value.code == "accounts.password_common"
     with pytest.raises(DomainError) as service:
-        validate_password("MySkynet2026", "alice@example.com")
+        validate_password(f"My{APP_NAME}2026", "alice@example.com")
     assert service.value.code == "accounts.password_common"
     with pytest.raises(DomainError) as contains:
         validate_password("Alice-loves-tea", "alice@example.com")

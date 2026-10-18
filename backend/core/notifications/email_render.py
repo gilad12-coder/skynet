@@ -1,6 +1,6 @@
-"""Email rendering: one calm, status-line layout for every Skynet email.
+"""Email rendering: one calm, status-line layout for every app email.
 
-Every email shares the same skeleton: a small SKYNET wordmark, a status label,
+Every email shares the same skeleton: a small upper-case wordmark, a status label,
 a one-line headline saying what happened, an optional row of facts (score,
 change vs baseline, spend, duration), exactly one button, and a footer saying
 why the recipient got the email. Each email also gets a plain-text twin.
@@ -30,6 +30,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
+from ..brand import APP_NAME
 from ..i18n import t_locale
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
@@ -592,7 +593,7 @@ def render_email_html(content: EmailContent) -> str:
         f'<tr><td style="padding-bottom:36px;text-align:{start};">'
         f'<a class="sk-ink" href="{home}" target="_blank" dir="ltr" style="font-family:{_DISPLAY_LEAD}{font};font-size:13px;'
         f'line-height:16px;font-weight:700;letter-spacing:0.24em;color:{light["ink"]};text-decoration:none;">'
-        "SKYNET</a></td></tr>"
+        f"{esc(APP_NAME.upper())}</a></td></tr>"
         f"{status_row}"
         f'<tr><td style="text-align:{start};"><h1 class="sk-ink sk-h1" style="margin:0;font-family:{_DISPLAY_LEAD}{font};'
         f"font-size:22px;line-height:30px;font-weight:600;{headline_tracking}color:{light['ink']};"
@@ -623,7 +624,7 @@ def render_email_text(content: EmailContent) -> str:
         return content.text_body
     rtl = is_rtl(content.locale)
     iso = _ltr if rtl else (lambda value: value)
-    lines = ["SKYNET", "", content.headline]
+    lines = [APP_NAME.upper(), "", content.headline]
     if content.detail:
         lines.append(content.detail)
     if content.code:

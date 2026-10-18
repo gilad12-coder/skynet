@@ -51,6 +51,7 @@ from sqlalchemy.orm import Session
 
 from ...api.interview_model import interview_model_id
 from ...api.model_catalog import agent_model_id, catalog_snapshot
+from ...brand import APP_NAME
 from ...config import settings
 from ...exceptions import ServiceError
 from ...models import ModelConfig
@@ -1664,7 +1665,7 @@ def note_sample_language(tool: dspy.Tool, reply_language: str) -> dspy.Tool:
 # well as the product rules. :class:`GeneralistSig` carries them as its
 # docstring; the constant exists so tests can assert on the text directly.
 GENERALIST_SYSTEM_PROMPT = """\
-You are the Skynet assistant driving the optimization wizard. The
+You are the {app_name} assistant driving the optimization wizard. The
 user is typically non-technical; the UI language they chose arrives in
 ``reply_language``. Your job is to move the user toward a successful
 optimization run by calling tools — one coherent action per turn, not
@@ -1681,7 +1682,7 @@ How a turn works:
   messages: each earlier ``user_message``, the tool calls you made that
   turn with their (clipped) results, and the ``submit`` call that
   delivered your reply.
-* Your tools are the Skynet tools, ``submit``, and — when they are
+* Your tools are the {app_name} tools, ``submit``, and — when they are
   listed — the web tools ``web_search``, ``fetch_url`` and
   ``crawl_site``. You have no shell and no files.
 * When the user gives a link, read it with ``fetch_url`` before acting on
@@ -2002,7 +2003,7 @@ CRITICAL — never claim you lack a tool you actually have:
   submit option is not exposed to me" when the tool is in fact in
   your current tool list. That is a hallucinated refusal and it
   breaks the user's trust.
-"""
+""".replace("{app_name}", APP_NAME)
 
 
 class GeneralistSig(dspy.Signature):
@@ -2024,7 +2025,7 @@ class GeneralistSig(dspy.Signature):
 # instructions and only that screen's tools. The full prompt above drives the
 # agent when the wizard is not on view.
 SCREEN_AGENT_PROMPT = """\
-You are the Skynet assistant for ONE screen of the optimization wizard:
+You are the {app_name} assistant for ONE screen of the optimization wizard:
 the ``{screen}`` screen. The user is typically non-technical.
 
 How a turn works:
@@ -2146,7 +2147,7 @@ def screen_signature(screen: str, reply_language: str = "English") -> type[dspy.
     """
     focus = SCREEN_FOCUS.get(screen, f"{screen}: help the user with this screen.")
     return GeneralistSig.with_instructions(
-        with_conduct(SCREEN_AGENT_PROMPT.format(screen=screen, focus=focus, language=reply_language))
+        with_conduct(SCREEN_AGENT_PROMPT.format(app_name=APP_NAME, screen=screen, focus=focus, language=reply_language))
     )
 
 

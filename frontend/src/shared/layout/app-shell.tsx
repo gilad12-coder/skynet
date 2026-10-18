@@ -8,7 +8,8 @@ import { motion } from "framer-motion";
 import { List } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
-import { SkynetMark } from "@/shared/ui/skynet-mark";
+import { AppMark } from "@/shared/ui/app-mark";
+import { APP_NAME } from "@/shared/lib/brand";
 import { GlobalSearch } from "@/shared/layout/global-search";
 import { useLocale } from "@/shared/providers";
 import { dirForLocale } from "@/shared/lib/locale";
@@ -173,17 +174,17 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
       >
         <div className="flex items-center gap-2 cursor-default">
           {/* The morphing mark and wordmark anchor the header at sm+; below sm they
-              collapse to the static mark and a plain DRWN wordmark where the
+              collapse to the static mark and the plain-text name where the
               full SVG would crowd the row. */}
           <div className="hidden sm:block">
             <AnimatedWordmark size={16} withMark autoMorph autoMorphDuration={10000} morphSpeed={250} />
           </div>
-          <SkynetMark className="sm:hidden size-5 shrink-0" aria-hidden="true" />
+          <AppMark className="sm:hidden size-5 shrink-0" aria-hidden="true" />
           <span
             className="sm:hidden text-sm font-bold tracking-[0.14em] uppercase text-primary cursor-default"
             style={{ fontFamily: "var(--font-ui)" }}
           >
-            DRWN
+            {APP_NAME}
           </span>
         </div>
 

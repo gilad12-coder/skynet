@@ -101,7 +101,7 @@ function oauthReturnUrl(): string {
 }
 
 /**
- * Oversized DRWN wordmark shared by every login state, so the loading moment
+ * Oversized wordmark shared by every login state, so the loading moment
  * and the credential form read as the same place. It fills the column width
  * and morphs continuously as an ambient "alive" signal.
  */

@@ -8,8 +8,10 @@
  * them before you rely on them.
  */
 
+import { APP_NAME } from "@/shared/lib/brand";
+
 export const LEGAL_CONFIG = {
-  serviceName: "DRWN",
+  serviceName: APP_NAME,
   websiteLabel: "skynetml.com",
   websiteUrl: "https://skynetml.com",
 
@@ -17,7 +19,7 @@ export const LEGAL_CONFIG = {
   effectiveDate: "August 11, 2026",
   lastUpdated: "October 13, 2026",
 
-  // Skynet is operated by an individual (sole proprietor); this legal name is
+  // The service is operated by an individual (sole proprietor); this legal name is
   // the operating party and, for the Privacy Policy, the data controller.
   legalEntity: "Gilad Morad",
 

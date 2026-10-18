@@ -1,7 +1,7 @@
 import type { SVGProps } from "react";
 
 /**
- * Skynet's brand mark: a Hoatzin (Opisthocomus hoazin) head as minimal geometric line art.
+ * The app's brand mark: a Hoatzin (Opisthocomus hoazin) head as minimal geometric line art.
  * It is built from a few primitives in a 512-unit drawing:
  * - the face is a circle (centre 288,288, r 70) cut by a straight bill base;
  * - the bill is the top terminal of the wordmark's default "S": an outer arc, a flat cut at
@@ -83,7 +83,7 @@ export function HoatzinShapes({ detail = "full" }: { detail?: HoatzinDetail }) {
 }
 
 /** The standalone mark. Defaults to the reduced detail its icon-sized call sites need. */
-export function SkynetMark({ detail = "simple", ...props }: SVGProps<SVGSVGElement> & { detail?: HoatzinDetail }) {
+export function AppMark({ detail = "simple", ...props }: SVGProps<SVGSVGElement> & { detail?: HoatzinDetail }) {
   return (
     <svg viewBox={HOATZIN_VIEWBOX} xmlns="http://www.w3.org/2000/svg" {...props}>
       <HoatzinShapes detail={detail} />

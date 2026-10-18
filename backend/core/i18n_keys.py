@@ -323,6 +323,7 @@ class TermKey(StrEnum):
     """Stable identifiers for catalog ``terms`` entries (resolved via ``term()``)."""
 
     API_KEY = 'apiKey'
+    APP_NAME = 'appName'
     BASELINE = 'baseline'
     BASELINE_SCORE = 'baselineScore'
     CANCELLATION_REASON = 'cancellationReason'

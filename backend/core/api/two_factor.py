@@ -16,12 +16,13 @@ from datetime import UTC, datetime, timedelta
 import pyotp
 from sqlalchemy.orm import Session
 
+from ..brand import APP_NAME
 from ..storage.models import TwoFactorEmailCodeModel, UserModel
 from .email_sender import email_configured
 from .errors import DomainError
 from .passwords import hash_password, verify_password
 
-TOTP_ISSUER = "Skynet"
+TOTP_ISSUER = APP_NAME
 EMAIL_CODE_TTL = timedelta(minutes=10)
 EMAIL_CODE_MAX_ATTEMPTS = 5
 _RECOVERY_CODE_COUNT = 8

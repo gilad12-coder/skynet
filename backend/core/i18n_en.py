@@ -13,10 +13,13 @@ flattened here to plain English nouns since the API consumer does not need the
 shared term layer.
 
 This module is intentionally a flat literal — no codegen, no I/O, no lookups —
-so missing-key drift surfaces immediately at import time.
+so missing-key drift surfaces immediately at import time. The app's name is the
+one exception: it comes from the generated :mod:`core.brand`.
 """
 
 from __future__ import annotations
+
+from .brand import APP_NAME
 
 ENGLISH_MESSAGES: dict[str, str] = {
     "agent.approval.unknown_call_id": "No pending approval for the given call_id.",
@@ -57,9 +60,9 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "billing.openrouter_oauth_state_invalid": "The OpenRouter sign-in link is invalid or expired. Start again.",
     "billing.openrouter_unreachable": "OpenRouter could not be reached. Try again in a moment.",
     "billing.byok_model_not_served": "{model} is not served through your saved {provider} key. Pick a model listed under that provider.",
-    "billing.already_subscribed": "You're already on Skynet Pro. Manage your plan from Billing.",
+    "billing.already_subscribed": f"You're already on {APP_NAME} Pro. Manage your plan from Billing.",
     "billing.not_configured": "Billing is not configured on this deployment.",
-    "billing.plan_unavailable": "Skynet Pro isn't available on this deployment yet.",
+    "billing.plan_unavailable": f"{APP_NAME} Pro isn't available on this deployment yet.",
     "billing.unknown_pack": "Unknown top-up pack '{pack_id}'.",
     "billing.webhook_invalid": "Stripe webhook signature verification failed.",
     "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
@@ -83,9 +86,9 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "connectors.hf_oauth_failed": "Hugging Face sign-in didn't complete. Try again.",
     "connectors.hf_oauth_state_invalid": "The Hugging Face sign-in link is invalid or expired. Start again.",
     "notifications.slack_not_configured": "Slack isn't set up on this server yet.",
-    "notifications.slack_not_connected": "Slack isn't connected. Add Skynet to Slack first.",
+    "notifications.slack_not_connected": f"Slack isn't connected. Add {APP_NAME} to Slack first.",
     "notifications.slack_state_invalid": "The Slack sign-in link is invalid or expired. Start again.",
-    "notifications.slack_not_in_channel": "Skynet isn't in that channel. In Slack, type /invite @Skynet in the channel, then pick it again.",
+    "notifications.slack_not_in_channel": f"{APP_NAME} isn't in that channel. In Slack, type /invite @Skynet in the channel, then pick it again.",
     "notifications.slack_reconnect": "The Slack connection stopped working. Reconnect Slack.",
     "notifications.slack_failed": "Slack didn't answer. Try again in a moment.",
     "connectors.hf_import_too_large": "That split is too large to import (the compressed-file limit is {max_mb} MB).",
@@ -190,7 +193,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "share.invalid_role": "Invalid share role '{role}'. Allowed roles: {allowed}.",
     "share.member_not_found": "No member grant for '{username}' on this optimization.",
     "share.not_found": "Shared optimization not found or the link was revoked.",
-    "submission.capacity_reached": "Skynet is at capacity right now. Please try again shortly.",
+    "submission.capacity_reached": f"{APP_NAME} is at capacity right now. Please try again shortly.",
     "submission.module_resolve_failed": "Module load failed: {error}",
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' not found for this user — re-upload the dataset and retry.",
     "submission.validation_failed": "Payload validation failed. Check the optimizer, module, and column mapping.",

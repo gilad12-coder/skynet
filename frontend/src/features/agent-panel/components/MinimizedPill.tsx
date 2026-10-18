@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { SkynetMark } from "@/shared/ui/skynet-mark";
+import { AppMark } from "@/shared/ui/app-mark";
 import { msg } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
@@ -53,7 +53,7 @@ export function MinimizedPill({
           />
         )}
         <span className="relative inline-flex size-5 overflow-hidden rounded-full bg-secondary">
-          <SkynetMark className="size-full" aria-hidden="true" />
+          <AppMark className="size-full" aria-hidden="true" />
         </span>
       </span>
       <span className="truncate max-w-[18ch] leading-none">

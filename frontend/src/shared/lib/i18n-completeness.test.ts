@@ -91,7 +91,8 @@ test("Cantonese copy does not regress to English or Simplified Chinese", () => {
   for (const [key, rawValue] of Object.entries(cantonese)) {
     const value = String(rawValue);
     assert.doesNotMatch(value, simplifiedOnlyCharacters, `${key} contains Simplified Chinese`);
-    const latinWords = value.match(/[A-Za-z]{2,}/g) ?? [];
+    // Term placeholders such as {term.appName} are names, not English prose.
+    const latinWords = value.replace(/\{term\.[A-Za-z0-9_]+\}/g, "").match(/[A-Za-z]{2,}/g) ?? [];
     const looksLikeEnglishProse = latinWords.length >= 3 && !/[\u3400-\u9fff]/.test(value);
     if (looksLikeEnglishProse && value === english[key]) {
       assert.ok(cantoneseEnglishAllowlist.has(key), `${key} still contains English prose`);

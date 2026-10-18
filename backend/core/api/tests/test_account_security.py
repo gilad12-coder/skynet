@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 from webauthn.helpers import bytes_to_base64url
 
+from ...brand import APP_NAME
 from ...config import settings
 from ...storage.models import (
     TwoFactorEmailCodeModel,
@@ -286,7 +287,7 @@ def test_passkey_register_list_delete(
 ) -> None:
     """Registration verifies against the stored challenge, then lists/deletes."""
     options = client.post("/auth/security/passkeys/options").json()
-    assert options["rp"]["name"] == "Skynet"
+    assert options["rp"]["name"] == APP_NAME
     challenge = options["challenge"]
 
     monkeypatch.setattr(

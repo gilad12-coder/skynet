@@ -21,6 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from ...brand import APP_NAME
 from ...config import settings
 from ...i18n_en import t_en
 from ...storage.models import EmailVerificationCodeModel, PasswordResetCodeModel, UserModel
@@ -139,7 +140,7 @@ def test_request_then_confirm_resets_password(
     assert requested.status_code == 200
     assert len(sent) == 1
     code = _last_code(sent)
-    assert sent[-1]["subject"] == "Your Skynet password-reset code"
+    assert sent[-1]["subject"] == f"Your {APP_NAME} password-reset code"
     assert code in sent[-1]["html"]
 
     confirmed = client.post(

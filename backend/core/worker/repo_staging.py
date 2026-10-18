@@ -15,6 +15,7 @@ from typing import Any
 
 from ..billing.protected_credentials import ProtectedCredentialVault, resolve_repo_secrets
 from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
+from ..brand import APP_NAME
 from ..connectors.github_publish import RepoPublishError, open_pull_request, push_version
 from ..connectors.github_repo import RepoFetchError, RepoSnapshot, fetch_snapshot, github_token, resolve_commit
 from ..connectors.saved_secrets import SavedSecretStore
@@ -277,7 +278,8 @@ def _description(result: dict[str, Any], patch: str, run_url: str) -> str:
     listed = "\n".join(f"- `{path}`" for path in files[:50])
     more = f"\n- and {len(files) - 50} more" if len(files) > 50 else ""
     return (
-        f"Skynet found this version while optimizing the repository with {result.get('engine_used', 'an agent')}.\n\n"
+        f"{APP_NAME} found this version while optimizing the repository with "
+        f"{result.get('engine_used', 'an agent')}.\n\n"
         f"Score went from {baseline:.4g} to {optimized:.4g}.\n\n"
         f"Changed files:\n{listed}{more}\n\n"
         f"Review the run: {run_url}\n"
@@ -334,7 +336,7 @@ def publish_improvement(
                 repo["commit"],
                 patch,
                 branch,
-                f"Apply the best version from Skynet run {optimization_id[:12]}",
+                f"Apply the best version from {APP_NAME} run {optimization_id[:12]}",
                 token,
             )
             change = open_pull_request(
@@ -342,7 +344,7 @@ def publish_improvement(
                 repo["repository"],
                 head=branch,
                 base_branch=repo.get("branch"),
-                title=f"Skynet: optimized version from run {optimization_id[:12]}",
+                title=f"{APP_NAME}: optimized version from run {optimization_id[:12]}",
                 body=_description(result, patch, run_url),
             )
             outcome = {"url": change.url, "number": change.number, "branch": change.branch, "draft": change.draft}

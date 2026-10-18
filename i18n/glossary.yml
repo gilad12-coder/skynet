@@ -10,6 +10,14 @@
 # the `terms` section; absence here means the term has no translation
 # controversy worth documenting.
 
+appName:
+  en: Skynet
+  he: Skynet
+  note: >-
+    Brand name, do not translate. Comes from i18n/brand.json; write
+    {term.appName} in copy instead of the name. The Slack bot handle (@Skynet)
+    is the Slack app's own name and stays literal.
+
 optimization:
   en: optimization
   he: אופטימיזציה

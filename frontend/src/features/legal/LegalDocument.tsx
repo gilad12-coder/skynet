@@ -25,13 +25,14 @@ import {
   Users,
 } from "@/shared/ui/icons";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
+import { APP_NAME } from "@/shared/lib/brand";
 import { LegalActionLink } from "./LegalActionLink";
 import { LEGAL_CONFIG } from "./legal-config";
 import type { LegalBlock, LegalDocument as LegalDoc } from "./types";
 import styles from "./legal-document.module.css";
 
 const CHROME = {
-  homeAria: "DRWN home",
+  homeAria: `${APP_NAME} home`,
   contents: "On this page",
   contentsAria: "Document sections",
   lastUpdated: "Last updated",
@@ -40,9 +41,9 @@ const CHROME = {
   minutes: "min",
   sections: "sections",
   current: "Current document",
-  backToApp: "Return to DRWN",
+  backToApp: `Return to ${APP_NAME}`,
   questions: "Questions about this document?",
-  contactPrompt: "Contact us and we will help clarify how this document applies to DRWN.",
+  contactPrompt: `Contact us and we will help clarify how this document applies to ${APP_NAME}.`,
   termsEyebrow: "Service agreement",
   privacyEyebrow: "Data & privacy",
 } as const;
