@@ -464,12 +464,34 @@ export function getOptimizerCatalog(kind: ArtifactKind, mode: DataMode, signal?:
 
 // The server words each check's `message` in this locale for API readers;
 // the wizard itself renders `message_code`.
-export function runContractCheck(req: ContractCheckRequest, signal?: AbortSignal) {
-  return request<ContractCheckResponse>("/optimizations/contract-check", {
+export async function runContractCheck(
+  req: ContractCheckRequest,
+  signal?: AbortSignal,
+  onPhase?: (phase: string) => void,
+): Promise<ContractCheckResponse> {
+  if (!onPhase)
+    return request<ContractCheckResponse>("/optimizations/contract-check", {
+      method: "POST",
+      body: JSON.stringify({ ...req, locale: getActiveLocale() }),
+      signal,
+    });
+  const response = await fetchWithAuthRetry(`${apiBase()}/optimizations/contract-check/stream`, {
     method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify({ ...req, locale: getActiveLocale() }),
     signal,
   });
+  if (!response.ok || !response.body)
+    throw new Error(parseErrorMessage(await response.text()) ?? msg("submit.preflight.failed"));
+  let result: ContractCheckResponse | undefined;
+  await readServerSentEvents(response.body, ({ event, data }) => {
+    if (event === "phase" && typeof data.phase === "string") onPhase(data.phase);
+    if (event === "result") result = data as unknown as ContractCheckResponse;
+    if (event === "error")
+      throw new Error(parseErrorMessage(JSON.stringify(data)) ?? msg("submit.preflight.failed"));
+  });
+  if (!result) throw new Error(msg("submit.preflight.failed"));
+  return result;
 }
 
 export function staticContractCheck(req: ContractCheckRequest, signal?: AbortSignal) {

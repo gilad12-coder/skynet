@@ -355,6 +355,9 @@ class SandboxPythonScorer:
         self._session: SandboxSession | None = None
         self._calls = 0
         self._lock = threading.Lock()
+        # ``_lock`` serializes whole calls for the engines; the counter only
+        # needs uniqueness, so concurrent contract-check invokes use their own.
+        self._calls_lock = threading.Lock()
         self.usage: ScorerUsage | None = ScorerUsage(gateway.billing_model) if gateway is not None else None
 
     def __call__(self, candidate: Candidate, case: Any = None) -> tuple[float, SideInfo]:
@@ -466,8 +469,9 @@ class SandboxPythonScorer:
             ServiceError: When the runner produced no output.
         """
         session = self._open()
-        self._calls += 1
-        call_dir = f"{CALLS_DIR}/{self._calls:06d}"
+        with self._calls_lock:
+            self._calls += 1
+            call_dir = f"{CALLS_DIR}/{self._calls:06d}"
         started = time.perf_counter()
         session.write_files(
             {f"{call_dir}/{runner.INPUT_FILE}": json.dumps(payload, default=runner.side_info_json_default)}

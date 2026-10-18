@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ContractCheckItem, ContractCheckResponse } from "@/shared/types/unified-run";
-import { CONTRACT_CHECK_PLAN, contractValidation } from "./contract-validation.ts";
+import {
+  CONTRACT_CHECK_PLAN,
+  activeContractPhase,
+  contractValidation,
+} from "./contract-validation.ts";
 
 function item(
   key: string,
@@ -32,10 +36,10 @@ test("no check yet shows the plan, not a progress", () => {
     contractValidation({ result: null, checking: false, error: null, timing: null, message: line }),
     null,
   );
-  assert.deepEqual(CONTRACT_CHECK_PLAN, ["budget", "evaluator"]);
+  assert.deepEqual(CONTRACT_CHECK_PLAN, ["budget", "sandbox", "evaluator"]);
 });
 
-test("a running check walks budget, then the sandboxed evaluator step", () => {
+test("a running check walks budget, sandbox, then the evaluator step", () => {
   const reserving = contractValidation({
     result: null,
     checking: true,
@@ -46,20 +50,78 @@ test("a running check walks budget, then the sandboxed evaluator step", () => {
   assert.equal(reserving?.status, "running");
   assert.deepEqual(reserving?.phases, [{ key: "budget", startedAt: 100, finishedAt: undefined }]);
 
-  const sandboxed = contractValidation({
+  const booting = contractValidation({
     result: null,
     checking: true,
     error: null,
-    timing: { startedAt: 100, requestAt: 150 },
+    timing: { startedAt: 100, requestAt: 150, sandboxAt: 160 },
     message: line,
   });
   assert.deepEqual(
-    sandboxed?.phases.map((p) => [p.key, p.startedAt, p.finishedAt]),
+    booting?.phases.map((p) => [p.key, p.startedAt, p.finishedAt]),
     [
-      ["budget", 100, 150],
-      ["evaluator", 150, undefined],
+      ["budget", 100, 160],
+      ["sandbox", 160, undefined],
     ],
   );
+
+  const scoring = contractValidation({
+    result: null,
+    checking: true,
+    error: null,
+    timing: { startedAt: 100, requestAt: 150, sandboxAt: 160, evaluatorAt: 400 },
+    message: line,
+  });
+  assert.deepEqual(
+    scoring?.phases.map((p) => [p.key, p.startedAt, p.finishedAt]),
+    [
+      ["budget", 100, 160],
+      ["sandbox", 160, 400],
+      ["evaluator", 400, undefined],
+    ],
+  );
+});
+
+test("a restored result reads every step as instant", () => {
+  const restored = contractValidation({
+    result: result(true, [item("workspace.run", "passed")]),
+    checking: false,
+    error: null,
+    timing: null,
+    message: line,
+  });
+  assert.deepEqual(
+    restored?.phases.map((p) => [p.key, p.startedAt, p.finishedAt]),
+    [
+      ["budget", 0, 0],
+      ["sandbox", 0, 0],
+      ["evaluator", 0, 0],
+    ],
+  );
+});
+
+test("a check refused before the sandbox woke ends on the budget step", () => {
+  const refused = contractValidation({
+    result: result(false, [item("workspace.run", "failed")]),
+    checking: false,
+    error: null,
+    timing: { startedAt: 100, requestAt: 150, finishedAt: 300 },
+    message: line,
+  });
+  assert.deepEqual(
+    refused?.phases.map((p) => [p.key, p.startedAt, p.finishedAt]),
+    [["budget", 100, 300]],
+  );
+});
+
+test("the compact label follows the step the check stands in", () => {
+  assert.equal(activeContractPhase(null, false), null);
+  assert.equal(activeContractPhase(null, true), null);
+  assert.equal(activeContractPhase({ startedAt: 1 }, true), "budget");
+  assert.equal(activeContractPhase({ startedAt: 1, requestAt: 2 }, true), "budget");
+  assert.equal(activeContractPhase({ startedAt: 1, sandboxAt: 2 }, true), "sandbox");
+  assert.equal(activeContractPhase({ startedAt: 1, sandboxAt: 2, evaluatorAt: 3 }, true), "evaluator");
+  assert.equal(activeContractPhase({ startedAt: 1, sandboxAt: 2 }, false), null);
 });
 
 test("a finished check maps its items and averages the sample scores", () => {

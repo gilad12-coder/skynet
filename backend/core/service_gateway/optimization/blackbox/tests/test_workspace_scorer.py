@@ -102,6 +102,42 @@ def test_one_box_serves_every_call() -> None:
     assert len(runtime.dirs) == 1
 
 
+def test_warm_opens_the_box_before_the_first_call() -> None:
+    """After ``warm`` the box exists; warming twice opens nothing more."""
+    runtime = _RecordingRuntime()
+    with FakeGateway(reply="unused") as gw:
+        scorer = build_workspace_scorer(
+            _payload(), GatewayConfig(url=gw.url, api_key="k"), protected=False, runtime=runtime
+        )
+        try:
+            scorer.warm()
+            assert len(runtime.dirs) == 1
+            scorer.warm()
+        finally:
+            scorer.close()
+
+    assert len(runtime.dirs) == 1
+
+
+def test_run_many_scores_every_case_in_order_in_one_box() -> None:
+    """The fan-out answers one probe per case, in order, from a single box."""
+    runtime = _RecordingRuntime()
+    cases = [{"input": {"q": str(i)}, "expected": f"p:{i}"} for i in range(3)]
+    with FakeGateway(reply="unused") as gw:
+        scorer = build_workspace_scorer(
+            _payload(), GatewayConfig(url=gw.url, api_key="k"), protected=False, runtime=runtime
+        )
+        try:
+            probes = scorer.run_many("p", cases)
+            empty = scorer.run_many("p", [])
+        finally:
+            scorer.close()
+
+    assert [(probe.score, probe.error) for probe in probes] == [(1.0, None)] * 3
+    assert empty == []
+    assert len(runtime.dirs) == 1
+
+
 def test_user_error_reaches_the_optimizer_as_type_and_message_only() -> None:
     """A crash in the run code is ``(0.0, {"error": "Type: msg"})`` with no source or traceback."""
     run_code = "def run(artifact, input):\n    raise ValueError('bad input')\n"

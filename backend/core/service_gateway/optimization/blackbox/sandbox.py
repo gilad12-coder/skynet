@@ -70,9 +70,11 @@ _RENEWAL_LEAD_SECONDS = 180.0
 _RENEWAL_MARGIN_SECONDS = 30.0
 _RENEWAL_JOIN_SECONDS = 30.0
 # Detached processes are watched with short status polls; the delay doubles from
-# the floor to the cap so quick commands return fast and long runs poll gently.
-_POLL_FLOOR_SECONDS = 1.0
-_POLL_CAP_SECONDS = 8.0
+# the floor to the cap while the command is silent. A quiet command is often
+# waiting on a mailbox answer that only the next poll can deliver, so the cap
+# stays low and the delay drops back to the floor whenever output moved.
+_POLL_FLOOR_SECONDS = 0.5
+_POLL_CAP_SECONDS = 2.0
 # Vercel caps a process kill timer at 18,000,000 ms even though a box itself
 # may live 24 hours, so a longer timer fails the whole command with HTTP 400.
 _VERCEL_KILL_TIMER_CEILING_SECONDS = 18_000
@@ -465,8 +467,8 @@ class VercelSandboxSession:
             time.sleep(delay)
             delay = min(delay * 2, _POLL_CAP_SECONDS)
             exit_code = self._recorded_exit_code(sentinel)
-            if on_output is not None:
-                self._forward_output(streams, on_output)
+            if self._forward_output(streams, on_output):
+                delay = _POLL_FLOOR_SECONDS
         self._forward_output(streams, on_output)
         return CommandResult(
             exit_code=exit_code,
@@ -475,13 +477,17 @@ class VercelSandboxSession:
             timed_out=timeout_seconds is not None and exit_code in _TIMEOUT_EXIT_CODES,
         )
 
-    def _forward_output(self, streams: Mapping[str, _OutputFile], on_output: OutputSink | None) -> None:
+    def _forward_output(self, streams: Mapping[str, _OutputFile], on_output: OutputSink | None) -> bool:
         """Re-read the command's output files and hand anything new to ``on_output``.
 
         Args:
             streams: The output files, by stream name.
             on_output: The sink, or ``None`` to only refresh the captured text.
+
+        Returns:
+            Whether either stream had new output.
         """
+        moved = False
         for name, stream in streams.items():
             text = stream.text
             with contextlib.suppress(Exception):
@@ -492,8 +498,10 @@ class VercelSandboxSession:
                 continue
             new = text[len(stream.text) :]
             stream.text = text
+            moved = True
             if on_output is not None:
                 on_output(name, new)
+        return moved
 
     def _recorded_exit_code(self, sentinel: str) -> int | None:
         """Return the exit code the wrapper wrote to ``sentinel``, or ``None`` while the command runs.
