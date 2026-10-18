@@ -35,13 +35,15 @@ import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { tip } from "@/shared/lib/tooltips";
 import { cn } from "@/shared/lib/utils";
 import { readRewardSpec } from "@/shared/lib/reward";
+import { readRewardRules } from "@/shared/lib/reward-rules-code";
+import { RewardRecap } from "@/shared/ui/reward/reward-recap";
 import type { ModelConfig } from "@/shared/types/api";
 import type { ContractCheckState } from "../../hooks/use-contract-check";
 import type { WizardV2State } from "../../lib/wizard-v2";
 import { ModelRoleRow } from "../blackbox/ModelRoleRow";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { optimizerLabel } from "./OptimizerPicker";
-import { RewardPreview } from "./RewardPreview";
+import { RewardPreview } from "@/shared/ui/reward/reward-preview";
 
 const DASH = "—";
 const ICON = "size-3.5 shrink-0";
@@ -195,6 +197,10 @@ export function RunOverview({
   // A repository run reads its own files, so it has no data tab. A metric
   // that declares an accuracy, speed and cost reward gets its review tab.
   const reward = task.repo ? null : readRewardSpec(workspace.metricCode);
+  // A reward made in the builder gets its recap; a hand-written one its parts table.
+  const built = task.repo
+    ? null
+    : readRewardRules(workspace.metricCode, inputs.expectedField ?? "expected");
   const tabs: readonly OverviewTab[] = [
     ...(task.repo
       ? (["general", "models", "budget"] as const)
@@ -588,7 +594,11 @@ export function RunOverview({
                 <div>
                   <dt className="sr-only">{t("submit.v2.overview.tab.reward")}</dt>
                   <dd>
-                    <RewardPreview read={reward} />
+                    {built?.kind === "build" ? (
+                      <RewardRecap build={built.build} />
+                    ) : (
+                      <RewardPreview read={reward} />
+                    )}
                   </dd>
                 </div>
               )}

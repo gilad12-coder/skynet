@@ -4,6 +4,9 @@ import * as React from "react";
 import { isGeneralistAgentEnabled, useHideAgentPill } from "@/features/agent-panel";
 import { githubRepoFile, githubRepoTree } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
+import { readRewardRules } from "@/shared/lib/reward-rules-code";
+import { Code, Robot, Sparkle } from "@/shared/ui/icons";
+import { Segmented } from "@/shared/ui/segmented";
 import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unified-run";
 import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
 import { useWizardV2, useWizardV2Shell } from "../../hooks/use-unified-wizard";
@@ -23,15 +26,22 @@ import {
   keepSessionValue,
   readSessionValue,
 } from "../../lib/session-state";
-import { metricUsesModel as metricCallsModel, withScorerImports } from "../../lib/scorer-dependencies";
+import {
+  metricUsesModel as metricCallsModel,
+  withScorerImports,
+} from "../../lib/scorer-dependencies";
 import { METRIC_FILE, RUN_FILE, isSingleAnswerTask, repoIssue } from "../../lib/wizard-v2";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { ContractCheckScreen } from "./ContractCheckScreen";
 import { MetricModelRow } from "./MetricModelRow";
+import { RewardBuilderPanel } from "./RewardBuilderPanel";
 import { RunOverview } from "./RunOverview";
 import { WizardScreen } from "./WizardScreen";
 
 const SAMPLE_CASE_LIMIT = 5;
+
+/** How the user writes the metric: with the coding agent, by hand, or in the reward builder. */
+type MetricMode = "auto" | "manual" | "ui";
 // The backend's REPO_FILES_MAX: every path rides each agent turn's prompt.
 const REPO_PATHS_LIMIT = 2000;
 
@@ -170,6 +180,28 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   const deleteFile = React.useCallback(
     (path: string) => setWorkspaceFile(path, null),
     [setWorkspaceFile],
+  );
+
+  // The builder's rewards live in metric.py, so a metric it wrote opens in UI mode.
+  const expectedField = inputs.expectedField ?? "expected";
+  const [chosenMode, setMode] = React.useState<MetricMode>(() =>
+    readRewardRules(workspace.metricCode, expectedField).kind === "none" ? "auto" : "ui",
+  );
+  // A repository run's scorer has its own signature, which the builder does not write.
+  const mode: MetricMode = repo && chosenMode === "ui" ? "auto" : chosenMode;
+  const builderSamples = React.useMemo(
+    () =>
+      (authoringContext?.sample_cases ?? []).map((c) => ({
+        input:
+          c.input !== null && typeof c.input === "object" && !Array.isArray(c.input)
+            ? (c.input as Record<string, unknown>)
+            : {},
+        expected:
+          c.expected !== null && typeof c.expected === "object" && !Array.isArray(c.expected)
+            ? (c.expected as Record<string, unknown>)
+            : null,
+      })),
+    [authoringContext],
   );
 
   const contract = useContractCheck(ctx);
@@ -313,23 +345,66 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           openRequests={openRequests}
           guided={guided}
           strip={
-            metricUsesModel ? (
-              <MetricModelRow
-                mode={workspace.metricModelMode}
-                explicitModel={workspace.metricModel}
-                reflectionModel={optimizer.reflectionModel}
-                onChange={patchWorkspace}
-                guided={guided}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <Segmented<MetricMode>
+                size="sm"
+                label={msg("reward_builder.mode.label")}
+                value={mode}
+                onChange={setMode}
+                className="w-auto"
+                segmentClassName="px-3"
+                options={[
+                  {
+                    value: "auto",
+                    label: msg("reward_builder.mode.auto"),
+                    icon: <Robot className="size-3.5" />,
+                    tip: msg("reward_builder.mode.auto_tip"),
+                  },
+                  {
+                    value: "manual",
+                    label: msg("reward_builder.mode.manual"),
+                    icon: <Code className="size-3.5" />,
+                    tip: msg("reward_builder.mode.manual_tip"),
+                  },
+                  ...(repo
+                    ? []
+                    : [
+                        {
+                          value: "ui" as const,
+                          label: msg("reward_builder.mode.ui"),
+                          icon: <Sparkle className="size-3.5" />,
+                          tip: msg("reward_builder.mode.ui_tip"),
+                        },
+                      ]),
+                ]}
               />
-            ) : null
+              {metricUsesModel && (
+                <MetricModelRow
+                  mode={workspace.metricModelMode}
+                  explicitModel={workspace.metricModel}
+                  reflectionModel={optimizer.reflectionModel}
+                  onChange={patchWorkspace}
+                  guided={guided}
+                />
+              )}
+            </div>
           }
           sidePanel={
-            <CodingAgentPanel
-              coding={coding}
-              disabledReason={agentContext ? null : t("submit.v2.ide.agent.waiting")}
-              onOpenFile={openFile}
-              guided={guided}
-            />
+            mode === "auto" ? (
+              <CodingAgentPanel
+                coding={coding}
+                disabledReason={agentContext ? null : t("submit.v2.ide.agent.waiting")}
+                onOpenFile={openFile}
+                guided={guided}
+              />
+            ) : mode === "ui" ? (
+              <RewardBuilderPanel
+                metricCode={workspace.metricCode}
+                onMetricCode={setMetricCode}
+                expectedField={expectedField}
+                samples={builderSamples}
+              />
+            ) : null
           }
         />
       </WizardScreen>

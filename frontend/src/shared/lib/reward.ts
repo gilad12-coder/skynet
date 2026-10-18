@@ -40,7 +40,10 @@ export type PyValue = string | number | boolean | null | PyValue[] | { [key: str
 const ESCAPES: Record<string, string> = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", "0": "\0" };
 
 /** Parse one Python literal (dict, list, str, number, bool, None) from `text` at `start`. */
-export function parsePyLiteral(text: string, start: number): { value: PyValue; end: number } | null {
+export function parsePyLiteral(
+  text: string,
+  start: number,
+): { value: PyValue; end: number } | null {
   let i = start;
   const skip = () => {
     for (;;) {

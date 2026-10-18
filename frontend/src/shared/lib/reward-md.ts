@@ -8,10 +8,16 @@
  * `[...]`, quoted and plain scalars, numbers, booleans and comments.
  */
 
-import { ruleFrom } from "./reward-rules-code.ts";
-import { NAME_PATTERN, type RewardEntry, type RewardRule } from "./reward-rules.ts";
+import { ruleFrom } from "./reward-rules-code";
+import { NAME_PATTERN, type RewardEntry, type RewardRule } from "./reward-rules";
 
-export type YamlValue = string | number | boolean | null | YamlValue[] | { [key: string]: YamlValue };
+export type YamlValue =
+  | string
+  | number
+  | boolean
+  | null
+  | YamlValue[]
+  | { [key: string]: YamlValue };
 
 export class YamlError extends Error {}
 
@@ -57,10 +63,22 @@ function resolvePlain(text: string): YamlValue {
   return text;
 }
 
-const DOUBLE_ESCAPES: Record<string, string> = { n: "\n", t: "\t", r: "\r", "0": "\0", "\\": "\\", '"': '"', "/": "/" };
+const DOUBLE_ESCAPES: Record<string, string> = {
+  n: "\n",
+  t: "\t",
+  r: "\r",
+  "0": "\0",
+  "\\": "\\",
+  '"': '"',
+  "/": "/",
+};
 
 /** Parse one flow value from `text` at `start`. */
-function flowValue(text: string, start: number, inFlow: boolean): { value: YamlValue; end: number } {
+function flowValue(
+  text: string,
+  start: number,
+  inFlow: boolean,
+): { value: YamlValue; end: number } {
   let i = start;
   const skip = () => {
     while (i < text.length && /\s/.test(text[i]!)) i++;
@@ -152,7 +170,8 @@ function flowKey(text: string, start: number): { key: string; end: number } {
 
 function inline(text: string): YamlValue {
   const parsed = flowValue(text, 0, false);
-  if (text.slice(parsed.end).trim()) throw new YamlError(`unexpected text: ${text.slice(parsed.end).trim()}`);
+  if (text.slice(parsed.end).trim())
+    throw new YamlError(`unexpected text: ${text.slice(parsed.end).trim()}`);
   return parsed.value;
 }
 
@@ -169,7 +188,8 @@ function splitKey(text: string): { key: string; rest: string } | null {
   return m ? { key: text.slice(0, m.index).trim(), rest: text.slice(m.index + m[0].length) } : null;
 }
 
-const isItem = (line: Line | undefined) => !!line && (line.text === "-" || line.text.startsWith("- "));
+const isItem = (line: Line | undefined) =>
+  !!line && (line.text === "-" || line.text.startsWith("- "));
 
 function block(lines: Line[], i: number, indent: number): { value: YamlValue; next: number } {
   return isItem(lines[i]) ? sequence(lines, i, indent) : mapping(lines, i, indent);
@@ -194,7 +214,8 @@ function mapping(lines: Line[], i: number, indent: number): { value: YamlValue; 
       i++;
     }
   }
-  if (i < lines.length && lines[i]!.indent > indent) throw new YamlError(`bad indentation at: ${lines[i]!.text}`);
+  if (i < lines.length && lines[i]!.indent > indent)
+    throw new YamlError(`bad indentation at: ${lines[i]!.text}`);
   return { value: map, next: i };
 }
 
@@ -235,7 +256,8 @@ export function parseYaml(source: string): YamlValue {
   const first = lines[0]!;
   if (!isItem(first) && !splitKey(first.text)) return inline(first.text);
   const parsed = block(lines, 0, first.indent);
-  if (parsed.next < lines.length) throw new YamlError(`unexpected text at: ${lines[parsed.next]!.text}`);
+  if (parsed.next < lines.length)
+    throw new YamlError(`unexpected text at: ${lines[parsed.next]!.text}`);
   return parsed.value;
 }
 
@@ -251,7 +273,9 @@ export function yamlFlow(value: unknown): string {
       : `'${value.replace(/'/g, "''")}'`;
   }
   if (Array.isArray(value)) return `[${value.map(yamlFlow).join(", ")}]`;
-  const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined);
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    ([, v]) => v !== undefined,
+  );
   return `{${entries.map(([k, v]) => `${yamlFlow(k)}: ${yamlFlow(v)}`).join(", ")}}`;
 }
 
@@ -305,7 +329,11 @@ export function rewardFromMarkdown(source: string, expectedField: string): Rewar
     meta = parseYaml(head);
     rule = parseYaml(body);
   } catch (error) {
-    return { ok: false, error: "bad_yaml", detail: error instanceof Error ? error.message : undefined };
+    return {
+      ok: false,
+      error: "bad_yaml",
+      detail: error instanceof Error ? error.message : undefined,
+    };
   }
   if (!isMap(meta) || !isMap(rule)) return { ok: false, error: "not_mapping" };
   const kind = meta.kind ?? "rule";

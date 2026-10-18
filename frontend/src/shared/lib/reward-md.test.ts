@@ -1,8 +1,19 @@
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
 import { test } from "node:test";
 
-import { parseYaml, rewardFromMarkdown, rewardToMarkdown } from "./reward-md.ts";
-import { bundledRewards, customReward, scoreRule } from "./reward-rules.ts";
+// Library files import siblings without the .ts ending, as Next.js expects.
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.startsWith(".") && !specifier.endsWith(".ts")) {
+      return { shortCircuit: true, url: new URL(`${specifier}.ts`, context.parentURL).href };
+    }
+    return nextResolve(specifier, context);
+  },
+});
+
+const { parseYaml, rewardFromMarkdown, rewardToMarkdown } = await import("./reward-md.ts");
+const { bundledRewards, customReward, scoreRule } = await import("./reward-rules.ts");
 
 // Unsloth Studio's bundled files (PR 14074), as Studio exports them.
 const UNSLOTH_EXACT = `---
@@ -52,7 +63,10 @@ test("Unsloth's bundled files import and score like Studio", () => {
   assert.ok(exact.ok);
   if (!exact.ok) return;
   assert.equal(exact.entry.name, "exact-answer");
-  assert.equal(exact.entry.description, "The text inside <answer> equals the dataset's answer column.");
+  assert.equal(
+    exact.entry.description,
+    "The text inside <answer> equals the dataset's answer column.",
+  );
   const gsm = { answer: "She pays 3 * 24 = 72\n#### 72" };
   assert.equal(scoreRule(exact.entry.rule, "<answer> 72 </answer>", gsm).score, 2);
 
@@ -77,13 +91,27 @@ test("every bundled and custom reward round-trips through REWARD.md", () => {
     ...(["regex", "exact_match", "numeric", "json_schema", "length"] as const).map((t) =>
       customReward(t, "answer"),
     ),
-    { ...customReward("regex", "answer"), description: "It's: #1 — עברית", rule: { type: "regex" as const, mode: "search" as const, pattern: "a'b #c", score: { match: 1, miss: -0.5 } } },
+    {
+      ...customReward("regex", "answer"),
+      description: "It's: #1 — עברית",
+      rule: {
+        type: "regex" as const,
+        mode: "search" as const,
+        pattern: "a'b #c",
+        score: { match: 1, miss: -0.5 },
+      },
+    },
   ];
   for (const entry of entries) {
     const read = rewardFromMarkdown(rewardToMarkdown(entry), "answer");
     assert.ok(read.ok, entry.name);
     if (!read.ok) continue;
-    assert.deepEqual(read.entry, { name: entry.name, description: entry.description, source: "yours", rule: entry.rule });
+    assert.deepEqual(read.entry, {
+      name: entry.name,
+      description: entry.description,
+      source: "yours",
+      rule: entry.rule,
+    });
   }
 });
 
@@ -122,6 +150,11 @@ test("parseYaml reads block maps, lists, comments and quotes", () => {
     parseYaml(
       "a: 1 # note\nb:\n  c: 'it''s'\n  d: \"x\\ny\"\nlist:\n- 1\n- within: 2\n  score: 3\nflow: {k: [1, two, null]}\n",
     ),
-    { a: 1, b: { c: "it's", d: "x\ny" }, list: [1, { within: 2, score: 3 }], flow: { k: [1, "two", null] } },
+    {
+      a: 1,
+      b: { c: "it's", d: "x\ny" },
+      list: [1, { within: 2, score: 3 }],
+      flow: { k: [1, "two", null] },
+    },
   );
 });

@@ -73,7 +73,10 @@ test("extractText takes the last between pair and a regex's first group", () => 
 
 test("scoreBuild is the weighted mean of scaled scores", () => {
   const build: RewardBuild = {
-    rewards: [{ ...exact!, weight: 3 }, { ...soft!, weight: 1 }],
+    rewards: [
+      { ...exact!, weight: 3 },
+      { ...soft!, weight: 1 },
+    ],
     speed: { weight: 0, reference: 2000 },
     cost: { weight: 0, reference: 0.001 },
   };
@@ -93,14 +96,23 @@ test("blendBuild matches the harness formula and scores unknown time 0", () => {
 });
 
 test("buildIssues finds what would break the metric", () => {
-  const empty: RewardBuild = { rewards: [], speed: { weight: 0, reference: 1 }, cost: { weight: 0, reference: 0 } };
+  const empty: RewardBuild = {
+    rewards: [],
+    speed: { weight: 0, reference: 1 },
+    cost: { weight: 0, reference: 0 },
+  };
   assert.deepEqual(
     buildIssues(empty).map((i) => i.code),
     ["no_rewards", "bad_reference"],
   );
   const bad = customReward("regex", "answer");
   const build: RewardBuild = {
-    rewards: [bad, { ...bad, name: "Bad Name" }, { ...exact!, weight: 0 }, { ...exact!, weight: 0 }],
+    rewards: [
+      bad,
+      { ...bad, name: "Bad Name" },
+      { ...exact!, weight: 0 },
+      { ...exact!, weight: 0 },
+    ],
     speed: { weight: 0, reference: 1 },
     cost: { weight: 0, reference: 1 },
   };

@@ -326,13 +326,16 @@ function rawScore(rule: RewardRule, text: string, expected: Expected): [number, 
       const missingKey = rule.schema.required.find(
         (key) => !Object.prototype.hasOwnProperty.call(value, key),
       );
-      if (missingKey !== undefined) return [rule.score.miss, { code: "missing_key", key: missingKey }];
+      if (missingKey !== undefined)
+        return [rule.score.miss, { code: "missing_key", key: missingKey }];
     }
     return [rule.score.match, { code: "match" }];
   }
   const raw = expected?.[rule.compare_to];
   const reference =
-    raw === undefined || raw === null ? null : extractText(expectedText(raw), rule.reference_extract);
+    raw === undefined || raw === null
+      ? null
+      : extractText(expectedText(raw), rule.reference_extract);
   if (reference === null) return [rule.missing, { code: "no_reference" }];
   if (answer === null) return [rule.missing, { code: "no_answer" }];
   if (rule.type === "exact_match") {
@@ -367,7 +370,10 @@ export interface BuildResult {
 
 /** Score one reply under every rule of a build. */
 export function scoreBuild(build: RewardBuild, reply: string, expected: Expected): BuildResult {
-  const rules = build.rewards.map((entry) => ({ entry, result: scoreRule(entry.rule, reply, expected) }));
+  const rules = build.rewards.map((entry) => ({
+    entry,
+    result: scoreRule(entry.rule, reply, expected),
+  }));
   const total = rules.reduce((sum, r) => sum + Math.max(r.entry.weight, 0), 0);
   const accuracy =
     total > 0
@@ -415,7 +421,9 @@ export function blendBuild(
   if (!(total > 0)) return { total: 0, parts };
   return {
     total:
-      (ruleWeight * parts.accuracy + build.speed.weight * parts.speed + build.cost.weight * parts.cost) /
+      (ruleWeight * parts.accuracy +
+        build.speed.weight * parts.speed +
+        build.cost.weight * parts.cost) /
       total,
     parts,
   };

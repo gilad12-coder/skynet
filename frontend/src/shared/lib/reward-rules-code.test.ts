@@ -1,13 +1,26 @@
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { readRewardSpec } from "./reward.ts";
-import { buildToMetricCode, readRewardRules, toPyLiteral } from "./reward-rules-code.ts";
-import { bundledRewards, customReward, scoreBuild, type RewardBuild } from "./reward-rules.ts";
+import type { RewardBuild } from "./reward-rules.ts";
+
+// Library files import siblings without the .ts ending, as Next.js expects.
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.startsWith(".") && !specifier.endsWith(".ts")) {
+      return { shortCircuit: true, url: new URL(`${specifier}.ts`, context.parentURL).href };
+    }
+    return nextResolve(specifier, context);
+  },
+});
+
+const { readRewardSpec } = await import("./reward.ts");
+const { buildToMetricCode, readRewardRules, toPyLiteral } = await import("./reward-rules-code.ts");
+const { bundledRewards, customReward, scoreBuild } = await import("./reward-rules.ts");
 
 const FIXTURE = new URL(
   "../../../../backend/core/service_gateway/optimization/blackbox/tests/fixtures/reward_builder_metric.txt",
@@ -20,7 +33,11 @@ function fixtureBuild(): RewardBuild {
   if (json.rule.type === "json_schema") json.rule.schema.required = ["value"];
   const length = customReward("length", "answer");
   return {
-    rewards: [...bundledRewards("answer"), { ...json, weight: 0.5 }, { ...length, description: "Short — קצר" }],
+    rewards: [
+      ...bundledRewards("answer"),
+      { ...json, weight: 0.5 },
+      { ...length, description: "Short — קצר" },
+    ],
     speed: { weight: 1, reference: 2000 },
     cost: { weight: 0.5, reference: 0.001 },
   };
@@ -62,7 +79,10 @@ test("readRewardRules says none or invalid", () => {
 });
 
 test("toPyLiteral writes Python values", () => {
-  assert.equal(toPyLiteral({ a: [1, true, null], b: 'q"\n' }), '{\n    "a": [1, True, None],\n    "b": "q\\"\\n",\n}');
+  assert.equal(
+    toPyLiteral({ a: [1, true, null], b: 'q"\n' }),
+    '{\n    "a": [1, True, None],\n    "b": "q\\"\\n",\n}',
+  );
 });
 
 test("the Python evaluator scores like the TS one", () => {
@@ -82,6 +102,8 @@ test("the Python evaluator scores like the TS one", () => {
   const out = execFileSync("python3", ["-I", "-c", script, dir], { encoding: "utf8" });
   const python = JSON.parse(out) as number[];
   const ts = CASES.map(([reply, expected]) => scoreBuild(build, reply, expected).accuracy);
-  python.forEach((value, i) => assert.ok(Math.abs(value - ts[i]!) < 1e-9, `case ${i}: ${value} vs ${ts[i]}`));
+  python.forEach((value, i) =>
+    assert.ok(Math.abs(value - ts[i]!) < 1e-9, `case ${i}: ${value} vs ${ts[i]}`),
+  );
   assert.ok(new Set(ts).size > 3, "the cases cover different scores");
 });

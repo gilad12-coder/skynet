@@ -8,7 +8,7 @@
  * it" and the run score a reply alike.
  */
 
-import { parsePyLiteral, type PyValue } from "./reward.ts";
+import { parsePyLiteral, type PyValue } from "./reward";
 import {
   DEFAULT_COST,
   DEFAULT_SPEED,
@@ -23,7 +23,7 @@ import {
   type RewardPart,
   type RewardRule,
   type RuleType,
-} from "./reward-rules.ts";
+} from "./reward-rules";
 
 /** One value as a Python literal. JSON string escapes are valid Python escapes. */
 export function toPyLiteral(value: unknown, indent = 0): string {
@@ -43,7 +43,9 @@ export function toPyLiteral(value: unknown, indent = 0): string {
     }
     return `[\n${value.map((v) => `${pad}${toPyLiteral(v, indent + 4)},`).join("\n")}\n${end}]`;
   }
-  const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined);
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    ([, v]) => v !== undefined,
+  );
   if (entries.length === 0) return "{}";
   return `{\n${entries
     .map(([k, v]) => `${pad}${JSON.stringify(k)}: ${toPyLiteral(v, indent + 4)},`)
@@ -346,7 +348,11 @@ export function ruleFrom(raw: unknown, expectedField: string): RewardRule | null
   return { type, ...shared, bands: parsed, else: otherwise, missing };
 }
 
-function partFrom(spec: Record<string, PyValue>, name: "speed" | "cost", base: RewardPart): RewardPart {
+function partFrom(
+  spec: Record<string, PyValue>,
+  name: "speed" | "cost",
+  base: RewardPart,
+): RewardPart {
   const weights = isRecord(spec.weights) ? spec.weights : {};
   const part = isRecord(spec[name]) ? spec[name] : {};
   return {
@@ -367,7 +373,10 @@ function literalAfter(code: string, name: string): PyValue | undefined {
  * `none` when the code has no `REWARD_RULES`; `invalid` when it has one the
  * builder cannot read (for example after a hand edit).
  */
-export function readRewardRules(code: string | null | undefined, expectedField: string): RewardRulesRead {
+export function readRewardRules(
+  code: string | null | undefined,
+  expectedField: string,
+): RewardRulesRead {
   if (!code || !/^REWARD_RULES\s*(?::[^=\n]*)?=/m.test(code)) return { kind: "none" };
   const rawRules = literalAfter(code, "REWARD_RULES");
   if (!Array.isArray(rawRules)) return { kind: "invalid" };
