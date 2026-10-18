@@ -252,7 +252,7 @@ def _holds_client(seen: list[str]) -> TestClient:
 
 
 def test_call_holds_price_one_call_like_the_gateway_reservation() -> None:
-    """The hold covers a full context at the dearest input rate plus the llm() output cap."""
+    """The hold covers the stand-in body's byte bound at the base input rate plus the llm() output cap."""
     client = _holds_client([])
     resp = client.post(
         "/models/call-holds",
@@ -265,7 +265,9 @@ def test_call_holds_price_one_call_like_the_gateway_reservation() -> None:
     )
 
     assert resp.status_code == 200
-    provider_usd = (1000 * Decimal("0.000003") + DEFAULT_MAX_TOKENS * Decimal("0.000002")) * Decimal("1.05")
+    # The stand-in body plus the 2,048-token wrapper allowance outgrows the 1,000-token window, and
+    # no breakpoint asks for the one-hour cache, so the window prices at the base prompt rate.
+    provider_usd = (1000 * Decimal("0.000001") + DEFAULT_MAX_TOKENS * Decimal("0.000002")) * Decimal("1.05")
     managed, byok = resp.json()["holds"]
     assert managed["cents"] == float(ChargePolicy("managed_model").convert(provider_usd).total)
     assert byok["cents"] == float(ChargePolicy("byok_model").convert(provider_usd).total)

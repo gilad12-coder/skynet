@@ -7,8 +7,7 @@ import { Label } from "@/shared/ui/primitives/label";
 import { HelpTip } from "@/shared/ui/help-tip";
 import {
   ClockCounterClockwise,
-  Cpu,
-  Gauge,
+  Flag,
   Hourglass,
   Info,
   ListChecks,
@@ -16,7 +15,6 @@ import {
   Minus,
   Play,
   Plus,
-  Terminal,
   Wallet,
   WarningCircle,
 } from "@/shared/ui/icons";
@@ -27,43 +25,33 @@ import { cn } from "@/shared/lib/utils";
 
 import { centsToBudgetText, parseBudgetInput } from "@/shared/lib/budget-input";
 import { budgetShortfall } from "../lib/budget-limit";
-import { chargeableBracket, type CostBracket } from "../lib/cost-bracket";
+import { startingLimitCents, type RunFloor } from "../lib/run-floor";
 import type { WizardV2Context } from "../lib/wizard-v2";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
 import { Disclosure } from "./Disclosure";
-import { Figure, buildEstimateSections, type CalcSection } from "./EstimateBreakdown";
+import { Figure, type CalcSection } from "./Figure";
 import { Segmented } from "@/shared/ui/segmented";
 import { StepCard } from "./blackbox/shared";
 
 /**
  * The one budget surface of both wizards: a spending limit that covers setup
- * checks and the optimization itself. The limit is the decision; the projected
- * usage bracket only supports it, so it sits attached under the field as one
- * block, and the arithmetic behind the bracket stays folded away until asked
- * for.
+ * checks and the optimization itself. A run has no upfront cost estimate; it
+ * spends up to the limit and stops at the budget with its best version. The
+ * card names the least the limit can be (what the run's boxes hold before
+ * the first model call, plus spare for its first calls), and once the
+ * budget exists, the server's ledger for it.
  *
  * Every figure on the card is a trigger: it opens a layer over the card that
- * walks through the calculation behind that number, built from the same trace
- * the bracket was computed from.
- *
- * Mode-aware: managed model roles show their full cost; BYOK roles show
- * their platform fee. The required execution environment is included in the
- * estimate in either mode.
+ * walks through the calculation behind that number.
  *
  * The limit can also be switched off: the run then draws on the account
  * balance until it finishes, and stops in place if that balance runs out. Each
  * mode explains itself in the tooltip of its option; under "No limit" the card
- * is its header alone, as the estimate and the ledger describe a limit.
+ * is its header alone, as the floor and the ledger describe a limit.
  */
 type BudgetContext = Pick<
   WizardV2Context,
-  | "costBracket"
-  | "suggestedCeiling"
-  | "tokenSource"
-  | "maxCostCents"
-  | "setMaxCostCents"
-  | "budgetUncapped"
-  | "setBudgetUncapped"
+  "runFloor" | "maxCostCents" | "setMaxCostCents" | "budgetUncapped" | "setBudgetUncapped"
 > & {
   setupSpent?: number;
   availableCents?: number | null;
@@ -71,8 +59,8 @@ type BudgetContext = Pick<
 
 const BUDGET_STEP_CENTS = 100;
 
-/** Why Continue holds while the spending limit sits under the estimate's low end. */
-export function belowEstimateMessage(neededCents: number): string {
+/** Why Continue holds while the spending limit sits under what the run needs to start. */
+export function belowFloorMessage(neededCents: number): string {
   return formatMsg("submit.budget.error.below_estimate", {
     amount: formatCentsUsd(neededCents, getActiveIntlLocale()),
   });
@@ -102,71 +90,10 @@ function sumDecimals(a: string, b: string): string {
 
 const isZero = (amount: string) => !/[1-9]/.test(amount);
 
-/** A budget context whose estimate exists: the card's arithmetic needs both figures. */
-type ReadyBudgetContext = Omit<BudgetContext, "costBracket" | "suggestedCeiling"> & {
-  costBracket: CostBracket;
-  suggestedCeiling: number;
-};
-
-export function TotalBudgetCard({
-  w,
-  mode,
-  preliminary = false,
-}: {
-  w: BudgetContext;
-  mode: TokenSourceMode;
-  /** The estimate still waits on inputs from later steps (cases, models). */
-  preliminary?: boolean;
-}) {
-  const { costBracket, suggestedCeiling } = w;
-  // No estimate before the setup names an artifact; the card says so instead of guessing.
-  if (costBracket == null || suggestedCeiling == null) {
-    return (
-      <StepCard
-        title={msg("submit.budget.label")}
-        description={msg("submit.budget.estimate_preliminary_note")}
-      >
-        {null}
-      </StepCard>
-    );
-  }
-  return (
-    <ReadyBudgetCard
-      w={{ ...w, costBracket, suggestedCeiling }}
-      mode={mode}
-      preliminary={preliminary}
-    />
-  );
-}
-
-function ReadyBudgetCard({
-  w,
-  mode,
-  preliminary,
-}: {
-  w: ReadyBudgetContext;
-  mode: TokenSourceMode;
-  preliminary: boolean;
-}) {
-  const {
-    costBracket,
-    suggestedCeiling,
-    maxCostCents,
-    setMaxCostCents,
-    budgetUncapped,
-    setBudgetUncapped,
-  } = w;
+export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSourceMode }) {
+  const { runFloor, maxCostCents, setMaxCostCents, budgetUncapped, setBudgetUncapped } = w;
   const { budget, budgetBusy, budgetError, minimumTotalCents } = useExecutionBudget();
   const locale = getActiveIntlLocale();
-  const bracket = chargeableBracket(costBracket, mode);
-  const { charge } = bracket;
-  const feeOnly = mode === "byok" && bracket.runtimeBillingBasis !== "at_cost";
-  const runtimeAtCost =
-    bracket.runtimeBillingBasis === "at_cost" &&
-    bracket.expectedRuntimeSessions > 0 &&
-    bracket.runtimeSessionHighCents > 0;
-  const runtimeIncluded = bracket.runtimeBillingBasis === "included_in_model_markup";
-  const mixedBilling = costBracket.managedModelHighCents > 0 && costBracket.byokModelHighCents > 0;
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [limitEdited, setLimitEdited] = useState(maxCostCents != null);
 
@@ -187,29 +114,29 @@ function ReadyBudgetCard({
 
   const isolate = (value: string) => `${ISOLATE_START}${value}${ISOLATE_END}`;
   const dollars = (value: number) => isolate(formatCentsUsd(value, locale));
-  const dollarRange = (low: number, high: number) =>
-    formatMsg("submit.summary.estimate_range", { low: dollars(low), high: dollars(high) });
   const unit = msg("submit.cost_ceiling.cap_unit");
   const ledgerAmount = (amount: string) => formatBudgetUsd(amount, locale);
-  const suggested = centsToBudgetText(suggestedCeiling, locale);
+  const minimum = minimumTotalCents == null ? null : Math.ceil(minimumTotalCents);
+  const floorCents = runFloor?.floorCents ?? null;
+  // Until the user edits it, an unset limit starts at the default, never below
+  // what the run needs to start or a minimum the server reports.
+  const startingLimit = startingLimitCents(floorCents ?? 0, minimum);
+  const suggested = centsToBudgetText(startingLimit, locale);
 
   const parsed = parseBudgetInput(text, locale);
   // The +/- nudge the limit by a dollar and never below one cent; an empty
   // field steps from the suggested limit rather than from zero.
   const nudge = (direction: 1 | -1) => {
-    const base = parsed.kind === "value" ? parsed.value : suggestedCeiling;
+    const base = parsed.kind === "value" ? parsed.value : startingLimit;
     const next = Math.max(1, base + direction * BUDGET_STEP_CENTS);
     setLimitEdited(true);
     setMaxCostCents(next);
     setText(centsToBudgetText(next, locale));
   };
   const atFloor = parsed.kind === "value" && parsed.value <= 1;
-  const minimum = minimumTotalCents == null ? null : Math.ceil(minimumTotalCents);
-  // Until the user edits it, an unset limit follows the estimate's low end,
-  // never below a minimum the server reports; a restored limit is kept as is.
-  const startingLimit = Math.max(1, Math.ceil(bracket.lowCents), minimum ?? 0);
-  // Only a limit this card filled in follows the estimate: one the agent
-  // wrote is kept, and if it sits under the estimate the field says so.
+  // Only a limit this card filled in follows the floor: one the agent wrote,
+  // or one restored with the draft, is kept, and if it sits under the floor
+  // the field says so.
   const autoLimitRef = useRef<number | null>(null);
   useEffect(() => {
     if (limitEdited || budgetUncapped || maxCostCents === startingLimit) return;
@@ -222,8 +149,8 @@ function ReadyBudgetCard({
       ? null
       : formatMsg("submit.budget.minimum_total", { amount: formatCentsUsd(minimum, locale) });
   const limitShort =
-    parsed.kind === "value"
-      ? budgetShortfall(costBracket, w.tokenSource, {
+    parsed.kind === "value" && floorCents != null
+      ? budgetShortfall(floorCents, {
           uncapped: budgetUncapped,
           limit: parsed.value,
           balance: null,
@@ -239,30 +166,12 @@ function ReadyBudgetCard({
           : parsed.kind === "value" && minimum != null && parsed.value < minimum
             ? minimumMessage
             : limitShort != null
-              ? belowEstimateMessage(limitShort.needed)
+              ? belowFloorMessage(limitShort.needed)
               : null;
   const fieldHint = fieldError == null && parsed.kind === "empty" ? minimumMessage : null;
   const fieldMessage = fieldError ?? fieldHint;
 
-  const estimateLabel = msg(
-    preliminary
-      ? "submit.budget.estimate_preliminary"
-      : feeOnly
-        ? "submit.summary.estimate_fee"
-        : "submit.summary.estimate_cost",
-  );
-  const estimateNotes = [
-    preliminary ? msg("submit.budget.estimate_preliminary_note") : null,
-    msg(runtimeAtCost ? "submit.budget.estimate_note_runtime" : "submit.budget.estimate_note"),
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const modelLow = Math.max(0, bracket.lowCents - bracket.runtimeLowCents);
-  const modelHigh = Math.max(modelLow, bracket.highCents - bracket.runtimeHighCents);
-
-  // The calculation behind the estimate, step by step from the bracket's trace.
-  const { estimateSections, modelSections, runtimeSection, estimateIntro, estimatePrinciples } =
-    buildEstimateSections(bracket, locale);
+  const floorSections: CalcSection[] = runFloor ? floorCalculation(runFloor, dollars) : [];
 
   // The ledger figures are the server's; their layers show how they add up.
   const spent = budget ? sumDecimals(budget.setup_spent_cents, budget.run_spent_cents) : null;
@@ -418,27 +327,27 @@ function ReadyBudgetCard({
                 <Plus className="size-3" />
               </button>
             </div>
-            <div className="border-t border-border/40 bg-background px-3.5 py-3">
-              <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                <span className="flex items-center gap-2 text-[13px] font-semibold text-primary">
-                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-fill text-primary-foreground">
-                    <Gauge className="h-3 w-3" aria-hidden="true" />
+            {runFloor && (
+              <div className="border-t border-border/40 bg-background px-3.5 py-3">
+                <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                  <span className="flex items-center gap-2 text-[13px] font-semibold text-primary">
+                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-fill text-primary-foreground">
+                      <Flag className="h-3 w-3" aria-hidden="true" />
+                    </span>
+                    {msg("submit.budget.floor")}
                   </span>
-                  {estimateLabel}
-                </span>
-                <Figure
-                  label={estimateLabel}
-                  value={dollarRange(bracket.lowCents, bracket.highCents)}
-                  sections={estimateSections}
-                  intro={estimateIntro}
-                  principles={estimatePrinciples}
-                  className="self-start text-[13px] text-primary sm:self-auto sm:text-end"
-                />
+                  <Figure
+                    label={msg("submit.budget.floor")}
+                    value={dollars(runFloor.floorCents)}
+                    sections={floorSections}
+                    className="self-start text-[13px] text-primary sm:self-auto sm:text-end"
+                  />
+                </div>
+                <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">
+                  {msg("submit.budget.floor_note")}
+                </p>
               </div>
-              <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">
-                {estimateNotes}
-              </p>
-            </div>
+            )}
           </div>
           {fieldMessage && (
             <p
@@ -523,29 +432,6 @@ function ReadyBudgetCard({
         >
           <div className="space-y-3">
             <dl>
-              <Row
-                icon={Cpu}
-                label={msg(
-                  mode === "byok" ? "submit.budget.details.fee" : "submit.budget.details.models",
-                )}
-                value={dollarRange(modelLow, modelHigh)}
-                sections={modelSections}
-              />
-              {runtimeAtCost && runtimeSection && (
-                <Row
-                  icon={Terminal}
-                  label={msg("submit.budget.details.runtime")}
-                  value={dollarRange(charge.runtimeLow, charge.runtimeHigh)}
-                  sections={[runtimeSection]}
-                />
-              )}
-              {runtimeIncluded && (
-                <Row
-                  icon={Terminal}
-                  label={msg("submit.budget.details.runtime")}
-                  value={msg("submit.budget.details.runtime_included")}
-                />
-              )}
               {budget && !isZero(budget.setup_spent_cents) && (
                 <Row
                   icon={ListChecks}
@@ -564,11 +450,8 @@ function ReadyBudgetCard({
               )}
             </dl>
             <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
-              <p dir="auto">
-                {msg("submit.budget.details.assumptions")}{" "}
-                {msg("submit.budget.details.reservation")}
-              </p>
-              {mixedBilling && <p dir="auto">{msg("submit.budget.details.mixed_billing")}</p>}
+              <p dir="auto">{msg("submit.budget.details.how")}</p>
+              <p dir="auto">{msg("submit.budget.details.reservation")}</p>
               {mode === "byok" && <p dir="auto">{msg("submit.budget.byok_note")}</p>}
             </div>
           </div>
@@ -576,6 +459,36 @@ function ReadyBudgetCard({
       )}
     </StepCard>
   );
+}
+
+/** The floor as a sum: the boxes' opening holds plus spare for the first calls. */
+function floorCalculation(floor: RunFloor, dollars: (cents: number) => string): CalcSection[] {
+  return [
+    {
+      steps: [
+        {
+          label: msg("submit.budget.calc.floor_boxes"),
+          value: dollars(floor.boxHoldCents),
+          why: msg("submit.budget.calc.floor_boxes_why"),
+        },
+        {
+          label: msg("submit.budget.calc.floor_spare"),
+          value: dollars(floor.spareCents),
+          why: msg("submit.budget.calc.floor_spare_why"),
+        },
+        {
+          label: msg("submit.budget.floor"),
+          equation: [
+            { value: dollars(floor.boxHoldCents), caption: msg("submit.budget.calc.term.runtime") },
+            { op: "+" },
+            { value: dollars(floor.spareCents), caption: msg("submit.budget.calc.term.spare") },
+          ],
+          value: dollars(floor.floorCents),
+          result: true,
+        },
+      ],
+    },
+  ];
 }
 
 /** One hairline row in the summary step's style: small icon, muted label, value at the end. */

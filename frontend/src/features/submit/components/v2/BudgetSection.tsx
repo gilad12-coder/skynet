@@ -10,7 +10,7 @@ import { msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
-import { aggregateTokenSource } from "../../lib/cost-bracket";
+import { aggregateTokenSource } from "../../lib/run-floor";
 import {
   minScorerRuns,
   supportsIterationLimit,
@@ -23,7 +23,7 @@ import { v2Msg } from "./ArtifactConfirmCard";
 /**
  * Step 3's budget: how many scorer runs the optimizer may spend, the
  * iteration cap where the engine honours one, the score that ends the run
- * early, and the money ceiling with its estimate.
+ * early, and the spending limit with the least it can be.
  */
 export function BudgetSection({ kind, choice }: { kind: ArtifactKind; choice: OptimizerChoice }) {
   const ctx = useWizardV2();
@@ -112,11 +112,7 @@ export function BudgetSection({ kind, choice }: { kind: ArtifactKind; choice: Op
         />
       </div>
 
-      <TotalBudgetCard
-        w={ctx}
-        mode={aggregateTokenSource(models)}
-        preliminary={!reflectionModel?.name.trim() || ctx.stepIssue("inputs") !== null}
-      />
+      <TotalBudgetCard w={ctx} mode={aggregateTokenSource(models)} />
     </StepCard>
   );
 }

@@ -42,7 +42,7 @@ function repoState() {
   return state;
 }
 
-const options = { username: "u", tokenSource: "managed" as const, maxCostCents: 500, estimate: null };
+const options = { username: "u", tokenSource: "managed" as const, maxCostCents: 500 };
 
 test("a repository run submits its repo, commit, paths and setup command", () => {
   const request = repoRunRequest(repoState(), options);

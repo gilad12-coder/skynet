@@ -925,7 +925,7 @@ class WizardState(TypedDict, total=False):
     model_configured: bool
     reflection_model_config: dict[str, Any]
     max_cost_cents: int | None
-    # The least the spending limit may be: the low end of the run's estimate.
+    # The least the spending limit may be: the boxes' opening hold plus spare for the first calls.
     spending_floor_cents: int | None
     run_code: str
     metric_code: str
@@ -1473,7 +1473,7 @@ def _limit_below_floor(state: WizardState) -> str | None:
 
     Returns:
         An English line naming the floor, or None when the limit is unset,
-        uncapped, unknown against an estimate, or at least the floor.
+        uncapped, unknown against a floor, or at least the floor.
     """
     floor = state.get("spending_floor_cents")
     if not isinstance(floor, int | float) or floor <= 0:
@@ -1488,7 +1488,7 @@ def _limit_below_floor(state: WizardState) -> str | None:
     if limit is None or limit >= floor:
         return None
     return (
-        f"the spending limit ${limit / 100:.2f} is below this run's estimated minimum ${floor / 100:.2f}; "
+        f"the spending limit ${limit / 100:.2f} is below this run's minimum ${floor / 100:.2f}; "
         "set at least that, or ask the user to raise it"
     )
 
@@ -2085,10 +2085,10 @@ This screen:
 _ASK_FOR_BUDGET = (
     "``spending_limit_usd`` is the most the run may spend, in US dollars, and only the user decides it. "
     "Unless the user already named an amount (in this chat or in ``notes_from_earlier_screens``), ask how "
-    "much they want to spend: give the minimum (``spending_floor_cents``, the low end of the run's "
-    "estimate) and their balance from ``get_wallet_for_agent``, and wait for the answer before setting it "
+    "much they want to spend: give the minimum (``spending_floor_cents``, what the run needs to "
+    "start; it spends up to the limit and stops there with its best version) and their balance from ``get_wallet_for_agent``, and wait for the answer before setting it "
     "or continuing. If you changed models or the optimizer in this turn, the minimum you were given is out "
-    "of date: point to the estimate on the screen instead of quoting a number. Never set it below that "
+    "of date: point to the minimum on the screen instead of quoting a number. Never set it below that "
     "minimum; if the user wants less, say the run needs at least that. Once the user names an amount at or "
     "above the minimum, set it and call ``continue_to_next_screen`` in the same turn; do not ask whether to "
     "continue."

@@ -2,12 +2,11 @@
 
 import { useRef, type KeyboardEvent } from "react";
 
-import { formatCentsUsd } from "@/features/billing";
 import { Warning } from "@/shared/ui/icons";
 import { Label } from "@/shared/ui/primitives/label";
 import { msg } from "@/shared/lib/messages";
 import type { ArtifactKind, DataMode, OptimizerChoice } from "@/shared/types/unified-run";
-import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
 import {
@@ -51,7 +50,7 @@ function optimizerDescription(view: OptimizerOptionView, kind: ArtifactKind, gui
  * Step 3's optimizer choice: only the optimizers that fit the task and inputs,
  * Auto first and preselected. Picking never happens on the user's behalf: when
  * an upstream edit rules the current choice out, the card says so and keeps it.
- * `plain` (Standard) words each card the plain way and adds its estimated cost.
+ * `plain` (Standard) words each card the plain way.
  */
 export function OptimizerPicker({
   kind,
@@ -62,19 +61,8 @@ export function OptimizerPicker({
   mode: DataMode;
   plain?: boolean;
 }) {
-  const { state, patchOptimizer, optimizerCatalog, optimizerCatalogLoading, guided, estimateFor } =
-    useWizardV2();
+  const { state, patchOptimizer, optimizerCatalog, optimizerCatalogLoading, guided } = useWizardV2();
   const t = (key: string, params?: Record<string, string>) => v2Msg(key, guided, params);
-  const locale = getActiveIntlLocale();
-  const costLine = (id: OptimizerChoice): string | null => {
-    const estimate = plain ? estimateFor(id) : null;
-    if (!estimate) return null;
-    const range = msg("submit.summary.estimate_range", {
-      low: formatCentsUsd(estimate.lowCents, locale),
-      high: formatCentsUsd(estimate.highCents, locale),
-    });
-    return t("submit.v2.optimizer.plan.cost", { p1: range });
-  };
   const choice = state.optimizer.choice;
   const repo = Boolean(state.task.repo);
   const options = optimizerOptions({ kind, mode, catalog: optimizerCatalog, guided, choice, repo });
@@ -137,7 +125,6 @@ export function OptimizerPicker({
         >
           {options.map((option, i) => {
             const checked = choice === option.id;
-            const cost = costLine(option.id);
             return (
               <button
                 key={option.id}
@@ -164,11 +151,6 @@ export function OptimizerPicker({
                   blocked={!option.available}
                   blockedNote={option.unavailableReason ?? t("submit.v2.optimizer.unavailable")}
                 />
-                {cost && (
-                  <span className="px-3 pb-3 text-xs font-medium text-foreground" dir="auto">
-                    {cost}
-                  </span>
-                )}
               </button>
             );
           })}

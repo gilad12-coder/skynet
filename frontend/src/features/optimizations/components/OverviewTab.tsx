@@ -4,7 +4,7 @@ import { ProgressBar } from "@/shared/ui/progress-bar";
 import { PingDot } from "@/shared/ui/ping-dot";
 import { memo, useMemo, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { ChatText, Gauge, Hourglass, Timer, TrendUp } from "@/shared/ui/icons";
+import { ChatText, Gauge, Hourglass, Timer, TrendUp, Wallet } from "@/shared/ui/icons";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import {
   Table,
@@ -28,6 +28,7 @@ import type {
 import type { PipelineStage } from "../constants";
 import { detectPairStage, detectStage } from "../lib/detect-stage";
 import { planPipelineStages, stageInPlan } from "../lib/pipeline-plan";
+import { budgetPaceLine } from "../lib/budget-pace";
 import { runShapeKey } from "../lib/run-kind-hint";
 import {
   formatBlackboxDelta,
@@ -354,6 +355,7 @@ function OverviewTabImpl({
           const tqdmElapsed = metrics.tqdm_elapsed as number | undefined;
           const tqdmRemaining = metrics.tqdm_remaining as number | undefined;
           const tqdmRate = metrics.tqdm_rate as number | undefined;
+          const pace = budgetPaceLine(metrics);
           const stats: Array<{ key: string; icon: ReactNode; label: string; value: string }> = [];
           if (tqdmElapsed != null)
             stats.push({
@@ -399,6 +401,22 @@ function OverviewTabImpl({
                   </span>
                 </div>
                 <ProgressBar value={tqdmPercent} className="mt-2" />
+                {pace && (
+                  <p
+                    className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground"
+                    dir="auto"
+                  >
+                    <Wallet className="size-3.5 shrink-0" aria-hidden="true" />
+                    {pace.kind === "calibrating"
+                      ? msg("optimization.progress.budget.calibrating")
+                      : formatMsg(
+                          pace.kind === "iterations"
+                            ? "optimization.progress.budget.iterations"
+                            : "optimization.progress.budget.evaluations",
+                          { count: pace.count },
+                        )}
+                  </p>
+                )}
                 {stats.length > 0 && (
                   <div className="mt-3.5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-border/70 pt-3.5 sm:grid-cols-3">
                     {stats.map((s) => (
