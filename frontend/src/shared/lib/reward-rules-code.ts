@@ -65,7 +65,7 @@ def _extract(text, extract):
         end = text.find(end_tag, start)
         return None if end < 0 else text[start:end]
     try:
-        found = re.search(extract["regex"], text, re.S)
+        found = re.search(extract["regex"], text, re.S | re.M)
     except re.error:
         return None
     if not found:
@@ -125,9 +125,9 @@ def _raw_score(rule, text, expected):
     if kind == "regex":
         try:
             if rule["mode"] == "fullmatch":
-                found = re.fullmatch(rule["pattern"], text.strip(), re.S)
+                found = re.fullmatch(rule["pattern"], text.strip(), re.S | re.M)
             else:
-                found = re.search(rule["pattern"], text, re.S)
+                found = re.search(rule["pattern"], text, re.S | re.M)
         except re.error:
             return rule["score"]["miss"], "bad pattern"
         return (rule["score"]["match"], "match") if found else (rule["score"]["miss"], "no match")
@@ -263,11 +263,13 @@ export function extractFrom(value: unknown): Extract | undefined | null {
   return pattern === null ? null : { regex: pattern };
 }
 
+/** A `score` mapping; like Unsloth, a missing mapping or key scores 0. */
 function scorePair<K extends string>(value: unknown, keys: [K, K]): Record<K, number> | null {
+  if (value === undefined) value = {};
   if (!isRecord(value)) return null;
   const out = {} as Record<K, number>;
   for (const key of keys) {
-    const n = num(value[key]);
+    const n = value[key] === undefined ? 0 : num(value[key]);
     if (n === null) return null;
     out[key] = n;
   }
@@ -324,7 +326,7 @@ export function ruleFrom(raw: unknown, expectedField: string): RewardRule | null
     ...(referenceExtract ? { reference_extract: referenceExtract } : {}),
   };
   if (type === "exact_match") {
-    const ops = raw.normalize ?? [];
+    const ops = raw.normalize ?? ["strip"];
     const score = scorePair(raw.score, ["match", "miss"]);
     if (!Array.isArray(ops) || !score) return null;
     if (!ops.every((op) => NORMALIZE_OPS.includes(op as NormalizeOp))) return null;
@@ -332,7 +334,7 @@ export function ruleFrom(raw: unknown, expectedField: string): RewardRule | null
   }
   const bands = raw.bands;
   const otherwise = raw.else === undefined ? 0 : num(raw.else);
-  if (!Array.isArray(bands) || otherwise === null) return null;
+  if (!Array.isArray(bands) || bands.length === 0 || otherwise === null) return null;
   const parsed: Array<{ within: number; score: number }> = [];
   for (const band of bands) {
     if (!isRecord(band)) return null;

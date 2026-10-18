@@ -158,7 +158,7 @@ def _extract(text, extract):
         end = text.find(end_tag, start)
         return None if end < 0 else text[start:end]
     try:
-        found = re.search(extract["regex"], text, re.S)
+        found = re.search(extract["regex"], text, re.S | re.M)
     except re.error:
         return None
     if not found:
@@ -218,9 +218,9 @@ def _raw_score(rule, text, expected):
     if kind == "regex":
         try:
             if rule["mode"] == "fullmatch":
-                found = re.fullmatch(rule["pattern"], text.strip(), re.S)
+                found = re.fullmatch(rule["pattern"], text.strip(), re.S | re.M)
             else:
-                found = re.search(rule["pattern"], text, re.S)
+                found = re.search(rule["pattern"], text, re.S | re.M)
         except re.error:
             return rule["score"]["miss"], "bad pattern"
         return (rule["score"]["match"], "match") if found else (rule["score"]["miss"], "no match")

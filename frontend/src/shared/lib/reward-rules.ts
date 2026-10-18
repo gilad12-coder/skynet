@@ -239,8 +239,9 @@ export function ruleRange(rule: RewardRule): { min: number; max: number } {
 
 function regex(pattern: string, anchored = false): RegExp | null {
   try {
-    // Python's re.S: a dot matches newlines in both evaluators.
-    return new RegExp(anchored ? `^(?:${pattern})$` : pattern, "s");
+    // Python's re.S | re.M, as Unsloth compiles a pattern. The lookarounds
+    // anchor at the very start and end, which ^ and $ do not under re.M.
+    return new RegExp(anchored ? `(?<![\\s\\S])(?:${pattern})(?![\\s\\S])` : pattern, "ms");
   } catch {
     return null;
   }
