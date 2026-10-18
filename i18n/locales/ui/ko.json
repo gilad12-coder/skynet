@@ -3687,7 +3687,6 @@
   "submit.blackbox.review.name_suggested": "목표에서 제안됨",
   "submit.budget.label": "지출 한도",
   "submit.budget.floor": "시작에 필요한 금액",
-  "submit.budget.floor_note": "사전 추정치는 없습니다. 실행은 한도까지 사용한 뒤 그 지점에서 지금까지의 최고 버전을 남기고 멈춥니다.",
   "submit.budget.explainer": "설정과 최적화를 포함합니다. 한도에 도달하면 중단됩니다.",
   "submit.budget.error.invalid": "달러 금액을 입력하세요(예: {suggested}).",
   "submit.budget.error.fraction": "금액은 센트 단위까지 가능합니다 — 소수점 이하 두 자리까지 사용하세요.",

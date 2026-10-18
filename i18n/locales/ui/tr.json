@@ -3687,7 +3687,6 @@
   "submit.blackbox.review.name_suggested": "Hedefinizden önerildi",
   "submit.budget.label": "Harcama limiti",
   "submit.budget.floor": "Başlamak için gereken",
-  "submit.budget.floor_note": "Önceden bir tahmin yok. Çalıştırma limitine kadar harcar ve orada o ana kadarki en iyi sürümüyle durur.",
   "submit.budget.explainer": "Kurulumu ve optimizasyonu kapsar. Limite ulaşıldığında durur.",
   "submit.budget.error.invalid": "Bir dolar tutarı girin, örneğin {suggested}.",
   "submit.budget.error.fraction": "Tutarlar sent düzeyine kadar iner — en fazla iki ondalık basamak kullanın.",

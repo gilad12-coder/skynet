@@ -3687,7 +3687,6 @@
   "submit.blackbox.review.name_suggested": "根据您的目标建议",
   "submit.budget.label": "支出上限",
   "submit.budget.floor": "开始所需",
-  "submit.budget.floor_note": "没有预先估算。运行会花到你的上限，并在那里停止，保留目前为止最好的版本。",
   "submit.budget.explainer": "涵盖设置和优化。达到上限时停止。",
   "submit.budget.error.invalid": "请输入美元金额，例如 {suggested}。",
   "submit.budget.error.fraction": "金额精确到分——最多使用两位小数。",

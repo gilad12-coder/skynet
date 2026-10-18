@@ -3166,7 +3166,6 @@
   "submit.blackbox.review.name_suggested": "Suggested from your objective",
   "submit.budget.label": "Spending limit",
   "submit.budget.floor": "Needed to start",
-  "submit.budget.floor_note": "There is no upfront estimate. The run spends up to your limit and stops there with its best version so far.",
   "submit.budget.explainer": "Covers setup and optimization. Stops when the limit is reached.",
   "submit.budget.error.invalid": "Enter a dollar amount, for example {suggested}.",
   "submit.budget.error.fraction": "Amounts go down to the cent — use at most two decimals.",

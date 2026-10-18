@@ -250,22 +250,19 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
             {runFloor && (
               <div className="border-t border-border/40 bg-background px-3.5 py-3">
                 <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                  <span className="flex items-center gap-2 text-[13px] font-semibold text-primary">
-                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-fill text-primary-foreground">
+                  <span className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
                       <Flag className="h-3 w-3" aria-hidden="true" />
                     </span>
                     {msg("submit.budget.floor")}
                   </span>
                   <span
                     dir="auto"
-                    className="self-start text-[13px] font-medium tabular-nums text-primary sm:self-auto sm:text-end"
+                    className="self-start text-[13px] font-medium tabular-nums text-foreground sm:self-auto sm:text-end"
                   >
                     {dollars(runFloor.floorCents)}
                   </span>
                 </div>
-                <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">
-                  {msg("submit.budget.floor_note")}
-                </p>
               </div>
             )}
           </div>

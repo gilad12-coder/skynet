@@ -3687,7 +3687,6 @@
   "submit.blackbox.review.name_suggested": "Suggéré à partir de votre objectif",
   "submit.budget.label": "Plafond de dépenses",
   "submit.budget.floor": "Nécessaire pour démarrer",
-  "submit.budget.floor_note": "Il n'y a pas d'estimation préalable. L'exécution dépense jusqu'à votre plafond et s'y arrête avec sa meilleure version obtenue.",
   "submit.budget.explainer": "Couvre la configuration et l'optimisation. S'arrête dès que le plafond est atteint.",
   "submit.budget.error.invalid": "Saisissez un montant en dollars, par exemple {suggested}.",
   "submit.budget.error.fraction": "Les montants vont jusqu'au centime — utilisez au maximum deux décimales.",

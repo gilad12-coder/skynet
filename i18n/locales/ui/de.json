@@ -3687,7 +3687,6 @@
   "submit.blackbox.review.name_suggested": "Aus Ihrem Ziel vorgeschlagen",
   "submit.budget.label": "Ausgabenlimit",
   "submit.budget.floor": "Zum Start nötig",
-  "submit.budget.floor_note": "Es gibt keine Vorabschätzung. Der Lauf gibt bis zu deinem Limit aus und stoppt dort mit seiner bisher besten Version.",
   "submit.budget.explainer": "Deckt Einrichtung und Optimierung ab. Stoppt, sobald das Limit erreicht ist.",
   "submit.budget.error.invalid": "Gib einen Dollar-Betrag ein, zum Beispiel {suggested}.",
   "submit.budget.error.fraction": "Beträge gehen bis auf den Cent — verwende höchstens zwei Dezimalstellen.",

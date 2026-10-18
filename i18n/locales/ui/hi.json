@@ -3687,7 +3687,6 @@
   "submit.blackbox.review.name_suggested": "आपके लक्ष्य से सुझाया गया",
   "submit.budget.label": "खर्च की सीमा",
   "submit.budget.floor": "शुरू करने के लिए ज़रूरी",
-  "submit.budget.floor_note": "कोई अग्रिम अनुमान नहीं है। रन आपकी सीमा तक खर्च करता है और वहीं अब तक के अपने सबसे अच्छे संस्करण के साथ रुक जाता है।",
   "submit.budget.explainer": "सेटअप और ऑप्टिमाइज़ेशन को कवर करती है। सीमा पूरी होने पर रुक जाती है।",
   "submit.budget.error.invalid": "डॉलर राशि दर्ज करें, उदाहरण के लिए {suggested}।",
   "submit.budget.error.fraction": "राशि सेंट तक जाती है — अधिकतम दो दशमलव स्थानों का उपयोग करें।",

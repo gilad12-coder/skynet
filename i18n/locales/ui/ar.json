@@ -3687,7 +3687,6 @@
   "submit.blackbox.review.name_suggested": "مقترح من هدفك",
   "submit.budget.label": "حد الإنفاق",
   "submit.budget.floor": "المطلوب للبدء",
-  "submit.budget.floor_note": "لا يوجد تقدير مسبق. يُنفق التشغيل حتى حدّك ثم يتوقف عنده محتفظًا بأفضل نسخة حتى الآن.",
   "submit.budget.explainer": "يغطي الإعداد والتحسين. يتوقف عند بلوغ الحد.",
   "submit.budget.error.invalid": "أدخل مبلغًا بالدولار، مثل {suggested}.",
   "submit.budget.error.fraction": "تصل دقّة المبالغ إلى السنت — استخدم منزلتين عشريتين كحد أقصى.",

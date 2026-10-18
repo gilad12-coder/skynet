@@ -3687,7 +3687,6 @@
   "submit.blackbox.review.name_suggested": "Sugerido a partir de tu objetivo",
   "submit.budget.label": "Límite de gasto",
   "submit.budget.floor": "Necesario para empezar",
-  "submit.budget.floor_note": "No hay estimación previa. La ejecución gasta hasta tu límite y se detiene ahí con su mejor versión hasta el momento.",
   "submit.budget.explainer": "Cubre la configuración y la optimización. Se detiene al alcanzar el límite.",
   "submit.budget.error.invalid": "Introduce un importe en dólares, por ejemplo {suggested}.",
   "submit.budget.error.fraction": "Los importes se indican hasta el céntimo: usa como máximo dos decimales.",
