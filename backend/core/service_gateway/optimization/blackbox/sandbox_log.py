@@ -408,7 +408,7 @@ def logged_command(run: Callable[..., Any]) -> Callable[..., Any]:
         command_id = None
         if terminal is not None:
             command_id = terminal.command_started(
-                record.label, scrub=record.scrub.text, sample=check_terminal.current_sample()
+                command, scrub=record.scrub.text, sample=check_terminal.current_sample()
             )
             on_output = _mirrored(terminal, command_id, on_output)
         sink = record.tee(on_output)

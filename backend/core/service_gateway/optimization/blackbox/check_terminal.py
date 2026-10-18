@@ -25,6 +25,8 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import json
+import re
+import shlex
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -45,6 +47,15 @@ MAX_EVENTS = 4_000
 _SECRET_MIN_CHARS = 8
 _REDACTED = "[redacted]"
 _SECRET_KEY_PARTS = ("token", "api_key", "apikey", "secret", "password", "authorization")
+LABEL_MAX_CHARS = 160
+# The model mailbox (core.billing.model_mailbox) wraps a guest command in its
+# proxy and talks to the host through nonce-tagged stdout frames. Both are
+# plumbing: the frames carry raw provider requests, headers included.
+_MAILBOX_FRAME = re.compile(r"APP_MODEL_[0-9a-f]{32}:")
+_MAILBOX_WRAPPER = re.compile(
+    r"python3 \.app-model-[0-9a-f]{32}/proxy\.py \.app-model-[0-9a-f]{32}/config\.json bash -lc (?P<inner>.+)",
+    re.DOTALL,
+)
 
 
 def secret_values(value: Any) -> set[str]:
@@ -158,11 +169,11 @@ class CheckTerminalRecorder:
             event["params"] = params
         self._append(event, phase=phase)
 
-    def command_started(self, label: str, *, scrub: Callable[[str], str], sample: int | None = None) -> int:
+    def command_started(self, command: str, *, scrub: Callable[[str], str], sample: int | None = None) -> int:
         """Record a sandboxed command's start and return its transcript id.
 
         Args:
-            label: The command line, already shortened.
+            command: The command line as the sandbox runs it.
             scrub: The command's own redaction, applied to everything it prints.
             sample: Evaluator sample the command serves, when known.
 
@@ -174,7 +185,11 @@ class CheckTerminalRecorder:
             command_id = self._next_id
             phase = "evaluator" if sample is not None else self._phase
             self._commands[command_id] = _Command(phase, sample, scrub)
-        event: dict[str, Any] = {"kind": "command", "id": command_id, "label": self.scrub(scrub(label))}
+        event: dict[str, Any] = {
+            "kind": "command",
+            "id": command_id,
+            "label": self.scrub(scrub(command_label(command))),
+        }
         self._append(event, phase=phase, sample=sample)
         return command_id
 
@@ -295,7 +310,7 @@ class CheckTerminalRecorder:
             raw: The line without its newline.
         """
         line = self.scrub(command.scrub(raw.rstrip("\r")))
-        if line.startswith(REPLY_PREFIX):
+        if line.startswith(REPLY_PREFIX) or _MAILBOX_FRAME.match(line):
             return
         if line.startswith(EVENT_PREFIX):
             line = _event_message(line[len(EVENT_PREFIX) :])
@@ -351,6 +366,24 @@ class CheckTerminalRecorder:
             # A viewer that went away must never break the check it watched.
             with contextlib.suppress(Exception):
                 emit(record)
+
+
+def command_label(command: str) -> str:
+    """Return the first line of the command a person would recognise, shortened.
+
+    Args:
+        command: The command line as the sandbox runs it, possibly wrapped
+            in the model mailbox's proxy.
+
+    Returns:
+        The wrapped command itself, cut to ``LABEL_MAX_CHARS``.
+    """
+    wrapped = _MAILBOX_WRAPPER.fullmatch(command.strip())
+    if wrapped is not None:
+        with contextlib.suppress(ValueError):
+            [command] = shlex.split(wrapped.group("inner"))
+    first = command.strip().splitlines()[0] if command.strip() else ""
+    return first[:LABEL_MAX_CHARS] + ("…" if len(first) > LABEL_MAX_CHARS else "")
 
 
 def _event_message(body: str) -> str:

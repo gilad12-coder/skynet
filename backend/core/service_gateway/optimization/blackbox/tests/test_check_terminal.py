@@ -164,3 +164,23 @@ def test_a_command_without_a_recorder_records_nothing() -> None:
     check_terminal.note("box_opening")
     result = CommandResult(exit_code=0, stdout="", stderr="")
     assert result.ok
+
+
+def test_model_mailbox_plumbing_never_reaches_the_transcript() -> None:
+    """A mailbox-wrapped command shows the command it wraps, and its nonce frames are hidden."""
+    nonce = "0123456789abcdef0123456789abcdef"
+    wrapped = (
+        f"python3 .app-model-{nonce}/proxy.py .app-model-{nonce}/config.json "
+        "bash -lc 'python3 app_workspace_harness.py --run'"
+    )
+    recorder = CheckTerminalRecorder()
+    command_id = recorder.command_started(wrapped, scrub=lambda text: text)
+    frame = f'APP_MODEL_{nonce}:{{"headers": {{"authorization": "Bearer x"}}}}'
+    recorder.command_output(command_id, "stdout", f"{frame}\nscore 1.0\n")
+    recorder.command_finished(command_id, exit_code=0)
+
+    events = recorder.snapshot()["events"]
+    assert events[0]["label"] == "python3 app_workspace_harness.py --run"
+    assert [event["text"] for event in events if event["kind"] == "output"] == ["score 1.0"]
+    assert "APP_MODEL_" not in _text(recorder)
+    assert ".app-model-" not in _text(recorder)
