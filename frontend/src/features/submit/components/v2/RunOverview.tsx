@@ -1,21 +1,105 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { CheckCircle, Warning, XCircle } from "@/shared/ui/icons";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import {
+  CheckCircle,
+  Coins,
+  Columns,
+  Cpu,
+  Cube,
+  Database,
+  FileText,
+  GitBranch,
+  Gauge,
+  Globe,
+  Key,
+  Lightbulb,
+  Lock,
+  Shuffle,
+  Stack,
+  Tag,
+  Target,
+  TextAlignLeft,
+  User,
+  Wallet,
+  Warning,
+  XCircle,
+} from "@/shared/ui/icons";
+import { HelpTip } from "@/shared/ui/help-tip";
+import { ModelChip } from "@/shared/ui/model-chip";
+import { RolePill } from "@/shared/ui/role-pill";
 import { msg, type MessageKey } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { tip } from "@/shared/lib/tooltips";
 import { cn } from "@/shared/lib/utils";
+import type { ModelConfig } from "@/shared/types/api";
 import type { ContractCheckState } from "../../hooks/use-contract-check";
 import type { WizardV2State } from "../../lib/wizard-v2";
+import { ModelRoleRow } from "../blackbox/ModelRoleRow";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { optimizerLabel } from "./OptimizerPicker";
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+const DASH = "—";
+const ICON = "size-3.5 shrink-0";
+
+/** One label/value line, laid out like the old summary step's rows. */
+function Row({
+  icon,
+  label,
+  help,
+  children,
+}: {
+  icon: ReactNode;
+  label: string;
+  help?: string;
+  children: ReactNode;
+}) {
+  const labelNode = (
+    <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      {icon}
+      {label}
+    </span>
+  );
   return (
-    <div className="grid gap-1 border-b border-border/30 py-3 last:border-b-0 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 text-sm text-foreground">{children}</dd>
+    <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/40 py-2.5">
+      <dt className="min-w-0">{help ? <HelpTip text={help}>{labelNode}</HelpTip> : labelNode}</dt>
+      <dd className="max-w-[55%] break-words text-end text-sm font-medium">{children}</dd>
     </div>
+  );
+}
+
+/** A row whose value is free text: the label sits above it so long text reads from the start. */
+function TextRow({ icon, label, children }: { icon: ReactNode; label: string; children: string }) {
+  return (
+    <div className="space-y-1.5 border-b border-border/40 py-2.5">
+      <dt className="flex items-center gap-2 text-xs text-muted-foreground">
+        {icon}
+        {label}
+      </dt>
+      <dd className="line-clamp-4 whitespace-pre-wrap break-words text-sm text-foreground">
+        <bdi>{children}</bdi>
+      </dd>
+    </div>
+  );
+}
+
+const TAB_ICONS: Record<OverviewTab, ReactNode> = {
+  general: <User className={ICON} aria-hidden />,
+  data: <Database className={ICON} aria-hidden />,
+  models: <Cpu className={ICON} aria-hidden />,
+  budget: <Coins className={ICON} aria-hidden />,
+};
+
+/** A model as the optimizer step shows it, read-only: the chip is inert and its name is read out once. */
+function ReadOnlyModel({ role, config }: { role: string; config: ModelConfig | null }) {
+  return (
+    <ModelRoleRow role={role}>
+      <span className="sr-only">{config?.name || msg("shared.model_chip.not_configured")}</span>
+      <div inert>
+        <ModelChip config={config ?? { name: "" }} roleLabel={role} onClick={() => {}} />
+      </div>
+    </ModelRoleRow>
   );
 }
 
@@ -58,10 +142,36 @@ function CheckStatus({ cc, guided }: { cc: ContractCheckState; guided: boolean }
   );
 }
 
+type OverviewTab = "general" | "data" | "models" | "budget";
+
+const EASE = [0.2, 0.8, 0.2, 1] as const;
+
+/**
+ * Track an element's height so the panel can grow or shrink smoothly when the
+ * tab changes. The first real size (the screen was hidden until now) applies
+ * at once, so the card does not grow open when the page appears.
+ */
+function useContentHeight() {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState<{ height: number; instant: boolean } | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      const height = el.offsetHeight;
+      setSize((prev) => ({ height, instant: !prev?.height || !height }));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, size] as const;
+}
+
 /**
  * The wizard's last screen: what the run will optimize, on what, with which
  * optimizer, and whether the contract check has passed. Run lives here, below
- * it, so it never sits over the code editors.
+ * it, so it never sits over the code editors. The details sit in tabs so the
+ * whole setup reads at a glance without a long scroll.
  */
 export function RunOverview({
   state,
@@ -73,64 +183,402 @@ export function RunOverview({
   guided: boolean;
 }) {
   const t = (key: string, params?: Record<string, string | number>) => v2Msg(key, guided, params);
-  const fmt = (n: number) => new Intl.NumberFormat(getActiveIntlLocale()).format(n);
-  const { task, inputs, optimizer } = state;
-  const data =
-    inputs.datasetLabel !== null
-      ? `${inputs.datasetLabel} · ${t("submit.v2.inputs.source.loaded", {
-          rows: fmt(inputs.rowCount),
-          cols: fmt(inputs.columns.length),
-        })}`
-      : t("submit.v2.overview.cases", { count: fmt(inputs.cases.length) });
+  const locale = getActiveIntlLocale();
+  const fmt = (n: number) => new Intl.NumberFormat(locale).format(n);
+  const pct = (n: number) => new Intl.NumberFormat(locale, { style: "percent" }).format(n);
+  const yesNo = (on: boolean) => t(on ? "submit.v2.overview.yes" : "submit.v2.overview.no");
+  const { task, inputs, optimizer, workspace, meta } = state;
+  // A repository run reads its own files, so it has no data tab.
+  const tabs: readonly OverviewTab[] = task.repo
+    ? ["general", "models", "budget"]
+    : ["general", "data", "models", "budget"];
+  const [active, setActive] = useState<OverviewTab>("general");
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const index = Math.max(0, tabs.indexOf(active));
+  const current = tabs[index] ?? "general";
+  const baseId = useId();
+  const reduceMotion = useReducedMotion();
+  const [contentRef, size] = useContentHeight();
+
+  const reflectionModels = [optimizer.reflectionModel, ...optimizer.extraReflectionModels].filter(
+    (m): m is NonNullable<typeof m> => m != null,
+  );
+  const byok = meta.tokenSource === "byok";
+  const limit = optimizer.budgetUncapped
+    ? msg("submit.budget.uncapped_short" as MessageKey)
+    : optimizer.maxCostCents != null
+      ? // The billing barrel pulls in CSS, so the cap formats here; it is whole cents.
+        new Intl.NumberFormat(locale, { style: "currency", currency: "USD" }).format(
+          optimizer.maxCostCents / 100,
+        )
+      : DASH;
+  const dataset = inputs.datasetLabel !== null;
+  const columnRoles: Array<[string, "input" | "output"]> = dataset
+    ? [
+        ...inputs.inputFields.map((c): [string, "input"] => [c, "input"]),
+        ...(inputs.expectedField ? [[inputs.expectedField, "output"] as [string, "output"]] : []),
+      ]
+    : [];
+  const splitParts = [
+    ["train", "bg-primary-fill", inputs.split.train],
+    ["val", "bg-chart-3", inputs.split.val],
+    ["test", "bg-muted-foreground", inputs.split.test],
+  ] as const;
+
+  /** Move focus between tabs with the arrow keys; the reading direction decides which way is "next". */
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const rtl = getComputedStyle(event.currentTarget).direction === "rtl";
+    const step =
+      event.key === "ArrowRight" ? (rtl ? -1 : 1) : event.key === "ArrowLeft" ? (rtl ? 1 : -1) : 0;
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? tabs.length - 1
+          : step
+            ? (index + step + tabs.length) % tabs.length
+            : -1;
+    const target = tabs[next];
+    if (next < 0 || !target) return;
+    event.preventDefault();
+    setActive(target);
+    tabRefs.current[next]?.focus();
+  };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl">
-      <header className="shrink-0 space-y-1 border-b border-border/30 px-4 py-3 sm:px-6">
-        <h3 className="text-lg font-semibold tracking-tight text-foreground">
-          {t("submit.v2.overview.title")}
-        </h3>
-        <p className="text-sm text-muted-foreground">{t("submit.v2.overview.desc")}</p>
-      </header>
-      <dl className="min-h-0 flex-1 overflow-y-auto px-4 sm:px-6">
-        <Row label={t("submit.v2.task.objective_label")}>
-          <span className="line-clamp-4 whitespace-pre-wrap break-words" dir="auto">
-            {task.objective}
+    <div className="flex max-h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card/80 shadow-lg backdrop-blur-xl">
+      <header className="shrink-0 space-y-3 border-b border-border/40 px-4 py-3 sm:px-5">
+        <div className="space-y-1">
+          <h3 className="text-lg font-semibold tracking-tight text-foreground">
+            {t("submit.v2.overview.title")}
+          </h3>
+          <p className="text-sm text-muted-foreground">{t("submit.v2.overview.desc")}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+          <span className="text-xs font-medium text-muted-foreground">
+            {t("submit.v2.metric.check.title")}
           </span>
-        </Row>
-        {task.repo ? (
-          <Row label={t("submit.v2.repo.repository_label")}>
-            <span className="break-all font-mono" dir="ltr">
-              {task.repo.repository}
-              {task.repo.commit.trim()
-                ? ` @ ${task.repo.commit.trim().slice(0, 7)}`
-                : task.repo.branch.trim()
-                  ? ` @ ${task.repo.branch.trim()}`
-                  : ""}
-            </span>
-          </Row>
-        ) : (
-          task.artifactKind && (
-            <Row label={t("submit.v2.task.artifact.kind_label")}>
-              {t(`submit.v2.task.artifact.kind.${task.artifactKind}`)}
-            </Row>
-          )
-        )}
-        {!task.repo && (
-          <Row label={msg("submit.v2.stage.inputs" as MessageKey)}>
-            <span dir="auto">{data}</span>
-          </Row>
-        )}
-        <Row label={msg("submit.v2.stage.optimizer" as MessageKey)}>
-          {optimizerLabel(optimizer.choice, guided)}
-        </Row>
-        <Row label={t("submit.v2.metric.check.title")}>
           {task.repo ? (
             <span className="text-muted-foreground">{t("submit.v2.repo.check_on_submit")}</span>
           ) : (
             <CheckStatus cc={cc} guided={guided} />
           )}
-        </Row>
-      </dl>
+        </div>
+      </header>
+      <div
+        role="tablist"
+        aria-label={t("submit.v2.overview.tabs_label")}
+        className="relative flex shrink-0 gap-0.5 border-b border-border bg-secondary/50 p-1"
+      >
+        <div
+          aria-hidden
+          className="pointer-events-none absolute bottom-1 top-1 rounded-lg bg-background shadow-sm transition-[inset-inline-start] duration-200 ease-out motion-reduce:transition-none"
+          style={{
+            width: `calc((100% - 8px - ${(tabs.length - 1) * 2}px) / ${tabs.length})`,
+            insetInlineStart: `calc(4px + ${index} * ((100% - 8px - ${(tabs.length - 1) * 2}px) / ${tabs.length} + 2px))`,
+          }}
+        />
+        {tabs.map((tab, i) => (
+          <button
+            key={tab}
+            ref={(el) => {
+              tabRefs.current[i] = el;
+            }}
+            type="button"
+            role="tab"
+            id={`${baseId}-tab-${tab}`}
+            aria-selected={active === tab}
+            aria-controls={`${baseId}-panel`}
+            tabIndex={active === tab ? 0 : -1}
+            onClick={() => setActive(tab)}
+            onKeyDown={onKeyDown}
+            className={cn(
+              "relative z-10 flex min-h-[44px] flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg py-2.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-0",
+              active === tab ? "text-foreground" : "text-muted-foreground hover:text-foreground/80",
+            )}
+          >
+            {TAB_ICONS[tab]}
+            {/* Icons alone on a phone, as before; the name stays for screen readers. */}
+            <span className="sr-only sm:not-sr-only">{t(`submit.v2.overview.tab.${tab}`)}</span>
+          </button>
+        ))}
+      </div>
+      <motion.div
+        className="min-h-0 shrink overflow-y-auto"
+        initial={false}
+        animate={{ height: size?.height ?? "auto" }}
+        transition={{ duration: reduceMotion || size?.instant ? 0 : 0.2, ease: EASE }}
+      >
+        <div ref={contentRef} className="p-4 sm:p-5">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.dl
+              key={current}
+              role="tabpanel"
+              id={`${baseId}-panel`}
+              aria-labelledby={`${baseId}-tab-${current}`}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: reduceMotion ? 0 : 0.15, ease: EASE }}
+              className="[&>div:last-child]:border-b-0"
+            >
+              {current === "general" && (
+                <>
+                  <TextRow
+                    icon={<Lightbulb className={ICON} aria-hidden />}
+                    label={t("submit.v2.task.objective_label")}
+                  >
+                    {task.objective}
+                  </TextRow>
+                  {task.background.trim() && (
+                    <TextRow
+                      icon={<TextAlignLeft className={ICON} aria-hidden />}
+                      label={t("submit.v2.task.background_label")}
+                    >
+                      {task.background}
+                    </TextRow>
+                  )}
+                  {meta.name.trim() && (
+                    <Row
+                      icon={<Tag className={ICON} aria-hidden />}
+                      label={t("submit.v2.overview.row.name")}
+                      help={tip("submit.name")}
+                    >
+                      <span dir="auto">{meta.name}</span>
+                    </Row>
+                  )}
+                  {task.repo ? (
+                    <Row
+                      icon={<GitBranch className={ICON} aria-hidden />}
+                      label={t("submit.v2.repo.repository_label")}
+                    >
+                      <span className="break-all font-mono" dir="ltr">
+                        {task.repo.repository}
+                        {task.repo.commit.trim()
+                          ? ` @ ${task.repo.commit.trim().slice(0, 7)}`
+                          : task.repo.branch.trim()
+                            ? ` @ ${task.repo.branch.trim()}`
+                            : ""}
+                      </span>
+                    </Row>
+                  ) : (
+                    task.artifactKind && (
+                      <Row
+                        icon={<Cube className={ICON} aria-hidden />}
+                        label={t("submit.v2.task.artifact.kind_label")}
+                      >
+                        {t(`submit.v2.task.artifact.kind.${task.artifactKind}`)}
+                      </Row>
+                    )
+                  )}
+                  <Row
+                    icon={<Target className={ICON} aria-hidden />}
+                    label={msg("submit.v2.stage.optimizer" as MessageKey)}
+                    help={tip("optimizer.choice")}
+                  >
+                    <bdi>{optimizerLabel(optimizer.choice, guided)}</bdi>
+                  </Row>
+                  <Row
+                    icon={
+                      meta.isPrivate ? (
+                        <Lock className={ICON} aria-hidden />
+                      ) : (
+                        <Globe className={ICON} aria-hidden />
+                      )
+                    }
+                    label={msg("submit.basics.privacy.label")}
+                    help={tip("submit.privacy")}
+                  >
+                    {msg(
+                      meta.isPrivate
+                        ? "submit.basics.privacy.private"
+                        : "submit.basics.privacy.public",
+                    )}
+                  </Row>
+                  <Row
+                    icon={
+                      byok ? (
+                        <Key className={ICON} aria-hidden />
+                      ) : (
+                        <Coins className={ICON} aria-hidden />
+                      )
+                    }
+                    label={msg("submit.budget.billing_source")}
+                    help={msg(byok ? "billing.mode.byok_hint" : "billing.mode.managed_hint")}
+                  >
+                    {msg(byok ? "billing.mode.byok" : "billing.mode.managed")}
+                  </Row>
+                </>
+              )}
+              {current === "data" && (
+                <>
+                  <Row
+                    icon={<FileText className={ICON} aria-hidden />}
+                    label={
+                      dataset
+                        ? msg("auto.features.submit.components.steps.summarystep.7")
+                        : t("submit.v2.overview.row.source")
+                    }
+                    help={dataset ? tip("submit.dataset_file") : undefined}
+                  >
+                    <span dir="auto">
+                      {dataset
+                        ? inputs.datasetLabel
+                        : t("submit.v2.overview.cases", { count: fmt(inputs.cases.length) })}
+                    </span>
+                  </Row>
+                  {dataset && (
+                    <Row
+                      icon={<Database className={ICON} aria-hidden />}
+                      label={msg("auto.features.submit.components.steps.summarystep.8")}
+                      help={tip("submit.dataset_size")}
+                    >
+                      {t("submit.v2.inputs.source.loaded", {
+                        rows: fmt(inputs.rowCount),
+                        cols: fmt(inputs.columns.length),
+                      })}
+                    </Row>
+                  )}
+                  {columnRoles.length > 0 && (
+                    <div className="space-y-2 pb-1 pt-3">
+                      <dt>
+                        <HelpTip text={tip("submit.column_roles")}>
+                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Columns className={ICON} aria-hidden />
+                            {msg("auto.features.submit.components.steps.summarystep.11")}
+                          </span>
+                        </HelpTip>
+                      </dt>
+                      <dd className="space-y-1.5">
+                        {columnRoles.map(([col, role]) => (
+                          <div key={col} className="flex items-center justify-between gap-2 py-1">
+                            <span className="truncate font-mono text-xs" dir="ltr">
+                              {col}
+                            </span>
+                            <RolePill role={role}>
+                              {msg(
+                                role === "input"
+                                  ? "auto.features.submit.components.steps.summarystep.literal.6"
+                                  : "auto.features.submit.components.steps.summarystep.literal.7",
+                              )}
+                            </RolePill>
+                          </div>
+                        ))}
+                      </dd>
+                    </div>
+                  )}
+                  <div className="mt-1 space-y-3 border-t border-border py-4">
+                    <dt>
+                      <HelpTip text={tip("data.split_explanation")}>
+                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Stack className={ICON} aria-hidden />
+                          {t("submit.v2.overview.row.split")}
+                        </span>
+                      </HelpTip>
+                    </dt>
+                    <dd className="space-y-3">
+                      <div className="flex h-3 overflow-hidden rounded-full" aria-hidden>
+                        {splitParts.map(([part, color, value]) => (
+                          <div key={part} className={color} style={{ width: `${value * 100}%` }} />
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-3 gap-4">
+                        {splitParts.map(([part, color, value]) => (
+                          <HelpTip
+                            key={part}
+                            text={tip(`data.split.${part}`)}
+                            className="items-center gap-1.5 text-xs tabular-nums"
+                          >
+                            <span className={cn("inline-block size-2 rounded-full", color)} />
+                            {msg(`submit.split.label_${part}`)} <bdi>{pct(value)}</bdi>
+                          </HelpTip>
+                        ))}
+                      </div>
+                    </dd>
+                  </div>
+                  <Row
+                    icon={<Shuffle className={ICON} aria-hidden />}
+                    label={msg("auto.features.submit.components.steps.summarystep.16")}
+                    help={tip("data.shuffle_explanation")}
+                  >
+                    {yesNo(inputs.shuffle)}
+                  </Row>
+                </>
+              )}
+              {current === "models" && (
+                <div className="space-y-3">
+                  <ReadOnlyModel
+                    role={t("submit.v2.optimizer.models.task.label")}
+                    config={optimizer.taskModel}
+                  />
+                  {reflectionModels.length ? (
+                    reflectionModels.map((m, i) => (
+                      <ReadOnlyModel
+                        key={`${m.name}-${i}`}
+                        role={t("submit.v2.optimizer.models.reflection.label")}
+                        config={m}
+                      />
+                    ))
+                  ) : (
+                    <ReadOnlyModel
+                      role={t("submit.v2.optimizer.models.reflection.label")}
+                      config={null}
+                    />
+                  )}
+                  {!task.repo &&
+                    (workspace.metricModelMode === "explicit" && workspace.metricModel ? (
+                      <ReadOnlyModel
+                        role={t("submit.v2.metric.model.label")}
+                        config={workspace.metricModel}
+                      />
+                    ) : (
+                      <ModelRoleRow
+                        role={t("submit.v2.metric.model.label")}
+                        binding={t("submit.v2.metric.model.inherit")}
+                      />
+                    ))}
+                </div>
+              )}
+              {current === "budget" && (
+                <>
+                  <Row
+                    icon={<Wallet className={ICON} aria-hidden />}
+                    label={msg("submit.budget.label" as MessageKey)}
+                    help={tip("submit.cost_ceiling")}
+                  >
+                    <bdi className="tabular-nums">{limit}</bdi>
+                  </Row>
+                  <Row
+                    icon={<Gauge className={ICON} aria-hidden />}
+                    label={t("submit.v2.optimizer.budget.max_runs")}
+                  >
+                    <bdi className="font-mono tabular-nums">
+                      {fmt(optimizer.budget.max_scorer_runs)}
+                    </bdi>
+                  </Row>
+                  {optimizer.budget.max_iterations != null && (
+                    <Row
+                      icon={<Stack className={ICON} aria-hidden />}
+                      label={t("submit.v2.optimizer.budget.max_iterations")}
+                    >
+                      <bdi className="font-mono tabular-nums">
+                        {fmt(optimizer.budget.max_iterations)}
+                      </bdi>
+                    </Row>
+                  )}
+                  <Row
+                    icon={<Coins className={ICON} aria-hidden />}
+                    label={msg("submit.economy.summary_label")}
+                    help={tip("submit.economy")}
+                  >
+                    {msg(meta.economyMode ? "submit.economy.label" : "submit.economy.summary_off")}
+                  </Row>
+                </>
+              )}
+            </motion.dl>
+          </AnimatePresence>
+        </div>
+      </motion.div>
     </div>
   );
 }
