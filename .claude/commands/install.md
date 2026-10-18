@@ -23,7 +23,9 @@ these steps.
 5. Run `just test-unit`. Run `cd frontend && npm run typecheck`.
 6. Start the backend and stop it again, to prove it boots:
    `cd backend && API_PORT=<free port> uv run python main.py`. Use a port
-   that no other process uses. Stop only the process you started.
+   that no other process uses. Wait up to 2 minutes for
+   `curl http://127.0.0.1:<port>/health` to return 200 (the first boot takes
+   about 60 seconds). Stop only the process you started.
 7. Write a report to `.claude/logs/install-report-<YYYYMMDD-HHMMSS>.md`.
    Quote the summary lines of the init log. List each fix you made, the test
    result and each step a human must do.
@@ -64,9 +66,15 @@ Add a new Problem / Solution pair each time you solve a new failure.
 - **Problem:** `npm ci` FAIL: `frontend/node_modules is a symlink`.
   **Solution:** Turbopack needs a real folder. Remove the link
   (`rm frontend/node_modules`) and run `just setup` again.
-- **Problem:** `just test-unit` takes longer than 10 minutes.
-  **Solution:** The suite is large. Run it in the background and wait for
-  it. Do not stop it early.
+- **Problem:** `just test-unit` takes about 20 minutes (5,000+ tests).
+  **Solution:** This is normal. Run it in the background and wait for it.
+  Do not stop it early.
+- **Problem:** `just test-unit` fails in
+  `core/service_gateway/tests/test_workflow_edit_session.py` (7 failures),
+  but the file passes alone.
+  **Solution:** Two test runs at the same time, or low free memory, make
+  these slow tests time out. Run one suite at a time. Check free memory
+  with `vm_stat` first, then run the suite again.
 - **Problem:** Two frontends on one machine log each other out.
   **Solution:** Set a distinct `AUTH_COOKIE_PREFIX` in each
   `frontend/.env.local`.
