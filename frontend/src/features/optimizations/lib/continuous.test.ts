@@ -10,25 +10,17 @@ import {
 } from "./continuous.ts";
 import type { ContinuousCycle, ContinuousPlan } from "@/shared/types/continuous";
 
-const form = {
-  permitted: { data: true, models: false, optimizers: false },
-  sourceRef: "acme/support/default/train",
-};
+const form = { permitted: { task_model: true, reflection_model: false } };
 
 test("the enable form mirrors the backend rules", () => {
   assert.equal(enableProblem(form), null);
   assert.equal(
-    enableProblem({ ...form, permitted: { data: false, models: false, optimizers: false } }),
-    "continuous_tab.form.need_permission",
-  );
-  assert.equal(enableProblem({ ...form, sourceRef: " " }), "continuous_tab.form.need_source");
-  assert.equal(
-    enableProblem({
-      ...form,
-      permitted: { data: false, models: true, optimizers: false },
-      sourceRef: "",
-    }),
+    enableProblem({ permitted: { task_model: false, reflection_model: true } }),
     null,
+  );
+  assert.equal(
+    enableProblem({ permitted: { task_model: false, reflection_model: false } }),
+    "continuous_tab.form.need_permission",
   );
 });
 

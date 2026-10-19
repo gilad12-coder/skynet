@@ -5,38 +5,34 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
-import { ConnectorSourcePicker, type ConnectorSource } from "@/features/connectors";
-import type { ContinuousEnableRequest, ScheduleRule } from "@/shared/types/continuous";
+import { Switch } from "@/shared/ui/primitives/switch";
+import type {
+  ContinuousEnableRequest,
+  ContinuousPermitted,
+  ScheduleRule,
+} from "@/shared/types/continuous";
 import { cn } from "@/shared/lib/utils";
 import { enableProblem } from "../lib/continuous";
 import { browserTimeZone, defaultRule, scheduleProblem } from "../lib/continuous-schedule";
 import { ScheduleEditor } from "./ScheduleEditor";
 
-type WalkStep = "source" | "schedule";
+type WalkStep = "models" | "schedule";
 
-const STEPS: WalkStep[] = ["source", "schedule"];
+const STEPS: WalkStep[] = ["models", "schedule"];
 
 const STEP_TITLES: Record<WalkStep, MessageKey> = {
-  source: "continuous_tab.source.label",
+  models: "continuous_tab.permit.label",
   schedule: "continuous_tab.schedule.label",
 };
 
-/**
- * The request a finished walk sends. A plan refreshes only its data: nothing
- * yet picks a newer model or optimizer, so a plan limited to those would
- * never start a run.
- */
-function requestFor(source: ConnectorSource | null, schedule: ScheduleRule): ContinuousEnableRequest {
-  return {
-    schedule,
-    permitted: { data: true, models: false, optimizers: false },
-    source: source ? { provider: source.provider, ref: source.ref } : null,
-  };
-}
+const MODEL_SWITCHES: Array<{ role: keyof ContinuousPermitted; label: MessageKey }> = [
+  { role: "task_model", label: "continuous_tab.permit.task_model" },
+  { role: "reflection_model", label: "continuous_tab.permit.reflection_model" },
+];
 
 /**
  * Walks the scheduled-run settings one screen at a time, like the submit
- * wizard: where the data comes from, then the schedule.
+ * wizard: which models may switch to a better one, then the schedule.
  */
 export function ScheduledRunSetup({
   busy = false,
@@ -49,7 +45,10 @@ export function ScheduledRunSetup({
   onFinish: (body: ContinuousEnableRequest) => void;
   idPrefix: string;
 }) {
-  const [source, setSource] = useState<ConnectorSource | null>(null);
+  const [permitted, setPermitted] = useState<ContinuousPermitted>({
+    task_model: true,
+    reflection_model: true,
+  });
   const [schedule, setSchedule] = useState<ScheduleRule>(() => defaultRule(browserTimeZone()));
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState(1);
@@ -59,14 +58,11 @@ export function ScheduledRunSetup({
   const at = Math.min(index, steps.length - 1);
   const step = steps[at]!;
   const last = at === steps.length - 1;
-  const body = requestFor(source, schedule);
+  const body: ContinuousEnableRequest = { schedule, permitted };
+  const modelProblem = enableProblem({ permitted });
 
   const stepProblem =
-    step === "source"
-      ? enableProblem({ permitted: body.permitted, sourceRef: source?.ref ?? "" })
-      : step === "schedule"
-        ? scheduleProblem(schedule)
-        : null;
+    step === "models" ? modelProblem : step === "schedule" ? scheduleProblem(schedule) : null;
 
   const move = (to: number) => {
     setDirection(to > at ? 1 : -1);
@@ -141,12 +137,29 @@ export function ScheduledRunSetup({
             transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="space-y-4"
           >
-            {step === "source" && (
+            {step === "models" && (
               <div className="space-y-4">
                 <p className="text-center text-base font-medium text-foreground">
-                  {msg("continuous_tab.walk.source_hint")}
+                  {msg("continuous_tab.walk.models_hint")}
                 </p>
-                <ConnectorSourcePicker value={source} onChange={setSource} />
+                <div className="divide-y divide-border/60 rounded-lg border border-border/60">
+                  {MODEL_SWITCHES.map(({ role, label }) => (
+                    <div key={role} className="flex items-center justify-between gap-4 px-4 py-3">
+                      <span id={`${idPrefix}-${role}`} className="text-sm text-foreground">
+                        {msg(label)}
+                      </span>
+                      <Switch
+                        checked={permitted[role]}
+                        disabled={busy}
+                        onCheckedChange={(on) => setPermitted((prev) => ({ ...prev, [role]: on }))}
+                        aria-labelledby={`${idPrefix}-${role}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+                {modelProblem && (
+                  <p className="text-center text-sm text-muted-foreground">{msg(modelProblem)}</p>
+                )}
               </div>
             )}
 

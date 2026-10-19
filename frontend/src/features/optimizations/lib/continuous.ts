@@ -66,17 +66,13 @@ export function allowanceShare(usage: ContinuousUsage): number {
 
 export interface EnableForm {
   permitted: ContinuousPermitted;
-  sourceRef: string;
 }
 
 /** Why the enable form cannot be sent, as a UI message key; null when it can. */
-export type EnableProblem =
-  | "continuous_tab.form.need_permission"
-  | "continuous_tab.form.need_source";
+export type EnableProblem = "continuous_tab.form.need_permission";
 
 export function enableProblem(form: EnableForm): EnableProblem | null {
-  const { data, models, optimizers } = form.permitted;
-  if (!data && !models && !optimizers) return "continuous_tab.form.need_permission";
-  if (data && !form.sourceRef.trim()) return "continuous_tab.form.need_source";
+  const { task_model, reflection_model } = form.permitted;
+  if (!task_model && !reflection_model) return "continuous_tab.form.need_permission";
   return null;
 }

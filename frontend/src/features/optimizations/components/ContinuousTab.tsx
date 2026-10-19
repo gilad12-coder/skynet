@@ -16,8 +16,6 @@ import {
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
-import { Input } from "@/shared/ui/primitives/input";
-import { Label } from "@/shared/ui/primitives/label";
 import { Switch } from "@/shared/ui/primitives/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import {
@@ -40,7 +38,6 @@ import {
   getContinuousState,
   reviewContinuousCycle,
   setContinuousPaused,
-  stageContinuousInputs,
   updateContinuousSchedule,
   type ConnectorProvider,
 } from "@/shared/lib/api";
@@ -94,9 +91,8 @@ const PAUSE_KEYS: Partial<Record<NonNullable<ContinuousPlan["pause_reason"]>, Me
 };
 
 const CHANGE_KEYS: Record<string, MessageKey> = {
-  data: "continuous_tab.permit.data",
-  models: "continuous_tab.permit.models",
-  optimizers: "continuous_tab.permit.optimizers",
+  task_model: "continuous_tab.permit.task_model",
+  reflection_model: "continuous_tab.permit.reflection_model",
 };
 
 type Act = (run: () => Promise<ContinuousPlan>, success?: MessageKey) => Promise<void>;
@@ -121,8 +117,8 @@ function errorText(err: unknown): string {
 /**
  * Continuous optimization of a successful run: enable a plan, see the next
  * check and this month's allowance, pause or resume it, and review each
- * cycle. A check with no permitted change is shown as skipped and has no
- * rerun. A candidate becomes the incumbent only when the owner approves it.
+ * cycle. A check that finds no better model is shown as skipped and has no
+ * run. A candidate becomes the incumbent only when the owner approves it.
  */
 export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
   const [state, setState] = useState<ContinuousState | null>(null);
@@ -387,8 +383,7 @@ function PlanView({
     (c) => c.status === "checking" || c.status === "optimizing",
   );
   const pending = plan.cycles.filter(canReview);
-  const refreshes = (["data", "models", "optimizers"] as const).filter((key) => plan.permitted[key]);
-  const staged = plan.permitted.models || plan.permitted.optimizers;
+  const switches = (["task_model", "reflection_model"] as const).filter((key) => plan.permitted[key]);
   return (
     <Card className="mt-4 overflow-hidden py-0">
       <CardContent className="divide-y divide-border/50 p-0">
@@ -504,18 +499,11 @@ function PlanView({
 
             <SettingRow label={msg("continuous_tab.refreshes_label")}>
               <p className="text-sm font-medium">
-                {refreshes.map((key) => msg(CHANGE_KEYS[key]!)).join(", ")}
+                {switches.length > 0
+                  ? switches.map((key) => msg(CHANGE_KEYS[key]!)).join(", ")
+                  : "—"}
               </p>
             </SettingRow>
-
-            {staged && (
-              <SettingRow
-                label={msg("continuous_tab.stage.title")}
-                hint={msg("continuous_tab.stage.description")}
-              >
-                <StageInputs plan={plan} busy={busy} act={act} />
-              </SettingRow>
-            )}
 
             <SettingRow label={msg("continuous_tab.version_label")}>
               <Link
@@ -711,58 +699,6 @@ function ReviewCard({
             {msg("continuous_tab.approve")}
           </Button>
         </div>
-    </div>
-  );
-}
-
-function StageInputs({
-  plan,
-  busy,
-  act,
-}: {
-  plan: ContinuousPlan;
-  busy: boolean;
-  act: Act;
-}) {
-  const [taskModel, setTaskModel] = useState(plan.pending_inputs.task_model ?? "");
-  const [optimizer, setOptimizer] = useState(plan.pending_inputs.optimizer ?? "");
-  const body = {
-    ...(plan.permitted.models && taskModel.trim() ? { task_model: taskModel.trim() } : {}),
-    ...(plan.permitted.optimizers && optimizer.trim() ? { optimizer: optimizer.trim() } : {}),
-  };
-  return (
-    <div className="flex flex-wrap items-end gap-3">
-      {plan.permitted.models && (
-        <div className="min-w-56 flex-1 space-y-1.5 sm:max-w-sm">
-          <Label htmlFor="continuous-task-model">{msg("continuous_tab.stage.task_model")}</Label>
-          <Input
-            id="continuous-task-model"
-            dir="ltr"
-            value={taskModel}
-            onChange={(e) => setTaskModel(e.target.value)}
-          />
-        </div>
-      )}
-      {plan.permitted.optimizers && (
-        <div className="min-w-56 flex-1 space-y-1.5 sm:max-w-sm">
-          <Label htmlFor="continuous-optimizer">{msg("continuous_tab.stage.optimizer")}</Label>
-          <Input
-            id="continuous-optimizer"
-            dir="ltr"
-            value={optimizer}
-            onChange={(e) => setOptimizer(e.target.value)}
-          />
-        </div>
-      )}
-      <Button
-        variant="outline"
-        disabled={busy || Object.keys(body).length === 0}
-        onClick={() =>
-          act(() => stageContinuousInputs(plan.id, body), "continuous_tab.toast.inputs_saved")
-        }
-      >
-        {msg("continuous_tab.stage.submit")}
-      </Button>
     </div>
   );
 }

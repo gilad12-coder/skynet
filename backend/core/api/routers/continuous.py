@@ -8,15 +8,14 @@
   runs it started stay.
 * ``PUT  /continuous/{plan_id}/schedule`` — change when the plan checks.
 * ``POST /continuous/{plan_id}/check-now`` — run the next check now instead of
-  waiting for its time. It is still a check: unchanged inputs are skipped.
+  waiting for its time. It is still a check: with no better model, it is skipped.
 * ``POST /continuous/schedule-preview`` — the next check times a rule gives.
-* ``POST /continuous/{plan_id}/inputs`` — stage a permitted model or optimizer
-  change for the next check.
 * ``POST /continuous/{plan_id}/cycles/{cycle_id}/approve`` and ``/reject`` —
   review a validated candidate. Approval makes it the incumbent later checks
   start from; it deploys nothing.
 
-There is deliberately no endpoint that reruns unchanged inputs.
+A check starts a run only when a better model came out. There is
+deliberately no endpoint that reruns the same models.
 """
 
 from __future__ import annotations
@@ -50,25 +49,16 @@ _IN_FLIGHT = frozenset(
 )
 
 
-# Which inputs a plan may refresh on its own; anything else needs a setup change.
+# Which models a plan may switch on its own when a better one comes out.
 class ContinuousPermitted(BaseModel):
-    data: bool = False
-    models: bool = False
-    optimizers: bool = False
-
-
-# A connected source the existing connectors can read. A Hugging Face ref is
-# ``repo_id/config/split``; other providers use their own import ref.
-class ContinuousSource(BaseModel):
-    provider: str = Field(min_length=1, max_length=64)
-    ref: str = Field(min_length=1, max_length=1024)
+    task_model: bool = False
+    reflection_model: bool = False
 
 
 # Enables continuous optimization on a successful run.
 class ContinuousEnableRequest(BaseModel):
     schedule: ScheduleRule
     permitted: ContinuousPermitted
-    source: ContinuousSource | None = None
     # Both are optional: a run reuses the source run's budget, and no monthly
     # limit means only the wallet balance gates a run (we never buy credit).
     monthly_limit_cents: int | None = Field(default=None, gt=0, le=10_000_000)
@@ -76,7 +66,7 @@ class ContinuousEnableRequest(BaseModel):
 
     @model_validator(mode="after")
     def _check(self) -> ContinuousEnableRequest:
-        """Reject a plan that cannot refresh anything or cannot afford one cycle.
+        """Reject a plan that can switch no model or cannot afford one cycle.
 
         Returns:
             The validated request.
@@ -84,10 +74,8 @@ class ContinuousEnableRequest(BaseModel):
         Raises:
             ValueError: On an inconsistent plan.
         """
-        if not (self.permitted.data or self.permitted.models or self.permitted.optimizers):
-            raise ValueError("permit at least one input to refresh")
-        if self.permitted.data and self.source is None:
-            raise ValueError("a data refresh needs a connected source")
+        if not (self.permitted.task_model or self.permitted.reflection_model):
+            raise ValueError("turn on at least one model switch")
         if (
             self.cycle_budget_cents is not None
             and self.monthly_limit_cents is not None
@@ -95,13 +83,6 @@ class ContinuousEnableRequest(BaseModel):
         ):
             raise ValueError("the cycle budget exceeds the monthly limit")
         return self
-
-
-# A staged model or optimizer change; only permitted dimensions are accepted.
-class ContinuousInputsRequest(BaseModel):
-    task_model: str | None = Field(default=None, min_length=1, max_length=200)
-    reflection_model: str | None = Field(default=None, min_length=1, max_length=200)
-    optimizer: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 # One scheduled check and the run it started, if any.
@@ -140,8 +121,6 @@ class ContinuousPlanItem(BaseModel):
     next_check_at: datetime | None = None
     upcoming_checks: list[datetime] = Field(default_factory=list)
     permitted: ContinuousPermitted
-    source: ContinuousSource | None = None
-    pending_inputs: dict[str, Any] = Field(default_factory=dict)
     cycle_budget_cents: int
     usage: ContinuousUsage
     cycles: list[ContinuousCycleItem]
@@ -224,13 +203,14 @@ def _owned_job(job_store, optimization_id: str, user: AuthenticatedUser, *, payl
     return job
 
 
-def _owned_plan(session: Session, plan_id: str, user: AuthenticatedUser) -> ContinuousPlanModel:
+def _owned_plan(session: Session, plan_id: str, user: AuthenticatedUser, *, lock: bool = False) -> ContinuousPlanModel:
     """Load a plan the caller owns.
 
     Args:
         session: Open session.
         plan_id: The plan.
         user: The caller.
+        lock: Lock the plan row before reading it, so a check that writes it meanwhile waits.
 
     Returns:
         The plan row.
@@ -238,7 +218,7 @@ def _owned_plan(session: Session, plan_id: str, user: AuthenticatedUser) -> Cont
     Raises:
         DomainError: 404 when the plan is missing or not the caller's.
     """
-    plan = session.get(ContinuousPlanModel, plan_id)
+    plan = session.get(ContinuousPlanModel, plan_id, with_for_update=lock)
     if plan is None or plan.username.lower() != user.username.lower():
         raise DomainError("continuous.not_found", status=404)
     return plan
@@ -285,8 +265,6 @@ def _plan_item(session: Session, plan: ContinuousPlanModel) -> ContinuousPlanIte
         next_check_at=engine_mod.aware(plan.next_check_at),
         upcoming_checks=_upcoming(plan),
         permitted=ContinuousPermitted.model_validate(plan.permitted or {}),
-        source=ContinuousSource.model_validate(plan.source) if plan.source else None,
-        pending_inputs=plan.pending_inputs or {},
         cycle_budget_cents=plan.cycle_budget_cents,
         usage=ContinuousUsage(
             month=month,
@@ -382,14 +360,14 @@ def _plan_for_run(session: Session, optimization_id: str) -> ContinuousPlanModel
 
 
 def create_continuous_router(
-    *, job_store, service, fetch_rows: engine_mod.RowFetcher = engine_mod.fetch_source_rows
+    *, job_store, service, pick_model: engine_mod.ModelPicker = engine_mod.better_model
 ) -> APIRouter:
     """Build the continuous-optimization router.
 
     Args:
         job_store: Job store whose engine holds the plans.
         service: Optimization service a "check now" hands its run to.
-        fetch_rows: Reads a source's rows for a "check now".
+        pick_model: Finds a better model for one role on a "check now".
 
     Returns:
         The router.
@@ -452,7 +430,7 @@ def create_continuous_router(
 
         Args:
             optimization_id: A successful unified run the caller owns.
-            body: Schedule, permitted inputs, source and limits.
+            body: Schedule, model switches and limits.
             current_user: The caller.
 
         Returns:
@@ -479,9 +457,7 @@ def create_continuous_router(
             incumbent_optimization_id=optimization_id,
             status=engine_mod.PLAN_WAITING if waiting else engine_mod.PLAN_ACTIVE,
             permitted=body.permitted.model_dump(),
-            source=body.source.model_dump() if body.source else None,
-            pending_inputs={},
-            baseline_snapshot=engine_mod.snapshot_of_payload(job["payload"]),
+            baseline_snapshot={"incumbent": optimization_id, "tried_models": []},
             monthly_limit_cents=body.monthly_limit_cents,
             cycle_budget_cents=cycle_budget,
             created_at=now,
@@ -606,8 +582,8 @@ def create_continuous_router(
     ) -> ContinuousPlanItem:
         """Make the next check due now and run it after responding; the schedule continues after it.
 
-        The check follows the usual rules, so unchanged inputs are recorded as
-        skipped and start no run.
+        The check follows the usual rules, so with no better model it is
+        recorded as skipped and starts no run.
 
         Args:
             plan_id: The plan.
@@ -636,7 +612,7 @@ def create_continuous_router(
             plan.updated_at = now
             session.commit()
             item = _plan_item(session, plan)
-        background_tasks.add_task(engine_mod.check_plan_now, job_store, service, plan_id, fetch_rows=fetch_rows)
+        background_tasks.add_task(engine_mod.check_plan_now, job_store, service, plan_id, pick_model=pick_model)
         return item
 
     @router.post(
@@ -657,40 +633,6 @@ def create_continuous_router(
         now = datetime.now(UTC)
         return SchedulePreviewResponse(next_checks=next_runs(body, now, anchor=now, count=_UPCOMING_CHECKS))
 
-    @router.post(
-        "/continuous/{plan_id}/inputs",
-        response_model=ContinuousPlanItem,
-        summary="Stage a permitted model or optimizer change",
-    )
-    def stage_inputs(
-        plan_id: str, body: ContinuousInputsRequest, current_user: AuthenticatedUserDep
-    ) -> ContinuousPlanItem:
-        """Record a model or optimizer change the next check may use.
-
-        Args:
-            plan_id: The plan.
-            body: The staged names.
-            current_user: The caller.
-
-        Returns:
-            The updated plan.
-
-        Raises:
-            DomainError: 409 for a change the plan does not permit.
-        """
-        with _session() as session:
-            plan = _owned_plan(session, plan_id, current_user)
-            permitted = plan.permitted or {}
-            changes = body.model_dump(exclude_none=True)
-            if (("task_model" in changes or "reflection_model" in changes) and not permitted.get("models")) or (
-                "optimizer" in changes and not permitted.get("optimizers")
-            ):
-                raise DomainError("continuous.not_permitted", status=409)
-            plan.pending_inputs = {**(plan.pending_inputs or {}), **changes}
-            plan.updated_at = datetime.now(UTC)
-            session.commit()
-            return _plan_item(session, plan)
-
     def _review(plan_id: str, cycle_id: str, user: AuthenticatedUser, *, approve: bool) -> ContinuousPlanItem:
         """Approve or reject a candidate that waits for review.
 
@@ -707,7 +649,9 @@ def create_continuous_router(
             DomainError: 409 when the cycle has no candidate awaiting review.
         """
         with _session() as session:
-            plan = _owned_plan(session, plan_id, user)
+            # Locked before the cycle, in the worker's lock order, so a review the worker
+            # records meanwhile is not overwritten.
+            plan = _owned_plan(session, plan_id, user, lock=True)
             # Locked so a concurrent approve and reject can't both see ``awaiting_review``.
             cycle = session.get(ContinuousCycleModel, cycle_id, with_for_update=True)
             if cycle is None or cycle.plan_id != plan.id or cycle.status != engine_mod.CYCLE_AWAITING_REVIEW:
@@ -715,6 +659,8 @@ def create_continuous_router(
             now = datetime.now(UTC)
             if approve:
                 plan.incumbent_optimization_id = cycle.optimization_id
+                # The new version runs on the better models, so every model gets a fresh turn against it.
+                plan.baseline_snapshot = {"incumbent": cycle.optimization_id, "tried_models": []}
                 cycle.status = engine_mod.CYCLE_APPROVED
                 cycle.detail_code = "continuous.review_approved"
             else:
