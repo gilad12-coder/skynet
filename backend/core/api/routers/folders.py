@@ -894,7 +894,9 @@ def create_folders_router(*, job_store) -> APIRouter:
             if req.folder_id:
                 require_folder_role(session, req.folder_id, current_user, ShareRole.editor)
             folder_roles: dict[str, ShareRole | None] = {}
-            for oid in dict.fromkeys(req.optimization_ids):
+            ids = list(dict.fromkeys(req.optimization_ids))
+            visible = grant_roles_for(job_store, ids, username)
+            for oid in ids:
                 try:
                     job = get_job_no_payload(job_store, oid)
                 except KeyError:
@@ -908,7 +910,9 @@ def create_folders_router(*, job_store) -> APIRouter:
                     current_role = folder_roles[current]
                     allowed = current_role is not None and role_rank(current_role) >= role_rank(ShareRole.editor)
                 if not allowed:
-                    skipped.append(MoveRunsSkipped(optimization_id=oid, reason="forbidden"))
+                    # A caller with no role on the run sees it as missing, like a 404 elsewhere.
+                    reason = "forbidden" if oid in visible else "not_found"
+                    skipped.append(MoveRunsSkipped(optimization_id=oid, reason=reason))
                     continue
                 # Checked after access, so a no-op cannot tell a stranger the run exists or where it is.
                 if current == (req.folder_id or None):

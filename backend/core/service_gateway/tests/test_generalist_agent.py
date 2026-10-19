@@ -1865,4 +1865,7 @@ def test_every_folder_agent_mutation_has_an_approval_gate() -> None:
     assert writes == {"create_folder", "update_folder", "delete_folder", "move_folder", "move_runs_to_folder"}
     for name in writes:
         assert _needs_approval(name, "ask") is True
-    assert _needs_approval("delete_folder", "auto_safe") is True
+    # Each of these can change who sees a run: a run inherits its folder's access.
+    for name in ("delete_folder", "move_folder", "move_runs_to_folder", "update_folder"):
+        assert _needs_approval(name, "auto_safe") is True
+    assert _needs_approval("create_folder", "auto_safe") is False

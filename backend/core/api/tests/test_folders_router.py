@@ -203,7 +203,7 @@ def test_viewer_cannot_file_runs_or_create_subfolders() -> None:
 
 
 def test_cannot_move_someone_elses_unfiled_run() -> None:
-    """Only a run's owner can file it when it is not in a folder yet."""
+    """Only a run's owner can file it; a stranger cannot tell the run from a missing one."""
     store = _MemStore()
     _seed_job(store, "alice-run")
     bob = _client(store, "bob")
@@ -212,7 +212,7 @@ def test_cannot_move_someone_elses_unfiled_run() -> None:
     body = resp.json()
     assert body["updated"] == []
     assert {s["optimization_id"]: s["reason"] for s in body["skipped"]} == {
-        "alice-run": "forbidden",
+        "alice-run": "not_found",
         "missing": "not_found",
     }
 
@@ -361,8 +361,22 @@ def test_moving_a_run_to_where_it_already_is_still_checks_access() -> None:
     bob = _client(store, "bob")
     body = bob.post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": None}).json()
     assert body["updated"] == []
-    assert body["skipped"] == [{"optimization_id": "alice-run", "reason": "forbidden"}]
+    assert body["skipped"] == [{"optimization_id": "alice-run", "reason": "not_found"}]
     alice = _client(store)
     assert alice.post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": None}).json()[
         "updated"
     ] == ["alice-run"]
+
+
+def test_a_viewer_is_told_a_move_is_forbidden() -> None:
+    """A caller who can already see the run gets ``forbidden``, not ``not_found``."""
+    store = _MemStore()
+    _seed_job(store, "alice-run")
+    alice = _client(store)
+    folder = _create(alice, "Shared")
+    alice.post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": folder})
+    _share(alice, folder, "bob", "viewer")
+    body = (
+        _client(store, "bob").post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": None}).json()
+    )
+    assert body["skipped"] == [{"optimization_id": "alice-run", "reason": "forbidden"}]

@@ -325,7 +325,7 @@ async def test_agent_groups_runs_through_mcp_tools() -> None:
         )
         assert moved["updated"] == ["a1", "a2"]
         assert {s["optimization_id"]: s["reason"] for s in moved["skipped"]} == {
-            "b1": "forbidden",
+            "b1": "not_found",
             "missing": "not_found",
         }
 
