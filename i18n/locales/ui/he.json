@@ -3874,7 +3874,6 @@
   "submit.v2.overview.tab.budget": "תקציב",
   "submit.v2.overview.tab.reward": "תגמול",
   "submit.v2.reward.formula": "תגמול = {accuracy} דיוק + {speed} מהירות + {cost} עלות",
-  "submit.v2.reward.utility": "כל רכיב הוא ייחוס ÷ (ייחוס + ערך). הוא 1 בערך 0 ו־½ בערך הייחוס, וכל שיפור מעלה אותו. המשקלים וערכי הייחוס קבועים לאורך כל הריצה.",
   "submit.v2.reward.score_accuracy": "ציון 0–1, כמו שהוא",
   "submit.v2.reward.parts_title": "רכיבי התגמול",
   "submit.v2.reward.col.part": "רכיב",

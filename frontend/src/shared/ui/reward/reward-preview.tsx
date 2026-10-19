@@ -21,20 +21,17 @@ export function rewardReference(spec: RewardSpec, component: RewardComponent): s
   return spec.accuracy.unit ? `${f.number(value)} ${spec.accuracy.unit}` : f.number(value);
 }
 
-/** The reward's fixed formula and how each part turns into a score. */
+/** The reward's fixed formula. */
 export function RewardFormula({ spec }: { spec: RewardSpec }) {
   const f = rewardFormatters();
   return (
-    <div className="space-y-1">
-      <p className="text-sm font-medium text-foreground">
-        {msg("submit.v2.reward.formula", {
-          accuracy: f.pct(spec.weights.accuracy),
-          speed: f.pct(spec.weights.speed),
-          cost: f.pct(spec.weights.cost),
-        })}
-      </p>
-      <p className="text-xs text-muted-foreground">{msg("submit.v2.reward.utility")}</p>
-    </div>
+    <p className="text-sm font-medium text-foreground">
+      {msg("submit.v2.reward.formula", {
+        accuracy: f.pct(spec.weights.accuracy),
+        speed: f.pct(spec.weights.speed),
+        cost: f.pct(spec.weights.cost),
+      })}
+    </p>
   );
 }
 

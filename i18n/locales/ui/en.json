@@ -3874,7 +3874,6 @@
   "submit.v2.overview.tab.budget": "Budget",
   "submit.v2.overview.tab.reward": "Reward",
   "submit.v2.reward.formula": "Reward = {accuracy} accuracy + {speed} speed + {cost} cost",
-  "submit.v2.reward.utility": "Each part is reference ÷ (reference + value). It is 1 at 0 and ½ at the reference, and every improvement raises it. The weights and references stay fixed for the whole run.",
   "submit.v2.reward.score_accuracy": "0–1 score, used as is",
   "submit.v2.reward.parts_title": "Reward parts",
   "submit.v2.reward.col.part": "Part",

@@ -21,7 +21,6 @@
   "submit.v2.reward.part.speed": "Vitesse",
   "submit.v2.reward.parts_title": "Parties de la récompense",
   "submit.v2.reward.score_accuracy": "Score de 0 à 1, utilisé tel quel",
-  "submit.v2.reward.utility": "Chaque partie vaut référence ÷ (référence + valeur). Elle vaut 1 à 0 et ½ à la référence, et chaque amélioration l’augmente. Les poids et les références restent fixes pendant toute l’exécution.",
   "submit.v2.ide.agent.empty_hint": "Demandez-lui d'écrire ou de modifier n'importe quel fichier. Il vérifie son code et corrige ce qui échoue.",
   "submit.v2.ide.agent.empty_title": "Agent de code",
   "submit.v2.ide.agent.kickoff.ask": "Avant d'écrire run.py et metric.py, pose-moi la seule question dont tu as besoin de la réponse : l'objectif de la tâche ou ses données manquent. Pose-la en une phrase et n'écris pas encore de code.",
