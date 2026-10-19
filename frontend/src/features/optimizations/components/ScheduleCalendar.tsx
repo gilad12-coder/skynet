@@ -181,56 +181,58 @@ export function ScheduleCalendar({
                   onMouseEnter={() => inMonth && setHovered(day)}
                   onFocus={() => inMonth && setHovered(day)}
                   className={cn(
-                    "group relative grid aspect-square place-items-center rounded-full text-sm tabular-nums",
+                    "group grid h-10 place-items-center rounded-md text-sm tabular-nums",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-default",
                     !inMonth && "invisible",
                     past && !lit && "text-muted-foreground/45",
                   )}
                 >
-                  <AnimatePresence>
-                    {lit && (
-                      <motion.span
+                  <span className="relative grid size-9 place-items-center">
+                    <AnimatePresence>
+                      {lit && (
+                        <motion.span
+                          aria-hidden
+                          className="absolute inset-0 rounded-full bg-primary-fill shadow-sm"
+                          initial={{ scale: reduceMotion ? 1 : 0.4, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          exit={{ scale: reduceMotion ? 1 : 0.4, opacity: 0 }}
+                          transition={{ type: "spring", stiffness: 520, damping: 30 }}
+                        />
+                      )}
+                    </AnimatePresence>
+                    {!lit && pickable && !past && (
+                      <span
                         aria-hidden
-                        className="absolute inset-0.5 rounded-full bg-primary-fill shadow-sm"
-                        initial={{ scale: reduceMotion ? 1 : 0.4, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: reduceMotion ? 1 : 0.4, opacity: 0 }}
-                        transition={{ type: "spring", stiffness: 520, damping: 30 }}
+                        className="absolute inset-0 rounded-full opacity-0 ring-1 ring-primary/40 transition-opacity group-hover:opacity-100"
                       />
                     )}
-                  </AnimatePresence>
-                  {!lit && pickable && !past && (
                     <span
-                      aria-hidden
-                      className="absolute inset-0.5 rounded-full opacity-0 ring-1 ring-primary/40 transition-opacity group-hover:opacity-100"
-                    />
-                  )}
-                  <span
-                    className={cn(
-                      "relative transition-colors",
-                      lit ? "font-semibold text-primary-foreground" : "",
-                      isToday && !lit && "font-semibold text-primary",
-                    )}
-                  >
-                    {day.getUTCDate()}
-                  </span>
-                  {isToday && (
-                    <span
-                      aria-hidden
                       className={cn(
-                        "absolute bottom-1 size-1 rounded-full",
-                        lit ? "bg-primary-foreground" : "bg-primary",
+                        "relative transition-colors",
+                        lit ? "font-semibold text-primary-foreground" : "",
+                        isToday && !lit && "font-semibold text-primary",
                       )}
-                    />
-                  )}
-                  {checks.length > 1 && (
-                    <span
-                      aria-hidden
-                      className="absolute -end-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-foreground px-1 text-[9px] font-semibold leading-4 text-background"
                     >
-                      {checks.length}
+                      {day.getUTCDate()}
                     </span>
-                  )}
+                    {isToday && (
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "absolute bottom-0.5 size-1 rounded-full",
+                          lit ? "bg-primary-foreground" : "bg-primary",
+                        )}
+                      />
+                    )}
+                    {checks.length > 1 && (
+                      <span
+                        aria-hidden
+                        className="absolute -end-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-foreground px-1 text-[9px] font-semibold leading-4 text-background"
+                      >
+                        {checks.length}
+                      </span>
+                    )}
+                  </span>
                 </button>
               );
             })}

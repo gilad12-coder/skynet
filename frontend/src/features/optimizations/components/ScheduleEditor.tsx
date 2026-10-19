@@ -67,9 +67,9 @@ export function formatCheck(iso: string, timezone: string): string {
 }
 
 /**
- * When a continuous plan checks, edited the way automation tools do it:
- * one-click presets, the time and time zone, and a month calendar where the
- * check days are picked by clicking dates, under a plain-language summary.
+ * When a continuous plan checks, edited in one calendar card: the schedule
+ * in words, one-click presets, a month calendar where the check days are
+ * picked by clicking dates, and the time and time zone along its foot.
  */
 export function ScheduleEditor({
   value,
@@ -93,112 +93,109 @@ export function ScheduleEditor({
   const field = "space-y-1.5";
 
   return (
-    <div className="space-y-5">
-      <Segmented
-        value={showCustom ? "custom" : preset}
-        onChange={(next) => {
-          setCustomPicked(next === "custom");
-          if (next !== "custom") onChange(applyPreset(value, next, locale));
-        }}
-        label={msg("continuous_tab.schedule.label")}
-        size="sm"
-        className="flex-wrap"
-        options={PRESETS.map((p) => ({ value: p, label: msg(PRESET_KEYS[p]) }))}
-      />
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_21rem] xl:gap-8">
-        <div className="min-w-0 space-y-5">
-          <div className="flex flex-wrap items-end gap-x-3 gap-y-4">
-            {showCustom && (
-              <div className={field}>
-                <Label htmlFor={`${idPrefix}-every`}>{msg("continuous_tab.schedule.every")}</Label>
-                <div className="flex gap-2">
-                  <NumberInput
-                    id={`${idPrefix}-every`}
-                    value={value.every}
-                    min={1}
-                    max={MAX_EVERY[value.frequency]}
-                    onChange={(every) => set({ every })}
-                    className="w-28"
-                  />
-                  <Select
-                    value={value.frequency}
-                    onValueChange={(frequency) => {
-                      const next = frequency as ScheduleFrequency;
-                      set({
-                        frequency: next,
-                        every: Math.min(value.every, MAX_EVERY[next]),
-                        weekdays:
-                          next === "weekly" && value.weekdays.length === 0 ? [0] : value.weekdays,
-                      });
-                    }}
-                  >
-                    <SelectTrigger
-                      className="w-32"
-                      aria-label={msg("continuous_tab.schedule.unit")}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {FREQUENCIES.map((f) => (
-                        <SelectItem key={f} value={f}>
-                          {msg(UNIT_KEYS[f])}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
+    <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm">
+      <div className="space-y-4 p-4 sm:p-5">
+        <p className="text-base font-semibold leading-snug" aria-live="polite">
+          {problem ? (
+            <span className="text-[var(--warning)]">{msg(problem)}</span>
+          ) : (
+            describeSchedule(value)
+          )}
+        </p>
+        <Segmented
+          value={showCustom ? "custom" : preset}
+          onChange={(next) => {
+            setCustomPicked(next === "custom");
+            if (next !== "custom") onChange(applyPreset(value, next, locale));
+          }}
+          label={msg("continuous_tab.schedule.label")}
+          size="sm"
+          className="w-full"
+          options={PRESETS.map((p) => ({ value: p, label: msg(PRESET_KEYS[p]) }))}
+        />
+        <ScheduleCalendar value={value} onChange={onChange} />
+      </div>
 
-            <div className={field}>
-              <Label htmlFor={`${idPrefix}-time`}>
-                {msg(hourly ? "continuous_tab.schedule.start_at" : "continuous_tab.schedule.at")}
-              </Label>
-              <Input
-                id={`${idPrefix}-time`}
-                type="time"
-                dir="ltr"
-                required
-                value={value.time}
-                onChange={(e) => set({ time: e.target.value })}
-                className="w-32"
+      <div className="flex flex-wrap items-end gap-x-3 gap-y-3 border-t border-border/60 bg-muted/40 px-4 py-3 sm:px-5">
+        {showCustom && (
+          <div className={field}>
+            <Label htmlFor={`${idPrefix}-every`} className="text-xs text-muted-foreground">
+              {msg("continuous_tab.schedule.every")}
+            </Label>
+            <div className="flex gap-2">
+              <NumberInput
+                id={`${idPrefix}-every`}
+                value={value.every}
+                min={1}
+                max={MAX_EVERY[value.frequency]}
+                onChange={(every) => set({ every })}
+                className="w-24"
               />
-            </div>
-
-            <div className={field}>
-              <Label htmlFor={`${idPrefix}-zone`}>{msg("continuous_tab.schedule.timezone")}</Label>
-              <Select value={value.timezone} onValueChange={(timezone) => set({ timezone })}>
-                <SelectTrigger id={`${idPrefix}-zone`} className="w-60">
+              <Select
+                value={value.frequency}
+                onValueChange={(frequency) => {
+                  const next = frequency as ScheduleFrequency;
+                  set({
+                    frequency: next,
+                    every: Math.min(value.every, MAX_EVERY[next]),
+                    weekdays:
+                      next === "weekly" && value.weekdays.length === 0 ? [0] : value.weekdays,
+                  });
+                }}
+              >
+                <SelectTrigger className="w-28" aria-label={msg("continuous_tab.schedule.unit")}>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="max-h-72">
-                  {zones.map((zone) => (
-                    <SelectItem key={zone} value={zone}>
-                      <bdi>{zone.replaceAll("_", " ")}</bdi>
+                <SelectContent>
+                  {FREQUENCIES.map((f) => (
+                    <SelectItem key={f} value={f}>
+                      {msg(UNIT_KEYS[f])}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
+        )}
 
-          {value.frequency === "monthly" && value.month_day > 28 && (
-            <p className="text-xs text-muted-foreground">
-              {msg("continuous_tab.schedule.month_end")}
-            </p>
-          )}
+        <div className={field}>
+          <Label htmlFor={`${idPrefix}-time`} className="text-xs text-muted-foreground">
+            {msg(hourly ? "continuous_tab.schedule.start_at" : "continuous_tab.schedule.at")}
+          </Label>
+          <Input
+            id={`${idPrefix}-time`}
+            type="time"
+            dir="ltr"
+            required
+            value={value.time}
+            onChange={(e) => set({ time: e.target.value })}
+            className="w-32 bg-background"
+          />
         </div>
 
-        <div className="rounded-xl border border-border/60 bg-muted/40 p-4">
-          <p className="mb-4 text-sm font-semibold leading-snug" aria-live="polite">
-            {problem ? (
-              <span className="text-[var(--warning)]">{msg(problem)}</span>
-            ) : (
-              describeSchedule(value)
-            )}
+        <div className={cn(field, "min-w-0 flex-1")}>
+          <Label htmlFor={`${idPrefix}-zone`} className="text-xs text-muted-foreground">
+            {msg("continuous_tab.schedule.timezone")}
+          </Label>
+          <Select value={value.timezone} onValueChange={(timezone) => set({ timezone })}>
+            <SelectTrigger id={`${idPrefix}-zone`} className="w-full min-w-48 bg-background">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="max-h-72">
+              {zones.map((zone) => (
+                <SelectItem key={zone} value={zone}>
+                  <bdi>{zone.replaceAll("_", " ")}</bdi>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {value.frequency === "monthly" && value.month_day > 28 && (
+          <p className="basis-full text-xs text-muted-foreground">
+            {msg("continuous_tab.schedule.month_end")}
           </p>
-          <ScheduleCalendar value={value} onChange={onChange} />
-        </div>
+        )}
       </div>
     </div>
   );
