@@ -57,6 +57,7 @@ import { cn } from "@/shared/lib/utils";
 import {
   allowanceShare,
   canReview,
+  cycleRuns,
   cycleTone,
   enableProblem,
   refreshDelayMs,
@@ -109,20 +110,6 @@ const RUN_KEYS: Record<string, MessageKey> = {
   both: "continuous_tab.matrix.both",
   reference: "continuous_tab.runs.reference",
 };
-
-interface CycleRunEntry {
-  kind: string;
-  optimization_id: string;
-  status?: string;
-  best_score?: number | null;
-  // The worker stores each role's new model as an object, not a bare name.
-  new_models?: Record<string, { name: string; byok_provider?: string | null }>;
-}
-
-function cycleRuns(cycle: ContinuousCycle): CycleRunEntry[] {
-  const runs = cycle.snapshot?.runs;
-  return Array.isArray(runs) ? (runs as CycleRunEntry[]) : [];
-}
 
 /**
  * The runs one check started, each with its score, so a check that tried

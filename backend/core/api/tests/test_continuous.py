@@ -1484,6 +1484,65 @@ def test_new_data_grows_the_test_set_and_never_moves_a_test_case_into_search(env
     assert not old_fit & set(pinned["test"])
 
 
+def test_new_data_that_drops_every_held_out_case_starts_no_run(env: _Env) -> None:
+    """A refresh whose source deleted the held-out rows does not count, so no run starts without test cases."""
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True})
+    request = UnifiedRunRequest.model_validate(_payload(env, source_id))
+    first = split_cases(request.data.cases, "pairs", request.data.split, shuffle=True, seed=split_seed(request))
+    old_test = {case_key(case) for case in first.test}
+    rows = _cases(["A"] * 10)
+    kept = [row for row, case in zip(rows, request.data.cases, strict=True) if case_key(case) not in old_test]
+    env.rows = kept + [{"question": f"New{index}?", "answer": "B"} for index in range(len(old_test))]
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.detail_code) == ("skipped", "continuous.skip_unchanged")
+    assert cycle.optimization_id is None
+
+
+def test_every_run_of_a_matrix_belongs_to_its_plan(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Runs that did not win stay linked to the plan, so none can start a second plan."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model", "both"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    env.sweep(_due(env))
+    runs = _runs(env.cycles()[0])
+    _finish(env, runs["data"], result=_result(0.6, 0.65))
+    _finish(env, runs["model"], result=_result(0.7, 0.72))
+    _finish(env, runs["both"], result=_result(0.7, 0.9))
+    env.sweep(_due(env) - timedelta(days=1))
+    assert env.cycles()[0].optimization_id == runs["both"]
+    plan_id = env.plan().id
+
+    for kind in ("data", "model"):
+        state = env.client.get(f"/optimizations/{runs[kind]}/continuous").json()
+        assert (state["plan"]["id"], state["eligible"]) == (plan_id, False)
+        body = {"schedule": WEEKLY, "permitted": {"data": True}, "source": env.plan().source}
+        refused = env.client.post(f"/optimizations/{runs[kind]}/continuous", json=body)
+        assert (refused.status_code, refused.json()["code"]) == (409, "continuous.already_enabled")
+    assert automated_run_ids(env.store, list(runs.values())) == set(runs.values())
+
+
+def test_a_caller_chosen_check_key_does_not_tie_a_run_to_a_plan(env: _Env) -> None:
+    """A run submitted under a key shaped like a check's is not one of that check's runs."""
+    source_id = _incumbent(env)
+    _enable(env, source_id)
+    env.rows = _cases(["B"] * 10)
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    response = env.client.post(
+        "/optimize", json=_incumbent_payload(), headers={"Idempotency-Key": f"continuous:{cycle.id}:model"}
+    )
+    assert response.status_code == 201, response.text
+    other_id = response.json()["optimization_id"]
+
+    assert automated_run_ids(env.store, [other_id]) == set()
+    assert env.client.get(f"/optimizations/{other_id}/continuous").json()["plan"] is None
+
+
 def test_the_matrix_starts_each_ticked_run_on_one_test_set(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
     """With new data and a better model, every ticked run starts, all holding out the same test cases."""
     _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))

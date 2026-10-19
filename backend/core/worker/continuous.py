@@ -511,7 +511,11 @@ def resolve_snapshot(
         new_keys = [key for key in (case_key(case) for case in fresh) if key not in known]
         untried = sum(1 for key in new_keys if key not in tried)
         fingerprint = _cases_fingerprint(fresh)
-        if fingerprint != prior.get("fingerprint") and untried >= new_cases_needed(plan, len(stored)):
+        if (
+            fingerprint != prior.get("fingerprint")
+            and untried >= new_cases_needed(plan, len(stored))
+            and _keeps_held_out(incumbent_payload, stored, fresh)
+        ):
             cases = fresh
             data_snapshot = {
                 "fingerprint": fingerprint,
@@ -582,6 +586,31 @@ def _split_keys(request: UnifiedRunRequest, cases: list[Any], pinned: PinnedSpli
     return PinnedSplit(
         test=[case_key(case) for case in splits.test], fit=[case_key(case) for case in splits.train + splits.val]
     )
+
+
+def _keeps_held_out(incumbent_payload: dict[str, Any], stored: list[Any], fresh: list[Any]) -> bool:
+    """Say whether refreshed cases would still hold out test cases.
+
+    Deleted source cases leave the test set, so a refresh that drops every
+    held-out row would start runs that can never replace the incumbent.
+
+    Args:
+        incumbent_payload: The incumbent run's stored request.
+        stored: The incumbent's cases.
+        fresh: The refreshed cases.
+
+    Returns:
+        ``True`` when a run on ``fresh`` would score on held-out test cases.
+    """
+    try:
+        request = UnifiedRunRequest.model_validate(_request_copy(scrub_execution_credentials(incumbent_payload)))
+    except ValidationError:
+        # ``plan_runs`` validates the same request and fails the check with the reason.
+        return True
+    data = request.data
+    earlier = _split_keys(request, stored, data.pinned_split)
+    splits = split_cases(fresh, data.mode, data.split, shuffle=data.shuffle, seed=split_seed(request), pinned=earlier)
+    return splits.counts.held_out
 
 
 def plan_runs(

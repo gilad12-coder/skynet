@@ -71,7 +71,7 @@ from ...service_gateway.optimization.training_ground.run_react import (
     resolve_react_tools,
 )
 from ...service_gateway.optimization.workflow import build_workflow_program, workflow_tool_users
-from ...storage.models import ContinuousCycleModel, ContinuousPlanModel
+from ...storage.models import ContinuousCycleModel, ContinuousPlanModel, JobModel
 from ..auth import AuthenticatedUser, is_admin
 from ..converters import (
     compute_elapsed,
@@ -611,6 +611,48 @@ def run_folder_ids(job_store, optimization_ids: list[str]) -> dict[str, str]:
         return folder_ids_for_runs(session, optimization_ids)
 
 
+def check_run_plan_ids(session: Session, optimization_ids: list[str]) -> dict[str, str]:
+    """Map the runs scheduled checks started to the plan of each check.
+
+    A check keeps only one run in its ``optimization_id`` column, so the other
+    runs of a matrix are found through the idempotency key every check run is
+    submitted under. A key alone could be chosen by a caller, so each match is
+    confirmed against the runs the check recorded.
+
+    Args:
+        session: Open session on the store that holds jobs and plans.
+        optimization_ids: Runs to look up.
+
+    Returns:
+        ``{optimization_id: plan_id}`` for the runs a check started.
+    """
+    if not optimization_ids:
+        return {}
+    keyed = session.execute(
+        select(JobModel.optimization_id, JobModel.idempotency_key).where(
+            JobModel.optimization_id.in_(optimization_ids), JobModel.idempotency_key.like("continuous:%")
+        )
+    ).all()
+    cycle_ids = {run_id: key.split(":")[1] for run_id, key in keyed}
+    if not cycle_ids:
+        return {}
+    cycles = {
+        cycle.id: cycle
+        for cycle in session.scalars(
+            select(ContinuousCycleModel).where(ContinuousCycleModel.id.in_(set(cycle_ids.values())))
+        )
+    }
+    found = {}
+    for run_id, cycle_id in cycle_ids.items():
+        cycle = cycles.get(cycle_id)
+        if cycle is None:
+            continue
+        recorded = {run.get("optimization_id") for run in (cycle.snapshot or {}).get("runs") or []}
+        if run_id in recorded or run_id == cycle.optimization_id:
+            found[run_id] = cycle.plan_id
+    return found
+
+
 def automated_run_ids(job_store, optimization_ids: list[str]) -> set[str]:
     """Return the runs that belong to a continuous plan.
 
@@ -640,7 +682,8 @@ def automated_run_ids(job_store, optimization_ids: list[str]) -> set[str]:
         started = session.scalars(
             select(ContinuousCycleModel.optimization_id).where(ContinuousCycleModel.optimization_id.in_(wanted))
         ).all()
-    return wanted & ({run for pair in plans for run in pair} | set(started))
+        matrix = check_run_plan_ids(session, list(wanted))
+    return wanted & ({run for pair in plans for run in pair} | set(started) | set(matrix))
 
 
 def get_job_no_payload(job_store, optimization_id: str) -> dict[str, Any]:

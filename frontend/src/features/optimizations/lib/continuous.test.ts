@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   allowanceShare,
   canReview,
+  cycleRuns,
   cycleTone,
   enableProblem,
   minCasesProblem,
@@ -146,4 +147,35 @@ test("the tab reloads while a check is due or running, waits for the next one, a
     refreshDelayMs(plan({ status: "paused", next_check_at: null }, ["skipped"]), now),
     null,
   );
+});
+
+test("a check lists only the runs it started, never a planned run without an id", () => {
+  const cycle: ContinuousCycle = {
+    id: "c",
+    slot: "s",
+    month: "2026-10",
+    status: "paused",
+    changes: ["data", "models"],
+    detail_code: "continuous.paused_funds",
+    detail_params: {},
+    snapshot: {
+      runs: [
+        { kind: "data", optimization_id: "run-1" },
+        { kind: "model", new_models: { task_model: { name: "m" } } },
+        { kind: "both", optimization_id: "" },
+        null,
+      ],
+    },
+    optimization_id: null,
+    incumbent_score: null,
+    candidate_score: null,
+    spent_cents: null,
+    created_at: "2026-10-18T00:00:00Z",
+  };
+  assert.deepEqual(
+    cycleRuns(cycle).map((run) => run.optimization_id),
+    ["run-1"],
+  );
+  assert.deepEqual(cycleRuns({ ...cycle, snapshot: null }), []);
+  assert.deepEqual(cycleRuns({ ...cycle, snapshot: { runs: "bad" } }), []);
 });

@@ -92,3 +92,30 @@ export function minCasesProblem(typed: string): EnableProblem | null {
     ? null
     : "continuous_tab.form.need_min_cases";
 }
+
+/** One run a check started, as the worker records it in the check's snapshot. */
+export interface CycleRunEntry {
+  kind: string;
+  optimization_id: string;
+  status?: string;
+  best_score?: number | null;
+  // The worker stores each role's new model as an object, not a bare name.
+  new_models?: Record<string, { name: string; byok_provider?: string | null }>;
+}
+
+/**
+ * The runs a check actually started. The worker records each planned run
+ * before submitting it, so a check that paused, was refused or awaits a
+ * retry lists runs with no id yet; they have no page to link to.
+ */
+export function cycleRuns(cycle: ContinuousCycle): CycleRunEntry[] {
+  const runs = cycle.snapshot?.runs;
+  if (!Array.isArray(runs)) return [];
+  return runs.filter(
+    (run): run is CycleRunEntry =>
+      typeof run === "object" &&
+      run !== null &&
+      typeof (run as { optimization_id?: unknown }).optimization_id === "string" &&
+      (run as { optimization_id: string }).optimization_id !== "",
+  );
+}

@@ -38,7 +38,7 @@ from ...worker.continuous_schedule import ScheduleRule, drop_past_slots, next_ru
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..converters import job_owner
 from ..errors import DomainError
-from ._helpers import get_job_no_payload
+from ._helpers import check_run_plan_ids, get_job_no_payload
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
@@ -394,7 +394,7 @@ def _plan_for_run(session: Session, optimization_id: str) -> ContinuousPlanModel
         return plan
     plan_id = session.scalar(
         select(ContinuousCycleModel.plan_id).where(ContinuousCycleModel.optimization_id == optimization_id)
-    )
+    ) or check_run_plan_ids(session, [optimization_id]).get(optimization_id)
     return session.get(ContinuousPlanModel, plan_id) if plan_id else None
 
 
