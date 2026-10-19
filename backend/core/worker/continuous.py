@@ -115,7 +115,7 @@ _TERMINAL_JOB = {
 }
 
 RowFetcher = Callable[[Any, str, dict[str, Any]], list[dict[str, Any]]]
-ModelPicker = Callable[[Any, str, dict[str, Any]], dict[str, Any] | None]
+ModelPicker = Callable[[Any, str, dict[str, Any], frozenset[str]], dict[str, Any] | None]
 
 
 @dataclass(frozen=True)
@@ -288,7 +288,9 @@ def _comparable(model: CatalogModel) -> bool:
     )
 
 
-def better_model(job_store: Any, username: str, current: dict[str, Any]) -> dict[str, Any] | None:
+def better_model(
+    job_store: Any, username: str, current: dict[str, Any], exclude: frozenset[str] = frozenset()
+) -> dict[str, Any] | None:
     """Find the model a plan should try next for one role: rated higher and priced no higher.
 
     A higher rating at an equal or lower price for both input and output has
@@ -301,6 +303,7 @@ def better_model(job_store: Any, username: str, current: dict[str, Any]) -> dict
         job_store: Store whose engine holds the provider connections.
         username: Plan owner.
         current: The model block the run uses now for this role.
+        exclude: Model names already tried for this role, skipped so the next best one is offered.
 
     Returns:
         ``{"name", "byok_provider"}`` for the highest-rated such model, or ``None``.
@@ -334,6 +337,7 @@ def better_model(job_store: Any, username: str, current: dict[str, Any]) -> dict
         model
         for model in models
         if _comparable(model)
+        and model.value not in exclude
         and (model.intelligence_index or 0.0) > (now.intelligence_index or 0.0)
         and (model.input_cost_per_token or 0.0) <= (now.input_cost_per_token or 0.0)
         and (model.output_cost_per_token or 0.0) <= (now.output_cost_per_token or 0.0)
@@ -532,7 +536,8 @@ def resolve_snapshot(
         block = blocks.get(role)
         if not (permitted.get(flag) and block and models.get(role)):
             continue
-        better = pick_model(job_store, plan.username, {**block, "name": models[role]})
+        skip = frozenset(entry.split(":", 1)[1] for entry in tried if entry.startswith(f"{role}:"))
+        better = pick_model(job_store, plan.username, {**block, "name": models[role]}, skip)
         if better is not None and f"{role}:{better['name']}" not in tried:
             found[role] = better
             tried.append(f"{role}:{better['name']}")
@@ -680,7 +685,8 @@ def month_committed(session: Session, plan: ContinuousPlanModel, month: str) -> 
     for cycle in cycles:
         found = [budgets[budget_id] for budget_id in cycle_budget_ids(cycle) if budget_id in budgets]
         if cycle.status == CYCLE_OPTIMIZING:
-            total += plan.cycle_budget_cents * max(1, len(cycle_runs(cycle)))
+            refused = len((cycle.snapshot or {}).get("refused_budgets") or [])
+            total += plan.cycle_budget_cents * max(1, len(cycle_runs(cycle)) + refused)
         elif found:
             # ``spent_cents`` is sampled once when the run ends; reconciliation can bill more later.
             total += sum(budget.billed_cents + budget_wallet_hold(budget) for budget in found)
@@ -713,7 +719,9 @@ def cycle_budget_ids(cycle: ContinuousCycleModel) -> list[str]:
     Returns:
         Budget ids, without repeats.
     """
+    snapshot = cycle.snapshot or {}
     ids = [run.get("budget") for run in cycle_runs(cycle)] + [cycle.execution_budget_id]
+    ids += list(snapshot.get("refused_budgets") or [])
     return list(dict.fromkeys(budget_id for budget_id in ids if budget_id))
 
 
@@ -1025,19 +1033,26 @@ def _link_accepted(job_store: Any, session: Session, username: str, cycle: Conti
         linked.append({"kind": RUN_DATA, "optimization_id": legacy, "budget": job.get("execution_budget_id")})
     if not linked:
         return False
-    _record_started(session, cycle, linked)
+    _record_started(session, cycle, linked, [])
     return True
 
 
-def _record_started(session: Session, cycle: ContinuousCycleModel, started: list[dict[str, Any]]) -> None:
+def _record_started(
+    session: Session, cycle: ContinuousCycleModel, started: list[dict[str, Any]], refused_budgets: list[str]
+) -> None:
     """Mark a check as optimizing on the runs it started.
 
     Args:
         session: Open session that owns ``cycle``.
         cycle: The cycle.
         started: The started runs, each with its ``optimization_id`` and ``budget``.
+        refused_budgets: Budgets created for runs whose submit was refused after setup was paid for.
     """
     cycle.snapshot = {**(cycle.snapshot or {}), "runs": started}
+    if refused_budgets:
+        # A refused run's setup check was already charged to its budget, so the
+        # monthly allowance must still count it.
+        cycle.snapshot["refused_budgets"] = refused_budgets
     cycle.optimization_id = started[0]["optimization_id"]
     cycle.execution_budget_id = started[0]["budget"]
     _finish_cycle(
@@ -1076,6 +1091,7 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
     started: list[dict[str, Any]] = []
     refused: DomainError | None = None
     budget_keys: list[str] = []
+    refused_keys: list[str] = []
     for run, payload in zip(planned, payloads, strict=True):
         key = _run_key(cycle_id, run["kind"])
         budget_key = resolve_submission_replay_keys(
@@ -1090,6 +1106,8 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
         except DomainError as error:
             logger.warning("Continuous cycle %s could not start its %s run: %s", cycle_id, run["kind"], error.code)
             refused = refused or error
+            if budget_key:
+                refused_keys.append(budget_key)
             if error.code == "budget.pending":
                 break
             continue
@@ -1102,7 +1120,8 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
             return
         plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
         if started:
-            _record_started(session, cycle, started)
+            refused_budgets = [BudgetService(engine=engine).find_by_creation_key(username, key) for key in refused_keys]
+            _record_started(session, cycle, started, [budget.id for budget in refused_budgets if budget is not None])
             logger.info("Continuous cycle %s started %d runs", cycle_id, len(started))
             return
         budgets = [BudgetService(engine=engine).find_by_creation_key(username, key) for key in budget_keys]
@@ -1188,7 +1207,7 @@ def _seen_snapshot(previous: dict[str, Any], snapshot: dict[str, Any], runs: lis
     Args:
         previous: The plan's baseline before this check.
         snapshot: The check's resolved snapshot.
-        runs: The runs the check started.
+        runs: The check's runs that succeeded; a failed run leaves its inputs unseen so a later check retries them.
 
     Returns:
         The new baseline snapshot.
@@ -1263,7 +1282,9 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
             reason = next((job["status"] for job in jobs if job["status"] != OptimizationStatus.success.value), "")
             _fail_cycle(session, plan, cycle, "continuous.run_failed", reason=reason)
             return
-        plan.baseline_snapshot = _seen_snapshot(plan.baseline_snapshot or {}, cycle.snapshot or {}, runs)
+        plan.baseline_snapshot = _seen_snapshot(
+            plan.baseline_snapshot or {}, cycle.snapshot or {}, [run for run, _ in finished]
+        )
         incumbent = _incumbent_on_test(job_store, cycle, finished)
         eligible = [
             (run, result)

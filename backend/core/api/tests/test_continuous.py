@@ -1637,3 +1637,87 @@ def test_approving_a_better_model_drops_an_older_staged_task_model(env: _Env, mo
     env.sweep(_due(env))
     assert env.cycles()[-1].detail_code == "continuous.skip_unchanged"
     assert env.count(JobModel) == jobs
+
+
+def test_after_the_top_model_loses_the_next_best_model_is_tried(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tried model is skipped when choosing, so a lower-rated model that also qualifies gets its run."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), mid=(50.0, 1e-6), strong=(60.0, 1e-6))
+    _new_models_plan(env)
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    assert _payload(env, cycle.optimization_id)["models"]["task_model"]["name"] == "fixture/strong"
+    _finish(env, cycle.optimization_id, result=_result(0.9, 0.705))
+    env.sweep(_due(env) - timedelta(days=1))
+
+    env.sweep(_due(env))
+
+    latest = env.cycles()[-1]
+    assert latest.status == "optimizing"
+    assert _payload(env, latest.optimization_id)["models"]["task_model"]["name"] == "fixture/mid"
+
+
+def test_a_failed_model_run_beside_a_successful_data_run_is_offered_again(
+    env: _Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a successful run marks its model as tried, so a model run lost to an outage runs on the next check."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    runs = _runs(cycle)
+    _finish(env, runs["data"], result=_result(0.6, 0.6))
+    _finish(env, runs["model"], status="failed")
+    env.sweep(_due(env) - timedelta(days=1))
+    assert env.cycles()[0].status != "optimizing"
+
+    env.sweep(_due(env))
+
+    latest = env.cycles()[-1]
+    assert latest.status == "optimizing"
+    assert "model" in _runs(latest)
+    assert "data" not in _runs(latest)
+
+
+def test_a_refused_run_keeps_its_budget_on_the_check(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A run refused after its budget was created still counts against the check and the monthly allowance."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    submit = continuous.submit_unified_payload
+    refused: list[str] = []
+
+    def refuse_the_model_run(payload: UnifiedRunRequest, **kwargs: Any) -> Any:
+        """Fund the model run's budget, then refuse it as a failed setup check would.
+
+        Args:
+            payload: The run's request.
+            **kwargs: Arguments for the real submit.
+
+        Returns:
+            The real submit's response for every other run.
+
+        Raises:
+            DomainError: For the model run, after its budget exists.
+        """
+        if payload.models.task_model.name != "fixture/strong":
+            return submit(payload, **kwargs)
+        key = continuous.resolve_submission_replay_keys(
+            payload,
+            username=kwargs["current_user"].username,
+            workflow=continuous.UNIFIED_WORKFLOW,
+            supplied_key=kwargs["idempotency_key"],
+        ).budget
+        refused.append(BudgetService(engine=env.store.engine).create("alice", 50, idempotency_key=key).id)
+        raise DomainError("submission.validation_failed", status=422)
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", refuse_the_model_run)
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    assert list(_runs(cycle)) == ["data"]
+    assert len(refused) == 1
+    assert refused[0] in continuous.cycle_budget_ids(cycle)
