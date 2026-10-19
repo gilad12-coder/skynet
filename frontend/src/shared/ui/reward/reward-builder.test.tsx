@@ -50,7 +50,8 @@ void describe("RewardBuilder", () => {
   });
 
   void it("shows the same rows read-only, without add or import", () => {
-    const html = render(<RewardBuilder build={build()} expectedField="answer" />);
+    // The run page shows Try it in its own card, beside the rows.
+    const html = render(<RewardBuilder build={build()} expectedField="answer" tryIt={false} />);
     assert.match(html, /exact-answer/);
     assert.doesNotMatch(html, /reward_builder\.add</);
     assert.doesNotMatch(html, /reward_builder\.import\.title/);
@@ -59,7 +60,7 @@ void describe("RewardBuilder", () => {
 });
 
 void describe("RewardTryIt", () => {
-  void it("fills the expected value from the first sample and lists each reward", () => {
+  void it("fills the expected value from the first sample and offers a reward picker", () => {
     const html = render(
       <RewardTryIt
         build={build()}
@@ -68,8 +69,9 @@ void describe("RewardTryIt", () => {
       />,
     );
     assert.match(html, /reward_builder\.try\.title/);
-    assert.match(html, /exact-answer/);
-    assert.match(html, /has-number/);
+    assert.match(html, /value="2"|>2</);
+    // Scores show after Run; until then the picker names which rewards run.
+    assert.match(html, /aria-label="reward_builder\.try\.which"/);
     // The speed field shows because speed has a weight; cost does not.
     assert.match(html, /reward_builder\.try\.time/);
     assert.doesNotMatch(html, /reward_builder\.try\.cost/);

@@ -5,7 +5,6 @@ import { msg, type MessageKey } from "@/shared/lib/messages";
 import { rewardFormatters, rewardPartLabel } from "@/shared/lib/reward-format";
 import { rewardFromMarkdown, rewardToMarkdown } from "@/shared/lib/reward-md";
 import {
-  RULE_TYPES,
   bundledRewards,
   buildIssues,
   customReward,
@@ -19,15 +18,18 @@ import { cn } from "@/shared/lib/utils";
 import { useCopyToClipboard } from "@/shared/ui/copy-button";
 import {
   BracketsCurly,
+  CaretDown,
   Check,
   Coins,
   DotsThree,
+  DownloadSimple,
   Hash,
-  Play,
+  PencilSimple,
   Plus,
   Ruler,
   TextT,
   Timer,
+  Trophy,
   UploadSimple,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -43,16 +45,20 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/shared/ui/primitives/dropdown-menu";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import { Textarea } from "@/shared/ui/primitives/textarea";
-import { RewardRuleEditor } from "./reward-rule-editor";
-import { importErrorText, plain, ruleSummary, ruleTypeLabel } from "./reward-text";
+import { SelectCheckbox, checkboxBoxClass } from "@/shared/ui/select-checkbox";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
+import { RewardRuleEditor, type RewardEditMode } from "./reward-rule-editor";
+import { importErrorText, plain, ruleSummary } from "./reward-text";
 import { RewardTryIt, type RewardSample } from "./reward-try-it";
+
+// Unsloth Studio's limit on the rewards in one run.
+export const MAX_REWARDS = 16;
 
 const TYPE_ICON: Record<RuleType, typeof Check> = {
   exact_match: Check,
@@ -69,6 +75,11 @@ function issueText(issue: BuildIssue): string {
   }
   if ("name" in issue) return msg(`reward_builder.issue.${issue.code}`, { name: issue.name });
   return msg(`reward_builder.issue.${issue.code}`);
+}
+
+/** A built-in reward's description in the active locale. */
+function bundledText(name: string): string {
+  return msg(`reward_builder.bundled.${name.replace(/-/g, "_")}` as MessageKey);
 }
 
 /** Save a text as a file the browser downloads. */
@@ -108,10 +119,46 @@ function InlineNumber({
         const next = Number(e.target.value);
         if (e.target.value.trim() !== "" && Number.isFinite(next) && next >= 0) onChange(next);
       }}
-      className={cn("h-7 w-14 px-1.5 text-center font-mono text-xs", className)}
+      className={cn("h-8 w-16 px-1.5 text-center font-mono text-xs", className)}
     />
   );
 }
+
+/** The rounded square that holds a row's icon. */
+function IconTile({ icon: Icon }: { icon: typeof Check }) {
+  return (
+    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+      <Icon className="size-4" aria-hidden />
+    </span>
+  );
+}
+
+/** The weight cell of a row: "×" and the weight, as a field or as text. */
+function WeightCell({
+  value,
+  readOnly,
+  label,
+  onChange,
+}: {
+  value: number;
+  readOnly: boolean;
+  label: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+      <span aria-hidden>×</span>
+      {readOnly ? (
+        <span className="font-mono tabular-nums text-foreground">{plain(value)}</span>
+      ) : (
+        <InlineNumber value={value} onChange={onChange} label={label} />
+      )}
+    </span>
+  );
+}
+
+// Rows share one grid so the weights and menus line up down the list.
+const ROW = "grid grid-cols-[2rem_minmax(0,1fr)_auto_2rem] items-center gap-3 px-4 py-3";
 
 function RewardRow({
   entry,
@@ -126,58 +173,39 @@ function RewardRow({
   onRemove: () => void;
   onWeight: (weight: number) => void;
 }) {
-  const Icon = TYPE_ICON[entry.rule.type];
   const { copy } = useCopyToClipboard();
-  const markdown = () => rewardToMarkdown(entry);
+  const bundled = entry.source === "bundled";
   return (
-    <li data-reward={entry.name} className="flex items-start gap-2 px-3 py-2">
-      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <div className="min-w-0 flex-1">
+    <li data-reward={entry.name} className={ROW}>
+      <IconTile icon={TYPE_ICON[entry.rule.type]} />
+      <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-1.5">
-          {readOnly ? (
-            <bdi dir="ltr" className="truncate font-mono text-xs font-medium">
-              {entry.name}
-            </bdi>
-          ) : (
-            <button
-              type="button"
-              onClick={onEdit}
-              className="truncate font-mono text-xs font-medium hover:underline"
-            >
-              <bdi dir="ltr">{entry.name}</bdi>
-            </button>
-          )}
+          <bdi dir="ltr" className="truncate font-mono text-sm font-medium">
+            {entry.name}
+          </bdi>
           <span
             className={cn(
               "shrink-0 rounded-full px-1.5 text-[0.625rem] font-medium",
-              entry.source === "bundled"
-                ? "bg-muted text-muted-foreground"
-                : "bg-primary-fill/15 text-foreground",
+              bundled ? "bg-muted text-muted-foreground" : "bg-primary-fill/15 text-foreground",
             )}
           >
-            {msg(entry.source === "bundled" ? "reward_builder.bundled" : "reward_builder.yours")}
+            {msg(bundled ? "reward_builder.bundled" : "reward_builder.yours")}
           </span>
         </div>
-        <p className="text-[0.6875rem] text-muted-foreground">{ruleSummary(entry.rule)}</p>
+        <p className="truncate text-xs text-muted-foreground">{ruleSummary(entry.rule)}</p>
       </div>
-      <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-        <span aria-hidden>×</span>
-        {readOnly ? (
-          <span className="font-mono tabular-nums text-foreground">{plain(entry.weight)}</span>
-        ) : (
-          <InlineNumber
-            value={entry.weight}
-            onChange={onWeight}
-            label={msg("reward_builder.weight_of", { name: entry.name })}
-          />
-        )}
-      </span>
+      <WeightCell
+        value={entry.weight}
+        readOnly={readOnly}
+        label={msg("reward_builder.weight_of", { name: entry.name })}
+        onChange={onWeight}
+      />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon-sm"
             aria-label={msg("reward_builder.row_menu", { name: entry.name })}
           >
             <DotsThree className="size-4" />
@@ -185,13 +213,13 @@ function RewardRow({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {!readOnly && (
-            <DropdownMenuItem onSelect={onEdit}>{msg("reward_builder.edit")}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={onEdit}>
+              <PencilSimple className="size-3.5" aria-hidden />
+              {msg(bundled ? "reward_builder.customize" : "reward_builder.edit")}
+            </DropdownMenuItem>
           )}
-          <DropdownMenuItem onSelect={() => void copy(markdown())}>
+          <DropdownMenuItem onSelect={() => void copy(rewardToMarkdown(entry))}>
             {msg("reward_builder.export.copy")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => download(`${entry.name}.md`, markdown())}>
-            {msg("reward_builder.export.download")}
           </DropdownMenuItem>
           {!readOnly && (
             <>
@@ -207,6 +235,7 @@ function RewardRow({
   );
 }
 
+/** Speed or cost (SKY-69): a row like a reward's, with its reference instead of a summary. */
 function PartRow({
   part,
   build,
@@ -219,17 +248,16 @@ function PartRow({
   onChange: (build: RewardBuild) => void;
 }) {
   const f = rewardFormatters();
-  const Icon = part === "speed" ? Timer : Coins;
   const value = build[part];
   const label = rewardPartLabel(part);
   const set = (next: Partial<typeof value>) =>
     onChange({ ...build, [part]: { ...value, ...next } });
   return (
-    <li data-part={part} className="flex items-start gap-2 px-3 py-2">
-      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-xs font-medium">{label}</p>
-        <div className="flex flex-wrap items-center gap-1 text-[0.6875rem] text-muted-foreground">
+    <li data-part={part} className={ROW}>
+      <IconTile icon={part === "speed" ? Timer : Coins} />
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{label}</p>
+        <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
           <span>
             {msg(
               part === "speed" ? "reward_builder.part.speed_ref" : "reward_builder.part.cost_ref",
@@ -244,25 +272,116 @@ function PartRow({
               value={value.reference}
               onChange={(reference) => set({ reference })}
               label={msg("reward_builder.part.reference_of", { part: label })}
-              className="w-20"
+              className="h-7 w-20"
             />
           )}
         </div>
       </div>
-      <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-        <span aria-hidden>×</span>
-        {readOnly ? (
-          <span className="font-mono tabular-nums text-foreground">{plain(value.weight)}</span>
-        ) : (
-          <InlineNumber
-            value={value.weight}
-            onChange={(weight) => set({ weight })}
-            label={msg("reward_builder.weight_of", { name: label })}
-          />
-        )}
-      </span>
-      {!readOnly && <span className="size-7 shrink-0" aria-hidden />}
+      <WeightCell
+        value={value.weight}
+        readOnly={readOnly}
+        label={msg("reward_builder.weight_of", { name: label })}
+        onChange={(weight) => set({ weight })}
+      />
+      <span aria-hidden />
     </li>
+  );
+}
+
+/** The Export menu: tick rewards, then download each as its REWARD.md. */
+function ExportMenu({ rewards }: { rewards: readonly RewardEntry[] }) {
+  const [picked, setPicked] = React.useState<ReadonlySet<string>>(new Set());
+  const names = rewards.map((r) => r.name);
+  const chosen = names.filter((name) => picked.has(name));
+  const all = chosen.length === names.length && names.length > 0;
+  const toggle = (name: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  return (
+    <DropdownMenu onOpenChange={(open) => open && setPicked(new Set(names))}>
+      <TooltipButton tooltip={msg("reward_builder.export.title")}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            aria-label={msg("reward_builder.export.title")}
+            disabled={names.length === 0}
+          >
+            <DownloadSimple />
+          </Button>
+        </DropdownMenuTrigger>
+      </TooltipButton>
+      <DropdownMenuContent align="end" className="w-72 p-0">
+        <div className="max-h-72 overflow-y-auto p-1">
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setPicked(all ? new Set() : new Set(names));
+            }}
+          >
+            <span
+              className={checkboxBoxClass(all ? true : chosen.length > 0 ? "mixed" : false)}
+              aria-hidden
+            >
+              {chosen.length > 0 && <Check className="size-3.5" />}
+            </span>
+            {msg("reward_builder.export.all")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {rewards.map((entry) => {
+            const Icon = TYPE_ICON[entry.rule.type];
+            const on = picked.has(entry.name);
+            return (
+              <DropdownMenuItem
+                key={entry.name}
+                role="menuitemcheckbox"
+                aria-checked={on}
+                onSelect={(e) => {
+                  e.preventDefault();
+                  toggle(entry.name);
+                }}
+                className="items-start"
+              >
+                <Icon className="mt-0.5 size-3.5 text-muted-foreground" aria-hidden />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <bdi dir="ltr" className="truncate font-mono text-xs">
+                    {entry.name}
+                  </bdi>
+                  {entry.description && (
+                    <span className="truncate text-[0.6875rem] text-muted-foreground">
+                      {entry.source === "bundled" ? bundledText(entry.name) : entry.description}
+                    </span>
+                  )}
+                </span>
+                <span className={checkboxBoxClass(on)} aria-hidden>
+                  {on && <Check className="size-3.5" />}
+                </span>
+              </DropdownMenuItem>
+            );
+          })}
+        </div>
+        <div className="border-t border-border/60 p-2">
+          <Button
+            type="button"
+            size="sm"
+            className="w-full"
+            disabled={chosen.length === 0}
+            onClick={() => {
+              for (const entry of rewards) {
+                if (picked.has(entry.name)) download(`${entry.name}.md`, rewardToMarkdown(entry));
+              }
+            }}
+          >
+            {msg("reward_builder.export.selected", { count: String(chosen.length) })}
+          </Button>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -275,11 +394,12 @@ function ImportDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onImport: (entries: RewardEntry[]) => void;
+  onImport: (entries: RewardEntry[], replace: boolean) => void;
   expectedField: string;
 }) {
   const id = React.useId();
   const [text, setText] = React.useState("");
+  const [replace, setReplace] = React.useState(false);
   const [errors, setErrors] = React.useState<string[]>([]);
   const fileRef = React.useRef<HTMLInputElement>(null);
 
@@ -292,7 +412,7 @@ function ImportDialog({
       else failed.push(`${source.label}: ${importErrorText(read.error, read.detail)}`);
     }
     setErrors(failed);
-    if (entries.length > 0) onImport(entries);
+    if (entries.length > 0) onImport(entries, replace);
     // What imported is in the build now; only the failures stay to retry,
     // so a second Import does not add the good ones again.
     if (failed.length === 0 || entries.length > 0) setText("");
@@ -347,6 +467,14 @@ function ImportDialog({
             className="min-h-32 font-mono text-xs"
           />
         </div>
+        <label className="flex items-center gap-2 text-xs">
+          <SelectCheckbox
+            checked={replace}
+            onToggle={() => setReplace((v) => !v)}
+            ariaLabel={msg("reward_builder.import.replace")}
+          />
+          {msg("reward_builder.import.replace")}
+        </label>
         {errors.length > 0 && (
           <ul role="alert" className="space-y-1 text-xs text-[var(--danger)]">
             {errors.map((error) => (
@@ -372,17 +500,18 @@ function ImportDialog({
 }
 
 /**
- * The reward builder (SKY-84), after Unsloth Studio's Rewards card: one row
- * per reward with its summary and weight, a Speed and a Cost row for the
- * SKY-69 reward, bundled and custom rewards to add, REWARD.md import and
- * export, and "Try it". Read-only, it lists the same rows for a finished run.
+ * The Rewards card (SKY-84), laid out like Unsloth Studio's: a header with
+ * the title and the Import and Export buttons; one row per reward with its
+ * icon, name, badge, summary, weight and menu; the SKY-69 Speed and Cost rows;
+ * a full-width "Add reward" menu of built-in rewards and "Custom"; then
+ * "Try it". Read-only, it shows the same rows for a finished run.
  *
  * Args:
  *   build: The rewards.
  *   onChange: Keep a changed build; omit for a read-only view.
  *   expectedField: The run's expected column.
  *   samples: Cases for "Try it".
- *   tryIt: Whether the header opens "Try it" in a dialog.
+ *   tryIt: Whether the card ends with "Try it".
  */
 export function RewardBuilder({
   build,
@@ -400,178 +529,204 @@ export function RewardBuilder({
   className?: string;
 }) {
   const readOnly = !onChange;
-  const [editing, setEditing] = React.useState<{ index: number; entry: RewardEntry } | null>(null);
+  const [editing, setEditing] = React.useState<{
+    index: number | null;
+    entry: RewardEntry;
+    mode: RewardEditMode;
+  } | null>(null);
   const [importing, setImporting] = React.useState(false);
-  const [trying, setTrying] = React.useState(false);
   const change = onChange ?? (() => undefined);
   const names = build.rewards.map((r) => r.name);
   const issues = buildIssues(build);
+  const full = build.rewards.length >= MAX_REWARDS;
+  const addable = bundledRewards(expectedField).filter((entry) => !names.includes(entry.name));
 
-  const add = (entries: RewardEntry[]) => {
-    const taken = [...names];
-    const added = entries.map((entry) => {
-      const name = uniqueName(entry.name, taken);
-      taken.push(name);
-      return { ...entry, name };
-    });
-    change({ ...build, rewards: [...build.rewards, ...added] });
-    return added;
-  };
-  const addCustom = (type: RuleType) => {
-    const [entry] = add([customReward(type, expectedField)]);
-    if (entry) setEditing({ index: build.rewards.length, entry });
+  const add = (entries: RewardEntry[], replace = false) => {
+    let rewards = [...build.rewards];
+    for (const entry of entries) {
+      const at = replace ? rewards.findIndex((r) => r.name === entry.name) : -1;
+      if (at >= 0) {
+        rewards[at] = { ...entry, weight: rewards[at]!.weight };
+        continue;
+      }
+      if (rewards.length >= MAX_REWARDS) break;
+      const name = uniqueName(
+        entry.name,
+        rewards.map((r) => r.name),
+      );
+      rewards = [...rewards, { ...entry, name }];
+    }
+    change({ ...build, rewards });
   };
 
   return (
     <section
       aria-labelledby="reward-builder-title"
-      className={cn("flex min-h-0 flex-col", className)}
+      className={cn("rounded-2xl border border-border/60 bg-card", className)}
     >
-      <header className="flex items-center gap-1 border-b border-border/60 px-3 py-2">
-        <h3 id="reward-builder-title" className="flex-1 text-sm font-semibold">
-          {msg("reward_builder.title")}
-        </h3>
-        {tryIt && (
-          <Button type="button" variant="ghost" size="xs" onClick={() => setTrying(true)}>
-            <Play />
-            {msg("reward_builder.try.open")}
-          </Button>
-        )}
+      <header className="flex items-start gap-3 px-4 py-4 sm:px-5">
+        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary-fill/15 text-foreground">
+          <Trophy className="size-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 id="reward-builder-title" className="text-base font-semibold">
+            {msg("reward_builder.title")}
+          </h3>
+          <p className="text-xs text-muted-foreground">{msg("reward_builder.desc")}</p>
+        </div>
         {!readOnly && (
-          <>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={msg("reward_builder.import.title")}
-              onClick={() => setImporting(true)}
+          <div className="flex shrink-0 items-center gap-1.5">
+            <TooltipButton tooltip={msg("reward_builder.import.title")}>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                aria-label={msg("reward_builder.import.title")}
+                onClick={() => setImporting(true)}
+              >
+                <UploadSimple />
+              </Button>
+            </TooltipButton>
+            <ExportMenu rewards={build.rewards} />
+          </div>
+        )}
+      </header>
+
+      {!readOnly && build.rewards.length === 0 && (
+        <p role="status" className="px-4 pb-3 text-xs text-[var(--warning)] sm:px-5">
+          {msg("reward_builder.empty")}
+        </p>
+      )}
+      <ul
+        aria-label={msg("reward_builder.title")}
+        className="divide-y divide-border/40 border-t border-border/50"
+      >
+        {build.rewards.map((entry, index) => (
+          <RewardRow
+            key={`${entry.name}-${index}`}
+            entry={entry}
+            readOnly={readOnly}
+            onEdit={() =>
+              setEditing({
+                index,
+                entry,
+                mode: entry.source === "bundled" ? "customize" : "edit",
+              })
+            }
+            onRemove={() =>
+              change({ ...build, rewards: build.rewards.filter((_, i) => i !== index) })
+            }
+            onWeight={(weight) =>
+              change({
+                ...build,
+                rewards: build.rewards.map((r, i) => (i === index ? { ...r, weight } : r)),
+              })
+            }
+          />
+        ))}
+      </ul>
+      <ul
+        aria-label={msg("reward_builder.parts")}
+        className="divide-y divide-border/40 border-y border-border/50"
+      >
+        <PartRow part="speed" build={build} readOnly={readOnly} onChange={change} />
+        <PartRow part="cost" build={build} readOnly={readOnly} onChange={change} />
+      </ul>
+      {!readOnly && issues.length > 0 && (
+        <ul role="status" className="space-y-1 px-4 pt-3 text-xs text-[var(--warning)] sm:px-5">
+          {issues.map((issue, i) => (
+            <li key={i}>{issueText(issue)}</li>
+          ))}
+        </ul>
+      )}
+
+      <div className="space-y-4 p-4 sm:p-5">
+        {!readOnly && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="outline" className="w-full" disabled={full}>
+                <Plus />
+                {msg("reward_builder.add")}
+                <CaretDown className="ms-auto opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="w-[var(--radix-dropdown-menu-trigger-width)]"
             >
-              <UploadSimple />
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button type="button" variant="outline" size="xs">
-                  <Plus />
-                  {msg("reward_builder.add")}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuLabel>{msg("reward_builder.add.bundled")}</DropdownMenuLabel>
-                {bundledRewards(expectedField).map((entry) => (
-                  <DropdownMenuItem key={entry.name} onSelect={() => add([entry])}>
+              {addable.map((entry) => {
+                const Icon = TYPE_ICON[entry.rule.type];
+                return (
+                  <DropdownMenuItem
+                    key={entry.name}
+                    onSelect={() => add([entry])}
+                    className="items-start"
+                  >
+                    <Icon className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
                     <span className="flex min-w-0 flex-col">
                       <bdi dir="ltr" className="font-mono text-xs">
                         {entry.name}
                       </bdi>
                       <span className="text-[0.6875rem] text-muted-foreground">
-                        {msg(
-                          `reward_builder.bundled.${entry.name.replace(/-/g, "_")}` as MessageKey,
-                        )}
+                        {bundledText(entry.name)}
                       </span>
                     </span>
                   </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>{msg("reward_builder.add.custom")}</DropdownMenuLabel>
-                {RULE_TYPES.map((type) => {
-                  const Icon = TYPE_ICON[type];
-                  return (
-                    <DropdownMenuItem key={type} onSelect={() => addCustom(type)}>
-                      <Icon className="size-3.5" aria-hidden />
-                      {ruleTypeLabel(type)}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
-        )}
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {build.rewards.length === 0 ? (
-          <div className="space-y-2 px-3 py-4 text-xs text-muted-foreground">
-            <p>{msg("reward_builder.empty")}</p>
-            {!readOnly && (
-              <Button
-                type="button"
-                size="xs"
-                onClick={() => add(bundledRewards(expectedField).slice(0, 1))}
+                );
+              })}
+              {addable.length > 0 && <DropdownMenuSeparator />}
+              <DropdownMenuItem
+                onSelect={() => {
+                  const entry = customReward("exact_match", expectedField);
+                  setEditing({
+                    index: null,
+                    entry: { ...entry, name: uniqueName(entry.name, names) },
+                    mode: "new",
+                  });
+                }}
+                className="items-start"
               >
-                {msg("reward_builder.empty.start")}
-              </Button>
-            )}
-          </div>
-        ) : (
-          <ul aria-label={msg("reward_builder.title")} className="divide-y divide-border/40">
-            {build.rewards.map((entry, index) => (
-              <RewardRow
-                key={`${entry.name}-${index}`}
-                entry={entry}
-                readOnly={readOnly}
-                onEdit={() => setEditing({ index, entry })}
-                onRemove={() =>
-                  change({ ...build, rewards: build.rewards.filter((_, i) => i !== index) })
-                }
-                onWeight={(weight) =>
-                  change({
-                    ...build,
-                    rewards: build.rewards.map((r, i) => (i === index ? { ...r, weight } : r)),
-                  })
-                }
-              />
-            ))}
-          </ul>
+                <PencilSimple className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-xs font-medium">{msg("reward_builder.add.custom")}</span>
+                  <span className="text-[0.6875rem] text-muted-foreground">
+                    {msg("reward_builder.add.custom_desc")}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
-        <ul
-          aria-label={msg("reward_builder.parts")}
-          className="divide-y divide-border/40 border-t border-border/60"
-        >
-          <PartRow part="speed" build={build} readOnly={readOnly} onChange={change} />
-          <PartRow part="cost" build={build} readOnly={readOnly} onChange={change} />
-        </ul>
-        {!readOnly && issues.length > 0 && (
-          <ul
-            role="status"
-            className="space-y-1 border-t border-border/60 px-3 py-2 text-xs text-[var(--warning)]"
-          >
-            {issues.map((issue, i) => (
-              <li key={i}>{issueText(issue)}</li>
-            ))}
-          </ul>
-        )}
+        {tryIt && <RewardTryIt build={build} expectedField={expectedField} samples={samples} />}
       </div>
 
       {!readOnly && (
         <>
           <RewardRuleEditor
             entry={editing?.entry ?? null}
+            mode={editing?.mode}
             taken={names.filter((_, i) => i !== editing?.index)}
             expectedField={expectedField}
             onClose={() => setEditing(null)}
             onSave={(entry) => {
-              const at = editing?.index ?? -1;
-              change({ ...build, rewards: build.rewards.map((r, i) => (i === at ? entry : r)) });
+              const at = editing?.index ?? null;
+              change({
+                ...build,
+                rewards:
+                  at === null
+                    ? [...build.rewards, entry]
+                    : build.rewards.map((r, i) => (i === at ? entry : r)),
+              });
               setEditing(null);
             }}
           />
           <ImportDialog
             open={importing}
             onClose={() => setImporting(false)}
-            onImport={(entries) => void add(entries)}
+            onImport={add}
             expectedField={expectedField}
           />
         </>
-      )}
-      {tryIt && (
-        <Dialog open={trying} onOpenChange={setTrying}>
-          <DialogContent className="sm:max-w-[min(36rem,92vw)]">
-            <DialogHeader className="sr-only">
-              <DialogTitle>{msg("reward_builder.try.title")}</DialogTitle>
-              <DialogDescription>{msg("reward_builder.try.how")}</DialogDescription>
-            </DialogHeader>
-            <RewardTryIt build={build} expectedField={expectedField} samples={samples} />
-          </DialogContent>
-        </Dialog>
       )}
     </section>
   );

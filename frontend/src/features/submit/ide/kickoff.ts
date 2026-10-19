@@ -68,14 +68,14 @@ export function kickoffKey(kickoff: Kickoff, repo: boolean): string {
 }
 
 /**
- * Decide whether a running agent turn must stop because the user left Auto.
+ * Decide whether a running agent turn must stop because the reward builder opened.
  *
- * Manual and the builder hide the agent's panel, so the user can neither see
+ * The full-screen builder covers the agent's panel, so the user can neither see
  * nor stop a turn that is still running. That turn would still write run.py
  * and metric.py, and replace the code or rewards the user is making.
  *
  * Args:
- *   auto: The metric is written in Auto mode, where the agent's panel shows.
+ *   auto: The agent's panel is in view (the reward builder does not cover it).
  *   busy: A turn is running.
  *
  * Returns:

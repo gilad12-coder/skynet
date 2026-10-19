@@ -4,9 +4,8 @@ import * as React from "react";
 import { isGeneralistAgentEnabled, useHideAgentPill } from "@/features/agent-panel";
 import { githubRepoFile, githubRepoTree } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
-import { readRewardRules } from "@/shared/lib/reward-rules-code";
-import { Code, Robot, Sparkle } from "@/shared/ui/icons";
-import { Segmented } from "@/shared/ui/segmented";
+import { Sparkle } from "@/shared/ui/icons";
+import { Button } from "@/shared/ui/primitives/button";
 import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unified-run";
 import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
 import { useWizardV2, useWizardV2Shell } from "../../hooks/use-unified-wizard";
@@ -35,14 +34,12 @@ import { METRIC_FILE, RUN_FILE, isSingleAnswerTask, repoIssue } from "../../lib/
 import { v2Msg } from "./ArtifactConfirmCard";
 import { ContractCheckScreen } from "./ContractCheckScreen";
 import { MetricModelRow } from "./MetricModelRow";
-import { RewardBuilderPanel } from "./RewardBuilderPanel";
+import { RewardBuilderDialog } from "./RewardBuilderPanel";
 import { RunOverview } from "./RunOverview";
 import { WizardScreen } from "./WizardScreen";
 
 const SAMPLE_CASE_LIMIT = 5;
 
-/** How the user writes the metric: with the coding agent, by hand, or in the reward builder. */
-type MetricMode = "auto" | "manual" | "ui";
 // The backend's REPO_FILES_MAX: every path rides each agent turn's prompt.
 const REPO_PATHS_LIMIT = 2000;
 
@@ -183,13 +180,8 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     [setWorkspaceFile],
   );
 
-  // The builder's rewards live in metric.py, so a metric it wrote opens in UI mode.
   const expectedField = inputs.expectedField ?? "expected";
-  const [chosenMode, setMode] = React.useState<MetricMode>(() =>
-    readRewardRules(workspace.metricCode, expectedField).kind === "none" ? "auto" : "ui",
-  );
-  // A repository run's scorer has its own signature, which the builder does not write.
-  const mode: MetricMode = repo && chosenMode === "ui" ? "auto" : chosenMode;
+  const [builderOpen, setBuilderOpen] = React.useState(false);
   const builderSamples = React.useMemo(
     () =>
       (authoringContext?.sample_cases ?? []).map((c) => ({
@@ -242,9 +234,9 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   );
   const coding = useIdeCodingAgent({
     context: agentContext,
-    // Manual and the builder are the user's own code: a hidden agent turn
-    // would rewrite their files and move the wizard on without them.
-    active: onScreen && mode === "auto",
+    // The builder covers the agent: a hidden turn would rewrite the rewards
+    // and move the wizard on without the user.
+    active: onScreen && !builderOpen,
     dataKnown: (authoringContext?.sample_cases?.length ?? 0) > 0 || isSingleAnswerTask(state),
     runCode: workspace.runCode,
     metricCode: workspace.metricCode,
@@ -284,12 +276,12 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     setAgentWriting(agentBusy);
     return () => setAgentWriting(false);
   }, [agentBusy, setAgentWriting]);
-  // The kickoff turn that started in Auto keeps streaming after a switch to
-  // Manual or the builder, and its writes would replace the user's rewards.
+  // A turn that runs when the builder opens keeps streaming under it, and its
+  // writes would replace the rewards the user is building.
   const stopAgent = coding.agent.stop;
   React.useEffect(() => {
-    if (stopsHiddenTurn(mode === "auto", agentBusy)) stopAgent();
-  }, [mode, agentBusy, stopAgent]);
+    if (stopsHiddenTurn(!builderOpen, agentBusy)) stopAgent();
+  }, [builderOpen, agentBusy, stopAgent]);
 
   // Code the agent just wrote moves the wizard on once it passes: from the
   // editor to Check, and from a passing Check to the overview, where Run
@@ -312,7 +304,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     if (onMetricStep && page === overviewPage) setOverviewSeen(true);
   }, [onMetricStep, page, overviewPage]);
   const advancePast = metricAdvanceFrom({
-    onStep: onMetricStep && mode === "auto",
+    onStep: onMetricStep && !builderOpen,
     overviewSeen,
     busy: agentBusy,
     agentLeftFiles: agentLeft === filesKey,
@@ -355,38 +347,18 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           guided={guided}
           strip={
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <Segmented<MetricMode>
-                size="sm"
-                label={msg("reward_builder.mode.label")}
-                value={mode}
-                onChange={setMode}
-                className="w-auto"
-                segmentClassName="px-3"
-                options={[
-                  {
-                    value: "auto",
-                    label: msg("reward_builder.mode.auto"),
-                    icon: <Robot className="size-3.5" />,
-                    tip: msg("reward_builder.mode.auto_tip"),
-                  },
-                  {
-                    value: "manual",
-                    label: msg("reward_builder.mode.manual"),
-                    icon: <Code className="size-3.5" />,
-                    tip: msg("reward_builder.mode.manual_tip"),
-                  },
-                  ...(repo
-                    ? []
-                    : [
-                        {
-                          value: "ui" as const,
-                          label: msg("reward_builder.mode.ui"),
-                          icon: <Sparkle className="size-3.5" />,
-                          tip: msg("reward_builder.mode.ui_tip"),
-                        },
-                      ]),
-                ]}
-              />
+              {/* A repository run's scorer has its own signature, which the builder does not write. */}
+              {!repo && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setBuilderOpen(true)}
+                >
+                  <Sparkle className="size-3.5" aria-hidden />
+                  {msg("reward_builder.screen.open")}
+                </Button>
+              )}
               {metricUsesModel && (
                 <MetricModelRow
                   mode={workspace.metricModelMode}
@@ -399,23 +371,24 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
             </div>
           }
           sidePanel={
-            mode === "auto" ? (
-              <CodingAgentPanel
-                coding={coding}
-                disabledReason={agentContext ? null : t("submit.v2.ide.agent.waiting")}
-                onOpenFile={openFile}
-                guided={guided}
-              />
-            ) : mode === "ui" ? (
-              <RewardBuilderPanel
-                metricCode={workspace.metricCode}
-                onMetricCode={setMetricCode}
-                expectedField={expectedField}
-                samples={builderSamples}
-              />
-            ) : null
+            <CodingAgentPanel
+              coding={coding}
+              disabledReason={agentContext ? null : t("submit.v2.ide.agent.waiting")}
+              onOpenFile={openFile}
+              guided={guided}
+            />
           }
         />
+        {!repo && (
+          <RewardBuilderDialog
+            open={builderOpen}
+            onOpenChange={setBuilderOpen}
+            metricCode={workspace.metricCode}
+            onMetricCode={setMetricCode}
+            expectedField={expectedField}
+            samples={builderSamples}
+          />
+        )}
       </WizardScreen>
       {!repo && (
         <WizardScreen active={page === 1}>
