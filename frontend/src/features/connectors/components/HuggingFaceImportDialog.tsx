@@ -279,9 +279,11 @@ export function HuggingFaceImportDialog({
           <div className="flex items-center gap-2.5">
             <HuggingFace.Avatar size={28} />
             <div className="min-w-0">
-              <DialogTitle className="text-base">{msg("hf_import.title")}</DialogTitle>
+              <DialogTitle className="text-base">
+                {msg(onPick ? "hf_import.pick_title" : "hf_import.title")}
+              </DialogTitle>
               <DialogDescription className="mt-0.5 text-xs">
-                {msg("hf_import.subtitle")}
+                {msg(onPick ? "hf_import.pick_subtitle" : "hf_import.subtitle")}
               </DialogDescription>
             </div>
           </div>

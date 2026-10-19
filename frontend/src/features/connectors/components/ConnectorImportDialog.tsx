@@ -440,10 +440,12 @@ export function ConnectorImportDialog({
             <meta.Avatar size={28} />
             <div className="min-w-0">
               <DialogTitle className="text-base">
-                {formatMsg("connector_import.title", { provider: meta.name })}
+                {formatMsg(onPick ? "connector_import.pick_title" : "connector_import.title", {
+                  provider: meta.name,
+                })}
               </DialogTitle>
               <DialogDescription className="mt-0.5 text-xs">
-                {msg("connector_import.subtitle")}
+                {msg(onPick ? "connector_import.pick_subtitle" : "connector_import.subtitle")}
               </DialogDescription>
             </div>
           </div>
