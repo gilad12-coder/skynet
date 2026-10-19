@@ -71,10 +71,14 @@ import {
   type RunFailure,
 } from "../lib/run-failure";
 import {
+  WIZARD_SCHEDULE_KEY,
   WIZARD_SESSION_KEY,
   WIZARD_VIEW_KEYS,
+  decodeScheduledRun,
   decodeWizardSession,
   encodeWizardSession,
+  keepSessionValue,
+  readSessionValue,
 } from "../lib/session-state";
 import { metricUsesModel } from "../lib/scorer-dependencies";
 import { computeStepIssue, hasModel, runBlockedReason as blockedReason } from "../lib/step-issue";
@@ -352,7 +356,10 @@ export function WizardV2Provider({
   );
 
   const [submitPhase, setSubmitPhase] = useState<SubmitPhase>("idle");
-  const [scheduledRun, setScheduledRun] = useState<ContinuousEnableRequest | null>(null);
+  // Kept with the tab's setup, so a reload does not silently submit a one-off run.
+  const [scheduledRun, setScheduledRun] = useState<ContinuousEnableRequest | null>(() =>
+    restored ? decodeScheduledRun(readSessionValue(WIZARD_SCHEDULE_KEY)) : null,
+  );
   const [advancing, setAdvancing] = useState(false);
   const [runFailure, setRunFailure] = useState<RunFailure | null>(null);
   const busy = advancing || submitPhase !== "idle";
@@ -752,6 +759,15 @@ export function WizardV2Provider({
       window.sessionStorage.setItem(WIZARD_SESSION_KEY, encodeWizardSession(accountId, stored));
     } catch {}
   }, [accountId, stored]);
+  useEffect(() => {
+    if (submittedRef.current) return;
+    if (scheduledRun) keepSessionValue(WIZARD_SCHEDULE_KEY, JSON.stringify(scheduledRun));
+    else {
+      try {
+        window.sessionStorage.removeItem(WIZARD_SCHEDULE_KEY);
+      } catch {}
+    }
+  }, [scheduledRun]);
   // Leaving the page inside the app ends the setup; only a reload, which runs
   // no cleanup, finds it again.
   useEffect(() => forgetWizardSession, []);

@@ -592,13 +592,16 @@ def process_cycle(
         cycle.changes = changes
         spendable = StripeBillingService(engine=engine).spendable_cents(plan.username)
         gate = None
-        if (
-            plan.monthly_limit_cents is not None
-            and plan.monthly_limit_cents - month_committed(session, plan, cycle.month) < plan.cycle_budget_cents
-        ):
-            gate = PAUSE_ALLOWANCE
-        elif spendable < plan.cycle_budget_cents:
-            gate = PAUSE_FUNDS
+        # A retry after ``budget.pending`` already holds this cycle's budget; gating it again
+        # would demand a second full cycle budget of headroom and pause a check that is covered.
+        if cycle.execution_budget_id is None:
+            if (
+                plan.monthly_limit_cents is not None
+                and plan.monthly_limit_cents - month_committed(session, plan, cycle.month) < plan.cycle_budget_cents
+            ):
+                gate = PAUSE_ALLOWANCE
+            elif spendable < plan.cycle_budget_cents:
+                gate = PAUSE_FUNDS
         if gate is None and plan.status == PLAN_PAUSED and plan.pause_reason in SYSTEM_PAUSES:
             plan.status, plan.pause_reason = PLAN_ACTIVE, None
         if not changes:
