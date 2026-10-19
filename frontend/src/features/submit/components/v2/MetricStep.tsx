@@ -26,6 +26,7 @@ import {
 import { metricUsesModel as metricCallsModel, withScorerImports } from "../../lib/scorer-dependencies";
 import { METRIC_FILE, RUN_FILE, isSingleAnswerTask, repoIssue } from "../../lib/wizard-v2";
 import { v2Msg } from "./ArtifactConfirmCard";
+import { ScheduleRunScreen } from "./ScheduleRunScreen";
 import { ContractCheckScreen } from "./ContractCheckScreen";
 import { MetricModelRow } from "./MetricModelRow";
 import { RunOverview } from "./RunOverview";
@@ -255,7 +256,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   // stays the user's. Only the files the agent left count (a hand edit stops
   // it), and only until the overview was first reached.
   const { advanceFrom } = useWizardAutoAdvance();
-  const overviewPage = repo ? 1 : 2;
+  const overviewPage = repo ? 1 : 3;
   const [overviewSeen, setOverviewSeen] = React.useState(false);
   const [agentLeft, setAgentLeft] = React.useState<string | null>(null);
   const filesKeyRef = React.useRef(filesKey);
@@ -338,8 +339,13 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           <ContractCheckScreen cc={contract} guided={guided} active={page === 1} onBack={onBack} />
         </WizardScreen>
       )}
-      {/* A repository run has no check screen, so its overview is the second page. */}
-      <WizardScreen active={page === (repo ? 1 : 2)} className="flex flex-col overflow-hidden">
+      {!repo && (
+        <WizardScreen active={page === 2} className="overflow-y-auto">
+          <ScheduleRunScreen />
+        </WizardScreen>
+      )}
+      {/* A repository run has no check or schedule screen, so its overview is the second page. */}
+      <WizardScreen active={page === overviewPage} className="flex flex-col overflow-hidden">
         <RunOverview state={state} cc={contract} guided={guided} />
       </WizardScreen>
     </div>

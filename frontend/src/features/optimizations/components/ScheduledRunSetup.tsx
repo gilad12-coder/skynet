@@ -1,0 +1,246 @@
+"use client";
+
+import { useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { ArrowLeft, ArrowRight, Check } from "@/shared/ui/icons";
+import { Button } from "@/shared/ui/primitives/button";
+import { Input } from "@/shared/ui/primitives/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/primitives/select";
+import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
+import type { ConnectorProvider } from "@/shared/lib/api";
+import { providerMeta, useConnectors } from "@/features/connectors";
+import type {
+  ContinuousEnableRequest,
+  ContinuousPermitted,
+  ScheduleRule,
+} from "@/shared/types/continuous";
+import { cn } from "@/shared/lib/utils";
+import { enableProblem } from "../lib/continuous";
+import { browserTimeZone, defaultRule, scheduleProblem } from "../lib/continuous-schedule";
+import { ScheduleEditor } from "./ScheduleEditor";
+
+type RefreshKind = keyof ContinuousPermitted;
+type WalkStep = "refresh" | "source" | "schedule";
+
+const STEP_TITLES: Record<WalkStep, MessageKey> = {
+  refresh: "continuous_tab.permit.label",
+  source: "continuous_tab.source.label",
+  schedule: "continuous_tab.schedule.label",
+};
+
+const REFRESH_KEYS: Record<RefreshKind, MessageKey> = {
+  data: "continuous_tab.permit.data",
+  models: "continuous_tab.permit.models",
+  optimizers: "continuous_tab.permit.optimizers",
+};
+
+/** The request a finished walk sends; only a data refresh carries a source. */
+function requestFor(
+  kind: RefreshKind,
+  provider: string,
+  sourceRef: string,
+  schedule: ScheduleRule,
+): ContinuousEnableRequest {
+  const permitted: ContinuousPermitted = {
+    data: kind === "data",
+    models: kind === "models",
+    optimizers: kind === "optimizers",
+  };
+  return {
+    schedule,
+    permitted,
+    source: permitted.data && provider ? { provider, ref: sourceRef.trim() } : null,
+  };
+}
+
+/**
+ * Walks the scheduled-run settings one screen at a time, like the submit
+ * wizard: what may refresh, where the data comes from, then the schedule.
+ */
+export function ScheduledRunSetup({
+  busy = false,
+  finishLabel,
+  onFinish,
+  idPrefix,
+}: {
+  busy?: boolean;
+  finishLabel: MessageKey;
+  onFinish: (body: ContinuousEnableRequest) => void;
+  idPrefix: string;
+}) {
+  const { connectors } = useConnectors();
+  const connected = connectors.filter((c) => c.connected);
+  const [kind, setKind] = useState<RefreshKind>("data");
+  const [provider, setProvider] = useState("");
+  const [sourceRef, setSourceRef] = useState("");
+  const [schedule, setSchedule] = useState<ScheduleRule>(() => defaultRule(browserTimeZone()));
+  const [index, setIndex] = useState(0);
+  const [direction, setDirection] = useState(1);
+  const reduceMotion = useReducedMotion();
+
+  const steps: WalkStep[] = kind === "data" ? ["refresh", "source", "schedule"] : ["refresh", "schedule"];
+  const at = Math.min(index, steps.length - 1);
+  const step = steps[at]!;
+  const last = at === steps.length - 1;
+  const chosenProvider = provider || connected[0]?.provider || "";
+  const body = requestFor(kind, chosenProvider, sourceRef, schedule);
+
+  const stepProblem =
+    step === "source"
+      ? enableProblem({ permitted: body.permitted, sourceRef: chosenProvider ? sourceRef : "" })
+      : step === "schedule"
+        ? scheduleProblem(schedule)
+        : null;
+
+  const move = (to: number) => {
+    setDirection(to > at ? 1 : -1);
+    setIndex(to);
+  };
+  const next = () => {
+    if (stepProblem != null || busy) return;
+    if (last) onFinish(body);
+    else move(at + 1);
+  };
+
+  // The screens slide the way reading runs, so a Hebrew walk moves right to left.
+  const rtl = typeof document !== "undefined" && document.dir === "rtl";
+  const offset = reduceMotion ? 0 : 32 * direction * (rtl ? -1 : 1);
+
+  return (
+    <div className="flex flex-col gap-6 px-5 pt-5 pb-6 sm:px-6 sm:pt-6">
+      <ol className="flex flex-wrap items-center gap-2" aria-label={msg("continuous_tab.walk.steps")}>
+        {steps.map((s, i) => {
+          const done = i < at;
+          const current = i === at;
+          return (
+            <li key={s} className="flex items-center gap-2">
+              {i > 0 && (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "h-px w-6 transition-colors duration-300",
+                    i <= at ? "bg-primary" : "bg-border",
+                  )}
+                />
+              )}
+              <button
+                type="button"
+                disabled={!done}
+                onClick={() => move(i)}
+                aria-current={current ? "step" : undefined}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-full py-1 pe-3 ps-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  current && "bg-primary/10 font-medium text-foreground",
+                  done && "text-foreground hover:bg-muted",
+                  !current && !done && "text-muted-foreground",
+                )}
+              >
+                <span
+                  className={cn(
+                    "inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold tabular-nums transition-colors duration-300",
+                    current && "bg-primary text-primary-foreground",
+                    done && "bg-primary/15 text-primary",
+                    !current && !done && "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {done ? <Check className="size-3.5" aria-hidden /> : i + 1}
+                </span>
+                {msg(STEP_TITLES[s])}
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+
+      <div className="relative min-h-[8rem]">
+        <AnimatePresence mode="wait" initial={false} custom={offset}>
+          <motion.div
+            key={step}
+            initial={{ opacity: 0, x: offset }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -offset }}
+            transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="space-y-3"
+          >
+            {step === "refresh" && (
+              <div className="max-w-sm space-y-2">
+                <p className="text-sm text-muted-foreground">{msg("continuous_tab.walk.refresh_hint")}</p>
+                <Select value={kind} onValueChange={(v) => setKind(v as RefreshKind)}>
+                  <SelectTrigger className="w-full" aria-label={msg("continuous_tab.permit.label")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(["data", "models", "optimizers"] as const).map((key) => (
+                      <SelectItem key={key} value={key}>
+                        {msg(REFRESH_KEYS[key])}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {step === "source" &&
+              (connected.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{msg("continuous_tab.source.none")}</p>
+              ) : (
+                <div className="grid max-w-xl gap-2 sm:grid-cols-[12rem_minmax(0,1fr)]">
+                  <Select value={chosenProvider} onValueChange={setProvider}>
+                    <SelectTrigger className="w-full" aria-label={msg("continuous_tab.source.provider")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {connected.map((c) => (
+                        <SelectItem key={c.provider} value={c.provider}>
+                          {providerMeta(c.provider as ConnectorProvider).name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    dir="ltr"
+                    value={sourceRef}
+                    onChange={(e) => setSourceRef(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") next();
+                    }}
+                    placeholder={msg("continuous_tab.source.ref_placeholder")}
+                    aria-label={msg("continuous_tab.source.ref")}
+                    autoFocus
+                  />
+                </div>
+              ))}
+
+            {step === "schedule" && (
+              <ScheduleEditor value={schedule} onChange={setSchedule} idPrefix={idPrefix} />
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-5">
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {formatMsg("continuous_tab.walk.position", { n: at + 1, total: steps.length })}
+        </span>
+        <div className="flex items-center gap-2">
+          {at > 0 && (
+            <Button type="button" variant="ghost" onClick={() => move(at - 1)} disabled={busy}>
+              <ArrowLeft className="size-4 rtl:rotate-180" aria-hidden />
+              {msg("continuous_tab.walk.back")}
+            </Button>
+          )}
+          <Button type="button" onClick={next} disabled={stepProblem != null || busy}>
+            {msg(last ? finishLabel : "continuous_tab.walk.next")}
+            {!last && <ArrowRight className="size-4 rtl:rotate-180" aria-hidden />}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

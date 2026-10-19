@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "Новая версия теперь текущая.",
   "continuous_tab.toast.rejected": "Вы отклонили новую версию.",
   "continuous_tab.review.current": "Текущая",
-  "continuous_tab.review.new": "Новая"
+  "continuous_tab.review.new": "Новая",
+  "continuous_tab.walk.steps": "Шаги настройки",
+  "continuous_tab.walk.refresh_hint": "Выберите, что может изменить запуск по расписанию.",
+  "continuous_tab.walk.position": "Шаг {n} из {total}",
+  "continuous_tab.walk.back": "Назад",
+  "continuous_tab.walk.next": "Далее",
+  "continuous_tab.walk.save": "Сохранить",
+  "continuous_tab.walk.start": "Запустить",
+  "submit.v2.schedule.title": "Запуск по расписанию",
+  "submit.v2.schedule.hint": "Повторяйте эту оптимизацию по расписанию после успешного завершения.",
+  "submit.v2.schedule.off": "Выкл.",
+  "submit.v2.schedule.failed": "Запуск начался, но запуск по расписанию не сохранён: {error}"
 }

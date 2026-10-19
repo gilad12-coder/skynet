@@ -43,6 +43,9 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 _HISTORY_LIMIT = 50
 _UPCOMING_CHECKS = 3
 _BUSY_CYCLES = (engine_mod.CYCLE_CHECKING, engine_mod.CYCLE_OPTIMIZING)
+_IN_FLIGHT = frozenset(
+    {OptimizationStatus.pending.value, OptimizationStatus.validating.value, OptimizationStatus.running.value}
+)
 
 
 # Which inputs a plan may refresh on its own; anything else needs a setup change.
@@ -403,6 +406,10 @@ def create_continuous_router(
         job = _owned_job(job_store, optimization_id, current_user, payload=True)
         with _session() as session:
             plan = _plan_for_run(session, optimization_id)
+            if plan is not None and engine_mod.settle_waiting(plan, job["status"], datetime.now(UTC)):
+                session.delete(plan)
+                plan = None
+            session.commit()
             eligible = plan is None and job["status"] == OptimizationStatus.success.value and _is_unified(job)
             return ContinuousStateResponse(plan=_plan_item(session, plan) if plan else None, eligible=eligible)
 
@@ -430,7 +437,9 @@ def create_continuous_router(
                 run, or already has a plan.
         """
         job = _owned_job(job_store, optimization_id, current_user, payload=True)
-        if job["status"] != OptimizationStatus.success.value or not _is_unified(job):
+        # A run still in flight takes a waiting plan, set up from the submit wizard.
+        waiting = job["status"] in _IN_FLIGHT
+        if (job["status"] != OptimizationStatus.success.value and not waiting) or not _is_unified(job):
             raise DomainError("continuous.not_eligible", status=409)
         cycle_budget = body.cycle_budget_cents or _source_budget_cents(job_store, job, current_user.username)
         if cycle_budget is None:
@@ -440,7 +449,7 @@ def create_continuous_router(
             username=current_user.username,
             source_optimization_id=optimization_id,
             incumbent_optimization_id=optimization_id,
-            status=engine_mod.PLAN_ACTIVE,
+            status=engine_mod.PLAN_WAITING if waiting else engine_mod.PLAN_ACTIVE,
             permitted=body.permitted.model_dump(),
             source=body.source.model_dump() if body.source else None,
             pending_inputs={},
@@ -477,6 +486,8 @@ def create_continuous_router(
         """
         with _session() as session:
             plan = _owned_plan(session, plan_id, current_user)
+            if plan.status == engine_mod.PLAN_WAITING:
+                raise DomainError("continuous.not_eligible", status=409)
             plan.status = engine_mod.PLAN_PAUSED
             plan.pause_reason = engine_mod.PAUSE_USER
             plan.next_check_at = None
@@ -503,6 +514,8 @@ def create_continuous_router(
         """
         with _session() as session:
             plan = _owned_plan(session, plan_id, current_user)
+            if plan.status == engine_mod.PLAN_WAITING:
+                raise DomainError("continuous.not_eligible", status=409)
             now = datetime.now(UTC)
             plan.status = engine_mod.PLAN_ACTIVE
             plan.pause_reason = None

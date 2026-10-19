@@ -15,6 +15,7 @@ export type WizardPageId =
   | "budget"
   | "metric"
   | "check"
+  | "schedule"
   | "overview";
 
 const OPTIMIZER_SCREENS: readonly WizardPageId[] = ["optimizer", "models", "budget"];
@@ -43,7 +44,8 @@ export function stepPages(step: WizardStepId, state: WizardV2State): readonly Wi
       // A repository's setup check runs on the server at submit, so it has no check screen.
       if (state.task.repo) return ["metric", "overview"];
       // The sandbox check closes the setup on a screen of its own, and Run
-      // sits on the overview after it, away from the code editors.
-      return ["metric", "check", "overview"];
+      // sits on the overview after it, away from the code editors. Between them
+      // the user may set the run to repeat on a schedule.
+      return ["metric", "check", "schedule", "overview"];
   }
 }

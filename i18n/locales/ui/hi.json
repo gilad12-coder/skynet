@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "नया संस्करण अब मौजूदा संस्करण है।",
   "continuous_tab.toast.rejected": "आपने नया संस्करण अस्वीकार किया।",
   "continuous_tab.review.current": "मौजूदा",
-  "continuous_tab.review.new": "नया"
+  "continuous_tab.review.new": "नया",
+  "continuous_tab.walk.steps": "सेटअप चरण",
+  "continuous_tab.walk.refresh_hint": "चुनें कि शेड्यूल किया गया रन क्या बदल सकता है।",
+  "continuous_tab.walk.position": "चरण {n} / {total}",
+  "continuous_tab.walk.back": "वापस",
+  "continuous_tab.walk.next": "आगे",
+  "continuous_tab.walk.save": "सहेजें",
+  "continuous_tab.walk.start": "शुरू करें",
+  "submit.v2.schedule.title": "शेड्यूल किया गया रन",
+  "submit.v2.schedule.hint": "सफल होने के बाद इस ऑप्टिमाइज़ेशन को शेड्यूल पर फिर से चलाएँ।",
+  "submit.v2.schedule.off": "बंद",
+  "submit.v2.schedule.failed": "रन शुरू हुआ, लेकिन शेड्यूल किया गया रन सहेजा नहीं गया: {error}"
 }

@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "A nova versão é agora a versão atual.",
   "continuous_tab.toast.rejected": "Rejeitou a nova versão.",
   "continuous_tab.review.current": "Atual",
-  "continuous_tab.review.new": "Novo"
+  "continuous_tab.review.new": "Novo",
+  "continuous_tab.walk.steps": "Etapas de configuração",
+  "continuous_tab.walk.refresh_hint": "Escolha o que uma execução agendada pode alterar.",
+  "continuous_tab.walk.position": "Etapa {n} de {total}",
+  "continuous_tab.walk.back": "Voltar",
+  "continuous_tab.walk.next": "Avançar",
+  "continuous_tab.walk.save": "Salvar",
+  "continuous_tab.walk.start": "Iniciar",
+  "submit.v2.schedule.title": "Execução agendada",
+  "submit.v2.schedule.hint": "Execute esta otimização novamente em um agendamento depois que ela tiver sucesso.",
+  "submit.v2.schedule.off": "Desativada",
+  "submit.v2.schedule.failed": "A execução começou, mas a execução agendada não foi salva: {error}"
 }

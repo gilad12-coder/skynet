@@ -60,6 +60,8 @@ CONTINUOUS_SWEEP_LOCK_KEY = 7_412_093_551
 
 PLAN_ACTIVE = "active"
 PLAN_PAUSED = "paused"
+# A plan set up in the submit wizard waits for its first run, and starts once that run succeeds.
+PLAN_WAITING = "waiting"
 PAUSE_USER = "user"
 PAUSE_ALLOWANCE = "allowance"
 PAUSE_FUNDS = "funds"
@@ -663,6 +665,45 @@ def next_check_after(plan: ContinuousPlanModel, after: datetime) -> datetime:
     return next_runs(plan_rule(plan), after, anchor=plan_anchor(plan) or after)[0]
 
 
+def settle_waiting(plan: ContinuousPlanModel, job_status: str | None, now: datetime) -> bool:
+    """Start a waiting plan once its first run succeeded, or drop it once that run ended otherwise.
+
+    Args:
+        plan: A plan, in any state.
+        job_status: Status of the plan's source run, or ``None`` when the run is gone.
+        now: Current time.
+
+    Returns:
+        ``True`` when the plan ended and the caller must delete it.
+    """
+    if plan.status != PLAN_WAITING:
+        return False
+    if job_status == OptimizationStatus.success.value:
+        plan.status = PLAN_ACTIVE
+        plan.next_check_at = next_check_after(plan, now)
+        plan.updated_at = now
+        return False
+    return job_status is None or job_status in _TERMINAL_JOB
+
+
+def _settle_waiting_plans(job_store: Any, now: datetime) -> None:
+    """Start or drop every waiting plan whose first run finished.
+
+    Args:
+        job_store: Job store.
+        now: Current time.
+    """
+    with Session(job_store.engine) as session:
+        for plan in session.scalars(select(ContinuousPlanModel).where(ContinuousPlanModel.status == PLAN_WAITING)):
+            try:
+                status = job_store.get_job(plan.source_optimization_id, include_payload=False)["status"]
+            except KeyError:
+                status = None
+            if settle_waiting(plan, status, now):
+                session.delete(plan)
+        session.commit()
+
+
 def _claim_due(engine: Any, now: datetime, *, only_plan_id: str | None = None) -> list[str]:
     """Claim every due check exactly once and return the new cycle ids.
 
@@ -772,6 +813,7 @@ def run_due_checks(
         ).all()
     for cycle_id in optimizing:
         review_cycle(job_store, cycle_id)
+    _settle_waiting_plans(job_store, now)
     checked = _reclaim_stale(engine, now) + _claim_due(engine, now)
     for cycle_id in checked:
         try:

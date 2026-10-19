@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "نسخه جدید اکنون نسخه فعلی است.",
   "continuous_tab.toast.rejected": "نسخه جدید را رد کردید.",
   "continuous_tab.review.current": "فعلی",
-  "continuous_tab.review.new": "جدید"
+  "continuous_tab.review.new": "جدید",
+  "continuous_tab.walk.steps": "مراحل راه‌اندازی",
+  "continuous_tab.walk.refresh_hint": "انتخاب کنید اجرای زمان‌بندی‌شده چه چیزی را می‌تواند تغییر دهد.",
+  "continuous_tab.walk.position": "مرحله {n} از {total}",
+  "continuous_tab.walk.back": "بازگشت",
+  "continuous_tab.walk.next": "بعدی",
+  "continuous_tab.walk.save": "ذخیره",
+  "continuous_tab.walk.start": "شروع",
+  "submit.v2.schedule.title": "اجرای زمان‌بندی‌شده",
+  "submit.v2.schedule.hint": "این بهینه‌سازی را پس از موفقیت، طبق زمان‌بندی دوباره اجرا کنید.",
+  "submit.v2.schedule.off": "خاموش",
+  "submit.v2.schedule.failed": "اجرا شروع شد، اما اجرای زمان‌بندی‌شده ذخیره نشد: {error}"
 }

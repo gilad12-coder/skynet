@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "La nouvelle version est maintenant la version actuelle.",
   "continuous_tab.toast.rejected": "Vous avez refusé la nouvelle version.",
   "continuous_tab.review.current": "Actuel",
-  "continuous_tab.review.new": "Nouveau"
+  "continuous_tab.review.new": "Nouveau",
+  "continuous_tab.walk.steps": "Étapes de configuration",
+  "continuous_tab.walk.refresh_hint": "Choisissez ce qu’une exécution planifiée peut modifier.",
+  "continuous_tab.walk.position": "Étape {n} sur {total}",
+  "continuous_tab.walk.back": "Retour",
+  "continuous_tab.walk.next": "Suivant",
+  "continuous_tab.walk.save": "Enregistrer",
+  "continuous_tab.walk.start": "Démarrer",
+  "submit.v2.schedule.title": "Exécution planifiée",
+  "submit.v2.schedule.hint": "Relancez cette optimisation selon un calendrier après sa réussite.",
+  "submit.v2.schedule.off": "Désactivée",
+  "submit.v2.schedule.failed": "L’exécution a démarré, mais l’exécution planifiée n’a pas été enregistrée : {error}"
 }

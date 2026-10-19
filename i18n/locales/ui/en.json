@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "The new version is now the current version.",
   "continuous_tab.toast.rejected": "You rejected the new version.",
   "continuous_tab.review.current": "Current",
-  "continuous_tab.review.new": "New"
+  "continuous_tab.review.new": "New",
+  "continuous_tab.walk.steps": "Setup steps",
+  "continuous_tab.walk.refresh_hint": "Choose what a scheduled run may change.",
+  "continuous_tab.walk.position": "Step {n} of {total}",
+  "continuous_tab.walk.back": "Back",
+  "continuous_tab.walk.next": "Next",
+  "continuous_tab.walk.save": "Save",
+  "continuous_tab.walk.start": "Start",
+  "submit.v2.schedule.title": "Scheduled run",
+  "submit.v2.schedule.hint": "Run this optimization again on a schedule after it succeeds.",
+  "submit.v2.schedule.off": "Off",
+  "submit.v2.schedule.failed": "The run started, but the scheduled run was not saved: {error}"
 }

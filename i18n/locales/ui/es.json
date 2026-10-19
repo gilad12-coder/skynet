@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "La nueva versión es ahora la versión actual.",
   "continuous_tab.toast.rejected": "Rechazaste la nueva versión.",
   "continuous_tab.review.current": "Actual",
-  "continuous_tab.review.new": "Nuevo"
+  "continuous_tab.review.new": "Nuevo",
+  "continuous_tab.walk.steps": "Pasos de configuración",
+  "continuous_tab.walk.refresh_hint": "Elige qué puede cambiar una ejecución programada.",
+  "continuous_tab.walk.position": "Paso {n} de {total}",
+  "continuous_tab.walk.back": "Atrás",
+  "continuous_tab.walk.next": "Siguiente",
+  "continuous_tab.walk.save": "Guardar",
+  "continuous_tab.walk.start": "Iniciar",
+  "submit.v2.schedule.title": "Ejecución programada",
+  "submit.v2.schedule.hint": "Vuelve a ejecutar esta optimización según un horario cuando tenga éxito.",
+  "submit.v2.schedule.off": "Desactivada",
+  "submit.v2.schedule.failed": "La ejecución empezó, pero no se guardó la ejecución programada: {error}"
 }
