@@ -661,7 +661,7 @@ def next_check_after(plan: ContinuousPlanModel, after: datetime) -> datetime:
     return next_runs(plan_rule(plan), after, anchor=plan_anchor(plan) or after)[0]
 
 
-def _claim_due(engine: Any, now: datetime) -> list[str]:
+def _claim_due(engine: Any, now: datetime, *, only_plan_id: str | None = None) -> list[str]:
     """Claim every due check exactly once and return the new cycle ids.
 
     The plan's ``next_check_at`` is advanced with a compare-and-set and the
@@ -673,17 +673,19 @@ def _claim_due(engine: Any, now: datetime) -> list[str]:
     Args:
         engine: Database engine.
         now: Current time.
+        only_plan_id: Claim only this plan's check; every plan when omitted.
 
     Returns:
         Ids of the cycles this call claimed.
     """
+    query = select(ContinuousPlanModel).where(
+        ContinuousPlanModel.next_check_at.is_not(None),
+        ContinuousPlanModel.next_check_at <= now,
+    )
+    if only_plan_id is not None:
+        query = query.where(ContinuousPlanModel.id == only_plan_id)
     with Session(engine) as session:
-        due = session.scalars(
-            select(ContinuousPlanModel).where(
-                ContinuousPlanModel.next_check_at.is_not(None),
-                ContinuousPlanModel.next_check_at <= now,
-            )
-        ).all()
+        due = session.scalars(query).all()
         plans = [(plan.id, plan.next_check_at, next_check_after(plan, now)) for plan in due]
     claimed = []
     for plan_id, slot_at, following in plans:
@@ -779,13 +781,26 @@ def run_due_checks(
     return checked
 
 
-# Set by :func:`request_sweep` so a "check now" runs without waiting for the timer.
-_SWEEP_REQUESTED = threading.Event()
+def check_plan_now(job_store: Any, service: Any, plan_id: str, *, fetch_rows: RowFetcher = fetch_source_rows) -> None:
+    """Claim and run one plan's due check now, without waiting for a sweep.
 
+    "Check now" calls this right after it makes the check due. Sweeps run on
+    one replica at a time and can lag by minutes, so the click must not wait
+    for one. The claim is the same compare-and-set as a sweep's, so a sweep
+    that reaches the plan first leaves nothing to claim here, and the reverse.
 
-def request_sweep() -> None:
-    """Ask this process's sweeper to run a pass now instead of at its next tick."""
-    _SWEEP_REQUESTED.set()
+    Args:
+        job_store: Job store.
+        service: Optimization service handed to the in-process worker.
+        plan_id: The plan whose check is due.
+        fetch_rows: Reads a source's rows.
+    """
+    for cycle_id in _claim_due(job_store.engine, datetime.now(UTC), only_plan_id=plan_id):
+        try:
+            process_cycle(job_store, service, cycle_id, fetch_rows=fetch_rows)
+        except Exception:
+            # The lease expires and a later sweep retries, as for a swept check.
+            logger.exception("Continuous cycle %s failed", cycle_id)
 
 
 class ContinuousSweeper:
@@ -813,7 +828,6 @@ class ContinuousSweeper:
     def stop(self) -> None:
         """Stop the background sweep loop."""
         self._stop_event.set()
-        _SWEEP_REQUESTED.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
 
@@ -827,12 +841,8 @@ class ContinuousSweeper:
             logger.warning("Continuous sweep failed", exc_info=True)
 
     def _run(self) -> None:
-        """Sweep on every tick or request until stopped."""
-        while True:
-            _SWEEP_REQUESTED.wait(self._interval_seconds)
-            _SWEEP_REQUESTED.clear()
-            if self._stop_event.is_set():
-                return
+        """Sweep until stopped."""
+        while not self._stop_event.wait(self._interval_seconds):
             self.sweep_once()
 
 

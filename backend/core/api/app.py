@@ -1345,7 +1345,7 @@ def create_app(
     app.include_router(create_dataset_library_router(job_store=job_store), tags=["Datasets"])
     app.include_router(create_dataset_share_router(job_store=job_store), tags=["Datasets"])
     app.include_router(create_folders_router(job_store=job_store), tags=["Folders"])
-    app.include_router(create_continuous_router(job_store=job_store), tags=["Optimizations"])
+    app.include_router(create_continuous_router(job_store=job_store, service=service), tags=["Optimizations"])
     app.include_router(create_connectors_router(job_store=job_store), tags=["Connectors"])
     app.include_router(create_saved_secrets_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_tagging_session_router(job_store=job_store), tags=["Optimizations"])

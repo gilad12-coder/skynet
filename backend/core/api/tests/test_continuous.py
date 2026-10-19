@@ -298,11 +298,12 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Env]:
         return JSONResponse(status_code=exc.status_code, content={"code": exc.code, "params": exc.params})
 
     app.include_router(submissions.create_submissions_router(service=object(), job_store=store))
-    app.include_router(create_continuous_router(job_store=store))
+    environment = _Env(fixture, rows=_cases(["A"] * 10))
+    app.include_router(create_continuous_router(job_store=store, service=object(), fetch_rows=environment.fetch))
     app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(fixture.username, fixture.role, ())
     with TestClient(app) as client:
         fixture.client = client
-        yield _Env(fixture, rows=_cases(["A"] * 10))
+        yield environment
     store.engine.dispose()
 
 
@@ -804,15 +805,15 @@ def test_preview_lists_the_next_three_checks(env: _Env) -> None:
 
 
 def test_check_now_runs_a_check_and_the_schedule_continues(env: _Env) -> None:
-    """Check now makes a check due at once; unchanged inputs still only record a skip."""
+    """Check now runs a check at once; unchanged inputs still only record a skip."""
     plan = _enable(env, _incumbent(env))
     scheduled = env.plan().next_check_at
     jobs_before = env.count(JobModel)
 
     now_plan = env.client.post(f"/continuous/{plan['id']}/check-now").json()
     assert datetime.fromisoformat(now_plan["next_check_at"]) <= datetime.now(UTC)
-    env.sweep(datetime.now(UTC) + timedelta(seconds=1))
 
+    # The check ran with the request, not at a later sweep.
     [cycle] = env.cycles()
     assert (cycle.status, cycle.detail_code) == ("skipped", "continuous.skip_unchanged")
     assert env.count(JobModel) == jobs_before

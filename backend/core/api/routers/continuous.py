@@ -22,7 +22,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -326,11 +326,15 @@ def _plan_for_run(session: Session, optimization_id: str) -> ContinuousPlanModel
     return session.get(ContinuousPlanModel, plan_id) if plan_id else None
 
 
-def create_continuous_router(*, job_store) -> APIRouter:
+def create_continuous_router(
+    *, job_store, service, fetch_rows: engine_mod.RowFetcher = engine_mod.fetch_source_rows
+) -> APIRouter:
     """Build the continuous-optimization router.
 
     Args:
         job_store: Job store whose engine holds the plans.
+        service: Optimization service a "check now" hands its run to.
+        fetch_rows: Reads a source's rows for a "check now".
 
     Returns:
         The router.
@@ -501,14 +505,17 @@ def create_continuous_router(*, job_store) -> APIRouter:
         response_model=ContinuousPlanItem,
         summary="Run the next continuous check now",
     )
-    def check_now(plan_id: str, current_user: AuthenticatedUserDep) -> ContinuousPlanItem:
-        """Make the next check due now; the schedule continues after it.
+    def check_now(
+        plan_id: str, background_tasks: BackgroundTasks, current_user: AuthenticatedUserDep
+    ) -> ContinuousPlanItem:
+        """Make the next check due now and run it after responding; the schedule continues after it.
 
         The check follows the usual rules, so unchanged inputs are recorded as
         skipped and start no run.
 
         Args:
             plan_id: The plan.
+            background_tasks: Runs the check once the response is sent.
             current_user: The caller.
 
         Returns:
@@ -533,7 +540,7 @@ def create_continuous_router(*, job_store) -> APIRouter:
             plan.updated_at = now
             session.commit()
             item = _plan_item(session, plan)
-        engine_mod.request_sweep()
+        background_tasks.add_task(engine_mod.check_plan_now, job_store, service, plan_id, fetch_rows=fetch_rows)
         return item
 
     @router.post(
