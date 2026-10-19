@@ -295,8 +295,10 @@ function EnableForm({
   const [sourceDraft, setSourceDraft] = useState("");
   // The location counts only when the user leaves the field, so a half-typed path never starts a run.
   const [sourceRef, setSourceRef] = useState("");
-  const started = useRef(false);
   const chosenProvider = provider || connected[0]?.provider || "";
+  // The settings last sent. A failed start retries only once the user changes one, never in a loop.
+  const sentKey = useRef<string | null>(null);
+  const formKey = JSON.stringify([schedule, refreshKind, chosenProvider, sourceRef]);
   const problem =
     scheduleProblem(schedule) ??
     enableProblem({
@@ -305,15 +307,15 @@ function EnableForm({
     });
 
   useEffect(() => {
-    if (problem != null || busy || started.current) return;
-    started.current = true;
+    if (problem != null || busy || sentKey.current === formKey) return;
+    sentKey.current = formKey;
     onEnable({
       schedule,
       permitted,
       source: permitted.data && chosenProvider ? { provider: chosenProvider, ref: sourceRef } : null,
     });
     // Only a newly complete form starts the plan; the values are read at that moment.
-  }, [problem, busy]);
+  }, [problem, busy, formKey]);
 
   return (
     <Card className="py-0">
