@@ -97,6 +97,12 @@ export function RewardBuilderDialog({
       <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
         <DialogContent
           style={FULL_SCREEN}
+          // Focus would land on Import and open its tooltip over the card, so
+          // the sheet itself takes focus; Tab still reaches Import first.
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).focus();
+          }}
           className="flex h-dvh max-h-none w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
         >
           <div className="shrink-0 border-b border-border/50 px-4 py-3 pe-14 sm:px-6">
