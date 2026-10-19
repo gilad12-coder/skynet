@@ -104,8 +104,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#FCFCFB" },
-    { media: "(prefers-color-scheme: dark)", color: "#151515" },
+    { media: "(prefers-color-scheme: light)", color: "#f9f4ee" },
+    { media: "(prefers-color-scheme: dark)", color: "#180e0c" },
   ],
 };
 
@@ -123,8 +123,8 @@ export async function generateMetadata(): Promise<Metadata> {
     icons: {
       // Versioned to evict browsers' sticky favicon caches, which survive
       // hard refreshes and kept serving the original robot-arm icon.
-      icon: "/favicon.svg?v=8",
-      apple: "/favicon.svg?v=8",
+      icon: "/favicon.svg?v=9",
+      apple: "/favicon.svg?v=9",
     },
     metadataBase: new URL(siteUrl),
     alternates: {

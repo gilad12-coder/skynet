@@ -181,18 +181,20 @@
 }
 
 /* ════════════════════════════════════════════
-   LIGHT MODE — Warm monochromatic palette
-   Beige / Brown / Cream / Warm greys
+   LIGHT MODE — Hoatzin palette
+   Anchors: terracotta #a4593e, chestnut #58210f, golden tan #a77748,
+   warm charcoal #615952, near-black #180e0c, warm cream #dcc2a2.
+   Cream-tint surfaces, near-black text, charcoal muted text.
    ════════════════════════════════════════════ */
 :root {
   color-scheme: light;
 
-  --code-keyword: #b4532f;
+  --code-keyword: #a4593e;
   --code-operator: #515256;
-  --code-accent: #8a4a2f;
+  --code-accent: #58210f;
   --code-type: #8a6a12;
-  --code-number: #a85a1c;
-  --code-text: #1c1612;
+  --code-number: #8b5934;
+  --code-text: #180e0c;
   --code-string: #3f7a3a;
   --code-comment: #88898d;
   --code-punct: #78797c;
@@ -203,40 +205,40 @@
   --duration-base: 160ms;
   --ease-snappy: cubic-bezier(0.2, 0.8, 0.2, 1);
 
-  --background: #fcfaf7;
-  --foreground: #1c1612;
-  --card: #ffffff;
-  --card-foreground: #1c1612;
-  --popover: #ffffff;
-  --popover-foreground: #1c1612;
-  --primary: #b4521f;
+  --background: #f9f4ee;
+  --foreground: #180e0c;
+  --card: #fdfbf9;
+  --card-foreground: #180e0c;
+  --popover: #fefdfb;
+  --popover-foreground: #180e0c;
+  --primary: #a4593e;
   --primary-foreground: #ffffff;
-  --primary-hover: #8f4318;
-  --primary-fill: #b4521f;
-  --secondary: #f3eee8;
-  --secondary-foreground: #1c1612;
-  --muted: #f3eee8;
-  --muted-foreground: #706356;
-  --accent: #ede6dd;
-  --accent-foreground: #1c1612;
-  --accent-muted: rgba(180, 82, 31, 0.05);
+  --primary-hover: #58210f;
+  --primary-fill: #a4593e;
+  --secondary: #f1e7da;
+  --secondary-foreground: #180e0c;
+  --muted: #f1e7da;
+  --muted-foreground: #615952;
+  --accent: #eddfcf;
+  --accent-foreground: #180e0c;
+  --accent-muted: rgba(164, 89, 62, 0.05);
   --destructive: #d03b3b;
-  --border: #e6ded4;
-  --input: #d8cdc0;
-  --ring: #b4521f;
+  --border: #e8d7c2;
+  --input: #c6af94;
+  --ring: #a4593e;
 
-  --bg: #f5f0ea;
-  --surface-1: #ffffff;
-  --surface-2: #faf7f3;
-  --surface-3: #f3eee8;
+  --bg: #f6efe7;
+  --surface-1: #fdfbf9;
+  --surface-2: #fbf8f4;
+  --surface-3: #f1e7da;
   --splash-ground: var(--surface-3);
   --splash-ink: var(--foreground);
-  --border-subtle: #ece5dc;
-  --text-1: #1c1612;
-  --text-2: #574a3f;
-  --text-3: #706356;
-  --blue: #b4521f;
-  --blue-light: rgba(180, 82, 31, 0.1);
+  --border-subtle: #eee0d0;
+  --text-1: #180e0c;
+  --text-2: #3c342f;
+  --text-3: #615952;
+  --blue: #a4593e;
+  --blue-light: rgba(164, 89, 62, 0.1);
 
   --danger: #c4413a;
   --danger-dim: rgba(196, 65, 58, 0.1);
@@ -255,113 +257,115 @@
   --shadow-card: none;
   --shadow-hover: none;
   --shadow-inset: none;
-  --shadow-float: 0 8px 24px -6px rgba(19, 19, 19, 0.14), 0 2px 6px -2px rgba(19, 19, 19, 0.08);
+  --shadow-float: 0 8px 24px -6px rgba(24, 14, 12, 0.14), 0 2px 6px -2px rgba(24, 14, 12, 0.08);
 
   /* Run-status palette (Light): success is teal, failed red, running the hoatzin's blue face
      so it never reads as failure; crest-tinted pending and paused sit apart by lightness. */
   --status-success: var(--success);
   --status-running: #3f6faa;
   --status-failed: var(--danger);
-  --status-pending: #f1dccb;
-  --status-paused: #a0694a;
-  --status-cancelled: #a89a8c;
+  --status-pending: #eadac7;
+  --status-paused: #a77748;
+  --status-cancelled: #988876;
   --tree-pass: var(--primary);
   --tree-fail: var(--muted-foreground);
-  --tree-winner: #9c7a3f;
-  --tree-winner-halo: rgba(156, 122, 63, 0.18);
-  --tree-winner-fill: #f8ebc8;
-  --tree-winner-number: #1c1612;
+  --tree-winner: #a77748;
+  --tree-winner-halo: rgba(167, 119, 72, 0.18);
+  --tree-winner-fill: #ede4da;
+  --tree-winner-number: #180e0c;
   --tree-winner-badge-ink: #ffffff;
-  --tree-ghost-fill: #e8e1d8;
+  --tree-ghost-fill: #ecddcc;
   --tree-grid: oklch(0.91 0.006 50);
   --trust-ask: #3d6db0;
   --trust-auto-safe: #2e7d4f;
   --trust-yolo: #c03a3a;
 
-  --chart-1: #b4521f;
-  --chart-2: #cf7a3a;
-  --chart-3: #ddb27c;
-  --chart-4: #6aa5dc;
-  --chart-5: #c9def2;
+  --chart-1: #a4593e;
+  --chart-2: #a77748;
+  --chart-3: #dcc2a2;
+  --chart-4: #58210f;
+  --chart-5: #615952;
 
-  --gradient-progress: linear-gradient(90deg, #8f4318, #b4521f, #cf7a3a);
+  --gradient-progress: linear-gradient(90deg, #58210f, #a4593e, #a77748);
 
-  --sidebar: #f5f0ea;
-  --sidebar-foreground: #1c1612;
-  --sidebar-primary: #b4521f;
+  --sidebar: #f6efe7;
+  --sidebar-foreground: #180e0c;
+  --sidebar-primary: #a4593e;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #ede6dd;
-  --sidebar-accent-foreground: #1c1612;
-  --sidebar-border: #e6ded4;
-  --sidebar-ring: #b4521f;
+  --sidebar-accent: #eddfcf;
+  --sidebar-accent-foreground: #180e0c;
+  --sidebar-border: #e8d7c2;
+  --sidebar-ring: #a4593e;
 
-  --skeleton-base: #ede6dd;
-  --skeleton-highlight: #f6f2ed;
-  --scrollbar-thumb: rgba(28, 22, 18, 0.18);
-  --scrollbar-thumb-hover: rgba(28, 22, 18, 0.32);
+  --skeleton-base: #eddfcf;
+  --skeleton-highlight: #f7f2eb;
+  --scrollbar-thumb: rgba(24, 14, 12, 0.18);
+  --scrollbar-thumb-hover: rgba(24, 14, 12, 0.32);
   /* Hover/glow tints and the dim behind overlays. */
-  --gold-tint: rgba(180, 82, 31, 0.1);
-  --spotlight-dim: rgba(28, 22, 18, 0.56);
+  --gold-tint: rgba(164, 89, 62, 0.1);
+  --spotlight-dim: rgba(24, 14, 12, 0.56);
 }
 
 /* ════════════════════════════════════════════
    DARK MODE
-   Bronze-brown: page #221d19, cards a step up,
-   borders #483d34. Warm off-white text, taupe muted
-   text, rufous accent (deep #b4521f fills, #e0935a
-   text). Every text pair clears WCAG AA.
+   Hoatzin palette: near-black page #180e0c,
+   chestnut-based cards a step up. Warm cream text,
+   light charcoal muted text, terracotta accent (deep
+   #a4593e fills, lifted #bc8568 text). Every text
+   pair clears WCAG AA.
    ════════════════════════════════════════════ */
 .dark {
   color-scheme: dark;
 
-  --code-keyword: #e39b7b;
+  --code-keyword: #c39375;
   --code-operator: #c2c3c8;
-  --code-accent: #e8b48f;
+  --code-accent: #e8d3b8;
   --code-type: #dcbc72;
-  --code-number: #e6a86e;
-  --code-text: #f3ede6;
+  --code-number: #c29c75;
+  --code-text: #dcc2a2;
   --code-string: #a9c48d;
   --code-comment: #8b8c92;
   --code-punct: #a0a1a6;
   --code-function: #8fb8de;
 
-  --background: #221d19;
-  --foreground: #f3ede6;
-  --card: #2c2621;
-  --card-foreground: #f3ede6;
-  --popover: #312a24;
-  --popover-foreground: #f3ede6;
-  --primary: #e0935a;
+  --background: #180e0c;
+  --foreground: #dcc2a2;
+  --card: #26120d;
+  --card-foreground: #dcc2a2;
+  --popover: #2b140d;
+  --popover-foreground: #dcc2a2;
+  --primary: #bc8568;
   --primary-foreground: #ffffff;
-  /* Solid surfaces (buttons, bars, dots) keep the deep Light rufous with white on top and
-     brighten on hover; --primary is a lifted amber because it also colours text on dark. */
-  --primary-hover: #c9622a;
-  --primary-fill: #b4521f;
-  --secondary: #382f28;
-  --secondary-foreground: #f3ede6;
-  --muted: #382f28;
-  --muted-foreground: #a89a8c;
-  --accent: #3e342c;
-  --accent-foreground: #f3ede6;
-  --accent-muted: rgba(224, 147, 90, 0.06);
+  /* Solid surfaces (buttons, bars, dots) keep the deep Light terracotta with white on top and
+     deepen toward chestnut on hover; --primary is a lifted terracotta because it also
+     colours text on dark. */
+  --primary-hover: #954e35;
+  --primary-fill: #a4593e;
+  --secondary: #32160d;
+  --secondary-foreground: #dcc2a2;
+  --muted: #32160d;
+  --muted-foreground: #a5937e;
+  --accent: #37170d;
+  --accent-foreground: #dcc2a2;
+  --accent-muted: rgba(188, 133, 104, 0.06);
   --destructive: #e66767;
-  --border: #483d34;
-  --input: #54483d;
-  --ring: #e0935a;
+  --border: #442e25;
+  --input: #4b3830;
+  --ring: #bc8568;
 
-  --bg: #1c1814;
-  --surface-1: #2c2621;
-  --surface-2: #27211d;
-  --surface-3: #382f28;
+  --bg: #120a09;
+  --surface-1: #26120d;
+  --surface-2: #21110c;
+  --surface-3: #32160d;
   /* The setup splash sits on the page's near-black with pure white type, for full contrast. */
   --splash-ground: var(--background);
   --splash-ink: #ffffff;
-  --border-subtle: #3a312a;
-  --text-1: #f3ede6;
-  --text-2: #cdbfb1;
-  --text-3: #a0917f;
-  --blue: #e0935a;
-  --blue-light: rgba(224, 147, 90, 0.14);
+  --border-subtle: #36221b;
+  --text-1: #dcc2a2;
+  --text-2: #bda88e;
+  --text-3: #988876;
+  --blue: #bc8568;
+  --blue-light: rgba(188, 133, 104, 0.14);
 
   --danger: #ef8a6a;
   --danger-dim: rgba(239, 138, 106, 0.15);
@@ -380,44 +384,44 @@
   --status-success: var(--success);
   --status-running: #82b8e6;
   --status-failed: var(--danger);
-  --status-pending: #5a3e2c;
-  --status-paused: #c08a66;
-  --status-cancelled: #75695e;
+  --status-pending: #3e190e;
+  --status-paused: #c29c75;
+  --status-cancelled: #73695e;
   --tree-pass: var(--primary);
   --tree-fail: var(--muted-foreground);
-  --tree-winner: #d9a441;
-  --tree-winner-halo: rgba(217, 164, 65, 0.22);
-  --tree-winner-fill: #8a6212;
+  --tree-winner: #c29c75;
+  --tree-winner-halo: rgba(194, 156, 117, 0.22);
+  --tree-winner-fill: #875531;
   --tree-winner-number: #ffffff;
-  --tree-winner-badge-ink: #2a1f08;
-  --tree-ghost-fill: #382f28;
+  --tree-winner-badge-ink: #180e0c;
+  --tree-ghost-fill: #32160d;
   --tree-grid: rgba(255, 255, 255, 0.07);
   --trust-ask: #7ba3dd;
   --trust-auto-safe: #7fbf8e;
   --trust-yolo: #e8706a;
 
-  --chart-1: #e0935a;
-  --chart-2: #f0b98a;
-  --chart-3: #ddb27c;
-  --chart-4: #82b8e6;
-  --chart-5: #8a7d70;
+  --chart-1: #bc8568;
+  --chart-2: #c29c75;
+  --chart-3: #dcc2a2;
+  --chart-4: #a5937e;
+  --chart-5: #7e3d26;
 
-  --gradient-progress: linear-gradient(90deg, #b4521f, #e0935a, #f0b98a);
+  --gradient-progress: linear-gradient(90deg, #a4593e, #bc8568, #c29c75);
 
-  --sidebar: #1c1814;
-  --sidebar-foreground: #f3ede6;
-  --sidebar-primary: #e0935a;
+  --sidebar: #120a09;
+  --sidebar-foreground: #dcc2a2;
+  --sidebar-primary: #bc8568;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #382f28;
-  --sidebar-accent-foreground: #f3ede6;
-  --sidebar-border: #483d34;
-  --sidebar-ring: #e0935a;
+  --sidebar-accent: #32160d;
+  --sidebar-accent-foreground: #dcc2a2;
+  --sidebar-border: #442e25;
+  --sidebar-ring: #bc8568;
 
-  --skeleton-base: #312a24;
-  --skeleton-highlight: #3e342c;
+  --skeleton-base: #2b140d;
+  --skeleton-highlight: #37170d;
   --scrollbar-thumb: rgba(255, 255, 255, 0.16);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
-  --gold-tint: rgba(224, 147, 90, 0.14);
+  --gold-tint: rgba(188, 133, 104, 0.14);
   /* The page is already near-black, so the tour's dim goes deeper still to
      read as a dim. */
   --spotlight-dim: rgba(0, 0, 0, 0.62);
