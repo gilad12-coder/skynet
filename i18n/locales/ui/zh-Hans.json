@@ -4270,9 +4270,17 @@
   "continuous_tab.cycle.approved": "已批准",
   "continuous_tab.cycle.rejected": "已拒绝",
   "continuous_tab.review.title": "新版本可供审核",
-  "continuous_tab.next_check_label": "下次检查",
   "continuous_tab.refreshes_label": "可以刷新",
   "continuous_tab.version_label": "当前版本",
+  "continuous_tab.next_check_on": "下次检查：{when}",
+  "continuous_tab.allowance_label": "每月上限",
+  "continuous_tab.toast.enabled": "计划运行已开启。",
+  "continuous_tab.toast.paused": "计划运行已暂停。",
+  "continuous_tab.toast.resumed": "计划运行已重新开启。",
+  "continuous_tab.toast.schedule_saved": "计划已保存。",
+  "continuous_tab.toast.inputs_saved": "更改已保存，将在下次检查时使用。",
+  "continuous_tab.toast.approved": "新版本现在是当前版本。",
+  "continuous_tab.toast.rejected": "你拒绝了新版本。",
   "continuous_tab.review.current": "当前",
   "continuous_tab.review.new": "新"
 }

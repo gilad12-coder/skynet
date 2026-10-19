@@ -4270,9 +4270,17 @@
   "continuous_tab.cycle.approved": "אושרה",
   "continuous_tab.cycle.rejected": "נדחתה",
   "continuous_tab.review.title": "גרסה חדשה מוכנה לבדיקה",
-  "continuous_tab.next_check_label": "הבדיקה הבאה",
   "continuous_tab.refreshes_label": "מותר לרענן",
   "continuous_tab.version_label": "הגרסה הנוכחית",
+  "continuous_tab.next_check_on": "הבדיקה הבאה: {when}",
+  "continuous_tab.allowance_label": "מגבלה חודשית",
+  "continuous_tab.toast.enabled": "הריצה המתוזמנת פועלת.",
+  "continuous_tab.toast.paused": "הריצה המתוזמנת מושהית.",
+  "continuous_tab.toast.resumed": "הריצה המתוזמנת פועלת שוב.",
+  "continuous_tab.toast.schedule_saved": "התזמון נשמר.",
+  "continuous_tab.toast.inputs_saved": "השינוי נשמר לבדיקה הבאה.",
+  "continuous_tab.toast.approved": "הגרסה החדשה היא עכשיו הגרסה הנוכחית.",
+  "continuous_tab.toast.rejected": "דחית את הגרסה החדשה.",
   "continuous_tab.review.current": "נוכחית",
   "continuous_tab.review.new": "חדשה"
 }

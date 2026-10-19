@@ -4270,9 +4270,17 @@
   "continuous_tab.cycle.approved": "승인됨",
   "continuous_tab.cycle.rejected": "거부됨",
   "continuous_tab.review.title": "새 버전을 검토할 수 있습니다",
-  "continuous_tab.next_check_label": "다음 확인",
   "continuous_tab.refreshes_label": "새로 고칠 수 있는 항목",
   "continuous_tab.version_label": "현재 버전",
+  "continuous_tab.next_check_on": "다음 확인: {when}",
+  "continuous_tab.allowance_label": "월 한도",
+  "continuous_tab.toast.enabled": "예약 실행이 켜졌습니다.",
+  "continuous_tab.toast.paused": "예약 실행이 일시 중지되었습니다.",
+  "continuous_tab.toast.resumed": "예약 실행이 다시 켜졌습니다.",
+  "continuous_tab.toast.schedule_saved": "일정이 저장되었습니다.",
+  "continuous_tab.toast.inputs_saved": "다음 확인을 위해 변경 사항이 저장되었습니다.",
+  "continuous_tab.toast.approved": "새 버전이 이제 현재 버전입니다.",
+  "continuous_tab.toast.rejected": "새 버전을 거부했습니다.",
   "continuous_tab.review.current": "현재",
   "continuous_tab.review.new": "새 후보"
 }

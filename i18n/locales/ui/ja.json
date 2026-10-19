@@ -4270,9 +4270,17 @@
   "continuous_tab.cycle.approved": "承認済み",
   "continuous_tab.cycle.rejected": "却下済み",
   "continuous_tab.review.title": "新しいバージョンを確認できます",
-  "continuous_tab.next_check_label": "次の確認",
   "continuous_tab.refreshes_label": "更新できる項目",
   "continuous_tab.version_label": "現在のバージョン",
+  "continuous_tab.next_check_on": "次の確認: {when}",
+  "continuous_tab.allowance_label": "月間上限",
+  "continuous_tab.toast.enabled": "スケジュール実行がオンになりました。",
+  "continuous_tab.toast.paused": "スケジュール実行を一時停止しました。",
+  "continuous_tab.toast.resumed": "スケジュール実行を再開しました。",
+  "continuous_tab.toast.schedule_saved": "スケジュールを保存しました。",
+  "continuous_tab.toast.inputs_saved": "次の確認に向けて変更を保存しました。",
+  "continuous_tab.toast.approved": "新しいバージョンが現在のバージョンになりました。",
+  "continuous_tab.toast.rejected": "新しいバージョンを却下しました。",
   "continuous_tab.review.current": "現在",
   "continuous_tab.review.new": "新規"
 }

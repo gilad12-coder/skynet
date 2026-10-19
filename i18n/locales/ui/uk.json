@@ -4270,9 +4270,17 @@
   "continuous_tab.cycle.approved": "Схвалено",
   "continuous_tab.cycle.rejected": "Відхилено",
   "continuous_tab.review.title": "Нова версія готова до перевірки",
-  "continuous_tab.next_check_label": "Наступна перевірка",
   "continuous_tab.refreshes_label": "Можна оновлювати",
   "continuous_tab.version_label": "Поточна версія",
+  "continuous_tab.next_check_on": "Наступна перевірка: {when}",
+  "continuous_tab.allowance_label": "Місячний ліміт",
+  "continuous_tab.toast.enabled": "Запуск за розкладом увімкнено.",
+  "continuous_tab.toast.paused": "Запуск за розкладом призупинено.",
+  "continuous_tab.toast.resumed": "Запуск за розкладом знову увімкнено.",
+  "continuous_tab.toast.schedule_saved": "Розклад збережено.",
+  "continuous_tab.toast.inputs_saved": "Зміну збережено для наступної перевірки.",
+  "continuous_tab.toast.approved": "Нова версія тепер поточна.",
+  "continuous_tab.toast.rejected": "Ви відхилили нову версію.",
   "continuous_tab.review.current": "Поточна",
   "continuous_tab.review.new": "Нова"
 }

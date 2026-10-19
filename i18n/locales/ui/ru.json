@@ -4270,9 +4270,17 @@
   "continuous_tab.cycle.approved": "Одобрена",
   "continuous_tab.cycle.rejected": "Отклонена",
   "continuous_tab.review.title": "Новая версия готова к проверке",
-  "continuous_tab.next_check_label": "Следующая проверка",
   "continuous_tab.refreshes_label": "Можно обновлять",
   "continuous_tab.version_label": "Текущая версия",
+  "continuous_tab.next_check_on": "Следующая проверка: {when}",
+  "continuous_tab.allowance_label": "Месячный лимит",
+  "continuous_tab.toast.enabled": "Запуск по расписанию включён.",
+  "continuous_tab.toast.paused": "Запуск по расписанию приостановлен.",
+  "continuous_tab.toast.resumed": "Запуск по расписанию снова включён.",
+  "continuous_tab.toast.schedule_saved": "Расписание сохранено.",
+  "continuous_tab.toast.inputs_saved": "Изменение сохранено для следующей проверки.",
+  "continuous_tab.toast.approved": "Новая версия теперь текущая.",
+  "continuous_tab.toast.rejected": "Вы отклонили новую версию.",
   "continuous_tab.review.current": "Текущая",
   "continuous_tab.review.new": "Новая"
 }

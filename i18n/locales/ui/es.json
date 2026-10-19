@@ -4270,9 +4270,17 @@
   "continuous_tab.cycle.approved": "Aprobada",
   "continuous_tab.cycle.rejected": "Rechazada",
   "continuous_tab.review.title": "Una nueva versión está lista para revisar",
-  "continuous_tab.next_check_label": "Próxima revisión",
   "continuous_tab.refreshes_label": "Puede actualizar",
   "continuous_tab.version_label": "Versión actual",
+  "continuous_tab.next_check_on": "Próxima revisión: {when}",
+  "continuous_tab.allowance_label": "Límite mensual",
+  "continuous_tab.toast.enabled": "La ejecución programada está activa.",
+  "continuous_tab.toast.paused": "La ejecución programada está en pausa.",
+  "continuous_tab.toast.resumed": "La ejecución programada vuelve a estar activa.",
+  "continuous_tab.toast.schedule_saved": "El horario está guardado.",
+  "continuous_tab.toast.inputs_saved": "El cambio está guardado para la próxima revisión.",
+  "continuous_tab.toast.approved": "La nueva versión es ahora la versión actual.",
+  "continuous_tab.toast.rejected": "Rechazaste la nueva versión.",
   "continuous_tab.review.current": "Actual",
   "continuous_tab.review.new": "Nuevo"
 }

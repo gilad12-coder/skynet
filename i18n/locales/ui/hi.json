@@ -4270,9 +4270,17 @@
   "continuous_tab.cycle.approved": "मंज़ूर",
   "continuous_tab.cycle.rejected": "अस्वीकृत",
   "continuous_tab.review.title": "नया संस्करण समीक्षा के लिए तैयार है",
-  "continuous_tab.next_check_label": "अगली जाँच",
   "continuous_tab.refreshes_label": "रीफ़्रेश हो सकता है",
   "continuous_tab.version_label": "मौजूदा संस्करण",
+  "continuous_tab.next_check_on": "अगली जाँच: {when}",
+  "continuous_tab.allowance_label": "मासिक सीमा",
+  "continuous_tab.toast.enabled": "शेड्यूल किया गया रन चालू है।",
+  "continuous_tab.toast.paused": "शेड्यूल किया गया रन रुका हुआ है।",
+  "continuous_tab.toast.resumed": "शेड्यूल किया गया रन फिर से चालू है।",
+  "continuous_tab.toast.schedule_saved": "शेड्यूल सहेजा गया।",
+  "continuous_tab.toast.inputs_saved": "बदलाव अगली जाँच के लिए सहेजा गया।",
+  "continuous_tab.toast.approved": "नया संस्करण अब मौजूदा संस्करण है।",
+  "continuous_tab.toast.rejected": "आपने नया संस्करण अस्वीकार किया।",
   "continuous_tab.review.current": "मौजूदा",
   "continuous_tab.review.new": "नया"
 }

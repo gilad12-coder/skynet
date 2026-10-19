@@ -4270,9 +4270,17 @@
   "continuous_tab.cycle.approved": "تمت الموافقة",
   "continuous_tab.cycle.rejected": "مرفوض",
   "continuous_tab.review.title": "نسخة جديدة جاهزة للمراجعة",
-  "continuous_tab.next_check_label": "الفحص التالي",
   "continuous_tab.refreshes_label": "يمكن تحديث",
   "continuous_tab.version_label": "النسخة الحالية",
+  "continuous_tab.next_check_on": "الفحص التالي: {when}",
+  "continuous_tab.allowance_label": "الحد الشهري",
+  "continuous_tab.toast.enabled": "التشغيل المجدول يعمل.",
+  "continuous_tab.toast.paused": "التشغيل المجدول متوقف مؤقتًا.",
+  "continuous_tab.toast.resumed": "التشغيل المجدول يعمل مرة أخرى.",
+  "continuous_tab.toast.schedule_saved": "تم حفظ الجدول.",
+  "continuous_tab.toast.inputs_saved": "تم حفظ التغيير للفحص التالي.",
+  "continuous_tab.toast.approved": "الإصدار الجديد هو الآن الإصدار الحالي.",
+  "continuous_tab.toast.rejected": "لقد رفضت الإصدار الجديد.",
   "continuous_tab.review.current": "الحالية",
   "continuous_tab.review.new": "الجديدة"
 }

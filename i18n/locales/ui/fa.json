@@ -4270,9 +4270,17 @@
   "continuous_tab.cycle.approved": "تأییدشده",
   "continuous_tab.cycle.rejected": "ردشده",
   "continuous_tab.review.title": "نسخهٔ جدید آمادهٔ بررسی است",
-  "continuous_tab.next_check_label": "بررسی بعدی",
   "continuous_tab.refreshes_label": "مجاز به به‌روزرسانی",
   "continuous_tab.version_label": "نسخهٔ فعلی",
+  "continuous_tab.next_check_on": "بررسی بعدی: {when}",
+  "continuous_tab.allowance_label": "سقف ماهانه",
+  "continuous_tab.toast.enabled": "اجرای زمان‌بندی‌شده روشن است.",
+  "continuous_tab.toast.paused": "اجرای زمان‌بندی‌شده متوقف است.",
+  "continuous_tab.toast.resumed": "اجرای زمان‌بندی‌شده دوباره روشن است.",
+  "continuous_tab.toast.schedule_saved": "زمان‌بندی ذخیره شد.",
+  "continuous_tab.toast.inputs_saved": "تغییر برای بررسی بعدی ذخیره شد.",
+  "continuous_tab.toast.approved": "نسخه جدید اکنون نسخه فعلی است.",
+  "continuous_tab.toast.rejected": "نسخه جدید را رد کردید.",
   "continuous_tab.review.current": "فعلی",
   "continuous_tab.review.new": "جدید"
 }

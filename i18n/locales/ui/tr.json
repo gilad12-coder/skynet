@@ -4270,9 +4270,17 @@
   "continuous_tab.cycle.approved": "Onaylandı",
   "continuous_tab.cycle.rejected": "Reddedildi",
   "continuous_tab.review.title": "Yeni sürüm incelemeye hazır",
-  "continuous_tab.next_check_label": "Sonraki kontrol",
   "continuous_tab.refreshes_label": "Yenilenebilir",
   "continuous_tab.version_label": "Mevcut sürüm",
+  "continuous_tab.next_check_on": "Sonraki kontrol: {when}",
+  "continuous_tab.allowance_label": "Aylık limit",
+  "continuous_tab.toast.enabled": "Zamanlanmış çalıştırma açık.",
+  "continuous_tab.toast.paused": "Zamanlanmış çalıştırma duraklatıldı.",
+  "continuous_tab.toast.resumed": "Zamanlanmış çalıştırma yeniden açık.",
+  "continuous_tab.toast.schedule_saved": "Zamanlama kaydedildi.",
+  "continuous_tab.toast.inputs_saved": "Değişiklik sonraki kontrol için kaydedildi.",
+  "continuous_tab.toast.approved": "Yeni sürüm artık geçerli sürüm.",
+  "continuous_tab.toast.rejected": "Yeni sürümü reddettiniz.",
   "continuous_tab.review.current": "Mevcut",
   "continuous_tab.review.new": "Yeni"
 }
