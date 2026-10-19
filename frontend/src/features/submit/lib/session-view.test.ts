@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { test } from "node:test";
 
-import { decodeCodingChat, decodeTaskAssist, reopenedPage } from "./session-state.ts";
+import { decodeCodingChat, reopenedPage } from "./session-state.ts";
 
 const unifiedRunUrl = new URL("../../../shared/types/unified-run.ts", import.meta.url).href;
 
@@ -30,13 +30,6 @@ test("a reload reopens the screen it was left on inside the step", () => {
   // A screen the step no longer has, or none saved, opens the step's first.
   assert.equal(reopenedPage(screens, "budget"), 0);
   assert.equal(reopenedPage(screens, null), 0);
-});
-
-test("the Task step's Auto/Manual choice comes back, Auto by default", () => {
-  assert.equal(decodeTaskAssist("manual"), "manual");
-  assert.equal(decodeTaskAssist("auto"), "auto");
-  assert.equal(decodeTaskAssist(null), "auto");
-  assert.equal(decodeTaskAssist("other"), "auto");
 });
 
 test("the coding agent's chat comes back whole, and a broken one starts fresh", () => {

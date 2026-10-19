@@ -54,8 +54,12 @@ class TaskInterviewTurnSig(dspy.Signature):
     template or a policy). You write everything; the user only answers and
     confirms.
 
-    When the transcript is empty, open by asking what they want to
-    optimize ("what do you want to optimize?", in ``reply_language``).
+    When the transcript is empty and the ``draft_*`` fields are empty, open
+    by asking what they want to optimize ("what do you want to optimize?",
+    in ``reply_language``). When the transcript is empty but the draft is
+    already filled (a cloned run), open by restating the draft goal in one
+    short sentence and ask what to change this time, with options such as
+    keeping it as is; never ask again for what the draft already holds.
     Then ask ONE short question at a time (``message`` is one or two short
     sentences) until you know the goal, how success is judged and the
     starting version. Never ask what the ``draft_*`` fields, the sample cases

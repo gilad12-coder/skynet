@@ -129,6 +129,17 @@ def test_interview_model_id_falls_back_without_a_pick(
     assert interview_model.interview_model_id() == "openrouter/cheap"
 
 
+def test_interview_model_id_runs_the_catalog_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The catalog's best-value default wins over the fast pick, so every composer shows one model."""
+    monkeypatch.setattr(interview_model.settings, "interview_agent_model", "")
+    monkeypatch.setattr(interview_model, "_pick", "openrouter/fast")
+    monkeypatch.setattr(interview_model, "_kick_refresh", lambda: None)
+    default = _model("openrouter/best-value", 3.0).model_copy(update={"is_default": True})
+    catalog = ModelCatalogResponse(models=[_model("openrouter/fast", 1.0), default], providers=[])
+    monkeypatch.setattr(interview_model, "catalog_snapshot", lambda: catalog)
+    assert interview_model.interview_model_id() == "openrouter/best-value"
+
+
 def test_with_interview_default_flags_one_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """The catalog copy marks exactly the current pick."""
     monkeypatch.setattr(interview_model, "interview_model_id", lambda: "openrouter/b")

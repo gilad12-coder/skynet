@@ -347,8 +347,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (parsed.code === INSUFFICIENT_FUNDS_CODE && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(INSUFFICIENT_FUNDS_EVENT));
     }
+    // The framework's bare "Not Found" / "Method Not Allowed" means this server
+    // has no such route: it runs an older version than the app. Say that
+    // instead of echoing the framework's words.
+    const missingRoute =
+      (res.status === 404 && parsed.message === "Not Found") ||
+      (res.status === 405 && parsed.message === "Method Not Allowed");
     throw new ApiError(
-      parsed.message ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status }),
+      missingRoute
+        ? msg("shared.api.route_missing", {
+            method: init?.method ?? "GET",
+            path: endpointTag(path),
+          })
+        : (parsed.message ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status })),
       { status: res.status, code: parsed.code, params: parsed.params },
     );
   }

@@ -20,6 +20,7 @@ import {
   Stack,
   Tag,
   Target,
+  Trophy,
   TextAlignLeft,
   User,
   Wallet,
@@ -33,12 +34,14 @@ import { msg, type MessageKey } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { tip } from "@/shared/lib/tooltips";
 import { cn } from "@/shared/lib/utils";
+import { readRewardSpec } from "@/shared/lib/reward";
 import type { ModelConfig } from "@/shared/types/api";
 import type { ContractCheckState } from "../../hooks/use-contract-check";
 import type { WizardV2State } from "../../lib/wizard-v2";
 import { ModelRoleRow } from "../blackbox/ModelRoleRow";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { optimizerLabel } from "./OptimizerPicker";
+import { RewardPreview } from "./RewardPreview";
 
 const DASH = "—";
 const ICON = "size-3.5 shrink-0";
@@ -89,6 +92,7 @@ const TAB_ICONS: Record<OverviewTab, ReactNode> = {
   data: <Database className={ICON} aria-hidden />,
   models: <Cpu className={ICON} aria-hidden />,
   budget: <Coins className={ICON} aria-hidden />,
+  reward: <Trophy className={ICON} aria-hidden />,
 };
 
 /** A model as the optimizer step shows it, read-only: the chip is inert and its name is read out once. */
@@ -142,7 +146,7 @@ function CheckStatus({ cc, guided }: { cc: ContractCheckState; guided: boolean }
   );
 }
 
-type OverviewTab = "general" | "data" | "models" | "budget";
+type OverviewTab = "general" | "data" | "models" | "budget" | "reward";
 
 const EASE = [0.2, 0.8, 0.2, 1] as const;
 
@@ -188,10 +192,15 @@ export function RunOverview({
   const pct = (n: number) => new Intl.NumberFormat(locale, { style: "percent" }).format(n);
   const yesNo = (on: boolean) => t(on ? "submit.v2.overview.yes" : "submit.v2.overview.no");
   const { task, inputs, optimizer, workspace, meta } = state;
-  // A repository run reads its own files, so it has no data tab.
-  const tabs: readonly OverviewTab[] = task.repo
-    ? ["general", "models", "budget"]
-    : ["general", "data", "models", "budget"];
+  // A repository run reads its own files, so it has no data tab. A metric
+  // that declares an accuracy, speed and cost reward gets its review tab.
+  const reward = task.repo ? null : readRewardSpec(workspace.metricCode);
+  const tabs: readonly OverviewTab[] = [
+    ...(task.repo
+      ? (["general", "models", "budget"] as const)
+      : (["general", "data", "models", "budget"] as const)),
+    ...(reward && reward.kind !== "none" ? (["reward"] as const) : []),
+  ];
   const [active, setActive] = useState<OverviewTab>("general");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const index = Math.max(0, tabs.indexOf(active));
@@ -574,6 +583,14 @@ export function RunOverview({
                     {msg(meta.economyMode ? "submit.economy.label" : "submit.economy.summary_off")}
                   </Row>
                 </>
+              )}
+              {current === "reward" && reward && (
+                <div>
+                  <dt className="sr-only">{t("submit.v2.overview.tab.reward")}</dt>
+                  <dd>
+                    <RewardPreview read={reward} />
+                  </dd>
+                </div>
               )}
             </motion.dl>
           </AnimatePresence>
