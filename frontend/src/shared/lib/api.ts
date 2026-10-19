@@ -2051,6 +2051,19 @@ export function setContinuousPaused(planId: string, paused: boolean) {
   );
 }
 
+/** Delete a plan and its check history; the runs it started stay. The route returns 204. */
+export async function deleteContinuous(planId: string): Promise<void> {
+  const res = await fetchWithAuthRetry(`${apiBase()}/continuous/${encodeURIComponent(planId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      parseErrorMessage(text) ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status }),
+    );
+  }
+}
+
 /** Replace when a plan checks; a paused plan stays paused. */
 export function updateContinuousSchedule(planId: string, rule: ScheduleRule) {
   return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/schedule`, {

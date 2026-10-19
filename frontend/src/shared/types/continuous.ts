@@ -75,9 +75,26 @@ export interface ContinuousPlan {
   id: string;
   source_optimization_id: string;
   incumbent_optimization_id: string;
-  status: "active" | "paused";
-  /** `user` (the owner paused it), `allowance` (monthly limit spent) or `funds` (wallet too low). */
-  pause_reason: "user" | "allowance" | "funds" | null;
+  /**
+   * `waiting` until the run it was set up with succeeds; `ended` when that run
+   * failed, was cancelled or is gone, so the schedule never started.
+   */
+  status: "active" | "paused" | "waiting" | "ended";
+  /**
+   * While paused: `user` (the owner paused it), `allowance` (monthly limit
+   * spent), `funds` (wallet too low) or `failing` (checks failed in a row).
+   * While ended: the first run's status (`failed`, `cancelled`, `stopped`) or `missing`.
+   */
+  pause_reason:
+    | "user"
+    | "allowance"
+    | "funds"
+    | "failing"
+    | "failed"
+    | "cancelled"
+    | "stopped"
+    | "missing"
+    | null;
   schedule: ScheduleRule;
   next_check_at: string | null;
   /** The next few check times, earliest first; empty while paused. */

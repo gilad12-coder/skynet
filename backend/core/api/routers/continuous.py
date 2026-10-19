@@ -4,6 +4,8 @@
   checks, this month's usage and the next scheduled check.
 * ``POST /optimizations/{id}/continuous`` — enable a plan from a successful run.
 * ``POST /continuous/{plan_id}/pause`` and ``/resume`` — the customer's pause.
+* ``DELETE /continuous/{plan_id}`` — remove a plan and its check history; the
+  runs it started stay.
 * ``PUT  /continuous/{plan_id}/schedule`` — change when the plan checks.
 * ``POST /continuous/{plan_id}/check-now`` — run the next check now instead of
   waiting for its time. It is still a check: unchanged inputs are skipped.
@@ -32,7 +34,7 @@ from ...billing.budgets import BudgetError, BudgetService
 from ...models.common import OptimizationStatus
 from ...storage.models import ContinuousCycleModel, ContinuousPlanModel
 from ...worker import continuous as engine_mod
-from ...worker.continuous_schedule import ScheduleRule, next_runs
+from ...worker.continuous_schedule import ScheduleRule, drop_past_slots, next_runs
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..converters import job_owner
 from ..errors import DomainError
@@ -330,18 +332,23 @@ def _upcoming(plan: ContinuousPlanModel) -> list[datetime]:
 
 
 def _set_schedule(plan: ContinuousPlanModel, rule: ScheduleRule, now: datetime) -> None:
-    """Store a rule and, for an active plan, its first check after now.
+    """Store a rule and, for a plan that still checks, its first check after now.
 
     The rule's intervals count from now, so "every 2 weeks" starts this week.
+    A plan paused for its allowance or funds still checks, so it takes the
+    new rule too; a customer's or a failure pause has no next check to move.
 
     Args:
         plan: The plan.
         rule: The new rule.
         now: Current time.
     """
+    rule = drop_past_slots(rule, now)
     plan.schedule = rule.frequency
     plan.schedule_rule = {**rule.model_dump(), "anchor": now.isoformat()}
-    if plan.status == engine_mod.PLAN_ACTIVE:
+    if plan.status == engine_mod.PLAN_ACTIVE or (
+        plan.status == engine_mod.PLAN_PAUSED and plan.pause_reason in engine_mod.SYSTEM_PAUSES
+    ):
         plan.next_check_at = engine_mod.next_check_after(plan, now)
     plan.updated_at = now
 
@@ -419,9 +426,8 @@ def create_continuous_router(
         job = _owned_job(job_store, optimization_id, current_user, payload=True)
         with _session() as session:
             plan = _plan_for_run(session, optimization_id)
-            if plan is not None and engine_mod.settle_waiting(plan, job["status"], datetime.now(UTC)):
-                session.delete(plan)
-                plan = None
+            if plan is not None:
+                engine_mod.settle_waiting(plan, job["status"], datetime.now(UTC))
             session.commit()
             eligible = plan is None and job["status"] == OptimizationStatus.success.value and _is_unified(job)
             return ContinuousStateResponse(plan=_plan_item(session, plan) if plan else None, eligible=eligible)
@@ -499,7 +505,7 @@ def create_continuous_router(
         """
         with _session() as session:
             plan = _owned_plan(session, plan_id, current_user)
-            if plan.status == engine_mod.PLAN_WAITING:
+            if plan.status in (engine_mod.PLAN_WAITING, engine_mod.PLAN_ENDED):
                 raise DomainError("continuous.not_eligible", status=409)
             plan.status = engine_mod.PLAN_PAUSED
             plan.pause_reason = engine_mod.PAUSE_USER
@@ -527,7 +533,7 @@ def create_continuous_router(
         """
         with _session() as session:
             plan = _owned_plan(session, plan_id, current_user)
-            if plan.status == engine_mod.PLAN_WAITING:
+            if plan.status in (engine_mod.PLAN_WAITING, engine_mod.PLAN_ENDED):
                 raise DomainError("continuous.not_eligible", status=409)
             now = datetime.now(UTC)
             plan.status = engine_mod.PLAN_ACTIVE
@@ -536,6 +542,28 @@ def create_continuous_router(
             plan.updated_at = now
             session.commit()
             return _plan_item(session, plan)
+
+    @router.delete(
+        "/continuous/{plan_id}",
+        status_code=204,
+        summary="Delete a continuous plan",
+    )
+    def delete_continuous(plan_id: str, current_user: AuthenticatedUserDep) -> None:
+        """Remove a plan and its check history in any state.
+
+        The runs its checks started stay as ordinary runs. A check claimed at
+        the same moment finds no plan and records nothing.
+
+        Args:
+            plan_id: The plan.
+            current_user: The caller.
+        """
+        with _session() as session:
+            plan = _owned_plan(session, plan_id, current_user)
+            for cycle in session.scalars(select(ContinuousCycleModel).where(ContinuousCycleModel.plan_id == plan.id)):
+                session.delete(cycle)
+            session.delete(plan)
+            session.commit()
 
     @router.put(
         "/continuous/{plan_id}/schedule",

@@ -441,7 +441,8 @@ def test_permitted_data_change_starts_one_linked_fresh_run(env: _Env) -> None:
     job = env.store.get_job(cycle.optimization_id, include_payload=True)
     payload = job["payload"]
     assert len(payload["data"]["cases"]) == 11
-    assert payload["data"]["cases"][-1] == {"input": {"question": "Q10?"}, "expected": {"answer": "C"}}
+    assert {"input": {"question": "Q10?"}, "expected": {"answer": "C"}} in payload["data"]["cases"]
+    assert payload["data"]["cases"] == continuous.canonical_cases(payload["data"]["cases"])
     assert payload["task"]["artifact"]["starting_version"] == "Answer in one word: "
     assert payload["task"]["objective"] == _incumbent_payload()["task"]["objective"]
     assert payload["workspace"]["metric_code"] == _incumbent_payload()["workspace"]["metric_code"]
@@ -715,6 +716,8 @@ def test_wallet_exhaustion_pauses_without_buying_credit(env: _Env) -> None:
         (_result(0.6, 0.9, guard=True), "regressed", "continuous.review_regressed"),
         (_result(0.6, 0.9, test=3, held_out=False), "regressed", "continuous.review_not_held_out"),
         (_result(0.6, 0.9, test=0, held_out=False), "regressed", "continuous.review_not_held_out"),
+        (_result(0.6, 0.605), "regressed", "continuous.review_within_margin"),
+        (_result(0.6, 0.61), "awaiting_review", "continuous.review_ready"),
         (_result(0.6, 0.9), "awaiting_review", "continuous.review_ready"),
     ],
 )
@@ -997,9 +1000,147 @@ def test_a_plan_set_up_while_the_run_works_waits_for_its_success(env: _Env) -> N
 
 
 def test_a_waiting_plan_ends_with_a_failed_run(env: _Env) -> None:
-    """A waiting plan is dropped when its run fails, so the run never shows a dead plan."""
+    """A waiting plan ends, with the reason kept, when its run fails; the owner can then delete it."""
     optimization_id = env.client.post("/optimize", json=_incumbent_payload()).json()["optimization_id"]
-    _enable(env, optimization_id, permitted={"models": True}, source=None)
+    plan = _enable(env, optimization_id, permitted={"models": True}, source=None)
     _finish(env, optimization_id, status="failed")
     env.sweep(datetime.now(UTC))
+    state = env.client.get(f"/optimizations/{optimization_id}/continuous").json()
+    assert state["eligible"] is False
+    assert (state["plan"]["status"], state["plan"]["pause_reason"], state["plan"]["next_check_at"]) == (
+        "ended",
+        "failed",
+        None,
+    )
+    assert env.client.post(f"/continuous/{plan['id']}/resume").status_code == 409
+
+    assert env.client.delete(f"/continuous/{plan['id']}").status_code == 204
     assert env.client.get(f"/optimizations/{optimization_id}/continuous").json() == {"plan": None, "eligible": False}
+    assert env.client.delete(f"/continuous/{plan['id']}").status_code == 404
+
+
+def test_the_same_rows_in_another_order_start_no_run(env: _Env) -> None:
+    """A warehouse that returns the same rows in a new order is not new data."""
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True})
+    env.rows = _cases(["B"] * 5 + ["C"] * 5)
+    env.sweep(_due(env))
+    [first] = env.cycles()
+    _finish(env, first.optimization_id, result=_result(0.5, 0.5))
+    env.sweep(_due(env) - timedelta(days=1))
+    jobs_before = env.count(JobModel)
+
+    env.rows = list(reversed(env.rows))
+    env.sweep(_due(env))
+
+    assert (env.cycles()[-1].status, env.cycles()[-1].detail_code) == ("skipped", "continuous.skip_unchanged")
+    assert env.count(JobModel) == jobs_before
+
+
+def test_a_failed_run_leaves_its_new_data_for_the_next_check(env: _Env) -> None:
+    """After an outage fails the run, the same new data starts a run on the next check."""
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True})
+    baseline = env.plan().baseline_snapshot
+    env.rows = _cases(["B"] * 10)
+    env.sweep(_due(env))
+    [first] = env.cycles()
+    _finish(env, first.optimization_id, status="failed")
+    env.sweep(_due(env) - timedelta(days=1))
+    assert env.plan().baseline_snapshot == baseline
+
+    env.sweep(_due(env))
+
+    second = env.cycles()[-1]
+    assert (second.status, second.changes) == ("optimizing", ["data"])
+
+
+def test_a_check_that_keeps_crashing_is_closed_and_frees_the_plan(env: _Env) -> None:
+    """A check that loses its worker three times is failed, so later checks and Check now run again."""
+    source_id = _incumbent(env)
+    plan = _enable(env, source_id)
+    env.rows = _cases(["B"] * 10)
+    now = _due(env)
+    [claimed] = continuous._claim_due(env.store.engine, now)
+    for attempt in range(continuous.MAX_CHECK_ATTEMPTS):
+        now += continuous.CYCLE_LEASE + timedelta(seconds=1)
+        reclaimed = continuous._reclaim_stale(env.store.engine, now)
+        assert reclaimed == ([claimed] if attempt < continuous.MAX_CHECK_ATTEMPTS - 1 else [])
+
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.detail_code) == ("failed", "continuous.check_stuck")
+    assert env.client.post(f"/continuous/{plan['id']}/check-now").status_code != 409
+
+
+def test_failing_checks_in_a_row_pause_the_plan_until_resumed(env: _Env) -> None:
+    """A source that keeps failing pauses the plan after a few checks instead of failing forever."""
+    source_id = _incumbent(env)
+    plan = _enable(env, source_id, schedule=DAILY)
+    env.source_error = continuous.SourceError("continuous.source_unavailable", provider="huggingface", reason="gone")
+    for _ in range(continuous.FAILURE_STREAK):
+        env.sweep(_due(env))
+
+    current = env.plan()
+    assert (current.status, current.pause_reason, current.next_check_at) == ("paused", "failing", None)
+    assert [c.status for c in env.cycles()] == ["failed"] * continuous.FAILURE_STREAK
+    fetches = env.fetches
+    env.sweep(datetime.now(UTC) + timedelta(days=30))
+    assert env.fetches == fetches
+
+    env.source_error = None
+    resumed = env.client.post(f"/continuous/{plan['id']}/resume").json()
+    assert (resumed["status"], resumed["pause_reason"]) == ("active", None)
+    assert resumed["next_check_at"] is not None
+
+
+def test_a_retry_keeps_the_snapshot_its_run_used(env: _Env) -> None:
+    """A worker that died after submitting is replayed without reading the source again."""
+    source_id = _incumbent(env)
+    _enable(env, source_id)
+    env.rows = _cases(["B"] * 10)
+    now = _due(env)
+    env.sweep(now)
+    [cycle] = env.cycles()
+    fetches = env.fetches
+    env.edit_cycle(cycle.id, status="checking", optimization_id=None, lease_until=now - timedelta(seconds=1))
+    env.rows = _cases(["C"] * 10)
+
+    env.sweep(now)
+
+    [retried] = env.cycles()
+    assert (retried.status, retried.optimization_id) == ("optimizing", cycle.optimization_id)
+    assert retried.snapshot == cycle.snapshot
+    assert env.fetches == fetches
+
+
+def test_a_waiting_check_is_reported_as_busy(env: _Env) -> None:
+    """A check behind another check still running says it is busy, not waiting for a review."""
+    source_id = _incumbent(env)
+    _enable(env, source_id)
+    env.rows = _cases(["B"] * 10)
+    now = _due(env)
+    continuous._claim_due(env.store.engine, now)
+    env.edit_plan(next_check_at=now)
+    [second] = continuous._claim_due(env.store.engine, now + timedelta(seconds=1))
+    continuous.process_cycle(env.store, object(), second, now=now, fetch_rows=env.fetch)
+    assert {c.id: c.detail_code for c in env.cycles()}[second] == "continuous.skip_busy"
+
+
+def test_a_schedule_change_reaches_a_plan_paused_for_its_allowance(env: _Env) -> None:
+    """A plan the system paused still checks, so a new rule moves its next check."""
+    plan = _enable(env, _incumbent(env))
+    env.edit_plan(status="paused", pause_reason="allowance")
+    changed = env.client.put(f"/continuous/{plan['id']}/schedule", json=DAILY).json()
+    first = datetime.fromisoformat(changed["next_check_at"])
+    assert changed["status"] == "paused"
+    assert (first.hour, first.minute) == (9, 0)
+    assert first - datetime.now(UTC) <= timedelta(days=1)
+
+
+def test_a_schedule_save_forgets_single_checks_that_passed(env: _Env) -> None:
+    """Old single-date changes are dropped on save, so they never fill the slot limit."""
+    plan = _enable(env, _incumbent(env))
+    past, future = "2020-01-01T09:00", "2099-01-01T09:00"
+    rule = {**DAILY, "skip": [past, future], "extra": [past]}
+    saved = env.client.put(f"/continuous/{plan['id']}/schedule", json=rule).json()
+    assert (saved["schedule"]["skip"], saved["schedule"]["extra"]) == ([future], [])

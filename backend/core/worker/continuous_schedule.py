@@ -130,6 +130,28 @@ def legacy_rule(schedule: str) -> ScheduleRule:
     return ScheduleRule(frequency="weekly", weekdays=[0], time=_LEGACY_DEFAULT_TIME)
 
 
+def drop_past_slots(rule: ScheduleRule, now: datetime) -> ScheduleRule:
+    """Forget single-check changes whose time already passed.
+
+    They can no longer change a check, and kept they would fill the slot
+    limit until a schedule save fails validation.
+
+    Args:
+        rule: The schedule rule.
+        now: Current time.
+
+    Returns:
+        The rule with only slots after ``now`` in its time zone.
+    """
+    local_now = now.astimezone(ZoneInfo(rule.timezone)).strftime("%Y-%m-%dT%H:%M")
+    return rule.model_copy(
+        update={
+            "skip": [slot for slot in rule.skip if slot > local_now],
+            "extra": [slot for slot in rule.extra if slot > local_now],
+        }
+    )
+
+
 def _month_index(day: date) -> int:
     """Count months from year 0 so two dates' month distance is a subtraction.
 
@@ -232,8 +254,14 @@ def next_runs(rule: ScheduleRule, after: datetime, *, anchor: datetime | None = 
     found: list[datetime] = []
     day = local_start
     while (day - search_from).days < _SEARCH_DAYS:
+        moments = set()
         for at in _day_times(rule, day, anchor_day, skipped, added):
-            when = datetime.combine(day, at, tzinfo=zone).astimezone(UTC)
+            moments.add(datetime.combine(day, at, tzinfo=zone).astimezone(UTC))
+            if rule.frequency == "hourly":
+                # On the fall-back day one wall-clock hour happens twice; an hourly
+                # rule checks in both, so its checks stay an hour apart.
+                moments.add(datetime.combine(day, at, tzinfo=zone).replace(fold=1).astimezone(UTC))
+        for when in sorted(moments):
             if when > after and (not found or when > found[-1]):
                 found.append(when)
                 if len(found) == count:

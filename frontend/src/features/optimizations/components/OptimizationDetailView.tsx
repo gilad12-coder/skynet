@@ -52,6 +52,7 @@ import {
   servePairProgramStream,
   serveSharedOptimization,
   STORAGE_CHANGED_EVENT,
+  getContinuousState,
 } from "@/shared/lib/api";
 import type { ServeInfoResponse, WorkflowNodeTrace, WorkflowSpec } from "@/shared/types/api";
 import { OptimizationDetailSkeleton } from "./OptimizationDetailSkeleton";
@@ -996,6 +997,30 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     [jobIsBlackbox, blackboxCandidates, jobLogs],
   );
 
+  // A schedule set up in the submit wizard stays on its run when the run fails,
+  // so that run still shows the tab to explain why it never started.
+  const jobStatus = job?.status;
+  const jobId = job?.optimization_id;
+  const endedRun = jobStatus === "failed" || jobStatus === "cancelled" || jobStatus === "stopped";
+  const [endedRunHasPlan, setEndedRunHasPlan] = useState(false);
+  useEffect(() => {
+    if (!endedRun || !jobIsBlackbox || !jobId || skipNetwork || isPairContext) {
+      setEndedRunHasPlan(false);
+      return;
+    }
+    let cancelled = false;
+    getContinuousState(jobId)
+      .then((state) => {
+        if (!cancelled) setEndedRunHasPlan(state.plan != null);
+      })
+      .catch(() => {
+        if (!cancelled) setEndedRunHasPlan(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [endedRun, jobIsBlackbox, jobId, skipNetwork, isPairContext]);
+
   // Optimized prompt picks the pair's artifact in pair view, otherwise falls
   // back to the run's artifact, otherwise to the grid's best pair (for the
   // grid-root overview banner/code tab).
@@ -1173,7 +1198,10 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   // Continuous optimization starts from the owner's own successful black-box
   // run; the backend still decides whether this run can carry a plan.
   const showContinuousTab =
-    !skipNetwork && !isPairContext && jobIsBlackbox && job.status === "success";
+    !skipNetwork &&
+    !isPairContext &&
+    jobIsBlackbox &&
+    (job.status === "success" || endedRunHasPlan);
 
   const pairCount = effectiveJob?.grid_result?.pair_results.length ?? 0;
   const isBestPair =

@@ -392,6 +392,8 @@
     "continuous.review_unscored": "L'esecuzione non ha un punteggio di confronto. Resta la versione attuale.",
     "continuous.review_not_held_out": "Il confronto non ha usato casi di test separati. Resta la versione attuale.",
     "continuous.review_regressed": "Il nuovo candidato non ha superato la versione attuale sugli stessi casi. Resta la versione attuale.",
+    "continuous.review_within_margin": "Il nuovo candidato ha ottenuto un punteggio più alto, ma di meno di 1 punto. La versione attuale resta.",
+    "continuous.check_stuck": "Il controllo si è interrotto {attempts} volte prima di finire, quindi è stato chiuso. I controlli successivi procedono normalmente.",
     "continuous.review_ready": "Il nuovo candidato ha superato la versione attuale sugli stessi casi. Attende la tua approvazione.",
     "continuous.review_approved": "Hai approvato il nuovo candidato. Ora è la versione attuale.",
     "continuous.review_rejected": "Hai rifiutato il nuovo candidato. Resta la versione precedente."

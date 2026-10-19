@@ -4,61 +4,39 @@ import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/shared/ui/primitives/select";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { ConnectorSourcePicker, type ConnectorSource } from "@/features/connectors";
-import type {
-  ContinuousEnableRequest,
-  ContinuousPermitted,
-  ScheduleRule,
-} from "@/shared/types/continuous";
+import type { ContinuousEnableRequest, ScheduleRule } from "@/shared/types/continuous";
 import { cn } from "@/shared/lib/utils";
 import { enableProblem } from "../lib/continuous";
 import { browserTimeZone, defaultRule, scheduleProblem } from "../lib/continuous-schedule";
 import { ScheduleEditor } from "./ScheduleEditor";
 
-type RefreshKind = keyof ContinuousPermitted;
-type WalkStep = "refresh" | "source" | "schedule";
+type WalkStep = "source" | "schedule";
+
+const STEPS: WalkStep[] = ["source", "schedule"];
 
 const STEP_TITLES: Record<WalkStep, MessageKey> = {
-  refresh: "continuous_tab.permit.label",
   source: "continuous_tab.source.label",
   schedule: "continuous_tab.schedule.label",
 };
 
-const REFRESH_KEYS: Record<RefreshKind, MessageKey> = {
-  data: "continuous_tab.permit.data",
-  models: "continuous_tab.permit.models",
-  optimizers: "continuous_tab.permit.optimizers",
-};
-
-/** The request a finished walk sends; only a data refresh carries a source. */
-function requestFor(
-  kind: RefreshKind,
-  source: ConnectorSource | null,
-  schedule: ScheduleRule,
-): ContinuousEnableRequest {
-  const permitted: ContinuousPermitted = {
-    data: kind === "data",
-    models: kind === "models",
-    optimizers: kind === "optimizers",
-  };
+/**
+ * The request a finished walk sends. A plan refreshes only its data: nothing
+ * yet picks a newer model or optimizer, so a plan limited to those would
+ * never start a run.
+ */
+function requestFor(source: ConnectorSource | null, schedule: ScheduleRule): ContinuousEnableRequest {
   return {
     schedule,
-    permitted,
-    source: permitted.data && source ? { provider: source.provider, ref: source.ref } : null,
+    permitted: { data: true, models: false, optimizers: false },
+    source: source ? { provider: source.provider, ref: source.ref } : null,
   };
 }
 
 /**
  * Walks the scheduled-run settings one screen at a time, like the submit
- * wizard: what may refresh, where the data comes from, then the schedule.
+ * wizard: where the data comes from, then the schedule.
  */
 export function ScheduledRunSetup({
   busy = false,
@@ -71,19 +49,17 @@ export function ScheduledRunSetup({
   onFinish: (body: ContinuousEnableRequest) => void;
   idPrefix: string;
 }) {
-  const [kind, setKind] = useState<RefreshKind>("data");
   const [source, setSource] = useState<ConnectorSource | null>(null);
   const [schedule, setSchedule] = useState<ScheduleRule>(() => defaultRule(browserTimeZone()));
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState(1);
   const reduceMotion = useReducedMotion();
 
-  const steps: WalkStep[] =
-    kind === "data" ? ["refresh", "source", "schedule"] : ["refresh", "schedule"];
+  const steps = STEPS;
   const at = Math.min(index, steps.length - 1);
   const step = steps[at]!;
   const last = at === steps.length - 1;
-  const body = requestFor(kind, source, schedule);
+  const body = requestFor(source, schedule);
 
   const stepProblem =
     step === "source"
@@ -165,29 +141,6 @@ export function ScheduledRunSetup({
             transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="space-y-4"
           >
-            {step === "refresh" && (
-              <div className="space-y-4">
-                <p className="text-center text-base font-medium text-foreground">
-                  {msg("continuous_tab.walk.refresh_hint")}
-                </p>
-                <Select value={kind} onValueChange={(v) => setKind(v as RefreshKind)}>
-                  <SelectTrigger
-                    className="h-11 w-full"
-                    aria-label={msg("continuous_tab.permit.label")}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(["data", "models", "optimizers"] as const).map((key) => (
-                      <SelectItem key={key} value={key}>
-                        {msg(REFRESH_KEYS[key])}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
             {step === "source" && (
               <div className="space-y-4">
                 <p className="text-center text-base font-medium text-foreground">

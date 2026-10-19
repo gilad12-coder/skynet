@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -146,3 +147,11 @@ def test_skips_past_the_search_window_still_find_the_next_check() -> None:
         skip=["2027-10-01T09:00", "2028-10-01T09:00"],
     )
     assert next_runs(rule, anchor, anchor=anchor) == [datetime(2029, 10, 1, 9, tzinfo=UTC)]
+
+
+def test_hourly_checks_both_hours_of_the_fall_back_day() -> None:
+    """When clocks go back, the repeated wall-clock hour is checked twice, so checks stay an hour apart."""
+    rule = ScheduleRule(frequency="hourly", time="00:00", timezone="America/New_York")
+    runs = next_runs(rule, datetime(2026, 11, 1, 4, 30, tzinfo=UTC), count=4)
+    gaps = {later - earlier for earlier, later in pairwise(runs)}
+    assert gaps == {timedelta(hours=1)}

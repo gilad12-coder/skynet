@@ -66,7 +66,17 @@ PLAN_WAITING = "waiting"
 PAUSE_USER = "user"
 PAUSE_ALLOWANCE = "allowance"
 PAUSE_FUNDS = "funds"
+# Checks kept failing; only the customer resumes, so a broken source stops costing checks.
+PAUSE_FAILING = "failing"
 SYSTEM_PAUSES = frozenset({PAUSE_ALLOWANCE, PAUSE_FUNDS})
+# A waiting plan whose first run did not succeed; kept so the owner sees why it never started.
+PLAN_ENDED = "ended"
+# This many failed checks in a row pause the plan.
+FAILURE_STREAK = 3
+# A check that lost its worker this many times is closed as failed instead of retried again.
+MAX_CHECK_ATTEMPTS = 3
+# A candidate must beat the incumbent by this much on a 0..1 score, so scoring noise cannot win.
+WIN_MARGIN = 0.01
 
 CYCLE_CHECKING = "checking"
 CYCLE_SKIPPED = "skipped"
@@ -144,15 +154,30 @@ def next_month_start(moment: datetime) -> datetime:
 
 
 def _cases_fingerprint(cases: list[dict[str, Any]]) -> str:
-    """Identify an evaluation snapshot by its exact cases.
+    """Identify an evaluation snapshot by its exact cases, in any order.
 
     Args:
         cases: Unified cases in their JSON form.
 
     Returns:
-        A stable content digest.
+        A content digest that the order of the cases does not change.
     """
-    return json_fingerprint(cases)
+    return json_fingerprint(canonical_cases(cases))
+
+
+def canonical_cases(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Put cases in an order that depends only on their content.
+
+    Warehouse sources return rows in no fixed order, so without this the same
+    rows would look like new data and start a paid run.
+
+    Args:
+        cases: Unified cases in their JSON form.
+
+    Returns:
+        The same cases, sorted by each case's content digest.
+    """
+    return sorted(cases, key=json_fingerprint)
 
 
 def _model_names(models: dict[str, Any]) -> dict[str, str | None]:
@@ -310,7 +335,7 @@ def resolve_snapshot(
     cases = list(data.get("cases") or [])
     data_snapshot: dict[str, Any] = {"fingerprint": _cases_fingerprint(cases), "cases": len(cases)}
     if permitted.get("data") and plan.source:
-        cases = prepare_source_cases(fetch_rows(job_store, plan.username, plan.source), data)
+        cases = canonical_cases(prepare_source_cases(fetch_rows(job_store, plan.username, plan.source), data))
         data_snapshot = {"fingerprint": _cases_fingerprint(cases), "cases": len(cases), "source": plan.source}
     models = _model_names(incumbent_payload.get("models") or {})
     optimizer = (incumbent_payload.get("optimizer") or {}).get("choice", "auto")
@@ -450,14 +475,48 @@ def _pause(plan: ContinuousPlanModel, reason: str) -> None:
 
     Args:
         plan: The plan.
-        reason: ``user``, ``allowance`` or ``funds``.
+        reason: ``user``, ``allowance``, ``funds`` or ``failing``.
     """
     if plan.pause_reason == PAUSE_USER and reason != PAUSE_USER:
         # Only the customer lifts their own pause, so a funds or allowance pause never replaces it.
         return
     plan.status = PLAN_PAUSED
     plan.pause_reason = reason
+    if reason == PAUSE_FAILING:
+        # Unlike a funds or allowance pause, nothing a later check sees can lift this one.
+        plan.next_check_at = None
     plan.updated_at = datetime.now(UTC)
+
+
+_STREAK_NEUTRAL = frozenset({"continuous.skip_busy", "continuous.skip_review_pending", "continuous.skip_paused"})
+
+
+def _fail_cycle(
+    session: Session, plan: ContinuousPlanModel, cycle: ContinuousCycleModel, code: str, **params: Any
+) -> None:
+    """Record a failed cycle and pause the plan after a streak of failures.
+
+    Checks skipped only because another check, a run or a review was in the
+    way say nothing about the source, so they neither count nor break a streak.
+
+    Args:
+        session: Open session that owns ``plan`` and ``cycle``.
+        plan: The cycle's plan.
+        cycle: The cycle.
+        code: I18n key explaining the failure.
+        **params: Substitution params for ``code``.
+    """
+    _finish_cycle(session, cycle, CYCLE_FAILED, code, **params)
+    session.flush()
+    recent = session.scalars(
+        select(ContinuousCycleModel)
+        .where(ContinuousCycleModel.plan_id == plan.id, ContinuousCycleModel.status != CYCLE_CHECKING)
+        .order_by(ContinuousCycleModel.created_at.desc(), ContinuousCycleModel.slot.desc())
+        .limit(FAILURE_STREAK * 4)
+    ).all()
+    counted = [item for item in recent if item.detail_code not in _STREAK_NEUTRAL][:FAILURE_STREAK]
+    if len(counted) == FAILURE_STREAK and all(item.status == CYCLE_FAILED for item in counted):
+        _pause(plan, PAUSE_FAILING)
 
 
 def process_cycle(
@@ -502,7 +561,7 @@ def process_cycle(
                 session, cycle, CYCLE_OPTIMIZING, "continuous.run_started", changes=",".join(cycle.changes or [])
             )
             return
-        if plan.status == PLAN_PAUSED and plan.pause_reason == PAUSE_USER:
+        if plan.status == PLAN_PAUSED and plan.pause_reason in (PAUSE_USER, PAUSE_FAILING):
             _finish_cycle(session, cycle, CYCLE_SKIPPED, "continuous.skip_paused")
             return
         busy = session.scalar(
@@ -514,21 +573,19 @@ def process_cycle(
             )
         )
         if busy is not None:
-            code = "continuous.skip_busy" if busy == CYCLE_OPTIMIZING else "continuous.skip_review_pending"
+            code = "continuous.skip_review_pending" if busy == CYCLE_AWAITING_REVIEW else "continuous.skip_busy"
             _finish_cycle(session, cycle, CYCLE_SKIPPED, code)
             return
         try:
             incumbent = _incumbent(job_store, plan.incumbent_optimization_id)
         except KeyError:
             # Uncaught, the cycle would stay ``checking`` and hold back every later check.
-            _finish_cycle(
-                session, cycle, CYCLE_FAILED, "continuous.run_rejected", reason="the incumbent run was deleted"
-            )
+            _fail_cycle(session, plan, cycle, "continuous.run_rejected", reason="the incumbent run was deleted")
             return
         try:
             snapshot, cases = resolve_snapshot(plan, incumbent["payload"], job_store=job_store, fetch_rows=fetch_rows)
         except SourceError as error:
-            _finish_cycle(session, cycle, CYCLE_FAILED, error.code, **error.params)
+            _fail_cycle(session, plan, cycle, error.code, **error.params)
             return
         cycle.snapshot = snapshot
         changes = changed_dimensions(plan.baseline_snapshot or {}, snapshot)
@@ -561,7 +618,7 @@ def process_cycle(
         except ValidationError as error:
             # A staged model or optimizer the run contract rejects fails this cycle instead of wedging the plan.
             reason = "; ".join(str(item.get("msg")) for item in error.errors())
-            _finish_cycle(session, cycle, CYCLE_FAILED, "continuous.run_rejected", reason=reason)
+            _fail_cycle(session, plan, cycle, "continuous.run_rejected", reason=reason)
             return
         key = f"continuous:{cycle.id}"
         budget_key = resolve_submission_replay_keys(
@@ -589,13 +646,15 @@ def process_cycle(
             if error.code == "budget.pending":
                 # Setup usage is still being confirmed. The cycle keeps its lease, so a
                 # later sweep replays this same key and budget instead of a new check
-                # paying for setup again.
+                # paying for setup again. This wait is not a crash, so it does
+                # not count toward MAX_CHECK_ATTEMPTS.
+                cycle.detail_params = {**(cycle.detail_params or {}), "attempts": 0}
                 return
             if error.code in {"billing.insufficient_funds", "budget.insufficient"}:
                 _pause(plan, PAUSE_FUNDS)
                 _finish_cycle(session, cycle, CYCLE_PAUSED, "continuous.paused_funds")
             else:
-                _finish_cycle(session, cycle, CYCLE_FAILED, "continuous.run_rejected", reason=str(error.detail))
+                _fail_cycle(session, plan, cycle, "continuous.run_rejected", reason=str(error.detail))
         return
     job = job_store.get_job(response.optimization_id, include_payload=False)
     with Session(engine) as session, session.begin():
@@ -610,9 +669,11 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
     """Judge a finished cycle run against the incumbent it started from.
 
     A candidate is kept for review only when its run succeeded, the final run
-    scored both versions on the same held-out cases, no regression guard
-    fired, and the candidate scored higher.
-    Anything else leaves the incumbent in place.
+    scored both versions on the same held-out test cases, no regression guard
+    fired, and the candidate scored at least ``WIN_MARGIN`` higher. Anything
+    else leaves the incumbent in place. Only a successful run marks its inputs
+    as seen, so a run that failed (a provider outage) is retried on the next
+    check instead of waiting for the data to change again.
 
     Args:
         job_store: Job store.
@@ -622,11 +683,11 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
         cycle = session.get(ContinuousCycleModel, cycle_id)
         if cycle is None or cycle.status != CYCLE_OPTIMIZING or cycle.optimization_id is None:
             return
-        plan = session.get(ContinuousPlanModel, cycle.plan_id)
+        plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
         try:
             job = job_store.get_job(cycle.optimization_id, include_payload=False)
         except KeyError:
-            _finish_cycle(session, cycle, CYCLE_FAILED, "continuous.run_failed", reason="missing")
+            _fail_cycle(session, plan, cycle, "continuous.run_failed", reason="missing")
             return
         if job["status"] not in _TERMINAL_JOB:
             return
@@ -634,7 +695,7 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
         plan.updated_at = datetime.now(UTC)
         if job["status"] != OptimizationStatus.success.value:
             # The baseline stays put so the next check retries these inputs instead of skipping them as unchanged.
-            _finish_cycle(session, cycle, CYCLE_FAILED, "continuous.run_failed", reason=job["status"])
+            _fail_cycle(session, plan, cycle, "continuous.run_failed", reason=job["status"])
             return
         plan.baseline_snapshot = cycle.snapshot or plan.baseline_snapshot
         result = job.get("result") or {}
@@ -644,10 +705,13 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
         cycle.incumbent_score, cycle.candidate_score = baseline, best
         if baseline is None or best is None:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_unscored")
-        elif not split.get("held_out"):
+        elif not (split.get("test") and split.get("held_out")):
+            # Without separate test cases the split that picked the candidate would also judge it.
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_not_held_out")
         elif result.get("regression_guard_applied") or best <= baseline:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_regressed")
+        elif best < baseline + WIN_MARGIN:
+            _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_within_margin")
         else:
             _finish_cycle(session, cycle, CYCLE_AWAITING_REVIEW, "continuous.review_ready")
 
@@ -692,29 +756,32 @@ def next_check_after(plan: ContinuousPlanModel, after: datetime) -> datetime:
     return next_runs(plan_rule(plan), after, anchor=plan_anchor(plan) or after)[0]
 
 
-def settle_waiting(plan: ContinuousPlanModel, job_status: str | None, now: datetime) -> bool:
-    """Start a waiting plan once its first run succeeded, or drop it once that run ended otherwise.
+def settle_waiting(plan: ContinuousPlanModel, job_status: str | None, now: datetime) -> None:
+    """Start a waiting plan once its first run succeeded, or end it once that run ended otherwise.
+
+    An ended plan is kept, with the run's outcome as its reason, so the owner
+    sees why the schedule never started; they delete it from the run page.
 
     Args:
         plan: A plan, in any state.
         job_status: Status of the plan's source run, or ``None`` when the run is gone.
         now: Current time.
-
-    Returns:
-        ``True`` when the plan ended and the caller must delete it.
     """
     if plan.status != PLAN_WAITING:
-        return False
+        return
     if job_status == OptimizationStatus.success.value:
         plan.status = PLAN_ACTIVE
         plan.next_check_at = next_check_after(plan, now)
         plan.updated_at = now
-        return False
-    return job_status is None or job_status in _TERMINAL_JOB
+    elif job_status is None or job_status in _TERMINAL_JOB:
+        plan.status = PLAN_ENDED
+        plan.pause_reason = job_status or "missing"
+        plan.next_check_at = None
+        plan.updated_at = now
 
 
 def _settle_waiting_plans(job_store: Any, now: datetime) -> None:
-    """Start or drop every waiting plan whose first run finished.
+    """Start or end every waiting plan whose first run finished.
 
     Args:
         job_store: Job store.
@@ -726,8 +793,7 @@ def _settle_waiting_plans(job_store: Any, now: datetime) -> None:
                 status = job_store.get_job(plan.source_optimization_id, include_payload=False)["status"]
             except KeyError:
                 status = None
-            if settle_waiting(plan, status, now):
-                session.delete(plan)
+            settle_waiting(plan, status, now)
         session.commit()
 
 
@@ -787,6 +853,10 @@ def _claim_due(engine: Any, now: datetime, *, only_plan_id: str | None = None) -
 def _reclaim_stale(engine: Any, now: datetime) -> list[str]:
     """Take over checks whose worker died before recording an outcome.
 
+    A check that already lost its worker ``MAX_CHECK_ATTEMPTS`` times is
+    closed as failed, so one check that always crashes cannot hold back the
+    plan's later checks and "Check now" forever.
+
     Args:
         engine: Database engine.
         now: Current time.
@@ -809,8 +879,19 @@ def _reclaim_stale(engine: Any, now: datetime) -> list[str]:
                 .where(ContinuousCycleModel.id == cycle_id, ContinuousCycleModel.lease_until == lease)
                 .values(lease_until=now + CYCLE_LEASE)
             ).rowcount
-        if won:
-            taken.append(cycle_id)
+            if not won:
+                continue
+            cycle = session.get(ContinuousCycleModel, cycle_id)
+            attempts = int((cycle.detail_params or {}).get("attempts", 1)) + 1
+            if attempts > MAX_CHECK_ATTEMPTS:
+                plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
+                if plan is None:
+                    _finish_cycle(session, cycle, CYCLE_FAILED, "continuous.check_stuck", attempts=MAX_CHECK_ATTEMPTS)
+                else:
+                    _fail_cycle(session, plan, cycle, "continuous.check_stuck", attempts=MAX_CHECK_ATTEMPTS)
+                continue
+            cycle.detail_params = {**(cycle.detail_params or {}), "attempts": attempts}
+        taken.append(cycle_id)
     return taken
 
 

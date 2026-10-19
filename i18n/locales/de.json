@@ -392,6 +392,8 @@
     "continuous.review_unscored": "Der Lauf hat keinen Vergleichswert. Die aktuelle Version bleibt.",
     "continuous.review_not_held_out": "Der Vergleich nutzte keine separaten Testfälle. Die aktuelle Version bleibt.",
     "continuous.review_regressed": "Der neue Kandidat war auf denselben Fällen nicht besser als die aktuelle Version. Die aktuelle Version bleibt.",
+    "continuous.review_within_margin": "Der neue Kandidat schnitt besser ab, aber um weniger als 1 Punkt. Die aktuelle Version bleibt.",
+    "continuous.check_stuck": "Die Prüfung brach {attempts}-mal vor dem Ende ab und wurde deshalb geschlossen. Spätere Prüfungen laufen normal.",
     "continuous.review_ready": "Der neue Kandidat war auf denselben Fällen besser als die aktuelle Version. Er wartet auf Ihre Genehmigung.",
     "continuous.review_approved": "Sie haben den neuen Kandidaten genehmigt. Er ist jetzt die aktuelle Version.",
     "continuous.review_rejected": "Sie haben den neuen Kandidaten abgelehnt. Die frühere Version bleibt."

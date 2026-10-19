@@ -392,6 +392,8 @@
     "continuous.review_unscored": "実行に比較スコアがありません。現在のバージョンを維持します。",
     "continuous.review_not_held_out": "比較に別のテストケースが使われませんでした。現在のバージョンを維持します。",
     "continuous.review_regressed": "新しい候補は同じケースで現在のバージョンを上回りませんでした。現在のバージョンを維持します。",
+    "continuous.review_within_margin": "新しい候補のスコアは高くなりましたが、差は1ポイント未満です。現在のバージョンを維持します。",
+    "continuous.check_stuck": "チェックが完了前に{attempts}回停止したため、終了しました。以降のチェックは通常どおり実行されます。",
     "continuous.review_ready": "新しい候補は同じケースで現在のバージョンを上回りました。あなたの承認を待っています。",
     "continuous.review_approved": "新しい候補を承認しました。これが現在のバージョンになりました。",
     "continuous.review_rejected": "新しい候補を却下しました。以前のバージョンを維持します。"

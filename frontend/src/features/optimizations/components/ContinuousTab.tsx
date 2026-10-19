@@ -11,6 +11,7 @@ import {
   Info,
   PencilSimple,
   Repeat,
+  Trash,
   X,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -34,6 +35,7 @@ import { tI18n } from "@/shared/lib/i18n";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import {
   checkContinuousNow,
+  deleteContinuous,
   enableContinuous,
   getContinuousState,
   reviewContinuousCycle,
@@ -84,10 +86,11 @@ const TONE_CLASS: Record<CycleTone, string> = {
   busy: "border-primary/30 bg-primary/10 text-primary",
 };
 
-const PAUSE_KEYS: Record<NonNullable<ContinuousPlan["pause_reason"]>, MessageKey> = {
+const PAUSE_KEYS: Partial<Record<NonNullable<ContinuousPlan["pause_reason"]>, MessageKey>> = {
   user: "continuous_tab.paused.user",
   allowance: "continuous_tab.paused.allowance",
   funds: "continuous_tab.paused.funds",
+  failing: "continuous_tab.paused.failing",
 };
 
 const CHANGE_KEYS: Record<string, MessageKey> = {
@@ -97,6 +100,7 @@ const CHANGE_KEYS: Record<string, MessageKey> = {
 };
 
 type Act = (run: () => Promise<ContinuousPlan>, success?: MessageKey) => Promise<void>;
+type Remove = () => Promise<void>;
 
 function formatWhen(iso: string | null): string {
   if (!iso) return "—";
@@ -175,6 +179,22 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
     }
   };
 
+  const remove: Remove = async () => {
+    if (!state?.plan) return;
+    setBusy(true);
+    try {
+      await deleteContinuous(state.plan.id);
+      toast.success(msg("continuous_tab.toast.deleted"));
+      window.dispatchEvent(new Event("optimizations-changed"));
+      setTurnedOn(false);
+      setState(await getContinuousState(optimizationId));
+    } catch (err) {
+      toast.error(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loadError) return <EmptyState icon={Repeat} title={msg("continuous_tab.load_error")} />;
   if (!state) {
     return (
@@ -240,7 +260,10 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
       </Card>
     );
   }
-  return <PlanView plan={state.plan} busy={busy} act={act} />;
+  if (state.plan.status === "waiting" || state.plan.status === "ended") {
+    return <NotStartedView plan={state.plan} busy={busy} remove={remove} />;
+  }
+  return <PlanView plan={state.plan} busy={busy} act={act} remove={remove} />;
 }
 
 function StatusLabel({
@@ -274,14 +297,78 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h3 className="text-sm! leading-6! font-semibold">{children}</h3>;
 }
 
+/**
+ * A plan set up in the submit wizard before its first run finished: it
+ * waits for that run, or ended because the run did not succeed.
+ */
+function NotStartedView({
+  plan,
+  busy,
+  remove,
+}: {
+  plan: ContinuousPlan;
+  busy: boolean;
+  remove: Remove;
+}) {
+  const ended = plan.status === "ended";
+  return (
+    <Card className="mt-4 overflow-hidden py-0">
+      <CardContent className="divide-y divide-border/50 p-0">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 p-5 sm:p-6">
+          <div className="min-w-0 space-y-1">
+            <StatusLabel tone="muted">
+              {msg(ended ? "continuous_tab.status.ended" : "continuous_tab.status.waiting")}
+            </StatusLabel>
+            <p className="max-w-prose text-lg font-semibold">
+              {msg(ended ? "continuous_tab.ended.description" : "continuous_tab.waiting.description")}
+            </p>
+          </div>
+          <DeleteButton busy={busy} remove={remove} />
+        </div>
+        <dl>
+          <SettingRow label={msg("continuous_tab.schedule.label")}>
+            <p className="text-sm font-medium">{describeSchedule(plan.schedule)}</p>
+          </SettingRow>
+        </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Deletes the plan after a second click, so one stray click keeps it. */
+function DeleteButton({ busy, remove }: { busy: boolean; remove: Remove }) {
+  const [confirming, setConfirming] = useState(false);
+  if (!confirming) {
+    return (
+      <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirming(true)}>
+        <Trash className="size-4" aria-hidden />
+        {msg("continuous_tab.delete")}
+      </Button>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button variant="destructive" size="sm" disabled={busy} onClick={() => void remove()}>
+        <Trash className="size-4" aria-hidden />
+        {msg("continuous_tab.delete.confirm")}
+      </Button>
+      <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirming(false)}>
+        {msg("continuous_tab.schedule.cancel")}
+      </Button>
+    </div>
+  );
+}
+
 function PlanView({
   plan,
   busy,
   act,
+  remove,
 }: {
   plan: ContinuousPlan;
   busy: boolean;
   act: Act;
+  remove: Remove;
 }) {
   const locale = getActiveIntlLocale();
   const paused = plan.status === "paused";
@@ -302,8 +389,10 @@ function PlanView({
 
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 p-5 sm:p-6">
             <div className="min-w-0">
-              {paused && plan.pause_reason ? (
-                <p className="max-w-prose text-lg font-semibold">{msg(PAUSE_KEYS[plan.pause_reason])}</p>
+              {paused && plan.pause_reason && PAUSE_KEYS[plan.pause_reason] ? (
+                <p className="max-w-prose text-lg font-semibold">
+                  {msg(PAUSE_KEYS[plan.pause_reason]!)}
+                </p>
               ) : (
                 <p className="text-lg font-semibold tracking-tight tabular-nums">
                   {formatMsg("continuous_tab.next_check_on", { when: formatWhen(plan.next_check_at) })}
@@ -469,6 +558,10 @@ function PlanView({
               </ol>
             )}
           </section>
+
+          <div className="flex justify-end px-5 py-3 sm:px-6">
+            <DeleteButton busy={busy} remove={remove} />
+          </div>
       </CardContent>
     </Card>
   );

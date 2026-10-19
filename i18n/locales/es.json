@@ -392,6 +392,8 @@
     "continuous.review_unscored": "La ejecución no tiene puntuación de comparación. Se mantiene la versión actual.",
     "continuous.review_not_held_out": "La comparación no usó casos de prueba separados. Se mantiene la versión actual.",
     "continuous.review_regressed": "El candidato nuevo no superó a la versión actual en los mismos casos. Se mantiene la versión actual.",
+    "continuous.review_within_margin": "El nuevo candidato obtuvo más puntos, pero menos de 1 punto más. Se mantiene la versión actual.",
+    "continuous.check_stuck": "La comprobación se detuvo {attempts} veces antes de terminar, así que se cerró. Las siguientes comprobaciones siguen normalmente.",
     "continuous.review_ready": "El candidato nuevo superó a la versión actual en los mismos casos. Espera tu aprobación.",
     "continuous.review_approved": "Aprobaste el candidato nuevo. Ahora es la versión actual.",
     "continuous.review_rejected": "Rechazaste el candidato nuevo. Se mantiene la versión anterior."

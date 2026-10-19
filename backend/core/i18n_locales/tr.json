@@ -392,6 +392,8 @@
     "continuous.review_unscored": "Çalıştırmanın karşılaştırma puanı yok. Mevcut sürüm kalır.",
     "continuous.review_not_held_out": "Karşılaştırmada ayrı test örnekleri kullanılmadı. Mevcut sürüm kalır.",
     "continuous.review_regressed": "Yeni aday aynı örneklerde mevcut sürümü geçemedi. Mevcut sürüm kalır.",
+    "continuous.review_within_margin": "Yeni aday daha yüksek puan aldı, ancak fark 1 puandan az. Mevcut sürüm kalır.",
+    "continuous.check_stuck": "Kontrol bitmeden {attempts} kez durdu, bu yüzden kapatıldı. Sonraki kontroller normal şekilde çalışır.",
     "continuous.review_ready": "Yeni aday aynı örneklerde mevcut sürümü geçti. Onayınızı bekliyor.",
     "continuous.review_approved": "Yeni adayı onayladınız. Artık mevcut sürüm bu.",
     "continuous.review_rejected": "Yeni adayı reddettiniz. Önceki sürüm kalır."
