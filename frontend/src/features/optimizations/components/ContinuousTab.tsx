@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "react-toastify";
 import {
   ArrowClockwise,
+  ArrowRight,
   ArrowSquareOut,
   Check,
   PencilSimple,
@@ -13,7 +14,6 @@ import {
   Repeat,
   X,
 } from "@/shared/ui/icons";
-import { Badge } from "@/shared/ui/primitives/badge";
 import { Button } from "@/shared/ui/primitives/button";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
 import { Input } from "@/shared/ui/primitives/input";
@@ -199,6 +199,20 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
   return <PlanView plan={state.plan} busy={busy} act={act} />;
 }
 
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  // The global h3 size is unlayered and outranks a plain utility, so the size is forced here.
+  return <h3 className="text-sm! leading-6! font-semibold">{children}</h3>;
+}
+
+function FormRow({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-3 py-5 first:pt-0 lg:grid-cols-[12rem_minmax(0,1fr)] lg:gap-8">
+      <SectionTitle>{title}</SectionTitle>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
 function EnableForm({
   busy,
   onEnable,
@@ -228,84 +242,92 @@ function EnableForm({
     setPermitted((prev) => ({ ...prev, [key]: on }));
 
   return (
-    <Card className="mt-4">
-      <CardContent className="space-y-5 p-5">
-        <h3 className="text-base font-semibold">{msg("continuous_tab.enable.title")}</h3>
+    <Card className="mt-4 overflow-hidden py-0">
+      <CardContent className="p-0">
+        <div className="px-5 pt-5 pb-1 sm:px-6 sm:pt-6">
+          <h2 className="text-lg! leading-7! font-semibold tracking-tight">
+            {msg("continuous_tab.enable.title")}
+          </h2>
+        </div>
+        <div className="divide-y divide-border/50 px-5 sm:px-6">
+          <FormRow title={msg("continuous_tab.schedule.label")}>
+            <ScheduleEditor value={schedule} onChange={setSchedule} idPrefix="continuous-schedule" />
+          </FormRow>
 
-        <div className="space-y-2">
-          <span className="text-sm font-medium">{msg("continuous_tab.schedule.label")}</span>
-          <ScheduleEditor value={schedule} onChange={setSchedule} idPrefix="continuous-schedule" />
+          <FormRow title={msg("continuous_tab.permit.label")}>
+            <div className="space-y-1">
+              {(["data", "models", "optimizers"] as const).map((key) => (
+                <label
+                  key={key}
+                  htmlFor={`continuous-permit-${key}`}
+                  className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 -mx-2 hover:bg-muted/60"
+                >
+                  <Switch
+                    id={`continuous-permit-${key}`}
+                    checked={permitted[key]}
+                    onCheckedChange={toggle(key)}
+                  />
+                  <span className="text-sm">{msg(CHANGE_KEYS[key]!)}</span>
+                </label>
+              ))}
+            </div>
+          </FormRow>
+
+          {permitted.data && (
+            <FormRow title={msg("continuous_tab.source.label")}>
+              {connected.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{msg("continuous_tab.source.none")}</p>
+              ) : (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Select value={chosenProvider} onValueChange={setProvider}>
+                    <SelectTrigger
+                      className="sm:w-48"
+                      aria-label={msg("continuous_tab.source.provider")}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {connected.map((c) => (
+                        <SelectItem key={c.provider} value={c.provider}>
+                          {providerMeta(c.provider as ConnectorProvider).name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    dir="ltr"
+                    value={sourceRef}
+                    onChange={(e) => setSourceRef(e.target.value)}
+                    placeholder={msg("continuous_tab.source.ref_placeholder")}
+                    aria-label={msg("continuous_tab.source.ref")}
+                  />
+                </div>
+              )}
+            </FormRow>
+          )}
         </div>
 
-        <fieldset className="space-y-3">
-          <legend className="mb-1 text-sm font-medium">{msg("continuous_tab.permit.label")}</legend>
-          {(["data", "models", "optimizers"] as const).map((key) => (
-            <div key={key} className="flex items-center gap-3">
-              <Switch
-                id={`continuous-permit-${key}`}
-                checked={permitted[key]}
-                onCheckedChange={toggle(key)}
-              />
-              <Label htmlFor={`continuous-permit-${key}`} className="text-sm font-normal">
-                {msg(CHANGE_KEYS[key]!)}
-              </Label>
-            </div>
-          ))}
-        </fieldset>
-
-        {permitted.data && (
-          <div className="space-y-2">
-            <span className="text-sm font-medium">{msg("continuous_tab.source.label")}</span>
-            {connected.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{msg("continuous_tab.source.none")}</p>
-            ) : (
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Select value={chosenProvider} onValueChange={setProvider}>
-                  <SelectTrigger
-                    className="sm:w-48"
-                    aria-label={msg("continuous_tab.source.provider")}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {connected.map((c) => (
-                      <SelectItem key={c.provider} value={c.provider}>
-                        {providerMeta(c.provider as ConnectorProvider).name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input
-                  dir="ltr"
-                  value={sourceRef}
-                  onChange={(e) => setSourceRef(e.target.value)}
-                  placeholder={msg("continuous_tab.source.ref_placeholder")}
-                  aria-label={msg("continuous_tab.source.ref")}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* The reason the button is off shows on hover, not as text. */}
-        <span className="inline-flex" title={problem ? msg(problem) : undefined}>
-          <Button
-            disabled={busy || problem != null}
-            onClick={() =>
-              onEnable({
-                schedule,
-                permitted,
-                source:
-                  permitted.data && chosenProvider
-                    ? { provider: chosenProvider, ref: sourceRef.trim() }
-                    : null,
-              })
-            }
-          >
-            <Repeat className="size-4" />
-            {msg("continuous_tab.enable.submit")}
-          </Button>
-        </span>
+        <div className="flex justify-end bg-muted/40 px-5 py-4 sm:px-6">
+          {/* The reason the button is off shows on hover, not as text. */}
+          <span className="inline-flex" title={problem ? msg(problem) : undefined}>
+            <Button
+              disabled={busy || problem != null}
+              onClick={() =>
+                onEnable({
+                  schedule,
+                  permitted,
+                  source:
+                    permitted.data && chosenProvider
+                      ? { provider: chosenProvider, ref: sourceRef.trim() }
+                      : null,
+                })
+              }
+            >
+              <Repeat className="size-4" />
+              {msg("continuous_tab.enable.submit")}
+            </Button>
+          </span>
+        </div>
       </CardContent>
     </Card>
   );
@@ -327,33 +349,45 @@ function PlanView({
   const checkRunning = plan.cycles.some(
     (c) => c.status === "checking" || c.status === "optimizing",
   );
+  const pending = plan.cycles.filter(canReview);
+  const refreshes = (["data", "models", "optimizers"] as const).filter((key) => plan.permitted[key]);
   return (
     <div className="mt-4 space-y-4">
-      <Card>
-        <CardContent className="space-y-4 p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-base font-semibold">{msg("continuous_tab.title")}</h3>
-                <Badge variant={paused ? "outline" : "secondary"} size="sm">
-                  {msg(paused ? "continuous_tab.status.paused" : "continuous_tab.status.active")}
-                </Badge>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {paused && plan.pause_reason
-                  ? msg(PAUSE_KEYS[plan.pause_reason])
-                  : formatMsg("continuous_tab.next_check", {
-                      when: formatWhen(plan.next_check_at),
-                    })}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {formatMsg("continuous_tab.refreshes", {
-                  changes: (["data", "models", "optimizers"] as const)
-                    .filter((key) => plan.permitted[key])
-                    .map((key) => msg(CHANGE_KEYS[key]!))
-                    .join(", "),
-                })}
-              </p>
+      {pending.map((cycle) => (
+        <ReviewCard key={cycle.id} plan={plan} cycle={cycle} busy={busy} act={act} />
+      ))}
+
+      <Card className="py-0">
+        <CardContent className="space-y-5 p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 space-y-1.5">
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 text-xs font-medium",
+                  paused ? "text-muted-foreground" : "text-[var(--success)]",
+                )}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    paused ? "bg-muted-foreground" : "bg-[var(--success)]",
+                  )}
+                />
+                {msg(paused ? "continuous_tab.status.paused" : "continuous_tab.status.active")}
+              </span>
+              {paused && plan.pause_reason ? (
+                <p className="max-w-prose text-base font-medium">{msg(PAUSE_KEYS[plan.pause_reason])}</p>
+              ) : (
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    {msg("continuous_tab.next_check_label")}
+                  </p>
+                  <p className="text-2xl font-semibold tracking-tight tabular-nums">
+                    {formatWhen(plan.next_check_at)}
+                  </p>
+                </div>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -389,64 +423,86 @@ function PlanView({
             </div>
           </div>
 
-          <div className="rounded-lg border border-border/60 px-3.5 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-medium">{msg("continuous_tab.schedule.label")}</span>
-              {editing === null && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => setEditing(plan.schedule)}
-                >
-                  <PencilSimple className="size-4" />
-                  {msg("continuous_tab.schedule.edit")}
-                </Button>
-              )}
-            </div>
-            {editing === null ? (
-              <div className="mt-1 space-y-1.5">
-                <p className="text-sm">{describeSchedule(plan.schedule)}</p>
+          {editing === null ? (
+            <dl className="grid gap-x-8 gap-y-5 rounded-lg bg-muted/50 p-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto]">
+              <div className="min-w-0 space-y-1">
+                <dt className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  {msg("continuous_tab.schedule.label")}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setEditing(plan.schedule)}
+                    className="inline-flex items-center gap-1 rounded text-xs font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                  >
+                    <PencilSimple className="size-3.5" />
+                    {msg("continuous_tab.schedule.edit")}
+                  </button>
+                </dt>
+                <dd className="text-sm font-medium">{describeSchedule(plan.schedule)}</dd>
                 {plan.upcoming_checks.length > 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    <span>{msg("continuous_tab.schedule.next_checks")}</span>
-                    <ul className="mt-0.5 space-y-0.5 text-foreground/80">
-                      {plan.upcoming_checks.map((iso) => (
-                        <li key={iso}>{formatCheck(iso, plan.schedule.timezone)}</li>
-                      ))}
-                    </ul>
-                  </div>
+                  <dd className="text-xs text-muted-foreground tabular-nums">
+                    {msg("continuous_tab.schedule.next_checks")}:{" "}
+                    {plan.upcoming_checks
+                      .map((iso) => formatCheck(iso, plan.schedule.timezone))
+                      .join(" · ")}
+                  </dd>
                 )}
               </div>
-            ) : (
-              <div className="mt-3 space-y-3">
-                <ScheduleEditor value={editing} onChange={setEditing} idPrefix="continuous-edit" />
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    disabled={busy || scheduleProblem(editing) != null}
-                    onClick={() =>
-                      act(async () => {
-                        const next = await updateContinuousSchedule(plan.id, editing);
-                        setEditing(null);
-                        return next;
-                      })
-                    }
-                  >
-                    {msg("continuous_tab.schedule.save")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => setEditing(null)}
-                  >
-                    {msg("continuous_tab.schedule.cancel")}
-                  </Button>
-                </div>
+              <div className="min-w-0 space-y-1.5">
+                <dt className="text-xs text-muted-foreground">
+                  {msg("continuous_tab.refreshes_label")}
+                </dt>
+                <dd className="flex flex-wrap gap-1.5">
+                  {refreshes.map((key) => (
+                    <span
+                      key={key}
+                      className="rounded-md bg-background px-2 py-0.5 text-xs font-medium"
+                    >
+                      {msg(CHANGE_KEYS[key]!)}
+                    </span>
+                  ))}
+                </dd>
               </div>
-            )}
-          </div>
+              <div className="min-w-0 space-y-1">
+                <dt className="text-xs text-muted-foreground">
+                  {msg("continuous_tab.version_label")}
+                </dt>
+                <dd className="text-sm font-medium">
+                  <Link
+                    className="underline-offset-4 hover:underline"
+                    href={`/optimizations/${plan.incumbent_optimization_id}`}
+                  >
+                    <bdi className="font-mono text-[0.8125rem]">
+                      {plan.incumbent_optimization_id.slice(0, 8)}
+                    </bdi>
+                  </Link>
+                </dd>
+              </div>
+            </dl>
+          ) : (
+            <div className="space-y-4 rounded-lg bg-muted/50 p-4">
+              <SectionTitle>{msg("continuous_tab.schedule.label")}</SectionTitle>
+              <ScheduleEditor value={editing} onChange={setEditing} idPrefix="continuous-edit" />
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="outline" size="sm" disabled={busy} onClick={() => setEditing(null)}>
+                  {msg("continuous_tab.schedule.cancel")}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={busy || scheduleProblem(editing) != null}
+                  onClick={() =>
+                    act(async () => {
+                      const next = await updateContinuousSchedule(plan.id, editing);
+                      setEditing(null);
+                      return next;
+                    })
+                  }
+                >
+                  {msg("continuous_tab.schedule.save")}
+                </Button>
+              </div>
+            </div>
+          )}
 
           {usage.limit_cents != null && (
             <div className="space-y-1.5">
@@ -466,13 +522,6 @@ function PlanView({
               <ProgressBar value={allowanceShare(usage) * 100} />
             </div>
           )}
-
-          <p className="text-xs text-muted-foreground">
-            {msg("continuous_tab.incumbent")}{" "}
-            <Link className="underline" href={`/optimizations/${plan.incumbent_optimization_id}`}>
-              <bdi>{plan.incumbent_optimization_id.slice(0, 8)}</bdi>
-            </Link>
-          </p>
         </CardContent>
       </Card>
 
@@ -480,21 +529,110 @@ function PlanView({
         <StageInputs plan={plan} busy={busy} act={act} />
       )}
 
-      <Card>
-        <CardContent className="p-5">
-          <h3 className="mb-3 text-sm font-semibold">{msg("continuous_tab.history")}</h3>
+      <Card className="py-0">
+        <CardContent className="p-5 sm:p-6">
+          <SectionTitle>{msg("continuous_tab.history")}</SectionTitle>
           {plan.cycles.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{msg("continuous_tab.history_empty")}</p>
+            <p className="mt-2 text-sm text-muted-foreground">{msg("continuous_tab.history_empty")}</p>
           ) : (
-            <ol className="divide-y divide-border/50">
+            <ol className="mt-3 divide-y divide-border/50">
               {plan.cycles.map((cycle) => (
-                <CycleRow key={cycle.id} plan={plan} cycle={cycle} busy={busy} act={act} />
+                <CycleRow key={cycle.id} cycle={cycle} />
               ))}
             </ol>
           )}
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function ReviewCard({
+  plan,
+  cycle,
+  busy,
+  act,
+}: {
+  plan: ContinuousPlan;
+  cycle: ContinuousCycle;
+  busy: boolean;
+  act: (run: () => Promise<ContinuousPlan>) => Promise<void>;
+}) {
+  const locale = getActiveIntlLocale();
+  const gain =
+    cycle.incumbent_score != null && cycle.candidate_score != null
+      ? cycle.candidate_score - cycle.incumbent_score
+      : null;
+  return (
+    <Card className="border-primary/40 bg-primary/[0.04] py-0">
+      <CardContent className="flex flex-wrap items-end justify-between gap-5 p-5 sm:p-6">
+        <div className="min-w-0 space-y-3">
+          <div className="space-y-0.5">
+            <SectionTitle>{msg("continuous_tab.review.title")}</SectionTitle>
+            <p className="text-xs text-muted-foreground">
+              {formatWhen(cycle.created_at)}
+              {cycle.changes.length > 0 &&
+                ` · ${formatMsg("continuous_tab.changed", {
+                  changes: cycle.changes
+                    .map((c) => (CHANGE_KEYS[c] ? msg(CHANGE_KEYS[c]) : c))
+                    .join(", "),
+                })}`}
+              {cycle.spent_cents != null &&
+                cycle.spent_cents > 0 &&
+                ` · ${formatMsg("continuous_tab.spent", {
+                  amount: formatCentsUsd(cycle.spent_cents, locale),
+                })}`}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-2 tabular-nums">
+            <div>
+              <p className="text-xs text-muted-foreground">{msg("continuous_tab.review.current")}</p>
+              <p className="text-xl font-medium text-muted-foreground">
+                {formatScore(cycle.incumbent_score)}
+              </p>
+            </div>
+            <ArrowRight aria-hidden className="mb-1.5 size-4 text-muted-foreground rtl:-scale-x-100" />
+            <div>
+              <p className="text-xs text-muted-foreground">{msg("continuous_tab.review.new")}</p>
+              <p className="text-xl font-semibold">
+                {formatScore(cycle.candidate_score)}
+                {gain != null && gain > 0 && (
+                  <span className="ms-2 text-sm font-medium text-[var(--success)]">
+                    +{gain.toFixed(3)}
+                  </span>
+                )}
+              </p>
+            </div>
+            {cycle.optimization_id && (
+              <Link
+                className="mb-1 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+                href={`/optimizations/${cycle.optimization_id}`}
+              >
+                {msg("continuous_tab.open_run")}
+                <ArrowSquareOut className="size-3 rtl:-scale-x-100" />
+              </Link>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => act(() => reviewContinuousCycle(plan.id, cycle.id, false))}
+          >
+            <X className="size-4" />
+            {msg("continuous_tab.reject")}
+          </Button>
+          <Button
+            disabled={busy}
+            onClick={() => act(() => reviewContinuousCycle(plan.id, cycle.id, true))}
+          >
+            <Check className="size-4" />
+            {msg("continuous_tab.approve")}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -514,15 +652,15 @@ function StageInputs({
     ...(plan.permitted.optimizers && optimizer.trim() ? { optimizer: optimizer.trim() } : {}),
   };
   return (
-    <Card>
-      <CardContent className="space-y-3 p-5">
-        <div className="space-y-1">
-          <h3 className="text-sm font-semibold">{msg("continuous_tab.stage.title")}</h3>
+    <Card className="py-0">
+      <CardContent className="space-y-4 p-5 sm:p-6">
+        <div className="space-y-0.5">
+          <SectionTitle>{msg("continuous_tab.stage.title")}</SectionTitle>
           <p className="text-xs text-muted-foreground">{msg("continuous_tab.stage.description")}</p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-wrap items-end gap-3">
           {plan.permitted.models && (
-            <div className="space-y-1.5">
+            <div className="min-w-56 flex-1 space-y-1.5 sm:max-w-sm">
               <Label htmlFor="continuous-task-model">
                 {msg("continuous_tab.stage.task_model")}
               </Label>
@@ -535,7 +673,7 @@ function StageInputs({
             </div>
           )}
           {plan.permitted.optimizers && (
-            <div className="space-y-1.5">
+            <div className="min-w-56 flex-1 space-y-1.5 sm:max-w-sm">
               <Label htmlFor="continuous-optimizer">{msg("continuous_tab.stage.optimizer")}</Label>
               <Input
                 id="continuous-optimizer"
@@ -545,107 +683,75 @@ function StageInputs({
               />
             </div>
           )}
+          <Button
+            variant="outline"
+            disabled={busy || Object.keys(body).length === 0}
+            onClick={() => act(() => stageContinuousInputs(plan.id, body))}
+          >
+            {msg("continuous_tab.stage.submit")}
+          </Button>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy || Object.keys(body).length === 0}
-          onClick={() => act(() => stageContinuousInputs(plan.id, body))}
-        >
-          {msg("continuous_tab.stage.submit")}
-        </Button>
       </CardContent>
     </Card>
   );
 }
 
-function CycleRow({
-  plan,
-  cycle,
-  busy,
-  act,
-}: {
-  plan: ContinuousPlan;
-  cycle: ContinuousCycle;
-  busy: boolean;
-  act: (run: () => Promise<ContinuousPlan>) => Promise<void>;
-}) {
+function CycleRow({ cycle }: { cycle: ContinuousCycle }) {
   const locale = getActiveIntlLocale();
   const scored = cycle.incumbent_score != null && cycle.candidate_score != null;
   return (
-    <li className="space-y-1.5 py-3 first:pt-0 last:pb-0">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
+    <li className="grid gap-x-6 gap-y-1.5 py-4 first:pt-1 last:pb-0 sm:grid-cols-[11rem_minmax(0,1fr)]">
+      <div className="flex items-center gap-2 sm:flex-col sm:items-start sm:gap-1.5">
         <span
           className={cn(
-            "rounded-full border px-2 py-0.5 text-xs font-medium",
+            "w-fit rounded-full border px-2 py-0.5 text-xs font-medium",
             TONE_CLASS[cycleTone(cycle.status)],
           )}
         >
           {msg(STATUS_KEYS[cycle.status] ?? "continuous_tab.cycle.checking")}
         </span>
-        <span className="text-muted-foreground">{formatWhen(cycle.created_at)}</span>
-        {cycle.changes.length > 0 && (
-          <span className="text-xs text-muted-foreground">
-            {formatMsg("continuous_tab.changed", {
-              changes: cycle.changes
-                .map((c) => (CHANGE_KEYS[c] ? msg(CHANGE_KEYS[c]) : c))
-                .join(", "),
-            })}
-          </span>
-        )}
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {formatWhen(cycle.created_at)}
+        </span>
       </div>
-      {cycle.detail_code && (
-        <p className="text-sm text-muted-foreground">
-          {tI18n(cycle.detail_code, cycle.detail_params)}
-        </p>
-      )}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        {scored && (
-          <span>
-            {formatMsg("continuous_tab.scores", {
-              incumbent: formatScore(cycle.incumbent_score),
-              candidate: formatScore(cycle.candidate_score),
-            })}
-          </span>
-        )}
-        {cycle.spent_cents != null && cycle.spent_cents > 0 && (
-          <span>
-            {formatMsg("continuous_tab.spent", {
-              amount: formatCentsUsd(cycle.spent_cents, locale),
-            })}
-          </span>
-        )}
-        {cycle.optimization_id && (
-          <Link
-            className="inline-flex items-center gap-1 underline"
-            href={`/optimizations/${cycle.optimization_id}`}
-          >
-            {msg("continuous_tab.open_run")}
-            <ArrowSquareOut className="size-3 rtl:-scale-x-100" />
-          </Link>
-        )}
-      </div>
-      {canReview(cycle) && (
-        <div className="flex flex-wrap gap-2 pt-1">
-          <Button
-            size="sm"
-            disabled={busy}
-            onClick={() => act(() => reviewContinuousCycle(plan.id, cycle.id, true))}
-          >
-            <Check className="size-4" />
-            {msg("continuous_tab.approve")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => act(() => reviewContinuousCycle(plan.id, cycle.id, false))}
-          >
-            <X className="size-4" />
-            {msg("continuous_tab.reject")}
-          </Button>
+      <div className="min-w-0 space-y-1">
+        {cycle.detail_code && <p className="text-sm">{tI18n(cycle.detail_code, cycle.detail_params)}</p>}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {cycle.changes.length > 0 && (
+            <span>
+              {formatMsg("continuous_tab.changed", {
+                changes: cycle.changes
+                  .map((c) => (CHANGE_KEYS[c] ? msg(CHANGE_KEYS[c]) : c))
+                  .join(", "),
+              })}
+            </span>
+          )}
+          {scored && (
+            <span className="tabular-nums">
+              {formatMsg("continuous_tab.scores", {
+                incumbent: formatScore(cycle.incumbent_score),
+                candidate: formatScore(cycle.candidate_score),
+              })}
+            </span>
+          )}
+          {cycle.spent_cents != null && cycle.spent_cents > 0 && (
+            <span>
+              {formatMsg("continuous_tab.spent", {
+                amount: formatCentsUsd(cycle.spent_cents, locale),
+              })}
+            </span>
+          )}
+          {cycle.optimization_id && (
+            <Link
+              className="inline-flex items-center gap-1 underline-offset-4 hover:underline"
+              href={`/optimizations/${cycle.optimization_id}`}
+            >
+              {msg("continuous_tab.open_run")}
+              <ArrowSquareOut className="size-3 rtl:-scale-x-100" />
+            </Link>
+          )}
         </div>
-      )}
+      </div>
     </li>
   );
 }
