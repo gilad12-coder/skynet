@@ -87,6 +87,10 @@ export function ScheduleEditor({
   const [customPicked, setCustomPicked] = useState(false);
 
   const set = (patch: Partial<ScheduleRule>) => onChange({ ...value, ...patch });
+  const pickPreset = (next: SchedulePreset) => {
+    setCustomPicked(next === "custom");
+    if (next !== "custom") onChange(applyPreset(value, next, locale));
+  };
   const hourly = value.frequency === "hourly";
   // "Custom" keeps the rule as it is, so the choice is held here until the rule itself differs.
   const showCustom = customPicked || preset === "custom";
@@ -102,17 +106,33 @@ export function ScheduleEditor({
             describeSchedule(value)
           )}
         </p>
+        {/* Six segments cut every name on a phone, so narrow screens get a dropdown. */}
         <Segmented
           value={showCustom ? "custom" : preset}
-          onChange={(next) => {
-            setCustomPicked(next === "custom");
-            if (next !== "custom") onChange(applyPreset(value, next, locale));
-          }}
+          onChange={pickPreset}
           label={msg("continuous_tab.schedule.label")}
           size="sm"
-          className="w-full"
+          className="hidden w-full sm:grid"
           options={PRESETS.map((p) => ({ value: p, label: msg(PRESET_KEYS[p]) }))}
         />
+        <Select
+          value={showCustom ? "custom" : preset}
+          onValueChange={(next) => pickPreset(next as SchedulePreset)}
+        >
+          <SelectTrigger
+            className="w-full sm:hidden"
+            aria-label={msg("continuous_tab.schedule.label")}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PRESETS.map((p) => (
+              <SelectItem key={p} value={p}>
+                {msg(PRESET_KEYS[p])}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <ScheduleCalendar value={value} onChange={onChange} />
       </div>
 
