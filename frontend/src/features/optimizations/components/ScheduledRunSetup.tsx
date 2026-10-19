@@ -107,9 +107,9 @@ export function ScheduledRunSetup({
   const offset = reduceMotion ? 0 : 32 * direction * (rtl ? -1 : 1);
 
   return (
-    <div className="flex flex-col gap-6 px-5 pt-5 pb-6 sm:px-6 sm:pt-6">
+    <div className="mx-auto flex w-full max-w-[39rem] flex-col gap-6 px-5 pt-6 pb-6 sm:px-6 sm:pt-8">
       <ol
-        className="flex flex-wrap items-center gap-2"
+        className="flex flex-wrap items-center justify-center gap-2"
         aria-label={msg("continuous_tab.walk.steps")}
       >
         {steps.map((s, i) => {
@@ -155,7 +155,7 @@ export function ScheduledRunSetup({
         })}
       </ol>
 
-      <div className="relative min-h-[8rem]">
+      <div className="relative">
         <AnimatePresence mode="wait" initial={false} custom={offset}>
           <motion.div
             key={step}
@@ -163,15 +163,18 @@ export function ScheduledRunSetup({
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -offset }}
             transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="space-y-3"
+            className="space-y-4"
           >
             {step === "refresh" && (
-              <div className="max-w-sm space-y-2">
-                <p className="text-sm text-muted-foreground">
+              <div className="space-y-4">
+                <p className="text-center text-base font-medium text-foreground">
                   {msg("continuous_tab.walk.refresh_hint")}
                 </p>
                 <Select value={kind} onValueChange={(v) => setKind(v as RefreshKind)}>
-                  <SelectTrigger className="w-full" aria-label={msg("continuous_tab.permit.label")}>
+                  <SelectTrigger
+                    className="h-11 w-full"
+                    aria-label={msg("continuous_tab.permit.label")}
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -186,8 +189,8 @@ export function ScheduledRunSetup({
             )}
 
             {step === "source" && (
-              <div className="max-w-2xl space-y-3">
-                <p className="text-sm text-muted-foreground">
+              <div className="space-y-4">
+                <p className="text-center text-base font-medium text-foreground">
                   {msg("continuous_tab.walk.source_hint")}
                 </p>
                 <ConnectorSourcePicker value={source} onChange={setSource} />
@@ -201,22 +204,40 @@ export function ScheduledRunSetup({
         </AnimatePresence>
       </div>
 
-      <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-5">
-        <span className="text-xs text-muted-foreground tabular-nums">
-          {formatMsg("continuous_tab.walk.position", { n: at + 1, total: steps.length })}
-        </span>
-        <div className="flex items-center gap-2">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-t border-border/50 pt-5">
+        <div className="justify-self-start">
           {at > 0 && (
             <Button type="button" variant="ghost" onClick={() => move(at - 1)} disabled={busy}>
               <ArrowLeft className="size-4 rtl:rotate-180" aria-hidden />
               {msg("continuous_tab.walk.back")}
             </Button>
           )}
-          <Button type="button" onClick={next} disabled={stepProblem != null || busy}>
-            {msg(last ? finishLabel : "continuous_tab.walk.next")}
-            {!last && <ArrowRight className="size-4 rtl:rotate-180" aria-hidden />}
-          </Button>
         </div>
+        {/* The same moving dots as the submit wizard, so both walks read alike. */}
+        <div
+          className="flex items-center gap-1.5"
+          role="img"
+          aria-label={formatMsg("continuous_tab.walk.position", { n: at + 1, total: steps.length })}
+        >
+          {steps.map((s, i) => (
+            <span
+              key={s}
+              className={cn(
+                "h-1.5 rounded-full transition-all duration-300",
+                i === at ? "w-4 bg-primary-fill" : "w-1.5 bg-muted-foreground/30",
+              )}
+            />
+          ))}
+        </div>
+        <Button
+          type="button"
+          className="justify-self-end"
+          onClick={next}
+          disabled={stepProblem != null || busy}
+        >
+          {msg(last ? finishLabel : "continuous_tab.walk.next")}
+          {!last && <ArrowRight className="size-4 rtl:rotate-180" aria-hidden />}
+        </Button>
       </div>
     </div>
   );

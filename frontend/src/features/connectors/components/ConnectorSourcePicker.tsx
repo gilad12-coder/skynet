@@ -145,7 +145,7 @@ export function ConnectorSourcePicker({
         </div>
       )}
 
-      <div className="flex flex-wrap items-stretch gap-2">
+      <div className="flex flex-wrap items-stretch justify-center gap-2">
         {linked.map((provider) => {
           const meta = providerMeta(provider);
           const label = byProvider(provider)?.account_label;
