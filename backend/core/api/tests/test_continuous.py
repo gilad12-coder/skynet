@@ -25,6 +25,7 @@ from core.api import preflight_execution
 from core.api.auth import AuthenticatedUser, get_authenticated_user
 from core.api.errors import DomainError
 from core.api.model_catalog import CatalogModel, ModelCatalogResponse
+from core.api.routers import continuous as continuous_router
 from core.api.routers import submissions
 from core.api.routers._helpers import automated_run_ids
 from core.api.routers.continuous import _HISTORY_LIMIT, create_continuous_router
@@ -2036,10 +2037,10 @@ def test_test_cases_the_source_drops_stay_in_the_test_set(env: _Env) -> None:
 
 
 def test_a_source_that_replaces_its_rows_keeps_the_pins_bounded(env: _Env) -> None:
-    """A run's pins keep only its own cases, and the plan's page never carries the plan's pins."""
+    """A run's search pins keep only its own cases, its test pins only grow, and the page omits the pins."""
     source_id = _incumbent(env)
     plan = _enable(env, source_id, permitted={"data": True})
-    sizes = []
+    sizes, tests = [], []
     for answer in ["B", "C", "D"]:
         env.rows = _cases([answer] * 10)
         env.sweep(_due(env))
@@ -2048,9 +2049,11 @@ def test_a_source_that_replaces_its_rows_keeps_the_pins_bounded(env: _Env) -> No
         env.sweep(_due(env) - timedelta(days=1))
         assert env.client.post(f"/continuous/{plan['id']}/cycles/{env.cycles()[-1].id}/reject").status_code == 200
         pins = _payload(env, cycle.optimization_id)["data"]["pinned_split"]
-        sizes.append(len(pins["test"]) + len(pins["fit"]))
+        sizes.append(len(pins["fit"]))
+        tests.append(set(pins["test"]))
 
     assert sizes[-1] == sizes[0]
+    assert tests[0] <= tests[1] <= tests[2]
     response = env.client.get(f"/optimizations/{source_id}/continuous")
     assert all("pins" not in (cycle["snapshot"] or {}) for cycle in response.json()["plan"]["cycles"])
 
@@ -2433,3 +2436,221 @@ def test_the_limit_covers_the_reference_run_that_duplicate_cases_need(
     [cycle] = env.cycles()
     assert (cycle.status, cycle.detail_code) == ("optimizing", "continuous.run_started")
     assert [run["kind"] for run in cycle.snapshot["runs"]] == ["model", "reference"]
+
+
+def test_rejected_test_rows_survive_source_replacement(env: Any) -> None:
+    """Keep every earlier held-out case after rejection and source replacement."""
+    source_id = _incumbent(env)
+    plan = _enable(env, source_id, permitted={"data": True})
+    env.rows = _cases(["A"] * 10) + _rows(100, 10)
+    env.sweep(_due(env))
+    first = env.cycles()[-1]
+    held = {continuous.case_key(case) for case in _split_payload(_payload(env, first.optimization_id)).test}
+    _finish(env, first.optimization_id, result=_result(0.5, 0.9, test=len(held)))
+    continuous.review_cycle(env.store, first.id)
+    assert env.client.post(f"/continuous/{plan['id']}/cycles/{first.id}/reject").status_code == 200
+
+    env.rows = _cases(["A"] * 10) + _rows(200, 10)
+    env.sweep(_due(env))
+    second = env.cycles()[-1]
+    assert second.status == "optimizing"
+    current = {continuous.case_key(case) for case in _split_payload(_payload(env, second.optimization_id)).test}
+    assert held <= current, f"Lost earlier held-out cases: {held - current}"
+
+
+def test_final_crash_attempt_recovers_refused_preflight_spend(env: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Count a preflight charged on the last allowed worker attempt."""
+    _enable(env, _incumbent(env), permitted={"data": True}, monthly_limit_cents=CYCLE_BUDGET)
+    env.rows = _rows(100, 10)
+    real_submit = continuous.submit_unified_payload
+    attempts = 0
+
+    def crash(*args: Any, **kwargs: Any) -> Any:
+        """Fail before setup twice, then lose the worker after charged setup."""
+        nonlocal attempts
+        attempts += 1
+        if attempts < continuous.MAX_CHECK_ATTEMPTS:
+            raise RuntimeError("worker lost before preflight")
+        env.harness.result_status = "failed"
+        try:
+            return real_submit(*args, **kwargs)
+        except DomainError as error:
+            raise RuntimeError(f"worker lost after charged preflight: {error.code}") from error
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", crash)
+    now = _due(env)
+    for attempt in range(continuous.MAX_CHECK_ATTEMPTS):
+        env.sweep(now + attempt * (continuous.CYCLE_LEASE + timedelta(seconds=1)))
+    first = env.cycles()[0]
+    budget = BudgetService(engine=env.store.engine).find_by_creation_key(
+        "alice", first.snapshot["runs"][0]["budget_key"]
+    )
+    assert budget is not None
+    assert budget.billed_cents == 1
+    monkeypatch.setattr(continuous, "submit_unified_payload", real_submit)
+    env.harness.result_status = "succeeded"
+    env.sweep(now + continuous.MAX_CHECK_ATTEMPTS * (continuous.CYCLE_LEASE + timedelta(seconds=1)))
+    assert env.cycles()[0].status == "failed"
+    with Session(env.store.engine) as session:
+        recorded = continuous.month_committed(session, env.plan(), first.month)
+    assert recorded >= budget.billed_cents, f"Committed {recorded}, charged {budget.billed_cents}"
+
+
+def test_optimizing_cycle_counts_refused_run_budget(env: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Count refused setup alongside the full budget of an accepted matrix run."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    _enable(
+        env,
+        _incumbent(env),
+        permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]},
+    )
+    env.rows = _cases(["A"] * 10) + _rows(100, 10)
+    real_submit = continuous.submit_unified_payload
+
+    def fail_model_preflight(*args: Any, **kwargs: Any) -> Any:
+        """Run real setup and fail its contract only for the model branch."""
+        env.harness.result_status = "failed" if kwargs["idempotency_key"].endswith(":model") else "succeeded"
+        return real_submit(*args, **kwargs)
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", fail_model_preflight)
+    env.sweep(_due(env))
+    cycle = env.cycles()[0]
+    assert cycle.status == "optimizing"
+    assert list(_runs(cycle)) == ["data"]
+    [refused_id] = cycle.snapshot["refused_budgets"]
+    refused = BudgetService(engine=env.store.engine).get(refused_id, "alice")
+    assert refused.billed_cents == 1
+    required = CYCLE_BUDGET + refused.billed_cents
+    with Session(env.store.engine) as session:
+        recorded = continuous.month_committed(session, env.plan(), cycle.month)
+    assert recorded >= required, f"Committed {recorded}, required {required}"
+
+
+def test_exact_one_percent_margin_is_reviewable(env: Any) -> None:
+    """Accept a decimal score difference exactly equal to the required margin."""
+    _enable(env, _incumbent(env), permitted={"data": True})
+    env.rows = _cases(["A"] * 10) + _rows(100, 10)
+    env.sweep(_due(env))
+    cycle = env.cycles()[0]
+    _finish(env, cycle.optimization_id, result=_result(0.56, 0.57))
+    continuous.review_cycle(env.store, cycle.id)
+    cycle = env.cycles()[0]
+    assert cycle.status == "awaiting_review", (
+        f"0.57 - 0.56 is the required 0.01, but status={cycle.status}, reason={cycle.detail_code}"
+    )
+
+
+def test_model_only_excludes_rejected_new_training_cases(env: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Limit the model-only matrix branch to the incumbent's search cases."""
+    _catalog(monkeypatch, task=(40.0, 1e-6))
+    source_id = _incumbent(env)
+    incumbent_split = _split_payload(_payload(env, source_id))
+    original_fit = {continuous.case_key(case) for case in incumbent_split.train + incumbent_split.val}
+    _enable(
+        env,
+        source_id,
+        permitted={"data": True, "new_task_model": True, "matrix": ["data", "model", "both"]},
+    )
+    env.rows = _cases(["A"] * 10) + _rows(100, 10)
+    env.sweep(_due(env))
+    first = env.cycles()[-1]
+    _finish(env, first.optimization_id, result=_result(0.7, 0.6))
+    continuous.review_cycle(env.store, first.id)
+    assert env.cycles()[-1].status == "regressed"
+    assert env.plan().incumbent_optimization_id == source_id
+
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    env.rows += _rows(200, 10)
+    env.sweep(_due(env))
+    second = env.cycles()[-1]
+    assert second.status == "optimizing"
+    model_split = _split_payload(_payload(env, _runs(second)["model"]))
+    model_fit = {continuous.case_key(case) for case in model_split.train + model_split.val}
+    assert model_fit <= original_fit, f"Model-only branch trains on {len(model_fit - original_fit)} new cases"
+
+
+def test_concurrent_approval_keeps_newer_staged_model(env: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep an input committed after approval reads the plan but before approval writes it."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    test_count = len(_split_payload(_payload(env, source_id)).test)
+    _finish(env, source_id, result=_result(0.5, 0.7, test=test_count))
+    plan = _enable(env, source_id, permitted={"models": True, "new_task_model": True}, source=None)
+    staged = env.client.post(f"/continuous/{plan['id']}/inputs", json={"task_model": "fixture/task"})
+    assert staged.status_code == 200
+    env.sweep(_due(env))
+    cycle = env.cycles()[-1]
+    _finish(env, cycle.optimization_id, result=_result(0.8, 0.9, test=test_count))
+    continuous.review_cycle(env.store, cycle.id)
+    assert env.cycles()[-1].status == "awaiting_review"
+    owned_plan = continuous_router._owned_plan
+    interleaved = False
+
+    def stage_between_read_and_write(*args: Any, **kwargs: Any) -> Any:
+        """Commit a separate input request while approval holds its old ORM snapshot."""
+        nonlocal interleaved
+        loaded = owned_plan(*args, **kwargs)
+        if not interleaved:
+            interleaved = True
+            response = env.client.post(f"/continuous/{plan['id']}/inputs", json={"task_model": "fixture/new-request"})
+            assert response.status_code == 200, response.text
+            assert env.plan().pending_inputs["task_model"] == "fixture/new-request"
+        return loaded
+
+    monkeypatch.setattr(continuous_router, "_owned_plan", stage_between_read_and_write)
+    response = env.client.post(f"/continuous/{plan['id']}/cycles/{cycle.id}/approve")
+    assert response.status_code == 200, response.text
+    assert env.plan().pending_inputs.get("task_model") == "fixture/new-request"
+
+
+def test_r4_pending_middle_run_does_not_drop_later_runs(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pending budget on one run only drops that run once another run started."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model", "both"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    real = continuous.submit_unified_payload
+
+    def pending_model(*args: Any, **kwargs: Any) -> Any:
+        if kwargs["idempotency_key"].endswith(":model"):
+            raise DomainError("budget.pending", status=409)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", pending_model)
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    assert list(_runs(cycle)) == ["data", "both"]
+
+
+def test_r4_tried_cases_stay_off_the_page(env: _Env) -> None:
+    """The per-case keys of tried new data never reach the plan page, like the pins."""
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "min_new_cases": 1})
+    sizes = []
+    for start in (100, 200, 300):
+        env.rows = _cases(["A"] * 10) + _rows(start, 10)
+        env.sweep(_due(env))
+        cycle = env.cycles()[-1]
+        assert cycle.status == "optimizing", cycle.detail_code
+        _finish(env, cycle.optimization_id, result=_result(0.5, 0.5))
+        env.sweep(_due(env) - timedelta(days=1))
+        sizes.append(len(env.plan().baseline_snapshot["data"]["tried_cases"]))
+    response = env.client.get(f"/optimizations/{source_id}/continuous")
+    body = response.json()
+    assert "tried_cases" not in response.text, sorted(body.keys())
+
+
+def test_r4_tried_cases_drop_cases_the_source_lost(env: _Env) -> None:
+    """Keys of cases the source dropped do not pile up in the plan row."""
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "min_new_cases": 1})
+    sizes = []
+    for start in (100, 200, 300):
+        env.rows = _cases(["A"] * 10) + _rows(start, 10)
+        env.sweep(_due(env))
+        cycle = env.cycles()[-1]
+        assert cycle.status == "optimizing", cycle.detail_code
+        _finish(env, cycle.optimization_id, result=_result(0.5, 0.5))
+        env.sweep(_due(env) - timedelta(days=1))
+        sizes.append(len(env.plan().baseline_snapshot["data"]["tried_cases"]))
+    assert sizes[-1] <= 20, sizes

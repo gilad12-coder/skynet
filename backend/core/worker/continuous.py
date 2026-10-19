@@ -455,6 +455,44 @@ def has_held_out(job: dict[str, Any]) -> bool:
     return cases is None or len(cases) >= MIN_PAIRS_FOR_HELD_OUT
 
 
+def _latest_test_cases(
+    job_store: Any, session: Session, plan: ContinuousPlanModel, cycle: ContinuousCycleModel
+) -> list[dict[str, Any]]:
+    """Read the test cases of the plan's latest check that started runs.
+
+    Each check holds out every earlier check's test cases, so the latest one
+    holds them all, also those the source no longer has.
+
+    Args:
+        job_store: Job store.
+        session: Open session.
+        plan: The plan.
+        cycle: The check being planned, which is left out.
+
+    Returns:
+        The cases, or none when no earlier check started a run that still exists.
+    """
+    latest = session.scalars(
+        select(ContinuousCycleModel)
+        .where(
+            ContinuousCycleModel.plan_id == plan.id,
+            ContinuousCycleModel.id != cycle.id,
+            ContinuousCycleModel.optimization_id.is_not(None),
+        )
+        .order_by(ContinuousCycleModel.slot.desc())
+        .limit(1)
+    ).first()
+    if latest is None:
+        return []
+    try:
+        payload = job_store.get_job(latest.optimization_id, include_payload=True)["payload"]
+    except KeyError:
+        return []
+    data = payload.get("data") or {}
+    test = set((data.get("pinned_split") or {}).get("test") or [])
+    return [case for case in data.get("cases") or [] if case_key(case) in test]
+
+
 def _incumbent(job_store: Any, optimization_id: str) -> dict[str, Any]:
     """Load the incumbent run with its payload and result.
 
@@ -509,7 +547,9 @@ def resolve_snapshot(
         known = {case_key(case) for case in stored}
         # New cases an earlier run already tried against this incumbent do not count again.
         same_incumbent = prior.get("incumbent") == plan.incumbent_optimization_id
-        tried = set(prior.get("tried_cases") or []) if same_incumbent else set()
+        fresh_keys = {case_key(case) for case in fresh}
+        # Only keys still in the source matter, so the list stays bounded by the source size.
+        tried = set(prior.get("tried_cases") or []) & fresh_keys if same_incumbent else set()
         # Copies of one row are one case, so they cannot make up the minimum on their own.
         new_keys = list(dict.fromkeys(key for key in (case_key(case) for case in fresh) if key not in known))
         untried = sum(1 for key in new_keys if key not in tried)
@@ -712,7 +752,8 @@ def plan_runs(
         cases: This check's cases.
         changes: The inputs that changed since the last reviewed check.
         kinds: The runs to build, for a retry that may start only what its first attempt gated.
-        available: Every case the source has now, so earlier test cases it still has stay test cases.
+        available: Every case the source has now, plus the latest check's test cases, so earlier
+            test cases stay test cases.
 
     Returns:
         The runs, in matrix order, the reference run last, and the fingerprint of
@@ -747,18 +788,21 @@ def plan_runs(
         kinds = [kind for kind in allowed_kinds if kind != RUN_REFERENCE]
     if data_changed:
         present = {case_key(case) for case in cases}
-        # The incumbent's test cases stay when the source drops them, so the test set only grows.
-        cases = cases + [case for case in own.test if case_key(case) not in present]
+        # Earlier test cases stay when the source drops them, so the test set only grows.
+        held = set(earlier.test)
+        dropped = [*own.test, *(case for case in available or [] if case_key(case) in held)]
+        cases = cases + list({case_key(case): case for case in dropped if case_key(case) not in present}.values())
         keys = {case_key(case) for case in cases}
         full = _merge_pins(_pins_of(_split(request, cases, earlier)), earlier, keep=keys)
-        searched_before = set(earlier.fit)
-        allowed = set(full.test) | searched_before
+        # Only the incumbent's own search cases: a rejected check's new cases would change its data too.
+        own_fit = [case_key(case) for case in own.train + own.val]
+        allowed = set(full.test) | set(own_fit)
         # The incumbent's search cases stay for the model-only run when the source drops them.
         model_cases = [case for case in cases if case_key(case) in allowed] + [
             case for case in own.train + own.val if case_key(case) not in keys
         ]
         model_keys = {case_key(case) for case in model_cases}
-        model_pinned = PinnedSplit(test=full.test, fit=[key for key in earlier.fit if key in model_keys])
+        model_pinned = PinnedSplit(test=full.test, fit=[key for key in dict.fromkeys(own_fit) if key in model_keys])
     else:
         known = {case_key(case) for case in stored}
         # Test cases an earlier check added stay test cases, so the test set only grows.
@@ -810,7 +854,7 @@ def month_committed(session: Session, plan: ContinuousPlanModel, month: str) -> 
     """Sum what a plan's cycles spent or hold in one monthly allowance.
 
     A cycle still optimizing counts at its full budget total, because its
-    reservation can still be drawn on. A finished cycle counts what its budget
+    reservation can still be drawn on, plus what its refused runs charged. A finished cycle counts what its budget
     billed plus any hold it still keeps for usage awaiting reconciliation.
 
     Args:
@@ -834,6 +878,9 @@ def month_committed(session: Session, plan: ContinuousPlanModel, month: str) -> 
         found = [budgets[budget_id] for budget_id in cycle_budget_ids(cycle) if budget_id in budgets]
         if cycle.status == CYCLE_OPTIMIZING:
             total += plan.cycle_budget_cents * max(1, len(cycle_runs(cycle)))
+            # A refused run's preflight charge is not part of any started run's budget.
+            refused = set((cycle.snapshot or {}).get("refused_budgets") or [])
+            total += sum(budget.billed_cents + budget_wallet_hold(budget) for budget in found if budget.id in refused)
         elif found:
             # ``spent_cents`` is sampled once when the run ends; reconciliation can bill more later.
             total += sum(budget.billed_cents + budget_wallet_hold(budget) for budget in found)
@@ -1101,6 +1148,7 @@ def process_cycle(
                 plan.status, plan.pause_reason = PLAN_ACTIVE, None
             _finish_cycle(session, cycle, CYCLE_SKIPPED, "continuous.skip_unchanged")
             return
+        available = available + _latest_test_cases(job_store, session, plan, cycle)
         try:
             # A retry may start only the runs its first attempt passed the gates for, or it could
             # spend past the allowance; it keeps their idempotency keys, so it reuses their budgets.
@@ -1230,14 +1278,7 @@ def _link_accepted(job_store: Any, session: Session, username: str, cycle: Conti
         linked.append({"kind": RUN_DATA, "optimization_id": legacy, "budget": job.get("execution_budget_id")})
     # A run refused before the crash can hold a budget its preflight charged, and the allowance must
     # count it, also when no run was accepted and the check ends without starting one.
-    accepted = {run["kind"] for run in linked}
-    budgets = BudgetService(engine=job_store.engine)
-    held = [
-        budgets.find_by_creation_key(username, run["budget_key"])
-        for run in planned
-        if run["kind"] not in accepted and run.get("budget_key")
-    ]
-    _keep_budgets(cycle, [budget.id for budget in held if budget is not None])
+    _keep_charged(session, username, cycle, skip={run["kind"] for run in linked})
     if not linked:
         return False
     _record_started(session, cycle, linked)
@@ -1274,6 +1315,29 @@ def _record_started(session: Session, cycle: ContinuousCycleModel, started: list
         changes=",".join(cycle.changes or []),
         runs=",".join(run["kind"] for run in started),
     )
+
+
+def _keep_charged(session: Session, username: str, cycle: ContinuousCycleModel, skip: set[str]) -> None:
+    """Keep the budgets a check's planned runs created, so the monthly allowance counts their charges.
+
+    Args:
+        session: Open session that owns ``cycle``; a second connection would wait on its write lock.
+        username: Plan owner.
+        cycle: The cycle.
+        skip: Kinds of runs that started, whose budgets the check already holds.
+    """
+    keys = [
+        run["budget_key"]
+        for run in (cycle.snapshot or {}).get("runs") or []
+        if run["kind"] not in skip and run.get("budget_key")
+    ]
+    if keys:
+        held = session.scalars(
+            select(ExecutionBudgetModel.id).where(
+                ExecutionBudgetModel.username == username, ExecutionBudgetModel.creation_key.in_(keys)
+            )
+        ).all()
+        _keep_budgets(cycle, list(held))
 
 
 def _keep_budgets(cycle: ContinuousCycleModel, budget_ids: list[str]) -> None:
@@ -1330,7 +1394,9 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
             refused = refused or error
             if budget_key:
                 refused_keys.append(budget_key)
-            if error.code == "budget.pending":
+            # Before any run starts, a pending budget waits for a replay of the whole set.
+            # Once one started, only the refused run drops and the rest still start.
+            if error.code == "budget.pending" and not started:
                 break
             continue
         job = job_store.get_job(response.optimization_id, include_payload=False)
@@ -1564,7 +1630,8 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_not_held_out")
         elif not eligible or best <= incumbent:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_regressed")
-        elif best < incumbent + WIN_MARGIN:
+        # Rounded, so a gain of exactly the margin (0.56 to 0.57) is not lost to float error.
+        elif round(best - incumbent, 9) < WIN_MARGIN:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_within_margin")
         else:
             _finish_cycle(session, cycle, CYCLE_AWAITING_REVIEW, "continuous.review_ready", run=best_run["kind"])
@@ -1746,6 +1813,8 @@ def _reclaim_stale(engine: Any, now: datetime) -> list[str]:
             attempts = int((cycle.detail_params or {}).get("attempts", 1)) + 1
             if attempts > MAX_CHECK_ATTEMPTS:
                 plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
+                # The last worker may have died after a preflight charged a budget; the allowance must count it.
+                _keep_charged(session, plan.username if plan else "", cycle, skip=set())
                 if plan is None:
                     _finish_cycle(session, cycle, CYCLE_FAILED, "continuous.check_stuck", attempts=MAX_CHECK_ATTEMPTS)
                 else:

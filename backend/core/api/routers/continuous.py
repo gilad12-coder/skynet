@@ -320,10 +320,7 @@ def _plan_item(session: Session, plan: ContinuousPlanModel) -> ContinuousPlanIte
                 changes=list(cycle.changes or []),
                 detail_code=cycle.detail_code,
                 detail_params=cycle.detail_params or {},
-                # The split pins can hold a key per case, which the page never reads.
-                snapshot={key: value for key, value in cycle.snapshot.items() if key != "pins"}
-                if cycle.snapshot
-                else cycle.snapshot,
+                snapshot=_page_snapshot(cycle.snapshot),
                 optimization_id=cycle.optimization_id,
                 incumbent_score=cycle.incumbent_score,
                 candidate_score=cycle.candidate_score,
@@ -333,6 +330,21 @@ def _plan_item(session: Session, plan: ContinuousPlanModel) -> ContinuousPlanIte
             for cycle in cycles
         ],
     )
+
+
+def _page_snapshot(value: Any) -> Any:
+    """Drop the per-case key lists from a check snapshot before the page gets it.
+
+    Args:
+        value: A check snapshot, or any value nested inside one.
+
+    Returns:
+        The same value without any ``pins`` or ``tried_cases`` entry.
+    """
+    # These lists hold a key per case and grow with the data, and the page never reads them.
+    if isinstance(value, dict):
+        return {key: _page_snapshot(item) for key, item in value.items() if key not in {"pins", "tried_cases"}}
+    return value
 
 
 def _upcoming(plan: ContinuousPlanModel) -> list[datetime]:
@@ -712,6 +724,8 @@ def create_continuous_router(
         """
         with _session() as session:
             plan = _owned_plan(session, plan_id, current_user)
+            # Locked and read again, so an approval that clears staged models cannot drop this change.
+            session.refresh(plan, with_for_update=True)
             permitted = plan.permitted or {}
             changes = body.model_dump(exclude_none=True)
             if (("task_model" in changes or "reflection_model" in changes) and not permitted.get("models")) or (
@@ -740,6 +754,9 @@ def create_continuous_router(
         """
         with _session() as session:
             plan = _owned_plan(session, plan_id, user)
+            # Locked and read again before the cycle, in the worker's lock order, so a model staged
+            # meanwhile is not overwritten when approval clears the staged models.
+            session.refresh(plan, with_for_update=True)
             # Locked so a concurrent approve and reject can't both see ``awaiting_review``.
             cycle = session.get(ContinuousCycleModel, cycle_id, with_for_update=True)
             if cycle is None or cycle.plan_id != plan.id or cycle.status != engine_mod.CYCLE_AWAITING_REVIEW:
