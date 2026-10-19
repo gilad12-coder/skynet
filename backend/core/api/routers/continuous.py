@@ -264,7 +264,7 @@ def _plan_item(session: Session, plan: ContinuousPlanModel) -> ContinuousPlanIte
         schedule=engine_mod.plan_rule(plan),
         next_check_at=engine_mod.aware(plan.next_check_at),
         upcoming_checks=_upcoming(plan),
-        permitted=ContinuousPermitted.model_validate(plan.permitted or {}),
+        permitted=ContinuousPermitted.model_validate(engine_mod.upgrade_switches(plan.permitted or {})),
         cycle_budget_cents=plan.cycle_budget_cents,
         usage=ContinuousUsage(
             month=month,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import calendar
+import importlib.util
 import logging
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -10,15 +11,18 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import func, select
+from sqlalchemy import JSON, Column, MetaData, String, Table, create_engine, func, select
 from sqlalchemy.orm import Session
 
 from core.api import preflight_execution
@@ -332,17 +336,18 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Env]:
     store.engine.dispose()
 
 
-def _incumbent(env: _Env, score: float = INCUMBENT_SCORE) -> str:
+def _incumbent(env: _Env, score: float = INCUMBENT_SCORE, name: str | None = None) -> str:
     """Submit and finish the run a plan is enabled from.
 
     Args:
         env: Test environment.
         score: The incumbent's saved test score.
+        name: Run name; a new name makes a new run instead of replaying an earlier submit.
 
     Returns:
         The incumbent's optimization id.
     """
-    response = env.client.post("/optimize", json=_incumbent_payload())
+    response = env.client.post("/optimize", json={**_incumbent_payload(), **({"name": name} if name else {})})
     assert response.status_code == 201, response.text
     optimization_id = response.json()["optimization_id"]
     _finish(env, optimization_id, result=_result(0.5, score))
@@ -576,8 +581,17 @@ def test_a_current_model_missing_its_rating_or_price_is_never_switched(env: _Env
     assert env.cycles()[-1].detail_code == "continuous.skip_unchanged"
 
 
-def test_a_price_that_rises_on_one_side_is_not_better(env: _Env) -> None:
-    """A model must cost no more for input and for output; a higher output price alone rules it out."""
+@pytest.mark.parametrize(
+    ("price_in", "price_out"),
+    [
+        # Cheaper for input, dearer for output.
+        (5e-7, 2e-6),
+        # Cheaper for output, dearer for input.
+        (2e-6, 5e-7),
+    ],
+)
+def test_a_price_that_rises_on_one_side_is_not_better(env: _Env, price_in: float, price_out: float) -> None:
+    """A model must cost no more for input and for output; a higher price on either side rules it out."""
     entries = [
         CatalogModel(
             value=f"fixture/{name}",
@@ -591,7 +605,7 @@ def test_a_price_that_rises_on_one_side_is_not_better(env: _Env) -> None:
         for name, score, price_in, price_out in (
             ("task", 40.0, 1e-6, 1e-6),
             ("text", 40.0, 1e-6, 1e-6),
-            ("lopsided", 90.0, 5e-7, 2e-6),
+            ("lopsided", 90.0, price_in, price_out),
         )
     ]
     env.monkeypatch.setattr(
@@ -625,10 +639,24 @@ def test_only_switched_on_roles_change(env: _Env) -> None:
     assert payload["models"]["reflection_model"]["name"] == "fixture/strong"
 
 
-def test_an_old_plan_with_data_switches_reads_as_no_model_switch(env: _Env) -> None:
-    """A plan saved with the removed data and config switches has no model switch on, so it never runs."""
+def test_an_old_plan_with_the_models_switch_tries_a_better_model(env: _Env) -> None:
+    """A plan saved with the old ``models`` switch on may switch both roles, before and after the migration."""
     _enable(env, _incumbent(env))
-    env.edit_plan(permitted={"data": True, "models": True, "optimizers": True})
+    env.edit_plan(permitted={"data": True, "models": True, "optimizers": False})
+    plan = env.client.get(f"/optimizations/{env.plan().source_optimization_id}/continuous").json()["plan"]
+    assert plan["permitted"] == {"task_model": True, "reflection_model": True}
+    env.better()
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.changes) == ("optimizing", ["reflection_model", "task_model"])
+
+
+def test_an_old_plan_without_the_models_switch_stays_skipped(env: _Env) -> None:
+    """A plan saved with only the removed data and optimizer switches has no model switch on, so it never runs."""
+    _enable(env, _incumbent(env))
+    env.edit_plan(permitted={"data": True, "models": False, "optimizers": True})
     env.better()
 
     env.sweep(_due(env))
@@ -636,6 +664,46 @@ def test_an_old_plan_with_data_switches_reads_as_no_model_switch(env: _Env) -> N
     assert env.cycles()[-1].detail_code == "continuous.skip_unchanged"
     plan = env.client.get(f"/optimizations/{env.plan().source_optimization_id}/continuous").json()["plan"]
     assert plan["permitted"] == {"task_model": False, "reflection_model": False}
+
+
+def _load_switches_migration() -> Any:
+    """Load the migration that rewrites old plan switches from its file.
+
+    Returns:
+        The imported migration module.
+    """
+    path = Path(__file__).resolve().parents[3] / "alembic/versions/d2a8f4c6e1b9_split_continuous_model_switch.py"
+    spec = importlib.util.spec_from_file_location("split_continuous_model_switch", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_switch_migration_rewrites_only_old_plans_and_can_run_twice() -> None:
+    """Old ``models`` switches become both role switches; new and empty rows stay as they are."""
+    migration = _load_switches_migration()
+    engine = create_engine("sqlite:///:memory:")
+    metadata = MetaData()
+    plans = Table("continuous_plans", metadata, Column("id", String(36), primary_key=True), Column("permitted", JSON))
+    metadata.create_all(engine)
+    rows = {
+        "old-on": {"data": True, "models": True, "optimizers": False},
+        "old-off": {"data": True, "models": False, "optimizers": True},
+        "new": {"task_model": True, "reflection_model": False},
+        "empty": {},
+    }
+    with engine.begin() as connection:
+        connection.execute(plans.insert(), [{"id": key, "permitted": value} for key, value in rows.items()])
+        for _ in range(2):
+            with patch.object(migration, "op", Operations(MigrationContext.configure(connection))):
+                migration.upgrade()
+        stored = dict(connection.execute(select(plans.c.id, plans.c.permitted)).all())
+    assert stored == {
+        "old-on": {"task_model": True, "reflection_model": True},
+        "old-off": {"task_model": False, "reflection_model": False},
+        "new": {"task_model": True, "reflection_model": False},
+        "empty": {},
+    }
 
 
 def test_the_removed_inputs_route_is_gone(env: _Env) -> None:
@@ -1014,6 +1082,139 @@ def test_pending_setup_usage_retries_the_same_check(env: _Env, monkeypatch: pyte
     assert retried.status == "optimizing"
     assert retried.execution_budget_id == cycle.execution_budget_id
     assert env.count(ExecutionBudgetModel) == budgets_before + 1
+
+
+def test_a_pending_retry_after_a_catalog_change_keeps_its_first_models_and_budget(
+    env: _Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A retried check replays the models it first chose, so its key meets the same request and budget."""
+    _enable(env, _incumbent(env))
+    env.better()
+    submit = continuous.submit_unified_payload
+    _refuse_after_charging(env, "budget.pending", 2)
+    now = _due(env)
+    env.sweep(now)
+    [cycle] = env.cycles()
+    env.catalog(**CURRENT_MODELS, strong=(60.0, 1e-6), stronger=(70.0, 1e-6))
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", submit)
+    env.sweep(now + continuous.CYCLE_LEASE + timedelta(seconds=1))
+
+    [retried] = env.cycles()
+    assert (retried.id, retried.status) == (cycle.id, "optimizing")
+    assert retried.snapshot["budget_key"] == cycle.snapshot["budget_key"]
+    assert retried.execution_budget_id == cycle.execution_budget_id
+    models = env.payload(retried.optimization_id)["models"]
+    assert (models["task_model"]["name"], models["reflection_model"]["name"]) == ("fixture/strong", "fixture/strong")
+
+
+def test_a_crashed_check_never_takes_another_users_budget_with_its_key(env: _Env) -> None:
+    """Crash recovery finds the check's budget by its key among the owner's budgets only."""
+    _enable(env, _incumbent(env))
+    [claimed] = continuous._claim_due(env.store.engine, _due(env))
+    env.edit_cycle(claimed, snapshot={"budget_key": "shared-key"})
+    BudgetService(engine=env.store.engine).create("bob", CYCLE_BUDGET, idempotency_key="shared-key")
+
+    continuous.process_cycle(env.store, object(), claimed)
+
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.execution_budget_id) == ("skipped", None)
+
+
+def test_the_new_run_inlines_the_cases_instead_of_a_staged_upload(env: _Env) -> None:
+    """A run copied from one that also named a staged upload is sent with the cases inline and no upload."""
+    source_id = _incumbent(env)
+    payload = env.payload(source_id)
+    env.store.update_job(source_id, payload={**payload, "data": {**payload["data"], "staged_dataset_id": "gone"}})
+    _enable(env, source_id)
+    env.better()
+    submit = continuous.submit_unified_payload
+    sent: list[Any] = []
+
+    def record(request: Any, **kwargs: Any) -> Any:
+        """Keep the request the check sends, then submit it.
+
+        Args:
+            request: The run's request.
+            **kwargs: Submission arguments.
+
+        Returns:
+            The submission response.
+        """
+        sent.append(request.data.staged_dataset_id)
+        return submit(request, **kwargs)
+
+    env.monkeypatch.setattr(continuous, "submit_unified_payload", record)
+
+    env.sweep(_due(env))
+
+    assert sent == [None]
+    [cycle] = env.cycles()
+    assert cycle.status == "optimizing", cycle.detail_code
+    copied = env.payload(cycle.optimization_id)["data"]
+    assert copied.get("staged_dataset_id") is None
+    assert copied["cases"] == payload["data"]["cases"]
+
+
+def test_a_model_on_a_custom_endpoint_is_never_switched(env: _Env) -> None:
+    """A role served from the customer's own endpoint keeps its model even when a better hosted one exists."""
+    source_id = _incumbent(env)
+    payload = env.payload(source_id)
+    models = {**payload["models"], "task_model": {**payload["models"]["task_model"], "base_url": "https://llm.test"}}
+    env.store.update_job(source_id, payload={**payload, "models": models})
+    _enable(env, source_id, permitted={"task_model": True})
+    env.better()
+
+    env.sweep(_due(env))
+
+    assert env.cycles()[-1].detail_code == "continuous.skip_unchanged"
+
+
+def test_an_unavailable_hosted_model_is_never_chosen(env: _Env) -> None:
+    """A better hosted model the catalog marks unavailable is not tried."""
+    entries = [
+        CatalogModel(
+            value=f"fixture/{name}",
+            label=name,
+            provider="fixture",
+            available=available,
+            intelligence_index=score,
+            input_cost_per_token=1e-6,
+            output_cost_per_token=1e-6,
+        )
+        for name, score, available in (("task", 40.0, True), ("text", 40.0, True), ("strong", 90.0, False))
+    ]
+    env.monkeypatch.setattr(
+        continuous, "get_catalog_cached", lambda: ModelCatalogResponse(providers=[], models=entries)
+    )
+    _enable(env, _incumbent(env))
+
+    env.sweep(_due(env))
+
+    assert env.cycles()[-1].detail_code == "continuous.skip_unchanged"
+
+
+def test_a_cycle_of_another_plan_cannot_be_reviewed_through_this_plan(env: _Env) -> None:
+    """Approve and reject refuse a cycle that belongs to another plan, the owner's own or another user's."""
+    _, plan, cycle = _started(env)
+    _finish(env, cycle.optimization_id, result=_result(0.5, 0.9))
+    env.sweep(_due(env) - timedelta(days=1))
+    other = _enable(env, _incumbent(env, name="Other answers"))
+    env.harness.username = "bob"
+    bobs = _enable(env, _incumbent(env, name="Bob answers"))
+    for action in ("approve", "reject"):
+        assert env.client.post(f"/continuous/{bobs['id']}/cycles/{cycle.id}/{action}").status_code == 409
+    env.harness.username = "alice"
+    for action in ("approve", "reject"):
+        assert env.client.post(f"/continuous/{other['id']}/cycles/{cycle.id}/{action}").status_code == 409
+
+    assert env.cycles()[0].status == "awaiting_review"
+    with Session(env.store.engine) as session:
+        incumbents = {
+            row.id: row.incumbent_optimization_id for row in session.scalars(select(ContinuousPlanModel)).all()
+        }
+    assert cycle.optimization_id not in incumbents.values()
+    assert plan["id"] in incumbents
 
 
 def test_a_pending_retry_at_the_allowance_edge_is_not_paused(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:

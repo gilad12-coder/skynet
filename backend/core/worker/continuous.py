@@ -218,6 +218,25 @@ def better_model(
 
 ModelPicker = Callable[[Any, str, dict[str, Any], frozenset[str]], dict[str, Any] | None]
 
+MODEL_SWITCHES = ("task_model", "reflection_model")
+# The switches plans stored before SKY-100; ``models`` covered both roles.
+_OLD_SWITCHES = frozenset({"data", "models", "optimizers"})
+
+
+def upgrade_switches(permitted: dict[str, Any]) -> dict[str, Any]:
+    """Read a plan's stored switches, mapping the old single ``models`` switch to both roles.
+
+    Args:
+        permitted: The stored ``permitted`` mapping.
+
+    Returns:
+        The same mapping when it already names a role, else both roles set to the old ``models`` switch.
+    """
+    if any(role in permitted for role in MODEL_SWITCHES) or not _OLD_SWITCHES & permitted.keys():
+        return permitted
+    allowed = bool(permitted.get("models"))
+    return dict.fromkeys(MODEL_SWITCHES, allowed)
+
 
 def tried_models(plan: ContinuousPlanModel) -> list[str]:
     """List the ``role:model`` pairs the plan already compared against its current version.
@@ -251,10 +270,10 @@ def find_better_models(
     Returns:
         ``{role: {"name", "byok_provider"}}`` for each role that has one.
     """
-    permitted = plan.permitted or {}
+    permitted = upgrade_switches(plan.permitted or {})
     tried = tried_models(plan)
     found = {}
-    for role in ("task_model", "reflection_model"):
+    for role in MODEL_SWITCHES:
         current = models.get(role)
         if not permitted.get(role) or not current:
             continue
