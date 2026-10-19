@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import math
 import threading
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -1048,7 +1049,8 @@ def _record_started(
         started: The started runs, each with its ``optimization_id`` and ``budget``.
         refused_budgets: Budgets created for runs whose submit was refused after setup was paid for.
     """
-    cycle.snapshot = {**(cycle.snapshot or {}), "runs": started}
+    cycle.snapshot = {key: value for key, value in (cycle.snapshot or {}).items() if key != "refused_budgets"}
+    cycle.snapshot["runs"] = started
     if refused_budgets:
         # A refused run's setup check was already charged to its budget, so the
         # monthly allowance must still count it.
@@ -1127,6 +1129,9 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
         budgets = [BudgetService(engine=engine).find_by_creation_key(username, key) for key in budget_keys]
         budget_ids = [budget.id for budget in budgets if budget is not None]
         cycle.execution_budget_id = budget_ids[0] if budget_ids else None
+        # Every refused run's setup check was charged to its own budget, and the
+        # monthly allowance reads budgets, not ``spent_cents``, once one exists.
+        cycle.snapshot = {**(cycle.snapshot or {}), "refused_budgets": budget_ids}
         cycle.spent_cents = sum(_billed_cents(job_store, budget_id, username) or 0 for budget_id in budget_ids) or None
         if refused is None:
             return
@@ -1144,13 +1149,33 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
             _fail_cycle(session, plan, cycle, "continuous.run_rejected", reason=str(refused.detail))
 
 
-def _incumbent_score(job_store: Any, optimization_id: str | None, split: dict[str, Any]) -> float | None:
-    """Read the incumbent run's own best score, when it was scored on the same test split.
+def _test_keys(payload: dict[str, Any]) -> Counter[str] | None:
+    """Name the test cases a stored run request held out, counting duplicate copies.
+
+    Args:
+        payload: A run's stored request.
+
+    Returns:
+        The test cases' keys with their counts, or ``None`` when the request no longer validates.
+    """
+    try:
+        request = UnifiedRunRequest.model_validate(_request_copy(scrub_execution_credentials(payload)))
+    except ValidationError:
+        return None
+    return Counter(_split_keys(request, list(request.data.cases or []), request.data.pinned_split).test)
+
+
+def _incumbent_score(job_store: Any, optimization_id: str | None, run_id: str, split: dict[str, Any]) -> float | None:
+    """Read the incumbent run's own best score, when it was scored on the same test cases.
+
+    Equal counts are not enough: a source that swaps every case for as many
+    new ones can leave a test split of the same size made of other cases.
 
     Args:
         job_store: Job store.
         optimization_id: The incumbent run the cycle started from.
-        split: The cycle run's ``split_counts``.
+        run_id: The cycle run whose test cases the score must match.
+        split: That run's ``split_counts``.
 
     Returns:
         The incumbent's score, or ``None`` when it is gone or used other test cases.
@@ -1158,11 +1183,16 @@ def _incumbent_score(job_store: Any, optimization_id: str | None, split: dict[st
     if optimization_id is None:
         return None
     try:
-        result = job_store.get_job(optimization_id, include_payload=False).get("result") or {}
+        incumbent = job_store.get_job(optimization_id, include_payload=True)
+        candidate = job_store.get_job(run_id, include_payload=True)
     except KeyError:
         return None
+    result = incumbent.get("result") or {}
     prior = result.get("split_counts") or {}
     if any(prior.get(key) != split.get(key) for key in ("test", "held_out", "report_split")):
+        return None
+    before = _test_keys(incumbent.get("payload") or {})
+    if before is None or before != _test_keys(candidate.get("payload") or {}):
         return None
     return result.get("best_score")
 
@@ -1193,8 +1223,9 @@ def _incumbent_on_test(
             return result.get("baseline_score")
     if not finished:
         return None
-    split = finished[0][1].get("split_counts") or {}
-    return _incumbent_score(job_store, (cycle.snapshot or {}).get("compared_against"), split)
+    run, result = finished[0]
+    split = result.get("split_counts") or {}
+    return _incumbent_score(job_store, (cycle.snapshot or {}).get("compared_against"), run["optimization_id"], split)
 
 
 def _seen_snapshot(previous: dict[str, Any], snapshot: dict[str, Any], runs: list[dict[str, Any]]) -> dict[str, Any]:

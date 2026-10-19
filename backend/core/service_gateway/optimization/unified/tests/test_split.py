@@ -7,8 +7,9 @@ from typing import Any
 import pytest
 
 from core.models.common import SplitFractions
-from core.models.unified import MIN_PAIRS_FOR_HELD_OUT, UnifiedCase, UnifiedRunRequest
+from core.models.unified import MIN_PAIRS_FOR_HELD_OUT, PinnedSplit, UnifiedCase, UnifiedRunRequest
 from core.service_gateway.optimization.unified.split import (
+    case_key,
     contract_samples,
     report_cases,
     selection_cases,
@@ -147,3 +148,45 @@ def test_split_seed_prefers_the_explicit_seed() -> None:
     assert split_seed(base.model_copy(update={"seed": 42})) == 42
     assert split_seed(base) == split_seed(_payload())
     assert 0 <= split_seed(base) < 2**31
+
+
+def _pins(cases: list[UnifiedCase], seed: int) -> PinnedSplit:
+    """Pin cases to the roles a first, unpinned split gives them.
+
+    Args:
+        cases: The first run's cases.
+        seed: Shuffle seed.
+
+    Returns:
+        The keys of the test and search cases, one per occurrence.
+    """
+    first = split_cases(cases, "pairs", SplitFractions(), shuffle=True, seed=seed)
+    return PinnedSplit(
+        test=[case_key(case) for case in first.test], fit=[case_key(case) for case in first.train + first.val]
+    )
+
+
+def test_identical_cases_keep_their_per_copy_roles_when_pinned() -> None:
+    """Copies of one row held out once and searched elsewhere must not all move into test."""
+    cases = [UnifiedCase(input={"q": "same"}, expected={"answer": "A"}) for _ in range(20)]
+    first = split_cases(cases, "pairs", SplitFractions(), shuffle=True, seed=7)
+
+    again = split_cases(cases, "pairs", SplitFractions(), shuffle=True, seed=7, pinned=_pins(cases, 7))
+
+    assert (again.counts.train, again.counts.val, again.counts.test) == (
+        first.counts.train,
+        first.counts.val,
+        first.counts.test,
+    )
+
+
+def test_extra_copies_of_a_searched_case_never_become_test_cases() -> None:
+    """A new copy of content an optimizer already searched stays in search, while test keeps its count."""
+    distinct = _cases(10)
+    pins = _pins(distinct, 3)
+    searched = next(case for case in distinct if case_key(case) in set(pins.fit))
+
+    again = split_cases([*distinct, searched, searched], "pairs", SplitFractions(), shuffle=True, seed=3, pinned=pins)
+
+    assert sorted(case_key(case) for case in again.test) == sorted(pins.test)
+    assert len(again.train) + len(again.val) == len(pins.fit) + 2

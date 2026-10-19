@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -179,6 +180,11 @@ def _pinned_split(
     new cases are split by ``fractions``, so the test set grows with the data.
     A pinned case the data no longer has simply drops out.
 
+    Identical cases share one key, so the test pins count occurrences: as
+    many copies stay in test as the earlier run held out, and the remaining
+    copies of a key an earlier run searched stay in search. Otherwise one
+    duplicated row pinned to test would pull every copy out of search.
+
     Args:
         cases: The run's cases.
         fractions: Train/val/test fractions for the new cases.
@@ -189,13 +195,21 @@ def _pinned_split(
     Returns:
         The three splits and their counts.
     """
-    test_keys, fit_keys = set(pinned.test), set(pinned.fit)
+    test_left, fit_keys = Counter(pinned.test), set(pinned.fit)
     test: list[Any] = []
     fit: list[Any] = []
     new: list[Any] = []
     for case in cases:
         key = case_key(case)
-        (test if key in test_keys else fit if key in fit_keys else new).append(case)
+        if test_left[key] > 0:
+            test_left[key] -= 1
+            test.append(case)
+        elif key in fit_keys:
+            fit.append(case)
+        elif key in test_left:
+            test.append(case)
+        else:
+            new.append(case)
     if shuffle:
         rng = random.Random(seed)
         rng.shuffle(fit)

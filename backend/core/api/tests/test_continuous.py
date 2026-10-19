@@ -1721,3 +1721,63 @@ def test_a_refused_run_keeps_its_budget_on_the_check(env: _Env, monkeypatch: pyt
     assert list(_runs(cycle)) == ["data"]
     assert len(refused) == 1
     assert refused[0] in continuous.cycle_budget_ids(cycle)
+
+
+def test_every_refused_run_keeps_its_budget_when_no_run_starts(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When every run of a check is refused after funding, each budget still counts against the allowance."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    refused: list[str] = []
+
+    def refuse_every_run(payload: UnifiedRunRequest, **kwargs: Any) -> Any:
+        """Fund each run's budget, then refuse it as a failed setup check would.
+
+        Args:
+            payload: The run's request.
+            **kwargs: Arguments for the real submit.
+
+        Raises:
+            DomainError: Always, after the run's budget exists.
+        """
+        key = continuous.resolve_submission_replay_keys(
+            payload,
+            username=kwargs["current_user"].username,
+            workflow=continuous.UNIFIED_WORKFLOW,
+            supplied_key=kwargs["idempotency_key"],
+        ).budget
+        refused.append(BudgetService(engine=env.store.engine).create("alice", 7, idempotency_key=key).id)
+        raise DomainError("submission.validation_failed", status=422)
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", refuse_every_run)
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    assert cycle.status == "failed"
+    assert len(refused) == 2
+    assert set(refused) <= set(continuous.cycle_budget_ids(cycle))
+    with Session(env.store.engine) as session:
+        budgets = [session.get(ExecutionBudgetModel, budget_id) for budget_id in refused]
+        committed = continuous.month_committed(session, env.plan(), cycle.month)
+    assert committed == sum(budget.billed_cents + budget_wallet_hold(budget) for budget in budgets)
+
+
+def test_a_failed_reference_run_leaves_a_swapped_test_set_unscored(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test split of the same size made of other cases cannot reuse the incumbent's own score."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True})
+    env.rows = [{"question": f"New {index}?", "answer": "B"} for index in range(10)]
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    runs = _runs(cycle)
+    assert list(runs) == ["both", "reference"]
+    _finish(env, runs["both"], result=_result(0.75, 0.9))
+    _finish(env, runs["reference"], status="failed")
+    env.sweep(_due(env) - timedelta(days=1))
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.detail_code, cycle.incumbent_score) == ("regressed", "continuous.review_unscored", None)
