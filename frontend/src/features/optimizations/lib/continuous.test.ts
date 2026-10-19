@@ -7,25 +7,13 @@ import {
   cycleTone,
   enableProblem,
   refreshDelayMs,
-  usdTextToCents,
 } from "./continuous.ts";
 import type { ContinuousCycle, ContinuousPlan } from "@/shared/types/continuous";
 
 const form = {
   permitted: { data: true, models: false, optimizers: false },
   sourceRef: "acme/support/default/train",
-  monthlyLimit: "10",
-  cycleBudget: "2.50",
 };
-
-test("dollar text becomes whole cents and rejects junk", () => {
-  assert.equal(usdTextToCents("2.50"), 250);
-  assert.equal(usdTextToCents("$10"), 1000);
-  assert.equal(usdTextToCents("0"), null);
-  assert.equal(usdTextToCents("1.234"), null);
-  assert.equal(usdTextToCents("-3"), null);
-  assert.equal(usdTextToCents(""), null);
-});
 
 test("the enable form mirrors the backend rules", () => {
   assert.equal(enableProblem(form), null);
@@ -42,11 +30,6 @@ test("the enable form mirrors the backend rules", () => {
     }),
     null,
   );
-  assert.equal(enableProblem({ ...form, monthlyLimit: "abc" }), "continuous_tab.form.bad_amount");
-  assert.equal(
-    enableProblem({ ...form, cycleBudget: "11" }),
-    "continuous_tab.form.budget_over_limit",
-  );
 });
 
 test("allowance share is clamped and a zero limit reads as spent", () => {
@@ -54,6 +37,7 @@ test("allowance share is clamped and a zero limit reads as spent", () => {
   assert.equal(allowanceShare({ ...usage, limit_cents: 100, committed_cents: 25 }), 0.25);
   assert.equal(allowanceShare({ ...usage, limit_cents: 100, committed_cents: 300 }), 1);
   assert.equal(allowanceShare({ ...usage, limit_cents: 0, committed_cents: 0 }), 1);
+  assert.equal(allowanceShare({ ...usage, limit_cents: null, committed_cents: 500 }), 0);
 });
 
 test("only a validated candidate with a run can be reviewed", () => {

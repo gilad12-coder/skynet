@@ -42,7 +42,7 @@ def upgrade() -> None:
         sa.Column("source", _JSON, nullable=True),
         sa.Column("pending_inputs", _JSON, nullable=False),
         sa.Column("baseline_snapshot", _JSON, nullable=False),
-        sa.Column("monthly_limit_cents", sa.Integer(), nullable=False),
+        sa.Column("monthly_limit_cents", sa.Integer(), nullable=True),
         sa.Column("cycle_budget_cents", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),

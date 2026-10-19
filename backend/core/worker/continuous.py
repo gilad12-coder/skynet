@@ -509,10 +509,12 @@ def process_cycle(
         cycle.snapshot = snapshot
         changes = changed_dimensions(plan.baseline_snapshot or {}, snapshot)
         cycle.changes = changes
-        remaining = plan.monthly_limit_cents - month_committed(session, plan, cycle.month)
         spendable = StripeBillingService(engine=engine).spendable_cents(plan.username)
         gate = None
-        if remaining < plan.cycle_budget_cents:
+        if (
+            plan.monthly_limit_cents is not None
+            and plan.monthly_limit_cents - month_committed(session, plan, cycle.month) < plan.cycle_budget_cents
+        ):
             gate = PAUSE_ALLOWANCE
         elif spendable < plan.cycle_budget_cents:
             gate = PAUSE_FUNDS

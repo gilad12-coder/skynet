@@ -65,7 +65,8 @@ export interface ContinuousCycle {
 
 export interface ContinuousUsage {
   month: string;
-  limit_cents: number;
+  /** Null when the plan has no monthly limit; only the wallet gates a run. */
+  limit_cents: number | null;
   committed_cents: number;
   resets_at: string;
 }
@@ -98,8 +99,6 @@ export interface ContinuousEnableRequest {
   schedule: ScheduleRule;
   permitted: ContinuousPermitted;
   source: ContinuousSource | null;
-  monthly_limit_cents: number;
-  cycle_budget_cents: number;
 }
 
 export interface ContinuousInputs {

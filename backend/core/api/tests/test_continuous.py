@@ -855,3 +855,24 @@ def test_the_sidebar_flags_every_run_of_a_plan(env: _Env) -> None:
     env.sweep(_due(env))
     started = env.cycles()[0].optimization_id
     assert automated_run_ids(env.store, [source_id, started, other_id]) == {source_id, started}
+
+
+def test_a_plan_without_amounts_reuses_the_run_budget_and_has_no_monthly_limit(env: _Env) -> None:
+    """With no amounts, each run gets the source run's budget and only the wallet gates it."""
+    source_id = _incumbent(env)
+    source = env.store.get_job(source_id, include_payload=True)
+    expected = source["payload"].get("max_cost_cents") or (
+        BudgetService(engine=env.store.engine).get(source["execution_budget_id"], "alice").total_cents
+    )
+    plan = _enable(env, source_id, monthly_limit_cents=None, cycle_budget_cents=None)
+    assert plan["cycle_budget_cents"] == expected
+    assert plan["usage"]["limit_cents"] is None
+
+    for _ in range(3):
+        env.rows = _cases(["B"] * 10) if env.rows[0]["answer"] != "B" else _cases(["C"] * 10)
+        env.sweep(_due(env))
+        cycle = env.cycles()[-1]
+        assert cycle.status == "optimizing", cycle.detail_code
+        _finish(env, cycle.optimization_id, result=_result(0.7, 0.6))
+        env.sweep(datetime.now(UTC))
+    assert env.plan().status == "active"

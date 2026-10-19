@@ -1831,7 +1831,7 @@ class ContinuousPlanModel(Base):
     source: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
     pending_inputs: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
     baseline_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
-    monthly_limit_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    monthly_limit_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cycle_budget_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)

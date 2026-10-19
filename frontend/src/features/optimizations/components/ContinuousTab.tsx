@@ -58,7 +58,6 @@ import {
   cycleTone,
   enableProblem,
   refreshDelayMs,
-  usdTextToCents,
   type CycleTone,
 } from "../lib/continuous";
 import { browserTimeZone, defaultRule, scheduleProblem } from "../lib/continuous-schedule";
@@ -217,16 +216,12 @@ function EnableForm({
   });
   const [provider, setProvider] = useState<string>("");
   const [sourceRef, setSourceRef] = useState("");
-  const [monthlyLimit, setMonthlyLimit] = useState("10");
-  const [cycleBudget, setCycleBudget] = useState("2");
   const chosenProvider = provider || connected[0]?.provider || "";
   const problem =
     scheduleProblem(schedule) ??
     enableProblem({
       permitted,
       sourceRef: chosenProvider ? sourceRef : "",
-      monthlyLimit,
-      cycleBudget,
     });
 
   const toggle = (key: keyof ContinuousPermitted) => (on: boolean) =>
@@ -235,12 +230,7 @@ function EnableForm({
   return (
     <Card className="mt-4">
       <CardContent className="space-y-5 p-5">
-        <div className="space-y-1">
-          <h3 className="text-base font-semibold">{msg("continuous_tab.enable.title")}</h3>
-          <p className="text-sm text-muted-foreground">
-            {msg("continuous_tab.enable.description")}
-          </p>
-        </div>
+        <h3 className="text-base font-semibold">{msg("continuous_tab.enable.title")}</h3>
 
         <div className="space-y-2">
           <span className="text-sm font-medium">{msg("continuous_tab.schedule.label")}</span>
@@ -297,34 +287,8 @@ function EnableForm({
           </div>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="continuous-limit">{msg("continuous_tab.limit.label")}</Label>
-            <Input
-              id="continuous-limit"
-              dir="ltr"
-              inputMode="decimal"
-              value={monthlyLimit}
-              onChange={(e) => setMonthlyLimit(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">{msg("continuous_tab.limit.help")}</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="continuous-cycle">{msg("continuous_tab.cycle_budget.label")}</Label>
-            <Input
-              id="continuous-cycle"
-              dir="ltr"
-              inputMode="decimal"
-              value={cycleBudget}
-              onChange={(e) => setCycleBudget(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              {msg("continuous_tab.cycle_budget.help")}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
+        {/* The reason the button is off shows on hover, not as text. */}
+        <span className="inline-flex" title={problem ? msg(problem) : undefined}>
           <Button
             disabled={busy || problem != null}
             onClick={() =>
@@ -335,19 +299,13 @@ function EnableForm({
                   permitted.data && chosenProvider
                     ? { provider: chosenProvider, ref: sourceRef.trim() }
                     : null,
-                monthly_limit_cents: usdTextToCents(monthlyLimit) ?? 0,
-                cycle_budget_cents: usdTextToCents(cycleBudget) ?? 0,
               })
             }
           >
             <Repeat className="size-4" />
             {msg("continuous_tab.enable.submit")}
           </Button>
-          {problem && <span className="text-xs text-muted-foreground">{msg(problem)}</span>}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {msg("continuous_tab.enable.no_auto_deploy")}
-        </p>
+        </span>
       </CardContent>
     </Card>
   );
@@ -490,27 +448,24 @@ function PlanView({
             )}
           </div>
 
-          <div className="space-y-1.5">
-            <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
-              <span>
-                {formatMsg("continuous_tab.allowance", {
-                  used: formatCentsUsd(usage.committed_cents, locale),
-                  limit: formatCentsUsd(usage.limit_cents, locale),
-                })}
-              </span>
-              <span>
-                {formatMsg("continuous_tab.allowance_resets", {
-                  when: formatWhen(usage.resets_at),
-                })}
-              </span>
+          {usage.limit_cents != null && (
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+                <span>
+                  {formatMsg("continuous_tab.allowance", {
+                    used: formatCentsUsd(usage.committed_cents, locale),
+                    limit: formatCentsUsd(usage.limit_cents ?? 0, locale),
+                  })}
+                </span>
+                <span>
+                  {formatMsg("continuous_tab.allowance_resets", {
+                    when: formatWhen(usage.resets_at),
+                  })}
+                </span>
+              </div>
+              <ProgressBar value={allowanceShare(usage) * 100} />
             </div>
-            <ProgressBar value={allowanceShare(usage) * 100} />
-            <p className="text-xs text-muted-foreground">
-              {formatMsg("continuous_tab.cycle_budget.value", {
-                amount: formatCentsUsd(plan.cycle_budget_cents, locale),
-              })}
-            </p>
-          </div>
+          )}
 
           <p className="text-xs text-muted-foreground">
             {msg("continuous_tab.incumbent")}{" "}

@@ -28,6 +28,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ...billing.budgets import BudgetError, BudgetService
 from ...models.common import OptimizationStatus
 from ...storage.models import ContinuousCycleModel, ContinuousPlanModel
 from ...worker import continuous as engine_mod
@@ -63,8 +64,10 @@ class ContinuousEnableRequest(BaseModel):
     schedule: ScheduleRule
     permitted: ContinuousPermitted
     source: ContinuousSource | None = None
-    monthly_limit_cents: int = Field(gt=0, le=10_000_000)
-    cycle_budget_cents: int = Field(gt=0, le=10_000_000)
+    # Both are optional: a run reuses the source run's budget, and no monthly
+    # limit means only the wallet balance gates a run (we never buy credit).
+    monthly_limit_cents: int | None = Field(default=None, gt=0, le=10_000_000)
+    cycle_budget_cents: int | None = Field(default=None, gt=0, le=10_000_000)
 
     @model_validator(mode="after")
     def _check(self) -> ContinuousEnableRequest:
@@ -80,7 +83,11 @@ class ContinuousEnableRequest(BaseModel):
             raise ValueError("permit at least one input to refresh")
         if self.permitted.data and self.source is None:
             raise ValueError("a data refresh needs a connected source")
-        if self.cycle_budget_cents > self.monthly_limit_cents:
+        if (
+            self.cycle_budget_cents is not None
+            and self.monthly_limit_cents is not None
+            and self.cycle_budget_cents > self.monthly_limit_cents
+        ):
             raise ValueError("the cycle budget exceeds the monthly limit")
         return self
 
@@ -112,7 +119,7 @@ class ContinuousCycleItem(BaseModel):
 # This month's allowance as the plan sees it.
 class ContinuousUsage(BaseModel):
     month: str
-    limit_cents: int
+    limit_cents: int | None = None
     committed_cents: int
     resets_at: datetime
 
@@ -157,6 +164,29 @@ def _is_unified(job: dict[str, Any]) -> bool:
     """
     payload = job.get("payload") or {}
     return isinstance(payload.get("task"), dict) and isinstance(payload.get("data"), dict) and "workspace" in payload
+
+
+def _source_budget_cents(job_store, job: dict[str, Any], username: str) -> int | None:
+    """Read the spending budget the source run started with.
+
+    Args:
+        job_store: Store whose engine holds the budgets.
+        job: The source run, with its payload.
+        username: Budget owner.
+
+    Returns:
+        The run's budget in cents, or ``None`` when it had none.
+    """
+    stated = (job.get("payload") or {}).get("max_cost_cents")
+    if stated:
+        return int(stated)
+    budget_id = job.get("execution_budget_id") or (job.get("payload") or {}).get("execution_budget_id")
+    if not budget_id:
+        return None
+    try:
+        return BudgetService(engine=job_store.engine).get(budget_id, username).total_cents
+    except BudgetError:
+        return None
 
 
 def _owned_job(job_store, optimization_id: str, user: AuthenticatedUser, *, payload: bool) -> dict[str, Any]:
@@ -402,6 +432,9 @@ def create_continuous_router(
         job = _owned_job(job_store, optimization_id, current_user, payload=True)
         if job["status"] != OptimizationStatus.success.value or not _is_unified(job):
             raise DomainError("continuous.not_eligible", status=409)
+        cycle_budget = body.cycle_budget_cents or _source_budget_cents(job_store, job, current_user.username)
+        if cycle_budget is None:
+            raise DomainError("continuous.not_eligible", status=409)
         now = datetime.now(UTC)
         plan = ContinuousPlanModel(
             username=current_user.username,
@@ -413,7 +446,7 @@ def create_continuous_router(
             pending_inputs={},
             baseline_snapshot=engine_mod.snapshot_of_payload(job["payload"]),
             monthly_limit_cents=body.monthly_limit_cents,
-            cycle_budget_cents=body.cycle_budget_cents,
+            cycle_budget_cents=cycle_budget,
             created_at=now,
         )
         _set_schedule(plan, body.schedule, now)
