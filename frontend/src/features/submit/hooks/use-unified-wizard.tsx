@@ -35,9 +35,11 @@ import {
   isStorageQuotaError,
   submitRepoRun,
   submitUnifiedRun,
+  enableContinuous,
 } from "@/shared/lib/api";
 import { contractCheckMessage } from "@/shared/lib/i18n";
-import { msg, type MessageKey } from "@/shared/lib/messages";
+import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
+import type { ContinuousEnableRequest } from "@/shared/types/continuous";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { getActiveMessages } from "@/shared/lib/runtime-messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
@@ -69,10 +71,14 @@ import {
   type RunFailure,
 } from "../lib/run-failure";
 import {
+  WIZARD_SCHEDULE_KEY,
   WIZARD_SESSION_KEY,
   WIZARD_VIEW_KEYS,
+  decodeScheduledRun,
   decodeWizardSession,
   encodeWizardSession,
+  keepSessionValue,
+  readSessionValue,
 } from "../lib/session-state";
 import { metricUsesModel } from "../lib/scorer-dependencies";
 import { computeStepIssue, hasModel, runBlockedReason as blockedReason } from "../lib/step-issue";
@@ -350,6 +356,10 @@ export function WizardV2Provider({
   );
 
   const [submitPhase, setSubmitPhase] = useState<SubmitPhase>("idle");
+  // Kept with the tab's setup, so a reload does not silently submit a one-off run.
+  const [scheduledRun, setScheduledRun] = useState<ContinuousEnableRequest | null>(() =>
+    restored ? decodeScheduledRun(readSessionValue(WIZARD_SCHEDULE_KEY)) : null,
+  );
   const [advancing, setAdvancing] = useState(false);
   const [runFailure, setRunFailure] = useState<RunFailure | null>(null);
   const busy = advancing || submitPhase !== "idle";
@@ -657,6 +667,16 @@ export function WizardV2Provider({
         optimizer: request.optimizer.choice,
         optimizer_resolved: resolvedOptimizer,
       });
+      if (scheduledRun) {
+        // The plan waits for the run to succeed. A refused plan never holds back the run itself.
+        await enableContinuous(result.optimization_id, scheduledRun).catch((err: unknown) => {
+          toast.error(
+            formatMsg("submit.v2.schedule.failed", {
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        });
+      }
       await openSubmitted(result.optimization_id);
     } catch (err) {
       submitFailed(err);
@@ -739,6 +759,15 @@ export function WizardV2Provider({
       window.sessionStorage.setItem(WIZARD_SESSION_KEY, encodeWizardSession(accountId, stored));
     } catch {}
   }, [accountId, stored]);
+  useEffect(() => {
+    if (submittedRef.current) return;
+    if (scheduledRun) keepSessionValue(WIZARD_SCHEDULE_KEY, JSON.stringify(scheduledRun));
+    else {
+      try {
+        window.sessionStorage.removeItem(WIZARD_SCHEDULE_KEY);
+      } catch {}
+    }
+  }, [scheduledRun]);
   // Leaving the page inside the app ends the setup; only a reload, which runs
   // no cleanup, finds it again.
   useEffect(() => forgetWizardSession, []);
@@ -959,6 +988,8 @@ export function WizardV2Provider({
     ensureBudget,
     submit,
     submitting: submitPhase !== "idle",
+    scheduledRun,
+    setScheduledRun,
     runFloor,
     costSettled,
     tokenSource,

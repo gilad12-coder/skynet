@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { test } from "node:test";
 
-import { decodeWizardSession, encodeWizardSession } from "./session-state.ts";
+import { decodeScheduledRun, decodeWizardSession, encodeWizardSession } from "./session-state.ts";
 
 const unifiedRunUrl = new URL("../../../shared/types/unified-run.ts", import.meta.url).href;
 
@@ -84,4 +84,27 @@ test("a saved spending limit survives any number of reloads", async () => {
     assert.equal(draft.optimizer.maxCostCents, 150, `reload ${reload}: the limit saved`);
     raw = encodeWizardSession("a@x.io", draft);
   }
+});
+
+test("a saved scheduled run reads back after a reload", () => {
+  const plan = {
+    schedule: { kind: "daily", time: "09:00", timezone: "UTC" },
+    permitted: { data: true },
+    source: { connector: "google_drive", ref: "file-1" },
+  };
+  assert.deepEqual(decodeScheduledRun(JSON.stringify(plan)), plan);
+  assert.deepEqual(decodeScheduledRun(JSON.stringify({ ...plan, source: null })), {
+    ...plan,
+    source: null,
+  });
+});
+
+test("a missing or malformed scheduled run reads back as none", () => {
+  assert.equal(decodeScheduledRun(null), null);
+  assert.equal(decodeScheduledRun("{not json"), null);
+  assert.equal(
+    decodeScheduledRun(JSON.stringify({ permitted: { data: true }, source: null })),
+    null,
+  );
+  assert.equal(decodeScheduledRun(JSON.stringify({ schedule: {}, source: null })), null);
 });

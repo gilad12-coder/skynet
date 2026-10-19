@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@/shared/hooks/use-code-agent";
+import type { ContinuousEnableRequest } from "@/shared/types/continuous";
 
 import type { WizardV2State } from "./wizard-v2";
 
@@ -12,11 +13,16 @@ export const WIZARD_SESSION_KEY = "skynet.wizard.session.v1";
 /**
  * What the setup's screens hold beside its answers, kept for the same tab and
  * read back only when the setup itself came back: the screen on view inside
- * the step and the coding agent's chat.
+ * the step, the coding agent's chat and the scheduled run saved for the run.
  */
 export const WIZARD_SCREEN_KEY = "skynet.wizard.screen.v1";
 export const WIZARD_CODING_CHAT_KEY = "skynet.wizard.coding-chat.v1";
-export const WIZARD_VIEW_KEYS = [WIZARD_SCREEN_KEY, WIZARD_CODING_CHAT_KEY] as const;
+export const WIZARD_SCHEDULE_KEY = "skynet.wizard.schedule.v1";
+export const WIZARD_VIEW_KEYS = [
+  WIZARD_SCREEN_KEY,
+  WIZARD_CODING_CHAT_KEY,
+  WIZARD_SCHEDULE_KEY,
+] as const;
 
 const SLICES = ["task", "inputs", "optimizer", "workspace", "meta"] as const;
 
@@ -149,4 +155,30 @@ export function decodeCodingChat(raw: string | null): AgentMessage[] {
         }
       : message,
   );
+}
+
+/**
+ * Read back the scheduled run saved on the setup's schedule screen, or none
+ * when it is missing or malformed.
+ *
+ * Args:
+ *   raw: The stored text, or null.
+ *
+ * Returns:
+ *   The saved plan request, or null.
+ */
+export function decodeScheduledRun(raw: string | null): ContinuousEnableRequest | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const { schedule, permitted, source } = parsed as Record<string, unknown>;
+  if (!schedule || typeof schedule !== "object") return null;
+  if (!permitted || typeof permitted !== "object") return null;
+  if (source !== null && typeof source !== "object") return null;
+  return parsed as ContinuousEnableRequest;
 }

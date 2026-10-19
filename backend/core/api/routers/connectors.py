@@ -225,6 +225,37 @@ class GithubFileResponse(BaseModel):
     missing: bool = Field(default=False, description="No regular file exists at this path and ref.")
 
 
+def connector_secret(vault: ConnectorVault, username: str, provider: str) -> ConnectorSecret:
+    """Load an account's credential for a generic provider, refreshing OAuth tokens.
+
+    Args:
+        vault: Encrypted connector credential store.
+        username: The account owner.
+        provider: Provider slug.
+
+    Returns:
+        The decrypted credential.
+
+    Raises:
+        DomainError: 404 for an unknown provider; 409 when unlinked or
+            the OAuth grant expired.
+    """
+    module = registry.get_provider(provider)
+    secret = vault.resolve(username, provider)
+    if secret is None:
+        raise DomainError("connectors.not_connected", status=409, provider=label(provider))
+    if secret.auth_method == "oauth":
+        token = generic_oauth.current_oauth_token(module.oauth_app(), vault, username)
+        secret = ConnectorSecret(
+            access_token=token,
+            refresh_token=secret.refresh_token,
+            expires_at=secret.expires_at,
+            auth_method=secret.auth_method,
+            account_label=secret.account_label,
+        )
+    return secret
+
+
 def create_connectors_router(*, job_store) -> APIRouter:
     """Build the connectors router.
 
@@ -558,33 +589,8 @@ def create_connectors_router(*, job_store) -> APIRouter:
         return configured or str(request.url_for("connector_oauth_callback", provider=provider))
 
     def _secret(username: str, provider: str) -> ConnectorSecret:
-        """Load the caller's credential for a generic provider, refreshing OAuth tokens.
-
-        Args:
-            username: The caller.
-            provider: Provider slug.
-
-        Returns:
-            The decrypted credential.
-
-        Raises:
-            DomainError: 404 for an unknown provider; 409 when unlinked or
-                the OAuth grant expired.
-        """
-        module = registry.get_provider(provider)
-        secret = vault.resolve(username, provider)
-        if secret is None:
-            raise DomainError("connectors.not_connected", status=409, provider=label(provider))
-        if secret.auth_method == "oauth":
-            token = generic_oauth.current_oauth_token(module.oauth_app(), vault, username)
-            secret = ConnectorSecret(
-                access_token=token,
-                refresh_token=secret.refresh_token,
-                expires_at=secret.expires_at,
-                auth_method=secret.auth_method,
-                account_label=secret.account_label,
-            )
-        return secret
+        """Load the caller's credential for a generic provider; see :func:`connector_secret`."""
+        return connector_secret(vault, username, provider)
 
     @router.get(
         "/connectors/github/repos",

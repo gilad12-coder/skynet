@@ -43,7 +43,7 @@ WORKDIR /app
 # context in the headless sandbox; the scorer runs with PYOPENGL_PLATFORM=osmesa.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential ca-certificates curl unzip git git-lfs \
-        libosmesa6 libgl1 libglu1-mesa \
+        libosmesa6 libgl1 libglu1-mesa tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Use UID 1001 with GID 0 — works everywhere (Docker, Podman, OpenShift restricted-v2 SCC).

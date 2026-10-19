@@ -510,7 +510,7 @@ export function BlackboxConfigCard({
         renderSlide={(activeSlide) => (
           <>
             {activeSlide === 0 && (
-              <div className="flex min-h-[24rem] flex-col gap-5">
+              <div className="flex flex-col gap-5">
                 <div className="grid items-stretch gap-3 md:grid-cols-2">
                   <SlideHeroCard
                     index={0}
@@ -543,7 +543,7 @@ export function BlackboxConfigCard({
             )}
 
             {activeSlide === 1 && (
-              <div className="flex min-h-[24rem] flex-col gap-5">
+              <div className="flex flex-col gap-5">
                 <div className="grid items-stretch gap-3 md:grid-cols-2">
                   <SlideHeroCard
                     index={0}
@@ -591,7 +591,7 @@ export function BlackboxConfigCard({
             )}
 
             {activeSlide === 2 && (
-              <div className="min-h-[24rem]">
+              <div>
                 {reflectionCard || taskCard || scorerModelCard || target.model ? (
                   <div
                     className="grid gap-4"
@@ -638,7 +638,7 @@ export function BlackboxConfigCard({
             )}
 
             {activeSlide === 3 && (
-              <div className="flex min-h-[24rem] flex-col gap-5">
+              <div className="flex flex-col gap-5">
                 <div className="grid items-stretch gap-3 md:grid-cols-2">
                   <SlideHeroCard
                     index={0}
@@ -666,7 +666,7 @@ export function BlackboxConfigCard({
             )}
 
             {activeSlide === 4 && (
-              <div className="flex min-h-[24rem] flex-col gap-5">
+              <div className="flex flex-col gap-5">
                 <div className="grid items-stretch gap-3 md:grid-cols-2">
                   <SlideHeroCard
                     index={0}

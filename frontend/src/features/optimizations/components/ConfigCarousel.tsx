@@ -371,7 +371,7 @@ export function ConfigCarousel({
             animate="center"
             exit="exit"
             transition={prefersReducedMotion ? { duration: 0 } : SLIDE_TRANSITION}
-            className="min-h-[24rem] w-full"
+            className="w-full"
           >
             {renderSlide(activeSlide)}
           </motion.div>

@@ -544,7 +544,7 @@ export function ConfigTab({
         renderSlide={(activeSlide) => (
           <>
             {activeSlide === 0 && (
-              <div className="flex min-h-[24rem] flex-col gap-5">
+              <div className="flex flex-col gap-5">
                 <div className="grid items-stretch gap-3 md:grid-cols-2">
                   <SlideHeroCard
                     index={0}
@@ -581,7 +581,7 @@ export function ConfigTab({
             )}
 
             {activeSlide === 1 && (
-              <div className="flex min-h-[24rem] flex-col gap-5">
+              <div className="flex flex-col gap-5">
                 <div className="grid items-stretch gap-3 md:grid-cols-2">
                   <SlideHeroCard
                     index={0}
@@ -605,7 +605,7 @@ export function ConfigTab({
             )}
 
             {activeSlide === 2 && (
-              <div className="min-h-[24rem]">
+              <div>
                 {!isGrid ? (
                   <div
                     className="grid gap-4"
@@ -715,7 +715,7 @@ export function ConfigTab({
             )}
 
             {activeSlide === 3 && (
-              <div className="flex min-h-[24rem] flex-col gap-5">
+              <div className="flex flex-col gap-5">
                 {job.source_dataset_id && (
                   <Link
                     href={`/datasets?open=${job.source_dataset_id}`}

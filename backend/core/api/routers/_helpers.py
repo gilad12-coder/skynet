@@ -19,6 +19,7 @@ from collections.abc import AsyncIterable, AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ...billing import StripeBillingService
@@ -70,6 +71,7 @@ from ...service_gateway.optimization.training_ground.run_react import (
     resolve_react_tools,
 )
 from ...service_gateway.optimization.workflow import build_workflow_program, workflow_tool_users
+from ...storage.models import ContinuousCycleModel, ContinuousPlanModel
 from ..auth import AuthenticatedUser, is_admin
 from ..converters import (
     compute_elapsed,
@@ -607,6 +609,38 @@ def run_folder_ids(job_store, optimization_ids: list[str]) -> dict[str, str]:
         return {}
     with Session(engine) as session:
         return folder_ids_for_runs(session, optimization_ids)
+
+
+def automated_run_ids(job_store, optimization_ids: list[str]) -> set[str]:
+    """Return the runs that belong to a continuous plan.
+
+    A run belongs when a plan was enabled from it, it is a plan's current
+    version, or a plan's scheduled check started it.
+
+    Args:
+        job_store: Job-store whose ``engine`` backs the plan tables.
+        optimization_ids: Runs to look up.
+
+    Returns:
+        The ids among ``optimization_ids`` that belong to a plan; empty for stores without an engine.
+    """
+    engine = getattr(job_store, "engine", None)
+    if engine is None or not optimization_ids:
+        return set()
+    wanted = set(optimization_ids)
+    with Session(engine) as session:
+        plans = session.execute(
+            select(ContinuousPlanModel.source_optimization_id, ContinuousPlanModel.incumbent_optimization_id).where(
+                or_(
+                    ContinuousPlanModel.source_optimization_id.in_(wanted),
+                    ContinuousPlanModel.incumbent_optimization_id.in_(wanted),
+                )
+            )
+        ).all()
+        started = session.scalars(
+            select(ContinuousCycleModel.optimization_id).where(ContinuousCycleModel.optimization_id.in_(wanted))
+        ).all()
+    return wanted & ({run for pair in plans for run in pair} | set(started))
 
 
 def get_job_no_payload(job_store, optimization_id: str) -> dict[str, Any]:

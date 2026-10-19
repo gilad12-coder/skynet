@@ -137,6 +137,15 @@ function viewRows(): ViewRow[] {
       ],
     },
     {
+      key: "automation",
+      label: msg("sidebar.filter.automation"),
+      options: [
+        { value: "all", label: msg("sidebar.filter.all") },
+        { value: "automated", label: msg("sidebar.filter.automation.automated") },
+        { value: "manual", label: msg("sidebar.filter.automation.manual") },
+      ],
+    },
+    {
       key: "group",
       label: msg("sidebar.filter.group"),
       options: [
@@ -234,9 +243,9 @@ export function SidebarFilterMenu({
         <TooltipContent side="bottom">{label}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-60">
-        {rows.slice(0, 3).map(renderRow)}
+        {rows.slice(0, 4).map(renderRow)}
         <DropdownMenuSeparator />
-        {rows.slice(3).map(renderRow)}
+        {rows.slice(4).map(renderRow)}
         {(filtered || view.group !== "folder" || view.sort !== "recent") && (
           <>
             <DropdownMenuSeparator />

@@ -55,6 +55,13 @@ import { I18N_KEY, tI18n } from "@/shared/lib/i18n";
 import { reportHandledError } from "@/shared/lib/report-error";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
 import type { RunUsage } from "@/shared/types/run-usage";
+import type {
+  ContinuousEnableRequest,
+  ContinuousInputs,
+  ContinuousPlan,
+  ContinuousState,
+  ScheduleRule,
+} from "@/shared/types/continuous";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import { readServerSentEvents, type ServerSentEvent } from "@/shared/lib/sse";
@@ -2019,6 +2026,75 @@ export function getRunUsage(optimizationId: string, pairIndex?: number | null) {
   return request<RunUsage>(`/optimizations/${encodeURIComponent(optimizationId)}/usage${qs}`);
 }
 
+/** Continuous optimization of one run: its plan (or null) and whether one can start. */
+export function getContinuousState(optimizationId: string) {
+  return request<ContinuousState>(
+    `/optimizations/${encodeURIComponent(optimizationId)}/continuous`,
+  );
+}
+
+export function enableContinuous(optimizationId: string, body: ContinuousEnableRequest) {
+  return request<ContinuousPlan>(
+    `/optimizations/${encodeURIComponent(optimizationId)}/continuous`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+/** Pause or resume a plan. */
+export function setContinuousPaused(planId: string, paused: boolean) {
+  return request<ContinuousPlan>(
+    `/continuous/${encodeURIComponent(planId)}/${paused ? "pause" : "resume"}`,
+    { method: "POST" },
+  );
+}
+
+/** Delete a plan and its check history; the runs it started stay. The route returns 204. */
+export async function deleteContinuous(planId: string): Promise<void> {
+  const res = await fetchWithAuthRetry(`${apiBase()}/continuous/${encodeURIComponent(planId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      parseErrorMessage(text) ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status }),
+    );
+  }
+}
+
+/** Replace when a plan checks; a paused plan stays paused. */
+export function updateContinuousSchedule(planId: string, rule: ScheduleRule) {
+  return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/schedule`, {
+    method: "PUT",
+    body: JSON.stringify(rule),
+  });
+}
+
+/** Run the next check now; unchanged inputs are still recorded as skipped. */
+export function checkContinuousNow(planId: string) {
+  return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/check-now`, {
+    method: "POST",
+  });
+}
+
+/** Stage a model or optimizer change for the next check. */
+export function stageContinuousInputs(planId: string, body: ContinuousInputs) {
+  return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/inputs`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Approve (the candidate becomes the incumbent) or reject a candidate in review. */
+export function reviewContinuousCycle(planId: string, cycleId: string, approve: boolean) {
+  return request<ContinuousPlan>(
+    `/continuous/${encodeURIComponent(planId)}/cycles/${encodeURIComponent(cycleId)}/${approve ? "approve" : "reject"}`,
+    { method: "POST" },
+  );
+}
+
 export function getOptimizationPayload(optimizationId: string) {
   return request<OptimizationPayloadResponse>(`/optimizations/${optimizationId}/payload`);
 }
@@ -3199,6 +3275,8 @@ export interface SidebarJobItem {
   role?: ShareRole | null;
   /** Folder this run is filed in; absent when unfiled. */
   folder_id?: string | null;
+  /** True when the run belongs to a continuous plan (an automation). */
+  automated?: boolean;
 }
 
 export function listJobsSidebar(params?: { username?: string; limit?: number; offset?: number }) {

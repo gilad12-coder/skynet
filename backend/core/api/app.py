@@ -71,6 +71,7 @@ from ..service_gateway.embedding_pipeline import (
 from ..service_gateway.language_models import install_openrouter_served_model_patch
 from ..service_gateway.service_builder import wire_registry_aliases
 from ..storage import get_job_store
+from ..worker.continuous import start_continuous_sweeper
 from ..worker.engine import BackgroundWorker, get_worker
 from .directory_client import build_directory_client
 from .errors import DomainError
@@ -101,6 +102,7 @@ from .routers.billing import create_billing_router
 from .routers.code_agent import create_code_agent_router
 from .routers.code_validation import create_code_validation_router
 from .routers.connectors import create_connectors_router
+from .routers.continuous import create_continuous_router
 from .routers.dashboard import create_dashboard_router
 from .routers.dataset_library import create_dataset_library_router
 from .routers.dataset_share import create_dataset_share_router
@@ -722,6 +724,7 @@ def create_app(
     issuing_funding_sweeper = None
     embedding_sweeper = None
     notification_hold_sweeper = None
+    continuous_sweeper = None
     loop_lag_monitor = None
 
     @asynccontextmanager
@@ -744,6 +747,7 @@ def create_app(
             issuing_funding_sweeper, \
             embedding_sweeper, \
             notification_hold_sweeper, \
+            continuous_sweeper, \
             worker
         # Reclaim jobs whose worker lease has expired. Under multi-pod scaling
         # this only fails rows whose ``lease_expires_at`` is in the past — a
@@ -785,6 +789,8 @@ def create_app(
         # Releases notifications held for the user's hold window (non-urgent
         # email/push/Slack wait so reading the inbox first can cancel them).
         notification_hold_sweeper = start_notification_hold_sweeper(getattr(job_store, "engine", None))
+        # Runs due continuous-optimization checks; one replica per tick holds its lock.
+        continuous_sweeper = start_continuous_sweeper(job_store, service)
         warn_if_local_key_uncapped()
         if settings.event_loop_lag_monitor_enabled:
             loop_lag_monitor = start_event_loop_lag_monitor()
@@ -879,6 +885,8 @@ def create_app(
                 embedding_sweeper.stop()
             if notification_hold_sweeper:
                 notification_hold_sweeper.stop()
+            if continuous_sweeper:
+                continuous_sweeper.stop()
             if loop_lag_monitor:
                 loop_lag_monitor.stop()
 
@@ -1337,6 +1345,7 @@ def create_app(
     app.include_router(create_dataset_library_router(job_store=job_store), tags=["Datasets"])
     app.include_router(create_dataset_share_router(job_store=job_store), tags=["Datasets"])
     app.include_router(create_folders_router(job_store=job_store), tags=["Folders"])
+    app.include_router(create_continuous_router(job_store=job_store, service=service), tags=["Optimizations"])
     app.include_router(create_connectors_router(job_store=job_store), tags=["Connectors"])
     app.include_router(create_saved_secrets_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_tagging_session_router(job_store=job_store), tags=["Optimizations"])

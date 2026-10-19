@@ -13,6 +13,7 @@ import {
   ShareNetwork,
   PencilSimple,
   PushPin,
+  Repeat,
   Pause,
   CircleNotch,
   GridFour,
@@ -1220,6 +1221,16 @@ function JobRow({
               {job.total_pairs ?? "?"}
             </span>
           )}
+          {job.automated && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex shrink-0 items-center text-primary">
+                  <Repeat className="size-3.5" weight="bold" aria-label={msg("sidebar.automated")} />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="right">{msg("sidebar.automated")}</TooltipContent>
+            </Tooltip>
+          )}
           {job.pinned && (
             <PushPin className={cn("size-2.5 shrink-0", "text-muted-foreground/60")} />
           )}
@@ -1326,7 +1337,11 @@ function JobRow({
 
               {canRerun && (
                 <PopoverPrimitive.Close asChild>
-                  <button type="button" onClick={handleClone} className={COMPACT_POPOVER_ITEM_CLASS}>
+                  <button
+                    type="button"
+                    onClick={handleClone}
+                    className={COMPACT_POPOVER_ITEM_CLASS}
+                  >
                     <Copy className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
                     <span className="flex-1 text-start">
                       {msg("auto.features.sidebar.components.sidebar.9")}
