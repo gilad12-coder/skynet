@@ -35,6 +35,7 @@ from ..api.observability import advisory_lock
 from ..api.routers.connectors import connector_secret
 from ..api.routers.submissions import UNIFIED_WORKFLOW, rows_to_cases, submit_unified_payload
 from ..api.submission_idempotency import resolve_submission_replay_keys
+from ..billing.budget_amounts import budget_wallet_hold
 from ..billing.budgets import BudgetError, BudgetService
 from ..billing.operation_pricing import json_fingerprint
 from ..billing.protected_credentials import scrub_execution_credentials
@@ -46,7 +47,7 @@ from ..constants import PAYLOAD_OVERVIEW_NAME
 from ..models import UnifiedRunRequest
 from ..models.common import OptimizationStatus
 from ..models.unified import UnifiedData
-from ..storage.models import ContinuousCycleModel, ContinuousPlanModel
+from ..storage.models import ContinuousCycleModel, ContinuousPlanModel, ExecutionBudgetModel
 from .continuous_schedule import ScheduleRule, legacy_rule, next_runs
 
 logger = logging.getLogger(__name__)
@@ -327,7 +328,8 @@ def month_committed(session: Session, plan: ContinuousPlanModel, month: str) -> 
     """Sum what a plan's cycles spent or hold in one monthly allowance.
 
     A cycle still optimizing counts at its full budget total, because its
-    reservation can still be drawn on; a finished cycle counts what it billed.
+    reservation can still be drawn on. A finished cycle counts what its budget
+    billed plus any hold it still keeps for usage awaiting reconciliation.
 
     Args:
         session: Open database session.
@@ -340,10 +342,19 @@ def month_committed(session: Session, plan: ContinuousPlanModel, month: str) -> 
     cycles = session.scalars(
         select(ContinuousCycleModel).where(ContinuousCycleModel.plan_id == plan.id, ContinuousCycleModel.month == month)
     ).all()
+    budget_ids = [cycle.execution_budget_id for cycle in cycles if cycle.execution_budget_id]
+    budgets = {
+        budget.id: budget
+        for budget in session.scalars(select(ExecutionBudgetModel).where(ExecutionBudgetModel.id.in_(budget_ids)))
+    }
     total = 0
     for cycle in cycles:
+        budget = budgets.get(cycle.execution_budget_id)
         if cycle.status == CYCLE_OPTIMIZING:
             total += plan.cycle_budget_cents
+        elif budget is not None:
+            # ``spent_cents`` is sampled once when the run ends; reconciliation can bill more later.
+            total += budget.billed_cents + budget_wallet_hold(budget)
         elif cycle.spent_cents:
             total += cycle.spent_cents
     return total
@@ -480,6 +491,17 @@ def process_cycle(
         plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
         if plan is None:
             return
+        accepted = job_store.find_job_by_idempotency_key(plan.username, f"continuous:{cycle.id}")
+        if accepted is not None:
+            # A worker died between submitting and linking. The run is already paid for and ran on the
+            # inputs recorded then, so link it as is instead of re-reading inputs or re-checking funds.
+            job = job_store.get_job(accepted, include_payload=False)
+            cycle.optimization_id = accepted
+            cycle.execution_budget_id = job.get("execution_budget_id")
+            _finish_cycle(
+                session, cycle, CYCLE_OPTIMIZING, "continuous.run_started", changes=",".join(cycle.changes or [])
+            )
+            return
         if plan.status == PLAN_PAUSED and plan.pause_reason == PAUSE_USER:
             _finish_cycle(session, cycle, CYCLE_SKIPPED, "continuous.skip_paused")
             return
@@ -520,10 +542,6 @@ def process_cycle(
             gate = PAUSE_ALLOWANCE
         elif spendable < plan.cycle_budget_cents:
             gate = PAUSE_FUNDS
-        if gate is not None and job_store.find_job_by_idempotency_key(plan.username, f"continuous:{cycle.id}"):
-            # A worker died between submitting and linking: the run is already paid for,
-            # and its own reservation is what now makes the wallet look short.
-            gate = None
         if gate is None and plan.status == PLAN_PAUSED and plan.pause_reason in SYSTEM_PAUSES:
             plan.status, plan.pause_reason = PLAN_ACTIVE, None
         if not changes:

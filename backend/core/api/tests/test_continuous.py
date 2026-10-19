@@ -25,8 +25,9 @@ from core.api.auth import AuthenticatedUser, get_authenticated_user
 from core.api.errors import DomainError
 from core.api.routers import submissions
 from core.api.routers._helpers import automated_run_ids
-from core.api.routers.continuous import create_continuous_router
+from core.api.routers.continuous import _HISTORY_LIMIT, create_continuous_router
 from core.api.tests.test_protected_submissions import _Gateway, _Harness, _SQLiteJobStore
+from core.billing.budget_amounts import CENT_SCALE, budget_wallet_hold
 from core.billing.budgets import BudgetService
 from core.storage.models import (
     BillingCustomerModel,
@@ -544,12 +545,17 @@ def test_overlapping_sweeps_and_retries_create_one_cycle_and_one_spend(env: _Env
 
     # A worker that died after submitting leaves the check in ``checking``;
     # the takeover replays the same run and budget instead of a second one.
-    # Its own reservation must not make the wallet look short and pause the plan.
+    # Its own reservation must not make the wallet look short and pause the plan,
+    # and the source changing meanwhile must not relabel what that run evaluated.
     env.set_balance(0)
+    env.rows = _cases(["C"] * 10)
+    fetches = env.fetches
     env.edit_cycle(cycle.id, status="checking", optimization_id=None, lease_until=now - timedelta(seconds=1))
     env.sweep(now)
     [retried] = env.cycles()
     assert (retried.status, retried.optimization_id) == ("optimizing", cycle.optimization_id)
+    assert retried.snapshot == cycle.snapshot
+    assert env.fetches == fetches
     assert env.plan().status == "active"
     assert env.count(JobModel) == jobs_before + 1
     assert env.count(ExecutionBudgetModel) == budgets_before + 1
@@ -611,6 +617,63 @@ def test_allowance_exhaustion_pauses_and_rollover_keeps_history(env: _Env) -> No
     assert budget_after.total_cents == budget_before.total_cents
     assert budget_after.billed_cents == budget_before.billed_cents
     assert env.balance() <= balance_before
+
+
+def test_a_finished_cycle_counts_usage_still_awaiting_reconciliation(env: _Env) -> None:
+    """A finished cycle's held coverage stays in the allowance until it settles, not just what it billed."""
+    source_id = _incumbent(env)
+    _enable(env, source_id, monthly_limit_cents=CYCLE_BUDGET + 1, cycle_budget_cents=CYCLE_BUDGET)
+    env.rows = _cases(["B"] * 10)
+    october = datetime(2026, 10, 20, tzinfo=UTC)
+    env.edit_plan(next_check_at=october)
+    env.sweep(october + timedelta(seconds=1))
+    [first] = env.cycles()
+    _finish(env, first.optimization_id, status="failed")
+    continuous.review_cycle(env.store, first.id)
+    # Usage the run reported but billing has not settled yet keeps its wallet hold after the run ends.
+    with Session(env.store.engine) as session, session.begin():
+        budget = session.get(ExecutionBudgetModel, first.execution_budget_id)
+        budget.wallet_reserved_units += CYCLE_BUDGET * CENT_SCALE
+        held = budget.billed_cents + budget_wallet_hold(budget)
+    [first] = env.cycles()
+    assert held > (first.spent_cents or 0)
+
+    with Session(env.store.engine) as session:
+        assert continuous.month_committed(session, env.plan(), first.month) == held
+
+    env.edit_plan(next_check_at=october + timedelta(days=5))
+    env.sweep(october + timedelta(days=5, seconds=1))
+    assert env.cycles()[-1].detail_code == "continuous.paused_allowance"
+
+
+def test_a_pending_review_stays_visible_past_the_history_window(env: _Env) -> None:
+    """A candidate waiting for approval is returned even after many newer skipped checks."""
+    source_id = _incumbent(env)
+    _enable(env, source_id)
+    env.rows = _cases(["B"] * 10)
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    _finish(env, cycle.optimization_id, result=_result(0.5, 0.9))
+    continuous.review_cycle(env.store, cycle.id)
+    plan_id = env.plan().id
+    later = datetime.now(UTC) + timedelta(minutes=1)
+    with Session(env.store.engine) as session, session.begin():
+        session.add_all(
+            ContinuousCycleModel(
+                plan_id=plan_id,
+                slot=f"later-{index}",
+                month=cycle.month,
+                status="skipped",
+                detail_code="continuous.skip_review_pending",
+                created_at=later + timedelta(minutes=index),
+            )
+            for index in range(_HISTORY_LIMIT)
+        )
+
+    cycles = env.client.get(f"/optimizations/{source_id}/continuous").json()["plan"]["cycles"]
+
+    assert len(cycles) == _HISTORY_LIMIT + 1
+    assert (cycles[-1]["id"], cycles[-1]["status"]) == (cycle.id, "awaiting_review")
 
 
 def test_rollover_never_resumes_a_user_pause(env: _Env) -> None:

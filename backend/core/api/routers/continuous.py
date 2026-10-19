@@ -252,12 +252,25 @@ def _plan_item(session: Session, plan: ContinuousPlanModel) -> ContinuousPlanIte
     """
     now = datetime.now(UTC)
     month = engine_mod.month_key(now)
-    cycles = session.scalars(
-        select(ContinuousCycleModel)
-        .where(ContinuousCycleModel.plan_id == plan.id)
-        .order_by(ContinuousCycleModel.created_at.desc())
-        .limit(_HISTORY_LIMIT)
-    ).all()
+    cycles = list(
+        session.scalars(
+            select(ContinuousCycleModel)
+            .where(ContinuousCycleModel.plan_id == plan.id)
+            .order_by(ContinuousCycleModel.created_at.desc())
+            .limit(_HISTORY_LIMIT)
+        )
+    )
+    shown = {cycle.id for cycle in cycles}
+    # Every later check is skipped while a candidate waits, so it can age out of the recent window.
+    cycles += [
+        cycle
+        for cycle in session.scalars(
+            select(ContinuousCycleModel).where(
+                ContinuousCycleModel.plan_id == plan.id, ContinuousCycleModel.status == engine_mod.CYCLE_AWAITING_REVIEW
+            )
+        )
+        if cycle.id not in shown
+    ]
     return ContinuousPlanItem(
         id=plan.id,
         source_optimization_id=plan.source_optimization_id,
