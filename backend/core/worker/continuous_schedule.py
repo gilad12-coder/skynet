@@ -23,6 +23,7 @@ Frequency = Literal["hourly", "daily", "weekly", "monthly"]
 
 MAX_EVERY: dict[str, int] = {"hourly": 12, "daily": 30, "weekly": 8, "monthly": 12}
 # Long enough to reach the next run of the sparsest rule (every 12 months on the 31st).
+# Skips can push the next run further out, so the window is counted from the last skip.
 _SEARCH_DAYS = 800
 _LEGACY_DEFAULT_TIME = "09:00"
 _MAX_SLOTS = 400
@@ -141,22 +142,44 @@ def _month_index(day: date) -> int:
     return day.year * 12 + day.month
 
 
-def _day_times(rule: ScheduleRule, day: date, anchor: date) -> list[time]:
+def _slots_by_day(slots: list[str]) -> dict[str, set[str]]:
+    """Group local ``YYYY-MM-DDTHH:MM`` slots by their date.
+
+    Args:
+        slots: Validated local slots.
+
+    Returns:
+        ``HH:MM`` times keyed by ``YYYY-MM-DD``.
+    """
+    grouped: dict[str, set[str]] = {}
+    for slot in slots:
+        day, at = slot.split("T")
+        grouped.setdefault(day, set()).add(at)
+    return grouped
+
+
+def _day_times(
+    rule: ScheduleRule,
+    day: date,
+    anchor: date,
+    skipped: dict[str, set[str]],
+    added: dict[str, set[str]],
+) -> list[time]:
     """List the wall-clock times the rule fires on one local date.
 
     Args:
         rule: The schedule rule.
         day: Local date to test.
         anchor: Local date the plan started counting from, so "every 2 weeks" has a phase.
+        skipped: The rule's ``skip`` slots, grouped by date.
+        added: The rule's ``extra`` slots, grouped by date.
 
     Returns:
         The times on ``day``, earliest first; empty when the rule skips it.
     """
-    prefix = f"{day.isoformat()}T"
-    skipped = {slot[len(prefix):] for slot in rule.skip if slot.startswith(prefix)}
-    added = {slot[len(prefix):] for slot in rule.extra if slot.startswith(prefix)}
+    key = day.isoformat()
     wall = {at.strftime("%H:%M") for at in _repeat_times(rule, day, anchor)}
-    return [time.fromisoformat(at) for at in sorted((wall - skipped) | added)]
+    return [time.fromisoformat(at) for at in sorted((wall - skipped.get(key, set())) | added.get(key, set()))]
 
 
 def _repeat_times(rule: ScheduleRule, day: date, anchor: date) -> list[time]:
@@ -203,13 +226,17 @@ def next_runs(rule: ScheduleRule, after: datetime, *, anchor: datetime | None = 
     after = after.astimezone(UTC)
     local_start = after.astimezone(zone).date()
     anchor_day = (anchor or after).astimezone(zone).date()
+    skipped = _slots_by_day(rule.skip)
+    added = _slots_by_day(rule.extra)
+    search_from = max(local_start, date.fromisoformat(max(skipped))) if skipped else local_start
     found: list[datetime] = []
-    for offset in range(_SEARCH_DAYS):
-        day = local_start + timedelta(days=offset)
-        for at in _day_times(rule, day, anchor_day):
+    day = local_start
+    while (day - search_from).days < _SEARCH_DAYS:
+        for at in _day_times(rule, day, anchor_day, skipped, added):
             when = datetime.combine(day, at, tzinfo=zone).astimezone(UTC)
             if when > after and (not found or when > found[-1]):
                 found.append(when)
                 if len(found) == count:
                     return found
+        day += timedelta(days=1)
     return found

@@ -132,3 +132,17 @@ def test_a_malformed_slot_is_refused() -> None:
     """A slot that is not a real date and time does not validate."""
     with pytest.raises(ValidationError):
         ScheduleRule(frequency="daily", skip=["2026-02-30T09:00"])
+
+
+def test_skips_past_the_search_window_still_find_the_next_check() -> None:
+    """Skipping the next two yearly checks finds the third instead of running out of window."""
+    anchor = datetime(2026, 10, 19, 10, tzinfo=UTC)
+    rule = ScheduleRule(
+        frequency="monthly",
+        every=12,
+        month_day=1,
+        time="09:00",
+        timezone="UTC",
+        skip=["2027-10-01T09:00", "2028-10-01T09:00"],
+    )
+    assert next_runs(rule, anchor, anchor=anchor) == [datetime(2029, 10, 1, 9, tzinfo=UTC)]

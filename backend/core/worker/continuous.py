@@ -586,6 +586,11 @@ def process_cycle(
             plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
             cycle.execution_budget_id = budget.id if budget else None
             cycle.spent_cents = _billed_cents(job_store, cycle.execution_budget_id, plan_username)
+            if error.code == "budget.pending":
+                # Setup usage is still being confirmed. The cycle keeps its lease, so a
+                # later sweep replays this same key and budget instead of a new check
+                # paying for setup again.
+                return
             if error.code in {"billing.insufficient_funds", "budget.insufficient"}:
                 _pause(plan, PAUSE_FUNDS)
                 _finish_cycle(session, cycle, CYCLE_PAUSED, "continuous.paused_funds")

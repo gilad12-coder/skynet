@@ -671,7 +671,8 @@ def create_continuous_router(
         """
         with _session() as session:
             plan = _owned_plan(session, plan_id, user)
-            cycle = session.get(ContinuousCycleModel, cycle_id)
+            # Locked so a concurrent approve and reject can't both see ``awaiting_review``.
+            cycle = session.get(ContinuousCycleModel, cycle_id, with_for_update=True)
             if cycle is None or cycle.plan_id != plan.id or cycle.status != engine_mod.CYCLE_AWAITING_REVIEW:
                 raise DomainError("continuous.not_reviewable", status=409)
             now = datetime.now(UTC)

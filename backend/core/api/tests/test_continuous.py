@@ -776,6 +776,41 @@ def test_a_rejected_staged_optimizer_fails_the_cycle_without_wedging_the_plan(en
     assert env.count(JobModel) == jobs_before
 
 
+def test_pending_setup_usage_retries_the_same_check(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A check whose setup usage awaits confirmation stays claimed and later replays the same budget."""
+    source_id = _incumbent(env)
+    _enable(env, source_id)
+    env.rows = _cases(["B"] * 10)
+    budgets_before = env.count(ExecutionBudgetModel)
+    submit = continuous.submit_unified_payload
+
+    def pending(*args: Any, **kwargs: Any) -> Any:
+        """Refuse the submission as if setup usage were still being confirmed.
+
+        Args:
+            *args: Unused.
+            **kwargs: Unused.
+
+        Raises:
+            DomainError: Always, as ``budget.pending``.
+        """
+        raise DomainError("budget.pending", status=409)
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", pending)
+    now = _due(env)
+    env.sweep(now)
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.optimization_id) == ("checking", None)
+    assert cycle.lease_until is not None
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", submit)
+    env.sweep(now + continuous.CYCLE_LEASE + timedelta(seconds=1))
+    [retried] = env.cycles()
+    assert retried.id == cycle.id
+    assert retried.status == "optimizing"
+    assert env.count(ExecutionBudgetModel) <= budgets_before + 1
+
+
 def test_a_deleted_incumbent_fails_the_cycle_without_wedging_the_plan(env: _Env) -> None:
     """A check whose incumbent run is gone records why instead of staying in ``checking``."""
     source_id = _incumbent(env)
