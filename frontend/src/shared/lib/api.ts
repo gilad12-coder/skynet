@@ -59,7 +59,6 @@ import type {
   ContinuousEnableRequest,
   ContinuousInputs,
   ContinuousPlan,
-  ContinuousSchedulePreview,
   ContinuousState,
   ScheduleRule,
 } from "@/shared/types/continuous";
@@ -2064,14 +2063,6 @@ export function updateContinuousSchedule(planId: string, rule: ScheduleRule) {
 export function checkContinuousNow(planId: string) {
   return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/check-now`, {
     method: "POST",
-  });
-}
-
-/** The next check times a schedule rule would give, counting from now. */
-export function previewContinuousSchedule(rule: ScheduleRule) {
-  return request<ContinuousSchedulePreview>("/continuous/schedule-preview", {
-    method: "POST",
-    body: JSON.stringify(rule),
   });
 }
 

@@ -21,10 +21,6 @@ export interface ScheduleRule {
   timezone: string;
 }
 
-export interface ContinuousSchedulePreview {
-  next_checks: string[];
-}
-
 export type ContinuousCycleStatus =
   | "checking"
   | "skipped"
