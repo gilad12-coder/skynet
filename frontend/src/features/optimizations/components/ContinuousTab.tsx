@@ -351,10 +351,20 @@ function PlanView({
               label={msg("continuous_tab.schedule.label")}
               action={
                 editing === null && (
-                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(plan.schedule)}>
-                    <PencilSimple className="size-4" />
-                    {msg("continuous_tab.schedule.edit")}
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={busy}
+                        onClick={() => setEditing(plan.schedule)}
+                        aria-label={msg("continuous_tab.schedule.edit")}
+                      >
+                        <PencilSimple className="size-4" aria-hidden />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{msg("continuous_tab.schedule.edit")}</TooltipContent>
+                  </Tooltip>
                 )
               }
             >

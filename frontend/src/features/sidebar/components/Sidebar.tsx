@@ -1222,10 +1222,14 @@ function JobRow({
             </span>
           )}
           {job.automated && (
-            <Repeat
-              className="size-2.5 shrink-0 text-muted-foreground/60"
-              aria-label={msg("sidebar.automated")}
-            />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex shrink-0 items-center text-primary">
+                  <Repeat className="size-3.5" weight="bold" aria-label={msg("sidebar.automated")} />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="right">{msg("sidebar.automated")}</TooltipContent>
+            </Tooltip>
           )}
           {job.pinned && (
             <PushPin className={cn("size-2.5 shrink-0", "text-muted-foreground/60")} />

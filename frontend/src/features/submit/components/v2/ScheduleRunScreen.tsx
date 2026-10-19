@@ -63,10 +63,20 @@ export function ScheduleRunScreen() {
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {on && scheduledRun && !editing && (
-                <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(true)}>
-                  <PencilSimple className="size-4" aria-hidden />
-                  {msg("continuous_tab.schedule.edit")}
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => setEditing(true)}
+                      aria-label={msg("continuous_tab.schedule.edit")}
+                    >
+                      <PencilSimple className="size-4" aria-hidden />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{msg("continuous_tab.schedule.edit")}</TooltipContent>
+                </Tooltip>
               )}
               <Switch
                 checked={on}
