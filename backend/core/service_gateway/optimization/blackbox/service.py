@@ -454,12 +454,15 @@ def _mean_named_scores(side_infos: list[dict[str, Any]]) -> dict[str, BlackboxNa
 
     Returns:
         Each name's mean score; its feedback verbatim with one case, else one
-        ``Case n: ...`` line per case, capped like any feedback text.
+        ``Case n: ...`` line per case, capped like any feedback text. A case
+        that failed (its side info is an ``error``) counts as 0 on every name,
+        as it does in the total, so a failure never vanishes from the parts.
     """
     collected: dict[str, list[tuple[int, dict[str, Any]]]] = {}
     for position, side_info in enumerate(side_infos, start=1):
         for name, entry in named_scores(side_info).items():
             collected.setdefault(name, []).append((position, entry))
+    failed = [i for i, side_info in enumerate(side_infos) if side_info.get("error") and not named_scores(side_info)]
     merged: dict[str, BlackboxNamedScore] = {}
     for name, entries in collected.items():
         if len(side_infos) == 1:
@@ -467,7 +470,7 @@ def _mean_named_scores(side_infos: list[dict[str, Any]]) -> dict[str, BlackboxNa
         else:
             feedback = "\n".join(f"Case {position}: {entry['feedback']}" for position, entry in entries)
         merged[name] = BlackboxNamedScore(
-            score=sum(entry["score"] for _, entry in entries) / len(entries),
+            score=sum(entry["score"] for _, entry in entries) / (len(entries) + len(failed)),
             feedback=feedback[:MINIBATCH_FEEDBACK_CHAR_CAP],
         )
     return merged

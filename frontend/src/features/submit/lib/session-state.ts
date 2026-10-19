@@ -12,16 +12,11 @@ export const WIZARD_SESSION_KEY = "skynet.wizard.session.v1";
 /**
  * What the setup's screens hold beside its answers, kept for the same tab and
  * read back only when the setup itself came back: the screen on view inside
- * the step, the Task step's Auto/Manual choice and the coding agent's chat.
+ * the step and the coding agent's chat.
  */
 export const WIZARD_SCREEN_KEY = "skynet.wizard.screen.v1";
-export const WIZARD_TASK_ASSIST_KEY = "skynet.wizard.task-assist.v1";
 export const WIZARD_CODING_CHAT_KEY = "skynet.wizard.coding-chat.v1";
-export const WIZARD_VIEW_KEYS = [
-  WIZARD_SCREEN_KEY,
-  WIZARD_TASK_ASSIST_KEY,
-  WIZARD_CODING_CHAT_KEY,
-] as const;
+export const WIZARD_VIEW_KEYS = [WIZARD_SCREEN_KEY, WIZARD_CODING_CHAT_KEY] as const;
 
 const SLICES = ["task", "inputs", "optimizer", "workspace", "meta"] as const;
 
@@ -116,19 +111,6 @@ export function keepSessionValue(key: string, value: string): void {
  */
 export function reopenedPage(screens: readonly string[], saved: string | null): number {
   return saved === null ? 0 : Math.max(0, screens.indexOf(saved));
-}
-
-/**
- * Read back the Task step's Auto/Manual choice; anything else is Auto.
- *
- * Args:
- *   raw: The stored text, or null.
- *
- * Returns:
- *   The choice.
- */
-export function decodeTaskAssist(raw: string | null): "auto" | "manual" {
-  return raw === "manual" ? "manual" : "auto";
 }
 
 /**

@@ -25,12 +25,6 @@ import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
 import { useTaskInterview, type TaskInterviewState } from "../../hooks/use-task-interview";
 import { useWizardV2, useWizardV2Shell } from "../../hooks/use-unified-wizard";
 import { taskAdvanceFrom } from "../../lib/auto-advance";
-import {
-  WIZARD_TASK_ASSIST_KEY,
-  decodeTaskAssist,
-  keepSessionValue,
-  readSessionValue,
-} from "../../lib/session-state";
 import { emptyRepoDraft, taskIssue } from "../../lib/wizard-v2";
 import { AuthoringShell } from "../steps/AuthoringShell";
 import { ArtifactConfirmCard, v2Msg } from "./ArtifactConfirmCard";
@@ -49,20 +43,16 @@ export function TaskStep({ page }: { page: number }) {
   const task = state.task;
   const t = (key: string) => v2Msg(key, guided);
 
-  // Manual hides the interview; it never discards the transcript.
-  // A reload keeps the choice, as it keeps the answers.
-  const { restored } = useWizardV2Shell();
-  const [assist, setAssist] = React.useState<"auto" | "manual">(() =>
-    restored ? decodeTaskAssist(readSessionValue(WIZARD_TASK_ASSIST_KEY)) : "auto",
-  );
-  React.useEffect(() => keepSessionValue(WIZARD_TASK_ASSIST_KEY, assist), [assist]);
-  const interview = useTaskInterview(ctx, assist === "auto");
+  // A clone's opening turn waits for its source run, so the agent restates
+  // that goal instead of asking for one the draft is about to hold.
+  const { cloneLoading } = useWizardV2Shell();
+  const interview = useTaskInterview(ctx, !cloneLoading);
 
   // Once the interview has what it needs, the wizard moves on by itself, but
   // only on the first pass: a user who comes back to edit the task stays put.
   const { advanceFrom } = useWizardAutoAdvance();
   const advancePast = taskAdvanceFrom({
-    auto: assist === "auto",
+    auto: true,
     firstPass: state.furthestStep === "task",
     onStep: state.step === "task",
     done: interview.done,
@@ -76,8 +66,6 @@ export function TaskStep({ page }: { page: number }) {
 
   return (
     <AuthoringShell
-      value={assist}
-      onChange={setAssist}
       title={t("submit.v2.task.title")}
       description={t("submit.v2.task.desc")}
       sidePanel={
@@ -96,7 +84,7 @@ export function TaskStep({ page }: { page: number }) {
         <TaskField
           id="v2-objective"
           label={t("submit.v2.task.objective_label")}
-          hint={assist === "auto" ? t("submit.v2.task.objective_hint_auto") : undefined}
+          hint={t("submit.v2.task.objective_hint_auto")}
           placeholder={t("submit.v2.task.objective_placeholder")}
           value={task.objective}
           onChange={(v) => interview.editField("objective", v)}

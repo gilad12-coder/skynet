@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Coins, Stack, Wallet } from "@/shared/ui/icons";
+import { Coins, Wallet } from "@/shared/ui/icons";
 import { ProgressBar } from "@/shared/ui/progress-bar";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
-import { Segmented } from "@/shared/ui/segmented";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
-import { Ghost, Skeleton } from "@/shared/ui/skeleton";
+import { Skeleton } from "@/shared/ui/skeleton";
 import { rememberLayout, useLayoutHint } from "@/shared/lib/layout-hint";
 import {
   Table,
@@ -40,9 +39,7 @@ import {
   type UsageGroup,
   type UsageGrouping,
 } from "../lib/run-usage";
-import { LiveMarker } from "./LogsTab";
 
-const GROUPING_STORAGE_KEY = "app.usage.grouping";
 // Shared by the summary strip and its skeleton. Seven columns wait for xl:
 // at lg the main column beside the sidebar is only about 780px wide (iPad
 // portrait), too narrow for seven money figures.
@@ -82,16 +79,6 @@ const ROLE_TIP_KEYS: Record<string, TooltipKey> = {
   rounding: "usage_tab.role.rounding",
 };
 
-const STAGE_TIP_KEYS: Record<string, TooltipKey> = {
-  baseline: "lm_activity.stage.baseline",
-  training: "lm_activity.stage.training",
-  evaluation: "lm_activity.stage.evaluation",
-  mutation: "usage_tab.stage.mutation",
-  novelty_judge: "usage_tab.stage.novelty_judge",
-  meta_notes: "usage_tab.stage.meta_notes",
-  embedding: "usage_tab.stage.embedding",
-};
-
 const STAGE_LABEL_KEYS: Record<string, Parameters<typeof msg>[0]> = {
   baseline: "auto.features.optimizations.components.lmactivitytab.stage_baseline",
   training: "auto.features.optimizations.components.lmactivitytab.stage_training",
@@ -102,26 +89,6 @@ const STAGE_LABEL_KEYS: Record<string, Parameters<typeof msg>[0]> = {
   meta_notes: "usage_tab.stage.meta_notes",
   embedding: "usage_tab.stage.embedding",
 };
-
-function readGrouping(): UsageGrouping {
-  try {
-    const value = window.localStorage.getItem(GROUPING_STORAGE_KEY);
-    if (value === "role" || value === "model" || value === "stage" || value === "candidate") {
-      return value;
-    }
-  } catch {
-    // Storage can be blocked; the default grouping is fine.
-  }
-  return "role";
-}
-
-function writeGrouping(grouping: UsageGrouping): void {
-  try {
-    window.localStorage.setItem(GROUPING_STORAGE_KEY, grouping);
-  } catch {
-    // Remembering the choice is a convenience only.
-  }
-}
 
 function groupLabel(group: UsageGroup, grouping: UsageGrouping): string {
   if (group.nonModel || grouping === "role") {
@@ -210,10 +177,7 @@ function Summary({
         : formatBudgetUsd(String(budget.total_cents), locale),
     ]);
   }
-  items.push([
-    spentLabel,
-    formatCentsUsd(total.chargedCents, locale),
-  ]);
+  items.push([spentLabel, formatCentsUsd(total.chargedCents, locale)]);
   if (splitCost && total.providerCents != null) {
     items.push([
       msg("usage_tab.provider"),
@@ -233,10 +197,7 @@ function Summary({
       tip("usage_tab.summary.available"),
     ]);
   }
-  items.push([
-    msg("usage_tab.summary.calls"),
-    formatCount(total.calls),
-  ]);
+  items.push([msg("usage_tab.summary.calls"), formatCount(total.calls)]);
   items.push([
     msg("usage_tab.summary.tokens"),
     formatCount(total.inputTokens + total.outputTokens),
@@ -254,7 +215,9 @@ function Summary({
         </div>
       ))}
       {budgetHit && (
-        <p className="col-span-full text-xs text-[#9a6a10] dark:text-[#e7b466]">{msg("usage_tab.budget_stopped")}</p>
+        <p className="col-span-full text-xs text-[#9a6a10] dark:text-[#e7b466]">
+          {msg("usage_tab.budget_stopped")}
+        </p>
       )}
     </dl>
   );
@@ -298,7 +261,9 @@ function BudgetPace({ job, spentCents }: { job: OptimizationStatusResponse; spen
           {pace.kind === "calibrating"
             ? msg("usage_tab.pace.calibrating")
             : formatMsg(
-                pace.kind === "iterations" ? "usage_tab.pace.iterations" : "usage_tab.pace.evaluations",
+                pace.kind === "iterations"
+                  ? "usage_tab.pace.iterations"
+                  : "usage_tab.pace.evaluations",
                 { count: pace.count },
               )}
         </p>
@@ -332,8 +297,6 @@ const COLD_USAGE_SHAPE: UsageShape = {
   notModelAt: -1,
 };
 
-const noop = () => {};
-
 /**
  * The summary strip, toolbar and table while the first usage fetch is in
  * flight, built from the same table primitives (and the grouping control
@@ -356,21 +319,7 @@ function UsageTabSkeleton({ budgeted, shape }: { budgeted: boolean; shape?: Usag
           </div>
         ))}
       </div>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3 overflow-x-auto no-scrollbar">
-          <div className="inline-flex items-center gap-1.5">
-            <span className="size-3" />
-            <Ghost>
-              <Segmented
-                size="sm"
-                label={msg("usage_tab.group.label")}
-                value={s.grouping}
-                onChange={noop}
-                options={s.groupings.map((g) => ({ value: g, label: msg(GROUPING_LABEL_KEYS[g]) }))}
-              />
-            </Ghost>
-          </div>
-        </div>
+      <div className="flex justify-end">
         <Skeleton height="100%" containerClassName={ICON_BONE} />
       </div>
       <Card className="overflow-hidden py-0">
@@ -480,14 +429,12 @@ export function UsageTab({
   pairIndex: number | null;
 }) {
   const { usage, error } = useRunUsage(job, pairIndex);
-  const [grouping, setGrouping] = useState<UsageGrouping>("role");
-  useEffect(() => setGrouping(readGrouping()), []);
   const locale = getActiveIntlLocale();
   const running = ACTIVE_STATUSES.has(job.status);
 
   const rows = useMemo(() => usage?.rows ?? [], [usage]);
   const offered = useMemo(() => availableGroupings(rows), [rows]);
-  const activeGrouping = offered.includes(grouping) ? grouping : "role";
+  const activeGrouping: UsageGrouping = "role";
   const groups = useMemo(() => groupUsage(rows, activeGrouping), [rows, activeGrouping]);
   const total = useMemo(() => usageTotal(rows), [rows]);
   const splitCost = hasProviderSpend(rows);
@@ -503,7 +450,7 @@ export function UsageTab({
       grouping: activeGrouping,
       rows: groups.length,
       splitCost,
-      notModelAt: activeGrouping === "model" ? firstNonModel : -1,
+      notModelAt: -1,
       budgeted,
     } satisfies UsageShape);
   }, [
@@ -542,23 +489,7 @@ export function UsageTab({
       <div className="space-y-4">
         {running && <BudgetPace job={job} spentCents={total.chargedCents} />}
         <Summary job={job} usage={usage} running={running} splitCost={splitCost} />
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-center gap-3 overflow-x-auto no-scrollbar">
-            <div className="inline-flex items-center gap-1.5">
-              <Stack className="size-3 text-foreground/35" aria-hidden="true" />
-              <Segmented
-                size="sm"
-                label={msg("usage_tab.group.label")}
-                value={activeGrouping}
-                onChange={(next) => {
-                  setGrouping(next);
-                  writeGrouping(next);
-                }}
-                options={offered.map((g) => ({ value: g, label: msg(GROUPING_LABEL_KEYS[g]) }))}
-              />
-            </div>
-            {running && <LiveMarker status="live" />}
-          </div>
+        <div className="flex justify-end">
           <ExportTableMenu
             iconOnly
             disabled={groups.length === 0}
@@ -613,9 +544,7 @@ export function UsageTab({
                         </HelpTip>
                       </TableHead>
                     )}
-                    <TableHead className="text-end">
-                      {msg("usage_tab.col.calls")}
-                    </TableHead>
+                    <TableHead className="text-end">{msg("usage_tab.col.calls")}</TableHead>
                     <TableHead className="text-end" collapse="md">
                       {msg("usage_tab.col.input")}
                     </TableHead>
@@ -630,14 +559,7 @@ export function UsageTab({
                 <TableBody>
                   {groups.map((g, i) => {
                     const label = groupLabel(g, activeGrouping);
-                    const rowTipKey: TooltipKey | undefined =
-                      activeGrouping === "role" || g.nonModel
-                        ? ROLE_TIP_KEYS[g.key]
-                        : g.key === UNATTRIBUTED
-                          ? "usage_tab.unattributed"
-                          : activeGrouping === "stage"
-                            ? STAGE_TIP_KEYS[g.key]
-                            : undefined;
+                    const rowTipKey: TooltipKey | undefined = ROLE_TIP_KEYS[g.key];
                     const roleTip = rowTipKey ? tip(rowTipKey) : null;
                     return (
                       <TableRow
@@ -645,18 +567,7 @@ export function UsageTab({
                         className={cn(i === firstNonModel && i > 0 && "border-t border-border")}
                       >
                         <TableCell className="max-w-[18rem] ps-4">
-                          {i === firstNonModel && activeGrouping === "model" && (
-                            <span className="mb-0.5 block text-[0.6875rem] text-muted-foreground">
-                              {msg("usage_tab.not_model")}
-                            </span>
-                          )}
-                          <span
-                            className={cn(
-                              "block truncate",
-                              activeGrouping === "model" && !g.nonModel && "font-mono text-xs",
-                            )}
-                            dir="auto"
-                          >
+                          <span className="block truncate" dir="auto">
                             {roleTip ? <HelpTip text={roleTip}>{label}</HelpTip> : label}
                           </span>
                           <TableInline at="md">

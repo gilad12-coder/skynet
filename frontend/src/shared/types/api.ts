@@ -739,6 +739,22 @@ export interface BlackboxCaseResult {
   best_score?: number | null;
   baseline_feedback?: string | null;
   best_feedback?: string | null;
+  /** The trusted measurement of each version's run on the case (time, model
+   *  attempts, metered service cost); absent where nothing measured it. */
+  baseline_observation?: BlackboxObservation | null;
+  best_observation?: BlackboxObservation | null;
+}
+
+/** One response's trusted observation; see `workspace_harness.build_observation`. */
+export interface BlackboxObservation {
+  timing?: { task_ms?: number | null; [key: string]: unknown } | null;
+  cost?: {
+    usd?: number | null;
+    status?: string | null;
+    reason?: string | null;
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
 }
 
 export interface BlackboxRunResult {

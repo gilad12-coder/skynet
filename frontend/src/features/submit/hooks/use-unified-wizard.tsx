@@ -115,6 +115,8 @@ export interface WizardV2Shell extends WizardV2Context {
   advancing: boolean;
   /** The setup came back from a reload of this tab. */
   restored: boolean;
+  /** A `?clone=` source run is still loading into the setup. */
+  cloneLoading: boolean;
   /** Why the last Run click on this exact setup did not start a run. */
   runFailure: RunFailure | null;
 }
@@ -705,6 +707,7 @@ export function WizardV2Provider({
   // `?clone=` hydrates every slice it can from the source run's stored,
   // server-scrubbed payload; the user still walks it forward one step at a time.
   const cloneRan = useRef(false);
+  const [cloneLoading, setCloneLoading] = useState(() => searchParams.has("clone"));
   useEffect(() => {
     const cloneId = searchParams.get("clone");
     if (!cloneId || cloneRan.current) return;
@@ -725,7 +728,8 @@ export function WizardV2Provider({
         patchWorkspace(slices.workspace);
         patchMeta(slices.meta);
       })
-      .catch(() => toast.error(msg("submit.clone.failed")));
+      .catch(() => toast.error(msg("submit.clone.failed")))
+      .finally(() => setCloneLoading(false));
     // Runs once per mount; a later ?clone= change remounts the page.
   }, []);
 
@@ -924,6 +928,7 @@ export function WizardV2Provider({
 
   const value: WizardV2Shell = {
     restored: restored !== null,
+    cloneLoading,
     state,
     goTo,
     goNext,

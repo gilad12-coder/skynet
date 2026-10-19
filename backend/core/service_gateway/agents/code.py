@@ -330,7 +330,7 @@ def _validate_unified_metric_code(code: str, metric_has_model: bool) -> str:
     Returns:
         An empty string when the code fits the contract, otherwise a short error message.
     """
-    functions, error, imported = _parse_functions(code, "metric")
+    functions, error, _ = _parse_functions(code, "metric")
     if error:
         return error
     fn = functions.get(_METRIC_NAME)
@@ -339,9 +339,34 @@ def _validate_unified_metric_code(code: str, metric_has_model: bool) -> str:
     accepted, required, variadic = _positional_capacity(fn)
     if (accepted < _METRIC_MIN_ACCEPTED and not variadic) or required > _METRIC_MAX_REQUIRED:
         return f"metric error: the signature must be {METRIC_SIGNATURE}."
-    if "skynet" in imported and not metric_has_model:
+    if not metric_has_model and _imports_skynet_llm(code):
         return "metric error: no metric model is attached, so `from skynet import llm` is unavailable."
     return ""
+
+
+def _imports_skynet_llm(code: str) -> bool:
+    """Return whether ``code`` may reach the metric model's ``llm`` helper.
+
+    The metric's ``skynet`` module always offers the trusted observation and
+    reward helpers; only ``llm`` needs an attached metric model. A bare
+    ``import skynet`` or a star import counts, since ``skynet.llm`` is then in reach.
+
+    Args:
+        code: Metric source that already parses.
+
+    Returns:
+        True when ``llm`` is imported from ``skynet`` or the module is imported whole.
+    """
+    for node in ast.walk(ast.parse(code)):
+        if isinstance(node, ast.Import) and any(alias.name.split(".")[0] == "skynet" for alias in node.names):
+            return True
+        if (
+            isinstance(node, ast.ImportFrom)
+            and (node.module or "").split(".")[0] == "skynet"
+            and any(alias.name in ("llm", "*") for alias in node.names)
+        ):
+            return True
+    return False
 
 
 def _validate_repo_metric_code(code: str) -> str:
@@ -998,7 +1023,13 @@ _METRIC_COMMON = """- Never raise: catch failures and return the lowest score wi
 
 _METRIC_LLM = """A metric model is attached: `from skynet import llm` calls it. llm(prompt) -> str asks a free-form question, e.g. to grade the output against a rubric: parse the reply defensively (look for a number or a verdict word, default to the lowest score). Prefer deterministic checks where they suffice."""
 
-_METRIC_NO_LLM = """No metric model is attached, so the metric has NO llm helper: never import skynet or call llm(). Score with deterministic checks (exact match, contains, numeric tolerance, JSON fields, structure, length, similarity to the expected value)."""
+_METRIC_NO_LLM = """No metric model is attached, so the metric has NO llm helper: never import llm from skynet or call llm(). Score with deterministic checks (exact match, contains, numeric tolerance, JSON fields, structure, length, similarity to the expected value)."""
+
+_METRIC_REWARD = """When the user's goals include speed or cost (how fast or how cheap one response is), never read time or cost from the output: run code can print anything. Use the trusted helper `from skynet import reward` (it needs no metric model) and declare the blend once, at module level, as plain data:
+REWARD_SPEC = {"weights": {"accuracy": <w>, "speed": <w>, "cost": <w>}, "accuracy": {"name": "<short name in the user's words>", "meaning": "<what is measured>", "unit": "<unit>", "reference": <error at which accuracy scores half; omit for a 0-1 score>}, "speed": {"name": "<short name, e.g. Speed>", "meaning": "Run time of one response", "unit": "ms", "reference": <ms>}, "cost": {"name": "<short name, e.g. Cost>", "meaning": "Model cost of one response", "unit": "USD", "reference": <usd>}}
+- Take the weights from the user (for example 35/35/30); they are normalized to sum to 1. Each reference is the value that scores half on that component (utility = reference / (reference + value)), so pick a typical value the user names or the current response gives; every improvement on either side of it still raises the score, and no cutoff, plateau, accuracy floor or time limit is added.
+- In score, compute the accuracy value (an error such as a distance when accuracy has a reference, else a score from 0 to 1; None when the output has no usable answer) and return reward(REWARD_SPEC, accuracy, "<feedback on accuracy>") unchanged. It adds speed and cost from the run's measured time and service cost, the per-component "scores", and the raw values; an unmeasured time or an unpriced call scores 0 on that component and says so.
+- When several answers are acceptable (an ambiguous place), use the best one. Never drop a case: a missing or unreadable answer passes None, and a failed run already scores the lowest."""
 
 _REPO_RUN_CONTRACT = """This is a repository run: there is NO run code. The optimizer edits the repository itself, and each version it proposes is a checkout of that repository. You write exactly one thing, metric.py, the scorer that measures how good one checkout is. Never write run.py or any other file."""
 
@@ -1035,6 +1066,7 @@ def _unified_contracts(unified: dict[str, Any]) -> tuple[str, str]:
             _METRIC_CONTRACT,
             _METRIC_COMMON,
             _METRIC_LLM if unified.get("metric_has_model") else _METRIC_NO_LLM,
+            _METRIC_REWARD,
         ]
     )
     return run_contract, metric_contract

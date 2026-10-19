@@ -23,7 +23,6 @@ export interface OverviewFixture {
     loggedMetricRows: number;
     climb: boolean;
     grid: boolean;
-    blackboxStats: boolean;
   };
 }
 
@@ -226,9 +225,7 @@ const finished = {
   loggedMetricRows: 0,
   climb: false,
   grid: false,
-  blackboxStats: false,
 };
-const blackboxFinished = { ...finished, blackboxStats: true };
 
 function pair(index: number, overrides: Partial<PairResult> = {}): PairResult {
   return {
@@ -334,14 +331,14 @@ export const OVERVIEW_FIXTURES: OverviewFixture[] = [
     job: blackboxJob("gepa"),
     payload: blackboxPayload("prompt", "gepa"),
     scorePoints: BLACKBOX_SERIES,
-    expect: blackboxFinished,
+    expect: finished,
   },
   {
     name: "oa-best-of-n-text",
     job: blackboxJob("best_of_n"),
     payload: blackboxPayload("text", "best_of_n"),
     scorePoints: BLACKBOX_SERIES,
-    expect: blackboxFinished,
+    expect: finished,
   },
   {
     name: "oa-meta-harness-code",
@@ -352,28 +349,28 @@ export const OVERVIEW_FIXTURES: OverviewFixture[] = [
     }),
     payload: blackboxPayload("code", "meta_harness"),
     scorePoints: BLACKBOX_SERIES,
-    expect: { ...blackboxFinished, climb: true },
+    expect: { ...finished, climb: true },
   },
   {
     name: "oa-autoresearch",
     job: blackboxJob("autoresearch"),
     payload: blackboxPayload("text", "autoresearch"),
     scorePoints: BLACKBOX_SERIES,
-    expect: { ...blackboxFinished, climb: true },
+    expect: { ...finished, climb: true },
   },
   {
     name: "oa-autosaddler",
     job: blackboxJob("autosaddler"),
     payload: blackboxPayload("text", "autosaddler"),
     scorePoints: BLACKBOX_SERIES,
-    expect: { ...blackboxFinished, climb: true },
+    expect: { ...finished, climb: true },
   },
   {
     name: "oa-shinka-evolve",
     job: blackboxJob("shinka_evolve"),
     payload: blackboxPayload("code", "shinka_evolve"),
     scorePoints: BLACKBOX_SERIES,
-    expect: { ...blackboxFinished, climb: true },
+    expect: { ...finished, climb: true },
   },
   {
     name: "oa-auto",
@@ -414,7 +411,7 @@ export const OVERVIEW_FIXTURES: OverviewFixture[] = [
       payload: { recipe: "prompt", strategy: { mode: "auto" } },
     },
     scorePoints: BLACKBOX_SERIES,
-    expect: blackboxFinished,
+    expect: finished,
   },
   {
     name: "oa-repo",
@@ -425,7 +422,7 @@ export const OVERVIEW_FIXTURES: OverviewFixture[] = [
     }),
     payload: blackboxPayload("repo", "meta_harness", { repo_url: "https://github.com/acme/agent" }),
     scorePoints: BLACKBOX_SERIES,
-    expect: { ...blackboxFinished, climb: true },
+    expect: { ...finished, climb: true },
   },
   {
     name: "unified-dspy-program",
@@ -438,7 +435,7 @@ export const OVERVIEW_FIXTURES: OverviewFixture[] = [
     }),
     payload: blackboxPayload("dspy_program", "gepa", { artifact_kind: "dspy_program" }),
     scorePoints: BLACKBOX_SERIES,
-    expect: blackboxFinished,
+    expect: finished,
   },
   {
     name: "oa-no-baseline",
@@ -449,14 +446,14 @@ export const OVERVIEW_FIXTURES: OverviewFixture[] = [
     }),
     payload: blackboxPayload("text", "gepa"),
     scorePoints: BLACKBOX_SERIES,
-    expect: { ...blackboxFinished, scoreCards: false },
+    expect: { ...finished, scoreCards: false },
   },
   {
     name: "oa-stopped-partial",
     job: blackboxJob("gepa", {}, { status: "stopped", stop_reason: "budget" }),
     payload: blackboxPayload("text", "gepa"),
     scorePoints: BLACKBOX_SERIES.slice(0, 3),
-    expect: blackboxFinished,
+    expect: finished,
   },
   {
     name: "grid-search",

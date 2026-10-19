@@ -65,11 +65,7 @@ void describe("finished-run Overview fixtures", () => {
         "no LM call count card",
       );
       assert.ok(!html.includes("run-overview-classic"), "no scoped 10-09 palette");
-      assert.equal(
-        html.includes("optimization.blackbox.stats.scorer_runs"),
-        expect.blackboxStats,
-        "scorer-run card",
-      );
+      assert.ok(!html.includes("optimization.blackbox.stats.scorer_runs"), "no scorer-run card");
       assert.equal(/stage\.hillClimbing/i.test(html), expect.climb, "hill-climb stage");
 
       if (expect.grid) {
