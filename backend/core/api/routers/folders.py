@@ -13,10 +13,15 @@ follow Drive's "My Drive" model (see :mod:`core.api.folder_access`):
   inside are never deleted; they return to the unfiled list.
 * ``POST   /folders/{id}/move`` — move a folder (owner, editor+ on the target).
 * ``GET    /folders/{id}/runs`` — the runs filed directly in a folder (viewer+).
+* ``GET    /folders/runs`` — the caller's own runs with their folders, compact,
+  for an agent that sorts runs into folders.
 * ``POST   /folders/items`` — file runs into a folder, or unfile them.
 * ``GET/PUT /folders/{id}/sharing`` plus ``members`` and ``transfer`` — the
   same sharing surface as datasets, gated by ``editors_can_share``.
 * ``POST   /folders/share/{token}/claim`` — redeem an ``anyone`` link.
+
+The tree, filing and listing routes carry the ``agent`` tag, so the MCP server
+exposes them as tools. The sharing routes stay REST-only.
 """
 
 from __future__ import annotations
@@ -25,11 +30,19 @@ import secrets
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from ...constants import (
+    PAYLOAD_OVERVIEW_DATASET_FILENAME,
+    PAYLOAD_OVERVIEW_DESCRIPTION,
+    PAYLOAD_OVERVIEW_MODEL_NAME,
+    PAYLOAD_OVERVIEW_MODULE_NAME,
+    PAYLOAD_OVERVIEW_NAME,
+    PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
+)
 from ...storage.models import (
     RunFolderItemModel,
     RunFolderModel,
@@ -37,7 +50,7 @@ from ...storage.models import (
     RunFolderShareLinkModel,
 )
 from ..auth import AuthenticatedUser, get_authenticated_user, is_admin
-from ..converters import job_owner
+from ..converters import job_owner, parse_overview, parse_timestamp
 from ..errors import DomainError
 from ..folder_access import (
     can_share,
@@ -63,7 +76,8 @@ from ..sharing_access import (
     _normalize_username,
     role_rank,
 )
-from ._helpers import get_job_no_payload, grant_roles_for, pausable_id_flags, resumable_id_flags
+from ._helpers import get_job_no_payload, grant_roles_for, pausable_id_flags, resumable_id_flags, run_folder_ids
+from .constants import VALID_STATUSES
 from .optimizations.listing import build_sidebar_item
 from .optimizations.schemas import SidebarJobItem
 
@@ -73,6 +87,13 @@ _GENERAL_ACCESS_VALUES = (GENERAL_ACCESS_RESTRICTED, GENERAL_ACCESS_ANYONE)
 _LINK_ROLE_VALUES = tuple(sorted(LINK_ROLES))
 _MAX_NAME_LENGTH = 120
 _MAX_MOVE_BATCH = 200
+_AGENT_TAG = "agent"
+# The organize listing filters in Python, so it reads at most this many of the
+# caller's newest runs; ``scan_truncated`` tells the agent when older ones exist.
+_ORGANIZE_SCAN_CAP = 1000
+_ORGANIZE_DEFAULT_LIMIT = 100
+_ORGANIZE_MAX_LIMIT = 200
+_TASK_PREVIEW_CHARS = 160
 
 
 class FolderItem(BaseModel):
@@ -101,6 +122,13 @@ class CreateFolderRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=_MAX_NAME_LENGTH)
     parent_id: str | None = None
+    reuse_existing: bool = Field(
+        default=False,
+        description=(
+            "Return the caller's folder with the same name (case-insensitive) under the same parent "
+            "instead of creating a duplicate; makes retries safe"
+        ),
+    )
 
 
 class UpdateFolderRequest(BaseModel):
@@ -133,6 +161,32 @@ class MoveRunsRequest(BaseModel):
 
     optimization_ids: list[str] = Field(min_length=1, max_length=_MAX_MOVE_BATCH)
     folder_id: str | None = None
+
+
+class OrganizeRunItem(BaseModel):
+    """One run as the organize listing shows it."""
+
+    optimization_id: str
+    name: str | None = None
+    task: str | None = None
+    dataset: str | None = None
+    model: str | None = None
+    status: str
+    folder_id: str | None = None
+    folder: str | None = None
+    created_at: datetime | None = None
+
+
+class OrganizeRunsResponse(BaseModel):
+    """Envelope for ``GET /folders/runs``."""
+
+    items: list[OrganizeRunItem]
+    total_runs: int
+    unfiled_runs: int
+    matched: int
+    next_offset: int | None = None
+    scan_truncated: bool = False
+    hint: str
 
 
 class MoveRunsSkipped(BaseModel):
@@ -273,6 +327,81 @@ def _inherited_role(session: Session, folder: RunFolderModel, username: str) -> 
         return str(ShareRole.editor)
     roles = [m.role for m in _inherited_members(session, folder) if m.username == username]
     return roles[0] if roles else None
+
+
+def _find_owned_folder(session: Session, owner: str, name: str, parent_id: str | None) -> RunFolderModel | None:
+    """Return the owner's folder named ``name`` under ``parent_id``, ignoring case.
+
+    Args:
+        session: Open DB session.
+        owner: Normalized owner username.
+        name: Trimmed folder name to match.
+        parent_id: Parent folder id, or ``None`` for the top level.
+
+    Returns:
+        The oldest matching folder, or ``None``.
+    """
+    parent_clause = RunFolderModel.parent_id.is_(None) if parent_id is None else RunFolderModel.parent_id == parent_id
+    candidates = session.scalars(
+        select(RunFolderModel)
+        .where(RunFolderModel.owner_username == owner, parent_clause)
+        .order_by(RunFolderModel.created_at)
+    ).all()
+    wanted = name.casefold()
+    return next((f for f in candidates if f.name.strip().casefold() == wanted), None)
+
+
+def _organize_item(row: dict, folder_id: str | None, folder_name: str | None) -> OrganizeRunItem:
+    """Build the compact organize-listing entry for one job row.
+
+    Args:
+        row: Raw job row from the store.
+        folder_id: Folder the run is filed in, if any.
+        folder_name: That folder's name when the caller can see it.
+
+    Returns:
+        The populated :class:`OrganizeRunItem`.
+    """
+    overview = parse_overview(row)
+    task = (overview.get(PAYLOAD_OVERVIEW_DESCRIPTION) or "").strip() or None
+    if task and len(task) > _TASK_PREVIEW_CHARS:
+        task = task[: _TASK_PREVIEW_CHARS - 1].rstrip() + "…"
+    return OrganizeRunItem(
+        optimization_id=row["optimization_id"],
+        name=overview.get(PAYLOAD_OVERVIEW_NAME),
+        task=task,
+        dataset=overview.get(PAYLOAD_OVERVIEW_DATASET_FILENAME),
+        model=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
+        status=row.get("status", "pending"),
+        folder_id=folder_id,
+        folder=folder_name,
+        created_at=parse_timestamp(row.get("created_at")),
+    )
+
+
+def _matches(item: OrganizeRunItem, row: dict, needle: str) -> bool:
+    """Return whether a run's text fields contain ``needle``.
+
+    Args:
+        item: The run's compact entry.
+        row: The raw job row, for the module and optimizer names.
+        needle: Lower-cased search text.
+
+    Returns:
+        ``True`` when any searchable field contains ``needle``.
+    """
+    overview = parse_overview(row)
+    fields = (
+        item.name,
+        overview.get(PAYLOAD_OVERVIEW_DESCRIPTION),
+        item.dataset,
+        item.model,
+        item.folder,
+        overview.get(PAYLOAD_OVERVIEW_MODULE_NAME),
+        overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME),
+        item.optimization_id,
+    )
+    return any(needle in str(value).lower() for value in fields if value)
 
 
 def create_folders_router(*, job_store) -> APIRouter:
@@ -418,7 +547,13 @@ def create_folders_router(*, job_store) -> APIRouter:
             )
         )
 
-    @router.get("/folders", response_model=FoldersResponse, summary="List every folder the caller can reach")
+    @router.get(
+        "/folders",
+        response_model=FoldersResponse,
+        summary="List every folder the caller can reach",
+        tags=[_AGENT_TAG],
+        operation_id="list_folders",
+    )
     def list_folders(current_user: AuthenticatedUserDep) -> FoldersResponse:
         """Return owned folders, shared folders, and everything nested in them.
 
@@ -525,19 +660,29 @@ def create_folders_router(*, job_store) -> APIRouter:
             updated_at=folder.updated_at,
         )
 
-    @router.post("/folders", response_model=FolderItem, status_code=201, summary="Create a folder")
-    def create_folder(req: CreateFolderRequest, current_user: AuthenticatedUserDep) -> FolderItem:
+    @router.post(
+        "/folders",
+        response_model=FolderItem,
+        status_code=201,
+        summary="Create a folder",
+        tags=[_AGENT_TAG],
+        operation_id="create_folder",
+    )
+    def create_folder(req: CreateFolderRequest, response: Response, current_user: AuthenticatedUserDep) -> FolderItem:
         """Create a folder owned by the caller.
 
         A subfolder inherits its parent's access, so creating one inside a
-        shared folder needs editor access on that parent.
+        shared folder needs editor access on that parent. With
+        ``reuse_existing`` the caller's folder of the same name under the same
+        parent comes back with status 200 instead of a duplicate.
 
         Args:
-            req: Body carrying the ``name`` and optional ``parent_id``.
+            req: Body carrying the ``name``, optional ``parent_id`` and ``reuse_existing``.
+            response: Outgoing response, set to 200 when an existing folder is reused.
             current_user: Authenticated caller.
 
         Returns:
-            The new :class:`FolderItem`.
+            The new (or reused) :class:`FolderItem`.
 
         Raises:
             DomainError: 400 on a blank name; 404/403 on the parent.
@@ -546,9 +691,15 @@ def create_folders_router(*, job_store) -> APIRouter:
         with Session(_engine()) as session:
             if req.parent_id:
                 require_folder_role(session, req.parent_id, current_user, ShareRole.editor)
+            owner = _normalize_username(current_user.username)
+            if req.reuse_existing:
+                existing = _find_owned_folder(session, owner, name, req.parent_id or None)
+                if existing is not None:
+                    response.status_code = 200
+                    return _folder_item(session, existing, ShareRole.owner)
             now = datetime.now(UTC)
             folder = RunFolderModel(
-                owner_username=_normalize_username(current_user.username),
+                owner_username=owner,
                 name=name,
                 parent_id=req.parent_id or None,
                 editors_can_share=True,
@@ -560,7 +711,11 @@ def create_folders_router(*, job_store) -> APIRouter:
             return _folder_item(session, folder, ShareRole.owner)
 
     @router.patch(
-        "/folders/{folder_id}", response_model=FolderItem, summary="Rename a folder or change who can share it"
+        "/folders/{folder_id}",
+        response_model=FolderItem,
+        summary="Rename a folder or change who can share it",
+        tags=[_AGENT_TAG],
+        operation_id="update_folder",
     )
     def update_folder(folder_id: str, req: UpdateFolderRequest, current_user: AuthenticatedUserDep) -> FolderItem:
         """Rename a folder (editor+) or set ``editors_can_share`` (owner).
@@ -589,10 +744,14 @@ def create_folders_router(*, job_store) -> APIRouter:
             return _folder_item(session, folder, role)
 
     @router.delete(
-        "/folders/{folder_id}", response_model=DeleteFolderResponse, summary="Delete a folder and its subfolders"
+        "/folders/{folder_id}",
+        response_model=DeleteFolderResponse,
+        summary="Delete a folder and its subfolders",
+        tags=[_AGENT_TAG],
+        operation_id="delete_folder",
     )
     def delete_folder(folder_id: str, current_user: AuthenticatedUserDep) -> DeleteFolderResponse:
-        """Delete a folder and every folder nested in it.
+        """Delete a folder and its subfolders; the runs inside are kept and become unfiled.
 
         Runs inside are never deleted: they return to their owners' unfiled
         lists, and whatever access they inherited from the folder goes with it.
@@ -617,7 +776,13 @@ def create_folders_router(*, job_store) -> APIRouter:
             session.commit()
         return DeleteFolderResponse(deleted=sorted(ids))
 
-    @router.post("/folders/{folder_id}/move", response_model=FolderItem, summary="Move a folder")
+    @router.post(
+        "/folders/{folder_id}/move",
+        response_model=FolderItem,
+        summary="Move a folder",
+        tags=[_AGENT_TAG],
+        operation_id="move_folder",
+    )
     def move_folder(folder_id: str, req: MoveFolderRequest, current_user: AuthenticatedUserDep) -> FolderItem:
         """Move a folder under another folder, or to the top level.
 
@@ -649,7 +814,13 @@ def create_folders_router(*, job_store) -> APIRouter:
             session.commit()
             return _folder_item(session, folder, role)
 
-    @router.get("/folders/{folder_id}/runs", response_model=FolderRunsResponse, summary="List the runs in a folder")
+    @router.get(
+        "/folders/{folder_id}/runs",
+        response_model=FolderRunsResponse,
+        summary="List the runs in a folder",
+        tags=[_AGENT_TAG],
+        operation_id="list_folder_runs",
+    )
     def list_folder_runs(folder_id: str, current_user: AuthenticatedUserDep) -> FolderRunsResponse:
         """Return the runs filed directly in a folder, newest first.
 
@@ -685,9 +856,15 @@ def create_folders_router(*, job_store) -> APIRouter:
             items.append(build_sidebar_item(row, resumable_ids, pausable_ids, role=role, folder_id=folder_id))
         return FolderRunsResponse(items=items)
 
-    @router.post("/folders/items", response_model=MoveRunsResponse, summary="File runs into a folder or unfile them")
+    @router.post(
+        "/folders/items",
+        response_model=MoveRunsResponse,
+        summary="File runs into a folder or unfile them",
+        tags=[_AGENT_TAG],
+        operation_id="move_runs_to_folder",
+    )
     def move_runs(req: MoveRunsRequest, current_user: AuthenticatedUserDep) -> MoveRunsResponse:
-        """File runs into ``folder_id``, or take them out of their folder.
+        """File up to 200 runs into ``folder_id`` in one call, or unfile them when ``folder_id`` is null.
 
         A run lives in at most one folder, so filing it moves it. Taking a run
         out of a folder needs the run's owner or an editor of that folder;
@@ -750,6 +927,100 @@ def create_folders_router(*, job_store) -> APIRouter:
                 updated.append(oid)
             session.commit()
         return MoveRunsResponse(updated=updated, skipped=skipped)
+
+    @router.get(
+        "/folders/runs",
+        response_model=OrganizeRunsResponse,
+        summary="List your runs with their folders, to organize them",
+        tags=[_AGENT_TAG],
+        operation_id="list_runs_for_organizing",
+    )
+    def list_runs_for_organizing(
+        current_user: AuthenticatedUserDep,
+        q: str | None = Query(
+            default=None,
+            description="Case-insensitive text match on name, task, dataset, model, module, optimizer or folder",
+        ),
+        status: str | None = Query(
+            default=None, description="Exact status filter: pending, validating, running, success, failed, cancelled"
+        ),
+        unfiled_only: bool = Query(default=False, description="Only runs that are not in any folder"),
+        limit: int = Query(default=_ORGANIZE_DEFAULT_LIMIT, ge=1, le=_ORGANIZE_MAX_LIMIT, description="Page size"),
+        offset: int = Query(default=0, ge=0, description="Matches to skip; pass the previous next_offset"),
+    ) -> OrganizeRunsResponse:
+        """List your own runs, newest first, with name, task, dataset, model, status and folder.
+
+        Covers the runs the caller owns, which are the runs they can always
+        file. ``total_runs`` and ``unfiled_runs`` count every scanned run;
+        ``matched`` counts the runs that pass the filters. Only the newest
+        1000 runs are scanned; ``scan_truncated`` reports
+        when older ones exist.
+
+        Args:
+            current_user: Authenticated caller.
+            q: Optional search text.
+            status: Optional exact status filter.
+            unfiled_only: Keep only runs outside every folder.
+            limit: Page size.
+            offset: Number of matches to skip.
+
+        Returns:
+            An :class:`OrganizeRunsResponse`.
+
+        Raises:
+            DomainError: 422 ``filter.invalid_status`` for an unknown status.
+        """
+        if status is not None and status not in VALID_STATUSES:
+            raise DomainError("filter.invalid_status", status=422, value=status, allowed=sorted(VALID_STATUSES))
+        rows = job_store.list_jobs(
+            username=current_user.username, status=status, limit=_ORGANIZE_SCAN_CAP + 1, with_counts=False
+        )
+        scan_truncated = len(rows) > _ORGANIZE_SCAN_CAP
+        rows = rows[:_ORGANIZE_SCAN_CAP]
+        folder_ids = run_folder_ids(job_store, [row["optimization_id"] for row in rows])
+        folder_names: dict[str, str] = {}
+        engine = getattr(job_store, "engine", None)
+        if engine is not None and folder_ids:
+            with Session(engine) as session:
+                for fid in set(folder_ids.values()):
+                    folder = get_folder(session, fid)
+                    # A run can sit in a folder its owner lost access to; keep
+                    # the id (the sidebar shows it too) but not the name.
+                    if folder is not None and resolve_folder_role(session, fid, current_user) is not None:
+                        folder_names[fid] = folder.name
+        needle = (q or "").strip().lower()
+        entries: list[OrganizeRunItem] = []
+        unfiled = 0
+        for row in rows:
+            fid = folder_ids.get(row["optimization_id"])
+            if fid is None:
+                unfiled += 1
+            item = _organize_item(row, fid, folder_names.get(fid) if fid else None)
+            if unfiled_only and fid is not None:
+                continue
+            if needle and not _matches(item, row, needle):
+                continue
+            entries.append(item)
+        page = entries[offset : offset + limit]
+        next_offset = offset + limit if offset + limit < len(entries) else None
+        if not rows:
+            hint = "0 runs found for this account."
+        elif not entries:
+            hint = "0 runs match these filters. Drop q, status or unfiled_only to see more."
+        else:
+            hint = (
+                "Group related runs: create_folder with reuse_existing=true, then move_runs_to_folder "
+                "with up to 200 optimization_ids."
+            )
+        return OrganizeRunsResponse(
+            items=page,
+            total_runs=len(rows),
+            unfiled_runs=unfiled,
+            matched=len(entries),
+            next_offset=next_offset,
+            scan_truncated=scan_truncated,
+            hint=hint,
+        )
 
     @router.get("/folders/{folder_id}/sharing", response_model=FolderSharingState, summary="Get a folder's sharing")
     def get_sharing(folder_id: str, current_user: AuthenticatedUserDep) -> FolderSharingState:
