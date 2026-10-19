@@ -210,7 +210,7 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
                     <Info className="size-4" aria-hidden="true" />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent className="max-w-xs">
+                <TooltipContent className="max-w-none whitespace-nowrap">
                   {msg(turnedOn ? "continuous_tab.setup_hint" : "continuous_tab.off_hint")}
                 </TooltipContent>
               </Tooltip>
