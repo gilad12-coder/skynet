@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "react-toastify";
 import {
@@ -9,8 +9,6 @@ import {
   ArrowSquareOut,
   Check,
   PencilSimple,
-  Pause,
-  Play,
   Repeat,
   X,
 } from "@/shared/ui/icons";
@@ -18,6 +16,7 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
+import { Switch } from "@/shared/ui/primitives/switch";
 import {
   Select,
   SelectContent,
@@ -118,6 +117,7 @@ function errorText(err: unknown): string {
  */
 export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
   const [state, setState] = useState<ContinuousState | null>(null);
+  const [turnedOn, setTurnedOn] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -189,13 +189,61 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
       );
     }
     return (
-      <EnableForm
-        busy={busy}
-        onEnable={(body) => act(() => enableContinuous(optimizationId, body))}
-      />
+      <div className="mt-4 space-y-4">
+        <Card className="py-0">
+          <CardContent className="flex items-center justify-between gap-4 p-5 sm:p-6">
+            <div className="min-w-0 space-y-1">
+              <StatusLabel tone="muted">
+                {msg(turnedOn ? "continuous_tab.status.setup" : "continuous_tab.status.off")}
+              </StatusLabel>
+              <p className="text-sm text-muted-foreground">
+                {msg(turnedOn ? "continuous_tab.setup_hint" : "continuous_tab.off_hint")}
+              </p>
+            </div>
+            <Switch
+              checked={turnedOn}
+              disabled={busy}
+              onCheckedChange={setTurnedOn}
+              aria-label={msg("continuous_tab.toggle")}
+            />
+          </CardContent>
+        </Card>
+        {turnedOn && (
+          <EnableForm
+            busy={busy}
+            onEnable={(body) => act(() => enableContinuous(optimizationId, body))}
+          />
+        )}
+      </div>
     );
   }
   return <PlanView plan={state.plan} busy={busy} act={act} />;
+}
+
+function StatusLabel({
+  tone,
+  children,
+}: {
+  tone: "success" | "muted";
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 text-sm font-medium",
+        tone === "success" ? "text-[var(--success)]" : "text-muted-foreground",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "size-1.5 rounded-full",
+          tone === "success" ? "bg-[var(--success)]" : "bg-muted-foreground",
+        )}
+      />
+      {children}
+    </span>
+  );
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
@@ -229,7 +277,10 @@ function EnableForm({
     optimizers: refreshKind === "optimizers",
   };
   const [provider, setProvider] = useState<string>("");
+  const [sourceDraft, setSourceDraft] = useState("");
+  // The location counts only when the user leaves the field, so a half-typed path never starts a run.
   const [sourceRef, setSourceRef] = useState("");
+  const started = useRef(false);
   const chosenProvider = provider || connected[0]?.provider || "";
   const problem =
     scheduleProblem(schedule) ??
@@ -238,15 +289,21 @@ function EnableForm({
       sourceRef: chosenProvider ? sourceRef : "",
     });
 
+  useEffect(() => {
+    if (problem != null || busy || started.current) return;
+    started.current = true;
+    onEnable({
+      schedule,
+      permitted,
+      source: permitted.data && chosenProvider ? { provider: chosenProvider, ref: sourceRef } : null,
+    });
+    // Only a newly complete form starts the plan; the values are read at that moment.
+  }, [problem, busy]);
+
   return (
-    <Card className="mt-4 overflow-hidden py-0">
+    <Card className="py-0">
       <CardContent className="p-0">
-        <div className="px-5 pt-5 pb-1 sm:px-6 sm:pt-6">
-          <h2 className="text-lg! leading-7! font-semibold tracking-tight">
-            {msg("continuous_tab.enable.title")}
-          </h2>
-        </div>
-        <div className="divide-y divide-border/50 px-5 sm:px-6">
+        <div className="divide-y divide-border/50 px-5 pt-5 sm:px-6 sm:pt-6">
           <FormRow title={msg("continuous_tab.schedule.label")}>
             <ScheduleEditor value={schedule} onChange={setSchedule} idPrefix="continuous-schedule" />
           </FormRow>
@@ -292,8 +349,12 @@ function EnableForm({
                   </Select>
                   <Input
                     dir="ltr"
-                    value={sourceRef}
-                    onChange={(e) => setSourceRef(e.target.value)}
+                    value={sourceDraft}
+                    onChange={(e) => setSourceDraft(e.target.value)}
+                    onBlur={() => setSourceRef(sourceDraft.trim())}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") setSourceRef(sourceDraft.trim());
+                    }}
                     placeholder={msg("continuous_tab.source.ref_placeholder")}
                     aria-label={msg("continuous_tab.source.ref")}
                   />
@@ -303,27 +364,6 @@ function EnableForm({
           )}
         </div>
 
-        <div className="flex justify-end bg-muted/40 px-5 py-4 sm:px-6">
-          {/* The reason the button is off shows on hover, not as text. */}
-          <span className="inline-flex" title={problem ? msg(problem) : undefined}>
-            <Button
-              disabled={busy || problem != null}
-              onClick={() =>
-                onEnable({
-                  schedule,
-                  permitted,
-                  source:
-                    permitted.data && chosenProvider
-                      ? { provider: chosenProvider, ref: sourceRef.trim() }
-                      : null,
-                })
-              }
-            >
-              <Repeat className="size-4" />
-              {msg("continuous_tab.enable.submit")}
-            </Button>
-          </span>
-        </div>
       </CardContent>
     </Card>
   );
@@ -357,21 +397,9 @@ function PlanView({
         <CardContent className="space-y-5 p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0 space-y-1.5">
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1.5 text-xs font-medium",
-                  paused ? "text-muted-foreground" : "text-[var(--success)]",
-                )}
-              >
-                <span
-                  aria-hidden
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    paused ? "bg-muted-foreground" : "bg-[var(--success)]",
-                  )}
-                />
+              <StatusLabel tone={paused ? "muted" : "success"}>
                 {msg(paused ? "continuous_tab.status.paused" : "continuous_tab.status.active")}
-              </span>
+              </StatusLabel>
               {paused && plan.pause_reason ? (
                 <p className="max-w-prose text-base font-medium">{msg(PAUSE_KEYS[plan.pause_reason])}</p>
               ) : (
@@ -385,7 +413,7 @@ function PlanView({
                 </div>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-3">
               <Button
                 size="sm"
                 disabled={busy || paused || checkRunning}
@@ -407,15 +435,12 @@ function PlanView({
                 <ArrowClockwise className="size-4" />
                 {msg("continuous_tab.check_now")}
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
+              <Switch
+                checked={!paused}
                 disabled={busy}
-                onClick={() => act(() => setContinuousPaused(plan.id, !paused))}
-              >
-                {paused ? <Play className="size-4" /> : <Pause className="size-4" />}
-                {msg(paused ? "continuous_tab.resume" : "continuous_tab.pause")}
-              </Button>
+                onCheckedChange={(on) => act(() => setContinuousPaused(plan.id, !on))}
+                aria-label={msg("continuous_tab.toggle")}
+              />
             </div>
           </div>
 
