@@ -17,7 +17,7 @@ from typing import Any
 
 from ....models.blackbox import UnifiedSplitCounts
 from ....models.common import SplitFractions
-from ....models.unified import MIN_PAIRS_FOR_HELD_OUT, DataMode, UnifiedCase, UnifiedRunRequest
+from ....models.unified import MIN_PAIRS_FOR_HELD_OUT, DataMode, PinnedSplit, UnifiedCase, UnifiedRunRequest
 from ...datasets.split_counts import split_counts
 
 
@@ -41,6 +41,23 @@ def _case_json(case: Any) -> Any:
         The case as plain data.
     """
     return case.model_dump(mode="json") if isinstance(case, UnifiedCase) else case
+
+
+def case_key(case: Any) -> str:
+    """Identify one case by its content, for pinning it to a split.
+
+    A raw mapping is read as a :class:`UnifiedCase` first, so a case read
+    back from a stored request and the same case inside a run share one key.
+
+    Args:
+        case: A :class:`UnifiedCase` or a raw case mapping.
+
+    Returns:
+        The first 16 hex digits of the sha256 of the case's canonical JSON.
+    """
+    body = UnifiedCase.model_validate(case).model_dump(mode="json") if isinstance(case, dict) else _case_json(case)
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 def task_fingerprint(payload: UnifiedRunRequest) -> str:
@@ -90,6 +107,7 @@ def split_cases(
     *,
     shuffle: bool,
     seed: int,
+    pinned: PinnedSplit | None = None,
 ) -> CaseSplits:
     """Split ``cases`` deterministically for search, selection and reporting.
 
@@ -104,6 +122,7 @@ def split_cases(
         fractions: Train/val/test fractions summing to 1.0.
         shuffle: Whether to shuffle (with ``seed``) before slicing.
         seed: RNG seed for the shuffle.
+        pinned: Roles earlier runs of a scheduled plan already gave some cases.
 
     Returns:
         The three splits and their counts.
@@ -123,18 +142,83 @@ def split_cases(
                 report_split="all",
             ),
         )
+    if pinned is not None:
+        return _pinned_split(ordered, fractions, shuffle=shuffle, seed=seed, pinned=pinned)
     if shuffle:
         random.Random(seed).shuffle(ordered)
     if len(ordered) < MIN_PAIRS_FOR_HELD_OUT:
-        searchable = fractions.train + fractions.val
-        fractions = (
-            SplitFractions(train=fractions.train / searchable, val=fractions.val / searchable, test=0.0)
-            if searchable > 0
-            else SplitFractions(train=1.0, val=0.0, test=0.0)
-        )
+        fractions = _search_fractions(fractions)
     counts = split_counts(len(ordered), fractions)
     val_end = counts.train + counts.val
     train, val, test = ordered[: counts.train], ordered[counts.train : val_end], ordered[val_end:]
+    return _splits(train, val, test)
+
+
+def _search_fractions(fractions: SplitFractions) -> SplitFractions:
+    """Spread the train and validation fractions over every case, holding none out.
+
+    Args:
+        fractions: The run's fractions.
+
+    Returns:
+        Fractions with no test share.
+    """
+    searchable = fractions.train + fractions.val
+    if searchable <= 0:
+        return SplitFractions(train=1.0, val=0.0, test=0.0)
+    return SplitFractions(train=fractions.train / searchable, val=fractions.val / searchable, test=0.0)
+
+
+def _pinned_split(
+    cases: list[Any], fractions: SplitFractions, *, shuffle: bool, seed: int, pinned: PinnedSplit
+) -> CaseSplits:
+    """Split cases so the ones earlier runs used keep their role.
+
+    Pinned test cases stay held out and pinned search cases never become test
+    cases, so no version is scored on a case an optimizer already saw. Only
+    new cases are split by ``fractions``, so the test set grows with the data.
+    A pinned case the data no longer has simply drops out.
+
+    Args:
+        cases: The run's cases.
+        fractions: Train/val/test fractions for the new cases.
+        shuffle: Whether to shuffle (with ``seed``) before slicing.
+        seed: RNG seed for the shuffle.
+        pinned: The keys of the earlier test and search cases.
+
+    Returns:
+        The three splits and their counts.
+    """
+    test_keys, fit_keys = set(pinned.test), set(pinned.fit)
+    test: list[Any] = []
+    fit: list[Any] = []
+    new: list[Any] = []
+    for case in cases:
+        key = case_key(case)
+        (test if key in test_keys else fit if key in fit_keys else new).append(case)
+    if shuffle:
+        rng = random.Random(seed)
+        rng.shuffle(fit)
+        rng.shuffle(new)
+    counts = split_counts(len(new), fractions)
+    searched = counts.train + counts.val
+    test += new[searched:]
+    pool = fit + new[:searched]
+    pool_counts = split_counts(len(pool), _search_fractions(fractions))
+    return _splits(pool[: pool_counts.train], pool[pool_counts.train :], test)
+
+
+def _splits(train: list[Any], val: list[Any], test: list[Any]) -> CaseSplits:
+    """Wrap three slices with their counts.
+
+    Args:
+        train: Search cases.
+        val: Selection cases.
+        test: Held-out cases.
+
+    Returns:
+        The splits and their counts.
+    """
     # Engines search on train; a split with no train fraction searches on
     # its validation cases and then selects on them too.
     if not train:

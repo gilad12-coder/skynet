@@ -22,7 +22,7 @@ There is deliberately no endpoint that reruns unchanged inputs.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field, model_validator
@@ -55,8 +55,13 @@ class ContinuousPermitted(BaseModel):
     data: bool = False
     models: bool = False
     optimizers: bool = False
-    # Try a stronger model from the catalog when one appears, once per model.
-    new_models: bool = False
+    # Try a model rated higher at an equal or lower price when one appears, once per model.
+    new_task_model: bool = False
+    new_reflection_model: bool = False
+    # New or changed cases that start a data run; unset means a tenth of the current cases.
+    min_new_cases: int | None = Field(default=None, ge=1, le=200_000)
+    # The runs a check starts when new data and a better model are both waiting.
+    matrix: list[Literal["data", "model", "both"]] = Field(default_factory=lambda: ["both"], min_length=1, max_length=3)
 
 
 # A connected source the existing connectors can read. A Hugging Face ref is
@@ -87,7 +92,13 @@ class ContinuousEnableRequest(BaseModel):
             ValueError: On an inconsistent plan.
         """
         permitted = self.permitted
-        if not (permitted.data or permitted.models or permitted.optimizers or permitted.new_models):
+        if not (
+            permitted.data
+            or permitted.models
+            or permitted.optimizers
+            or permitted.new_task_model
+            or permitted.new_reflection_model
+        ):
             raise ValueError("permit at least one input to refresh")
         if self.permitted.data and self.source is None:
             raise ValueError("a data refresh needs a connected source")
@@ -157,10 +168,13 @@ class SchedulePreviewResponse(BaseModel):
 
 # ``plan`` is null when the run has none; ``eligible`` says whether one can start here.
 # ``held_out`` is false when the run kept no test cases apart, so no plan can start from it.
+# The model names let the setup say which models a better-model check compares against.
 class ContinuousStateResponse(BaseModel):
     plan: ContinuousPlanItem | None = None
     eligible: bool
     held_out: bool = True
+    task_model: str | None = None
+    reflection_model: str | None = None
 
 
 def _is_unified(job: dict[str, Any]) -> bool:
@@ -438,8 +452,13 @@ def create_continuous_router(
             eligible = (
                 plan is None and job["status"] == OptimizationStatus.success.value and _is_unified(job) and held_out
             )
+            models = (job.get("payload") or {}).get("models") or {}
             return ContinuousStateResponse(
-                plan=_plan_item(session, plan) if plan else None, eligible=eligible, held_out=held_out
+                plan=_plan_item(session, plan) if plan else None,
+                eligible=eligible,
+                held_out=held_out,
+                task_model=(models.get("task_model") or {}).get("name"),
+                reflection_model=(models.get("reflection_model") or {}).get("name"),
             )
 
     @router.post(
@@ -718,10 +737,11 @@ def create_continuous_router(
             now = datetime.now(UTC)
             if approve:
                 plan.incumbent_optimization_id = cycle.optimization_id
-                stronger = (cycle.snapshot or {}).get("new_model")
-                if stronger and plan.baseline_snapshot:
-                    # The new incumbent runs on this model, so a later check must not see it as a change.
-                    models = {**(plan.baseline_snapshot.get("models") or {}), "task_model": stronger["name"]}
+                adopted = ((cycle.snapshot or {}).get("winner") or {}).get("new_models") or {}
+                if adopted and plan.baseline_snapshot:
+                    # The new incumbent runs on these models, so a later check must not see them as a change.
+                    models = {**(plan.baseline_snapshot.get("models") or {})}
+                    models.update({role: model["name"] for role, model in adopted.items()})
                     plan.baseline_snapshot = {**plan.baseline_snapshot, "models": models}
                 cycle.status = engine_mod.CYCLE_APPROVED
                 cycle.detail_code = "continuous.review_approved"

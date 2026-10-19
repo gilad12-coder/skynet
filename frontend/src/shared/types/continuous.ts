@@ -36,11 +36,19 @@ export type ContinuousCycleStatus =
   | "approved"
   | "rejected";
 
+/** The runs a check starts when new data and a better model are both waiting. */
+export type ContinuousMatrixRun = "data" | "model" | "both";
+
 export interface ContinuousPermitted {
   data: boolean;
   models: boolean;
   optimizers: boolean;
-  new_models: boolean;
+  /** Try a model rated higher at an equal or lower price, once per model. */
+  new_task_model: boolean;
+  new_reflection_model: boolean;
+  /** New or changed cases that start a data run; null means a tenth of the current cases. */
+  min_new_cases?: number | null;
+  matrix?: ContinuousMatrixRun[];
 }
 
 export interface ContinuousSource {
@@ -115,6 +123,9 @@ export interface ContinuousState {
   eligible: boolean;
   /** False when the run kept no test cases apart, so no plan can start from it. */
   held_out?: boolean;
+  /** The run's models, which a better-model check compares against. */
+  task_model?: string | null;
+  reflection_model?: string | null;
 }
 
 export interface ContinuousEnableRequest {

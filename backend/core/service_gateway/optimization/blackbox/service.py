@@ -233,6 +233,8 @@ class JobSpec:
     context: dict[str, Any] = field(default_factory=dict)
     # Further metered models (the DSPy task model) whose usage the run bills.
     extra_lms: list[Any] = field(default_factory=list)
+    # Skip the search and only score the starting version in the final runs.
+    score_only: bool = False
 
 
 def job_spec_from_payload(payload: BlackboxRunRequest) -> JobSpec:
@@ -1092,8 +1094,14 @@ def _run_job(
     selection_scope = "validation" if splits.val else "training"
     stop: BudgetReached | None = None
     try:
-        with dspy.context(callbacks=callbacks):
-            result, lanes = run_strategy(job.strategy, task, server, ctx, progress_callback, caps=caps)
+        if job.score_only and seed_candidate is not None:
+            result = Result(
+                best_candidate=seed_candidate, best_score=None, total_evals=0, metadata={"selection_source": "seed"}
+            )
+            lanes = []
+        else:
+            with dspy.context(callbacks=callbacks):
+                result, lanes = run_strategy(job.strategy, task, server, ctx, progress_callback, caps=caps)
     except BudgetReached as exc:
         stop = exc
         result = exc.result

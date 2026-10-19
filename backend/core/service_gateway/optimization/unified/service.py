@@ -109,6 +109,7 @@ def unified_job_spec(
         seed_candidate=payload.task.artifact.starting_version,
         seed=seed,
         budget=payload.optimizer.budget,
+        score_only=payload.optimizer.score_only,
         strategy=unified_strategy(resolved),
         reflection_model_settings=models.reflection_model,
         proposer=payload.optimizer.proposer,
@@ -164,7 +165,12 @@ def run_unified_optimization(
         raise ServiceError("A unified run needs its cases inline; resolve the staged dataset before queueing it.")
     seed = split_seed(payload)
     splits = split_cases(
-        list(payload.data.cases), payload.data.mode, payload.data.split, shuffle=payload.data.shuffle, seed=seed
+        list(payload.data.cases),
+        payload.data.mode,
+        payload.data.split,
+        shuffle=payload.data.shuffle,
+        seed=seed,
+        pinned=payload.data.pinned_split,
     )
     resolved = resolve_optimizer(payload.optimizer.choice, payload.task.artifact.kind)
     task_lm = None

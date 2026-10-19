@@ -701,6 +701,7 @@ def _unified_overview(
         payload.data.split,
         shuffle=payload.data.shuffle,
         seed=cast(int, payload.seed),
+        pinned=payload.data.pinned_split,
     )
     reflection = payload.models.reflection_model
     reflection_name = reflection.normalized_identifier()

@@ -31,6 +31,8 @@ from core.api.routers.continuous import _HISTORY_LIMIT, create_continuous_router
 from core.api.tests.test_protected_submissions import _Gateway, _Harness, _SQLiteJobStore
 from core.billing.budget_amounts import CENT_SCALE, budget_wallet_hold
 from core.billing.budgets import BudgetService
+from core.models import UnifiedRunRequest
+from core.service_gateway.optimization.unified.split import case_key, split_cases, split_seed
 from core.storage.models import (
     BillingCustomerModel,
     ContinuousCycleModel,
@@ -366,7 +368,14 @@ def test_enable_inspect_pause_resume_and_next_check(env: _Env) -> None:
     """A successful run enables one plan with a visible next check; pause and resume toggle it."""
     source_id = _incumbent(env)
     state = env.client.get(f"/optimizations/{source_id}/continuous").json()
-    assert state == {"plan": None, "eligible": True, "held_out": True}
+    assert state == {
+        "plan": None,
+        "eligible": True,
+        "held_out": True,
+        # The setup names the models a better-model check compares against.
+        "task_model": "fixture/task",
+        "reflection_model": "fixture/text",
+    }
 
     before = datetime.now(UTC)
     plan = _enable(env, source_id)
@@ -1017,8 +1026,8 @@ def test_a_plan_without_amounts_reuses_the_run_budget_and_has_no_monthly_limit(e
     assert plan["cycle_budget_cents"] == expected
     assert plan["usage"]["limit_cents"] is None
 
-    for _ in range(3):
-        env.rows = _cases(["B"] * 10) if env.rows[0]["answer"] != "B" else _cases(["C"] * 10)
+    for answer in ("B", "C", "D"):
+        env.rows = _cases([answer] * 10)
         env.sweep(_due(env))
         cycle = env.cycles()[-1]
         assert cycle.status == "optimizing", cycle.detail_code
@@ -1061,6 +1070,8 @@ def test_a_waiting_plan_ends_with_a_failed_run(env: _Env) -> None:
         "plan": None,
         "eligible": False,
         "held_out": True,
+        "task_model": "fixture/task",
+        "reflection_model": "fixture/text",
     }
     assert env.client.delete(f"/continuous/{plan['id']}").status_code == 404
 
@@ -1261,50 +1272,87 @@ def test_a_schedule_save_forgets_single_checks_that_passed(env: _Env) -> None:
     assert (saved["schedule"]["skip"], saved["schedule"]["extra"]) == ([future], [])
 
 
-def _catalog(monkeypatch: pytest.MonkeyPatch, **scores: float) -> None:
-    """Serve a hosted catalog whose models have the given intelligence scores.
+def _catalog(monkeypatch: pytest.MonkeyPatch, **models: tuple[float, float]) -> None:
+    """Serve a hosted catalog whose models have the given rating and price.
 
     Args:
         monkeypatch: Replaces the cached catalog lookup.
-        **scores: Score per model, keyed by the name after ``fixture/``.
+        **models: ``(intelligence score, price per token)`` per model, keyed by the name after ``fixture/``.
     """
-    models = [
-        CatalogModel(value=f"fixture/{name}", label=name, provider="fixture", available=True, intelligence_index=score)
-        for name, score in scores.items()
+    entries = [
+        CatalogModel(
+            value=f"fixture/{name}",
+            label=name,
+            provider="fixture",
+            available=True,
+            intelligence_index=score,
+            input_cost_per_token=price,
+            output_cost_per_token=price,
+        )
+        for name, (score, price) in models.items()
     ]
-    monkeypatch.setattr(continuous, "get_catalog_cached", lambda: ModelCatalogResponse(providers=[], models=models))
+    monkeypatch.setattr(continuous, "get_catalog_cached", lambda: ModelCatalogResponse(providers=[], models=entries))
 
 
-def _new_models_plan(env: _Env) -> tuple[str, dict[str, Any]]:
-    """Enable a plan that only tries stronger models.
+def _new_models_plan(env: _Env, **permitted: Any) -> tuple[str, dict[str, Any]]:
+    """Enable a plan that only tries better models.
 
     Args:
         env: Test environment.
+        **permitted: Permission overrides; the task model by default.
 
     Returns:
         The incumbent's id and the plan.
     """
     source_id = _incumbent(env)
-    plan = _enable(env, source_id, permitted={"new_models": True}, source=None)
+    plan = _enable(env, source_id, permitted=permitted or {"new_task_model": True}, source=None)
     return source_id, plan
 
 
-def test_a_stronger_model_runs_once_on_the_same_cases_and_is_judged_against_the_incumbent(
+def _payload(env: _Env, optimization_id: str) -> dict[str, Any]:
+    """Read a run's stored request.
+
+    Args:
+        env: Test environment.
+        optimization_id: The run.
+
+    Returns:
+        The request.
+    """
+    return env.store.get_job(optimization_id, include_payload=True)["payload"]
+
+
+def _runs(cycle: Any) -> dict[str, str]:
+    """Map each run a check started to its optimization id, by kind.
+
+    Args:
+        cycle: The cycle.
+
+    Returns:
+        Optimization id per run kind.
+    """
+    return {run["kind"]: run["optimization_id"] for run in cycle.snapshot["runs"]}
+
+
+def test_a_better_model_at_the_same_price_runs_once_on_the_same_test_cases(
     env: _Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A stronger model starts one run on the incumbent's cases, seed and version, then waits for approval."""
-    _catalog(monkeypatch, task=40.0, weak=20.0, strong=60.0)
+    """A model rated higher at the same price starts one run on the incumbent's cases, then waits for approval."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
     source_id, plan = _new_models_plan(env)
-    incumbent = env.store.get_job(source_id, include_payload=True)["payload"]
+    incumbent = _payload(env, source_id)
 
     env.sweep(_due(env))
 
     [cycle] = env.cycles()
-    assert (cycle.status, cycle.changes) == ("optimizing", ["new_model"])
-    payload = env.store.get_job(cycle.optimization_id, include_payload=True)["payload"]
+    assert (cycle.status, cycle.changes, list(_runs(cycle))) == ("optimizing", ["new_model"], ["model"])
+    payload = _payload(env, cycle.optimization_id)
     assert payload["models"]["task_model"]["name"] == "fixture/strong"
+    assert payload["models"]["reflection_model"]["name"] == "fixture/text"
     assert payload["data"]["cases"] == incumbent["data"]["cases"]
-    assert payload["seed"] == incumbent["seed"]
+    request = UnifiedRunRequest.model_validate(incumbent)
+    first = split_cases(request.data.cases, "pairs", request.data.split, shuffle=True, seed=split_seed(request))
+    assert set(payload["data"]["pinned_split"]["test"]) == {case_key(case) for case in first.test}
     assert payload["task"]["artifact"]["starting_version"] == "Answer in one word: "
 
     # The new model scores the old version higher than the incumbent did, and optimizing adds nothing.
@@ -1322,6 +1370,38 @@ def test_a_stronger_model_runs_once_on_the_same_cases_and_is_judged_against_the_
 
 
 @pytest.mark.parametrize(
+    "models",
+    [
+        {"task": (40.0, 1e-6), "pricier": (60.0, 2e-6)},
+        {"task": (60.0, 1e-6), "weaker": (40.0, 5e-7)},
+        {"strong": (60.0, 1e-6)},
+    ],
+)
+def test_no_better_model_at_the_same_price_starts_no_run(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, models: dict
+) -> None:
+    """A model that costs more, rates lower, or has no current model to compare with is never tried."""
+    _catalog(monkeypatch, **models)
+    _new_models_plan(env)
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.detail_code) == ("skipped", "continuous.skip_unchanged")
+
+
+def test_a_cheaper_better_model_is_tried(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Of the models that qualify, the highest-rated one is tried, even when a cheaper one also qualifies."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), cheap=(50.0, 5e-7), best=(55.0, 1e-6), pricey=(90.0, 3e-6))
+    _new_models_plan(env)
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    assert _payload(env, cycle.optimization_id)["models"]["task_model"]["name"] == "fixture/best"
+
+
+@pytest.mark.parametrize(
     ("result", "code"),
     [
         (_result(0.9, 0.705), "continuous.review_within_margin"),
@@ -1331,11 +1411,11 @@ def test_a_stronger_model_runs_once_on_the_same_cases_and_is_judged_against_the_
         ),
     ],
 )
-def test_a_stronger_model_that_does_not_win_is_not_tried_again(
+def test_a_better_model_that_does_not_win_is_not_tried_again(
     env: _Env, monkeypatch: pytest.MonkeyPatch, result: dict, code: str
 ) -> None:
     """A model that loses, or ran on other test cases, keeps the incumbent and costs no second run."""
-    _catalog(monkeypatch, task=40.0, strong=60.0)
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
     _new_models_plan(env)
     env.sweep(_due(env))
     [cycle] = env.cycles()
@@ -1350,28 +1430,135 @@ def test_a_stronger_model_that_does_not_win_is_not_tried_again(
     assert env.count(JobModel) == jobs
 
 
-@pytest.mark.parametrize("scores", [{"task": 60.0, "weaker": 40.0}, {"strong": 60.0}])
-def test_no_stronger_model_starts_no_run(env: _Env, monkeypatch: pytest.MonkeyPatch, scores: dict) -> None:
-    """Without a model rated above the incumbent's, the check is skipped."""
-    _catalog(monkeypatch, **scores)
-    _new_models_plan(env)
+def test_a_better_reflection_model_keeps_the_task_model_and_its_own_baseline(
+    env: _Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the reflection model moves, so the run's own baseline is the incumbent's score."""
+    # The task model rates highest but costs more, so the reflection role cannot move to it.
+    _catalog(monkeypatch, task=(90.0, 5e-6), text=(40.0, 1e-6), sharper=(60.0, 1e-6))
+    _new_models_plan(env, new_reflection_model=True)
 
     env.sweep(_due(env))
 
     [cycle] = env.cycles()
-    assert (cycle.status, cycle.detail_code) == ("skipped", "continuous.skip_unchanged")
-
-
-def test_new_data_runs_first_and_the_stronger_model_waits(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
-    """New data and a stronger model never share a run, since the model is judged on the incumbent's cases."""
-    _catalog(monkeypatch, task=40.0, strong=60.0)
-    source_id = _incumbent(env)
-    _enable(env, source_id, permitted={"data": True, "new_models": True})
-    env.rows = _cases(["B"] * 10)
-
-    env.sweep(_due(env))
-
-    [cycle] = env.cycles()
-    assert cycle.changes == ["data"]
-    payload = env.store.get_job(cycle.optimization_id, include_payload=True)["payload"]
+    payload = _payload(env, cycle.optimization_id)
     assert payload["models"]["task_model"]["name"] == "fixture/task"
+    assert payload["models"]["reflection_model"]["name"] == "fixture/sharper"
+    _finish(env, cycle.optimization_id, result=_result(0.6, 0.8))
+    env.sweep(_due(env) - timedelta(days=1))
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.incumbent_score) == ("awaiting_review", 0.6)
+
+
+def test_new_data_below_the_minimum_starts_no_run(env: _Env) -> None:
+    """A few new cases wait until the plan's minimum of untried cases arrives."""
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "min_new_cases": 3})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 12)[10:12]
+
+    env.sweep(_due(env))
+    assert env.cycles()[-1].detail_code == "continuous.skip_unchanged"
+
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 13)[10:13]
+    env.sweep(_due(env))
+    assert env.cycles()[-1].status == "optimizing"
+
+
+def test_new_data_grows_the_test_set_and_never_moves_a_test_case_into_search(env: _Env) -> None:
+    """The incumbent's test cases stay held out, and some new cases join them."""
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True})
+    incumbent = _payload(env, source_id)
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    pinned = _payload(env, cycle.optimization_id)["data"]["pinned_split"]
+    request = UnifiedRunRequest.model_validate(incumbent)
+    first = split_cases(request.data.cases, "pairs", request.data.split, shuffle=True, seed=split_seed(request))
+    old_test = {case_key(case) for case in first.test}
+    old_fit = {case_key(case) for case in first.train + first.val}
+    assert old_test < set(pinned["test"])
+    assert len(pinned["test"]) > len(old_test)
+    assert not old_fit & set(pinned["test"])
+
+
+def test_the_matrix_starts_each_ticked_run_on_one_test_set(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With new data and a better model, every ticked run starts, all holding out the same test cases."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model", "both"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    runs = _runs(cycle)
+    assert list(runs) == ["data", "model", "both"]
+    payloads = {kind: _payload(env, run_id) for kind, run_id in runs.items()}
+    assert {kind: p["models"]["task_model"]["name"] for kind, p in payloads.items()} == {
+        "data": "fixture/task",
+        "model": "fixture/strong",
+        "both": "fixture/strong",
+    }
+    tests = {tuple(sorted(p["data"]["pinned_split"]["test"])) for p in payloads.values()}
+    assert len(tests) == 1
+    # The model-only run searches only on cases the incumbent already searched.
+    assert len(payloads["model"]["data"]["cases"]) < len(payloads["data"]["data"]["cases"])
+
+    # The data run kept the incumbent's model, so its baseline scores the incumbent on the new test set.
+    _finish(env, runs["data"], result=_result(0.6, 0.65))
+    _finish(env, runs["model"], result=_result(0.7, 0.72))
+    env.sweep(_due(env) - timedelta(days=1))
+    assert env.cycles()[0].status == "optimizing"
+    _finish(env, runs["both"], result=_result(0.7, 0.9))
+    env.sweep(_due(env) - timedelta(days=1))
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.optimization_id) == ("awaiting_review", runs["both"])
+    assert (cycle.incumbent_score, cycle.candidate_score) == (0.6, 0.9)
+    assert cycle.snapshot["winner"]["kind"] == "both"
+
+
+def test_runs_that_all_move_the_task_model_score_the_incumbent_once_without_optimizing(
+    env: _Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a run on the incumbent's own model, a reference run scores it on the grown test set."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    runs = _runs(cycle)
+    assert list(runs) == ["both", "reference"]
+    reference = _payload(env, runs["reference"])
+    assert reference["optimizer"]["score_only"] is True
+    assert reference["models"]["task_model"]["name"] == "fixture/task"
+
+    _finish(env, runs["both"], result=_result(0.75, 0.8))
+    _finish(env, runs["reference"], result=_result(0.62, 0.62))
+    env.sweep(_due(env) - timedelta(days=1))
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.incumbent_score, cycle.candidate_score) == ("awaiting_review", 0.62, 0.8)
+
+
+def test_the_allowance_gate_counts_every_run_of_a_check(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A check whose runs together exceed what is left this month pauses before it starts any."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(
+        env,
+        source_id,
+        permitted={"data": True, "new_task_model": True, "matrix": ["data", "model", "both"]},
+        monthly_limit_cents=CYCLE_BUDGET * 2,
+    )
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.detail_code) == ("paused", "continuous.paused_allowance")
+    assert env.plan().pause_reason == "allowance"

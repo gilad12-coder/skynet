@@ -707,6 +707,7 @@ def run_contract_check(
         payload.data.split,
         shuffle=payload.data.shuffle,
         seed=split_seed(payload),
+        pinned=payload.data.pinned_split,
     )
     scorer = build_workspace_scorer(
         payload,

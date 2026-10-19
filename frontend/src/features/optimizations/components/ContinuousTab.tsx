@@ -97,10 +97,72 @@ const CHANGE_KEYS: Record<string, MessageKey> = {
   data: "continuous_tab.permit.data",
   models: "continuous_tab.permit.models",
   optimizers: "continuous_tab.permit.optimizers",
-  new_models: "continuous_tab.permit.new_models",
+  new_task_model: "continuous_tab.permit.new_task_model",
+  new_reflection_model: "continuous_tab.permit.new_reflection_model",
   // A check's changes name the dimension, which is singular for a model switch.
   new_model: "continuous_tab.permit.new_models",
 };
+
+const RUN_KEYS: Record<string, MessageKey> = {
+  data: "continuous_tab.matrix.data",
+  model: "continuous_tab.matrix.model",
+  both: "continuous_tab.matrix.both",
+  reference: "continuous_tab.runs.reference",
+};
+
+interface CycleRunEntry {
+  kind: string;
+  optimization_id: string;
+  status?: string;
+  best_score?: number | null;
+  new_models?: Record<string, string>;
+}
+
+function cycleRuns(cycle: ContinuousCycle): CycleRunEntry[] {
+  const runs = cycle.snapshot?.runs;
+  return Array.isArray(runs) ? (runs as CycleRunEntry[]) : [];
+}
+
+/**
+ * The runs one check started, each with its score, so a check that tried
+ * several options shows which one won. A check with one plain data run has
+ * nothing to add over its own line.
+ */
+function CycleRuns({ cycle }: { cycle: ContinuousCycle }) {
+  const runs = cycleRuns(cycle);
+  if (runs.length === 0 || (runs.length === 1 && !runs[0]!.new_models)) return null;
+  const winner = cycle.optimization_id;
+  const settled = cycle.status === "awaiting_review" || cycle.status === "approved";
+  return (
+    <ul className="space-y-1 text-xs text-muted-foreground">
+      {runs.map((run) => {
+        const models = Object.values(run.new_models ?? {});
+        const won = settled && run.optimization_id === winner;
+        return (
+          <li key={run.optimization_id} className="flex flex-wrap items-center gap-x-2">
+            <Link
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+              href={`/optimizations/${run.optimization_id}`}
+            >
+              {msg(RUN_KEYS[run.kind] ?? "continuous_tab.matrix.data")}
+            </Link>
+            {models.length > 0 && (
+              <span dir="ltr" className="font-mono">
+                {models.join(", ")}
+              </span>
+            )}
+            {run.best_score != null && <span className="tabular-nums">{formatScore(run.best_score)}</span>}
+            {won && (
+              <span className="rounded-full bg-[var(--success)]/10 px-1.5 text-[var(--success)]">
+                {msg("continuous_tab.runs.best")}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 type Act = (run: () => Promise<ContinuousPlan>, success?: MessageKey) => Promise<void>;
 type Remove = () => Promise<void>;
@@ -256,6 +318,8 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
             <ScheduledRunSetup
               busy={busy}
               idPrefix="continuous-schedule"
+              taskModel={state.task_model}
+              reflectionModel={state.reflection_model}
               finishLabel="continuous_tab.walk.start"
               onFinish={(body) =>
                 act(() => enableContinuous(optimizationId, body), "continuous_tab.toast.enabled")
@@ -390,7 +454,11 @@ function PlanView({
     (c) => c.status === "checking" || c.status === "optimizing",
   );
   const pending = plan.cycles.filter(canReview);
-  const refreshes = (["data", "models", "optimizers", "new_models"] as const).filter((key) => plan.permitted[key]);
+  const refreshes = (
+    ["data", "models", "optimizers", "new_task_model", "new_reflection_model"] as const
+  ).filter((key) => plan.permitted[key]);
+  const matrixShown =
+    plan.permitted.data && (plan.permitted.new_task_model || plan.permitted.new_reflection_model);
   const staged = plan.permitted.models || plan.permitted.optimizers;
   return (
     <Card className="mt-4 overflow-hidden py-0">
@@ -507,9 +575,23 @@ function PlanView({
 
             <SettingRow label={msg("continuous_tab.refreshes_label")}>
               <p className="text-sm font-medium">
-                {refreshes.map((key) => msg(CHANGE_KEYS[key]!)).join(", ")}
+                {refreshes
+                  .map((key) =>
+                    key === "data" && plan.permitted.min_new_cases
+                      ? formatMsg("continuous_tab.permit.data_min", { n: plan.permitted.min_new_cases })
+                      : msg(CHANGE_KEYS[key]!),
+                  )
+                  .join(", ")}
               </p>
             </SettingRow>
+
+            {matrixShown && (
+              <SettingRow label={msg("continuous_tab.matrix.label")}>
+                <p className="text-sm font-medium">
+                  {(plan.permitted.matrix ?? ["both"]).map((run) => msg(RUN_KEYS[run]!)).join(", ")}
+                </p>
+              </SettingRow>
+            )}
 
             {staged && (
               <SettingRow
@@ -692,6 +774,7 @@ function ReviewCard({
               </Link>
             )}
           </div>
+          <CycleRuns cycle={cycle} />
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -790,6 +873,7 @@ function CycleRow({ cycle }: { cycle: ContinuousCycle }) {
       </div>
       <div className="min-w-0 space-y-1">
         {cycle.detail_code && <p className="text-sm">{tI18n(cycle.detail_code, cycle.detail_params)}</p>}
+        <CycleRuns cycle={cycle} />
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
           {cycle.changes.length > 0 && (
             <span>

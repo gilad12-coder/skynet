@@ -72,11 +72,23 @@ export interface EnableForm {
 /** Why the enable form cannot be sent, as a UI message key; null when it can. */
 export type EnableProblem =
   | "continuous_tab.form.need_permission"
-  | "continuous_tab.form.need_source";
+  | "continuous_tab.form.need_source"
+  | "continuous_tab.form.need_min_cases";
 
 export function enableProblem(form: EnableForm): EnableProblem | null {
-  const { data, models, optimizers, new_models } = form.permitted;
-  if (!data && !models && !optimizers && !new_models) return "continuous_tab.form.need_permission";
+  const { data, models, optimizers, new_task_model, new_reflection_model } = form.permitted;
+  if (!data && !models && !optimizers && !new_task_model && !new_reflection_model)
+    return "continuous_tab.form.need_permission";
   if (data && !form.sourceRef.trim()) return "continuous_tab.form.need_source";
   return null;
+}
+
+/** Why a typed minimum of new cases is invalid; empty means the default and is fine. */
+export function minCasesProblem(typed: string): EnableProblem | null {
+  const value = typed.trim();
+  if (!value) return null;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 && n <= 200_000
+    ? null
+    : "continuous_tab.form.need_min_cases";
 }

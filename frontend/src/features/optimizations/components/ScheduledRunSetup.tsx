@@ -4,12 +4,17 @@ import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
+import { Input } from "@/shared/ui/primitives/input";
 import { Switch } from "@/shared/ui/primitives/switch";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { ConnectorSourcePicker, type ConnectorSource } from "@/features/connectors";
-import type { ContinuousEnableRequest, ScheduleRule } from "@/shared/types/continuous";
+import type {
+  ContinuousEnableRequest,
+  ContinuousMatrixRun,
+  ScheduleRule,
+} from "@/shared/types/continuous";
 import { cn } from "@/shared/lib/utils";
-import { enableProblem } from "../lib/continuous";
+import { enableProblem, minCasesProblem } from "../lib/continuous";
 import { browserTimeZone, defaultRule, scheduleProblem } from "../lib/continuous-schedule";
 import { ScheduleEditor } from "./ScheduleEditor";
 
@@ -22,22 +27,51 @@ const STEP_TITLES: Record<WalkStep, MessageKey> = {
   schedule: "continuous_tab.schedule.label",
 };
 
+const MATRIX: Array<{ run: ContinuousMatrixRun; label: MessageKey }> = [
+  { run: "data", label: "continuous_tab.matrix.data" },
+  { run: "model", label: "continuous_tab.matrix.model" },
+  { run: "both", label: "continuous_tab.matrix.both" },
+];
+
+export interface SetupChoices {
+  data: boolean;
+  /** The minimum of new or changed cases as typed; empty means the default. */
+  minCases: string;
+  newTaskModel: boolean;
+  newReflectionModel: boolean;
+  matrix: ContinuousMatrixRun[];
+}
+
 /**
  * The request a finished walk sends. A plan may refresh its data, try a
- * stronger model, or both. Nothing yet stages a model or optimizer by hand
- * from here, so those stay off.
+ * better model in either role, or both. Nothing yet stages a model or
+ * optimizer by hand from here, so those stay off.
  */
-function requestFor(
-  data: boolean,
-  newModels: boolean,
+export function requestFor(
+  choices: SetupChoices,
   source: ConnectorSource | null,
   schedule: ScheduleRule,
 ): ContinuousEnableRequest {
+  const minCases = choices.minCases.trim();
   return {
     schedule,
-    permitted: { data, models: false, optimizers: false, new_models: newModels },
-    source: data && source ? { provider: source.provider, ref: source.ref } : null,
+    permitted: {
+      data: choices.data,
+      models: false,
+      optimizers: false,
+      new_task_model: choices.newTaskModel,
+      new_reflection_model: choices.newReflectionModel,
+      min_new_cases: choices.data && minCases ? Number(minCases) : null,
+      matrix: choices.matrix,
+    },
+    source: choices.data && source ? { provider: source.provider, ref: source.ref } : null,
   };
+}
+
+function modelHint(model: string | null | undefined): string {
+  return model
+    ? formatMsg("continuous_tab.permit.better_model_hint", { model })
+    : msg("continuous_tab.permit.better_model_hint_unknown");
 }
 
 function TriggerRow({
@@ -49,7 +83,7 @@ function TriggerRow({
 }: {
   id: string;
   label: MessageKey;
-  hint: MessageKey;
+  hint: string;
   checked: boolean;
   onChange: (next: boolean) => void;
 }) {
@@ -59,7 +93,7 @@ function TriggerRow({
         <label htmlFor={id} className="cursor-pointer text-sm font-medium text-foreground">
           {msg(label)}
         </label>
-        <p className="text-sm text-muted-foreground">{msg(hint)}</p>
+        <p className="text-sm text-muted-foreground">{hint}</p>
       </div>
       <Switch id={id} checked={checked} onCheckedChange={onChange} className="mt-0.5" />
     </div>
@@ -68,21 +102,32 @@ function TriggerRow({
 
 /**
  * Walks the scheduled-run settings one screen at a time, like the submit
- * wizard: where the data comes from, then the schedule.
+ * wizard: what starts a run, then the schedule. The model names say which
+ * models a better-model check compares against.
  */
 export function ScheduledRunSetup({
   busy = false,
   finishLabel,
   onFinish,
   idPrefix,
+  taskModel,
+  reflectionModel,
 }: {
   busy?: boolean;
   finishLabel: MessageKey;
   onFinish: (body: ContinuousEnableRequest) => void;
   idPrefix: string;
+  taskModel?: string | null;
+  reflectionModel?: string | null;
 }) {
-  const [data, setData] = useState(true);
-  const [newModels, setNewModels] = useState(false);
+  const [choices, setChoices] = useState<SetupChoices>({
+    data: true,
+    minCases: "",
+    newTaskModel: false,
+    newReflectionModel: false,
+    matrix: ["both"],
+  });
+  const choose = (patch: Partial<SetupChoices>) => setChoices((prev) => ({ ...prev, ...patch }));
   const [source, setSource] = useState<ConnectorSource | null>(null);
   const [schedule, setSchedule] = useState<ScheduleRule>(() => defaultRule(browserTimeZone()));
   const [index, setIndex] = useState(0);
@@ -93,11 +138,14 @@ export function ScheduledRunSetup({
   const at = Math.min(index, steps.length - 1);
   const step = steps[at]!;
   const last = at === steps.length - 1;
-  const body = requestFor(data, newModels, source, schedule);
+  const body = requestFor(choices, source, schedule);
+  const { data } = choices;
+  const newModel = choices.newTaskModel || choices.newReflectionModel;
 
   const stepProblem =
     step === "source"
-      ? enableProblem({ permitted: body.permitted, sourceRef: source?.ref ?? "" })
+      ? (enableProblem({ permitted: body.permitted, sourceRef: source?.ref ?? "" }) ??
+        (data ? minCasesProblem(choices.minCases) : null))
       : step === "schedule"
         ? scheduleProblem(schedule)
         : null;
@@ -183,18 +231,107 @@ export function ScheduledRunSetup({
                 <TriggerRow
                   id={`${idPrefix}-data`}
                   label="continuous_tab.permit.data"
-                  hint="continuous_tab.walk.source_hint"
+                  hint={msg("continuous_tab.walk.source_hint")}
                   checked={data}
-                  onChange={setData}
+                  onChange={(next) => choose({ data: next })}
                 />
-                {data && <ConnectorSourcePicker value={source} onChange={setSource} />}
+                {data && (
+                  <div className="space-y-4">
+                    <ConnectorSourcePicker value={source} onChange={setSource} />
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor={`${idPrefix}-min-cases`}
+                        className="text-sm font-medium text-foreground"
+                      >
+                        {msg("continuous_tab.permit.min_new_cases")}
+                      </label>
+                      <Input
+                        id={`${idPrefix}-min-cases`}
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        step={1}
+                        dir="ltr"
+                        className="w-32"
+                        value={choices.minCases}
+                        placeholder={msg("continuous_tab.permit.min_new_cases_placeholder")}
+                        onChange={(e) => choose({ minCases: e.target.value })}
+                        aria-describedby={`${idPrefix}-min-cases-hint`}
+                      />
+                      <p
+                        id={`${idPrefix}-min-cases-hint`}
+                        className={cn(
+                          "text-sm",
+                          minCasesProblem(choices.minCases)
+                            ? "text-destructive"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        {msg(
+                          minCasesProblem(choices.minCases) ??
+                            "continuous_tab.permit.min_new_cases_hint",
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <TriggerRow
-                  id={`${idPrefix}-new-models`}
-                  label="continuous_tab.permit.new_models"
-                  hint="continuous_tab.permit.new_models_hint"
-                  checked={newModels}
-                  onChange={setNewModels}
+                  id={`${idPrefix}-new-task-model`}
+                  label="continuous_tab.permit.new_task_model"
+                  hint={modelHint(taskModel)}
+                  checked={choices.newTaskModel}
+                  onChange={(next) => choose({ newTaskModel: next })}
                 />
+                <TriggerRow
+                  id={`${idPrefix}-new-reflection-model`}
+                  label="continuous_tab.permit.new_reflection_model"
+                  hint={modelHint(reflectionModel)}
+                  checked={choices.newReflectionModel}
+                  onChange={(next) => choose({ newReflectionModel: next })}
+                />
+                {data && newModel && (
+                  <fieldset className="space-y-2 rounded-lg border border-border/60 p-4">
+                    <legend className="px-1 text-sm font-medium text-foreground">
+                      {msg("continuous_tab.matrix.label")}
+                    </legend>
+                    <p className="text-sm text-muted-foreground">
+                      {msg("continuous_tab.matrix.hint")}
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {MATRIX.map(({ run, label }) => {
+                        const on = choices.matrix.includes(run);
+                        // One run must stay ticked, so the last one cannot be cleared.
+                        const locked = on && choices.matrix.length === 1;
+                        return (
+                          <button
+                            key={run}
+                            type="button"
+                            aria-pressed={on}
+                            disabled={locked}
+                            onClick={() =>
+                              choose({
+                                matrix: on
+                                  ? choices.matrix.filter((r) => r !== run)
+                                  : MATRIX.map((m) => m.run).filter(
+                                      (r) => r === run || choices.matrix.includes(r),
+                                    ),
+                              })
+                            }
+                            className={cn(
+                              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default",
+                              on
+                                ? "border-primary bg-primary/10 font-medium text-foreground"
+                                : "border-border text-muted-foreground hover:bg-muted",
+                            )}
+                          >
+                            {on && <Check className="size-3.5" aria-hidden />}
+                            {msg(label)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+                )}
               </div>
             )}
 

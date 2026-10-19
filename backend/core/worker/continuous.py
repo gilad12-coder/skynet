@@ -19,8 +19,10 @@ customer's own pause.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -49,7 +51,8 @@ from ..connectors.vault import ConnectorVault
 from ..constants import PAYLOAD_OVERVIEW_NAME
 from ..models import UnifiedRunRequest
 from ..models.common import OptimizationStatus, SplitFractions
-from ..models.unified import MIN_PAIRS_FOR_HELD_OUT, UnifiedData
+from ..models.unified import MIN_PAIRS_FOR_HELD_OUT, PinnedSplit, UnifiedData
+from ..service_gateway.optimization.unified.split import case_key, split_cases, split_seed
 from ..storage.models import ContinuousCycleModel, ContinuousPlanModel, ExecutionBudgetModel
 from .continuous_schedule import ScheduleRule, legacy_rule, next_runs
 
@@ -82,6 +85,17 @@ FAILURE_STREAK = 3
 MAX_CHECK_ATTEMPTS = 3
 # A candidate must beat the incumbent by this much on a 0..1 score, so scoring noise cannot win.
 WIN_MARGIN = 0.01
+# Without an owner-set minimum, new data starts a run once it adds this share of the incumbent's cases.
+DEFAULT_NEW_CASES_SHARE = 0.1
+# The plan flag that lets each model role move to a better model.
+NEW_MODEL_FLAGS = {"task_model": "new_task_model", "reflection_model": "new_reflection_model"}
+# The runs a check can start when new data and a better model are both waiting.
+RUN_DATA = "data"
+RUN_MODEL = "model"
+RUN_BOTH = "both"
+MATRIX_KINDS = (RUN_DATA, RUN_MODEL, RUN_BOTH)
+# Scores the current version with its own models on a changed test set, without optimizing.
+RUN_REFERENCE = "reference"
 
 CYCLE_CHECKING = "checking"
 CYCLE_SKIPPED = "skipped"
@@ -102,6 +116,25 @@ _TERMINAL_JOB = {
 
 RowFetcher = Callable[[Any, str, dict[str, Any]], list[dict[str, Any]]]
 ModelPicker = Callable[[Any, str, dict[str, Any]], dict[str, Any] | None]
+
+
+@dataclass(frozen=True)
+class CycleRun:
+    """One run a check starts, with the cases and split it uses.
+
+    Every run of one check holds out the same test cases, so their scores
+    compare. ``new_models`` maps a model role to the better model this run
+    tries. ``own_models`` keeps the incumbent's models as they are, which only
+    the reference run does.
+    """
+
+    kind: str
+    cases: list[dict[str, Any]]
+    pinned: PinnedSplit
+    task_model_changed: bool
+    new_models: dict[str, dict[str, Any]] = field(default_factory=dict)
+    own_models: bool = False
+    score_only: bool = False
 
 
 class SourceError(Exception):
@@ -234,41 +267,80 @@ def changed_dimensions(baseline: dict[str, Any], snapshot: dict[str, Any]) -> li
         changed.append("models")
     if baseline.get("optimizer") != snapshot.get("optimizer"):
         changed.append("optimizer")
-    if snapshot.get("new_model"):
+    if snapshot.get("new_models"):
         changed.append("new_model")
     return changed
 
 
-def strongest_model(job_store: Any, username: str, task_model: dict[str, Any]) -> dict[str, Any] | None:
-    """Find the model a plan should try next: the strongest one that scores above the run's model.
+def _comparable(model: CatalogModel) -> bool:
+    """Say whether a catalog model has the rating and both prices a comparison needs.
 
-    Only models the run can pay for the way it pays now are considered: the
-    hosted catalog for a managed run, the owner's verified connections for a
-    BYOK run. A model on a custom endpoint is never switched.
+    Args:
+        model: A catalog model.
+
+    Returns:
+        ``True`` when it is rated and priced for input and output.
+    """
+    return (
+        model.intelligence_index is not None
+        and model.input_cost_per_token is not None
+        and model.output_cost_per_token is not None
+    )
+
+
+def better_model(job_store: Any, username: str, current: dict[str, Any]) -> dict[str, Any] | None:
+    """Find the model a plan should try next for one role: rated higher and priced no higher.
+
+    A higher rating at an equal or lower price for both input and output has
+    no downside, so a plan may try it on its own. Only models the run can pay
+    for the way it pays now are considered: the hosted catalog for a managed
+    run, the owner's verified connections for a BYOK run. A model on a custom
+    endpoint is never switched.
 
     Args:
         job_store: Store whose engine holds the provider connections.
         username: Plan owner.
-        task_model: The incumbent run's ``task_model`` block.
+        current: The model block the run uses now for this role.
 
     Returns:
-        ``{"name", "byok_provider"}`` for a stronger model, or ``None``.
+        ``{"name", "byok_provider"}`` for the highest-rated such model, or ``None``.
     """
-    if task_model.get("base_url"):
+    if current.get("base_url"):
         return None
-    if task_model.get("token_source") == "byok":
+    if current.get("token_source") == "byok":
         models = _byok_catalog_for_user(ProviderKeyVault(engine=job_store.engine), username).models
     else:
         models = [model for model in get_catalog_cached().models if model.available]
-    rated = [model for model in models if model.intelligence_index is not None]
-    current = next((model for model in rated if model.value == task_model.get("name")), None)
-    if current is None:
-        # A model without a rating has nothing to beat, so nothing counts as better.
+    now = next((model for model in models if model.value == current.get("name")), None)
+    if now is None or not _comparable(now):
+        # Without a rating and both prices there is nothing to compare, so nothing counts as better.
         return None
-    best: CatalogModel = max(rated, key=lambda model: model.intelligence_index or 0.0)
-    if (best.intelligence_index or 0.0) <= (current.intelligence_index or 0.0):
+    better = [
+        model
+        for model in models
+        if _comparable(model)
+        and (model.intelligence_index or 0.0) > (now.intelligence_index or 0.0)
+        and (model.input_cost_per_token or 0.0) <= (now.input_cost_per_token or 0.0)
+        and (model.output_cost_per_token or 0.0) <= (now.output_cost_per_token or 0.0)
+    ]
+    if not better:
         return None
+    best = max(better, key=lambda model: (model.intelligence_index or 0.0, -(model.input_cost_per_token or 0.0)))
     return {"name": best.value, "byok_provider": best.byok_provider}
+
+
+def new_cases_needed(plan: ContinuousPlanModel, incumbent_cases: int) -> int:
+    """Return how many new or changed cases start a data run.
+
+    Args:
+        plan: The plan.
+        incumbent_cases: How many cases the incumbent run used.
+
+    Returns:
+        The owner's minimum, else a share of the incumbent's cases, at least one.
+    """
+    explicit = (plan.permitted or {}).get("min_new_cases")
+    return int(explicit) if explicit else max(1, math.ceil(incumbent_cases * DEFAULT_NEW_CASES_SHARE))
 
 
 def fetch_source_rows(job_store: Any, username: str, source: dict[str, Any]) -> list[dict[str, Any]]:
@@ -382,20 +454,20 @@ def resolve_snapshot(
     *,
     job_store: Any,
     fetch_rows: RowFetcher,
-    pick_model: ModelPicker = strongest_model,
+    pick_model: ModelPicker = better_model,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Resolve the inputs this check would use, refreshing only what is permitted.
 
-    A stronger model is tried only when nothing else changed: its run is judged
-    against the incumbent's own score, which is fair only on the same cases in
-    the same order, so the same test split. Each model is tried once.
+    Refreshed data counts only once it adds the plan's minimum of new or
+    changed cases; until then the check keeps the incumbent's cases, so small
+    changes do not pay for a run. Each better model is tried once per role.
 
     Args:
         plan: The plan being checked.
         incumbent_payload: The incumbent run's stored request.
         job_store: Job store handed to the row fetcher.
         fetch_rows: Reads a source's rows.
-        pick_model: Finds a stronger model than the incumbent's.
+        pick_model: Finds a better model for one role.
 
     Returns:
         The snapshot and the cases it describes.
@@ -407,14 +479,28 @@ def resolve_snapshot(
     data = incumbent_payload.get("data") or {}
     stored = list(data.get("cases") or [])
     cases = stored
-    data_snapshot: dict[str, Any] = {"fingerprint": _cases_fingerprint(cases), "cases": len(cases)}
+    baseline = plan.baseline_snapshot or {}
+    prior = baseline.get("data") or {"fingerprint": _cases_fingerprint(stored), "cases": len(stored)}
+    data_snapshot: dict[str, Any] = prior
     if permitted.get("data") and plan.source:
-        cases = canonical_cases(prepare_source_cases(fetch_rows(job_store, plan.username, plan.source), data))
-        data_snapshot = {"fingerprint": _cases_fingerprint(cases), "cases": len(cases), "source": plan.source}
-    same_data = data_snapshot["fingerprint"] == _cases_fingerprint(stored)
-    if same_data:
-        # The same rows keep the incumbent's order, so the seeded split picks the same test cases.
-        cases = stored
+        fresh = canonical_cases(prepare_source_cases(fetch_rows(job_store, plan.username, plan.source), data))
+        known = {case_key(case) for case in stored}
+        # New cases an earlier run already tried against this incumbent do not count again.
+        same_incumbent = prior.get("incumbent") == plan.incumbent_optimization_id
+        tried = set(prior.get("tried_cases") or []) if same_incumbent else set()
+        new_keys = [key for key in (case_key(case) for case in fresh) if key not in known]
+        untried = sum(1 for key in new_keys if key not in tried)
+        fingerprint = _cases_fingerprint(fresh)
+        if fingerprint != prior.get("fingerprint") and untried >= new_cases_needed(plan, len(stored)):
+            cases = fresh
+            data_snapshot = {
+                "fingerprint": fingerprint,
+                "cases": len(fresh),
+                "source": plan.source,
+                "new_cases": len(new_keys),
+                "incumbent": plan.incumbent_optimization_id,
+                "tried_cases": sorted(tried | set(new_keys)),
+            }
     models = _model_names(incumbent_payload.get("models") or {})
     optimizer = (incumbent_payload.get("optimizer") or {}).get("choice", "auto")
     pending = plan.pending_inputs or {}
@@ -424,23 +510,132 @@ def resolve_snapshot(
                 models[role] = pending[role]
     if permitted.get("optimizers") and pending.get("optimizer"):
         optimizer = pending["optimizer"]
-    snapshot: dict[str, Any] = {"data": data_snapshot, "models": models, "optimizer": optimizer}
-    baseline = plan.baseline_snapshot or {}
     tried = list(baseline.get("tried_models") or [])
-    task_model = (incumbent_payload.get("models") or {}).get("task_model")
-    unchanged = (
-        same_data
-        and (baseline.get("data") or {}).get("fingerprint") == data_snapshot["fingerprint"]
-        and models == baseline.get("models")
-        and optimizer == baseline.get("optimizer")
-    )
-    if permitted.get("new_models") and task_model and unchanged:
-        stronger = pick_model(job_store, plan.username, task_model)
-        if stronger is not None and stronger["name"] not in tried:
-            snapshot["new_model"] = stronger
-            tried.append(stronger["name"])
-    snapshot["tried_models"] = tried
+    found: dict[str, dict[str, Any]] = {}
+    blocks = incumbent_payload.get("models") or {}
+    for role, flag in NEW_MODEL_FLAGS.items():
+        block = blocks.get(role)
+        if not (permitted.get(flag) and block and models.get(role)):
+            continue
+        better = pick_model(job_store, plan.username, {**block, "name": models[role]})
+        if better is not None and f"{role}:{better['name']}" not in tried:
+            found[role] = better
+            tried.append(f"{role}:{better['name']}")
+    snapshot: dict[str, Any] = {"data": data_snapshot, "models": models, "optimizer": optimizer, "tried_models": tried}
+    if found:
+        snapshot["new_models"] = found
     return snapshot, cases
+
+
+def _request_copy(stored: dict[str, Any]) -> dict[str, Any]:
+    """Drop the fields of a stored request that belong to that run's funding alone.
+
+    Args:
+        stored: A stored unified request, with credentials scrubbed.
+
+    Returns:
+        The fields a new run may reuse.
+    """
+    return {
+        key: value
+        for key, value in stored.items()
+        if not key.startswith("_budget")
+        and not key.startswith("execution_budget_")
+        and key not in {"preflight_id", "preflight_fingerprint", "estimated_cents_low", "estimated_cents_high"}
+    }
+
+
+def _split_keys(request: UnifiedRunRequest, cases: list[Any], pinned: PinnedSplit | None) -> PinnedSplit:
+    """Split cases the way the run engine would, and name each case's role.
+
+    Args:
+        request: The incumbent's request, which fixes the fractions, shuffle and seed.
+        cases: The cases to split.
+        pinned: Roles earlier runs already gave some cases.
+
+    Returns:
+        The keys of the test cases and of the search cases.
+    """
+    data = request.data
+    splits = split_cases(cases, data.mode, data.split, shuffle=data.shuffle, seed=split_seed(request), pinned=pinned)
+    return PinnedSplit(
+        test=[case_key(case) for case in splits.test], fit=[case_key(case) for case in splits.train + splits.val]
+    )
+
+
+def plan_runs(
+    plan: ContinuousPlanModel,
+    incumbent_payload: dict[str, Any],
+    snapshot: dict[str, Any],
+    cases: list[dict[str, Any]],
+    changes: list[str],
+) -> list[CycleRun]:
+    """Decide which runs a check starts and which cases each one uses.
+
+    New data alone starts a data run and a better model alone a model run.
+    When both wait, the plan's matrix picks among data only, model only and
+    both. Every run holds out the same test cases: the incumbent's, plus some
+    of the new cases. A model-only run searches only on the incumbent's
+    search cases. When every run changes the task model on a changed test
+    set, no run's own baseline is the incumbent, so a reference run scores the
+    incumbent on the new test cases without optimizing.
+
+    Args:
+        plan: The plan.
+        incumbent_payload: The incumbent run's stored request.
+        snapshot: This check's resolved inputs.
+        cases: This check's cases.
+        changes: The inputs that changed since the last reviewed check.
+
+    Returns:
+        The runs, in matrix order, the reference run last.
+    """
+    stored = list((incumbent_payload.get("data") or {}).get("cases") or [])
+    request = UnifiedRunRequest.model_validate(_request_copy(scrub_execution_credentials(incumbent_payload)))
+    earlier = _split_keys(request, stored, request.data.pinned_split)
+    new_models = snapshot.get("new_models") or {}
+    data_changed = "data" in changes
+    if data_changed and new_models:
+        matrix = (plan.permitted or {}).get("matrix") or [RUN_BOTH]
+        kinds = [kind for kind in MATRIX_KINDS if kind in matrix]
+    elif new_models:
+        kinds = [RUN_MODEL]
+    else:
+        kinds = [RUN_DATA]
+    if data_changed:
+        full = _split_keys(request, cases, earlier)
+        searched_before = set(earlier.fit)
+        model_pinned = PinnedSplit(test=full.test, fit=[key for key in full.fit if key in searched_before])
+        allowed = set(model_pinned.test) | searched_before
+        model_cases = [case for case in cases if case_key(case) in allowed]
+    else:
+        full, model_pinned, model_cases = earlier, earlier, stored
+    incumbent_task = _model_names(incumbent_payload.get("models") or {})["task_model"]
+    base_task_changed = snapshot["models"].get("task_model") != incumbent_task
+    runs = []
+    for kind in kinds:
+        tried = new_models if kind in (RUN_MODEL, RUN_BOTH) else {}
+        runs.append(
+            CycleRun(
+                kind=kind,
+                cases=model_cases if kind == RUN_MODEL else cases,
+                pinned=model_pinned if kind == RUN_MODEL else full,
+                task_model_changed=base_task_changed or "task_model" in tried,
+                new_models=tried,
+            )
+        )
+    if data_changed and all(run.task_model_changed for run in runs):
+        runs.append(
+            CycleRun(
+                kind=RUN_REFERENCE,
+                cases=cases,
+                pinned=full,
+                task_model_changed=False,
+                own_models=True,
+                score_only=True,
+            )
+        )
+    return runs
 
 
 def month_committed(session: Session, plan: ContinuousPlanModel, month: str) -> int:
@@ -461,22 +656,50 @@ def month_committed(session: Session, plan: ContinuousPlanModel, month: str) -> 
     cycles = session.scalars(
         select(ContinuousCycleModel).where(ContinuousCycleModel.plan_id == plan.id, ContinuousCycleModel.month == month)
     ).all()
-    budget_ids = [cycle.execution_budget_id for cycle in cycles if cycle.execution_budget_id]
+    budget_ids = [budget_id for cycle in cycles for budget_id in cycle_budget_ids(cycle)]
     budgets = {
         budget.id: budget
         for budget in session.scalars(select(ExecutionBudgetModel).where(ExecutionBudgetModel.id.in_(budget_ids)))
     }
     total = 0
     for cycle in cycles:
-        budget = budgets.get(cycle.execution_budget_id)
+        found = [budgets[budget_id] for budget_id in cycle_budget_ids(cycle) if budget_id in budgets]
         if cycle.status == CYCLE_OPTIMIZING:
-            total += plan.cycle_budget_cents
-        elif budget is not None:
+            total += plan.cycle_budget_cents * max(1, len(cycle_runs(cycle)))
+        elif found:
             # ``spent_cents`` is sampled once when the run ends; reconciliation can bill more later.
-            total += budget.billed_cents + budget_wallet_hold(budget)
+            total += sum(budget.billed_cents + budget_wallet_hold(budget) for budget in found)
         elif cycle.spent_cents:
             total += cycle.spent_cents
     return total
+
+
+def cycle_runs(cycle: ContinuousCycleModel) -> list[dict[str, Any]]:
+    """List the runs a check started, including a check from before checks started several.
+
+    Args:
+        cycle: The cycle.
+
+    Returns:
+        One entry per run, each with its ``optimization_id`` and ``execution_budget_id``.
+    """
+    runs = [run for run in (cycle.snapshot or {}).get("runs") or [] if run.get("optimization_id")]
+    if not runs and cycle.optimization_id:
+        return [{"kind": RUN_DATA, "optimization_id": cycle.optimization_id, "budget": cycle.execution_budget_id}]
+    return runs
+
+
+def cycle_budget_ids(cycle: ContinuousCycleModel) -> list[str]:
+    """List the protected budgets a check's runs draw on.
+
+    Args:
+        cycle: The cycle.
+
+    Returns:
+        Budget ids, without repeats.
+    """
+    ids = [run.get("budget") for run in cycle_runs(cycle)] + [cycle.execution_budget_id]
+    return list(dict.fromkeys(budget_id for budget_id in ids if budget_id))
 
 
 def _billed_cents(job_store: Any, budget_id: str | None, username: str) -> int | None:
@@ -501,52 +724,54 @@ def _billed_cents(job_store: Any, budget_id: str | None, username: str) -> int |
 def _cycle_payload(
     plan: ContinuousPlanModel,
     incumbent: dict[str, Any],
-    cases: list[dict[str, Any]],
+    run: CycleRun,
     snapshot: dict[str, Any],
     sequence: int,
 ) -> UnifiedRunRequest:
-    """Derive a fresh run request from the incumbent and this check's inputs.
+    """Derive a fresh run request from the incumbent and one of this check's runs.
 
-    The objective, metric, workspace, constraints and split stay those of the
-    incumbent; only the permitted inputs change. The run starts from the
-    incumbent's best version, so its final run scores incumbent and candidate
-    on the same cases.
+    The objective, metric, workspace, constraints and split fractions stay
+    those of the incumbent; only the permitted inputs change. The run starts
+    from the incumbent's best version, so its final run scores incumbent and
+    candidate on the same cases, and its split is pinned, so it holds out the
+    same test cases as every other run of the check.
 
     Args:
         plan: The plan.
         incumbent: The incumbent run record.
-        cases: This check's evaluation cases.
+        run: The run to derive.
         snapshot: This check's resolved inputs.
         sequence: Cycle number shown in the run name.
 
     Returns:
         A new, unfunded unified request.
     """
-    stored = scrub_execution_credentials(incumbent["payload"])
-    copy = {
-        key: value
-        for key, value in stored.items()
-        if not key.startswith("_budget")
-        and not key.startswith("execution_budget_")
-        and key not in {"preflight_id", "preflight_fingerprint", "estimated_cents_low", "estimated_cents_high"}
+    copy = _request_copy(scrub_execution_credentials(incumbent["payload"]))
+    copy["data"] = {
+        **copy["data"],
+        "cases": run.cases,
+        "staged_dataset_id": None,
+        "pinned_split": run.pinned.model_dump(),
     }
-    copy["data"] = {**copy["data"], "cases": cases, "staged_dataset_id": None}
     best = (incumbent.get("result") or {}).get("best_candidate")
     if best is not None:
         copy["task"] = {**copy["task"], "artifact": {**copy["task"]["artifact"], "starting_version": best}}
     models = dict(copy["models"])
-    for role in ("task_model", "reflection_model"):
-        name = snapshot["models"].get(role)
-        if name and (models.get(role) or {}).get("name") != name:
-            models[role] = {**(models.get(role) or {}), "name": name}
-    stronger = snapshot.get("new_model")
-    if stronger:
-        task_model = {**models["task_model"], "name": stronger["name"]}
-        if task_model.get("token_source") == "byok":
-            task_model["byok_provider"] = stronger.get("byok_provider")
-        models["task_model"] = task_model
+    if not run.own_models:
+        for role in ("task_model", "reflection_model"):
+            name = snapshot["models"].get(role)
+            if name and (models.get(role) or {}).get("name") != name:
+                models[role] = {**(models.get(role) or {}), "name": name}
+        if not run.score_only:
+            copy["optimizer"] = {**copy.get("optimizer", {}), "choice": snapshot["optimizer"]}
+    for role, better in run.new_models.items():
+        block = {**models[role], "name": better["name"]}
+        if block.get("token_source") == "byok":
+            block["byok_provider"] = better.get("byok_provider")
+        models[role] = block
     copy["models"] = models
-    copy["optimizer"] = {**copy.get("optimizer", {}), "choice": snapshot["optimizer"]}
+    if run.score_only:
+        copy["optimizer"] = {**copy.get("optimizer", {}), "score_only": True}
     base_name = (incumbent.get("payload_overview") or {}).get(PAYLOAD_OVERVIEW_NAME) or copy.get("name") or ""
     copy["name"] = f"{base_name} · #{sequence}".strip(" ·")
     copy["max_cost_cents"] = plan.cycle_budget_cents
@@ -626,13 +851,13 @@ def process_cycle(
     *,
     now: datetime | None = None,
     fetch_rows: RowFetcher = fetch_source_rows,
-    pick_model: ModelPicker = strongest_model,
+    pick_model: ModelPicker = better_model,
 ) -> None:
-    """Run one claimed check to its outcome: skip, pause, fail or start a run.
+    """Run one claimed check to its outcome: skip, pause, fail or start its runs.
 
-    Safe to repeat. The run is submitted under an idempotency key derived from
-    the cycle, so a retried check replays the same run and the same budget
-    instead of creating new ones.
+    Safe to repeat. Each run is submitted under an idempotency key derived from
+    the cycle and the run's kind, so a retried check replays the same runs and
+    the same budgets instead of creating new ones.
 
     Args:
         job_store: Job store.
@@ -640,7 +865,7 @@ def process_cycle(
         cycle_id: The claimed cycle.
         now: Clock override for tests.
         fetch_rows: Reads a source's rows.
-        pick_model: Finds a stronger model than the incumbent's.
+        pick_model: Finds a better model for one role.
     """
     now = now or datetime.now(UTC)
     engine = job_store.engine
@@ -652,16 +877,7 @@ def process_cycle(
         plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
         if plan is None:
             return
-        accepted = job_store.find_job_by_idempotency_key(plan.username, f"continuous:{cycle.id}")
-        if accepted is not None:
-            # A worker died between submitting and linking. The run is already paid for and ran on the
-            # inputs recorded then, so link it as is instead of re-reading inputs or re-checking funds.
-            job = job_store.get_job(accepted, include_payload=False)
-            cycle.optimization_id = accepted
-            cycle.execution_budget_id = job.get("execution_budget_id")
-            _finish_cycle(
-                session, cycle, CYCLE_OPTIMIZING, "continuous.run_started", changes=",".join(cycle.changes or [])
-            )
+        if _link_accepted(job_store, session, plan.username, cycle):
             return
         if plan.status == PLAN_PAUSED and plan.pause_reason in (PAUSE_USER, PAUSE_FAILING):
             _finish_cycle(session, cycle, CYCLE_SKIPPED, "continuous.skip_paused")
@@ -691,91 +907,207 @@ def process_cycle(
         except SourceError as error:
             _fail_cycle(session, plan, cycle, error.code, **error.params)
             return
+        # A retry after ``budget.pending`` already holds this check's budgets.
+        retrying = bool((cycle.snapshot or {}).get("runs"))
         cycle.snapshot = snapshot
         changes = changed_dimensions(plan.baseline_snapshot or {}, snapshot)
         cycle.changes = changes
-        spendable = StripeBillingService(engine=engine).spendable_cents(plan.username)
-        gate = None
-        # A retry after ``budget.pending`` already holds this cycle's budget; gating it again
-        # would demand a second full cycle budget of headroom and pause a check that is covered.
-        if cycle.execution_budget_id is None:
-            if (
-                plan.monthly_limit_cents is not None
-                and plan.monthly_limit_cents - month_committed(session, plan, cycle.month) < plan.cycle_budget_cents
-            ):
-                gate = PAUSE_ALLOWANCE
-            elif spendable < plan.cycle_budget_cents:
-                gate = PAUSE_FUNDS
-        if gate is None and plan.status == PLAN_PAUSED and plan.pause_reason in SYSTEM_PAUSES:
-            plan.status, plan.pause_reason = PLAN_ACTIVE, None
         if not changes:
+            if plan.status == PLAN_PAUSED and plan.pause_reason in SYSTEM_PAUSES:
+                plan.status, plan.pause_reason = PLAN_ACTIVE, None
             _finish_cycle(session, cycle, CYCLE_SKIPPED, "continuous.skip_unchanged")
             return
-        if gate is not None:
-            _pause(plan, gate)
-            _finish_cycle(session, cycle, CYCLE_PAUSED, f"continuous.paused_{gate}")
-            return
-        started = session.scalars(
-            select(ContinuousCycleModel.id).where(
-                ContinuousCycleModel.plan_id == plan.id, ContinuousCycleModel.optimization_id.is_not(None)
-            )
-        ).all()
         try:
-            payload = _cycle_payload(plan, incumbent, cases, snapshot, len(started) + 1)
+            runs = plan_runs(plan, incumbent["payload"], snapshot, cases, changes)
+            started = session.scalars(
+                select(ContinuousCycleModel.id).where(
+                    ContinuousCycleModel.plan_id == plan.id, ContinuousCycleModel.optimization_id.is_not(None)
+                )
+            ).all()
+            payloads = [_cycle_payload(plan, incumbent, run, snapshot, len(started) + 1) for run in runs]
         except ValidationError as error:
             # A staged model or optimizer the run contract rejects fails this cycle instead of wedging the plan.
             reason = "; ".join(str(item.get("msg")) for item in error.errors())
             _fail_cycle(session, plan, cycle, "continuous.run_rejected", reason=reason)
             return
-        key = f"continuous:{cycle.id}"
-        budget_key = resolve_submission_replay_keys(
-            payload, username=plan.username, workflow=UNIFIED_WORKFLOW, supplied_key=key
-        ).budget
+        need = plan.cycle_budget_cents * len(runs)
+        gate = None
+        # Gating a retry again would demand a second set of check budgets of headroom
+        # and pause a check that is covered.
+        if not retrying:
+            if (
+                plan.monthly_limit_cents is not None
+                and plan.monthly_limit_cents - month_committed(session, plan, cycle.month) < need
+            ):
+                gate = PAUSE_ALLOWANCE
+            elif StripeBillingService(engine=engine).spendable_cents(plan.username) < need:
+                gate = PAUSE_FUNDS
+        if gate is None and plan.status == PLAN_PAUSED and plan.pause_reason in SYSTEM_PAUSES:
+            plan.status, plan.pause_reason = PLAN_ACTIVE, None
+        if gate is not None:
+            _pause(plan, gate)
+            _finish_cycle(session, cycle, CYCLE_PAUSED, f"continuous.paused_{gate}", runs=len(runs))
+            return
         plan_username = plan.username
         cycle.snapshot = {
             **snapshot,
-            "config": json_fingerprint(payload.task.model_dump(mode="json", exclude={"artifact"})),
-            "seed": payload.seed,
+            "config": json_fingerprint(payloads[0].task.model_dump(mode="json", exclude={"artifact"})),
+            "seed": payloads[0].seed,
             "compared_against": plan.incumbent_optimization_id,
+            "runs": [
+                {
+                    "kind": run.kind,
+                    "new_models": run.new_models,
+                    "task_model_changed": run.task_model_changed,
+                    "test_cases": len(run.pinned.test),
+                }
+                for run in runs
+            ],
         }
-    user = AuthenticatedUser(plan_username, "user", ())
-    try:
-        response = submit_unified_payload(
-            payload, service=service, job_store=job_store, current_user=user, idempotency_key=key
-        )
-    except DomainError as error:
-        budget = BudgetService(engine=engine).find_by_creation_key(plan_username, budget_key) if budget_key else None
-        with Session(engine) as session, session.begin():
-            cycle = session.get(ContinuousCycleModel, cycle_id)
-            if cycle is None:
-                # The owner deleted the plan while this check was submitting.
-                return
-            plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
-            cycle.execution_budget_id = budget.id if budget else None
-            cycle.spent_cents = _billed_cents(job_store, cycle.execution_budget_id, plan_username)
+    _submit_runs(job_store, service, cycle_id, plan_username, payloads)
+
+
+def _run_key(cycle_id: str, kind: str) -> str:
+    """Return the idempotency key of one of a check's runs.
+
+    Args:
+        cycle_id: The check.
+        kind: The run's kind.
+
+    Returns:
+        The key.
+    """
+    return f"continuous:{cycle_id}:{kind}"
+
+
+def _link_accepted(job_store: Any, session: Session, username: str, cycle: ContinuousCycleModel) -> bool:
+    """Link the runs a check already submitted before its worker died.
+
+    The runs are already paid for and ran on the inputs recorded then, so they
+    are linked as they are instead of re-reading inputs or re-checking funds.
+    A run the dead worker never submitted is dropped from the check.
+
+    Args:
+        job_store: Job store.
+        session: Open session that owns ``cycle``.
+        username: Plan owner.
+        cycle: The cycle.
+
+    Returns:
+        ``True`` when the check had submitted runs and is now optimizing.
+    """
+    planned = (cycle.snapshot or {}).get("runs") or []
+    linked = []
+    for run in planned:
+        accepted = job_store.find_job_by_idempotency_key(username, _run_key(cycle.id, run["kind"]))
+        if accepted is not None:
+            job = job_store.get_job(accepted, include_payload=False)
+            linked.append({**run, "optimization_id": accepted, "budget": job.get("execution_budget_id")})
+    # A check claimed before checks started several runs used one key for its one run.
+    legacy = None if planned else job_store.find_job_by_idempotency_key(username, f"continuous:{cycle.id}")
+    if legacy is not None:
+        job = job_store.get_job(legacy, include_payload=False)
+        linked.append({"kind": RUN_DATA, "optimization_id": legacy, "budget": job.get("execution_budget_id")})
+    if not linked:
+        return False
+    _record_started(session, cycle, linked)
+    return True
+
+
+def _record_started(session: Session, cycle: ContinuousCycleModel, started: list[dict[str, Any]]) -> None:
+    """Mark a check as optimizing on the runs it started.
+
+    Args:
+        session: Open session that owns ``cycle``.
+        cycle: The cycle.
+        started: The started runs, each with its ``optimization_id`` and ``budget``.
+    """
+    cycle.snapshot = {**(cycle.snapshot or {}), "runs": started}
+    cycle.optimization_id = started[0]["optimization_id"]
+    cycle.execution_budget_id = started[0]["budget"]
+    _finish_cycle(
+        session,
+        cycle,
+        CYCLE_OPTIMIZING,
+        "continuous.run_started",
+        changes=",".join(cycle.changes or []),
+        runs=",".join(run["kind"] for run in started),
+    )
+
+
+def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, payloads: list[UnifiedRunRequest]) -> None:
+    """Submit a check's runs, then record which started.
+
+    When no run started, a run refused for a pending budget leaves the check
+    claimed, so a later sweep replays the same keys and budgets. Once one run
+    started, a refusal only drops the refused run, because the started ones
+    are already paid for.
+
+    Args:
+        job_store: Job store.
+        service: Optimization service handed to the in-process worker.
+        cycle_id: The check.
+        username: Plan owner.
+        payloads: One request per planned run, in the snapshot's order.
+    """
+    engine = job_store.engine
+    user = AuthenticatedUser(username, "user", ())
+    with Session(engine) as session:
+        cycle = session.get(ContinuousCycleModel, cycle_id)
+        if cycle is None:
+            # The owner deleted the plan before this check submitted anything.
+            return
+        planned = list((cycle.snapshot or {}).get("runs") or [])
+    started: list[dict[str, Any]] = []
+    refused: DomainError | None = None
+    budget_keys: list[str] = []
+    for run, payload in zip(planned, payloads, strict=True):
+        key = _run_key(cycle_id, run["kind"])
+        budget_key = resolve_submission_replay_keys(
+            payload, username=username, workflow=UNIFIED_WORKFLOW, supplied_key=key
+        ).budget
+        if budget_key:
+            budget_keys.append(budget_key)
+        try:
+            response = submit_unified_payload(
+                payload, service=service, job_store=job_store, current_user=user, idempotency_key=key
+            )
+        except DomainError as error:
+            logger.warning("Continuous cycle %s could not start its %s run: %s", cycle_id, run["kind"], error.code)
+            refused = refused or error
             if error.code == "budget.pending":
-                # Setup usage is still being confirmed. The cycle keeps its lease, so a
-                # later sweep replays this same key and budget instead of a new check
-                # paying for setup again. This wait is not a crash, so it does
-                # not count toward MAX_CHECK_ATTEMPTS.
-                cycle.detail_params = {**(cycle.detail_params or {}), "attempts": 0}
-                return
-            if error.code in {"billing.insufficient_funds", "budget.insufficient"}:
-                _pause(plan, PAUSE_FUNDS)
-                _finish_cycle(session, cycle, CYCLE_PAUSED, "continuous.paused_funds")
-            else:
-                _fail_cycle(session, plan, cycle, "continuous.run_rejected", reason=str(error.detail))
-        return
-    job = job_store.get_job(response.optimization_id, include_payload=False)
+                break
+            continue
+        job = job_store.get_job(response.optimization_id, include_payload=False)
+        started.append({**run, "optimization_id": response.optimization_id, "budget": job.get("execution_budget_id")})
     with Session(engine) as session, session.begin():
         cycle = session.get(ContinuousCycleModel, cycle_id)
         if cycle is None:
-            # The owner deleted the plan while this check was submitting; its run stays an ordinary run.
+            # The owner deleted the plan while this check was submitting; its runs stay ordinary runs.
             return
-        cycle.optimization_id = response.optimization_id
-        cycle.execution_budget_id = job.get("execution_budget_id")
-        _finish_cycle(session, cycle, CYCLE_OPTIMIZING, "continuous.run_started", changes=",".join(cycle.changes))
-    logger.info("Continuous cycle %s started run %s", cycle_id, response.optimization_id)
+        plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
+        if started:
+            _record_started(session, cycle, started)
+            logger.info("Continuous cycle %s started %d runs", cycle_id, len(started))
+            return
+        budgets = [BudgetService(engine=engine).find_by_creation_key(username, key) for key in budget_keys]
+        budget_ids = [budget.id for budget in budgets if budget is not None]
+        cycle.execution_budget_id = budget_ids[0] if budget_ids else None
+        cycle.spent_cents = sum(_billed_cents(job_store, budget_id, username) or 0 for budget_id in budget_ids) or None
+        if refused is None:
+            return
+        if refused.code == "budget.pending":
+            # Setup usage is still being confirmed. The cycle keeps its lease, so a
+            # later sweep replays these same keys and budgets instead of a new check
+            # paying for setup again. This wait is not a crash, so it does
+            # not count toward MAX_CHECK_ATTEMPTS.
+            cycle.detail_params = {**(cycle.detail_params or {}), "attempts": 0}
+            return
+        if refused.code in {"billing.insufficient_funds", "budget.insufficient"}:
+            _pause(plan, PAUSE_FUNDS)
+            _finish_cycle(session, cycle, CYCLE_PAUSED, "continuous.paused_funds")
+        else:
+            _fail_cycle(session, plan, cycle, "continuous.run_rejected", reason=str(refused.detail))
 
 
 def _incumbent_score(job_store: Any, optimization_id: str | None, split: dict[str, Any]) -> float | None:
@@ -796,24 +1128,53 @@ def _incumbent_score(job_store: Any, optimization_id: str | None, split: dict[st
     except KeyError:
         return None
     prior = result.get("split_counts") or {}
-    if any(prior.get(key) != split.get(key) for key in ("train", "val", "test", "held_out", "report_split")):
+    if any(prior.get(key) != split.get(key) for key in ("test", "held_out", "report_split")):
         return None
     return result.get("best_score")
 
 
+def _incumbent_on_test(
+    job_store: Any, cycle: ContinuousCycleModel, finished: list[tuple[dict[str, Any], dict[str, Any]]]
+) -> float | None:
+    """Score the incumbent on this check's test cases with its own models.
+
+    A run that keeps the incumbent's task model scores the incumbent as its
+    own baseline. When every run moves the task model, the reference run
+    scored it, or, on unchanged test cases, the incumbent run's own score
+    still holds.
+
+    Args:
+        job_store: Job store.
+        cycle: The cycle.
+        finished: Each successful run with its result.
+
+    Returns:
+        The incumbent's score, or ``None`` when no run could score it.
+    """
+    for run, result in finished:
+        if run["kind"] == RUN_REFERENCE:
+            return result.get("best_score")
+    for run, result in finished:
+        if not run.get("task_model_changed"):
+            return result.get("baseline_score")
+    if not finished:
+        return None
+    split = finished[0][1].get("split_counts") or {}
+    return _incumbent_score(job_store, (cycle.snapshot or {}).get("compared_against"), split)
+
+
 def review_cycle(job_store: Any, cycle_id: str) -> None:
-    """Judge a finished cycle run against the incumbent it started from.
+    """Judge a check's finished runs against the incumbent they started from.
 
-    A candidate is kept for review only when its run succeeded, the final run
-    scored both versions on the same held-out test cases, no regression guard
-    fired, and the candidate scored at least ``WIN_MARGIN`` higher. Anything
-    else leaves the incumbent in place. Only a successful run marks its inputs
-    as seen, so a run that failed (a provider outage) is retried on the next
-    check instead of waiting for the data to change again.
-
-    A run on a stronger model scores the incumbent's version with that model
-    too, so its own baseline cannot show whether the switch helps. It is judged
-    against the incumbent run's own score instead, on the same test split.
+    The check waits until every run ended. The incumbent is scored on the
+    check's test cases with its own models, which every run held out. A run's
+    candidate counts only when the run succeeded, its final run scored on
+    held-out test cases, and, for a run that kept the incumbent's task model,
+    no regression guard fired. The best such candidate is kept for review when
+    it scored at least ``WIN_MARGIN`` above the incumbent; anything else leaves
+    the incumbent in place. Only a check with a successful run marks its inputs
+    as seen, so a check whose runs all failed (a provider outage) is retried on
+    the next check instead of waiting for the data to change again.
 
     Args:
         job_store: Job store.
@@ -824,40 +1185,74 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
         if cycle is None or cycle.status != CYCLE_OPTIMIZING or cycle.optimization_id is None:
             return
         plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
-        try:
-            job = job_store.get_job(cycle.optimization_id, include_payload=False)
-        except KeyError:
-            _fail_cycle(session, plan, cycle, "continuous.run_failed", reason="missing")
+        runs = cycle_runs(cycle)
+        jobs = []
+        for run in runs:
+            try:
+                jobs.append(job_store.get_job(run["optimization_id"], include_payload=False))
+            except KeyError:
+                jobs.append({"status": "missing"})
+        if any(job["status"] not in _TERMINAL_JOB and job["status"] != "missing" for job in jobs):
             return
-        if job["status"] not in _TERMINAL_JOB:
-            return
-        cycle.spent_cents = _billed_cents(job_store, cycle.execution_budget_id, plan.username)
+        billed = [_billed_cents(job_store, budget_id, plan.username) for budget_id in cycle_budget_ids(cycle)]
+        cycle.spent_cents = sum(cents or 0 for cents in billed) if any(c is not None for c in billed) else None
         plan.updated_at = datetime.now(UTC)
-        if job["status"] != OptimizationStatus.success.value:
+        recorded = []
+        finished = []
+        for run, job in zip(runs, jobs, strict=True):
+            result = job.get("result") or {}
+            recorded.append(
+                {
+                    **run,
+                    "status": job["status"],
+                    "baseline_score": result.get("baseline_score"),
+                    "best_score": result.get("best_score"),
+                }
+            )
+            if job["status"] == OptimizationStatus.success.value:
+                finished.append((run, result))
+        cycle.snapshot = {**(cycle.snapshot or {}), "runs": recorded}
+        candidates = [(run, result) for run, result in finished if run["kind"] != RUN_REFERENCE]
+        if not candidates:
             # The baseline stays put so the next check retries these inputs instead of skipping them as unchanged.
-            _fail_cycle(session, plan, cycle, "continuous.run_failed", reason=job["status"])
+            reason = next((job["status"] for job in jobs if job["status"] != OptimizationStatus.success.value), "")
+            _fail_cycle(session, plan, cycle, "continuous.run_failed", reason=reason)
             return
-        plan.baseline_snapshot = cycle.snapshot or plan.baseline_snapshot
-        result = job.get("result") or {}
-        baseline = result.get("baseline_score")
-        best = result.get("best_score")
-        split = result.get("split_counts") or {}
-        new_model = bool((cycle.snapshot or {}).get("new_model"))
-        if new_model:
-            baseline = _incumbent_score(job_store, (cycle.snapshot or {}).get("compared_against"), split)
-        cycle.incumbent_score, cycle.candidate_score = baseline, best
-        if baseline is None or best is None:
+        plan.baseline_snapshot = {
+            key: value for key, value in (cycle.snapshot or {}).items() if key not in {"runs", "winner"}
+        } or plan.baseline_snapshot
+        incumbent = _incumbent_on_test(job_store, cycle, finished)
+        eligible = [
+            (run, result)
+            for run, result in candidates
+            if result.get("best_score") is not None
+            and (result.get("split_counts") or {}).get("test")
+            and (result.get("split_counts") or {}).get("held_out")
+            # With the same task model the guard means the search found nothing; on a new model it
+            # only means optimizing did not help, and the model alone may still win.
+            and not (result.get("regression_guard_applied") and not run.get("task_model_changed"))
+        ]
+        best_run, best_result = max(eligible or candidates, key=lambda item: item[1].get("best_score") or 0.0)
+        best = best_result.get("best_score")
+        cycle.optimization_id = best_run["optimization_id"]
+        cycle.execution_budget_id = best_run.get("budget")
+        cycle.incumbent_score, cycle.candidate_score = incumbent, best
+        cycle.snapshot = {
+            **cycle.snapshot,
+            "winner": {"kind": best_run["kind"], "new_models": best_run.get("new_models") or {}},
+        }
+        split = best_result.get("split_counts") or {}
+        if incumbent is None or best is None:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_unscored")
         elif not (split.get("test") and split.get("held_out")):
             # Without separate test cases the split that picked the candidate would also judge it.
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_not_held_out")
-        # On a stronger model the guard only means optimizing did not help; the model alone may still win.
-        elif (result.get("regression_guard_applied") and not new_model) or best <= baseline:
+        elif not eligible or best <= incumbent:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_regressed")
-        elif best < baseline + WIN_MARGIN:
+        elif best < incumbent + WIN_MARGIN:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_within_margin")
         else:
-            _finish_cycle(session, cycle, CYCLE_AWAITING_REVIEW, "continuous.review_ready")
+            _finish_cycle(session, cycle, CYCLE_AWAITING_REVIEW, "continuous.review_ready", run=best_run["kind"])
 
 
 def plan_rule(plan: ContinuousPlanModel) -> ScheduleRule:

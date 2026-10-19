@@ -234,8 +234,16 @@ class UnifiedTask(BaseModel):
     artifact: UnifiedArtifact
 
 
+# Case keys (``split.case_key``) whose role a scheduled plan's earlier runs
+# fixed: ``test`` cases stay held out and ``fit`` cases are never test cases.
+class PinnedSplit(BaseModel):
+    test: list[str] = Field(default_factory=list, max_length=200_000)
+    fit: list[str] = Field(default_factory=list, max_length=200_000)
+
+
 # ``expected_field`` names the table column the expected output came from
-# when pairs were built from a dataset.
+# when pairs were built from a dataset. ``pinned_split`` is set only by a
+# scheduled plan, so a later run never scores on a case an earlier one searched.
 class UnifiedData(BaseModel):
     mode: DataMode
     cases: list[UnifiedCase] | None = Field(default=None, max_length=200_000)
@@ -244,6 +252,7 @@ class UnifiedData(BaseModel):
     expected_field: str | None = None
     split: SplitFractions = Field(default_factory=SplitFractions)
     shuffle: bool = True
+    pinned_split: PinnedSplit | None = None
 
     @model_validator(mode="after")
     def _ensure_cases(self) -> UnifiedData:
@@ -275,8 +284,11 @@ class UnifiedData(BaseModel):
 
 # ``dspy_kwargs`` reaches the DSPy optimizer constructor; black-box engines
 # ignore it, and DSPy optimizers ignore ``proposer`` and ``shinka``.
+# ``score_only`` skips the search and only scores the starting version, which
+# a scheduled plan uses to score its current version on a grown test set.
 class UnifiedOptimizer(BaseModel):
     choice: OptimizerChoice = "auto"
+    score_only: bool = False
     budget: BlackboxBudget = Field(default_factory=BlackboxBudget)
     proposer: BlackboxProposer = Field(default_factory=BlackboxProposer)
     shinka: BlackboxShinkaSettings | None = None

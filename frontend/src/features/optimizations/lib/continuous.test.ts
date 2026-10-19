@@ -6,12 +6,19 @@ import {
   canReview,
   cycleTone,
   enableProblem,
+  minCasesProblem,
   refreshDelayMs,
 } from "./continuous.ts";
 import type { ContinuousCycle, ContinuousPlan } from "@/shared/types/continuous";
 
 const form = {
-  permitted: { data: true, models: false, optimizers: false, new_models: false },
+  permitted: {
+    data: true,
+    models: false,
+    optimizers: false,
+    new_task_model: false,
+    new_reflection_model: false,
+  },
   sourceRef: "acme/support/default/train",
 };
 
@@ -20,14 +27,26 @@ test("the enable form mirrors the backend rules", () => {
   assert.equal(
     enableProblem({
       ...form,
-      permitted: { data: false, models: false, optimizers: false, new_models: false },
+      permitted: {
+        data: false,
+        models: false,
+        optimizers: false,
+        new_task_model: false,
+        new_reflection_model: false,
+      },
     }),
     "continuous_tab.form.need_permission",
   );
   assert.equal(
     enableProblem({
       ...form,
-      permitted: { data: false, models: false, optimizers: false, new_models: true },
+      permitted: {
+        data: false,
+        models: false,
+        optimizers: false,
+        new_task_model: true,
+        new_reflection_model: false,
+      },
       sourceRef: "",
     }),
     null,
@@ -36,11 +55,41 @@ test("the enable form mirrors the backend rules", () => {
   assert.equal(
     enableProblem({
       ...form,
-      permitted: { data: false, models: true, optimizers: false, new_models: false },
+      permitted: {
+        data: false,
+        models: true,
+        optimizers: false,
+        new_task_model: false,
+        new_reflection_model: false,
+      },
       sourceRef: "",
     }),
     null,
   );
+});
+
+test("a reflection-only plan needs no source", () => {
+  assert.equal(
+    enableProblem({
+      permitted: {
+        data: false,
+        models: false,
+        optimizers: false,
+        new_task_model: false,
+        new_reflection_model: true,
+      },
+      sourceRef: "",
+    }),
+    null,
+  );
+});
+
+test("the minimum of new cases is empty or a whole number of 1 or more", () => {
+  assert.equal(minCasesProblem(""), null);
+  assert.equal(minCasesProblem(" 20 "), null);
+  for (const typed of ["0", "-3", "2.5", "abc", "200001"]) {
+    assert.equal(minCasesProblem(typed), "continuous_tab.form.need_min_cases", typed);
+  }
 });
 
 test("allowance share is clamped and a zero limit reads as spent", () => {

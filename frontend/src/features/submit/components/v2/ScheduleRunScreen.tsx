@@ -111,6 +111,8 @@ export function ScheduleRunScreen() {
           {on && heldOut && editing && (
             <ScheduledRunSetup
               idPrefix="wizard-schedule"
+              taskModel={state.optimizer.taskModel?.name || null}
+              reflectionModel={state.optimizer.reflectionModel?.name || null}
               finishLabel="continuous_tab.walk.save"
               onFinish={(body) => {
                 setScheduledRun(body);
