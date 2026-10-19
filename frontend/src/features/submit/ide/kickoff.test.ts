@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { kickoffFor, kickoffKey, stopsHiddenTurn, type KickoffInput } from "./kickoff.ts";
+import { kickoffFor, kickoffKey, type KickoffInput } from "./kickoff.ts";
 
 const BLANK: KickoffInput = {
   hasContext: true,
@@ -72,10 +72,4 @@ test("repository kickoffs use their own messages", () => {
   assert.equal(kickoffKey("write", false), "submit.v2.ide.agent.kickoff.write");
   assert.equal(kickoffKey("fix", true), "submit.v2.ide.agent.kickoff.repo_fix");
   assert.equal(kickoffKey("ask", true), "submit.v2.ide.agent.kickoff.repo_ask");
-});
-
-test("leaving Auto stops a running turn, so it cannot replace the user's code", () => {
-  assert.equal(stopsHiddenTurn(false, true), true);
-  assert.equal(stopsHiddenTurn(true, true), false);
-  assert.equal(stopsHiddenTurn(false, false), false);
 });

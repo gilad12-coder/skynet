@@ -4,8 +4,6 @@ import * as React from "react";
 import { isGeneralistAgentEnabled, useHideAgentPill } from "@/features/agent-panel";
 import { githubRepoFile, githubRepoTree } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
-import { Sparkle } from "@/shared/ui/icons";
-import { Button } from "@/shared/ui/primitives/button";
 import type { UnifiedAuthoringContext, UnifiedCase } from "@/shared/types/unified-run";
 import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
 import { useWizardV2, useWizardV2Shell } from "../../hooks/use-unified-wizard";
@@ -13,7 +11,6 @@ import { useContractCheck } from "../../hooks/use-contract-check";
 import { CodingAgentPanel } from "../../ide/CodingAgentPanel";
 import { workspaceKey } from "../../ide/agent-verdict";
 import { IdeWorkspace } from "../../ide/IdeWorkspace";
-import { stopsHiddenTurn } from "../../ide/kickoff";
 import type { IdeOpenRequest } from "../../ide/open-file";
 import { indexRepoTree, repoFolderName, type RepoSource } from "../../ide/repo-files";
 import { useIdeCodingAgent } from "../../ide/use-ide-coding-agent";
@@ -26,20 +23,15 @@ import {
   keepSessionValue,
   readSessionValue,
 } from "../../lib/session-state";
-import {
-  metricUsesModel as metricCallsModel,
-  withScorerImports,
-} from "../../lib/scorer-dependencies";
+import { metricUsesModel as metricCallsModel, withScorerImports } from "../../lib/scorer-dependencies";
 import { METRIC_FILE, RUN_FILE, isSingleAnswerTask, repoIssue } from "../../lib/wizard-v2";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { ContractCheckScreen } from "./ContractCheckScreen";
 import { MetricModelRow } from "./MetricModelRow";
-import { RewardBuilderDialog } from "./RewardBuilderPanel";
 import { RunOverview } from "./RunOverview";
 import { WizardScreen } from "./WizardScreen";
 
 const SAMPLE_CASE_LIMIT = 5;
-
 // The backend's REPO_FILES_MAX: every path rides each agent turn's prompt.
 const REPO_PATHS_LIMIT = 2000;
 
@@ -180,23 +172,6 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     [setWorkspaceFile],
   );
 
-  const expectedField = inputs.expectedField ?? "expected";
-  const [builderOpen, setBuilderOpen] = React.useState(false);
-  const builderSamples = React.useMemo(
-    () =>
-      (authoringContext?.sample_cases ?? []).map((c) => ({
-        input:
-          c.input !== null && typeof c.input === "object" && !Array.isArray(c.input)
-            ? (c.input as Record<string, unknown>)
-            : {},
-        expected:
-          c.expected !== null && typeof c.expected === "object" && !Array.isArray(c.expected)
-            ? (c.expected as Record<string, unknown>)
-            : null,
-      })),
-    [authoringContext],
-  );
-
   const contract = useContractCheck(ctx);
   const lastCheckOk = contract.lastCheck && !contract.stale ? contract.lastCheck.ok : null;
   // The running Check names its step beside the IDE's spinner, as the check
@@ -234,9 +209,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
   );
   const coding = useIdeCodingAgent({
     context: agentContext,
-    // The builder covers the agent: a hidden turn would rewrite the rewards
-    // and move the wizard on without the user.
-    active: onScreen && !builderOpen,
+    active: onScreen,
     dataKnown: (authoringContext?.sample_cases?.length ?? 0) > 0 || isSingleAnswerTask(state),
     runCode: workspace.runCode,
     metricCode: workspace.metricCode,
@@ -276,12 +249,6 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     setAgentWriting(agentBusy);
     return () => setAgentWriting(false);
   }, [agentBusy, setAgentWriting]);
-  // A turn that runs when the builder opens keeps streaming under it, and its
-  // writes would replace the rewards the user is building.
-  const stopAgent = coding.agent.stop;
-  React.useEffect(() => {
-    if (stopsHiddenTurn(!builderOpen, agentBusy)) stopAgent();
-  }, [builderOpen, agentBusy, stopAgent]);
 
   // Code the agent just wrote moves the wizard on once it passes: from the
   // editor to Check, and from a passing Check to the overview, where Run
@@ -304,7 +271,7 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
     if (onMetricStep && page === overviewPage) setOverviewSeen(true);
   }, [onMetricStep, page, overviewPage]);
   const advancePast = metricAdvanceFrom({
-    onStep: onMetricStep && !builderOpen,
+    onStep: onMetricStep,
     overviewSeen,
     busy: agentBusy,
     agentLeftFiles: agentLeft === filesKey,
@@ -346,32 +313,15 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           openRequests={openRequests}
           guided={guided}
           strip={
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              {/* A repository run's scorer has its own signature, which the builder does not write.
-                  It waits for a running turn: opening it stops the turn, and a stopped first
-                  turn leaves run.py blank with no kickoff to write it again. */}
-              {!repo && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={agentBusy}
-                  onClick={() => setBuilderOpen(true)}
-                >
-                  <Sparkle className="size-3.5" aria-hidden />
-                  {msg("reward_builder.screen.open")}
-                </Button>
-              )}
-              {metricUsesModel && (
-                <MetricModelRow
-                  mode={workspace.metricModelMode}
-                  explicitModel={workspace.metricModel}
-                  reflectionModel={optimizer.reflectionModel}
-                  onChange={patchWorkspace}
-                  guided={guided}
-                />
-              )}
-            </div>
+            metricUsesModel ? (
+              <MetricModelRow
+                mode={workspace.metricModelMode}
+                explicitModel={workspace.metricModel}
+                reflectionModel={optimizer.reflectionModel}
+                onChange={patchWorkspace}
+                guided={guided}
+              />
+            ) : null
           }
           sidePanel={
             <CodingAgentPanel
@@ -382,16 +332,6 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
             />
           }
         />
-        {!repo && (
-          <RewardBuilderDialog
-            open={builderOpen}
-            onOpenChange={setBuilderOpen}
-            metricCode={workspace.metricCode}
-            onMetricCode={setMetricCode}
-            expectedField={expectedField}
-            samples={builderSamples}
-          />
-        )}
       </WizardScreen>
       {!repo && (
         <WizardScreen active={page === 1}>

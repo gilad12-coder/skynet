@@ -35,15 +35,10 @@ export type RewardSpecRead =
   | { kind: "invalid" }
   | { kind: "spec"; spec: RewardSpec };
 
-export type PyValue = string | number | boolean | null | PyValue[] | { [key: string]: PyValue };
-
-const ESCAPES: Record<string, string> = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", "0": "\0" };
+type PyValue = string | number | boolean | null | PyValue[] | { [key: string]: PyValue };
 
 /** Parse one Python literal (dict, list, str, number, bool, None) from `text` at `start`. */
-export function parsePyLiteral(
-  text: string,
-  start: number,
-): { value: PyValue; end: number } | null {
+function parsePyLiteral(text: string, start: number): { value: PyValue; end: number } | null {
   let i = start;
   const skip = () => {
     for (;;) {
@@ -91,19 +86,7 @@ export function parsePyLiteral(
         i++;
         while (i < text.length && text[i] !== quote) {
           if (text[i] === "\n") return undefined;
-          if (text[i] === "\\" && i + 1 < text.length) {
-            i++;
-            const escaped = ESCAPES[text[i]!];
-            const hex = /^(?:u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2})/.exec(text.slice(i));
-            if (hex) {
-              out += String.fromCharCode(parseInt(hex[0].slice(1), 16));
-              i += hex[0].length;
-              continue;
-            }
-            out += escaped ?? text[i];
-            i++;
-            continue;
-          }
+          if (text[i] === "\\" && i + 1 < text.length) i++;
           out += text[i];
           i++;
         }

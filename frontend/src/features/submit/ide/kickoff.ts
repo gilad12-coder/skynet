@@ -66,21 +66,3 @@ export function kickoffFor(input: KickoffInput): Kickoff | null {
 export function kickoffKey(kickoff: Kickoff, repo: boolean): string {
   return `submit.v2.ide.agent.kickoff.${repo ? `repo_${kickoff}` : kickoff}`;
 }
-
-/**
- * Decide whether a running agent turn must stop because the reward builder opened.
- *
- * The full-screen builder covers the agent's panel, so the user can neither see
- * nor stop a turn that is still running. That turn would still write run.py
- * and metric.py, and replace the code or rewards the user is making.
- *
- * Args:
- *   auto: The agent's panel is in view (the reward builder does not cover it).
- *   busy: A turn is running.
- *
- * Returns:
- *   True when the running turn must stop.
- */
-export function stopsHiddenTurn(auto: boolean, busy: boolean): boolean {
-  return busy && !auto;
-}

@@ -7,7 +7,6 @@ const frontend = path.resolve(path.dirname(new URL(import.meta.url).pathname), "
 
 // node --test only loads .ts, so the reward .tsx render tests run in jiti children.
 for (const file of [
-  "src/shared/ui/reward/reward-builder.test.tsx",
   "src/shared/ui/reward/reward-preview.test.tsx",
   "src/features/optimizations/components/RewardTab.test.tsx",
 ]) {
