@@ -1781,3 +1781,160 @@ def test_a_failed_reference_run_leaves_a_swapped_test_set_unscored(env: _Env, mo
     env.sweep(_due(env) - timedelta(days=1))
     [cycle] = env.cycles()
     assert (cycle.status, cycle.detail_code, cycle.incumbent_score) == ("regressed", "continuous.review_unscored", None)
+
+
+def test_a_retry_that_new_data_grows_pays_for_its_extra_runs(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Runs a ``budget.pending`` retry adds on new inputs pass the allowance gate; the funded run does not again."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(
+        env,
+        source_id,
+        permitted={"data": True, "new_task_model": True},
+        monthly_limit_cents=CYCLE_BUDGET,
+        cycle_budget_cents=CYCLE_BUDGET,
+    )
+    pending_budgets: list[str] = []
+
+    def pending(payload: Any, **kwargs: Any) -> Any:
+        """Create the run's budget with setup charges, then refuse as setup usage awaits confirmation.
+
+        Args:
+            payload: The run's request.
+            **kwargs: Submission arguments, including the replay key.
+
+        Raises:
+            DomainError: Always, as ``budget.pending``.
+        """
+        budget_key = continuous.resolve_submission_replay_keys(
+            payload, username="alice", workflow=continuous.UNIFIED_WORKFLOW, supplied_key=kwargs["idempotency_key"]
+        ).budget
+        budget = BudgetService(engine=env.store.engine).create("alice", CYCLE_BUDGET, idempotency_key=budget_key)
+        pending_budgets.append(budget.id)
+        raise DomainError("budget.pending", status=409)
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", pending)
+    now = _due(env)
+    env.sweep(now)
+    [cycle] = env.cycles()
+    assert [run["kind"] for run in cycle.snapshot["runs"]] == ["model"]
+
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    env.sweep(now + continuous.CYCLE_LEASE + timedelta(seconds=1))
+
+    [retried] = env.cycles()
+    assert (retried.id, retried.status, retried.detail_code) == (cycle.id, "paused", "continuous.paused_allowance")
+    assert pending_budgets[0] in continuous.cycle_budget_ids(retried)
+
+
+def test_a_retry_gates_only_the_runs_it_has_no_budget_for(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With headroom for one more budget, a retry that adds one run starts both, its funded run included."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(
+        env,
+        source_id,
+        permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]},
+        cycle_budget_cents=CYCLE_BUDGET,
+    )
+    submit = continuous.submit_unified_payload
+
+    def pending(payload: Any, **kwargs: Any) -> Any:
+        """Create the run's budget, then refuse as setup usage awaits confirmation.
+
+        Args:
+            payload: The run's request.
+            **kwargs: Submission arguments, including the replay key.
+
+        Raises:
+            DomainError: Always, as ``budget.pending``.
+        """
+        budget_key = continuous.resolve_submission_replay_keys(
+            payload, username="alice", workflow=continuous.UNIFIED_WORKFLOW, supplied_key=kwargs["idempotency_key"]
+        ).budget
+        BudgetService(engine=env.store.engine).create("alice", CYCLE_BUDGET, idempotency_key=budget_key)
+        raise DomainError("budget.pending", status=409)
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", pending)
+    now = _due(env)
+    env.sweep(now)
+    [cycle] = env.cycles()
+    assert [run["kind"] for run in cycle.snapshot["runs"]] == ["model"]
+    with Session(env.store.engine) as session:
+        committed = continuous.month_committed(session, env.plan(), cycle.month)
+    env.edit_plan(monthly_limit_cents=committed + CYCLE_BUDGET)
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", submit)
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    env.sweep(now + continuous.CYCLE_LEASE + timedelta(seconds=1))
+
+    [retried] = env.cycles()
+    assert (retried.id, retried.status) == (cycle.id, "optimizing")
+    assert sorted(_runs(retried)) == ["data", "model"]
+
+
+def test_duplicate_new_rows_hold_out_as_many_copies_in_every_run(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The model-only run keeps only the held-out copies of a duplicated new row, as the data run does."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]})
+    env.rows = _cases(["A"] * 10) + [{"question": "Again?", "answer": "B"}] * 10
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    runs = _runs(cycle)
+    assert list(runs) == ["data", "model"]
+    held_out = {kind: continuous._test_keys(_payload(env, run_id)) for kind, run_id in runs.items()}
+    assert held_out["model"] == held_out["data"]
+
+
+def test_a_crashed_check_keeps_the_budget_of_a_run_refused_before_the_crash(
+    env: _Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recovery links the accepted run and still counts the budget a refused sibling was charged on."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    submit = continuous.submit_unified_payload
+    refused: list[str] = []
+
+    def refuse_the_model_run(payload: UnifiedRunRequest, **kwargs: Any) -> Any:
+        """Fund the model run's budget, then refuse it as a failed setup check would.
+
+        Args:
+            payload: The run's request.
+            **kwargs: Arguments for the real submit.
+
+        Returns:
+            The real submit's response for every other run.
+
+        Raises:
+            DomainError: For the model run, after its budget exists.
+        """
+        if payload.models.task_model.name != "fixture/strong":
+            return submit(payload, **kwargs)
+        key = continuous.resolve_submission_replay_keys(
+            payload,
+            username=kwargs["current_user"].username,
+            workflow=continuous.UNIFIED_WORKFLOW,
+            supplied_key=kwargs["idempotency_key"],
+        ).budget
+        refused.append(BudgetService(engine=env.store.engine).create("alice", 50, idempotency_key=key).id)
+        raise DomainError("submission.validation_failed", status=422)
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", refuse_the_model_run)
+    now = _due(env)
+    env.sweep(now)
+    [cycle] = env.cycles()
+    # The worker died after both submits but before recording them.
+    snapshot = {key: value for key, value in cycle.snapshot.items() if key != "refused_budgets"}
+    snapshot["runs"] = [{"kind": "data"}, {"kind": "model"}]
+    env.edit_cycle(cycle.id, status="checking", optimization_id=None, snapshot=snapshot, lease_until=now)
+
+    env.sweep(now + timedelta(seconds=1))
+
+    [recovered] = env.cycles()
+    assert (recovered.status, list(_runs(recovered))) == ("optimizing", ["data"])
+    assert refused[0] in continuous.cycle_budget_ids(recovered)

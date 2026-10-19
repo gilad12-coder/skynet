@@ -21,6 +21,19 @@ class SubmissionReplayKeys:
     synthesized: bool = False
 
 
+def explicit_budget_key(workflow: str, key: str) -> str:
+    """Return the budget creation key of a submission sent with an explicit idempotency key.
+
+    Args:
+        workflow: DSPy or Anything request family.
+        key: The caller's non-blank ``Idempotency-Key``.
+
+    Returns:
+        The budget creation key.
+    """
+    return "api:" + json_fingerprint({"workflow": workflow, "key": key})
+
+
 def resolve_submission_replay_keys(
     payload: BaseModel,
     *,
@@ -48,10 +61,7 @@ def resolve_submission_replay_keys(
     """
     explicit = (supplied_key or "").strip() or None
     if explicit is not None:
-        return SubmissionReplayKeys(
-            job=explicit,
-            budget="api:" + json_fingerprint({"workflow": workflow, "key": explicit}),
-        )
+        return SubmissionReplayKeys(job=explicit, budget=explicit_budget_key(workflow, explicit))
     if getattr(payload, "execution_budget_id", None) is not None:
         return SubmissionReplayKeys(job=None, budget=None)
     request_fingerprint = json_fingerprint(payload.model_dump(mode="json", by_alias=True))

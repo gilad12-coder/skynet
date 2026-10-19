@@ -39,7 +39,7 @@ from ..api.observability import advisory_lock
 from ..api.routers.billing import _byok_catalog_for_user
 from ..api.routers.connectors import connector_secret
 from ..api.routers.submissions import UNIFIED_WORKFLOW, rows_to_cases, submit_unified_payload
-from ..api.submission_idempotency import resolve_submission_replay_keys
+from ..api.submission_idempotency import explicit_budget_key, resolve_submission_replay_keys
 from ..billing import ProviderKeyVault
 from ..billing.budget_amounts import budget_wallet_hold
 from ..billing.budgets import BudgetError, BudgetService
@@ -627,8 +627,18 @@ def plan_runs(
         full = _split_keys(request, cases, earlier)
         searched_before = set(earlier.fit)
         model_pinned = PinnedSplit(test=full.test, fit=[key for key in full.fit if key in searched_before])
-        allowed = set(model_pinned.test) | searched_before
-        model_cases = [case for case in cases if case_key(case) in allowed]
+        # Counted per copy, the way ``_pinned_split`` reads the pins: keeping
+        # every copy of a duplicated new case would hold out more copies in
+        # the model run than in the data run.
+        test_left = Counter(full.test)
+        model_cases = []
+        for case in cases:
+            key = case_key(case)
+            if test_left[key] > 0:
+                test_left[key] -= 1
+                model_cases.append(case)
+            elif key in searched_before:
+                model_cases.append(case)
     else:
         full, model_pinned, model_cases = earlier, earlier, stored
     incumbent_task = _model_names(incumbent_payload.get("models") or {})["task_model"]
@@ -931,8 +941,21 @@ def process_cycle(
         except SourceError as error:
             _fail_cycle(session, plan, cycle, error.code, **error.params)
             return
-        # A retry after ``budget.pending`` already holds this check's budgets.
-        retrying = bool((cycle.snapshot or {}).get("runs"))
+        previous = cycle.snapshot or {}
+        # A retry after ``budget.pending`` holds a budget for each run it submitted;
+        # a run the stop at the first pending refusal never reached has none.
+        budgets = BudgetService(engine=engine)
+        funded = {
+            run["kind"]
+            for run in previous.get("runs") or []
+            if budgets.find_by_creation_key(
+                plan.username, explicit_budget_key(UNIFIED_WORKFLOW, _run_key(cycle.id, run["kind"]))
+            )
+            is not None
+        }
+        if previous.get("refused_budgets"):
+            # Those budgets exist and were charged for setup, so the allowance must keep counting them.
+            snapshot = {**snapshot, "refused_budgets": previous["refused_budgets"]}
         cycle.snapshot = snapshot
         changes = changed_dimensions(plan.baseline_snapshot or {}, snapshot)
         cycle.changes = changes
@@ -954,11 +977,11 @@ def process_cycle(
             reason = "; ".join(str(item.get("msg")) for item in error.errors())
             _fail_cycle(session, plan, cycle, "continuous.run_rejected", reason=reason)
             return
-        need = plan.cycle_budget_cents * len(runs)
+        # Gating a retry's funded runs again would demand a second set of budgets of
+        # headroom and pause a check that is covered; runs new inputs added still pay.
+        need = plan.cycle_budget_cents * sum(1 for run in runs if run.kind not in funded)
         gate = None
-        # Gating a retry again would demand a second set of check budgets of headroom
-        # and pause a check that is covered.
-        if not retrying:
+        if need:
             if (
                 plan.monthly_limit_cents is not None
                 and plan.monthly_limit_cents - month_committed(session, plan, cycle.month) < need
@@ -1034,7 +1057,14 @@ def _link_accepted(job_store: Any, session: Session, username: str, cycle: Conti
         linked.append({"kind": RUN_DATA, "optimization_id": legacy, "budget": job.get("execution_budget_id")})
     if not linked:
         return False
-    _record_started(session, cycle, linked, [])
+    accepted_kinds = {run["kind"] for run in linked}
+    budgets = BudgetService(engine=job_store.engine)
+    refused = [
+        budgets.find_by_creation_key(username, explicit_budget_key(UNIFIED_WORKFLOW, _run_key(cycle.id, run["kind"])))
+        for run in planned
+        if run["kind"] not in accepted_kinds
+    ]
+    _record_started(session, cycle, linked, [budget.id for budget in refused if budget is not None])
     return True
 
 
@@ -1049,6 +1079,13 @@ def _record_started(
         started: The started runs, each with its ``optimization_id`` and ``budget``.
         refused_budgets: Budgets created for runs whose submit was refused after setup was paid for.
     """
+    earlier = list((cycle.snapshot or {}).get("refused_budgets") or [])
+    started_budgets = {run["budget"] for run in started}
+    # A budget an earlier ``budget.pending`` attempt recorded is stale once its
+    # run started on the replayed key; one whose run was dropped still counts.
+    refused_budgets = [
+        budget_id for budget_id in dict.fromkeys(earlier + refused_budgets) if budget_id not in started_budgets
+    ]
     cycle.snapshot = {key: value for key, value in (cycle.snapshot or {}).items() if key != "refused_budgets"}
     cycle.snapshot["runs"] = started
     if refused_budgets:
@@ -1127,7 +1164,9 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
             logger.info("Continuous cycle %s started %d runs", cycle_id, len(started))
             return
         budgets = [BudgetService(engine=engine).find_by_creation_key(username, key) for key in budget_keys]
-        budget_ids = [budget.id for budget in budgets if budget is not None]
+        # An earlier attempt may have planned a run this one dropped; its budget still exists.
+        earlier = list((cycle.snapshot or {}).get("refused_budgets") or [])
+        budget_ids = list(dict.fromkeys(earlier + [budget.id for budget in budgets if budget is not None]))
         cycle.execution_budget_id = budget_ids[0] if budget_ids else None
         # Every refused run's setup check was charged to its own budget, and the
         # monthly allowance reads budgets, not ``spent_cents``, once one exists.
