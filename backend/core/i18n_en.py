@@ -95,6 +95,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "continuous.run_failed": "The run did not finish successfully ({reason}). The current version stays.",
     "continuous.review_unscored": "The run has no comparison score. The current version stays.",
     "continuous.review_not_held_out": "The comparison did not use separate test cases. The current version stays.",
+    "continuous.no_test_split": "A scheduled run needs separate test cases. Run again with a test split, then set up the schedule.",
     "continuous.review_regressed": "The new candidate did not beat the current version on the same cases. The current version stays.",
     "continuous.review_within_margin": "The new candidate scored higher, but by less than 1 point. The current version stays.",
     "continuous.check_stuck": "The check stopped {attempts} times before it finished, so it was closed. Later checks run as usual.",
