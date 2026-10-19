@@ -45,7 +45,7 @@ import { buildBlackboxTrajectoryContext } from "../lib/blackbox-trajectory";
 import { describeBlackboxArtifact } from "../lib/blackbox-artifact";
 import { buildVersions, versionForPrompt } from "../lib/blackbox-versions";
 import { VersionFeedback } from "./BlackboxFinalScores";
-import { HeldOutNotice } from "./RewardComparison";
+import { HeldOutNotice, RewardComparison, savedMetricCode } from "./RewardComparison";
 import { sideInfoFeedback, sideInfoNamedScores } from "@/shared/lib/blackbox-scores";
 import { RepoCandidateBrowser } from "./RepoCandidateBrowser";
 
@@ -471,7 +471,10 @@ function OverviewTabImpl({
 
       {bbResult && job.status === "success" && (
         <FadeIn delay={0.1}>
-          <HeldOutNotice splitCounts={bbResult.split_counts} />
+          <div className="space-y-2.5">
+            <HeldOutNotice splitCounts={bbResult.split_counts} />
+            <RewardComparison result={bbResult} metricCode={savedMetricCode(payload?.payload)} />
+          </div>
         </FadeIn>
       )}
 

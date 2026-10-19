@@ -27,7 +27,6 @@ import {
   Package,
   Cube,
   Coins,
-  Trophy,
 } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 
@@ -97,7 +96,6 @@ import { CodeTab } from "./CodeTab";
 import { ArtifactTab } from "./ArtifactTab";
 import { PairSelectionStrip } from "./PairSelectionStrip";
 import { OverviewTab } from "./OverviewTab";
-import { RewardTab, hasRewardTab } from "./RewardTab";
 import { RunLifecycleNotice } from "./RunLifecycleNotice";
 import { isBudgetPause } from "../lib/run-lifecycle";
 import { RunCostChip } from "./RunCostChip";
@@ -1165,7 +1163,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   // A remote-scorer black-box run has no code to show at all.
   const showCodeTab = (!jobIsBlackbox || !!metricCode) && levelShowsTab("code");
   const showConfigTab = levelShowsTab("config");
-  const showRewardTab = jobIsBlackbox && hasRewardTab(payload?.payload) && levelShowsTab("reward");
   // Usage reads the run's billing records, which only an authenticated viewer can fetch.
   const showUsageTab = !skipNetwork;
 
@@ -1528,7 +1525,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   ...(showBestVersionTab ? ["best"] : []),
                   ...(showDataTab ? ["data"] : []),
                   ...(showCodeTab ? ["code"] : []),
-                  ...(showRewardTab ? ["reward"] : []),
                   ...(showArtifactTab ? ["artifact"] : []),
                   ...(showLogsTab ? ["logs"] : []),
                   ...(showUsageTab ? ["usage"] : []),
@@ -1567,12 +1563,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 <TabsTrigger value="code" className={tabCls}>
                   <Code className="size-3.5" />
                   {msg("auto.app.optimizations.id.page.17")}
-                </TabsTrigger>
-              )}
-              {showRewardTab && (
-                <TabsTrigger value="reward" className={tabCls}>
-                  <Trophy className="size-3.5" />
-                  {msg("reward_tab.title")}
                 </TabsTrigger>
               )}
               {showArtifactTab && (
@@ -1679,15 +1669,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   metricCode={metricCode ?? ""}
                   workflowSpec={workflowSpec}
                   metricLabel={jobIsBlackbox ? msg("optimization.blackbox.scorer_code") : undefined}
-                />
-              </TabsContent>
-            )}
-
-            {showRewardTab && (
-              <TabsContent value="reward" className="mt-4">
-                <RewardTab
-                  payload={payload?.payload}
-                  result={job.status === "success" ? (job.blackbox_result ?? null) : null}
                 />
               </TabsContent>
             )}

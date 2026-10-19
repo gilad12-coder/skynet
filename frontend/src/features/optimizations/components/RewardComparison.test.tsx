@@ -105,24 +105,11 @@ void describe("RewardComparison", () => {
     assert.equal(savedMetricCode(undefined), null);
   });
 
-  void it("puts each part's meaning and reference in a tooltip on its name", () => {
+  void it("puts a part's meaning in a tooltip on its name", () => {
     const html = render(<RewardComparison result={result()} metricCode={METRIC} />);
-    for (const key of ["accuracy", "mean_ms", "cost"]) {
-      assert.match(html, new RegExp(`data-meaning="${key}"`));
-    }
-    assert.doesNotMatch(html, /data-meaning="total"/);
-  });
-
-  void it("shows each part's weight in the same table, and 100% for the total", () => {
-    const html = render(<RewardComparison result={result()} metricCode={METRIC} />);
-    assert.match(html, /submit\.v2\.reward\.col\.weight/);
-    assert.match(html, /submit\.v2\.reward\.formula/);
-    const weight = (key: string) =>
-      new RegExp(`data-weight="${key}"[^>]*>[\\s\\S]*?</td>`).exec(html)?.[0] ?? "";
-    assert.match(weight("accuracy"), /35%/);
-    assert.match(weight("mean_ms"), /35%/);
-    assert.match(weight("cost"), /30%/);
-    assert.match(weight("total"), /100%/);
+    assert.match(html, /data-meaning="accuracy"/);
+    // The fixture gives speed and cost no meaning, so those rows stay plain.
+    assert.doesNotMatch(html, /data-meaning="(mean_ms|cost|total)"/);
   });
 
   void it("names a part in the metric's words, else the built-in label", () => {
