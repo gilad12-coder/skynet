@@ -13,7 +13,7 @@ import { setClientLocale } from "@/shared/lib/runtime-locale";
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
 
-const { RewardPreview } = await import("./RewardPreview");
+const { RewardPreview } = await import("./reward-preview");
 
 export const GEOCODING_METRIC = `from skynet import reward
 

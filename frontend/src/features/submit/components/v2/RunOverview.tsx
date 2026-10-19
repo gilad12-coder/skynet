@@ -41,7 +41,7 @@ import type { WizardV2State } from "../../lib/wizard-v2";
 import { ModelRoleRow } from "../blackbox/ModelRoleRow";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { optimizerLabel } from "./OptimizerPicker";
-import { RewardPreview } from "./RewardPreview";
+import { RewardPreview } from "@/shared/ui/reward/reward-preview";
 
 const DASH = "—";
 const ICON = "size-3.5 shrink-0";
