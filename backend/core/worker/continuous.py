@@ -640,6 +640,9 @@ def process_cycle(
         budget = BudgetService(engine=engine).find_by_creation_key(plan_username, budget_key) if budget_key else None
         with Session(engine) as session, session.begin():
             cycle = session.get(ContinuousCycleModel, cycle_id)
+            if cycle is None:
+                # The owner deleted the plan while this check was submitting.
+                return
             plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
             cycle.execution_budget_id = budget.id if budget else None
             cycle.spent_cents = _billed_cents(job_store, cycle.execution_budget_id, plan_username)
@@ -659,6 +662,9 @@ def process_cycle(
     job = job_store.get_job(response.optimization_id, include_payload=False)
     with Session(engine) as session, session.begin():
         cycle = session.get(ContinuousCycleModel, cycle_id)
+        if cycle is None:
+            # The owner deleted the plan while this check was submitting; its run stays an ordinary run.
+            return
         cycle.optimization_id = response.optimization_id
         cycle.execution_budget_id = job.get("execution_budget_id")
         _finish_cycle(session, cycle, CYCLE_OPTIMIZING, "continuous.run_started", changes=",".join(cycle.changes))

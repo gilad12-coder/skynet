@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import calendar
+import logging
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -1017,6 +1018,39 @@ def test_a_waiting_plan_ends_with_a_failed_run(env: _Env) -> None:
     assert env.client.delete(f"/continuous/{plan['id']}").status_code == 204
     assert env.client.get(f"/optimizations/{optimization_id}/continuous").json() == {"plan": None, "eligible": False}
     assert env.client.delete(f"/continuous/{plan['id']}").status_code == 404
+
+
+def test_a_plan_deleted_while_its_check_submits_keeps_the_run(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A plan deleted mid-check leaves its run as an ordinary run and the check finishes quietly."""
+    source_id = _incumbent(env)
+    plan = _enable(env, source_id)
+    env.rows = _cases(["B"] * 10)
+    submit = continuous.submit_unified_payload
+    submitted: list[str] = []
+
+    def delete_then_submit(*args: Any, **kwargs: Any) -> Any:
+        """Delete the plan, then submit as usual.
+
+        Args:
+            *args: Forwarded to the real submit.
+            **kwargs: Forwarded to the real submit.
+
+        Returns:
+            The real submit's response.
+        """
+        assert env.client.delete(f"/continuous/{plan['id']}").status_code == 204
+        response = submit(*args, **kwargs)
+        submitted.append(response.optimization_id)
+        return response
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", delete_then_submit)
+    env.sweep(_due(env))
+
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert env.cycles() == []
+    assert env.store.get_job(submitted[0], include_payload=False)["optimization_id"] == submitted[0]
 
 
 def test_the_same_rows_in_another_order_start_no_run(env: _Env) -> None:
