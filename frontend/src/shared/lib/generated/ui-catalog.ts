@@ -5793,7 +5793,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "continuous_tab.schedule.label": "תדירות בדיקה",
   "continuous_tab.schedule.month_end": "בחודשים שאין בהם את היום הזה, הבדיקה תרוץ ביום האחרון של החודש.",
   "continuous_tab.schedule.next_checks": "הבדיקות הבאות",
-  "continuous_tab.schedule.preset.custom": "מותאם אישית",
+  "continuous_tab.schedule.preset.custom": "מותאם",
   "continuous_tab.schedule.preset.daily": "כל יום",
   "continuous_tab.schedule.preset.hourly": "כל שעה",
   "continuous_tab.schedule.preset.monthly": "כל חודש",

@@ -4228,7 +4228,7 @@
   "continuous_tab.schedule.preset.weekdays": "ימי עבודה",
   "continuous_tab.schedule.preset.weekly": "כל שבוע",
   "continuous_tab.schedule.preset.monthly": "כל חודש",
-  "continuous_tab.schedule.preset.custom": "מותאם אישית",
+  "continuous_tab.schedule.preset.custom": "מותאם",
   "continuous_tab.schedule.every": "חזרה כל",
   "continuous_tab.schedule.unit": "יחידה",
   "continuous_tab.schedule.unit.hourly": "שעות",
