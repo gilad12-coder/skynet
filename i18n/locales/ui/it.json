@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "La nuova versione è ora la versione attuale.",
   "continuous_tab.toast.rejected": "Hai rifiutato la nuova versione.",
   "continuous_tab.review.current": "Attuale",
-  "continuous_tab.review.new": "Nuovo"
+  "continuous_tab.review.new": "Nuovo",
+  "continuous_tab.walk.steps": "Passaggi di configurazione",
+  "continuous_tab.walk.refresh_hint": "Scegli cosa può cambiare un'esecuzione pianificata.",
+  "continuous_tab.walk.position": "Passaggio {n} di {total}",
+  "continuous_tab.walk.back": "Indietro",
+  "continuous_tab.walk.next": "Avanti",
+  "continuous_tab.walk.save": "Salva",
+  "continuous_tab.walk.start": "Avvia",
+  "submit.v2.schedule.title": "Esecuzione pianificata",
+  "submit.v2.schedule.hint": "Riesegui questa ottimizzazione secondo una pianificazione dopo il successo.",
+  "submit.v2.schedule.off": "Disattivata",
+  "submit.v2.schedule.failed": "L'esecuzione è partita, ma l'esecuzione pianificata non è stata salvata: {error}"
 }

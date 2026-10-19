@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "新版本现在是当前版本。",
   "continuous_tab.toast.rejected": "你拒绝了新版本。",
   "continuous_tab.review.current": "当前",
-  "continuous_tab.review.new": "新"
+  "continuous_tab.review.new": "新",
+  "continuous_tab.walk.steps": "设置步骤",
+  "continuous_tab.walk.refresh_hint": "选择计划运行可以更改的内容。",
+  "continuous_tab.walk.position": "第 {n} 步，共 {total} 步",
+  "continuous_tab.walk.back": "返回",
+  "continuous_tab.walk.next": "下一步",
+  "continuous_tab.walk.save": "保存",
+  "continuous_tab.walk.start": "开始",
+  "submit.v2.schedule.title": "计划运行",
+  "submit.v2.schedule.hint": "成功后按计划再次运行此优化。",
+  "submit.v2.schedule.off": "关闭",
+  "submit.v2.schedule.failed": "运行已开始，但计划运行未保存：{error}"
 }

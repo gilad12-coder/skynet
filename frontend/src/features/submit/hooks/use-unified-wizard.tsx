@@ -35,9 +35,11 @@ import {
   isStorageQuotaError,
   submitRepoRun,
   submitUnifiedRun,
+  enableContinuous,
 } from "@/shared/lib/api";
 import { contractCheckMessage } from "@/shared/lib/i18n";
-import { msg, type MessageKey } from "@/shared/lib/messages";
+import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
+import type { ContinuousEnableRequest } from "@/shared/types/continuous";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { getActiveMessages } from "@/shared/lib/runtime-messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
@@ -350,6 +352,7 @@ export function WizardV2Provider({
   );
 
   const [submitPhase, setSubmitPhase] = useState<SubmitPhase>("idle");
+  const [scheduledRun, setScheduledRun] = useState<ContinuousEnableRequest | null>(null);
   const [advancing, setAdvancing] = useState(false);
   const [runFailure, setRunFailure] = useState<RunFailure | null>(null);
   const busy = advancing || submitPhase !== "idle";
@@ -657,6 +660,16 @@ export function WizardV2Provider({
         optimizer: request.optimizer.choice,
         optimizer_resolved: resolvedOptimizer,
       });
+      if (scheduledRun) {
+        // The plan waits for the run to succeed. A refused plan never holds back the run itself.
+        await enableContinuous(result.optimization_id, scheduledRun).catch((err: unknown) => {
+          toast.error(
+            formatMsg("submit.v2.schedule.failed", {
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        });
+      }
       await openSubmitted(result.optimization_id);
     } catch (err) {
       submitFailed(err);
@@ -959,6 +972,8 @@ export function WizardV2Provider({
     ensureBudget,
     submit,
     submitting: submitPhase !== "idle",
+    scheduledRun,
+    setScheduledRun,
     runFloor,
     costSettled,
     tokenSource,

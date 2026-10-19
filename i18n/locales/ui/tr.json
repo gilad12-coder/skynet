@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "Yeni sürüm artık geçerli sürüm.",
   "continuous_tab.toast.rejected": "Yeni sürümü reddettiniz.",
   "continuous_tab.review.current": "Mevcut",
-  "continuous_tab.review.new": "Yeni"
+  "continuous_tab.review.new": "Yeni",
+  "continuous_tab.walk.steps": "Kurulum adımları",
+  "continuous_tab.walk.refresh_hint": "Zamanlanmış çalıştırmanın neyi değiştirebileceğini seçin.",
+  "continuous_tab.walk.position": "Adım {n} / {total}",
+  "continuous_tab.walk.back": "Geri",
+  "continuous_tab.walk.next": "İleri",
+  "continuous_tab.walk.save": "Kaydet",
+  "continuous_tab.walk.start": "Başlat",
+  "submit.v2.schedule.title": "Zamanlanmış çalıştırma",
+  "submit.v2.schedule.hint": "Bu optimizasyonu başarılı olduktan sonra bir zamanlamayla yeniden çalıştırın.",
+  "submit.v2.schedule.off": "Kapalı",
+  "submit.v2.schedule.failed": "Çalıştırma başladı, ancak zamanlanmış çalıştırma kaydedilmedi: {error}"
 }

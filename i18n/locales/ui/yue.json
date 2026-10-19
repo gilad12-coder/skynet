@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "新版本而家係目前版本。",
   "continuous_tab.toast.rejected": "你拒絕咗新版本。",
   "continuous_tab.review.current": "目前",
-  "continuous_tab.review.new": "新"
+  "continuous_tab.review.new": "新",
+  "continuous_tab.walk.steps": "設定步驟",
+  "continuous_tab.walk.refresh_hint": "揀選排程執行可以改邊啲嘢。",
+  "continuous_tab.walk.position": "第 {n} 步，共 {total} 步",
+  "continuous_tab.walk.back": "返回",
+  "continuous_tab.walk.next": "下一步",
+  "continuous_tab.walk.save": "儲存",
+  "continuous_tab.walk.start": "開始",
+  "submit.v2.schedule.title": "排程執行",
+  "submit.v2.schedule.hint": "成功之後，按排程再執行呢個最佳化。",
+  "submit.v2.schedule.off": "關閉",
+  "submit.v2.schedule.failed": "執行已經開始，但排程執行未儲存：{error}"
 }

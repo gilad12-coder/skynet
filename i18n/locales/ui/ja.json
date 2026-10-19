@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "新しいバージョンが現在のバージョンになりました。",
   "continuous_tab.toast.rejected": "新しいバージョンを却下しました。",
   "continuous_tab.review.current": "現在",
-  "continuous_tab.review.new": "新規"
+  "continuous_tab.review.new": "新規",
+  "continuous_tab.walk.steps": "設定の手順",
+  "continuous_tab.walk.refresh_hint": "スケジュール実行で変更できる項目を選びます。",
+  "continuous_tab.walk.position": "ステップ {n} / {total}",
+  "continuous_tab.walk.back": "戻る",
+  "continuous_tab.walk.next": "次へ",
+  "continuous_tab.walk.save": "保存",
+  "continuous_tab.walk.start": "開始",
+  "submit.v2.schedule.title": "スケジュール実行",
+  "submit.v2.schedule.hint": "成功後、この最適化をスケジュールに沿って再実行します。",
+  "submit.v2.schedule.off": "オフ",
+  "submit.v2.schedule.failed": "実行は開始しましたが、スケジュール実行は保存されませんでした: {error}"
 }

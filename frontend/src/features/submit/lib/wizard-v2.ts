@@ -14,6 +14,7 @@ import type {
 } from "@/shared/types/api";
 import type { ExperienceLevel } from "@/features/experience";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
+import type { ContinuousEnableRequest } from "@/shared/types/continuous";
 import {
   optimizersFor,
   resolveOptimizer,
@@ -634,6 +635,9 @@ export interface WizardV2Context {
   ensureBudget(): Promise<ExecutionBudget>;
   submit(): Promise<void>;
   submitting: boolean;
+  /** The scheduled run set up on the last metric screen; it starts with the run. */
+  scheduledRun: ContinuousEnableRequest | null;
+  setScheduledRun(next: ContinuousEnableRequest | null): void;
   // TotalBudgetCard BudgetContext fields.
   /** The least the spending limit can be; null until the server's box hold loads. */
   runFloor: RunFloor | null;

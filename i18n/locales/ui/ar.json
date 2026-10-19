@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "الإصدار الجديد هو الآن الإصدار الحالي.",
   "continuous_tab.toast.rejected": "لقد رفضت الإصدار الجديد.",
   "continuous_tab.review.current": "الحالية",
-  "continuous_tab.review.new": "الجديدة"
+  "continuous_tab.review.new": "الجديدة",
+  "continuous_tab.walk.steps": "خطوات الإعداد",
+  "continuous_tab.walk.refresh_hint": "اختر ما يمكن للتشغيل المجدول تغييره.",
+  "continuous_tab.walk.position": "الخطوة {n} من {total}",
+  "continuous_tab.walk.back": "رجوع",
+  "continuous_tab.walk.next": "التالي",
+  "continuous_tab.walk.save": "حفظ",
+  "continuous_tab.walk.start": "تشغيل",
+  "submit.v2.schedule.title": "تشغيل مجدول",
+  "submit.v2.schedule.hint": "شغّل هذا التحسين مرة أخرى وفق جدول بعد نجاحه.",
+  "submit.v2.schedule.off": "متوقف",
+  "submit.v2.schedule.failed": "بدأ التشغيل، لكن لم يُحفظ التشغيل المجدول: {error}"
 }

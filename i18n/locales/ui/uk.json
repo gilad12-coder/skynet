@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "Нова версія тепер поточна.",
   "continuous_tab.toast.rejected": "Ви відхилили нову версію.",
   "continuous_tab.review.current": "Поточна",
-  "continuous_tab.review.new": "Нова"
+  "continuous_tab.review.new": "Нова",
+  "continuous_tab.walk.steps": "Кроки налаштування",
+  "continuous_tab.walk.refresh_hint": "Виберіть, що може змінити запуск за розкладом.",
+  "continuous_tab.walk.position": "Крок {n} з {total}",
+  "continuous_tab.walk.back": "Назад",
+  "continuous_tab.walk.next": "Далі",
+  "continuous_tab.walk.save": "Зберегти",
+  "continuous_tab.walk.start": "Запустити",
+  "submit.v2.schedule.title": "Запуск за розкладом",
+  "submit.v2.schedule.hint": "Повторюйте цю оптимізацію за розкладом після успішного завершення.",
+  "submit.v2.schedule.off": "Вимк.",
+  "submit.v2.schedule.failed": "Запуск почався, але запуск за розкладом не збережено: {error}"
 }

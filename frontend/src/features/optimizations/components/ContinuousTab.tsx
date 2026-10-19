@@ -62,6 +62,7 @@ import {
 } from "../lib/continuous";
 import { browserTimeZone, defaultRule, scheduleProblem } from "../lib/continuous-schedule";
 import { ScheduleEditor, describeSchedule, formatCheck } from "./ScheduleEditor";
+import { ScheduledRunSetup } from "./ScheduledRunSetup";
 
 const STATUS_KEYS: Record<ContinuousCycle["status"], MessageKey> = {
   checking: "continuous_tab.cycle.checking",
@@ -226,9 +227,11 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
             />
           </div>
           {turnedOn && (
-            <EnableForm
+            <ScheduledRunSetup
               busy={busy}
-              onEnable={(body) =>
+              idPrefix="continuous-schedule"
+              finishLabel="continuous_tab.walk.start"
+              onFinish={(body) =>
                 act(() => enableContinuous(optimizationId, body), "continuous_tab.toast.enabled")
               }
             />
@@ -269,120 +272,6 @@ function StatusLabel({
 function SectionTitle({ children }: { children: React.ReactNode }) {
   // The global h3 size is unlayered and outranks a plain utility, so the size is forced here.
   return <h3 className="text-sm! leading-6! font-semibold">{children}</h3>;
-}
-
-function FieldBlock({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="min-w-0 space-y-3">
-      <SectionTitle>{title}</SectionTitle>
-      {children}
-    </div>
-  );
-}
-
-function EnableForm({
-  busy,
-  onEnable,
-}: {
-  busy: boolean;
-  onEnable: (body: Parameters<typeof enableContinuous>[1]) => void;
-}) {
-  const { connectors } = useConnectors();
-  const connected = connectors.filter((c) => c.connected);
-  const [schedule, setSchedule] = useState<ScheduleRule>(() => defaultRule(browserTimeZone()));
-  const [refreshKind, setRefreshKind] = useState<keyof ContinuousPermitted>("data");
-  const permitted: ContinuousPermitted = {
-    data: refreshKind === "data",
-    models: refreshKind === "models",
-    optimizers: refreshKind === "optimizers",
-  };
-  const [provider, setProvider] = useState<string>("");
-  const [sourceDraft, setSourceDraft] = useState("");
-  // The location counts only when the user leaves the field, so a half-typed path never starts a run.
-  const [sourceRef, setSourceRef] = useState("");
-  const chosenProvider = provider || connected[0]?.provider || "";
-  // The settings last sent. A failed start retries only once the user changes one, never in a loop.
-  const sentKey = useRef<string | null>(null);
-  const formKey = JSON.stringify([schedule, refreshKind, chosenProvider, sourceRef]);
-  const problem =
-    scheduleProblem(schedule) ??
-    enableProblem({
-      permitted,
-      sourceRef: chosenProvider ? sourceRef : "",
-    });
-
-  useEffect(() => {
-    if (problem != null || busy || sentKey.current === formKey) return;
-    sentKey.current = formKey;
-    onEnable({
-      schedule,
-      permitted,
-      source: permitted.data && chosenProvider ? { provider: chosenProvider, ref: sourceRef } : null,
-    });
-    // Only a newly complete form starts the plan; the values are read at that moment.
-  }, [problem, busy, formKey]);
-
-  return (
-    <div className="grid gap-8 px-5 pt-5 pb-6 sm:px-6 sm:pt-6 xl:grid-cols-[17rem_minmax(0,36rem)] xl:gap-10">
-      <div className="space-y-6 xl:max-w-none max-w-xl">
-        <FieldBlock title={msg("continuous_tab.permit.label")}>
-          <Select
-            value={refreshKind}
-            onValueChange={(value) => setRefreshKind(value as keyof ContinuousPermitted)}
-          >
-            <SelectTrigger className="w-full" aria-label={msg("continuous_tab.permit.label")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(["data", "models", "optimizers"] as const).map((key) => (
-                <SelectItem key={key} value={key}>
-                  {msg(CHANGE_KEYS[key]!)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </FieldBlock>
-
-        {permitted.data && (
-          <FieldBlock title={msg("continuous_tab.source.label")}>
-            {connected.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{msg("continuous_tab.source.none")}</p>
-            ) : (
-              <div className="flex flex-col gap-2">
-                <Select value={chosenProvider} onValueChange={setProvider}>
-                  <SelectTrigger className="w-full" aria-label={msg("continuous_tab.source.provider")}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {connected.map((c) => (
-                      <SelectItem key={c.provider} value={c.provider}>
-                        {providerMeta(c.provider as ConnectorProvider).name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input
-                  dir="ltr"
-                  value={sourceDraft}
-                  onChange={(e) => setSourceDraft(e.target.value)}
-                  onBlur={() => setSourceRef(sourceDraft.trim())}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") setSourceRef(sourceDraft.trim());
-                  }}
-                  placeholder={msg("continuous_tab.source.ref_placeholder")}
-                  aria-label={msg("continuous_tab.source.ref")}
-                />
-              </div>
-            )}
-          </FieldBlock>
-        )}
-      </div>
-
-      <FieldBlock title={msg("continuous_tab.schedule.label")}>
-        <ScheduleEditor value={schedule} onChange={setSchedule} idPrefix="continuous-schedule" />
-      </FieldBlock>
-    </div>
-  );
 }
 
 function PlanView({

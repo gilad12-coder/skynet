@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "הגרסה החדשה היא עכשיו הגרסה הנוכחית.",
   "continuous_tab.toast.rejected": "דחית את הגרסה החדשה.",
   "continuous_tab.review.current": "נוכחית",
-  "continuous_tab.review.new": "חדשה"
+  "continuous_tab.review.new": "חדשה",
+  "continuous_tab.walk.steps": "שלבי ההגדרה",
+  "continuous_tab.walk.refresh_hint": "בחרו מה ריצה מתוזמנת רשאית לשנות.",
+  "continuous_tab.walk.position": "שלב {n} מתוך {total}",
+  "continuous_tab.walk.back": "חזרה",
+  "continuous_tab.walk.next": "הבא",
+  "continuous_tab.walk.save": "שמירה",
+  "continuous_tab.walk.start": "הפעלה",
+  "submit.v2.schedule.title": "ריצה מתוזמנת",
+  "submit.v2.schedule.hint": "הריצו את האופטימיזציה הזו שוב לפי לוח זמנים אחרי שהיא מצליחה.",
+  "submit.v2.schedule.off": "כבויה",
+  "submit.v2.schedule.failed": "הריצה התחילה, אבל הריצה המתוזמנת לא נשמרה: {error}"
 }

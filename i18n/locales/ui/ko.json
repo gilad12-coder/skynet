@@ -4283,5 +4283,16 @@
   "continuous_tab.toast.approved": "새 버전이 이제 현재 버전입니다.",
   "continuous_tab.toast.rejected": "새 버전을 거부했습니다.",
   "continuous_tab.review.current": "현재",
-  "continuous_tab.review.new": "새 후보"
+  "continuous_tab.review.new": "새 후보",
+  "continuous_tab.walk.steps": "설정 단계",
+  "continuous_tab.walk.refresh_hint": "예약 실행이 변경할 수 있는 항목을 선택하세요.",
+  "continuous_tab.walk.position": "{total}단계 중 {n}단계",
+  "continuous_tab.walk.back": "뒤로",
+  "continuous_tab.walk.next": "다음",
+  "continuous_tab.walk.save": "저장",
+  "continuous_tab.walk.start": "시작",
+  "submit.v2.schedule.title": "예약 실행",
+  "submit.v2.schedule.hint": "성공 후 이 최적화를 일정에 따라 다시 실행합니다.",
+  "submit.v2.schedule.off": "꺼짐",
+  "submit.v2.schedule.failed": "실행은 시작되었지만 예약 실행은 저장되지 않았습니다: {error}"
 }
