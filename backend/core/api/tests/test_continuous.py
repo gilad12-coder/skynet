@@ -1562,3 +1562,54 @@ def test_the_allowance_gate_counts_every_run_of_a_check(env: _Env, monkeypatch: 
     [cycle] = env.cycles()
     assert (cycle.status, cycle.detail_code) == ("paused", "continuous.paused_allowance")
     assert env.plan().pause_reason == "allowance"
+
+
+def test_a_byok_run_rates_its_models_by_their_hosted_twins(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """BYOK registry entries carry no rating, so the hosted catalog's rating for the same model decides."""
+    hosted = [
+        CatalogModel(value="openrouter/acme/fast-1.5", label="fast", provider="openrouter", intelligence_index=40.0),
+        CatalogModel(value="openrouter/acme/deep-2.0", label="deep", provider="openrouter", intelligence_index=60.0),
+    ]
+    byok = [
+        CatalogModel(
+            value=value,
+            label=value,
+            provider="acme",
+            available=True,
+            byok_provider="acme",
+            input_cost_per_token=1e-6,
+            output_cost_per_token=1e-6,
+        )
+        for value in ("acme/fast-1-5", "acme/deep-2-0-20260901", "acme/unrated")
+    ]
+    monkeypatch.setattr(continuous, "get_catalog_cached", lambda: ModelCatalogResponse(providers=[], models=hosted))
+    monkeypatch.setattr(
+        continuous, "_byok_catalog_for_user", lambda vault, username: ModelCatalogResponse(providers=[], models=byok)
+    )
+
+    better = continuous.better_model(env.store, "alice", {"name": "acme/fast-1-5", "token_source": "byok"})
+
+    assert better == {"name": "acme/deep-2-0-20260901", "byok_provider": "acme"}
+
+
+def test_approving_a_better_model_drops_an_older_staged_task_model(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A task model staged before the switch must not undo the approved better model on the next check."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    _, plan = _new_models_plan(env, models=True, new_task_model=True)
+    staged = env.client.post(f"/continuous/{plan['id']}/inputs", json={"task_model": "fixture/task"})
+    assert staged.status_code == 200, staged.text
+
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    assert cycle.changes == ["new_model"]
+    _finish(env, cycle.optimization_id, result=_result(0.8, 0.8))
+    env.sweep(_due(env) - timedelta(days=1))
+    [cycle] = env.cycles()
+    assert cycle.status == "awaiting_review"
+    approved = env.client.post(f"/continuous/{plan['id']}/cycles/{cycle.id}/approve")
+    assert approved.status_code == 200, approved.text
+
+    jobs = env.count(JobModel)
+    env.sweep(_due(env))
+    assert env.cycles()[-1].detail_code == "continuous.skip_unchanged"
+    assert env.count(JobModel) == jobs

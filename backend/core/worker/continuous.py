@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from ..api.auth import AuthenticatedUser
 from ..api.errors import DomainError
-from ..api.model_catalog import CatalogModel, get_catalog_cached
+from ..api.model_catalog import CatalogModel, _reasoning_match_key, get_catalog_cached
 from ..api.observability import advisory_lock
 from ..api.routers.billing import _byok_catalog_for_user
 from ..api.routers.connectors import connector_secret
@@ -308,7 +308,22 @@ def better_model(job_store: Any, username: str, current: dict[str, Any]) -> dict
     if current.get("base_url"):
         return None
     if current.get("token_source") == "byok":
-        models = _byok_catalog_for_user(ProviderKeyVault(engine=job_store.engine), username).models
+        # The BYOK registry carries no ratings, so each model borrows the
+        # rating of its hosted twin (same id, or the same model under another
+        # provider's spelling).
+        ratings: dict[str, float] = {}
+        for hosted in get_catalog_cached().models:
+            if hosted.intelligence_index is not None:
+                ratings.setdefault(hosted.value, hosted.intelligence_index)
+                ratings.setdefault(_reasoning_match_key(hosted.value), hosted.intelligence_index)
+        models = [
+            model
+            if model.intelligence_index is not None
+            else model.model_copy(
+                update={"intelligence_index": ratings.get(model.value, ratings.get(_reasoning_match_key(model.value)))}
+            )
+            for model in _byok_catalog_for_user(ProviderKeyVault(engine=job_store.engine), username).models
+        ]
     else:
         models = [model for model in get_catalog_cached().models if model.available]
     now = next((model for model in models if model.value == current.get("name")), None)
