@@ -876,3 +876,26 @@ def test_a_plan_without_amounts_reuses_the_run_budget_and_has_no_monthly_limit(e
         _finish(env, cycle.optimization_id, result=_result(0.7, 0.6))
         env.sweep(datetime.now(UTC))
     assert env.plan().status == "active"
+
+
+def test_a_plan_set_up_while_the_run_works_waits_for_its_success(env: _Env) -> None:
+    """A plan made from the submit wizard waits, then starts when the run succeeds."""
+    optimization_id = env.client.post("/optimize", json=_incumbent_payload()).json()["optimization_id"]
+    plan = _enable(env, optimization_id, monthly_limit_cents=None, cycle_budget_cents=None)
+    assert (plan["status"], plan["next_check_at"]) == ("waiting", None)
+    assert env.client.post(f"/continuous/{plan['id']}/pause").status_code == 409
+    assert env.sweep(datetime.now(UTC) + timedelta(days=30)) == []
+
+    _finish(env, optimization_id, result=_result(0.5, 0.7))
+    started = env.client.get(f"/optimizations/{optimization_id}/continuous").json()["plan"]
+    assert started["status"] == "active"
+    assert started["next_check_at"] is not None
+
+
+def test_a_waiting_plan_ends_with_a_failed_run(env: _Env) -> None:
+    """A waiting plan is dropped when its run fails, so the run never shows a dead plan."""
+    optimization_id = env.client.post("/optimize", json=_incumbent_payload()).json()["optimization_id"]
+    _enable(env, optimization_id, permitted={"models": True}, source=None)
+    _finish(env, optimization_id, status="failed")
+    env.sweep(datetime.now(UTC))
+    assert env.client.get(f"/optimizations/{optimization_id}/continuous").json() == {"plan": None, "eligible": False}
