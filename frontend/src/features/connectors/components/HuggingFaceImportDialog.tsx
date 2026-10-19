@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   CaretRight,
+  Check,
   CircleNotch,
   DownloadSimple,
   Lock,
@@ -57,7 +58,12 @@ export interface HuggingFaceImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Called with the library record once the split has been saved (or deduplicated). */
-  onImported: (dataset: DatasetSummary) => void;
+  onImported?: (dataset: DatasetSummary) => void;
+  /**
+   * Choose the split instead of importing it: the dialog hands back the
+   * ``repo_id/config/split`` ref and a name, and saves nothing to the library.
+   */
+  onPick?: (ref: string, name: string) => void;
 }
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -84,6 +90,7 @@ export function HuggingFaceImportDialog({
   open,
   onOpenChange,
   onImported,
+  onPick,
 }: HuggingFaceImportDialogProps) {
   const { huggingFace, loading: connectorsLoading } = useConnectors(open);
   const settingsModal = useSettingsModal();
@@ -218,6 +225,11 @@ export function HuggingFaceImportDialog({
 
   const handleImport = async () => {
     if (!repoId || !selectedSplit || importing) return;
+    if (onPick) {
+      onPick(`${repoId}/${selectedSplit.config}/${selectedSplit.split}`, name.trim() || repoId);
+      onOpenChange(false);
+      return;
+    }
     setImporting(true);
     try {
       const res = await importHuggingFaceDataset({
@@ -229,7 +241,7 @@ export function HuggingFaceImportDialog({
       toast.success(
         res.deduplicated ? msg("hf_import.toast.deduplicated") : msg("hf_import.toast.imported"),
       );
-      onImported(res.dataset);
+      onImported?.(res.dataset);
       onOpenChange(false);
     } catch (err) {
       if (!isStorageQuotaError(err)) {
@@ -439,18 +451,20 @@ export function HuggingFaceImportDialog({
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="flex flex-col gap-1.5">
-                      <Label htmlFor="hf-name" className="text-xs">
-                        {msg("hf_import.name_label")}
-                      </Label>
-                      <Input
-                        id="hf-name"
-                        dir="ltr"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        className={TOUCH_FIELD}
-                      />
-                    </div>
+                    {!onPick && (
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor="hf-name" className="text-xs">
+                          {msg("hf_import.name_label")}
+                        </Label>
+                        <Input
+                          id="hf-name"
+                          dir="ltr"
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                          className={TOUCH_FIELD}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex flex-col gap-1.5">
@@ -488,10 +502,14 @@ export function HuggingFaceImportDialog({
                       className="animate-spin motion-reduce:animate-none"
                       aria-hidden="true"
                     />
+                  ) : onPick ? (
+                    <Check className="size-4" />
                   ) : (
                     <DownloadSimple className="size-4" />
                   )}
-                  {importing ? msg("hf_import.importing") : msg("hf_import.import")}
+                  {importing
+                    ? msg("hf_import.importing")
+                    : msg(onPick ? "connector_import.use_source" : "hf_import.import")}
                 </Button>
               </DialogFooter>
             )}

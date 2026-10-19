@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ArrowSquareOut,
   CaretRight,
+  Check,
   CircleNotch,
   DotsThree,
   DownloadSimple,
@@ -59,7 +60,12 @@ export interface ConnectorImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Called with the library record once the file has been saved (or deduplicated). */
-  onImported: (dataset: DatasetSummary) => void;
+  onImported?: (dataset: DatasetSummary) => void;
+  /**
+   * Choose the file instead of importing it: the dialog hands back its ref
+   * and name, and saves nothing to the library.
+   */
+  onPick?: (ref: string, name: string) => void;
 }
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -129,6 +135,7 @@ export function ConnectorImportDialog({
   open,
   onOpenChange,
   onImported,
+  onPick,
 }: ConnectorImportDialogProps) {
   const meta = providerMeta(provider);
   const { openTo } = useSettingsModal();
@@ -384,6 +391,11 @@ export function ConnectorImportDialog({
 
   const handleImport = async () => {
     if (!selected || importing) return;
+    if (onPick) {
+      onPick(selected.ref, selected.name);
+      onOpenChange(false);
+      return;
+    }
     setImporting(true);
     try {
       const res = await importConnectorRef(provider, selected.ref, name.trim() || undefined);
@@ -392,7 +404,7 @@ export function ConnectorImportDialog({
           ? msg("connector_import.toast.deduplicated")
           : msg("connector_import.toast.imported"),
       );
-      onImported(res.dataset);
+      onImported?.(res.dataset);
       onOpenChange(false);
     } catch (err) {
       if (!isStorageQuotaError(err)) {
@@ -649,18 +661,20 @@ export function ConnectorImportDialog({
                 </span>
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="connector-import-name" className="text-xs">
-                  {msg("connector_import.name_label")}
-                </Label>
-                <Input
-                  id="connector-import-name"
-                  dir="ltr"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className={TOUCH_FIELD}
-                />
-              </div>
+              {!onPick && (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="connector-import-name" className="text-xs">
+                    {msg("connector_import.name_label")}
+                  </Label>
+                  <Input
+                    id="connector-import-name"
+                    dir="ltr"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className={TOUCH_FIELD}
+                  />
+                </div>
+              )}
 
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between gap-2">
@@ -696,10 +710,14 @@ export function ConnectorImportDialog({
                     className="animate-spin motion-reduce:animate-none"
                     aria-hidden="true"
                   />
+                ) : onPick ? (
+                  <Check className="size-4" />
                 ) : (
                   <DownloadSimple className="size-4" />
                 )}
-                {importing ? msg("connector_import.importing") : msg("connector_import.import")}
+                {importing
+                  ? msg("connector_import.importing")
+                  : msg(onPick ? "connector_import.use_source" : "connector_import.import")}
               </Button>
             </DialogFooter>
           </div>

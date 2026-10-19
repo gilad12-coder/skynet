@@ -4,7 +4,6 @@ import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
-import { Input } from "@/shared/ui/primitives/input";
 import {
   Select,
   SelectContent,
@@ -13,8 +12,7 @@ import {
   SelectValue,
 } from "@/shared/ui/primitives/select";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
-import type { ConnectorProvider } from "@/shared/lib/api";
-import { providerMeta, useConnectors } from "@/features/connectors";
+import { ConnectorSourcePicker, type ConnectorSource } from "@/features/connectors";
 import type {
   ContinuousEnableRequest,
   ContinuousPermitted,
@@ -43,8 +41,7 @@ const REFRESH_KEYS: Record<RefreshKind, MessageKey> = {
 /** The request a finished walk sends; only a data refresh carries a source. */
 function requestFor(
   kind: RefreshKind,
-  provider: string,
-  sourceRef: string,
+  source: ConnectorSource | null,
   schedule: ScheduleRule,
 ): ContinuousEnableRequest {
   const permitted: ContinuousPermitted = {
@@ -55,7 +52,7 @@ function requestFor(
   return {
     schedule,
     permitted,
-    source: permitted.data && provider ? { provider, ref: sourceRef.trim() } : null,
+    source: permitted.data && source ? { provider: source.provider, ref: source.ref } : null,
   };
 }
 
@@ -74,26 +71,23 @@ export function ScheduledRunSetup({
   onFinish: (body: ContinuousEnableRequest) => void;
   idPrefix: string;
 }) {
-  const { connectors } = useConnectors();
-  const connected = connectors.filter((c) => c.connected);
   const [kind, setKind] = useState<RefreshKind>("data");
-  const [provider, setProvider] = useState("");
-  const [sourceRef, setSourceRef] = useState("");
+  const [source, setSource] = useState<ConnectorSource | null>(null);
   const [schedule, setSchedule] = useState<ScheduleRule>(() => defaultRule(browserTimeZone()));
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState(1);
   const reduceMotion = useReducedMotion();
 
-  const steps: WalkStep[] = kind === "data" ? ["refresh", "source", "schedule"] : ["refresh", "schedule"];
+  const steps: WalkStep[] =
+    kind === "data" ? ["refresh", "source", "schedule"] : ["refresh", "schedule"];
   const at = Math.min(index, steps.length - 1);
   const step = steps[at]!;
   const last = at === steps.length - 1;
-  const chosenProvider = provider || connected[0]?.provider || "";
-  const body = requestFor(kind, chosenProvider, sourceRef, schedule);
+  const body = requestFor(kind, source, schedule);
 
   const stepProblem =
     step === "source"
-      ? enableProblem({ permitted: body.permitted, sourceRef: chosenProvider ? sourceRef : "" })
+      ? enableProblem({ permitted: body.permitted, sourceRef: source?.ref ?? "" })
       : step === "schedule"
         ? scheduleProblem(schedule)
         : null;
@@ -114,7 +108,10 @@ export function ScheduledRunSetup({
 
   return (
     <div className="flex flex-col gap-6 px-5 pt-5 pb-6 sm:px-6 sm:pt-6">
-      <ol className="flex flex-wrap items-center gap-2" aria-label={msg("continuous_tab.walk.steps")}>
+      <ol
+        className="flex flex-wrap items-center gap-2"
+        aria-label={msg("continuous_tab.walk.steps")}
+      >
         {steps.map((s, i) => {
           const done = i < at;
           const current = i === at;
@@ -170,7 +167,9 @@ export function ScheduledRunSetup({
           >
             {step === "refresh" && (
               <div className="max-w-sm space-y-2">
-                <p className="text-sm text-muted-foreground">{msg("continuous_tab.walk.refresh_hint")}</p>
+                <p className="text-sm text-muted-foreground">
+                  {msg("continuous_tab.walk.refresh_hint")}
+                </p>
                 <Select value={kind} onValueChange={(v) => setKind(v as RefreshKind)}>
                   <SelectTrigger className="w-full" aria-label={msg("continuous_tab.permit.label")}>
                     <SelectValue />
@@ -186,36 +185,14 @@ export function ScheduledRunSetup({
               </div>
             )}
 
-            {step === "source" &&
-              (connected.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{msg("continuous_tab.source.none")}</p>
-              ) : (
-                <div className="grid max-w-xl gap-2 sm:grid-cols-[12rem_minmax(0,1fr)]">
-                  <Select value={chosenProvider} onValueChange={setProvider}>
-                    <SelectTrigger className="w-full" aria-label={msg("continuous_tab.source.provider")}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {connected.map((c) => (
-                        <SelectItem key={c.provider} value={c.provider}>
-                          {providerMeta(c.provider as ConnectorProvider).name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    dir="ltr"
-                    value={sourceRef}
-                    onChange={(e) => setSourceRef(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") next();
-                    }}
-                    placeholder={msg("continuous_tab.source.ref_placeholder")}
-                    aria-label={msg("continuous_tab.source.ref")}
-                    autoFocus
-                  />
-                </div>
-              ))}
+            {step === "source" && (
+              <div className="max-w-2xl space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {msg("continuous_tab.walk.source_hint")}
+                </p>
+                <ConnectorSourcePicker value={source} onChange={setSource} />
+              </div>
+            )}
 
             {step === "schedule" && (
               <ScheduleEditor value={schedule} onChange={setSchedule} idPrefix={idPrefix} />
