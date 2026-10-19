@@ -461,7 +461,8 @@ def _latest_test_cases(
     """Read the test cases of the plan's latest check that started runs.
 
     Each check holds out every earlier check's test cases, so the latest one
-    holds them all, also those the source no longer has.
+    holds them all, also those the source no longer has. The plan keeps its
+    own copy of them, so deleting a run does not shrink the test set.
 
     Args:
         job_store: Job store.
@@ -470,8 +471,9 @@ def _latest_test_cases(
         cycle: The check being planned, which is left out.
 
     Returns:
-        The cases, or none when no earlier check started a run that still exists.
+        The cases, or none when no earlier check started a run.
     """
+    kept = list((plan.baseline_snapshot or {}).get("held_out_cases") or [])
     latest = session.scalars(
         select(ContinuousCycleModel)
         .where(
@@ -483,14 +485,14 @@ def _latest_test_cases(
         .limit(1)
     ).first()
     if latest is None:
-        return []
+        return kept
     try:
         payload = job_store.get_job(latest.optimization_id, include_payload=True)["payload"]
     except KeyError:
-        return []
+        return kept
     data = payload.get("data") or {}
     test = set((data.get("pinned_split") or {}).get("test") or [])
-    return [case for case in data.get("cases") or [] if case_key(case) in test]
+    return kept + [case for case in data.get("cases") or [] if case_key(case) in test]
 
 
 def _incumbent(job_store: Any, optimization_id: str) -> dict[str, Any]:
@@ -544,7 +546,8 @@ def resolve_snapshot(
         fresh = available = canonical_cases(
             prepare_source_cases(fetch_rows(job_store, plan.username, plan.source), data)
         )
-        known = {case_key(case) for case in stored}
+        # Test cases a model-only winner took from a batch were never searched on, so they still count.
+        known = {case_key(case) for case in stored} - set(prior.get("unsearched") or [])
         # New cases an earlier run already tried against this incumbent do not count again.
         same_incumbent = prior.get("incumbent") == plan.incumbent_optimization_id
         fresh_keys = {case_key(case) for case in fresh}
@@ -795,14 +798,14 @@ def plan_runs(
         keys = {case_key(case) for case in cases}
         full = _merge_pins(_pins_of(_split(request, cases, earlier)), earlier, keep=keys)
         # Only the incumbent's own search cases: a rejected check's new cases would change its data too.
-        own_fit = [case_key(case) for case in own.train + own.val]
-        allowed = set(full.test) | set(own_fit)
-        # The incumbent's search cases stay for the model-only run when the source drops them.
-        model_cases = [case for case in cases if case_key(case) in allowed] + [
-            case for case in own.train + own.val if case_key(case) not in keys
-        ]
-        model_keys = {case_key(case) for case in model_cases}
-        model_pinned = PinnedSplit(test=full.test, fit=[key for key in dict.fromkeys(own_fit) if key in model_keys])
+        own_fit = list(dict.fromkeys(case_key(case) for case in own.train + own.val))
+        fit_keys, test_keys = set(own_fit), set(full.test)
+        # The incumbent's own search rows, copies included, so new copies in the source do not
+        # change their weight and rows the source dropped still stay.
+        model_cases = [case for case in stored if case_key(case) in fit_keys] + list(
+            {case_key(case): case for case in cases if case_key(case) in test_keys - fit_keys}.values()
+        )
+        model_pinned = PinnedSplit(test=full.test, fit=own_fit)
     else:
         known = {case_key(case) for case in stored}
         # Test cases an earlier check added stay test cases, so the test set only grows.
@@ -1096,6 +1099,7 @@ def process_cycle(
         cycle = session.get(ContinuousCycleModel, cycle_id)
         if cycle is None or cycle.status != CYCLE_CHECKING:
             return
+        lease = cycle.lease_until
         # Locked so a customer's pause committed meanwhile is not overwritten by this check's outcome.
         plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
         if plan is None:
@@ -1214,8 +1218,30 @@ def process_cycle(
                 _pins_of(_incumbent_split(incumbent["payload"])[2]),
                 *(run.pinned for run in runs),
             ).model_dump(),
+            # Moved onto the plan once a run starts, so a deleted run cannot take them away.
+            "held_out_cases": list(
+                {
+                    case_key(case): case if isinstance(case, dict) else case.model_dump(mode="json")
+                    for run in runs
+                    for case in run.cases
+                    if case_key(case) in set(run.pinned.test)
+                }.values()
+            ),
         }
-    _submit_runs(job_store, service, cycle_id, plan_username, payloads)
+    _submit_runs(job_store, service, cycle_id, plan_username, payloads, lease)
+
+
+def _holds_lease(cycle: ContinuousCycleModel | None, lease: datetime | None) -> bool:
+    """Say whether a worker still owns a check it claimed under ``lease``.
+
+    Args:
+        cycle: The check as stored now.
+        lease: The lease the worker read when it took the check.
+
+    Returns:
+        ``True`` while no other worker took the check over and it has no outcome yet.
+    """
+    return cycle is not None and cycle.status == CYCLE_CHECKING and aware(cycle.lease_until) == aware(lease)
 
 
 def _run_key(cycle_id: str, kind: str) -> str:
@@ -1293,9 +1319,15 @@ def _record_started(session: Session, cycle: ContinuousCycleModel, started: list
         cycle: The cycle.
         started: The started runs, each with its ``optimization_id`` and ``budget``.
     """
-    cycle.snapshot = {**(cycle.snapshot or {}), "runs": started}
+    held_out = (cycle.snapshot or {}).get("held_out_cases") or []
+    cycle.snapshot = {key: value for key, value in (cycle.snapshot or {}).items() if key != "held_out_cases"}
+    cycle.snapshot = {**cycle.snapshot, "runs": started}
     cycle.optimization_id = started[0]["optimization_id"]
     plan = session.get(ContinuousPlanModel, cycle.plan_id)
+    if plan is not None and held_out:
+        baseline = plan.baseline_snapshot or {}
+        merged = {case_key(case): case for case in [*(baseline.get("held_out_cases") or []), *held_out]}
+        plan.baseline_snapshot = {**baseline, "held_out_cases": list(merged.values())}
     if plan is not None and (pins := cycle.snapshot.get("pins")):
         # A started run may search on its cases even if it later fails, so their roles hold for the plan.
         baseline = plan.baseline_snapshot or {}
@@ -1353,13 +1385,21 @@ def _keep_budgets(cycle: ContinuousCycleModel, budget_ids: list[str]) -> None:
         cycle.snapshot = {**(cycle.snapshot or {}), "refused_budgets": merged}
 
 
-def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, payloads: list[UnifiedRunRequest]) -> None:
+def _submit_runs(
+    job_store: Any,
+    service: Any,
+    cycle_id: str,
+    username: str,
+    payloads: list[UnifiedRunRequest],
+    lease: datetime | None,
+) -> None:
     """Submit a check's runs, then record which started.
 
     When no run started, a run refused for a pending budget leaves the check
     claimed, so a later sweep replays the same keys and budgets. Once one run
     started, a refusal only drops the refused run, because the started ones
-    are already paid for.
+    are already paid for. A worker whose lease another worker took over stops,
+    because that worker already linked the runs and released the check.
 
     Args:
         job_store: Job store.
@@ -1367,6 +1407,7 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
         cycle_id: The check.
         username: Plan owner.
         payloads: One request per planned run, in the snapshot's order.
+        lease: The lease this worker read when it took the check.
     """
     engine = job_store.engine
     user = AuthenticatedUser(username, "user", ())
@@ -1381,6 +1422,11 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
     budget_keys: list[str] = []
     refused_keys: list[str] = []
     for run, payload in zip(planned, payloads, strict=True):
+        with Session(engine) as session:
+            if not _holds_lease(session.get(ContinuousCycleModel, cycle_id), lease):
+                # A later run started now would be paid for outside the allowance the new owner counts.
+                logger.warning("Continuous cycle %s lost its lease before its %s run", cycle_id, run["kind"])
+                return
         key = _run_key(cycle_id, run["kind"])
         budget_key = run.get("budget_key")
         if budget_key:
@@ -1397,14 +1443,17 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
             # Before any run starts, a pending budget waits for a replay of the whole set.
             # Once one started, only the refused run drops and the rest still start.
             if error.code == "budget.pending" and not started:
+                # The wait wins over an earlier refusal, or the check would close before the replay.
+                refused = error
                 break
             continue
         job = job_store.get_job(response.optimization_id, include_payload=False)
         started.append({**run, "optimization_id": response.optimization_id, "budget": job.get("execution_budget_id")})
     with Session(engine) as session, session.begin():
-        cycle = session.get(ContinuousCycleModel, cycle_id)
-        if cycle is None:
-            # The owner deleted the plan while this check was submitting; its runs stay ordinary runs.
+        cycle = session.get(ContinuousCycleModel, cycle_id, with_for_update=True)
+        if not _holds_lease(cycle, lease):
+            # The owner deleted the plan, or another worker took the check over and may already have
+            # recorded its outcome, which this late write must not reopen.
             return
         plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
         if started:
@@ -1511,10 +1560,11 @@ def _seen_snapshot(previous: dict[str, Any], snapshot: dict[str, Any], runs: lis
     seen = {
         key: value
         for key, value in snapshot.items()
-        if key not in {"runs", "planned", "winner", "new_models", "refused_budgets", "pins"}
+        if key not in {"runs", "planned", "winner", "new_models", "refused_budgets", "pins", "held_out_cases"}
     }
-    if previous.get("pins"):
-        seen["pins"] = previous["pins"]
+    for kept in ("pins", "held_out_cases"):
+        if previous.get(kept):
+            seen[kept] = previous[kept]
     if not any(run["kind"] in (RUN_DATA, RUN_BOTH) for run in runs):
         if previous.get("data"):
             seen["data"] = previous["data"]
@@ -1614,9 +1664,20 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
             return
         if best_run["kind"] == RUN_MODEL and "data" in (cycle.changes or []):
             # A model-only winner leaves out the new search cases, so approving it must reopen them.
+            data_before = dict((plan.baseline_snapshot or {}).get("data") or {})
+            try:
+                stored = _incumbent(job_store, plan.incumbent_optimization_id)["payload"].get("data") or {}
+            except KeyError:
+                stored = None
+            if stored is not None:
+                # The winner holds some new cases out as test cases. They are still new to every search,
+                # so the next check counts them toward the minimum like the rest of their batch.
+                known = {case_key(case) for case in stored.get("cases") or []}
+                test = ((cycle.snapshot or {}).get("pins") or {}).get("test") or []
+                data_before["unsearched"] = sorted(set(test) - known)
             cycle.snapshot = {
                 **cycle.snapshot,
-                "winner": {**cycle.snapshot["winner"], "data_before": (plan.baseline_snapshot or {}).get("data")},
+                "winner": {**cycle.snapshot["winner"], "data_before": data_before or None},
             }
         plan.baseline_snapshot = _seen_snapshot(
             plan.baseline_snapshot or {}, cycle.snapshot or {}, [run for run, _ in finished]
@@ -1778,7 +1839,7 @@ def _claim_due(engine: Any, now: datetime, *, only_plan_id: str | None = None) -
     return claimed
 
 
-def _reclaim_stale(engine: Any, now: datetime) -> list[str]:
+def _reclaim_stale(job_store: Any, now: datetime) -> list[str]:
     """Take over checks whose worker died before recording an outcome.
 
     A check that already lost its worker ``MAX_CHECK_ATTEMPTS`` times is
@@ -1786,12 +1847,13 @@ def _reclaim_stale(engine: Any, now: datetime) -> list[str]:
     plan's later checks and "Check now" forever.
 
     Args:
-        engine: Database engine.
+        job_store: Job store.
         now: Current time.
 
     Returns:
         Ids of the cycles this call took over.
     """
+    engine = job_store.engine
     with Session(engine) as session:
         stale = session.execute(
             select(ContinuousCycleModel.id, ContinuousCycleModel.lease_until).where(
@@ -1813,6 +1875,9 @@ def _reclaim_stale(engine: Any, now: datetime) -> list[str]:
             attempts = int((cycle.detail_params or {}).get("attempts", 1)) + 1
             if attempts > MAX_CHECK_ATTEMPTS:
                 plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
+                # The last worker may have started runs before it died; they are paid for and still count.
+                if plan is not None and _link_accepted(job_store, session, plan.username, cycle):
+                    continue
                 # The last worker may have died after a preflight charged a budget; the allowance must count it.
                 _keep_charged(session, plan.username if plan else "", cycle, skip=set())
                 if plan is None:
@@ -1852,7 +1917,7 @@ def run_due_checks(
     for cycle_id in optimizing:
         review_cycle(job_store, cycle_id)
     _settle_waiting_plans(job_store, now)
-    checked = _reclaim_stale(engine, now) + _claim_due(engine, now)
+    checked = _reclaim_stale(job_store, now) + _claim_due(engine, now)
     for cycle_id in checked:
         try:
             process_cycle(job_store, service, cycle_id, now=now, fetch_rows=fetch_rows)

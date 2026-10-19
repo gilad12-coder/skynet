@@ -339,11 +339,15 @@ def _page_snapshot(value: Any) -> Any:
         value: A check snapshot, or any value nested inside one.
 
     Returns:
-        The same value without any ``pins`` or ``tried_cases`` entry.
+        The same value without any per-case list: ``pins``, ``tried_cases``, ``held_out_cases``, ``unsearched``.
     """
     # These lists hold a key per case and grow with the data, and the page never reads them.
     if isinstance(value, dict):
-        return {key: _page_snapshot(item) for key, item in value.items() if key not in {"pins", "tried_cases"}}
+        return {
+            key: _page_snapshot(item)
+            for key, item in value.items()
+            if key not in {"pins", "tried_cases", "held_out_cases", "unsearched"}
+        }
     return value
 
 
