@@ -352,3 +352,17 @@ def test_transfer_ownership_keeps_old_owner_as_editor() -> None:
     assert body["owner"] == "bob"
     assert body["role"] == "editor"
     assert body["members"] == [{"username": "alice", "role": "editor"}]
+
+
+def test_moving_a_run_to_where_it_already_is_still_checks_access() -> None:
+    """A no-op move of someone else's run is refused, so it cannot show the run exists or is unfiled."""
+    store = _MemStore()
+    _seed_job(store, "alice-run")
+    bob = _client(store, "bob")
+    body = bob.post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": None}).json()
+    assert body["updated"] == []
+    assert body["skipped"] == [{"optimization_id": "alice-run", "reason": "forbidden"}]
+    alice = _client(store)
+    assert alice.post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": None}).json()[
+        "updated"
+    ] == ["alice-run"]

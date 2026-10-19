@@ -901,9 +901,6 @@ def create_folders_router(*, job_store) -> APIRouter:
                     skipped.append(MoveRunsSkipped(optimization_id=oid, reason="not_found"))
                     continue
                 current = folder_of_run(session, oid)
-                if current == (req.folder_id or None):
-                    updated.append(oid)
-                    continue
                 allowed = admin or job_owner(job) == username
                 if not allowed and current is not None:
                     if current not in folder_roles:
@@ -912,6 +909,10 @@ def create_folders_router(*, job_store) -> APIRouter:
                     allowed = current_role is not None and role_rank(current_role) >= role_rank(ShareRole.editor)
                 if not allowed:
                     skipped.append(MoveRunsSkipped(optimization_id=oid, reason="forbidden"))
+                    continue
+                # Checked after access, so a no-op cannot tell a stranger the run exists or where it is.
+                if current == (req.folder_id or None):
+                    updated.append(oid)
                     continue
                 item = session.get(RunFolderItemModel, oid)
                 if req.folder_id:

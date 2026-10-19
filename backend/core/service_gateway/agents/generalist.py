@@ -136,6 +136,9 @@ _DESTRUCTIVE_TOOLS: frozenset[str] = frozenset(
         # the balance the same way a fresh submit does.
         "resume_job_optimizations",
         "restart_job_optimizations",
+        # Deleting a folder drops every share it carried, so the people it was
+        # shared with lose access to the runs inside.
+        "delete_folder",
     }
 )
 
@@ -160,6 +163,11 @@ _SAFE_MUTATIONS: frozenset[str] = frozenset(
         "pause_job_optimizations",
         # Staging a sample overwrites the wizard's dataset, roles and code.
         "stage_sample_dataset_datasets_samples",
+        # Folder edits are undone by another edit and never touch the runs.
+        "create_folder",
+        "update_folder",
+        "move_folder",
+        "move_runs_to_folder",
     }
 )
 
