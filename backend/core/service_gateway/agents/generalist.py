@@ -121,8 +121,8 @@ def _apply_interactive_timeout(config: ModelConfig) -> None:
 
 TrustMode = Literal["ask", "auto_safe", "yolo"]
 
-# Tools whose side-effects can destroy or create billing-bearing work.
-# Always require confirmation except in YOLO mode.
+# Tools whose side-effects can destroy or create billing-bearing work, or
+# change who can see a run. Always require confirmation except in YOLO mode.
 _DESTRUCTIVE_TOOLS: frozenset[str] = frozenset(
     {
         "delete_job_optimizations",
