@@ -271,11 +271,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h3 className="text-sm! leading-6! font-semibold">{children}</h3>;
 }
 
-function FormRow({ title, children }: { title: string; children: React.ReactNode }) {
+function FieldBlock({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="grid gap-3 py-5 first:pt-0 lg:grid-cols-[12rem_minmax(0,1fr)] lg:gap-8">
+    <div className="min-w-0 space-y-3">
       <SectionTitle>{title}</SectionTitle>
-      <div className="min-w-0">{children}</div>
+      {children}
     </div>
   );
 }
@@ -323,66 +323,65 @@ function EnableForm({
   }, [problem, busy, formKey]);
 
   return (
-        <div className="divide-y divide-border/50 px-5 pt-5 sm:px-6 sm:pt-6">
-          <FormRow title={msg("continuous_tab.schedule.label")}>
-            <ScheduleEditor value={schedule} onChange={setSchedule} idPrefix="continuous-schedule" />
-          </FormRow>
+    <div className="grid gap-8 px-5 pt-5 pb-6 sm:px-6 sm:pt-6 xl:grid-cols-[17rem_minmax(0,36rem)] xl:gap-10">
+      <div className="space-y-6 xl:max-w-none max-w-xl">
+        <FieldBlock title={msg("continuous_tab.permit.label")}>
+          <Select
+            value={refreshKind}
+            onValueChange={(value) => setRefreshKind(value as keyof ContinuousPermitted)}
+          >
+            <SelectTrigger className="w-full" aria-label={msg("continuous_tab.permit.label")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(["data", "models", "optimizers"] as const).map((key) => (
+                <SelectItem key={key} value={key}>
+                  {msg(CHANGE_KEYS[key]!)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FieldBlock>
 
-          <FormRow title={msg("continuous_tab.permit.label")}>
-            <Select
-              value={refreshKind}
-              onValueChange={(value) => setRefreshKind(value as keyof ContinuousPermitted)}
-            >
-              <SelectTrigger className="sm:w-72" aria-label={msg("continuous_tab.permit.label")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(["data", "models", "optimizers"] as const).map((key) => (
-                  <SelectItem key={key} value={key}>
-                    {msg(CHANGE_KEYS[key]!)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FormRow>
+        {permitted.data && (
+          <FieldBlock title={msg("continuous_tab.source.label")}>
+            {connected.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{msg("continuous_tab.source.none")}</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Select value={chosenProvider} onValueChange={setProvider}>
+                  <SelectTrigger className="w-full" aria-label={msg("continuous_tab.source.provider")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {connected.map((c) => (
+                      <SelectItem key={c.provider} value={c.provider}>
+                        {providerMeta(c.provider as ConnectorProvider).name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  dir="ltr"
+                  value={sourceDraft}
+                  onChange={(e) => setSourceDraft(e.target.value)}
+                  onBlur={() => setSourceRef(sourceDraft.trim())}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") setSourceRef(sourceDraft.trim());
+                  }}
+                  placeholder={msg("continuous_tab.source.ref_placeholder")}
+                  aria-label={msg("continuous_tab.source.ref")}
+                />
+              </div>
+            )}
+          </FieldBlock>
+        )}
+      </div>
 
-          {permitted.data && (
-            <FormRow title={msg("continuous_tab.source.label")}>
-              {connected.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{msg("continuous_tab.source.none")}</p>
-              ) : (
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Select value={chosenProvider} onValueChange={setProvider}>
-                    <SelectTrigger
-                      className="sm:w-48"
-                      aria-label={msg("continuous_tab.source.provider")}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {connected.map((c) => (
-                        <SelectItem key={c.provider} value={c.provider}>
-                          {providerMeta(c.provider as ConnectorProvider).name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    dir="ltr"
-                    value={sourceDraft}
-                    onChange={(e) => setSourceDraft(e.target.value)}
-                    onBlur={() => setSourceRef(sourceDraft.trim())}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") setSourceRef(sourceDraft.trim());
-                    }}
-                    placeholder={msg("continuous_tab.source.ref_placeholder")}
-                    aria-label={msg("continuous_tab.source.ref")}
-                  />
-                </div>
-              )}
-            </FormRow>
-          )}
-        </div>
+      <FieldBlock title={msg("continuous_tab.schedule.label")}>
+        <ScheduleEditor value={schedule} onChange={setSchedule} idPrefix="continuous-schedule" />
+      </FieldBlock>
+    </div>
   );
 }
 
