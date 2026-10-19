@@ -18,7 +18,6 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
-import { Switch } from "@/shared/ui/primitives/switch";
 import {
   Select,
   SelectContent,
@@ -223,11 +222,12 @@ function EnableForm({
   const { connectors } = useConnectors();
   const connected = connectors.filter((c) => c.connected);
   const [schedule, setSchedule] = useState<ScheduleRule>(() => defaultRule(browserTimeZone()));
-  const [permitted, setPermitted] = useState<ContinuousPermitted>({
-    data: true,
-    models: false,
-    optimizers: false,
-  });
+  const [refreshKind, setRefreshKind] = useState<keyof ContinuousPermitted>("data");
+  const permitted: ContinuousPermitted = {
+    data: refreshKind === "data",
+    models: refreshKind === "models",
+    optimizers: refreshKind === "optimizers",
+  };
   const [provider, setProvider] = useState<string>("");
   const [sourceRef, setSourceRef] = useState("");
   const chosenProvider = provider || connected[0]?.provider || "";
@@ -237,9 +237,6 @@ function EnableForm({
       permitted,
       sourceRef: chosenProvider ? sourceRef : "",
     });
-
-  const toggle = (key: keyof ContinuousPermitted) => (on: boolean) =>
-    setPermitted((prev) => ({ ...prev, [key]: on }));
 
   return (
     <Card className="mt-4 overflow-hidden py-0">
@@ -255,22 +252,21 @@ function EnableForm({
           </FormRow>
 
           <FormRow title={msg("continuous_tab.permit.label")}>
-            <div className="space-y-1">
-              {(["data", "models", "optimizers"] as const).map((key) => (
-                <label
-                  key={key}
-                  htmlFor={`continuous-permit-${key}`}
-                  className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 -mx-2 hover:bg-muted/60"
-                >
-                  <Switch
-                    id={`continuous-permit-${key}`}
-                    checked={permitted[key]}
-                    onCheckedChange={toggle(key)}
-                  />
-                  <span className="text-sm">{msg(CHANGE_KEYS[key]!)}</span>
-                </label>
-              ))}
-            </div>
+            <Select
+              value={refreshKind}
+              onValueChange={(value) => setRefreshKind(value as keyof ContinuousPermitted)}
+            >
+              <SelectTrigger className="sm:w-72" aria-label={msg("continuous_tab.permit.label")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(["data", "models", "optimizers"] as const).map((key) => (
+                  <SelectItem key={key} value={key}>
+                    {msg(CHANGE_KEYS[key]!)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </FormRow>
 
           {permitted.data && (
