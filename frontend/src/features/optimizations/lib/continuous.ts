@@ -75,8 +75,8 @@ export type EnableProblem =
   | "continuous_tab.form.need_source";
 
 export function enableProblem(form: EnableForm): EnableProblem | null {
-  const { data, models, optimizers } = form.permitted;
-  if (!data && !models && !optimizers) return "continuous_tab.form.need_permission";
+  const { data, models, optimizers, new_models } = form.permitted;
+  if (!data && !models && !optimizers && !new_models) return "continuous_tab.form.need_permission";
   if (data && !form.sourceRef.trim()) return "continuous_tab.form.need_source";
   return null;
 }

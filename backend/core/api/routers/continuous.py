@@ -55,6 +55,8 @@ class ContinuousPermitted(BaseModel):
     data: bool = False
     models: bool = False
     optimizers: bool = False
+    # Try a stronger model from the catalog when one appears, once per model.
+    new_models: bool = False
 
 
 # A connected source the existing connectors can read. A Hugging Face ref is
@@ -84,7 +86,8 @@ class ContinuousEnableRequest(BaseModel):
         Raises:
             ValueError: On an inconsistent plan.
         """
-        if not (self.permitted.data or self.permitted.models or self.permitted.optimizers):
+        permitted = self.permitted
+        if not (permitted.data or permitted.models or permitted.optimizers or permitted.new_models):
             raise ValueError("permit at least one input to refresh")
         if self.permitted.data and self.source is None:
             raise ValueError("a data refresh needs a connected source")
@@ -715,6 +718,11 @@ def create_continuous_router(
             now = datetime.now(UTC)
             if approve:
                 plan.incumbent_optimization_id = cycle.optimization_id
+                stronger = (cycle.snapshot or {}).get("new_model")
+                if stronger and plan.baseline_snapshot:
+                    # The new incumbent runs on this model, so a later check must not see it as a change.
+                    models = {**(plan.baseline_snapshot.get("models") or {}), "task_model": stronger["name"]}
+                    plan.baseline_snapshot = {**plan.baseline_snapshot, "models": models}
                 cycle.status = engine_mod.CYCLE_APPROVED
                 cycle.detail_code = "continuous.review_approved"
             else:

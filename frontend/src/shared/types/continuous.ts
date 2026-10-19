@@ -40,6 +40,7 @@ export interface ContinuousPermitted {
   data: boolean;
   models: boolean;
   optimizers: boolean;
+  new_models: boolean;
 }
 
 export interface ContinuousSource {

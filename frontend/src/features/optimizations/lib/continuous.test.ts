@@ -11,21 +11,32 @@ import {
 import type { ContinuousCycle, ContinuousPlan } from "@/shared/types/continuous";
 
 const form = {
-  permitted: { data: true, models: false, optimizers: false },
+  permitted: { data: true, models: false, optimizers: false, new_models: false },
   sourceRef: "acme/support/default/train",
 };
 
 test("the enable form mirrors the backend rules", () => {
   assert.equal(enableProblem(form), null);
   assert.equal(
-    enableProblem({ ...form, permitted: { data: false, models: false, optimizers: false } }),
+    enableProblem({
+      ...form,
+      permitted: { data: false, models: false, optimizers: false, new_models: false },
+    }),
     "continuous_tab.form.need_permission",
+  );
+  assert.equal(
+    enableProblem({
+      ...form,
+      permitted: { data: false, models: false, optimizers: false, new_models: true },
+      sourceRef: "",
+    }),
+    null,
   );
   assert.equal(enableProblem({ ...form, sourceRef: " " }), "continuous_tab.form.need_source");
   assert.equal(
     enableProblem({
       ...form,
-      permitted: { data: false, models: true, optimizers: false },
+      permitted: { data: false, models: true, optimizers: false, new_models: false },
       sourceRef: "",
     }),
     null,

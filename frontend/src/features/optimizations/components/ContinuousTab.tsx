@@ -97,6 +97,9 @@ const CHANGE_KEYS: Record<string, MessageKey> = {
   data: "continuous_tab.permit.data",
   models: "continuous_tab.permit.models",
   optimizers: "continuous_tab.permit.optimizers",
+  new_models: "continuous_tab.permit.new_models",
+  // A check's changes name the dimension, which is singular for a model switch.
+  new_model: "continuous_tab.permit.new_models",
 };
 
 type Act = (run: () => Promise<ContinuousPlan>, success?: MessageKey) => Promise<void>;
@@ -387,7 +390,7 @@ function PlanView({
     (c) => c.status === "checking" || c.status === "optimizing",
   );
   const pending = plan.cycles.filter(canReview);
-  const refreshes = (["data", "models", "optimizers"] as const).filter((key) => plan.permitted[key]);
+  const refreshes = (["data", "models", "optimizers", "new_models"] as const).filter((key) => plan.permitted[key]);
   const staged = plan.permitted.models || plan.permitted.optimizers;
   return (
     <Card className="mt-4 overflow-hidden py-0">

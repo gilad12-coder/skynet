@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
+import { Switch } from "@/shared/ui/primitives/switch";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { ConnectorSourcePicker, type ConnectorSource } from "@/features/connectors";
 import type { ContinuousEnableRequest, ScheduleRule } from "@/shared/types/continuous";
@@ -17,21 +18,52 @@ type WalkStep = "source" | "schedule";
 const STEPS: WalkStep[] = ["source", "schedule"];
 
 const STEP_TITLES: Record<WalkStep, MessageKey> = {
-  source: "continuous_tab.source.label",
+  source: "continuous_tab.walk.triggers",
   schedule: "continuous_tab.schedule.label",
 };
 
 /**
- * The request a finished walk sends. A plan refreshes only its data: nothing
- * yet picks a newer model or optimizer, so a plan limited to those would
- * never start a run.
+ * The request a finished walk sends. A plan may refresh its data, try a
+ * stronger model, or both. Nothing yet stages a model or optimizer by hand
+ * from here, so those stay off.
  */
-function requestFor(source: ConnectorSource | null, schedule: ScheduleRule): ContinuousEnableRequest {
+function requestFor(
+  data: boolean,
+  newModels: boolean,
+  source: ConnectorSource | null,
+  schedule: ScheduleRule,
+): ContinuousEnableRequest {
   return {
     schedule,
-    permitted: { data: true, models: false, optimizers: false },
-    source: source ? { provider: source.provider, ref: source.ref } : null,
+    permitted: { data, models: false, optimizers: false, new_models: newModels },
+    source: data && source ? { provider: source.provider, ref: source.ref } : null,
   };
+}
+
+function TriggerRow({
+  id,
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  id: string;
+  label: MessageKey;
+  hint: MessageKey;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <label htmlFor={id} className="cursor-pointer text-sm font-medium text-foreground">
+          {msg(label)}
+        </label>
+        <p className="text-sm text-muted-foreground">{msg(hint)}</p>
+      </div>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} className="mt-0.5" />
+    </div>
+  );
 }
 
 /**
@@ -49,6 +81,8 @@ export function ScheduledRunSetup({
   onFinish: (body: ContinuousEnableRequest) => void;
   idPrefix: string;
 }) {
+  const [data, setData] = useState(true);
+  const [newModels, setNewModels] = useState(false);
   const [source, setSource] = useState<ConnectorSource | null>(null);
   const [schedule, setSchedule] = useState<ScheduleRule>(() => defaultRule(browserTimeZone()));
   const [index, setIndex] = useState(0);
@@ -59,7 +93,7 @@ export function ScheduledRunSetup({
   const at = Math.min(index, steps.length - 1);
   const step = steps[at]!;
   const last = at === steps.length - 1;
-  const body = requestFor(source, schedule);
+  const body = requestFor(data, newModels, source, schedule);
 
   const stepProblem =
     step === "source"
@@ -142,11 +176,25 @@ export function ScheduledRunSetup({
             className="space-y-4"
           >
             {step === "source" && (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <p className="text-center text-base font-medium text-foreground">
-                  {msg("continuous_tab.walk.source_hint")}
+                  {msg("continuous_tab.walk.refresh_hint")}
                 </p>
-                <ConnectorSourcePicker value={source} onChange={setSource} />
+                <TriggerRow
+                  id={`${idPrefix}-data`}
+                  label="continuous_tab.permit.data"
+                  hint="continuous_tab.walk.source_hint"
+                  checked={data}
+                  onChange={setData}
+                />
+                {data && <ConnectorSourcePicker value={source} onChange={setSource} />}
+                <TriggerRow
+                  id={`${idPrefix}-new-models`}
+                  label="continuous_tab.permit.new_models"
+                  hint="continuous_tab.permit.new_models_hint"
+                  checked={newModels}
+                  onChange={setNewModels}
+                />
               </div>
             )}
 

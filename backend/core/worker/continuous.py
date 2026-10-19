@@ -31,10 +31,13 @@ from sqlalchemy.orm import Session
 
 from ..api.auth import AuthenticatedUser
 from ..api.errors import DomainError
+from ..api.model_catalog import CatalogModel, get_catalog_cached
 from ..api.observability import advisory_lock
+from ..api.routers.billing import _byok_catalog_for_user
 from ..api.routers.connectors import connector_secret
 from ..api.routers.submissions import UNIFIED_WORKFLOW, rows_to_cases, submit_unified_payload
 from ..api.submission_idempotency import resolve_submission_replay_keys
+from ..billing import ProviderKeyVault
 from ..billing.budget_amounts import budget_wallet_hold
 from ..billing.budgets import BudgetError, BudgetService
 from ..billing.operation_pricing import json_fingerprint
@@ -52,7 +55,7 @@ from .continuous_schedule import ScheduleRule, legacy_rule, next_runs
 
 logger = logging.getLogger(__name__)
 
-DIMENSIONS = ("data", "models", "optimizer")
+DIMENSIONS = ("data", "models", "optimizer", "new_model")
 CYCLE_LEASE = timedelta(minutes=30)
 # A minute keeps a check within a minute of the time the owner picked.
 SWEEP_INTERVAL_SECONDS = 60.0
@@ -98,6 +101,7 @@ _TERMINAL_JOB = {
 }
 
 RowFetcher = Callable[[Any, str, dict[str, Any]], list[dict[str, Any]]]
+ModelPicker = Callable[[Any, str, dict[str, Any]], dict[str, Any] | None]
 
 
 class SourceError(Exception):
@@ -230,7 +234,41 @@ def changed_dimensions(baseline: dict[str, Any], snapshot: dict[str, Any]) -> li
         changed.append("models")
     if baseline.get("optimizer") != snapshot.get("optimizer"):
         changed.append("optimizer")
+    if snapshot.get("new_model"):
+        changed.append("new_model")
     return changed
+
+
+def strongest_model(job_store: Any, username: str, task_model: dict[str, Any]) -> dict[str, Any] | None:
+    """Find the model a plan should try next: the strongest one that scores above the run's model.
+
+    Only models the run can pay for the way it pays now are considered: the
+    hosted catalog for a managed run, the owner's verified connections for a
+    BYOK run. A model on a custom endpoint is never switched.
+
+    Args:
+        job_store: Store whose engine holds the provider connections.
+        username: Plan owner.
+        task_model: The incumbent run's ``task_model`` block.
+
+    Returns:
+        ``{"name", "byok_provider"}`` for a stronger model, or ``None``.
+    """
+    if task_model.get("base_url"):
+        return None
+    if task_model.get("token_source") == "byok":
+        models = _byok_catalog_for_user(ProviderKeyVault(engine=job_store.engine), username).models
+    else:
+        models = [model for model in get_catalog_cached().models if model.available]
+    rated = [model for model in models if model.intelligence_index is not None]
+    current = next((model for model in rated if model.value == task_model.get("name")), None)
+    if current is None:
+        # A model without a rating has nothing to beat, so nothing counts as better.
+        return None
+    best: CatalogModel = max(rated, key=lambda model: model.intelligence_index or 0.0)
+    if (best.intelligence_index or 0.0) <= (current.intelligence_index or 0.0):
+        return None
+    return {"name": best.value, "byok_provider": best.byok_provider}
 
 
 def fetch_source_rows(job_store: Any, username: str, source: dict[str, Any]) -> list[dict[str, Any]]:
@@ -339,15 +377,25 @@ def _incumbent(job_store: Any, optimization_id: str) -> dict[str, Any]:
 
 
 def resolve_snapshot(
-    plan: ContinuousPlanModel, incumbent_payload: dict[str, Any], *, job_store: Any, fetch_rows: RowFetcher
+    plan: ContinuousPlanModel,
+    incumbent_payload: dict[str, Any],
+    *,
+    job_store: Any,
+    fetch_rows: RowFetcher,
+    pick_model: ModelPicker = strongest_model,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Resolve the inputs this check would use, refreshing only what is permitted.
+
+    A stronger model is tried only when nothing else changed: its run is judged
+    against the incumbent's own score, which is fair only on the same cases in
+    the same order, so the same test split. Each model is tried once.
 
     Args:
         plan: The plan being checked.
         incumbent_payload: The incumbent run's stored request.
         job_store: Job store handed to the row fetcher.
         fetch_rows: Reads a source's rows.
+        pick_model: Finds a stronger model than the incumbent's.
 
     Returns:
         The snapshot and the cases it describes.
@@ -357,11 +405,16 @@ def resolve_snapshot(
     """
     permitted = plan.permitted or {}
     data = incumbent_payload.get("data") or {}
-    cases = list(data.get("cases") or [])
+    stored = list(data.get("cases") or [])
+    cases = stored
     data_snapshot: dict[str, Any] = {"fingerprint": _cases_fingerprint(cases), "cases": len(cases)}
     if permitted.get("data") and plan.source:
         cases = canonical_cases(prepare_source_cases(fetch_rows(job_store, plan.username, plan.source), data))
         data_snapshot = {"fingerprint": _cases_fingerprint(cases), "cases": len(cases), "source": plan.source}
+    same_data = data_snapshot["fingerprint"] == _cases_fingerprint(stored)
+    if same_data:
+        # The same rows keep the incumbent's order, so the seeded split picks the same test cases.
+        cases = stored
     models = _model_names(incumbent_payload.get("models") or {})
     optimizer = (incumbent_payload.get("optimizer") or {}).get("choice", "auto")
     pending = plan.pending_inputs or {}
@@ -371,7 +424,23 @@ def resolve_snapshot(
                 models[role] = pending[role]
     if permitted.get("optimizers") and pending.get("optimizer"):
         optimizer = pending["optimizer"]
-    return {"data": data_snapshot, "models": models, "optimizer": optimizer}, cases
+    snapshot: dict[str, Any] = {"data": data_snapshot, "models": models, "optimizer": optimizer}
+    baseline = plan.baseline_snapshot or {}
+    tried = list(baseline.get("tried_models") or [])
+    task_model = (incumbent_payload.get("models") or {}).get("task_model")
+    unchanged = (
+        same_data
+        and (baseline.get("data") or {}).get("fingerprint") == data_snapshot["fingerprint"]
+        and models == baseline.get("models")
+        and optimizer == baseline.get("optimizer")
+    )
+    if permitted.get("new_models") and task_model and unchanged:
+        stronger = pick_model(job_store, plan.username, task_model)
+        if stronger is not None and stronger["name"] not in tried:
+            snapshot["new_model"] = stronger
+            tried.append(stronger["name"])
+    snapshot["tried_models"] = tried
+    return snapshot, cases
 
 
 def month_committed(session: Session, plan: ContinuousPlanModel, month: str) -> int:
@@ -470,6 +539,12 @@ def _cycle_payload(
         name = snapshot["models"].get(role)
         if name and (models.get(role) or {}).get("name") != name:
             models[role] = {**(models.get(role) or {}), "name": name}
+    stronger = snapshot.get("new_model")
+    if stronger:
+        task_model = {**models["task_model"], "name": stronger["name"]}
+        if task_model.get("token_source") == "byok":
+            task_model["byok_provider"] = stronger.get("byok_provider")
+        models["task_model"] = task_model
     copy["models"] = models
     copy["optimizer"] = {**copy.get("optimizer", {}), "choice": snapshot["optimizer"]}
     base_name = (incumbent.get("payload_overview") or {}).get(PAYLOAD_OVERVIEW_NAME) or copy.get("name") or ""
@@ -551,6 +626,7 @@ def process_cycle(
     *,
     now: datetime | None = None,
     fetch_rows: RowFetcher = fetch_source_rows,
+    pick_model: ModelPicker = strongest_model,
 ) -> None:
     """Run one claimed check to its outcome: skip, pause, fail or start a run.
 
@@ -564,6 +640,7 @@ def process_cycle(
         cycle_id: The claimed cycle.
         now: Clock override for tests.
         fetch_rows: Reads a source's rows.
+        pick_model: Finds a stronger model than the incumbent's.
     """
     now = now or datetime.now(UTC)
     engine = job_store.engine
@@ -608,7 +685,9 @@ def process_cycle(
             _fail_cycle(session, plan, cycle, "continuous.run_rejected", reason="the incumbent run was deleted")
             return
         try:
-            snapshot, cases = resolve_snapshot(plan, incumbent["payload"], job_store=job_store, fetch_rows=fetch_rows)
+            snapshot, cases = resolve_snapshot(
+                plan, incumbent["payload"], job_store=job_store, fetch_rows=fetch_rows, pick_model=pick_model
+            )
         except SourceError as error:
             _fail_cycle(session, plan, cycle, error.code, **error.params)
             return
@@ -699,6 +778,29 @@ def process_cycle(
     logger.info("Continuous cycle %s started run %s", cycle_id, response.optimization_id)
 
 
+def _incumbent_score(job_store: Any, optimization_id: str | None, split: dict[str, Any]) -> float | None:
+    """Read the incumbent run's own best score, when it was scored on the same test split.
+
+    Args:
+        job_store: Job store.
+        optimization_id: The incumbent run the cycle started from.
+        split: The cycle run's ``split_counts``.
+
+    Returns:
+        The incumbent's score, or ``None`` when it is gone or used other test cases.
+    """
+    if optimization_id is None:
+        return None
+    try:
+        result = job_store.get_job(optimization_id, include_payload=False).get("result") or {}
+    except KeyError:
+        return None
+    prior = result.get("split_counts") or {}
+    if any(prior.get(key) != split.get(key) for key in ("train", "val", "test", "held_out", "report_split")):
+        return None
+    return result.get("best_score")
+
+
 def review_cycle(job_store: Any, cycle_id: str) -> None:
     """Judge a finished cycle run against the incumbent it started from.
 
@@ -708,6 +810,10 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
     else leaves the incumbent in place. Only a successful run marks its inputs
     as seen, so a run that failed (a provider outage) is retried on the next
     check instead of waiting for the data to change again.
+
+    A run on a stronger model scores the incumbent's version with that model
+    too, so its own baseline cannot show whether the switch helps. It is judged
+    against the incumbent run's own score instead, on the same test split.
 
     Args:
         job_store: Job store.
@@ -736,13 +842,17 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
         baseline = result.get("baseline_score")
         best = result.get("best_score")
         split = result.get("split_counts") or {}
+        new_model = bool((cycle.snapshot or {}).get("new_model"))
+        if new_model:
+            baseline = _incumbent_score(job_store, (cycle.snapshot or {}).get("compared_against"), split)
         cycle.incumbent_score, cycle.candidate_score = baseline, best
         if baseline is None or best is None:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_unscored")
         elif not (split.get("test") and split.get("held_out")):
             # Without separate test cases the split that picked the candidate would also judge it.
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_not_held_out")
-        elif result.get("regression_guard_applied") or best <= baseline:
+        # On a stronger model the guard only means optimizing did not help; the model alone may still win.
+        elif (result.get("regression_guard_applied") and not new_model) or best <= baseline:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_regressed")
         elif best < baseline + WIN_MARGIN:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_within_margin")
