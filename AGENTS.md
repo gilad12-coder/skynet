@@ -56,6 +56,23 @@ approves that specific PR in chat or on GitHub.
 send one card: the backend changes that landed, staging smoke status, and a
 60s video tour of the core flow on staging. Promote only on "promote".
 
+### Fix bugs locally, deploy once (MANDATORY)
+
+Each push rebuilds the PR preview (the sandbox image too) and starts a new
+automated review. A bug found after the push costs a full rebuild. Find the
+bugs before you push. Follow this order for every PR:
+
+1. Build the change. Run the tests, lint and typecheck locally.
+2. Review the full diff locally. Use two reviewers with fresh context (for
+   example, two subagents). Verify each finding with a failing test, then
+   fix it. Repeat until a review finds nothing new.
+3. Push once. Let CI, the preview build and the automated review gate run.
+4. Run the acceptance checks on the PR preview.
+5. Record the before-and-after videos last, on the final commit.
+
+If the review gate or the acceptance checks find a bug, fix all findings
+locally, check them again, and then push them together in one push.
+
 ### PR preview environments: keep them able to run an optimization
 
 The merger has to sign up and finish a real run in each `*-pr-<n>` Railway
