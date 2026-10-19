@@ -32,6 +32,8 @@ from core.api.tests.test_protected_submissions import _Gateway, _Harness, _SQLit
 from core.billing.budget_amounts import CENT_SCALE, budget_wallet_hold
 from core.billing.budgets import BudgetService
 from core.models import UnifiedRunRequest
+from core.models.common import SplitFractions
+from core.models.unified import PinnedSplit, UnifiedCase
 from core.service_gateway.optimization.unified.split import case_key, split_cases, split_seed
 from core.storage.models import (
     BillingCustomerModel,
@@ -1173,7 +1175,8 @@ def test_a_failed_run_leaves_its_new_data_for_the_next_check(env: _Env) -> None:
     [first] = env.cycles()
     _finish(env, first.optimization_id, status="failed")
     env.sweep(_due(env) - timedelta(days=1))
-    assert env.plan().baseline_snapshot == baseline
+    # Only the split roles the failed run used are kept, so its searched cases never become test cases.
+    assert {key: value for key, value in env.plan().baseline_snapshot.items() if key != "pins"} == baseline
 
     env.sweep(_due(env))
 
@@ -1649,8 +1652,10 @@ def test_the_allowance_gate_counts_every_run_of_a_check(env: _Env, monkeypatch: 
         env,
         source_id,
         permitted={"data": True, "new_task_model": True, "matrix": ["data", "model", "both"]},
-        monthly_limit_cents=CYCLE_BUDGET * 2,
+        monthly_limit_cents=CYCLE_BUDGET * 3,
     )
+    # Lower the limit after setup, so the three runs no longer fit in what is left.
+    env.edit_plan(monthly_limit_cents=CYCLE_BUDGET * 2)
     env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
 
     env.sweep(_due(env))
@@ -1709,3 +1714,232 @@ def test_approving_a_better_model_drops_an_older_staged_task_model(env: _Env, mo
     env.sweep(_due(env))
     assert env.cycles()[-1].detail_code == "continuous.skip_unchanged"
     assert env.count(JobModel) == jobs
+
+
+def _pending_then(real: Any) -> Any:
+    """Build a submit that reports ``budget.pending`` once, then submits for real.
+
+    Args:
+        real: The real submit.
+
+    Returns:
+        The replacement submit.
+    """
+    calls = {"pending": True}
+
+    def submit(*args: Any, **kwargs: Any) -> Any:
+        """Refuse the first attempt as pending, then pass through.
+
+        Args:
+            *args: Passed to the real submit.
+            **kwargs: Passed to the real submit.
+
+        Returns:
+            The real submit's response.
+
+        Raises:
+            DomainError: On the first attempt, as ``budget.pending``.
+        """
+        if calls["pending"]:
+            raise DomainError("budget.pending", status=409)
+        return real(*args, **kwargs)
+
+    submit.calls = calls
+    return submit
+
+
+def test_a_pending_retry_starts_only_the_runs_its_first_attempt_gated(
+    env: _Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """New data that arrives while a check waits on its budget does not add ungated runs to the retry."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True}, monthly_limit_cents=CYCLE_BUDGET * 2)
+    submit = _pending_then(continuous.submit_unified_payload)
+    monkeypatch.setattr(continuous, "submit_unified_payload", submit)
+    now = _due(env)
+    env.sweep(now)
+    [cycle] = env.cycles()
+    assert [run["kind"] for run in cycle.snapshot["runs"]] == ["model"]
+
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    submit.calls["pending"] = False
+    env.sweep(now + continuous.CYCLE_LEASE + timedelta(seconds=1))
+
+    [retried] = env.cycles()
+    assert retried.status == "optimizing"
+    assert list(_runs(retried)) == ["model"]
+
+
+def test_a_check_whose_runs_were_all_refused_counts_every_budget(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each refused run billed its own preflight, so the monthly allowance counts all of them."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model", "both"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    submit = continuous.submit_unified_payload
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        """Create each run's budget as a real submit does, then refuse the run.
+
+        Args:
+            *args: Passed to the real submit.
+            **kwargs: Passed to the real submit.
+
+        Raises:
+            DomainError: Always, after the budget exists.
+        """
+        submit(*args, **kwargs)
+        raise DomainError("submission.validation_failed", status=422)
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", refuse)
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    assert cycle.optimization_id is None
+    assert len(continuous.cycle_budget_ids(cycle)) == 3
+
+
+def test_a_rejected_checks_test_cases_stay_held_out(env: _Env) -> None:
+    """Cases a rejected check held out never move into a later check's search."""
+    source_id = _incumbent(env)
+    plan = _enable(env, source_id, permitted={"data": True})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    env.sweep(_due(env))
+    [first] = env.cycles()
+    held = set(_payload(env, first.optimization_id)["data"]["pinned_split"]["test"])
+    _finish(env, first.optimization_id, result=_result(0.5, 0.9))
+    env.sweep(_due(env) - timedelta(days=1))
+    assert env.client.post(f"/continuous/{plan['id']}/cycles/{first.id}/reject").status_code == 200
+
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20] + _cases(["C"] * 30)[20:30]
+    env.sweep(_due(env))
+
+    second = env.cycles()[-1]
+    pinned = _payload(env, second.optimization_id)["data"]["pinned_split"]
+    assert held <= set(pinned["test"])
+    assert not held & set(pinned["fit"])
+
+
+def test_a_better_reflection_model_that_also_runs_the_task_is_compared_with_the_incumbent(
+    env: _Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run without its own task model runs on the reflection model, so moving it changes the task model too."""
+    _catalog(monkeypatch, text=(40.0, 1e-6), sharper=(60.0, 1e-6))
+    payload = _incumbent_payload()
+    payload["models"] = {"reflection_model": {"name": "fixture/text"}}
+    response = env.client.post("/optimize", json=payload)
+    assert response.status_code == 201, response.text
+    source_id = response.json()["optimization_id"]
+    _finish(env, source_id, result=_result(0.5, 0.8))
+    _enable(env, source_id, permitted={"new_reflection_model": True}, source=None)
+
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    assert cycle.snapshot["runs"][0]["task_model_changed"] is True
+    # The run's own baseline is the new model's score, which says nothing about the incumbent.
+    _finish(env, cycle.optimization_id, result=_result(0.3, 0.4))
+    env.sweep(_due(env) - timedelta(days=1))
+
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.incumbent_score) == ("regressed", 0.8)
+
+
+def test_every_run_of_a_check_leads_to_its_plan(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The second and third runs of a check show the plan, not an offer to start another one."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    plan = _enable(
+        env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model", "both"]}
+    )
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    runs = _runs(cycle)
+
+    for run_id in runs.values():
+        response = env.client.get(f"/optimizations/{run_id}/continuous")
+        assert response.status_code == 200, response.text
+        assert response.json()["plan"]["id"] == plan["id"]
+    assert automated_run_ids(env.store, list(runs.values())) == set(runs.values())
+
+
+def test_a_monthly_limit_below_every_run_of_a_check_is_refused(env: _Env) -> None:
+    """A limit that one check's runs together exceed would pause every check, so enabling refuses it."""
+    source_id = _incumbent(env)
+    response = env.client.post(
+        f"/optimizations/{source_id}/continuous",
+        json={
+            "schedule": WEEKLY,
+            "permitted": {"data": True, "new_task_model": True},
+            "source": {"provider": "huggingface", "ref": "acme/support/default/train"},
+            "monthly_limit_cents": CYCLE_BUDGET,
+            "cycle_budget_cents": CYCLE_BUDGET,
+        },
+    )
+    assert (response.status_code, response.json()["code"]) == (422, "continuous.limit_too_low")
+
+
+def test_a_failed_run_leaves_an_unscored_model_untried(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the run that scores the incumbent fails, the better model is offered again next check."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    runs = _runs(cycle)
+    _finish(env, runs["data"], status="failed")
+    # The new cases grew the test set, so the incumbent's own score no longer applies.
+    _finish(env, runs["model"], result=_result(0.7, 0.9, test=4))
+    env.sweep(_due(env) - timedelta(days=1))
+
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.detail_code) == ("failed", "continuous.review_unscored")
+    assert not env.plan().baseline_snapshot.get("tried_models")
+    env.sweep(_due(env))
+    assert list(_runs(env.cycles()[-1])) == ["data", "model"]
+
+
+def test_identical_cases_keep_one_role_each_when_pinned() -> None:
+    """Two copies of one case split across roles keep those roles, so the test count does not change."""
+    case = UnifiedCase.model_validate({"input": {"question": "Q?"}, "expected": "A"})
+    others = [UnifiedCase.model_validate({"input": {"question": f"Q{i}?"}, "expected": "A"}) for i in range(8)]
+    key = case_key(case)
+    pinned = PinnedSplit(
+        test=[key] + [case_key(other) for other in others[:1]],
+        fit=[key] + [case_key(other) for other in others[1:]],
+    )
+
+    splits = split_cases(
+        [case, case, *others],
+        "pairs",
+        SplitFractions(train=0.6, val=0.2, test=0.2),
+        shuffle=True,
+        seed=1,
+        pinned=pinned,
+    )
+
+    assert len(splits.test) == 2
+    assert len(splits.train) + len(splits.val) == 8
+
+
+def test_approving_a_model_only_winner_offers_its_unused_data_again(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The model-only run never searched on the new cases, so after its approval they start a data run."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    plan = _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    runs = _runs(cycle)
+    _finish(env, runs["data"], result=_result(0.6, 0.62))
+    _finish(env, runs["model"], result=_result(0.7, 0.9))
+    env.sweep(_due(env) - timedelta(days=1))
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.snapshot["winner"]["kind"]) == ("awaiting_review", "model")
+    assert env.client.post(f"/continuous/{plan['id']}/cycles/{cycle.id}/approve").status_code == 200
+
+    env.sweep(_due(env))
+
+    assert list(_runs(env.cycles()[-1])) == ["data"]

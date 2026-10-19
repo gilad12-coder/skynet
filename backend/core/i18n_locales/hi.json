@@ -385,6 +385,7 @@
     "continuous.source_unavailable": "हम {provider} पर स्रोत नहीं पढ़ सके: {reason}। सेटिंग्स में कनेक्शन जाँचें।",
     "continuous.source_invalid_cases": "स्रोत रन के केस फ़ॉर्मैट से मेल नहीं खाता: {reason}। पिछला सेटअप बना रहता है।",
     "continuous.paused_allowance": "मासिक सीमा खर्च हो चुकी है। योजना अगले महीने जारी रहेगी।",
+    "continuous.limit_too_low": "मासिक सीमा एक जाँच की लागत से कम है। सीमा बढ़ाएँ या कुछ रन बंद करें।",
     "continuous.paused_funds": "रन के लिए वॉलेट बैलेंस बहुत कम है। जारी रखने के लिए क्रेडिट जोड़ें।",
     "continuous.run_rejected": "रन शुरू नहीं हुआ: {reason}",
     "continuous.run_started": "एक अनुमत इनपुट बदला, और एक नया रन शुरू हुआ।",

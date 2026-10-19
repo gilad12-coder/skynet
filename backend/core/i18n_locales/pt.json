@@ -385,6 +385,7 @@
     "continuous.source_unavailable": "Não foi possível ler a origem em {provider}: {reason}. Verifique a ligação em Definições.",
     "continuous.source_invalid_cases": "A origem não corresponde ao formato de casos da execução: {reason}. A última configuração mantém-se.",
     "continuous.paused_allowance": "O limite mensal está esgotado. O plano continua no próximo mês.",
+    "continuous.limit_too_low": "O limite mensal é menor do que uma verificação pode custar. Aumente o limite ou desative algumas execuções.",
     "continuous.paused_funds": "O saldo da carteira é demasiado baixo para uma execução. Adicione crédito para continuar.",
     "continuous.run_rejected": "A execução não começou: {reason}",
     "continuous.run_started": "Uma entrada permitida mudou e começou uma nova execução.",

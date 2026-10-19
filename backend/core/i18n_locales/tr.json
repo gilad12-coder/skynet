@@ -385,6 +385,7 @@
     "continuous.source_unavailable": "{provider} üzerindeki kaynak okunamadı: {reason}. Ayarlar'da bağlantıyı kontrol edin.",
     "continuous.source_invalid_cases": "Kaynak, çalıştırmanın örnek biçimiyle eşleşmiyor: {reason}. Son yapılandırma yerinde kalır.",
     "continuous.paused_allowance": "Aylık limit harcandı. Plan gelecek ay devam eder.",
+    "continuous.limit_too_low": "Aylık limit, bir kontrolün maliyetinden düşük. Limiti artırın veya bazı çalıştırmaları kapatın.",
     "continuous.paused_funds": "Cüzdan bakiyesi bir çalıştırma için çok düşük. Devam etmek için kredi ekleyin.",
     "continuous.run_rejected": "Çalıştırma başlamadı: {reason}",
     "continuous.run_started": "İzin verilen bir girdi değişti ve yeni bir çalıştırma başladı.",

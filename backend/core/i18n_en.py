@@ -89,6 +89,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "continuous.source_unavailable": "We could not read the source on {provider}: {reason}. Check the connection in Settings.",
     "continuous.source_invalid_cases": "The source does not match the run's case format: {reason}. The last setup stays in place.",
     "continuous.paused_allowance": "The monthly limit is spent. The plan continues next month.",
+    "continuous.limit_too_low": "The monthly limit is lower than one check can cost. Raise the limit or turn off some runs.",
     "continuous.paused_funds": "The wallet balance is too low for a run. Add credit to continue.",
     "continuous.run_rejected": "The run did not start: {reason}",
     "continuous.run_started": "A permitted input changed, and a fresh run started.",

@@ -112,7 +112,7 @@ const RUN_KEYS: Record<string, MessageKey> = {
 
 interface CycleRunEntry {
   kind: string;
-  optimization_id: string;
+  optimization_id?: string;
   status?: string;
   best_score?: number | null;
   new_models?: Record<string, { name: string }>;
@@ -138,14 +138,20 @@ function CycleRuns({ cycle }: { cycle: ContinuousCycle }) {
       {runs.map((run) => {
         const models = Object.values(run.new_models ?? {}).map((model) => model.name);
         const won = settled && run.optimization_id === winner;
+        const label = msg(RUN_KEYS[run.kind] ?? "continuous_tab.matrix.data");
         return (
-          <li key={run.optimization_id} className="flex flex-wrap items-center gap-x-2">
-            <Link
-              className="font-medium text-foreground underline-offset-4 hover:underline"
-              href={`/optimizations/${run.optimization_id}`}
-            >
-              {msg(RUN_KEYS[run.kind] ?? "continuous_tab.matrix.data")}
-            </Link>
+          <li key={run.optimization_id ?? run.kind} className="flex flex-wrap items-center gap-x-2">
+            {/* A run waiting for its budget has no id yet, so it shows without a link. */}
+            {run.optimization_id ? (
+              <Link
+                className="font-medium text-foreground underline-offset-4 hover:underline"
+                href={`/optimizations/${run.optimization_id}`}
+              >
+                {label}
+              </Link>
+            ) : (
+              <span className="font-medium text-foreground">{label}</span>
+            )}
             {models.length > 0 && (
               <span dir="ltr" className="font-mono">
                 {models.join(", ")}

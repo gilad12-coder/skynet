@@ -38,7 +38,7 @@ from ...worker.continuous_schedule import ScheduleRule, drop_past_slots, next_ru
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..converters import job_owner
 from ..errors import DomainError
-from ._helpers import get_job_no_payload
+from ._helpers import cycle_ids_of_runs, get_job_no_payload
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
@@ -395,6 +395,8 @@ def _plan_for_run(session: Session, optimization_id: str) -> ContinuousPlanModel
     plan_id = session.scalar(
         select(ContinuousCycleModel.plan_id).where(ContinuousCycleModel.optimization_id == optimization_id)
     )
+    if plan_id is None and (cycle_id := cycle_ids_of_runs(session, {optimization_id}).get(optimization_id)):
+        plan_id = session.scalar(select(ContinuousCycleModel.plan_id).where(ContinuousCycleModel.id == cycle_id))
     return session.get(ContinuousPlanModel, plan_id) if plan_id else None
 
 
@@ -494,6 +496,11 @@ def create_continuous_router(
         cycle_budget = body.cycle_budget_cents or _source_budget_cents(job_store, job, current_user.username)
         if cycle_budget is None:
             raise DomainError("continuous.not_eligible", status=409)
+        # A check can start several runs, each with its own budget, so a lower limit would pause every check.
+        if body.monthly_limit_cents is not None and (
+            cycle_budget * engine_mod.max_runs(body.permitted.model_dump()) > body.monthly_limit_cents
+        ):
+            raise DomainError("continuous.limit_too_low", status=422)
         now = datetime.now(UTC)
         plan = ContinuousPlanModel(
             username=current_user.username,
@@ -737,7 +744,11 @@ def create_continuous_router(
             now = datetime.now(UTC)
             if approve:
                 plan.incumbent_optimization_id = cycle.optimization_id
-                adopted = ((cycle.snapshot or {}).get("winner") or {}).get("new_models") or {}
+                winner = (cycle.snapshot or {}).get("winner") or {}
+                if "data_before" in winner and plan.baseline_snapshot:
+                    # The adopted run never searched on the new cases, so the next check offers them again.
+                    plan.baseline_snapshot = {**plan.baseline_snapshot, "data": winner["data_before"]}
+                adopted = winner.get("new_models") or {}
                 if adopted and plan.baseline_snapshot:
                     # The new incumbent runs on these models, so a later check must not see them as a change.
                     models = {**(plan.baseline_snapshot.get("models") or {})}

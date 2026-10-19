@@ -385,6 +385,7 @@
     "continuous.source_unavailable": "تعذّرت قراءة المصدر على {provider}: {reason}. تحقق من الاتصال في الإعدادات.",
     "continuous.source_invalid_cases": "لا يطابق المصدر تنسيق حالات التشغيل: {reason}. يبقى الإعداد الأخير كما هو.",
     "continuous.paused_allowance": "تم استنفاد الحد الشهري. تستمر الخطة في الشهر القادم.",
+    "continuous.limit_too_low": "الحد الشهري أقل مما قد يكلفه فحص واحد. ارفع الحد أو أوقف بعض التشغيلات.",
     "continuous.paused_funds": "رصيد المحفظة منخفض جدًا لبدء تشغيل. أضف رصيدًا للمتابعة.",
     "continuous.run_rejected": "لم يبدأ التشغيل: {reason}",
     "continuous.run_started": "تغيّر مدخل مسموح به، وبدأ تشغيل جديد.",

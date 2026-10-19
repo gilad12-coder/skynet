@@ -385,6 +385,7 @@
     "continuous.source_unavailable": "Non è stato possibile leggere la fonte su {provider}: {reason}. Controlla la connessione in Impostazioni.",
     "continuous.source_invalid_cases": "La fonte non corrisponde al formato dei casi dell'esecuzione: {reason}. Resta valida l'ultima configurazione.",
     "continuous.paused_allowance": "Il limite mensile è esaurito. Il piano riprende il mese prossimo.",
+    "continuous.limit_too_low": "Il limite mensile è inferiore al costo di un controllo. Aumenta il limite o disattiva alcune esecuzioni.",
     "continuous.paused_funds": "Il saldo del portafoglio è troppo basso per un'esecuzione. Aggiungi credito per continuare.",
     "continuous.run_rejected": "L'esecuzione non è partita: {reason}",
     "continuous.run_started": "Un input consentito è cambiato ed è partita una nuova esecuzione.",

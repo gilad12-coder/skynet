@@ -385,6 +385,7 @@
     "continuous.source_unavailable": "我哋讀唔到 {provider} 上面嘅來源：{reason}。請喺「設定」檢查連接。",
     "continuous.source_invalid_cases": "來源同呢個運行嘅案例格式唔夾：{reason}。上次嘅設定維持不變。",
     "continuous.paused_allowance": "每月上限已經用晒。計劃會喺下個月繼續。",
+    "continuous.limit_too_low": "每月上限低過一次檢查可能嘅費用。請提高上限，或者關閉部分運行。",
     "continuous.paused_funds": "錢包餘額唔夠一次運行。請增值額度再繼續。",
     "continuous.run_rejected": "運行冇開始：{reason}",
     "continuous.run_started": "有獲准嘅輸入變咗，已經開始新嘅運行。",

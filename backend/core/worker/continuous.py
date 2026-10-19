@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import math
 import threading
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -583,12 +584,64 @@ def _split_keys(request: UnifiedRunRequest, cases: list[Any], pinned: PinnedSpli
     )
 
 
+def _merge_pins(*pins: PinnedSplit | None) -> PinnedSplit:
+    """Join pinned roles, keeping each key as often as the pin that repeats it most.
+
+    A pin lists a key once per case, so identical cases keep one role each.
+
+    Args:
+        *pins: Pins to join; ``None`` adds nothing.
+
+    Returns:
+        One pin with every key of every pin.
+    """
+    test: Counter[str] = Counter()
+    fit: Counter[str] = Counter()
+    for pin in pins:
+        if pin is not None:
+            test |= Counter(pin.test)
+            fit |= Counter(pin.fit)
+    return PinnedSplit(test=list(test.elements()), fit=list(fit.elements()))
+
+
+def _effective_task(models: dict[str, Any]) -> str | None:
+    """Name the model a run's code calls, which is the reflection model when no task model is set.
+
+    Args:
+        models: Model names by role.
+
+    Returns:
+        The model name, or ``None``.
+    """
+    return models.get("task_model") or models.get("reflection_model")
+
+
+def max_runs(permitted: dict[str, Any]) -> int:
+    """Return the most runs a check can start on its own, the reference run included.
+
+    A reference run joins only when new data meets a better model and no
+    matrix run keeps the incumbent's model. A model the user stages counts as
+    their own change, so it does not raise the count.
+
+    Args:
+        permitted: The plan's permitted inputs.
+
+    Returns:
+        The run count.
+    """
+    if not (permitted.get("data") and any(permitted.get(flag) for flag in NEW_MODEL_FLAGS.values())):
+        return 1
+    matrix = permitted.get("matrix") or [RUN_BOTH]
+    return len(matrix) + (0 if RUN_DATA in matrix else 1)
+
+
 def plan_runs(
     plan: ContinuousPlanModel,
     incumbent_payload: dict[str, Any],
     snapshot: dict[str, Any],
     cases: list[dict[str, Any]],
     changes: list[str],
+    kinds: list[str] | None = None,
 ) -> list[CycleRun]:
     """Decide which runs a check starts and which cases each one uses.
 
@@ -606,15 +659,25 @@ def plan_runs(
         snapshot: This check's resolved inputs.
         cases: This check's cases.
         changes: The inputs that changed since the last reviewed check.
+        kinds: The runs to build, for a retry that may start only what its first attempt gated.
 
     Returns:
         The runs, in matrix order, the reference run last.
     """
     stored = list((incumbent_payload.get("data") or {}).get("cases") or [])
     request = UnifiedRunRequest.model_validate(_request_copy(scrub_execution_credentials(incumbent_payload)))
-    earlier = _split_keys(request, stored, request.data.pinned_split)
+    # Keys of cases the source dropped stay pinned, so a case an earlier version searched on
+    # never comes back as a test case.
+    history = (plan.baseline_snapshot or {}).get("pins")
+    earlier = _merge_pins(
+        _split_keys(request, stored, request.data.pinned_split),
+        request.data.pinned_split,
+        # A rejected check's roles stay too, so its test cases never move into a later search.
+        PinnedSplit.model_validate(history) if history else None,
+    )
     new_models = snapshot.get("new_models") or {}
     data_changed = "data" in changes
+    allowed_kinds = kinds
     if data_changed and new_models:
         matrix = (plan.permitted or {}).get("matrix") or [RUN_BOTH]
         kinds = [kind for kind in MATRIX_KINDS if kind in matrix]
@@ -622,29 +685,35 @@ def plan_runs(
         kinds = [RUN_MODEL]
     else:
         kinds = [RUN_DATA]
+    if allowed_kinds is not None:
+        kinds = [kind for kind in allowed_kinds if kind != RUN_REFERENCE]
     if data_changed:
-        full = _split_keys(request, cases, earlier)
+        full = _merge_pins(_split_keys(request, cases, earlier), earlier)
         searched_before = set(earlier.fit)
         model_pinned = PinnedSplit(test=full.test, fit=[key for key in full.fit if key in searched_before])
         allowed = set(model_pinned.test) | searched_before
         model_cases = [case for case in cases if case_key(case) in allowed]
     else:
         full, model_pinned, model_cases = earlier, earlier, stored
-    incumbent_task = _model_names(incumbent_payload.get("models") or {})["task_model"]
-    base_task_changed = snapshot["models"].get("task_model") != incumbent_task
+    incumbent_task = _effective_task(_model_names(incumbent_payload.get("models") or {}))
     runs = []
     for kind in kinds:
         tried = new_models if kind in (RUN_MODEL, RUN_BOTH) else {}
+        run_models = {**snapshot["models"], **{role: model["name"] for role, model in tried.items()}}
         runs.append(
             CycleRun(
                 kind=kind,
                 cases=model_cases if kind == RUN_MODEL else cases,
                 pinned=model_pinned if kind == RUN_MODEL else full,
-                task_model_changed=base_task_changed or "task_model" in tried,
+                task_model_changed=_effective_task(run_models) != incumbent_task,
                 new_models=tried,
             )
         )
-    if data_changed and all(run.task_model_changed for run in runs):
+    if (
+        data_changed
+        and all(run.task_model_changed for run in runs)
+        and (allowed_kinds is None or RUN_REFERENCE in allowed_kinds)
+    ):
         runs.append(
             CycleRun(
                 kind=RUN_REFERENCE,
@@ -929,7 +998,10 @@ def process_cycle(
             _fail_cycle(session, plan, cycle, error.code, **error.params)
             return
         # A retry after ``budget.pending`` already holds this check's budgets.
-        retrying = bool((cycle.snapshot or {}).get("runs"))
+        previous = cycle.snapshot or {}
+        retrying = bool(previous.get("runs"))
+        if held := previous.get("refused_budgets"):
+            snapshot["refused_budgets"] = held
         cycle.snapshot = snapshot
         changes = changed_dimensions(plan.baseline_snapshot or {}, snapshot)
         cycle.changes = changes
@@ -939,7 +1011,10 @@ def process_cycle(
             _finish_cycle(session, cycle, CYCLE_SKIPPED, "continuous.skip_unchanged")
             return
         try:
-            runs = plan_runs(plan, incumbent["payload"], snapshot, cases, changes)
+            # A retry may start only the runs its first attempt passed the gates for, or it could
+            # spend past the allowance; it keeps their idempotency keys, so it reuses their budgets.
+            gated = [run["kind"] for run in previous["runs"]] if retrying else None
+            runs = plan_runs(plan, incumbent["payload"], snapshot, cases, changes, kinds=gated)
             started = session.scalars(
                 select(ContinuousCycleModel.id).where(
                     ContinuousCycleModel.plan_id == plan.id, ContinuousCycleModel.optimization_id.is_not(None)
@@ -950,6 +1025,9 @@ def process_cycle(
             # A staged model or optimizer the run contract rejects fails this cycle instead of wedging the plan.
             reason = "; ".join(str(item.get("msg")) for item in error.errors())
             _fail_cycle(session, plan, cycle, "continuous.run_rejected", reason=reason)
+            return
+        if not runs:
+            _finish_cycle(session, cycle, CYCLE_SKIPPED, "continuous.skip_unchanged")
             return
         need = plan.cycle_budget_cents * len(runs)
         gate = None
@@ -984,6 +1062,7 @@ def process_cycle(
                 }
                 for run in runs
             ],
+            "pins": _merge_pins(*(run.pinned for run in runs)).model_dump(),
         }
     _submit_runs(job_store, service, cycle_id, plan_username, payloads)
 
@@ -1045,6 +1124,15 @@ def _record_started(session: Session, cycle: ContinuousCycleModel, started: list
     """
     cycle.snapshot = {**(cycle.snapshot or {}), "runs": started}
     cycle.optimization_id = started[0]["optimization_id"]
+    plan = session.get(ContinuousPlanModel, cycle.plan_id)
+    if plan is not None and (pins := cycle.snapshot.get("pins")):
+        # A started run may search on its cases even if it later fails, so their roles hold for the plan.
+        baseline = plan.baseline_snapshot or {}
+        known = PinnedSplit.model_validate(baseline["pins"]) if baseline.get("pins") else None
+        plan.baseline_snapshot = {
+            **baseline,
+            "pins": _merge_pins(known, PinnedSplit.model_validate(pins)).model_dump(),
+        }
     cycle.execution_budget_id = started[0]["budget"]
     _finish_cycle(
         session,
@@ -1054,6 +1142,19 @@ def _record_started(session: Session, cycle: ContinuousCycleModel, started: list
         changes=",".join(cycle.changes or []),
         runs=",".join(run["kind"] for run in started),
     )
+
+
+def _keep_budgets(cycle: ContinuousCycleModel, budget_ids: list[str]) -> None:
+    """Record budgets that no started run holds, so the monthly allowance still counts them.
+
+    Args:
+        cycle: The cycle.
+        budget_ids: Budgets to add to the ones it already keeps.
+    """
+    kept = list((cycle.snapshot or {}).get("refused_budgets") or [])
+    merged = list(dict.fromkeys(kept + budget_ids))
+    if merged != kept:
+        cycle.snapshot = {**(cycle.snapshot or {}), "refused_budgets": merged}
 
 
 def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, payloads: list[UnifiedRunRequest]) -> None:
@@ -1114,13 +1215,14 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
             _record_started(session, cycle, started)
             # A refused run can still hold a budget its preflight charged, and the monthly allowance must count it.
             held = [BudgetService(engine=engine).find_by_creation_key(username, key) for key in refused_keys]
-            if held_ids := [budget.id for budget in held if budget is not None]:
-                cycle.snapshot = {**(cycle.snapshot or {}), "refused_budgets": held_ids}
+            _keep_budgets(cycle, [budget.id for budget in held if budget is not None])
             logger.info("Continuous cycle %s started %d runs", cycle_id, len(started))
             return
         budgets = [BudgetService(engine=engine).find_by_creation_key(username, key) for key in budget_keys]
         budget_ids = [budget.id for budget in budgets if budget is not None]
         cycle.execution_budget_id = budget_ids[0] if budget_ids else None
+        # Each refused preflight can bill its own budget, and the monthly allowance must count all of them.
+        _keep_budgets(cycle, budget_ids)
         cycle.spent_cents = sum(_billed_cents(job_store, budget_id, username) or 0 for budget_id in budget_ids) or None
         if refused is None:
             return
@@ -1207,8 +1309,12 @@ def _seen_snapshot(previous: dict[str, Any], snapshot: dict[str, Any], runs: lis
         The new baseline snapshot.
     """
     seen = {
-        key: value for key, value in snapshot.items() if key not in {"runs", "winner", "new_models", "refused_budgets"}
+        key: value
+        for key, value in snapshot.items()
+        if key not in {"runs", "winner", "new_models", "refused_budgets", "pins"}
     }
+    if previous.get("pins"):
+        seen["pins"] = previous["pins"]
     if not any(run["kind"] in (RUN_DATA, RUN_BOTH) for run in runs):
         if previous.get("data"):
             seen["data"] = previous["data"]
@@ -1278,9 +1384,6 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
             reason = next((job["status"] for job in jobs if job["status"] != OptimizationStatus.success.value), "")
             _fail_cycle(session, plan, cycle, "continuous.run_failed", reason=reason)
             return
-        plan.baseline_snapshot = _seen_snapshot(
-            plan.baseline_snapshot or {}, cycle.snapshot or {}, [run for run, _ in finished]
-        )
         incumbent = _incumbent_on_test(job_store, cycle, finished)
         eligible = [
             (run, result)
@@ -1302,7 +1405,22 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
             "winner": {"kind": best_run["kind"], "new_models": best_run.get("new_models") or {}},
         }
         split = best_result.get("split_counts") or {}
+        if (incumbent is None or best is None) and len(finished) < len(runs):
+            # A failed run (often the reference run) left nothing to judge, so the inputs stay unseen
+            # for the next check, and a streak of these pauses the plan like any other failure.
+            _fail_cycle(session, plan, cycle, "continuous.review_unscored")
+            return
+        if best_run["kind"] == RUN_MODEL and "data" in (cycle.changes or []):
+            # A model-only winner leaves out the new search cases, so approving it must reopen them.
+            cycle.snapshot = {
+                **cycle.snapshot,
+                "winner": {**cycle.snapshot["winner"], "data_before": (plan.baseline_snapshot or {}).get("data")},
+            }
+        plan.baseline_snapshot = _seen_snapshot(
+            plan.baseline_snapshot or {}, cycle.snapshot or {}, [run for run, _ in finished]
+        )
         if incumbent is None or best is None:
+            # Every run succeeded on other test cases than the incumbent's, and a retry would meet the same cases.
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_unscored")
         elif not (split.get("test") and split.get("held_out")):
             # Without separate test cases the split that picked the candidate would also judge it.

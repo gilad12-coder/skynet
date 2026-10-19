@@ -385,6 +385,7 @@
     "continuous.source_unavailable": "{provider} のソースを読み取れませんでした：{reason}。設定で接続を確認してください。",
     "continuous.source_invalid_cases": "ソースが実行のケース形式と一致しません：{reason}。前回のセットアップがそのまま使われます。",
     "continuous.paused_allowance": "月間上限に達しました。プランは来月再開します。",
+    "continuous.limit_too_low": "月間上限が1回のチェックの費用より低くなっています。上限を上げるか、一部の実行をオフにしてください。",
     "continuous.paused_funds": "ウォレット残高が実行に足りません。続けるにはクレジットを追加してください。",
     "continuous.run_rejected": "実行が開始されませんでした：{reason}",
     "continuous.run_started": "許可された入力が変わったため、新しい実行が開始されました。",

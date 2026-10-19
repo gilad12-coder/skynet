@@ -71,7 +71,7 @@ from ...service_gateway.optimization.training_ground.run_react import (
     resolve_react_tools,
 )
 from ...service_gateway.optimization.workflow import build_workflow_program, workflow_tool_users
-from ...storage.models import ContinuousCycleModel, ContinuousPlanModel
+from ...storage.models import ContinuousCycleModel, ContinuousPlanModel, JobModel
 from ..auth import AuthenticatedUser, is_admin
 from ..converters import (
     compute_elapsed,
@@ -611,6 +611,27 @@ def run_folder_ids(job_store, optimization_ids: list[str]) -> dict[str, str]:
         return folder_ids_for_runs(session, optimization_ids)
 
 
+def cycle_ids_of_runs(session: Session, optimization_ids: set[str]) -> dict[str, str]:
+    """Map runs a scheduled check started to that check, read from their idempotency keys.
+
+    A check with several runs records only one on its row, so the key
+    ``continuous:<cycle>:<kind>`` is the one link every run carries.
+
+    Args:
+        session: Open session.
+        optimization_ids: Runs to look up.
+
+    Returns:
+        ``{optimization_id: cycle_id}`` for the runs a check started.
+    """
+    rows = session.execute(
+        select(JobModel.optimization_id, JobModel.idempotency_key).where(
+            JobModel.optimization_id.in_(optimization_ids), JobModel.idempotency_key.like("continuous:%")
+        )
+    ).all()
+    return {run: key.split(":")[1] for run, key in rows}
+
+
 def automated_run_ids(job_store, optimization_ids: list[str]) -> set[str]:
     """Return the runs that belong to a continuous plan.
 
@@ -640,7 +661,8 @@ def automated_run_ids(job_store, optimization_ids: list[str]) -> set[str]:
         started = session.scalars(
             select(ContinuousCycleModel.optimization_id).where(ContinuousCycleModel.optimization_id.in_(wanted))
         ).all()
-    return wanted & ({run for pair in plans for run in pair} | set(started))
+        keyed = cycle_ids_of_runs(session, wanted)
+    return wanted & ({run for pair in plans for run in pair} | set(started) | set(keyed))
 
 
 def get_job_no_payload(job_store, optimization_id: str) -> dict[str, Any]:

@@ -385,6 +385,7 @@
     "continuous.source_unavailable": "לא הצלחנו לקרוא את המקור ב-{provider}: {reason}. בדקו את החיבור בהגדרות.",
     "continuous.source_invalid_cases": "המקור לא מתאים למבנה המקרים של ההרצה: {reason}. ההגדרה האחרונה נשמרה.",
     "continuous.paused_allowance": "המגבלה החודשית נוצלה. התוכנית תמשיך בחודש הבא.",
+    "continuous.limit_too_low": "המגבלה החודשית נמוכה ממה שבדיקה אחת יכולה לעלות. הגדילו את המגבלה או כבו חלק מהריצות.",
     "continuous.paused_funds": "אין מספיק יתרה בארנק להרצה. הוסיפו יתרה כדי להמשיך.",
     "continuous.run_rejected": "ההרצה לא התחילה: {reason}",
     "continuous.run_started": "קלט מותר השתנה, והרצה חדשה התחילה.",

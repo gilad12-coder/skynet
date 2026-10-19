@@ -385,6 +385,7 @@
     "continuous.source_unavailable": "No pudimos leer la fuente en {provider}: {reason}. Revisa la conexión en Ajustes.",
     "continuous.source_invalid_cases": "La fuente no coincide con el formato de casos de la ejecución: {reason}. Se mantiene la última configuración.",
     "continuous.paused_allowance": "El límite mensual se agotó. El plan continúa el mes que viene.",
+    "continuous.limit_too_low": "El límite mensual es menor que lo que puede costar una revisión. Sube el límite o desactiva algunas ejecuciones.",
     "continuous.paused_funds": "El saldo de la cartera es demasiado bajo para una ejecución. Añade crédito para continuar.",
     "continuous.run_rejected": "La ejecución no se inició: {reason}",
     "continuous.run_started": "Cambió una entrada permitida y se inició una ejecución nueva.",

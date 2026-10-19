@@ -385,6 +385,7 @@
     "continuous.source_unavailable": "Wir konnten die Quelle bei {provider} nicht lesen: {reason}. Prüfen Sie die Verbindung in den Einstellungen.",
     "continuous.source_invalid_cases": "Die Quelle passt nicht zum Fallformat des Laufs: {reason}. Die letzte Einrichtung bleibt bestehen.",
     "continuous.paused_allowance": "Das Monatslimit ist aufgebraucht. Der Plan geht nächsten Monat weiter.",
+    "continuous.limit_too_low": "Das Monatslimit ist niedriger als die Kosten einer Prüfung. Erhöhe das Limit oder schalte einige Läufe ab.",
     "continuous.paused_funds": "Das Guthaben im Wallet reicht für keinen Lauf. Laden Sie Guthaben auf, um fortzufahren.",
     "continuous.run_rejected": "Der Lauf wurde nicht gestartet: {reason}",
     "continuous.run_started": "Eine zugelassene Eingabe hat sich geändert, und ein neuer Lauf wurde gestartet.",

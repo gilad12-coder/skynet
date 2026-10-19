@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -189,13 +190,21 @@ def _pinned_split(
     Returns:
         The three splits and their counts.
     """
-    test_keys, fit_keys = set(pinned.test), set(pinned.fit)
+    # A pin repeats a key once per identical case, so copies split across roles keep those roles.
+    test_keys, fit_keys = Counter(pinned.test), Counter(pinned.fit)
     test: list[Any] = []
     fit: list[Any] = []
     new: list[Any] = []
     for case in cases:
         key = case_key(case)
-        (test if key in test_keys else fit if key in fit_keys else new).append(case)
+        if test_keys[key] > 0:
+            test_keys[key] -= 1
+            test.append(case)
+        elif fit_keys[key] > 0:
+            fit_keys[key] -= 1
+            fit.append(case)
+        else:
+            new.append(case)
     if shuffle:
         rng = random.Random(seed)
         rng.shuffle(fit)
