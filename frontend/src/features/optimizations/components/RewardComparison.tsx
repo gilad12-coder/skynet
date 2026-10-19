@@ -16,6 +16,7 @@ import {
   type RewardComponent,
   type ResponseObservation,
 } from "@/shared/lib/reward";
+import { RewardFormula, rewardReference } from "@/shared/ui/reward/reward-preview";
 import type { BlackboxRunResult } from "@/shared/types/api";
 import type { UnifiedSplitCounts } from "@/shared/types/unified-run";
 
@@ -24,6 +25,8 @@ type Better = "higher" | "lower";
 interface ComparisonRow {
   key: string;
   label: string;
+  /** The part this row scores; the total has none. */
+  component?: RewardComponent;
   /** The metric's own words for this part, from `REWARD_SPEC`. */
   meaning?: string;
   baseline: number | null;
@@ -54,11 +57,13 @@ export function savedMetricCode(payload: unknown): string | null {
 }
 
 /**
- * The reward breakdown of the baseline and the selected version (SKY-69).
+ * The reward breakdown of the baseline and the selected version (SKY-69), in
+ * one table with each part's weight beside its values (SKY-84).
  *
  * Time and cost come from each final-run response's trusted observation; the
  * parts and the total come from the run's own scores. A part where the
- * selected version is worse is marked, even when the total rose.
+ * selected version is worse is marked, even when the total rose. Hovering a
+ * part's name shows its meaning and the value at which it scores ½.
  */
 export function RewardComparison({
   result,
@@ -81,6 +86,7 @@ export function RewardComparison({
   const rows: ComparisonRow[] = [
     {
       key: "accuracy",
+      component: "accuracy",
       label: rewardPartName(spec, "accuracy"),
       meaning: spec.accuracy.meaning,
       baseline: part(result.baseline_named_scores, "accuracy"),
@@ -90,6 +96,7 @@ export function RewardComparison({
     },
     {
       key: "mean_ms",
+      component: "speed",
       label: spec.speed.name || msg("optimization.reward.mean_time"),
       meaning: spec.speed.meaning,
       baseline: baselineObs.meanMs,
@@ -99,6 +106,7 @@ export function RewardComparison({
     },
     {
       key: "cost",
+      component: "cost",
       label: spec.cost.name || msg("optimization.reward.cost_per_response"),
       meaning: spec.cost.meaning,
       baseline: baselineObs.meanCostUsd,
@@ -132,6 +140,7 @@ export function RewardComparison({
         <Trophy className="size-4 shrink-0 text-primary" aria-hidden="true" />
         {msg("optimization.reward.title")}
       </h3>
+      <RewardFormula spec={spec} />
       <TooltipProvider>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[26rem] text-xs">
@@ -139,6 +148,9 @@ export function RewardComparison({
               <tr className="border-b border-border/60">
                 <th scope="col" className={th}>
                   {msg("optimization.logged_metrics.metric_col")}
+                </th>
+                <th scope="col" className={th}>
+                  {msg("submit.v2.reward.col.weight")}
                 </th>
                 <th scope="col" className={th}>
                   {msg("optimization.logged_metrics.baseline_col")}
@@ -165,7 +177,7 @@ export function RewardComparison({
                       scope="row"
                       className={cn(td, "text-start font-normal", row.strong && "font-semibold")}
                     >
-                      {row.meaning ? (
+                      {row.component ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span
@@ -176,14 +188,25 @@ export function RewardComparison({
                               {row.label}
                             </span>
                           </TooltipTrigger>
-                          <TooltipContent className="max-w-xs">
-                            <bdi>{row.meaning}</bdi>
+                          <TooltipContent className="max-w-xs space-y-0.5">
+                            {row.meaning && (
+                              <p>
+                                <bdi>{row.meaning}</bdi>
+                              </p>
+                            )}
+                            <p className="opacity-80">
+                              {msg("submit.v2.reward.col.reference")}:{" "}
+                              <bdi>{rewardReference(spec, row.component)}</bdi>
+                            </p>
                           </TooltipContent>
                         </Tooltip>
                       ) : (
                         row.label
                       )}
                     </th>
+                    <td className={td} data-weight={row.key}>
+                      <bdi dir="ltr">{f.pct(row.component ? spec.weights[row.component] : 1)}</bdi>
+                    </td>
                     <td className={td}>
                       <bdi dir="ltr">{row.format(row.baseline)}</bdi>
                     </td>

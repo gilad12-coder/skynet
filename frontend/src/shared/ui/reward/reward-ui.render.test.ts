@@ -9,6 +9,7 @@ const frontend = path.resolve(path.dirname(new URL(import.meta.url).pathname), "
 for (const file of [
   "src/shared/ui/reward/reward-preview.test.tsx",
   "src/features/optimizations/components/RewardTab.test.tsx",
+  "src/features/optimizations/components/RewardComparison.test.tsx",
 ]) {
   void it(`${path.basename(file)} render tests pass`, () => {
     const result = spawnSync(path.join(frontend, "node_modules/.bin/jiti"), [file], {

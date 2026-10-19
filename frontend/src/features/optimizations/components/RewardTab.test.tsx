@@ -56,11 +56,14 @@ void describe("RewardTab", () => {
     assert.equal(hasRewardTab(undefined), false);
   });
 
-  void it("turns a code metric into its parts and compares the run", () => {
+  void it("shows one table with each part's weight beside the run's values", () => {
     const html = render(<RewardTab payload={payload(CODE_METRIC)} result={result()} />);
     assert.match(html, /submit\.v2\.reward\.formula/);
     assert.match(html, /optimization\.reward\.title/);
     assert.match(html, /data-row="total"/);
+    assert.equal(html.match(/<table/g)?.length, 1);
+    assert.match(html, /data-weight="accuracy"[^>]*>[\s\S]*?50%/);
+    assert.doesNotMatch(html, /submit\.v2\.reward\.col\.meaning/);
   });
 
   void it("leaves the comparison out until the run finishes", () => {

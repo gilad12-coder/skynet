@@ -23,9 +23,9 @@ export function hasRewardTab(payload: unknown): boolean {
 }
 
 /**
- * The run page's Reward tab (SKY-84): the parts of the metric's REWARD_SPEC
- * and, for a finished run, the baseline and the selected version compared
- * part by part.
+ * The run page's Reward tab (SKY-84). A finished run shows one table: each
+ * part's weight beside the baseline and the selected version. Until then the
+ * tab shows the metric's REWARD_SPEC parts.
  *
  * Args:
  *   payload: The run's saved submit payload.
@@ -39,12 +39,10 @@ export function RewardTab({
   result: BlackboxRunResult | null;
 }) {
   const code = runMetricCode(payload);
+  if (result) return <RewardComparison result={result} metricCode={code} />;
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl border border-border bg-card px-4 py-3.5">
-        <RewardPreview read={readRewardSpec(code)} />
-      </div>
-      {result && <RewardComparison result={result} metricCode={code} />}
+    <div className="rounded-xl border border-border bg-card px-4 py-3.5">
+      <RewardPreview read={readRewardSpec(code)} />
     </div>
   );
 }
