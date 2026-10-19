@@ -11,7 +11,7 @@ import {
   type RewardBuild,
 } from "@/shared/lib/reward-rules";
 import { cn } from "@/shared/lib/utils";
-import { Info, Play, Target } from "@/shared/ui/icons";
+import { Play, Target } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
@@ -248,29 +248,19 @@ export function RewardTryIt({
             <div className="rounded-lg border border-border/60 bg-muted/30">
               <ul className="divide-y divide-border/40">
                 {ranked.map(({ entry, result: r }) => (
-                  <li
-                    key={entry.name}
-                    data-reward={entry.name}
-                    className="flex items-center gap-2 px-3 py-2"
-                  >
-                    <bdi dir="ltr" className="min-w-0 truncate font-mono text-xs">
-                      {entry.name}
-                    </bdi>
-                    <TooltipButton tooltip={reasonText(r.reason)}>
-                      <button
-                        type="button"
-                        className="shrink-0 text-muted-foreground hover:text-foreground"
-                        aria-label={reasonText(r.reason)}
-                      >
-                        <Info className="size-3.5" />
-                      </button>
-                    </TooltipButton>
-                    <span className="ms-auto shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
-                      <bdi dir="ltr">
-                        {signed(r.score)} × {plain(entry.weight)} =
+                  <li key={entry.name} data-reward={entry.name} className="space-y-0.5 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <bdi dir="ltr" className="min-w-0 truncate font-mono text-xs">
+                        {entry.name}
                       </bdi>
-                    </span>
-                    <ScorePill>{signed(r.score * entry.weight)}</ScorePill>
+                      <span className="ms-auto shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+                        <bdi dir="ltr">
+                          {signed(r.score)} × {plain(entry.weight)} =
+                        </bdi>
+                      </span>
+                      <ScorePill>{signed(r.score * entry.weight)}</ScorePill>
+                    </div>
+                    <p className="text-[0.6875rem] text-muted-foreground">{reasonText(r.reason)}</p>
                   </li>
                 ))}
               </ul>

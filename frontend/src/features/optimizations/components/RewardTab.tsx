@@ -70,17 +70,13 @@ export function RewardTab({
     <div className="space-y-6">
       {rules.kind === "build" ? (
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-border bg-card">
-            <RewardBuilder
-              build={rules.build}
-              expectedField={expectedField}
-              samples={samples}
-              tryIt={false}
-            />
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <RewardTryIt build={rules.build} expectedField={expectedField} samples={samples} />
-          </div>
+          <RewardBuilder
+            build={rules.build}
+            expectedField={expectedField}
+            samples={samples}
+            tryIt={false}
+          />
+          <RewardTryIt build={rules.build} expectedField={expectedField} samples={samples} />
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card px-4 py-3.5">
