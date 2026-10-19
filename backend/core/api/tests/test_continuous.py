@@ -596,9 +596,7 @@ def test_allowance_exhaustion_pauses_and_rollover_keeps_history(env: _Env) -> No
     """A spent allowance pauses paid work; the next month resumes it and keeps every record."""
     source_id = _incumbent(env)
     # Without staged models a check starts one run, so one budget covers it.
-    _enable(
-        env, source_id, permitted={"data": True}, monthly_limit_cents=CYCLE_BUDGET, cycle_budget_cents=CYCLE_BUDGET
-    )
+    _enable(env, source_id, permitted={"data": True}, monthly_limit_cents=CYCLE_BUDGET, cycle_budget_cents=CYCLE_BUDGET)
     env.rows = _cases(["B"] * 10)
     october = datetime(2026, 10, 20, tzinfo=UTC)
     env.edit_plan(next_check_at=october)
@@ -839,9 +837,7 @@ def test_pending_setup_usage_retries_the_same_check(env: _Env, monkeypatch: pyte
 def test_a_pending_retry_at_the_allowance_edge_is_not_paused(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
     """A retried check that already holds its budget does not need a second cycle budget of allowance."""
     source_id = _incumbent(env)
-    _enable(
-        env, source_id, permitted={"data": True}, monthly_limit_cents=CYCLE_BUDGET, cycle_budget_cents=CYCLE_BUDGET
-    )
+    _enable(env, source_id, permitted={"data": True}, monthly_limit_cents=CYCLE_BUDGET, cycle_budget_cents=CYCLE_BUDGET)
     env.rows = _cases(["B"] * 10)
     submit = continuous.submit_unified_payload
 
@@ -1498,7 +1494,8 @@ def test_a_failed_model_run_leaves_its_model_untried(env: _Env, monkeypatch: pyt
 
     latest = env.cycles()[-1]
     assert latest.status == "optimizing"
-    assert list(_runs(latest)) == ["model"]
+    # The rejected data run's test cases stay, so the incumbent needs a score on them.
+    assert list(_runs(latest)) == ["model", "reference"]
 
 
 def test_a_refused_run_keeps_its_budget_on_the_check(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2039,7 +2036,7 @@ def test_test_cases_the_source_drops_stay_in_the_test_set(env: _Env) -> None:
 
 
 def test_a_source_that_replaces_its_rows_keeps_the_pins_bounded(env: _Env) -> None:
-    """Pins keep only the cases a check used, and the plan's page never carries them."""
+    """A run's pins keep only its own cases, and the plan's page never carries the plan's pins."""
     source_id = _incumbent(env)
     plan = _enable(env, source_id, permitted={"data": True})
     sizes = []
@@ -2050,7 +2047,7 @@ def test_a_source_that_replaces_its_rows_keeps_the_pins_bounded(env: _Env) -> No
         _finish(env, cycle.optimization_id, result=_result(0.5, 0.6))
         env.sweep(_due(env) - timedelta(days=1))
         assert env.client.post(f"/continuous/{plan['id']}/cycles/{env.cycles()[-1].id}/reject").status_code == 200
-        pins = env.plan().baseline_snapshot["pins"]
+        pins = _payload(env, cycle.optimization_id)["data"]["pinned_split"]
         sizes.append(len(pins["test"]) + len(pins["fit"]))
 
     assert sizes[-1] == sizes[0]
@@ -2124,3 +2121,315 @@ def test_a_crash_after_a_refused_run_keeps_its_charged_budget(env: _Env, monkeyp
     [cycle] = env.cycles()
     assert list(_runs(cycle)) == ["model"]
     assert len(continuous.cycle_budget_ids(cycle)) == 2
+
+
+def _rows(start: int, count: int) -> list[dict[str, str]]:
+    """Build disjoint source rows.
+
+    Args:
+        start: First question index.
+        count: Number of rows.
+
+    Returns:
+        Source rows.
+    """
+    return [{"question": f"Unique Q{index}?", "answer": "A"} for index in range(start, start + count)]
+
+
+def _split_payload(payload: dict[str, Any]) -> Any:
+    """Compute the production split of a stored request.
+
+    Args:
+        payload: Stored request.
+
+    Returns:
+        Split cases.
+    """
+    request = UnifiedRunRequest.model_validate(payload)
+    return split_cases(
+        request.data.cases,
+        request.data.mode,
+        request.data.split,
+        shuffle=request.data.shuffle,
+        seed=split_seed(request),
+        pinned=request.data.pinned_split,
+    )
+
+
+def _accept_data(env: _Env, plan_id: str) -> Any:
+    """Run and approve one data cycle.
+
+    Args:
+        env: Real SQLite fixture.
+        plan_id: Plan to approve.
+
+    Returns:
+        Started cycle.
+    """
+    env.sweep(_due(env))
+    cycle = env.cycles()[-1]
+    assert cycle.status == "optimizing"
+    actual = _split_payload(_payload(env, cycle.optimization_id))
+    _finish(env, cycle.optimization_id, result=_result(0.5, 0.9, test=len(actual.test)))
+    continuous.review_cycle(env.store, cycle.id)
+    response = env.client.post(f"/continuous/{plan_id}/cycles/{cycle.id}/approve")
+    assert response.status_code == 200, response.text
+    return cycle
+
+
+def test_a_searched_case_stays_out_of_test_after_two_approvals(env: _Env) -> None:
+    """Keep previously learned cases outside test after source rotation and return."""
+    plan = _enable(env, _incumbent(env), permitted={"data": True}, monthly_limit_cents=200)
+    env.rows = _rows(100, 10)
+    first = _accept_data(env, plan["id"])
+    learned = _split_payload(_payload(env, first.optimization_id))
+    learned_keys = {case_key(case) for case in learned.train + learned.val}
+    env.rows = _rows(200, 10)
+    _accept_data(env, plan["id"])
+    env.rows = [
+        {"question": case.input["question"], "answer": case.expected["answer"]} for case in learned.train + learned.val
+    ]
+    env.sweep(_due(env))
+    latest = env.cycles()[-1]
+    assert latest.status == "optimizing"
+    test_keys = {case_key(case) for case in _split_payload(_payload(env, latest.optimization_id)).test}
+    assert not (learned_keys & test_keys), f"Previously searched cases returned as test: {learned_keys & test_keys}"
+
+
+def test_a_model_only_run_keeps_the_incumbent_search_cases_when_the_source_replaces_its_rows(
+    env: _Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Use incumbent search data for the model-only arm after a source replacement."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]})
+    old = _split_payload(_payload(env, source_id))
+    expected_fit = {case_key(case) for case in old.train + old.val}
+    env.rows = _rows(100, 10)
+    env.sweep(_due(env))
+    cycle = env.cycles()[-1]
+    model = _split_payload(_payload(env, _runs(cycle)["model"]))
+    actual_fit = {case_key(case) for case in model.train + model.val}
+    assert actual_fit == expected_fit, f"Model-only search kept {len(actual_fit)} of {len(expected_fit)} cases"
+
+
+def test_a_model_only_check_keeps_a_rejected_checks_test_cases(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Preserve the enlarged held-out set when the next check changes only the model."""
+    _catalog(monkeypatch, task=(40.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True})
+    env.rows = _cases(["A"] * 10) + _rows(100, 10)
+    env.sweep(_due(env))
+    first = env.cycles()[-1]
+    old_test = {case_key(case) for case in _split_payload(_payload(env, first.optimization_id)).test}
+    _finish(env, first.optimization_id, result=_result(0.7, 0.6, test=len(old_test)))
+    continuous.review_cycle(env.store, first.id)
+    assert env.cycles()[-1].status == "regressed"
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    env.sweep(_due(env))
+    latest = env.cycles()[-1]
+    new_test = {case_key(case) for case in _split_payload(_payload(env, latest.optimization_id)).test}
+    assert old_test <= new_test, f"Held-out set shrank from {len(old_test)} to {len(new_test)}"
+
+
+def test_a_crash_before_any_run_starts_keeps_the_charged_budget(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Count real refused-preflight charges after a crash and changed-input retry."""
+    _enable(
+        env,
+        _incumbent(env),
+        permitted={"data": True},
+        schedule=DAILY,
+        monthly_limit_cents=CYCLE_BUDGET,
+    )
+    now = datetime(2030, 1, 6, 9, tzinfo=UTC)
+    env.edit_plan(next_check_at=now)
+    env.rows = _rows(100, 10)
+    env.harness.result_status = "failed"
+    real_submit = continuous.submit_unified_payload
+
+    def crash_after_refused_preflight(*args: Any, **kwargs: Any) -> Any:
+        """Interrupt durable accounting after a real preflight refusal.
+
+        Args:
+            *args: Original positional arguments.
+            **kwargs: Original keyword arguments.
+
+        Raises:
+            RuntimeError: After the real setup charges the wallet and refuses.
+        """
+        try:
+            return real_submit(*args, **kwargs)
+        except DomainError as error:
+            if error.code != "submission.validation_failed":
+                raise
+            raise RuntimeError("simulated worker loss after refused preflight") from error
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", crash_after_refused_preflight)
+    env.sweep(now)
+    first = env.cycles()[-1]
+    assert first.status == "checking"
+    assert first.optimization_id is None
+    budget = BudgetService(engine=env.store.engine).find_by_creation_key(
+        "alice", first.snapshot["runs"][0]["budget_key"]
+    )
+    assert budget is not None
+    assert budget.billed_cents == 1
+    monkeypatch.setattr(continuous, "submit_unified_payload", real_submit)
+    env.harness.result_status = "succeeded"
+    env.rows = _rows(200, 10)
+    env.sweep(now + continuous.CYCLE_LEASE + timedelta(seconds=1))
+    first = env.cycles()[0]
+    assert first.detail_code == "continuous.skip_inputs_changed"
+    with Session(env.store.engine) as session:
+        recorded_before = continuous.month_committed(session, env.plan(), first.month)
+    assert recorded_before >= budget.billed_cents, f"accounted {recorded_before}; orphan budget {budget.id}"
+    env.sweep(_due(env))
+    second = env.cycles()[-1]
+    # The charged cent leaves less than one run's budget, so the next check must not start.
+    assert (second.status, second.detail_code) == ("paused", "continuous.paused_allowance")
+
+
+def test_copies_of_one_row_count_as_one_new_case(env: _Env) -> None:
+    """Avoid a paid run when copies of one new case satisfy the configured threshold."""
+    _enable(env, _incumbent(env), permitted={"data": True, "min_new_cases": 10})
+    env.rows = _cases(["A"] * 10) + _rows(100, 1) * 10
+    env.sweep(_due(env))
+    cycle = env.cycles()[-1]
+    assert cycle.detail_code == "continuous.skip_unchanged", f"One distinct new case started {cycle.status}"
+
+
+@pytest.mark.parametrize("interruption", ["refused_reference", "crash_before_reference"])
+def test_a_missing_reference_run_leaves_its_model_untried(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, interruption: str
+) -> None:
+    """Retry an unjudged model when its required reference never starts."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    _enable(env, _incumbent(env), permitted={"data": True, "new_task_model": True})
+    env.rows = _cases(["A"] * 10) + _rows(100, 10)
+    real_submit = continuous.submit_unified_payload
+
+    def interrupt_reference(*args: Any, **kwargs: Any) -> Any:
+        """Interrupt the reference after the candidate is durably accepted.
+
+        Args:
+            *args: Original positional arguments.
+            **kwargs: Original keyword arguments.
+
+        Returns:
+            The accepted candidate.
+
+        Raises:
+            DomainError: For a real reference-preflight failure.
+            RuntimeError: After accepting the candidate, before the reference.
+        """
+        if kwargs["idempotency_key"].endswith(":reference"):
+            env.harness.result_status = "failed"
+        response = real_submit(*args, **kwargs)
+        if interruption == "crash_before_reference":
+            raise RuntimeError("simulated crash before reference submission")
+        return response
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", interrupt_reference)
+    now = _due(env)
+    env.sweep(now)
+    monkeypatch.setattr(continuous, "submit_unified_payload", real_submit)
+    env.harness.result_status = "succeeded"
+    if interruption == "crash_before_reference":
+        env.sweep(now + continuous.CYCLE_LEASE + timedelta(seconds=1))
+    cycle = env.cycles()[-1]
+    assert list(_runs(cycle)) == ["both"]
+    actual = _split_payload(_payload(env, cycle.optimization_id))
+    _finish(env, cycle.optimization_id, result=_result(0.8, 0.9, test=len(actual.test)))
+    continuous.review_cycle(env.store, cycle.id)
+    cycle = env.cycles()[-1]
+    assert cycle.incumbent_score is None
+    env.sweep(_due(env))
+    latest = env.cycles()[-1]
+    assert latest.status == "optimizing", (
+        f"Unjudged model became tried={env.plan().baseline_snapshot.get('tried_models')}; "
+        f"next check={latest.detail_code}"
+    )
+
+
+def test_approval_keeps_a_model_staged_after_the_check_started(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep a newer staged input when adopting a candidate from an older check."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    actual = _split_payload(_payload(env, source_id))
+    _finish(env, source_id, result=_result(0.5, 0.7, test=len(actual.test)))
+    plan = _enable(env, source_id, permitted={"models": True, "new_task_model": True}, source=None)
+    env.sweep(_due(env))
+    cycle = env.cycles()[-1]
+    _finish(env, cycle.optimization_id, result=_result(0.8, 0.9, test=len(actual.test)))
+    continuous.review_cycle(env.store, cycle.id)
+    assert env.cycles()[-1].status == "awaiting_review"
+    staged = env.client.post(f"/continuous/{plan['id']}/inputs", json={"task_model": "fixture/newly-requested"})
+    assert staged.status_code == 200, staged.text
+    approved = env.client.post(f"/continuous/{plan['id']}/cycles/{cycle.id}/approve")
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["pending_inputs"].get("task_model") == "fixture/newly-requested"
+
+
+@pytest.mark.parametrize("extra", list(range(2, 12)))
+def test_a_case_the_approved_lineage_searched_never_returns_as_test(env: _Env, extra: int) -> None:
+    """A case an approved version searched on keeps its role after the source drops it and it returns."""
+    source_id = _incumbent(env)
+    plan = _enable(env, source_id, permitted={"data": True})
+    request = UnifiedRunRequest.model_validate(_payload(env, source_id))
+    first = split_cases(request.data.cases, "pairs", request.data.split, shuffle=True, seed=split_seed(request))
+    fit_keys = {case_key(c) for c in first.train + first.val}
+    original = _cases(["A"] * 10)
+    keyed = [(case_key(c), row) for c, row in zip(request.data.cases, original, strict=True)]
+    f_key, f_row = next((k, r) for k, r in keyed if k in fit_keys)
+    # Check 1: the source drops F, adds ten new rows. The data run wins and is approved.
+    env.rows = [r for k, r in keyed if k != f_key] + _cases(["B"] * 20)[10:20]
+    env.sweep(_due(env))
+    [first_cycle] = env.cycles()
+    _finish(env, first_cycle.optimization_id, result=_result(0.5, 0.9))
+    env.sweep(_due(env) - timedelta(days=1))
+    assert env.cycles()[0].status == "awaiting_review"
+    assert env.client.post(f"/continuous/{plan['id']}/cycles/{first_cycle.id}/approve").status_code == 200
+    # Check 2: F comes back with some more new rows.
+    env.rows = [*env.rows, f_row, *_cases(["C"] * (40 + extra))[40 : 40 + extra]]
+    env.sweep(_due(env))
+    second = env.cycles()[-1]
+    assert second.optimization_id, (second.status, second.detail_code)
+    pinned = _payload(env, second.optimization_id)["data"]["pinned_split"]
+    assert f_key not in pinned["test"], "a case the incumbent's ancestor searched on is now a test case"
+
+
+def test_the_limit_covers_the_reference_run_that_duplicate_cases_need(
+    env: _Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Copies of one row in two roles need a reference run, and the smallest limit pays for it."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    payload = _incumbent_payload()
+    rows = [{"question": "Q0?", "answer": "A"}] * 7 + _cases(["A"] * 5)[1:5]
+    payload["data"]["cases"] = submissions.rows_to_cases(rows, input_fields=["question"], expected_field="answer")
+    request = UnifiedRunRequest.model_validate(payload)
+    split = split_cases(request.data.cases, "pairs", request.data.split, shuffle=True, seed=split_seed(request))
+    dup = case_key(request.data.cases[0])
+    assert dup in {case_key(c) for c in split.test}
+    assert dup in {case_key(c) for c in split.train + split.val}
+    response = env.client.post("/optimize", json=payload)
+    assert response.status_code == 201, response.text
+    source_id = response.json()["optimization_id"]
+    _finish(env, source_id, result=_result(0.5, 0.7))
+    # One check's model run and its reference run must fit the smallest limit the plan accepts.
+    too_low = env.client.post(
+        f"/optimizations/{source_id}/continuous",
+        json={
+            "schedule": WEEKLY,
+            "permitted": {"new_task_model": True},
+            "monthly_limit_cents": CYCLE_BUDGET,
+            "cycle_budget_cents": CYCLE_BUDGET,
+        },
+    )
+    assert too_low.status_code == 422
+    _enable(env, source_id, permitted={"new_task_model": True}, source=None, monthly_limit_cents=CYCLE_BUDGET * 2)
+
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.detail_code) == ("optimizing", "continuous.run_started")
+    assert [run["kind"] for run in cycle.snapshot["runs"]] == ["model", "reference"]

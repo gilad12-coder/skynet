@@ -757,9 +757,13 @@ def create_continuous_router(
                     models = {**(plan.baseline_snapshot.get("models") or {})}
                     models.update({role: model["name"] for role, model in adopted.items()})
                     plan.baseline_snapshot = {**plan.baseline_snapshot, "models": models}
-                    # A model staged earlier for the same role would otherwise replace the adopted one next check.
+                    # A model staged earlier for the same role would otherwise replace the adopted one next
+                    # check; one staged after the check started is a newer request and stays.
+                    used = (cycle.snapshot or {}).get("models") or {}
                     plan.pending_inputs = {
-                        key: value for key, value in (plan.pending_inputs or {}).items() if key not in adopted
+                        key: value
+                        for key, value in (plan.pending_inputs or {}).items()
+                        if key not in adopted or value != used.get(key)
                     }
                 cycle.status = engine_mod.CYCLE_APPROVED
                 cycle.detail_code = "continuous.review_approved"
