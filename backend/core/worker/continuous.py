@@ -520,6 +520,10 @@ def process_cycle(
             gate = PAUSE_ALLOWANCE
         elif spendable < plan.cycle_budget_cents:
             gate = PAUSE_FUNDS
+        if gate is not None and job_store.find_job_by_idempotency_key(plan.username, f"continuous:{cycle.id}"):
+            # A worker died between submitting and linking: the run is already paid for,
+            # and its own reservation is what now makes the wallet look short.
+            gate = None
         if gate is None and plan.status == PLAN_PAUSED and plan.pause_reason in SYSTEM_PAUSES:
             plan.status, plan.pause_reason = PLAN_ACTIVE, None
         if not changes:
@@ -583,8 +587,8 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
     """Judge a finished cycle run against the incumbent it started from.
 
     A candidate is kept for review only when its run succeeded, the final run
-    scored both versions on the same cases (on held-out cases when the split
-    has any), no regression guard fired, and the candidate scored higher.
+    scored both versions on the same held-out cases, no regression guard
+    fired, and the candidate scored higher.
     Anything else leaves the incumbent in place.
 
     Args:
@@ -600,16 +604,16 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
             job = job_store.get_job(cycle.optimization_id, include_payload=False)
         except KeyError:
             _finish_cycle(session, cycle, CYCLE_FAILED, "continuous.run_failed", reason="missing")
-            plan.baseline_snapshot = cycle.snapshot or plan.baseline_snapshot
             return
         if job["status"] not in _TERMINAL_JOB:
             return
         cycle.spent_cents = _billed_cents(job_store, cycle.execution_budget_id, plan.username)
-        plan.baseline_snapshot = cycle.snapshot or plan.baseline_snapshot
         plan.updated_at = datetime.now(UTC)
         if job["status"] != OptimizationStatus.success.value:
+            # The baseline stays put so the next check retries these inputs instead of skipping them as unchanged.
             _finish_cycle(session, cycle, CYCLE_FAILED, "continuous.run_failed", reason=job["status"])
             return
+        plan.baseline_snapshot = cycle.snapshot or plan.baseline_snapshot
         result = job.get("result") or {}
         baseline = result.get("baseline_score")
         best = result.get("best_score")
@@ -617,7 +621,7 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
         cycle.incumbent_score, cycle.candidate_score = baseline, best
         if baseline is None or best is None:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_unscored")
-        elif split.get("test") and not split.get("held_out"):
+        elif not split.get("held_out"):
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_not_held_out")
         elif result.get("regression_guard_applied") or best <= baseline:
             _finish_cycle(session, cycle, CYCLE_REGRESSED, "continuous.review_regressed")

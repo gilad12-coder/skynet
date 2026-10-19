@@ -37,18 +37,23 @@ export function canReview(cycle: ContinuousCycle): boolean {
 
 const DUE_REFRESH_MS = 5_000;
 const RUN_REFRESH_MS = 30_000;
+// Far-off checks are re-armed daily; a longer setTimeout delay overflows.
+const MAX_WAIT_MS = 86_400_000;
 
 /**
  * How long to wait before reloading the plan so the history shows a check's
  * outcome without a page reload; null when nothing is pending. A due check
  * (after "Check now", or a scheduled time that passed) or one still checking
- * is a sweep away, while a run takes minutes.
+ * is a sweep away, while a run takes minutes. A tab left open waits for the
+ * next scheduled check.
  */
 export function refreshDelayMs(plan: ContinuousPlan, now: number): number | null {
   if (plan.cycles.some((c) => c.status === "checking")) return DUE_REFRESH_MS;
   const due = plan.next_check_at ? Date.parse(plan.next_check_at) : Number.NaN;
   if (plan.status === "active" && due <= now) return DUE_REFRESH_MS;
   if (plan.cycles.some((c) => c.status === "optimizing")) return RUN_REFRESH_MS;
+  if (plan.status === "active" && due > now)
+    return Math.min(due - now + DUE_REFRESH_MS, MAX_WAIT_MS);
   return null;
 }
 

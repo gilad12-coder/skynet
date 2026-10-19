@@ -544,10 +544,13 @@ def test_overlapping_sweeps_and_retries_create_one_cycle_and_one_spend(env: _Env
 
     # A worker that died after submitting leaves the check in ``checking``;
     # the takeover replays the same run and budget instead of a second one.
+    # Its own reservation must not make the wallet look short and pause the plan.
+    env.set_balance(0)
     env.edit_cycle(cycle.id, status="checking", optimization_id=None, lease_until=now - timedelta(seconds=1))
     env.sweep(now)
     [retried] = env.cycles()
-    assert retried.optimization_id == cycle.optimization_id
+    assert (retried.status, retried.optimization_id) == ("optimizing", cycle.optimization_id)
+    assert env.plan().status == "active"
     assert env.count(JobModel) == jobs_before + 1
     assert env.count(ExecutionBudgetModel) == budgets_before + 1
 
@@ -648,6 +651,7 @@ def test_wallet_exhaustion_pauses_without_buying_credit(env: _Env) -> None:
         (_result(0.6, 0.6), "regressed", "continuous.review_regressed"),
         (_result(0.6, 0.9, guard=True), "regressed", "continuous.review_regressed"),
         (_result(0.6, 0.9, test=3, held_out=False), "regressed", "continuous.review_not_held_out"),
+        (_result(0.6, 0.9, test=0, held_out=False), "regressed", "continuous.review_not_held_out"),
         (_result(0.6, 0.9), "awaiting_review", "continuous.review_ready"),
     ],
 )
@@ -683,11 +687,13 @@ def test_failed_cycle_run_keeps_the_incumbent(env: _Env) -> None:
     env.rows = _cases(["B"] * 10)
     env.sweep(_due(env))
     [cycle] = env.cycles()
+    baseline = env.plan().baseline_snapshot
     _finish(env, cycle.optimization_id, status="failed")
     env.sweep(_due(env) - timedelta(days=1))
     [cycle] = env.cycles()
     assert (cycle.status, cycle.detail_code) == ("failed", "continuous.run_failed")
     assert env.plan().incumbent_optimization_id == source_id
+    assert env.plan().baseline_snapshot == baseline
 
 
 def test_a_rejected_staged_optimizer_fails_the_cycle_without_wedging_the_plan(env: _Env) -> None:

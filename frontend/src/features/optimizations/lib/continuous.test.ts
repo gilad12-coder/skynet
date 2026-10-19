@@ -64,7 +64,7 @@ test("only a validated candidate with a run can be reviewed", () => {
   assert.equal(cycleTone("regressed"), "warn");
 });
 
-test("the tab reloads while a check is due or running, and stops when nothing is pending", () => {
+test("the tab reloads while a check is due or running, waits for the next one, and stops when nothing is pending", () => {
   const now = Date.parse("2026-10-19T04:00:00Z");
   const plan = (patch: Partial<ContinuousPlan>, statuses: ContinuousCycle["status"][] = []) =>
     ({
@@ -73,8 +73,12 @@ test("the tab reloads while a check is due or running, and stops when nothing is
       cycles: statuses.map((status) => ({ status })),
       ...patch,
     }) as ContinuousPlan;
-  assert.equal(refreshDelayMs(plan({}), now), null);
-  assert.equal(refreshDelayMs(plan({}, ["skipped"]), now), null);
+  assert.equal(refreshDelayMs(plan({}), now), 86_400_000);
+  assert.equal(
+    refreshDelayMs(plan({ next_check_at: "2026-10-19T05:00:00Z" }, ["skipped"]), now),
+    3_605_000,
+  );
+  assert.equal(refreshDelayMs(plan({ status: "paused" }), now), null);
   assert.equal(refreshDelayMs(plan({ next_check_at: "2026-10-19T04:00:00Z" }), now), 5_000);
   assert.equal(refreshDelayMs(plan({}, ["checking"]), now), 5_000);
   assert.equal(refreshDelayMs(plan({}, ["optimizing"]), now), 30_000);
