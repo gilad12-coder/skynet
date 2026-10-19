@@ -7,6 +7,7 @@ import type {
   ContinuousCycle,
   ContinuousCycleStatus,
   ContinuousPermitted,
+  ContinuousPlan,
   ContinuousUsage,
 } from "@/shared/types/continuous";
 
@@ -32,6 +33,23 @@ export function cycleTone(status: ContinuousCycleStatus): CycleTone {
 /** Only a validated candidate waits for the owner's approve or reject. */
 export function canReview(cycle: ContinuousCycle): boolean {
   return cycle.status === "awaiting_review" && !!cycle.optimization_id;
+}
+
+const DUE_REFRESH_MS = 5_000;
+const RUN_REFRESH_MS = 30_000;
+
+/**
+ * How long to wait before reloading the plan so the history shows a check's
+ * outcome without a page reload; null when nothing is pending. A due check
+ * (after "Check now", or a scheduled time that passed) or one still checking
+ * is a sweep away, while a run takes minutes.
+ */
+export function refreshDelayMs(plan: ContinuousPlan, now: number): number | null {
+  if (plan.cycles.some((c) => c.status === "checking")) return DUE_REFRESH_MS;
+  const due = plan.next_check_at ? Date.parse(plan.next_check_at) : Number.NaN;
+  if (plan.status === "active" && due <= now) return DUE_REFRESH_MS;
+  if (plan.cycles.some((c) => c.status === "optimizing")) return RUN_REFRESH_MS;
+  return null;
 }
 
 /** Share of this month's allowance already committed, clamped to 0..1. */

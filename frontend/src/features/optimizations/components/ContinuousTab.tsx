@@ -57,6 +57,7 @@ import {
   canReview,
   cycleTone,
   enableProblem,
+  refreshDelayMs,
   usdTextToCents,
   type CycleTone,
 } from "../lib/continuous";
@@ -135,6 +136,26 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
       cancelled = true;
     };
   }, [optimizationId]);
+
+  useEffect(() => {
+    const delay = state?.plan ? refreshDelayMs(state.plan, Date.now()) : null;
+    if (delay === null) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      getContinuousState(optimizationId)
+        .then((next) => {
+          if (!cancelled) setState(next);
+        })
+        // A failed refresh keeps what is shown and, as a new state, schedules the next try.
+        .catch(() => {
+          if (!cancelled) setState((prev) => (prev ? { ...prev } : prev));
+        });
+    }, delay);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [state, optimizationId]);
 
   const act = async (run: () => Promise<ContinuousPlan>) => {
     setBusy(true);

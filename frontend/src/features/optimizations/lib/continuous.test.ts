@@ -6,8 +6,10 @@ import {
   canReview,
   cycleTone,
   enableProblem,
+  refreshDelayMs,
   usdTextToCents,
 } from "./continuous.ts";
+import type { ContinuousCycle, ContinuousPlan } from "@/shared/types/continuous";
 
 const form = {
   permitted: { data: true, models: false, optimizers: false },
@@ -33,11 +35,18 @@ test("the enable form mirrors the backend rules", () => {
   );
   assert.equal(enableProblem({ ...form, sourceRef: " " }), "continuous_tab.form.need_source");
   assert.equal(
-    enableProblem({ ...form, permitted: { data: false, models: true, optimizers: false }, sourceRef: "" }),
+    enableProblem({
+      ...form,
+      permitted: { data: false, models: true, optimizers: false },
+      sourceRef: "",
+    }),
     null,
   );
   assert.equal(enableProblem({ ...form, monthlyLimit: "abc" }), "continuous_tab.form.bad_amount");
-  assert.equal(enableProblem({ ...form, cycleBudget: "11" }), "continuous_tab.form.budget_over_limit");
+  assert.equal(
+    enableProblem({ ...form, cycleBudget: "11" }),
+    "continuous_tab.form.budget_over_limit",
+  );
 });
 
 test("allowance share is clamped and a zero limit reads as spent", () => {
@@ -69,4 +78,24 @@ test("only a validated candidate with a run can be reviewed", () => {
   assert.equal(cycleTone("skipped"), "muted");
   assert.equal(cycleTone("failed"), "bad");
   assert.equal(cycleTone("regressed"), "warn");
+});
+
+test("the tab reloads while a check is due or running, and stops when nothing is pending", () => {
+  const now = Date.parse("2026-10-19T04:00:00Z");
+  const plan = (patch: Partial<ContinuousPlan>, statuses: ContinuousCycle["status"][] = []) =>
+    ({
+      status: "active",
+      next_check_at: "2026-10-20T05:30:00Z",
+      cycles: statuses.map((status) => ({ status })),
+      ...patch,
+    }) as ContinuousPlan;
+  assert.equal(refreshDelayMs(plan({}), now), null);
+  assert.equal(refreshDelayMs(plan({}, ["skipped"]), now), null);
+  assert.equal(refreshDelayMs(plan({ next_check_at: "2026-10-19T04:00:00Z" }), now), 5_000);
+  assert.equal(refreshDelayMs(plan({}, ["checking"]), now), 5_000);
+  assert.equal(refreshDelayMs(plan({}, ["optimizing"]), now), 30_000);
+  assert.equal(
+    refreshDelayMs(plan({ status: "paused", next_check_at: null }, ["skipped"]), now),
+    null,
+  );
 });
