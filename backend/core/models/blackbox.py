@@ -603,12 +603,17 @@ class BlackboxNamedScore(BaseModel):
 
 
 # The final run's fresh scores of the starting point and the winner on one case.
+# ``*_observation`` is the trusted measurement of that version's run on the
+# case (time in ms, each model attempt, metered service cost); see
+# ``workspace_harness.build_observation``. ``None`` where nothing measured it.
 class BlackboxCaseResult(BaseModel):
     index: int
     baseline_score: float | None = None
     best_score: float | None = None
     baseline_feedback: str | None = None
     best_feedback: str | None = None
+    baseline_observation: dict[str, Any] | None = None
+    best_observation: dict[str, Any] | None = None
 
 
 # How a unified run's cases were split. Selection (the winner and the

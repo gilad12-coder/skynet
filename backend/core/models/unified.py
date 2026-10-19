@@ -433,6 +433,8 @@ class ContractSample(BaseModel):
     score: float | None = None
     feedback_preview: str | None = None
     duration_ms: int | None = None
+    # The trusted measurement of this run (see ``workspace_harness.build_observation``).
+    observation: dict[str, Any] | None = None
 
 
 class ContractCheckRequest(BaseModel):
