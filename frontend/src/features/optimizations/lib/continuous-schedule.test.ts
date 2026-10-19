@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 
 import {
   applyPreset,
+  calendarDay,
+  checkTimesOn,
+  pickDay,
+  pickWeekday,
   defaultRule,
   presetOf,
   scheduleProblem,
@@ -27,12 +31,12 @@ test("presets set the frequency and keep the chosen time and zone", () => {
   assert.equal(applyPreset(weekdays, "weekly", "en").weekdays.length, 1);
 });
 
-test("a rule reads back as its preset, or custom once edited", () => {
+test("a rule reads back as its preset, or custom once its interval changes", () => {
   for (const preset of ["hourly", "daily", "weekdays", "weekly", "monthly"] as const) {
     assert.equal(presetOf(applyPreset(base, preset, "en"), "en"), preset);
   }
   assert.equal(presetOf({ ...base, every: 2 }, "en"), "custom");
-  assert.equal(presetOf({ ...base, weekdays: [1, 3] }, "en"), "custom");
+  assert.equal(presetOf({ ...base, weekdays: [1, 3] }, "en"), "weekly");
 });
 
 test("weekday toggles stay sorted and unique", () => {
@@ -81,7 +85,7 @@ test("weekdays and the week's first day follow the locale", () => {
   assert.deepEqual(workweek("he"), [0, 1, 2, 3, 6]);
   const hebrew = applyPreset(base, "weekdays", "he");
   assert.equal(presetOf(hebrew, "he"), "weekdays");
-  assert.equal(presetOf(hebrew, "en"), "custom");
+  assert.equal(presetOf(hebrew, "en"), "weekly");
   assert.equal(scheduleSummary(hebrew, "he").key, "continuous_tab.schedule.summary.weekdays");
   assert.deepEqual(weekdayOrder("he"), [6, 0, 1, 2, 3, 4, 5]);
   assert.deepEqual(weekdayOrder("de"), [0, 1, 2, 3, 4, 5, 6]);
@@ -96,4 +100,32 @@ test("the current zone is always selectable", () => {
   const zones = timeZoneOptions("Etc/Unknown-Zone");
   assert.equal(zones[0], "Etc/Unknown-Zone");
   assert.ok(timeZoneOptions("UTC").includes("UTC"));
+});
+
+const RULE = defaultRule("UTC");
+// Monday 19 Oct 2026.
+const MON = calendarDay(2026, 9, 19);
+
+test("checkTimesOn follows the worker's weekly phase", () => {
+  const rule = { ...RULE, every: 2, weekdays: [0, 2] };
+  assert.deepEqual(checkTimesOn(rule, MON, MON), ["09:00"]);
+  assert.deepEqual(checkTimesOn(rule, calendarDay(2026, 9, 21), MON), ["09:00"]);
+  assert.deepEqual(checkTimesOn(rule, calendarDay(2026, 9, 26), MON), []);
+  assert.deepEqual(checkTimesOn(rule, calendarDay(2026, 10, 2), MON), ["09:00"]);
+});
+
+test("checkTimesOn lists every hourly time and falls back to the month end", () => {
+  assert.equal(checkTimesOn({ ...RULE, frequency: "hourly", every: 6 }, MON, MON).length, 4);
+  const monthly = { ...RULE, frequency: "monthly" as const, month_day: 31 };
+  assert.deepEqual(checkTimesOn(monthly, calendarDay(2026, 10, 30), MON), ["09:00"]);
+  assert.deepEqual(checkTimesOn(monthly, calendarDay(2026, 10, 29), MON), []);
+});
+
+test("pickDay moves a monthly rule and toggles a weekday", () => {
+  assert.equal(pickDay({ ...RULE, frequency: "monthly" }, MON).month_day, 19);
+  assert.deepEqual(pickDay({ ...RULE, weekdays: [0, 3] }, MON).weekdays, [3]);
+  const daily = pickWeekday({ ...RULE, frequency: "daily", every: 3 }, 6);
+  assert.deepEqual([daily.frequency, daily.every, daily.weekdays], ["weekly", 1, [0, 1, 2, 3, 4, 5]]);
+  const hourly = { ...RULE, frequency: "hourly" as const };
+  assert.equal(pickDay(hourly, MON), hourly);
 });

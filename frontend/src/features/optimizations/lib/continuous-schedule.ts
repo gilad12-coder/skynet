@@ -102,7 +102,7 @@ export function presetOf(rule: ScheduleRule, locale: string): SchedulePreset {
   if (rule.every !== 1) return "custom";
   if (rule.frequency === "weekly") {
     if (sameDays(rule.weekdays, workweek(locale))) return "weekdays";
-    return rule.weekdays.length === 1 ? "weekly" : "custom";
+    return "weekly";
   }
   return rule.frequency;
 }
@@ -137,7 +137,7 @@ export function scheduleProblem(rule: ScheduleRule): ScheduleProblem | null {
 }
 
 /** Name each weekday in the active locale, Monday first. */
-export function weekdayNames(locale: string, width: "short" | "long"): string[] {
+export function weekdayNames(locale: string, width: "narrow" | "short" | "long"): string[] {
   const format = new Intl.DateTimeFormat(locale, { weekday: width, timeZone: "UTC" });
   // 2024-01-01 was a Monday.
   return WEEKDAYS.map((day) => format.format(new Date(Date.UTC(2024, 0, 1 + day))));
@@ -206,4 +206,81 @@ export function timeZoneOptions(current: string): string[] {
     typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
   const zones = supported.includes("UTC") ? supported : ["UTC", ...supported];
   return zones.includes(current) ? zones : [current, ...zones];
+}
+
+/** A calendar date with no time or zone, held as UTC midnight so day arithmetic is exact. */
+export function calendarDay(year: number, month: number, day: number): Date {
+  return new Date(Date.UTC(year, month, day));
+}
+
+/** Today's date in a time zone, so the calendar opens on the plan's own today. */
+export function todayIn(timezone: string): Date {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return calendarDay(get("year"), get("month") - 1, get("day"));
+}
+
+/** Monday = 0, matching the rule's weekday numbers. */
+export function weekdayOf(day: Date): number {
+  return (day.getUTCDay() + 6) % 7;
+}
+
+const DAY_MS = 86_400_000;
+
+function daysBetween(from: Date, to: Date): number {
+  return Math.round((to.getTime() - from.getTime()) / DAY_MS);
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/**
+ * The HH:MM times a rule checks on one date, counted from `anchor` the way
+ * the worker counts them (`_day_times` in `continuous_schedule.py`).
+ */
+export function checkTimesOn(rule: ScheduleRule, day: Date, anchor: Date): string[] {
+  const [hour = 0, minute = 0] = rule.time.split(":").map(Number);
+  const at = [`${pad(hour)}:${pad(minute)}`];
+  const offset = daysBetween(anchor, day);
+  const mod = (n: number) => ((n % rule.every) + rule.every) % rule.every;
+  if (rule.frequency === "hourly") {
+    const times: string[] = [];
+    for (let h = 0; h < 24; h++) if (mod(offset * 24 + h - hour) === 0) times.push(`${pad(h)}:${pad(minute)}`);
+    return times;
+  }
+  if (rule.frequency === "daily") return mod(offset) === 0 ? at : [];
+  if (rule.frequency === "weekly") {
+    const anchorMonday = daysBetween(calendarDay(1970, 0, 5), anchor) - weekdayOf(anchor);
+    const week = Math.floor((daysBetween(calendarDay(1970, 0, 5), day) - anchorMonday) / 7);
+    return rule.weekdays.includes(weekdayOf(day)) && mod(week) === 0 ? at : [];
+  }
+  const months = (day.getUTCFullYear() - anchor.getUTCFullYear()) * 12 + day.getUTCMonth() - anchor.getUTCMonth();
+  if (mod(months) !== 0) return [];
+  const last = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth() + 1, 0)).getUTCDate();
+  return day.getUTCDate() === Math.min(rule.month_day, last) ? at : [];
+}
+
+/**
+ * The rule after a date is clicked in the calendar: a monthly rule moves to
+ * that day of the month; daily and weekly rules turn that weekday on or off.
+ * Hourly rules check every day, so a click leaves them as they are.
+ */
+export function pickDay(rule: ScheduleRule, day: Date): ScheduleRule {
+  if (rule.frequency === "monthly") return { ...rule, month_day: day.getUTCDate() };
+  if (rule.frequency === "hourly") return rule;
+  return pickWeekday(rule, weekdayOf(day));
+}
+
+/** The rule after a weekday is clicked: every day but that one, or that day toggled. */
+export function pickWeekday(rule: ScheduleRule, weekday: number): ScheduleRule {
+  if (rule.frequency === "hourly" || rule.frequency === "monthly") return rule;
+  const days = rule.frequency === "daily" ? [...WEEKDAYS] : rule.weekdays;
+  const every = rule.frequency === "daily" ? 1 : rule.every;
+  return { ...rule, frequency: "weekly", every, weekdays: toggleWeekday(days, weekday) };
 }
