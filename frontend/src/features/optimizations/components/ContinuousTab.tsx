@@ -115,7 +115,7 @@ interface CycleRunEntry {
   optimization_id: string;
   status?: string;
   best_score?: number | null;
-  new_models?: Record<string, string>;
+  new_models?: Record<string, { name: string }>;
 }
 
 function cycleRuns(cycle: ContinuousCycle): CycleRunEntry[] {
@@ -130,13 +130,13 @@ function cycleRuns(cycle: ContinuousCycle): CycleRunEntry[] {
  */
 function CycleRuns({ cycle }: { cycle: ContinuousCycle }) {
   const runs = cycleRuns(cycle);
-  if (runs.length === 0 || (runs.length === 1 && !runs[0]!.new_models)) return null;
+  if (runs.length === 0 || (runs.length === 1 && Object.keys(runs[0]!.new_models ?? {}).length === 0)) return null;
   const winner = cycle.optimization_id;
   const settled = cycle.status === "awaiting_review" || cycle.status === "approved";
   return (
     <ul className="space-y-1 text-xs text-muted-foreground">
       {runs.map((run) => {
-        const models = Object.values(run.new_models ?? {});
+        const models = Object.values(run.new_models ?? {}).map((model) => model.name);
         const won = settled && run.optimization_id === winner;
         return (
           <li key={run.optimization_id} className="flex flex-wrap items-center gap-x-2">

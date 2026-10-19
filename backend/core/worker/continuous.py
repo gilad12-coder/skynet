@@ -115,7 +115,7 @@ _TERMINAL_JOB = {
 }
 
 RowFetcher = Callable[[Any, str, dict[str, Any]], list[dict[str, Any]]]
-ModelPicker = Callable[[Any, str, dict[str, Any]], dict[str, Any] | None]
+ModelPicker = Callable[[Any, str, dict[str, Any], frozenset[str]], dict[str, Any] | None]
 
 
 @dataclass(frozen=True)
@@ -288,7 +288,9 @@ def _comparable(model: CatalogModel) -> bool:
     )
 
 
-def better_model(job_store: Any, username: str, current: dict[str, Any]) -> dict[str, Any] | None:
+def better_model(
+    job_store: Any, username: str, current: dict[str, Any], skip: frozenset[str] = frozenset()
+) -> dict[str, Any] | None:
     """Find the model a plan should try next for one role: rated higher and priced no higher.
 
     A higher rating at an equal or lower price for both input and output has
@@ -301,6 +303,7 @@ def better_model(job_store: Any, username: str, current: dict[str, Any]) -> dict
         job_store: Store whose engine holds the provider connections.
         username: Plan owner.
         current: The model block the run uses now for this role.
+        skip: Model names the plan already tried for this role, so the next best gets its turn.
 
     Returns:
         ``{"name", "byok_provider"}`` for the highest-rated such model, or ``None``.
@@ -334,6 +337,7 @@ def better_model(job_store: Any, username: str, current: dict[str, Any]) -> dict
         model
         for model in models
         if _comparable(model)
+        and model.value not in skip
         and (model.intelligence_index or 0.0) > (now.intelligence_index or 0.0)
         and (model.input_cost_per_token or 0.0) <= (now.input_cost_per_token or 0.0)
         and (model.output_cost_per_token or 0.0) <= (now.output_cost_per_token or 0.0)
@@ -532,8 +536,9 @@ def resolve_snapshot(
         block = blocks.get(role)
         if not (permitted.get(flag) and block and models.get(role)):
             continue
-        better = pick_model(job_store, plan.username, {**block, "name": models[role]})
-        if better is not None and f"{role}:{better['name']}" not in tried:
+        skip = frozenset(entry.split(":", 1)[1] for entry in tried if entry.startswith(f"{role}:"))
+        better = pick_model(job_store, plan.username, {**block, "name": models[role]}, skip)
+        if better is not None:
             found[role] = better
             tried.append(f"{role}:{better['name']}")
     snapshot: dict[str, Any] = {"data": data_snapshot, "models": models, "optimizer": optimizer, "tried_models": tried}
@@ -713,7 +718,8 @@ def cycle_budget_ids(cycle: ContinuousCycleModel) -> list[str]:
     Returns:
         Budget ids, without repeats.
     """
-    ids = [run.get("budget") for run in cycle_runs(cycle)] + [cycle.execution_budget_id]
+    refused = list((cycle.snapshot or {}).get("refused_budgets") or [])
+    ids = [run.get("budget") for run in cycle_runs(cycle)] + [cycle.execution_budget_id] + refused
     return list(dict.fromkeys(budget_id for budget_id in ids if budget_id))
 
 
@@ -1076,6 +1082,7 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
     started: list[dict[str, Any]] = []
     refused: DomainError | None = None
     budget_keys: list[str] = []
+    refused_keys: list[str] = []
     for run, payload in zip(planned, payloads, strict=True):
         key = _run_key(cycle_id, run["kind"])
         budget_key = resolve_submission_replay_keys(
@@ -1090,6 +1097,8 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
         except DomainError as error:
             logger.warning("Continuous cycle %s could not start its %s run: %s", cycle_id, run["kind"], error.code)
             refused = refused or error
+            if budget_key:
+                refused_keys.append(budget_key)
             if error.code == "budget.pending":
                 break
             continue
@@ -1103,6 +1112,10 @@ def _submit_runs(job_store: Any, service: Any, cycle_id: str, username: str, pay
         plan = session.get(ContinuousPlanModel, cycle.plan_id, with_for_update=True)
         if started:
             _record_started(session, cycle, started)
+            # A refused run can still hold a budget its preflight charged, and the monthly allowance must count it.
+            held = [BudgetService(engine=engine).find_by_creation_key(username, key) for key in refused_keys]
+            if held_ids := [budget.id for budget in held if budget is not None]:
+                cycle.snapshot = {**(cycle.snapshot or {}), "refused_budgets": held_ids}
             logger.info("Continuous cycle %s started %d runs", cycle_id, len(started))
             return
         budgets = [BudgetService(engine=engine).find_by_creation_key(username, key) for key in budget_keys]
@@ -1188,12 +1201,14 @@ def _seen_snapshot(previous: dict[str, Any], snapshot: dict[str, Any], runs: lis
     Args:
         previous: The plan's baseline before this check.
         snapshot: The check's resolved snapshot.
-        runs: The runs the check started.
+        runs: The runs of the check that succeeded.
 
     Returns:
         The new baseline snapshot.
     """
-    seen = {key: value for key, value in snapshot.items() if key not in {"runs", "winner", "new_models"}}
+    seen = {
+        key: value for key, value in snapshot.items() if key not in {"runs", "winner", "new_models", "refused_budgets"}
+    }
     if not any(run["kind"] in (RUN_DATA, RUN_BOTH) for run in runs):
         if previous.get("data"):
             seen["data"] = previous["data"]
@@ -1263,7 +1278,9 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
             reason = next((job["status"] for job in jobs if job["status"] != OptimizationStatus.success.value), "")
             _fail_cycle(session, plan, cycle, "continuous.run_failed", reason=reason)
             return
-        plan.baseline_snapshot = _seen_snapshot(plan.baseline_snapshot or {}, cycle.snapshot or {}, runs)
+        plan.baseline_snapshot = _seen_snapshot(
+            plan.baseline_snapshot or {}, cycle.snapshot or {}, [run for run, _ in finished]
+        )
         incumbent = _incumbent_on_test(job_store, cycle, finished)
         eligible = [
             (run, result)

@@ -1450,6 +1450,78 @@ def test_a_better_reflection_model_keeps_the_task_model_and_its_own_baseline(
     assert (cycle.status, cycle.incumbent_score) == ("awaiting_review", 0.6)
 
 
+def test_after_the_best_model_loses_the_next_best_gets_its_turn(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tried model is skipped while picking, so a lower-rated model that also qualifies runs next."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), middle=(50.0, 1e-6), strong=(60.0, 1e-6))
+    _new_models_plan(env)
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    assert _payload(env, cycle.optimization_id)["models"]["task_model"]["name"] == "fixture/strong"
+    _finish(env, cycle.optimization_id, result=_result(0.8, 0.5))
+    env.sweep(_due(env) - timedelta(days=1))
+
+    env.sweep(_due(env))
+
+    latest = env.cycles()[-1]
+    assert latest.status == "optimizing"
+    assert _payload(env, latest.optimization_id)["models"]["task_model"]["name"] == "fixture/middle"
+
+
+def test_a_failed_model_run_leaves_its_model_untried(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only a successful run marks its inputs as seen, so a model whose run failed is offered again."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    runs = _runs(cycle)
+    _finish(env, runs["data"], result=_result(0.6, 0.6))
+    _finish(env, runs["model"], status="failed")
+    env.sweep(_due(env) - timedelta(days=1))
+
+    env.sweep(_due(env))
+
+    latest = env.cycles()[-1]
+    assert latest.status == "optimizing"
+    assert list(_runs(latest)) == ["model"]
+
+
+def test_a_refused_run_keeps_its_budget_on_the_check(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A run refused after its budget was created still counts toward the check while another run started."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["data", "model"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+    submit = continuous.submit_unified_payload
+
+    def refuse_model_run(*args: Any, **kwargs: Any) -> Any:
+        """Create the model run's budget as a real submit does, then refuse it.
+
+        Args:
+            *args: Passed to the real submit.
+            **kwargs: Passed to the real submit.
+
+        Returns:
+            The real submit's response, for every run but the model run.
+
+        Raises:
+            DomainError: For the model run, after its budget exists.
+        """
+        response = submit(*args, **kwargs)
+        if kwargs["idempotency_key"].endswith(":model"):
+            raise DomainError("submission.validation_failed", status=422)
+        return response
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", refuse_model_run)
+    env.sweep(_due(env))
+
+    [cycle] = env.cycles()
+    assert list(_runs(cycle)) == ["data"]
+    assert len(cycle.snapshot["refused_budgets"]) == 1
+    assert len(continuous.cycle_budget_ids(cycle)) == 2
+
+
 def test_new_data_below_the_minimum_starts_no_run(env: _Env) -> None:
     """A few new cases wait until the plan's minimum of untried cases arrives."""
     source_id = _incumbent(env)
