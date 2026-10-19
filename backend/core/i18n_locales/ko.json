@@ -391,6 +391,7 @@
     "continuous.run_failed": "실행이 성공적으로 완료되지 않았습니다({reason}). 현재 버전이 유지됩니다.",
     "continuous.review_unscored": "실행에 비교 점수가 없습니다. 현재 버전이 유지됩니다.",
     "continuous.review_not_held_out": "비교에 별도의 테스트 케이스가 사용되지 않았습니다. 현재 버전이 유지됩니다.",
+    "continuous.no_test_split": "예약 실행에는 별도의 테스트 케이스가 필요합니다. 테스트 분할로 다시 실행한 다음 일정을 설정하세요.",
     "continuous.review_regressed": "새 후보가 같은 케이스에서 현재 버전보다 낫지 않았습니다. 현재 버전이 유지됩니다.",
     "continuous.review_within_margin": "새 후보의 점수가 더 높았지만 차이가 1점 미만입니다. 현재 버전을 유지합니다.",
     "continuous.check_stuck": "검사가 끝나기 전에 {attempts}번 중단되어 종료했습니다. 이후 검사는 평소대로 실행됩니다.",

@@ -391,6 +391,7 @@
     "continuous.run_failed": "実行は正常に完了しませんでした（{reason}）。現在のバージョンを維持します。",
     "continuous.review_unscored": "実行に比較スコアがありません。現在のバージョンを維持します。",
     "continuous.review_not_held_out": "比較に別のテストケースが使われませんでした。現在のバージョンを維持します。",
+    "continuous.no_test_split": "スケジュール実行には別のテストケースが必要です。テスト分割を付けて再実行してから、スケジュールを設定してください。",
     "continuous.review_regressed": "新しい候補は同じケースで現在のバージョンを上回りませんでした。現在のバージョンを維持します。",
     "continuous.review_within_margin": "新しい候補のスコアは高くなりましたが、差は1ポイント未満です。現在のバージョンを維持します。",
     "continuous.check_stuck": "チェックが完了前に{attempts}回停止したため、終了しました。以降のチェックは通常どおり実行されます。",

@@ -153,9 +153,11 @@ class SchedulePreviewResponse(BaseModel):
 
 
 # ``plan`` is null when the run has none; ``eligible`` says whether one can start here.
+# ``held_out`` is false when the run kept no test cases apart, so no plan can start from it.
 class ContinuousStateResponse(BaseModel):
     plan: ContinuousPlanItem | None = None
     eligible: bool
+    held_out: bool = True
 
 
 def _is_unified(job: dict[str, Any]) -> bool:
@@ -427,10 +429,15 @@ def create_continuous_router(
         with _session() as session:
             plan = _plan_for_run(session, optimization_id)
             if plan is not None:
-                engine_mod.settle_waiting(plan, job["status"], datetime.now(UTC))
+                engine_mod.settle_waiting(plan, job["status"], datetime.now(UTC), held_out=engine_mod.has_held_out(job))
             session.commit()
-            eligible = plan is None and job["status"] == OptimizationStatus.success.value and _is_unified(job)
-            return ContinuousStateResponse(plan=_plan_item(session, plan) if plan else None, eligible=eligible)
+            held_out = engine_mod.has_held_out(job)
+            eligible = (
+                plan is None and job["status"] == OptimizationStatus.success.value and _is_unified(job) and held_out
+            )
+            return ContinuousStateResponse(
+                plan=_plan_item(session, plan) if plan else None, eligible=eligible, held_out=held_out
+            )
 
     @router.post(
         "/optimizations/{optimization_id}/continuous",
@@ -453,13 +460,15 @@ def create_continuous_router(
 
         Raises:
             DomainError: 409 when the run did not succeed, is not a unified
-                run, or already has a plan.
+                run, keeps no test cases apart, or already has a plan.
         """
         job = _owned_job(job_store, optimization_id, current_user, payload=True)
         # A run still in flight takes a waiting plan, set up from the submit wizard.
         waiting = job["status"] in _IN_FLIGHT
         if (job["status"] != OptimizationStatus.success.value and not waiting) or not _is_unified(job):
             raise DomainError("continuous.not_eligible", status=409)
+        if not engine_mod.has_held_out(job):
+            raise DomainError("continuous.no_test_split", status=409)
         cycle_budget = body.cycle_budget_cents or _source_budget_cents(job_store, job, current_user.username)
         if cycle_budget is None:
             raise DomainError("continuous.not_eligible", status=409)

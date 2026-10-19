@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "操作に失敗しました。もう一度お試しください。",
   "continuous_tab.not_eligible.title": "ここではスケジュール実行を利用できません",
   "continuous_tab.not_eligible.description": "継続最適化は、正常に完了したご自身の実行でのみオンにできます。",
+  "continuous_tab.no_test_split.title": "スケジュール実行にはテストケースが必要です",
+  "continuous_tab.no_test_split.description": "テスト分割をオンにして再実行してください。別のテストケースがないと、どのチェックも現在のバージョンを置き換えられません。",
   "continuous_tab.schedule.label": "確認スケジュール",
   "continuous_tab.permit.label": "更新してよいもの",
   "continuous_tab.permit.data": "接続済みソースのデータ",

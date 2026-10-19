@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "操作失敗，請再試一次。",
   "continuous_tab.not_eligible.title": "呢度用唔到排程執行",
   "continuous_tab.not_eligible.description": "只可以為你自己成功完成嘅運行開啟。",
+  "continuous_tab.no_test_split.title": "排程運行需要測試案例",
+  "continuous_tab.no_test_split.description": "開啟測試分割再運行一次。冇獨立嘅測試案例，任何檢查都唔可以取代目前版本。",
   "continuous_tab.schedule.label": "檢查時間表",
   "continuous_tab.permit.label": "可以更新嘅內容",
   "continuous_tab.permit.data": "已連接來源嘅數據",

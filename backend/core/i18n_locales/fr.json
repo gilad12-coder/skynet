@@ -391,6 +391,7 @@
     "continuous.run_failed": "L'exécution ne s'est pas terminée avec succès ({reason}). La version actuelle est conservée.",
     "continuous.review_unscored": "L'exécution n'a pas de score de comparaison. La version actuelle est conservée.",
     "continuous.review_not_held_out": "La comparaison n'a pas utilisé de cas de test distincts. La version actuelle est conservée.",
+    "continuous.no_test_split": "Une exécution planifiée a besoin de cas de test séparés. Relancez avec une part de test, puis configurez la planification.",
     "continuous.review_regressed": "Le nouveau candidat n'a pas battu la version actuelle sur les mêmes cas. La version actuelle est conservée.",
     "continuous.review_within_margin": "Le nouveau candidat a obtenu un meilleur score, mais de moins de 1 point. La version actuelle reste.",
     "continuous.check_stuck": "La vérification s'est arrêtée {attempts} fois avant la fin, elle a donc été fermée. Les vérifications suivantes continuent normalement.",

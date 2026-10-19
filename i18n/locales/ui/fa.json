@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "این اقدام ناموفق بود. دوباره تلاش کنید.",
   "continuous_tab.not_eligible.title": "اجرای زمان‌بندی‌شده اینجا در دسترس نیست",
   "continuous_tab.not_eligible.description": "فقط برای اجرای خودتان که با موفقیت تمام شده است می‌توانید آن را روشن کنید.",
+  "continuous_tab.no_test_split.title": "اجرای زمان‌بندی‌شده به موارد آزمون نیاز دارد",
+  "continuous_tab.no_test_split.description": "تقسیم آزمون را روشن کنید و دوباره اجرا کنید. بدون موارد آزمون جداگانه، هیچ بررسی‌ای نمی‌تواند نسخهٔ فعلی را جایگزین کند.",
   "continuous_tab.schedule.label": "زمان‌بندی بررسی",
   "continuous_tab.permit.label": "چه چیزی می‌تواند به‌روز شود",
   "continuous_tab.permit.data": "داده از منبع متصل",

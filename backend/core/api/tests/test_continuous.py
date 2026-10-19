@@ -365,7 +365,7 @@ def test_enable_inspect_pause_resume_and_next_check(env: _Env) -> None:
     """A successful run enables one plan with a visible next check; pause and resume toggle it."""
     source_id = _incumbent(env)
     state = env.client.get(f"/optimizations/{source_id}/continuous").json()
-    assert state == {"plan": None, "eligible": True}
+    assert state == {"plan": None, "eligible": True, "held_out": True}
 
     before = datetime.now(UTC)
     plan = _enable(env, source_id)
@@ -1056,8 +1056,48 @@ def test_a_waiting_plan_ends_with_a_failed_run(env: _Env) -> None:
     assert env.client.post(f"/continuous/{plan['id']}/resume").status_code == 409
 
     assert env.client.delete(f"/continuous/{plan['id']}").status_code == 204
-    assert env.client.get(f"/optimizations/{optimization_id}/continuous").json() == {"plan": None, "eligible": False}
+    assert env.client.get(f"/optimizations/{optimization_id}/continuous").json() == {
+        "plan": None,
+        "eligible": False,
+        "held_out": True,
+    }
     assert env.client.delete(f"/continuous/{plan['id']}").status_code == 404
+
+
+def test_a_run_without_test_cases_cannot_start_a_plan(env: _Env) -> None:
+    """A plan could never replace a run that kept no test cases apart, so none starts from it."""
+    optimization_id = env.client.post("/optimize", json=_incumbent_payload()).json()["optimization_id"]
+    _finish(env, optimization_id, result=_result(0.5, 0.7, test=0, held_out=False))
+    state = env.client.get(f"/optimizations/{optimization_id}/continuous").json()
+    assert (state["eligible"], state["held_out"]) == (False, False)
+    refused = env.client.post(
+        f"/optimizations/{optimization_id}/continuous",
+        json={"schedule": WEEKLY, "permitted": {"models": True}, "cycle_budget_cents": CYCLE_BUDGET},
+    )
+    assert (refused.status_code, refused.json()["code"]) == (409, "continuous.no_test_split")
+
+
+def test_a_run_in_flight_without_a_test_split_cannot_start_a_plan(env: _Env) -> None:
+    """The submit wizard cannot set up a plan for a run whose split keeps no test cases."""
+    payload = _incumbent_payload()
+    payload["data"]["split"] = {"train": 0.8, "val": 0.2, "test": 0.0}
+    optimization_id = env.client.post("/optimize", json=payload).json()["optimization_id"]
+    refused = env.client.post(
+        f"/optimizations/{optimization_id}/continuous",
+        json={"schedule": WEEKLY, "permitted": {"models": True}, "cycle_budget_cents": CYCLE_BUDGET},
+    )
+    assert (refused.status_code, refused.json()["code"]) == (409, "continuous.no_test_split")
+
+
+def test_a_waiting_plan_ends_when_its_run_keeps_no_test_cases(env: _Env) -> None:
+    """A run with too few cases for a test split succeeds, and its waiting plan ends with the reason."""
+    optimization_id = env.client.post("/optimize", json=_incumbent_payload()).json()["optimization_id"]
+    plan = _enable(env, optimization_id, monthly_limit_cents=None, cycle_budget_cents=None)
+    assert plan["status"] == "waiting"
+    _finish(env, optimization_id, result=_result(0.5, 0.7, test=0, held_out=False))
+    env.sweep(datetime.now(UTC))
+    ended = env.client.get(f"/optimizations/{optimization_id}/continuous").json()["plan"]
+    assert (ended["status"], ended["pause_reason"], ended["next_check_at"]) == ("ended", "no_test_split", None)
 
 
 def test_a_plan_deleted_while_its_check_submits_keeps_the_run(

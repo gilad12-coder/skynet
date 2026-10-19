@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "The action failed. Try again.",
   "continuous_tab.not_eligible.title": "A scheduled run is not available here",
   "continuous_tab.not_eligible.description": "You can turn it on only for your own run that finished successfully.",
+  "continuous_tab.no_test_split.title": "A scheduled run needs test cases",
+  "continuous_tab.no_test_split.description": "Turn on a test split and run again. Without separate test cases, no check could replace the current version.",
   "continuous_tab.schedule.label": "Check schedule",
   "continuous_tab.permit.label": "What may refresh",
   "continuous_tab.permit.data": "Data from the connected source",

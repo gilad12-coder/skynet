@@ -391,6 +391,7 @@
     "continuous.run_failed": "運行冇成功完成（{reason}）。目前版本維持不變。",
     "continuous.review_unscored": "呢個運行冇比較分數。目前版本維持不變。",
     "continuous.review_not_held_out": "比較冇用獨立嘅測試案例。目前版本維持不變。",
+    "continuous.no_test_split": "排程運行需要獨立嘅測試個案。請用測試劃分再運行一次，然後設定排程。",
     "continuous.review_regressed": "喺相同案例上，新嘅候選冇贏到目前版本。目前版本維持不變。",
     "continuous.review_within_margin": "新候選版本分數較高，但差距少過 1 分。現時版本保持不變。",
     "continuous.check_stuck": "檢查喺完成之前停咗 {attempts} 次，所以已經關閉。之後嘅檢查照常進行。",

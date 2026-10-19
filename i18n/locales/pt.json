@@ -391,6 +391,7 @@
     "continuous.run_failed": "A execução não terminou com êxito ({reason}). A versão atual mantém-se.",
     "continuous.review_unscored": "A execução não tem pontuação de comparação. A versão atual mantém-se.",
     "continuous.review_not_held_out": "A comparação não usou casos de teste separados. A versão atual mantém-se.",
+    "continuous.no_test_split": "Uma execução agendada precisa de casos de teste separados. Execute novamente com uma divisão de teste e depois configure o agendamento.",
     "continuous.review_regressed": "O novo candidato não superou a versão atual nos mesmos casos. A versão atual mantém-se.",
     "continuous.review_within_margin": "O novo candidato teve uma pontuação mais alta, mas por menos de 1 ponto. A versão atual mantém-se.",
     "continuous.check_stuck": "A verificação parou {attempts} vezes antes de terminar, por isso foi fechada. As verificações seguintes decorrem normalmente.",

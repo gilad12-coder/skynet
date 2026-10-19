@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "Дія не вдалася. Спробуйте ще раз.",
   "continuous_tab.not_eligible.title": "Запуск за розкладом тут недоступний",
   "continuous_tab.not_eligible.description": "Її можна ввімкнути лише для вашого власного запуску, що завершився успішно.",
+  "continuous_tab.no_test_split.title": "Запуску за розкладом потрібні тестові приклади",
+  "continuous_tab.no_test_split.description": "Увімкніть тестову вибірку й запустіть знову. Без окремих тестових прикладів жодна перевірка не зможе замінити поточну версію.",
   "continuous_tab.schedule.label": "Розклад перевірок",
   "continuous_tab.permit.label": "Що може оновлюватися",
   "continuous_tab.permit.data": "Дані з підключеного джерела",

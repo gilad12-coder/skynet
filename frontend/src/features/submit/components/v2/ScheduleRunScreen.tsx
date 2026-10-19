@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Info, PencilSimple, Repeat } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
@@ -9,15 +9,27 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/
 import { msg } from "@/shared/lib/messages";
 import { ScheduledRunSetup, describeSchedule } from "@/features/optimizations";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
+import { heldOutCounts } from "../../lib/inputs-mode";
 
 /**
  * The last setup screen before the overview: the run may repeat on a schedule.
  * The plan is only saved here; it starts with the run and waits for its success.
  */
 export function ScheduleRunScreen() {
-  const { scheduledRun, setScheduledRun } = useWizardV2();
+  const { state, scheduledRun, setScheduledRun } = useWizardV2();
+  const { inputs } = state;
+  // Mirrors the server: a run without held-out test cases can never replace its version.
+  const heldOut =
+    inputs.cases.length > 0
+      ? heldOutCounts(inputs.cases.length, inputs.split, inputs.mode).heldOut
+      : inputs.mode === "pairs" && inputs.split.test > 0;
   const [on, setOn] = useState(scheduledRun !== null);
   const [editing, setEditing] = useState(scheduledRun === null);
+
+  // A schedule saved before the test split was removed would be refused at submit.
+  useEffect(() => {
+    if (!heldOut && scheduledRun) setScheduledRun(null);
+  }, [heldOut, scheduledRun, setScheduledRun]);
 
   const toggle = (next: boolean) => {
     setOn(next);
@@ -51,18 +63,28 @@ export function ScheduleRunScreen() {
                         <Info className="size-4" aria-hidden />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent className="max-w-xs">{msg("submit.v2.schedule.hint")}</TooltipContent>
+                    <TooltipContent className="max-w-xs">
+                      {msg("submit.v2.schedule.hint")}
+                    </TooltipContent>
                   </Tooltip>
                 </div>
-                <p className="truncate text-sm text-muted-foreground">
-                  {on && scheduledRun && !editing
-                    ? describeSchedule(scheduledRun.schedule)
-                    : msg(on ? "continuous_tab.status.setup" : "submit.v2.schedule.off")}
+                <p
+                  className={
+                    heldOut
+                      ? "truncate text-sm text-muted-foreground"
+                      : "text-sm text-muted-foreground"
+                  }
+                >
+                  {!heldOut
+                    ? msg("continuous_tab.no_test_split.description")
+                    : on && scheduledRun && !editing
+                      ? describeSchedule(scheduledRun.schedule)
+                      : msg(on ? "continuous_tab.status.setup" : "submit.v2.schedule.off")}
                 </p>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              {on && scheduledRun && !editing && (
+              {on && heldOut && scheduledRun && !editing && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -79,13 +101,14 @@ export function ScheduleRunScreen() {
                 </Tooltip>
               )}
               <Switch
-                checked={on}
+                checked={on && heldOut}
+                disabled={!heldOut}
                 onCheckedChange={toggle}
                 aria-label={msg("continuous_tab.toggle")}
               />
             </div>
           </div>
-          {on && editing && (
+          {on && heldOut && editing && (
             <ScheduledRunSetup
               idPrefix="wizard-schedule"
               finishLabel="continuous_tab.walk.save"

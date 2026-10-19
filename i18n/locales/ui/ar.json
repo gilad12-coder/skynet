@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "فشل الإجراء. حاول مرة أخرى.",
   "continuous_tab.not_eligible.title": "التشغيل المجدول غير متاح هنا",
   "continuous_tab.not_eligible.description": "يمكنك تفعيله فقط لتشغيل خاص بك انتهى بنجاح.",
+  "continuous_tab.no_test_split.title": "يحتاج التشغيل المجدول إلى حالات اختبار",
+  "continuous_tab.no_test_split.description": "فعّل تقسيم الاختبار وشغّل مرة أخرى. بدون حالات اختبار منفصلة، لا يمكن لأي فحص أن يستبدل النسخة الحالية.",
   "continuous_tab.schedule.label": "جدول الفحص",
   "continuous_tab.permit.label": "ما الذي يمكن تحديثه",
   "continuous_tab.permit.data": "البيانات من المصدر المتصل",

@@ -83,7 +83,8 @@ export interface ContinuousPlan {
   /**
    * While paused: `user` (the owner paused it), `allowance` (monthly limit
    * spent), `funds` (wallet too low) or `failing` (checks failed in a row).
-   * While ended: the first run's status (`failed`, `cancelled`, `stopped`) or `missing`.
+   * While ended: the first run's status (`failed`, `cancelled`, `stopped`), `missing`,
+   * or `no_test_split` (the run kept no test cases apart).
    */
   pause_reason:
     | "user"
@@ -94,6 +95,7 @@ export interface ContinuousPlan {
     | "cancelled"
     | "stopped"
     | "missing"
+    | "no_test_split"
     | null;
   schedule: ScheduleRule;
   next_check_at: string | null;
@@ -110,6 +112,8 @@ export interface ContinuousPlan {
 export interface ContinuousState {
   plan: ContinuousPlan | null;
   eligible: boolean;
+  /** False when the run kept no test cases apart, so no plan can start from it. */
+  held_out?: boolean;
 }
 
 export interface ContinuousEnableRequest {

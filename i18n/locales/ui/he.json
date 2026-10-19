@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "הפעולה נכשלה. נסו שוב.",
   "continuous_tab.not_eligible.title": "אי אפשר להפעיל כאן ריצה מתוזמנת",
   "continuous_tab.not_eligible.description": "אפשר להפעיל אותה רק על הרצה משלכם שהסתיימה בהצלחה.",
+  "continuous_tab.no_test_split.title": "ריצה מתוזמנת צריכה מקרי בדיקה",
+  "continuous_tab.no_test_split.description": "הפעילו חלוקת בדיקה והריצו שוב. בלי מקרי בדיקה נפרדים, אף בדיקה לא תוכל להחליף את הגרסה הנוכחית.",
   "continuous_tab.schedule.label": "תדירות בדיקה",
   "continuous_tab.permit.label": "מה מותר לרענן",
   "continuous_tab.permit.data": "נתונים מהמקור המחובר",

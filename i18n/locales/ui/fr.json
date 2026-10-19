@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "L'action a échoué. Réessayez.",
   "continuous_tab.not_eligible.title": "L’exécution planifiée n’est pas disponible ici",
   "continuous_tab.not_eligible.description": "Vous ne pouvez l'activer que pour l'une de vos exécutions terminée avec succès.",
+  "continuous_tab.no_test_split.title": "Une exécution planifiée a besoin de cas de test",
+  "continuous_tab.no_test_split.description": "Activez une répartition de test et relancez. Sans cas de test séparés, aucune vérification ne peut remplacer la version actuelle.",
   "continuous_tab.schedule.label": "Fréquence de vérification",
   "continuous_tab.permit.label": "Ce qui peut être actualisé",
   "continuous_tab.permit.data": "Données de la source connectée",

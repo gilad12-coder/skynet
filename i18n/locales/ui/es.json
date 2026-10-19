@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "La acción falló. Inténtalo de nuevo.",
   "continuous_tab.not_eligible.title": "La ejecución programada no está disponible aquí",
   "continuous_tab.not_eligible.description": "Solo puedes activarla en una ejecución propia que haya terminado correctamente.",
+  "continuous_tab.no_test_split.title": "Una ejecución programada necesita casos de prueba",
+  "continuous_tab.no_test_split.description": "Activa una división de prueba y vuelve a ejecutar. Sin casos de prueba separados, ninguna revisión puede reemplazar la versión actual.",
   "continuous_tab.schedule.label": "Frecuencia de revisión",
   "continuous_tab.permit.label": "Qué se puede actualizar",
   "continuous_tab.permit.data": "Datos de la fuente conectada",

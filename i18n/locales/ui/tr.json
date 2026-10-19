@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "İşlem başarısız oldu. Tekrar deneyin.",
   "continuous_tab.not_eligible.title": "Zamanlanmış çalıştırma burada kullanılamıyor",
   "continuous_tab.not_eligible.description": "Bunu yalnızca başarıyla tamamlanan kendi çalıştırmanız için açabilirsiniz.",
+  "continuous_tab.no_test_split.title": "Zamanlanmış çalıştırma test örnekleri gerektirir",
+  "continuous_tab.no_test_split.description": "Test bölmesini açın ve yeniden çalıştırın. Ayrı test örnekleri olmadan hiçbir kontrol mevcut sürümün yerini alamaz.",
   "continuous_tab.schedule.label": "Kontrol programı",
   "continuous_tab.permit.label": "Neler yenilenebilir",
   "continuous_tab.permit.data": "Bağlı kaynaktaki veriler",

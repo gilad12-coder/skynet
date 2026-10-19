@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "Die Aktion ist fehlgeschlagen. Versuchen Sie es erneut.",
   "continuous_tab.not_eligible.title": "Ein geplanter Lauf ist hier nicht verfügbar",
   "continuous_tab.not_eligible.description": "Sie können sie nur für Ihren eigenen Lauf aktivieren, der erfolgreich abgeschlossen wurde.",
+  "continuous_tab.no_test_split.title": "Ein geplanter Lauf braucht Testfälle",
+  "continuous_tab.no_test_split.description": "Aktiviere eine Testaufteilung und starte erneut. Ohne getrennte Testfälle kann keine Prüfung die aktuelle Version ersetzen.",
   "continuous_tab.schedule.label": "Prüfrhythmus",
   "continuous_tab.permit.label": "Was aktualisiert werden darf",
   "continuous_tab.permit.data": "Daten aus der verbundenen Quelle",

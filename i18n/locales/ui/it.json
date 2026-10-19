@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "L'azione non è riuscita. Riprova.",
   "continuous_tab.not_eligible.title": "L’esecuzione pianificata non è disponibile qui",
   "continuous_tab.not_eligible.description": "Puoi attivarla solo per una tua esecuzione terminata correttamente.",
+  "continuous_tab.no_test_split.title": "Un'esecuzione programmata richiede casi di test",
+  "continuous_tab.no_test_split.description": "Attiva una suddivisione di test ed esegui di nuovo. Senza casi di test separati, nessun controllo può sostituire la versione attuale.",
   "continuous_tab.schedule.label": "Frequenza dei controlli",
   "continuous_tab.permit.label": "Cosa può essere aggiornato",
   "continuous_tab.permit.data": "Dati dalla fonte collegata",

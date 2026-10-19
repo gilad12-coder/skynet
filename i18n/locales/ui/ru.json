@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "Действие не выполнено. Попробуйте ещё раз.",
   "continuous_tab.not_eligible.title": "Запуск по расписанию здесь недоступен",
   "continuous_tab.not_eligible.description": "Её можно включить только для вашего собственного запуска, который завершился успешно.",
+  "continuous_tab.no_test_split.title": "Запуску по расписанию нужны тестовые примеры",
+  "continuous_tab.no_test_split.description": "Включите тестовую выборку и запустите снова. Без отдельных тестовых примеров ни одна проверка не сможет заменить текущую версию.",
   "continuous_tab.schedule.label": "Расписание проверок",
   "continuous_tab.permit.label": "Что можно обновлять",
   "continuous_tab.permit.data": "Данные из подключённого источника",

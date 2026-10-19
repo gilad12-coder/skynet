@@ -206,11 +206,14 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
   }
   if (!state.plan) {
     if (!state.eligible) {
+      const noTestSplit = state.held_out === false;
       return (
         <EmptyState
           icon={Repeat}
-          title={msg("continuous_tab.not_eligible.title")}
-          description={msg("continuous_tab.not_eligible.description")}
+          title={msg(noTestSplit ? "continuous_tab.no_test_split.title" : "continuous_tab.not_eligible.title")}
+          description={msg(
+            noTestSplit ? "continuous_tab.no_test_split.description" : "continuous_tab.not_eligible.description",
+          )}
         />
       );
     }
@@ -320,7 +323,13 @@ function NotStartedView({
               {msg(ended ? "continuous_tab.status.ended" : "continuous_tab.status.waiting")}
             </StatusLabel>
             <p className="max-w-prose text-lg font-semibold">
-              {msg(ended ? "continuous_tab.ended.description" : "continuous_tab.waiting.description")}
+              {msg(
+                !ended
+                  ? "continuous_tab.waiting.description"
+                  : plan.pause_reason === "no_test_split"
+                    ? "continuous_tab.no_test_split.description"
+                    : "continuous_tab.ended.description",
+              )}
             </p>
           </div>
           <DeleteButton busy={busy} remove={remove} />

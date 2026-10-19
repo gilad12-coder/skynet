@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "कार्रवाई विफल रही। फिर से कोशिश करें।",
   "continuous_tab.not_eligible.title": "निर्धारित रन यहाँ उपलब्ध नहीं है",
   "continuous_tab.not_eligible.description": "आप इसे केवल अपने उस रन के लिए चालू कर सकते हैं जो सफलतापूर्वक पूरा हुआ हो।",
+  "continuous_tab.no_test_split.title": "निर्धारित रन को टेस्ट केस चाहिए",
+  "continuous_tab.no_test_split.description": "टेस्ट स्प्लिट चालू करें और फिर से चलाएँ। अलग टेस्ट केस के बिना कोई जाँच मौजूदा संस्करण को नहीं बदल सकती।",
   "continuous_tab.schedule.label": "जाँच का शेड्यूल",
   "continuous_tab.permit.label": "क्या रीफ़्रेश हो सकता है",
   "continuous_tab.permit.data": "कनेक्ट किए गए स्रोत का डेटा",

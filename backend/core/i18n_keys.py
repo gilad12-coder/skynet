@@ -91,6 +91,7 @@ class I18nKey(StrEnum):
     CONTINUOUS_CHECK_BUSY = 'continuous.check_busy'
     CONTINUOUS_CHECK_PAUSED = 'continuous.check_paused'
     CONTINUOUS_CHECK_STUCK = 'continuous.check_stuck'
+    CONTINUOUS_NO_TEST_SPLIT = 'continuous.no_test_split'
     CONTINUOUS_NOT_ELIGIBLE = 'continuous.not_eligible'
     CONTINUOUS_NOT_FOUND = 'continuous.not_found'
     CONTINUOUS_NOT_PERMITTED = 'continuous.not_permitted'

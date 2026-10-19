@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "操作失败，请重试。",
   "continuous_tab.not_eligible.title": "此处无法使用定时运行",
   "continuous_tab.not_eligible.description": "只能为你自己的、已成功完成的运行开启。",
+  "continuous_tab.no_test_split.title": "计划运行需要测试用例",
+  "continuous_tab.no_test_split.description": "开启测试拆分后重新运行。没有单独的测试用例，任何检查都无法替换当前版本。",
   "continuous_tab.schedule.label": "检查计划",
   "continuous_tab.permit.label": "可以刷新的内容",
   "continuous_tab.permit.data": "来自已连接来源的数据",

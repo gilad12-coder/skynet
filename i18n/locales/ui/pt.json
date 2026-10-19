@@ -4186,6 +4186,8 @@
   "continuous_tab.action_failed": "A ação falhou. Tente novamente.",
   "continuous_tab.not_eligible.title": "A execução agendada não está disponível aqui",
   "continuous_tab.not_eligible.description": "Só a pode ativar numa execução sua que tenha terminado com êxito.",
+  "continuous_tab.no_test_split.title": "Uma execução agendada precisa de casos de teste",
+  "continuous_tab.no_test_split.description": "Ative uma divisão de teste e execute novamente. Sem casos de teste separados, nenhuma verificação pode substituir a versão atual.",
   "continuous_tab.schedule.label": "Frequência de verificação",
   "continuous_tab.permit.label": "O que pode ser atualizado",
   "continuous_tab.permit.data": "Dados da origem ligada",

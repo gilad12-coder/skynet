@@ -45,8 +45,8 @@ from ..connectors import registry
 from ..connectors.vault import ConnectorVault
 from ..constants import PAYLOAD_OVERVIEW_NAME
 from ..models import UnifiedRunRequest
-from ..models.common import OptimizationStatus
-from ..models.unified import UnifiedData
+from ..models.common import OptimizationStatus, SplitFractions
+from ..models.unified import MIN_PAIRS_FOR_HELD_OUT, UnifiedData
 from ..storage.models import ContinuousCycleModel, ContinuousPlanModel, ExecutionBudgetModel
 from .continuous_schedule import ScheduleRule, legacy_rule, next_runs
 
@@ -68,6 +68,8 @@ PAUSE_ALLOWANCE = "allowance"
 PAUSE_FUNDS = "funds"
 # Checks kept failing; only the customer resumes, so a broken source stops costing checks.
 PAUSE_FAILING = "failing"
+# An ended plan whose first run kept no test cases apart, so no check could ever replace it.
+END_NO_TEST_SPLIT = "no_test_split"
 SYSTEM_PAUSES = frozenset({PAUSE_ALLOWANCE, PAUSE_FUNDS})
 # A waiting plan whose first run did not succeed; kept so the owner sees why it never started.
 PLAN_ENDED = "ended"
@@ -298,6 +300,29 @@ def prepare_source_cases(rows: list[dict[str, Any]], data: dict[str, Any]) -> li
         message = str(error.errors()[0].get("msg", "")) if error.errors() else str(error)
         raise SourceError("continuous.source_invalid_cases", reason=message.removeprefix("Value error, ")) from error
     return cases
+
+
+def has_held_out(job: dict[str, Any]) -> bool:
+    """Say whether a run scores its versions on test cases that no optimizer saw.
+
+    A plan can replace its current version only on such a run, so a run without
+    them would spend money on checks that can never win. A finished run answers
+    from the split it recorded; a run still in flight from its request.
+
+    Args:
+        job: A run with its payload and, once finished, its result.
+
+    Returns:
+        ``True`` when the run has held-out test cases.
+    """
+    split = (job.get("result") or {}).get("split_counts")
+    if isinstance(split, dict):
+        return bool(split.get("test")) and split.get("held_out") is True
+    data = (job.get("payload") or {}).get("data") or {}
+    if data.get("mode") != "pairs" or SplitFractions(**(data.get("split") or {})).test <= 0:
+        return False
+    cases = data.get("cases")
+    return cases is None or len(cases) >= MIN_PAIRS_FOR_HELD_OUT
 
 
 def _incumbent(job_store: Any, optimization_id: str) -> dict[str, Any]:
@@ -765,7 +790,7 @@ def next_check_after(plan: ContinuousPlanModel, after: datetime) -> datetime:
     return next_runs(plan_rule(plan), after, anchor=plan_anchor(plan) or after)[0]
 
 
-def settle_waiting(plan: ContinuousPlanModel, job_status: str | None, now: datetime) -> None:
+def settle_waiting(plan: ContinuousPlanModel, job_status: str | None, now: datetime, *, held_out: bool = True) -> None:
     """Start a waiting plan once its first run succeeded, or end it once that run ended otherwise.
 
     An ended plan is kept, with the run's outcome as its reason, so the owner
@@ -775,10 +800,16 @@ def settle_waiting(plan: ContinuousPlanModel, job_status: str | None, now: datet
         plan: A plan, in any state.
         job_status: Status of the plan's source run, or ``None`` when the run is gone.
         now: Current time.
+        held_out: Whether the source run kept test cases apart; without them the plan ends.
     """
     if plan.status != PLAN_WAITING:
         return
-    if job_status == OptimizationStatus.success.value:
+    if job_status == OptimizationStatus.success.value and not held_out:
+        plan.status = PLAN_ENDED
+        plan.pause_reason = END_NO_TEST_SPLIT
+        plan.next_check_at = None
+        plan.updated_at = now
+    elif job_status == OptimizationStatus.success.value:
         plan.status = PLAN_ACTIVE
         plan.next_check_at = next_check_after(plan, now)
         plan.updated_at = now
@@ -799,10 +830,11 @@ def _settle_waiting_plans(job_store: Any, now: datetime) -> None:
     with Session(job_store.engine) as session:
         for plan in session.scalars(select(ContinuousPlanModel).where(ContinuousPlanModel.status == PLAN_WAITING)):
             try:
-                status = job_store.get_job(plan.source_optimization_id, include_payload=False)["status"]
+                job = job_store.get_job(plan.source_optimization_id, include_payload=True)
             except KeyError:
-                status = None
-            settle_waiting(plan, status, now)
+                settle_waiting(plan, None, now)
+                continue
+            settle_waiting(plan, job["status"], now, held_out=has_held_out(job))
         session.commit()
 
 
