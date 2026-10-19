@@ -347,12 +347,15 @@ export function MetricStep({ page, onBack }: { page: number; onBack: () => void 
           guided={guided}
           strip={
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              {/* A repository run's scorer has its own signature, which the builder does not write. */}
+              {/* A repository run's scorer has its own signature, which the builder does not write.
+                  It waits for a running turn: opening it stops the turn, and a stopped first
+                  turn leaves run.py blank with no kickoff to write it again. */}
               {!repo && (
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
+                  disabled={agentBusy}
                   onClick={() => setBuilderOpen(true)}
                 >
                   <Sparkle className="size-3.5" aria-hidden />
