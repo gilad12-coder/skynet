@@ -640,65 +640,67 @@ export function RewardBuilder({
         </ul>
       )}
 
-      <div className="space-y-4 p-4 sm:p-5">
-        {!readOnly && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" variant="outline" className="w-full" disabled={full}>
-                <Plus />
-                {msg("reward_builder.add")}
-                <CaretDown className="ms-auto opacity-60" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className="w-[var(--radix-dropdown-menu-trigger-width)]"
-            >
-              {addable.map((entry) => {
-                const Icon = TYPE_ICON[entry.rule.type];
-                return (
-                  <DropdownMenuItem
-                    key={entry.name}
-                    onSelect={() => add([entry])}
-                    className="items-start"
-                  >
-                    <Icon className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
-                    <span className="flex min-w-0 flex-col">
-                      <bdi dir="ltr" className="font-mono text-xs">
-                        {entry.name}
-                      </bdi>
-                      <span className="text-[0.6875rem] text-muted-foreground">
-                        {bundledText(entry.name)}
-                      </span>
-                    </span>
-                  </DropdownMenuItem>
-                );
-              })}
-              {addable.length > 0 && <DropdownMenuSeparator />}
-              <DropdownMenuItem
-                onSelect={() => {
-                  const entry = customReward("exact_match", expectedField);
-                  setEditing({
-                    index: null,
-                    entry: { ...entry, name: uniqueName(entry.name, names) },
-                    mode: "new",
-                  });
-                }}
-                className="items-start"
+      {(!readOnly || tryIt) && (
+        <div className="space-y-4 p-4 sm:p-5">
+          {!readOnly && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="outline" className="w-full" disabled={full}>
+                  <Plus />
+                  {msg("reward_builder.add")}
+                  <CaretDown className="ms-auto opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="w-[var(--radix-dropdown-menu-trigger-width)]"
               >
-                <PencilSimple className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
-                <span className="flex min-w-0 flex-col">
-                  <span className="text-xs font-medium">{msg("reward_builder.add.custom")}</span>
-                  <span className="text-[0.6875rem] text-muted-foreground">
-                    {msg("reward_builder.add.custom_desc")}
+                {addable.map((entry) => {
+                  const Icon = TYPE_ICON[entry.rule.type];
+                  return (
+                    <DropdownMenuItem
+                      key={entry.name}
+                      onSelect={() => add([entry])}
+                      className="items-start"
+                    >
+                      <Icon className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
+                      <span className="flex min-w-0 flex-col">
+                        <bdi dir="ltr" className="font-mono text-xs">
+                          {entry.name}
+                        </bdi>
+                        <span className="text-[0.6875rem] text-muted-foreground">
+                          {bundledText(entry.name)}
+                        </span>
+                      </span>
+                    </DropdownMenuItem>
+                  );
+                })}
+                {addable.length > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuItem
+                  onSelect={() => {
+                    const entry = customReward("exact_match", expectedField);
+                    setEditing({
+                      index: null,
+                      entry: { ...entry, name: uniqueName(entry.name, names) },
+                      mode: "new",
+                    });
+                  }}
+                  className="items-start"
+                >
+                  <PencilSimple className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
+                  <span className="flex min-w-0 flex-col">
+                    <span className="text-xs font-medium">{msg("reward_builder.add.custom")}</span>
+                    <span className="text-[0.6875rem] text-muted-foreground">
+                      {msg("reward_builder.add.custom_desc")}
+                    </span>
                   </span>
-                </span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        {tryIt && <RewardTryIt build={build} expectedField={expectedField} samples={samples} />}
-      </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {tryIt && <RewardTryIt build={build} expectedField={expectedField} samples={samples} />}
+        </div>
+      )}
 
       {!readOnly && (
         <>
