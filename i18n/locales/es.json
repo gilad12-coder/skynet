@@ -382,6 +382,7 @@
     "continuous.skip_paused": "El plan está en pausa, así que se omitió esta revisión.",
     "continuous.skip_busy": "Una ejecución anterior sigue en curso, así que se omitió esta revisión.",
     "continuous.skip_review_pending": "Un candidato anterior espera tu revisión, así que se omitió esta revisión.",
+    "continuous.skip_inputs_changed": "Los datos o los modelos cambiaron mientras esta revisión esperaba su presupuesto, así que se omitió. La siguiente revisión usa las nuevas entradas.",
     "continuous.source_unavailable": "No pudimos leer la fuente en {provider}: {reason}. Revisa la conexión en Ajustes.",
     "continuous.source_invalid_cases": "La fuente no coincide con el formato de casos de la ejecución: {reason}. Se mantiene la última configuración.",
     "continuous.paused_allowance": "El límite mensual se agotó. El plan continúa el mes que viene.",

@@ -382,6 +382,7 @@
     "continuous.skip_paused": "الخطة متوقفة مؤقتًا، لذا تم تخطي هذا الفحص.",
     "continuous.skip_busy": "لا يزال تشغيل سابق قيد التنفيذ، لذا تم تخطي هذا الفحص.",
     "continuous.skip_review_pending": "مرشّح سابق بانتظار مراجعتك، لذا تم تخطي هذا الفحص.",
+    "continuous.skip_inputs_changed": "تغيّرت البيانات أو النماذج أثناء انتظار هذا الفحص لميزانيته، لذا تم تخطيه. يستخدم الفحص التالي المدخلات الجديدة.",
     "continuous.source_unavailable": "تعذّرت قراءة المصدر على {provider}: {reason}. تحقق من الاتصال في الإعدادات.",
     "continuous.source_invalid_cases": "لا يطابق المصدر تنسيق حالات التشغيل: {reason}. يبقى الإعداد الأخير كما هو.",
     "continuous.paused_allowance": "تم استنفاد الحد الشهري. تستمر الخطة في الشهر القادم.",

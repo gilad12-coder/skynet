@@ -382,6 +382,7 @@
     "continuous.skip_paused": "プランが一時停止中のため、この確認はスキップされました。",
     "continuous.skip_busy": "前の実行がまだ進行中のため、この確認はスキップされました。",
     "continuous.skip_review_pending": "前の候補がレビュー待ちのため、この確認はスキップされました。",
+    "continuous.skip_inputs_changed": "この確認が予算を待つ間にデータまたはモデルが変わったため、スキップされました。次の確認で新しい入力を使います。",
     "continuous.source_unavailable": "{provider} のソースを読み取れませんでした：{reason}。設定で接続を確認してください。",
     "continuous.source_invalid_cases": "ソースが実行のケース形式と一致しません：{reason}。前回のセットアップがそのまま使われます。",
     "continuous.paused_allowance": "月間上限に達しました。プランは来月再開します。",

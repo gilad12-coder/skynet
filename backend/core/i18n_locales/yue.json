@@ -382,6 +382,7 @@
     "continuous.skip_paused": "計劃已暫停，所以略過咗呢次檢查。",
     "continuous.skip_busy": "之前嘅運行仲進行緊，所以略過咗呢次檢查。",
     "continuous.skip_review_pending": "之前嘅候選仲等緊你審批，所以略過咗呢次檢查。",
+    "continuous.skip_inputs_changed": "呢次檢查等緊預算嗰陣，數據或者模型改咗，所以略過咗。下次檢查會用新嘅輸入。",
     "continuous.source_unavailable": "我哋讀唔到 {provider} 上面嘅來源：{reason}。請喺「設定」檢查連接。",
     "continuous.source_invalid_cases": "來源同呢個運行嘅案例格式唔夾：{reason}。上次嘅設定維持不變。",
     "continuous.paused_allowance": "每月上限已經用晒。計劃會喺下個月繼續。",

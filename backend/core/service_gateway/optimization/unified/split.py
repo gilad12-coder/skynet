@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import random
-from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -190,29 +189,29 @@ def _pinned_split(
     Returns:
         The three splits and their counts.
     """
-    # A pin repeats a key once per identical case, so copies split across roles keep those roles.
-    test_keys, fit_keys = Counter(pinned.test), Counter(pinned.fit)
+    # Roles follow a case's content, so identical copies always share one role. A key pinned to
+    # both roles was already searched on, so it stays out of the test cases.
+    fit_keys, test_keys = set(pinned.fit), set(pinned.test)
     test: list[Any] = []
     fit: list[Any] = []
-    new: list[Any] = []
+    new: dict[str, list[Any]] = {}
     for case in cases:
         key = case_key(case)
-        if test_keys[key] > 0:
-            test_keys[key] -= 1
-            test.append(case)
-        elif fit_keys[key] > 0:
-            fit_keys[key] -= 1
+        if key in fit_keys:
             fit.append(case)
+        elif key in test_keys:
+            test.append(case)
         else:
-            new.append(case)
+            new.setdefault(key, []).append(case)
+    groups = list(new.values())
     if shuffle:
         rng = random.Random(seed)
         rng.shuffle(fit)
-        rng.shuffle(new)
-    counts = split_counts(len(new), fractions)
+        rng.shuffle(groups)
+    counts = split_counts(len(groups), fractions)
     searched = counts.train + counts.val
-    test += new[searched:]
-    pool = fit + new[:searched]
+    test += [case for group in groups[searched:] for case in group]
+    pool = fit + [case for group in groups[:searched] for case in group]
     pool_counts = split_counts(len(pool), _search_fractions(fractions))
     return _splits(pool[: pool_counts.train], pool[pool_counts.train :], test)
 

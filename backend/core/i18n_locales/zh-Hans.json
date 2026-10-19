@@ -382,6 +382,7 @@
     "continuous.skip_paused": "计划已暂停，因此跳过了此次检查。",
     "continuous.skip_busy": "之前的运行仍在进行，因此跳过了此次检查。",
     "continuous.skip_review_pending": "之前的候选项正在等待你审核，因此跳过了此次检查。",
+    "continuous.skip_inputs_changed": "此次检查等待预算期间，数据或模型发生了变化，因此已跳过。下次检查将使用新的输入。",
     "continuous.source_unavailable": "无法读取 {provider} 上的来源：{reason}。请在“设置”中检查连接。",
     "continuous.source_invalid_cases": "来源与此运行的用例格式不符：{reason}。上一次的设置保持不变。",
     "continuous.paused_allowance": "每月限额已用完。计划将于下个月继续。",

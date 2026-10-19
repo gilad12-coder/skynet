@@ -382,6 +382,7 @@
     "continuous.skip_paused": "Plan duraklatıldığı için bu kontrol atlandı.",
     "continuous.skip_busy": "Önceki bir çalıştırma hâlâ sürdüğü için bu kontrol atlandı.",
     "continuous.skip_review_pending": "Önceki bir aday incelemenizi beklediği için bu kontrol atlandı.",
+    "continuous.skip_inputs_changed": "Bu kontrol bütçesini beklerken veriler veya modeller değişti, bu yüzden atlandı. Sonraki kontrol yeni girdileri kullanır.",
     "continuous.source_unavailable": "{provider} üzerindeki kaynak okunamadı: {reason}. Ayarlar'da bağlantıyı kontrol edin.",
     "continuous.source_invalid_cases": "Kaynak, çalıştırmanın örnek biçimiyle eşleşmiyor: {reason}. Son yapılandırma yerinde kalır.",
     "continuous.paused_allowance": "Aylık limit harcandı. Plan gelecek ay devam eder.",

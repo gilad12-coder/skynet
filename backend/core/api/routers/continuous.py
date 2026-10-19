@@ -320,7 +320,10 @@ def _plan_item(session: Session, plan: ContinuousPlanModel) -> ContinuousPlanIte
                 changes=list(cycle.changes or []),
                 detail_code=cycle.detail_code,
                 detail_params=cycle.detail_params or {},
-                snapshot=cycle.snapshot,
+                # The split pins can hold a key per case, which the page never reads.
+                snapshot={key: value for key, value in cycle.snapshot.items() if key != "pins"}
+                if cycle.snapshot
+                else cycle.snapshot,
                 optimization_id=cycle.optimization_id,
                 incumbent_score=cycle.incumbent_score,
                 candidate_score=cycle.candidate_score,

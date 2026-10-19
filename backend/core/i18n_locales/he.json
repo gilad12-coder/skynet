@@ -382,6 +382,7 @@
     "continuous.skip_paused": "התוכנית מושהית, ולכן הבדיקה דולגה.",
     "continuous.skip_busy": "הרצה קודמת עדיין פועלת, ולכן הבדיקה דולגה.",
     "continuous.skip_review_pending": "גרסה קודמת ממתינה לאישור שלכם, ולכן הבדיקה דולגה.",
+    "continuous.skip_inputs_changed": "הנתונים או המודלים השתנו בזמן שהבדיקה המתינה לתקציב שלה, ולכן היא דולגה. הבדיקה הבאה תשתמש בקלט החדש.",
     "continuous.source_unavailable": "לא הצלחנו לקרוא את המקור ב-{provider}: {reason}. בדקו את החיבור בהגדרות.",
     "continuous.source_invalid_cases": "המקור לא מתאים למבנה המקרים של ההרצה: {reason}. ההגדרה האחרונה נשמרה.",
     "continuous.paused_allowance": "המגבלה החודשית נוצלה. התוכנית תמשיך בחודש הבא.",

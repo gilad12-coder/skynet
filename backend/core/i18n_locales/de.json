@@ -382,6 +382,7 @@
     "continuous.skip_paused": "Der Plan ist pausiert, daher wurde diese Prüfung übersprungen.",
     "continuous.skip_busy": "Ein früherer Lauf ist noch aktiv, daher wurde diese Prüfung übersprungen.",
     "continuous.skip_review_pending": "Ein früherer Kandidat wartet auf Ihre Freigabe, daher wurde diese Prüfung übersprungen.",
+    "continuous.skip_inputs_changed": "Daten oder Modelle haben sich geändert, während diese Prüfung auf ihr Budget wartete, daher wurde sie übersprungen. Die nächste Prüfung nutzt die neuen Eingaben.",
     "continuous.source_unavailable": "Wir konnten die Quelle bei {provider} nicht lesen: {reason}. Prüfen Sie die Verbindung in den Einstellungen.",
     "continuous.source_invalid_cases": "Die Quelle passt nicht zum Fallformat des Laufs: {reason}. Die letzte Einrichtung bleibt bestehen.",
     "continuous.paused_allowance": "Das Monatslimit ist aufgebraucht. Der Plan geht nächsten Monat weiter.",

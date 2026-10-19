@@ -110,6 +110,7 @@ class I18nKey(StrEnum):
     CONTINUOUS_RUN_REJECTED = 'continuous.run_rejected'
     CONTINUOUS_RUN_STARTED = 'continuous.run_started'
     CONTINUOUS_SKIP_BUSY = 'continuous.skip_busy'
+    CONTINUOUS_SKIP_INPUTS_CHANGED = 'continuous.skip_inputs_changed'
     CONTINUOUS_SKIP_PAUSED = 'continuous.skip_paused'
     CONTINUOUS_SKIP_REVIEW_PENDING = 'continuous.skip_review_pending'
     CONTINUOUS_SKIP_UNCHANGED = 'continuous.skip_unchanged'

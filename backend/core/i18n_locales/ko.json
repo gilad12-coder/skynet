@@ -382,6 +382,7 @@
     "continuous.skip_paused": "플랜이 일시 중지되어 이 확인을 건너뛰었습니다.",
     "continuous.skip_busy": "이전 실행이 아직 진행 중이어서 이 확인을 건너뛰었습니다.",
     "continuous.skip_review_pending": "이전 후보가 검토를 기다리고 있어 이 확인을 건너뛰었습니다.",
+    "continuous.skip_inputs_changed": "이 확인이 예산을 기다리는 동안 데이터나 모델이 바뀌어 건너뛰었습니다. 다음 확인에서 새 입력을 사용합니다.",
     "continuous.source_unavailable": "{provider}에서 소스를 읽지 못했습니다: {reason}. 설정에서 연결을 확인하세요.",
     "continuous.source_invalid_cases": "소스가 실행의 케이스 형식과 맞지 않습니다: {reason}. 이전 설정이 그대로 유지됩니다.",
     "continuous.paused_allowance": "월 한도를 모두 사용했습니다. 플랜은 다음 달에 계속됩니다.",

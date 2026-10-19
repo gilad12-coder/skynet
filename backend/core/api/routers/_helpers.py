@@ -625,11 +625,22 @@ def cycle_ids_of_runs(session: Session, optimization_ids: set[str]) -> dict[str,
         ``{optimization_id: cycle_id}`` for the runs a check started.
     """
     rows = session.execute(
-        select(JobModel.optimization_id, JobModel.idempotency_key).where(
+        select(JobModel.optimization_id, JobModel.idempotency_key, JobModel.username).where(
             JobModel.optimization_id.in_(optimization_ids), JobModel.idempotency_key.like("continuous:%")
         )
     ).all()
-    return {run: key.split(":")[1] for run, key in rows}
+    keyed = {run: (key.split(":")[1], owner) for run, key, owner in rows}
+    if not keyed:
+        return {}
+    # Any caller can send a ``continuous:`` key, so a run links only to a check of its own owner's plan.
+    owners = dict(
+        session.execute(
+            select(ContinuousCycleModel.id, ContinuousPlanModel.username)
+            .join(ContinuousPlanModel, ContinuousPlanModel.id == ContinuousCycleModel.plan_id)
+            .where(ContinuousCycleModel.id.in_({cycle for cycle, _ in keyed.values()}))
+        ).all()
+    )
+    return {run: cycle for run, (cycle, owner) in keyed.items() if owners.get(cycle) == owner}
 
 
 def automated_run_ids(job_store, optimization_ids: list[str]) -> set[str]:

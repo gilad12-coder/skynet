@@ -382,6 +382,7 @@
     "continuous.skip_paused": "Il piano è in pausa, quindi questo controllo è stato saltato.",
     "continuous.skip_busy": "Un'esecuzione precedente è ancora in corso, quindi questo controllo è stato saltato.",
     "continuous.skip_review_pending": "Un candidato precedente attende la tua revisione, quindi questo controllo è stato saltato.",
+    "continuous.skip_inputs_changed": "I dati o i modelli sono cambiati mentre questo controllo attendeva il suo budget, quindi è stato saltato. Il prossimo controllo usa i nuovi input.",
     "continuous.source_unavailable": "Non è stato possibile leggere la fonte su {provider}: {reason}. Controlla la connessione in Impostazioni.",
     "continuous.source_invalid_cases": "La fonte non corrisponde al formato dei casi dell'esecuzione: {reason}. Resta valida l'ultima configurazione.",
     "continuous.paused_allowance": "Il limite mensile è esaurito. Il piano riprende il mese prossimo.",

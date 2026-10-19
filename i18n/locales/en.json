@@ -382,6 +382,7 @@
     "continuous.skip_paused": "The plan is paused, so this check was skipped.",
     "continuous.skip_busy": "An earlier run is still going, so this check was skipped.",
     "continuous.skip_review_pending": "An earlier candidate waits for your review, so this check was skipped.",
+    "continuous.skip_inputs_changed": "The data or models changed while this check waited for its budget, so it was skipped. The next check uses the new inputs.",
     "continuous.source_unavailable": "We could not read the source on {provider}: {reason}. Check the connection in Settings.",
     "continuous.source_invalid_cases": "The source does not match the run's case format: {reason}. The last setup stays in place.",
     "continuous.paused_allowance": "The monthly limit is spent. The plan continues next month.",

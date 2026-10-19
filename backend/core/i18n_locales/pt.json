@@ -382,6 +382,7 @@
     "continuous.skip_paused": "O plano está em pausa, por isso esta verificação foi ignorada.",
     "continuous.skip_busy": "Uma execução anterior ainda está a decorrer, por isso esta verificação foi ignorada.",
     "continuous.skip_review_pending": "Um candidato anterior aguarda a sua revisão, por isso esta verificação foi ignorada.",
+    "continuous.skip_inputs_changed": "Os dados ou os modelos mudaram enquanto esta verificação aguardava o orçamento, por isso foi ignorada. A próxima verificação usa as novas entradas.",
     "continuous.source_unavailable": "Não foi possível ler a origem em {provider}: {reason}. Verifique a ligação em Definições.",
     "continuous.source_invalid_cases": "A origem não corresponde ao formato de casos da execução: {reason}. A última configuração mantém-se.",
     "continuous.paused_allowance": "O limite mensal está esgotado. O plano continua no próximo mês.",
