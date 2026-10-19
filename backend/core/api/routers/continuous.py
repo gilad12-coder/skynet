@@ -4,6 +4,10 @@
   checks, this month's usage and the next scheduled check.
 * ``POST /optimizations/{id}/continuous`` — enable a plan from a successful run.
 * ``POST /continuous/{plan_id}/pause`` and ``/resume`` — the customer's pause.
+* ``PUT  /continuous/{plan_id}/schedule`` — change when the plan checks.
+* ``POST /continuous/{plan_id}/check-now`` — run the next check now instead of
+  waiting for its time. It is still a check: unchanged inputs are skipped.
+* ``POST /continuous/schedule-preview`` — the next check times a rule gives.
 * ``POST /continuous/{plan_id}/inputs`` — stage a permitted model or optimizer
   change for the next check.
 * ``POST /continuous/{plan_id}/cycles/{cycle_id}/approve`` and ``/reject`` —
@@ -16,7 +20,7 @@ There is deliberately no endpoint that reruns unchanged inputs.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, model_validator
@@ -27,6 +31,7 @@ from sqlalchemy.orm import Session
 from ...models.common import OptimizationStatus
 from ...storage.models import ContinuousCycleModel, ContinuousPlanModel
 from ...worker import continuous as engine_mod
+from ...worker.continuous_schedule import ScheduleRule, next_runs
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..converters import job_owner
 from ..errors import DomainError
@@ -35,6 +40,8 @@ from ._helpers import get_job_no_payload
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
 _HISTORY_LIMIT = 50
+_UPCOMING_CHECKS = 3
+_BUSY_CYCLES = (engine_mod.CYCLE_CHECKING, engine_mod.CYCLE_OPTIMIZING)
 
 
 # Which inputs a plan may refresh on its own; anything else needs a setup change.
@@ -53,7 +60,7 @@ class ContinuousSource(BaseModel):
 
 # Enables continuous optimization on a successful run.
 class ContinuousEnableRequest(BaseModel):
-    schedule: Literal["daily", "weekly"]
+    schedule: ScheduleRule
     permitted: ContinuousPermitted
     source: ContinuousSource | None = None
     monthly_limit_cents: int = Field(gt=0, le=10_000_000)
@@ -117,14 +124,20 @@ class ContinuousPlanItem(BaseModel):
     incumbent_optimization_id: str
     status: str
     pause_reason: str | None = None
-    schedule: str
+    schedule: ScheduleRule
     next_check_at: datetime | None = None
+    upcoming_checks: list[datetime] = Field(default_factory=list)
     permitted: ContinuousPermitted
     source: ContinuousSource | None = None
     pending_inputs: dict[str, Any] = Field(default_factory=dict)
     cycle_budget_cents: int
     usage: ContinuousUsage
     cycles: list[ContinuousCycleItem]
+
+
+# The next check times a schedule rule gives, earliest first.
+class SchedulePreviewResponse(BaseModel):
+    next_checks: list[datetime]
 
 
 # ``plan`` is null when the run has none; ``eligible`` says whether one can start here.
@@ -218,8 +231,9 @@ def _plan_item(session: Session, plan: ContinuousPlanModel) -> ContinuousPlanIte
         incumbent_optimization_id=plan.incumbent_optimization_id,
         status=plan.status,
         pause_reason=plan.pause_reason,
-        schedule=plan.schedule,
+        schedule=engine_mod.plan_rule(plan),
         next_check_at=engine_mod.aware(plan.next_check_at),
+        upcoming_checks=_upcoming(plan),
         permitted=ContinuousPermitted.model_validate(plan.permitted or {}),
         source=ContinuousSource.model_validate(plan.source) if plan.source else None,
         pending_inputs=plan.pending_inputs or {},
@@ -249,6 +263,41 @@ def _plan_item(session: Session, plan: ContinuousPlanModel) -> ContinuousPlanIte
             for cycle in cycles
         ],
     )
+
+
+def _upcoming(plan: ContinuousPlanModel) -> list[datetime]:
+    """List the plan's next few check times; none while it is paused.
+
+    Args:
+        plan: The plan.
+
+    Returns:
+        Up to three check times, earliest first.
+    """
+    first = engine_mod.aware(plan.next_check_at)
+    if first is None:
+        return []
+    later = next_runs(
+        engine_mod.plan_rule(plan), first, anchor=engine_mod.plan_anchor(plan), count=_UPCOMING_CHECKS - 1
+    )
+    return [first, *later]
+
+
+def _set_schedule(plan: ContinuousPlanModel, rule: ScheduleRule, now: datetime) -> None:
+    """Store a rule and, for an active plan, its first check after now.
+
+    The rule's intervals count from now, so "every 2 weeks" starts this week.
+
+    Args:
+        plan: The plan.
+        rule: The new rule.
+        now: Current time.
+    """
+    plan.schedule = rule.frequency
+    plan.schedule_rule = {**rule.model_dump(), "anchor": now.isoformat()}
+    if plan.status == engine_mod.PLAN_ACTIVE:
+        plan.next_check_at = engine_mod.next_check_after(plan, now)
+    plan.updated_at = now
 
 
 def _plan_for_run(session: Session, optimization_id: str) -> ContinuousPlanModel | None:
@@ -355,15 +404,15 @@ def create_continuous_router(*, job_store) -> APIRouter:
             source_optimization_id=optimization_id,
             incumbent_optimization_id=optimization_id,
             status=engine_mod.PLAN_ACTIVE,
-            schedule=body.schedule,
-            next_check_at=now + engine_mod.SCHEDULES[body.schedule],
             permitted=body.permitted.model_dump(),
             source=body.source.model_dump() if body.source else None,
             pending_inputs={},
             baseline_snapshot=engine_mod.snapshot_of_payload(job["payload"]),
             monthly_limit_cents=body.monthly_limit_cents,
             cycle_budget_cents=body.cycle_budget_cents,
+            created_at=now,
         )
+        _set_schedule(plan, body.schedule, now)
         with _session() as session:
             if _plan_for_run(session, optimization_id) is not None:
                 raise DomainError("continuous.already_enabled", status=409)
@@ -404,7 +453,7 @@ def create_continuous_router(*, job_store) -> APIRouter:
         summary="Resume a paused continuous plan",
     )
     def resume_continuous(plan_id: str, current_user: AuthenticatedUserDep) -> ContinuousPlanItem:
-        """Resume checks; the next one runs one schedule interval from now.
+        """Resume checks; the next one is the schedule's first time after now.
 
         An allowance or funds limit still applies at that check.
 
@@ -420,10 +469,90 @@ def create_continuous_router(*, job_store) -> APIRouter:
             now = datetime.now(UTC)
             plan.status = engine_mod.PLAN_ACTIVE
             plan.pause_reason = None
-            plan.next_check_at = now + engine_mod.SCHEDULES.get(plan.schedule, engine_mod.SCHEDULES["weekly"])
+            plan.next_check_at = engine_mod.next_check_after(plan, now)
             plan.updated_at = now
             session.commit()
             return _plan_item(session, plan)
+
+    @router.put(
+        "/continuous/{plan_id}/schedule",
+        response_model=ContinuousPlanItem,
+        summary="Change when a continuous plan checks",
+    )
+    def update_schedule(plan_id: str, body: ScheduleRule, current_user: AuthenticatedUserDep) -> ContinuousPlanItem:
+        """Replace the plan's repeat rule; a paused plan stays paused.
+
+        Args:
+            plan_id: The plan.
+            body: The new rule.
+            current_user: The caller.
+
+        Returns:
+            The updated plan.
+        """
+        with _session() as session:
+            plan = _owned_plan(session, plan_id, current_user)
+            _set_schedule(plan, body, datetime.now(UTC))
+            session.commit()
+            return _plan_item(session, plan)
+
+    @router.post(
+        "/continuous/{plan_id}/check-now",
+        response_model=ContinuousPlanItem,
+        summary="Run the next continuous check now",
+    )
+    def check_now(plan_id: str, current_user: AuthenticatedUserDep) -> ContinuousPlanItem:
+        """Make the next check due now; the schedule continues after it.
+
+        The check follows the usual rules, so unchanged inputs are recorded as
+        skipped and start no run.
+
+        Args:
+            plan_id: The plan.
+            current_user: The caller.
+
+        Returns:
+            The plan with its check due now.
+
+        Raises:
+            DomainError: 409 while the plan is paused or a check or run is still in progress.
+        """
+        with _session() as session:
+            plan = _owned_plan(session, plan_id, current_user)
+            if plan.status != engine_mod.PLAN_ACTIVE:
+                raise DomainError("continuous.check_paused", status=409)
+            busy = session.scalar(
+                select(ContinuousCycleModel.id).where(
+                    ContinuousCycleModel.plan_id == plan.id, ContinuousCycleModel.status.in_(_BUSY_CYCLES)
+                )
+            )
+            if busy is not None:
+                raise DomainError("continuous.check_busy", status=409)
+            now = datetime.now(UTC)
+            plan.next_check_at = now
+            plan.updated_at = now
+            session.commit()
+            item = _plan_item(session, plan)
+        engine_mod.request_sweep()
+        return item
+
+    @router.post(
+        "/continuous/schedule-preview",
+        response_model=SchedulePreviewResponse,
+        summary="Preview the next check times of a schedule rule",
+    )
+    def preview_schedule(body: ScheduleRule, current_user: AuthenticatedUserDep) -> SchedulePreviewResponse:
+        """Return the next three times a rule would check, counting from now.
+
+        Args:
+            body: The rule.
+            current_user: The caller; only signed-in users may preview.
+
+        Returns:
+            The next check times.
+        """
+        now = datetime.now(UTC)
+        return SchedulePreviewResponse(next_checks=next_runs(body, now, anchor=now, count=_UPCOMING_CHECKS))
 
     @router.post(
         "/continuous/{plan_id}/inputs",

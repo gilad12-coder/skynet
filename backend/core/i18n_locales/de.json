@@ -376,6 +376,8 @@
     "continuous.already_enabled": "Dieser Lauf hat bereits einen kontinuierlichen Plan.",
     "continuous.not_permitted": "Der Plan erlaubt keine Änderung an dieser Eingabe.",
     "continuous.not_reviewable": "Diese Prüfung hat keinen Kandidaten, der auf Freigabe wartet.",
+    "continuous.check_paused": "Setze den Plan fort, um eine Prüfung auszuführen.",
+    "continuous.check_busy": "Eine Prüfung oder ein Lauf ist noch im Gange. Versuche es erneut, wenn er beendet ist.",
     "continuous.skip_unchanged": "Keine zugelassene Eingabe hat sich geändert, daher startete kein Lauf und es wurde nichts berechnet.",
     "continuous.skip_paused": "Der Plan ist pausiert, daher wurde diese Prüfung übersprungen.",
     "continuous.skip_busy": "Ein früherer Lauf ist noch aktiv, daher wurde diese Prüfung übersprungen.",

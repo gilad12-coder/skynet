@@ -376,6 +376,8 @@
     "continuous.already_enabled": "This run already has a continuous plan.",
     "continuous.not_permitted": "The plan does not permit a change to this input.",
     "continuous.not_reviewable": "This check has no candidate that waits for review.",
+    "continuous.check_paused": "Resume the plan to run a check.",
+    "continuous.check_busy": "A check or run is still in progress. Try again when it finishes.",
     "continuous.skip_unchanged": "No permitted input changed, so no run started and nothing was charged.",
     "continuous.skip_paused": "The plan is paused, so this check was skipped.",
     "continuous.skip_busy": "An earlier run is still going, so this check was skipped.",

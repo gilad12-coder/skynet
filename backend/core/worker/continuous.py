@@ -47,13 +47,14 @@ from ..models import UnifiedRunRequest
 from ..models.common import OptimizationStatus
 from ..models.unified import UnifiedData
 from ..storage.models import ContinuousCycleModel, ContinuousPlanModel
+from .continuous_schedule import ScheduleRule, legacy_rule, next_runs
 
 logger = logging.getLogger(__name__)
 
-SCHEDULES: dict[str, timedelta] = {"daily": timedelta(days=1), "weekly": timedelta(days=7)}
 DIMENSIONS = ("data", "models", "optimizer")
 CYCLE_LEASE = timedelta(minutes=30)
-SWEEP_INTERVAL_SECONDS = 300.0
+# A minute keeps a check within a minute of the time the owner picked.
+SWEEP_INTERVAL_SECONDS = 60.0
 # Distinct from every other sweeper's advisory lock key in core.api.observability.
 CONTINUOUS_SWEEP_LOCK_KEY = 7_412_093_551
 
@@ -620,12 +621,54 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
             _finish_cycle(session, cycle, CYCLE_AWAITING_REVIEW, "continuous.review_ready")
 
 
+def plan_rule(plan: ContinuousPlanModel) -> ScheduleRule:
+    """Read a plan's schedule rule, including plans saved as ``daily``/``weekly``.
+
+    Args:
+        plan: The plan.
+
+    Returns:
+        The plan's rule.
+    """
+    return ScheduleRule.model_validate(plan.schedule_rule) if plan.schedule_rule else legacy_rule(plan.schedule)
+
+
+def plan_anchor(plan: ContinuousPlanModel) -> datetime | None:
+    """Return when the plan's intervals start counting: its last schedule change, else its creation.
+
+    Args:
+        plan: The plan.
+
+    Returns:
+        The anchor time, or ``None`` for an unsaved plan with neither.
+    """
+    stored = (plan.schedule_rule or {}).get("anchor")
+    if isinstance(stored, str):
+        return aware(datetime.fromisoformat(stored))
+    return aware(plan.created_at)
+
+
+def next_check_after(plan: ContinuousPlanModel, after: datetime) -> datetime:
+    """Return the plan's first scheduled check strictly after ``after``.
+
+    Args:
+        plan: The plan.
+        after: Reference time.
+
+    Returns:
+        The next check time in UTC.
+    """
+    return next_runs(plan_rule(plan), after, anchor=plan_anchor(plan) or after)[0]
+
+
 def _claim_due(engine: Any, now: datetime) -> list[str]:
     """Claim every due check exactly once and return the new cycle ids.
 
     The plan's ``next_check_at`` is advanced with a compare-and-set and the
     cycle is inserted under the unique ``(plan_id, slot)`` pair in the same
     transaction, so a second worker or an overlapping sweep claims nothing.
+    The next check is the rule's first time after now, so checks missed while
+    the service was down collapse into this one.
 
     Args:
         engine: Database engine.
@@ -635,19 +678,16 @@ def _claim_due(engine: Any, now: datetime) -> list[str]:
         Ids of the cycles this call claimed.
     """
     with Session(engine) as session:
-        due = session.execute(
-            select(ContinuousPlanModel.id, ContinuousPlanModel.next_check_at, ContinuousPlanModel.schedule).where(
+        due = session.scalars(
+            select(ContinuousPlanModel).where(
                 ContinuousPlanModel.next_check_at.is_not(None),
                 ContinuousPlanModel.next_check_at <= now,
             )
         ).all()
+        plans = [(plan.id, plan.next_check_at, next_check_after(plan, now)) for plan in due]
     claimed = []
-    for plan_id, slot_at, schedule in due:
-        interval = SCHEDULES.get(schedule, SCHEDULES["weekly"])
+    for plan_id, slot_at, following in plans:
         slot = aware(slot_at)
-        following = slot + interval
-        while following <= now:
-            following += interval
         try:
             with Session(engine) as session, session.begin():
                 won = session.execute(
@@ -739,6 +779,15 @@ def run_due_checks(
     return checked
 
 
+# Set by :func:`request_sweep` so a "check now" runs without waiting for the timer.
+_SWEEP_REQUESTED = threading.Event()
+
+
+def request_sweep() -> None:
+    """Ask this process's sweeper to run a pass now instead of at its next tick."""
+    _SWEEP_REQUESTED.set()
+
+
 class ContinuousSweeper:
     """Run :func:`run_due_checks` on a timer on one replica at a time."""
 
@@ -764,6 +813,7 @@ class ContinuousSweeper:
     def stop(self) -> None:
         """Stop the background sweep loop."""
         self._stop_event.set()
+        _SWEEP_REQUESTED.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
 
@@ -777,8 +827,12 @@ class ContinuousSweeper:
             logger.warning("Continuous sweep failed", exc_info=True)
 
     def _run(self) -> None:
-        """Sweep until stopped."""
-        while not self._stop_event.wait(self._interval_seconds):
+        """Sweep on every tick or request until stopped."""
+        while True:
+            _SWEEP_REQUESTED.wait(self._interval_seconds)
+            _SWEEP_REQUESTED.clear()
+            if self._stop_event.is_set():
+                return
             self.sweep_once()
 
 

@@ -33,6 +33,9 @@ class SidebarJobItem(BaseModel):
     role: str | None = None
     # Folder the run is filed in (each run has at most one), or None when unfiled.
     folder_id: str | None = None
+    # True when the run belongs to a continuous plan: enabled from it, its
+    # current version, or started by one of its scheduled checks.
+    automated: bool = False
 
 
 class SidebarJobsResponse(BaseModel):

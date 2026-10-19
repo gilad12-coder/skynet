@@ -376,6 +376,8 @@
     "continuous.already_enabled": "لهذا التشغيل خطة مستمرة بالفعل.",
     "continuous.not_permitted": "لا تسمح الخطة بتغيير هذا المدخل.",
     "continuous.not_reviewable": "لا يوجد في هذا الفحص مرشّح بانتظار المراجعة.",
+    "continuous.check_paused": "استأنف الخطة لإجراء فحص.",
+    "continuous.check_busy": "لا يزال فحص أو تشغيل قيد التنفيذ. حاول مرة أخرى عند انتهائه.",
     "continuous.skip_unchanged": "لم يتغيّر أي مدخل مسموح به، لذا لم يبدأ أي تشغيل ولم يُخصم أي مبلغ.",
     "continuous.skip_paused": "الخطة متوقفة مؤقتًا، لذا تم تخطي هذا الفحص.",
     "continuous.skip_busy": "لا يزال تشغيل سابق قيد التنفيذ، لذا تم تخطي هذا الفحص.",

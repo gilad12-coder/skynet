@@ -376,6 +376,8 @@
     "continuous.already_enabled": "이 실행에는 이미 지속 플랜이 있습니다.",
     "continuous.not_permitted": "이 플랜에서는 이 입력을 변경할 수 없습니다.",
     "continuous.not_reviewable": "이 확인에는 검토를 기다리는 후보가 없습니다.",
+    "continuous.check_paused": "확인을 실행하려면 플랜을 다시 시작하세요.",
+    "continuous.check_busy": "확인 또는 실행이 아직 진행 중입니다. 끝난 후 다시 시도하세요.",
     "continuous.skip_unchanged": "허용된 입력이 바뀌지 않아 실행이 시작되지 않았고 청구된 금액도 없습니다.",
     "continuous.skip_paused": "플랜이 일시 중지되어 이 확인을 건너뛰었습니다.",
     "continuous.skip_busy": "이전 실행이 아직 진행 중이어서 이 확인을 건너뛰었습니다.",

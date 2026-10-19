@@ -1811,7 +1811,9 @@ class ContinuousPlanModel(Base):
     ``baseline_snapshot`` holds the inputs of the last reviewed cycle, so a check
     with no permitted change records a skip instead of a run. ``pause_reason``
     keeps a customer's pause apart from an allowance or funds pause, because a
-    monthly reset may lift only the latter.
+    monthly reset may lift only the latter. ``schedule_rule`` is the repeat rule
+    (``core.worker.continuous_schedule.ScheduleRule``); ``schedule`` keeps its
+    frequency name, and plans saved before rules existed have only that.
     """
 
     __tablename__ = "continuous_plans"
@@ -1823,6 +1825,7 @@ class ContinuousPlanModel(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
     pause_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
     schedule: Mapped[str] = mapped_column(String(16), nullable=False)
+    schedule_rule: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     permitted: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
     source: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)

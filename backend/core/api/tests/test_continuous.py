@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import calendar
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from cryptography.fernet import Fernet
@@ -22,6 +24,7 @@ from core.api import preflight_execution
 from core.api.auth import AuthenticatedUser, get_authenticated_user
 from core.api.errors import DomainError
 from core.api.routers import submissions
+from core.api.routers._helpers import automated_run_ids
 from core.api.routers.continuous import create_continuous_router
 from core.api.tests.test_protected_submissions import _Gateway, _Harness, _SQLiteJobStore
 from core.billing.budgets import BudgetService
@@ -35,6 +38,8 @@ from core.storage.models import (
 from core.worker import continuous
 
 BALANCE = 1000
+WEEKLY = {"frequency": "weekly", "weekdays": [0], "time": "09:00", "timezone": "UTC"}
+DAILY = {"frequency": "daily", "time": "09:00", "timezone": "UTC"}
 CYCLE_BUDGET = 20
 
 
@@ -329,7 +334,7 @@ def _enable(env: _Env, optimization_id: str, **overrides: Any) -> dict[str, Any]
         The plan response.
     """
     body = {
-        "schedule": "weekly",
+        "schedule": WEEKLY,
         "permitted": {"data": True, "models": True, "optimizers": True},
         "source": {"provider": "huggingface", "ref": "acme/support/default/train"},
         "monthly_limit_cents": 100,
@@ -362,7 +367,11 @@ def test_enable_inspect_pause_resume_and_next_check(env: _Env) -> None:
     before = datetime.now(UTC)
     plan = _enable(env, source_id)
     next_check = datetime.fromisoformat(plan["next_check_at"])
-    assert before + timedelta(days=7) <= next_check <= datetime.now(UTC) + timedelta(days=7)
+    assert before < next_check <= datetime.now(UTC) + timedelta(days=7)
+    assert (next_check.weekday(), next_check.hour, next_check.minute) == (0, 9, 0)
+    assert plan["schedule"] == {**WEEKLY, "every": 1, "month_day": 1}
+    assert len(plan["upcoming_checks"]) == 3
+    assert plan["upcoming_checks"][0] == plan["next_check_at"]
     assert plan["status"] == "active"
     assert plan["usage"] == {
         "month": continuous.month_key(datetime.now(UTC)),
@@ -373,7 +382,7 @@ def test_enable_inspect_pause_resume_and_next_check(env: _Env) -> None:
 
     again = env.client.post(
         f"/optimizations/{source_id}/continuous",
-        json={"schedule": "daily", "permitted": {"models": True}, "monthly_limit_cents": 50, "cycle_budget_cents": 10},
+        json={"schedule": DAILY, "permitted": {"models": True}, "monthly_limit_cents": 50, "cycle_budget_cents": 10},
     )
     assert again.status_code == 409
     assert again.json()["code"] == "continuous.already_enabled"
@@ -384,7 +393,9 @@ def test_enable_inspect_pause_resume_and_next_check(env: _Env) -> None:
 
     resumed = env.client.post(f"/continuous/{plan['id']}/resume").json()
     assert (resumed["status"], resumed["pause_reason"]) == ("active", None)
-    assert datetime.fromisoformat(resumed["next_check_at"]) > datetime.now(UTC) + timedelta(days=6)
+    resumed_at = datetime.fromisoformat(resumed["next_check_at"])
+    assert datetime.now(UTC) < resumed_at <= datetime.now(UTC) + timedelta(days=7)
+    assert resumed_at.weekday() == 0
     assert env.client.get(f"/optimizations/{source_id}/continuous").json()["plan"]["id"] == plan["id"]
 
 
@@ -396,13 +407,13 @@ def test_only_a_successful_unified_run_can_enable(env: _Env) -> None:
     assert env.client.get(f"/optimizations/{optimization_id}/continuous").json()["eligible"] is False
     refused = env.client.post(
         f"/optimizations/{optimization_id}/continuous",
-        json={"schedule": "weekly", "permitted": {"models": True}, "monthly_limit_cents": 50, "cycle_budget_cents": 10},
+        json={"schedule": WEEKLY, "permitted": {"models": True}, "monthly_limit_cents": 50, "cycle_budget_cents": 10},
     )
     assert refused.status_code == 409
     _finish(env, optimization_id, result=_result(0.5, 0.7))
     no_source = env.client.post(
         f"/optimizations/{optimization_id}/continuous",
-        json={"schedule": "weekly", "permitted": {"data": True}, "monthly_limit_cents": 50, "cycle_budget_cents": 10},
+        json={"schedule": WEEKLY, "permitted": {"data": True}, "monthly_limit_cents": 50, "cycle_budget_cents": 10},
     )
     assert no_source.status_code == 422
 
@@ -737,3 +748,109 @@ def test_other_users_cannot_read_or_change_a_plan(env: _Env) -> None:
     env.harness.username = "bob"
     assert env.client.get(f"/optimizations/{source_id}/continuous").status_code == 404
     assert env.client.post(f"/continuous/{plan['id']}/pause").status_code == 404
+    assert env.client.put(f"/continuous/{plan['id']}/schedule", json=DAILY).status_code == 404
+    assert env.client.post(f"/continuous/{plan['id']}/check-now").status_code == 404
+
+
+def test_schedule_change_moves_the_next_check_and_keeps_a_pause(env: _Env) -> None:
+    """A new rule sets the next check from now; a paused plan stays paused with no check."""
+    plan = _enable(env, _incumbent(env))
+    rule = {"frequency": "monthly", "month_day": 31, "time": "18:30", "timezone": "Asia/Jerusalem"}
+    changed = env.client.put(f"/continuous/{plan['id']}/schedule", json=rule).json()
+    first = datetime.fromisoformat(changed["next_check_at"]).astimezone(ZoneInfo("Asia/Jerusalem"))
+    assert (first.hour, first.minute) == (18, 30)
+    assert first.day == calendar.monthrange(first.year, first.month)[1]
+    assert changed["schedule"]["frequency"] == "monthly"
+    assert len(changed["upcoming_checks"]) == 3
+
+    env.client.post(f"/continuous/{plan['id']}/pause")
+    paused = env.client.put(f"/continuous/{plan['id']}/schedule", json=DAILY).json()
+    assert (paused["status"], paused["next_check_at"], paused["upcoming_checks"]) == ("paused", None, [])
+    assert paused["schedule"]["frequency"] == "daily"
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {"frequency": "weekly", "weekdays": [], "time": "09:00"},
+        {"frequency": "daily", "time": "25:00"},
+        {"frequency": "hourly", "every": 13},
+        {"frequency": "daily", "timezone": "Mars/Olympus"},
+        {"frequency": "weekly", "weekdays": [7]},
+    ],
+)
+def test_an_impossible_schedule_is_refused(env: _Env, rule: dict[str, Any]) -> None:
+    """A rule that can't run, or names an unknown zone, is refused on enable, edit and preview."""
+    source_id = _incumbent(env)
+    assert env.client.post("/continuous/schedule-preview", json=rule).status_code == 422
+    body = {"schedule": rule, "permitted": {"models": True}, "monthly_limit_cents": 50, "cycle_budget_cents": 10}
+    assert env.client.post(f"/optimizations/{source_id}/continuous", json=body).status_code == 422
+    plan = _enable(env, source_id)
+    assert env.client.put(f"/continuous/{plan['id']}/schedule", json=rule).status_code == 422
+
+
+def test_preview_lists_the_next_three_checks(env: _Env) -> None:
+    """The preview gives the rule's next three times, at the chosen local time."""
+    rule = {"frequency": "weekly", "weekdays": [0, 2, 4], "time": "07:15", "timezone": "America/New_York"}
+    times = [
+        datetime.fromisoformat(t)
+        for t in env.client.post("/continuous/schedule-preview", json=rule).json()["next_checks"]
+    ]
+    local = [t.astimezone(ZoneInfo("America/New_York")) for t in times]
+    assert len(local) == 3
+    assert local == sorted(local)
+    assert all(t.weekday() in {0, 2, 4} and (t.hour, t.minute) == (7, 15) for t in local)
+    assert times[0] > datetime.now(UTC)
+
+
+def test_check_now_runs_a_check_and_the_schedule_continues(env: _Env) -> None:
+    """Check now makes a check due at once; unchanged inputs still only record a skip."""
+    plan = _enable(env, _incumbent(env))
+    scheduled = env.plan().next_check_at
+    jobs_before = env.count(JobModel)
+
+    now_plan = env.client.post(f"/continuous/{plan['id']}/check-now").json()
+    assert datetime.fromisoformat(now_plan["next_check_at"]) <= datetime.now(UTC)
+    env.sweep(datetime.now(UTC) + timedelta(seconds=1))
+
+    [cycle] = env.cycles()
+    assert (cycle.status, cycle.detail_code) == ("skipped", "continuous.skip_unchanged")
+    assert env.count(JobModel) == jobs_before
+    assert continuous.aware(env.plan().next_check_at) == continuous.aware(scheduled)
+
+
+def test_check_now_waits_for_a_running_check_and_a_resume(env: _Env) -> None:
+    """Check now is refused while a run is going or the plan is paused."""
+    plan = _enable(env, _incumbent(env))
+    env.rows = _cases(["B"] * 10)
+    env.sweep(_due(env))
+    assert env.cycles()[0].status == "optimizing"
+    busy = env.client.post(f"/continuous/{plan['id']}/check-now")
+    assert (busy.status_code, busy.json()["code"]) == (409, "continuous.check_busy")
+
+    env.client.post(f"/continuous/{plan['id']}/pause")
+    paused = env.client.post(f"/continuous/{plan['id']}/check-now")
+    assert (paused.status_code, paused.json()["code"]) == (409, "continuous.check_paused")
+
+
+def test_a_plan_saved_before_rules_reads_as_a_rule(env: _Env) -> None:
+    """A stored ``daily`` plan with no rule shows and schedules as daily at 09:00 UTC."""
+    source_id = _incumbent(env)
+    _enable(env, source_id)
+    env.edit_plan(schedule="daily", schedule_rule=None)
+    env.sweep(_due(env))
+    following = continuous.aware(env.plan().next_check_at)
+    assert (following.hour, following.minute) == (9, 0)
+    plan = env.client.get(f"/optimizations/{source_id}/continuous").json()["plan"]
+    assert (plan["schedule"]["frequency"], plan["schedule"]["time"]) == ("daily", "09:00")
+
+
+def test_the_sidebar_flags_every_run_of_a_plan(env: _Env) -> None:
+    """The source run and a run a check started are automated; an unrelated run is not."""
+    source_id = _incumbent(env)
+    other_id = env.client.post("/optimize", json=_incumbent_payload()).json()["optimization_id"]
+    _enable(env, source_id)
+    env.rows = _cases(["B"] * 10)
+    env.sweep(_due(env))
+    started = env.cycles()[0].optimization_id
+    assert automated_run_ids(env.store, [source_id, started, other_id]) == {source_id, started}

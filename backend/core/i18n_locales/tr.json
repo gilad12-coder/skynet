@@ -376,6 +376,8 @@
     "continuous.already_enabled": "Bu çalıştırmanın zaten bir sürekli planı var.",
     "continuous.not_permitted": "Plan bu girdide değişikliğe izin vermiyor.",
     "continuous.not_reviewable": "Bu kontrolde inceleme bekleyen bir aday yok.",
+    "continuous.check_paused": "Kontrol çalıştırmak için planı sürdürün.",
+    "continuous.check_busy": "Bir kontrol veya çalıştırma hâlâ sürüyor. Bittiğinde tekrar deneyin.",
     "continuous.skip_unchanged": "İzin verilen hiçbir girdi değişmedi; bu yüzden çalıştırma başlamadı ve ücret alınmadı.",
     "continuous.skip_paused": "Plan duraklatıldığı için bu kontrol atlandı.",
     "continuous.skip_busy": "Önceki bir çalıştırma hâlâ sürdüğü için bu kontrol atlandı.",

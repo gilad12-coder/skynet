@@ -59,7 +59,9 @@ import type {
   ContinuousEnableRequest,
   ContinuousInputs,
   ContinuousPlan,
+  ContinuousSchedulePreview,
   ContinuousState,
+  ScheduleRule,
 } from "@/shared/types/continuous";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
@@ -2016,14 +2018,19 @@ export function getRunUsage(optimizationId: string, pairIndex?: number | null) {
 
 /** Continuous optimization of one run: its plan (or null) and whether one can start. */
 export function getContinuousState(optimizationId: string) {
-  return request<ContinuousState>(`/optimizations/${encodeURIComponent(optimizationId)}/continuous`);
+  return request<ContinuousState>(
+    `/optimizations/${encodeURIComponent(optimizationId)}/continuous`,
+  );
 }
 
 export function enableContinuous(optimizationId: string, body: ContinuousEnableRequest) {
-  return request<ContinuousPlan>(`/optimizations/${encodeURIComponent(optimizationId)}/continuous`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return request<ContinuousPlan>(
+    `/optimizations/${encodeURIComponent(optimizationId)}/continuous`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 /** Pause or resume a plan. */
@@ -2032,6 +2039,29 @@ export function setContinuousPaused(planId: string, paused: boolean) {
     `/continuous/${encodeURIComponent(planId)}/${paused ? "pause" : "resume"}`,
     { method: "POST" },
   );
+}
+
+/** Replace when a plan checks; a paused plan stays paused. */
+export function updateContinuousSchedule(planId: string, rule: ScheduleRule) {
+  return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/schedule`, {
+    method: "PUT",
+    body: JSON.stringify(rule),
+  });
+}
+
+/** Run the next check now; unchanged inputs are still recorded as skipped. */
+export function checkContinuousNow(planId: string) {
+  return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/check-now`, {
+    method: "POST",
+  });
+}
+
+/** The next check times a schedule rule would give, counting from now. */
+export function previewContinuousSchedule(rule: ScheduleRule) {
+  return request<ContinuousSchedulePreview>("/continuous/schedule-preview", {
+    method: "POST",
+    body: JSON.stringify(rule),
+  });
 }
 
 /** Stage a model or optimizer change for the next check. */
@@ -3230,6 +3260,8 @@ export interface SidebarJobItem {
   role?: ShareRole | null;
   /** Folder this run is filed in; absent when unfiled. */
   folder_id?: string | null;
+  /** True when the run belongs to a continuous plan (an automation). */
+  automated?: boolean;
 }
 
 export function listJobsSidebar(params?: { username?: string; limit?: number; offset?: number }) {

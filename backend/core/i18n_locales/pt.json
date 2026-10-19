@@ -376,6 +376,8 @@
     "continuous.already_enabled": "Esta execução já tem um plano contínuo.",
     "continuous.not_permitted": "O plano não permite alterar esta entrada.",
     "continuous.not_reviewable": "Esta verificação não tem nenhum candidato a aguardar revisão.",
+    "continuous.check_paused": "Retome o plano para executar uma verificação.",
+    "continuous.check_busy": "Uma verificação ou execução ainda está em andamento. Tente novamente quando terminar.",
     "continuous.skip_unchanged": "Nenhuma entrada permitida mudou, por isso nenhuma execução começou e nada foi cobrado.",
     "continuous.skip_paused": "O plano está em pausa, por isso esta verificação foi ignorada.",
     "continuous.skip_busy": "Uma execução anterior ainda está a decorrer, por isso esta verificação foi ignorada.",

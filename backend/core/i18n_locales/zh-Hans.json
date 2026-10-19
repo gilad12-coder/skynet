@@ -376,6 +376,8 @@
     "continuous.already_enabled": "此运行已有持续计划。",
     "continuous.not_permitted": "此计划不允许更改该输入。",
     "continuous.not_reviewable": "此次检查没有等待审核的候选项。",
+    "continuous.check_paused": "请先恢复计划再运行检查。",
+    "continuous.check_busy": "仍有检查或运行正在进行。请在完成后重试。",
     "continuous.skip_unchanged": "没有允许的输入发生变化，因此未启动运行，也未产生费用。",
     "continuous.skip_paused": "计划已暂停，因此跳过了此次检查。",
     "continuous.skip_busy": "之前的运行仍在进行，因此跳过了此次检查。",
