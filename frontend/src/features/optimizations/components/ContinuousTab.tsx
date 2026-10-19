@@ -194,9 +194,9 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
       );
     }
     return (
-      <div className="mt-4 space-y-4">
-        <Card className="py-0">
-          <CardContent className="flex items-center justify-between gap-4 p-5 sm:p-6">
+      <Card className="mt-4 overflow-hidden py-0">
+        <CardContent className="divide-y divide-border/50 p-0">
+          <div className="flex items-center justify-between gap-4 p-5 sm:p-6">
             <div className="flex min-w-0 items-center gap-1.5">
               <StatusLabel tone="muted">
                 {msg(turnedOn ? "continuous_tab.status.setup" : "continuous_tab.status.off")}
@@ -224,17 +224,17 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
               onCheckedChange={setTurnedOn}
               aria-label={msg("continuous_tab.toggle")}
             />
-          </CardContent>
-        </Card>
-        {turnedOn && (
-          <EnableForm
-            busy={busy}
-            onEnable={(body) =>
-              act(() => enableContinuous(optimizationId, body), "continuous_tab.toast.enabled")
-            }
-          />
-        )}
-      </div>
+          </div>
+          {turnedOn && (
+            <EnableForm
+              busy={busy}
+              onEnable={(body) =>
+                act(() => enableContinuous(optimizationId, body), "continuous_tab.toast.enabled")
+              }
+            />
+          )}
+        </CardContent>
+      </Card>
     );
   }
   return <PlanView plan={state.plan} busy={busy} act={act} />;
@@ -323,8 +323,6 @@ function EnableForm({
   }, [problem, busy, formKey]);
 
   return (
-    <Card className="py-0">
-      <CardContent className="p-0">
         <div className="divide-y divide-border/50 px-5 pt-5 sm:px-6 sm:pt-6">
           <FormRow title={msg("continuous_tab.schedule.label")}>
             <ScheduleEditor value={schedule} onChange={setSchedule} idPrefix="continuous-schedule" />
@@ -385,9 +383,6 @@ function EnableForm({
             </FormRow>
           )}
         </div>
-
-      </CardContent>
-    </Card>
   );
 }
 
@@ -411,13 +406,12 @@ function PlanView({
   const refreshes = (["data", "models", "optimizers"] as const).filter((key) => plan.permitted[key]);
   const staged = plan.permitted.models || plan.permitted.optimizers;
   return (
-    <div className="mt-4 space-y-4">
-      {pending.map((cycle) => (
-        <ReviewCard key={cycle.id} plan={plan} cycle={cycle} busy={busy} act={act} />
-      ))}
+    <Card className="mt-4 overflow-hidden py-0">
+      <CardContent className="divide-y divide-border/50 p-0">
+          {pending.map((cycle) => (
+            <ReviewCard key={cycle.id} plan={plan} cycle={cycle} busy={busy} act={act} />
+          ))}
 
-      <Card className="py-0">
-        <CardContent className="p-0">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 p-5 sm:p-6">
             <div className="min-w-0">
               {paused && plan.pause_reason ? (
@@ -464,7 +458,7 @@ function PlanView({
             </div>
           </div>
 
-          <dl className="divide-y divide-border/50 border-t border-border/50">
+          <dl className="divide-y divide-border/50">
             <SettingRow
               label={msg("continuous_tab.schedule.label")}
               action={
@@ -560,22 +554,25 @@ function PlanView({
               </SettingRow>
             )}
           </dl>
-        </CardContent>
-      </Card>
 
-      <section className="pt-4">
-        <SectionTitle>{msg("continuous_tab.history")}</SectionTitle>
-        {plan.cycles.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">{msg("continuous_tab.history_empty")}</p>
-        ) : (
-          <ol className="mt-3 divide-y divide-border/50 border-y border-border/50">
-            {plan.cycles.map((cycle) => (
-              <CycleRow key={cycle.id} cycle={cycle} />
-            ))}
-          </ol>
-        )}
-      </section>
-    </div>
+          <section className="bg-muted/30">
+            <div className="px-5 pt-5 sm:px-6">
+              <SectionTitle>{msg("continuous_tab.history")}</SectionTitle>
+            </div>
+            {plan.cycles.length === 0 ? (
+              <p className="px-5 pt-2 pb-5 text-sm text-muted-foreground sm:px-6">
+                {msg("continuous_tab.history_empty")}
+              </p>
+            ) : (
+              <ol className="divide-y divide-border/50 pt-1">
+                {plan.cycles.map((cycle) => (
+                  <CycleRow key={cycle.id} cycle={cycle} />
+                ))}
+              </ol>
+            )}
+          </section>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -644,8 +641,7 @@ function ReviewCard({
       ? cycle.candidate_score - cycle.incumbent_score
       : null;
   return (
-    <Card className="border-primary/40 bg-primary/[0.04] py-0">
-      <CardContent className="flex flex-wrap items-end justify-between gap-5 p-5 sm:p-6">
+    <div className="flex flex-wrap items-end justify-between gap-5 border-s-2 border-s-primary bg-primary/[0.05] p-5 sm:p-6">
         <div className="min-w-0 space-y-3">
           <div className="space-y-0.5">
             <SectionTitle>{msg("continuous_tab.review.title")}</SectionTitle>
@@ -715,8 +711,7 @@ function ReviewCard({
             {msg("continuous_tab.approve")}
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -776,7 +771,7 @@ function CycleRow({ cycle }: { cycle: ContinuousCycle }) {
   const locale = getActiveIntlLocale();
   const scored = cycle.incumbent_score != null && cycle.candidate_score != null;
   return (
-    <li className="grid gap-x-6 gap-y-1.5 py-4 sm:grid-cols-[13rem_minmax(0,1fr)] sm:gap-x-8">
+    <li className="grid gap-x-6 gap-y-1.5 px-5 py-4 sm:grid-cols-[13rem_minmax(0,1fr)] sm:gap-x-8 sm:px-6">
       <div className="flex items-center gap-2 sm:flex-col sm:items-start sm:gap-1.5">
         <span
           className={cn(
