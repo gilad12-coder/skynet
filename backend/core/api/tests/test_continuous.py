@@ -370,7 +370,7 @@ def test_enable_inspect_pause_resume_and_next_check(env: _Env) -> None:
     next_check = datetime.fromisoformat(plan["next_check_at"])
     assert before < next_check <= datetime.now(UTC) + timedelta(days=7)
     assert (next_check.weekday(), next_check.hour, next_check.minute) == (0, 9, 0)
-    assert plan["schedule"] == {**WEEKLY, "every": 1, "month_day": 1}
+    assert plan["schedule"] == {**WEEKLY, "every": 1, "month_day": 1, "skip": [], "extra": []}
     assert len(plan["upcoming_checks"]) == 3
     assert plan["upcoming_checks"][0] == plan["next_check_at"]
     assert plan["status"] == "active"

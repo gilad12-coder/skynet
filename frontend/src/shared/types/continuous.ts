@@ -19,6 +19,10 @@ export interface ScheduleRule {
   weekdays: number[];
   month_day: number;
   timezone: string;
+  /** Single checks turned off, as local `YYYY-MM-DDTHH:MM` slots. */
+  skip?: string[];
+  /** Single checks added outside the repeat, as local `YYYY-MM-DDTHH:MM` slots. */
+  extra?: string[];
 }
 
 export type ContinuousCycleStatus =

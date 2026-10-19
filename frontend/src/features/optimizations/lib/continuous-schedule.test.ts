@@ -7,6 +7,7 @@ import {
   checkTimesOn,
   pickDay,
   pickWeekday,
+  toggleSlot,
   defaultRule,
   presetOf,
   scheduleProblem,
@@ -121,11 +122,27 @@ test("checkTimesOn lists every hourly time and falls back to the month end", () 
   assert.deepEqual(checkTimesOn(monthly, calendarDay(2026, 10, 29), MON), []);
 });
 
-test("pickDay moves a monthly rule and toggles a weekday", () => {
-  assert.equal(pickDay({ ...RULE, frequency: "monthly" }, MON).month_day, 19);
-  assert.deepEqual(pickDay({ ...RULE, weekdays: [0, 3] }, MON).weekdays, [3]);
+test("pickDay turns one date off or on and leaves the repeat alone", () => {
+  const weekly = { ...RULE, weekdays: [0, 3] };
+  const off = pickDay(weekly, MON, MON);
+  assert.deepEqual(off.weekdays, [0, 3]);
+  assert.deepEqual(checkTimesOn(off, MON, MON), []);
+  assert.deepEqual(checkTimesOn(off, calendarDay(2026, 9, 26), MON), ["09:00"]);
+  assert.deepEqual(checkTimesOn(pickDay(off, MON, MON), MON, MON), ["09:00"]);
+  const tue = calendarDay(2026, 9, 20);
+  assert.deepEqual(checkTimesOn(pickDay(weekly, tue, MON), tue, MON), ["09:00"]);
   const daily = pickWeekday({ ...RULE, frequency: "daily", every: 3 }, 6);
   assert.deepEqual([daily.frequency, daily.every, daily.weekdays], ["weekly", 1, [0, 1, 2, 3, 4, 5]]);
   const hourly = { ...RULE, frequency: "hourly" as const };
-  assert.equal(pickDay(hourly, MON), hourly);
+  assert.equal(pickDay(hourly, MON, MON), hourly);
+});
+
+test("toggleSlot turns single hours off and on, and drops past slots", () => {
+  const hourly = { ...RULE, frequency: "hourly" as const, every: 1 };
+  const off = toggleSlot(hourly, MON, "10:00", MON);
+  assert.equal(checkTimesOn(off, MON, MON).includes("10:00"), false);
+  assert.equal(checkTimesOn(off, MON, MON).length, 23);
+  assert.equal(checkTimesOn(toggleSlot(off, MON, "10:00", MON), MON, MON).length, 24);
+  const later = calendarDay(2026, 9, 21);
+  assert.deepEqual(toggleSlot(off, later, "10:00", later).skip, ["2026-10-21T10:00"]);
 });

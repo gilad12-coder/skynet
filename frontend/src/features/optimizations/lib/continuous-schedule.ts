@@ -240,11 +240,30 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+/** A calendar date as `YYYY-MM-DD`. */
+export function dateKey(day: Date): string {
+  return `${day.getUTCFullYear()}-${pad(day.getUTCMonth() + 1)}-${pad(day.getUTCDate())}`;
+}
+
+function slotsOn(slots: string[] | undefined, day: Date): Set<string> {
+  const prefix = `${dateKey(day)}T`;
+  return new Set((slots ?? []).filter((s) => s.startsWith(prefix)).map((s) => s.slice(prefix.length)));
+}
+
 /**
  * The HH:MM times a rule checks on one date, counted from `anchor` the way
- * the worker counts them (`_day_times` in `continuous_schedule.py`).
+ * the worker counts them (`_day_times` in `continuous_schedule.py`), with
+ * single checks turned off or added on that date.
  */
 export function checkTimesOn(rule: ScheduleRule, day: Date, anchor: Date): string[] {
+  const skipped = slotsOn(rule.skip, day);
+  const added = slotsOn(rule.extra, day);
+  const repeat = repeatTimesOn(rule, day, anchor).filter((t) => !skipped.has(t));
+  return [...new Set([...repeat, ...added])].sort();
+}
+
+/** The HH:MM times the repeat alone checks on one date. */
+function repeatTimesOn(rule: ScheduleRule, day: Date, anchor: Date): string[] {
   const [hour = 0, minute = 0] = rule.time.split(":").map(Number);
   const at = [`${pad(hour)}:${pad(minute)}`];
   const offset = daysBetween(anchor, day);
@@ -266,15 +285,44 @@ export function checkTimesOn(rule: ScheduleRule, day: Date, anchor: Date): strin
   return day.getUTCDate() === Math.min(rule.month_day, last) ? at : [];
 }
 
+/** Sorted, unique slots from `today` on, so turned-off past checks don't pile up. */
+function keepSlots(slots: Iterable<string>, today: Date): string[] {
+  const from = dateKey(today);
+  return [...new Set(slots)].filter((s) => s >= from).sort();
+}
+
 /**
- * The rule after a date is clicked in the calendar: a monthly rule moves to
- * that day of the month; daily and weekly rules turn that weekday on or off.
- * Hourly rules check every day, so a click leaves them as they are.
+ * The rule after one check slot (a date and an HH:MM time) is clicked: a
+ * check the repeat makes is turned off for that slot only, a turned-off one
+ * comes back, and a slot the repeat skips gets a single added check.
  */
-export function pickDay(rule: ScheduleRule, day: Date): ScheduleRule {
-  if (rule.frequency === "monthly") return { ...rule, month_day: day.getUTCDate() };
+export function toggleSlot(rule: ScheduleRule, day: Date, time: string, today: Date): ScheduleRule {
+  const slot = `${dateKey(day)}T${time}`;
+  const skip = new Set(rule.skip ?? []);
+  const extra = new Set(rule.extra ?? []);
+  if (repeatTimesOn(rule, day, today).includes(time)) {
+    if (skip.has(slot)) skip.delete(slot);
+    else skip.add(slot);
+  } else if (extra.has(slot)) {
+    extra.delete(slot);
+  } else {
+    extra.add(slot);
+  }
+  return { ...rule, skip: keepSlots(skip, today), extra: keepSlots(extra, today) };
+}
+
+/**
+ * The rule after a date is clicked in the calendar: that date's checks turn
+ * off, or a date with none gets one at the rule's time. Weekdays and other
+ * dates stay as they are. Hourly rules pick single hours in a clock instead.
+ */
+export function pickDay(rule: ScheduleRule, day: Date, today: Date): ScheduleRule {
   if (rule.frequency === "hourly") return rule;
-  return pickWeekday(rule, weekdayOf(day));
+  const times = checkTimesOn(rule, day, today);
+  if (times.length === 0) {
+    return toggleSlot(rule, day, rule.time, today);
+  }
+  return times.reduce((next, time) => toggleSlot(next, day, time, today), rule);
 }
 
 /** The rule after a weekday is clicked: every day but that one, or that day toggled. */

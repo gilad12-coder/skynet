@@ -105,3 +105,30 @@ def test_impossible_rules_are_refused(fields: dict) -> None:
     """A rule with no weekday, too long an interval, a bad time or an unknown zone is refused."""
     with pytest.raises(ValidationError):
         ScheduleRule(**fields)
+
+
+def test_a_skipped_slot_drops_only_that_check() -> None:
+    """A skipped day keeps the repeat on the other days."""
+    rule = ScheduleRule(frequency="daily", time="09:00", timezone="UTC", skip=["2026-10-20T09:00"])
+    runs = next_runs(rule, datetime(2026, 10, 19, 10, tzinfo=UTC), count=2)
+    assert runs == [datetime(2026, 10, 21, 9, tzinfo=UTC), datetime(2026, 10, 22, 9, tzinfo=UTC)]
+
+
+def test_an_extra_slot_adds_one_check() -> None:
+    """An extra slot adds a check the repeat does not have."""
+    rule = ScheduleRule(frequency="weekly", weekdays=[0], time="09:00", timezone="UTC", extra=["2026-10-21T14:30"])
+    runs = next_runs(rule, datetime(2026, 10, 19, 10, tzinfo=UTC), count=2)
+    assert runs == [datetime(2026, 10, 21, 14, 30, tzinfo=UTC), datetime(2026, 10, 26, 9, tzinfo=UTC)]
+
+
+def test_a_skipped_hour_drops_one_hourly_check() -> None:
+    """On an hourly rule, a skipped slot drops one hour of that day."""
+    rule = ScheduleRule(frequency="hourly", time="00:00", timezone="UTC", skip=["2026-10-19T11:00"])
+    runs = next_runs(rule, datetime(2026, 10, 19, 10, tzinfo=UTC), count=2)
+    assert runs == [datetime(2026, 10, 19, 12, tzinfo=UTC), datetime(2026, 10, 19, 13, tzinfo=UTC)]
+
+
+def test_a_malformed_slot_is_refused() -> None:
+    """A slot that is not a real date and time does not validate."""
+    with pytest.raises(ValidationError):
+        ScheduleRule(frequency="daily", skip=["2026-02-30T09:00"])

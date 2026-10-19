@@ -7,11 +7,13 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import type { ScheduleRule } from "@/shared/types/continuous";
 import { cn } from "@/shared/lib/utils";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import {
   calendarDay,
   checkTimesOn,
   formatClock,
   pickDay,
+  toggleSlot,
   pickWeekday,
   todayIn,
   weekdayNames,
@@ -24,8 +26,9 @@ const CELLS = 42;
 
 /**
  * A month calendar that both shows and sets the schedule: lit dates are the
- * check days, a click on a date (or a weekday heading) changes the rule, and
- * hovering a date reads out its check times.
+ * check days, a click on a date turns that one date on or off (on an hourly
+ * rule it opens a clock to pick that date's hours), a weekday heading
+ * changes the repeat, and hovering a date reads out its check times.
  */
 export function ScheduleCalendar({
   value,
@@ -42,11 +45,12 @@ export function ScheduleCalendar({
   );
   const [direction, setDirection] = useState(0);
   const [hovered, setHovered] = useState<Date | null>(null);
+  const [clockDay, setClockDay] = useState<string | null>(null);
   const order = useMemo(() => weekdayOrder(locale), [locale]);
   const narrowDays = useMemo(() => weekdayNames(locale, "narrow"), [locale]);
   const longDays = useMemo(() => weekdayNames(locale, "long"), [locale]);
 
-  const pickable = value.frequency !== "hourly";
+  const hourly = value.frequency === "hourly";
   const weekdayPickable = value.frequency === "daily" || value.frequency === "weekly";
   const atStart =
     month.getUTCFullYear() === today.getUTCFullYear() &&
@@ -170,21 +174,23 @@ export function ScheduleCalendar({
               const isToday = day.getTime() === today.getTime();
               const checks = !past && inMonth ? checkTimesOn(value, day, today) : [];
               const lit = checks.length > 0;
-              return (
+              const pickable = inMonth && !past;
+              const cell = (
                 <button
                   key={day.toISOString()}
                   type="button"
-                  disabled={!pickable || !inMonth}
+                  disabled={!pickable}
                   aria-label={dayLabel(day)}
-                  aria-pressed={pickable && inMonth ? lit : undefined}
-                  onClick={() => onChange(pickDay(value, day))}
+                  aria-pressed={pickable && !hourly ? lit : undefined}
+                  aria-haspopup={hourly ? "dialog" : undefined}
+                  onClick={hourly ? undefined : () => onChange(pickDay(value, day, today))}
                   onMouseEnter={() => inMonth && setHovered(day)}
                   onFocus={() => inMonth && setHovered(day)}
                   className={cn(
                     "group grid h-10 place-items-center rounded-md text-sm tabular-nums",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-default",
                     !inMonth && "invisible",
-                    past && !lit && "text-muted-foreground/45",
+                    past && "text-muted-foreground/45",
                   )}
                 >
                   <span className="relative grid size-9 place-items-center">
@@ -200,7 +206,7 @@ export function ScheduleCalendar({
                         />
                       )}
                     </AnimatePresence>
-                    {!lit && pickable && !past && (
+                    {!lit && pickable && (
                       <span
                         aria-hidden
                         className="absolute inset-0 rounded-full opacity-0 ring-1 ring-primary/40 transition-opacity group-hover:opacity-100"
@@ -235,6 +241,25 @@ export function ScheduleCalendar({
                   </span>
                 </button>
               );
+              if (!hourly || !pickable) return cell;
+              const key = day.toISOString();
+              return (
+                <Popover
+                  key={key}
+                  open={clockDay === key}
+                  onOpenChange={(open) => setClockDay(open ? key : null)}
+                >
+                  <PopoverTrigger asChild>{cell}</PopoverTrigger>
+                  <PopoverContent className="w-auto p-4">
+                    <HourClock
+                      title={dayLabel(day)}
+                      checks={checks}
+                      minute={value.time.slice(3)}
+                      onToggle={(time) => onChange(toggleSlot(value, day, time, today))}
+                    />
+                  </PopoverContent>
+                </Popover>
+              );
             })}
           </motion.div>
         </AnimatePresence>
@@ -243,12 +268,74 @@ export function ScheduleCalendar({
       <p className="mt-3 min-h-5 truncate text-xs text-muted-foreground" aria-live="polite">
         {readout ??
           msg(
-            !pickable
+            hourly
               ? "continuous_tab.schedule.calendar.hint.hourly"
               : value.frequency === "monthly"
                 ? "continuous_tab.schedule.calendar.hint.monthly"
                 : "continuous_tab.schedule.calendar.hint.weekly",
           )}
+      </p>
+    </div>
+  );
+}
+
+const DIAL = 264;
+const RING = 108;
+
+/** A 24-hour clock face for one date: lit hours check, a click turns one hour on or off. */
+function HourClock({
+  title,
+  checks,
+  minute,
+  onToggle,
+}: {
+  title: string;
+  checks: string[];
+  minute: string;
+  onToggle: (time: string) => void;
+}) {
+  const locale = getActiveIntlLocale();
+  const on = new Set(checks);
+  return (
+    <div className="space-y-3">
+      <p className="text-center text-sm font-semibold">{title}</p>
+      <div className="relative mx-auto rounded-full bg-muted/50" style={{ width: DIAL, height: DIAL }}>
+        <div className="absolute inset-[34%] grid place-items-center rounded-full bg-background text-center shadow-xs">
+          <span className="text-[11px] font-medium leading-tight text-muted-foreground">
+            {msg("continuous_tab.schedule.calendar.checks", { count: checks.length })}
+          </span>
+        </div>
+        {Array.from({ length: 24 }, (_, hour) => {
+          const time = `${String(hour).padStart(2, "0")}:${minute}`;
+          const lit = on.has(time);
+          const angle = (hour / 24) * 2 * Math.PI - Math.PI / 2;
+          return (
+            <button
+              key={hour}
+              type="button"
+              aria-pressed={lit}
+              aria-label={formatClock(time, locale)}
+              title={formatClock(time, locale)}
+              onClick={() => onToggle(time)}
+              style={{
+                left: DIAL / 2 + RING * Math.cos(angle),
+                top: DIAL / 2 + RING * Math.sin(angle),
+              }}
+              className={cn(
+                "absolute grid size-6 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full text-[11px] font-medium tabular-nums transition-[background-color,color,transform] duration-150 active:scale-90",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
+                lit
+                  ? "bg-primary-fill text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-background hover:text-foreground",
+              )}
+            >
+              {hour}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-center text-xs text-muted-foreground">
+        {msg("continuous_tab.schedule.calendar.clock_hint")}
       </p>
     </div>
   );

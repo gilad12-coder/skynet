@@ -5,7 +5,9 @@ hours, days, weeks or months, at a wall-clock time in the owner's time zone,
 on chosen weekdays (weekly) or a day of the month (monthly). Times are
 computed in that zone, so a 09:00 check stays at 09:00 across daylight-saving
 changes. A day of the month a month doesn't have (the 31st in April) falls on
-that month's last day instead of being skipped.
+that month's last day instead of being skipped. On top of the repeat, the
+owner can turn single checks off (``skip``) or add single checks (``extra``),
+each a local ``YYYY-MM-DDTHH:MM`` slot picked on the calendar.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ MAX_EVERY: dict[str, int] = {"hourly": 12, "daily": 30, "weekly": 8, "monthly": 
 # Long enough to reach the next run of the sparsest rule (every 12 months on the 31st).
 _SEARCH_DAYS = 800
 _LEGACY_DEFAULT_TIME = "09:00"
+_MAX_SLOTS = 400
 
 
 # A plan's repeat rule; ``weekdays`` count from Monday = 0.
@@ -33,6 +36,29 @@ class ScheduleRule(BaseModel):
     weekdays: list[int] = Field(default_factory=list, max_length=7)
     month_day: int = Field(default=1, ge=1, le=31)
     timezone: str = Field(default="UTC", min_length=1, max_length=64)
+    skip: list[str] = Field(default_factory=list, max_length=_MAX_SLOTS)
+    extra: list[str] = Field(default_factory=list, max_length=_MAX_SLOTS)
+
+    @field_validator("skip", "extra")
+    @classmethod
+    def _slots(cls, value: list[str]) -> list[str]:
+        """Keep each local slot once, in order, and refuse anything not a real date and time.
+
+        Args:
+            value: Local ``YYYY-MM-DDTHH:MM`` slots.
+
+        Returns:
+            The sorted, unique slots.
+
+        Raises:
+            ValueError: On a slot that is not a valid date and time.
+        """
+        for slot in value:
+            try:
+                datetime.strptime(slot, "%Y-%m-%dT%H:%M")
+            except ValueError as exc:
+                raise ValueError(f"{slot!r} is not a YYYY-MM-DDTHH:MM time") from exc
+        return sorted(set(value))
 
     @field_validator("weekdays")
     @classmethod
@@ -125,6 +151,24 @@ def _day_times(rule: ScheduleRule, day: date, anchor: date) -> list[time]:
 
     Returns:
         The times on ``day``, earliest first; empty when the rule skips it.
+    """
+    prefix = f"{day.isoformat()}T"
+    skipped = {slot[len(prefix):] for slot in rule.skip if slot.startswith(prefix)}
+    added = {slot[len(prefix):] for slot in rule.extra if slot.startswith(prefix)}
+    wall = {at.strftime("%H:%M") for at in _repeat_times(rule, day, anchor)}
+    return [time.fromisoformat(at) for at in sorted((wall - skipped) | added)]
+
+
+def _repeat_times(rule: ScheduleRule, day: date, anchor: date) -> list[time]:
+    """List the times the repeat alone fires on one local date, before single-check changes.
+
+    Args:
+        rule: The schedule rule.
+        day: Local date to test.
+        anchor: Local date the plan started counting from.
+
+    Returns:
+        The repeat's times on ``day``.
     """
     hour, minute = (int(part) for part in rule.time.split(":"))
     at = [time(hour, minute)]
