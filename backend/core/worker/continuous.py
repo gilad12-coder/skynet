@@ -1170,12 +1170,42 @@ def _incumbent_on_test(
         if run["kind"] == RUN_REFERENCE:
             return result.get("best_score")
     for run, result in finished:
-        if not run.get("task_model_changed"):
+        if not run.get("task_model_changed") and result.get("baseline_score") is not None:
             return result.get("baseline_score")
     if not finished:
         return None
     split = finished[0][1].get("split_counts") or {}
     return _incumbent_score(job_store, (cycle.snapshot or {}).get("compared_against"), split)
+
+
+def _seen_snapshot(previous: dict[str, Any], snapshot: dict[str, Any], runs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build the plan's new baseline from a check, counting only what a started run used.
+
+    A check resolves new data and every better model it found, but the
+    matrix, or a refused submit, can leave some of them without a run. Those
+    stay unseen, so a later check still offers them.
+
+    Args:
+        previous: The plan's baseline before this check.
+        snapshot: The check's resolved snapshot.
+        runs: The runs the check started.
+
+    Returns:
+        The new baseline snapshot.
+    """
+    seen = {key: value for key, value in snapshot.items() if key not in {"runs", "winner", "new_models"}}
+    if not any(run["kind"] in (RUN_DATA, RUN_BOTH) for run in runs):
+        if previous.get("data"):
+            seen["data"] = previous["data"]
+        else:
+            seen.pop("data", None)
+    tried = list(previous.get("tried_models") or [])
+    for run in runs:
+        for role, model in (run.get("new_models") or {}).items():
+            if f"{role}:{model['name']}" not in tried:
+                tried.append(f"{role}:{model['name']}")
+    seen["tried_models"] = tried
+    return seen
 
 
 def review_cycle(job_store: Any, cycle_id: str) -> None:
@@ -1233,9 +1263,7 @@ def review_cycle(job_store: Any, cycle_id: str) -> None:
             reason = next((job["status"] for job in jobs if job["status"] != OptimizationStatus.success.value), "")
             _fail_cycle(session, plan, cycle, "continuous.run_failed", reason=reason)
             return
-        plan.baseline_snapshot = {
-            key: value for key, value in (cycle.snapshot or {}).items() if key not in {"runs", "winner"}
-        } or plan.baseline_snapshot
+        plan.baseline_snapshot = _seen_snapshot(plan.baseline_snapshot or {}, cycle.snapshot or {}, runs)
         incumbent = _incumbent_on_test(job_store, cycle, finished)
         eligible = [
             (run, result)

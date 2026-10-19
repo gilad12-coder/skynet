@@ -1520,6 +1520,30 @@ def test_the_matrix_starts_each_ticked_run_on_one_test_set(env: _Env, monkeypatc
     assert cycle.snapshot["winner"]["kind"] == "both"
 
 
+def test_new_data_the_matrix_left_without_a_run_waits_for_the_next_check(
+    env: _Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A check that runs only the better model leaves its new data unseen, so the next check runs on it."""
+    _catalog(monkeypatch, task=(40.0, 1e-6), strong=(60.0, 1e-6))
+    source_id = _incumbent(env)
+    _enable(env, source_id, permitted={"data": True, "new_task_model": True, "matrix": ["model"]})
+    env.rows = _cases(["A"] * 10) + _cases(["B"] * 20)[10:20]
+
+    env.sweep(_due(env))
+    [cycle] = env.cycles()
+    runs = _runs(cycle)
+    assert not {"data", "both"} & set(runs)
+    for run_id in runs.values():
+        _finish(env, run_id, result=_result(0.6, 0.6))
+    env.sweep(_due(env) - timedelta(days=1))
+    assert env.cycles()[0].status != "optimizing"
+
+    env.sweep(_due(env))
+    latest = env.cycles()[-1]
+    assert latest.status == "optimizing"
+    assert list(_runs(latest)) == ["data"]
+
+
 def test_runs_that_all_move_the_task_model_score_the_incumbent_once_without_optimizing(
     env: _Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
