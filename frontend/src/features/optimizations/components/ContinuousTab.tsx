@@ -8,6 +8,7 @@ import {
   ArrowRight,
   ArrowSquareOut,
   Check,
+  Info,
   PencilSimple,
   Repeat,
   X,
@@ -17,6 +18,7 @@ import { Card, CardContent } from "@/shared/ui/primitives/card";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import { Switch } from "@/shared/ui/primitives/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import {
   Select,
   SelectContent,
@@ -192,13 +194,26 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
       <div className="mt-4 space-y-4">
         <Card className="py-0">
           <CardContent className="flex items-center justify-between gap-4 p-5 sm:p-6">
-            <div className="min-w-0 space-y-1">
+            <div className="flex min-w-0 items-center gap-1.5">
               <StatusLabel tone="muted">
                 {msg(turnedOn ? "continuous_tab.status.setup" : "continuous_tab.status.off")}
               </StatusLabel>
-              <p className="text-sm text-muted-foreground">
-                {msg(turnedOn ? "continuous_tab.setup_hint" : "continuous_tab.off_hint")}
-              </p>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={msg(
+                      turnedOn ? "continuous_tab.setup_hint" : "continuous_tab.off_hint",
+                    )}
+                  >
+                    <Info className="size-4" aria-hidden="true" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  {msg(turnedOn ? "continuous_tab.setup_hint" : "continuous_tab.off_hint")}
+                </TooltipContent>
+              </Tooltip>
             </div>
             <Switch
               checked={turnedOn}
