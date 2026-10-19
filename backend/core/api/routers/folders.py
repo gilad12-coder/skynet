@@ -32,7 +32,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from ...constants import (
@@ -693,6 +693,12 @@ def create_folders_router(*, job_store) -> APIRouter:
                 require_folder_role(session, req.parent_id, current_user, ShareRole.editor)
             owner = _normalize_username(current_user.username)
             if req.reuse_existing:
+                # No unique constraint backs (owner, parent, name), so overlapping
+                # retries would both miss the lookup and insert; serialize them.
+                bind = session.get_bind()
+                if bind.dialect.name == "postgresql":
+                    key = f"run-folder:{owner}:{req.parent_id or ''}:{name.casefold()}"
+                    session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": key})
                 existing = _find_owned_folder(session, owner, name, req.parent_id or None)
                 if existing is not None:
                     response.status_code = 200
@@ -972,9 +978,9 @@ def create_folders_router(*, job_store) -> APIRouter:
         """
         if status is not None and status not in VALID_STATUSES:
             raise DomainError("filter.invalid_status", status=422, value=status, allowed=sorted(VALID_STATUSES))
-        rows = job_store.list_jobs(
-            username=current_user.username, status=status, limit=_ORGANIZE_SCAN_CAP + 1, with_counts=False
-        )
+        # Status is filtered below, not in the store query, so the totals and
+        # the empty-account hint cover every scanned run.
+        rows = job_store.list_jobs(username=current_user.username, limit=_ORGANIZE_SCAN_CAP + 1, with_counts=False)
         scan_truncated = len(rows) > _ORGANIZE_SCAN_CAP
         rows = rows[:_ORGANIZE_SCAN_CAP]
         folder_ids = run_folder_ids(job_store, [row["optimization_id"] for row in rows])
@@ -997,6 +1003,8 @@ def create_folders_router(*, job_store) -> APIRouter:
                 unfiled += 1
             item = _organize_item(row, fid, folder_names.get(fid) if fid else None)
             if unfiled_only and fid is not None:
+                continue
+            if status is not None and item.status != status:
                 continue
             if needle and not _matches(item, row, needle):
                 continue

@@ -225,6 +225,13 @@ def test_organize_listing_search_unfiled_and_status_filters() -> None:
 
     failed = alice.get("/folders/runs", params={"status": "failed"}).json()
     assert [i["optimization_id"] for i in failed["items"]] == ["a3"]
+    assert failed["total_runs"] == 3
+    assert failed["unfiled_runs"] == 2
+    assert failed["matched"] == 1
+
+    cancelled = alice.get("/folders/runs", params={"status": "cancelled"}).json()
+    assert cancelled["total_runs"] == 3
+    assert cancelled["hint"].startswith("0 runs match")
 
     none = alice.get("/folders/runs", params={"q": "nothing-like-this"}).json()
     assert none["items"] == []
