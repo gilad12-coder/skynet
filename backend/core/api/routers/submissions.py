@@ -169,7 +169,7 @@ class _InFlightSubmissions:
         """Join the running submission for a scope, or start ``work`` in a background thread.
 
         Args:
-            scope: Account and ``Idempotency-Key``, or None for a request without a key.
+            scope: Account and replay key, or None for a request without one.
             work: The complete submission.
 
         Returns:
@@ -239,25 +239,25 @@ _IN_FLIGHT_SUBMISSIONS = _InFlightSubmissions()
 
 def _submit_within_proxy_timeout(
     username: str,
-    idempotency_key: str | None,
+    replay_key: str | None,
     work: Callable[[], OptimizationSubmissionResponse],
 ) -> OptimizationSubmissionResponse | JSONResponse:
     """Answer a submission before common proxy timeouts, even while its setup check runs.
 
-    A same-key request joins the running submission instead of starting a
-    second one. A submission still running after the wait answers 202, and the
-    client retries with the same key to collect the run or its error.
+    A request with the same replay key joins the running submission instead of
+    starting a second one. A submission still running after the wait answers
+    202, and the client retries the same request to collect the run or its error.
 
     Args:
         username: Authenticated submitter.
-        idempotency_key: Caller's ``Idempotency-Key`` header, if any.
+        replay_key: The caller's ``Idempotency-Key``, or the synthesized key of
+            a keyless budgetless request; None when the request has neither.
         work: The complete submission.
 
     Returns:
         The submission response, or a 202 asking the client to retry.
     """
-    key = (idempotency_key or "").strip()
-    scope = (username, key) if key else None
+    scope = (username, replay_key) if replay_key else None
     future = _IN_FLIGHT_SUBMISSIONS.start(scope, work)
     wait([future], timeout=_SUBMISSION_WAIT_SECONDS)
     if not future.done():
@@ -1109,9 +1109,17 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                 (quota or stale setup evidence), 422 (workspace code does not
                 fit the optimizer).
         """
+        # Taken before the submission mutates the payload, so an identical
+        # keyless retry joins the same in-flight submission and its outcome.
+        replay_key = resolve_submission_replay_keys(
+            payload,
+            username=current_user.username,
+            workflow=UNIFIED_WORKFLOW,
+            supplied_key=idempotency_key,
+        ).job
         return _submit_within_proxy_timeout(
             current_user.username,
-            idempotency_key,
+            replay_key,
             lambda: submit_unified_payload(
                 payload,
                 service=service,

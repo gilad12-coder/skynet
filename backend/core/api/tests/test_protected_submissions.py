@@ -714,6 +714,32 @@ def test_failed_check_after_202_is_reported_to_the_retry_without_running_again(
     assert harness.count(JobModel) == 0
 
 
+def test_keyless_failed_check_after_202_is_reported_to_an_identical_retry(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deliver a keyless request's background failure to its identical retry without a second check.
+
+    Args:
+        harness: Real persistence with a held, failing setup check.
+        monkeypatch: Shorten the in-request wait.
+    """
+    monkeypatch.setattr(submissions, "_SUBMISSION_WAIT_SECONDS", 0.2)
+    harness.result_status = "failed"
+    held = _HeldCheck(harness)
+    try:
+        accepted = harness.client.post(ROUTE, json=_payload())
+    finally:
+        held.release.set()
+
+    assert accepted.status_code == 202, accepted.text
+    monkeypatch.setattr(submissions, "_SUBMISSION_WAIT_SECONDS", 30.0)
+    refused = harness.client.post(ROUTE, json=_payload())
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"].startswith("Payload validation failed")
+    assert len(harness.calls) == 1
+    assert harness.count(JobModel) == 0
+
+
 def test_same_key_retry_on_another_replica_answers_202_while_the_check_runs(
     harness: _Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
