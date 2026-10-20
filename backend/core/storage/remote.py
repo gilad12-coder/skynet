@@ -100,6 +100,9 @@ ORPHANED_RUN_MESSAGE = "The run stopped because its worker went away. Resume, re
 ORPHANED_RUN_RECOVERY_FAILED_MESSAGE = (
     "The run stopped because its worker went away, and it cannot continue by itself. Retry or clone it."
 )
+# Guards each store's in-memory list of runs the orphan sweep ended; test
+# stores skip ``__init__``, so the list is created on first use.
+_ENDED_ORPHANS_LOCK = threading.Lock()
 PROGRESS_TRIM_SAMPLE_RATE = 100
 # Auto's composition phases; a single-engine run's lane reports phase "single".
 AUTO_LANE_PHASES = frozenset({"explore", "continue"})
@@ -1762,6 +1765,8 @@ class RemoteDBJobStore:
                         )
                     _mark_resume_budget_stop(job)
                     session.commit()
+                    if automatic:
+                        self._note_ended_orphan(optimization_id)
                     return None
             if pair_index_to_resume is not None:
                 result = job.result if isinstance(job.result, dict) else {}
@@ -2318,7 +2323,8 @@ class RemoteDBJobStore:
         it has none, on any live worker. A graceful worker restart does not count
         against the attempt cap; an expired lease does, so a run that crashes
         its worker cannot loop forever. A run that waits for in-flight usage to
-        settle stays active until a later sweep.
+        settle stays active until a later sweep. A run that the sweep fails or
+        stops waits in :meth:`take_ended_orphans` for its notification.
 
         Returns:
             Number of orphaned jobs requeued or marked failed.
@@ -2386,8 +2392,30 @@ class RemoteDBJobStore:
                 claimed_at=None,
                 lease_expires_at=None,
             ):
+                self._note_ended_orphan(identifier)
                 handled += 1
         return handled
+
+    def _note_ended_orphan(self, optimization_id: str) -> None:
+        """Remember a run that the orphan sweep ended, so its owner hears about it.
+
+        Args:
+            optimization_id: The run that the sweep failed or stopped.
+        """
+        with _ENDED_ORPHANS_LOCK:
+            vars(self).setdefault("_ended_orphans", []).append(optimization_id)
+
+    def take_ended_orphans(self) -> list[str]:
+        """Return and forget the runs that orphan sweeps ended since the last call.
+
+        The store cannot send notifications itself (the notification package
+        imports the storage package), so the periodic sweeper sends them.
+
+        Returns:
+            Ids of the runs that a sweep failed or stopped, oldest first.
+        """
+        with _ENDED_ORPHANS_LOCK:
+            return vars(self).pop("_ended_orphans", [])
 
     def claim_next_job(
         self,

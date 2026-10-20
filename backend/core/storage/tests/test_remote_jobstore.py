@@ -30,6 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import core.api.observability as observability_mod
 import core.storage.remote as remote_mod
 from core.billing.budgets import BudgetService
 from core.constants import OPTIMIZATION_TYPE_TAGGING, WORKER_RESTART_CAUSE
@@ -1088,6 +1089,92 @@ def test_recover_orphaned_jobs_fails_unfunded_run(store: SQLiteJobStore) -> None
     assert job["status"] == "failed"
     assert job["attempts"] == 0
     assert job["message"] == remote_mod.ORPHANED_RUN_MESSAGE
+
+
+@pytest.mark.parametrize("status", ["running", "validating"])
+def test_recover_orphaned_jobs_keeps_ended_runs_for_notification(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """A run that the sweep fails waits for its notification once; a requeued run does not.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+        status: Active status the shutdown interrupted.
+    """
+    restart = {"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE}
+    store.create_job("unfunded")
+    store.update_job("unfunded", status=status, recovery=restart)
+    store.create_job("resumed")
+    store.update_job("resumed", status=status, recovery=restart)
+    _fund_checkpoint(store, "resumed", monkeypatch)
+    assert store.recover_orphaned_jobs() == 2
+    assert store.take_ended_orphans() == ["unfunded"]
+    assert store.take_ended_orphans() == []
+
+
+def test_recover_orphaned_jobs_keeps_budget_stopped_run_for_notification(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restarted run that its budget cannot fund stops and waits for its notification.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+    """
+    store.create_job("spent")
+    store.update_job(
+        "spent",
+        status="running",
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    service = _fund_checkpoint(store, "spent", monkeypatch)
+    budget = service.get(store.get_job("spent")["execution_budget_id"], "resume-owner")
+    monkeypatch.setattr(
+        BudgetService,
+        "get",
+        lambda self, budget_id, username, **kwargs: replace(budget, available_cents=0, blocked_reason="budget_reached"),
+    )
+    assert store.recover_orphaned_jobs() == 0
+    assert store.get_job("spent")["status"] == "stopped"
+    assert store.take_ended_orphans() == ["spent"]
+
+
+@pytest.mark.parametrize("status", ["running", "validating"])
+def test_orphan_sweeper_notifies_the_owner_of_a_run_it_ends(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """The periodic sweeper sends one failure notification and outcome event per ended run.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to capture notifications and events.
+        status: Active status the shutdown interrupted.
+    """
+    sent: list[tuple[Any, ...]] = []
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        observability_mod,
+        "notify_job_completed",
+        lambda optimization_id, username, status, message=None: sent.append(
+            (optimization_id, username, status, message)
+        ),
+    )
+    monkeypatch.setattr(observability_mod, "record_server_event", lambda engine, **kwargs: events.append(kwargs))
+    store.create_job("ended")
+    store.update_job(
+        "ended",
+        status=status,
+        username="owner",
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    store.recover_orphaned_jobs()
+    sweeper = observability_mod.OrphanRecoverySweeper(store, interval_seconds=60)
+    sweeper.sweep_once()
+    sweeper.sweep_once()
+    assert sent == [("ended", "owner", "failed", remote_mod.ORPHANED_RUN_MESSAGE)]
+    assert [event["name"] for event in events] == ["run_failed"]
+    assert events[0]["username"] == "owner"
 
 
 def _fund_without_checkpoint(store: SQLiteJobStore, optimization_id: str) -> BudgetService:

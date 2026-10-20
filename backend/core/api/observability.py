@@ -45,7 +45,16 @@ from ..billing.model_reconciliation import OpenRouterUsageReconciler
 from ..billing.operation_pricing import json_fingerprint
 from ..billing.vercel_reconciliation import VercelSessionUsageClient, VercelUsageReconciler
 from ..config import settings
+from ..constants import (
+    PAYLOAD_OVERVIEW_MODEL_NAME,
+    PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
+    PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
+    PAYLOAD_OVERVIEW_TOKEN_SOURCE,
+)
+from ..notifications import notify_job_completed
 from ..storage.usage import purge_expired_staged_datasets
+from ..telemetry import record_server_event
+from ..telemetry.run_outcome import failed_properties
 from .alerts import install_alert_log_handler
 from .log_shipping import build_log_ship_handler
 from .routers.agent_history import purge_stale_conversations
@@ -411,6 +420,21 @@ class OrphanRecoverySweeper:
             self._thread.join(timeout=2.0)
 
     def sweep_once(self) -> int:
+        """Run one orphan-recovery pass, then tell owners about the runs it ended.
+
+        The notifications also cover runs that the boot-time sweep ended in
+        this process, so they go out even when a peer wins the lock.
+
+        Returns:
+            The number of orphans handled by the sweep, or ``0`` if this
+            replica did not win the advisory lock (peer is sweeping).
+        """
+        try:
+            return self._recover_orphans()
+        finally:
+            self._notify_ended_orphans()
+
+    def _recover_orphans(self) -> int:
         """Acquire the leader-election lock and run one orphan-recovery pass.
 
         Returns:
@@ -440,6 +464,42 @@ class OrphanRecoverySweeper:
         except Exception:
             logger.warning("Orphan recovery sweep failed", exc_info=True)
             return 0
+
+    def _notify_ended_orphans(self) -> None:
+        """Send the failure or stop notification and outcome event for each run a sweep ended.
+
+        A worker that stops a run itself sends these; a run that the sweep
+        ends has no worker left to do it.
+        """
+        take = getattr(self._job_store, "take_ended_orphans", None)
+        if take is None:
+            return
+        for optimization_id in take():
+            try:
+                job = self._job_store.get_job(optimization_id, include_payload=False)
+                if not self._job_store.claim_completion_notification(optimization_id):
+                    continue
+                username = job.get("username") or ""
+                status = job.get("status") or "failed"
+                notify_job_completed(optimization_id, username, status, message=job.get("message"))
+                overview = job.get("payload_overview") or {}
+                properties: dict[str, Any] = {
+                    "status": status,
+                    "optimization_type": overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE),
+                    "optimizer": overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME),
+                    "model": overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
+                    "token_source": overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE),
+                }
+                if status == "failed":
+                    properties.update(failed_properties(None, None))
+                record_server_event(
+                    getattr(self._job_store, "engine", None),
+                    username=username or None,
+                    name="run_stopped" if status == "stopped" else "run_failed",
+                    properties=properties,
+                )
+            except Exception:
+                logger.warning("Could not notify the owner of ended orphan %s", optimization_id, exc_info=True)
 
     def _reconcile_sandbox_usage(self, engine: Any) -> None:
         """Reconcile a bounded page under the existing recovery leader's lease.
