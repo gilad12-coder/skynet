@@ -12,10 +12,12 @@ from typing import Any, cast
 import dspy
 import litellm
 import pytest
+from fastapi.routing import APIRoute
 from pydantic import SecretStr
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
+from core.api.routers.folders import create_folders_router
 from core.config import settings
 from core.service_gateway.agents import generalist as generalist_module
 from core.service_gateway.agents import web_tools
@@ -1850,3 +1852,20 @@ def test_mcp_session_bounds_each_tool_call(monkeypatch: pytest.MonkeyPatch) -> N
 
     asyncio.run(run())
     assert seen["read_timeout_seconds"].total_seconds() == generalist_module.MCP_CALL_TIMEOUT_SECONDS
+
+
+def test_every_folder_agent_mutation_has_an_approval_gate() -> None:
+    """Each agent-tagged folder write is gated, so exposing it to the agent later cannot skip the confirm."""
+    router = create_folders_router(job_store=None)
+    writes = {
+        route.operation_id
+        for route in router.routes
+        if isinstance(route, APIRoute) and "agent" in route.tags and route.methods - {"GET"}
+    }
+    assert writes == {"create_folder", "update_folder", "delete_folder", "move_folder", "move_runs_to_folder"}
+    for name in writes:
+        assert _needs_approval(name, "ask") is True
+    # Each of these can change who sees a run: a run inherits its folder's access.
+    for name in ("delete_folder", "move_folder", "move_runs_to_folder", "update_folder"):
+        assert _needs_approval(name, "auto_safe") is True
+    assert _needs_approval("create_folder", "auto_safe") is False
