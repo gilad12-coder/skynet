@@ -15,7 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from ...storage.models import Base, JobModel, RunFolderItemModel, RunFolderModel
+from ...storage.models import Base, JobModel, OptimizationShareGrantModel, RunFolderItemModel, RunFolderModel
 from ...storage.remote import RemoteDBJobStore
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..routers._helpers import grant_roles_for
@@ -380,3 +380,22 @@ def test_a_viewer_is_told_a_move_is_forbidden() -> None:
         _client(store, "bob").post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": None}).json()
     )
     assert body["skipped"] == [{"optimization_id": "alice-run", "reason": "forbidden"}]
+
+
+def test_a_direct_run_grant_does_not_allow_a_move() -> None:
+    """A direct grant on the run itself, even editor, lets the caller see it but not move it."""
+    store = _MemStore()
+    _seed_job(store, "alice-run")
+    with Session(store.engine) as session:
+        session.add(
+            OptimizationShareGrantModel(
+                optimization_id="alice-run", grantee_username="bob", role="editor", created_by="alice"
+            )
+        )
+        session.commit()
+    bob = _client(store, "bob")
+    folder = _create(bob, "Mine")
+    for destination in (folder, None):
+        body = bob.post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": destination}).json()
+        assert body["updated"] == []
+        assert body["skipped"] == [{"optimization_id": "alice-run", "reason": "forbidden"}]
