@@ -15,12 +15,12 @@ from queue import Empty, Queue
 from threading import Thread
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 
-from ...i18n import t
+from ...i18n import request_locale, t, t_locale
 from ...models import BlackboxRunRequest
 from ...models.unified import (
     ContractCheckItem,
@@ -38,12 +38,101 @@ from ...service_gateway.optimization.unified.contract import (
 )
 from ...storage.preflights import setup_seed
 from ..auth import AuthenticatedUser, get_authenticated_user
-from ..preflight_execution import BUDGET_CHECK_KEY, WizardPreflightRequest, WizardPreflightResponse, run_preflight
+from ..preflight_execution import (
+    BUDGET_CHECK_KEY,
+    WizardPreflightCheck,
+    WizardPreflightRequest,
+    WizardPreflightResponse,
+    run_preflight,
+)
 from ..preflight_progress import progress_observer
 from ..rate_limit import enforce_submission_rate
 from .submissions import _default_unified_seed, _materialize_unified_cases
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
+AcceptLanguageDep = Annotated[str | None, Header(include_in_schema=False)]
+CONTRACT_CHECK_KEY = "metric.contract"
+
+
+def _contract_failure(contract: dict[str, Any], spec: UnifiedRunRequest | None) -> ContractCheckItem | None:
+    """Find the coded item behind a failed ``metric.contract`` check.
+
+    Args:
+        contract: The contract outcome under the setup check's ``workflow_result``.
+        spec: The canonical unified spec, used to recover codes an older
+            sandbox image left out; None when it is not known.
+
+    Returns:
+        The first failed item carrying a message code, or None.
+    """
+    try:
+        parsed = ContractCheckResponse.model_validate(contract)
+    except ValidationError:
+        return None
+    if spec is not None and any(item.message_code is None for item in parsed.checks):
+        parsed = with_message_codes(parsed, static_contract_check(spec))
+    return next((item for item in parsed.checks if item.status == "failed" and item.message_code), None)
+
+
+def _localized_check(
+    check: WizardPreflightCheck, code: str, failure: ContractCheckItem, locale: str
+) -> WizardPreflightCheck:
+    """Word a failed contract check in ``locale`` and attach its message code.
+
+    Args:
+        check: The ``metric.contract`` check as the setup check stored it.
+        code: The failure's message code.
+        failure: The coded contract item the check reports.
+        locale: The caller's locale tag.
+
+    Returns:
+        The check with its message in ``locale``, keeping the exact error detail.
+    """
+    message = t_locale(locale, code, **failure.message_params)
+    if failure.detail:
+        message = f"{message}\n{failure.detail}"
+    return check.model_copy(
+        update={
+            "message": message,
+            "message_code": code,
+            "message_params": dict(failure.message_params),
+        }
+    )
+
+
+def localize_preflight(
+    response: WizardPreflightResponse, spec: UnifiedRunRequest | None, locale: str
+) -> WizardPreflightResponse:
+    """Render a setup check's catalog messages in the caller's locale.
+
+    The contract check words its failure in the Hebrew base wherever it runs
+    (often a sandbox with no request locale), and the stored evidence is
+    replayed to later callers in any language, so the wording happens here
+    at response time.
+
+    Args:
+        response: The setup check result.
+        spec: The canonical unified spec the check ran, if known.
+        locale: The caller's locale tag.
+
+    Returns:
+        The result with its failed contract check worded in ``locale``.
+    """
+    contract = (response.workflow_result or {}).get("contract")
+    if not isinstance(contract, dict):
+        return response
+    if not any(check.key == CONTRACT_CHECK_KEY and check.status == "failed" for check in response.checks):
+        return response
+    failure = _contract_failure(contract, spec)
+    if failure is None or failure.message_code is None:
+        return response
+    checks = [
+        _localized_check(check, failure.message_code, failure, locale)
+        if check.key == CONTRACT_CHECK_KEY and check.status == "failed"
+        else check
+        for check in response.checks
+    ]
+    return response.model_copy(update={"checks": checks})
 
 
 def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
@@ -51,17 +140,37 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
     router = APIRouter()
 
     @router.post("/wizard/preflight", response_model=WizardPreflightResponse, response_model_exclude_none=True)
-    def preflight(request: WizardPreflightRequest, user: AuthenticatedUserDep) -> WizardPreflightResponse:
+    def preflight(
+        request: WizardPreflightRequest, user: AuthenticatedUserDep, accept_language: AcceptLanguageDep = None
+    ) -> WizardPreflightResponse:
         """Validate the current wizard stage once and return durable budget-aware evidence.
+
+        Args:
+            request: Current authored inputs and the user's shared budget revision.
+            user: Authenticated owner used for data, credentials, and spending.
+            accept_language: The browser's languages, used when the body names no locale.
+
+        Returns:
+            Scoped checks, reusable evidence identity, and authoritative setup spend,
+            worded in the caller's locale.
+        """
+        response, spec = _checked_preflight(request, user)
+        return localize_preflight(response, spec, request_locale(request.locale, accept_language))
+
+    def _checked_preflight(
+        request: WizardPreflightRequest, user: AuthenticatedUser
+    ) -> tuple[WizardPreflightResponse, UnifiedRunRequest | None]:
+        """Run one setup check, with its messages still in the Hebrew base.
 
         Args:
             request: Current authored inputs and the user's shared budget revision.
             user: Authenticated owner used for data, credentials, and spending.
 
         Returns:
-            Scoped checks, reusable evidence identity, and authoritative setup spend.
+            The check result, and the canonical unified spec it ran (None for other workflows).
         """
         enforce_submission_rate(user.username)
+        spec: UnifiedRunRequest | None = None
         payload = copy.deepcopy(request.payload)
         payload["username"] = user.username
         payload["execution_budget_id"] = request.execution_budget_id
@@ -79,16 +188,20 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             if isinstance(typed, UnifiedRunRequest):
                 _materialize_unified_cases(typed, job_store=job_store, username=user.username)
                 _default_unified_seed(typed)
+                spec = typed
             payload = typed.model_dump(mode="json", by_alias=True)
-        return run_preflight(request.model_copy(update={"payload": payload}), user, job_store)
+        return run_preflight(request.model_copy(update={"payload": payload}), user, job_store), spec
 
     @router.post("/wizard/preflight/stream", include_in_schema=False)
-    def stream_preflight(request: WizardPreflightRequest, user: AuthenticatedUserDep) -> StreamingResponse:
+    def stream_preflight(
+        request: WizardPreflightRequest, user: AuthenticatedUserDep, accept_language: AcceptLanguageDep = None
+    ) -> StreamingResponse:
         """Stream actual setup phases followed by the existing authoritative result.
 
         Args:
             request: Current wizard inputs and budget revision.
             user: Authenticated owner of the setup request.
+            accept_language: The browser's languages, used when the body names no locale.
 
         Returns:
             An event stream that never dispatches a second validation attempt.
@@ -103,7 +216,7 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             """Finish admitted work even if the viewer disconnects, preserving its billing evidence."""
             token = progress_observer.set(phase)
             try:
-                result = preflight(request, user)
+                result = preflight(request, user, accept_language)
                 events.put({"event": "result", "data": result.model_dump(mode="json", exclude_none=True)})
             except HTTPException as error:
                 events.put({"event": "error", "data": {"detail": error.detail}})
@@ -187,7 +300,7 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             return static
         if spec.execution_budget_id is None or spec.execution_budget_revision is None:
             raise HTTPException(status_code=402, detail="Choose a spending budget before running the contract check.")
-        result = preflight(
+        result, _ = _checked_preflight(
             WizardPreflightRequest(
                 scope="evaluation",
                 workflow="unified",

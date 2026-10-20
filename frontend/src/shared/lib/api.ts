@@ -564,13 +564,13 @@ export async function runWizardPreflight(
   if (!onPhase)
     return request<WizardPreflightResponse>("/wizard/preflight", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, locale: getActiveLocale() }),
       signal,
     });
   const response = await fetchWithAuthRetry(`${apiBase()}/wizard/preflight/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, locale: getActiveLocale() }),
     signal,
   });
   if (!response.ok || !response.body)
