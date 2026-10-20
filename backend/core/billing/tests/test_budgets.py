@@ -936,6 +936,28 @@ def test_restart_waiver_without_checkpoint_returns_the_whole_generation(engine: 
     assert _balance(engine) == 50
 
 
+def test_restart_waiver_keeps_the_setup_charge(engine: Engine) -> None:
+    """A restart repeats run work only; the setup check before the run stays paid."""
+    with Session(engine) as session:
+        session.get(BillingCustomerModel, "alice").grant_remaining = 4
+        session.commit()
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 40, idempotency_key="restart-setup")
+    setup = _reserve(service, budget.id, "setup-check", max_cents=3)
+    service.mark_dispatched(setup.id, "alice")
+    service.settle(setup.id, "alice", evidence_key="setup-usage", actual_cents=3, evidence={"usage": "setup"})
+    service.attach_to_job(budget.id, "alice", "restart-job", expected_revision=service.get(budget.id, "alice").revision)
+    _settled_run_call(service, budget.id, "lost", 5)
+    fenced = service.fence_generation(budget.id, "alice", expected_generation=0)
+
+    waived = service.waive_interrupted_work(fenced.id, "alice", generation=0, settled_after=None)
+
+    assert waived.billed_cents == 3
+    with Session(engine) as session:
+        wallet = session.get(BillingCustomerModel, "alice")
+        assert (wallet.grant_remaining, wallet.balance_cents) == (1, 50)
+
+
 def test_restart_waiver_returns_grant_cents_to_the_grant(engine: Engine) -> None:
     """A waiver never turns free-grant cents into paid balance."""
     service, budget, checkpoint = _interrupted_run(engine, grant=4)

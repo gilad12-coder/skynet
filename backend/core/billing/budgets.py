@@ -1176,16 +1176,20 @@ class BudgetService:
             settlement_key = f"restart:{budget_id}:g{generation}"
             if session.scalar(select(WalletLedgerModel.id).where(WalletLedgerModel.settlement_key == settlement_key)):
                 return self._snapshot(session, budget, wallet)
-            lost = select(
-                func.coalesce(func.sum(ExecutionOperationModel.actual_units), 0),
-                func.coalesce(func.sum(ExecutionOperationModel.actual_wallet_units), 0),
-            ).where(
+            # Setup work ran before the budget joined the run, and no resume
+            # repeats it, so only run work can be lost.
+            lost_operations = select(ExecutionOperationModel.id).where(
                 ExecutionOperationModel.budget_id == budget_id,
                 ExecutionOperationModel.generation == generation,
+                ExecutionOperationModel.phase == "run",
                 ExecutionOperationModel.state == "settled",
             )
             if settled_after is not None:
-                lost = lost.where(ExecutionOperationModel.updated_at > settled_after)
+                lost_operations = lost_operations.where(ExecutionOperationModel.updated_at > settled_after)
+            lost = select(
+                func.coalesce(func.sum(ExecutionOperationModel.actual_units), 0),
+                func.coalesce(func.sum(ExecutionOperationModel.actual_wallet_units), 0),
+            ).where(ExecutionOperationModel.id.in_(lost_operations))
             scope, charge = (int(value) for value in session.execute(lost).one())
             if not scope:
                 return self._snapshot(session, budget, wallet)
@@ -1201,10 +1205,14 @@ class BudgetService:
                 # returns; the kept work stays paid as it was.
                 run_rows = (WalletLedgerModel.budget_id == budget_id, WalletLedgerModel.kind == "run")
                 lost_grant = select(func.coalesce(func.sum(WalletLedgerModel.from_grant_cents), 0)).where(
-                    *run_rows, WalletLedgerModel.delta_cents < 0
+                    *run_rows,
+                    WalletLedgerModel.delta_cents < 0,
+                    WalletLedgerModel.settlement_key.in_(
+                        select(ExecutionUsageEvidenceModel.id).where(
+                            ExecutionUsageEvidenceModel.operation_id.in_(lost_operations)
+                        )
+                    ),
                 )
-                if settled_after is not None:
-                    lost_grant = lost_grant.where(WalletLedgerModel.created_at > settled_after)
                 net_grant = select(
                     func.coalesce(
                         func.sum(
