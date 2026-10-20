@@ -474,11 +474,15 @@ class OrphanRecoverySweeper:
         take = getattr(self._job_store, "take_ended_orphans", None)
         if take is None:
             return
-        for optimization_id in take():
+        for optimization_id, generation in take():
             try:
-                job = self._job_store.get_job(optimization_id, include_payload=False)
-                if not self._job_store.claim_completion_notification(optimization_id):
+                # The owner can resume a stopped run before this pass; the
+                # fence leaves its notification to the worker that runs it.
+                if not self._job_store.claim_completion_notification(
+                    optimization_id, statuses=("failed", "stopped"), expected_generation=generation
+                ):
                     continue
+                job = self._job_store.get_job(optimization_id, include_payload=False)
                 username = job.get("username") or ""
                 status = job.get("status") or "failed"
                 notify_job_completed(optimization_id, username, status, message=job.get("message"))

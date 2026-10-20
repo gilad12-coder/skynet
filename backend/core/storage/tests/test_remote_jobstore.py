@@ -1109,7 +1109,7 @@ def test_recover_orphaned_jobs_keeps_ended_runs_for_notification(
     store.update_job("resumed", status=status, recovery=restart)
     _fund_checkpoint(store, "resumed", monkeypatch)
     assert store.recover_orphaned_jobs() == 2
-    assert store.take_ended_orphans() == ["unfunded"]
+    assert store.take_ended_orphans() == [("unfunded", store.get_job("unfunded")["execution_generation"])]
     assert store.take_ended_orphans() == []
 
 
@@ -1137,7 +1137,50 @@ def test_recover_orphaned_jobs_keeps_budget_stopped_run_for_notification(
     )
     assert store.recover_orphaned_jobs() == 0
     assert store.get_job("spent")["status"] == "stopped"
-    assert store.take_ended_orphans() == ["spent"]
+    assert store.take_ended_orphans() == [("spent", store.get_job("spent")["execution_generation"])]
+
+
+def test_orphan_sweeper_skips_a_stopped_run_that_its_owner_resumed(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A budget-stopped run resumed before the sweeper's pass keeps its later completion notification.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to stop the budget and capture notifications.
+    """
+    sent: list[str] = []
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        observability_mod,
+        "notify_job_completed",
+        lambda optimization_id, username, status, message=None: sent.append(status),
+    )
+    monkeypatch.setattr(observability_mod, "record_server_event", lambda engine, **kwargs: events.append(kwargs))
+    store.create_job("raised")
+    store.update_job(
+        "raised",
+        status="running",
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    service = _fund_checkpoint(store, "raised", monkeypatch)
+    budget = service.get(store.get_job("raised")["execution_budget_id"], "resume-owner")
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            BudgetService,
+            "get",
+            lambda self, budget_id, username, **kwargs: replace(
+                budget, available_cents=0, blocked_reason="budget_reached"
+            ),
+        )
+        assert store.recover_orphaned_jobs() == 0
+    stopped = store.get_job("raised")
+    assert stopped["status"] == "stopped"
+    store.update_job("raised", status="pending", execution_generation=stopped["execution_generation"] + 1)
+    observability_mod.OrphanRecoverySweeper(store, interval_seconds=60)._notify_ended_orphans()
+    assert sent == []
+    assert events == []
+    assert store.claim_completion_notification("raised") is True
 
 
 @pytest.mark.parametrize("status", ["running", "validating"])

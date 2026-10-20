@@ -749,7 +749,13 @@ class RemoteDBJobStore:
         finally:
             session.close()
 
-    def claim_completion_notification(self, optimization_id: str) -> bool:
+    def claim_completion_notification(
+        self,
+        optimization_id: str,
+        *,
+        statuses: tuple[str, ...] | None = None,
+        expected_generation: int | None = None,
+    ) -> bool:
         """Atomically claim the right to send the completion notification.
 
         Multiple paths can converge on a single job's completion: the worker
@@ -762,21 +768,28 @@ class RemoteDBJobStore:
 
         Args:
             optimization_id: ID of the job whose notification is being sent.
+            statuses: Statuses the job must still have, or ``None`` for any.
+            expected_generation: Execution generation the job must still
+                have, or ``None`` for any.
 
         Returns:
             ``True`` if the caller won the race and should send the message,
-            ``False`` when a prior attempt already notified (or the job is
-            missing — there is nothing to notify about).
+            ``False`` when a prior attempt already notified, the job moved on
+            from the expected status or generation, or the job is missing.
         """
         now = datetime.now(UTC)
         session = self._get_session()
         try:
-            rows = (
+            query = (
                 session.query(JobModel)
                 .filter(JobModel.optimization_id == optimization_id)
                 .filter(JobModel.notified_at.is_(None))
-                .update({JobModel.notified_at: now}, synchronize_session=False)
             )
+            if statuses is not None:
+                query = query.filter(JobModel.status.in_(statuses))
+            if expected_generation is not None:
+                query = query.filter(JobModel.execution_generation == expected_generation)
+            rows = query.update({JobModel.notified_at: now}, synchronize_session=False)
             session.commit()
             return rows > 0
         finally:
@@ -1764,9 +1777,10 @@ class RemoteDBJobStore:
                             reason="budget_reached",
                         )
                     _mark_resume_budget_stop(job)
+                    ended_generation = int(job.execution_generation or 0)
                     session.commit()
                     if automatic:
-                        self._note_ended_orphan(optimization_id)
+                        self._note_ended_orphan(optimization_id, ended_generation)
                     return None
             if pair_index_to_resume is not None:
                 result = job.result if isinstance(job.result, dict) else {}
@@ -2392,27 +2406,29 @@ class RemoteDBJobStore:
                 claimed_at=None,
                 lease_expires_at=None,
             ):
-                self._note_ended_orphan(identifier)
+                self._note_ended_orphan(identifier, generation)
                 handled += 1
         return handled
 
-    def _note_ended_orphan(self, optimization_id: str) -> None:
+    def _note_ended_orphan(self, optimization_id: str, generation: int) -> None:
         """Remember a run that the orphan sweep ended, so its owner hears about it.
 
         Args:
             optimization_id: The run that the sweep failed or stopped.
+            generation: Execution generation the run ended in.
         """
         with _ENDED_ORPHANS_LOCK:
-            vars(self).setdefault("_ended_orphans", []).append(optimization_id)
+            vars(self).setdefault("_ended_orphans", []).append((optimization_id, generation))
 
-    def take_ended_orphans(self) -> list[str]:
+    def take_ended_orphans(self) -> list[tuple[str, int]]:
         """Return and forget the runs that orphan sweeps ended since the last call.
 
         The store cannot send notifications itself (the notification package
         imports the storage package), so the periodic sweeper sends them.
 
         Returns:
-            Ids of the runs that a sweep failed or stopped, oldest first.
+            ``(id, generation)`` of each run that a sweep failed or stopped,
+            oldest first.
         """
         with _ENDED_ORPHANS_LOCK:
             return vars(self).pop("_ended_orphans", [])
