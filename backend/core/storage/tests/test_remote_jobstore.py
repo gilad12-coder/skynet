@@ -40,6 +40,7 @@ from core.storage.models import (
     BillingCustomerModel,
     ExecutionBudgetModel,
     ExecutionOperationModel,
+    GepaCheckpointModel,
     JobModel,
     OptimizationShareGrantModel,
     WalletLedgerModel,
@@ -969,6 +970,97 @@ def test_recover_orphaned_jobs_resumes_worker_restart_without_an_attempt(
     job = store.get_job("restart")
     assert job["status"] == "pending"
     assert job["attempts"] == 0
+
+
+def _bill_run_call(service: BudgetService, username: str, budget_id: str, key: str, cents: int) -> None:
+    """Settle one run-phase model call of the first execution generation.
+
+    Args:
+        service: Authoritative budget service.
+        username: Run owner.
+        budget_id: Attached run envelope.
+        key: Operation identity.
+        cents: Actual charge.
+    """
+    operation = service.reserve(
+        budget_id,
+        username,
+        operation_key=key,
+        generation=0,
+        phase="run",
+        cost_kind="model",
+        request_fingerprint=key,
+        price_snapshot={"version": "fixture-v1"},
+        max_cents=cents,
+    )
+    service.mark_dispatched(operation.id, username)
+    service.settle(operation.id, username, evidence_key=key, actual_cents=cents, evidence={"usage": key})
+
+
+def _balance_of(store: SQLiteJobStore, username: str) -> int:
+    """Read one account's paid balance.
+
+    Args:
+        store: Private fixture database.
+        username: Account owner.
+
+    Returns:
+        Paid balance in cents.
+    """
+    with Session(store.engine) as session:
+        return session.get(BillingCustomerModel, username).balance_cents
+
+
+def test_recover_orphaned_jobs_does_not_charge_work_the_resume_repeats(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Work billed after the last checkpoint runs again on resume, so its charge is returned.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+    """
+    store.create_job("redo")
+    store.update_job(
+        "redo",
+        status="running",
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    service = _fund_checkpoint(store, "redo", monkeypatch)
+    budget_id = store.get_job("redo")["execution_budget_id"]
+    _bill_run_call(service, "resume-owner", budget_id, "before-checkpoint", 2)
+    time.sleep(0.01)
+    with Session(store.engine) as session:
+        session.query(GepaCheckpointModel).filter_by(optimization_id="redo").update({"updated_at": datetime.now(UTC)})
+        session.commit()
+    time.sleep(0.01)
+    _bill_run_call(service, "resume-owner", budget_id, "after-checkpoint", 3)
+    assert _balance_of(store, "resume-owner") == 45
+
+    assert store.recover_orphaned_jobs() == 1
+    assert store.recover_orphaned_jobs() == 0
+
+    assert store.get_job("redo")["status"] == "pending"
+    assert _balance_of(store, "resume-owner") == 48
+    assert service.get(budget_id, "resume-owner").billed_cents == 2
+
+
+def test_recover_orphaned_jobs_does_not_charge_a_restart_from_the_beginning(store: SQLiteJobStore) -> None:
+    """A run with no checkpoint repeats all its interrupted work, so all of that charge is returned.
+
+    Args:
+        store: Disposable job store.
+    """
+    store.create_job("again")
+    store.update_job("again", status="validating")
+    service = _fund_without_checkpoint(store, "again")
+    budget_id = store.get_job("again")["execution_budget_id"]
+    _bill_run_call(service, "restart-owner", budget_id, "lost", 4)
+
+    assert store.recover_orphaned_jobs() == 1
+
+    assert store.get_job("again")["status"] == "pending"
+    assert _balance_of(store, "restart-owner") == 50
 
 
 def test_recover_orphaned_jobs_unpins_a_pinned_run_for_any_live_worker(

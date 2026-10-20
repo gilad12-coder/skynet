@@ -18,7 +18,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from ..storage.models import (
@@ -1145,6 +1145,95 @@ class BudgetService:
             budget.updated_at = datetime.now(UTC)
             return self._snapshot(session, budget, wallet)
 
+    def waive_interrupted_work(
+        self,
+        budget_id: str,
+        username: str,
+        *,
+        generation: int,
+        settled_after: datetime | None,
+    ) -> BudgetSnapshot:
+        """Stop charging the work an infrastructure interruption makes a resumed run repeat.
+
+        The interrupted generation's usage that settled after the last saved
+        checkpoint is lost, and the resumed run pays for it again. Its wallet
+        charge is credited back, and its usage stops counting against the run's
+        limit. The operations keep their evidence, so the provider cost stays
+        auditable.
+
+        Args:
+            budget_id: Envelope of the interrupted run.
+            username: Authenticated owner.
+            generation: Budget generation the interruption ended.
+            settled_after: Save time of the checkpoint the run resumes from, or
+                ``None`` when the run starts again and loses all of that work.
+
+        Returns:
+            Budget after the waiver.
+        """
+        with self._transaction() as session:
+            wallet, budget = self._locked(session, budget_id, username)
+            settlement_key = f"restart:{budget_id}:g{generation}"
+            if session.scalar(select(WalletLedgerModel.id).where(WalletLedgerModel.settlement_key == settlement_key)):
+                return self._snapshot(session, budget, wallet)
+            lost = select(
+                func.coalesce(func.sum(ExecutionOperationModel.actual_units), 0),
+                func.coalesce(func.sum(ExecutionOperationModel.actual_wallet_units), 0),
+            ).where(
+                ExecutionOperationModel.budget_id == budget_id,
+                ExecutionOperationModel.generation == generation,
+                ExecutionOperationModel.state == "settled",
+            )
+            if settled_after is not None:
+                lost = lost.where(ExecutionOperationModel.updated_at > settled_after)
+            scope, charge = (int(value) for value in session.execute(lost).one())
+            if not scope:
+                return self._snapshot(session, budget, wallet)
+            budget.settled_units -= scope
+            budget.wallet_settled_units -= charge
+            refund = budget.billed_cents - ceil_cents(budget.wallet_settled_units)
+            budget.billed_cents -= refund
+            budget.updated_at = datetime.now(UTC)
+            to_grant = 0
+            if refund:
+                # Free-grant cents go back to the grant, so a waiver never turns
+                # them into paid balance. Only the grant the lost charges drew
+                # returns; the kept work stays paid as it was.
+                run_rows = (WalletLedgerModel.budget_id == budget_id, WalletLedgerModel.kind == "run")
+                lost_grant = select(func.coalesce(func.sum(WalletLedgerModel.from_grant_cents), 0)).where(
+                    *run_rows, WalletLedgerModel.delta_cents < 0
+                )
+                if settled_after is not None:
+                    lost_grant = lost_grant.where(WalletLedgerModel.created_at > settled_after)
+                net_grant = select(
+                    func.coalesce(
+                        func.sum(
+                            case((WalletLedgerModel.delta_cents < 0, WalletLedgerModel.from_grant_cents), else_=0)
+                            - case((WalletLedgerModel.delta_cents > 0, WalletLedgerModel.from_grant_cents), else_=0)
+                        ),
+                        0,
+                    )
+                ).where(*run_rows)
+                to_grant = max(0, min(refund, int(session.scalar(lost_grant)), int(session.scalar(net_grant))))
+                wallet.grant_remaining = int(wallet.grant_remaining or 0) + to_grant
+                wallet.balance_cents += refund - to_grant
+                wallet.updated_at = datetime.now(UTC)
+            # Written even for a sub-cent waiver: the row is what makes a repeated
+            # call for this generation a no-op.
+            session.add(
+                WalletLedgerModel(
+                    username=username,
+                    delta_cents=refund,
+                    kind="run",
+                    description="Work repeated after a restart (not charged)",
+                    budget_id=budget.id,
+                    settlement_key=settlement_key,
+                    optimization_id=budget.job_id,
+                    from_grant_cents=to_grant,
+                )
+            )
+            return self._snapshot(session, budget, wallet)
+
     def stop_admission(
         self,
         budget_id: str,
@@ -1366,6 +1455,7 @@ class BudgetService:
                                 budget_id=budget.id,
                                 settlement_key=event_id,
                                 model=document.get("model"),
+                                from_grant_cents=from_grant,
                             )
                         )
                         wallet.updated_at = datetime.now(UTC)

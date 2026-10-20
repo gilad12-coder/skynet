@@ -1765,6 +1765,23 @@ class RemoteDBJobStore:
                 budget = budget_service.get(job.execution_budget_id, job.username)
                 if budget.pending_operations or budget.reserved_cents:
                     return None
+                if automatic:
+                    # The earliest pair checkpoint bounds what every pair keeps;
+                    # work that settled after it runs again and is not charged twice.
+                    resumed_from = (
+                        None
+                        if fresh_restart
+                        else session.query(func.min(GepaCheckpointModel.updated_at))
+                        .filter(GepaCheckpointModel.optimization_id == optimization_id)
+                        .scalar()
+                    )
+                    budget_service.waive_interrupted_work(
+                        job.execution_budget_id,
+                        job.username,
+                        generation=int(job.execution_budget_generation or 0) - 1,
+                        settled_after=resumed_from,
+                    )
+                    budget = budget_service.get(job.execution_budget_id, job.username)
                 if budget.state == "closed" and budget.available_cents > 0:
                     budget = budget_service.resume_admission(
                         job.execution_budget_id, job.username, expected_generation=job.execution_budget_generation
