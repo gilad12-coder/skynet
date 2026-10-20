@@ -4,18 +4,32 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "react-toastify";
 import {
-  ArrowClockwise,
   ArrowRight,
-  ArrowSquareOut,
+  ArrowsClockwise,
+  CalendarBlank,
+  CaretDown,
   Check,
+  CheckCircle,
+  CircleNotch,
+  Eye,
+  Hourglass,
   Info,
+  LinkSimple,
+  MinusCircle,
+  Pause,
   PencilSimple,
   Repeat,
   Trash,
+  TrendUp,
+  Trophy,
+  Warning,
   X,
+  XCircle,
+  type Icon,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import { Switch } from "@/shared/ui/primitives/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import {
@@ -26,13 +40,11 @@ import {
   SelectValue,
 } from "@/shared/ui/primitives/select";
 import { EmptyState } from "@/shared/ui/empty-state";
-import { ProgressBar } from "@/shared/ui/progress-bar";
 import { Skeleton } from "@/shared/ui/skeleton";
-import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { tI18n } from "@/shared/lib/i18n";
+import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import {
-  checkContinuousNow,
   deleteContinuous,
   enableContinuous,
   getContinuousState,
@@ -41,7 +53,6 @@ import {
   updateContinuousSchedule,
   type ConnectorProvider,
 } from "@/shared/lib/api";
-import { formatCentsUsd } from "@/features/billing";
 import { providerMeta, useConnectors } from "@/features/connectors";
 import type {
   ContinuousCycle,
@@ -50,17 +61,21 @@ import type {
   ContinuousState,
   ScheduleRule,
 } from "@/shared/types/continuous";
+import { modelProviderSlug } from "@/shared/lib/model-provider";
+import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { cn } from "@/shared/lib/utils";
 import {
-  allowanceShare,
   canReview,
   cycleTone,
   enableProblem,
+  modelChanges,
+  modelLabels,
   refreshDelayMs,
+  scoreGain,
   type CycleTone,
 } from "../lib/continuous";
 import { browserTimeZone, defaultRule, scheduleProblem } from "../lib/continuous-schedule";
-import { ScheduleEditor, describeSchedule, formatCheck } from "./ScheduleEditor";
+import { ScheduleEditor, describeSchedule } from "./ScheduleEditor";
 import { ScheduledRunSetup } from "./ScheduledRunSetup";
 
 const STATUS_KEYS: Record<ContinuousCycle["status"], MessageKey> = {
@@ -73,6 +88,18 @@ const STATUS_KEYS: Record<ContinuousCycle["status"], MessageKey> = {
   awaiting_review: "continuous_tab.cycle.awaiting_review",
   approved: "continuous_tab.cycle.approved",
   rejected: "continuous_tab.cycle.rejected",
+};
+
+const STATUS_ICONS: Record<ContinuousCycle["status"], Icon> = {
+  checking: CircleNotch,
+  skipped: MinusCircle,
+  failed: XCircle,
+  paused: Pause,
+  optimizing: ArrowsClockwise,
+  regressed: Warning,
+  awaiting_review: Hourglass,
+  approved: CheckCircle,
+  rejected: X,
 };
 
 const TONE_CLASS: Record<CycleTone, string> = {
@@ -116,9 +143,8 @@ function errorText(err: unknown): string {
 
 /**
  * Continuous optimization of a successful run: enable a plan, see the next
- * check and this month's allowance, pause or resume it, and review each
- * cycle. A check that finds no better model is shown as skipped and has no
- * run. A candidate becomes the incumbent only when the owner approves it.
+ * check, pause or resume it, and review each cycle. A check that finds no
+ * better model starts no run and is left out of the history. A candidate becomes the incumbent only when the owner approves it.
  */
 export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
   const [state, setState] = useState<ContinuousState | null>(null);
@@ -206,9 +232,15 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
       return (
         <EmptyState
           icon={Repeat}
-          title={msg(noTestSplit ? "continuous_tab.no_test_split.title" : "continuous_tab.not_eligible.title")}
+          title={msg(
+            noTestSplit
+              ? "continuous_tab.no_test_split.title"
+              : "continuous_tab.not_eligible.title",
+          )}
           description={msg(
-            noTestSplit ? "continuous_tab.no_test_split.description" : "continuous_tab.not_eligible.description",
+            noTestSplit
+              ? "continuous_tab.no_test_split.description"
+              : "continuous_tab.not_eligible.description",
           )}
         />
       );
@@ -262,16 +294,10 @@ export function ContinuousTab({ optimizationId }: { optimizationId: string }) {
   if (state.plan.status === "waiting" || state.plan.status === "ended") {
     return <NotStartedView plan={state.plan} busy={busy} remove={remove} />;
   }
-  return <PlanView plan={state.plan} busy={busy} act={act} remove={remove} />;
+  return <PlanView plan={state.plan} busy={busy} act={act} />;
 }
 
-function StatusLabel({
-  tone,
-  children,
-}: {
-  tone: "success" | "muted";
-  children: React.ReactNode;
-}) {
+function StatusLabel({ tone, children }: { tone: "success" | "muted"; children: React.ReactNode }) {
   return (
     <span
       className={cn(
@@ -331,7 +357,7 @@ function NotStartedView({
           <DeleteButton busy={busy} remove={remove} />
         </div>
         <dl>
-          <SettingRow label={msg("continuous_tab.schedule.label")}>
+          <SettingRow icon={CalendarBlank} label={msg("continuous_tab.schedule.label")}>
             <p className="text-sm font-medium">{describeSchedule(plan.schedule)}</p>
           </SettingRow>
         </dl>
@@ -364,212 +390,190 @@ function DeleteButton({ busy, remove }: { busy: boolean; remove: Remove }) {
   );
 }
 
-function PlanView({
-  plan,
-  busy,
-  act,
-  remove,
-}: {
-  plan: ContinuousPlan;
-  busy: boolean;
-  act: Act;
-  remove: Remove;
-}) {
-  const locale = getActiveIntlLocale();
+function PlanView({ plan, busy, act }: { plan: ContinuousPlan; busy: boolean; act: Act }) {
   const paused = plan.status === "paused";
-  const { usage } = plan;
   const [editing, setEditing] = useState<ScheduleRule | null>(null);
-  const checkRunning = plan.cycles.some(
-    (c) => c.status === "checking" || c.status === "optimizing",
-  );
+  const [historyOpen, setHistoryOpen] = useState(false);
   const pending = plan.cycles.filter(canReview);
-  const switches = (["task_model", "reflection_model"] as const).filter((key) => plan.permitted[key]);
+  const pauseKey = paused && plan.pause_reason ? PAUSE_KEYS[plan.pause_reason] : undefined;
   return (
     <Card className="mt-4 overflow-hidden py-0">
       <CardContent className="divide-y divide-border/50 p-0">
-          {pending.map((cycle) => (
-            <ReviewCard key={cycle.id} plan={plan} cycle={cycle} busy={busy} act={act} />
-          ))}
+        {pending.map((cycle) => (
+          <ReviewCard key={cycle.id} plan={plan} cycle={cycle} busy={busy} act={act} />
+        ))}
 
-          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 p-5 sm:p-6">
-            <div className="min-w-0">
-              {paused && plan.pause_reason && PAUSE_KEYS[plan.pause_reason] ? (
-                <p className="max-w-prose text-lg font-semibold">
-                  {msg(PAUSE_KEYS[plan.pause_reason]!)}
-                </p>
-              ) : (
-                <p className="text-lg font-semibold tracking-tight tabular-nums">
-                  {formatMsg("continuous_tab.next_check_on", { when: formatWhen(plan.next_check_at) })}
-                </p>
+        <div className="space-y-2 p-5 sm:p-6">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <StatusLabel tone={paused ? "muted" : "success"}>
+                {msg(paused ? "continuous_tab.status.paused" : "continuous_tab.status.active")}
+              </StatusLabel>
+              {!paused && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={formatMsg("continuous_tab.next_check_on", {
+                        when: formatWhen(plan.next_check_at),
+                      })}
+                    >
+                      <Info className="size-4" aria-hidden="true" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-none whitespace-nowrap">
+                    {formatMsg("continuous_tab.next_check_on", {
+                      when: formatWhen(plan.next_check_at),
+                    })}
+                  </TooltipContent>
+                </Tooltip>
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-4">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy || paused || checkRunning}
-                title={msg(
-                  paused
-                    ? "continuous_tab.check_now.paused"
-                    : checkRunning
-                      ? "continuous_tab.check_now.busy"
-                      : "continuous_tab.check_now.help",
-                )}
-                onClick={() => act(() => checkContinuousNow(plan.id), "continuous_tab.check_now.started")}
-              >
-                <ArrowClockwise className="size-4" />
-                {msg("continuous_tab.check_now")}
-              </Button>
-              <label className="flex cursor-pointer items-center gap-2.5 rounded-full border border-border/70 py-1 ps-3 pe-1">
-                <StatusLabel tone={paused ? "muted" : "success"}>
-                  {msg(paused ? "continuous_tab.status.paused" : "continuous_tab.status.active")}
-                </StatusLabel>
-                <Switch
-                  checked={!paused}
-                  disabled={busy}
-                  onCheckedChange={(on) =>
-                    act(
-                      () => setContinuousPaused(plan.id, !on),
-                      on ? "continuous_tab.toast.resumed" : "continuous_tab.toast.paused",
-                    )
-                  }
-                  aria-label={msg("continuous_tab.toggle")}
-                />
-              </label>
-            </div>
-          </div>
-
-          <dl className="divide-y divide-border/50">
-            <SettingRow
-              label={msg("continuous_tab.schedule.label")}
-              action={
-                editing === null && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        disabled={busy}
-                        onClick={() => setEditing(plan.schedule)}
-                        aria-label={msg("continuous_tab.schedule.edit")}
-                      >
-                        <PencilSimple className="size-4" aria-hidden />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{msg("continuous_tab.schedule.edit")}</TooltipContent>
-                  </Tooltip>
+            <Switch
+              checked={!paused}
+              disabled={busy}
+              onCheckedChange={(on) =>
+                act(
+                  () => setContinuousPaused(plan.id, !on),
+                  on ? "continuous_tab.toast.resumed" : "continuous_tab.toast.paused",
                 )
               }
-            >
-              {editing === null ? (
-                <div className="space-y-3">
-                  <p className="text-sm font-medium">{describeSchedule(plan.schedule)}</p>
-                  {plan.upcoming_checks.length > 0 && (
-                    <ul className="flex flex-wrap gap-2" aria-label={msg("continuous_tab.schedule.next_checks")}>
-                      {plan.upcoming_checks.map((iso) => (
-                        <CheckTile key={iso} iso={iso} timezone={plan.schedule.timezone} />
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <ScheduleEditor value={editing} onChange={setEditing} idPrefix="continuous-edit" />
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      disabled={busy || scheduleProblem(editing) != null}
-                      onClick={() =>
-                        act(async () => {
-                          const next = await updateContinuousSchedule(plan.id, editing);
-                          setEditing(null);
-                          return next;
-                        }, "continuous_tab.toast.schedule_saved")
-                      }
-                    >
-                      {msg("continuous_tab.schedule.save")}
-                    </Button>
-                    <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(null)}>
-                      {msg("continuous_tab.schedule.cancel")}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </SettingRow>
-
-            <SettingRow label={msg("continuous_tab.refreshes_label")}>
-              <p className="text-sm font-medium">
-                {switches.length > 0
-                  ? switches.map((key) => msg(CHANGE_KEYS[key]!)).join(", ")
-                  : "—"}
-              </p>
-            </SettingRow>
-
-            <SettingRow label={msg("continuous_tab.version_label")}>
-              <Link
-                className="inline-flex items-center gap-1 text-sm font-medium underline-offset-4 hover:underline"
-                href={`/optimizations/${plan.incumbent_optimization_id}`}
-              >
-                <bdi className="font-mono text-[0.8125rem]">
-                  {plan.incumbent_optimization_id.slice(0, 8)}
-                </bdi>
-                <ArrowSquareOut className="size-3 text-muted-foreground rtl:-scale-x-100" />
-              </Link>
-            </SettingRow>
-
-            {usage.limit_cents != null && (
-              <SettingRow label={msg("continuous_tab.allowance_label")}>
-                <div className="space-y-1.5">
-                  <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
-                    <span>
-                      {formatMsg("continuous_tab.allowance", {
-                        used: formatCentsUsd(usage.committed_cents, locale),
-                        limit: formatCentsUsd(usage.limit_cents ?? 0, locale),
-                      })}
-                    </span>
-                    <span>
-                      {formatMsg("continuous_tab.allowance_resets", {
-                        when: formatWhen(usage.resets_at),
-                      })}
-                    </span>
-                  </div>
-                  <ProgressBar value={allowanceShare(usage) * 100} />
-                </div>
-              </SettingRow>
-            )}
-          </dl>
-
-          <section className="bg-muted/30">
-            <div className="px-5 pt-5 sm:px-6">
-              <SectionTitle>{msg("continuous_tab.history")}</SectionTitle>
-            </div>
-            {plan.cycles.length === 0 ? (
-              <p className="px-5 pt-2 pb-5 text-sm text-muted-foreground sm:px-6">
-                {msg("continuous_tab.history_empty")}
-              </p>
-            ) : (
-              <ol className="divide-y divide-border/50 pt-1">
-                {plan.cycles.map((cycle) => (
-                  <CycleRow key={cycle.id} cycle={cycle} />
-                ))}
-              </ol>
-            )}
-          </section>
-
-          <div className="flex justify-end px-5 py-3 sm:px-6">
-            <DeleteButton busy={busy} remove={remove} />
+              aria-label={msg("continuous_tab.toggle")}
+            />
           </div>
+          {pauseKey && (
+            <p className="max-w-prose text-sm text-muted-foreground animate-in fade-in-0 slide-in-from-top-1 duration-200 motion-reduce:animate-none">
+              {msg(pauseKey)}
+            </p>
+          )}
+        </div>
+
+        <dl className="divide-y divide-border/50">
+          <SettingRow
+            icon={CalendarBlank}
+            label={msg("continuous_tab.schedule.label")}
+            action={
+              editing === null && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={busy}
+                      onClick={() => setEditing(plan.schedule)}
+                      aria-label={msg("continuous_tab.schedule.edit")}
+                    >
+                      <PencilSimple className="size-4" aria-hidden />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{msg("continuous_tab.schedule.edit")}</TooltipContent>
+                </Tooltip>
+              )
+            }
+          >
+            {editing === null ? (
+              <p className="text-sm font-medium">{describeSchedule(plan.schedule)}</p>
+            ) : (
+              <div className="space-y-4 animate-in fade-in-0 duration-200 motion-reduce:animate-none">
+                <ScheduleEditor value={editing} onChange={setEditing} idPrefix="continuous-edit" />
+                {/* Matches the editor's width so the two buttons split it evenly beneath it. */}
+                <div className="grid w-full max-w-xl grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    className="w-full"
+                    aria-label={msg("continuous_tab.schedule.cancel")}
+                    disabled={busy}
+                    onClick={() => setEditing(null)}
+                  >
+                    <X className="size-4" aria-hidden />
+                  </Button>
+                  <Button
+                    size="icon-sm"
+                    className="w-full"
+                    aria-label={msg("continuous_tab.schedule.save")}
+                    disabled={busy || scheduleProblem(editing) != null}
+                    onClick={() =>
+                      act(async () => {
+                        const next = await updateContinuousSchedule(plan.id, editing);
+                        setEditing(null);
+                        return next;
+                      }, "continuous_tab.toast.schedule_saved")
+                    }
+                  >
+                    <Check className="size-4" aria-hidden />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </SettingRow>
+
+          <SettingRow icon={Trophy} label={msg("continuous_tab.version_label")}>
+            <span className="inline-flex items-center gap-1.5 text-sm font-medium">
+              <bdi className="font-mono text-[0.8125rem] break-all">
+                {plan.incumbent_optimization_id}
+              </bdi>
+              <RunLink id={plan.incumbent_optimization_id} />
+            </span>
+          </SettingRow>
+        </dl>
+
+        <section className="bg-muted/30">
+          <button
+            type="button"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((open) => !open)}
+            aria-controls="continuous-history"
+            className="flex w-full items-center gap-2 px-5 py-4 text-start transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
+          >
+            <CaretDown
+              aria-hidden
+              className={cn(
+                "size-4 text-muted-foreground transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+                !historyOpen && "-rotate-90 rtl:rotate-90",
+              )}
+            />
+            <SectionTitle>{msg("continuous_tab.history")}</SectionTitle>
+            <span className="text-xs text-muted-foreground tabular-nums">{plan.cycles.length}</span>
+          </button>
+          {/* The rows stay mounted so the list can open by height; inert keeps them out of tab order while shut. */}
+          <div
+            id="continuous-history"
+            inert={!historyOpen}
+            className={cn(
+              "grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+              historyOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+            )}
+          >
+            <div className="min-h-0 overflow-hidden">
+              {plan.cycles.length === 0 ? (
+                <p className="px-5 pb-5 text-sm text-muted-foreground sm:px-6">
+                  {msg("continuous_tab.history_empty")}
+                </p>
+              ) : (
+                <ol className="divide-y divide-border/50 border-t border-border/50">
+                  {plan.cycles.map((cycle) => (
+                    <CycleRow key={cycle.id} cycle={cycle} />
+                  ))}
+                </ol>
+              )}
+            </div>
+          </div>
+        </section>
       </CardContent>
     </Card>
   );
 }
 
 function SettingRow({
+  icon: RowIcon,
   label,
   hint,
   action,
   children,
 }: {
+  icon: Icon;
   label: string;
   hint?: string;
   action?: React.ReactNode;
@@ -578,8 +582,11 @@ function SettingRow({
   return (
     <div className="grid gap-x-8 gap-y-2 px-5 py-4 sm:px-6 lg:grid-cols-[13rem_minmax(0,1fr)_auto]">
       <dt className="space-y-0.5">
-        <span className="text-sm text-muted-foreground">{label}</span>
-        {hint && <p className="text-xs text-muted-foreground/80">{hint}</p>}
+        <span className="flex items-center gap-2 text-sm text-muted-foreground">
+          <RowIcon className="size-4 shrink-0" aria-hidden />
+          {label}
+        </span>
+        {hint && <p className="ps-6 text-xs text-muted-foreground/80">{hint}</p>}
       </dt>
       <dd className="min-w-0">{children}</dd>
       {action && <div className="-my-1 lg:justify-self-end">{action}</div>}
@@ -587,28 +594,122 @@ function SettingRow({
   );
 }
 
-/** One upcoming check as a small date tile, read in the plan's zone. */
-function CheckTile({ iso, timezone }: { iso: string; timezone: string }) {
-  const locale = getActiveIntlLocale();
-  const at = new Date(iso);
-  const part = (opts: Intl.DateTimeFormatOptions) =>
-    at.toLocaleString(locale, { ...opts, timeZone: timezone });
+/** An icon link to a run, named by its tooltip. */
+function RunLink({ id }: { id: string }) {
   return (
-    <li
-      title={formatCheck(iso, timezone)}
-      className="flex items-center gap-2.5 rounded-lg border border-border/60 bg-muted/40 py-1.5 ps-1.5 pe-3"
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon-sm" asChild aria-label={msg("continuous_tab.open_run")}>
+          <Link href={`/optimizations/${id}`}>
+            <LinkSimple className="size-4" aria-hidden />
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{msg("continuous_tab.open_run")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Why a check ended as it did, and the models it swapped from their old names to their new ones. */
+function CycleChanges({ cycle }: { cycle: ContinuousCycle }) {
+  const changes = modelChanges(cycle);
+  const reason = cycle.detail_code ? tI18n(cycle.detail_code, cycle.detail_params) : null;
+  if (changes.length === 0 && !reason) return null;
+  return (
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="icon-sm" aria-label={msg("continuous_tab.details")}>
+              <Eye className="size-4" aria-hidden />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{msg("continuous_tab.details")}</TooltipContent>
+      </Tooltip>
+      <PopoverContent
+        align="end"
+        className="w-auto max-w-[min(28rem,calc(100vw-2rem))] min-w-64 p-0 text-sm"
+      >
+        {reason && <p className="px-4 py-3 leading-relaxed">{reason}</p>}
+        {changes.length > 0 && (
+          <dl className="space-y-3 border-border/60 px-4 py-3 [p+&]:border-t">
+            {changes.map(({ role, from, to }) => {
+              const [fromLabel, toLabel] = modelLabels(from, to);
+              return (
+                <div key={role} className="space-y-1">
+                  <dt className="text-xs text-muted-foreground">
+                    {CHANGE_KEYS[role] ? msg(CHANGE_KEYS[role]) : role}
+                  </dt>
+                  <dd className="flex min-w-0 items-center gap-2 font-medium whitespace-nowrap">
+                    {from && (
+                      <>
+                        <ModelName id={from} label={fromLabel!} muted />
+                        <ArrowRight
+                          aria-hidden
+                          className="size-3.5 shrink-0 text-muted-foreground rtl:-scale-x-100"
+                        />
+                      </>
+                    )}
+                    <ModelName id={to} label={toLabel} />
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** A model's short name after its company's logo; the full id shows on hover. */
+function ModelName({ id, label, muted }: { id: string; label: string; muted?: boolean }) {
+  return (
+    <span className={cn("flex min-w-0 items-center gap-1.5", muted && "text-muted-foreground")}>
+      <span className={cn("inline-flex shrink-0", muted && "opacity-50")}>
+        <ProviderLogo slug={modelProviderSlug(id)} size={16} />
+      </span>
+      <bdi title={id} className="truncate">
+        {label}
+      </bdi>
+    </span>
+  );
+}
+
+function ScoreChange({ cycle, size }: { cycle: ContinuousCycle; size: "lg" | "sm" }) {
+  const gain = scoreGain(cycle);
+  if (gain == null) return null;
+  const incumbent = formatScore(cycle.incumbent_score);
+  const candidate = formatScore(cycle.candidate_score);
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 tabular-nums",
+        size === "lg" ? "text-xl font-semibold" : "text-sm font-medium",
+      )}
     >
-      <span className="flex size-9 flex-col items-center justify-center rounded-md bg-background leading-none shadow-xs">
-        <span className="text-[0.625rem] font-medium uppercase text-primary">{part({ month: "short" })}</span>
-        <span className="text-sm font-semibold tabular-nums">{part({ day: "numeric" })}</span>
+      <span className="sr-only">
+        {formatMsg("continuous_tab.scores", { incumbent, candidate })}
       </span>
-      <span className="text-xs leading-tight">
-        <span className="block font-medium">{part({ weekday: "short" })}</span>
-        <span className="block text-muted-foreground tabular-nums">
-          {part({ hour: "numeric", minute: "2-digit" })}
+      <span aria-hidden className="font-medium text-muted-foreground">
+        {incumbent}
+      </span>
+      <ArrowRight aria-hidden className="size-4 text-muted-foreground rtl:-scale-x-100" />
+      <span aria-hidden>{candidate}</span>
+      {gain !== 0 && (
+        <span
+          dir="ltr"
+          className={cn(
+            "text-sm font-medium",
+            gain > 0 ? "text-[var(--success)]" : "text-[var(--danger)]",
+          )}
+        >
+          {gain > 0 ? "+" : "−"}
+          {Math.abs(gain).toFixed(3)}
         </span>
-      </span>
-    </li>
+      )}
+    </span>
   );
 }
 
@@ -623,142 +724,79 @@ function ReviewCard({
   busy: boolean;
   act: Act;
 }) {
-  const locale = getActiveIntlLocale();
-  const gain =
-    cycle.incumbent_score != null && cycle.candidate_score != null
-      ? cycle.candidate_score - cycle.incumbent_score
-      : null;
   return (
-    <div className="flex flex-wrap items-end justify-between gap-5 border-s-2 border-s-primary bg-primary/[0.05] p-5 sm:p-6">
-        <div className="min-w-0 space-y-3">
-          <div className="space-y-0.5">
-            <SectionTitle>{msg("continuous_tab.review.title")}</SectionTitle>
-            <p className="text-xs text-muted-foreground">
-              {formatWhen(cycle.created_at)}
-              {cycle.changes.length > 0 &&
-                ` · ${formatMsg("continuous_tab.changed", {
-                  changes: cycle.changes
-                    .map((c) => (CHANGE_KEYS[c] ? msg(CHANGE_KEYS[c]) : c))
-                    .join(", "),
-                })}`}
-              {cycle.spent_cents != null &&
-                cycle.spent_cents > 0 &&
-                ` · ${formatMsg("continuous_tab.spent", {
-                  amount: formatCentsUsd(cycle.spent_cents, locale),
-                })}`}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-end gap-x-6 gap-y-2 tabular-nums">
-            <div>
-              <p className="text-xs text-muted-foreground">{msg("continuous_tab.review.current")}</p>
-              <p className="text-xl font-medium text-muted-foreground">
-                {formatScore(cycle.incumbent_score)}
-              </p>
-            </div>
-            <ArrowRight aria-hidden className="mb-1.5 size-4 text-muted-foreground rtl:-scale-x-100" />
-            <div>
-              <p className="text-xs text-muted-foreground">{msg("continuous_tab.review.new")}</p>
-              <p className="text-xl font-semibold">
-                {formatScore(cycle.candidate_score)}
-                {gain != null && gain > 0 && (
-                  <span className="ms-2 text-sm font-medium text-[var(--success)]">
-                    +{gain.toFixed(3)}
-                  </span>
-                )}
-              </p>
-            </div>
-            {cycle.optimization_id && (
-              <Link
-                className="mb-1 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
-                href={`/optimizations/${cycle.optimization_id}`}
-              >
-                {msg("continuous_tab.open_run")}
-                <ArrowSquareOut className="size-3 rtl:-scale-x-100" />
-              </Link>
-            )}
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 bg-primary/[0.05] p-5 animate-in fade-in-0 slide-in-from-top-2 [animation-duration:400ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)] motion-reduce:animate-none sm:p-6">
+      {/* Sized like the scores beside it; the global h3 size outranks a plain utility. */}
+      <h3 className="flex items-center gap-2.5 text-lg! leading-7! font-semibold tracking-tight">
+        <TrendUp className="size-5 shrink-0 text-primary rtl:-scale-x-100" aria-hidden />
+        {msg("continuous_tab.review.title")}
+      </h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <ScoreChange cycle={cycle} size="lg" />
+        <span className="flex items-center">
+          <CycleChanges cycle={cycle} />
+          {cycle.optimization_id && <RunLink id={cycle.optimization_id} />}
+        </span>
+        <span className="flex gap-2 ps-2">
           <Button
+            size="icon-sm"
             variant="outline"
+            aria-label={msg("continuous_tab.reject")}
             disabled={busy}
             onClick={() =>
-              act(() => reviewContinuousCycle(plan.id, cycle.id, false), "continuous_tab.toast.rejected")
+              act(
+                () => reviewContinuousCycle(plan.id, cycle.id, false),
+                "continuous_tab.toast.rejected",
+              )
             }
           >
-            <X className="size-4" />
-            {msg("continuous_tab.reject")}
+            <X className="size-4" aria-hidden />
           </Button>
           <Button
+            size="icon-sm"
+            aria-label={msg("continuous_tab.approve")}
             disabled={busy}
             onClick={() =>
-              act(() => reviewContinuousCycle(plan.id, cycle.id, true), "continuous_tab.toast.approved")
+              act(
+                () => reviewContinuousCycle(plan.id, cycle.id, true),
+                "continuous_tab.toast.approved",
+              )
             }
           >
-            <Check className="size-4" />
-            {msg("continuous_tab.approve")}
+            <Check className="size-4" aria-hidden />
           </Button>
-        </div>
+        </span>
+      </div>
     </div>
   );
 }
 
 function CycleRow({ cycle }: { cycle: ContinuousCycle }) {
-  const locale = getActiveIntlLocale();
-  const scored = cycle.incumbent_score != null && cycle.candidate_score != null;
+  const StatusIcon = STATUS_ICONS[cycle.status] ?? CircleNotch;
   return (
-    <li className="grid gap-x-6 gap-y-1.5 px-5 py-4 sm:grid-cols-[13rem_minmax(0,1fr)] sm:gap-x-8 sm:px-6">
-      <div className="flex items-center gap-2 sm:flex-col sm:items-start sm:gap-1.5">
-        <span
-          className={cn(
-            "w-fit rounded-full border px-2 py-0.5 text-xs font-medium",
-            TONE_CLASS[cycleTone(cycle.status)],
-          )}
-        >
-          {msg(STATUS_KEYS[cycle.status] ?? "continuous_tab.cycle.checking")}
-        </span>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          {formatWhen(cycle.created_at)}
-        </span>
-      </div>
-      <div className="min-w-0 space-y-1">
-        {cycle.detail_code && <p className="text-sm">{tI18n(cycle.detail_code, cycle.detail_params)}</p>}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          {cycle.changes.length > 0 && (
-            <span>
-              {formatMsg("continuous_tab.changed", {
-                changes: cycle.changes
-                  .map((c) => (CHANGE_KEYS[c] ? msg(CHANGE_KEYS[c]) : c))
-                  .join(", "),
-              })}
-            </span>
-          )}
-          {scored && (
-            <span className="tabular-nums">
-              {formatMsg("continuous_tab.scores", {
-                incumbent: formatScore(cycle.incumbent_score),
-                candidate: formatScore(cycle.candidate_score),
-              })}
-            </span>
-          )}
-          {cycle.spent_cents != null && cycle.spent_cents > 0 && (
-            <span>
-              {formatMsg("continuous_tab.spent", {
-                amount: formatCentsUsd(cycle.spent_cents, locale),
-              })}
-            </span>
-          )}
-          {cycle.optimization_id && (
-            <Link
-              className="inline-flex items-center gap-1 underline-offset-4 hover:underline"
-              href={`/optimizations/${cycle.optimization_id}`}
-            >
-              {msg("continuous_tab.open_run")}
-              <ArrowSquareOut className="size-3 rtl:-scale-x-100" />
-            </Link>
-          )}
-        </div>
-      </div>
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 px-5 py-2.5 sm:grid-cols-[8.5rem_9rem_minmax(0,1fr)_auto] sm:px-6">
+      <span
+        className={cn(
+          "flex w-fit items-center gap-1 rounded-full border py-0.5 ps-1.5 pe-2 text-xs font-medium",
+          TONE_CLASS[cycleTone(cycle.status)],
+        )}
+      >
+        <StatusIcon
+          className={cn("size-3.5", cycle.status === "checking" && "motion-safe:animate-spin")}
+          aria-hidden
+        />
+        {msg(STATUS_KEYS[cycle.status] ?? "continuous_tab.cycle.checking")}
+      </span>
+      <span className="col-start-1 text-xs text-muted-foreground tabular-nums sm:col-start-auto">
+        {formatWhen(cycle.created_at)}
+      </span>
+      <span className="col-start-1 min-w-0 sm:col-start-auto">
+        <ScoreChange cycle={cycle} size="sm" />
+      </span>
+      <span className="col-start-2 row-span-3 row-start-1 flex items-center sm:col-start-auto sm:row-span-1 sm:row-start-auto">
+        <CycleChanges cycle={cycle} />
+        {cycle.optimization_id && <RunLink id={cycle.optimization_id} />}
+      </span>
     </li>
   );
 }

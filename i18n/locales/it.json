@@ -376,8 +376,6 @@
     "continuous.already_enabled": "Questa esecuzione ha già un piano continuo.",
     "continuous.not_permitted": "Il piano non consente modifiche a questo input.",
     "continuous.not_reviewable": "Questo controllo non ha candidati in attesa di revisione.",
-    "continuous.check_paused": "Riprendi il piano per eseguire un controllo.",
-    "continuous.check_busy": "Un controllo o un’esecuzione è ancora in corso. Riprova quando sarà terminato.",
     "continuous.skip_unchanged": "Non è uscito un modello migliore, quindi nessuna esecuzione è partita e non è stato addebitato nulla.",
     "continuous.skip_paused": "Il piano è in pausa, quindi questo controllo è stato saltato.",
     "continuous.skip_busy": "Un'esecuzione precedente è ancora in corso, quindi questo controllo è stato saltato.",

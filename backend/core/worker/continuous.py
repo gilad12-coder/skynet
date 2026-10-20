@@ -687,11 +687,19 @@ def process_cycle(
             _fail_cycle(session, plan, cycle, "continuous.run_rejected", reason="the incumbent run was deleted")
             return
         previous = cycle.snapshot or {}
+        current_models = incumbent["payload"].get("models") or {}
         if "new_models" in previous:
             # A retry replays the first attempt's run, so its idempotency key meets the same request.
             new_models = previous["new_models"]
         else:
-            new_models = find_better_models(job_store, plan, incumbent["payload"].get("models") or {}, pick_model)
+            new_models = find_better_models(job_store, plan, current_models, pick_model)
+        if missing := sorted(role for role in new_models if not (current_models.get(role) or {}).get("name")):
+            # Only a retry can name a role the incumbent lacks; uncaught, it would stay ``checking``.
+            _fail_cycle(
+                session, plan, cycle, "continuous.run_rejected", reason=f"the incumbent has no {', '.join(missing)}"
+            )
+            return
+        old_models = previous.get("old_models") or {role: current_models[role]["name"] for role in new_models}
         cycle.changes = sorted(new_models)
         gate = None
         # A retry after ``budget.pending`` already holds this cycle's budget; gating it again
@@ -734,6 +742,7 @@ def process_cycle(
         cycle.snapshot = {
             "compared_against": plan.incumbent_optimization_id,
             "new_models": new_models,
+            "old_models": old_models,
             # Kept before submitting, so a crash recovery finds a budget the preflight already charged.
             "budget_key": resolve_submission_replay_keys(
                 payload, username=plan_username, workflow=UNIFIED_WORKFLOW, supplied_key=_run_key(cycle_id)
@@ -982,7 +991,7 @@ def _settle_waiting_plans(job_store: Any, now: datetime) -> None:
         session.commit()
 
 
-def _claim_due(engine: Any, now: datetime, *, only_plan_id: str | None = None) -> list[str]:
+def _claim_due(engine: Any, now: datetime) -> list[str]:
     """Claim every due check exactly once and return the new cycle ids.
 
     The plan's ``next_check_at`` is advanced with a compare-and-set and the
@@ -994,7 +1003,6 @@ def _claim_due(engine: Any, now: datetime, *, only_plan_id: str | None = None) -
     Args:
         engine: Database engine.
         now: Current time.
-        only_plan_id: Claim only this plan's check; every plan when omitted.
 
     Returns:
         Ids of the cycles this call claimed.
@@ -1003,8 +1011,6 @@ def _claim_due(engine: Any, now: datetime, *, only_plan_id: str | None = None) -
         ContinuousPlanModel.next_check_at.is_not(None),
         ContinuousPlanModel.next_check_at <= now,
     )
-    if only_plan_id is not None:
-        query = query.where(ContinuousPlanModel.id == only_plan_id)
     with Session(engine) as session:
         due = session.scalars(query).all()
         plans = [(plan.id, plan.next_check_at, next_check_after(plan, now)) for plan in due]
@@ -1040,9 +1046,9 @@ def _reclaim_stale(job_store: Any, now: datetime) -> list[str]:
 
     A check that already lost its worker ``MAX_CHECK_ATTEMPTS`` times is
     closed as failed, so one check that always crashes cannot hold back the
-    plan's later checks and "Check now" forever. Before it closes, it still
-    links a run its last worker submitted, so a paid run is never orphaned,
-    and it keeps any budget a preflight charged, so the allowance counts it.
+    plan's later checks forever. Before it closes, it still links a run its
+    last worker submitted, so a paid run is never orphaned, and it keeps any
+    budget a preflight charged, so the allowance counts it.
 
     Args:
         job_store: Job store.
@@ -1119,28 +1125,6 @@ def run_due_checks(
             # keeps that retry from starting or funding a second run.
             logger.exception("Continuous cycle %s failed", cycle_id)
     return checked
-
-
-def check_plan_now(job_store: Any, service: Any, plan_id: str, *, pick_model: ModelPicker = better_model) -> None:
-    """Claim and run one plan's due check now, without waiting for a sweep.
-
-    "Check now" calls this right after it makes the check due. Sweeps run on
-    one replica at a time and can lag by minutes, so the click must not wait
-    for one. The claim is the same compare-and-set as a sweep's, so a sweep
-    that reaches the plan first leaves nothing to claim here, and the reverse.
-
-    Args:
-        job_store: Job store.
-        service: Optimization service handed to the in-process worker.
-        plan_id: The plan whose check is due.
-        pick_model: Finds a better model for one role.
-    """
-    for cycle_id in _claim_due(job_store.engine, datetime.now(UTC), only_plan_id=plan_id):
-        try:
-            process_cycle(job_store, service, cycle_id, pick_model=pick_model)
-        except Exception:
-            # The lease expires and a later sweep retries, as for a swept check.
-            logger.exception("Continuous cycle %s failed", cycle_id)
 
 
 class ContinuousSweeper:

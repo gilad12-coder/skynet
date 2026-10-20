@@ -376,8 +376,6 @@
     "continuous.already_enabled": "呢個運行已經有持續計劃。",
     "continuous.not_permitted": "呢個計劃唔准更改呢項輸入。",
     "continuous.not_reviewable": "呢次檢查冇等緊審批嘅候選。",
-    "continuous.check_paused": "要先恢復計劃先可以行檢查。",
-    "continuous.check_busy": "仲有檢查或者運行進行緊。完成之後再試。",
     "continuous.skip_unchanged": "冇更好嘅模型推出，所以冇開始運行，亦冇收費。",
     "continuous.skip_paused": "計劃已暫停，所以略過咗呢次檢查。",
     "continuous.skip_busy": "之前嘅運行仲進行緊，所以略過咗呢次檢查。",

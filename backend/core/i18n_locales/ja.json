@@ -376,8 +376,6 @@
     "continuous.already_enabled": "この実行にはすでに継続プランがあります。",
     "continuous.not_permitted": "このプランでは、この入力の変更は許可されていません。",
     "continuous.not_reviewable": "この確認には、レビュー待ちの候補がありません。",
-    "continuous.check_paused": "チェックを実行するにはプランを再開してください。",
-    "continuous.check_busy": "チェックまたは実行がまだ進行中です。終了してからもう一度お試しください。",
     "continuous.skip_unchanged": "より良いモデルが出ていないため、実行は開始されず、料金もかかりませんでした。",
     "continuous.skip_paused": "プランが一時停止中のため、この確認はスキップされました。",
     "continuous.skip_busy": "前の実行がまだ進行中のため、この確認はスキップされました。",

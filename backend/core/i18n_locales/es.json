@@ -376,8 +376,6 @@
     "continuous.already_enabled": "Esta ejecución ya tiene un plan continuo.",
     "continuous.not_permitted": "El plan no permite cambiar esta entrada.",
     "continuous.not_reviewable": "Esta revisión no tiene ningún candidato pendiente de revisión.",
-    "continuous.check_paused": "Reanuda el plan para ejecutar una comprobación.",
-    "continuous.check_busy": "Todavía hay una comprobación o una ejecución en curso. Vuelve a intentarlo cuando termine.",
     "continuous.skip_unchanged": "No salió un modelo mejor, así que no empezó ninguna ejecución y no se cobró nada.",
     "continuous.skip_paused": "El plan está en pausa, así que se omitió esta revisión.",
     "continuous.skip_busy": "Una ejecución anterior sigue en curso, así que se omitió esta revisión.",

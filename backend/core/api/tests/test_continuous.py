@@ -327,7 +327,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Env]:
         return JSONResponse(status_code=exc.status_code, content={"code": exc.code, "params": exc.params})
 
     app.include_router(submissions.create_submissions_router(service=object(), job_store=store))
-    app.include_router(create_continuous_router(job_store=store, service=object()))
+    app.include_router(create_continuous_router(job_store=store))
     app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(fixture.username, fixture.role, ())
     environment = _Env(fixture, monkeypatch)
     environment.catalog(**CURRENT_MODELS)
@@ -520,6 +520,9 @@ def test_a_better_model_starts_one_run_on_the_incumbents_exact_request(env: _Env
         "reflection_model": {"name": "fixture/strong", "byok_provider": None},
     }
     incumbent, payload = env.payload(source_id), env.payload(cycle.optimization_id)
+    assert cycle.snapshot["old_models"] == {
+        role: incumbent["models"][role]["name"] for role in ("task_model", "reflection_model")
+    }
     assert payload["models"]["task_model"]["name"] == "fixture/strong"
     assert payload["models"]["reflection_model"]["name"] == "fixture/strong"
     for key in ("task", "workspace", "optimizer", "seed"):
@@ -566,7 +569,7 @@ def test_no_better_model_starts_no_run_and_cannot_be_rerun(env: _Env, models: di
     assert env.count(ExecutionBudgetModel) == budgets_before
     assert env.balance() == balance_before
     state = env.client.get(f"/optimizations/{source_id}/continuous").json()["plan"]
-    assert state["cycles"][0]["status"] == "skipped"
+    assert state["cycles"] == []
     assert env.client.post(f"/continuous/{plan['id']}/rerun").status_code in {404, 405}
     assert env.client.post(f"/continuous/{plan['id']}/cycles/{cycle.id}/rerun").status_code in {404, 405}
 
@@ -840,7 +843,7 @@ def test_a_finished_cycle_counts_usage_still_awaiting_reconciliation(env: _Env) 
 
 
 def test_a_pending_review_stays_visible_past_the_history_window(env: _Env) -> None:
-    """A candidate waiting for approval is returned even after many newer skipped checks."""
+    """A candidate waiting for approval is returned even after many newer checks."""
     source_id, _, cycle = _started(env)
     _finish(env, cycle.optimization_id, result=_result(0.5, 0.9))
     continuous.review_cycle(env.store, cycle.id)
@@ -852,8 +855,8 @@ def test_a_pending_review_stays_visible_past_the_history_window(env: _Env) -> No
                 plan_id=plan_id,
                 slot=f"later-{index}",
                 month=cycle.month,
-                status="skipped",
-                detail_code="continuous.skip_review_pending",
+                status="failed",
+                detail_code="continuous.run_failed",
                 created_at=later + timedelta(minutes=index),
             )
             for index in range(_HISTORY_LIMIT)
@@ -863,6 +866,29 @@ def test_a_pending_review_stays_visible_past_the_history_window(env: _Env) -> No
 
     assert len(cycles) == _HISTORY_LIMIT + 1
     assert (cycles[-1]["id"], cycles[-1]["status"]) == (cycle.id, "awaiting_review")
+
+
+def test_skipped_checks_never_push_runs_out_of_the_history(env: _Env) -> None:
+    """Most checks find no better model; the history lists runs only, so skips cannot crowd them out."""
+    source_id, _, cycle = _started(env)
+    plan_id = env.plan().id
+    later = datetime.now(UTC) + timedelta(minutes=1)
+    with Session(env.store.engine) as session, session.begin():
+        session.add_all(
+            ContinuousCycleModel(
+                plan_id=plan_id,
+                slot=f"later-{index}",
+                month=cycle.month,
+                status="skipped",
+                detail_code="continuous.skip_unchanged",
+                created_at=later + timedelta(minutes=index),
+            )
+            for index in range(_HISTORY_LIMIT)
+        )
+
+    cycles = env.client.get(f"/optimizations/{source_id}/continuous").json()["plan"]["cycles"]
+
+    assert [c["id"] for c in cycles] == [cycle.id]
 
 
 def test_rollover_never_resumes_a_user_pause(env: _Env) -> None:
@@ -1053,6 +1079,7 @@ def test_approval_makes_the_new_run_current_and_later_checks_start_from_its_mode
     env.sweep(_due(env))
     latest = env.cycles()[-1]
     assert latest.snapshot["compared_against"] == cycle.optimization_id
+    assert latest.snapshot["old_models"] == {"task_model": "fixture/strong", "reflection_model": "fixture/strong"}
     assert env.payload(latest.optimization_id)["models"]["task_model"]["name"] == "fixture/stronger"
     _finish(env, latest.optimization_id, result=_result(0.5, 0.905))
     env.sweep(_due(env) - timedelta(days=1))
@@ -1096,6 +1123,8 @@ def test_a_pending_retry_after_a_catalog_change_keeps_its_first_models_and_budge
     now = _due(env)
     env.sweep(now)
     [cycle] = env.cycles()
+    first_old = {"task_model": "fixture/first-task", "reflection_model": "fixture/first-reflection"}
+    env.edit_cycle(cycle.id, snapshot={**cycle.snapshot, "old_models": first_old})
     env.catalog(**CURRENT_MODELS, strong=(60.0, 1e-6), stronger=(70.0, 1e-6))
 
     monkeypatch.setattr(continuous, "submit_unified_payload", submit)
@@ -1104,9 +1133,38 @@ def test_a_pending_retry_after_a_catalog_change_keeps_its_first_models_and_budge
     [retried] = env.cycles()
     assert (retried.id, retried.status) == (cycle.id, "optimizing")
     assert retried.snapshot["budget_key"] == cycle.snapshot["budget_key"]
+    assert retried.snapshot["old_models"] == first_old
     assert retried.execution_budget_id == cycle.execution_budget_id
     models = env.payload(retried.optimization_id)["models"]
     assert (models["task_model"]["name"], models["reflection_model"]["name"]) == ("fixture/strong", "fixture/strong")
+
+
+@pytest.mark.parametrize("lacking", ["absent", None, {}])
+def test_a_retry_naming_a_role_the_incumbent_lacks_fails_instead_of_sticking(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, lacking: str | dict | None
+) -> None:
+    """A retry whose saved models name a role the incumbent lacks fails with a reason, not a crash."""
+    incumbent_id = _incumbent(env)
+    _enable(env, incumbent_id)
+    env.better()
+    submit = continuous.submit_unified_payload
+    _refuse_after_charging(env, "budget.pending", 2)
+    now = _due(env)
+    env.sweep(now)
+    [cycle] = env.cycles()
+    env.edit_cycle(cycle.id, snapshot={k: v for k, v in cycle.snapshot.items() if k != "old_models"})
+    payload = env.payload(incumbent_id)
+    models = {**payload["models"], "task_model": lacking}
+    if lacking == "absent":
+        del models["task_model"]
+    env.store.update_job(incumbent_id, payload={**payload, "models": models})
+
+    monkeypatch.setattr(continuous, "submit_unified_payload", submit)
+    env.sweep(now + continuous.CYCLE_LEASE + timedelta(seconds=1))
+
+    [retried] = env.cycles()
+    assert (retried.id, retried.status, retried.detail_code) == (cycle.id, "failed", "continuous.run_rejected")
+    assert retried.detail_params == {"reason": "the incumbent has no task_model"}
 
 
 def test_a_crashed_check_never_takes_another_users_budget_with_its_key(env: _Env) -> None:
@@ -1281,7 +1339,6 @@ def test_other_users_cannot_read_or_change_a_plan(env: _Env) -> None:
     assert env.client.post(f"/continuous/{plan['id']}/pause").status_code == 404
     assert env.client.post(f"/continuous/{plan['id']}/resume").status_code == 404
     assert env.client.put(f"/continuous/{plan['id']}/schedule", json=DAILY).status_code == 404
-    assert env.client.post(f"/continuous/{plan['id']}/check-now").status_code == 404
     assert env.client.post(f"/continuous/{plan['id']}/cycles/{cycle.id}/approve").status_code == 404
     assert env.client.post(f"/continuous/{plan['id']}/cycles/{cycle.id}/reject").status_code == 404
     assert env.client.delete(f"/continuous/{plan['id']}").status_code == 404
@@ -1359,44 +1416,6 @@ def test_preview_lists_the_next_three_checks(env: _Env) -> None:
     assert local == sorted(local)
     assert all(t.weekday() in {0, 2, 4} and (t.hour, t.minute) == (7, 15) for t in local)
     assert times[0] > datetime.now(UTC)
-
-
-def test_check_now_runs_a_check_and_the_schedule_continues(env: _Env) -> None:
-    """Check now runs a check at once; with no better model it still only records a skip."""
-    plan = _enable(env, _incumbent(env))
-    scheduled = env.plan().next_check_at
-    jobs_before = env.count(JobModel)
-
-    now_plan = env.client.post(f"/continuous/{plan['id']}/check-now").json()
-    assert datetime.fromisoformat(now_plan["next_check_at"]) <= datetime.now(UTC)
-
-    # The check ran with the request, not at a later sweep.
-    [cycle] = env.cycles()
-    assert (cycle.status, cycle.detail_code) == ("skipped", "continuous.skip_unchanged")
-    assert env.count(JobModel) == jobs_before
-    assert continuous.aware(env.plan().next_check_at) == continuous.aware(scheduled)
-
-
-def test_check_now_starts_a_run_when_a_better_model_came_out(env: _Env) -> None:
-    """Check now uses the same model search as a scheduled check."""
-    plan = _enable(env, _incumbent(env))
-    env.better()
-
-    env.client.post(f"/continuous/{plan['id']}/check-now")
-
-    [cycle] = env.cycles()
-    assert (cycle.status, cycle.detail_code) == ("optimizing", "continuous.run_started")
-
-
-def test_check_now_waits_for_a_running_check_and_a_resume(env: _Env) -> None:
-    """Check now is refused while a run is going or the plan is paused."""
-    _, plan, _ = _started(env)
-    busy = env.client.post(f"/continuous/{plan['id']}/check-now")
-    assert (busy.status_code, busy.json()["code"]) == (409, "continuous.check_busy")
-
-    env.client.post(f"/continuous/{plan['id']}/pause")
-    paused = env.client.post(f"/continuous/{plan['id']}/check-now")
-    assert (paused.status_code, paused.json()["code"]) == (409, "continuous.check_paused")
 
 
 def test_a_plan_saved_before_rules_reads_as_a_rule(env: _Env) -> None:
@@ -1550,9 +1569,9 @@ def test_a_plan_deleted_while_its_check_submits_keeps_the_run(
 
 
 def test_a_check_that_keeps_crashing_is_closed_and_frees_the_plan(env: _Env) -> None:
-    """A check that loses its worker three times is failed, so later checks and Check now run again."""
+    """A check that loses its worker three times is failed, so later checks run again."""
     source_id = _incumbent(env)
-    plan = _enable(env, source_id)
+    _enable(env, source_id)
     env.better()
     now = _due(env)
     [claimed] = continuous._claim_due(env.store.engine, now)
@@ -1563,7 +1582,6 @@ def test_a_check_that_keeps_crashing_is_closed_and_frees_the_plan(env: _Env) -> 
 
     [cycle] = env.cycles()
     assert (cycle.status, cycle.detail_code) == ("failed", "continuous.check_stuck")
-    assert env.client.post(f"/continuous/{plan['id']}/check-now").status_code != 409
 
 
 def test_the_last_crash_retry_still_links_a_run_its_worker_started(env: _Env) -> None:

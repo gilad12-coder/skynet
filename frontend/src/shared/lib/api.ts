@@ -2071,13 +2071,6 @@ export function updateContinuousSchedule(planId: string, rule: ScheduleRule) {
   });
 }
 
-/** Run the next check now; unchanged inputs are still recorded as skipped. */
-export function checkContinuousNow(planId: string) {
-  return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/check-now`, {
-    method: "POST",
-  });
-}
-
 /** Approve (the candidate becomes the incumbent) or reject a candidate in review. */
 export function reviewContinuousCycle(planId: string, cycleId: string, approve: boolean) {
   return request<ContinuousPlan>(

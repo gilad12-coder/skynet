@@ -7,8 +7,6 @@
 * ``DELETE /continuous/{plan_id}`` — remove a plan and its check history; the
   runs it started stay.
 * ``PUT  /continuous/{plan_id}/schedule`` — change when the plan checks.
-* ``POST /continuous/{plan_id}/check-now`` — run the next check now instead of
-  waiting for its time. It is still a check: with no better model, it is skipped.
 * ``POST /continuous/schedule-preview`` — the next check times a rule gives.
 * ``POST /continuous/{plan_id}/cycles/{cycle_id}/approve`` and ``/reject`` —
   review a validated candidate. Approval makes it the incumbent later checks
@@ -23,7 +21,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -43,7 +41,6 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 
 _HISTORY_LIMIT = 50
 _UPCOMING_CHECKS = 3
-_BUSY_CYCLES = (engine_mod.CYCLE_CHECKING, engine_mod.CYCLE_OPTIMIZING)
 _IN_FLIGHT = frozenset(
     {OptimizationStatus.pending.value, OptimizationStatus.validating.value, OptimizationStatus.running.value}
 )
@@ -239,13 +236,14 @@ def _plan_item(session: Session, plan: ContinuousPlanModel) -> ContinuousPlanIte
     cycles = list(
         session.scalars(
             select(ContinuousCycleModel)
-            .where(ContinuousCycleModel.plan_id == plan.id)
+            # Most checks find no better model; listing them would push real runs out of the window.
+            .where(ContinuousCycleModel.plan_id == plan.id, ContinuousCycleModel.status != engine_mod.CYCLE_SKIPPED)
             .order_by(ContinuousCycleModel.created_at.desc())
             .limit(_HISTORY_LIMIT)
         )
     )
     shown = {cycle.id for cycle in cycles}
-    # Every later check is skipped while a candidate waits, so it can age out of the recent window.
+    # A candidate waiting for approval must stay reviewable even after it ages out of the recent window.
     cycles += [
         cycle
         for cycle in session.scalars(
@@ -359,15 +357,11 @@ def _plan_for_run(session: Session, optimization_id: str) -> ContinuousPlanModel
     return session.get(ContinuousPlanModel, plan_id) if plan_id else None
 
 
-def create_continuous_router(
-    *, job_store, service, pick_model: engine_mod.ModelPicker = engine_mod.better_model
-) -> APIRouter:
+def create_continuous_router(*, job_store) -> APIRouter:
     """Build the continuous-optimization router.
 
     Args:
         job_store: Job store whose engine holds the plans.
-        service: Optimization service a "check now" hands its run to.
-        pick_model: Finds a better model for one role on a "check now".
 
     Returns:
         The router.
@@ -571,49 +565,6 @@ def create_continuous_router(
             _set_schedule(plan, body, datetime.now(UTC))
             session.commit()
             return _plan_item(session, plan)
-
-    @router.post(
-        "/continuous/{plan_id}/check-now",
-        response_model=ContinuousPlanItem,
-        summary="Run the next continuous check now",
-    )
-    def check_now(
-        plan_id: str, background_tasks: BackgroundTasks, current_user: AuthenticatedUserDep
-    ) -> ContinuousPlanItem:
-        """Make the next check due now and run it after responding; the schedule continues after it.
-
-        The check follows the usual rules, so with no better model it is
-        recorded as skipped and starts no run.
-
-        Args:
-            plan_id: The plan.
-            background_tasks: Runs the check once the response is sent.
-            current_user: The caller.
-
-        Returns:
-            The plan with its check due now.
-
-        Raises:
-            DomainError: 409 while the plan is paused or a check or run is still in progress.
-        """
-        with _session() as session:
-            plan = _owned_plan(session, plan_id, current_user)
-            if plan.status != engine_mod.PLAN_ACTIVE:
-                raise DomainError("continuous.check_paused", status=409)
-            busy = session.scalar(
-                select(ContinuousCycleModel.id).where(
-                    ContinuousCycleModel.plan_id == plan.id, ContinuousCycleModel.status.in_(_BUSY_CYCLES)
-                )
-            )
-            if busy is not None:
-                raise DomainError("continuous.check_busy", status=409)
-            now = datetime.now(UTC)
-            plan.next_check_at = now
-            plan.updated_at = now
-            session.commit()
-            item = _plan_item(session, plan)
-        background_tasks.add_task(engine_mod.check_plan_now, job_store, service, plan_id, pick_model=pick_model)
-        return item
 
     @router.post(
         "/continuous/schedule-preview",

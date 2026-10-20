@@ -376,8 +376,6 @@
     "continuous.already_enabled": "להרצה הזאת כבר יש תוכנית רציפה.",
     "continuous.not_permitted": "התוכנית לא מתירה לשנות את הקלט הזה.",
     "continuous.not_reviewable": "אין בבדיקה הזאת גרסה שממתינה לאישור.",
-    "continuous.check_paused": "צריך לחדש את התוכנית כדי להריץ בדיקה.",
-    "continuous.check_busy": "בדיקה או ריצה עדיין מתבצעות. אפשר לנסות שוב כשהן יסתיימו.",
     "continuous.skip_unchanged": "לא יצא מודל טוב יותר, ולכן לא התחילה ריצה ושום דבר לא חויב.",
     "continuous.skip_paused": "התוכנית מושהית, ולכן הבדיקה דולגה.",
     "continuous.skip_busy": "הרצה קודמת עדיין פועלת, ולכן הבדיקה דולגה.",
