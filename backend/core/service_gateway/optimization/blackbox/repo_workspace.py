@@ -125,6 +125,7 @@ class RepoWorkspace:
         readonly_paths: Iterable[str],
         setup_command: str | None,
         secrets: Mapping[str, str],
+        protected_paths: Iterable[str] = (),
     ) -> None:
         """Bind a snapshot to a runtime without opening anything yet.
 
@@ -137,12 +138,15 @@ class RepoWorkspace:
             readonly_paths: Submodules and Git LFS files.
             setup_command: Shell command run once on the starting commit.
             secrets: Environment the scorer receives; setup never does.
+            protected_paths: Files and folders no version may change, even
+                inside an editable path.
         """
         self._runtime = runtime
         self._spec = spec
         self._archive = archive
         self._editable = tuple(editable_paths)
         self._readonly = tuple(readonly_paths)
+        self._protected = tuple(protected_paths)
         self._setup = (setup_command or "").strip() or None
         self._secrets = dict(secrets)
         self._session: SandboxSession | None = None
@@ -268,7 +272,7 @@ class RepoWorkspace:
             The checkout's path, relative to the box, or why the version is
             not allowed or does not apply.
         """
-        problems = patch_violations(patch, self._editable, self._readonly)
+        problems = patch_violations(patch, self._editable, self._readonly, self._protected)
         if problems:
             return Checkout(path=None, problems=tuple(problems))
         with self._lock:

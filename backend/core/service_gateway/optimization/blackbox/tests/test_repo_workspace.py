@@ -280,3 +280,32 @@ def test_versions_outside_the_editable_paths_never_reach_the_box(
 def test_redact_hides_long_values_only() -> None:
     """Mask real secrets while leaving short values that would scramble ordinary output."""
     assert redact("key=abcdefgh on=1", ["abcdefgh", "1"]) == "key=[secret] on=1"
+
+
+def test_protected_paths_win_over_editable_ones_before_the_box_opens(tmp_path: Path) -> None:
+    """Lay out an allowed edit, but refuse one to a protected judge file inside an editable folder."""
+    archive = _archive(tmp_path, {"src/app.py": "x = 1\n", "src/judge.py": "ok = True\n"})
+    runtime = _Runtime()
+    space = RepoWorkspace(
+        runtime=runtime,
+        spec=_ONLINE,
+        archive=archive,
+        editable_paths=["src"],
+        readonly_paths=[],
+        setup_command=None,
+        secrets={},
+        protected_paths=["optimize.toml", "src/judge.py"],
+    )
+    try:
+        rigged = space.checkout(_patch(tmp_path / "rigged", archive, {"src/judge.py": "ok = 'always'\n"}))
+        assert rigged.path is None
+        assert rigged.problems == (
+            "'src/judge.py' is protected by the repository's optimize.toml ([paths] protected).",
+        )
+        assert runtime.boxes == []
+        rules = space.checkout(_patch(tmp_path / "rules", archive, {"optimize.toml": "[paths]\neditable = ['.']\n"}))
+        assert rules.path is None
+        allowed = space.checkout(_patch(tmp_path / "allowed", archive, {"src/app.py": "x = 2\n"}))
+        assert allowed.path == WORK_DIR
+    finally:
+        space.close()
