@@ -99,6 +99,7 @@ import { CodeTab } from "./CodeTab";
 import { ArtifactTab } from "./ArtifactTab";
 import { PairSelectionStrip } from "./PairSelectionStrip";
 import { OverviewTab } from "./OverviewTab";
+import { HeldOutNotice } from "./RewardComparison";
 import { RewardTab, hasRewardTab } from "./RewardTab";
 import { RunLifecycleNotice } from "./RunLifecycleNotice";
 import { isBudgetPause } from "../lib/run-lifecycle";
@@ -1210,6 +1211,11 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   return (
     <div className="space-y-6 pb-12">
       {sharedTier && <RunAccessBanner tier={sharedTier} owner={sharedByOwner} />}
+      {jobIsBlackbox && job.status === "success" && job.blackbox_result && (
+        <FadeIn delay={0.1}>
+          <HeldOutNotice splitCounts={job.blackbox_result.split_counts} />
+        </FadeIn>
+      )}
       <FadeIn delay={0.1}>
         <div className="rounded-xl border border-border/40 bg-card p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">

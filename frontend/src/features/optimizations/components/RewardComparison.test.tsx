@@ -141,4 +141,10 @@ void describe("HeldOutNotice", () => {
     // A legacy DSPy split has no held_out flag.
     assert.equal(render(<HeldOutNotice splitCounts={{ train: 5, val: 2, test: 3 }} />), "");
   });
+
+  void it("leads with a warning icon that assistive technology skips", () => {
+    const html = render(<HeldOutNotice splitCounts={result().split_counts} />);
+    assert.match(html, /^<p role="note" data-notice="not-held-out"[^>]*class="flex items-start/);
+    assert.match(html, /^<p[^>]*><svg[^>]*aria-hidden="true"[^>]*>[\s\S]*<\/svg><span>/);
+  });
 });

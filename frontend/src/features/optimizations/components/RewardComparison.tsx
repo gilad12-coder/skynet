@@ -2,7 +2,7 @@
 
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
-import { Trophy } from "@/shared/ui/icons";
+import { Trophy, Warning } from "@/shared/ui/icons";
 import {
   Tooltip,
   TooltipContent,
@@ -251,9 +251,10 @@ export function HeldOutNotice({ splitCounts }: { splitCounts: unknown }) {
     <p
       role="note"
       data-notice="not-held-out"
-      className="rounded-xl border border-[var(--warning-border)] bg-[var(--warning-dim)] px-4 py-3 text-xs text-[var(--warning)]"
+      className="flex items-start gap-2 rounded-xl border border-[var(--warning-border)] bg-[var(--warning-dim)] px-4 py-3 text-xs text-[var(--warning)]"
     >
-      {msg("optimization.reward.not_held_out")}
+      <Warning className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+      <span>{msg("optimization.reward.not_held_out")}</span>
     </p>
   );
 }
