@@ -39,7 +39,7 @@ from ..api.observability import advisory_lock
 from ..api.routers.billing import _byok_catalog_for_user
 from ..api.routers.submissions import UNIFIED_WORKFLOW, submit_unified_payload
 from ..api.submission_idempotency import resolve_submission_replay_keys
-from ..billing import ProviderKeyVault
+from ..billing import ProviderKeyVault, byok_provider_for_litellm, provider_slug_for_model
 from ..billing.budget_amounts import budget_wallet_hold
 from ..billing.budgets import BudgetError, BudgetService
 from ..billing.operation_pricing import json_fingerprint
@@ -164,8 +164,8 @@ def better_model(
     A higher rating at an equal or lower price for both input and output has
     no downside, so a plan may try it on its own. Only models the run can pay
     for the way it pays now are considered: the hosted catalog for a managed
-    run, the owner's verified connections for a BYOK run. A model on a custom
-    endpoint is never switched.
+    run, the owner's verified connections for a BYOK run. A model on a saved
+    custom endpoint is never switched, and never chosen as a replacement.
 
     Args:
         job_store: Store whose engine holds the provider connections.
@@ -176,9 +176,15 @@ def better_model(
     Returns:
         ``{"name", "byok_provider"}`` for the highest-rated such model, or ``None``.
     """
-    if current.get("base_url"):
-        return None
     if current.get("token_source") == "byok":
+        vault = ProviderKeyVault(engine=job_store.engine)
+        # Submission clears a model's own base_url, so the saved connection is the only record of a custom endpoint.
+        custom = {view.provider for view in vault.list_keys(username).keys if view.api_base}
+        prefix = provider_slug_for_model(str(current.get("name") or ""))
+        # Submission reads an unnamed provider from the model prefix, so this check does too.
+        provider = current.get("byok_provider") or (byok_provider_for_litellm(prefix) if prefix else None)
+        if provider in custom:
+            return None
         # The BYOK registry carries no ratings, so each model borrows the
         # rating of its hosted twin (same id, or the same model under another
         # provider's spelling).
@@ -193,7 +199,8 @@ def better_model(
             else model.model_copy(
                 update={"intelligence_index": ratings.get(model.value, ratings.get(_reasoning_match_key(model.value)))}
             )
-            for model in _byok_catalog_for_user(ProviderKeyVault(engine=job_store.engine), username).models
+            for model in _byok_catalog_for_user(vault, username).models
+            if model.byok_provider not in custom
         ]
     else:
         models = [model for model in get_catalog_cached().models if model.available]
@@ -273,15 +280,46 @@ def find_better_models(
     permitted = upgrade_switches(plan.permitted or {})
     tried = tried_models(plan)
     found = {}
+    swapped = dict(models)
     for role in MODEL_SWITCHES:
         current = models.get(role)
         if not permitted.get(role) or not current:
             continue
         skip = frozenset(item.split(":", 1)[1] for item in tried if item.startswith(f"{role}:"))
-        better = pick_model(job_store, plan.username, current, skip)
-        if better is not None:
-            found[role] = better
+        while (better := pick_model(job_store, plan.username, current, skip)) is not None:
+            candidate = {**swapped, role: {**current, "name": better["name"]}}
+            if not _mixed_billing(candidate):
+                found[role] = better
+                swapped = candidate
+                break
+            # Submission refuses one model id under two billing sources, so the next best gets its turn.
+            skip |= {better["name"]}
     return found
+
+
+def _mixed_billing(models: dict[str, Any]) -> bool:
+    """Say whether one model id appears in two roles under different billing sources.
+
+    Args:
+        models: A run's ``models`` block.
+
+    Returns:
+        ``True`` when submission would refuse the block.
+    """
+    blocks = [
+        models.get("task_model"),
+        models.get("reflection_model"),
+        *(models.get("extra_reflection_models") or []),
+        models.get("metric_model"),
+    ]
+    sources: dict[str, Any] = {}
+    for block in blocks:
+        if not block:
+            continue
+        name = str(block.get("name") or "").strip("/")
+        if sources.setdefault(name, block.get("token_source")) != block.get("token_source"):
+            return True
+    return False
 
 
 def _request_copy(stored: dict[str, Any]) -> dict[str, Any]:

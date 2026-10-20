@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -1156,20 +1157,6 @@ def test_the_new_run_inlines_the_cases_instead_of_a_staged_upload(env: _Env) -> 
     assert copied["cases"] == payload["data"]["cases"]
 
 
-def test_a_model_on_a_custom_endpoint_is_never_switched(env: _Env) -> None:
-    """A role served from the customer's own endpoint keeps its model even when a better hosted one exists."""
-    source_id = _incumbent(env)
-    payload = env.payload(source_id)
-    models = {**payload["models"], "task_model": {**payload["models"]["task_model"], "base_url": "https://llm.test"}}
-    env.store.update_job(source_id, payload={**payload, "models": models})
-    _enable(env, source_id, permitted={"task_model": True})
-    env.better()
-
-    env.sweep(_due(env))
-
-    assert env.cycles()[-1].detail_code == "continuous.skip_unchanged"
-
-
 def test_an_unavailable_hosted_model_is_never_chosen(env: _Env) -> None:
     """A better hosted model the catalog marks unavailable is not tried."""
     entries = [
@@ -1731,3 +1718,126 @@ def test_a_schedule_save_forgets_single_checks_that_passed(env: _Env) -> None:
     rule = {**DAILY, "skip": [past, future], "extra": [past]}
     saved = env.client.put(f"/continuous/{plan['id']}/schedule", json=rule).json()
     assert (saved["schedule"]["skip"], saved["schedule"]["extra"]) == ([future], [])
+
+
+def _byok(monkeypatch: pytest.MonkeyPatch, connections: dict[str, str | None], models: dict[str, float]) -> None:
+    """Serve saved BYOK connections and the models they reach, all at the same price.
+
+    Args:
+        monkeypatch: Pytest monkeypatch.
+        connections: ``{provider: api_base}``; ``None`` is a native key.
+        models: ``{"provider/model": rating}``; the provider is the part before the slash.
+    """
+    views = [SimpleNamespace(provider=provider, api_base=base) for provider, base in connections.items()]
+    entries = [
+        CatalogModel(
+            value=name,
+            label=name,
+            provider=name.split("/", 1)[0],
+            byok_provider=name.split("/", 1)[0],
+            available=True,
+            intelligence_index=rating,
+            input_cost_per_token=1e-6,
+            output_cost_per_token=1e-6,
+        )
+        for name, rating in models.items()
+    ]
+    vault = SimpleNamespace(list_keys=lambda username: SimpleNamespace(keys=views))
+    monkeypatch.setattr(continuous, "ProviderKeyVault", lambda engine: vault)
+    monkeypatch.setattr(
+        continuous, "_byok_catalog_for_user", lambda vault, username: ModelCatalogResponse(providers=[], models=entries)
+    )
+    monkeypatch.setattr(continuous, "get_catalog_cached", lambda: ModelCatalogResponse(providers=[], models=[]))
+
+
+def test_a_model_on_a_saved_custom_endpoint_is_never_switched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A role on a connection with its own endpoint keeps its model even when a better one is listed."""
+    _byok(monkeypatch, {"openai": "https://llm.test/v1"}, {"openai/now": 40.0, "openai/strong": 60.0})
+    current = {"name": "openai/now", "token_source": "byok", "byok_provider": "openai"}
+
+    assert continuous.better_model(SimpleNamespace(engine=None), "alice", current) is None
+
+
+def test_a_custom_endpoint_model_without_its_provider_named_is_never_switched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A block that names no provider is matched to its connection by its model prefix, as submission does."""
+    _byok(monkeypatch, {"openai": "https://llm.test/v1"}, {"openai/strong": 60.0})
+    monkeypatch.setattr(
+        continuous,
+        "_byok_catalog_for_user",
+        lambda vault, username: ModelCatalogResponse(
+            providers=[],
+            models=[
+                CatalogModel(
+                    value=name,
+                    label=name,
+                    provider="openrouter",
+                    byok_provider="openrouter",
+                    available=True,
+                    intelligence_index=rating,
+                    input_cost_per_token=1e-6,
+                    output_cost_per_token=1e-6,
+                )
+                for name, rating in (("openai/now", 40.0), ("openai/strong", 60.0))
+            ],
+        ),
+    )
+    current = {"name": "openai/now", "token_source": "byok", "byok_provider": None}
+
+    assert continuous.better_model(SimpleNamespace(engine=None), "alice", current) is None
+
+
+def test_a_model_on_a_custom_endpoint_is_never_a_replacement(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A native-key role never moves to a model that only a custom endpoint serves."""
+    _byok(
+        monkeypatch,
+        {"openrouter": None, "openai": "https://llm.test/v1"},
+        {"openrouter/now": 40.0, "openai/strong": 90.0, "openrouter/better": 60.0},
+    )
+    current = {"name": "openrouter/now", "token_source": "byok", "byok_provider": "openrouter"}
+
+    better = continuous.better_model(SimpleNamespace(engine=None), "alice", current)
+
+    assert better == {"name": "openrouter/better", "byok_provider": "openrouter"}
+
+
+def _picks(*ranked: str) -> continuous.ModelPicker:
+    """Pick the best model in ``ranked`` the plan has not skipped.
+
+    Args:
+        *ranked: Model names, best first.
+
+    Returns:
+        A model picker.
+    """
+
+    def pick(job_store: Any, username: str, current: dict[str, Any], skip: frozenset[str]) -> dict[str, Any] | None:
+        name = next((name for name in ranked if name not in skip and name != current["name"]), None)
+        return None if name is None else {"name": name, "byok_provider": None}
+
+    return pick
+
+
+@pytest.mark.parametrize("other_role", ["reflection_model", "metric_model", "extra_reflection_models"])
+@pytest.mark.parametrize(
+    ("ranked", "expected"),
+    [(("fixture/b", "fixture/c"), {"task_model": "fixture/c"}), (("fixture/b",), {})],
+)
+def test_a_replacement_billed_another_way_in_another_role_gives_the_next_best_its_turn(
+    ranked: tuple[str, ...], expected: dict[str, str], other_role: str
+) -> None:
+    """One model id under two billing sources is refused at submission, so it is never picked."""
+    plan = SimpleNamespace(
+        permitted={"task_model": True}, username="alice", baseline_snapshot=None, incumbent_optimization_id=None
+    )
+    other = {"name": "fixture/b", "token_source": "byok", "byok_provider": "openrouter"}
+    models = {
+        "task_model": {"name": "fixture/a", "token_source": "managed"},
+        "reflection_model": {"name": "fixture/r", "token_source": "managed"},
+        other_role: [other] if other_role == "extra_reflection_models" else other,
+    }
+
+    found = continuous.find_better_models(None, plan, models, _picks(*ranked))
+
+    assert {role: better["name"] for role, better in found.items()} == expected
