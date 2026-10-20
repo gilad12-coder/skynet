@@ -1409,7 +1409,7 @@ export function SettingsModal() {
                             aria-hidden="true"
                             className="size-4 shrink-0 transition-colors duration-200"
                           />
-                          <span className="flex-1 truncate">{msg(labelKey)}</span>
+                          <span className="flex-1 truncate text-start">{msg(labelKey)}</span>
                         </span>
                       </TabsTrigger>
                     );
