@@ -12,12 +12,18 @@ still executes legacy payloads already queued or resumed.
 
 from __future__ import annotations
 
+import contextvars
 import logging
+import threading
+import time
+from collections.abc import Callable
+from concurrent.futures import Future, wait
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from ...billing import (
@@ -127,6 +133,153 @@ _BLACKBOX_WORKFLOW = "anything"
 _UNIFIED_CONTRACT_FAILED = "submit.unified.contract_failed"
 # The DSPy optimizer that bootstraps demos from the task model alone.
 _DSPY_WITHOUT_REFLECTION = frozenset({"dspy_bootstrap_fewshot"})
+# Common proxies (nginx, AWS ALB) drop a request silent for 60 seconds, and a
+# budgetless submission's setup check takes minutes. The request answers 202
+# well before that while the submission continues in the background.
+_SUBMISSION_WAIT_SECONDS = 25.0
+_SUBMISSION_RETRY_AFTER_SECONDS = 5
+# A submission that answered 202 keeps its outcome for the next same-key
+# retry, so a failed check is reported instead of run and paid for again.
+_SUBMISSION_OUTCOME_TTL_SECONDS = 900.0
+_SUBMISSION_IN_PROGRESS = "submission.in_progress"
+
+
+class SubmissionInProgressError(DomainError):
+    """Report that another attempt is still running this submission's setup check.
+
+    The code stays ``budget.pending`` so a continuous cycle keeps replaying the
+    same key, while the HTTP routes answer 202 for a client to retry.
+    """
+
+    def __init__(self) -> None:
+        """Build the in-progress refusal."""
+        super().__init__("budget.pending", status=409)
+
+
+class _InFlightSubmissions:
+    """Run each keyed submission once per process and hold its outcome for a retry."""
+
+    def __init__(self) -> None:
+        """Start with no submissions."""
+        self._lock = threading.Lock()
+        self._futures: dict[tuple[str, str], Future] = {}
+        self._finished_at: dict[tuple[str, str], float] = {}
+
+    def start(self, scope: tuple[str, str] | None, work: Callable[[], OptimizationSubmissionResponse]) -> Future:
+        """Join the running submission for a scope, or start ``work`` in a background thread.
+
+        Args:
+            scope: Account and ``Idempotency-Key``, or None for a request without a key.
+            work: The complete submission.
+
+        Returns:
+            Future of the submission's response or error.
+        """
+        with self._lock:
+            now = time.monotonic()
+            for stale, finished in list(self._finished_at.items()):
+                if now - finished > _SUBMISSION_OUTCOME_TTL_SECONDS:
+                    self._discard(stale)
+            if scope is not None and scope in self._futures:
+                return self._futures[scope]
+            future: Future = Future()
+            if scope is not None:
+                self._futures[scope] = future
+                future.add_done_callback(lambda _done: self._mark_finished(scope))
+        context = contextvars.copy_context()
+        threading.Thread(target=context.run, args=(self._run, future, work), daemon=True).start()
+        return future
+
+    def forget(self, scope: tuple[str, str] | None, future: Future) -> None:
+        """Drop a delivered outcome so later retries read the stored run instead.
+
+        Args:
+            scope: Scope the future was started under.
+            future: The delivered submission.
+        """
+        with self._lock:
+            if scope is not None and self._futures.get(scope) is future:
+                self._discard(scope)
+
+    def _mark_finished(self, scope: tuple[str, str]) -> None:
+        """Start the outcome's retention window.
+
+        Args:
+            scope: Scope of the finished submission.
+        """
+        with self._lock:
+            if scope in self._futures:
+                self._finished_at[scope] = time.monotonic()
+
+    def _discard(self, scope: tuple[str, str]) -> None:
+        """Remove one scope; the caller holds the lock.
+
+        Args:
+            scope: Scope to remove.
+        """
+        self._futures.pop(scope, None)
+        self._finished_at.pop(scope, None)
+
+    @staticmethod
+    def _run(future: Future, work: Callable[[], OptimizationSubmissionResponse]) -> None:
+        """Settle the future with the submission's response or error.
+
+        Args:
+            future: Future the waiting requests share.
+            work: The complete submission.
+        """
+        try:
+            future.set_result(work())
+        except BaseException as error:
+            future.set_exception(error)
+
+
+_IN_FLIGHT_SUBMISSIONS = _InFlightSubmissions()
+
+
+def _submit_within_proxy_timeout(
+    username: str,
+    idempotency_key: str | None,
+    work: Callable[[], OptimizationSubmissionResponse],
+) -> OptimizationSubmissionResponse | JSONResponse:
+    """Answer a submission before common proxy timeouts, even while its setup check runs.
+
+    A same-key request joins the running submission instead of starting a
+    second one. A submission still running after the wait answers 202, and the
+    client retries with the same key to collect the run or its error.
+
+    Args:
+        username: Authenticated submitter.
+        idempotency_key: Caller's ``Idempotency-Key`` header, if any.
+        work: The complete submission.
+
+    Returns:
+        The submission response, or a 202 asking the client to retry.
+    """
+    key = (idempotency_key or "").strip()
+    scope = (username, key) if key else None
+    future = _IN_FLIGHT_SUBMISSIONS.start(scope, work)
+    wait([future], timeout=_SUBMISSION_WAIT_SECONDS)
+    if not future.done():
+        return _in_progress_response()
+    _IN_FLIGHT_SUBMISSIONS.forget(scope, future)
+    try:
+        return future.result()
+    except SubmissionInProgressError:
+        return _in_progress_response()
+
+
+def _in_progress_response() -> JSONResponse:
+    """Tell the client its submission is still running and when to retry with the same key."""
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "in_progress",
+            "code": _SUBMISSION_IN_PROGRESS,
+            "detail": "The setup check is still running. Send the same request again to get the run.",
+        },
+        headers={"Retry-After": str(_SUBMISSION_RETRY_AFTER_SECONDS)},
+    )
 
 
 def _ensure_api_budget(
@@ -135,8 +288,6 @@ def _ensure_api_budget(
     workflow: str,
     budget_creation_key: str | None,
     user: AuthenticatedUser,
-    *,
-    recover_existing: bool,
 ) -> None:
     """Give older API requests the same durable setup and run authority as the wizard.
 
@@ -146,7 +297,6 @@ def _ensure_api_budget(
         workflow: DSPy or Anything request family.
         budget_creation_key: Stable account-scoped identity for budget creation.
         user: Authenticated submitter.
-        recover_existing: Reuse the original approved total for a synthesized legacy retry.
     """
     if payload.execution_budget_id is not None:
         return
@@ -155,7 +305,9 @@ def _ensure_api_budget(
         raise DomainError("budget.invalid", status=503)
     service = BudgetService(engine=engine)
     try:
-        budget = service.find_by_creation_key(user.username, budget_creation_key) if recover_existing else None
+        # A retry reuses the original approved total: the balance it would be
+        # recomputed from moves once the first attempt's check reserves spend.
+        budget = service.find_by_creation_key(user.username, budget_creation_key)
         if budget is None:
             spendable = _enforce_balance(job_store, user.username, payload.token_source)
             total = payload.max_cost_cents
@@ -180,6 +332,10 @@ def _ensure_api_budget(
         user,
         job_store,
     )
+    if checked.pending_reason is not None and checked.pending_reason.category == "setup_incomplete":
+        # Only an attempt that still holds the claim reads as incomplete:
+        # a same-key retry reached a check another request is running.
+        raise SubmissionInProgressError()
     if checked.status != "succeeded":
         raise DomainError(
             "budget.pending" if checked.status == "pending" else "submission.validation_failed", status=409
@@ -858,7 +1014,6 @@ def submit_unified_payload(
         UNIFIED_WORKFLOW,
         replay_keys.budget,
         current_user,
-        recover_existing=replay_keys.synthesized,
     )
     verified = _protected_submission(payload, job_store, UNIFIED_WORKFLOW)
 
@@ -918,12 +1073,20 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         status_code=201,
         summary="Submit an optimization run",
         tags=["agent"],
+        responses={
+            202: {
+                "description": (
+                    "The setup check is still running. Retry after ``Retry-After`` seconds "
+                    "with the same body and ``Idempotency-Key`` to get the run or its error."
+                )
+            }
+        },
     )
     def submit_unified_run(
         payload: UnifiedRunRequest,
         current_user: AuthenticatedUserDep,
         idempotency_key: IdempotencyKeyHeader = None,
-    ) -> OptimizationSubmissionResponse:
+    ) -> OptimizationSubmissionResponse | JSONResponse:
         """Queue one optimization of a prompt, code, text or DSPy program.
 
         Every optimizer (the DSPy optimizers and the black-box engines) runs
@@ -939,19 +1102,23 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
 
         Returns:
             An ``OptimizationSubmissionResponse`` carrying the assigned id
-            and ``pending`` status.
+            and ``pending`` status, or a 202 while the setup check still runs.
 
         Raises:
             DomainError: 400 (unknown staged dataset), 402 (no balance), 409
                 (quota or stale setup evidence), 422 (workspace code does not
                 fit the optimizer).
         """
-        return submit_unified_payload(
-            payload,
-            service=service,
-            job_store=job_store,
-            current_user=current_user,
-            idempotency_key=idempotency_key,
+        return _submit_within_proxy_timeout(
+            current_user.username,
+            idempotency_key,
+            lambda: submit_unified_payload(
+                payload,
+                service=service,
+                job_store=job_store,
+                current_user=current_user,
+                idempotency_key=idempotency_key,
+            ),
         )
 
     @router.post(
@@ -1024,7 +1191,6 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             _BLACKBOX_WORKFLOW,
             replay_keys.budget,
             current_user,
-            recover_existing=replay_keys.synthesized,
         )
         verified = _protected_submission(payload, job_store, _BLACKBOX_WORKFLOW)
         try:
