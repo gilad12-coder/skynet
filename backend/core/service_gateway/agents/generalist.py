@@ -121,8 +121,8 @@ def _apply_interactive_timeout(config: ModelConfig) -> None:
 
 TrustMode = Literal["ask", "auto_safe", "yolo"]
 
-# Tools whose side-effects can destroy or create billing-bearing work.
-# Always require confirmation except in YOLO mode.
+# Tools whose side-effects can destroy or create billing-bearing work, or
+# change who can see a run. Always require confirmation except in YOLO mode.
 _DESTRUCTIVE_TOOLS: frozenset[str] = frozenset(
     {
         "delete_job_optimizations",
@@ -136,6 +136,13 @@ _DESTRUCTIVE_TOOLS: frozenset[str] = frozenset(
         # the balance the same way a fresh submit does.
         "resume_job_optimizations",
         "restart_job_optimizations",
+        # A run inherits its folder's access, so each of these can change who
+        # sees a run: a delete drops the shares, a move takes the destination's,
+        # and an update can change who may share.
+        "delete_folder",
+        "move_folder",
+        "move_runs_to_folder",
+        "update_folder",
     }
 )
 
@@ -160,6 +167,8 @@ _SAFE_MUTATIONS: frozenset[str] = frozenset(
         "pause_job_optimizations",
         # Staging a sample overwrites the wizard's dataset, roles and code.
         "stage_sample_dataset_datasets_samples",
+        # A new folder starts empty, so it gives nobody access to a run.
+        "create_folder",
     }
 )
 
