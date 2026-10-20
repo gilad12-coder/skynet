@@ -17,9 +17,10 @@ from fastmcp import Client, FastMCP
 from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
 from sqlalchemy.orm import Session
 
-from ...storage.models import JobModel
+from ...storage.models import JobModel, RunFolderItemModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..mcp_mount import AGENT_TAG, _trim_tool_spec
+from ..routers import folders as folders_module
 from ..routers.folders import create_folders_router
 from .test_folders_router import _MemStore
 
@@ -256,6 +257,49 @@ def test_organize_listing_paginates_with_next_offset() -> None:
     last = alice.get("/folders/runs", params={"limit": 2, "offset": 4}).json()
     assert [i["optimization_id"] for i in last["items"]] == ["a4"]
     assert last["next_offset"] is None
+
+
+def test_organize_listing_reaches_runs_older_than_the_newest_thousand() -> None:
+    """With 1001 owned runs, the oldest unfiled run and the account-wide totals are reachable."""
+    store = _MemStore()
+    for n in range(1001):
+        _seed(store, f"r{n:04d}", age_minutes=n)
+    alice = _client(store)
+    folder_id = alice.post("/folders", json={"name": "Filed"}).json()["id"]
+    # Filed with direct inserts: the shared SQLite connection would roll back
+    # a 200-run move when the store's own session closes mid-request.
+    with Session(store.engine) as session:
+        session.add_all(
+            RunFolderItemModel(
+                optimization_id=f"r{n:04d}", folder_id=folder_id, added_by="alice", added_at=datetime.now(UTC)
+            )
+            for n in range(1000)
+        )
+        session.commit()
+
+    unfiled = alice.get("/folders/runs", params={"unfiled_only": "true"}).json()
+    assert [i["optimization_id"] for i in unfiled["items"]] == ["r1000"]
+    assert unfiled["total_runs"] == 1001
+    assert unfiled["unfiled_runs"] == 1
+    assert unfiled["matched"] == 1
+    assert unfiled["next_offset"] is None
+
+    last_page = alice.get("/folders/runs", params={"limit": 200, "offset": 1000}).json()
+    assert [i["optimization_id"] for i in last_page["items"]] == ["r1000"]
+    assert last_page["next_offset"] is None
+
+
+def test_organize_listing_scans_store_pages_without_gaps_or_repeats(monkeypatch) -> None:
+    """A small store page size still yields every owned run exactly once, newest first."""
+    monkeypatch.setattr(folders_module, "_ORGANIZE_SCAN_PAGE", 2)
+    store = _MemStore()
+    for n in range(5):
+        _seed(store, f"a{n}", age_minutes=n)
+    _seed(store, "b0", username="bob")
+    body = _client(store).get("/folders/runs").json()
+    assert [i["optimization_id"] for i in body["items"]] == ["a0", "a1", "a2", "a3", "a4"]
+    assert body["total_runs"] == 5
+    assert body["unfiled_runs"] == 5
 
 
 def test_organize_listing_hides_names_of_folders_the_caller_cannot_see() -> None:

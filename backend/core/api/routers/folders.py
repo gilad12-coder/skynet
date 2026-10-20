@@ -88,9 +88,9 @@ _LINK_ROLE_VALUES = tuple(sorted(LINK_ROLES))
 _MAX_NAME_LENGTH = 120
 _MAX_MOVE_BATCH = 200
 _AGENT_TAG = "agent"
-# The organize listing filters in Python, so it reads at most this many of the
-# caller's newest runs; ``scan_truncated`` tells the agent when older ones exist.
-_ORGANIZE_SCAN_CAP = 1000
+# The organize listing filters in Python, so it reads every owned run from the
+# store in pages of this size to keep each query and folder lookup bounded.
+_ORGANIZE_SCAN_PAGE = 500
 _ORGANIZE_DEFAULT_LIMIT = 100
 _ORGANIZE_MAX_LIMIT = 200
 _TASK_PREVIEW_CHARS = 160
@@ -185,7 +185,6 @@ class OrganizeRunsResponse(BaseModel):
     unfiled_runs: int
     matched: int
     next_offset: int | None = None
-    scan_truncated: bool = False
     hint: str
 
 
@@ -962,10 +961,8 @@ def create_folders_router(*, job_store) -> APIRouter:
         """List your own runs, newest first, with name, task, dataset, model, status and folder.
 
         Covers the runs the caller owns, which are the runs they can always
-        file. ``total_runs`` and ``unfiled_runs`` count every scanned run;
-        ``matched`` counts the runs that pass the filters. Only the newest
-        1000 runs are scanned; ``scan_truncated`` reports
-        when older ones exist.
+        file. ``total_runs`` and ``unfiled_runs`` count every owned run;
+        ``matched`` counts the runs that pass the filters.
 
         Args:
             current_user: Authenticated caller.
@@ -984,11 +981,24 @@ def create_folders_router(*, job_store) -> APIRouter:
         if status is not None and status not in VALID_STATUSES:
             raise DomainError("filter.invalid_status", status=422, value=status, allowed=sorted(VALID_STATUSES))
         # Status is filtered below, not in the store query, so the totals and
-        # the empty-account hint cover every scanned run.
-        rows = job_store.list_jobs(username=current_user.username, limit=_ORGANIZE_SCAN_CAP + 1, with_counts=False)
-        scan_truncated = len(rows) > _ORGANIZE_SCAN_CAP
-        rows = rows[:_ORGANIZE_SCAN_CAP]
-        folder_ids = run_folder_ids(job_store, [row["optimization_id"] for row in rows])
+        # the empty-account hint cover every owned run.
+        rows: list[dict] = []
+        folder_ids: dict[str, str] = {}
+        seen: set[str] = set()
+        store_offset = 0
+        while True:
+            batch = job_store.list_jobs(
+                username=current_user.username, limit=_ORGANIZE_SCAN_PAGE, offset=store_offset, with_counts=False
+            )
+            # A run created during the scan shifts the offsets by one, so the
+            # next page can repeat a row; count each run once.
+            fresh = [row for row in batch if row["optimization_id"] not in seen]
+            seen.update(row["optimization_id"] for row in fresh)
+            rows.extend(fresh)
+            folder_ids.update(run_folder_ids(job_store, [row["optimization_id"] for row in fresh]))
+            if len(batch) < _ORGANIZE_SCAN_PAGE:
+                break
+            store_offset += _ORGANIZE_SCAN_PAGE
         folder_names: dict[str, str] = {}
         engine = getattr(job_store, "engine", None)
         if engine is not None and folder_ids:
@@ -1031,7 +1041,6 @@ def create_folders_router(*, job_store) -> APIRouter:
             unfiled_runs=unfiled,
             matched=len(entries),
             next_offset=next_offset,
-            scan_truncated=scan_truncated,
             hint=hint,
         )
 
