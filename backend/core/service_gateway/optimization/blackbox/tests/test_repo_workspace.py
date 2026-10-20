@@ -13,7 +13,15 @@ import pytest
 from core.exceptions import ServiceError
 
 from ..repo_tree import unpack_tree, version_patch
-from ..repo_workspace import _PROBE_OK, WORK_DIR, NetworkCutoffError, RepoSetupError, RepoWorkspace, redact
+from ..repo_workspace import (
+    _PROBE_OK,
+    PREPARED_DIR,
+    WORK_DIR,
+    NetworkCutoffError,
+    RepoSetupError,
+    RepoWorkspace,
+    redact,
+)
 from ..sandbox import CommandResult, LocalSubprocessRuntime, SandboxSpec
 
 
@@ -309,3 +317,77 @@ def test_protected_paths_win_over_editable_ones_before_the_box_opens(tmp_path: P
         assert allowed.path == WORK_DIR
     finally:
         space.close()
+
+
+def _guarded(tmp_path: Path) -> tuple[RepoWorkspace, Path]:
+    """Build a workspace whose evaluation folder is protected and whose source is editable.
+
+    Args:
+        tmp_path: Scratch folder.
+
+    Returns:
+        The workspace and its archive.
+    """
+    archive = _archive(tmp_path, {"src/app.py": "x = 1\n", "eval/labels.csv": "a,1\n", "eval/judge.py": "ok = True\n"})
+    space = RepoWorkspace(
+        runtime=_Runtime(),
+        spec=_ONLINE,
+        archive=archive,
+        editable_paths=["src"],
+        readonly_paths=[],
+        setup_command=None,
+        secrets={},
+        protected_paths=["eval", "optimize.toml"],
+    )
+    return space, archive
+
+
+def test_a_source_only_version_whose_code_rewrites_the_labels_is_caught(tmp_path: Path) -> None:
+    """Flag protected files the version's code changes while it runs, even though its patch names only source."""
+    space, archive = _guarded(tmp_path)
+    try:
+        version = _patch(tmp_path / "one", archive, {"src/app.py": "x = 2\n"})
+        assert space.checkout(version).path == WORK_DIR
+        assert space.protected_changes() == ()
+
+        space.checkout(version)
+        space.session().run(f"cd {WORK_DIR} && printf 'a,0\\n' > eval/labels.csv && touch eval/extra.csv")
+        assert space.protected_changes() == (
+            "'eval/extra.csv' is protected by the repository's optimize.toml ([paths] protected),"
+            " and the version's code changed it while it ran.",
+            "'eval/labels.csv' is protected by the repository's optimize.toml ([paths] protected),"
+            " and the version's code changed it while it ran.",
+        )
+
+        space.checkout(version)
+        space.session().run(f"rm {WORK_DIR}/eval/judge.py")
+        assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval/judge.py"]
+    finally:
+        space.close()
+
+
+def test_tampering_with_the_prepared_tree_is_caught_on_the_next_version(tmp_path: Path) -> None:
+    """Compare against fingerprints the parent holds, so rewriting the prepared copy in the box does not hide a change."""
+    space, archive = _guarded(tmp_path)
+    try:
+        version = _patch(tmp_path / "one", archive, {"src/app.py": "x = 2\n"})
+        space.checkout(version)
+        space.session().run(f"printf 'a,0\\n' > {PREPARED_DIR}/eval/labels.csv")
+
+        space.checkout(version)
+
+        assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval/labels.csv"]
+    finally:
+        space.close()
+
+
+def test_a_workspace_without_protected_paths_skips_the_check(
+    workspace: tuple[RepoWorkspace, _Runtime, Path, Path],
+) -> None:
+    """Run no fingerprinting when the repository protects nothing."""
+    space, runtime, _, _ = workspace
+
+    space.checkout("")
+
+    assert space.protected_changes() == ()
+    assert all("hashlib" not in command for command, _, _ in runtime.boxes[0].commands)

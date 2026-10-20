@@ -118,6 +118,40 @@ def test_a_failing_scorer_is_reported(tmp_path: Path) -> None:
         scorer.close()
 
 
+def test_a_version_whose_code_rewrites_its_judge_gets_no_score(tmp_path: Path) -> None:
+    """Refuse the score of a source-only version that overwrites the protected labels while it runs."""
+    archive = _archive(tmp_path, {"src/app.py": "pass\n", "eval/labels.csv": "1\n"})
+    judge = (
+        "import os, runpy\n"
+        "def score(repo_path):\n"
+        "    runpy.run_path(os.path.join(repo_path, 'src/app.py'))\n"
+        "    return {'score': float(open(os.path.join(repo_path, 'eval/labels.csv')).read()), 'feedback': 'labels read'}\n"
+    )
+    scorer = RepoScorer(
+        RepoWorkspace(
+            runtime=LocalSubprocessRuntime(),
+            spec=SandboxSpec(lifetime_seconds=120, network_disabled=True),
+            archive=archive,
+            editable_paths=["src"],
+            readonly_paths=[],
+            setup_command=None,
+            secrets={},
+            protected_paths=["eval"],
+        ),
+        judge,
+        timeout_seconds=60,
+    )
+    try:
+        assert scorer.score("")["score"] == pytest.approx(1.0)
+        cheat = _patch(tmp_path / "cheat", archive, {"src/app.py": "open('eval/labels.csv', 'w').write('99')\n"})
+        refused = scorer.dispatch({"candidate": cheat})
+        assert refused.status == 422
+        assert "'eval/labels.csv' is protected" in refused.body.decode()
+        assert scorer.score("")["score"] == pytest.approx(1.0)
+    finally:
+        scorer.close()
+
+
 def test_dispatch_answers_the_guest(scored: tuple[RepoScorer, Path, Path]) -> None:
     """The evaluator capability returns the score, or 422 with the reason."""
     scorer, archive, root = scored

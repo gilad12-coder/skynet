@@ -102,7 +102,8 @@ class RepoScorer:
 
         Raises:
             RepoScoreError: When the version breaks the path rules or does not
-                apply, or the scorer fails or returns no score.
+                apply, changes a protected file while it runs, or the scorer
+                fails or returns no score.
         """
         secrets = list(self._workspace.secrets.values())
         # Checkout and scoring share one lock: the next version's checkout
@@ -133,6 +134,9 @@ class RepoScorer:
                 )
             if result.timed_out:
                 raise RepoScoreError(f"The scorer exceeded its {self._timeout_seconds:g}s timeout.")
+            tampered = self._workspace.protected_changes()
+            if tampered:
+                raise RepoScoreError(" ".join(tampered))
             text = session.read_file(f"{CALLS_DIR}/{self._calls:06d}/{runner.OUTPUT_FILE}")
         if text is None:
             output = redact((result.stderr or result.stdout)[-2_000:], secrets)

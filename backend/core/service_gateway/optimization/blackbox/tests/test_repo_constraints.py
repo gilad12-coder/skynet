@@ -115,6 +115,7 @@ def test_the_file_cannot_widen_the_approved_editable_paths() -> None:
         (b"[network]\nallow = true\n", r"\[network\] is not a supported section"),
         (b"[paths]\nwritable = []\n", r"\[paths\] writable is not a supported setting"),
         (b'[paths]\nprotected = ["."]\n', "cannot protect the whole repository"),
+        (b"[paths]\neditable = []\n", r"\[paths\] editable is empty"),
         (b'[paths]\neditable = ["../outside"]\n', "must be relative and stay inside"),
         (b'[paths]\nprotected = [".git/hooks"]\n', "cannot name the .git folder"),
         (b"version = 2\n", "version 2 is not supported"),

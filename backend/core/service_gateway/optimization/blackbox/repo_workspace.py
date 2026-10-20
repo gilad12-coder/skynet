@@ -13,6 +13,7 @@ starts from a copy of that prepared tree and runs no setup of its own.
 
 from __future__ import annotations
 
+import json
 import shlex
 import threading
 from collections.abc import Iterable, Mapping
@@ -36,6 +37,37 @@ _GIT_NO_MAINTENANCE = "-c maintenance.auto=false -c gc.auto=0"
 _PROBE_TIMEOUT_SECONDS = 120.0
 _PROBE_ATTEMPTS = 5
 _PROBE_OK = "app-network-closed"
+_HASH_TIMEOUT_SECONDS = 300.0
+# Fingerprints every file under the protected paths. It runs with ``-I`` so a
+# module the version drops into the checkout cannot shadow ``hashlib``; links
+# and special files are recorded rather than followed or opened.
+_HASH_PROTECTED = r"""
+import hashlib, json, os, sys
+
+def digest(path):
+    if os.path.islink(path):
+        return "link:" + os.readlink(path)
+    if not os.path.isfile(path):
+        return "special"
+    sha = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            sha.update(block)
+    return sha.hexdigest()
+
+found = {}
+for top in sys.argv[1:]:
+    if os.path.isdir(top) and not os.path.islink(top):
+        for folder, folders, files in os.walk(top):
+            folders[:] = [name for name in folders if name != ".git"]
+            linked = [name for name in folders if os.path.islink(os.path.join(folder, name))]
+            for name in files + linked:
+                path = os.path.normpath(os.path.join(folder, name))
+                found[path] = digest(path)
+    elif os.path.lexists(top):
+        found[os.path.normpath(top)] = digest(top)
+print(json.dumps(found, sort_keys=True))
+"""
 
 
 class RepoSetupError(RuntimeError):
@@ -152,6 +184,9 @@ class RepoWorkspace:
         self._session: SandboxSession | None = None
         self._failure: BaseException | None = None
         self._setup_log = ""
+        # Held in the parent, not the box: a version's code can rewrite any
+        # copy of the tree inside the box, the prepared one included.
+        self._protected_baseline: dict[str, str] = {}
         self._lock = threading.Lock()
 
     @property
@@ -239,6 +274,35 @@ class RepoWorkspace:
         moved = session.run(f"mv {WORK_DIR} {PREPARED_DIR}", timeout_seconds=_SETUP_TIMEOUT_SECONDS)
         if not moved.ok:
             raise RepoSetupError(f"The prepared repository could not be kept: {_tail(moved)}")
+        if self._protected:
+            baseline = self._fingerprint(session, PREPARED_DIR)
+            if baseline is None:
+                raise RepoSetupError("The repository's protected files could not be fingerprinted.")
+            self._protected_baseline = baseline
+
+    def _fingerprint(self, session: SandboxSession, directory: str) -> dict[str, str] | None:
+        """Hash every file under the protected paths of one tree in the box.
+
+        Args:
+            session: The box holding the tree.
+            directory: The tree's folder, relative to the box.
+
+        Returns:
+            Repository-relative path to digest, or ``None`` when the hashing
+            command failed or printed something unreadable.
+        """
+        paths = " ".join(shlex.quote(path) for path in self._protected)
+        result = session.run(
+            f"cd {shlex.quote(directory)} && python3 -I -c {shlex.quote(_HASH_PROTECTED)} {paths}",
+            timeout_seconds=_HASH_TIMEOUT_SECONDS,
+        )
+        if not result.ok:
+            return None
+        try:
+            found = json.loads(result.stdout.strip().splitlines()[-1])
+        except (IndexError, ValueError):
+            return None
+        return found if isinstance(found, dict) else None
 
     def _cut_network(self, session: SandboxSession) -> None:
         """Switch the box offline and confirm it from inside before any version runs.
@@ -286,6 +350,34 @@ class RepoWorkspace:
             if not applied.ok:
                 return Checkout(path=None, problems=(f"The change does not apply cleanly: {_tail(applied)}",))
             return Checkout(path=WORK_DIR)
+
+    def protected_changes(self) -> tuple[str, ...]:
+        """Explain how the version that last ran changed the protected files.
+
+        The patch check only sees the files a version names; its code can
+        still write to the judge's files while it runs. Call this after the
+        scorer finishes and before its score is accepted.
+
+        Returns:
+            One reason per protected file added, changed or removed since
+            setup, or why they could not be checked; empty when untouched.
+        """
+        if not self._protected:
+            return ()
+        with self._lock:
+            current = self._fingerprint(self.session(), WORK_DIR)
+        if current is None:
+            return ("The protected files could not be checked after the version ran.",)
+        changed = sorted(
+            path
+            for path in set(self._protected_baseline) | set(current)
+            if self._protected_baseline.get(path) != current.get(path)
+        )
+        return tuple(
+            f"'{path}' is protected by the repository's optimize.toml ([paths] protected),"
+            " and the version's code changed it while it ran."
+            for path in changed
+        )
 
     def close(self) -> None:
         """Destroy the box."""

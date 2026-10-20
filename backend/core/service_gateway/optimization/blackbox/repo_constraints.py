@@ -204,6 +204,12 @@ def parse_constraints(raw: bytes) -> RepoConstraints:
     protected = _paths(paths, "protected") or ()
     if "." in protected:
         raise ConstraintsError(f"{CONSTRAINTS_FILE}: [paths] protected cannot protect the whole repository.")
+    editable = _paths(paths, "editable")
+    if editable == ():
+        raise ConstraintsError(
+            f"{CONSTRAINTS_FILE}: [paths] editable is empty, so no version could change anything."
+            " List at least one path, or remove the setting to keep the approved ones."
+        )
     invariants = instructions.get("invariants", [])
     if not isinstance(invariants, list) or len(invariants) > _MAX_INVARIANTS:
         raise ConstraintsError(
@@ -211,7 +217,7 @@ def parse_constraints(raw: bytes) -> RepoConstraints:
         )
     return RepoConstraints(
         sha256=hashlib.sha256(raw).hexdigest(),
-        editable_paths=_paths(paths, "editable"),
+        editable_paths=editable,
         protected_paths=protected,
         setup_command=_text(setup["command"], "[setup] command", _MAX_COMMAND_CHARS) if "command" in setup else None,
         intent=_text(instructions["intent"], "[instructions] intent", _MAX_INTENT_CHARS)

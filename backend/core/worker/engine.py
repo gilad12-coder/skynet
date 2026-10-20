@@ -933,9 +933,13 @@ class BackgroundWorker:
                             if inferred_setup is not None:
                                 self._record_setup_command(optimization_id, inferred_setup)
                             bind_repo_scorer(payload_dict, staged_repository, budget_gateway, owner_id=optimization_id)
-                            self._record_repo_environment(
+                            recorded = self._record_repo_environment(
                                 optimization_id, payload_dict["target"]["repo"][ENVIRONMENT_KEY]
                             )
+                            # Resume checks checkpoints against the stored payload,
+                            # which now holds what staging recorded.
+                            if recorded is not None:
+                                checkpoint_tracker["payload"] = dict(recorded)
                 if is_unified:
                     strip_unified_model_aliases(payload_dict)
                 if has_exposed_execution_credentials(
@@ -1499,7 +1503,7 @@ class BackgroundWorker:
             stored["target"]["setup_command"] = command
             self._job_store.update_job(optimization_id, payload=stored)
 
-    def _record_repo_environment(self, optimization_id: str, environment: dict[str, Any]) -> None:
+    def _record_repo_environment(self, optimization_id: str, environment: dict[str, Any]) -> dict[str, Any] | None:
         """Store the environment a repository run is held to on the run's own payload.
 
         The run then shows what it could and could not do, and a resumed run
@@ -1508,13 +1512,20 @@ class BackgroundWorker:
         Args:
             optimization_id: The repository run.
             environment: The effective environment worked out at staging.
+
+        Returns:
+            The run's stored payload after the update, or ``None`` when it
+            is not a repository payload.
         """
         stored = self._job_store.get_job(optimization_id).get("payload")
         target = stored.get("target") if isinstance(stored, dict) else None
         repo = target.get("repo") if isinstance(target, dict) else None
-        if isinstance(repo, dict) and repo.get(ENVIRONMENT_KEY) != environment:
+        if not isinstance(repo, dict):
+            return None
+        if repo.get(ENVIRONMENT_KEY) != environment:
             repo[ENVIRONMENT_KEY] = environment
             self._job_store.update_job(optimization_id, payload=stored)
+        return stored
 
     def _record_repo_commit(self, optimization_id: str, commit: str) -> None:
         """Store the commit a repository run was pinned to on the run's own payload.
