@@ -183,3 +183,7 @@ OPTIMIZER_REFLECTION_LM_KEY = "reflection_lm"
 OPTIMIZER_LOG_DIR_KEY = "log_dir"
 
 OPTIMIZER_NAME_GEPA = "gepa"
+
+# A worker that shuts down mid-run marks the run with this recovery cause; the
+# orphan sweep then requeues it without counting the restart as a failed attempt.
+WORKER_RESTART_CAUSE = "worker_restart"

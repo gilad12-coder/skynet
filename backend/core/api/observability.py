@@ -368,7 +368,7 @@ def advisory_lock(engine: Any, key: int) -> Iterator[bool]:
 
 
 class OrphanRecoverySweeper:
-    """Periodically fail jobs whose worker lease expired.
+    """Periodically requeue or fail jobs whose worker lease expired.
 
     The startup-only sweep in :func:`backend.core.api.app.lifespan` only fires
     once. If a worker dies mid-job after the fleet has booted, the lease ticks
