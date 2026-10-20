@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { chromeCellAction, shouldOfferRunPrompt, vapidKeyBytes } from "./push-state.ts";
+import { chromeCellAction, shouldSyncPush, vapidKeyBytes } from "./push-state.ts";
 
 test("vapidKeyBytes decodes urlsafe base64 without padding", () => {
   const bytes = new Uint8Array([0xfb, 0xff, 0xbf, 0x04, 0x41]);
@@ -16,12 +16,11 @@ test("vapidKeyBytes keeps the 65-byte uncompressed point length", () => {
   assert.equal(vapidKeyBytes(Buffer.from(point).toString("base64url")).length, 65);
 });
 
-test("the run prompt only shows to a never-asked browser the user has not declined", () => {
-  assert.equal(shouldOfferRunPrompt("default", false), true);
-  assert.equal(shouldOfferRunPrompt("default", true), false);
-  assert.equal(shouldOfferRunPrompt("granted", false), false);
-  assert.equal(shouldOfferRunPrompt("denied", false), false);
-  assert.equal(shouldOfferRunPrompt("unsupported", false), false);
+test("a run start re-saves the subscription only where the browser already granted", () => {
+  assert.equal(shouldSyncPush("granted"), true);
+  assert.equal(shouldSyncPush("default"), false);
+  assert.equal(shouldSyncPush("denied"), false);
+  assert.equal(shouldSyncPush("unsupported"), false);
 });
 
 test("a chrome cell subscribes first unless already subscribed or blocked", () => {

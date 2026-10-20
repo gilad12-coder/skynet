@@ -11,10 +11,14 @@ import {
   savePushSubscription,
 } from "@/shared/lib/api";
 
-import { vapidKeyBytes, type PushPermission, type PushSubscribeResult } from "./push-state";
+import {
+  shouldSyncPush,
+  vapidKeyBytes,
+  type PushPermission,
+  type PushSubscribeResult,
+} from "./push-state";
 
 const WORKER_URL = "/sw.js";
-const DECLINED_KEY = "app.push.declined";
 
 /** Whether this browser can do web push at all (secure context, SW, PushManager). */
 export function pushSupported(): boolean {
@@ -30,25 +34,6 @@ export function pushSupported(): boolean {
 /** The browser's notification permission, or "unsupported". */
 export function pushPermission(): PushPermission {
   return pushSupported() ? Notification.permission : "unsupported";
-}
-
-/** Whether the user said no to the after-run prompt in this browser. */
-export function pushDeclined(): boolean {
-  try {
-    return window.localStorage.getItem(DECLINED_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-/** Remember (or forget) a "no" to the after-run prompt. */
-export function setPushDeclined(declined: boolean): void {
-  try {
-    if (declined) window.localStorage.setItem(DECLINED_KEY, "1");
-    else window.localStorage.removeItem(DECLINED_KEY);
-  } catch {
-    // Storage blocked (private mode): the prompt may simply ask again.
-  }
 }
 
 async function registration(): Promise<ServiceWorkerRegistration> {
@@ -98,16 +83,18 @@ export async function subscribePush(): Promise<PushSubscribeResult> {
       subscription = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
     }
     await savePushSubscription(serialize(subscription));
-    setPushDeclined(false);
     return "subscribed";
   } catch {
     return "error";
   }
 }
 
-/** Re-save a subscription this browser already holds (it may belong to another account here). */
+/**
+ * Re-save a subscription this browser already holds (it may belong to another
+ * account here). Never asks for permission, so it is safe to call on any run start.
+ */
 export async function syncPushSubscription(): Promise<boolean> {
-  if (pushPermission() !== "granted") return false;
+  if (!shouldSyncPush(pushPermission())) return false;
   try {
     const subscription = await currentPushSubscription();
     if (!subscription) return false;
