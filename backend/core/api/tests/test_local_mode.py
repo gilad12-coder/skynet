@@ -282,6 +282,32 @@ def test_host_cli_proposer_is_refused_outside_local_mode(monkeypatch: pytest.Mon
     assert store.created_ids() == []
 
 
+def test_droid_is_not_a_host_cli_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Droid cannot run isolated, so the submit schema refuses it as a host proposer.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode.
+    """
+    client, store = _local_submit_client(monkeypatch, local_mode=True)
+
+    resp = client.post(
+        "/optimize",
+        json=unified_payload(
+            token_source="subscription",
+            models=_SUBSCRIPTION_MODELS,
+            optimizer={"choice": "gepa", "proposer": {"host_cli": "droid"}},
+        ),
+    )
+
+    assert resp.status_code == 422, resp.text
+    [issue] = [issue for issue in resp.json()["detail"] if issue["loc"][-1] == "host_cli"]
+    assert issue["loc"] == ["body", "optimizer", "proposer", "host_cli"]
+    assert "Droid is no longer supported" in issue["msg"]
+    assert store.created_ids() == []
+    schema = client.get("/openapi.json").json()["components"]["schemas"]["BlackboxProposer"]
+    assert schema["properties"]["host_cli"]["anyOf"][0]["enum"] == ["codex", "claude"]
+
+
 def test_docker_runtime_is_refused_outside_local_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     """A hosted deployment runs only Vercel sandboxes, so a Docker run gets 422.
 

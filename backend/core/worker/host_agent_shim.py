@@ -1,7 +1,7 @@
 """Guest side of a host-CLI proposer turn: ship the workspace out, apply the result.
 
-In local mode a proposer can run on the user's own coding CLI (Codex, Claude
-Code or Droid) instead of inside the sandbox. This shim is the proposer
+In local mode a proposer can run on the user's own coding CLI (Codex or Claude
+Code) instead of inside the sandbox. This shim is the proposer
 command the sandbox runs. It packs the current workspace, sends it to the
 parent's ``/v1/_host_agent`` capability with the token the parent minted for
 this proposer, and writes the tree that comes back over the workspace. The parent runs the CLI in a copy,

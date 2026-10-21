@@ -53,8 +53,8 @@ from core.worker import host_agent_shim
 STRIPPED = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY")
 RESET_EPOCH = 1_893_456_000
 
-# One fake for all three CLIs: it records how it was started, edits the copy,
-# and prints that CLI's JSON shape (shapes taken from real codex/claude/droid runs).
+# One fake for both CLIs: it records how it was started, edits the copy,
+# and prints that CLI's JSON shape (shapes taken from real codex/claude runs).
 FAKE_CLI = r"""
 import json, os, sys
 from pathlib import Path
@@ -62,8 +62,6 @@ from pathlib import Path
 cli = os.environ["FAKE_CLI_NAME"]
 argv = sys.argv[1:]
 prompt = sys.stdin.read()
-if "-f" in argv:
-    prompt = Path(argv[argv.index("-f") + 1]).read_text()
 Path(os.environ["FAKE_CLI_RECORD"]).write_text(json.dumps({
     "argv": argv,
     "cwd": os.getcwd(),
@@ -202,7 +200,6 @@ def local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
             "local_state_dir": str(tmp_path / "state"),
             "codex_bin": str(script),
             "claude_bin": str(script),
-            "droid_bin": str(script),
             "host_agent_timeout_seconds": 60,
         }
     )
@@ -767,9 +764,11 @@ def test_model_route_token_is_refused(gateway: ModelGateway, local: Settings, gu
     assert model_token != host_token
 
 
-def test_droid_is_refused(gateway: ModelGateway, local: Settings, guest: Path, tmp_path: Path) -> None:
-    """Droid cannot run isolated from the user's config, so it never becomes a host proposer."""
-    with pytest.raises(ValueError, match="isolated"):
+def test_a_cli_outside_the_host_options_is_refused(
+    gateway: ModelGateway, local: Settings, guest: Path, tmp_path: Path
+) -> None:
+    """Droid is not a host option; a stored payload that names it still never runs it."""
+    with pytest.raises(ValueError, match="Unknown host proposer"):
         bind_host_agent(gateway, local, cli="droid", permission="workspace_only")
     body = {"prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
 

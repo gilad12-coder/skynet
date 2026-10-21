@@ -175,11 +175,13 @@ def test_host_launch_ships_only_the_shim(cli: str, instructions: str, local: Set
     assert payload["env"]["APP_HOST_AGENT_TIMEOUT"] == "60"
 
 
-@pytest.mark.parametrize(("cli", "token", "message"), [("droid", "host", "isolated"), ("claude", None, "token")])
-def test_host_launch_refuses_droid_and_a_missing_token(
+@pytest.mark.parametrize(
+    ("cli", "token", "message"), [("droid", "host", "Unknown host CLI"), ("claude", None, "token")]
+)
+def test_host_launch_refuses_an_unknown_cli_and_a_missing_token(
     cli: str, token: str | None, message: str, local: Settings
 ) -> None:
-    """Droid is never a host proposer, and a launch without its host token is refused."""
+    """A CLI outside the host options (Droid) and a launch without its host token are refused."""
     with pytest.raises(ServiceError, match=message):
         build_launch(
             TARGET, GatewayConfig(url="https://gw.example/v1", api_key="k"), host_cli=cli, host_agent_token=token

@@ -1,7 +1,7 @@
 """Parent side of a host-CLI proposer turn, run on the user's own subscription.
 
-In local mode a black-box proposer can be the user's own coding CLI (Codex,
-Claude Code or Droid). The sandbox never reaches the CLI itself. Its shim
+In local mode a black-box proposer can be the user's own coding CLI (Codex
+or Claude Code). The sandbox never reaches the CLI itself. Its shim
 (:mod:`core.worker.host_agent_shim`) sends the workspace to the gateway's
 ``/v1/_host_agent`` capability. This module unpacks that archive into a fresh
 copy under ``local_state_dir``, runs the CLI there with provider API keys
@@ -69,10 +69,9 @@ from .runtime import PaidResult
 logger = logging.getLogger(__name__)
 
 HOST_AGENT_PATH = "/v1/_host_agent"
-HOST_CLIS: tuple[CliProvider, ...] = ("codex", "claude", "droid")
 # Droid has no flag that skips the user's own config, hooks and MCP servers,
-# so it cannot run isolated and is refused as a host proposer.
-ISOLATED_HOST_CLIS: tuple[CliProvider, ...] = ("codex", "claude")
+# so it cannot run isolated and is not a host proposer option.
+HOST_CLIS: tuple[CliProvider, ...] = ("codex", "claude")
 HostPermission = Literal["workspace_only", "full_access"]
 HOST_PERMISSIONS: tuple[HostPermission, ...] = ("workspace_only", "full_access")
 HOST_AGENT_TOKEN_KEY = "host_agent_token"
@@ -1088,8 +1087,8 @@ def run_host_agent(
     Returns:
         ``{status, result_tar_b64, usage, transcript_tail, error?}``.
     """
-    if cli not in ISOLATED_HOST_CLIS:
-        return _error(FAILED_KEY, f"The {cli} CLI cannot run isolated as a host proposer.")
+    if cli not in HOST_CLIS:
+        return _error(FAILED_KEY, f"Unknown host CLI {cli!r}.")
     if permission not in HOST_PERMISSIONS:
         return _error(FAILED_KEY, f"Unknown host permission {permission!r}.")
     try:
@@ -1290,16 +1289,12 @@ def bind_host_agent(gateway: ModelGateway, settings: Settings, *, cli: str, perm
         The token the host proposer's shim must present.
 
     Raises:
-        ValueError: Outside local mode, or for a CLI or permission that cannot run.
+        ValueError: Outside local mode, or for an unknown CLI or permission.
     """
     if not settings.local_mode:
         raise ValueError("Host agents are available only in local mode.")
     if cli not in HOST_CLIS or permission not in HOST_PERMISSIONS:
         raise ValueError(f"Unknown host proposer {cli!r} with permission {permission!r}.")
-    if cli not in ISOLATED_HOST_CLIS:
-        raise ValueError(
-            f"The {cli} CLI cannot run isolated from the user's own config, so it cannot be a host proposer."
-        )
     trusted_cli = cast(CliProvider, cli)
     trusted_permission = cast(HostPermission, permission)
     token = secrets.token_urlsafe(32)
