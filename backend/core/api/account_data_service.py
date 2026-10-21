@@ -47,6 +47,9 @@ from ..storage.models import (
     DatasetModel,
     DatasetShareGrantModel,
     DatasetShareLinkModel,
+    DesktopLinkCodeModel,
+    DesktopLinkModel,
+    DesktopTokenModel,
     GepaCheckpointModel,
     GridPairResultModel,
     JobEmbeddingModel,
@@ -507,6 +510,11 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(AgentConversationModel).where(AgentConversationModel.username == username))
 
     _run_delete(delete(ApiTokenModel).where(ApiTokenModel.username == username))
+    desktop_link_ids = list(session.scalars(select(DesktopLinkModel.id).where(DesktopLinkModel.username == username)))
+    if desktop_link_ids:
+        _run_delete(delete(DesktopTokenModel).where(DesktopTokenModel.link_id.in_(desktop_link_ids)))
+    _run_delete(delete(DesktopLinkModel).where(DesktopLinkModel.username == username))
+    _run_delete(delete(DesktopLinkCodeModel).where(DesktopLinkCodeModel.username == username))
     _run_delete(delete(UserIdentityModel).where(UserIdentityModel.username == username))
     _run_delete(delete(TwoFactorEmailCodeModel).where(TwoFactorEmailCodeModel.email == username))
     _run_delete(delete(WebAuthnCredentialModel).where(WebAuthnCredentialModel.user_email == username))
