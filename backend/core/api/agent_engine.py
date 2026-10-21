@@ -19,7 +19,10 @@ from ..storage.models import AgentEnginePreferenceModel
 from .model_catalog import is_removed_model
 from .model_router import _RETIRED_AUTO_ID
 
-AgentEngine = Literal["openrouter", "codex", "claude", "droid"]
+# Droid has no flag that skips the user's own config, hooks and MCP servers,
+# so it cannot run like the hosted setup and is not an engine option. A saved
+# "droid" row is unknown here and falls back to the default engine.
+AgentEngine = Literal["openrouter", "codex", "claude"]
 AGENT_ENGINES: tuple[AgentEngine, ...] = get_args(AgentEngine)
 OPENROUTER_ENGINE: AgentEngine = "openrouter"
 
@@ -45,12 +48,15 @@ def default_agent_engine() -> AgentEngine | None:
     """Return the engine a caller runs on before choosing one.
 
     Returns:
-        ``openrouter`` in hosted mode; in local mode the first ready CLI, or
-        ``None`` when no CLI is ready.
+        ``openrouter`` in hosted mode; in local mode the first ready engine
+        CLI, or ``None`` when none is ready.
     """
     if not settings.local_mode:
         return OPENROUTER_ENGINE
-    return next((status.id for status in probe_clis(settings) if _ready(status)), None)
+    return next(
+        (status.id for status in probe_clis(settings) if status.id in AGENT_ENGINES and _ready(status)),
+        None,
+    )
 
 
 def stored_agent_engine(job_store: object | None, username: str) -> AgentEngine | None:

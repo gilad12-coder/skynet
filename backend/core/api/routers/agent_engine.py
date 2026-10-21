@@ -19,8 +19,8 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 
 _ENGINE_DESCRIPTION = (
     "Which engine runs agent turns that pick no model: 'openrouter' (managed models), or a "
-    "subscription CLI on this machine: 'codex' (Codex CLI), 'claude' (Claude Code CLI) or "
-    "'droid' (Factory droid CLI). The CLIs run only in the Mac app, which cannot use 'openrouter'."
+    "subscription CLI on this machine: 'codex' (Codex CLI) or 'claude' (Claude Code CLI). "
+    "The CLIs run only in the Mac app, which cannot use 'openrouter'."
 )
 
 

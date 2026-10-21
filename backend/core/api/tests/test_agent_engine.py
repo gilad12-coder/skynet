@@ -156,7 +156,7 @@ def test_hosted_default_is_openrouter_without_a_database_read() -> None:
 
 
 @pytest.mark.usefixtures("hosted")
-@pytest.mark.parametrize("engine", ["codex", "claude", "droid"])
+@pytest.mark.parametrize("engine", ["codex", "claude"])
 def test_hosted_refuses_a_cli_engine(engine: str) -> None:
     """Refuse every CLI engine in hosted mode with the existing local-only error.
 
@@ -180,7 +180,9 @@ def test_local_default_is_the_first_ready_cli(local: list[CliStatus]) -> None:
     assert client.get("/account/agent-engine").json() == {"engine": "codex"}
     local[0] = _status("codex", logged_in=False)
     local[1] = _status("claude", rate_limited_until="2099-01-01T00:00:00Z")
-    assert client.get("/account/agent-engine").json() == {"engine": "droid"}
+    assert client.get("/account/agent-engine").json() == {"engine": None}
+    local[1] = _status("claude")
+    assert client.get("/account/agent-engine").json() == {"engine": "claude"}
     local[1] = _status("claude", version_ok=False)
     local[2] = _status("droid", path=None, logged_in=None, version_ok=False)
     assert client.get("/account/agent-engine").json() == {"engine": None}
@@ -200,6 +202,48 @@ def test_local_refuses_openrouter_and_unknown_engines() -> None:
     assert client.put("/account/agent-engine", json={"engine": "gemini"}).status_code == 422
     with Session(engine) as session:
         assert session.get(AgentEnginePreferenceModel, _USER) is None
+
+
+@pytest.mark.parametrize("mode", ["hosted", "local"])
+def test_droid_is_not_an_agent_engine(mode: str, request: pytest.FixtureRequest) -> None:
+    """Refuse droid as an engine: it cannot skip the user's config, hooks and MCP servers.
+
+    Args:
+        mode: The fixture that sets hosted or local mode.
+        request: Pytest request used to load that fixture.
+    """
+    request.getfixturevalue(mode)
+    engine = _engine()
+    client = _client(SimpleNamespace(engine=engine) if mode == "local" else _NoDatabase())
+    response = client.put("/account/agent-engine", json={"engine": "droid"})
+    assert response.status_code == 422
+    assert [issue["loc"] for issue in response.json()["detail"]] == [["body", "engine"]]
+    if mode == "local":
+        with Session(engine) as session:
+            assert session.get(AgentEnginePreferenceModel, _USER) is None
+    app = FastAPI()
+    app.include_router(create_agent_engine_router(job_store=None))
+    schemas = TestClient(app).get("/openapi.json").json()["components"]["schemas"]
+    assert schemas["AgentEngineUpdate"]["properties"]["engine"]["enum"] == ["openrouter", "codex", "claude"]
+
+
+def test_stored_droid_falls_back_to_the_default(local: list[CliStatus]) -> None:
+    """Run a saved droid setting on the first ready isolated CLI, never on droid.
+
+    Args:
+        local: The probe results, edited in place.
+    """
+    engine = _engine()
+    with Session(engine) as session:
+        session.add(AgentEnginePreferenceModel(username=_USER, engine="droid"))
+        session.commit()
+    store = SimpleNamespace(engine=engine)
+    assert _client(store).get("/account/agent-engine").json() == {"engine": "codex"}
+    assert agent_engine.engine_agent_model(store, _USER, None) == _CODEX_ID
+    local[0] = _status("codex", path=None)
+    local[1] = _status("claude", logged_in=False)
+    assert _client(store).get("/account/agent-engine").json() == {"engine": None}
+    assert agent_engine.engine_agent_model(store, _USER, None) is None
 
 
 @pytest.mark.usefixtures("local")
