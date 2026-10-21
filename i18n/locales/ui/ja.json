@@ -4319,5 +4319,7 @@
   "subscription.cli.droid": "Droid",
   "tagger.assist.local_key_needed": "Mac アプリでのタグ付けには、ご自身のプロバイダーキーが必要です。「自分のキー」からモデルを選んでください。",
   "submit.budget.local_note": "Mac アプリには支出上限がありません。各モデル呼び出しの料金は、ご自身のプロバイダーキーまたは CLI プランが支払います。",
-  "billing.mode.byok_hint_local": "モデルの料金はご自身のプロバイダーキーに請求されます。Mac アプリは手数料を請求しません。"
+  "billing.mode.byok_hint_local": "モデルの料金はご自身のプロバイダーキーに請求されます。Mac アプリは手数料を請求しません。",
+  "usage_tab.charged_local": "Mac アプリの残高",
+  "tooltip.usage_tab.charged_local": "これらの呼び出しが無料の Mac アプリ残高から使った額です。実際のお金ではありません。料金はプロバイダーがご自身のキーに請求します。"
 }

@@ -4319,5 +4319,7 @@
   "subscription.cli.droid": "Droid",
   "tagger.assist.local_key_needed": "在 Mac 应用中标注需要你自己的服务商密钥。请在“你自己的密钥”下选择模型。",
   "submit.budget.local_note": "Mac 应用不设支出上限。每次模型调用由你的服务商密钥或 CLI 套餐支付。",
-  "billing.mode.byok_hint_local": "模型费用计入你自己的服务商密钥。Mac 应用不收取任何费用。"
+  "billing.mode.byok_hint_local": "模型费用计入你自己的服务商密钥。Mac 应用不收取任何费用。",
+  "usage_tab.charged_local": "Mac 应用余额",
+  "tooltip.usage_tab.charged_local": "这些调用从免费的 Mac 应用余额中使用的金额。这不是真实的钱。服务商会向你自己的密钥计费。"
 }

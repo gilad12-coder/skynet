@@ -159,6 +159,29 @@ export function byokHintKey(
   return localMode ? "billing.mode.byok_hint_local" : "billing.mode.byok_hint";
 }
 
+/**
+ * The label of the run detail estimate row, or null to hide the row. The stored
+ * estimate forecasts a Skynet fee or charge, which a local run never pays in
+ * real money, so local mode hides it.
+ */
+export function runEstimateLabelKey(
+  tokenSource: string | null,
+  localMode: boolean,
+): "submit.summary.estimate_fee" | "submit.summary.estimate_cost" | null {
+  if (localMode) return null;
+  return tokenSource === "byok" ? "submit.summary.estimate_fee" : "submit.summary.estimate_cost";
+}
+
+/**
+ * The usage tab column that sits next to the provider column. The hosted label
+ * names a Skynet charge; the local build only draws on its free local balance.
+ */
+export function usageChargedKey(
+  localMode: boolean,
+): "usage_tab.charged" | "usage_tab.charged_local" {
+  return localMode ? "usage_tab.charged_local" : "usage_tab.charged";
+}
+
 /** A model config billed to the user's CLI subscription. */
 export function subscriptionModelConfig(name: string, cli: CliProvider): ModelConfig {
   return { name, token_source: "subscription", cli_provider: cli };

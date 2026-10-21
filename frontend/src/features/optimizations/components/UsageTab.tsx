@@ -25,6 +25,8 @@ import { ACTIVE_STATUSES } from "@/shared/constants/job-status";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { getRunUsage } from "@/shared/lib/api";
 import { formatBudgetUsd, formatCentsUsd } from "@/features/billing";
+import { usageChargedKey } from "@/features/local-runtime";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import type { OptimizationStatusResponse } from "@/shared/types/api";
 import { cn } from "@/shared/lib/utils";
 import { budgetPaceLine } from "../lib/budget-pace";
@@ -482,7 +484,7 @@ export function UsageTab({
     g.providerCents == null ? empty : formatCentsUsd(g.providerCents, locale);
   const empty = <span className="text-muted-foreground/50">{msg("common.empty")}</span>;
   const activity = (g: UsageGroup, value: string) => (g.nonModel ? empty : value);
-  const costLabel = splitCost ? msg("usage_tab.charged") : msg("usage_tab.col.cost");
+  const costKey = splitCost ? usageChargedKey(isLocalMode()) : "usage_tab.col.cost";
 
   return (
     <FadeIn>
@@ -533,9 +535,7 @@ export function UsageTab({
                       {msg(GROUPING_LABEL_KEYS[activeGrouping])}
                     </TableHead>
                     <TableHead className="text-end">
-                      <HelpTip text={tip(splitCost ? "usage_tab.charged" : "usage_tab.col.cost")}>
-                        {costLabel}
-                      </HelpTip>
+                      <HelpTip text={tip(costKey)}>{msg(costKey)}</HelpTip>
                     </TableHead>
                     {splitCost && (
                       <TableHead className="text-end" collapse="sm">

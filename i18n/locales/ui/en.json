@@ -4319,5 +4319,7 @@
   "settings.agent_local.role.tagger": "Tagging interview",
   "tagger.assist.local_key_needed": "Tagging in the Mac app needs your own provider key. Choose a model under Your own key.",
   "submit.budget.local_note": "The Mac app sets no spending limit. Your provider key or your CLI plan pays for each model call.",
-  "billing.mode.byok_hint_local": "The model is billed to your own provider key. The Mac app charges no fee."
+  "billing.mode.byok_hint_local": "The model is billed to your own provider key. The Mac app charges no fee.",
+  "usage_tab.charged_local": "Mac app balance",
+  "tooltip.usage_tab.charged_local": "What these calls took from the free Mac app balance. It is not real money. Your provider bills your own key."
 }

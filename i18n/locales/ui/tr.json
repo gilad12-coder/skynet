@@ -4319,5 +4319,7 @@
   "subscription.cli.droid": "Droid",
   "tagger.assist.local_key_needed": "Mac uygulamasında etiketleme için kendi sağlayıcı anahtarınız gerekir. «Kendi anahtarınız» altından bir model seçin.",
   "submit.budget.local_note": "Mac uygulaması harcama limiti koymaz. Her model çağrısını sağlayıcı anahtarınız veya CLI planınız öder.",
-  "billing.mode.byok_hint_local": "Model ücreti kendi sağlayıcı anahtarınıza yansıtılır. Mac uygulaması ücret almaz."
+  "billing.mode.byok_hint_local": "Model ücreti kendi sağlayıcı anahtarınıza yansıtılır. Mac uygulaması ücret almaz.",
+  "usage_tab.charged_local": "Mac uygulaması bakiyesi",
+  "tooltip.usage_tab.charged_local": "Bu çağrıların ücretsiz Mac uygulaması bakiyesinden aldığı tutar. Gerçek para değildir. Sağlayıcınız ücreti kendi anahtarınıza yansıtır."
 }

@@ -4319,5 +4319,7 @@
   "subscription.cli.droid": "Droid",
   "tagger.assist.local_key_needed": "Etiquetar na app para Mac precisa da sua própria chave de fornecedor. Escolha um modelo em «A sua própria chave».",
   "submit.budget.local_note": "A app para Mac não define limite de gastos. A sua chave de fornecedor ou o seu plano da CLI paga cada chamada ao modelo.",
-  "billing.mode.byok_hint_local": "O modelo é cobrado na sua própria chave de fornecedor. A app para Mac não cobra nenhuma taxa."
+  "billing.mode.byok_hint_local": "O modelo é cobrado na sua própria chave de fornecedor. A app para Mac não cobra nenhuma taxa.",
+  "usage_tab.charged_local": "Saldo da app para Mac",
+  "tooltip.usage_tab.charged_local": "O que estas chamadas usaram do saldo gratuito da app para Mac. Não é dinheiro real. O seu fornecedor cobra na sua própria chave."
 }

@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const {
   byokHintKey,
+  runEstimateLabelKey,
+  usageChargedKey,
   cliState,
   defaultAgentCli,
   hostCliPatch,
@@ -278,4 +281,32 @@ test("the proposer host CLI select starts at workspace only and clears on off", 
 test("the own-key hint names no platform fee in local mode", () => {
   assert.equal(byokHintKey(false), "billing.mode.byok_hint");
   assert.equal(byokHintKey(true), "billing.mode.byok_hint_local");
+});
+
+test("the run detail hides the fee estimate in local mode", () => {
+  assert.equal(runEstimateLabelKey("byok", false), "submit.summary.estimate_fee");
+  assert.equal(runEstimateLabelKey("managed", false), "submit.summary.estimate_cost");
+  assert.equal(runEstimateLabelKey(null, false), "submit.summary.estimate_cost");
+  assert.equal(runEstimateLabelKey("byok", true), null);
+  assert.equal(runEstimateLabelKey("managed", true), null);
+  assert.equal(runEstimateLabelKey(null, true), null);
+});
+
+test("the usage tab names no Skynet charge in local mode", () => {
+  assert.equal(usageChargedKey(false), "usage_tab.charged");
+  assert.equal(usageChargedKey(true), "usage_tab.charged_local");
+});
+
+test("the local English texts name no fee and no Skynet charge", () => {
+  const en = JSON.parse(
+    readFileSync(new URL("../../../../../i18n/locales/ui/en.json", import.meta.url), "utf8"),
+  ) as Record<string, string>;
+  for (const key of [
+    "billing.mode.byok_hint_local",
+    "usage_tab.charged_local",
+    "tooltip.usage_tab.charged_local",
+  ]) {
+    assert.ok(en[key], key);
+    assert.doesNotMatch(en[key], /platform fee|term\.appName|Skynet/, key);
+  }
 });
