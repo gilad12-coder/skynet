@@ -11,7 +11,9 @@ from __future__ import annotations
 import logging
 
 from ..config import settings
+from ..local.cli_catalog import CLI_MODELS, parse_subscription_model_id
 from ..models import ModelConfig
+from .errors import DomainError
 from .interview_model import interview_model_id
 from .model_catalog import (
     REASONING_EFFORTS,
@@ -60,7 +62,12 @@ def route_agent_model(model: str | None) -> ModelConfig:
     Raises:
         DomainError: 422 when an explicit id is not a catalog model.
     """
-    return ModelConfig(name=route_menu_model(model) or agent_model_id(settings.generalist_agent_model))
+    name = route_menu_model(model)
+    subscription = parse_subscription_model_id(name or "")
+    if subscription is not None:
+        cli, slug = subscription
+        return ModelConfig(name=slug, token_source="subscription", cli_provider=cli)
+    return ModelConfig(name=name or agent_model_id(settings.generalist_agent_model))
 
 
 def effective_reasoning_effort(model: str | None, requested: str | None) -> str | None:
@@ -131,12 +138,20 @@ def route_menu_model(model: str | None) -> str | None:
     Returns:
         The validated catalog id, the catalog default when none was picked
         (or a retired / withdrawn id was sent), or ``None`` when the catalog flags no default (the engine's
-        configured default runs).
+        configured default runs). In local mode a ``subscription/<cli>/<slug>``
+        id is returned as is.
 
     Raises:
-        DomainError: 422 when an explicit id is not a catalog model.
+        DomainError: 422 when an explicit id is not a catalog model, or names
+            a subscription model its CLI cannot run.
     """
     name = str(model or "").strip()
+    subscription = parse_subscription_model_id(name) if settings.local_mode else None
+    if subscription is not None:
+        cli, slug = subscription
+        if slug not in CLI_MODELS[cli]:
+            raise DomainError("billing.subscription_unmapped_model", status=422, provider=cli)
+        return name
     # Saved prefs and stored conversations may still name a withdrawn model;
     # run the default instead of failing every turn with a 422.
     if name and name != _RETIRED_AUTO_ID and not is_removed_model(name):

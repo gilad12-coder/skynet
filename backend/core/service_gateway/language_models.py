@@ -16,12 +16,15 @@ import httpx
 import litellm
 
 from ..api.model_catalog import default_effort_for
+from ..billing.cli_dispatch import local_subscription_route
 from ..billing.model_gateway import ROUTE_KEY, raise_gateway_stop
+from ..billing.operation_pricing import UnpricedOperationError
 from ..billing.pricing import ModelUsage
 from ..billing.runtime import UsagePendingError
 from ..billing.signals import BudgetReached
 from ..config import app_env, settings
 from ..exceptions import InfrastructureInterruptionError, ServiceError
+from ..local.cli_catalog import parse_subscription_model_id
 from ..models import ModelConfig
 
 try:
@@ -282,6 +285,7 @@ class LmUsageTotals:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
+    model_ms: int = 0
 
     def add_split(self, usage: object, split: tuple[int, int]) -> None:
         """Fold one call's input/output split and its cost evidence into the totals.
@@ -297,6 +301,7 @@ class LmUsageTotals:
         self.input_tokens += split[0]
         self.output_tokens += split[1]
         self.split_found = True
+        self.model_ms += _count(_field(usage, "model_ms"))
         cost = _usage_reported_cost(usage)
         if cost is not None:
             self.reported_cost_usd += cost
@@ -515,6 +520,29 @@ def lm_call_count(language_model: object) -> int | None:
     return len(history) if isinstance(history, list) else None
 
 
+def _apply_subscription_route(lm_kwargs: dict[str, object], config: ModelConfig) -> None:
+    """Point an API-side subscription model at the local CLI endpoint.
+
+    Args:
+        lm_kwargs: The ``dspy.LM`` kwargs assembled so far, mutated in place.
+        config: A ``token_source == "subscription"`` model config.
+
+    Raises:
+        ServiceError: Outside local mode, or when its CLI cannot run the model.
+    """
+    name = config.name.strip("/").removeprefix("openrouter/")
+    parsed = parse_subscription_model_id(name)
+    cli, slug = parsed if parsed is not None else (config.cli_provider, name)
+    try:
+        route = local_subscription_route(slug, cli, "agent")  # type: ignore[arg-type]
+    except UnpricedOperationError as error:
+        raise ServiceError(f"Failed to build language model '{config.name}': {error}") from error
+    lm_kwargs["model"] = f"litellm_proxy/{route['model']}"
+    lm_kwargs["base_url"] = route["url"]
+    lm_kwargs["api_key"] = route["token"]
+    lm_kwargs.pop("api_base", None)
+
+
 def build_language_model(config: ModelConfig, *, disable_cache: bool = False) -> dspy.LM:
     """Construct a DSPy language model from a ModelConfig.
 
@@ -569,6 +597,8 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
         if effort:
             lm_kwargs["reasoning_effort"] = effort
     budget_route = lm_kwargs.pop(ROUTE_KEY, None)
+    if budget_route is None and config.token_source == "subscription":
+        _apply_subscription_route(lm_kwargs, config)
     _apply_managed_gateway(lm_kwargs)
     _translate_gateway_reasoning(lm_kwargs)
     if disable_cache:
@@ -734,6 +764,10 @@ def _usage_reported_cost(usage: object) -> float | None:
     Returns:
         The call's full provider cost, or ``None`` when it was not reported.
     """
+    if _field(usage, "token_source") == "subscription":
+        # ``cost`` is the public list price, kept for the cost score; the
+        # user's own subscription paid for the call, so nothing is billed.
+        return 0.0
     cost = _field(usage, "cost")
     if isinstance(cost, bool) or not isinstance(cost, int | float) or cost < 0:
         return None
