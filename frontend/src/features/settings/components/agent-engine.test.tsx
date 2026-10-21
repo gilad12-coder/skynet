@@ -75,13 +75,11 @@ void describe("AgentEngineSelect", () => {
   });
 });
 
-// Each engine's mark, by its accessible name; Droid's is Factory's mark, found by
-// the start of its path.
+// Each engine's mark, by its accessible name.
 const BRAND: Record<AgentEngine, RegExp[]> = {
   codex: [/aria-label="Codex"/],
   claude: [/aria-label="Claude Code"/],
   openrouter: [/aria-label="OpenRouter"/],
-  droid: [/aria-label="Droid"/, /<path d="M321\.997 150\.712C/],
 };
 
 function assertLogo(html: string, engine: AgentEngine) {
@@ -92,8 +90,8 @@ function assertLogo(html: string, engine: AgentEngine) {
 
 void describe("engine logos", () => {
   void it("the selected value shows the engine's logo next to its name", () => {
-    for (const engine of ["codex", "claude", "droid"] as const) {
-      const html = render(true, engine, status([cli("codex"), cli("claude"), cli("droid")]));
+    for (const engine of ["codex", "claude"] as const) {
+      const html = render(true, engine, status([cli("codex"), cli("claude")]));
       assertLogo(html, engine);
       assert.match(html, new RegExp(`subscription\\.cli\\.${engine}`));
     }
@@ -102,21 +100,32 @@ void describe("engine logos", () => {
 
   void it("every menu choice shows its logo, also when it is disabled", () => {
     setClientLocale("en");
-    const s = status([cli("codex"), cli("claude"), cli("droid", { logged_in: false })]);
+    const s = status([cli("codex"), cli("claude", { logged_in: false })]);
     const options = agentEngineOptions(s, true);
     assert.deepEqual(
       options.map((o) => o.engine),
-      ["codex", "claude", "droid", "openrouter"],
+      ["codex", "claude", "openrouter"],
     );
     for (const option of options) {
       const html = renderToStaticMarkup(<EngineChoice option={option} status={s} failed={false} />);
       assertLogo(html, option.engine);
-      if (option.engine === "droid") {
+      if (option.engine === "claude") {
         assert.equal(option.disabled, true);
         assert.match(html, /subscription\.state\.logged_out/);
-        assert.match(html, /<code[^>]*>droid<\/code>/);
+        assert.match(html, /<code[^>]*>claude auth login<\/code>/);
       }
     }
+  });
+
+  void it("offers no Droid choice, even when an older backend reports it", () => {
+    setClientLocale("en");
+    const droid = { ...cli("codex"), id: "droid" } as unknown as CliStatus;
+    const s = status([cli("codex"), cli("claude"), droid]);
+    assert.deepEqual(
+      agentEngineOptions(s, true).map((o) => o.engine),
+      ["codex", "claude", "openrouter"],
+    );
+    assert.doesNotMatch(render(true, "codex", s), /droid/i);
   });
 });
 
@@ -189,7 +198,7 @@ void describe("loadAgentEngine", () => {
       let answer: (res: Response) => void = () => {};
       globalThis.fetch = (async (url: string, init?: RequestInit) => {
         if (init?.method === "PUT") {
-          return new Response(JSON.stringify({ engine: "droid" }), {
+          return new Response(JSON.stringify({ engine: "codex" }), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
@@ -197,22 +206,48 @@ void describe("loadAgentEngine", () => {
         if (String(url).endsWith("/account/agent-engine")) {
           return new Promise<Response>((resolve) => (answer = resolve));
         }
-        return new Response(JSON.stringify(status([cli("claude"), cli("droid")])), {
+        return new Response(JSON.stringify(status([cli("claude"), cli("codex")])), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
       }) as typeof fetch;
       await loadLocalStatus(true);
       const refreshing = loadAgentEngine();
-      assert.equal(await saveAgentEngine("droid"), "droid");
+      assert.equal(await saveAgentEngine("codex"), "codex");
       answer(
         new Response(JSON.stringify({ engine: "claude" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
       );
-      assert.equal(await refreshing, "droid");
-      assert.equal(peekAgentEngine(), "droid");
+      assert.equal(await refreshing, "codex");
+      assert.equal(peekAgentEngine(), "codex");
+    } finally {
+      globalThis.fetch = realFetch;
+      if (realLocal === undefined) delete process.env.APP_LOCAL_MODE;
+      else process.env.APP_LOCAL_MODE = realLocal;
+    }
+  });
+
+  void it("a saved Droid engine falls back to the default CLI", async () => {
+    const realFetch = globalThis.fetch;
+    const realLocal = process.env.APP_LOCAL_MODE;
+    process.env.APP_LOCAL_MODE = "1";
+    globalThis.fetch = (async (url: string) => {
+      const body = String(url).endsWith("/account/agent-engine")
+        ? { engine: "droid" }
+        : status([cli("claude", { logged_in: false }), cli("codex")]);
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      await loadLocalStatus(true);
+      assert.equal(await loadAgentEngine(), null);
+      assert.equal(peekAgentEngine(), null);
+      // With no engine, every role runs on the first ready CLI.
+      assert.match((await localAgentModel(null, null)) ?? "", /^subscription\/codex\//);
     } finally {
       globalThis.fetch = realFetch;
       if (realLocal === undefined) delete process.env.APP_LOCAL_MODE;
@@ -229,7 +264,7 @@ void describe("loadAgentEngine", () => {
     globalThis.fetch = (async (url: string) => {
       if (String(url).endsWith("/account/agent-engine")) {
         return new Response(
-          JSON.stringify(engineFails ? { detail: "boom" } : { engine: "droid" }),
+          JSON.stringify(engineFails ? { detail: "boom" } : { engine: "codex" }),
           {
             status: engineFails ? 500 : 200,
             headers: { "Content-Type": "application/json" },
@@ -238,7 +273,7 @@ void describe("loadAgentEngine", () => {
       }
       const s = status([
         cli("claude", { models: ["claude-sonnet"] }),
-        cli("droid", { models: ["glm-4"] }),
+        cli("codex", { models: ["openai/gpt-5"] }),
       ]);
       return new Response(JSON.stringify(s), {
         status: 200,
@@ -247,13 +282,13 @@ void describe("loadAgentEngine", () => {
     }) as typeof fetch;
     try {
       await loadLocalStatus(true);
-      assert.equal(await loadAgentEngine(), "droid");
-      assert.match((await localAgentModel(null, null)) ?? "", /^subscription\/droid\//);
+      assert.equal(await loadAgentEngine(), "codex");
+      assert.match((await localAgentModel(null, null)) ?? "", /^subscription\/codex\//);
       // The status cache expires, so the next request refreshes it and reloads the engine.
       engineFails = true;
       Date.now = () => realNow() + 60_000;
-      assert.match((await localAgentModel(null, null)) ?? "", /^subscription\/droid\//);
-      assert.equal(peekAgentEngine(), "droid");
+      assert.match((await localAgentModel(null, null)) ?? "", /^subscription\/codex\//);
+      assert.equal(peekAgentEngine(), "codex");
     } finally {
       globalThis.fetch = realFetch;
       Date.now = realNow;

@@ -259,20 +259,15 @@ test("a request with no model pick sends the first model of the signed-in CLI", 
 test("the default agent CLI prefers ready, then installed, then Claude Code", () => {
   const now = new Date("2026-10-21T10:00:00Z");
   const codex = cli({ id: "codex" });
-  const droid = cli({ id: "droid" });
   assert.equal(defaultAgentCli(status([cli({ path: null }), codex]), null, now), "codex");
   // A ready CLI wins over an installed one listed before it.
   assert.equal(
-    defaultAgentCli(
-      status([cli({ path: null }), { ...droid, logged_in: false }, codex]),
-      null,
-      now,
-    ),
-    "codex",
+    defaultAgentCli(status([{ ...codex, logged_in: false }, cli()]), null, now),
+    "claude",
   );
   assert.equal(
-    defaultAgentCli(status([cli({ path: null }), { ...droid, logged_in: false }]), null, now),
-    "droid",
+    defaultAgentCli(status([cli({ path: null }), { ...codex, logged_in: false }]), null, now),
+    "codex",
   );
   assert.equal(defaultAgentCli(status([cli({ path: null })]), null, now), "claude");
   assert.equal(defaultAgentCli(null, null, now), "claude");
@@ -282,7 +277,10 @@ test("a CLI agent engine is the default CLI for every role, even when not ready"
   const now = new Date("2026-10-21T10:00:00Z");
   const ready = status([cli(), cli({ id: "codex", logged_in: false })]);
   assert.equal(defaultAgentCli(ready, "codex", now), "codex");
-  assert.equal(defaultAgentCli(null, "droid", now), "droid");
+  assert.equal(defaultAgentCli(null, "codex", now), "codex");
+  // A saved Droid engine is no longer a choice, so the CLI default stays.
+  assert.equal(defaultAgentCli(ready, "droid" as never, now), "claude");
+  assert.equal(isAgentEngine("droid"), false);
   // OpenRouter cannot run local agents, so the CLI default stays.
   assert.equal(defaultAgentCli(ready, "openrouter", now), "claude");
   assert.equal(isAgentEngine("codex"), true);
@@ -331,7 +329,6 @@ test("hosted builds offer only OpenRouter; local builds offer ready CLIs", () =>
     [
       ["codex", false],
       ["claude", true],
-      ["droid", true],
       ["openrouter", true],
     ],
   );
@@ -343,7 +340,6 @@ test("hosted builds offer only OpenRouter; local builds offer ready CLIs", () =>
     kind: "logged_out",
     hint: "Run `claude auth login` in a terminal.",
   });
-  assert.deepEqual(state("droid"), { kind: "missing" });
   // While the status loads, every CLI waits and none can be picked.
   for (const option of agentEngineOptions(null, true, now)) {
     assert.equal(option.disabled, true);
