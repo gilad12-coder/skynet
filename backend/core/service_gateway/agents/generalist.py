@@ -2404,8 +2404,9 @@ def _build_local_summary_lm(turn_config: ModelConfig | None) -> Any | None:
     if turn_config.token_source == TOKEN_SOURCE_BYOK:
         model = interview_model_id() or agent_model_id()
         # Keep the saved key, endpoint and connection params; drop the turn's
-        # own effort, which a label must not think with.
-        extra = {k: v for k, v in turn_config.extra.items() if k != "reasoning_effort"}
+        # own effort and any connection reasoning knobs, which a label must
+        # not think with.
+        extra = {k: v for k, v in turn_config.extra.items() if k not in {"reasoning_effort", "reasoning", "thinking"}}
         # A connection's own reasoning body would make the label think; only
         # the no-thinking settings below may set it.
         if isinstance(extra.get("extra_body"), dict):

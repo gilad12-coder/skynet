@@ -123,6 +123,26 @@ async def test_local_summary_drops_the_connection_reasoning_body(
     assert turn.extra["extra_body"]["reasoning"] == {"effort": "high"}
 
 
+async def test_local_summary_drops_the_connection_top_level_reasoning(
+    built: list[ModelConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep a saved connection's top-level ``reasoning`` and ``thinking`` params out of the label."""
+    monkeypatch.setattr(generalist, "_no_thinking_extra", lambda model: {"reasoning_effort": "none"})
+    turn = _byok_turn()
+    turn.extra["reasoning"] = {"effort": "high"}
+    turn.extra["thinking"] = {"type": "enabled", "budget_tokens": 4096}
+    summaries = generalist._thinking_summaries("English", asyncio.Queue(), [], turn)
+
+    assert await summaries._summarize(REASONING) == generalist._clean_summary(LABEL)
+    summary = built[0]
+    assert summary.extra["reasoning_effort"] == "none"
+    assert "reasoning" not in summary.extra
+    assert "thinking" not in summary.extra
+    # The turn keeps its own params.
+    assert turn.extra["reasoning"] == {"effort": "high"}
+    assert turn.extra["thinking"] == {"type": "enabled", "budget_tokens": 4096}
+
+
 async def test_local_turn_labels_thinking_on_its_own_saved_key(
     built: list[ModelConfig], monkeypatch: pytest.MonkeyPatch
 ) -> None:
