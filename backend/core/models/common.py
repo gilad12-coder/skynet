@@ -59,12 +59,28 @@ class ModelConfig(BaseModel):
     """Configuration block for language-model/backbone selection."""
 
     name: str
-    token_source: Literal["managed", "byok"] | None = None
+    token_source: Literal["managed", "byok", "subscription"] | None = None
     byok_provider: str | None = None
+    cli_provider: Literal["codex", "claude", "droid"] | None = None
     base_url: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=1)
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _require_cli_for_subscription(self) -> ModelConfig:
+        """Reject a subscription model that names no CLI to run it.
+
+        Returns:
+            The validated model config.
+
+        Raises:
+            ValueError: When ``token_source`` is ``"subscription"`` and
+                ``cli_provider`` is unset.
+        """
+        if self.token_source == "subscription" and self.cli_provider is None:
+            raise ValueError("A subscription model needs cli_provider (codex, claude or droid).")
+        return self
 
     def normalized_identifier(self) -> str:
         """Return the LiteLLM identifier with any leading or trailing slashes stripped.

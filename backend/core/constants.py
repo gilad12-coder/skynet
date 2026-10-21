@@ -158,6 +158,10 @@ OPTIMIZATION_TYPE_TAGGING = "tagging_autotag"
 # own provider key and is never billed.
 TOKEN_SOURCE_MANAGED = "managed"
 TOKEN_SOURCE_BYOK = "byok"
+# "subscription" runs on the user's own logged-in coding CLI (local mode only)
+# and is never billed.
+TOKEN_SOURCE_SUBSCRIPTION = "subscription"
+CLI_PROVIDERS = ("codex", "claude", "droid")
 
 PAYLOAD_OVERVIEW_TOTAL_PAIRS = "total_pairs"
 PAYLOAD_OVERVIEW_GENERATION_MODELS = "generation_models"

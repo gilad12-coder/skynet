@@ -281,6 +281,8 @@ class BlackboxProposer(BaseModel):
     ralph: bool = True
     max_no_eval_seconds: float | None = Field(default=None, gt=0, le=7_200)
     max_tool_calls: int = Field(default=100, ge=1, le=1000)
+    host_cli: Literal["codex", "claude", "droid"] | None = None
+    host_permission: Literal["workspace_only", "full_access"] = "workspace_only"
 
     @model_validator(mode="after")
     def _ensure_launchable(self) -> BlackboxProposer:
@@ -405,7 +407,7 @@ class BlackboxRunRequest(BaseModel):
     budget: BlackboxBudget = Field(default_factory=BlackboxBudget)
     strategy: BlackboxStrategy = Field(default_factory=BlackboxStrategy)
     target: BlackboxTarget = Field(default_factory=BlackboxTarget)
-    proposer_runtime: Literal["vercel"] = "vercel"
+    proposer_runtime: Literal["vercel", "docker"] = "vercel"
     proposer: BlackboxProposer = Field(default_factory=BlackboxProposer)
     task_model_settings: ModelConfig | None = Field(default=None, alias="task_model_config")
     reflection_model_settings: ModelConfig = Field(alias="reflection_model_config")
@@ -418,7 +420,7 @@ class BlackboxRunRequest(BaseModel):
         max_length=BLACKBOX_MAX_EXTRA_REFLECTION_MODELS,
     )
     shinka: BlackboxShinkaSettings | None = None
-    token_source: Literal["managed", "byok"] = "managed"
+    token_source: Literal["managed", "byok", "subscription"] = "managed"
     is_private: bool = False
     economy_mode: bool = Field(
         default=False,

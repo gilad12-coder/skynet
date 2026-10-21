@@ -38,6 +38,10 @@ VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 86_400
 ENV_PREFIX = "APP_"
 LEGACY_ENV_PREFIX = "SKYNET_"
 
+# main.run_server binds API_HOST (default 0.0.0.0); local mode must stay
+# reachable from this machine only.
+LOCAL_MODE_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
 
 def legacy_env_name(name: str) -> str:
     """Return the pre-rename ``SKYNET_*`` spelling of an ``APP_*`` variable.
@@ -182,6 +186,77 @@ class Settings(BaseSettings):
         alias="PREVIEW_GRANT_CENTS",
         description="One-time credit each new account gets in a PR preview environment, so automated "
         "checks can pay for a run there. Ignored outside preview environments.",
+    )
+    local_mode: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("APP_LOCAL_MODE", "SKYNET_LOCAL_MODE"),
+        description="Run as a single-user app on this machine (the Mac app). Never valid on a hosted deployment.",
+    )
+    local_state_dir: str = Field(
+        default="",
+        validation_alias=AliasChoices("APP_LOCAL_STATE_DIR", "SKYNET_LOCAL_STATE_DIR"),
+        description="Directory for local-mode state files, such as CLI rate-limit records.",
+    )
+    local_grant_cents: int = Field(
+        default=100_000_000,
+        ge=0,
+        validation_alias=AliasChoices("APP_LOCAL_GRANT_CENTS", "SKYNET_LOCAL_GRANT_CENTS"),
+        description="Credit the local user gets in local mode, so budget checks never block a run.",
+    )
+    local_user_email: str = Field(
+        default="local@skynet.local",
+        validation_alias=AliasChoices("APP_LOCAL_USER_EMAIL", "SKYNET_LOCAL_USER_EMAIL"),
+        description="Email of the single local-mode user.",
+    )
+    local_sandbox_image: str = Field(
+        default="",
+        pattern=r"^(sha256:[0-9a-f]{64})?$",
+        validation_alias=AliasChoices("APP_LOCAL_SANDBOX_IMAGE", "SKYNET_LOCAL_SANDBOX_IMAGE"),
+        description="Docker image id (sha256:<64 hex>) of the local proposer sandbox. Empty means not built.",
+    )
+    docker_bin: str = Field(
+        default="docker",
+        validation_alias=AliasChoices("APP_DOCKER_BIN", "SKYNET_DOCKER_BIN"),
+        description="Docker CLI used by local mode.",
+    )
+    codex_bin: str = Field(
+        default="codex",
+        validation_alias=AliasChoices("APP_CODEX_BIN", "SKYNET_CODEX_BIN"),
+        description="Codex CLI used for subscription calls in local mode.",
+    )
+    claude_bin: str = Field(
+        default="claude",
+        validation_alias=AliasChoices("APP_CLAUDE_BIN", "SKYNET_CLAUDE_BIN"),
+        description="Claude Code CLI used for subscription calls in local mode.",
+    )
+    droid_bin: str = Field(
+        default="droid",
+        validation_alias=AliasChoices("APP_DROID_BIN", "SKYNET_DROID_BIN"),
+        description="Factory Droid CLI used for subscription calls in local mode.",
+    )
+    cli_max_concurrency: int = Field(
+        default=2,
+        ge=1,
+        le=16,
+        validation_alias=AliasChoices("APP_CLI_MAX_CONCURRENCY", "SKYNET_CLI_MAX_CONCURRENCY"),
+        description="Most CLI subscription calls that run at the same time in local mode.",
+    )
+    cli_fallback_order: str = Field(
+        default="",
+        validation_alias=AliasChoices("APP_CLI_FALLBACK", "SKYNET_CLI_FALLBACK"),
+        description="Comma-separated CLIs to try, in order, when a CLI is rate limited. Empty disables fallback.",
+    )
+    cli_call_timeout_seconds: float = Field(
+        default=600.0,
+        gt=0,
+        validation_alias=AliasChoices("APP_CLI_CALL_TIMEOUT", "SKYNET_CLI_CALL_TIMEOUT"),
+        description="Wall-clock limit for one CLI subscription model call.",
+    )
+    host_agent_timeout_seconds: float = Field(
+        default=3600.0,
+        gt=0,
+        validation_alias=AliasChoices("APP_HOST_AGENT_TIMEOUT", "SKYNET_HOST_AGENT_TIMEOUT"),
+        description="Wall-clock limit for one host CLI proposer session.",
     )
     smtp_host: str | None = Field(
         default=None,
@@ -1378,6 +1453,32 @@ class Settings(BaseSettings):
         if not self.generalist_agent_mcp_url:
             host = "127.0.0.1" if self.host in ("0.0.0.0", "") else self.host
             self.generalist_agent_mcp_url = f"http://{host}:{self.port}/mcp/"
+        return self
+
+    @model_validator(mode="after")
+    def _guard_local_mode(self) -> Settings:
+        """Refuse local mode on any hosted or network-reachable deployment.
+
+        Local mode grants a large credit, skips budget checks and signs in a
+        single user without a password. On a hosted deployment that would give
+        every caller free spend, so the app must not start.
+
+        Returns:
+            The settings instance, unchanged.
+
+        Raises:
+            ValueError: When local mode is on and the process runs on Railway,
+                in a PR preview, or binds a non-loopback API_HOST.
+        """
+        if not self.local_mode:
+            return self
+        if self.railway_environment_name:
+            raise ValueError("APP_LOCAL_MODE is not allowed on a Railway deployment")
+        if self.is_preview_environment:
+            raise ValueError("APP_LOCAL_MODE is not allowed in a preview environment")
+        api_host = os.environ.get("API_HOST", "0.0.0.0")
+        if api_host not in LOCAL_MODE_LOOPBACK_HOSTS:
+            raise ValueError(f"APP_LOCAL_MODE requires a loopback API_HOST, got {api_host!r}")
         return self
 
     @property

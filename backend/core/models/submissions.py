@@ -108,7 +108,7 @@ class _OptimizationRequestBase(BaseModel):
         default=False,
         description="When true, the optimization is excluded from the public explore page.",
     )
-    token_source: Literal["managed", "byok"] = Field(
+    token_source: Literal["managed", "byok", "subscription"] = Field(
         default="managed",
         description=(
             f"How model calls are billed: 'managed' charges the marked-up provider cost to the {APP_NAME} balance; "
