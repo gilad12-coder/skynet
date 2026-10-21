@@ -88,8 +88,6 @@ class I18nKey(StrEnum):
     CONNECTORS_UNREACHABLE = 'connectors.unreachable'
     CONNECTORS_VAULT_NOT_CONFIGURED = 'connectors.vault_not_configured'
     CONTINUOUS_ALREADY_ENABLED = 'continuous.already_enabled'
-    CONTINUOUS_CHECK_BUSY = 'continuous.check_busy'
-    CONTINUOUS_CHECK_PAUSED = 'continuous.check_paused'
     CONTINUOUS_CHECK_STUCK = 'continuous.check_stuck'
     CONTINUOUS_NO_TEST_SPLIT = 'continuous.no_test_split'
     CONTINUOUS_NOT_ELIGIBLE = 'continuous.not_eligible'

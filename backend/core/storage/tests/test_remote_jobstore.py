@@ -19,6 +19,7 @@ import inspect
 import pickle
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -29,15 +30,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import core.api.observability as observability_mod
 import core.storage.remote as remote_mod
 from core.billing.budgets import BudgetService
-from core.constants import OPTIMIZATION_TYPE_TAGGING
+from core.constants import OPTIMIZATION_TYPE_TAGGING, WORKER_RESTART_CAUSE
 from core.storage.base import JobStore
 from core.storage.models import (
     Base,
     BillingCustomerModel,
     ExecutionBudgetModel,
     ExecutionOperationModel,
+    GepaCheckpointModel,
     JobModel,
     OptimizationShareGrantModel,
     WalletLedgerModel,
@@ -922,10 +925,10 @@ def test_count_jobs_zero_when_empty(store: SQLiteJobStore) -> None:
     assert store.count_jobs() == 0
 
 
-def test_recover_orphaned_jobs_fails_running_job_with_checkpoint(
+def test_recover_orphaned_jobs_resumes_running_job_with_checkpoint(
     store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An orphaned run stays failed even when a checkpoint could resume it.
+    """An orphaned funded run with a checkpoint is requeued to resume, counting one attempt.
 
     Args:
         store: Disposable job store.
@@ -936,11 +939,450 @@ def test_recover_orphaned_jobs_fails_running_job_with_checkpoint(
     _fund_checkpoint(store, "r1", monkeypatch)
     assert store.recover_orphaned_jobs() == 1
     job = store.get_job("r1")
+    assert job["status"] == "pending"
+    assert job["attempts"] == 1
+    assert job["recovery"] is None
+    assert job["stop_reason"] is None
+    assert job["completed_at"] is None
+    assert job["message"] == "Resuming after a worker restart"
+    assert store.get_gepa_checkpoint("r1") is not None
+
+
+@pytest.mark.parametrize("status", ["running", "validating"])
+def test_recover_orphaned_jobs_resumes_worker_restart_without_an_attempt(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """A run released by a graceful worker shutdown resumes without using an attempt.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+        status: Active status the shutdown interrupted.
+    """
+    store.create_job("restart")
+    store.update_job(
+        "restart",
+        status=status,
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    _fund_checkpoint(store, "restart", monkeypatch)
+    assert store.recover_orphaned_jobs() == 1
+    job = store.get_job("restart")
+    assert job["status"] == "pending"
+    assert job["attempts"] == 0
+
+
+def _bill_run_call(service: BudgetService, username: str, budget_id: str, key: str, cents: int) -> None:
+    """Settle one run-phase model call of the first execution generation.
+
+    Args:
+        service: Authoritative budget service.
+        username: Run owner.
+        budget_id: Attached run envelope.
+        key: Operation identity.
+        cents: Actual charge.
+    """
+    operation = service.reserve(
+        budget_id,
+        username,
+        operation_key=key,
+        generation=0,
+        phase="run",
+        cost_kind="model",
+        request_fingerprint=key,
+        price_snapshot={"version": "fixture-v1"},
+        max_cents=cents,
+    )
+    service.mark_dispatched(operation.id, username)
+    service.settle(operation.id, username, evidence_key=key, actual_cents=cents, evidence={"usage": key})
+
+
+def _balance_of(store: SQLiteJobStore, username: str) -> int:
+    """Read one account's paid balance.
+
+    Args:
+        store: Private fixture database.
+        username: Account owner.
+
+    Returns:
+        Paid balance in cents.
+    """
+    with Session(store.engine) as session:
+        return session.get(BillingCustomerModel, username).balance_cents
+
+
+def test_recover_orphaned_jobs_does_not_charge_work_the_resume_repeats(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Work billed after the last checkpoint runs again on resume, so its charge is returned.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+    """
+    store.create_job("redo")
+    store.update_job(
+        "redo",
+        status="running",
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    service = _fund_checkpoint(store, "redo", monkeypatch)
+    budget_id = store.get_job("redo")["execution_budget_id"]
+    _bill_run_call(service, "resume-owner", budget_id, "before-checkpoint", 2)
+    time.sleep(0.01)
+    with Session(store.engine) as session:
+        session.query(GepaCheckpointModel).filter_by(optimization_id="redo").update({"updated_at": datetime.now(UTC)})
+        session.commit()
+    time.sleep(0.01)
+    _bill_run_call(service, "resume-owner", budget_id, "after-checkpoint", 3)
+    assert _balance_of(store, "resume-owner") == 45
+
+    assert store.recover_orphaned_jobs() == 1
+    assert store.recover_orphaned_jobs() == 0
+
+    assert store.get_job("redo")["status"] == "pending"
+    assert _balance_of(store, "resume-owner") == 48
+    assert service.get(budget_id, "resume-owner").billed_cents == 2
+
+
+def test_recover_orphaned_jobs_does_not_charge_a_restart_from_the_beginning(store: SQLiteJobStore) -> None:
+    """A run with no checkpoint repeats all its interrupted work, so all of that charge is returned.
+
+    Args:
+        store: Disposable job store.
+    """
+    store.create_job("again")
+    store.update_job("again", status="validating")
+    service = _fund_without_checkpoint(store, "again")
+    budget_id = store.get_job("again")["execution_budget_id"]
+    _bill_run_call(service, "restart-owner", budget_id, "lost", 4)
+
+    assert store.recover_orphaned_jobs() == 1
+
+    assert store.get_job("again")["status"] == "pending"
+    assert _balance_of(store, "restart-owner") == 50
+
+
+def test_recover_orphaned_jobs_unpins_a_pinned_run_for_any_live_worker(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run pinned to a sandbox image is claimable by workers of any version after recovery.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+    """
+    store.create_job("pinned")
+    store.update_job("pinned", status="running")
+    _fund_checkpoint(store, "pinned", monkeypatch)
+    store.pin_sandbox_image("pinned", _RECOVERY_IMAGE)
+    store.update_job("pinned", status="running")
+    assert store.recover_orphaned_jobs() == 1
+    job = store.get_job("pinned")
+    assert job["status"] == "pending"
+    assert job["code_version"] is None
+
+
+def test_recover_orphaned_jobs_restarts_funded_run_without_checkpoint(store: SQLiteJobStore) -> None:
+    """An orphaned funded run with no checkpoint yet starts again from the beginning.
+
+    Args:
+        store: Disposable job store.
+    """
+    store.create_job("fresh")
+    store.update_job("fresh", status="validating")
+    _fund_without_checkpoint(store, "fresh")
+    assert store.recover_orphaned_jobs() == 1
+    job = store.get_job("fresh")
+    assert job["status"] == "pending"
+    assert job["attempts"] == 1
+    assert job["message"] == "Starting again after a worker restart"
+
+
+def test_recover_orphaned_jobs_fails_child_run_without_checkpoint(store: SQLiteJobStore) -> None:
+    """A child run with no checkpoint cannot start again alone, so it fails with a retryable message.
+
+    Args:
+        store: Disposable job store.
+    """
+    store.create_job("parent")
+    store.update_job("parent", status="success")
+    store.create_job("child")
+    store.update_job("child", status="running", parent_optimization_id="parent")
+    _fund_without_checkpoint(store, "child")
+    assert store.recover_orphaned_jobs() == 1
+    job = store.get_job("child")
     assert job["status"] == "failed"
     assert job["stop_reason"] == "interrupted"
+    assert job["message"].startswith(remote_mod.ORPHANED_RUN_RECOVERY_FAILED_MESSAGE)
+    assert "No completed compatible checkpoint" in job["message"]
+
+
+def test_recover_orphaned_jobs_fails_run_at_its_attempt_limit(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run that keeps losing its worker stops at the attempt cap with a clear reason.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+    """
+    monkeypatch.setattr(remote_mod.settings, "job_max_attempts", 2)
+    store.create_job("capped")
+    store.update_job("capped", status="running", attempts=1)
+    _fund_checkpoint(store, "capped", monkeypatch)
+    assert store.recover_orphaned_jobs() == 1
+    job = store.get_job("capped")
+    assert job["status"] == "failed"
+    assert job["stop_reason"] == "interrupted"
+    assert "resume attempt limit" in job["message"]
+
+
+def test_recover_orphaned_jobs_waits_for_in_flight_usage(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run with unsettled usage stays active and recovering until a later sweep.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+    """
+    store.create_job("usage")
+    store.update_job(
+        "usage",
+        status="running",
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    service = _fund_checkpoint(store, "usage", monkeypatch)
+    budget = store.get_job("usage")["execution_budget_id"]
+    reserved = service.get(budget, "resume-owner")
+    monkeypatch.setattr(
+        BudgetService,
+        "get",
+        lambda self, budget_id, username, **kwargs: replace(reserved, pending_operations=1),
+    )
+    assert store.recover_orphaned_jobs() == 0
+    job = store.get_job("usage")
+    assert job["status"] == "running"
+    assert job["recovery"]["phase"] == "waiting_for_usage"
+    assert job["recovery"]["cause"] == WORKER_RESTART_CAUSE
+
+
+def test_recover_orphaned_jobs_fails_unfunded_run(store: SQLiteJobStore) -> None:
+    """An orphaned run without a cumulative budget keeps failing with the orphan message.
+
+    Args:
+        store: Disposable job store.
+    """
+    store.create_job("legacy")
+    store.update_job("legacy", status="running")
+    assert store.recover_orphaned_jobs() == 1
+    job = store.get_job("legacy")
+    assert job["status"] == "failed"
     assert job["attempts"] == 0
     assert job["message"] == remote_mod.ORPHANED_RUN_MESSAGE
-    assert job["completed_at"] is not None
+
+
+@pytest.mark.parametrize("status", ["running", "validating"])
+def test_recover_orphaned_jobs_keeps_ended_runs_for_notification(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """A run that the sweep fails waits for its notification once; a requeued run does not.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+        status: Active status the shutdown interrupted.
+    """
+    restart = {"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE}
+    store.create_job("unfunded")
+    store.update_job("unfunded", status=status, recovery=restart)
+    store.create_job("resumed")
+    store.update_job("resumed", status=status, recovery=restart)
+    _fund_checkpoint(store, "resumed", monkeypatch)
+    assert store.recover_orphaned_jobs() == 2
+    assert store.take_ended_orphans() == [("unfunded", store.get_job("unfunded")["execution_generation"])]
+    assert store.take_ended_orphans() == []
+
+
+def test_recover_orphaned_jobs_keeps_budget_stopped_run_for_notification(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restarted run that its budget cannot fund stops and waits for its notification.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+    """
+    store.create_job("spent")
+    store.update_job(
+        "spent",
+        status="running",
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    service = _fund_checkpoint(store, "spent", monkeypatch)
+    budget = service.get(store.get_job("spent")["execution_budget_id"], "resume-owner")
+    monkeypatch.setattr(
+        BudgetService,
+        "get",
+        lambda self, budget_id, username, **kwargs: replace(budget, available_cents=0, blocked_reason="budget_reached"),
+    )
+    assert store.recover_orphaned_jobs() == 0
+    assert store.get_job("spent")["status"] == "stopped"
+    assert store.take_ended_orphans() == [("spent", store.get_job("spent")["execution_generation"])]
+
+
+def test_orphan_sweeper_skips_a_stopped_run_that_its_owner_resumed(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A budget-stopped run resumed before the sweeper's pass keeps its later completion notification.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to stop the budget and capture notifications.
+    """
+    sent: list[str] = []
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        observability_mod,
+        "notify_job_completed",
+        lambda optimization_id, username, status, message=None: sent.append(status),
+    )
+    monkeypatch.setattr(observability_mod, "record_server_event", lambda engine, **kwargs: events.append(kwargs))
+    store.create_job("raised")
+    store.update_job(
+        "raised",
+        status="running",
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    service = _fund_checkpoint(store, "raised", monkeypatch)
+    budget = service.get(store.get_job("raised")["execution_budget_id"], "resume-owner")
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            BudgetService,
+            "get",
+            lambda self, budget_id, username, **kwargs: replace(
+                budget, available_cents=0, blocked_reason="budget_reached"
+            ),
+        )
+        assert store.recover_orphaned_jobs() == 0
+    stopped = store.get_job("raised")
+    assert stopped["status"] == "stopped"
+    store.update_job("raised", status="pending", execution_generation=stopped["execution_generation"] + 1)
+    observability_mod.OrphanRecoverySweeper(store, interval_seconds=60)._notify_ended_orphans()
+    assert sent == []
+    assert events == []
+    assert store.claim_completion_notification("raised") is True
+
+
+def test_orphan_sweeper_reports_the_stop_it_claimed_when_the_owner_resumes_right_after(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A resume that lands after the sweeper's claim cannot change the stop the notification describes.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to stop the budget, resume the run and capture notifications.
+    """
+    sent: list[str] = []
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        observability_mod,
+        "notify_job_completed",
+        lambda optimization_id, username, status, message=None: sent.append(status),
+    )
+    monkeypatch.setattr(observability_mod, "record_server_event", lambda engine, **kwargs: events.append(kwargs))
+    store.create_job("raced")
+    store.update_job(
+        "raced",
+        status="running",
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    service = _fund_checkpoint(store, "raced", monkeypatch)
+    budget = service.get(store.get_job("raced")["execution_budget_id"], "resume-owner")
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            BudgetService,
+            "get",
+            lambda self, budget_id, username, **kwargs: replace(
+                budget, available_cents=0, blocked_reason="budget_reached"
+            ),
+        )
+        assert store.recover_orphaned_jobs() == 0
+    generation = store.get_job("raced")["execution_generation"]
+    original_get_job = store.get_job
+
+    def resume_then_get_job(optimization_id: str, **kwargs: Any) -> Any:
+        """Resume the run just before any later read, as an owner resume would.
+
+        Args:
+            optimization_id: Run to read.
+            **kwargs: Passed through to the real read.
+
+        Returns:
+            The real read after the resume.
+        """
+        store.update_job(optimization_id, status="pending", execution_generation=generation + 1)
+        return original_get_job(optimization_id, **kwargs)
+
+    monkeypatch.setattr(store, "get_job", resume_then_get_job)
+    original_claim = store.claim_ended_orphan_notification
+
+    def claim_then_resume(optimization_id: str, claimed_generation: int) -> Any:
+        """Claim the notification, then resume the run before the sweeper continues.
+
+        Args:
+            optimization_id: Run to claim.
+            claimed_generation: Generation the sweep ended.
+
+        Returns:
+            The snapshot of the real claim.
+        """
+        snapshot = original_claim(optimization_id, claimed_generation)
+        store.update_job(optimization_id, status="pending", execution_generation=generation + 1)
+        return snapshot
+
+    monkeypatch.setattr(store, "claim_ended_orphan_notification", claim_then_resume)
+    observability_mod.OrphanRecoverySweeper(store, interval_seconds=60)._notify_ended_orphans()
+    assert sent == ["stopped"]
+    assert [(event["name"], event["properties"]["status"]) for event in events] == [("run_stopped", "stopped")]
+
+
+@pytest.mark.parametrize("status", ["running", "validating"])
+def test_orphan_sweeper_notifies_the_owner_of_a_run_it_ends(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """The periodic sweeper sends one failure notification and outcome event per ended run.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to capture notifications and events.
+        status: Active status the shutdown interrupted.
+    """
+    sent: list[tuple[Any, ...]] = []
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        observability_mod,
+        "notify_job_completed",
+        lambda optimization_id, username, status, message=None: sent.append(
+            (optimization_id, username, status, message)
+        ),
+    )
+    monkeypatch.setattr(observability_mod, "record_server_event", lambda engine, **kwargs: events.append(kwargs))
+    store.create_job("ended")
+    store.update_job(
+        "ended",
+        status=status,
+        username="owner",
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    store.recover_orphaned_jobs()
+    sweeper = observability_mod.OrphanRecoverySweeper(store, interval_seconds=60)
+    sweeper.sweep_once()
+    sweeper.sweep_once()
+    assert sent == [("ended", "owner", "failed", remote_mod.ORPHANED_RUN_MESSAGE)]
+    assert [event["name"] for event in events] == ["run_failed"]
+    assert events[0]["username"] == "owner"
 
 
 def _fund_without_checkpoint(store: SQLiteJobStore, optimization_id: str) -> BudgetService:

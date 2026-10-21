@@ -57,7 +57,6 @@ import type { ExecutionBudget } from "@/shared/types/execution-budget";
 import type { RunUsage } from "@/shared/types/run-usage";
 import type {
   ContinuousEnableRequest,
-  ContinuousInputs,
   ContinuousPlan,
   ContinuousState,
   ScheduleRule,
@@ -2069,21 +2068,6 @@ export function updateContinuousSchedule(planId: string, rule: ScheduleRule) {
   return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/schedule`, {
     method: "PUT",
     body: JSON.stringify(rule),
-  });
-}
-
-/** Run the next check now; unchanged inputs are still recorded as skipped. */
-export function checkContinuousNow(planId: string) {
-  return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/check-now`, {
-    method: "POST",
-  });
-}
-
-/** Stage a model or optimizer change for the next check. */
-export function stageContinuousInputs(planId: string, body: ContinuousInputs) {
-  return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/inputs`, {
-    method: "POST",
-    body: JSON.stringify(body),
   });
 }
 

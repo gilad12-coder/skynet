@@ -114,6 +114,9 @@ class WizardPreflightResponse(BaseModel):
     scorer_result: dict[str, Any] | None = None
     workflow_result: dict[str, Any] | None = None
     terminal: dict[str, Any] | None = None
+    # A repository run's effective environment: what versions may change,
+    # what stays protected, and which network and services each step gets.
+    environment: dict[str, Any] | None = None
 
 
 def _canonical_execution_payload(request: WizardPreflightRequest, username: str) -> dict[str, Any]:
@@ -636,6 +639,8 @@ def _perform_preflight(
             bind_repo_scorer(protected, staged, gateway, owner_id=f"preflight-{identity}")
         if request.workflow == "anything":
             result = _verify_anything(gateway, protected, scope=request.scope, identity=identity)
+            if is_repo_payload(protected):
+                result["environment"] = protected["target"]["repo"]["environment"]
         else:
             result = _verify_unified(gateway, protected, scope=request.scope, identity=identity)
         states = {check["status"] for check in result["checks"]}

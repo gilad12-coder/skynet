@@ -102,7 +102,8 @@ class RepoScorer:
 
         Raises:
             RepoScoreError: When the version breaks the path rules or does not
-                apply, or the scorer fails or returns no score.
+                apply, changes a protected file while it runs, or the scorer
+                fails or returns no score.
         """
         secrets = list(self._workspace.secrets.values())
         # Checkout and scoring share one lock: the next version's checkout
@@ -122,17 +123,28 @@ class RepoScorer:
                     )
                 }
             )
+            unstamped = self._workspace.stamp_before_run()
+            if unstamped:
+                raise RepoScoreError(unstamped)
             # A sink makes the session stream stderr live, which is where log() events travel.
             with sandbox_log.event_scope(source="scorer"):
                 result = session.run(
                     f"cd {shlex.quote(checkout.path)} && python3 {shlex.quote(f'{root}/{RUNNER_PATH}')}"
                     f" {shlex.quote(call_dir)}",
-                    env=self._workspace.secrets or None,
+                    # Importing a protected package would otherwise write
+                    # __pycache__ into it and fail the protected-path check.
+                    # Skipping the bytecode beats ignoring __pycache__, where a
+                    # version could plant a .pyc that the judge then loads.
+                    env={**self._workspace.secrets, "PYTHONDONTWRITEBYTECODE": "1"},
                     timeout_seconds=self._timeout_seconds,
                     on_output=sandbox_log.ignore_output,
                 )
             if result.timed_out:
                 raise RepoScoreError(f"The scorer exceeded its {self._timeout_seconds:g}s timeout.")
+            tampered = self._workspace.protected_changes()
+            if tampered:
+                # The version's code names these files and can read the secrets.
+                raise RepoScoreError(redact(" ".join(tampered), secrets))
             text = session.read_file(f"{CALLS_DIR}/{self._calls:06d}/{runner.OUTPUT_FILE}")
         if text is None:
             output = redact((result.stderr or result.stdout)[-2_000:], secrets)
