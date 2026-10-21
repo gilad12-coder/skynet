@@ -335,7 +335,7 @@ class VercelSandboxSession:
         # cannot create another billable lifetime behind the admission boundary.
         self._session = box.current_session
         if self._session is None:
-            raise ServiceError("Vercel did not return the sandbox's exact execution session.")
+            raise ServiceError("The cloud sandbox did not return its exact execution session.")
         self._api_session = api_session
         self._context = context
         self._cwd = box.cwd
@@ -543,7 +543,7 @@ class VercelSandboxSession:
         # Vercel may echo an empty custom allowlist instead of the deny-all
         # mode; both admit no host, and anything else fails closed.
         if not (mode == "deny-all" or (mode == "custom" and not getattr(policy, "allow", None))):
-            raise ServiceError("Vercel did not confirm that the scoring box's network is off.")
+            raise ServiceError("The cloud sandbox did not confirm that the scoring box's network is off.")
         self._session = updated
 
     def close(self) -> None:

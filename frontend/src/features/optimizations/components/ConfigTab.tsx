@@ -62,6 +62,7 @@ import {
   SlideNote,
   SplitBar,
 } from "./ConfigCarousel";
+import { runtimeLabelKey } from "../lib/runtime-label";
 
 const CONFIG_SLIDES = perLocale(() => [
   {
@@ -325,9 +326,10 @@ export function ConfigTab({
     });
   }
   if (runtime) {
+    const runtimeKey = runtimeLabelKey(runtime);
     generalRows.push({
       label: msg("optimization.config.runtime"),
-      value: runtime === "vercel" ? msg("submit.runtime.vercel") : runtime,
+      value: runtimeKey ? msg(runtimeKey) : runtime,
       icon: <RocketLaunch />,
     });
   }
