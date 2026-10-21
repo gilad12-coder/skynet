@@ -75,20 +75,19 @@ void describe("AgentEngineSelect", () => {
   });
 });
 
-// Each engine's mark, by the accessible name @lobehub/icons gives it; Droid has
-// no mark there, so its neutral tile has none.
-const BRAND: Record<AgentEngine, RegExp | null> = {
-  codex: /aria-label="Codex"/,
-  claude: /aria-label="Claude Code"/,
-  openrouter: /aria-label="OpenRouter"/,
-  droid: null,
+// Each engine's mark, by its accessible name; Droid's is Factory's mark, found by
+// the start of its path.
+const BRAND: Record<AgentEngine, RegExp[]> = {
+  codex: [/aria-label="Codex"/],
+  claude: [/aria-label="Claude Code"/],
+  openrouter: [/aria-label="OpenRouter"/],
+  droid: [/aria-label="Droid"/, /<path d="M321\.997 150\.712C/],
 };
 
 function assertLogo(html: string, engine: AgentEngine) {
   // The logo is decorative: hidden from assistive tech, so the name stays the label.
   assert.match(html, new RegExp(`<span aria-hidden="true" data-engine-logo="${engine}"`));
-  const brand = BRAND[engine];
-  if (brand) assert.match(html, brand);
+  for (const brand of BRAND[engine]) assert.match(html, brand);
 }
 
 void describe("engine logos", () => {
