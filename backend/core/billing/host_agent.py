@@ -30,6 +30,7 @@ import io
 import json
 import logging
 import os
+import platform
 import re
 import secrets
 import shutil
@@ -41,6 +42,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import urllib.parse
 import uuid
 import weakref
 from dataclasses import dataclass
@@ -242,29 +244,75 @@ def _safe_link(workdir: Path, path: Path) -> bool:
     return os.path.commonpath([resolved, str(workdir)]) == str(workdir)
 
 
-def _holds_secret(path: Path, secret_values: set[str]) -> bool:
-    """Tell whether a file contains one of the CLI's login tokens.
+def _encoded_forms(value: str) -> set[bytes]:
+    """Return the byte forms in which a file can hold a token: plain, hex, percent and base64.
+
+    A base64 copy depends on where the token starts in a 3-byte group, so
+    each start gives one form: the characters that only token bytes decide.
+
+    Args:
+        value: A token value.
+
+    Returns:
+        The forms to look for.
+    """
+    raw = value.encode()
+    forms = {
+        raw,
+        raw.hex().encode(),
+        raw.hex().upper().encode(),
+        urllib.parse.quote(value, safe="").encode(),
+        "".join(f"%{byte:02X}" for byte in raw).encode(),
+        "".join(f"%{byte:02x}" for byte in raw).encode(),
+    }
+    for shift in range(3):
+        start, end = -(-8 * shift // 6), 8 * (shift + len(raw)) // 6
+        for encode in (base64.b64encode, base64.urlsafe_b64encode):
+            forms.add(encode(b"\0" * shift + raw)[start:end])
+    return forms
+
+
+def _redact(text: str, secret_values: set[str]) -> str:
+    """Replace each login token in a CLI's output, in any form of :func:`_encoded_forms`.
+
+    Args:
+        text: Output that goes to the guest.
+        secret_values: Token values of the CLI's login.
+
+    Returns:
+        The text with every token form replaced by ``[redacted]``.
+    """
+    forms = sorted(
+        {form.decode("utf-8", "replace") for value in secret_values for form in _encoded_forms(value)}, key=len
+    )
+    for form in reversed(forms):
+        text = text.replace(form, "[redacted]")
+    return text
+
+
+def _holds_secret(path: Path, forms: set[bytes]) -> bool:
+    """Tell whether a file contains one of the CLI's login tokens in any form of :func:`_encoded_forms`.
 
     Args:
         path: A regular file in the copy.
-        secret_values: Token values from the login file.
+        forms: The encoded forms of the login's token values.
 
     Returns:
-        True when any token appears in the file's bytes.
+        True when any form appears in the file's bytes.
     """
-    if not secret_values:
+    if not forms:
         return False
     try:
         data = path.read_bytes()
     except OSError:
         return True
-    return any(value.encode() in data for value in secret_values)
+    return any(form in data for form in forms)
 
 
 def _pack(workdir: Path, secret_values: set[str] | frozenset[str] = frozenset()) -> bytes:
     """Archive the edited copy without following links.
 
-    Launch files, agent config, login files, files that hold a login token,
+    Launch files, agent config, login files, files that hold a login token (plain or encoded),
     special files and links that leave the copy stay out, so the guest never
     receives a path into the Mac or the user's login.
 
@@ -275,6 +323,7 @@ def _pack(workdir: Path, secret_values: set[str] | frozenset[str] = frozenset())
     Returns:
         Gzip tar bytes.
     """
+    forms = {form for value in secret_values for form in _encoded_forms(value)}
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
         for path in sorted(workdir.rglob("*")):
@@ -286,7 +335,7 @@ def _pack(workdir: Path, secret_values: set[str] | frozenset[str] = frozenset())
                     logger.warning("Host agent: dropped a link that leaves the copy")
                     continue
             elif path.is_file():
-                if _holds_secret(path, set(secret_values)):
+                if _holds_secret(path, forms):
                     logger.warning("Host agent: dropped a file that holds the CLI's login")
                     continue
             elif not path.is_dir():
@@ -449,6 +498,8 @@ _PROC_PIDVNODEPATHINFO = 9
 _VNODE_PATH_INFO_SIZE = 2352
 _CWD_PATH = slice(152, 152 + 1024)
 _libproc: list[Any] = []
+_sandbox: list[Any] = []
+_SANDBOX_FILTER_PATH = 1
 
 
 def _cwd(pid: int) -> str | None:
@@ -511,6 +562,57 @@ def _marked(marker: str) -> set[int]:
     return found
 
 
+def _confined_to(pids: set[int], root: str, home: str) -> set[int]:
+    """Find the processes that run under this turn's Seatbelt profile.
+
+    A process cannot leave its sandbox, so this finds a turn process that
+    left the tree, its group and the turn folder and cleared its environment.
+    The turn's profile lets it write the turn's folder but not the folder
+    around it or the home. A system service sandbox that may write the
+    shared temp tree can also write the folder around the turn, so it does
+    not match.
+
+    Args:
+        pids: Candidate process ids.
+        root: The turn's real folder; it must exist.
+        home: The user's real home directory.
+
+    Returns:
+        The process ids under this turn's profile; empty off macOS.
+    """
+    if sys.platform != "darwin":
+        return set()
+    if not _sandbox:
+        library = ctypes.CDLL("/usr/lib/system/libsystem_sandbox.dylib")
+        library.sandbox_check.restype = ctypes.c_int
+        _sandbox.extend([library.sandbox_check, ctypes.c_int.in_dll(library, "SANDBOX_CHECK_NO_REPORT").value])
+    check, no_report = _sandbox
+
+    def allowed(pid: int, path: str) -> bool:
+        """Ask the kernel whether ``pid`` may write ``path``, without a log entry.
+
+        Args:
+            pid: The process id.
+            path: An existing real path.
+
+        Returns:
+            True when the write is allowed.
+        """
+        # sandbox_check takes the path as a variadic argument, which arm64 Darwin
+        # passes on the stack: five dummies fill the remaining argument registers.
+        padding = (ctypes.c_long(0),) * 5 if platform.machine() == "arm64" else ()
+        filter_type = ctypes.c_int(_SANDBOX_FILTER_PATH | no_report)
+        return check(ctypes.c_int(pid), b"file-write-data", filter_type, *padding, ctypes.c_char_p(path.encode())) == 0
+
+    found = set()
+    outside = (str(Path(root).parent), home)
+    for pid in pids:
+        confined = check(ctypes.c_int(pid), None, ctypes.c_int(0)) == 1
+        if confined and allowed(pid, root) and not any(allowed(pid, path) for path in outside):
+            found.add(pid)
+    return found
+
+
 def _process_table() -> list[tuple[int, int, int]]:
     """List this user's live processes with their parent and group.
 
@@ -546,8 +648,9 @@ def _turn_processes(leader: int | None, root: Path, marker: str) -> set[int]:
 
     A process belongs to the turn when it is the leader or its descendant,
     when it works inside the turn's folder (an escaped tool command keeps the
-    folder it started in), when its environment holds the turn marker, or
-    when it shares a group with one that does.
+    folder it started in), when its environment holds the turn marker, when
+    it runs under the turn's Seatbelt profile, or when it shares a group with
+    one that does.
 
     Args:
         leader: The CLI's own process while it is not reaped, else None.
@@ -561,6 +664,7 @@ def _turn_processes(leader: int | None, root: Path, marker: str) -> set[int]:
     real_root = _real(root)
     live = {pid for pid, _, _ in rows}
     found = (set() if leader is None else {leader}) | (_marked(marker) & live)
+    found |= _confined_to(live - {os.getpid()}, real_root, _real(Path.home()))
     for pid, _, _ in rows:
         cwd = _cwd(pid)
         if cwd is not None and (cwd == real_root or cwd.startswith(real_root + os.sep)):
@@ -1012,12 +1116,14 @@ def run_host_agent(
             except OSError as error:
                 return _error(FAILED_KEY, f"The {cli} CLI could not start: {error}")
         elapsed_ms = int((time.monotonic() - started) * 1000)
-        text, usage, cli_error = parse_cli_output(cli, completed.stdout)
-        transcript = text or completed.stdout or completed.stderr
+        # The transcript and the error text go to the guest like the files do.
+        stdout, stderr = _redact(completed.stdout, secret_values), _redact(completed.stderr, secret_values)
+        text, usage, cli_error = parse_cli_output(cli, stdout)
+        transcript = text or stdout or stderr
         if completed.returncode != 0 and cli_error is None:
-            cli_error = (completed.stderr or completed.stdout).strip()[-2000:] or f"exit status {completed.returncode}"
+            cli_error = (stderr or stdout).strip()[-2000:] or f"exit status {completed.returncode}"
         if cli_error is not None:
-            capped = limit_error(cli, f"{cli_error}\n{completed.stderr}")
+            capped = limit_error(cli, f"{cli_error}\n{stderr}")
             if capped is not None:
                 reset_at = capped.reset_at.isoformat() if capped.reset_at else None
                 if capped.reset_at is not None:

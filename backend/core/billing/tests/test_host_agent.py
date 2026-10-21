@@ -13,7 +13,8 @@ import sys
 import tarfile
 import tempfile
 import time
-from collections.abc import Iterator
+import urllib.parse
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -73,6 +74,14 @@ Path(os.environ["FAKE_CLI_RECORD"]).write_text(json.dumps({
     "login": (Path(os.environ["CODEX_HOME"]) / "auth.json").read_text() if cli == "codex" else None,
     "files": sorted(path.as_posix() for path in Path(".").rglob("*")),
 }))
+if os.environ.get("FAKE_CLI_MODE") == "leak":
+    # A prompt-injected turn prints the copied token, plain and encoded, in its answer and errors.
+    import base64
+    token = json.loads((Path(os.environ["CODEX_HOME"]) / "auth.json").read_text())["tokens"]["access_token"]
+    leaked = f"{token} {base64.b64encode(token.encode()).decode()} {token.encode().hex()}"
+    print(f"stderr {leaked}", file=sys.stderr)
+    print(json.dumps({"type": "turn.failed", "error": {"message": f"boom {leaked}"}}))
+    sys.exit(1)
 if os.environ.get("FAKE_CLI_MODE") == "expired":
     print(json.dumps({"type": "turn.failed", "error": {"message": "unexpected status 401 Unauthorized"}}))
     sys.exit(1)
@@ -378,6 +387,22 @@ def test_expired_codex_login_tells_the_user_to_refresh_it(
     assert document["status"] == "error"
     assert document["error"]["message"].startswith(host_agent.CODEX_EXPIRED_HINT)
     assert "401" in document["error"]["message"]
+
+
+def test_turn_output_hides_the_login_token(local: Settings, guest: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The transcript and error text that go to the guest hold no copy of the login token."""
+    monkeypatch.setenv("FAKE_CLI_NAME", "codex")
+    monkeypatch.setenv("FAKE_CLI_MODE", "leak")
+    body = {"model": "", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+
+    document = run_host_agent(body, local, cli="codex", permission="workspace_only")
+
+    token = "A" * 32
+    shown = json.dumps(document)
+    assert document["status"] == "error"
+    assert "[redacted]" in document["error"]["message"]
+    for form in (token, base64.b64encode(token.encode()).decode(), token.encode().hex()):
+        assert form not in shown
 
 
 @pytest.mark.parametrize(
@@ -909,6 +934,30 @@ time.sleep(120)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Seatbelt is macOS only")
+def test_turn_end_kills_a_confined_process_that_hid_every_other_trace(tmp_path: Path) -> None:
+    """A confined daemon that left the tree, group and folder and cleared its env still stops."""
+    turn = tmp_path / "turn"
+    turn.mkdir()
+    pid_file = turn / "daemon.pid"
+    # Fork, setsid, fork again, close the pipes, leave the folder, drop the env (and its marker), then sleep.
+    escape = (
+        "use POSIX; my $f = $ARGV[0];"
+        " if (fork) { select(undef, undef, undef, 0.1) until -s $f; exit 0 }"
+        " POSIX::setsid(); exit 0 if fork;"
+        ' open(STDIN, "<", "/dev/null"); open(STDOUT, ">", "/dev/null"); open(STDERR, ">", "/dev/null");'
+        ' chdir "/"; %ENV = (); open(my $h, ">", $f) or die; print $h $$; close $h;'
+        ' exec "/bin/sleep", "120"'
+    )
+    argv = host_agent.confine(
+        ["/usr/bin/perl", "-e", escape, str(pid_file)], home=tmp_path, writable=[str(turn)], readable=[]
+    )
+
+    host_agent.run_group(argv, cwd=turn, env=dict(os.environ), stdin="", timeout=30)
+
+    assert _gone(int(pid_file.read_text()))
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Seatbelt is macOS only")
 def test_workspace_only_cannot_start_an_app_through_launchservices(tmp_path: Path) -> None:
     """Under the profile ``open`` cannot start an app, which would run outside the sandbox."""
     home = tmp_path / "home"
@@ -978,6 +1027,34 @@ def test_result_drops_login_files_and_token_copies(tmp_path: Path) -> None:
         names = set(archive.getnames())
 
     assert names == {"a.txt", "sub"}
+
+
+@pytest.mark.parametrize(
+    "encode",
+    [
+        base64.b64encode,
+        lambda raw: base64.b64encode(b"x" + raw),
+        lambda raw: base64.b64encode(b"xy" + raw + b"z"),
+        lambda raw: base64.urlsafe_b64encode(b"?" + raw).rstrip(b"="),
+        lambda raw: raw.hex().encode(),
+        lambda raw: raw.hex().upper().encode(),
+        lambda raw: urllib.parse.quote(raw.decode(), safe="").encode(),
+        lambda raw: "".join(f"%{byte:02X}" for byte in raw).encode(),
+    ],
+    ids=["base64", "base64-shift1", "base64-shift2", "base64url", "hex", "hex-upper", "url", "url-all"],
+)
+def test_result_drops_encoded_token_copies(encode: Callable[[bytes], bytes], tmp_path: Path) -> None:
+    """A token copied as base64, hex or percent-encoding, at any offset, stays out of the archive."""
+    workdir = tmp_path / "copy"
+    workdir.mkdir()
+    secret = "s3cret/token+value=0123456789~"
+    (workdir / "a.txt").write_text("a")
+    (workdir / "leak.txt").write_bytes(b"data: " + encode(secret.encode()) + b"\n")
+
+    with tarfile.open(fileobj=io.BytesIO(host_agent._pack(workdir, {secret})), mode="r:gz") as archive:
+        names = set(archive.getnames())
+
+    assert names == {"a.txt"}
 
 
 @pytest.mark.parametrize(
