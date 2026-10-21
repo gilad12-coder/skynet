@@ -19,6 +19,7 @@ from core.billing.protected_execution import (
 )
 from core.config import Settings
 from core.i18n import t
+from core.service_gateway.optimization.blackbox import agent_eval
 from core.service_gateway.optimization.blackbox import service as blackbox_service
 from core.service_gateway.optimization.blackbox.docker_sandbox import DockerSandboxRuntime
 from core.service_gateway.optimization.blackbox.sandbox import JOB_TAG
@@ -222,3 +223,42 @@ def test_engine_catalog_names_the_docker_proposer_runtime_in_local_mode(
 
     assert runtime.id == "docker"
     assert runtime.cost.maximum_session_cents == "0"
+
+
+_NO_GATEWAY: dict[str, Any] = {
+    "blackbox_agent_gateway_url": None,
+    "blackbox_agent_gateway_api_key": None,
+    "litellm_proxy_url": None,
+    "litellm_proxy_api_key": None,
+}
+
+
+def test_engine_catalog_reports_the_docker_sandbox_available_in_local_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Local mode with a working Docker runtime needs no deployment gateway, so it shows no sandbox warning."""
+    binary = tmp_path / "docker"
+    binary.write_text(_FAKE_DOCKER.format(python=sys.executable))
+    binary.chmod(0o755)
+    monkeypatch.setenv("FAKE_DOCKER_LOG", str(tmp_path / "calls.jsonl"))
+    settings = _settings(
+        monkeypatch, local_mode=True, docker_bin=str(binary), local_sandbox_image=_IMAGE, **_NO_GATEWAY
+    )
+    monkeypatch.setattr(blackbox_service, "settings", settings)
+
+    catalog = blackbox_service.engine_catalog("agent")
+
+    assert catalog.sandbox_available is True
+    assert catalog.sandbox_reason is None
+
+
+def test_engine_catalog_still_needs_a_gateway_on_hosted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hosted deployment with sandboxes but no model gateway keeps the gateway warning."""
+    settings = _settings(monkeypatch, **_NO_GATEWAY)
+    monkeypatch.setattr(blackbox_service, "settings", settings)
+    monkeypatch.setattr(agent_eval, "sandbox_unavailable_reason", lambda settings: None)
+
+    catalog = blackbox_service.engine_catalog("agent")
+
+    assert catalog.sandbox_available is False
+    assert catalog.sandbox_reason == agent_eval._GATEWAY_MISSING
