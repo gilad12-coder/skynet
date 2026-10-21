@@ -197,7 +197,10 @@ def test_logged_out_cli_is_reported(tmp_path: Path) -> None:
     claude = _fake_cli(tmp_path, "claude", version="2.1.306 (Claude Code)", login_out='{"loggedIn": false}')
     settings = _settings(tmp_path, codex_bin=str(codex), claude_bin=str(claude))
 
-    assert [status.logged_in for status in probe_clis(settings)] == [False, False]
+    statuses = probe_clis(settings)
+    assert [status.logged_in for status in statuses] == [False, False]
+    # A Keychain-only codex login cannot be read, so the hint names the file store.
+    assert 'cli_auth_credentials_store = "file"' in statuses[0].login_hint
 
 
 def test_ready_clis_report_ok(tmp_path: Path) -> None:

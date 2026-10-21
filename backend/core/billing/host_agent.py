@@ -77,7 +77,8 @@ RATE_LIMITED_CODE = "subscription.rate_limited"
 FAILED_KEY = "blackbox.host_agent_failed"
 CLAUDE_WORKSPACE_TOOLS = ("Read", "Edit", "Write", "Glob", "Grep")
 CODEX_SUBSCRIPTION_HINT = (
-    "Codex is not signed in with a ChatGPT subscription. Run `codex login` and sign in with ChatGPT."
+    "Codex is not signed in with a ChatGPT subscription in a login file. Sign in with ChatGPT, not an API key: "
+    'set `cli_auth_credentials_store = "file"` in `~/.codex/config.toml`, then run `codex login`.'
 )
 CODEX_EXPIRED_HINT = "Your Codex login expired. Run `codex` once in a terminal to refresh it, then retry."
 # The turn's login copy has no refresh token, so these mean an expired access token.

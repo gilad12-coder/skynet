@@ -66,7 +66,10 @@ _PROBE_CACHE_SECONDS = 30.0
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 _LOGIN_HINTS: dict[CliProvider, str] = {
-    "codex": "Run `codex login` in a terminal.",
+    # Skynet reads the codex login from auth.json, so a Keychain-only login looks signed out.
+    "codex": (
+        'Sign in to codex with ChatGPT: set `cli_auth_credentials_store = "file"` in `~/.codex/config.toml`, then run `codex login` in a terminal.'
+    ),
     "claude": "Run `claude auth login` in a terminal.",
 }
 
