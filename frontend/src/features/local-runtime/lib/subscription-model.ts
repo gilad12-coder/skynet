@@ -177,23 +177,58 @@ export function keyMenuModels(catalog: CatalogModel[] | undefined): CatalogModel
 
 /**
  * The local composer menu: the CLI's subscription models, then the saved
- * key's models. `null` key models mean the key's list is still loading; the
- * whole menu then waits, so a saved key pick is not judged stale too early.
+ * key's models. `null` CLI models mean `/local/status` has not loaded; `null`
+ * key models mean the key's list still loads. The menu stays empty until the
+ * rows that can hold `pick` are known, so the menu never judges a saved pick
+ * stale (and clears it) too early.
  */
 export function localMenuModels(
-  cliModels: CatalogModel[],
+  cliModels: CatalogModel[] | null,
   keyModels: CatalogModel[] | null,
+  pick: string | null,
 ): CatalogModel[] {
-  return keyModels === null ? [] : [...cliModels, ...keyModels];
+  if (cliModels === null) return [];
+  if (keyModels === null) return pick && !parseSubscriptionModelId(pick) ? [] : cliModels;
+  return [...cliModels, ...keyModels];
+}
+
+/** Whether `model` is an `openrouter/<vendor>/<model>` id, which runs on a saved key. */
+export function isOpenRouterModelId(model: string | null | undefined): boolean {
+  return !!model && /^openrouter\/[^/]+\/[^/]/.test(model);
 }
 
 /**
- * Whether an agent request sends `model` unchanged to run on the saved key:
- * a catalog id (not a subscription id) that the key's listing serves.
+ * The model id a local agent request sends, matching what the composer chip
+ * shows. A subscription pick resolves on the CLI and waits for nothing else.
+ * An OpenRouter pick is sent unchanged unless the app knows there is no
+ * verified key. With no pick and no CLI model, the chip shows the key's first
+ * model, so the request sends that model.
  */
-export function runsOnLocalKey(model: string | null, catalog: CatalogModel[] | undefined): boolean {
-  if (!model || parseSubscriptionModelId(model)) return false;
-  return (catalog ?? []).some((entry) => entry.value === model && isLocalKeyModel(entry));
+export async function resolveLocalAgentModel(
+  model: string | null,
+  cli: CliProvider | null | undefined,
+  deps: {
+    loadStatus: () => Promise<LocalStatus>;
+    peekStatus: () => LocalStatus | null;
+    /** Whether the saved OpenRouter key is verified; null when the key list cannot load. */
+    keyVerified: () => Promise<boolean | null>;
+    keyCatalog: () => Promise<CatalogModel[]>;
+    /** The agent engine; a role with no CLI runs on it. */
+    engine?: AgentEngine | null;
+  },
+): Promise<string | null> {
+  const engine = deps.engine ?? null;
+  const viaCli = () => resolveAgentModel(model, cli, deps.loadStatus, deps.peekStatus, engine);
+  if (isOpenRouterModelId(model)) {
+    // Sending it unchanged lets the backend run it on the key, or refuse it
+    // visibly; a CLI stand-in would run a model the chip does not name.
+    return (await deps.keyVerified()) === false ? viaCli() : model;
+  }
+  if (model) return viaCli();
+  const status = await deps.loadStatus().catch(() => deps.peekStatus());
+  const sent = subscriptionAgentModel(null, cli ?? defaultAgentCli(status, engine), status);
+  if (sent || !status || !(await deps.keyVerified())) return sent;
+  return keyMenuModels(await deps.keyCatalog())[0]?.value ?? null;
 }
 
 /**

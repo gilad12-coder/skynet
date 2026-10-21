@@ -245,7 +245,10 @@ function TaggingTab() {
 
 function AgentTab() {
   const { prefs, setPref } = useUserPrefs();
-  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("generalist"));
+  const localMenuModels = useLocalAgentMenuModels(
+    agentSubscriptionFor("generalist"),
+    prefs.composerModel,
+  );
 
   return (
     <div className="space-y-1">

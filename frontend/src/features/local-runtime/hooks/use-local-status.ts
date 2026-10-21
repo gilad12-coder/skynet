@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { fetchWithAuthRetry } from "@/shared/lib/api";
+import { fetchWithAuthRetry, getProviderKeys } from "@/shared/lib/api";
 import { tI18n } from "@/shared/lib/i18n";
 import { cachedByokCatalog, cachedCatalog, getByokModelCatalog } from "@/shared/lib/model-catalog";
 import { getRuntimeEnv, isLocalMode } from "@/shared/lib/runtime-env";
@@ -15,9 +15,9 @@ import {
   keyMenuModels,
   LOCAL_KEY_PROVIDER,
   localMenuModels,
-  resolveAgentModel,
-  runsOnLocalKey,
+  resolveLocalAgentModel,
   subscriptionMenuModels,
+  type AgentEngine,
   type LocalStatus,
 } from "../lib/subscription-model";
 import { loadAgentEngine, refreshAgentEngine, useAgentEngine } from "./use-agent-engine";
@@ -63,12 +63,22 @@ export function peekLocalStatus(): LocalStatus | null {
   return cached?.status ?? null;
 }
 
+/** Whether the saved OpenRouter key is verified; null when the key list cannot load. */
+async function localKeyVerified(): Promise<boolean | null> {
+  try {
+    const { keys } = await getProviderKeys();
+    return keys.some((key) => key.provider === LOCAL_KEY_PROVIDER && key.status === "verified");
+  } catch {
+    return null;
+  }
+}
+
 /**
- * The model id an agent request sends for a role set to run on `cli`. A pick
- * the saved OpenRouter key serves is sent unchanged. Any other pick waits for
- * `/local/status`, since the CLI's models decide the id. A local role with no
- * CLI runs on the agent engine's CLI, else the default CLI, since the local
- * backend has no managed models. Hosted builds send the composer's choice
+ * The model id an agent request sends for a role set to run on `cli`: the
+ * model the composer chip shows. A subscription pick waits for
+ * `/local/status`, since the CLI's models decide the id. An OpenRouter pick is
+ * sent unchanged for the saved key. A local role with no CLI runs on the agent
+ * engine's CLI, else the default CLI. Hosted builds send the composer's choice
  * unchanged.
  */
 export async function localAgentModel(
@@ -76,12 +86,19 @@ export async function localAgentModel(
   cli: CliProvider | null,
 ): Promise<string | null> {
   if (!isLocalMode()) return model;
-  if (model && runsOnLocalKey(model, (await getByokModelCatalog()).models)) return model;
-  if (cli) return resolveAgentModel(model, cli, loadLocalStatus, peekLocalStatus);
-  // A status refresh can change the engine, so load the engine after the status.
-  await loadLocalStatus().catch(() => null);
-  const engine = await loadAgentEngine();
-  return resolveAgentModel(model, null, loadLocalStatus, peekLocalStatus, engine);
+  let engine: AgentEngine | null = null;
+  if (!cli) {
+    // A status refresh can change the engine, so load the engine after the status.
+    await loadLocalStatus().catch(() => null);
+    engine = await loadAgentEngine();
+  }
+  return resolveLocalAgentModel(model, cli, {
+    loadStatus: loadLocalStatus,
+    peekStatus: peekLocalStatus,
+    keyVerified: localKeyVerified,
+    keyCatalog: async () => (await getByokModelCatalog()).models,
+    engine,
+  });
 }
 
 /**
@@ -119,10 +136,14 @@ function useLocalKeyModels(enabled: boolean): CatalogModel[] | null {
 /**
  * The composer menu's models for an agent role on `cli` in the local build:
  * that CLI's models (the agent engine's CLI when the role has none), then the
- * models of a saved, verified OpenRouter key. Hosted builds get undefined and
- * keep the catalog.
+ * models of a saved, verified OpenRouter key. `pick` is the role's saved
+ * model, which decides what the menu waits for. Hosted builds get undefined
+ * and keep the catalog.
  */
-export function useLocalAgentMenuModels(cli: CliProvider | null): CatalogModel[] | undefined {
+export function useLocalAgentMenuModels(
+  cli: CliProvider | null,
+  pick: string | null,
+): CatalogModel[] | undefined {
   const local = isLocalMode();
   const { status } = useLocalStatus(local);
   const { engine } = useAgentEngine();
@@ -131,14 +152,17 @@ export function useLocalAgentMenuModels(cli: CliProvider | null): CatalogModel[]
     () =>
       local
         ? localMenuModels(
-            subscriptionMenuModels(
-              findCli(status, cli ?? defaultAgentCli(status, engine)),
-              cachedCatalog()?.models,
-            ),
+            status
+              ? subscriptionMenuModels(
+                  findCli(status, cli ?? defaultAgentCli(status, engine)),
+                  cachedCatalog()?.models,
+                )
+              : null,
             keyModels,
+            pick,
           )
         : undefined,
-    [local, status, cli, engine, keyModels],
+    [local, status, cli, engine, keyModels, pick],
   );
 }
 

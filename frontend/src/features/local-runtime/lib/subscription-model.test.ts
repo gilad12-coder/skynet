@@ -19,8 +19,9 @@ const {
   keyMenuModels,
   localMenuModels,
   LOCAL_MODEL_REFUSED_CODE,
-  runsOnLocalKey,
+  isOpenRouterModelId,
   resolveAgentModel,
+  resolveLocalAgentModel,
   parseSubscriptionModelId,
   subscriptionAgentModel,
   subscriptionCatalogModels,
@@ -566,7 +567,7 @@ test("the key's menu rows are its OpenRouter models, featured first, else capped
   assert.deepEqual(keyMenuModels(undefined), []);
 });
 
-test("the local menu lists the CLI's models, then the key's, and waits for the key", () => {
+test("the local menu lists the CLI's models, then the key's, and waits only when it must", () => {
   const codex = cli({ id: "codex", models: ["openai/gpt-5"] });
   const cliRows = subscriptionMenuModels(codex, [
     keyRow("openrouter/openai/gpt-5", { byok_provider: "openrouter" }),
@@ -574,26 +575,124 @@ test("the local menu lists the CLI's models, then the key's, and waits for the k
   // A catalog hit must not mark the CLI row as an own-key row.
   assert.equal(cliRows[0]!.byok_provider, null);
   const keyRows = [keyRow("openrouter/anthropic/claude-sonnet-4.5")];
+  const cliPick = "subscription/codex/openai/gpt-5";
+  const keyPick = "openrouter/anthropic/claude-sonnet-4.5";
   assert.deepEqual(
-    localMenuModels(cliRows, keyRows).map((m) => m.value),
-    ["subscription/codex/openai/gpt-5", "openrouter/anthropic/claude-sonnet-4.5"],
+    localMenuModels(cliRows, keyRows, null).map((m) => m.value),
+    [cliPick, keyPick],
   );
   // No key: exactly the SKY-115 menu.
-  assert.deepEqual(localMenuModels(cliRows, []), cliRows);
-  // Key models still loading: no rows yet, so a saved key pick is not cleared.
-  assert.deepEqual(localMenuModels(cliRows, null), []);
+  assert.deepEqual(localMenuModels(cliRows, [], cliPick), cliRows);
+  // Status not loaded (or failed): no rows, so key rows alone never make a
+  // saved CLI pick look stale.
+  assert.deepEqual(localMenuModels(null, keyRows, cliPick), []);
+  assert.deepEqual(localMenuModels(null, keyRows, null), []);
+  // Key models still loading: a saved key pick waits; a CLI pick or no pick
+  // shows the CLI rows at once.
+  assert.deepEqual(localMenuModels(cliRows, null, keyPick), []);
+  assert.deepEqual(localMenuModels(cliRows, null, cliPick), cliRows);
+  assert.deepEqual(localMenuModels(cliRows, null, null), cliRows);
 });
 
-test("only a pick the key serves runs on the key", () => {
-  const catalog: Catalog = [
-    keyRow("openrouter/anthropic/claude-sonnet-4.5"),
-    keyRow("openai/gpt-5", { byok_provider: "openai", provider: "openai" }),
-  ];
-  assert.equal(runsOnLocalKey("openrouter/anthropic/claude-sonnet-4.5", catalog), true);
-  assert.equal(runsOnLocalKey("openai/gpt-5", catalog), false);
-  assert.equal(runsOnLocalKey("openrouter/anthropic/claude-opus-4.1", catalog), false);
-  assert.equal(runsOnLocalKey("subscription/claude/anthropic/claude-sonnet-4.5", catalog), false);
-  assert.equal(runsOnLocalKey(null, catalog), false);
-  // No saved key: the catalog is empty and every pick keeps the SKY-115 route.
-  assert.equal(runsOnLocalKey("openrouter/anthropic/claude-sonnet-4.5", []), false);
+test("only openrouter/<vendor>/<model> ids count as key picks", () => {
+  assert.equal(isOpenRouterModelId("openrouter/google/gemini-3-pro"), true);
+  assert.equal(isOpenRouterModelId("openrouter/google/"), false);
+  assert.equal(isOpenRouterModelId("openrouter/auto"), false);
+  assert.equal(isOpenRouterModelId("anthropic/claude-sonnet-4.5"), false);
+  assert.equal(isOpenRouterModelId("subscription/claude/anthropic/claude-sonnet-4.5"), false);
+  assert.equal(isOpenRouterModelId(null), false);
+});
+
+const localDeps = (
+  overrides: Partial<Parameters<typeof resolveLocalAgentModel>[2]> = {},
+): Parameters<typeof resolveLocalAgentModel>[2] & { calls: string[] } => {
+  const calls: string[] = [];
+  return {
+    calls,
+    loadStatus: async () => {
+      calls.push("status");
+      return status([cli()]);
+    },
+    peekStatus: () => null,
+    keyVerified: async () => {
+      calls.push("keys");
+      return true;
+    },
+    keyCatalog: async () => {
+      calls.push("catalog");
+      return [];
+    },
+    ...overrides,
+  };
+};
+
+test("a key pick goes unchanged, even when the key's model list is empty", async () => {
+  const pick = "openrouter/google/gemini-3-pro";
+  const deps = localDeps();
+  assert.equal(await resolveLocalAgentModel(pick, "claude", deps), pick);
+  assert.deepEqual(deps.calls, ["keys"]);
+  // Key state unknown: still unchanged, so the backend decides visibly.
+  assert.equal(
+    await resolveLocalAgentModel(pick, "claude", localDeps({ keyVerified: async () => null })),
+    pick,
+  );
+  // Known to have no verified key: the SKY-115 CLI route.
+  assert.equal(
+    await resolveLocalAgentModel(
+      "openrouter/anthropic/claude-opus-4.1",
+      "claude",
+      localDeps({ keyVerified: async () => false }),
+    ),
+    "subscription/claude/anthropic/claude-opus-4.1",
+  );
+});
+
+test("a subscription pick waits for no key or model list", async () => {
+  const deps = localDeps({
+    keyVerified: () => new Promise<boolean | null>(() => {}),
+    keyCatalog: () => new Promise<Catalog>(() => {}),
+  });
+  const pick = "subscription/claude/anthropic/claude-opus-4.1";
+  assert.equal(await resolveLocalAgentModel(pick, "claude", deps), pick);
+  assert.deepEqual(deps.calls, ["status"]);
+});
+
+test("no pick sends the model the chip shows", async () => {
+  // A CLI with models: its first model, and no key lookups.
+  const deps = localDeps();
+  assert.equal(
+    await resolveLocalAgentModel(null, "claude", deps),
+    "subscription/claude/anthropic/claude-sonnet-4.5",
+  );
+  assert.deepEqual(deps.calls, ["status"]);
+  // No CLI model: the chip shows the key's first menu row.
+  const noCli = {
+    loadStatus: async () => status([cli({ path: null, models: [] })]),
+    keyCatalog: async () => [
+      keyRow("openrouter/google/gemini-3-pro"),
+      keyRow("openrouter/openai/gpt-5-mini"),
+    ],
+  };
+  assert.equal(
+    await resolveLocalAgentModel(null, "claude", localDeps(noCli)),
+    "openrouter/google/gemini-3-pro",
+  );
+  // No CLI model and no verified key: the chip shows "Default"; nothing is sent.
+  assert.equal(
+    await resolveLocalAgentModel(
+      null,
+      "claude",
+      localDeps({ ...noCli, keyVerified: async () => false }),
+    ),
+    null,
+  );
+  // Status failed with nothing cached: the menu is empty; nothing is sent.
+  assert.equal(
+    await resolveLocalAgentModel(
+      null,
+      "claude",
+      localDeps({ loadStatus: () => Promise.reject(new Error("down")) }),
+    ),
+    null,
+  );
 });

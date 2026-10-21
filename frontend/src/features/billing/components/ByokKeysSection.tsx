@@ -322,7 +322,7 @@ export function ByokKeysSection() {
   return (
     <div data-setup="model-keys" className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        {/* The local backend runs models only on a saved OpenRouter key and has no balance. */}
+        {/* The local backend runs models only on a saved OpenRouter key and bills no Skynet balance for them. */}
         {msg(isLocalMode() ? "settings.keys.description_local" : "settings.keys.description")}
       </p>
 

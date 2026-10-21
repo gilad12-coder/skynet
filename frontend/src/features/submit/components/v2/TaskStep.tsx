@@ -232,7 +232,10 @@ function TaskInterviewPanel({
 
   // Answers typed while the interviewer is replying wait for it to finish.
   const { midTurn } = useSteerQueue({ busy: interview.busy, send: interview.send });
-  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("interview"));
+  const localMenuModels = useLocalAgentMenuModels(
+    agentSubscriptionFor("interview"),
+    interview.model,
+  );
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}>

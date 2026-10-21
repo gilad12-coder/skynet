@@ -2912,7 +2912,7 @@
   "settings.keys.base_url_placeholder": "URL base personalizada (opcional)",
   "settings.keys.cancel": "Cancelar",
   "settings.keys.description": "Guarde as suas próprias chaves de fornecedor para executar na sua conta em vez de usar o saldo {term.appName}.",
-  "settings.keys.description_local": "Salve sua chave do OpenRouter para usar os modelos dela neste app. Chaves de outros provedores não são usadas aqui.",
+  "settings.keys.description_local": "Guarde a sua chave OpenRouter para executar os modelos dela nesta app. As chaves de outros fornecedores não são usadas aqui.",
   "settings.keys.invalid": "Inválida",
   "settings.keys.invalid_toast": "Essa chave foi rejeitada pelo provedor. Verifique-a e tente novamente.",
   "settings.keys.json_advanced": "Avançado — importar de JSON",

@@ -42,7 +42,7 @@ export function CodingAgentPanel({
   guided: boolean;
 }) {
   const { agent } = coding;
-  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("code"));
+  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("code"), coding.model);
   const renderToolCall = React.useCallback(
     (call: AgentToolCall) => <CodingCallRows calls={[call]} onOpenFile={onOpenFile} />,
     [onOpenFile],
@@ -96,7 +96,9 @@ export function CodingAgentPanel({
               {agent.status === "error" && agent.error && (
                 <ChatErrorBanner
                   message={agent.error}
-                  retryLabel={agent.limitReached ? undefined : v2Msg("submit.v2.ide.agent.retry", guided)}
+                  retryLabel={
+                    agent.limitReached ? undefined : v2Msg("submit.v2.ide.agent.retry", guided)
+                  }
                   onRetry={agent.limitReached ? undefined : agent.retry}
                 />
               )}

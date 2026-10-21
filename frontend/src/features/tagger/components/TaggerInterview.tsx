@@ -138,7 +138,10 @@ export function TaggerInterview({
   onConfirmRubric,
 }: Props) {
   useCompletionNotification(busy, () => msg("notify.interview.turn"));
-  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("tagger"));
+  const localMenuModels = useLocalAgentMenuModels(
+    agentSubscriptionFor("tagger"),
+    interviewComposerModel(assist),
+  );
   const [draft, setDraft] = useState("");
   const done = assist.interview.done;
   // A synthetic session has no rows until the interview has specified them.
@@ -490,7 +493,6 @@ function RubricCard({
     setCategories((prev) => [...prev, { id: crypto.randomUUID(), label: "" }]);
   };
   const cleanedCategories = categories.filter((c) => c.label.trim());
-
 
   const taskValid = mode !== "multiclass" || cleanedCategories.length >= 2;
 
