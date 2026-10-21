@@ -421,8 +421,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             The body, or None when it is larger than :data:`MAX_BODY_BYTES`.
 
         Raises:
-            ValueError: The body framing is malformed.
+            ValueError: A header line or the body framing is malformed.
         """
+        # RFC 9112 5.1 and 5.2: the stdlib parser drops a line with whitespace before
+        # its colon (and every line after it) with only a defect, and keeps a folded
+        # line inside the value, so a framing header can go missing; refuse both.
+        if self.headers.defects or any("\n" in value for value in self.headers.values()):
+            raise ValueError("malformed header line")
         # RFC 9112 6.1 and 6.3: any other coding, chunked with a Content-Length, or
         # more than one Content-Length leaves the body length unclear, so refuse.
         codings = self.headers.get_all("transfer-encoding") or []
@@ -455,7 +460,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not (length.isascii() and length.isdigit()):
             raise ValueError("content-length is not digits")
         size = int(length)
-        return None if size > MAX_BODY_BYTES else self.rfile.read(size)
+        if size > MAX_BODY_BYTES:
+            return None
+        body = self.rfile.read(size)
+        # RFC 9112 6.3: a stream that ends before the full length gives an
+        # incomplete message, which must not go upstream as a shorter one.
+        if len(body) != size:
+            raise ValueError("body is shorter than its content-length")
+        return body
 
     def _forward(self) -> None:
         """Run the checks, then forward the request and stream the response."""

@@ -288,6 +288,7 @@ def test_chunk_size_that_is_not_plain_hex_is_refused(
         (b"Transfer-Encoding: chunked\r\nContent-Length: 15\r\n", b"5\r\nhello\r\n0\r\n\r\n"),
         (b"Content-Length: 5\r\nContent-Length: 5\r\n", b"hello"),
         (b"Content-Length: 2\r\nContent-Length: 5\r\n", b"hello"),
+        (b"Transfer-Encoding : chunked\r\n", b"5\r\nhello\r\n0\r\n\r\n"),
     ],
     ids=[
         "gzip-with-length",
@@ -299,6 +300,7 @@ def test_chunk_size_that_is_not_plain_hex_is_refused(
         "chunked-with-length",
         "same-length-twice",
         "different-lengths",
+        "space-before-colon",
     ],
 )
 def test_unclear_body_framing_is_refused(
@@ -311,6 +313,19 @@ def test_unclear_body_framing_is_refused(
         payload: The body bytes.
     """
     answer = _raw_post(proxy, framing, payload)
+
+    assert answer.startswith(b"HTTP/1.1 400 ")
+    assert upstream.seen == []
+
+
+@pytest.mark.parametrize("fold", [b" folded", b"\tfolded"], ids=["space", "tab"])
+def test_folded_header_line_is_refused(fold: bytes, proxy: CodexAuthProxy, upstream: type[_Upstream]) -> None:
+    """A header line folded onto the one before it (obs-fold) gets 400 and is not forwarded, as RFC 9112 5.2 allows.
+
+    Args:
+        fold: The continuation line, without its CRLF.
+    """
+    answer = _raw_post(proxy, b"X-Note: a\r\n" + fold + b"\r\nContent-Length: 5\r\n", b"hello")
 
     assert answer.startswith(b"HTTP/1.1 400 ")
     assert upstream.seen == []
@@ -349,6 +364,20 @@ def test_chunked_body_cut_off_by_the_stream_end_is_malformed(payload: bytes) -> 
     handler.headers = http.client.parse_headers(io.BytesIO(b"Transfer-Encoding: chunked\r\n\r\n"))
 
     with pytest.raises(ValueError, match="unterminated"):
+        handler._body()
+
+
+def test_content_length_body_cut_off_by_the_stream_end_is_malformed() -> None:
+    """A body the stream ends inside, before its Content-Length, is malformed, which ``_forward`` answers with 400.
+
+    RFC 9112 6.3 says such a message is incomplete, so no shorter body goes
+    upstream. As in the chunked case, this reads the body from a plain stream.
+    """
+    handler = object.__new__(codex_auth_proxy._Handler)
+    handler.rfile = io.BytesIO(b'{"a":1')
+    handler.headers = http.client.parse_headers(io.BytesIO(b"Content-Length: 100\r\n\r\n"))
+
+    with pytest.raises(ValueError, match="shorter"):
         handler._body()
 
 
