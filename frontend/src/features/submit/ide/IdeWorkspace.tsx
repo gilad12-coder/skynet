@@ -33,7 +33,7 @@ import { v2Msg } from "../components/v2/ArtifactConfirmCard";
 import { pendingOpens, repoOpenTarget, type IdeOpenRequest, type IdeOpenTarget } from "./open-file";
 import { park, unpark } from "./park";
 import type { RepoSource } from "./repo-files";
-import { guardClippingAncestors } from "./scroll-guard";
+import { guardClippingAncestors, guardClippingInside } from "./scroll-guard";
 import type { IdeWorkbench } from "./workbench";
 import { ZOOM_EASING, ZOOM_MS, prefersReducedMotion, zoomFrames } from "./zoom";
 
@@ -315,7 +315,9 @@ export function IdeWorkspace({
     });
     observer.observe(host);
     const releaseScroll = guardClippingAncestors(host);
+    const releaseInside = guardClippingInside(host);
     return () => {
+      releaseInside();
       releaseScroll();
       observer.disconnect();
       // VS Code boots once per page, so between hosts it waits in the

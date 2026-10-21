@@ -616,7 +616,8 @@ class WalletLedgerModel(Base):
     # written before run attribution landed.
     optimization_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     # Cents of a ``run`` row's charge drawn from the free grant; the paid part
-    # is ``-delta_cents - from_grant_cents``. None on non-run and older rows.
+    # is ``-delta_cents - from_grant_cents``. On a positive restart-waiver row,
+    # the cents returned to the grant. None on non-run and older rows.
     from_grant_cents: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC), index=True

@@ -1,7 +1,8 @@
 /**
  * Continuous optimization wire types (`/optimizations/{id}/continuous`,
- * `/continuous/{planId}/…`). A plan rechecks a successful run on a schedule
- * and starts a fresh run only when a permitted input changed.
+ * `/continuous/{planId}/…`). A plan checks a successful run on a schedule
+ * and starts a new run only when a better model came out for a model it may
+ * switch.
  */
 
 export type ScheduleFrequency = "hourly" | "daily" | "weekly" | "monthly";
@@ -36,15 +37,10 @@ export type ContinuousCycleStatus =
   | "approved"
   | "rejected";
 
+/** The models a plan may switch to a better one (rated higher, priced no higher). */
 export interface ContinuousPermitted {
-  data: boolean;
-  models: boolean;
-  optimizers: boolean;
-}
-
-export interface ContinuousSource {
-  provider: string;
-  ref: string;
+  task_model: boolean;
+  reflection_model: boolean;
 }
 
 export interface ContinuousCycle {
@@ -102,8 +98,6 @@ export interface ContinuousPlan {
   /** The next few check times, earliest first; empty while paused. */
   upcoming_checks: string[];
   permitted: ContinuousPermitted;
-  source: ContinuousSource | null;
-  pending_inputs: Record<string, string>;
   cycle_budget_cents: number;
   usage: ContinuousUsage;
   cycles: ContinuousCycle[];
@@ -119,11 +113,4 @@ export interface ContinuousState {
 export interface ContinuousEnableRequest {
   schedule: ScheduleRule;
   permitted: ContinuousPermitted;
-  source: ContinuousSource | null;
-}
-
-export interface ContinuousInputs {
-  task_model?: string;
-  reflection_model?: string;
-  optimizer?: string;
 }

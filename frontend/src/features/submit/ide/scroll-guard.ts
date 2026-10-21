@@ -7,6 +7,10 @@
  * Monaco undoes this inside the editor and VS Code resets only its own
  * container's `scrollTop`, so a wizard frame above the IDE kept the offset:
  * the header slid out of view and an empty band opened above the nav.
+ *
+ * The same happens to clipping boxes inside the workbench: a paste or a click
+ * into metric.py could scroll one of the editor's own frames sideways, so the
+ * code slid out of view while the cursor still read Ln 1, Col 1.
  */
 
 /** The slice of a computed style this reads. */
@@ -44,4 +48,34 @@ export function guardClippingAncestors(start: HTMLElement): () => void {
   return () => {
     for (const fn of undo) fn();
   };
+}
+
+/**
+ * Pin, at scroll offset 0, every clipping box inside `root` that the browser
+ * scrolls to reveal the focused node.
+ *
+ * Returns:
+ *   A function that removes the listener.
+ */
+export function guardClippingInside(root: HTMLElement): () => void {
+  // `scroll` does not bubble, but a capturing listener still sees it.
+  const reset = (event: Event) => {
+    const box = event.target;
+    if (!(box instanceof HTMLElement) || box === root) return;
+    const focused = box.ownerDocument.activeElement;
+    // Only a box that holds the focus was moved by the browser to reveal it;
+    // VS Code's own scrollers are `auto` or move their content by script.
+    // The focused node itself is skipped: Monaco's hidden input textarea sets
+    // its own scroll offsets to place the caret and IME composition text.
+    if (!focused || box === focused || !box.contains(focused)) return;
+    // VS Code menus (Explorer context menu, "..." menus) hide their overflow
+    // and scroll the focused item into view by script; pinning them at 0 hid
+    // the lower items of a menu taller than a short window.
+    if (box.closest(".monaco-menu-container")) return;
+    if (!clipsButScrolls(getComputedStyle(box))) return;
+    if (box.scrollTop !== 0) box.scrollTop = 0;
+    if (box.scrollLeft !== 0) box.scrollLeft = 0;
+  };
+  root.addEventListener("scroll", reset, { capture: true, passive: true });
+  return () => root.removeEventListener("scroll", reset, { capture: true });
 }

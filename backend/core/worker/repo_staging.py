@@ -19,6 +19,12 @@ from ..brand import APP_NAME
 from ..connectors.github_publish import RepoPublishError, open_pull_request, push_version
 from ..connectors.github_repo import RepoFetchError, RepoSnapshot, fetch_snapshot, github_token, resolve_commit
 from ..connectors.saved_secrets import SavedSecretStore
+from ..service_gateway.optimization.blackbox.repo_constraints import (
+    ConstraintsError,
+    effective_environment,
+    instructions_brief,
+    read_constraints,
+)
 from ..service_gateway.optimization.blackbox.repo_scorer import RepoScorer
 from ..service_gateway.optimization.blackbox.repo_setup import infer_setup_command
 from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY, patch_paths, patch_violations
@@ -28,6 +34,9 @@ from ..service_gateway.optimization.blackbox.sandbox import SandboxSpec
 logger = logging.getLogger(__name__)
 
 PULL_REQUEST_DETAIL = "pull_request"
+ENVIRONMENT_KEY = "environment"
+# Rules the run is held to; a resumed run must arrive at exactly these again.
+_ENFORCED_FIELDS = ("commit", "editable_paths", "protected_paths", "readonly_paths", "services")
 _SETUP_ANSWER_TOKENS = 1_024
 
 
@@ -39,6 +48,7 @@ class StagedRepository:
     secrets: dict[str, str]
     workdir: Path
     scorers: list[RepoScorer] = field(default_factory=list)
+    protected_paths: tuple[str, ...] = ()
 
     def close_scorers(self) -> None:
         """Close the parent's scoring boxes; the gateway still stops any that fail to close."""
@@ -81,8 +91,14 @@ def stage_repository(
         engine: SQLAlchemy engine for the vaults.
 
     Returns:
-        A payload copy that pins the commit, lists no secret entries and names
-        the packed tree, plus the staged tree and secrets for the parent.
+        A payload copy that pins the commit, lists no secret entries, names
+        the packed tree and carries the effective environment under
+        ``target.repo.environment``, plus the staged tree and secrets for the parent.
+
+    Raises:
+        ConstraintsError: When the repository's ``optimize.toml`` is invalid,
+            asks for more than the run approved, or a resumed run's rules
+            changed since they were first recorded.
     """
     result = copy.deepcopy(payload)
     repo = result["target"]["repo"]
@@ -98,10 +114,29 @@ def stage_repository(
     workdir = Path(tempfile.mkdtemp(prefix="app-repo-"))
     try:
         snapshot = fetch_snapshot(repo["repository"], commit, token, workdir)
+        environment = effective_environment(
+            read_constraints(snapshot.archive),
+            approved_editable=repo["editable_paths"],
+            approved_setup=result["target"].get("setup_command"),
+        )
+        record = environment.record(
+            repository=repo["repository"],
+            commit=commit,
+            readonly_paths=snapshot.readonly_paths,
+            secret_names=secrets,
+        )
+        _ensure_unchanged(repo.get(ENVIRONMENT_KEY), record)
     except BaseException:
         shutil.rmtree(workdir, ignore_errors=True)
         raise
     repo["commit"] = commit
+    repo["editable_paths"] = list(environment.editable_paths)
+    repo[ENVIRONMENT_KEY] = record
+    result["target"]["setup_command"] = environment.setup_command
+    if environment.constraints is not None:
+        result["background"] = "\n\n".join(
+            part for part in ((result.get("background") or "").strip(), instructions_brief(environment)) if part
+        )
     repo["secrets"] = []
     result[REPO_SNAPSHOT_KEY] = {
         "archive": str(snapshot.archive),
@@ -109,7 +144,28 @@ def stage_repository(
         "readonly_paths": list(snapshot.readonly_paths),
         "secret_names": sorted(secrets),
     }
-    return result, StagedRepository(snapshot=snapshot, secrets=secrets, workdir=workdir)
+    return result, StagedRepository(
+        snapshot=snapshot, secrets=secrets, workdir=workdir, protected_paths=environment.protected_paths
+    )
+
+
+def _ensure_unchanged(previous: Any, current: dict[str, Any]) -> None:
+    """Refuse to resume a run under rules other than the ones first recorded for it.
+
+    Args:
+        previous: The environment saved on the run by an earlier attempt, if any.
+        current: The environment this attempt worked out.
+
+    Raises:
+        ConstraintsError: When an enforced rule differs from the saved one.
+    """
+    if not isinstance(previous, dict):
+        return
+    changed = [name for name in _ENFORCED_FIELDS if previous.get(name) != current.get(name)]
+    if changed:
+        raise ConstraintsError(
+            f"The run's environment changed since it was recorded ({', '.join(changed)}); clone the run to review it."
+        )
 
 
 def _setup_asker(payload: dict[str, Any], gateway: Any) -> Callable[[str], str | None] | None:
@@ -209,10 +265,15 @@ def bind_repo_scorer(payload: dict[str, Any], staged: StagedRepository, gateway:
             readonly_paths=staged.snapshot.readonly_paths,
             setup_command=target.get("setup_command"),
             secrets=staged.secrets,
+            protected_paths=staged.protected_paths,
         ),
         str(scorer_spec["metric_code"]),
         timeout_seconds=float(scorer_spec["timeout_seconds"]),
     )
+    environment = target["repo"].get(ENVIRONMENT_KEY)
+    if isinstance(environment, dict):
+        environment["setup_command"] = target.get("setup_command")
+        environment["network"] = {"setup": list(hosts), "versions": []}
     staged.scorers.append(scorer)
     # Setup and the network cutoff finish here, in the parent, before the
     # guest that writes versions exists; either failing fails the run.
@@ -321,7 +382,7 @@ def publish_improvement(
     outcome: dict[str, Any]
     # The patch came back from the guest, so the editing rules are checked
     # again before anything reaches the user's repository.
-    problems = patch_violations(patch, repo["editable_paths"], staged.snapshot.readonly_paths)
+    problems = patch_violations(patch, repo["editable_paths"], staged.snapshot.readonly_paths, staged.protected_paths)
     if problems:
         outcome = {"error": f"The best version breaks the editing rules: {problems[0]}"}
     else:

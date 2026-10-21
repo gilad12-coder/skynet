@@ -106,6 +106,7 @@ def test_sandbox_route_needs_a_budget(calls: list[Any]) -> None:
         response = client.post("/optimizations/contract-check", json={"spec": _spec(budget=False)})
 
     assert response.status_code == 402
+    assert response.json()["detail"] == t_locale("en", "submit.preflight.contract_budget_missing")
     assert calls == []
 
 
@@ -229,7 +230,7 @@ def test_sandbox_route_tells_a_spent_budget_from_a_code_mismatch(
 
     [run] = [item for item in body["checks"] if item["key"] == "workspace.run"]
     assert (run["message_code"], run["message_params"]) == (code, {"error": SPENT})
-    assert run["message"] == t(code, error=SPENT)
+    assert run["message"] == t_locale("en", code, error=SPENT)
     assert run["detail"] is None
 
 
@@ -489,10 +490,12 @@ def test_stream_route_reports_a_missing_budget_as_an_error_event(calls: list[Any
 
 
 def test_static_route_words_its_messages_in_the_request_locale(calls: list[Any]) -> None:
-    """An English caller reads English messages; a caller naming no locale keeps the Hebrew base."""
+    """An English caller reads English messages; a Hebrew browser with no body locale reads Hebrew."""
     with _client() as client:
         english = client.post("/optimizations/contract-check/static", json={"spec": _spec(), "locale": "en"}).json()
-        base = client.post("/optimizations/contract-check/static", json={"spec": _spec()}).json()
+        base = client.post(
+            "/optimizations/contract-check/static", json={"spec": _spec()}, headers={"Accept-Language": "he"}
+        ).json()
 
     coded = [item for item in english["checks"] if item["message_code"]]
     assert coded
