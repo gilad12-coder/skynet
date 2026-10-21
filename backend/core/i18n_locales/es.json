@@ -422,6 +422,12 @@
     "continuous.review_rejected": "Rechazaste el candidato nuevo. Se mantiene la versión anterior.",
     "local.not_available": "Esta función solo está disponible en la app de {term.appName} para Mac.",
     "models.subscription_local_only": "Los modelos por suscripción y los proponentes CLI locales solo se ejecutan en la app de {term.appName} para Mac.",
-    "models.managed_unavailable_local": "La app para Mac no puede usar modelos gestionados. Elige un modelo por suscripción o tu propia clave de proveedor."
+    "models.managed_unavailable_local": "La app para Mac no puede usar modelos gestionados. Elige un modelo por suscripción o tu propia clave de proveedor.",
+    "sync.import_local_only_disabled": "La importación solo funciona en la cuenta alojada de {term.appName}, no en la app de Mac.",
+    "sync.unsupported_schema": "Este archivo de exportación usa un formato no compatible ({schema}).",
+    "sync.invalid_bundle": "Este archivo de exportación está dañado o incompleto.",
+    "sync.bundle_too_large": "El archivo de exportación supera los {max_mb} MB.",
+    "sync.export_not_finished": "Solo se puede exportar una ejecución terminada. Esta ejecución está en '{status}'.",
+    "sync.unsupported_run_type": "No se pueden exportar ejecuciones de tipo '{optimization_type}'."
   }
 }

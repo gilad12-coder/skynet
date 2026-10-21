@@ -422,6 +422,12 @@
     "continuous.review_rejected": "Yeni adayı reddettiniz. Önceki sürüm kalır.",
     "local.not_available": "Bu özellik yalnızca {term.appName} Mac uygulamasında kullanılabilir.",
     "models.subscription_local_only": "Abonelik modelleri ve yerel CLI önericileri yalnızca {term.appName} Mac uygulamasında çalışır.",
-    "models.managed_unavailable_local": "Mac uygulaması yönetilen modelleri kullanamaz. Bir abonelik modeli veya kendi sağlayıcı anahtarınızı seçin."
+    "models.managed_unavailable_local": "Mac uygulaması yönetilen modelleri kullanamaz. Bir abonelik modeli veya kendi sağlayıcı anahtarınızı seçin.",
+    "sync.import_local_only_disabled": "İçe aktarma yalnızca barındırılan {term.appName} hesabında çalışır, Mac uygulamasında çalışmaz.",
+    "sync.unsupported_schema": "Bu dışa aktarma dosyası desteklenmeyen bir biçim kullanıyor ({schema}).",
+    "sync.invalid_bundle": "Bu dışa aktarma dosyası bozuk veya eksik.",
+    "sync.bundle_too_large": "Dışa aktarma dosyası {max_mb} MB'tan büyük.",
+    "sync.export_not_finished": "Yalnızca tamamlanmış bir çalıştırma dışa aktarılabilir. Bu çalıştırmanın durumu '{status}'.",
+    "sync.unsupported_run_type": "'{optimization_type}' türündeki çalıştırmalar dışa aktarılamaz."
   }
 }

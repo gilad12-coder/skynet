@@ -422,6 +422,12 @@
     "continuous.review_rejected": "Вы отклонили нового кандидата. Прежняя версия остаётся.",
     "local.not_available": "Эта функция доступна только в приложении {term.appName} для Mac.",
     "models.subscription_local_only": "Модели по подписке и локальные CLI-генераторы предложений работают только в приложении {term.appName} для Mac.",
-    "models.managed_unavailable_local": "Приложение для Mac не может использовать управляемые модели. Выберите модель по подписке или собственный ключ провайдера."
+    "models.managed_unavailable_local": "Приложение для Mac не может использовать управляемые модели. Выберите модель по подписке или собственный ключ провайдера.",
+    "sync.import_local_only_disabled": "Импорт работает только в облачном аккаунте {term.appName}, а не в приложении для Mac.",
+    "sync.unsupported_schema": "Этот файл экспорта использует неподдерживаемый формат ({schema}).",
+    "sync.invalid_bundle": "Этот файл экспорта повреждён или неполон.",
+    "sync.bundle_too_large": "Файл экспорта больше {max_mb} МБ.",
+    "sync.export_not_finished": "Экспортировать можно только завершённый запуск. Состояние этого запуска: '{status}'.",
+    "sync.unsupported_run_type": "Запуски типа '{optimization_type}' нельзя экспортировать."
   }
 }

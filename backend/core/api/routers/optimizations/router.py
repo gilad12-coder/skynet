@@ -13,6 +13,7 @@ from .lifecycle import register_lifecycle_routes
 from .listing import register_listing_routes
 from .repository import register_repository_routes
 from .streaming import register_dashboard_stream, register_job_stream, register_log_stream
+from .sync import register_sync_routes
 from .usage import register_usage_routes
 
 
@@ -35,6 +36,7 @@ def create_optimizations_router(*, job_store, get_worker_ref: Callable[[], Any])
     router = APIRouter()
 
     register_listing_routes(router, job_store=job_store)
+    register_sync_routes(router, job_store=job_store)
     register_dashboard_stream(router, job_store=job_store)
     register_detail_routes(router, job_store=job_store)
     register_repository_routes(router, job_store=job_store)

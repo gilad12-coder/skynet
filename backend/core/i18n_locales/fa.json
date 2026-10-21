@@ -422,6 +422,12 @@
     "continuous.review_rejected": "شما نامزد جدید را رد کردید. نسخهٔ قبلی باقی می‌ماند.",
     "local.not_available": "این قابلیت فقط در برنامهٔ {term.appName} برای Mac در دسترس است.",
     "models.subscription_local_only": "مدل‌های اشتراکی و پیشنهاددهنده‌های CLI محلی فقط در برنامهٔ {term.appName} برای Mac اجرا می‌شوند.",
-    "models.managed_unavailable_local": "برنامهٔ Mac نمی‌تواند از مدل‌های مدیریت‌شده استفاده کند. یک مدل اشتراکی یا کلید ارائه‌دهندهٔ خودتان را انتخاب کنید."
+    "models.managed_unavailable_local": "برنامهٔ Mac نمی‌تواند از مدل‌های مدیریت‌شده استفاده کند. یک مدل اشتراکی یا کلید ارائه‌دهندهٔ خودتان را انتخاب کنید.",
+    "sync.import_local_only_disabled": "وارد کردن فقط در حساب میزبانی‌شده {term.appName} کار می‌کند، نه در برنامه Mac.",
+    "sync.unsupported_schema": "این فایل خروجی از قالبی پشتیبانی‌نشده استفاده می‌کند ({schema}).",
+    "sync.invalid_bundle": "این فایل خروجی خراب یا ناقص است.",
+    "sync.bundle_too_large": "فایل خروجی بزرگ‌تر از {max_mb} مگابایت است.",
+    "sync.export_not_finished": "فقط اجرای تمام‌شده قابل خروجی گرفتن است. وضعیت این اجرا '{status}' است.",
+    "sync.unsupported_run_type": "اجراهای نوع '{optimization_type}' قابل خروجی گرفتن نیستند."
   }
 }
