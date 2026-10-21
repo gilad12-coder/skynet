@@ -64,6 +64,7 @@ describe("buildChildEnv", () => {
       [
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
+        "FACTORY_API_KEY",
         "OPENAI_API_KEY",
         "OPENROUTER_API_KEY",
         "RAILWAY_ENVIRONMENT_NAME",

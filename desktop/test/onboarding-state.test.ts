@@ -56,8 +56,9 @@ describe("computeOnboardingState", () => {
     expect(state({ clis: [cli("claude", { loggedIn: false }), cli("codex", { loggedIn: false })] }).kind).toBe("not_logged_in");
   });
 
-  it("treats an unknown login state (droid) as usable", () => {
-    expect(state({ clis: [cli("claude", { loggedIn: false }), cli("droid", { loggedIn: null })] }).kind).toBe("starting");
+  it("treats an unreadable login check as signed out", () => {
+    expect(state({ clis: [cli("claude", { loggedIn: false }), cli("droid", { loggedIn: null })] }).kind).toBe("not_logged_in");
+    expect(state({ clis: [cli("droid", { loggedIn: null }), cli("codex", { loggedIn: true })] }).kind).toBe("starting");
   });
 
   it("reports the earliest reset when every usable CLI is capped", () => {

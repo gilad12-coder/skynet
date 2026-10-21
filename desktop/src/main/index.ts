@@ -6,6 +6,7 @@ import { allocatePorts, type PortPlan } from "./ports";
 import { databaseUrl, removeSandboxContainers, startPostgres, stopPostgres, type DockerCtx } from "./postgres";
 import { ensureSandboxImage } from "./sandbox-image";
 import { loadOrCreateSecrets } from "./secrets";
+import { clearPids, commandLine, psCommandOf, recordPid, sweepOrphans } from "./stack-pids";
 import { buildChildEnv, loginShellPath } from "./shell-env";
 import {
   computeOnboardingState,
@@ -49,6 +50,8 @@ let api: ManagedProcess | null = null;
 let frontend: ManagedProcess | null = null;
 let postgresStarted = false;
 let frontendUrl: string | null = null;
+let sweptOrphans = false;
+let sweptSandboxes = false;
 
 function setState(next: OnboardingState): void {
   state = next;
@@ -71,7 +74,7 @@ function showOnboarding(): void {
  * bundle. uv writes build metadata next to pyproject.toml and Next writes its
  * cache under .next, and neither may write inside the signed .app.
  */
-function stageRuntime(): { backendDir: string; frontendDir: string } {
+function stageRuntime(): { backendDir: string; frontendDir: string; bundleId: string } {
   const bundleId = fs.readFileSync(path.join(resourcesDir, "bundle-id.txt"), "utf8").trim();
   const runtimeRoot = path.join(dataDir, "runtime");
   const target = path.join(runtimeRoot, bundleId);
@@ -86,13 +89,23 @@ function stageRuntime(): { backendDir: string; frontendDir: string } {
   for (const old of fs.readdirSync(runtimeRoot)) {
     if (old !== bundleId) fs.rmSync(path.join(runtimeRoot, old), { recursive: true, force: true });
   }
-  return { backendDir: path.join(target, "backend"), frontendDir: path.join(target, "frontend") };
+  return { backendDir: path.join(target, "backend"), frontendDir: path.join(target, "frontend"), bundleId };
 }
 
 async function check(): Promise<void> {
   if (busy) return;
   busy = true;
   try {
+    if (!sweptOrphans) {
+      // Before stopStack, which deletes the pid file. Ports held by a crashed session are freed before allocatePorts.
+      sweptOrphans = true;
+      await sweepOrphans(dataDir, {
+        commandOf: psCommandOf,
+        kill: (target, sig) => process.kill(target, sig),
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        log,
+      });
+    }
     await stopStack();
     setState({ kind: "checking", clis: [], docker: null });
     const login = await loginShellPath();
@@ -110,6 +123,11 @@ async function check(): Promise<void> {
     setState(next);
     if (next.kind !== "starting") return;
     dockerCtx = { docker: docker.path as string, env };
+    if (!sweptSandboxes) {
+      // Job containers from a crashed session are not removed by its quit path.
+      sweptSandboxes = true;
+      await removeSandboxContainers(dockerCtx);
+    }
     await startStack(next, loginPath);
   } catch (err) {
     if (quitting) return;
@@ -140,14 +158,14 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
   log(`ports api=${ports.api} frontend=${ports.frontend} postgres=${ports.postgres}`);
 
   step("runtime");
-  const { backendDir, frontendDir } = stageRuntime();
+  const { backendDir, frontendDir, bundleId } = stageRuntime();
 
   step("postgres");
   postgresStarted = true;
   await startPostgres(ctx, ports.postgres, secrets.pgPassword);
 
   step("sandbox");
-  const sandboxImage = await ensureSandboxImage(ctx, backendDir, app.getVersion(), path.join(logsDir, "sandbox-build.log"));
+  const sandboxImage = await ensureSandboxImage(ctx, backendDir, bundleId, path.join(logsDir, "sandbox-build.log"));
 
   const feOrigin = `http://127.0.0.1:${ports.frontend}`;
   const apiOrigin = `http://127.0.0.1:${ports.api}`;
@@ -186,12 +204,14 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
   }
 
   step("api");
-  api = new ManagedProcess("api", uvBin, ["run", "--frozen", "python", "main.py"], {
+  const apiArgs = ["run", "--frozen", "python", "main.py"];
+  api = new ManagedProcess("api", uvBin, apiArgs, {
     env: uvEnv,
     cwd: backendDir,
     logFile: path.join(logsDir, "api.log"),
   });
   api.start();
+  if (api.pid) recordPid(dataDir, { role: "api", pgid: api.pid, command: commandLine(uvBin, apiArgs) });
   const apiProc = api;
   await waitFor("The API", async () => (await httpStatus(`${apiOrigin}/health`)) === 200, {
     timeoutMs: 180_000,
@@ -216,6 +236,7 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
     logFile: path.join(logsDir, "frontend.log"),
   });
   frontend.start();
+  if (frontend.pid) recordPid(dataDir, { role: "frontend", pgid: frontend.pid, command: commandLine(process.execPath, ["server.js"]) });
   const feProc = frontend;
   await waitFor("The web app", async () => (await httpStatus(`${feOrigin}/api/auth/session`)) === 200, {
     timeoutMs: 120_000,
@@ -256,6 +277,7 @@ async function stopStack(): Promise<void> {
     await removeSandboxContainers(dockerCtx);
   }
   postgresStarted = false;
+  clearPids(dataDir);
 }
 
 function isAllowedUrl(target: string): boolean {

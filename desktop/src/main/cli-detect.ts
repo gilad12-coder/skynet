@@ -39,7 +39,7 @@ export interface CliStatus {
   version: string | null;
   minVersion: string;
   versionOk: boolean;
-  /** null means the CLI has no reliable login check. */
+  /** null means the login check gave no readable answer; the readiness gate treats it as signed out. */
   loggedIn: boolean | null;
   loginCommand: string;
   upgradeCommand: string;
@@ -121,7 +121,8 @@ export function childPath(loginPath: string, env: NodeJS.ProcessEnv = process.en
   return fake ? `${fake}:${loginPath}` : loginPath;
 }
 
-async function checkLogin(id: CliId, bin: string, run: Runner, env: Record<string, string>): Promise<boolean | null> {
+/** The same login checks as the backend's `core/local/cli_probe.py` (SKY-111). */
+export async function checkLogin(id: CliId, bin: string, run: Runner, env: Record<string, string>): Promise<boolean | null> {
   if (id === "claude") {
     const res = await run(bin, ["auth", "status"], env);
     try {
@@ -134,9 +135,16 @@ async function checkLogin(id: CliId, bin: string, run: Runner, env: Record<strin
   }
   if (id === "codex") {
     const res = await run(bin, ["login", "status"], env);
-    return res.code === 0;
+    // "Not logged in" also contains "logged in"; the exit code rules that case out.
+    return res.code === 0 && /logged in/i.test(`${res.stdout}\n${res.stderr}`);
   }
-  // droid has no documented non-interactive login check yet (plan §5).
+  const res = await run(bin, ["doctor", "--auth", "--json"], env);
+  try {
+    const parsed = JSON.parse(res.stdout) as { ok?: unknown } | null;
+    if (parsed && typeof parsed.ok === "boolean") return parsed.ok;
+  } catch {
+    // Unreadable output: unknown.
+  }
   return null;
 }
 

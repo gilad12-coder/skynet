@@ -106,14 +106,30 @@ describe("probeCli with fake binaries", () => {
     expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: true });
   });
 
-  it("uses the codex login status exit code", async () => {
-    fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else exit 1; fi');
+  it("needs exit 0 and 'logged in' from codex login status", async () => {
+    fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "Not logged in" >&2; exit 1; fi');
     expect(await probeCli("codex", [dir], {})).toMatchObject({ version: "0.160.1", versionOk: true, loggedIn: false });
+    fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "something else"; fi');
+    expect(await probeCli("codex", [dir], {})).toMatchObject({ loggedIn: false });
+    fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "Logged in using ChatGPT" >&2; fi');
+    expect(await probeCli("codex", [dir], {})).toMatchObject({ loggedIn: true });
   });
 
-  it("treats droid login as unknown", async () => {
-    fake("droid", "echo 0.231.0");
-    expect(await probeCli("droid", [dir], {})).toMatchObject({ versionOk: true, loggedIn: null });
+  it("reads ok from droid doctor --auth --json", async () => {
+    const droid = (out: string) => {
+      const runner: Runner = async (_file, args) => {
+        if (args[0] === "--version") return { code: 0, stdout: "0.231.0", stderr: "" };
+        expect(args).toEqual(["doctor", "--auth", "--json"]);
+        return { code: 0, stdout: out, stderr: "" };
+      };
+      return probeCli("droid", [dir], {}, runner);
+    };
+    fake("droid", "exit 0");
+    expect(await droid('{"ok": true, "checks": []}')).toMatchObject({ versionOk: true, loggedIn: true });
+    expect(await droid('{"ok": false}')).toMatchObject({ loggedIn: false });
+    expect(await droid("Error: unknown command")).toMatchObject({ loggedIn: null });
+    expect(await droid('{"ok": "yes"}')).toMatchObject({ loggedIn: null });
+    expect(await droid("null")).toMatchObject({ loggedIn: null });
   });
 
   it("probes with provider keys removed from the environment", async () => {
@@ -123,11 +139,12 @@ describe("probeCli with fake binaries", () => {
       seen.push(env);
       return { code: 0, stdout: args[0] === "--version" ? "2.1.300" : '{"loggedIn":true}', stderr: "" };
     };
-    await probeClis([dir], { ANTHROPIC_API_KEY: "sk-test", OPENAI_API_KEY: "sk-test", HOME: "/Users/x" }, runner);
+    await probeClis([dir], { ANTHROPIC_API_KEY: "sk-test", OPENAI_API_KEY: "sk-test", FACTORY_API_KEY: "fk-test", HOME: "/Users/x" }, runner);
     expect(seen.length).toBeGreaterThan(0);
     for (const env of seen) {
       expect(env).not.toHaveProperty("ANTHROPIC_API_KEY");
       expect(env).not.toHaveProperty("OPENAI_API_KEY");
+      expect(env).not.toHaveProperty("FACTORY_API_KEY");
       expect(env.HOME).toBe("/Users/x");
     }
   });

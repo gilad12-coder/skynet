@@ -9,20 +9,22 @@ On launch the app:
 1. Reads your login shell `PATH` so it finds Homebrew, nvm and `~/.local/bin` tools.
 2. Checks Docker, then a coding CLI: installed, new enough, signed in, and not at its usage limit.
    Each failed check shows an onboarding screen with the command to fix it.
-3. Starts Postgres (`pgvector/pgvector:pg16`, container `skynet-local-postgres`, volume `skynet-local-pgdata`).
-4. Builds the job sandbox image `skynet-local-sandbox:<app version>` from `backend/Dockerfile` once per app version.
+3. Stops any API or web server that a crashed earlier session left running (recorded in `stack.pids`),
+   removes leftover `skynet.job` containers, then starts Postgres (`pgvector/pgvector:pg16`, container `skynet-local-postgres`, volume `skynet-local-pgdata`).
+4. Builds the job sandbox image `skynet-local-sandbox:<bundle id>` from `backend/Dockerfile` once per packaged build
+   (the bundle id is version, commit and build time) and removes the tags of older builds.
    It builds for `linux/amd64`, because the Dockerfile installs x64-only harness binaries. Docker Desktop runs it under Rosetta.
 5. Installs Python packages with the bundled `uv`, runs `alembic upgrade head`, and starts the API.
 6. Starts the bundled Next.js server and opens it in the window.
 
 All services listen on `127.0.0.1` only (API 48100-48119, web 48120-48139, Postgres 48140-48159).
 The app removes `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`,
-`VERCEL_TOKEN`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `RAILWAY_ENVIRONMENT_NAME` from every child environment.
+`FACTORY_API_KEY`, `VERCEL_TOKEN`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `RAILWAY_ENVIRONMENT_NAME` from every child environment.
 Quitting stops the web server, the API, Postgres and every `skynet.job` sandbox container.
 
 ## Requirements
 
-- macOS on Apple silicon
+- macOS on Apple silicon. CI also builds an Intel (x64) app, but nobody has run it on Intel hardware yet.
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/), running, with "Use Rosetta for x86_64/amd64 emulation" turned on
 - One coding CLI, signed in: `claude` 2.1.226 or newer, `codex` 0.160.0 or newer, or `droid`
 
@@ -51,7 +53,7 @@ npm run build:mac
 `build:mac` compiles the shell, builds the frontend (`next build`, standalone output) when
 `frontend/.next/standalone` is missing, stages the tracked backend files, downloads the pinned
 `uv` release and checks its SHA-256, then writes `dist/Skynet-<version>-arm64.dmg` and
-`dist/mac-arm64/Skynet.app`. Set `SKYNET_DESKTOP_REBUILD_FRONTEND=1` to force a fresh frontend build.
+`dist/mac-arm64/Skynet.app` (plus `-x64.dmg` and `dist/mac/Skynet.app` when `SKYNET_DESKTOP_ARCHS=arm64,x64`). Set `SKYNET_DESKTOP_REBUILD_FRONTEND=1` to force a fresh frontend build.
 
 Check the signature:
 
@@ -76,6 +78,7 @@ npm start
 | `~/Library/Application Support/Skynet/local/` | Local state for the backend, including `cli_limits.json` |
 | `~/Library/Application Support/Skynet/venv/` | Python environment |
 | `~/Library/Application Support/Skynet/runtime/` | The backend and frontend copied out of the app bundle |
+| `~/Library/Application Support/Skynet/stack.pids` | Process groups of the running API and web server; removed on a clean quit |
 | `~/Library/Application Support/Skynet/logs/` | `desktop.log`, `api.log`, `frontend.log`, `migrate.log`, `sandbox-build.log` |
 
 A rebuilt ad-hoc app has a new signature, so macOS can ask once for keychain access to `secrets.bin`. Choose "Always Allow".

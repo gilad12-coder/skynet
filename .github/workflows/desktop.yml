@@ -43,14 +43,21 @@ jobs:
         env:
           # Ad-hoc signing ("-" in electron-builder.yml) needs no certificate.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          SKYNET_DESKTOP_ARCHS: arm64
+          SKYNET_DESKTOP_ARCHS: arm64,x64
         run: npm run build:mac
-      - name: Verify signature
-        run: codesign -dv desktop/dist/mac-arm64/Skynet.app 2>&1 | tee /dev/stderr | grep -q "Signature=adhoc"
+      - name: Verify signatures
+        run: |
+          for app in desktop/dist/mac-arm64/Skynet.app desktop/dist/mac/Skynet.app; do
+            codesign -dv "$app" 2>&1 | tee /dev/stderr | grep -q "Signature=adhoc"
+          done
+          lipo -archs desktop/dist/mac/Skynet.app/Contents/MacOS/Skynet | grep -qx x86_64
+          lipo -archs desktop/dist/mac/Skynet.app/Contents/Resources/uv/uv | grep -qx x86_64
       - uses: actions/upload-artifact@v4
         with:
-          name: skynet-desktop-mac-arm64
-          path: desktop/dist/Skynet-*-arm64.dmg
+          name: skynet-desktop-mac
+          path: |
+            desktop/dist/Skynet-*-arm64.dmg
+            desktop/dist/Skynet-*-x64.dmg
           if-no-files-found: error
           retention-days: 14
 
@@ -78,7 +85,7 @@ jobs:
         working-directory: desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SKYNET_DESKTOP_ARCHS: arm64
+          SKYNET_DESKTOP_ARCHS: arm64,x64
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

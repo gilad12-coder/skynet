@@ -3,14 +3,17 @@ import os from "node:os";
 
 /**
  * Keys removed from every child environment (§1.7). With none of these keys
- * present, no child can bill OpenRouter, Anthropic, OpenAI, Vercel or Stripe,
- * and the backend's hosted-safety validator cannot see a Railway environment.
+ * present, no child can bill OpenRouter, Anthropic, OpenAI, Factory, Vercel or
+ * Stripe, and the backend's hosted-safety validator cannot see a Railway
+ * environment. FACTORY_API_KEY would make droid bill an API account (and its
+ * `doctor --auth` check report signed in from the key, not the subscription).
  */
 export const DELETED_ENV_KEYS = [
   "OPENROUTER_API_KEY",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
   "OPENAI_API_KEY",
+  "FACTORY_API_KEY",
   "VERCEL_TOKEN",
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",

@@ -53,7 +53,8 @@ function isCapped(limit: CliLimit | undefined, now: Date): boolean {
  * Decide which onboarding screen to show. Checks run in dependency order:
  * Docker first (Postgres and every sandbox need it), then a CLI that is
  * installed, new enough, signed in, and not rate capped. A CLI whose login
- * state is unknown (droid) counts as signed in.
+ * check gave no readable answer (loggedIn null) counts as signed out, so the
+ * app never starts on a CLI that cannot run jobs.
  */
 export function computeOnboardingState(input: Inputs): OnboardingState {
   const { docker, clis, limits, now } = input;
@@ -64,7 +65,7 @@ export function computeOnboardingState(input: Inputs): OnboardingState {
   if (installed.length === 0) return { ...base, kind: "no_cli" };
   const current = installed.filter((c) => c.versionOk);
   if (current.length === 0) return { ...base, kind: "cli_too_old" };
-  const signedIn = current.filter((c) => c.loggedIn !== false);
+  const signedIn = current.filter((c) => c.loggedIn === true);
   if (signedIn.length === 0) return { ...base, kind: "not_logged_in" };
   const free = signedIn.filter((c) => !isCapped(limits[c.id], now));
   if (free.length === 0 && !input.acceptedRateCap) {

@@ -181,7 +181,7 @@ function panelBody(state: State): Node[] {
       nodes.push(actions(recheck));
       break;
     case "not_logged_in":
-      for (const cli of state.clis.filter((c) => c.versionOk && c.loggedIn === false)) {
+      for (const cli of state.clis.filter((c) => c.versionOk && c.loggedIn !== true)) {
         nodes.push(command(cli.loginCommand, CLI_NAMES[cli.id]));
       }
       nodes.push(actions(recheck));

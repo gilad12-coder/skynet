@@ -14,20 +14,27 @@ async function imageId(ctx: DockerCtx, ref: string): Promise<string | null> {
   return res.code === 0 && id.startsWith("sha256:") ? id : null;
 }
 
+/** A Docker tag from a bundle id: allowed characters only, at most 128. */
+export function sandboxTag(bundleId: string): string {
+  const tag = bundleId.replace(/[^A-Za-z0-9_.-]/g, "-").replace(/^[.-]+/, "").slice(0, 128);
+  return tag || "local";
+}
+
 /**
- * Make sure `skynet-local-sandbox:<appVersion>` exists and return its image
- * ID. The tag carries the app version, so an app update builds a fresh image
- * from the backend it ships; the same version reuses the cached image.
+ * Make sure `skynet-local-sandbox:<bundle id>` exists and return its image ID.
+ * The bundle id changes with every packaged build (version, commit, build
+ * time), the same key stageRuntime uses for the backend copy, so a new build
+ * never runs jobs in an image made from an older backend Dockerfile.
  * The backend runs sandboxes by ID (`APP_LOCAL_SANDBOX_IMAGE=sha256:...`) so a
  * retag can never swap the image under a running job.
  */
 export async function ensureSandboxImage(
   ctx: DockerCtx,
   backendDir: string,
-  appVersion: string,
+  bundleId: string,
   logFile: string,
 ): Promise<string> {
-  const ref = `${SANDBOX_REPO}:${appVersion}`;
+  const ref = `${SANDBOX_REPO}:${sandboxTag(bundleId)}`;
   const existing = await imageId(ctx, ref);
   if (existing) return existing;
   const log = fs.createWriteStream(logFile, { flags: "a" });
@@ -50,5 +57,16 @@ export async function ensureSandboxImage(
   }
   const built = await imageId(ctx, ref);
   if (!built) throw new Error(`docker build ${ref} produced no image`);
+  await removeOlderTags(ctx, ref);
   return built;
+}
+
+/** Drop the tags of earlier builds. Docker refuses to remove an image a container still uses. */
+async function removeOlderTags(ctx: DockerCtx, keep: string): Promise<void> {
+  const list = await runCommand(ctx.docker, ["image", "ls", SANDBOX_REPO, "--format", "{{.Repository}}:{{.Tag}}"], {
+    env: ctx.env,
+    timeoutMs: 30_000,
+  });
+  const old = list.stdout.split("\n").map((l) => l.trim()).filter((l) => l.startsWith(`${SANDBOX_REPO}:`) && !l.endsWith(":<none>") && l !== keep);
+  if (old.length) await runCommand(ctx.docker, ["image", "rm", ...old], { env: ctx.env, timeoutMs: 120_000 });
 }
